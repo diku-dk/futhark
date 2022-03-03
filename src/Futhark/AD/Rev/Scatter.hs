@@ -34,24 +34,24 @@ withinBounds (qi : qis) = withinBounds [qi] .&&. withinBounds qis
 -- )
 -- The idea is that you do not want to put under the `if` something
 --     that is an array because it would not flatten well!
-genIdxLamBdy :: VName -> [(SubExp, Param Type)] -> Type -> ADM Body
-genIdxLamBdy as wpis = genRecLamBdy as wpis []
+genIdxLamBody :: VName -> [(SubExp, Param Type)] -> Type -> ADM (Body SOACS)
+genIdxLamBody as wpis = genRecLamBody as wpis []
   where
-    genRecLamBdy :: VName -> [(SubExp, Param Type)] -> [Param Type] -> Type -> ADM Body
-    genRecLamBdy arr w_pis nest_pis (Array t (Shape []) _) =
-      genRecLamBdy arr w_pis nest_pis (Prim t)
-    genRecLamBdy arr w_pis nest_pis (Array t (Shape (s : ss)) _) = do
+    genRecLamBody :: VName -> [(SubExp, Param Type)] -> [Param Type] -> Type -> ADM (Body SOACS)
+    genRecLamBody arr w_pis nest_pis (Array t (Shape []) _) =
+      genRecLamBody arr w_pis nest_pis (Prim t)
+    genRecLamBody arr w_pis nest_pis (Array t (Shape (s : ss)) _) = do
       new_ip <- newParam "i" (Prim int64)
       let t' = Prim t `arrayOfShape` Shape ss
       inner_lam <-
         mkLambda [new_ip] $
-          bodyBind =<< genRecLamBdy arr w_pis (nest_pis ++ [new_ip]) t'
+          bodyBind =<< genRecLamBody arr w_pis (nest_pis ++ [new_ip]) t'
       let (_, orig_pis) = unzip w_pis
       buildBody_ . localScope (scopeOfLParams (orig_pis ++ nest_pis)) $ do
         iota_v <- letExp "iota" $ BasicOp $ Iota s (intConst Int64 0) (intConst Int64 1) Int64
         r <- letSubExp (baseString arr ++ "_elem") $ Op $ Screma s [iota_v] (mapSOAC inner_lam)
         pure [subExpRes r]
-    genRecLamBdy arr w_pis nest_pis (Prim ptp) = do
+    genRecLamBody arr w_pis nest_pis (Prim ptp) = do
       let (ws, orig_pis) = unzip w_pis
       let inds = map paramName (orig_pis ++ nest_pis)
       localScope (scopeOfLParams (orig_pis ++ nest_pis)) $
@@ -64,7 +64,7 @@ genIdxLamBdy as wpis = genRecLamBdy as wpis []
               )
               (resultBodyM [Constant $ blankPrimValue ptp])
           ]
-    genRecLamBdy _ _ _ _ = error "In Rev.hs, helper function genRecLamBdy, unreachable case reached!"
+    genRecLamBody _ _ _ _ = error "In Rev.hs, helper function genRecLamBody, unreachable case reached!"
 
 --
 -- Original:
@@ -79,7 +79,7 @@ genIdxLamBdy as wpis = genRecLamBdy as wpis []
 --   let xs_adj = scatter ys_adj is \overline{0}
 --   let xs = scatter ys is xs_save
 vjpScatter1 ::
-  PatElem ->
+  PatElem Type ->
   StmAux () ->
   (SubExp, [VName], (ShapeBase SubExp, Int, VName)) ->
   ADM () ->
@@ -138,15 +138,15 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
       gather_lam <- mkLambda (concat ips) . fmap mconcat . forM ips $ \idxs -> do
         let q = length idxs
             (ws, eltp) = (take q $ arrayDims arr_t, stripArray q arr_t)
-        bodyBind =<< genIdxLamBdy arr (zip ws idxs) eltp
+        bodyBind =<< genIdxLamBody arr (zip ws idxs) eltp
       let soac = Screma w (concat inds_as) (mapSOAC gather_lam)
       letTupExp (baseString arr ++ "_gather") $ Op soac
 
 vjpScatter ::
   VjpOps ->
-  Pat ->
+  Pat Type ->
   StmAux () ->
-  (SubExp, [VName], Lambda, [(Shape, Int, VName)]) ->
+  (SubExp, [VName], Lambda SOACS, [(Shape, Int, VName)]) ->
   ADM () ->
   ADM ()
 vjpScatter ops (Pat pes) aux (w, ass, lam, written_info) m

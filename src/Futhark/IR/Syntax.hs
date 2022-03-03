@@ -14,11 +14,11 @@
 -- The core language type system is much more restricted than the core
 -- language.  This is a theme that repeats often.  The only types that
 -- are supported in the core language are various primitive types
--- t'PrimType' which can be combined in arrays (ignore v'Mem' for
--- now).  Types are represented as t'TypeBase', which is parameterised
--- by the shape of the array and whether we keep uniqueness
--- information.  The t'Type' alias, which is the most commonly used,
--- uses t'Shape' and t'NoUniqueness'.
+-- t'PrimType' which can be combined in arrays (ignore v'Mem' and
+-- v'Acc' for now).  Types are represented as t'TypeBase', which is
+-- parameterised by the shape of the array and whether we keep
+-- uniqueness information.  The t'Type' alias, which is the most
+-- commonly used, uses t'Shape' and t'NoUniqueness'.
 --
 -- This means that the records, tuples, and sum types of the source
 -- language are represented merely as collections of primitives and
@@ -56,7 +56,7 @@
 -- the values of the variables indicated by the result.
 --
 -- A statement ('Stm') consists of a t'Pat' alongside an
--- expression 'ExpT'.  A pattern is a sequence of name/type pairs.
+-- expression 'Exp'.  A pattern is a sequence of name/type pairs.
 --
 -- For example, the source language expression @let z = x + y - 1 in
 -- z@ would in the core language be represented (in prettyprinted
@@ -70,9 +70,9 @@
 --
 -- == Representations
 --
--- Most AST types ('Stm', 'ExpT', t'Prog', etc) are parameterised by a
+-- Most AST types ('Stm', 'Exp', t'Prog', etc) are parameterised by a
 -- type parameter @rep@.  The representation specifies how to fill out
--- various polymorphic parts of the AST.  For example, 'ExpT' has a
+-- various polymorphic parts of the AST.  For example, 'Exp' has a
 -- constructor v'Op' whose payload depends on @rep@, via the use of a
 -- type family called t'Op' (a kind of type-level function) which is
 -- applied to the @rep@.  The SOACS representation
@@ -80,7 +80,7 @@
 -- that @Op SOACS@ is a SOAC, while the Kernels representation
 -- ("Futhark.IR.Kernels") defines @Op Kernels@ as some kind of kernel
 -- construct.  Similarly, various other decorations (e.g. what
--- information we store in a t'PatElemT') are also type families.
+-- information we store in a t'PatElem') are also type families.
 --
 -- The full list of possible decorations is defined as part of the
 -- type class 'RepTypes' (although other type families are also
@@ -90,6 +90,11 @@
 -- proxy, saving us from having to parameterise the AST type with all
 -- the different forms of decorations that we desire (it would easily
 -- become a type with a dozen type parameters).
+--
+-- Some AST elements (such as 'Pat') do not take a @rep@ type
+-- parameter, but instead immediately the single type of decoration
+-- that they contain.  We only use the more complicated machinery when
+-- needed.
 --
 -- Defining a new representation (or /rep/) thus requires you to
 -- define an empty datatype and implement a handful of type class
@@ -113,17 +118,14 @@ module Futhark.IR.Syntax
     -- * Abstract syntax tree
     Ident (..),
     SubExp (..),
-    PatElem,
-    PatElemT (..),
-    PatT (..),
-    Pat,
+    PatElem (..),
+    Pat (..),
     StmAux (..),
     Stm (..),
     Stms,
     SubExpRes (..),
     Result,
-    BodyT (..),
-    Body,
+    Body (..),
     BasicOp (..),
     UnOp (..),
     BinOp (..),
@@ -133,14 +135,12 @@ module Futhark.IR.Syntax
     DimChange (..),
     ShapeChange,
     WithAccInput,
-    ExpT (..),
-    Exp,
+    Exp (..),
     LoopForm (..),
     IfDec (..),
     IfSort (..),
     Safety (..),
-    LambdaT (..),
-    Lambda,
+    Lambda (..),
 
     -- * Definitions
     Param (..),
@@ -168,6 +168,7 @@ where
 
 import Control.Category
 import Data.Foldable
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Sequence as Seq
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
@@ -177,31 +178,25 @@ import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
 
--- | A type alias for namespace control.
-type PatElem rep = PatElemT (LetDec rep)
-
 -- | A pattern is conceptually just a list of names and their types.
-newtype PatT dec = Pat {patElems :: [PatElemT dec]}
+newtype Pat dec = Pat {patElems :: [PatElem dec]}
   deriving (Ord, Show, Eq)
 
-instance Semigroup (PatT dec) where
+instance Semigroup (Pat dec) where
   Pat xs <> Pat ys = Pat (xs <> ys)
 
-instance Monoid (PatT dec) where
+instance Monoid (Pat dec) where
   mempty = Pat mempty
 
-instance Functor PatT where
+instance Functor Pat where
   fmap = fmapDefault
 
-instance Foldable PatT where
+instance Foldable Pat where
   foldMap = foldMapDefault
 
-instance Traversable PatT where
+instance Traversable Pat where
   traverse f (Pat xs) =
     Pat <$> traverse (traverse f) xs
-
--- | A type alias for namespace control.
-type Pat rep = PatT (LetDec rep)
 
 -- | Auxilliary Information associated with a statement.
 data StmAux dec = StmAux
@@ -218,7 +213,7 @@ instance Semigroup dec => Semigroup (StmAux dec) where
 -- | A local variable binding.
 data Stm rep = Let
   { -- | Pat.
-    stmPat :: Pat rep,
+    stmPat :: Pat (LetDec rep),
     -- | Auxiliary information statement.
     stmAux :: StmAux (ExpDec rep),
     -- | Expression.
@@ -291,20 +286,17 @@ type Result = [SubExpRes]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data BodyT rep = Body
+data Body rep = Body
   { bodyDec :: BodyDec rep,
     bodyStms :: Stms rep,
     bodyResult :: Result
   }
 
-deriving instance RepTypes rep => Ord (BodyT rep)
+deriving instance RepTypes rep => Ord (Body rep)
 
-deriving instance RepTypes rep => Show (BodyT rep)
+deriving instance RepTypes rep => Show (Body rep)
 
-deriving instance RepTypes rep => Eq (BodyT rep)
-
--- | Type alias for namespace reasons.
-type Body = BodyT
+deriving instance RepTypes rep => Eq (Body rep)
 
 -- | The new dimension in a 'Reshape'-like operation.  This allows us to
 -- disambiguate "real" reshapes, that change the actual shape of the
@@ -384,8 +376,19 @@ data BasicOp
     Update Safety VName (Slice SubExp) SubExp
   | FlatIndex VName (FlatSlice SubExp)
   | FlatUpdate VName (FlatSlice SubExp) VName
-  | -- | @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
-    Concat Int VName [VName] SubExp
+  | -- | @
+    -- concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@.
+    -- @
+    --
+    -- Concatenates the non-empty list of 'VName' resulting in an
+    -- array of length t'SubExp'. The 'Int' argument is used to
+    -- specify the dimension along which the arrays are
+    -- concatenated. For instance:
+    --
+    -- @
+    -- concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]
+    -- @
+    Concat Int (NonEmpty VName) SubExp
   | -- | Copy the given array.  The result will not alias anything.
     Copy VName
   | -- | Manifest an array with dimensions represented in the given
@@ -404,7 +407,7 @@ data BasicOp
     Scratch PrimType [SubExp]
   | -- Array index space transformation.
 
-    -- | 1st arg is the new shape, 2nd arg is the input array *)
+    -- | 1st arg is the new shape, 2nd arg is the input array.
     Reshape (ShapeChange SubExp) VName
   | -- | Permute the dimensions of the input array.  The list
     -- of integers is a list of dimensions (0-indexed), which
@@ -429,13 +432,13 @@ type WithAccInput rep =
 -- | The root Futhark expression type.  The v'Op' constructor contains
 -- a rep-specific operation.  Do-loops, branches and function calls
 -- are special.  Everything else is a simple t'BasicOp'.
-data ExpT rep
+data Exp rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
   | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
-  | If SubExp (BodyT rep) (BodyT rep) (IfDec (BranchType rep))
+  | If SubExp (Body rep) (Body rep) (IfDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
-    DoLoop [(FParam rep, SubExp)] (LoopForm rep) (BodyT rep)
+    DoLoop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
@@ -446,11 +449,11 @@ data ExpT rep
     WithAcc [WithAccInput rep] (Lambda rep)
   | Op (Op rep)
 
-deriving instance RepTypes rep => Eq (ExpT rep)
+deriving instance RepTypes rep => Eq (Exp rep)
 
-deriving instance RepTypes rep => Show (ExpT rep)
+deriving instance RepTypes rep => Show (Exp rep)
 
-deriving instance RepTypes rep => Ord (ExpT rep)
+deriving instance RepTypes rep => Ord (Exp rep)
 
 -- | For-loop or while-loop?
 data LoopForm rep
@@ -489,24 +492,18 @@ data IfSort
     IfEquiv
   deriving (Eq, Show, Ord)
 
--- | A type alias for namespace control.
-type Exp = ExpT
-
 -- | Anonymous function for use in a SOAC.
-data LambdaT rep = Lambda
+data Lambda rep = Lambda
   { lambdaParams :: [LParam rep],
-    lambdaBody :: BodyT rep,
+    lambdaBody :: Body rep,
     lambdaReturnType :: [Type]
   }
 
-deriving instance RepTypes rep => Eq (LambdaT rep)
+deriving instance RepTypes rep => Eq (Lambda rep)
 
-deriving instance RepTypes rep => Show (LambdaT rep)
+deriving instance RepTypes rep => Show (Lambda rep)
 
-deriving instance RepTypes rep => Ord (LambdaT rep)
-
--- | Type alias for namespacing reasons.
-type Lambda = LambdaT
+deriving instance RepTypes rep => Ord (Lambda rep)
 
 -- | A function and loop parameter.
 type FParam rep = Param (FParamInfo rep)
@@ -523,7 +520,7 @@ data FunDef rep = FunDef
     funDefName :: Name,
     funDefRetType :: [RetType rep],
     funDefParams :: [FParam rep],
-    funDefBody :: BodyT rep
+    funDefBody :: Body rep
   }
 
 deriving instance RepTypes rep => Eq (FunDef rep)

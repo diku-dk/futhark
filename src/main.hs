@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | The futhark command line tool.
+-- | The @futhark@ command line program.
 module Main (main) where
 
 import Control.Exception
@@ -66,7 +66,8 @@ commands =
       ("dataget", (Misc.mainDataget, "Extract test data.")),
       ("doc", (Doc.main, "Generate documentation for Futhark code.")),
       ("pkg", (Pkg.main, "Manage local packages.")),
-      ("check", (Check.main, "Type check a program.")),
+      ("check", (Check.main, "Type-check a program.")),
+      ("check-syntax", (Misc.mainCheckSyntax, "Syntax-check a program.")),
       ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files.")),
       ("hash", (Misc.mainHash, "Print hash of program AST.")),
       ("autotune", (Autotune.main, "Autotune threshold parameters.")),

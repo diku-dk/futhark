@@ -19,6 +19,7 @@ module Futhark.Optimise.TileLoops.Shared
     isTileableRedomap,
     changeEnv,
     kkLoopBody,
+    TileKind (..),
   )
 where
 
@@ -35,6 +36,9 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 
 type TileM = ReaderT (Scope GPU) (State VNameSource)
+
+-- | Are we working with full or partial tiles?
+data TileKind = TilePartial | TileFull
 
 --type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
 --type Env = (M.Map VName (Lambda GPU, [SubExp]), M.Map VName IxFun)
@@ -205,6 +209,45 @@ segScatter2D ::
   String ->
   SubExp ->
   VName ->
+  SegLevel -> -- lvl
+  [SubExp] -> -- dims of sequential loop on top
+  (SubExp, SubExp) -> -- (dim_y, dim_x)
+  ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
+  Builder GPU VName
+segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
+  ltid_x <- newVName "ltid_x"
+  ltid_y <- newVName "ltid_y"
+  ltid_flat <- newVName "ltid_flat"
+
+  seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
+  let seq_space = zip seq_is seq_dims
+
+  let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_x, dim_x), (ltid_y, dim_y)]
+      lvl' =
+        SegThread
+          (segNumGroups lvl)
+          (segGroupSize lvl)
+          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims -1]))
+
+  ((t_v, res_v, res_i), stms) <- runBuilder $ do
+    (res_v, res_i) <-
+      localScope (scopeOfSegSpace segspace) $
+        f seq_is (ltid_x, ltid_y)
+    t_v <- subExpType res_v
+    return (t_v, res_v, res_i)
+
+  let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
+  let body = KernelBody () stms [ret]
+
+  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl' segspace [t_v] body
+
+{--
+-- Cosmin's old version
+
+segScatter2D ::
+  String ->
+  SubExp ->
+  VName ->
   SegLevel ->
   (SubExp, SubExp) ->
   ((VName, VName) -> Builder GPU (SubExp, SubExp)) ->
@@ -224,6 +267,7 @@ segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
   let body = KernelBody () stms [ret]
 
   letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
+--}
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
@@ -389,7 +433,7 @@ kkLoopBody
     (iii, jjj),
     (load_A, inp_A, pt_A, load_B, inp_B, pt_B),
     (map_lam, red_lam)
-    )
+  )
   kk0
   (thd_res_merge, a_loc_init', b_loc_init')
   epilogue = do
@@ -528,20 +572,30 @@ kkLoopBody
             str_A = baseString inp_X
         x_loc <-
           if is_inner_coal
-            then forLoop r_par [x_loc_init'] $ \i0 [a_loc_merge] -> do
-              loop_a_loc <- forLoop tseq_div_tpar [a_loc_merge] $ \k0 [a_loc_merge'] -> do
-                scatter_a_loc <-
-                  segScatter2D (str_A ++ "_glb2loc") loc_sz_X a_loc_merge' segthd_lvl (t_par, t_par) $
-                    scatterFun is_inner_coal (i0, k0)
-                resultBodyM $ map Var scatter_a_loc
-              resultBodyM [Var loop_a_loc]
-            else forLoop tseq_div_tpar [x_loc_init'] $ \k0 [b_loc_merge] -> do
-              loop_b_loc <- forLoop r_par [b_loc_merge] $ \j0 [b_loc_merge'] -> do
-                scatter_b_loc <-
-                  segScatter2D (str_A ++ "_glb2loc") loc_sz_X b_loc_merge' segthd_lvl (t_par, t_par) $
-                    scatterFun is_inner_coal (j0, k0)
-                resultBodyM $ map Var scatter_b_loc
-              resultBodyM [Var loop_b_loc]
+            then -- former case A (matrix NOT transposed); use [ry, tk_div_tx]
+                 segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
+                   scatterFun is_inner_coal
+{--
+              forLoop r_par [x_loc_init'] $ \i0 [a_loc_merge] -> do
+                loop_a_loc <- forLoop tseq_div_tpar [a_loc_merge] $ \k0 [a_loc_merge'] -> do
+                  scatter_a_loc <- -- former case A (matrix NOT transposed); use [ry, tk_div_tx]
+                    segScatter2D (str_A ++ "_glb2loc") loc_sz_X a_loc_merge' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
+                      scatterFun is_inner_coal (i0, k0)
+                  resultBodyM $ map Var scatter_a_loc
+                resultBodyM [Var loop_a_loc]
+--}
+            else -- former case B (matrix IS transposed); use [tk_div_ty, rx]
+                 segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [tseq_div_tpar, r_par] (t_par, t_par) $
+                   scatterFun is_inner_coal
+{--
+              forLoop tseq_div_tpar [x_loc_init'] $ \k0 [b_loc_merge] -> do
+                loop_b_loc <- forLoop r_par [b_loc_merge] $ \j0 [b_loc_merge'] -> do
+                  scatter_b_loc <- -- former case B (matrix IS transposed); use [tk_div_ty, rx]
+                    segScatter2D (str_A ++ "_glb2loc") loc_sz_X b_loc_merge' segthd_lvl [tseq_div_tpar, r_par] (t_par, t_par) $
+                      scatterFun is_inner_coal (j0, k0)
+                  resultBodyM $ map Var scatter_b_loc
+                resultBodyM [Var loop_b_loc]
+--}
         return (x_loc, copyLoc2Reg is_inner_coal str_A x_loc)
         where
           copyLoc2Reg ::
@@ -569,10 +623,10 @@ kkLoopBody
           --
           scatterFun ::
             Bool ->
-            (VName, VName) ->
+            [VName] ->
             (VName, VName) ->
             Builder GPU (SubExp, SubExp)
-          scatterFun is_inner_coal (i0, k0) (thd_y, thd_x) = do
+          scatterFun is_inner_coal [i0, k0] (thd_y, thd_x) = do
             let str_A = baseString inp_X
                 t_seq = tk
             --k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 tx)
@@ -607,3 +661,5 @@ kkLoopBody
                   )
                   (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
             return (a_elem, a_loc_ind)
+          scatterFun _ _ _ = do
+            error "Function scatterFun in Shared.hs: 2nd arg should be an array with 2 elements! Error!"

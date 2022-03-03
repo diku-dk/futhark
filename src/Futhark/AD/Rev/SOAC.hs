@@ -24,7 +24,7 @@ import Futhark.Util (chunks)
 splitScanRed ::
   VjpOps ->
   ([a] -> ADM (ScremaForm SOACS), a -> [SubExp]) ->
-  (Pat, StmAux (), [a], SubExp, [VName]) ->
+  (Pat Type, StmAux (), [a], SubExp, [VName]) ->
   ADM () ->
   ADM ()
 splitScanRed vjpops (opSOAC, opNeutral) (pat, aux, ops, w, as) m = do
@@ -38,13 +38,13 @@ splitScanRed vjpops (opSOAC, opNeutral) (pat, aux, ops, w, as) m = do
       onOps _ _ _ = m
   onOps ops pat_per_op as_per_op
 
-commonSOAC :: Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM [Adj]
+commonSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM () -> ADM [Adj]
 commonSOAC pat aux soac m = do
   addStm $ Let pat aux $ Op soac
   m
   returnSweepCode $ mapM lookupAdj $ patNames pat
 
-vjpSOAC :: VjpOps -> Pat -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
+vjpSOAC :: VjpOps -> Pat Type -> StmAux () -> SOAC SOACS -> ADM () -> ADM ()
 vjpSOAC ops pat aux soac@(Screma w as form) m
   | Just reds <- isReduceSOAC form,
     length reds > 1 =

@@ -75,7 +75,7 @@ instance Substitute SubExp where
 instance Substitutable rep => Substitute (Exp rep) where
   substituteNames substs = mapExp $ replace substs
 
-instance Substitute dec => Substitute (PatElemT dec) where
+instance Substitute dec => Substitute (PatElem dec) where
   substituteNames substs (PatElem ident dec) =
     PatElem (substituteNames substs ident) (substituteNames substs dec)
 
@@ -100,7 +100,7 @@ instance Substitute SubExpRes where
   substituteNames substs (SubExpRes cs se) =
     SubExpRes (substituteNames substs cs) (substituteNames substs se)
 
-instance Substitute dec => Substitute (PatT dec) where
+instance Substitute dec => Substitute (Pat dec) where
   substituteNames substs (Pat xs) =
     Pat (substituteNames substs xs)
 

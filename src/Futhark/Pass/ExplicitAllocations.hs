@@ -224,7 +224,7 @@ patWithAllocations ::
   [VName] ->
   Exp (Rep m) ->
   [ExpHint] ->
-  m (PatT LetDecMem)
+  m (Pat LetDecMem)
 patWithAllocations def_space chunkmap names e hints = do
   ts' <- instantiateShapes' names <$> expExtType e
   let idents = zipWith Ident names ts'
@@ -246,7 +246,7 @@ allocsForPat ::
   [Ident] ->
   [ExpReturns] ->
   [ExpHint] ->
-  m [PatElemT LetDecMem]
+  m [PatElem LetDecMem]
 allocsForPat def_space chunkmap some_idents rts hints = do
   idents <- mkMissingIdents some_idents rts
 
@@ -1022,7 +1022,7 @@ allocInLoopForm (ForLoop i it n loopvars) =
           return (p {paramDec = MemAcc acc ispace ts u}, a)
 
 class SizeSubst op where
-  opSizeSubst :: PatT dec -> op -> ChunkMap
+  opSizeSubst :: Pat dec -> op -> ChunkMap
   opIsConst :: op -> Bool
   opIsConst = const False
 

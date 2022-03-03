@@ -126,6 +126,7 @@ data Values
   | ScriptFile FilePath
   deriving (Show)
 
+-- | How to generate a single random value.
 data GenValue
   = -- | Generate a value of the given rank and primitive
     -- type.  Scalars are considered 0-ary arrays.

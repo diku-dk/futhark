@@ -450,6 +450,8 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                                  free_constants(ctx);
                                  free_lock(&ctx->lock);
                                  $stms:(map releaseKernel (M.toList kernels))
+                                 OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
+                                 OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
                                  teardown_opencl(&ctx->opencl);
                                  ctx->cfg->in_use = 0;
                                  free(ctx);
@@ -492,7 +494,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 
                    $stm:(failureSwitch failures)
 
-                   return 1;
+                   return FUTHARK_PROGRAM_ERROR;
                  }
                  return 0;
                }|]

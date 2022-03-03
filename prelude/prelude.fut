@@ -18,7 +18,7 @@ def r64 (x: i32): f64 = f64.i32 x
 def t64 (x: f64): i32 = i32.f64 x
 
 -- | Negate a boolean.  `not x` is the same as `!x`.  This function is
--- mostly useful for passing to `map
+-- mostly useful for passing to `map`.
 def not (x: bool): bool = !x
 
 -- | Semantically just identity, but serves as an optimisation

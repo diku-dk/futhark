@@ -3,7 +3,7 @@
 {-# LANGUAGE TupleSections #-}
 
 -- | This module defines a translation from imperative code with
--- kernels to imperative code with OpenCL calls.
+-- kernels to imperative code with OpenCL or CUDA calls.
 module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
   ( kernelsToOpenCL,
     kernelsToCUDA,
@@ -33,8 +33,12 @@ import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
-kernelsToCUDA, kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
+-- | Generate CUDA host and device code.
+kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateGPU TargetCUDA
+
+-- | Generate OpenCL host and device code.
+kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToOpenCL = translateGPU TargetOpenCL
 
 -- | Translate a kernels-program to an OpenCL-program.
@@ -134,7 +138,7 @@ initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
 
 type AllFunctions = ImpGPU.Functions ImpGPU.HostOp
 
-lookupFunction :: Name -> AllFunctions -> Maybe ImpGPU.Function
+lookupFunction :: Name -> AllFunctions -> Maybe (ImpGPU.Function HostOp)
 lookupFunction fname (ImpGPU.Functions fs) = lookup fname fs
 
 type OnKernelM = ReaderT AllFunctions (State ToOpenCL)
@@ -168,14 +172,9 @@ genGPUCode mode body failures =
 
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
-generateDeviceFun :: Name -> ImpGPU.Function -> OnKernelM ()
-generateDeviceFun fname host_func = do
-  -- Functions are a priori always considered host-level, so we have
-  -- to convert them to device code.  This is where most of our
-  -- limitations on device-side functions (no arrays, no parallelism)
-  -- comes from.
-  let device_func = fmap toDevice host_func
-  when (any memParam $ functionInput host_func) bad
+generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
+generateDeviceFun fname device_func = do
+  when (any memParam $ functionInput device_func) bad
 
   failures <- gets clFailures
 
@@ -199,9 +198,6 @@ generateDeviceFun fname host_func = do
   -- right clFailures.
   void $ ensureDeviceFuns $ functionBody device_func
   where
-    toDevice :: HostOp -> KernelOp
-    toDevice _ = bad
-
     memParam MemParam {} = True
     memParam ScalarParam {} = False
 
@@ -209,7 +205,7 @@ generateDeviceFun fname host_func = do
 
 -- Ensure that this device function is available, but don't regenerate
 -- it if it already exists.
-ensureDeviceFun :: Name -> ImpGPU.Function -> OnKernelM ()
+ensureDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
 ensureDeviceFun fname host_func = do
   exists <- gets $ M.member fname . clDevFuns
   unless exists $ generateDeviceFun fname host_func
@@ -221,10 +217,19 @@ ensureDeviceFuns code = do
     forM (S.toList called) $ \fname -> do
       def <- asks $ lookupFunction fname
       case def of
-        Just func -> do
-          ensureDeviceFun fname func
+        Just host_func -> do
+          -- Functions are a priori always considered host-level, so we have
+          -- to convert them to device code.  This is where most of our
+          -- limitations on device-side functions (no arrays, no parallelism)
+          -- comes from.
+          let device_func = fmap toDevice host_func
+          ensureDeviceFun fname device_func
           return $ Just fname
         Nothing -> return Nothing
+  where
+    bad = compilerLimitationS "Cannot generate GPU functions that contain parallelism."
+    toDevice :: HostOp -> KernelOp
+    toDevice _ = bad
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
 onKernel target kernel = do
@@ -235,8 +240,11 @@ onKernel target kernel = do
   failures <- gets clFailures
 
   let (kernel_body, cstate) =
-        genGPUCode KernelMode (kernelBody kernel) failures $
-          GC.blockScope $ GC.compileCode $ kernelBody kernel
+        genGPUCode KernelMode (kernelBody kernel) failures . GC.collect $ do
+          body <- GC.collect $ GC.compileCode $ kernelBody kernel
+          -- No need to free, as we cannot allocate memory in kernels.
+          mapM_ GC.item =<< GC.declAllocatedMem
+          mapM_ GC.item body
       kstate = GC.compUserState cstate
 
       (local_memory_args, local_memory_params, local_memory_init) =

@@ -2,13 +2,56 @@
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TupleSections #-}
 
--- | Imperative intermediate language used as a stepping stone in code generation.
+-- | ImpCode is an imperative intermediate language used as a stepping
+-- stone in code generation.  The functional core IR
+-- ("Futhark.IR.Syntax") gets translated into ImpCode by
+-- "Futhark.CodeGen.ImpGen".  Later we then translate ImpCode to, for
+-- example, C.
 --
--- This is a generic representation parametrised on an extensible
--- arbitrary operation.
+-- == Basic design
 --
--- Originally inspired by the paper "Defunctionalizing Push Arrays"
--- (FHPC '14).
+-- ImpCode distinguishes between /statements/ ('Code'), which may have
+-- side effects, and /expressions/ ('Exp') which do not.  Expressions
+-- involve only scalars and have a type.  The actual expression
+-- definition is in "Futhark.Analysis.PrimExp", specifically
+-- 'Futhark.Analysis.PrimExp.PrimExp' and its phantom-typed variant
+-- 'Futhark.Analysis.PrimExp.TPrimExp'.
+--
+-- 'Code' is a generic representation parametrised on an extensible
+-- arbitrary operation, represented by the 'Op' constructor.  Specific
+-- instantiations of ImpCode, such as
+-- "Futhark.CodeGen.ImpCode.Multicore", will pass in a specific kind
+-- of operation to express backend-specific functionality (in the case
+-- of multicore, this is
+-- 'Futhark.CodeGen.ImpCode.Multicore.Multicore').
+--
+-- == Arrays and memory
+--
+-- ImpCode does not have arrays. 'DeclareArray' is for declaring
+-- constant array literals, not arrays in general.  Instead, ImpCode
+-- deals only with memory.  Array operations present in core IR
+-- programs are turned into 'Write', v'Read', and 'Copy' operations
+-- that use flat indexes and offsets based on the index function of
+-- the original array.
+--
+-- == Scoping
+--
+-- ImpCode is much simpler than the functional core IR; partly because
+-- we hope to do less work on it.  We don't have real optimisation
+-- passes on ImpCode.  One result of this simplicity is that ImpCode
+-- has a fairly naive view of scoping.  The /only/ things that can
+-- bring new names into scope are 'DeclareMem', 'DeclareScalar',
+-- 'DeclareArray', 'For', and function parameters.  In particular,
+-- 'Op's /cannot/ bind parameters.  The standard workaround is to
+-- define 'Op's that retrieve the value of an implicit parameter and
+-- assign it to a variable declared with the normal
+-- mechanisms. 'Futhark.CodeGen.ImpCode.Multicore.GetLoopBounds' is an
+-- example of this pattern.
+--
+-- == Inspiration
+--
+-- ImpCode was originally inspired by the paper "Defunctionalizing
+-- Push Arrays" (FHPC '14).
 module Futhark.CodeGen.ImpCode
   ( Definitions (..),
     Functions (..),
@@ -89,7 +132,7 @@ type DimSize = SubExp
 data Param
   = MemParam VName Space
   | ScalarParam VName PrimType
-  deriving (Show)
+  deriving (Eq, Show)
 
 -- | The name of a parameter.
 paramName :: Param -> VName
@@ -241,8 +284,7 @@ data Code a
   | -- | @Write mem i t space vol v@ writes the value @v@ to
     -- @mem@ offset by @i@ elements of type @t@.  The
     -- 'Space' argument is the memory space of @mem@
-    -- (technically redundant, but convenient).  Note that
-    -- /reading/ is done with an 'Exp' ('Read').
+    -- (technically redundant, but convenient).
     Write VName (Count Elements (TExp Int64)) PrimType Space Volatility Exp
   | -- | Set a scalar variable.
     SetScalar VName Exp
@@ -486,6 +528,8 @@ instance Pretty op => Pretty (Code op) where
         Nonvolatile -> mempty
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
+  ppr (SetMem dest from DefaultSpace) =
+    ppr dest <+> text "<-" <+> ppr from
   ppr (SetMem dest from space) =
     ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
   ppr (Assert e msg _) =

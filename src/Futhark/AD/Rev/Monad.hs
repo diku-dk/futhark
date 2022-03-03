@@ -74,7 +74,7 @@ import Futhark.Tools
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks)
 
-zeroExp :: Type -> ExpT rep
+zeroExp :: Type -> Exp rep
 zeroExp (Prim pt) =
   BasicOp $ SubExp $ Constant $ blankPrimValue pt
 zeroExp (Array pt shape _) =
@@ -87,7 +87,7 @@ onePrim (FloatType ft) = FloatValue $ floatValue ft (1 :: Double)
 onePrim Bool = BoolValue True
 onePrim Unit = UnitValue
 
-oneExp :: Type -> ExpT rep
+oneExp :: Type -> Exp rep
 oneExp (Prim t) = BasicOp $ SubExp $ constant $ onePrim t
 oneExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ onePrim pt
@@ -246,7 +246,7 @@ adjVName v = newVName (baseString v <> "_adj")
 -- return statements which include copies of the consumed arrays.
 --
 -- See Note [Consumption].
-copyConsumedArrsInStm :: Stm -> ADM (Substitutions, Stms SOACS)
+copyConsumedArrsInStm :: Stm SOACS -> ADM (Substitutions, Stms SOACS)
 copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
   where
     copyConsumedArrsInStm' stm =
@@ -262,7 +262,7 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
        in M.fromList . mconcat
             <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
 
-copyConsumedArrsInBody :: [VName] -> Body -> ADM Substitutions
+copyConsumedArrsInBody :: [VName] -> Body SOACS -> ADM Substitutions
 copyConsumedArrsInBody dontCopy b =
   mconcat <$> mapM onConsumed (filter (`notElem` dontCopy) $ namesToList $ consumedInBody (Alias.analyseBody mempty b))
   where
@@ -327,7 +327,7 @@ tabNest = tabNest' []
       letTupExp "tab" $ Op $ Screma w (iota : vs) (mapSOAC lam)
 
 -- | Construct a lambda for adding two values of the given type.
-addLambda :: Type -> ADM Lambda
+addLambda :: Type -> ADM (Lambda SOACS)
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
 addLambda t@Array {} = do
   xs_p <- newParam "xs" t
@@ -348,7 +348,7 @@ addLambda t =
   error $ "addLambda: " ++ show t
 
 -- Construct an expression for adding the two variables.
-addExp :: VName -> VName -> ADM Exp
+addExp :: VName -> VName -> ADM (Exp SOACS)
 addExp x y = do
   x_t <- lookupType x
   case x_t of
@@ -487,8 +487,8 @@ subSubsts m = do
   pure x
 
 data VjpOps = VjpOps
-  { vjpLambda :: [Adj] -> [VName] -> Lambda -> ADM Lambda,
-    vjpStm :: Stm -> ADM () -> ADM ()
+  { vjpLambda :: [Adj] -> [VName] -> Lambda SOACS -> ADM (Lambda SOACS),
+    vjpStm :: Stm SOACS -> ADM () -> ADM ()
   }
 
 -- | @setLoopTape v vs@ establishes @vs@ as the name of the array

@@ -13,6 +13,7 @@
 module Futhark.IR.SegOp
   ( SegOp (..),
     SegVirt (..),
+    SegSeqDims (..),
     segLevel,
     segBody,
     segSpace,
@@ -150,7 +151,7 @@ histType op =
     lambdaReturnType $ histOp op
 
 -- | Split reduction results returned by a 'KernelBody' into those
--- that correspond to indexes for the 'HistOps', and those that
+-- that correspond to indexes for the 'HistOp's, and those that
 -- correspond to value.
 splitHistResults :: [HistOp rep] -> [SubExp] -> [([SubExp], [SubExp])]
 splitHistResults ops res =
@@ -494,6 +495,24 @@ instance Pretty KernelResult where
       onDim (dim, blk_tile, reg_tile) =
         ppr dim <+> "/" <+> parens (ppr blk_tile <+> "*" <+> ppr reg_tile)
 
+-- | These dimensions (indexed from 0, outermost) of the corresponding
+-- 'SegSpace' should not be parallelised, but instead iterated
+-- sequentially.  For example, with a 'SegSeqDims' of @[0]@ and a
+-- 'SegSpace' with dimensions @[n][m]@, there will be an outer loop
+-- with @n@ iterations, while the @m@ dimension will be parallelised.
+--
+-- Semantically, this has no effect, but it may allow reductions in
+-- memory usage or other low-level optimisations.  Operationally, the
+-- guarantee is that for a SegSeqDims of e.g. @[i,j,k]@, threads
+-- running at any given moment will always have the same indexes along
+-- the dimensions specified by @[i,j,k]@.
+--
+-- At the moment, this is only supported for 'SegNoVirtFull'
+-- intra-group parallelism in GPU code, as we have not yet found it
+-- useful anywhere else.
+newtype SegSeqDims = SegSeqDims {segSeqDims :: [Int]}
+  deriving (Eq, Ord, Show)
+
 -- | Do we need group-virtualisation when generating code for the
 -- segmented operation?  In most cases, we do, but for some simple
 -- kernels, we compute the full number of groups in advance, and then
@@ -507,7 +526,7 @@ data SegVirt
   | -- | Not only do we not need virtualisation, but we _guarantee_
     -- that all physical threads participate in the work.  This can
     -- save some checks in code generation.
-    SegNoVirtFull
+    SegNoVirtFull SegSeqDims
   deriving (Eq, Ord, Show)
 
 -- | Index space of a 'SegOp'.
@@ -1308,7 +1327,7 @@ segOpRuleBottomUp vtable pat dec op
 topDownSegOp ::
   (HasSegOp rep, BuilderOps rep, Buildable rep) =>
   ST.SymbolTable rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep
@@ -1414,7 +1433,7 @@ segOpGuts (SegHist lvl space ops kts body) =
 bottomUpSegOp ::
   (HasSegOp rep, BuilderOps rep) =>
   (ST.SymbolTable rep, UT.UsageTable) ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   SegOp (SegOpLevel rep) rep ->
   Rule rep

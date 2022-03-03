@@ -79,11 +79,11 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
 
       let gridxyt_pexp = pe64 gridDim_y * pe64 gridDim_x * pe64 gridDim_t
-      let grid_pexp =
+          grid_pexp =
             foldl (\x d -> pe64 d * x) gridxyt_pexp $
               map snd rem_outer_dims_rev
-      (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
 
+      (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
       (gid_x, gid_y, gid_flat) <- mkGidsXYF
       gid_t <- newVName "gid_t"
 
@@ -526,7 +526,7 @@ mkNewSegthdLvl ::
 mkNewSegthdLvl tx ty grid_pexp = do
   grid_size <- letSubExp "grid_size" =<< toExp grid_pexp
   group_size <- letSubExp "group_size" =<< toExp (pe64 ty * pe64 tx)
-  let segthd_lvl = SegThread (Count grid_size) (Count group_size) SegNoVirtFull
+  let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
   return (grid_size, group_size, segthd_lvl)
 
 mkGidsXYF :: Builder GPU (VName, VName, VName)
@@ -855,7 +855,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       let grid_pexp = product $ gridxyz_pexp : map (pe64 . snd) rem_outer_dims_rev
       grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
       group_size <- letSubExp "group_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
-      let segthd_lvl = SegThread (Count grid_size) (Count group_size) SegNoVirtFull
+      let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
 
       count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz group_size
 

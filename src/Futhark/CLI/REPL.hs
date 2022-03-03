@@ -15,19 +15,19 @@ import Control.Monad.State
 import Data.Char
 import Data.List (intercalate, intersperse)
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Version
 import Futhark.Compiler
 import Futhark.MonadFreshNames
-import Futhark.Pipeline
-import Futhark.Util (fancyTerminal, toPOSIX)
+import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
 import Futhark.Version
 import Language.Futhark
 import qualified Language.Futhark.Interpreter as I
-import Language.Futhark.Parser hiding (EOF)
+import Language.Futhark.Parser
 import qualified Language.Futhark.Semantic as T
 import qualified Language.Futhark.TypeChecker as T
 import NeatInterpolation (text)
@@ -81,30 +81,30 @@ repl maybe_prog = do
           Left (Load file) -> do
             liftIO $ T.putStrLn $ "Loading " <> T.pack file
             maybe_new_state <-
-              liftIO $ newFutharkiState (futharkiCount s) $ Just file
+              liftIO $ newFutharkiState (futharkiCount s) (futharkiProg s) $ Just file
             case maybe_new_state of
               Right new_state -> toploop new_state
               Left err -> do
                 liftIO $ putStrLn err
                 toploop s'
-          Right _ -> return ()
+          Right _ -> pure ()
 
       finish s = do
         quit <- if fancyTerminal then confirmQuit else pure True
-        if quit then return () else toploop s
+        if quit then pure () else toploop s
 
-  maybe_init_state <- liftIO $ newFutharkiState 0 maybe_prog
+  maybe_init_state <- liftIO $ newFutharkiState 0 noLoadedProg maybe_prog
   s <- case maybe_init_state of
     Left prog_err -> do
-      noprog_init_state <- liftIO $ newFutharkiState 0 Nothing
+      noprog_init_state <- liftIO $ newFutharkiState 0 noLoadedProg Nothing
       case noprog_init_state of
         Left err ->
           error $ "Failed to initialise interpreter state: " ++ err
         Right s -> do
           liftIO $ putStrLn prog_err
-          return s {futharkiLoaded = maybe_prog}
+          pure s {futharkiLoaded = maybe_prog}
     Right s ->
-      return s
+      pure s
   Haskeline.runInputT Haskeline.defaultSettings $ toploop s
 
   putStrLn "Leaving 'futhark repl'."
@@ -113,9 +113,9 @@ confirmQuit :: Haskeline.InputT IO Bool
 confirmQuit = do
   c <- Haskeline.getInputChar "Quit REPL? (y/n) "
   case c of
-    Nothing -> return True -- EOF
-    Just 'y' -> return True
-    Just 'n' -> return False
+    Nothing -> pure True -- EOF
+    Just 'y' -> pure True
+    Just 'n' -> pure False
     _ -> confirmQuit
 
 -- | Representation of breaking at a breakpoint, to allow for
@@ -128,8 +128,7 @@ data Breaking = Breaking
   }
 
 data FutharkiState = FutharkiState
-  { futharkiImports :: Imports,
-    futharkiNameSource :: VNameSource,
+  { futharkiProg :: LoadedProg,
     futharkiCount :: Int,
     futharkiEnv :: (T.Env, I.Ctx),
     -- | Are we currently stopped at a breakpoint?
@@ -141,55 +140,50 @@ data FutharkiState = FutharkiState
     futharkiLoaded :: Maybe FilePath
   }
 
-newFutharkiState :: Int -> Maybe FilePath -> IO (Either String FutharkiState)
-newFutharkiState count maybe_file = runExceptT $ do
-  (imports, src, tenv, ienv) <- case maybe_file of
+extendEnvs :: LoadedProg -> (T.Env, I.Ctx) -> [String] -> (T.Env, I.Ctx)
+extendEnvs prog (tenv, ictx) opens = (tenv', ictx')
+  where
+    tenv' = T.envWithImports t_imports tenv
+    ictx' = I.ctxWithImports i_envs ictx
+    t_imports = filter ((`elem` opens) . fst) $ lpImports prog
+    i_envs = map snd $ filter ((`elem` opens) . fst) $ M.toList $ I.ctxImports ictx
+
+newFutharkiState :: Int -> LoadedProg -> Maybe FilePath -> IO (Either String FutharkiState)
+newFutharkiState count prev_prog maybe_file = runExceptT $ do
+  (prog, tenv, ienv) <- case maybe_file of
     Nothing -> do
       -- Load the builtins through the type checker.
-      (_, imports, src) <- badOnLeft show =<< runExceptT (readLibrary [] [])
+      (_, prog) <-
+        badOnLeft prettyProgramErrors =<< liftIO (reloadProg prev_prog [])
       -- Then into the interpreter.
       ienv <-
         foldM
           (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
           I.initialCtx
-          $ map (fmap fileProg) imports
+          $ map (fmap fileProg) (lpImports prog)
 
-      -- Then make the prelude available in the type checker.
-      (tenv, d, src') <-
-        badOnLeft pretty . snd $
-          T.checkDec imports src T.initialEnv (T.mkInitialImport ".") $
-            mkOpen "/prelude/prelude"
-      -- Then in the interpreter.
-      ienv' <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv d)
-      return (imports, src', tenv, ienv')
+      let (tenv, ienv') =
+            extendEnvs prog (T.initialEnv, ienv) ["/prelude/prelude"]
+
+      pure (prog, tenv, ienv')
     Just file -> do
-      (ws, imports, src) <-
-        badOnLeft show
-          =<< liftIO
-            ( runExceptT (readProgram [] file)
-                `catch` \(err :: IOException) ->
-                  return (externalErrorS (show err))
-            )
+      (ws, prog) <- badOnLeft prettyProgramErrors =<< liftIO (reloadProg prev_prog [file])
       liftIO $ putStrLn $ pretty ws
 
-      let imp = T.mkInitialImport "."
-      ienv1 <-
-        foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
-          map (fmap fileProg) imports
-      (tenv1, d1, src') <-
-        badOnLeft pretty . snd . T.checkDec imports src T.initialEnv imp $
-          mkOpen "/prelude/prelude"
-      (tenv2, d2, src'') <-
-        badOnLeft pretty . snd . T.checkDec imports src' tenv1 imp $
-          mkOpen $ toPOSIX $ dropExtension file
-      ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
-      ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
-      return (imports, src'', tenv2, ienv3)
+      ienv <-
+        foldM
+          (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
+          I.initialCtx
+          $ map (fmap fileProg) (lpImports prog)
+
+      let (tenv, ienv') =
+            extendEnvs prog (T.initialEnv, ienv) ["/prelude/prelude", dropExtension file]
+
+      pure (prog, tenv, ienv')
 
   return
     FutharkiState
-      { futharkiImports = imports,
-        futharkiNameSource = src,
+      { futharkiProg = prog,
         futharkiCount = count,
         futharkiEnv = (tenv, ienv),
         futharkiBreaking = Nothing,
@@ -199,16 +193,15 @@ newFutharkiState count maybe_file = runExceptT $ do
       }
   where
     badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
-    badOnLeft _ (Right x) = return x
+    badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
+
+    prettyProgramErrors = pretty . pprProgramErrors
 
 getPrompt :: FutharkiM String
 getPrompt = do
   i <- gets futharkiCount
-  return $ "[" ++ show i ++ "]> "
-
-mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo mempty) mempty
+  pure $ "[" ++ show i ++ "]> "
 
 -- The ExceptT part is more of a continuation, really.
 newtype FutharkiM a = FutharkiM {runFutharkiM :: ExceptT StopReason (StateT FutharkiState (Haskeline.InputT IO)) a}
@@ -229,7 +222,7 @@ readEvalPrint = do
   case T.uncons line of
     Nothing
       | isJust breaking -> throwError Stop
-      | otherwise -> return ()
+      | otherwise -> pure ()
     Just (':', command) -> do
       let (cmdname, rest) = T.break isSpace command
           arg = T.dropWhileEnd isSpace $ T.dropWhile isSpace rest
@@ -253,36 +246,36 @@ readEvalPrint = do
     inputLine prompt = do
       inp <- FutharkiM $ lift $ lift $ Haskeline.getInputLine prompt
       case inp of
-        Just s -> return $ T.pack s
+        Just s -> pure $ T.pack s
         Nothing -> throwError EOF
 
 getIt :: FutharkiM (Imports, VNameSource, T.Env, I.Ctx)
 getIt = do
-  imports <- gets futharkiImports
-  src <- gets futharkiNameSource
+  imports <- gets $ lpImports . futharkiProg
+  src <- gets $ lpNameSource . futharkiProg
   (tenv, ienv) <- gets futharkiEnv
-  return (imports, src, tenv, ienv)
+  pure (imports, src, tenv, ienv)
 
 onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
-  (imports, src, tenv, ienv) <- getIt
+  old_imports <- gets $ lpImports . futharkiProg
   cur_import <- gets $ T.mkInitialImport . fromMaybe "." . futharkiLoaded
+  let mkImport = uncurry $ T.mkImportFrom cur_import
+      files = map (T.includeToFilePath . mkImport) $ decImports d
 
-  -- Most of the complexity here concerns the dealing with the fact
-  -- that 'import "foo"' is a declaration.  We have to involve a lot
-  -- of machinery to load this external code before executing the
-  -- declaration itself.
-  let basis = Basis imports src ["/prelude/prelude"]
-      mkImport = uncurry $ T.mkImportFrom cur_import
-  imp_r <- runExceptT $ readImports basis (map mkImport $ decImports d)
-
+  cur_prog <- gets futharkiProg
+  imp_r <- liftIO $ extendProg cur_prog files
   case imp_r of
-    Left e -> liftIO $ print e
-    Right (_, imports', src') ->
-      case T.checkDec imports' src' tenv cur_import d of
+    Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgramErrors e
+    Right (_ws, prog) -> do
+      env <- gets futharkiEnv
+      let (tenv, ienv) = extendEnvs prog env (map fst $ decImports d)
+          imports = lpImports prog
+          src = lpNameSource prog
+      case T.checkDec imports src tenv cur_import d of
         (_, Left e) -> liftIO $ putStrLn $ pretty e
-        (_, Right (tenv', d', src'')) -> do
-          let new_imports = filter ((`notElem` map fst imports) . fst) imports'
+        (_, Right (tenv', d', src')) -> do
+          let new_imports = filter ((`notElem` map fst old_imports) . fst) imports
           int_r <- runInterpreter $ do
             let onImport ienv' (s, imp) =
                   I.interpretImport ienv' (s, T.fileProg imp)
@@ -293,8 +286,7 @@ onDec d = do
             Right ienv' -> modify $ \s ->
               s
                 { futharkiEnv = (tenv', ienv'),
-                  futharkiImports = imports',
-                  futharkiNameSource = src''
+                  futharkiProg = prog {lpNameSource = src'}
                 }
 
 onExp :: UncheckedExp -> FutharkiM ()
@@ -332,7 +324,7 @@ runInterpreter :: F I.ExtOp a -> FutharkiM (Either I.InterpreterError a)
 runInterpreter m = runF m (return . Right) intOp
   where
     intOp (I.ExtOpError err) =
-      return $ Left err
+      pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putStrLn $ w ++ ": " ++ v
       c
@@ -384,7 +376,7 @@ runInterpreter m = runF m (return . Right) intOp
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreter' m = runF m (return . Right) intOp
   where
-    intOp (I.ExtOpError err) = return $ Left err
+    intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putStrLn $ w ++ ": " ++ v
       c
@@ -411,9 +403,7 @@ genTypeCommand f g h e = do
   case f prompt e of
     Left err -> liftIO $ print err
     Right e' -> do
-      imports <- gets futharkiImports
-      src <- gets futharkiNameSource
-      (tenv, _) <- gets futharkiEnv
+      (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of
         Left err -> liftIO $ putStrLn $ pretty err
         Right x -> liftIO $ putStrLn $ h x

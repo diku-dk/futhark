@@ -76,7 +76,7 @@ type Transformer m =
 
 transformBody ::
   (Transformer m, LetDec (Rep m) ~ LetDec SOACS) =>
-  Body ->
+  Body SOACS ->
   m (AST.Body (Rep m))
 transformBody (Body () stms res) = buildBody_ $ do
   mapM_ transformStmRecursively stms
@@ -85,9 +85,7 @@ transformBody (Body () stms res) = buildBody_ $ do
 -- | First transform any nested t'Body' or t'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
 transformStmRecursively ::
-  (Transformer m, LetDec (Rep m) ~ LetDec SOACS) =>
-  Stm ->
-  m ()
+  (Transformer m, LetDec (Rep m) ~ LetDec SOACS) => Stm SOACS -> m ()
 transformStmRecursively (Let pat aux (Op soac)) =
   auxing aux $ transformSOAC pat =<< mapSOACM soacTransform soac
   where
@@ -122,7 +120,7 @@ resultArray arrs ts = do
 -- on the given rep.
 transformSOAC ::
   Transformer m =>
-  AST.Pat (Rep m) ->
+  Pat (LetDec (Rep m)) ->
   SOAC (Rep m) ->
   m ()
 transformSOAC _ JVP {} =
@@ -369,7 +367,7 @@ transformLambda ::
     LetDec rep ~ LetDec SOACS,
     CanBeAliased (Op rep)
   ) =>
-  Lambda ->
+  Lambda SOACS ->
   m (AST.Lambda rep)
 transformLambda (Lambda params body rettype) = do
   body' <-

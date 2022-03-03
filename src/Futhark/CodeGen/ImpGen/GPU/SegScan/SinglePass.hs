@@ -209,7 +209,7 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
 compileSegScan ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
   SegBinOp GPUMem ->
@@ -266,7 +266,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
   sReplicate statusFlags $ intConst Int8 statusX
 
-  sKernelThread "segscan" num_groups group_size (segFlat space) $ do
+  sKernelThread "segscan" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
 
     (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-

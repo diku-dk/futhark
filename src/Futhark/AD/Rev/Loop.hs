@@ -22,17 +22,17 @@ import Futhark.Transform.Substitute
 import Futhark.Util (traverseFold)
 
 -- | A convenience function to bring the components of a for-loop into
--- scope and throw an error if the passed 'ExpT' is not a for-loop.
+-- scope and throw an error if the passed 'Exp' is not a for-loop.
 bindForLoop ::
   PrettyRep rep =>
-  ExpT rep ->
+  Exp rep ->
   ( [(Param (FParamInfo rep), SubExp)] ->
     LoopForm rep ->
     VName ->
     IntType ->
     SubExp ->
     [(Param (LParamInfo rep), VName)] ->
-    BodyT rep ->
+    Body rep ->
     a
   ) ->
   a
@@ -44,28 +44,28 @@ bindForLoop e _ = error $ "bindForLoop: not a for-loop:\n" <> pretty e
 -- renamed components.
 renameForLoop ::
   (MonadFreshNames m, Renameable rep, PrettyRep rep) =>
-  ExpT rep ->
-  ( ExpT rep ->
+  Exp rep ->
+  ( Exp rep ->
     [(Param (FParamInfo rep), SubExp)] ->
     LoopForm rep ->
     VName ->
     IntType ->
     SubExp ->
     [(Param (LParamInfo rep), VName)] ->
-    BodyT rep ->
+    Body rep ->
     m a
   ) ->
   m a
 renameForLoop loop f = renameExp loop >>= \loop' -> bindForLoop loop' (f loop')
 
 -- | Is the loop a while-loop?
-isWhileLoop :: ExpT rep -> Bool
+isWhileLoop :: Exp rep -> Bool
 isWhileLoop (DoLoop _ WhileLoop {} _) = True
 isWhileLoop _ = False
 
 -- | Transforms a 'ForLoop' into a 'ForLoop' with an empty list of
 -- loop variables.
-removeLoopVars :: MonadBuilder m => ExpT (Rep m) -> m (ExpT (Rep m))
+removeLoopVars :: MonadBuilder m => Exp (Rep m) -> m (Exp (Rep m))
 removeLoopVars loop =
   bindForLoop loop $ \val_pats form i _it _bound loop_vars body -> do
     let indexify (x_param, xs) = do
@@ -79,7 +79,7 @@ removeLoopVars loop =
     return $ DoLoop val_pats form $ Body aux' (subst_stms <> stms') res'
 
 -- | Augments a while-loop to also compute the number of iterations.
-computeWhileIters :: ExpT SOACS -> ADM SubExp
+computeWhileIters :: Exp SOACS -> ADM SubExp
 computeWhileIters (DoLoop val_pats (WhileLoop b) body) = do
   bound_v <- newVName "bound"
   let t = Prim $ IntType Int64
@@ -101,7 +101,7 @@ computeWhileIters e = error $ "convertWhileIters: not a while-loop:\n" <> pretty
 -- where @n@ is an upper bound on the number of iterations of the
 -- while-loop. The resulting for-loop will execute for @n@ iterations on
 -- all inputs, so the tighter the bound the better.
-convertWhileLoop :: SubExp -> ExpT SOACS -> ADM (ExpT SOACS)
+convertWhileLoop :: SubExp -> Exp SOACS -> ADM (Exp SOACS)
 convertWhileLoop bound_se (DoLoop val_pats (WhileLoop cond) body) =
   localScope (scopeOfFParams $ map fst val_pats) $ do
     i <- newVName "i"
@@ -122,8 +122,8 @@ convertWhileLoop _ e = error $ "convertWhileLoopBound: not a while-loop:\n" <> p
 nestifyLoop ::
   SubExp ->
   Integer ->
-  ExpT SOACS ->
-  ADM (ExpT SOACS)
+  Exp SOACS ->
+  ADM (Exp SOACS)
 nestifyLoop bound_se = nestifyLoop' bound_se
   where
     nestifyLoop' offset n loop = bindForLoop loop nestify
@@ -165,7 +165,7 @@ nestifyLoop bound_se = nestifyLoop' bound_se
 -- An additional @bound - (floor(bound^(1/n)))^n@-iteration remainder loop is
 -- inserted after the stripmined loop which executes the remaining iterations
 -- so that the stripmined loop is semantically equivalent to the original loop.
-stripmine :: Integer -> Pat -> ExpT SOACS -> ADM (Stms SOACS)
+stripmine :: Integer -> Pat Type -> Exp SOACS -> ADM (Stms SOACS)
 stripmine n pat loop = do
   loop' <- removeLoopVars loop
   bindForLoop loop' $ \_val_pats _form _i it bound _loop_vars _body -> do
@@ -197,7 +197,7 @@ stripmine n pat loop = do
 -- | Stripmines a statement. Only has an effect when the statement's
 -- expression is a for-loop with a @#[stripmine(n)]@ attribute, where
 -- @n@ is the nesting depth.
-stripmineStm :: Stm -> ADM (Stms SOACS)
+stripmineStm :: Stm SOACS -> ADM (Stms SOACS)
 stripmineStm stm@(Let pat aux loop@(DoLoop _ ForLoop {} _)) =
   case nums of
     (n : _) -> stripmine n pat loop
@@ -215,7 +215,7 @@ stripmineStms = traverseFold stripmineStm
 -- to save the loop values at each iteration onto a tape as well as copying
 -- any consumed arrays in the loop's body and consuming said copies in lieu of
 -- the originals (which will be consumed later in the reverse pass).
-fwdLoop :: Pat -> StmAux () -> ExpT SOACS -> ADM ()
+fwdLoop :: Pat Type -> StmAux () -> Exp SOACS -> ADM ()
 fwdLoop pat aux loop =
   bindForLoop loop $ \val_pats form i _it bound _loop_vars body -> do
     bound64 <- asIntS Int64 bound
@@ -273,7 +273,7 @@ valPatAdjs = (mapM . mapM) valPatAdj
 
 -- | Reverses a loop by substituting the loop index as well as reversing
 -- the arrays that loop variables are bound to.
-reverseIndices :: ExpT SOACS -> ADM (Substitutions, Substitutions, Stms SOACS)
+reverseIndices :: Exp SOACS -> ADM (Substitutions, Substitutions, Stms SOACS)
 reverseIndices loop = do
   bindForLoop loop $ \_val_pats form i it bound loop_vars _body -> do
     bound_minus_one <-
@@ -339,7 +339,7 @@ data LoopInfo a = LoopInfo
   deriving (Functor, Foldable, Traversable, Show)
 
 -- | Transforms a for-loop into its reverse-mode derivative.
-revLoop :: (Stms SOACS -> ADM ()) -> Pat -> ExpT SOACS -> ADM ()
+revLoop :: (Stms SOACS -> ADM ()) -> Pat Type -> Exp SOACS -> ADM ()
 revLoop diffStms pat loop =
   bindForLoop loop $ \val_pats _form _i _it _bound _loop_vars _body ->
     renameForLoop loop $
@@ -435,7 +435,7 @@ revLoop diffStms pat loop =
               zipWithM_ updateAdj (loopVals loop_vnames) loop_val_adjs
 
 -- | Transforms a loop into its reverse-mode derivative.
-diffLoop :: (Stms SOACS -> ADM ()) -> Pat -> StmAux () -> ExpT SOACS -> ADM () -> ADM ()
+diffLoop :: (Stms SOACS -> ADM ()) -> Pat Type -> StmAux () -> Exp SOACS -> ADM () -> ADM ()
 diffLoop diffStms pat aux loop m
   | isWhileLoop loop =
     let getBound (AttrComp "bound" [AttrInt b]) = Just b

@@ -454,7 +454,7 @@ binLambda bop arg_t ret_t = do
         lambdaBody = body
       }
 
--- | Easily construct a 'Lambda' within a 'MonadBuilder'.
+-- | Easily construct a t'Lambda' within a 'MonadBuilder'.
 mkLambda ::
   MonadBuilder m =>
   [LParam (Rep m)] ->
@@ -556,7 +556,7 @@ mapResult f (Body _ stms res) =
 -- | Instantiate all existential parts dimensions of the given
 -- type, using a monadic action to create the necessary t'SubExp's.
 -- You should call this function within some monad that allows you to
--- collect the actions performed (say, 'Writer').
+-- collect the actions performed (say, 'State').
 instantiateShapes ::
   Monad m =>
   (Int -> m SubExp) ->

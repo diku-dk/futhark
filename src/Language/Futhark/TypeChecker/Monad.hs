@@ -74,10 +74,9 @@ import Language.Futhark.Warnings
 import qualified Paths_futhark
 import Prelude hiding (mapM, mod)
 
--- | A note with extra information regarding a type error.
 newtype Note = Note Doc
 
--- | A collection of 'Note's.
+-- | A collection of extra information regarding a type error.
 newtype Notes = Notes [Note]
   deriving (Semigroup, Monoid)
 
@@ -92,11 +91,11 @@ aNote :: Pretty a => a -> Notes
 aNote = Notes . pure . Note . ppr
 
 -- | Information about an error during type checking.
-data TypeError = TypeError SrcLoc Notes Doc
+data TypeError = TypeError Loc Notes Doc
 
 instance Pretty TypeError where
   ppr (TypeError loc notes msg) =
-    text (inRed $ "Error at " <> locStr loc <> ":")
+    text (inRed $ "Error at " <> locStr (srclocOf loc) <> ":")
       </> msg <> ppr notes
 
 errorIndexUrl :: Doc
@@ -371,7 +370,7 @@ instance MonadTypeChecker TypeM where
                     qualifyTypeVars outer_env mempty qs t'
                 )
 
-  typeError loc notes s = throwError $ TypeError (srclocOf loc) notes s
+  typeError loc notes s = throwError $ TypeError (locOf loc) notes s
 
 -- | Extract from a type a first-order type.
 getType :: TypeBase dim as -> Maybe (TypeBase dim as)

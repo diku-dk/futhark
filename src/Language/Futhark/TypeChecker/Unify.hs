@@ -651,7 +651,10 @@ linkVarToType ::
   Level ->
   StructType ->
   m ()
-linkVarToType onDims usage bound bcs vn lvl tp = do
+linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
+  -- We have to expand anyway for the occurs check, so we might as
+  -- well link the fully expanded type.
+  tp <- normTypeFully tp_unnorm
   occursCheck usage bcs vn tp
   scopeCheck usage bcs vn lvl tp
 
@@ -1149,10 +1152,10 @@ instance MonadUnify UnifyM where
   curLevel = pure 0
 
   unifyError loc notes bcs doc =
-    throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
+    throwError $ TypeError (locOf loc) notes $ doc <> ppr bcs
 
   matchError loc notes bcs t1 t2 =
-    throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
+    throwError $ TypeError (locOf loc) notes $ doc <> ppr bcs
     where
       doc =
         "Types"
@@ -1172,13 +1175,13 @@ runUnifyM tparams (UnifyM m) = runExcept $ evalStateT m (constraints, 0)
 -- The type parameters are allowed to be instantiated; all other types
 -- are considered rigid.
 doUnification ::
-  SrcLoc ->
+  Loc ->
   [TypeParam] ->
   StructType ->
   StructType ->
   Either TypeError StructType
 doUnification loc tparams t1 t2 = runUnifyM tparams $ do
-  expect (Usage Nothing loc) t1 t2
+  expect (Usage Nothing (srclocOf loc)) t1 t2
   normTypeFully t2
 
 -- Note [Linking variables to sum types]

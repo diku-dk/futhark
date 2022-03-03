@@ -71,7 +71,7 @@ scanExc desc scan arrs = do
     nes = scanNeutral scan
     ts = lambdaReturnType $ scanLambda scan
 
-mkF :: Lambda -> ADM ([VName], Lambda)
+mkF :: Lambda SOACS -> ADM ([VName], Lambda SOACS)
 mkF lam = do
   lam_l <- renameLambda lam
   lam_r <- renameLambda lam

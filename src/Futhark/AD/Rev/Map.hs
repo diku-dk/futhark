@@ -54,14 +54,14 @@ partitionAdjVars (fv : fvs) =
 buildRenamedBody ::
   MonadBuilder m =>
   m (Result, a) ->
-  m (BodyT (Rep m), a)
+  m (Body (Rep m), a)
 buildRenamedBody m = do
   (body, x) <- buildBody m
   body' <- renameBody body
   pure (body', x)
 
 withAcc ::
-  [(Shape, [VName], Maybe (Lambda, [SubExp]))] ->
+  [(Shape, [VName], Maybe (Lambda SOACS, [SubExp]))] ->
   ([VName] -> ADM Result) ->
   ADM [VName]
 withAcc [] m =
@@ -77,7 +77,7 @@ withAcc inputs m = do
     subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params
   letTupExp "withacc_res" $ WithAcc inputs acc_lam
 
-vjpMap :: VjpOps -> [Adj] -> SubExp -> Lambda -> [VName] -> ADM ()
+vjpMap :: VjpOps -> [Adj] -> SubExp -> Lambda SOACS -> [VName] -> ADM ()
 vjpMap ops res_adjs w map_lam as
   | Just res_ivs <- mapM isSparse res_adjs = returnSweepCode $ do
     -- Since at most only a constant number of adjoint are nonzero

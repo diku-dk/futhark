@@ -17,7 +17,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     liftTypeM,
     ValBinding (..),
     Locality (..),
-    SizeSource (..),
+    SizeSource (SourceBound, SourceSlice),
     NameReason (..),
     InferredType (..),
     Checking (..),
@@ -399,7 +399,7 @@ envToTermScope env =
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
 
--- Wrap a function name to give it a vacuous Eq instance for SizeSource.
+-- | Wrap a function name to give it a vacuous Eq instance for SizeSource.
 newtype FName = FName (Maybe (QualName VName))
   deriving (Show)
 
@@ -500,10 +500,10 @@ instance MonadUnify TermTypeM where
     case checking of
       Just checking' ->
         throwError $
-          TypeError (srclocOf loc) notes $
+          TypeError (locOf loc) notes $
             ppr checking' <> line </> doc <> ppr bcs
       Nothing ->
-        throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
+        throwError $ TypeError (locOf loc) notes $ doc <> ppr bcs
 
   matchError loc notes bcs t1 t2 = do
     checking <- asks termChecking
@@ -511,14 +511,14 @@ instance MonadUnify TermTypeM where
       Just checking'
         | hasNoBreadCrumbs bcs ->
           throwError $
-            TypeError (srclocOf loc) notes $
+            TypeError (locOf loc) notes $
               ppr checking'
         | otherwise ->
           throwError $
-            TypeError (srclocOf loc) notes $
+            TypeError (locOf loc) notes $
               ppr checking' <> line </> doc <> ppr bcs
       Nothing ->
-        throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
+        throwError $ TypeError (locOf loc) notes $ doc <> ppr bcs
     where
       doc =
         "Types"
@@ -686,9 +686,9 @@ instance MonadTypeChecker TermTypeM where
     checking <- asks termChecking
     case checking of
       Just checking' ->
-        throwError $ TypeError (srclocOf loc) notes (ppr checking' <> line </> s)
+        throwError $ TypeError (locOf loc) notes (ppr checking' <> line </> s)
       Nothing ->
-        throwError $ TypeError (srclocOf loc) notes s
+        throwError $ TypeError (locOf loc) notes s
 
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}

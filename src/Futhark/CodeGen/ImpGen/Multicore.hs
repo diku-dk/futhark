@@ -83,7 +83,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                 error $ "Missing locks for " ++ pretty acc
 
 withAcc ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   [(Shape, [VName], Maybe (Lambda MCMem, [SubExp]))] ->
   Lambda MCMem ->
   MulticoreGen ()
@@ -116,7 +116,7 @@ compileMCExp dest e =
   defCompileExp dest e
 
 compileMCOp ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
@@ -124,42 +124,37 @@ compileMCOp pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
-  nsubtasks <- dPrim "num_tasks" $ IntType Int32
-  seq_code <- compileSegOp pat op nsubtasks
+  seq_code <- collect $ do
+    nsubtasks <- dPrim "nsubtasks" int32
+    sOp $ Imp.GetNumTasks $ tvVar nsubtasks
+    emit =<< compileSegOp pat op nsubtasks
   retvals <- getReturnParams pat op
 
-  let scheduling_info = Imp.SchedulerInfo (tvVar nsubtasks) (untyped iterations)
+  let scheduling_info = Imp.SchedulerInfo (untyped iterations)
 
-  par_code <- case par_op of
+  par_task <- case par_op of
     Just nested_op -> do
       let space' = getSpace nested_op
       dPrimV_ (segFlat space') (0 :: Imp.TExp Int64)
-      compileSegOp pat nested_op nsubtasks
-    Nothing -> return mempty
-
-  let par_task = case par_op of
-        Just nested_op -> Just $ Imp.ParallelTask par_code $ segFlat $ getSpace nested_op
-        Nothing -> Nothing
-
-  let non_free =
-        ( [segFlat space, tvVar nsubtasks]
-            ++ map Imp.paramName retvals
-        )
-          ++ case par_op of
-            Just nested_op ->
-              [segFlat $ getSpace nested_op]
-            Nothing -> []
+      par_code <- collect $ do
+        nsubtasks <- dPrim "nsubtasks" int32
+        sOp $ Imp.GetNumTasks $ tvVar nsubtasks
+        emit =<< compileSegOp pat nested_op nsubtasks
+      pure $ Just $ Imp.ParallelTask par_code
+    Nothing -> pure Nothing
 
   s <- segOpString op
-  free_params <- freeParams (par_code <> seq_code) non_free
-  let seq_task = Imp.ParallelTask seq_code (segFlat space)
-  emit $ Imp.Op $ Imp.Segop s free_params seq_task par_task retvals $ scheduling_info (decideScheduling' op seq_code)
+  let seq_task = Imp.ParallelTask seq_code
+  free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
+  emit . Imp.Op $
+    Imp.SegOp s free_params seq_task par_task retvals $
+      scheduling_info (decideScheduling' op seq_code)
 
 compileSegOp ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegOp () MCMem ->
   TV Int32 ->
-  ImpM MCMem HostEnv Imp.Multicore Imp.Code
+  ImpM MCMem HostEnv Imp.Multicore Imp.MCCode
 compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
   compileSegHist pat space histops kbody ntasks
 compileSegOp pat (SegScan _ space scans _ kbody) ntasks =

@@ -15,9 +15,87 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.21.7]
+
+### Added
+
+* `futhark check-syntax`: check syntactic validity of a program
+  file, without type-checking.
+
+* Parsing multi-file programs is now parallelised, making it
+  *slightly* faster.
+
+* Reloading a large program in `futhark repl` is now faster, as long
+  as not too many of its files have been modified (#1597).
+
+### Fixed
+
+* Mistake in occurs check could cause infinite loop in type checker
+  for programs with type errors (#1599).
+
+## [0.21.6]
+
+### Added
+
+* `futhark bench` now explicitly notes when a tuning file is not
+  present.
+
+* `futhark bench`, `futhark test` and friends are now better at
+  handling fatally terminating programs (e.g. segmentation faults).
+
+* Generated C code is now a lot smaller for large programs, as error
+  recovery has been more centralised (#1584).
+
+### Fixed
+
+* Some bugs in checking for local memory capacity for particularly
+  exotic generated code.
+
+* Insufficient hoisting of allocation sizes led to problems with
+  memory expansion in rare cases (#1579).
+
+* Conversion of floating-point NaNs and infinities to integers now
+  well defined (produces zero) (#1586).
+
+* Better handling of OOM for certain short-lived CPU-side allocations (#1585).
+
+## [0.21.5]
+
+### Added
+
+* API functions now return more precise error codes in some cases.
+
+* Out-of-memory errors contain more information.
+
+### Fixed
+
+* Yet another in-place lowering issue (#1569).
+
+* Removed unnecessary bounds checks in register tiling, giving about
+  1.8x speedup on e.g. matrix multiplication on newer NVIDIA GPUs.
+
+* A parser bug erroneously demanded whitespace in some type
+  expressions (#1573).
+
+* Some memory was not being freed correctly when shutting down OpenCL
+  and CUDA contexts, which could lead to memory leaks in processes
+  that created and freed many contexts.
+
+* An incorrect copy-removal in some exotic cases (#1572).
+
+* 'restore'-functions might perform undefined pointer arithmetic when
+  passed garbage.
+
+## [0.21.4]
+
+### Fixed
+
 * A size inference bug in type checking of `loop`s (#1565).
 
 * Exotic flattening bug (#1563).
+
+* Segmented `reduce_by_index` with fairly small histogram size would
+  use vastly more memory than needed.
 
 ## [0.21.3]
 

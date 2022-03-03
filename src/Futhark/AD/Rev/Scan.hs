@@ -12,7 +12,7 @@ import Futhark.Util (pairs, unpairs)
 data FirstOrSecond = WrtFirst | WrtSecond
 
 -- computes `d(x op y)/dx` or d(x op y)/dy
-mkScanAdjointLam :: VjpOps -> Lambda -> FirstOrSecond -> ADM Lambda
+mkScanAdjointLam :: VjpOps -> Lambda SOACS -> FirstOrSecond -> ADM (Lambda SOACS)
 mkScanAdjointLam ops lam0 which = do
   let len = length $ lambdaReturnType lam0
   lam <- renameLambda lam0
@@ -30,7 +30,7 @@ mkScanAdjointLam ops lam0 which = do
 --       `xs` is  the input  of scan
 --       `ys_adj` is the known adjoint of ys
 --       `j` draw values from `iota n`
-mkScanFusedMapLam :: VjpOps -> SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM Lambda
+mkScanFusedMapLam :: VjpOps -> SubExp -> Lambda SOACS -> [VName] -> [VName] -> [VName] -> ADM (Lambda SOACS)
 mkScanFusedMapLam ops w scn_lam xs ys ys_adj = do
   lam <- mkScanAdjointLam ops scn_lam WrtFirst
   ys_ts <- mapM lookupType ys
@@ -102,7 +102,7 @@ mkScan2ndMaps w (arr_tp, y_adj, (ds, cs)) = do
 -- let xs_contribs =
 --    map3 (\ i a r -> if i==0 then r else (df2dy (ys[i-1]) a) \bar{*} r)
 --         (iota n) xs rs
-mkScanFinalMap :: VjpOps -> SubExp -> Lambda -> [VName] -> [VName] -> [VName] -> ADM [VName]
+mkScanFinalMap :: VjpOps -> SubExp -> Lambda SOACS -> [VName] -> [VName] -> [VName] -> ADM [VName]
 mkScanFinalMap ops w scan_lam xs ys rs = do
   let eltps = lambdaReturnType scan_lam
   lam <- mkScanAdjointLam ops scan_lam WrtSecond

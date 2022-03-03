@@ -124,11 +124,8 @@ computeHistoUsage space op = do
                   Space "device"
 
             multiHistoCase = do
-              let num_elems =
-                    foldl' (*) (sExt64 $ tvExp num_subhistos) $
-                      map toInt64Exp $ arrayDims dest_t
-
-              let subhistos_mem_size =
+              let num_elems = product $ map toInt64Exp $ shapeDims subhistos_shape
+                  subhistos_mem_size =
                     Imp.bytes $
                       Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
 
@@ -381,7 +378,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
       return (l', do_op')
 
 histKernelGlobalPass ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
   SegSpace ->
@@ -399,7 +396,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
   hist_H_chks <- forM (map (histSize . slugOp) slugs) $ \w ->
     dPrimVE "hist_H_chk" $ w `divUp` sExt64 hist_S
 
-  sKernelThread "seghist_global" num_groups group_size (segFlat space) $ do
+  sKernelThread "seghist_global" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
 
     -- Compute subhistogram index for each thread, per histogram.
@@ -472,7 +469,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
                       do_op (bucket_is ++ is)
 
 histKernelGlobal ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -519,20 +516,16 @@ type InitLocalHistograms =
 prepareIntermediateArraysLocal ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  SegSpace ->
   [SegHistSlug] ->
   CallKernelGen InitLocalHistograms
-prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space slugs = do
-  num_segments <-
-    dPrimVE "num_segments" $
-      product $ map (toInt64Exp . snd) $ init $ unSegSpace space
-  mapM (onOp num_segments) slugs
+prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
+  mapM onOp
   where
-    onOp num_segments (SegHistSlug op num_subhistos subhisto_info do_op) = do
-      num_subhistos <-- sExt64 (unCount groups_per_segment) * num_segments
+    onOp (SegHistSlug op num_subhistos subhisto_info do_op) = do
+      num_subhistos <-- sExt64 (unCount groups_per_segment)
 
       emit $
-        Imp.DebugPrint "Number of subhistograms in global memory" $
+        Imp.DebugPrint "Number of subhistograms in global memory per segment" $
           Just $ untyped $ tvExp num_subhistos
 
       mk_op <-
@@ -584,7 +577,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space 
 histKernelLocalPass ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
   SegSpace ->
@@ -632,7 +625,8 @@ histKernelLocalPass
         dPrimVE "init_per_thread" $ sExt32 $ group_hists_size `divUp` unCount group_size
       return (histo_dims, histo_size, init_per_thread)
 
-    sKernelThread "seghist_local" num_groups group_size (segFlat space) $
+    let attrs = (defKernelAttrs num_groups group_size) {kAttrCheckLocalMemory = False}
+    sKernelThread "seghist_local" (segFlat space) attrs $
       virtualiseGroups SegVirt (sExt32 $ unCount groups_per_segment * num_segments) $ \group_id -> do
         constants <- kernelConstants <$> askEnv
 
@@ -831,7 +825,7 @@ histKernelLocalPass
 histKernelLocal ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -849,7 +843,7 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
       Just $ untyped num_subhistos_per_group
 
   init_histograms <-
-    prepareIntermediateArraysLocal num_subhistos_per_group_var groups_per_segment space slugs
+    prepareIntermediateArraysLocal num_subhistos_per_group_var groups_per_segment slugs
 
   sFor "chk_i" hist_S $ \chk_i ->
     histKernelLocalPass
@@ -875,7 +869,7 @@ slugMaxLocalMemPasses slug =
     AtomicLocking _ -> 6
 
 localMemoryCase ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Imp.TExp Int32 ->
   SegSpace ->
   Imp.TExp Int64 ->
@@ -1030,7 +1024,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
 -- | Generate code for a segmented histogram called from the host.
 compileSegHist ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->

@@ -414,7 +414,7 @@ multiCoreReport names = report_kernels
                 [C.citem|ctx->total_runs += ctx->$id:runs;|]
               ]
 
-addBenchmarkFields :: Name -> Maybe VName -> GC.CompilerM op s ()
+addBenchmarkFields :: Name -> Maybe C.Id -> GC.CompilerM op s ()
 addBenchmarkFields name (Just _) = do
   GC.contextFieldDyn
     (functionRuntime name)
@@ -436,7 +436,7 @@ addBenchmarkFields name Nothing = do
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
   GC.contextField (functionIter name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
-benchmarkCode :: Name -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
+benchmarkCode :: Name -> Maybe C.Id -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name tid code = do
   addBenchmarkFields name tid
   return
@@ -490,31 +490,29 @@ generateParLoopFn ::
   C.ToIdent a =>
   M.Map VName Space ->
   String ->
-  Code ->
+  MCCode ->
   a ->
   [(VName, (C.Type, ValueType))] ->
   [(VName, (C.Type, ValueType))] ->
-  VName ->
-  VName ->
   GC.CompilerM Multicore s Name
-generateParLoopFn lexical basename code fstruct free retval tid ntasks = do
+generateParLoopFn lexical basename code fstruct free retval = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
   multicoreDef basename $ \s -> do
-    fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction False $
-      GC.cachingMemory lexical $
-        \decl_cached free_cached -> GC.blockScope $ do
-          mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
-          mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
-          mapM_ GC.item decl_cached
-          code' <- GC.blockScope $ GC.compileCode code
-          mapM_ GC.item [C.citems|$items:code'|]
-          GC.stm [C.cstm|cleanup: {$stms:free_cached}|]
+    fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
+      GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
+        mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
+        mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
+        code' <- GC.collect $ GC.compileCode code
+        mapM_ GC.item decl_cached
+        mapM_ GC.item =<< GC.declAllocatedMem
+        mapM_ GC.item code'
+        free_mem <- GC.freeAllocatedMem
+        GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     return
       [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
                            int err = 0;
-                           int $id:tid = tid;
-                           int $id:ntasks = info.nsubtasks;
+                           int subtask_id = tid;
                            struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                            struct futhark_context *ctx = $id:fstruct->ctx;
                            $items:fbody
@@ -547,8 +545,15 @@ prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
-  let (ParallelTask seq_code tid) = seq_task
+compileOp (GetLoopBounds start end) = do
+  GC.stm [C.cstm|$id:start = start;|]
+  GC.stm [C.cstm|$id:end = end;|]
+compileOp (GetTaskId v) =
+  GC.stm [C.cstm|$id:v = subtask_id;|]
+compileOp (GetNumTasks v) =
+  GC.stm [C.cstm|$id:v = info.nsubtasks;|]
+compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) = do
+  let (ParallelTask seq_code) = seq_task
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
   let free_args = map paramName params
@@ -563,7 +568,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
   fstruct <-
     prepareTaskStruct "task" free_args free_ctypes retval_args retval_ctypes
 
-  fpar_task <- generateParLoopFn lexical (name ++ "_task") seq_code fstruct free retval tid nsubtask
+  fpar_task <- generateParLoopFn lexical (name ++ "_task") seq_code fstruct free retval
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
@@ -582,9 +587,9 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
 
   -- Generate the nested segop function if available
   fnpar_task <- case par_task of
-    Just (ParallelTask nested_code nested_tid) -> do
+    Just (ParallelTask nested_code) -> do
       let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
-      fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval nested_tid nsubtask
+      fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
     Nothing -> do
@@ -597,7 +602,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
         [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
                   if ($id:ftask_err != 0) {
                     $items:free_all_mem;
-                    err = 1;
+                    err = $id:ftask_err;
                     goto cleanup;
                   }|]
 
@@ -605,42 +610,33 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
 
   -- Add profile fields for -P option
   mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
-compileOp (ParLoop s' i prebody body postbody free tid) = do
+compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
-  let lexical =
-        lexicalMemoryUsage $
-          Function Nothing [] free (prebody <> body) [] []
+  let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
 
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
 
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
-    fbody <- benchmarkCode s (Just tid)
-      <=< GC.inNewFunction False
-      $ GC.cachingMemory lexical $
-        \decl_cached free_cached -> GC.blockScope $ do
-          mapM_
-            GC.item
-            [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
+    fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
+      GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
+        mapM_
+          GC.item
+          [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
 
-          mapM_ GC.item decl_cached
+        GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
-          GC.decl [C.cdecl|typename int64_t iterations = end - start;|]
-          GC.decl [C.cdecl|typename int64_t $id:i = start;|]
-          GC.compileCode prebody
-          body' <- GC.blockScope $ GC.compileCode body
-          GC.stm
-            [C.cstm|for (; $id:i < end; $id:i++) {
-                       $items:body'
-                     }|]
-          GC.compileCode postbody
-          GC.stm [C.cstm|cleanup: {}|]
-          mapM_ GC.stm free_cached
+        body' <- GC.collect $ GC.compileCode body
 
+        mapM_ GC.item decl_cached
+        mapM_ GC.item =<< GC.declAllocatedMem
+        free_mem <- GC.freeAllocatedMem
+        mapM_ GC.item body'
+        GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     return
-      [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
+      [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int subtask_id, int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
@@ -665,7 +661,7 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
       [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler,
                                                            &$id:ftask_name);
                if ($id:ftask_err != 0) {
-                 err = 1;
+                 err = $id:ftask_err;
                  goto cleanup;
                }|]
 

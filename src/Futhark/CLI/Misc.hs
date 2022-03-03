@@ -5,6 +5,7 @@ module Futhark.CLI.Misc
   ( mainImports,
     mainHash,
     mainDataget,
+    mainCheckSyntax,
   )
 where
 
@@ -24,7 +25,7 @@ import System.FilePath
 import System.IO
 
 isBuiltin :: String -> Bool
-isBuiltin = ("prelude/" `isPrefixOf`)
+isBuiltin = ("/prelude/" `isPrefixOf`)
 
 -- | @futhark imports@
 mainImports :: String -> [String] -> IO ()
@@ -80,3 +81,10 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
     testSpecRuns = testActionRuns . testAction
     testActionRuns CompileTimeFailure {} = []
     testActionRuns (RunCases ios _ _) = concatMap iosTestRuns ios
+
+-- | @futhark check-syntax@
+mainCheckSyntax :: String -> [String] -> IO ()
+mainCheckSyntax = mainWithOptions () [] "program" $ \args () ->
+  case args of
+    [file] -> Just $ void $ readUntypedProgramOrDie file
+    _ -> Nothing

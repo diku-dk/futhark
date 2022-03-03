@@ -13,4 +13,4 @@ entry f_jvp x y =
 entry f_vjp x y =
   let (dx1,dx2) = vjp f (x,y) [1,0]
   let (dy1,dy2) = vjp f (x,y) [0,1]
-  in ([dx1, dy1], [dx1, dy2])
+  in ([dx1, dy1], [dx2, dy2])

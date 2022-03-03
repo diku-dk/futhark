@@ -23,12 +23,13 @@ module Futhark.Analysis.PrimExp
     leafExpTypes,
     true,
     false,
+    fromBool,
     constFoldPrimExp,
 
     -- * Construction
     module Futhark.IR.Primitive,
     NumExp (..),
-    IntExp,
+    IntExp (..),
     FloatExp (..),
     sExt,
     zExt,
@@ -53,6 +54,7 @@ module Futhark.Analysis.PrimExp
     sExt64,
     zExt32,
     zExt64,
+    sExtAs,
     fMin64,
     fMax64,
 
@@ -237,37 +239,46 @@ class NumExp t where
 
 -- | The class of integer types that can be used for constructing
 -- 'TPrimExp's.
-class NumExp t => IntExp t
+class NumExp t => IntExp t where
+  -- | The type of an expression, known to be an integer type.
+  expIntType :: TPrimExp t v -> IntType
 
 instance NumExp Int8 where
   fromInteger' = isInt8 . ValueExp . IntValue . Int8Value . fromInteger
   fromBoolExp = isInt8 . ConvOpExp (BToI Int8) . untyped
 
-instance IntExp Int8
+instance IntExp Int8 where
+  expIntType = const Int8
 
 instance NumExp Int16 where
   fromInteger' = isInt16 . ValueExp . IntValue . Int16Value . fromInteger
   fromBoolExp = isInt16 . ConvOpExp (BToI Int16) . untyped
 
-instance IntExp Int16
+instance IntExp Int16 where
+  expIntType = const Int16
 
 instance NumExp Int32 where
   fromInteger' = isInt32 . ValueExp . IntValue . Int32Value . fromInteger
   fromBoolExp = isInt32 . ConvOpExp (BToI Int32) . untyped
 
-instance IntExp Int32
+instance IntExp Int32 where
+  expIntType = const Int32
 
 instance NumExp Int64 where
   fromInteger' = isInt64 . ValueExp . IntValue . Int64Value . fromInteger
   fromBoolExp = isInt64 . ConvOpExp (BToI Int64) . untyped
 
-instance IntExp Int64
+instance IntExp Int64 where
+  expIntType = const Int64
 
 -- | The class of floating-point types that can be used for
 -- constructing 'TPrimExp's.
 class NumExp t => FloatExp t where
   -- | Construct a typed expression from a rational.
   fromRational' :: Rational -> TPrimExp t v
+
+  -- | The type of an expression, known to be a floating-point type.
+  expFloatType :: TPrimExp t v -> FloatType
 
 instance NumExp Half where
   fromInteger' = isF16 . ValueExp . FloatValue . Float16Value . fromInteger
@@ -283,12 +294,15 @@ instance NumExp Double where
 
 instance FloatExp Half where
   fromRational' = TPrimExp . ValueExp . FloatValue . Float16Value . fromRational
+  expFloatType = const Float16
 
 instance FloatExp Float where
   fromRational' = TPrimExp . ValueExp . FloatValue . Float32Value . fromRational
+  expFloatType = const Float32
 
 instance FloatExp Double where
   fromRational' = TPrimExp . ValueExp . FloatValue . Float64Value . fromRational
+  expFloatType = const Float64
 
 instance (NumExp t, Pretty v) => Num (TPrimExp t v) where
   TPrimExp x + TPrimExp y
@@ -580,6 +594,10 @@ true, false :: TPrimExp Bool v
 true = TPrimExp $ ValueExp $ BoolValue True
 false = TPrimExp $ ValueExp $ BoolValue False
 
+-- | Conversion from Bool to 'TPrimExp'
+fromBool :: Bool -> TPrimExp Bool v
+fromBool b = if b then true else false
+
 -- | Boolean negation smart constructor.
 bNot :: TPrimExp Bool v -> TPrimExp Bool v
 bNot = TPrimExp . UnOpExp Not . untyped
@@ -623,6 +641,15 @@ fMin64 x y = TPrimExp $ BinOpExp (FMin Float64) (untyped x) (untyped y)
 -- | 64-bit float maximum.
 fMax64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
 fMax64 x y = TPrimExp $ BinOpExp (FMax Float64) (untyped x) (untyped y)
+
+-- | Convert result of some integer expression to have the same type
+-- as another, using sign extension.
+sExtAs ::
+  (IntExp to, IntExp from) =>
+  TPrimExp from v ->
+  TPrimExp to v ->
+  TPrimExp to v
+sExtAs from to = TPrimExp $ sExt (expIntType to) (untyped from)
 
 -- Prettyprinting instances
 

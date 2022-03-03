@@ -1,4 +1,4 @@
-resolver: nightly-2021-06-19
+resolver: nightly-2022-01-14
 packages:
 - .
 
@@ -16,7 +16,6 @@ ghc-options:
 
 extra-deps:
 - futhark-data-1.0.3.0
-- futhark-server-1.1.2.0
+- futhark-server-1.1.2.1
 - futhark-manifest-1.0.0.0
-- githash-0.1.6.1@sha256:a81001a9766438b3384d8f56584235f21c285889c6d4084f98dee8260010e0ac,1527
 - aeson-2.0.1.0

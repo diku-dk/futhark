@@ -17,6 +17,7 @@ where
 import Data.Char (isAlpha)
 import Data.Functor
 import Data.List (zipWith5)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as S
 import qualified Data.Text as T
@@ -283,7 +284,9 @@ pBasicOp =
         d <- "@" *> L.decimal
         parens $ do
           w <- pSubExp <* pComma
-          Concat d <$> pVName <*> many (pComma *> pVName) <*> pure w,
+          x <- pVName
+          ys <- many (pComma *> pVName)
+          return $ Concat d (x :| ys) w,
       pIota,
       try $
         flip Update
@@ -312,6 +315,8 @@ pBasicOp =
       pConvOp "sitofp" SIToFP pIntType pFloatType,
       pConvOp "itob" (const . IToB) pIntType (keyword "bool"),
       pConvOp "btoi" (const BToI) (keyword "bool") pIntType,
+      pConvOp "ftob" (const . FToB) pFloatType (keyword "bool"),
+      pConvOp "btof" (const BToF) (keyword "bool") pFloatType,
       --
       pIndex,
       pFlatIndex,
@@ -381,11 +386,11 @@ pLParam = pParam . pLParamInfo
 pLParams :: PR rep -> Parser [LParam rep]
 pLParams pr = braces $ pLParam pr `sepBy` pComma
 
-pPatElem :: PR rep -> Parser (PatElem rep)
+pPatElem :: PR rep -> Parser (PatElem (LetDec rep))
 pPatElem pr =
   (PatElem <$> pVName <*> (pColon *> pLetDec pr)) <?> "pattern element"
 
-pPat :: PR rep -> Parser (Pat rep)
+pPat :: PR rep -> Parser (Pat (LetDec rep))
 pPat pr = Pat <$> braces (pPatElem pr `sepBy` pComma)
 
 pResult :: Parser Result
@@ -840,7 +845,8 @@ pSegLevel =
       <*> choice
         [ pSemi
             *> choice
-              [ keyword "full" $> SegOp.SegNoVirtFull,
+              [ keyword "full" $> SegOp.SegNoVirtFull
+                  <*> (SegOp.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
                 keyword "virtualise" $> SegOp.SegVirt
               ],
           pure SegOp.SegNoVirt

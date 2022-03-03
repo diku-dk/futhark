@@ -4,8 +4,9 @@
 #define CUDA_SUCCEED_NONFATAL(x) cuda_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED_FATAL(x) nvrtc_api_succeed_fatal(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED_NONFATAL(x) nvrtc_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
-
-#define SUCCEED_OR_RETURN(serror) {               \
+// Take care not to override an existing error.
+#define CUDA_SUCCEED_OR_RETURN(e) {               \
+    char *serror = CUDA_SUCCEED_NONFATAL(e);      \
     if (serror) {                                 \
       if (!ctx->error) {                          \
         ctx->error = serror;                      \
@@ -15,8 +16,6 @@
       }                                           \
     }                                             \
   }
-
-#define CUDA_SUCCEED_OR_RETURN(e) SUCCEED_OR_RETURN(CUDA_SUCCEED_NONFATAL(e))
 
 // CUDA_SUCCEED_OR_RETURN returns the value of the variable 'bad' in
 // scope.  By default, it will be this one.  Create a local variable
@@ -625,8 +624,8 @@ static void cuda_cleanup(struct cuda_context *ctx) {
   CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
 }
 
-static CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
-                           const char *tag, CUdeviceptr *mem_out) {
+static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
+                           size_t min_size, const char *tag, CUdeviceptr *mem_out) {
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
   }
@@ -634,13 +633,24 @@ static CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
   size_t size;
   if (free_list_find(&ctx->free_list, min_size, &size, mem_out) == 0) {
     if (size >= min_size) {
+      if (ctx->cfg.debugging) {
+        fprintf(log, "No need to allocate: Found a block in the free list.\n");
+      }
       return CUDA_SUCCESS;
     } else {
+      if (ctx->cfg.debugging) {
+        fprintf(log, "Found a free block, but it was too small.\n");
+      }
+
       CUresult res = cuMemFree(*mem_out);
       if (res != CUDA_SUCCESS) {
         return res;
       }
     }
+  }
+
+  if (ctx->cfg.debugging) {
+    fprintf(log, "Actually allocating the desired block.\n");
   }
 
   CUresult res = cuMemAlloc(mem_out, min_size);

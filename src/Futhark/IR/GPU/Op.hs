@@ -74,7 +74,7 @@ instance PP.Pretty SegLevel where
         SegGroup {} -> "group"
       virt = case segVirt lvl of
         SegNoVirt -> mempty
-        SegNoVirtFull -> PP.semi <+> text "full"
+        SegNoVirtFull dims -> PP.semi <+> text "full" <+> ppr (segSeqDims dims)
         SegVirt -> PP.semi <+> text "virtualise"
 
 instance Engine.Simplifiable SegLevel where

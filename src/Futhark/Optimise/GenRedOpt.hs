@@ -165,7 +165,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       let grid_pexp = foldl (\x d -> x * pe64 d) (pe64 se1) $ map snd gid_dims_new
       dim_prod <- letSubExp "dim_prod" =<< toExp grid_pexp
       letSubExp "grid_size" =<< ceilDiv dim_prod (unCount seg_group_size)
-    let level1 = SegThread (Count grid_size) seg_group_size SegNoVirtFull -- novirt ?
+    let level1 = SegThread (Count grid_size) seg_group_size (SegNoVirtFull (SegSeqDims [])) -- novirt ?
         kbody1 = KernelBody () ker1_stms [Returns ResultMaySimplify (Certs []) k1_res]
 
     -- is it OK here to use the "aux" from the parrent kernel?

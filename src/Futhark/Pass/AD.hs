@@ -12,9 +12,9 @@ import Futhark.Pass
 
 bindLambda ::
   (MonadBuilder m, Rep m ~ SOACS) =>
-  Pat ->
+  Pat Type ->
   StmAux (ExpDec SOACS) ->
-  Lambda ->
+  Lambda SOACS ->
   [SubExp] ->
   m ()
 bindLambda pat aux (Lambda params body _) args = do
@@ -27,7 +27,7 @@ bindLambda pat aux (Lambda params body _) args = do
   forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
     certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 
-onStm :: Scope SOACS -> Stm -> PassM (Stms SOACS)
+onStm :: Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
 onStm scope (Let pat aux (Op (VJP lam args vec))) = do
   lam' <- revVJP scope =<< onLambda scope lam
   runBuilderT_ (bindLambda pat aux lam' $ args ++ vec) scope
@@ -48,12 +48,12 @@ onStms scope stms = mconcat <$> mapM (onStm scope') (stmsToList stms)
   where
     scope' = scopeOf stms <> scope
 
-onBody :: Scope SOACS -> Body -> PassM Body
+onBody :: Scope SOACS -> Body SOACS -> PassM (Body SOACS)
 onBody scope body = do
   stms <- onStms scope $ bodyStms body
   pure $ body {bodyStms = stms}
 
-onLambda :: Scope SOACS -> Lambda -> PassM Lambda
+onLambda :: Scope SOACS -> Lambda SOACS -> PassM (Lambda SOACS)
 onLambda scope lam = do
   body <- onBody (scopeOfLParams (lambdaParams lam) <> scope) $ lambdaBody lam
   pure $ lam {lambdaBody = body}

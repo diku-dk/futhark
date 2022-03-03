@@ -14,6 +14,7 @@ import Control.Monad.State.Strict
 import Data.Bifunctor (second)
 import qualified Data.Kind
 import Data.List (transpose)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
@@ -25,7 +26,7 @@ zeroTan :: Type -> ADM SubExp
 zeroTan (Prim t) = return $ constant $ blankPrimValue t
 zeroTan t = error $ "zeroTan on non-primitive type: " ++ pretty t
 
-zeroExp :: Type -> Exp
+zeroExp :: Type -> Exp SOACS
 zeroExp (Prim pt) =
   BasicOp $ SubExp $ Constant $ blankPrimValue pt
 zeroExp (Array pt shape _) =
@@ -108,7 +109,7 @@ instance (Monoid (Bundled a), TanBuilder a) => TanBuilder [a] where
   newTan = mapM newTan
   bundleNew = fmap mconcat . mapM bundleNew
 
-instance TanBuilder (PatElemT (TypeBase s u)) where
+instance TanBuilder (PatElem (TypeBase s u)) where
   newTan (PatElem p t)
     | isAcc t = do
       insertTan p p
@@ -125,8 +126,8 @@ instance TanBuilder (PatElemT (TypeBase s u)) where
       then return [pe']
       else return [pe, pe']
 
-instance TanBuilder (PatT (TypeBase s u)) where
-  type Bundled (PatT (TypeBase s u)) = PatT (TypeBase s u)
+instance TanBuilder (Pat (TypeBase s u)) where
+  type Bundled (Pat (TypeBase s u)) = Pat (TypeBase s u)
   newTan (Pat pes) = Pat <$> newTan pes
   bundleNew (Pat pes) = Pat <$> bundleNew pes
 
@@ -198,7 +199,7 @@ instance Tangent SubExpRes where
   tangent (SubExpRes cs se) = SubExpRes cs <$> tangent se
   bundleTan (SubExpRes cs se) = map (SubExpRes cs) <$> bundleTan se
 
-basicFwd :: Pat -> StmAux () -> BasicOp -> ADM ()
+basicFwd :: Pat Type -> StmAux () -> BasicOp -> ADM ()
 basicFwd pat aux op = do
   pat_tan <- newTan pat
   case op of
@@ -239,10 +240,10 @@ basicFwd pat aux op = do
       arr_tan <- tangent arr
       se_tan <- tangent se
       addStm $ Let pat_tan aux $ BasicOp $ Update safety arr_tan slice se_tan
-    Concat d arr arrs w -> do
+    Concat d (arr :| arrs) w -> do
       arr_tan <- tangent arr
       arrs_tans <- tangent arrs
-      addStm $ Let pat_tan aux $ BasicOp $ Concat d arr_tan arrs_tans w
+      addStm $ Let pat_tan aux $ BasicOp $ Concat d (arr_tan :| arrs_tans) w
     Copy arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Copy arr_tan
@@ -267,11 +268,11 @@ basicFwd pat aux op = do
       addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
     _ -> error $ "basicFwd: Unsupported op " ++ pretty op
 
-fwdLambda :: Lambda -> ADM Lambda
+fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
 fwdLambda l@(Lambda params body ret) =
   Lambda <$> bundleNew params <*> inScopeOf l (fwdBody body) <*> bundleTan ret
 
-fwdStreamLambda :: Lambda -> ADM Lambda
+fwdStreamLambda :: Lambda SOACS -> ADM (Lambda SOACS)
 fwdStreamLambda l@(Lambda params body ret) =
   Lambda <$> ((take 1 params ++) <$> bundleNew (drop 1 params)) <*> inScopeOf l (fwdBody body) <*> bundleTan ret
 
@@ -286,7 +287,7 @@ zeroFromSubExp (Var v) = do
   t <- lookupType v
   letExp "zero" $ zeroExp t
 
-fwdSOAC :: Pat -> StmAux () -> SOAC SOACS -> ADM ()
+fwdSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM ()
 fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
   pat' <- bundleNew pat
   xs' <- bundleTan xs
@@ -328,11 +329,26 @@ fwdSOAC pat aux (Stream size xs form nes lam) = do
       let form' = Parallel o comm lam0'
       addStm $ Let pat' aux $ Op $ Stream size xs' form' nes' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
-  pat_tan <- newTan pat
+  pat' <- bundleNew pat
   ops' <- mapM fwdHist ops
-  bucket_fun' <- fwdLambda bucket_fun
-  addStm $ Let (pat <> pat_tan) aux $ Op $ Hist w arrs ops' bucket_fun'
+  bucket_fun' <- fwdHistBucket bucket_fun
+  vss' <- bundleTan vss
+  addStm $ Let pat' aux $ Op $ Hist w (iss <> vss') ops' bucket_fun'
   where
+    n_indices = sum $ map (shapeRank . histShape) ops
+    (iss, vss) = splitAt n_indices arrs
+    fwdBodyHist (Body _ stms res) = buildBody_ $ do
+      mapM_ fwdStm stms
+      let (res_is, res_vs) = splitAt n_indices res
+      (res_is ++) <$> bundleTan res_vs
+    fwdHistBucket l@(Lambda params body ret) =
+      let (p_is, p_vs) = splitAt n_indices params
+          (r_is, r_vs) = splitAt n_indices ret
+       in Lambda
+            <$> ((p_is ++) <$> bundleNew p_vs)
+            <*> inScopeOf l (fwdBodyHist body)
+            <*> ((r_is ++) <$> bundleTan r_vs)
+
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp shape rf dest nes op) = do
       dest' <- bundleTan dest
@@ -356,7 +372,7 @@ fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
   let s = Let (Pat (pes ++ pes_tan)) aux $ Op $ Scatter w ivs' lam' $ as ++ as_tan
   addStm s
   where
-    fwdScatterLambda :: Int -> Lambda -> ADM Lambda
+    fwdScatterLambda :: Int -> Lambda SOACS -> ADM (Lambda SOACS)
     fwdScatterLambda n_indices (Lambda params body ret) = do
       params' <- bundleNew params
       ret_tan <- tangent $ drop n_indices ret
@@ -364,7 +380,7 @@ fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
       let indices = concat $ replicate 2 $ take n_indices ret
           ret' = indices ++ drop n_indices ret ++ ret_tan
       return $ Lambda params' body' ret'
-    fwdBodyScatter :: Int -> Body -> ADM Body
+    fwdBodyScatter :: Int -> Body SOACS -> ADM (Body SOACS)
     fwdBodyScatter n_indices (Body _ stms res) = do
       (res_tan, stms') <- collectStms $ do
         mapM_ fwdStm stms
@@ -377,7 +393,7 @@ fwdSOAC _ _ JVP {} =
 fwdSOAC _ _ VJP {} =
   error "fwdSOAC: nested VJP not allowed."
 
-fwdStm :: Stm -> ADM ()
+fwdStm :: Stm SOACS -> ADM ()
 fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
   pat' <- bundleNew pat
   x' <- bundleTan x
@@ -455,17 +471,17 @@ fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
   error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
-fwdBody :: Body -> ADM Body
+fwdBody :: Body SOACS -> ADM (Body SOACS)
 fwdBody (Body _ stms res) = buildBody_ $ do
   mapM_ fwdStm stms
   bundleTan res
 
-fwdBodyTansLast :: Body -> ADM Body
+fwdBodyTansLast :: Body SOACS -> ADM (Body SOACS)
 fwdBodyTansLast (Body _ stms res) = buildBody_ $ do
   mapM_ fwdStm stms
   (res <>) <$> tangent res
 
-fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
+fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
 fwdJVP scope l@(Lambda params body ret) =
   runADM . localScope scope . inScopeOf l $ do
     params_tan <- newTan params

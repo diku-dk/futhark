@@ -13,11 +13,12 @@ module Language.Futhark.Interpreter
     interpretDec,
     interpretImport,
     interpretFunction,
+    ctxWithImports,
     ExtOp (..),
     BreakReason (..),
     StackFrame (..),
     typeCheckerEnv,
-    Value (ValuePrim, ValueArray, ValueRecord),
+    Value (ValuePrim, ValueRecord),
     fromTuple,
     isEmptyArray,
     prettyEmptyArray,
@@ -150,6 +151,7 @@ data Shape d
   | ShapeSum (M.Map Name [Shape d])
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
+-- | The shape of an array.
 type ValueShape = Shape Int64
 
 instance Pretty d => Pretty (Shape d) where
@@ -721,7 +723,7 @@ evalTermVar env qv t =
       size_env <- extSizeEnv
       v $ evalType (size_env <> env) t
     Just (TermValue _ v) -> return v
-    _ -> error $ "`" <> pretty qv <> "` is not bound to a value."
+    _ -> error $ "\"" <> pretty qv <> "\" is not bound to a value."
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
@@ -1173,8 +1175,14 @@ evalModuleVar env qv =
 evalModExp :: Env -> ModExp -> EvalM Module
 evalModExp _ (ModImport _ (Info f) _) = do
   f' <- lookupImport f
+  known <- asks snd
   case f' of
-    Nothing -> error $ "Unknown import " ++ show f
+    Nothing ->
+      error $
+        unlines
+          [ "Unknown interpreter import: " ++ show f,
+            "Known: " ++ show (M.keys known)
+          ]
     Just m -> return $ Module m
 evalModExp env (ModDecs ds _) = do
   Env terms types _ <- foldM evalDec env ds
@@ -1959,6 +1967,11 @@ interpretImport :: Ctx -> (FilePath, Prog) -> F ExtOp Ctx
 interpretImport ctx (fp, prog) = do
   env <- runEvalM (ctxImports ctx) $ foldM evalDec (ctxEnv ctx) $ progDecs prog
   return ctx {ctxImports = M.insert fp env $ ctxImports ctx}
+
+-- | Produce a context, based on the one passed in, where all of
+-- the provided imports have been @open@ened in order.
+ctxWithImports :: [Env] -> Ctx -> Ctx
+ctxWithImports envs ctx = ctx {ctxEnv = mconcat (reverse envs) <> ctxEnv ctx}
 
 checkEntryArgs :: VName -> [F.Value] -> StructType -> Either String ()
 checkEntryArgs entry args entry_t

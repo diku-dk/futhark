@@ -1,7 +1,7 @@
 {
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE TupleSections #-}
+
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog
@@ -10,8 +10,6 @@ module Language.Futhark.Parser.Parser
   , futharkType
   , anyValue
   , anyValues
-
-  , ParserMonad
   , parse
   , ParseError(..)
   , parseDecOrExpIncrM
@@ -40,6 +38,7 @@ import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
 import Futhark.Util.Pretty
 import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
+import Language.Futhark.Parser.Monad
 
 }
 
@@ -382,7 +381,7 @@ BindingBinOp :: { Name }
       : BinOp {% let (QualName qs name, loc) = $1 in do
                    unless (null qs) $ parseErrorAt loc $
                      Just "Cannot use a qualified name in binding position."
-                   return name }
+                   pure name }
       | '-'   { nameFromString "-" }
 
 BindingId :: { (Name, SrcLoc) }
@@ -445,8 +444,6 @@ TypeExpTerm :: { UncheckedTypeExp }
            { TEUnique $2 (srcspan $1 $>) }
          | '[' DimExp ']' TypeExpTerm %prec indexprec
            { TEArray $4 $2 (srcspan $1 $>) }
-         | '['  ']' TypeExpTerm %prec indexprec
-           { TEArray $3 DimExpAny (srcspan $1 $>) }
          | TypeExpApply %prec sumprec { $1 }
 
          -- Errors
@@ -457,20 +454,20 @@ TypeExpTerm :: { UncheckedTypeExp }
            }
 
 SumType :: { UncheckedTypeExp }
-SumType  : SumClauses %prec sumprec { let (cs, loc) = $1
-                        in TESum cs loc }
+SumType  : SumClauses %prec sumprec { let (cs, loc) = $1 in TESum cs loc }
 
 SumClauses :: { ([(Name, [UncheckedTypeExp])], SrcLoc) }
-            : SumClauses '|' SumClause %prec sumprec { let (cs, loc1) = $1;
-                                             (c, ts, loc2) = $3
-                                          in (cs++[(c, ts)], srcspan loc1 loc2) }
-            | SumClause  %prec sumprec { let (n, ts, loc) = $1
-                                        in ([(n, ts)], loc) }
+            : SumClauses '|' SumClause %prec sumprec
+              { let (cs, loc1) = $1; (c, ts, loc2) = $3
+                in (cs++[(c, ts)], srcspan loc1 loc2) }
+            | SumClause  %prec sumprec
+              { let (n, ts, loc) = $1 in ([(n, ts)], loc) }
 
 SumClause :: { (Name, [UncheckedTypeExp], SrcLoc) }
-           : SumClause TypeExpAtom { let (n, ts, loc) = $1
-                                     in (n, ts ++ [$2], srcspan loc $>)}
-           | Constr { (fst $1, [], snd $1) }
+           : SumClause TypeExpAtom
+             { let (n, ts, loc) = $1 in (n, ts ++ [$2], srcspan loc $>)}
+           | Constr
+            { (fst $1, [], snd $1) }
 
 TypeExpApply :: { UncheckedTypeExp }
               : TypeExpApply TypeArg
@@ -498,7 +495,6 @@ Constr :: { (Name, SrcLoc) }
 
 TypeArg :: { TypeArgExp Name }
          : '[' DimExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
-         | '[' ']'         { TypeArgExpDim DimExpAny (srcspan $1 $>) }
          | TypeExpAtom     { TypeArgExpType $1 }
 
 FieldType :: { (Name, UncheckedTypeExp) }
@@ -518,6 +514,8 @@ DimExp :: { DimExp Name }
         | intlit
           { let L loc (INTLIT n) = $1
             in DimExpConst (fromIntegral n) loc }
+        |
+          { DimExpAny }
 
 FunParam :: { PatBase NoInfo Name }
 FunParam : InnerPat { $1 }
@@ -969,29 +967,29 @@ FloatLit :: { (FloatValue, SrcLoc) }
          | f64lit { let L loc (F64LIT num) = $1 in (Float64Value num, loc) }
          | QualName {% let (qn, loc) = $1 in
                        case qn of
-                         QualName ["f16"] "inf" -> return (Float16Value (1/0), loc)
-                         QualName ["f16"] "nan" -> return (Float16Value (0/0), loc)
-                         QualName ["f32"] "inf" -> return (Float32Value (1/0), loc)
-                         QualName ["f32"] "nan" -> return (Float32Value (0/0), loc)
-                         QualName ["f64"] "inf" -> return (Float64Value (1/0), loc)
-                         QualName ["f64"] "nan" -> return (Float64Value (0/0), loc)
+                         QualName ["f16"] "inf" -> pure (Float16Value (1/0), loc)
+                         QualName ["f16"] "nan" -> pure (Float16Value (0/0), loc)
+                         QualName ["f32"] "inf" -> pure (Float32Value (1/0), loc)
+                         QualName ["f32"] "nan" -> pure (Float32Value (0/0), loc)
+                         QualName ["f64"] "inf" -> pure (Float64Value (1/0), loc)
+                         QualName ["f64"] "nan" -> pure (Float64Value (0/0), loc)
                          _ -> parseErrorAt (snd $1) Nothing
                     }
          | floatlit { let L loc (FLOATLIT num) = $1 in (Float64Value num, loc) }
 
 ArrayValue :: { Value }
 ArrayValue :  '[' Value ']'
-             {% return $ ArrayValue (arrayFromList [$2]) $
+             {% pure $ ArrayValue (arrayFromList [$2]) $
                 arrayOf (valueType $2) (ShapeDecl [1]) Unique
              }
            |  '[' Value ',' Values ']'
              {% case combArrayElements $2 $4 of
                   Left e -> throwError e
-                  Right v -> return $ ArrayValue (arrayFromList $ $2:$4) $
+                  Right v -> pure $ ArrayValue (arrayFromList $ $2:$4) $
                              arrayOf (valueType v) (ShapeDecl [1+fromIntegral (length $4)]) Unique
              }
            | id '(' ValueType ')'
-             {% ($1 `mustBe` "empty") >> mustBeEmpty (srcspan $2 $4) $3 >> return (ArrayValue (listArray (0,-1) []) $3) }
+             {% ($1 `mustBe` "empty") >> mustBeEmpty (srcspan $2 $4) $3 >> pure (ArrayValue (listArray (0,-1) []) $3) }
 
            -- Errors
            | '[' ']'
@@ -1010,263 +1008,29 @@ Values : Value ',' Values { $1 : $3 }
        |                  { [] }
 
 {
-
-addDoc :: DocComment -> UncheckedDec -> UncheckedDec
-addDoc doc (ValDec val) = ValDec (val { valBindDoc = Just doc })
-addDoc doc (TypeDec tp) = TypeDec (tp { typeDoc = Just doc })
-addDoc doc (SigDec sig) = SigDec (sig { sigDoc = Just doc })
-addDoc doc (ModDec mod) = ModDec (mod { modDoc = Just doc })
-addDoc _ dec = dec
-
-addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
-addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig { typeDoc = Just doc })
-addDocSpec doc val@(ValSpec {}) = val { specDoc = Just doc }
-addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
-addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
-addDocSpec _ spec = spec
-
-addAttr :: AttrInfo Name -> UncheckedDec -> UncheckedDec
-addAttr attr (ValDec val) =
-  ValDec $ val { valBindAttrs = attr : valBindAttrs val }
-addAttr attr dec =
-  dec
-
--- We will extend this function once we actually start tracking these.
-addAttrSpec :: AttrInfo Name -> UncheckedSpec -> UncheckedSpec
-addAttrSpec _attr dec = dec
-
-reverseNonempty :: (a, [a]) -> (a, [a])
-reverseNonempty (x, l) =
-  case reverse (x:l) of
-    x':rest -> (x', rest)
-    []      -> (x, [])
-
-mustBe (L loc (ID got)) expected
-  | nameToString got == expected = return ()
-mustBe (L loc _) expected =
-  parseErrorAt loc $ Just $
-  "Only the keyword '" ++ expected ++ "' may appear here."
-
-mustBeEmpty :: SrcLoc -> ValueType -> ParserMonad ()
-mustBeEmpty loc (Array _ _ _ (ShapeDecl dims))
-  | any (==0) dims = return ()
-mustBeEmpty loc t =
-  parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
-
-data ParserEnv = ParserEnv {
-                 parserFile :: FilePath
-               }
-
-type ParserMonad a =
-  ExceptT String (
-    StateT ParserEnv (
-       StateT ([L Token], Pos) ReadLineMonad)) a
-
-data ReadLineMonad a = Value a
-                     | GetLine (Maybe T.Text -> ReadLineMonad a)
-
-readLineFromMonad :: ReadLineMonad (Maybe T.Text)
-readLineFromMonad = GetLine Value
-
-instance Monad ReadLineMonad where
-  return = Value
-  Value x >>= f = f x
-  GetLine g >>= f = GetLine $ \s -> g s >>= f
-
-instance Functor ReadLineMonad where
-  f `fmap` m = do x <- m
-                  return $ f x
-
-instance Applicative ReadLineMonad where
-  (<*>) = ap
-
-getLinesFromM :: Monad m => m T.Text -> ReadLineMonad a -> m a
-getLinesFromM _ (Value x) = return x
-getLinesFromM fetch (GetLine f) = do
-  s <- fetch
-  getLinesFromM fetch $ f $ Just s
-
-getLinesFromTexts :: [T.Text] -> ReadLineMonad a -> Either String a
-getLinesFromTexts _ (Value x) = Right x
-getLinesFromTexts (x : xs) (GetLine f) = getLinesFromTexts xs $ f $ Just x
-getLinesFromTexts [] (GetLine f) = getLinesFromTexts [] $ f Nothing
-
-getNoLines :: ReadLineMonad a -> Either String a
-getNoLines (Value x) = Right x
-getNoLines (GetLine f) = getNoLines $ f Nothing
-
-combArrayElements :: Value
-                  -> [Value]
-                  -> Either String Value
-combArrayElements t ts = foldM comb t ts
-  where comb x y
-          | valueType x == valueType y = Right x
-          | otherwise                  = Left $ "Elements " ++ pretty x ++ " and " ++
-                                         pretty y ++ " cannot exist in same array."
-
-arrayFromList :: [a] -> Array Int a
-arrayFromList l = listArray (0, length l-1) l
-
-applyExp :: [UncheckedExp] -> ParserMonad UncheckedExp
-applyExp all@((Constr n [] _ loc1):es) =
-  return $ Constr n es NoInfo (srcspan loc1 (last all))
-applyExp es =
-  foldM ap (head es) (tail es)
-  where
-     ap (AppExp (Index e is floc) _) (ArrayLit xs _ xloc) =
-       parseErrorAt (srcspan floc xloc) $
-       Just $ pretty $ "Incorrect syntax for multi-dimensional indexing." </>
-       "Use" <+> align (ppr index)
-       where index = AppExp (Index e (is++map DimFix xs) xloc) NoInfo
-     ap f x =
-        return $ AppExp (Apply f x NoInfo (srcspan f x)) NoInfo
-
-patternExp :: UncheckedPat -> ParserMonad UncheckedExp
-patternExp (Id v _ loc) = return $ Var (qualName v) NoInfo loc
-patternExp (TuplePat pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
-patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
-patternExp (PatAscription pat _ _) = patternExp pat
-patternExp (PatParens pat _) = patternExp pat
-patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
-  where field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
-
-eof :: Pos -> L Token
-eof pos = L (SrcLoc $ Loc pos pos) EOF
-
-binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)
-
-binOp x (L loc (SYMBOL _ qs op)) y =
-  AppExp (BinOp (QualName qs op, loc) NoInfo (x, NoInfo) (y, NoInfo) (srcspan x y)) NoInfo
-
-getTokens :: ParserMonad ([L Token], Pos)
-getTokens = lift $ lift get
-
-putTokens :: ([L Token], Pos) -> ParserMonad ()
-putTokens = lift . lift . put
-
-primTypeFromName :: SrcLoc -> Name -> ParserMonad PrimType
-primTypeFromName loc s = maybe boom return $ M.lookup s namesToPrimTypes
-  where boom = parseErrorAt loc $ Just $ "No type named " ++ nameToString s
-
-getFilename :: ParserMonad FilePath
-getFilename = lift $ gets parserFile
-
-intNegate :: IntValue -> IntValue
-intNegate (Int8Value v) = Int8Value (-v)
-intNegate (Int16Value v) = Int16Value (-v)
-intNegate (Int32Value v) = Int32Value (-v)
-intNegate (Int64Value v) = Int64Value (-v)
-
-floatNegate :: FloatValue -> FloatValue
-floatNegate (Float16Value v) = Float16Value (-v)
-floatNegate (Float32Value v) = Float32Value (-v)
-floatNegate (Float64Value v) = Float64Value (-v)
-
-primNegate :: PrimValue -> PrimValue
-primNegate (FloatValue v) = FloatValue $ floatNegate v
-primNegate (SignedValue v) = SignedValue $ intNegate v
-primNegate (UnsignedValue v) = UnsignedValue $ intNegate v
-primNegate (BoolValue v) = BoolValue $ not v
-
-readLine :: ParserMonad (Maybe T.Text)
-readLine = lift $ lift $ lift readLineFromMonad
-
-lexer :: (L Token -> ParserMonad a) -> ParserMonad a
-lexer cont = do
-  (ts, pos) <- getTokens
-  case ts of
-    [] -> do
-      ended <- lift $ runExceptT $ cont $ eof pos
-      case ended of
-        Right x -> return x
-        Left parse_e -> do
-          line <- readLine
-          ts' <-
-            case line of Nothing -> throwError parse_e
-                         Just line' -> return $ scanTokensText (advancePos pos '\n') line'
-          (ts'', pos') <-
-            case ts' of Right x -> return x
-                        Left lex_e  -> throwError lex_e
-          case ts'' of
-            [] -> cont $ eof pos
-            xs -> do
-              putTokens (xs, pos')
-              lexer cont
-    (x : xs) -> do
-      putTokens (xs, pos)
-      cont x
-
-parseError :: (L Token, [String]) -> ParserMonad a
-parseError (L loc EOF, expected) =
-  parseErrorAt (srclocOf loc) $ Just $
-  unlines ["unexpected end of file.",
-           "Expected one of the following: " ++ unwords expected]
-parseError (L loc DOC{}, _) =
-  parseErrorAt (srclocOf loc) $
-  Just "documentation comments ('-- |') are only permitted when preceding declarations."
-parseError (L loc tok, expected) =
-  parseErrorAt loc $ Just $
-  unlines ["unexpected " ++ show tok,
-          "Expected one of the following: " ++ unwords expected]
-
-parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
-parseErrorAt loc Nothing = throwError $ "Error at " ++ locStr loc ++ ": Parse error."
-parseErrorAt loc (Just s) = throwError $ "Error at " ++ locStr loc ++ ": " ++ s
-
-emptyArrayError :: SrcLoc -> ParserMonad a
-emptyArrayError loc =
-  parseErrorAt loc $
-  Just "write empty arrays as 'empty(t)', for element type 't'.\n"
-
-twoDotsRange :: SrcLoc -> ParserMonad a
-twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
-
---- Now for the parser interface.
-
--- | A parse error.  Use 'show' to get a human-readable description.
-data ParseError = ParseError String
-
-instance Show ParseError where
-  show (ParseError s) = s
-
-parseInMonad :: ParserMonad a -> FilePath -> T.Text
-             -> ReadLineMonad (Either ParseError a)
-parseInMonad p file program =
-  either (Left . ParseError) Right <$> either (return . Left)
-  (evalStateT (evalStateT (runExceptT p) env))
-  (scanTokensText (Pos file 1 1 0) program)
-  where env = ParserEnv file
-
-parseIncremental :: ParserMonad a -> FilePath -> T.Text
-                 -> Either ParseError a
-parseIncremental p file program =
-  either (Left . ParseError) id
-  $ getLinesFromTexts (T.lines program)
-  $ parseInMonad p file mempty
-
-parse :: ParserMonad a -> FilePath -> T.Text
-      -> Either ParseError a
-parse p file program =
-  either (Left . ParseError) id
-  $ getNoLines $ parseInMonad p file program
-
--- | Parse an Futhark expression incrementally from monadic actions, using the
+  -- | Parse an Futhark expression incrementally from monadic actions, using the
 -- 'FilePath' as the source name for error messages.
-parseExpIncrM :: Monad m =>
-                 m T.Text -> FilePath -> T.Text
-              -> m (Either ParseError UncheckedExp)
+parseExpIncrM ::
+  Monad m =>
+  m T.Text ->
+  FilePath ->
+  T.Text ->
+  m (Either ParseError UncheckedExp)
 parseExpIncrM fetch file program =
   getLinesFromM fetch $ parseInMonad expression file program
 
 -- | Parse either an expression or a declaration incrementally;
 -- favouring declarations in case of ambiguity.
-parseDecOrExpIncrM :: Monad m =>
-                      m T.Text -> FilePath -> T.Text
-                   -> m (Either ParseError (Either UncheckedDec UncheckedExp))
+parseDecOrExpIncrM ::
+  Monad m =>
+  m T.Text ->
+  FilePath ->
+  T.Text ->
+  m (Either ParseError (Either UncheckedDec UncheckedExp))
 parseDecOrExpIncrM fetch file input =
   case parseInMonad declaration file input of
-    Value Left{} -> fmap Right <$> parseExpIncrM fetch file input
-    Value (Right d) -> return $ Right $ Left d
+    Value Left {} -> fmap Right <$> parseExpIncrM fetch file input
+    Value (Right d) -> pure $ Right $ Left d
     GetLine c -> do
       l <- fetch
       parseDecOrExpIncrM fetch file $ input <> "\n" <> l
