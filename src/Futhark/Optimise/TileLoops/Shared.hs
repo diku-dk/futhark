@@ -215,14 +215,14 @@ segScatter2D ::
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
 segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
-  ltid_x <- newVName "ltid_x"
-  ltid_y <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
+  ltid_y <- newVName "ltid_y"
+  ltid_x <- newVName "ltid_x"
 
   seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
   let seq_space = zip seq_is seq_dims
 
-  let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_x, dim_x), (ltid_y, dim_y)]
+  let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
       lvl' =
         SegThread
           (segNumGroups lvl)
@@ -232,7 +232,7 @@ segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
   ((t_v, res_v, res_i), stms) <- runBuilder $ do
     (res_v, res_i) <-
       localScope (scopeOfSegSpace segspace) $
-        f seq_is (ltid_x, ltid_y)
+        f seq_is (ltid_y, ltid_x)
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
@@ -243,8 +243,7 @@ segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
 
 {--
 -- Cosmin's old version
-
-segScatter2D ::
+segScatter2D_Old ::
   String ->
   SubExp ->
   VName ->
@@ -252,7 +251,7 @@ segScatter2D ::
   (SubExp, SubExp) ->
   ((VName, VName) -> Builder GPU (SubExp, SubExp)) ->
   Builder GPU [VName]
-segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
+segScatter2D_Old desc arr_size updt_arr lvl (dim_x, dim_y) f = do
   ltid_flat <- newVName "ltid_flat"
   ltid_y <- newVName "ltid_y"
   ltid_x <- newVName "ltid_x"
@@ -579,20 +578,20 @@ kkLoopBody
               forLoop r_par [x_loc_init'] $ \i0 [a_loc_merge] -> do
                 loop_a_loc <- forLoop tseq_div_tpar [a_loc_merge] $ \k0 [a_loc_merge'] -> do
                   scatter_a_loc <- -- former case A (matrix NOT transposed); use [ry, tk_div_tx]
-                    segScatter2D (str_A ++ "_glb2loc") loc_sz_X a_loc_merge' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
-                      scatterFun is_inner_coal (i0, k0)
+                    segScatter2D_Old (str_A ++ "_glb2loc") loc_sz_X a_loc_merge' segthd_lvl (t_par, t_par) $
+                      scatterFun is_inner_coal [i0, k0]
                   resultBodyM $ map Var scatter_a_loc
                 resultBodyM [Var loop_a_loc]
 --}
-            else -- former case B (matrix IS transposed); use [tk_div_ty, rx]
-                 segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [tseq_div_tpar, r_par] (t_par, t_par) $
+            else -- former case B (matrix IS transposed); use the reverse of [tk_div_ty, rx]
+                 segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
                    scatterFun is_inner_coal
 {--
               forLoop tseq_div_tpar [x_loc_init'] $ \k0 [b_loc_merge] -> do
                 loop_b_loc <- forLoop r_par [b_loc_merge] $ \j0 [b_loc_merge'] -> do
                   scatter_b_loc <- -- former case B (matrix IS transposed); use [tk_div_ty, rx]
-                    segScatter2D (str_A ++ "_glb2loc") loc_sz_X b_loc_merge' segthd_lvl [tseq_div_tpar, r_par] (t_par, t_par) $
-                      scatterFun is_inner_coal (j0, k0)
+                    segScatter2D_Old (str_A ++ "_glb2loc") loc_sz_X b_loc_merge' segthd_lvl (t_par, t_par) $
+                      scatterFun is_inner_coal [j0, k0]
                   resultBodyM $ map Var scatter_b_loc
                 resultBodyM [Var loop_b_loc]
 --}
