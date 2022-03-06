@@ -12,8 +12,7 @@
 #
 # Also remember this guide: https://github.com/Gabriel439/haskell-nix/blob/master/project1/README.md
 
-{ compiler ? "ghc883", # ignored ATM
-  suffix ? "nightly",
+{ suffix ? "nightly",
   commit ? "" }:
 let
   config = {
