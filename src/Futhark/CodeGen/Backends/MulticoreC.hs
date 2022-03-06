@@ -534,7 +534,10 @@ ispcDef s f = do
 sharedDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
 sharedDef s f = do
   s' <- multicoreName s
+  GC.libDecl [C.cedecl|$esc:("#ifndef __ISPC_STRUCT_" <> (nameToString s') <> "__")|]
+  GC.libDecl [C.cedecl|$esc:("#define __ISPC_STRUCT_" <> (nameToString s') <> "__")|] -- TODO:(K) - refacor this shit
   GC.libDecl =<< f s'
+  GC.libDecl [C.cedecl|$esc:("#endif")|]
   GC.ispcDecl =<< f s'
   return s'
 
@@ -589,10 +592,11 @@ prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
   fstruct <- sharedDef name makeStruct
-  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
-  GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
-  GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct retval_args retval_ctypes)|]
+  let fstruct' =  fstruct <> "_"
+  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct';|]
+  GC.stm [C.cstm|$id:fstruct'.ctx = ctx;|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct' free_args free_ctypes)|]
+  GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct' retval_args retval_ctypes)|]
   return fstruct
 
 -- Generate a segop function for top_level and potentially nested SegOp code
@@ -624,44 +628,71 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
-  GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
-  GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
-  GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
-  GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
-  GC.stm [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  -- Create the timing fields for the task
-  GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->$id:(functionTiming fpar_task);|]
-  GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(functionIterations fpar_task);|]
+  
+  toc <- GC.collect $ do
+    GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
+    GC.stm [C.cstm|$id:ftask_name.args = args;|]
+    GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
+    GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
+    GC.stm [C.cstm|$id:ftask_name.iterations = iterations;|]
+    -- Create the timing fields for the task
+    GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->$id:(functionTiming fpar_task);|]
+    GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(functionIterations fpar_task);|]
 
-  case sched of
-    Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
-    Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
+    case sched of
+        Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
+        Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
-  -- Generate the nested segop function if available
-  fnpar_task <- case par_task of
-    Just (ParallelTask nested_code) -> do
-      let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
-      fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
-      GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-      return $ zip [fnpar_task] [True]
-    Nothing -> do
-      GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-      return mempty
+    -- Generate the nested segop function if available
+    fnpar_task <- case par_task of
+        Just (ParallelTask nested_code) -> do
+            let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
+            fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
+            GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
+            return $ zip [fnpar_task] [True]
+        Nothing -> do
+            GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
+            return mempty
 
-  free_all_mem <- GC.freeAllocatedMem
-  let ftask_err = fpar_task <> "_err"
-      code =
-        [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
-                  if ($id:ftask_err != 0) {
-                    $items:free_all_mem;
-                    err = $id:ftask_err;
-                    goto cleanup;
-                  }|]
+    free_all_mem <- GC.freeAllocatedMem
+    let ftask_err = fpar_task <> "_err"
+        code =
+            [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
+                    /*if ($id:ftask_err != 0) {
+                        $items:free_all_mem;
+                        err = $id:ftask_err;
+                        goto cleanup;
+                    }*/|]
 
-  mapM_ GC.item code
+    mapM_ GC.item code
 
-  -- Add profile fields for -P option
-  mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
+    -- Add profile fields for -P option
+    mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
+
+  schedn <- multicoreDef "schedule_shim" $ \s ->
+    return [C.cedecl|void $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) {
+        $items:toc
+    }|]
+
+  let fwdDec = "extern \"C\" unmasked void "
+               <> schedn <> "("
+               <> "struct futhark_context uniform * uniform ctx, "
+               <> "struct " <> fstruct <> " uniform * uniform args, "
+               <> "uniform int iterations" <> ");"
+  _fwdDec <- ispcDef "" $ \_ -> return [ISPC.cedecl|$esc:(nameToString fwdDec)|]
+
+  GC.stm [ISPC.cstm|$escstm:("#if ISPC")|]
+  GC.decl [ISPC.cdecl|uniform struct $id:fstruct aos[programCount];|]
+  GC.stm [ISPC.cstm|aos[programIndex] = $id:(fstruct <> "_");|]
+  GC.stm [ISPC.cstm|$escstm:("foreach_active (i) {")|]
+  GC.stm [ISPC.cstm|$id:schedn(ctx, &aos[i], extract($exp:e', i));|]
+  GC.stm [ISPC.cstm|$escstm:("}")|]
+  GC.stm [ISPC.cstm|$escstm:("#else")|]
+  GC.stm [ISPC.cstm|$id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');|]
+  GC.stm [ISPC.cstm|$escstm:("#endif")|]
+
+  -- TODO(pema): Move this to C
+  pure ()
 
 compileOp (ForEach i bound body free) = do
   free_ctypes <- mapM paramToCType free
@@ -701,13 +732,13 @@ compileOp (ForEach i bound body free) = do
         --mapM_ GC.item =<< GC.declAllocatedMem
         --mapM_ GC.item body'
     return
-      [ISPC.cedecl|export static void $id:s($params:inputs) {
+      [ISPC.cedecl|export static void $id:s(struct futhark_context uniform * uniform ctx, $params:inputs) {
                        $decls:memderef
                        $items:loopBody
                      }|]
 
   let ispc_inputs = compileIspcInputs free_args free_ctypes
-  GC.stm [C.cstm|$id:_ispcLoop($args:ispc_inputs);|]
+  GC.stm [C.cstm|$id:_ispcLoop(ctx, $args:ispc_inputs);|]
   pure ()
 
 
@@ -753,7 +784,7 @@ compileOp (ParLoop s' body free) = do
   GC.decl [C.cdecl|struct scheduler_parloop $id:ftask_name;|]
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString ftask);|]
   GC.stm [C.cstm|$id:ftask_name.fn = $id:ftask;|]
-  GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
+  GC.stm [C.cstm|$id:ftask_name.args = &$id:(fstruct <> "_");|]
   GC.stm [C.cstm|$id:ftask_name.iterations = iterations;|]
   GC.stm [C.cstm|$id:ftask_name.info = info;|]
 
