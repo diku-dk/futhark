@@ -860,8 +860,54 @@ static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
 static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
   return mul64hi(a, b);
 }
+#elif ISPC
 
-#else // Not OpenCL or CUDA, but plain C.
+static uint8_t futrts_mul_hi8(uint8_t a, uint8_t b) {
+  uint16_t aa = a;
+  uint16_t bb = b;
+
+  return aa * bb >> 8;
+}
+
+static uint16_t futrts_mul_hi16(uint16_t a, uint16_t b) {
+  uint32_t aa = a;
+  uint32_t bb = b;
+
+  return aa * bb >> 16;
+}
+
+static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
+  uint64_t aa = a;
+  uint64_t bb = b;
+
+  return aa * bb >> 32;
+}
+
+static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
+  uint64_t ah = a >> 32;
+  uint64_t al = a & 0xffffffff;
+  uint64_t bh = b >> 32;
+  uint64_t bl = b & 0xffffffff;
+
+  uint64_t p1 = al * bl;
+  uint64_t p2 = al * bh;
+  uint64_t p3 = ah * bl;
+  uint64_t p4 = ah * bh;
+
+  uint64_t p1h = p1 >> 32;
+  uint64_t p2h = p2 >> 32;
+  uint64_t p3h = p3 >> 32;
+  uint64_t p2l = p2 & 0xffffffff;
+  uint64_t p3l = p3 & 0xffffffff;
+
+  uint64_t l = p1h + p2l  + p3l;
+  uint64_t m = (p2 >> 32) + (p3 >> 32);
+  uint64_t h = (l >> 32) + m + p4;
+
+  return h;
+}
+
+#else // Not OpenCL, ISPC, or CUDA, but plain C.
 
 static uint8_t futrts_mul_hi8(uint8_t a, uint8_t b) {
   uint16_t aa = a;
@@ -1165,15 +1211,15 @@ static inline float fpow32(float x, float y) {
 #elif ISPC
 
 static inline float fabs32(float x) {
-  return fabs32(x);
+  return abs(x);
 }
 
 static inline float fmax32(float x, float y) {
-  return fmax32(x, y);
+  return max(x, y);
 }
 
 static inline float fmin32(float x, float y) {
-  return fmin32(x, y);
+  return min(x, y);
 }
 
 static inline float fpow32(float x, float y) {
@@ -1206,7 +1252,10 @@ static inline bool futrts_isnan32(float x) {
 #if ISPC // Changed
 
 static inline bool futrts_isinf32(float x) {
-  return false;
+  return !isnan(x) && isnan(x - x); //TODO: Find cleaner solution                           
+}
+static inline bool futrts_isfinite32(float x) {
+  return !isnan(x) && !futrts_isinf32(x);
 }
 
 #else
@@ -1469,7 +1518,33 @@ static inline float futrts_atan2_32(float x, float y) {
 }
 
 static inline float futrts_hypot32(float x, float y) {
-  return sqrt(x*x+y*y); // TODO: Should handle over/underflow
+  //Old version that does not handle overflow, both untested
+  //return sqrt(x*x+y*y); 
+  if (isfinite (x) && isfinite (y)) {
+    x = abs(x);
+    y = abs(y);
+    float a;
+    float b;
+    if (x >= y){
+        a = x;
+        b = y;
+    } else {
+        a = y;
+        b = x;
+    }
+    int e;
+    float an;
+    float bn;
+    an = frexp (a, &e);
+    bn = ldexp (b, - e);
+    float cn;
+    cn = sqrt (an * an + bn * bn);
+    return ldexp (cn, e);
+  } else {
+    if (isinf (x) || isinf (y)) return 1.0f / 0.0f; //INF
+    else return x + y; //NAN
+  }
+
 }
 
 static inline float futrts_gamma32(float x) {
