@@ -1520,7 +1520,7 @@ static inline float futrts_atan2_32(float x, float y) {
 static inline float futrts_hypot32(float x, float y) {
   //Old version that does not handle overflow, both untested
   //return sqrt(x*x+y*y); 
-  if (isfinite (x) && isfinite (y)) {
+  if (futrts_isfinite32 (x) && futrts_isfinite32 (y)) {
     x = abs(x);
     y = abs(y);
     float a;
@@ -1541,7 +1541,7 @@ static inline float futrts_hypot32(float x, float y) {
     cn = sqrt (an * an + bn * bn);
     return ldexp (cn, e);
   } else {
-    if (isinf (x) || isinf (y)) return 1.0f / 0.0f; //INF
+    if (futrts_isinf32 (x) || futrts_isinf32 (y)) return 1.0f / 0.0f; //INF
     else return x + y; //NAN
   }
 
