@@ -35,7 +35,7 @@ data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String Code [Param]
   | -- | ForEach in ISPC
-    ForEach VName Exp Code [Param]
+    ForEach VName Exp Code Code [Param]
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -124,7 +124,8 @@ instance Pretty Multicore where
             nestedBlock "body {" "}" (ppr body)
           ]
   ppr (Atomic _) = "AtomicOp"
-  ppr (ForEach i limit body _) =
+  ppr (ForEach i limit prebody body _) =
+    ppr prebody <+> -- TODO(pema): How to show this
     text "foreach" <+> ppr i <+> langle <+> ppr limit <+> text "{"
       </> indent 2 (ppr body)
       </> text "}"
@@ -147,7 +148,7 @@ instance FreeIn Multicore where
   freeIn' (ParLoop _ body _) =
     freeIn' body
   freeIn' (Atomic aop) = freeIn' aop
-  freeIn' (ForEach i bound body _) =
-    let a = unFV (freeIn' body <> freeIn' bound) in
+  freeIn' (ForEach i bound prebody body _) =
+    let a = unFV (freeIn' (prebody :>>: body) <> freeIn' bound) in
     let b = filter (/= i) (namesToList a) in
     fvNames (namesFromList b)

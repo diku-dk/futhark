@@ -11,6 +11,7 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Util (chunks)
 import Prelude hiding (quot, rem)
+import Debug.Trace
 
 type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MulticoreGen ()) -> MulticoreGen ())
 
@@ -84,7 +85,7 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
       nsubtasks' = tvExp nsubtasks
 
   reductionStage1 space slugs1 kbody
-  reds2 <- renameSegBinOp reds
+  reds2 <- traceShow ("REDS: " <> (show $ length reds)) renameSegBinOp reds
   let slugs2 = zipWith SegBinOpSlug reds2 thread_res_arrs
   reductionStage2 pat space nsubtasks' slugs2
 
@@ -107,9 +108,9 @@ reductionStage1 space slugs kbody = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    slug_local_accs <- do
+    (slug_local_accs, prebody) <- collect' $ do
       dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-
+      
       forM slugs $ \slug -> do
         let shape = segBinOpShape $ slugOp slug
 
@@ -131,7 +132,7 @@ reductionStage1 space slugs kbody = do
 
           pure acc
 
-    generateChunkLoop "SegRed" $ \i -> do
+    generateChunkLoop "SegRed" True prebody $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
       kbody $ \all_red_res -> do
         let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
@@ -226,7 +227,7 @@ compileSegRedBody pat space reds kbody = do
 
   let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension
-  collect . generateChunkLoop "SegRed" $ \n_segments -> do
+  collect . generateChunkLoop "SegRed" False mempty $ \n_segments -> do
     flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
     zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
     sComment "neutral-initialise the accumulators" $
