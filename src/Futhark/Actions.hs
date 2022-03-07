@@ -61,7 +61,6 @@ import System.Directory
 import System.Exit
 import System.FilePath
 import qualified System.Info
-import Debug.Trace (traceShowId)
 
 -- | Print the result to stdout.
 printAction :: ASTRep rep => Action rep
@@ -203,22 +202,22 @@ runCC cpath outpath cflags_def ldflags = do
     Right (ExitSuccess, _, _) ->
       return ()
 runISPC :: String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
-runISPC ispcpath cpath outpath ispc_flags cflags_def ldflags = do
+runISPC ispcpath ispcbase cpath ispc_flags cflags_def ldflags = do
   ret_ispc <-
     liftIO $
       runProgramWithExitCode
         "ispc"
-        ( [ispcpath, "-o", "ispc_" <> outpath `addExtension` "o"] ++
+        ( [ispcpath, "-o", ispcbase `addExtension` "o"] ++
           cmdCFLAGS ispc_flags ++
-          ["-h", "ispc_" <> outpath `addExtension` "h"]
+          ["-h", ispcbase `addExtension` "h"]
         )
         mempty
   ret <- -- TODO(kris): Clean this shit up
     liftIO $
       runProgramWithExitCode
         cmdCC
-        ( ["ispc_" ++ (outpath `addExtension` "h"),
-           "ispc_" ++ (outpath `addExtension` "o"), cpath--, "-o", outpath
+        ( [ispcbase `addExtension` "h",
+           ispcbase `addExtension` "o", cpath--, "-o", outpath
           ]
             ++ cmdCFLAGS cflags_def
             ++
@@ -357,9 +356,10 @@ compileMulticoreAction fcfg mode outpath =
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
           ispcPath = outpath `addExtension` "ispc"
-          ispcHeaderPath = ("ispc_" <> outpath) `addExtension` "h"
+          ispcHeaderBase = takeBaseName outpath <> "_ispc"
+          ispcHeader = ispcHeaderBase `addExtension` "h"
 
-      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeaderPath <> "\"") (T.pack versionString) prog
+      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeader <> "\"") (T.pack versionString) prog
       case mode of
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
@@ -370,7 +370,7 @@ compileMulticoreAction fcfg mode outpath =
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
           liftIO $ T.writeFile cpath $ cPrependHeader $ c
           liftIO $ T.writeFile ispcPath $ ispc
-          runISPC ispcPath cpath outpath ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath ispcHeaderBase cpath ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
           --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
