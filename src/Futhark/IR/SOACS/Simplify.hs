@@ -417,7 +417,7 @@ removeUnusedSOACInput _ pat aux op
     auxing aux $ letBind pat $ Op $ soacOp $ Screma w used_arrs (ScremaForm scan reduce map_lam')
   where
     used_in_body map_lam = freeIn $ lambdaBody map_lam
-    usedInput map_lam (param, _) = paramName param `nameIn` (used_in_body map_lam)
+    usedInput map_lam (param, _) = paramName param `nameIn` used_in_body map_lam
 removeUnusedSOACInput _ _ _ _ = Skip
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
