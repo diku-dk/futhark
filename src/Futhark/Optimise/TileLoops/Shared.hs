@@ -543,15 +543,8 @@ kkLoopBody
             is_inner_coal = isInnerCoal env inp_X load_X
             str_A = baseString inp_X
         x_loc <-
-          if is_inner_coal
-            then -- former case A (matrix NOT transposed); use [ry, tk_div_tx]
-
-              segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
-                scatterFun is_inner_coal
-            else -- former case B (matrix IS transposed); use the reverse of [tk_div_ty, rx]
-
-              segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
-                scatterFun is_inner_coal
+          segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
+            scatterFun is_inner_coal
 
         return (x_loc, copyLoc2Reg is_inner_coal str_A x_loc)
         where
