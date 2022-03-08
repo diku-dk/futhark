@@ -321,17 +321,14 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   when fancyTerminal $ do
     clearLine
     putStr "\r"
+    putStr $ descString (atMostChars 40 dataset_desc) pad_to
 
   case res of
-    Left err -> do
-      when fancyTerminal $
-        liftIO $ putStrLn $ descString (atMostChars 40 dataset_desc) pad_to
-      liftIO $ putStrLn $ inRed $ T.unpack err
-      return $ Just $ DataResult dataset_desc $ Left err
+    Left err -> liftIO $ do
+      putStrLn ""
+      putStrLn $ inRed $ T.unpack err
+      pure $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
-      when fancyTerminal $
-        putStr $ descString (atMostChars 40 dataset_desc) pad_to
-
       reportResult runtimes
       Result runtimes (getMemoryUsage errout) errout
         & Right
