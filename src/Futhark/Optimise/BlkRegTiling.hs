@@ -31,8 +31,6 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 
---import Debug.Trace
-
 -- ToDo: we need tx == ty (named t_par), and rx == ry (named r_par)
 --       in order to handle all the cases without transpositions.
 --       additionally, of course, we need that tk is a multiple of t_par.
