@@ -40,9 +40,6 @@ type TileM = ReaderT (Scope GPU) (State VNameSource)
 -- | Are we working with full or partial tiles?
 data TileKind = TilePartial | TileFull
 
---type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
---type Env = (M.Map VName (Lambda GPU, [SubExp]), M.Map VName IxFun)
-
 scratch :: MonadBuilder m => String -> PrimType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
@@ -151,8 +148,7 @@ segMap1D desc lvl manifest f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc $
-    Op . SegOp $
-      SegMap lvl space ts $ KernelBody () stms' $ map ret res'
+    Op . SegOp $ SegMap lvl space ts $ KernelBody () stms' $ map ret res'
 
 segMap2D ::
   String -> -- desc
@@ -176,8 +172,7 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op . SegOp $
-      SegMap lvl segspace ts $ KernelBody () stms $ map ret res
+    Op . SegOp $ SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segMap3D ::
   String -> -- desc
@@ -202,8 +197,7 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op . SegOp $
-      SegMap lvl segspace ts $ KernelBody () stms $ map ret res
+    Op . SegOp $ SegMap lvl segspace ts $ KernelBody () stms $ map ret res
 
 segScatter2D ::
   String ->
@@ -425,9 +419,7 @@ kkLoopBody
         =<< eIf
           ( toExp $
               if epilogue
-                then
-                  le64 kk + le64 k
-                    .<. pe64 common_dim
+                then le64 kk + le64 k .<. pe64 common_dim
                 else true -- if in prologue, always compute redomap.
           )
           ( do
