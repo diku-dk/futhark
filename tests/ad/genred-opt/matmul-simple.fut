@@ -1,22 +1,20 @@
 -- ==
 -- entry: rev_J
--- compiled random input { [1024][80]f32 [80][1024]f32 [1024][1024]f32} auto output
--- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32} auto output
--- compiled random input { [2048][1024]f32 [1024][2048]f32 [2048][2048]f32} auto output
-
--- compiled input
--- {
--- [[1.0,2.0],[3.0,4.0]] [[5.0,6.0],[7.0,8.0]]
+-- compiled input {
+--   [[1.0,2.0],[3.0,4.0]]
+--   [[5.0,6.0],[7.0,8.0]]
+--   [[1.0,2.0],[3.0,4.0]]
+-- }
+-- output {
+--   [[17.0, 23.0], [39.0, 53.0]]
+--   [[10.0, 14.0], [14.0, 20.0]]
 -- }
 
-type real = f32
-let real_sum = f32.sum
+let dotprod xs ys = f64.sum (map2 (*) xs ys)
 
-let dotprod xs ys = real_sum (map2 (*) xs ys)
-
-let matmul [m][n][q] (xss: [m][q]real, yss: [q][n]real) =
+let matmul [m][n][q] (xss: [m][q]f64, yss: [q][n]f64) =
   map (\xs -> map (dotprod xs) (transpose yss)) xss
 
-entry rev_J [n][m][q] (xss: [m][q]real) (yss: [q][n]real) (res_adj: [m][n]real) =
+entry rev_J [n][m][q] (xss: [m][q]f64) (yss: [q][n]f64) (res_adj: [m][n]f64) =
   vjp matmul (xss, yss) res_adj
 
