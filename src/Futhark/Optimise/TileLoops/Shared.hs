@@ -6,8 +6,6 @@ module Futhark.Optimise.TileLoops.Shared
     scratch,
     index,
     update,
-    update',
-    rebindLambda,
     forLoop',
     forLoop,
     segMap1D,
@@ -55,48 +53,9 @@ index se_desc arr outer_indices = do
       slice = Slice $ map (DimFix . Var) outer_indices ++ inner_slices
   letExp se_desc $ BasicOp $ Index arr slice
 
-update :: MonadBuilder m => String -> VName -> [VName] -> VName -> m VName
-update se_desc arr indices new_elem = update' se_desc arr indices (Var new_elem)
-
-update' :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
-update' se_desc arr indices new_elem =
+update :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
+update se_desc arr indices new_elem =
   letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) indices) new_elem
-
--- given a lambda "lam", a list "new_params" of new
--- parameters which should be applied to the lambda,
--- and a VName "res_name" which the lambda result should
--- be bound to:
---   creates Stms corresponding to binding of new_params,
---   lambda body, and binding of lambda result to res_name.
-rebindLambda ::
-  Lambda GPU ->
-  [VName] ->
-  [VName] ->
-  Stms GPU
-rebindLambda lam new_params res_names =
-  stmsFromList
-    ( zipWith
-        (\ident new_param -> mkLet [ident] $ BasicOp $ SubExp $ Var new_param)
-        idents
-        new_params
-    )
-    <> bodyStms lam_body
-    <> stmsFromList res_cpy_stms
-  where
-    (lam_params, lam_body, lam_ret_type : _) =
-      (lambdaParams lam, lambdaBody lam, lambdaReturnType lam)
-    idents =
-      map
-        (\param -> Ident (paramName param) (paramDec param))
-        lam_params
-    res_cpy_stms =
-      zipWith
-        ( \res_name (SubExpRes cs lam_res) ->
-            certify cs $ mkLet [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res
-        )
-        res_names
-        lam_ress
-    lam_ress = bodyResult lam_body
 
 forLoop' ::
   SubExp -> -- loop var
@@ -504,7 +463,6 @@ kkLoopBody
                         b <- index "b" bs [j]
                         c <- index "c" css_merge' [i, j]
 
-                        map_res <- newVName "map_res"
                         map_lam' <- renameLambda map_lam
                         red_lam' <- renameLambda red_lam
 
@@ -513,11 +471,9 @@ kkLoopBody
                         -- it just so happens that the inverse of [a,b] is [b,a]
                         let map_inp_reg = if var_dims == [0, 1] then [a, b] else [b, a]
 
-                        addStms $
-                          rebindLambda map_lam' map_inp_reg [map_res]
-                            <> rebindLambda red_lam' [c, map_res] [c]
-
-                        css <- update "css" css_merge' [i, j] c
+                        map_res <- eLambda map_lam' (map (eSubExp . Var) map_inp_reg)
+                        ~[red_res] <- eLambda red_lam' (map eSubExp $ Var c : map resSubExp map_res)
+                        css <- update "css" css_merge' [i, j] (resSubExp red_res)
 
                         resultBodyM [Var css]
                     )
@@ -559,8 +515,8 @@ kkLoopBody
                         else le64 ij + le64 ltid_yx * pe64 r_par + le64 k * (pe64 tr_par + pe64 se1)
                     )
               xsss <-
-                index (str_A ++ "_loc_elem") x_loc [x_loc_ind]
-                  >>= update (str_A ++ "_regs") xsss_merge [ij]
+                update (str_A ++ "_regs") xsss_merge [ij] . Var
+                  =<< index (str_A ++ "_loc_elem") x_loc [x_loc_ind]
               resultBodyM [Var xsss]
           --
           scatterFun ::

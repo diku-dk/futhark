@@ -369,7 +369,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                               resultBodyM [Var res_nm]
                           )
                           (eBody [eBlank res_tp])
-                    rss'' <- update' "rss" rss_merge' [i, j] res_el
+                    rss'' <- update "rss" rss_merge' [i, j] res_el
                     resultBodyM [Var rss'']
                   resultBodyM [Var rss']
                 return [varRes rss]
@@ -550,7 +550,7 @@ initRegShmem
       css_init <- scratch "css_init" red_t [ry, rx]
       css <- forLoop ry [css_init] $ \i [css_merge] -> do
         css' <- forLoop rx [css_merge] $ \j [css_merge'] -> do
-          css'' <- update' "css" css_merge' [i, j] red_ne
+          css'' <- update "css" css_merge' [i, j] red_ne
           resultBodyM [Var css'']
         resultBodyM [Var css']
       return [varRes css]
@@ -873,7 +873,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
           forM (zip red_nes red_res_tps) $ \(red_ne, red_t) -> do
             css_init <- scratch "res_init" (elemType red_t) [rz]
             css <- forLoop rz [css_init] $ \i [css_merge] -> do
-              css' <- update' "css" css_merge [i] red_ne
+              css' <- update "css" css_merge [i] red_ne
               resultBodyM [Var css']
             return $ varRes css
 
@@ -967,14 +967,12 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                                           case M.lookup arr_nm tab_scals of
                                             Nothing -> error "Impossible case reached in tiling3D\n"
                                             Just nm -> return nm
-                                        map_res_scals <- forM (lambdaReturnType map_lam) $ \_ -> newVName "map_res"
                                         map_lam' <- renameLambda map_lam
                                         red_lam' <- renameLambda red_lam
-                                        addStms $
-                                          rebindLambda map_lam' map_inp_scals map_res_scals
-                                            <> rebindLambda red_lam' (cs ++ map_res_scals) cs
-                                        css <- forM (zip reg_arr_mm_nms cs) $ \(reg_arr_nm, c) ->
-                                          update (baseString reg_arr_nm) reg_arr_nm [i] c
+                                        map_res_scals <- eLambda map_lam' (map (eSubExp . Var) map_inp_scals)
+                                        red_res <- eLambda red_lam' (map eSubExp (map Var cs ++ map resSubExp map_res_scals))
+                                        css <- forM (zip reg_arr_mm_nms red_res) $ \(reg_arr_nm, c) ->
+                                          update (baseString reg_arr_nm) reg_arr_nm [i] (resSubExp c)
                                         resultBodyM $ map Var css
                                     )
                                     (resultBodyM $ map Var reg_arr_mm_nms)
