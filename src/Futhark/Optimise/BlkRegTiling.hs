@@ -431,7 +431,7 @@ matchesBlkRegTile seg_space kstms
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
     -- get the variables on which the first result of redomap depends on
-    [redomap_orig_res] <- map patElemName (patElems pat_redomap),
+    [redomap_orig_res] <- patNames pat_redomap,
     Just res_red_var <- M.lookup redomap_orig_res variance, -- variance of the reduce result
 
     -- we furthermore check that code1 is only formed by
@@ -991,8 +991,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         epilogue_res <-
           if length redomap_orig_res == length ker_res_nms
             && ker_res_nms == map patElemName redomap_orig_res
-            then -- all (\ (a,b) -> patElemName a == b ) $ zip redomap_orig_res ker_res_nms
-            segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
+            then segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
               forM (zip kertp redomap_res) $ \(res_tp, res) -> do
                 rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
                 fmap varRes $

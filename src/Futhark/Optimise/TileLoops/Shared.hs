@@ -416,12 +416,12 @@ kkLoopBody
         return (i, k, e)
       isInnerCoal :: Env -> VName -> Stm GPU -> Bool
       isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
-        | [slc_X'] <- map patElemName (patElems pat),
+        | [slc_X'] <- patNames pat,
           slc_X == slc_X',
           Nothing <- M.lookup x ixfn_env =
           True -- if not in the table, we assume not-transposed!
       isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
-        | [slc_X'] <- map patElemName (patElems pat),
+        | [slc_X'] <- patNames pat,
           slc_X == slc_X',
           Just ixf_fn <- M.lookup x ixfn_env,
           (IxFun.IxFun (lmad :| []) _ _) <- ixf_fn =
