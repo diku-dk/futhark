@@ -29,8 +29,6 @@ import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
 
---import Debug.Trace
-
 type GenRedM = ReaderT (Scope GPU) (State VNameSource)
 
 -- | The pass definition.
@@ -131,7 +129,6 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     --   memory accesses: if more than two are re-executed, then we
     --   should abort.
     cost <- costRedundantExecution variance pat_acc_nm r_ses kstms,
-    --trace ("Redundant cost is: "++printCost cost) $
     maxCost cost (Small 2) == Small 2 = do
     -- 1. create the first kernel
     acc_tp <- lookupType acc_nm
@@ -160,7 +157,6 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       res_redmap <- letTupExp "res_mapred" op_exp
       letSubExp (baseString pat_acc_nm ++ "_big_update") $
         BasicOp (UpdateAcc acc_nm acc_inds $ map Var res_redmap)
-    -- Let pat_accum aux (BasicOp (UpdateAcc acc_nm acc_inds res_redmap))
 
     -- 1.3. build the kernel expression and rename it!
     gid_flat_1 <- newVName "gid_flat"
@@ -178,16 +174,10 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     let ker1 = Let pat_accum aux ker_exp
 
     -- 2 build the second kernel
-    -- Let pat_ker aux  (Op (SegOp (SegMap seg_thd seg_space kres_tps old_kbody)))
     let ker2_body = old_kbody {kernelBodyStms = code1 <> code2}
     ker2_exp <- renameExp $ Op (SegOp (SegMap seg_thd seg_space kres_tps ker2_body))
     let ker2 = Let pat_ker aux ker2_exp
     return $
-      --trace ("\nIdentified Potential for Optimizing Gen Red, acc-stm:\n"++
-      --       pretty accum_stmt++"\n invar to:"++pretty (invar_gid, gid_ind)++
-      --       -- "\nkernel code:\n"++pretty kerstm++
-      --       "\n first redomap kernel:\n"++pretty ker1++"\n transpositions: "++pretty code1_tr_host
-      --      ) $
       Just (code1_tr_host <> host_stms1 <> oneStm ker1, ker2)
   where
     isIndVarToParDim _ (Constant _) _ = False
@@ -238,9 +228,6 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
         let invar_par = isSliceInvar2 variance slc (map fst gid_dims)
             invar_seq = isSliceInvar2 variance slc [seq_gid]
          in invar_par || invar_seq
-    --in  trace ("!!!!!!!!!!!!!!Slice "++pretty slc ++" is invariant to: "++pretty gid_dims++" "++
-    --             pretty seq_gid++" answer: "++pretty invar_par++" "++pretty invar_seq) $
-    --              invar_par || invar_seq
     -- this relies on the cost model, that currently accepts only
     -- global-memory reads, and for example rejects in-place updates
     -- or loops inside the code that is transformed in a redomap.
@@ -256,7 +243,6 @@ genRed2SegRed :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU, Stm GPU))
 genRed2SegRed _ _ =
   return Nothing
 
--- M.Map VName ([Int], VName, Stms GPU)
 transposeFVs ::
   Names ->
   VarianceTable ->
@@ -282,8 +268,6 @@ transposeFVs fvs variance gid stms = do
         Nothing <- M.lookup arr tab,
         ii /= length dims - 1,
         perm <- [0 .. ii -1] ++ [ii + 1 .. length dims - 1] ++ [ii] = do
-        --        length dims == 2,
-        --        ii == 0 = do
         (arr_tr, stms_tr) <- runBuilderT' $ do
           arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange perm arr --Manifest [1,0] arr
           letExp (baseString arr' ++ "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
@@ -382,8 +366,7 @@ costRedundantExecution variance pat_acc_nm r_ses kstms =
       vartab_cut_acc = varianceInStmsWithout (oneName pat_acc_nm) mempty kstms
       res_deps = mconcat $ map (findDeps vartab_cut_acc) $ mapMaybe se2nm r_ses
       common_deps = namesIntersection res_deps acc_deps
-   in --trace ("Common deps: "++pretty common_deps) $
-      foldl (addCostOfStmt common_deps) (Small 0) kstms
+   in foldl (addCostOfStmt common_deps) (Small 0) kstms
   where
     se2nm (Var nm) = Just nm
     se2nm _ = Nothing
@@ -408,12 +391,6 @@ costRedundantExecution variance pat_acc_nm r_ses kstms =
 data Cost = Small Int | Big | Break
   deriving (Eq)
 
-{--
-printCost :: Cost -> String
-printCost Big   = "BIG"
-printCost Break = "BREAK"
-printCost (Small i) = "(Small "++show i++")"
---}
 addCosts :: Cost -> Cost -> Cost
 addCosts Break _ = Break
 addCosts _ Break = Break
@@ -453,23 +430,3 @@ costRedundantStmt (Let _ _ (BasicOp Manifest {})) = Big
 costRedundantStmt (Let _ _ (BasicOp Replicate {})) = Big
 costRedundantStmt (Let _ _ (BasicOp UpdateAcc {})) = Break
 costRedundantStmt (Let _ _ (BasicOp _)) = Small 0
-
--------------------------
---- Diffs
--------------------------
--- 1. In src/Language/Futhark/Prop.hs
---   -                   $ tupleRecord [Scalar t_b, Scalar t_b]
---   +                   $ RetType [] . Scalar $ tupleRecord [Scalar t_b, Scalar t_b]
--- and another like that
---
--- 2. In src/Futhark/Passes.hs
---              tileLoops,
---     +        simplifyGPU,
---     +        --tileLoops,
--- 3. src/Futhark/IR/GPU/Simplify.hs
---   kernelRules =
---     standardRules <> segOpRules
---       <> ruleBook
---  -      [ RuleOp redomapIotaToLoop,
---  +      [ --RuleOp redomapIotaToLoop,
---           RuleOp SOAC.simplifyKnownIterationSOAC,
