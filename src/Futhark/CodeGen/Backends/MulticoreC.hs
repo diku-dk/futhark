@@ -694,7 +694,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   -- TODO(pema): Move this to C
   pure ()
 
-compileOp (ForEach i bound body free) = do
+compileOp (ForEach i bound prebody body free) = do
   free_ctypes <- mapM paramToCType free
   let new_free = map freshMemName free -- fresh memblock names
   let free_args = map paramName free
@@ -727,6 +727,7 @@ compileOp (ForEach i bound body free) = do
       GC.collect $ do
         --GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
+        GC.compileCode prebody
         GC.stm stm
 
         --mapM_ GC.item =<< GC.declAllocatedMem
