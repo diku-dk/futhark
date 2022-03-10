@@ -150,6 +150,8 @@ cmpOpToZ3 (CmpUlt _) = mkLt
 cmpOpToZ3 (CmpUle _) = mkLe
 cmpOpToZ3 (CmpSlt _) = mkLt
 cmpOpToZ3 (CmpSle _) = mkLe
+cmpOpToZ3 (FCmpLe _) = mkLe
+cmpOpToZ3 (FCmpLt _) = mkLt
 cmpOpToZ3 c = error $ "Unsupported CmpOp " <> pretty c
 
 binOpToZ3 :: MonadZ3 z3 => BinOp -> AST -> AST -> z3 AST
