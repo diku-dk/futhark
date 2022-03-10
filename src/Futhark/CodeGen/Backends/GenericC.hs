@@ -1660,7 +1660,6 @@ typedef unsigned int64 uint64_t;
 typedef unsigned int32 uint32_t;
 typedef unsigned int16 uint16_t;
 typedef unsigned int8 uint8_t;
-typedef unsigned int64 __uint128_t; // TODO(pema): Wrong
 
 $cScalarDefs
 
