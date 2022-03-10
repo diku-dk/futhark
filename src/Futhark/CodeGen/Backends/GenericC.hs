@@ -1590,7 +1590,6 @@ $entrydecls
 // Miscellaneous
 $miscdecls
 #define FUTHARK_BACKEND_$backend
-#define futhark_foreach(t, i, n) for (t i = 0; i < n; i++)
 $errorsH
 
 #ifdef __cplusplus
@@ -1673,11 +1672,6 @@ struct memblock {
     const int8_t * desc;
 };
 #endif
-
-#define futhark_foreach(t, i, n) foreach(i = 0 ... n)
-#define register uniform
-#define memblock_ref memblock * uniform
-#define auto export
 
 $ispc_decls
         |]
