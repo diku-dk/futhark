@@ -232,9 +232,11 @@ extractAllocations segop_code = f segop_code
 -- iteration.
 generateChunkLoop ::
   String ->
+  Bool ->
+  Imp.Code ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
-generateChunkLoop desc m = do
+generateChunkLoop desc vec prebody m = do
   -- TODO: Pema, debugging
   -- emit $ Imp.DebugPrint (desc <> " " <> "hello fbody") Nothing
   (start, end) <- getLoopBounds
@@ -248,10 +250,12 @@ generateChunkLoop desc m = do
   -- We need to gather the free variables in both the bound expression and the body
   let bound = untyped n
   free_params_bound <- freeParams bound
-  free_params_body <- freeParams body
+  free_params_body <- freeParams (prebody Imp.:>>: body) -- TODO(pema): Use the existing freeIn instance for this
   -- But we don't want to include the loop index, since is being bound in this expression
   let free_final = filter (\x -> Imp.paramName x /= i) (free_params_body <> free_params_bound)
-  emit $ Imp.Op $ Imp.ForEach i bound body free_final
+  if vec
+  then emit $ Imp.Op $ Imp.ForEach i bound prebody body free_final
+  else emit $ prebody Imp.:>>: Imp.For i bound body
 
 -------------------------------
 ------- SegHist helpers -------
