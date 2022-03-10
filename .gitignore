@@ -42,6 +42,13 @@ core.*
 # Ignore temporary backup directories.
 *-backup
 
+#Ignore C/ISPC files
+*.o
+*.c
+*.h
+*.ispc
+*.gch
+
 # Ignore directories often created by testing
 data/
 lib/
