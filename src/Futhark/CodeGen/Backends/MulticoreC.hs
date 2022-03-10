@@ -671,13 +671,10 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
         $items:toc
     }|]
 
-  let fwdDec = "extern \"C\" unmasked void "
-               <> schedn <> "("
-               <> "struct futhark_context uniform * uniform ctx, "
-               <> "struct " <> fstruct <> " uniform * uniform args, "
-               <> "uniform int iterations" <> ");"
-  _fwdDec <- ispcDef "" $ \_ -> return [ISPC.cedecl|$esc:(nameToString fwdDec)|]
-
+  _ <- ispcDef "" $ \_ -> return [ISPC.cedecl| extern "C" unmasked void $id:schedn 
+                                                (struct futhark_context uniform * uniform ctx, 
+                                                struct $id:fstruct uniform * uniform args, 
+                                                uniform int iterations);|]
   GC.stm [ISPC.cstm|$escstm:("#if ISPC")|]
   GC.decl [ISPC.cdecl|uniform struct $id:fstruct aos[programCount];|]
   GC.stm [ISPC.cstm|aos[programIndex] = $id:(fstruct <> "_");|]

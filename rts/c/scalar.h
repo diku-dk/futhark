@@ -1502,15 +1502,23 @@ static inline float futrts_tanh32(float x) {
 }
 
 static inline float futrts_acosh32(float x) {
-  return log(x+sqrt(x*x-1)); // TODO: Check if correct, might not work for all x? (Might not need to) 
+  float f = x+sqrt(x*x-1);
+  if(futrts_isfinite32(f)) return log(f);
+  return f;
 }
 
 static inline float futrts_asinh32(float x) {
-  return log(x+sqrt(x*x+1));
+  float f = x+sqrt(x*x+1);
+  if(futrts_isfinite32(f)) return log(f);
+  return f;
+
 }
 
 static inline float futrts_atanh32(float x) {
-  return log((1+x)/(1-x))/2; // TODO: Check if correct, might not work for all x? (Might not need to) 
+  float f = (1+x)/(1-x);
+  if(futrts_isfinite32(f)) return log(f)/2.0f;
+  return f;
+
 }
 
 static inline float futrts_atan2_32(float x, float y) {
