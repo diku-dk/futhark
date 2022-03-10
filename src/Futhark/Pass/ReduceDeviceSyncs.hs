@@ -156,17 +156,20 @@ storeScalar stms se t = do
   case entry of
     Just (_, _, arr, _) -> pure (stms, arr)
     Nothing ->
-      do
-        n <- newName $ case se of
-          Var n -> n
-          _ -> VName (nameFromString "const") 0
+      case se of
+        Var n -> do
+          n' <- newName n
+          let stm = bind (PatElem n' t) (BasicOp $ SubExp se)
 
-        let stm = bind (PatElem n t) (BasicOp $ SubExp se)
+          gpubody <- inGPUBody (pure stm)
+          let dev = patElemName $ head $ patElems (stmPat gpubody)
 
-        gpubody <- inGPUBody (pure stm)
-        let dev = patElemName $ head $ patElems (stmPat gpubody)
-
-        pure (stms |> gpubody, dev)
+          pure (stms |> gpubody, dev)
+        _ -> do
+          let n = VName (nameFromString "const") 0
+          pe <- arrayizePatElem (PatElem n t)
+          let stm = bind pe (BasicOp $ ArrayLit [se] t)
+          pure (stms |> stm, patElemName pe)
 
 -- | Map a variable name to itself or, if the variable no longer can be used on
 -- host, the name of a single element array containing its value.

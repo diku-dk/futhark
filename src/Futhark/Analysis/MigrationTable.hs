@@ -354,10 +354,12 @@ graphStm stm = do
     BasicOp (Opaque _ se) -> do
       graphSimple bs e
       one bs `reusesSubExp` se
-    BasicOp (ArrayLit [] _) -> graphSimple bs e
-    BasicOp (ArrayLit _ t)
-      | isScalar t ->
+    BasicOp (ArrayLit arr t)
+      | isScalar t,
+        any (isJust . subExpVar) arr ->
         -- Migrating an array literal of n scalars saves n synchronous writes.
+        -- If all scalars are constants then the compiler generates more
+        -- efficient code that copies static device memory.
         graphAutoMove (one bs)
     BasicOp ArrayLit {} -> graphSimple bs e
     BasicOp UnOp {} -> graphSimple bs e
