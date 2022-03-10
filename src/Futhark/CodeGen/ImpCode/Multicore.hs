@@ -159,10 +159,6 @@ instance FreeIn Multicore where
   freeIn' (Atomic aop) = freeIn' aop
   freeIn' (ISPCBlock body _ _) = freeIn' body
   freeIn' (ForEach i bound body) =
-    let a = unFV (freeIn' body <> freeIn' bound) in
-    let b = filter (/= i) (namesToList a) in
-    fvNames (namesFromList b)
+    fvBind (oneName i) (freeIn' body <> freeIn' bound)
   freeIn' (ForEachActive i body) =
-    let a = unFV (freeIn' body) in
-    let b = filter (/= i) (namesToList a) in
-    fvNames (namesFromList b)
+    fvBind (oneName i) (freeIn' body)

@@ -170,9 +170,6 @@ pyPrependHeader = (T.unlines pyHeaderLines <>)
 cmdCC :: String
 cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
 
---cmdISPC :: String
---cmdISPC = fromMaybe "ispc" $ lookup "CC" unixEnvironment
-
 cmdCFLAGS :: [String] -> [String]
 cmdCFLAGS def = maybe def words $ lookup "CFLAGS" unixEnvironment
 
@@ -357,7 +354,7 @@ compileMulticoreAction fcfg mode outpath =
           ispcbase = outpath <> "_ispc"
           ispcHeader = takeBaseName ispcbase `addExtension` "h"
       cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeader <> "\"") (T.pack versionString) prog
-      case mode of
+      case mode of -- TODO(pema): Library, Server mode
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
@@ -365,8 +362,8 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
-          liftIO $ T.writeFile cpath $ cPrependHeader $ c
-          liftIO $ T.writeFile ispcPath $ ispc
+          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile ispcPath ispc
           runISPC ispcPath ispcbase cpath ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
           --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do

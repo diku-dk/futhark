@@ -29,8 +29,7 @@ import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Quote.ISPC as ISPC
+import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 
 -- | Compile the program to ImpCode with multicore operations.
@@ -210,8 +209,8 @@ generateContext = do
   GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[0];|]
 
   GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
-      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value) {
+    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, typename size_t param_value);|],
+      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, typename size_t param_value) {
                      (void)cfg; (void)param_name; (void)param_value;
                      return 1;
                    }|]
@@ -275,11 +274,11 @@ compileKernelInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Param]
 compileKernelInputs = zipWith field
   where
     field name (ty, Prim) =
-      [ISPC.cparam|uniform $ty:ty $id:(getName name)|]
+      [C.cparam|uniform $ty:ty $id:(getName name)|]
     field name (_, RawMem) =
-      [ISPC.cparam|unsigned char uniform * uniform $id:(getName name)|]
+      [C.cparam|unsigned char uniform * uniform $id:(getName name)|]
     field name (_, _) =
-      [ISPC.cparam|uniform typename memblock * uniform $id:(getName name)|]
+      [C.cparam|uniform typename memblock * uniform $id:(getName name)|]
 compileIspcInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Exp]
 compileIspcInputs = zipWith field
   where
@@ -291,8 +290,8 @@ compileMemblockDeref :: [(VName, VName)] -> [(C.Type, ValueType)] -> [C.InitGrou
 compileMemblockDeref = zipWith deref
   where
     deref (v1, v2) (ty, Prim) = [C.cdecl|$ty:ty $id:v1 = $id:(getName v2);|]
-    deref (v1, v2) (_, RawMem) = [ISPC.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
-    deref (v1, v2) (ty, MemBlock) = [ISPC.cdecl|uniform $ty:ty $id:v1 = *$id:(getName v2);|]
+    deref (v1, v2) (_, RawMem) = [C.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
+    deref (v1, v2) (ty, MemBlock) = [C.cdecl|uniform $ty:ty $id:v1 = *$id:(getName v2);|]
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
@@ -590,6 +589,7 @@ prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
                      };|]
   fstruct <- sharedDef name makeStruct
   let fstruct' =  fstruct <> "_"
+  -- TODO(pema, K): These underscores are pretty gross. We need them because of ISPC restriction on struct names.
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct';|]
   GC.stm [C.cstm|$id:fstruct'.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct' free_args free_ctypes)|]
@@ -671,22 +671,21 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
         $items:toc
     }|]
 
-  _ <- ispcDef "" $ \_ -> return [ISPC.cedecl| extern "C" unmasked void $id:schedn 
+  _ <- ispcDef "" $ \_ -> return [C.cedecl| extern "C" unmasked void $id:schedn 
                                                 (struct futhark_context uniform * uniform ctx, 
                                                 struct $id:fstruct uniform * uniform args, 
                                                 uniform int iterations);|]
-  GC.stm [ISPC.cstm|$escstm:("#if ISPC")|]
-  GC.decl [ISPC.cdecl|uniform struct $id:fstruct aos[programCount];|]
-  GC.stm [ISPC.cstm|aos[programIndex] = $id:(fstruct <> "_");|]
-  GC.stm [ISPC.cstm|$escstm:("foreach_active (i) {")|]
-  GC.stm [ISPC.cstm|$id:schedn(ctx, &aos[i], extract($exp:e', i));|]
-  GC.stm [ISPC.cstm|$escstm:("}")|]
-  GC.stm [ISPC.cstm|$escstm:("#else")|]
-  GC.stm [ISPC.cstm|$id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');|]
-  GC.stm [ISPC.cstm|$escstm:("#endif")|]
-
-  -- TODO(pema): Move this to C
-  pure ()
+  GC.stm [C.cstm|$escstm:("#if ISPC")|]
+  GC.items [C.citems|
+    #if ISPC
+    uniform struct $id:fstruct aos[programCount];
+    aos[programIndex] = $id:(fstruct <> "_");
+    foreach_active (i) {
+      $id:schedn(ctx, &aos[i], extract($exp:e', i));
+    }|]
+  GC.stm [C.cstm|$escstm:("#else")|]
+  GC.stm [C.cstm|$id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');|]
+  GC.stm [C.cstm|$escstm:("#endif")|]
 
 compileOp (ISPCBlock body free retvals) = do
   free_ctypes <- mapM paramToCType free
@@ -718,26 +717,32 @@ compileOp (ISPCBlock body free retvals) = do
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     --mainBody <- GC.collect $ GC.compileCode body
     return
-      [ISPC.cedecl|export static void $id:s(struct futhark_context uniform * uniform ctx, uniform typename int64_t start, uniform typename int64_t end, $params:inputs) {
-                       $decls:memderef
-                       $items:mainBody
-                     }|]
+      [C.cedecl|
+        export static void $id:s(struct futhark_context uniform * uniform ctx,
+                                 uniform typename int64_t start,
+                                 uniform typename int64_t end,
+                                 $params:inputs) {
+          $decls:memderef
+          $items:mainBody
+        }|]
 
   let ispc_inputs = compileIspcInputs free_args free_ctypes
   GC.stm [C.cstm|$id:ispcShim(ctx, start, end, $args:ispc_inputs);|]
 
 compileOp (ForEach i bound body) = do
-  let t = primTypeToCType $ primExpType bound
   bound' <- GC.compileExp bound
   body' <- GC.collect $ GC.compileCode body
-  GC.stm [ISPC.cstm|foreach ($id:i = 0 ... extract($exp:bound', 0)) {
-    $items:body'
-  }|]
+  GC.stm [C.cstm|
+    foreach ($id:i = 0 ... extract($exp:bound', 0)) {
+      $items:body'
+    }|]
 
 compileOp (ForEachActive name body) = do
-  GC.stm [ISPC.cstm|$escstm:("foreach_active (" <> pretty name <> ") {")|]
-  GC.compileCode body
-  GC.stm [ISPC.cstm|$escstm:("}")|]
+  body' <- GC.collect $ GC.compileCode body
+  GC.stm [C.cstm|
+    foreach_active ($id:name) {
+      $items:body'
+    }|]
 
 compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
@@ -747,8 +752,6 @@ compileOp (ParLoop s' body free) = do
 
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
-
-
 
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $

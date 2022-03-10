@@ -35,7 +35,6 @@ module Futhark.IR.Prop.Names
     -- * Efficient computation
     FreeDec (..),
     FV,
-    unFV, -- TODO(Pema): Hack
     fvBind,
     fvName,
     fvNames,
