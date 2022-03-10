@@ -24,7 +24,7 @@ module Futhark.Actions
     compilePyOpenCLAction,
   )
 where
-
+import Debug.Trace(traceM)
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (intercalate)
@@ -208,21 +208,20 @@ runISPC ispcpath ispcbase cpath ispc_flags cflags_def ldflags = do
       runProgramWithExitCode
         "ispc"
         ( [ispcpath, "-o", ispcbase `addExtension` "o"] ++
-          cmdCFLAGS ispc_flags ++
-          ["-h", ispcbase `addExtension` "h"]
+          ["-h", ispcbase `addExtension` "h"] ++ 
+          cmdCFLAGS ispc_flags
         )
         mempty
   ret <- -- TODO(kris): Clean this shit up
     liftIO $
       runProgramWithExitCode
         cmdCC
-        ( [ispcbase `addExtension` "h",
-           ispcbase `addExtension` "o", cpath--, "-o", outpath
-          ]
-            ++ cmdCFLAGS cflags_def
-            ++
+        ( [ispcbase `addExtension` "h"] ++
+          [ispcbase `addExtension` "o"] ++
+          [cpath] ++ --, "-o", outpath          
+          cmdCFLAGS cflags_def ++
             -- The default LDFLAGS are always added.
-            ldflags
+          ldflags
         )
         mempty
   case ret_ispc of
@@ -356,9 +355,8 @@ compileMulticoreAction fcfg mode outpath =
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
           ispcPath = outpath `addExtension` "ispc"
-          ispcHeaderBase = takeBaseName outpath <> "_ispc"
-          ispcHeader = ispcHeaderBase `addExtension` "h"
-
+          ispcbase = outpath <> "_ispc"
+          ispcHeader = takeBaseName ispcbase `addExtension` "h"
       cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeader <> "\"") (T.pack versionString) prog
       case mode of
         ToLibrary -> do
@@ -370,7 +368,7 @@ compileMulticoreAction fcfg mode outpath =
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
           liftIO $ T.writeFile cpath $ cPrependHeader $ c
           liftIO $ T.writeFile ispcPath $ ispc
-          runISPC ispcPath ispcHeaderBase cpath ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath ispcbase cpath ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
           --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
