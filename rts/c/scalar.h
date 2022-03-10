@@ -1541,6 +1541,7 @@ static inline float futrts_hypot32(float x, float y) {
     cn = sqrt (an * an + bn * bn);
     return ldexp (cn, e);
   } else {
+    #pragma ignore warning(all)
     if (futrts_isinf32 (x) || futrts_isinf32 (y)) return 1.0f / 0.0f; //INF
     else return x + y; //NAN
   }
