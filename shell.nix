@@ -1,6 +1,7 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
+  unstable = import <nixos-unstable> {};
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
@@ -11,7 +12,10 @@ pkgs.stdenv.mkDerivation {
     pkgs.file
     pkgs.git
     pkgs.git-annex
-    pkgs.ghc
+    #pkgs.ghc
+    unstable.haskell.compiler.ghc902
+    pkgs.ispc
+    pkgs.stack
     pkgs.haskellPackages.weeder
     pkgs.hlint
     pkgs.pkgconfig
