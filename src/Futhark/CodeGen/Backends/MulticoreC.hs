@@ -295,7 +295,7 @@ compileMemblockDeref = zipWith deref
   where
     deref (v1, v2) (ty, Prim) = [C.cdecl|$ty:ty $id:v1 = $id:(getName v2);|]
     deref (v1, v2) (_, RawMem) = [ISPC.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
-    deref (v1, v2) (ty, MemBlock) = [C.cdecl|$ty:ty $id:v1 = *$id:(getName v2);|]
+    deref (v1, v2) (ty, MemBlock) = [ISPC.cdecl|uniform $ty:ty $id:v1 = *$id:(getName v2);|]
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
