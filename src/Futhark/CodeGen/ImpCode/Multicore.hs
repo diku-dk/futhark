@@ -18,8 +18,6 @@ where
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Util.Pretty
-import Debug.Trace
-import Futhark.IR.Prop.Names (FV)
 
 -- | An imperative program.
 type Program = Imp.Functions Multicore
@@ -34,9 +32,11 @@ type Code = Imp.Code Multicore
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String Code [Param]
-  | -- | ForEach in ISPC
-    ForEach VName Exp Code Code Code [Param] [Param]
-  | -- | ForEach_Active in ISPC
+  | -- | Emit code in ISPC
+    ISPCBlock Code [Param] [Param]
+  | -- | ForEach, only valid in ISPC
+    ForEach VName Exp Code
+  | -- | ForEach_Active, only valid in ISPC
     ForEachActive VName Code
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
@@ -126,12 +126,14 @@ instance Pretty Multicore where
             nestedBlock "body {" "}" (ppr body)
           ]
   ppr (Atomic _) = "AtomicOp"
-  ppr (ForEach i limit prebody body postbody _ _) =
-    ppr prebody <+> text "\n" <+> -- TODO(pema): How to show this
+  ppr (ISPCBlock body _ _) =
+    text "ispc {"
+      </> indent 2 (ppr body)
+      </> text "}"
+  ppr (ForEach i limit body) =
     text "foreach" <+> ppr i <+> langle <+> ppr limit <+> text "{"
       </> indent 2 (ppr body)
-      </> text "}\n"
-    <+> ppr postbody
+      </> text "}"
   ppr (ForEachActive i body) =
     text "foreach_active" <+> ppr i <+> text "{"
     </> indent 2 (ppr body)
@@ -155,8 +157,9 @@ instance FreeIn Multicore where
   freeIn' (ParLoop _ body _) =
     freeIn' body
   freeIn' (Atomic aop) = freeIn' aop
-  freeIn' (ForEach i bound prebody body postbody _ _) =
-    let a = unFV (freeIn' (prebody :>>: body :>>: postbody) <> freeIn' bound) in
+  freeIn' (ISPCBlock body _ _) = freeIn' body
+  freeIn' (ForEach i bound body) =
+    let a = unFV (freeIn' body <> freeIn' bound) in
     let b = filter (/= i) (namesToList a) in
     fvNames (namesFromList b)
   freeIn' (ForEachActive i body) =

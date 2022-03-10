@@ -85,7 +85,7 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
       nsubtasks' = tvExp nsubtasks
 
   reductionStage1 space slugs1 kbody
-  reds2 <- traceShow ("REDS: " <> (show $ length reds)) renameSegBinOp reds
+  reds2 <- renameSegBinOp reds
   let slugs2 = zipWith SegBinOpSlug reds2 thread_res_arrs
   reductionStage2 pat space nsubtasks' slugs2
 
@@ -162,29 +162,32 @@ reductionStage1 space slugs kbody = do
                   \(local_acc, se) ->
                     copyDWIMFix local_acc vec_is se []
 
-    generateChunkLoop "SegRed" True prebody postbody retvals $ \i -> do
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-      kbody $ \all_red_res -> do
-        let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
-        forM_ (zip3 all_red_res' slugs slug_local_accs) $ \(red_res, slug, local_accs) ->
-          sLoopNest (slugShape slug) $ \vec_is -> do
-            let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
-            -- Load accum params
-            sComment "Load accum params" $
-              forM_ (zip3 (accParams slug) local_accs lamtypes) $
-                \(p, local_acc, t) ->
-                  when (primType t) $
-                    copyDWIMFix (paramName p) [] (Var local_acc) vec_is
+    inISPC retvals $ do
+      emit prebody
+      generateChunkLoop "SegRed" True $ \i -> do
+        zipWithM_ dPrimV_ is $ unflattenIndex ns' i
+        kbody $ \all_red_res -> do
+          let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
+          forM_ (zip3 all_red_res' slugs slug_local_accs) $ \(red_res, slug, local_accs) ->
+            sLoopNest (slugShape slug) $ \vec_is -> do
+              let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
+              -- Load accum params
+              sComment "Load accum params" $
+                forM_ (zip3 (accParams slug) local_accs lamtypes) $
+                  \(p, local_acc, t) ->
+                    when (primType t) $
+                      copyDWIMFix (paramName p) [] (Var local_acc) vec_is
 
-            sComment "Load next params" $
-              forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
-                copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+              sComment "Load next params" $
+                forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
+                  copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
 
-            sComment "SegRed body" $
-              compileStms mempty (bodyStms $ slugBody slug) $
-                forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
-                  \(local_acc, se) ->
-                    copyDWIMFix local_acc vec_is se []
+              sComment "SegRed body" $
+                compileStms mempty (bodyStms $ slugBody slug) $
+                  forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
+                    \(local_acc, se) ->
+                      copyDWIMFix local_acc vec_is se []
+      emit postbody
 
     forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
       forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
@@ -257,7 +260,7 @@ compileSegRedBody pat space reds kbody = do
 
   let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension
-  collect . generateChunkLoop "SegRed" False mempty mempty [] $ \n_segments -> do
+  collect . generateChunkLoop "SegRed" False $ \n_segments -> do
     flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
     zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
     sComment "neutral-initialise the accumulators" $

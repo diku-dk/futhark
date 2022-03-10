@@ -634,8 +634,6 @@ instance FreeIn a => FreeIn (Code a) where
     mempty
   freeIn' (For i bound body) =
     fvBind (oneName i) $ freeIn' bound <> freeIn' body
- {- freeIn' (ForEach i bound body) =
-    fvBind (oneName i) $ freeIn' bound <> freeIn' body -}
   freeIn' (While cond body) =
     freeIn' cond <> freeIn' body
   freeIn' (DeclareMem _ space) =

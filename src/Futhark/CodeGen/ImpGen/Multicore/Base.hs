@@ -21,6 +21,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     segOpString,
     generateChunkLoop,
     generateUniformizeLoop,
+    inISPC,
     toParam,
   )
 where
@@ -235,14 +236,9 @@ extractAllocations segop_code = f segop_code
 generateChunkLoop ::
   String ->
   Bool ->
-  Imp.Code ->
-  Imp.Code ->
-  [Imp.Param] ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
-generateChunkLoop desc vec prebody postbody retvals m = do
-  -- TODO: Pema, debugging
-  -- emit $ Imp.DebugPrint (desc <> " " <> "hello fbody") Nothing
+generateChunkLoop desc vec m = do
   (start, end) <- getLoopBounds
   n <- dPrimVE "n" $ end - start
   i <- newVName (desc <> "_i")
@@ -251,15 +247,11 @@ generateChunkLoop desc vec prebody postbody retvals m = do
       addLoopVar i Int64
       m $ start + Imp.le64 i
   emit body_allocs
-  -- We need to gather the free variables in both the bound expression and the body
+  -- Emit either foreach or normal for loop
   let bound = untyped n
-  free_params_bound <- freeParams bound
-  free_params_body <- freeParams (prebody Imp.:>>: body) -- TODO(pema): Use the existing freeIn instance for this
-  -- But we don't want to include the loop index, since is being bound in this expression
-  let free_final = filter (\x -> Imp.paramName x /= i) (free_params_body <> free_params_bound)
   if vec
-  then emit $ Imp.Op $ Imp.ForEach i bound prebody body postbody free_final retvals
-  else emit $ prebody Imp.:>>: Imp.For i bound body
+  then emit $ Imp.Op $ Imp.ForEach i bound body
+  else emit $ Imp.For i bound body
 
 generateUniformizeLoop :: (Imp.TExp Int64 -> MulticoreGen ()) -> MulticoreGen ()
 generateUniformizeLoop m = do
@@ -268,6 +260,13 @@ generateUniformizeLoop m = do
     addLoopVar i Int64
     m $ Imp.le64 i
   emit $ Imp.Op $ Imp.ForEachActive i body
+
+inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
+inISPC retvals code = do
+  (allocs, res) <- extractAllocations <$> collect code
+  free <- freeParams res
+  emit allocs
+  emit $ Imp.Op $ Imp.ISPCBlock res free retvals
 
 -------------------------------
 ------- SegHist helpers -------

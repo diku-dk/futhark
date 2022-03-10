@@ -152,8 +152,6 @@ import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
 import Language.Futhark.Warnings
 import Prelude hiding (quot)
-import Language.C.Pretty (pprBlock)
-import Language.C (pprBlock)
 
 -- | How to compile an t'Op'.
 type OpCompiler rep r op = Pat rep -> Op rep -> ImpM rep r op ()

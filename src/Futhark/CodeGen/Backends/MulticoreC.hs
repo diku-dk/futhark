@@ -32,9 +32,6 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Quote.ISPC as ISPC
 import qualified Language.C.Syntax as C
-import Futhark.Util.Pretty (prettyCompact)
-import Language.Haskell.TH (fieldExp)
-
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -694,13 +691,15 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   -- TODO(pema): Move this to C
   pure ()
 
-compileOp (ForEach i bound prebody body postbody free retvals) = do
+compileOp (ISPCBlock body free retvals) = do
   free_ctypes <- mapM paramToCType free
   let new_free = map freshMemName free -- fresh memblock names
   let free_args = map paramName free
   let _free_args = map paramName new_free
 
   let inputs = compileKernelInputs _free_args free_ctypes
+
+  let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
 
   let mem_input = filter isMemblock new_free -- get freshly named memblocks
   let mem_body = filter isMemblock free -- old memblocks
@@ -709,37 +708,34 @@ compileOp (ForEach i bound prebody body postbody free retvals) = do
   mem_ctypes <- mapM paramToCType (filter isMemblock free)
   let memderef = compileMemblockDeref (zip mem_body_args mem_input_args) mem_ctypes
 
-  let t = primTypeToCType $ primExpType bound
-  bound' <- GC.compileExp bound
-  body' <- GC.collect $ GC.compileCode body
-  let pi' = pretty i
-  let ptype = pretty t
-  let pbound = pretty bound'
-  let pbody = pretty body'
-  let macro = "futhark_foreach (" <> ptype <> ", " <> pi' <> ", " <> pbound <> ") "
-              <> T.unpack (T.replace "\n" "\n    " $ T.pack pbody)
-  let stm = [C.cstm|$escstm:macro|]
-
-  _ispcLoop <- ispcDef "loop_ispc" $ \s -> do
-    loopBody <- GC.inNewFunction $
+  -- TODO(pema): We generate code for a new function without calling GC.inNewFunction,
+  -- I think this is a hack. If I understand correctly, it can result in double-frees
+  -- when an inner scope thinks that it owns memory from an outer scope.
+  ispcShim <- ispcDef "loop_ispc" $ \s -> do
+    mainBody <- GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
-        --GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
-
-        GC.compileCode prebody
-        GC.stm stm
-        GC.compileCode postbody
-
-        --mapM_ GC.item =<< GC.declAllocatedMem
-        --mapM_ GC.item body'
+        mapM_ GC.item decl_cached
+        mapM_ GC.item =<< GC.declAllocatedMem
+        free_mem <- GC.freeAllocatedMem
+        GC.compileCode body
+        GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
+    --mainBody <- GC.collect $ GC.compileCode body
     return
-      [ISPC.cedecl|export static void $id:s(struct futhark_context uniform * uniform ctx, $params:inputs) {
+      [ISPC.cedecl|export static void $id:s(struct futhark_context uniform * uniform ctx, uniform typename int64_t start, uniform typename int64_t end, $params:inputs) {
                        $decls:memderef
-                       $items:loopBody
+                       $items:mainBody
                      }|]
 
   let ispc_inputs = compileIspcInputs free_args free_ctypes
-  GC.stm [C.cstm|$id:_ispcLoop(ctx, $args:ispc_inputs);|]
-  pure ()
+  GC.stm [C.cstm|$id:ispcShim(ctx, start, end, $args:ispc_inputs);|]
+
+compileOp (ForEach i bound body) = do
+  let t = primTypeToCType $ primExpType bound
+  bound' <- GC.compileExp bound
+  body' <- GC.collect $ GC.compileCode body
+  GC.stm [ISPC.cstm|foreach ($id:i = 0 ... extract($exp:bound', 0)) {
+    $items:body'
+  }|]
 
 compileOp (ForEachActive name body) = do
   GC.stm [ISPC.cstm|$escstm:("foreach_active (" <> pretty name <> ") {")|]

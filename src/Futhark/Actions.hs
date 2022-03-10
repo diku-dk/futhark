@@ -24,7 +24,6 @@ module Futhark.Actions
     compilePyOpenCLAction,
   )
 where
-import Debug.Trace(traceM)
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (intercalate)
