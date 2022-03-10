@@ -1093,6 +1093,45 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update safety x _ _elm
           actv'' = if safety == Unsafe then mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt' else actv'
       return $
         bu_env {activeCoals = actv'', inhibit = inhbt'}
+
+-- The case of flat in-place update:
+--   @let x' = x with flat-slice <- elm@
+mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (FlatUpdate x _ _elm))) td_env bu_env
+  | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
+    do
+      -- (a) filter by the 3rd safety for @elm@ and @x'@
+      (actv, inhbt) <- liftIO $ recordMemRefUses td_env bu_env stm
+      -- mkCoalsHelper1FilterActive pat (se2names elm) (scope td_env) (scals bu_env)
+      --                                      (activeCoals bu_env) (inhibit bu_env)
+      -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
+      let (actv', inhbt') =
+            case M.lookup m_x actv of
+              Nothing -> (actv, inhbt)
+              Just info ->
+                case M.lookup (patElemName x') (vartab info) of
+                  Nothing ->
+                    -- error "In ArrayCoalescing.hs, fun mkCoalsTabStm, case in-place update!"
+                    -- this case should not happen, but if it can that just fail conservatively
+                    markFailedCoal (actv, inhbt) m_x
+                  Just (Coalesced k mblk@(MemBlock _ _ _ x_indfun) _) ->
+                    case freeVarSubstitutions (scope td_env) (scals bu_env) x_indfun of
+                      Just fv_subs
+                        | isInScope td_env (dstmem info) ->
+                          let coal_etry_x = Coalesced k mblk fv_subs
+                              info' =
+                                info
+                                  { vartab =
+                                      M.insert x coal_etry_x $
+                                        M.insert (patElemName x') coal_etry_x (vartab info)
+                                  }
+                           in (M.insert m_x info' actv, inhbt)
+                      _ ->
+                        markFailedCoal (actv, inhbt) m_x
+
+          -- (c) this stm is also a potential source for coalescing, so process it
+          actv'' = mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt'
+      return $
+        bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
 mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
   error $ "In ArrayCoalescing.hs, fun mkCoalsTabStm, illegal pattern for in-place update: " ++ pretty pat
@@ -1352,6 +1391,18 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Update _ x slice_x (Var b)))
     updateIndFunSlice ind_fun slc_x =
       let slc_x' = map (fmap pe64) $ unSlice slc_x
        in IxFun.slice ind_fun $ Slice slc_x'
+genCoalStmtInfo lutab scopetab pat (BasicOp (FlatUpdate x slice_x b))
+  | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
+    case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
+      (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
+        if not (nameIn b last_uses)
+          then Nothing
+          else Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
+      _ -> Nothing
+  where
+    updateIndFunSlice :: IxFun -> FlatSlice SubExp -> IxFun
+    updateIndFunSlice ind_fun (FlatSlice offset dims) =
+      IxFun.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
 
 -- CASE b) @let x = concat(a, b^{lu})@
 genCoalStmtInfo lutab scopetab pat (BasicOp (Concat concat_dim (b0 :| bs) _))
