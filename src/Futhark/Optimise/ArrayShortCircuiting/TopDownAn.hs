@@ -69,7 +69,9 @@ data TopDnEnv rep = TopDnEnv
     scalarTable :: M.Map VName (PrimExp VName),
     -- | A list of known relations of the form 'VName' @<@ 'SubExp', typically
     -- gotten from 'LoopForm' and 'SegSpace'.
-    knownLessThan :: [(VName, PrimExp VName)]
+    knownLessThan :: [(VName, PrimExp VName)],
+    -- | A list of the asserts encountered so far
+    td_asserts :: [SubExp]
   }
 
 isInScope :: TopDnEnv rep -> VName -> Bool
@@ -192,6 +194,8 @@ topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
 --           scope = scope env <> scopeOf stm,
 --           usage_table = usageInStm stm <> usage_table env
 --         }
+topdwnTravBinding env stm@(Let (Pat _) _ (BasicOp (Assert se _ _))) =
+  env {td_asserts = se : td_asserts env}
 topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
     let ixfn_inv = getInvAliasFromExp e

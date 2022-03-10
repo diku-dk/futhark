@@ -1248,8 +1248,8 @@ disjoint2 less_thans non_negatives lmad1 lmad2 =
         _ ->
           False
 
-disjoint3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> [PrimExp VName] -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> IO Bool
-disjoint3 scope less_thans non_negatives lmad1 lmad2 =
+disjoint3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> IO Bool
+disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 =
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
       (neg_offset, pos_offset) =
@@ -1295,7 +1295,7 @@ disjoint3 scope less_thans non_negatives lmad1 lmad2 =
                       <> pretty interval2''
                       <> "\nresult"
                   )
-                <$> mapM (uncurry $ disjointZ3 scope less_thans non_negatives) (zip interval1'' interval2'')
+                <$> mapM (uncurry $ disjointZ3 scope asserts less_thans non_negatives) (zip interval1'' interval2'')
             else return False
         _ ->
           return False

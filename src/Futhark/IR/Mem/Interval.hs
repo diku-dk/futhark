@@ -207,8 +207,8 @@ mkMax e1 e2 = do
   cond <- mkGe e1 e2
   mkIte cond e1 e2
 
-disjointZ3 :: M.Map VName Type -> [(VName, PrimExp VName)] -> [PrimExp VName] -> Interval -> Interval -> IO Bool
-disjointZ3 scope less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
+disjointZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> Interval -> Interval -> IO Bool
+disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
   | st1 == st2 = do
     let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2
     result <- evalZ3With Nothing (opt "timeout" (1000 :: Integer)) $ do
@@ -218,6 +218,7 @@ disjointZ3 scope less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval
         Nothing -> return Undef
         Just var_table -> do
           non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
+          asserts <- mapM (\vn -> primExpToZ3 var_table vn) asserts
           lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
           nes <-
             sequence
@@ -231,6 +232,7 @@ disjointZ3 scope less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval
               nes
                 <> non_negs
                 <> lts
+                <> asserts
 
           implies2 <-
             mkOr
