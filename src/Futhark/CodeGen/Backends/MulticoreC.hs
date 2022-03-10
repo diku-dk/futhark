@@ -21,7 +21,6 @@ import Control.Monad
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
@@ -31,6 +30,7 @@ import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
+import qualified Futhark.CodeGen.Backends.GenericC as GC
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -266,12 +266,14 @@ isMemblock _  = False
 
 data ValueType = Prim | MemBlock | RawMem
 
+-- Escaped memory name to immediately deref within function scope.
 freshMemName :: Param -> Param
 freshMemName (MemParam v s) = MemParam (VName (nameFromString ('_' : baseString v)) (baseTag v)) s
 freshMemName param = param
 
-compileKernelInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Param]
-compileKernelInputs = zipWith field
+-- Compile parameter definitions to pass to ISPC kernel
+compileKernelParams :: [VName] -> [(C.Type, ValueType)] -> [C.Param]
+compileKernelParams = zipWith field
   where
     field name (ty, Prim) =
       [C.cparam|uniform $ty:ty $id:(getName name)|]
@@ -279,13 +281,16 @@ compileKernelInputs = zipWith field
       [C.cparam|unsigned char uniform * uniform $id:(getName name)|]
     field name (_, _) =
       [C.cparam|uniform typename memblock * uniform $id:(getName name)|]
-compileIspcInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Exp]
-compileIspcInputs = zipWith field
+
+-- Compile parameter values to ISPC kernel
+compileKernelInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Exp]
+compileKernelInputs = zipWith field
   where
     field name (_, Prim) = [C.cexp|$id:(getName name)|]
     field name (_, RawMem) = [C.cexp|$id:(getName name)|]
     field name (_, MemBlock) = [C.cexp|&$id:(getName name)|]
 
+-- Immediately dereference a memblock passed to the kernel, so we can use it normally
 compileMemblockDeref :: [(VName, VName)] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileMemblockDeref = zipWith deref
   where
@@ -626,7 +631,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   let ftask_name = fstruct <> "_task"
   
-  toc <- GC.collect $ do
+  toC <- GC.collect $ do
     GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
     GC.stm [C.cstm|$id:ftask_name.args = args;|]
     GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
@@ -651,27 +656,19 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
             GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
             return mempty
 
-    free_all_mem <- GC.freeAllocatedMem
-    let ftask_err = fpar_task <> "_err"
-        code =
-            [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
-                    /*if ($id:ftask_err != 0) {
-                        $items:free_all_mem;
-                        err = $id:ftask_err;
-                        goto cleanup;
-                    }*/|] -- TODO(pema): Uncomment
-
-    mapM_ GC.item code
+    GC.stm [C.cstm|return scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);|]
 
     -- Add profile fields for -P option
     mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
 
   schedn <- multicoreDef "schedule_shim" $ \s ->
-    return [C.cedecl|void $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) {
-        $items:toc
+    return [C.cedecl|int $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) {
+        $items:toC
     }|]
 
-  _ <- ispcDef "" $ \_ -> return [C.cedecl| extern "C" unmasked void $id:schedn 
+  free_all_mem <- GC.freeAllocatedMem -- TODO(pema): Should this free be here?
+
+  _ <- ispcDef "" $ \_ -> return [C.cedecl| extern "C" unmasked uniform int $id:schedn 
                                                 (struct futhark_context uniform * uniform ctx, 
                                                 struct $id:fstruct uniform * uniform args, 
                                                 uniform int iterations);|]
@@ -681,44 +678,56 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     uniform struct $id:fstruct aos[programCount];
     aos[programIndex] = $id:(fstruct <> "_");
     foreach_active (i) {
-      $id:schedn(ctx, &aos[i], extract($exp:e', i));
+      if (err == 0) {
+        err = $id:schedn(ctx, &aos[i], extract($exp:e', i));
+      }
     }|]
+  -- TODO(pema): We can't do much else here^^ than set the error code and hope for the best
   GC.stm [C.cstm|$escstm:("#else")|]
-  GC.stm [C.cstm|$id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');|]
+  GC.items [C.citems|
+    err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
+    if (err != 0) {
+      $items:free_all_mem
+      goto cleanup;
+    }|]
   GC.stm [C.cstm|$escstm:("#endif")|]
 
-compileOp (ISPCBlock body free retvals) = do
+compileOp (ISPCKernel body free retvals) = do
   free_ctypes <- mapM paramToCType free
-  let new_free = map freshMemName free -- fresh memblock names
   let free_args = map paramName free
-  let _free_args = map paramName new_free
 
-  let inputs = compileKernelInputs _free_args free_ctypes
+  -- rename memblocks so we can pass them as pointers, compile the parameters
+  let free_names_esc = map freshMemName free
+  let free_args_esc = map paramName free_names_esc
+  let inputs = compileKernelParams free_args_esc free_ctypes
 
-  let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
-
-  let mem_input = filter isMemblock new_free -- get freshly named memblocks
-  let mem_body = filter isMemblock free -- old memblocks
-  let mem_body_args = map paramName mem_body
-  let mem_input_args = map paramName mem_input
+  -- dereference memblock pointers into the unescaped names
+  let mem_args = map paramName $ filter isMemblock free
+  let mem_args_esc = map paramName $ filter isMemblock free_names_esc
   mem_ctypes <- mapM paramToCType (filter isMemblock free)
-  let memderef = compileMemblockDeref (zip mem_body_args mem_input_args) mem_ctypes
+  let memderef = compileMemblockDeref (zip mem_args mem_args_esc) mem_ctypes
 
   -- TODO(pema): We generate code for a new function without calling GC.inNewFunction,
   -- I think this is a hack. If I understand correctly, it can result in double-frees
   -- when an inner scope thinks that it owns memory from an outer scope.
+  let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
+  -- Generate ISPC kernel
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
     mainBody <- GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
+        GC.decl [C.cdecl|uniform int err = 0;|]
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
         free_mem <- GC.freeAllocatedMem
+
         GC.compileCode body
+        
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
+        GC.stm [C.cstm|return err;|]
     --mainBody <- GC.collect $ GC.compileCode body
     return
       [C.cedecl|
-        export static void $id:s(struct futhark_context uniform * uniform ctx,
+        export static uniform int $id:s(struct futhark_context uniform * uniform ctx,
                                  uniform typename int64_t start,
                                  uniform typename int64_t end,
                                  $params:inputs) {
@@ -726,8 +735,15 @@ compileOp (ISPCBlock body free retvals) = do
           $items:mainBody
         }|]
 
-  let ispc_inputs = compileIspcInputs free_args free_ctypes
-  GC.stm [C.cstm|$id:ispcShim(ctx, start, end, $args:ispc_inputs);|]
+  -- Generate C code to call into ISPC kernel
+  let ispc_inputs = compileKernelInputs free_args free_ctypes
+  free_all_mem <- GC.freeAllocatedMem -- TODO(pema): Should this be here?
+  GC.items [C.citems|
+    err = $id:ispcShim(ctx, start, end, $args:ispc_inputs);
+    if (err != 0) {
+      $items:free_all_mem
+      goto cleanup;
+    }|]
 
 compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound

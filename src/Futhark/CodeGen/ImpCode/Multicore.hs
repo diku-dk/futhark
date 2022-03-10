@@ -33,7 +33,7 @@ data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String Code [Param]
   | -- | Emit code in ISPC
-    ISPCBlock Code [Param] [Param]
+    ISPCKernel Code [Param] [Param]
   | -- | ForEach, only valid in ISPC
     ForEach VName Exp Code
   | -- | ForEach_Active, only valid in ISPC
@@ -125,8 +125,9 @@ instance Pretty Multicore where
           [ nestedBlock "params {" "}" (ppr params),
             nestedBlock "body {" "}" (ppr body)
           ]
-  ppr (Atomic _) = "AtomicOp"
-  ppr (ISPCBlock body _ _) =
+  ppr (Atomic _) =
+    "AtomicOp"
+  ppr (ISPCKernel body _ _) =
     text "ispc {"
       </> indent 2 (ppr body)
       </> text "}"
@@ -156,8 +157,10 @@ instance FreeIn Multicore where
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
   freeIn' (ParLoop _ body _) =
     freeIn' body
-  freeIn' (Atomic aop) = freeIn' aop
-  freeIn' (ISPCBlock body _ _) = freeIn' body
+  freeIn' (Atomic aop) =
+    freeIn' aop
+  freeIn' (ISPCKernel body _ _) =
+    freeIn' body
   freeIn' (ForEach i bound body) =
     fvBind (oneName i) (freeIn' body <> freeIn' bound)
   freeIn' (ForEachActive i body) =

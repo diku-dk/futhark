@@ -266,7 +266,7 @@ inISPC retvals code = do
   (allocs, res) <- extractAllocations <$> collect code
   free <- freeParams res
   emit allocs
-  emit $ Imp.Op $ Imp.ISPCBlock res free retvals
+  emit $ Imp.Op $ Imp.ISPCKernel res free retvals
 
 -------------------------------
 ------- SegHist helpers -------
