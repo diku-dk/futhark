@@ -20,6 +20,8 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     getReturnParams,
     segOpString,
     generateChunkLoop,
+    generateUniformizeLoop,
+    toParam,
   )
 where
 
@@ -234,9 +236,11 @@ generateChunkLoop ::
   String ->
   Bool ->
   Imp.Code ->
+  Imp.Code ->
+  [Imp.Param] ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
-generateChunkLoop desc vec prebody m = do
+generateChunkLoop desc vec prebody postbody retvals m = do
   -- TODO: Pema, debugging
   -- emit $ Imp.DebugPrint (desc <> " " <> "hello fbody") Nothing
   (start, end) <- getLoopBounds
@@ -254,8 +258,16 @@ generateChunkLoop desc vec prebody m = do
   -- But we don't want to include the loop index, since is being bound in this expression
   let free_final = filter (\x -> Imp.paramName x /= i) (free_params_body <> free_params_bound)
   if vec
-  then emit $ Imp.Op $ Imp.ForEach i bound prebody body free_final
+  then emit $ Imp.Op $ Imp.ForEach i bound prebody body postbody free_final retvals
   else emit $ prebody Imp.:>>: Imp.For i bound body
+
+generateUniformizeLoop :: (Imp.TExp Int64 -> MulticoreGen ()) -> MulticoreGen ()
+generateUniformizeLoop m = do
+  i <- newVName "uni_i"
+  body <- collect $ do
+    addLoopVar i Int64
+    m $ Imp.le64 i
+  emit $ Imp.Op $ Imp.ForEachActive i body
 
 -------------------------------
 ------- SegHist helpers -------

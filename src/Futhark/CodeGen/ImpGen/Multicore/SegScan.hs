@@ -101,7 +101,7 @@ scanStage1 pat space scan_ops kbody = do
 
         pure acc
 
-    generateChunkLoop "SegScan" False mempty $ \i -> do
+    generateChunkLoop "SegScan" False mempty mempty [] $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
       compileStms mempty (kernelBodyStms kbody) $ do
         sComment "write mapped values results to memory" $ do
@@ -226,7 +226,7 @@ scanStage3 pat space scan_ops kbody = do
           sIf (start .==. 0) read_neutral read_carry_in
         pure acc
 
-    generateChunkLoop "SegScan" False mempty $ \i -> do
+    generateChunkLoop "SegScan" False mempty mempty [] $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
       sComment "stage 3 scan body" $
         compileStms mempty (kernelBodyStms kbody) $
@@ -278,7 +278,7 @@ compileSegScanBody pat space scan_ops kbody = collect $ do
   sOp $ Imp.GetTaskId (segFlat space)
 
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  generateChunkLoop "SegScan" False mempty $ \segment_i -> do
+  generateChunkLoop "SegScan" False mempty mempty [] $ \segment_i -> do
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
       let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op

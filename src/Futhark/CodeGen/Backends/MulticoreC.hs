@@ -662,7 +662,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                         $items:free_all_mem;
                         err = $id:ftask_err;
                         goto cleanup;
-                    }*/|]
+                    }*/|] -- TODO(pema): Uncomment
 
     mapM_ GC.item code
 
@@ -694,13 +694,11 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   -- TODO(pema): Move this to C
   pure ()
 
-compileOp (ForEach i bound prebody body free) = do
+compileOp (ForEach i bound prebody body postbody free retvals) = do
   free_ctypes <- mapM paramToCType free
   let new_free = map freshMemName free -- fresh memblock names
   let free_args = map paramName free
   let _free_args = map paramName new_free
-
-  let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
 
   let inputs = compileKernelInputs _free_args free_ctypes
 
@@ -729,6 +727,7 @@ compileOp (ForEach i bound prebody body free) = do
 
         GC.compileCode prebody
         GC.stm stm
+        GC.compileCode postbody
 
         --mapM_ GC.item =<< GC.declAllocatedMem
         --mapM_ GC.item body'
@@ -742,14 +741,16 @@ compileOp (ForEach i bound prebody body free) = do
   GC.stm [C.cstm|$id:_ispcLoop(ctx, $args:ispc_inputs);|]
   pure ()
 
+compileOp (ForEachActive name body) = do
+  GC.stm [ISPC.cstm|$escstm:("foreach_active (" <> pretty name <> ") {")|]
+  GC.compileCode body
+  GC.stm [ISPC.cstm|$escstm:("}")|]
 
 compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
   let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
-
-  let inputs = compileKernelInputs free_args free_ctypes
 
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
