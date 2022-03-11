@@ -60,20 +60,21 @@ distributeOffset offset (Interval lb ne st0 : is) = do
   --
   -- Example: The offset is `a + b * b * 2` and the stride is `b * b`. The
   -- remaining offset should be `a` and the new lower bound should be `2`.
-  AlgSimplify.Prod neg st <-
-    maybe (fail "Stride should have exactly one term") return $
-      justOne $
-        AlgSimplify.simplify0 $ untyped st0
-  -- We do not support negative strides here. They should've been normalized.
-  if neg
-    then fail "Stride should be positive"
-    else case find (`AlgSimplify.isMultipleOf` st) offset of
-      Just t@(AlgSimplify.Prod False as') ->
-        distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify.sumToExp [AlgSimplify.Prod False $ traceWith "res" $ traceWith "as'" as' \\ traceWith "st" st])) ne st0 : is
-      Just (AlgSimplify.Prod True _) -> fail "Offset term should be positive"
-      Nothing -> do
-        rest <- distributeOffset offset is
-        return $ Interval lb ne st0 : rest
+  case AlgSimplify.simplify0 $ untyped st0 of
+    [AlgSimplify.Prod neg st] ->
+      -- We do not support negative strides here. They should've been normalized.
+      if neg
+        then trace "stride should be positive" $ fail "Stride should be positive"
+        else case find (`AlgSimplify.isMultipleOf` st) offset of
+          Just t@(AlgSimplify.Prod False as') ->
+            distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify.sumToExp [AlgSimplify.Prod False $ traceWith "res" $ traceWith "as'" as' \\ traceWith "st" st])) ne st0 : is
+          Just (AlgSimplify.Prod True _) -> trace "offset term should be positive" $ fail "Offset term should be positive"
+          Nothing -> do
+            rest <- distributeOffset offset is
+            return $ Interval lb ne st0 : rest
+    _ -> do
+      rest <- distributeOffset offset is
+      return $ Interval lb ne st0 : rest
   where
     justOne :: [a] -> Maybe a
     justOne [a] = Just a
