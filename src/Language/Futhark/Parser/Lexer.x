@@ -18,6 +18,7 @@ import qualified Data.Text.Read as T
 import Data.Char (ord, toLower, digitToInt)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
+import Data.Loc (Loc (NoLoc))
 import Data.Bits
 import Data.Function (fix)
 import Data.List
@@ -163,7 +164,7 @@ keyword s =
 indexing :: T.Text -> Alex Name
 indexing s = case keyword s of
   ID v -> return v
-  _    -> alexError $ "Cannot index keyword '" ++ T.unpack s ++ "'."
+  _    -> alexError NoLoc $ "Cannot index keyword '" ++ T.unpack s ++ "'."
 
 mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
@@ -379,7 +380,8 @@ alexMonadScan = do
   sc <- alexGetStartCode
   case alexScan inp sc of
     AlexEOF -> alexEOF
-    AlexError ((AlexPn _ line column), _, _, _) -> alexError $ "lexical error at line " ++ (show line) ++ ", column " ++ (show column)
+    AlexError ((AlexPn _ line column), _, _, _) -> let pos = Pos "file" line column 0 in
+      alexError (Loc pos pos) ("lexical error at line " ++ (show line) ++ ", column " ++ (show column))
     AlexSkip inp' _len -> do
       alexSetInput inp'
       alexMonadScan
@@ -394,8 +396,8 @@ getToken file = do
   sc <- alexGetStartCode
   case alexScan inp__ sc of
     AlexEOF -> alexEOF
-    AlexError ((AlexPn _ line column),_,_,_) ->
-      alexError $ "Error at " ++ file ++ ":" ++ show line ++ ":" ++ show column ++ ": lexical error."
+    AlexError ((AlexPn _ line column),_,_,_) -> let pos = Pos file line column 0 in
+      alexError (Loc pos pos) $ "Error at " ++ file ++ ":" ++ show line ++ ":" ++ show column ++ ": lexical error."
     AlexSkip  inp__' _len -> do
       alexSetInput inp__'
       getToken file
@@ -405,10 +407,10 @@ getToken file = do
 
 -- | Given a starting position, produce tokens from the given text (or
 -- a lexer error).  Returns the final position.
-scanTokensText :: Pos -> T.Text -> Either String ([L Token], Pos)
+scanTokensText :: Pos -> T.Text -> Either LexerError ([L Token], Pos)
 scanTokensText pos = scanTokens pos . BS.fromStrict . T.encodeUtf8
 
-scanTokens :: Pos -> BS.ByteString -> Either String ([L Token], Pos)
+scanTokens :: Pos -> BS.ByteString -> Either LexerError ([L Token], Pos)
 scanTokens (Pos file start_line start_col start_off) str =
   runAlex' (AlexPn start_off start_line start_col) str $ do
   fix $ \loop -> do

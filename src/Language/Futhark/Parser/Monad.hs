@@ -57,6 +57,7 @@ import Language.Futhark.Pretty ()
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
 import Prelude hiding (mod)
+import Language.Futhark.Parser.Lexer.Wrapper (LexerError (..))
 
 addDoc :: DocComment -> UncheckedDec -> UncheckedDec
 addDoc doc (ValDec val) = ValDec (val {valBindDoc = Just doc})
@@ -99,7 +100,7 @@ newtype ParserEnv = ParserEnv
   }
 
 type ParserMonad =
-  ExceptT String (StateT ParserEnv (StateT ([L Token], Pos) ReadLineMonad))
+  ExceptT ParseError (StateT ParserEnv (StateT ([L Token], Pos) ReadLineMonad))
 
 data ReadLineMonad a
   = Value a
@@ -126,17 +127,17 @@ getLinesFromM fetch (GetLine f) = do
   s <- fetch
   getLinesFromM fetch $ f $ Just s
 
-getNoLines :: ReadLineMonad a -> Either String a
+getNoLines :: ReadLineMonad a -> Either ParseError a
 getNoLines (Value x) = Right x
 getNoLines (GetLine f) = getNoLines $ f Nothing
 
-combArrayElements :: Value -> [Value] -> Either String Value
+combArrayElements :: Value -> [Value] -> Either ParseError Value
 combArrayElements = foldM comb
   where
     comb x y
       | valueType x == valueType y = Right x
       | otherwise =
-        Left $
+        Left $ ParseError NoLoc $
           "Elements " <> pretty x <> " and "
             <> pretty y
             <> " cannot exist in same array."
@@ -232,7 +233,7 @@ lexer cont = do
           (ts'', pos') <-
             case ts' of
               Right x -> pure x
-              Left lex_e -> throwError lex_e
+              Left lex_e -> throwError $ lexerErrToParseErr lex_e
           case ts'' of
             [] -> cont $ eof pos
             xs -> do
@@ -258,8 +259,8 @@ parseError (L loc tok, expected) =
     ]
 
 parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
-parseErrorAt loc Nothing = throwError $ "Error at " ++ locStr loc ++ ": Parse error."
-parseErrorAt loc (Just s) = throwError $ "Error at " ++ locStr loc ++ ": " ++ s
+parseErrorAt loc Nothing = throwError $ ParseError (locOf loc) $ "Error at " ++ locStr loc ++ ": Parse error."
+parseErrorAt loc (Just s) = throwError $ ParseError (locOf loc) $ "Error at " ++ locStr loc ++ ": " ++ s
 
 emptyArrayError :: SrcLoc -> ParserMonad a
 emptyArrayError loc =
@@ -272,16 +273,19 @@ twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
 --- Now for the parser interface.
 
 -- | A parse error.  Use 'show' to get a human-readable description.
-newtype ParseError = ParseError String
+data ParseError = ParseError Loc String
 
 instance Show ParseError where
-  show (ParseError s) = s
+  show (ParseError _ s) = s
+
+lexerErrToParseErr :: LexerError -> ParseError
+lexerErrToParseErr (LexerError loc msg) = ParseError loc msg
 
 parseInMonad :: ParserMonad a -> FilePath -> T.Text -> ReadLineMonad (Either ParseError a)
 parseInMonad p file program =
-  either (Left . ParseError) Right
+  either Left Right
     <$> either
-      (pure . Left)
+      (pure . Left . lexerErrToParseErr)
       (evalStateT (evalStateT (runExceptT p) env))
       (scanTokensText (Pos file 1 1 0) program)
   where
@@ -289,4 +293,4 @@ parseInMonad p file program =
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either ParseError a
 parse p file program =
-  either (Left . ParseError) id $ getNoLines $ parseInMonad p file program
+  either Left id $ getNoLines $ parseInMonad p file program

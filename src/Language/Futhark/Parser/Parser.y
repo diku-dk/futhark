@@ -39,6 +39,7 @@ import Language.Futhark.Parser.Lexer
 import Futhark.Util.Pretty
 import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
 import Language.Futhark.Parser.Monad
+import Language.Futhark.Parser.Lexer.Wrapper (LexerError (..))
 
 }
 
