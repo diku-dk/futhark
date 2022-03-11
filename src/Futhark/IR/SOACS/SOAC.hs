@@ -80,7 +80,7 @@ import Prelude hiding (id, (.))
 -- | A second-order array combinator (SOAC).
 data SOAC rep
   = Stream SubExp [VName] (StreamForm rep) [SubExp] (Lambda rep)
-  | -- | @Scatter <length> <lambda> <inputs> <outputs>@
+  | -- | @Scatter <length> <inputs> <lambda> <outputs>@
     --
     -- Scatter maps values from a set of input arrays to indices and values of a
     -- set of output arrays. It is able to write multiple values to multiple
@@ -116,13 +116,11 @@ data SOAC rep
     -- arr2. Additionally, the results are grouped, so the first 6 index values
     -- will correspond to the first two output values, and so on. For this
     -- example, <lambda> should return a total of 11 values, 8 index values and
-    -- 3 output values.
+    -- 3 output values.  See also 'splitScatterResults'.
     Scatter SubExp [VName] (Lambda rep) [(Shape, Int, VName)]
-  | -- | @Hist <length> <dest-arrays-and-ops> <bucket fun> <input arrays>@
+  | -- | @Hist <length> <input arrays> <dest-arrays-and-ops> <bucket fun>@
     --
-    -- The first SubExp is the length of the input arrays. The first
-    -- list describes the operations to perform.  The t'Lambda' is the
-    -- bucket function.  Finally comes the input images.
+    -- The final lambda produces indexes and values for the 'HistOp's.
     Hist SubExp [VName] [HistOp rep] (Lambda rep)
   | -- FIXME: this should not be here
     JVP (Lambda rep) [SubExp] [SubExp]

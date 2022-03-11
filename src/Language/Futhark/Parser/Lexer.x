@@ -31,10 +31,11 @@ import Language.Futhark.Core (Int8, Int16, Int32, Int64,
 import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
 import Futhark.Util.Loc hiding (L)
+import Language.Futhark.Parser.Lexer.Wrapper
+import qualified Data.ByteString.Internal as ByteString (w2c)
+import qualified Data.ByteString.Lazy as ByteString
 
 }
-
-%wrapper "monad-bytestring"
 
 @charlit = ($printable#['\\]|\\($printable|[0-9]+))
 @stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+))
@@ -373,15 +374,19 @@ data Token = ID Name
 
              deriving (Show, Eq, Ord)
 
-runAlex' :: AlexPosn -> ByteString.ByteString -> Alex a -> Either String a
-runAlex' start_pos input__ (Alex f) =
-  case f (AlexState { alex_pos = start_pos
-                    , alex_bpos = 0
-                    , alex_inp = input__
-                    , alex_chr = '\n'
-                    , alex_scd = 0}) of Left msg -> Left msg
-                                        Right ( _, a ) -> Right a
-
+alexMonadScan = do
+  inp@(_, _, _, n) <- alexGetInput
+  sc <- alexGetStartCode
+  case alexScan inp sc of
+    AlexEOF -> alexEOF
+    AlexError ((AlexPn _ line column), _, _, _) -> alexError $ "lexical error at line " ++ (show line) ++ ", column " ++ (show column)
+    AlexSkip inp' _len -> do
+      alexSetInput inp'
+      alexMonadScan
+    AlexToken inp'@(_, _, _, n') _ action -> do
+      let len = n' - n
+      alexSetInput inp'
+      action inp len
 
 getToken :: FilePath -> Alex (Lexeme Token)
 getToken file = do
@@ -396,7 +401,7 @@ getToken file = do
       getToken file
     AlexToken inp__'@(_,_,_,n') _ action -> let len = n'-n in do
       alexSetInput inp__'
-      action (ignorePendingBytes inp__) len
+      action inp__ len
 
 -- | Given a starting position, produce tokens from the given text (or
 -- a lexer error).  Returns the final position.

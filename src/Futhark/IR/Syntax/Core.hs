@@ -414,6 +414,7 @@ sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
       DimSlice (j + (s0 * i)) n (s0 * s1) : sliceSlice' js' is'
     sliceSlice' _ _ = []
 
+-- | A dimension in a 'FlatSlice'.
 data FlatDimIndex d
   = FlatDimIndex
       d
@@ -431,6 +432,10 @@ instance Functor FlatDimIndex where
 instance Foldable FlatDimIndex where
   foldMap = foldMapDefault
 
+-- | A flat slice is a way of viewing a one-dimensional array as a
+-- multi-dimensional array, using a more compressed mechanism than
+-- reshaping and using 'Slice'.  The initial @d@ is an offset, and the
+-- list then specifies the shape of the resulting array.
 data FlatSlice d = FlatSlice d [FlatDimIndex d]
   deriving (Eq, Ord, Show)
 
@@ -444,11 +449,13 @@ instance Functor FlatSlice where
 instance Foldable FlatSlice where
   foldMap = foldMapDefault
 
+-- | The dimensions (shape) of the view produced by a flat slice.
 flatSliceDims :: FlatSlice d -> [d]
 flatSliceDims (FlatSlice _ ds) = map dimSlice ds
   where
     dimSlice (FlatDimIndex n _) = n
 
+-- | The strides of each dimension produced by a flat slice.
 flatSliceStrides :: FlatSlice d -> [d]
 flatSliceStrides (FlatSlice _ ds) = map dimStride ds
   where

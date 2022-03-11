@@ -72,7 +72,7 @@ analyseStm ::
   Stm (Aliases rep)
 analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
   let e' = analyseExp aliases e
-      pat' = addAliasesToPat pat e'
+      pat' = mkAliasedPat pat e'
       rep' = (AliasDec $ consumedInExp e', dec)
    in Let pat' (StmAux cs attrs rep') e'
 
