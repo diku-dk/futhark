@@ -178,6 +178,10 @@ convOpToZ3 (FPToSI _ _) x = mkReal2Int x
 convOpToZ3 (FPToUI _ _) x = mkReal2Int x
 convOpToZ3 c _ = error $ "Unsupported ConvOp " <> pretty c
 
+unOpToZ3 :: MonadZ3 z3 => UnOp -> AST -> z3 AST
+unOpToZ3 Not x = mkNot x
+unOpToZ3 u _ = error $ "Unsupported UnOp " <> pretty u
+
 primExpToZ3 :: MonadZ3 z3 => M.Map VName AST -> PrimExp VName -> z3 AST
 primExpToZ3 var_table (LeafExp vn _) = return $ var_table M.! vn
 primExpToZ3 var_table (ValueExp (IntValue v)) = mkInteger $ valueIntegral v
@@ -192,6 +196,7 @@ primExpToZ3 var_table (CmpOpExp cop e1 e2) =
     cmpOpToZ3 cop <$> primExpToZ3 var_table e1
       <*> primExpToZ3 var_table e2
 primExpToZ3 var_table (ConvOpExp c e) = convOpToZ3 c =<< primExpToZ3 var_table e
+primExpToZ3 var_table (UnOpExp u e) = unOpToZ3 u =<< primExpToZ3 var_table e
 primExpToZ3 var_table (FunExp name [e1] _)
   | name == "sqrt64" || name == "sqrt32" || name == "sqrt16" = do
     e1' <- primExpToZ3 var_table e1
