@@ -11,6 +11,7 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
     topdwnTravBinding,
     topDownLoop,
     getDirAliasedIxfn,
+    getDirAliasedIxfn',
     addInvAliassesVarTab,
     areAnyAliased,
     isInScope,
@@ -253,6 +254,22 @@ getDirAliasedIxfn td_env coals_tab x =
           -- This value is not subject to coalescing at the moment. Just return the
           -- original index function
           trace ("Didn't find m_x (" <> pretty m_x <> ") in coals_tab") $ Just (m_x, m_x, orig_ixfun)
+    Nothing -> trace "Didn't find scope mem info" Nothing
+
+-- | Like 'getDirAliasedIxfn', but this version returns 'Nothing' if the value
+-- is not currently subject to coalescing.
+getDirAliasedIxfn' :: HasMemBlock (Aliases rep) => TopDnEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
+getDirAliasedIxfn' td_env coals_tab x =
+  case getScopeMemInfo x (scope td_env) of
+    Just (MemBlock _ _ m_x orig_ixfun) ->
+      case M.lookup m_x coals_tab of
+        Just coal_etry -> do
+          (Coalesced _ (MemBlock _ _ m ixf) _) <- walkAliasTab (v_alias td_env) (vartab coal_etry) x
+          return $ traceWith "getDirAliasedIxfn'" (m_x, m, ixf)
+        Nothing ->
+          -- This value is not subject to coalescing at the moment. Just return the
+          -- original index function
+          trace ("Didn't find m_x (" <> pretty m_x <> ") in coals_tab") Nothing
     Nothing -> trace "Didn't find scope mem info" Nothing
 
 -- | Given a 'VName', walk the 'VarAliasTab' until found in the 'Map'.

@@ -382,7 +382,7 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
   let bu_env''' = bu_env'' {activeCoals = actv}
 
   -- Process pattern and return values
-  let mergee_writes = mapMaybe (\(p, _) -> fmap (p,) $ getDirAliasedIxfn td_env (activeCoals bu_env''') $ patElemName p) ps_and_space
+  let mergee_writes = mapMaybe (\(p, _) -> fmap (p,) $ getDirAliasedIxfn' td_env (activeCoals bu_env''') $ patElemName p) ps_and_space
   -- Now, for each mergee write, we need to check that it doesn't overlap with any previous uses of the destination.
   bu_env'''' <-
     foldM
