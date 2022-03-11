@@ -46,3 +46,6 @@ core.*
 data/
 lib/
 testparser/
+
+# ignore mac garbage
+*.DS_Store

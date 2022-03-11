@@ -192,8 +192,6 @@ fuseContexts infusable
     new_outp = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (outp1 `L.union` outp2)
 fuseContexts _ _ _ = Nothing
 
-namesFromRes =  map ((\(Var x) -> x) . resSubExp)
-
 
 fuseStms :: [VName] ->  Stm SOACS -> Stm SOACS -> Maybe (Stm SOACS)
 fuseStms infusible s1 s2 =

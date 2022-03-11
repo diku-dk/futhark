@@ -1,11 +1,10 @@
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-{-# HLINT ignore "Use camelCase" #-}
 module Futhark.Optimise.GraphRep where
 
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import Data.Maybe
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import qualified Futhark.Analysis.Alias as Alias
@@ -178,7 +177,7 @@ makeScanInfusible :: DepGraphAug
 makeScanInfusible g = emap change_node_to_idep g
   where
     find_scan_results :: Stm SOACS -> [VName]
-    find_scan_results  ((Let pat _ (Op (Futhark.Screma  _ _ (ScremaForm scns _ _))))) =
+    find_scan_results  (Let pat _ (Op (Futhark.Screma  _ _ (ScremaForm scns _ _)))) =
       take (length scns) (patNames pat)
     find_scan_results _ = []
 
@@ -244,5 +243,11 @@ getStmRes :: EdgeGenerator
 getStmRes (RNode name) = [(name, Res)]
 getStmRes _ = []
 
+-- TODO: Figure out where to put this
+namesFromRes :: [SubExpRes] -> [VName]
+namesFromRes = mapMaybe ((\x -> case x of
+    Var z -> Just z
+    Constant _ -> Nothing
+  ) . resSubExp)
 
 --- /Inspecting Stms ---
