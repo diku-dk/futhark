@@ -7,7 +7,7 @@ module Futhark.AD.Rev.Loop (diffLoop, stripmineStms) where
 
 import Control.Monad
 import Data.Foldable (toList)
-import Data.List ((\\))
+import Data.List (nub, (\\))
 import qualified Data.Map as M
 import Data.Maybe
 import Futhark.AD.Rev.Monad
@@ -355,7 +355,7 @@ revLoop diffStms pat loop =
                   loopFree =
                     (namesToList (freeIn loop') \\ loop_var_arrays') \\ mapMaybe getVName loop_vals',
                   loopVars = loop_var_arrays',
-                  loopVals = mapMaybe getVName loop_vals'
+                  loopVals = nub $ mapMaybe getVName loop_vals'
                 }
 
         renameLoopTape $ M.fromList $ zip (map paramName loop_params) (map paramName loop_params')
@@ -429,7 +429,7 @@ revLoop diffStms pat loop =
                 (loop_var_adjs, loop_val_adjs) =
                   splitAt (length $ loopVars loop_adjs) loop_var_val_adjs
             returnSweepCode $ do
-              zipWithM_ insSubExpAdj loop_vals' loop_res_adjs
+              zipWithM_ updateSubExpAdj loop_vals' loop_res_adjs
               zipWithM_ insAdj (loopFree loop_vnames) loop_free_adjs
               zipWithM_ insAdj (loopVars loop_vnames) loop_var_adjs
               zipWithM_ updateAdj (loopVals loop_vnames) loop_val_adjs
