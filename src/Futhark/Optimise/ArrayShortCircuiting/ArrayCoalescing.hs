@@ -79,7 +79,8 @@ emptyTopDnEnv =
       m_alias = mempty,
       nonNegatives = mempty,
       scalarTable = mempty,
-      knownLessThan = mempty
+      knownLessThan = mempty,
+      td_asserts = mempty
     }
 
 emptyBotUpEnv :: BotUpEnv
