@@ -203,11 +203,9 @@ addWisdomToPat ::
   Exp (Wise rep) ->
   Pat (LetDec (Wise rep))
 addWisdomToPat pat e =
-  Pat $ map f $ Aliases.mkPatAliases pat e
+  f <$> Aliases.mkAliasedPat pat e
   where
-    f pe =
-      let (als, dec) = patElemDec pe
-       in pe `setPatElemDec` (VarWisdom als, dec)
+    f (als, dec) = (VarWisdom als, dec)
 
 mkWiseBody ::
   (ASTRep rep, CanBeWise (Op rep)) =>
@@ -223,7 +221,7 @@ mkWiseBody dec stms res =
     stms
     res
   where
-    (aliases, consumed) = Aliases.mkBodyAliases stms res
+    (aliases, consumed) = Aliases.mkBodyAliasing stms res
 
 mkWiseLetStm ::
   (ASTRep rep, CanBeWise (Op rep)) =>
