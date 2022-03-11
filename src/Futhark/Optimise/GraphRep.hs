@@ -22,7 +22,9 @@ import Debug.Trace
 
 
 data EdgeT = InfDep VName | Dep VName | Cons | Fake | Res deriving (Eq, Ord)
-data NodeT = SNode (Stm SOACS) | RNode VName deriving (Eq, Ord)
+data NodeT = SNode (Stm SOACS) | RNode VName | InNode VName
+  deriving (Eq, Ord)
+
 
 instance Show EdgeT where
   show (Dep vName) = "Dep " <> ppr vName
@@ -37,7 +39,8 @@ instance Show EdgeT where
 -- nodeT_to_str
 instance Show NodeT where
     show (SNode stm@(Let pat _ _)) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
-    show (RNode name) = ppr $ "Res: " ++ ppr name
+    show (RNode name)  = ppr $ "Res: "   ++ ppr name
+    show (InNode name) = ppr $ "Input: " ++ ppr name
 
 -- PrettyPrinter
 ppr :: PP.Pretty m => m -> String
@@ -57,17 +60,19 @@ type EdgeGenerator = NodeT -> [(VName, EdgeT)]
 
 --- Graph Construction ---
 
-emptyG :: [Stm SOACS] -> Result -> DepGraph
-emptyG stms r = mkGraph (label_nodes (snodes ++ rnodes)) []
+emptyG :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
+emptyG stms r inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
   where
     namesFromRes = map ((\(Var x) -> x) . resSubExp)
     label_nodes = zip [0..]
     snodes = map SNode stms
     rnodes = map RNode (namesFromRes r)
+    inNodes= map (InNode .paramName) inputs -- there might be a better way
 
-mkDepGraph :: [Stm SOACS] -> Result  -> DepGraph
-mkDepGraph stms res =
-    applyAugs (emptyG stms res) [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges]
+
+mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
+mkDepGraph stms res inputs =
+    applyAugs (emptyG stms res inputs) [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges]
 
 genEdges :: [DepNode] -> EdgeGenerator -> [LEdge EdgeT]
 genEdges l_stms edge_fun = concatMap gen_edge l_stms
@@ -78,7 +83,7 @@ genEdges l_stms edge_fun = concatMap gen_edge l_stms
     gen_names_map s = M.fromList $ concatMap gen_dep_list s
       where
         gen_dep_list :: DepNode -> [(VName, Node)]
-        gen_dep_list (i, node) = [(name, i) | name <- concatMap getStmNames (stmFromNode node)]
+        gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]-- getStmNames (stmFromNode node)]
     gen_edge :: DepNode -> [LEdge EdgeT]
     gen_edge (from, node) = [toLEdge (from,to) edgeT  | (dep, edgeT) <- edge_fun node,
                                               Just to <- [M.lookup dep name_map]]
@@ -249,5 +254,11 @@ namesFromRes = mapMaybe ((\x -> case x of
     Var z -> Just z
     Constant _ -> Nothing
   ) . resSubExp)
+
+getOutputs :: NodeT -> [VName]
+getOutputs node = case node of
+  (SNode stm) -> getStmNames stm
+  (RNode _)   -> []
+  (InNode name) -> [name]
 
 --- /Inspecting Stms ---
