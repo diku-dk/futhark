@@ -527,8 +527,6 @@ kkLoopBody
           scatterFun is_inner_coal [i0, k0] (thd_y, thd_x) = do
             let str_A = baseString inp_X
                 t_seq = tk
-            --k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 tx)
-            --i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 ty)
             (i, k, epx_loc_fi) <- mk_ik is_inner_coal (thd_y, thd_x) (i0, k0)
             letBindNames [gtid] =<< toExp (le64 ii + le64 i)
             a_seqdim_idx <- letExp (str_A ++ "_seqdim_idx") =<< toExp (le64 kk + le64 k)
@@ -553,11 +551,8 @@ kkLoopBody
               letSubExp (str_A ++ "_loc_ind")
                 =<< eIf
                   (toExp $ le64 k .<. pe64 t_seq)
-                  ( toExp epx_loc_fi -- (le64 k + le64 i * pe64 t_seq)
-                      >>= letTupExp' "loc_fi"
-                      >>= resultBodyM
-                  )
-                  (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
+                  (eBody [toExp epx_loc_fi])
+                  (eBody [eSubExp $ intConst Int64 (-1)])
             return (a_elem, a_loc_ind)
           scatterFun _ _ _ = do
-            error "Function scatterFun in Shared.hs: 2nd arg should be an array with 2 elements! Error!"
+            error "Function scatterFun in Shared.hs: 2nd arg should be an array with 2 elements!"
