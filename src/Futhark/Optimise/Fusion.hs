@@ -71,15 +71,15 @@ fuseFun _stmts fun = do
       res = bodyResult b
       graph_not_fused = mkDepGraph stms res (trace (show $ funDefParams  fun) (funDefParams  fun))
       graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
-      graph_fused = keeptrying doMapFusion graph_not_fused'
+      graph_fused = doHorizontalFusion $ keeptrying doMapFusion graph_not_fused'
       graph_fused' = trace (pprg graph_fused) graph_fused
       stms_new = reverse $ concatMap stmFromNode $ Q.topsort' graph_fused'
       stms_new' = trace (unlines (map ppr stms_new)) stms_new
 
 -- map-fusion part
 
--- horizontally_fusible :: DepGraph -> (Bool, [[DepNode]])
--- horizontally_fusible g = let hfg =(horizontally_fusible_groups g) in (not $ null hfg, hfg)
+-- horizontally_fusible_groups :: DepGraph -> [[DepNode]]
+-- horizontally_fusible_groups g = let hfg =(horizontally_fusible_groups g) in (not $ null hfg, hfg)
 
 -- horizontally_fusible_groups :: DepGraph -> [[DepNode]]
 -- horizontally_fusible_groups g =
@@ -102,13 +102,22 @@ fuseFun _stmts fun = do
 
 
 
--- try_fuse_all :: [DepNode] -> DepGraphAug
--- try_fuse_all depsnodes g = applyAugs g (map (uncurry tryFuseNodesInGraph) pairs)
---   where
---     nodes = map nodeFromLNode depsnodes
---     pairs = [(x, y) | x <- nodes, y <- nodes,  x < y]
 
--- -- fuse_all === applyAugs g try_fuse_all listlist
+doHorizontalFusion :: DepGraphAug
+doHorizontalFusion g = applyAugs g (map  horizontalFusionOnNode (nodes g))
+
+  -- for each node, find what came before, attempt to fuse
+
+horizontalFusionOnNode :: Node -> DepGraphAug
+horizontalFusionOnNode node g = try_fuse_all incoming_nodes g
+  where
+    (incoming_nodes, _) = unzip $ lpre g node
+
+
+try_fuse_all :: [Node] -> DepGraphAug
+try_fuse_all nodes g = trace (show $ map (uncurry (d_fusion_feasability g)) pairs) applyAugs g (map (uncurry tryFuseNodesInGraph2) pairs)
+  where
+    pairs = [(x, y) | x <- nodes, y <- nodes,  x < y]
 
 doMapFusion :: DepGraphAug
 -- go through each node and attempt a map fusion
@@ -124,20 +133,30 @@ isRes _ = False
 
 
 v_fusion_feasability :: DepGraph -> Node -> Node -> Bool
-v_fusion_feasability g n1 n2 = all is_deps edges && (all (==n2) nodes || all (==n1) nodes2)
+v_fusion_feasability g n1 n2 = all is_deps edges && (all (==n2) nodesN1 || all (==n1) nodesN2)
   where
-    (nodes2, _) = unzip $ filter (not . isRes) $ lsuc g n2
-    (nodes, edges) = unzip $ filter (not . isRes) $ lpre g n1
+    (nodesN2, _) = unzip $ filter (not . isRes) $ lsuc g n2
+    (nodesN1, edges) = unzip $ filter (not . isRes) $ lpre g n1
     is_deps (Dep _) = True
     is_deps (InfDep _) = True
-    -- is_deps Res = True -- unintuitive, but i think it works
+    is_deps Res = True -- unintuitive, but i think it works
     is_deps _ = False
 
 
 
 
 d_fusion_feasability :: DepGraph -> Node -> Node -> Bool
-d_fusion_feasability _ _ _ = True
+d_fusion_feasability g n1 n2 = lessThanOneDep n1 || lessThanOneDep n2
+  where
+    lessThanOneDep n =
+      let (nodes, _) = unzip $ filter (not . isRes) $ lpre g n
+      in (>=1) $ length (L.nub nodes)
+
+
+
+  -- what are the rules here?
+  --  - they have an input in common
+  --  -
 
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug
@@ -166,15 +185,20 @@ tryFuseNodesInGraph node_1 node_2 g
         (concatMap (edgesBetween g node_1) (filter (/=node_2) $ pre g node_1))
                                   -- L.\\ edges_between g node_1 node_2)
 
-  --- | otherwise = case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
-  --     Just new_Context -> (&) new_Context $ delNodes [node_1, node_2] g
-  --     Nothing -> g
-  --   where
-  --     -- sorry about this
-  --     infusable_nodes = concatMap deps_from_edge
-  --       (concatMap (edgesBetween g node_1) (pre g node_1)
-  --                                 L.\\ edgesBetween g node_1 node_2)
-
+-- for horizontal fusion
+tryFuseNodesInGraph2 :: Node -> Node -> DepGraphAug
+tryFuseNodesInGraph2 node_1 node_2 g
+  | not (gelem node_1 g && gelem node_2 g) = g
+  | d_fusion_feasability g node_1 node_2 =
+    case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
+      Just new_Context -> (&) new_Context $ delNodes [node_1, node_2] g
+      Nothing -> g
+  | otherwise = g
+    where
+      -- sorry about this
+      infusable_nodes = concatMap (depsFromEdge g)
+        (concatMap (edgesBetween g node_1) (filter (/=node_2) $ pre g node_1))
+                                  -- L.\\ edges_between g node_1 node_2)
 
 
 

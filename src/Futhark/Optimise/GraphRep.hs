@@ -1,4 +1,3 @@
--- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use camelCase" #-}
 module Futhark.Optimise.GraphRep where
@@ -20,7 +19,7 @@ import qualified Futhark.Util.Pretty as PP
 
 import Debug.Trace
 
-
+-- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
 data EdgeT = InfDep VName | Dep VName | Cons | Fake | Res deriving (Eq, Ord)
 data NodeT = SNode (Stm SOACS) | RNode VName | InNode VName
@@ -34,7 +33,7 @@ instance Show EdgeT where
   show Fake = "Fake"
   show Res  = "Res"
 
-
+-- inputs could have their own edges - to facilitate fusion
 
 
 -- nodeT_to_str
@@ -68,8 +67,14 @@ emptyG stms r inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
     label_nodes = zip [0..]
     snodes = map SNode stms
     rnodes = map RNode (namesFromRes r)
-    inNodes= map (InNode .paramName) inputs -- there might be a better way
+    inNodes= map (InNode . paramName) $ filter isArray inputs -- there might be a better way
 
+
+
+isArray :: FParam SOACS -> Bool
+isArray p = case paramDec p of
+  Array {} -> True
+  _ -> False
 
 mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
 mkDepGraph stms res inputs =
