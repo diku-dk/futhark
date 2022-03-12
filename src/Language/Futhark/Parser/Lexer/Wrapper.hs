@@ -24,8 +24,8 @@ import Control.Applicative (liftA)
 import qualified Data.ByteString.Internal as BS (w2c)
 import qualified Data.ByteString.Lazy as BS
 import Data.Int (Int64)
-import Data.Word (Word8)
 import Data.Loc (Loc)
+import Data.Word (Word8)
 
 type Byte = Word8
 
@@ -69,7 +69,7 @@ tabSize :: Int
 tabSize = 8
 
 alexMove :: AlexPosn -> Char -> AlexPosn
-alexMove (AlexPn a l c) '\t' = AlexPn (a + 1) l (c + tabSize - ((c -1) `mod` tabSize))
+alexMove (AlexPn a l c) '\t' = AlexPn (a + 1) l (c + tabSize - ((c - 1) `mod` tabSize))
 alexMove (AlexPn a l _) '\n' = AlexPn (a + 1) (l + 1) 1
 alexMove (AlexPn a l c) _ = AlexPn (a + 1) l (c + 1)
 
