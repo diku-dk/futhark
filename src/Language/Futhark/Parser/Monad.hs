@@ -283,8 +283,7 @@ lexerErrToParseErr (LexerError loc msg) = ParseError loc msg
 
 parseInMonad :: ParserMonad a -> FilePath -> T.Text -> ReadLineMonad (Either ParseError a)
 parseInMonad p file program =
-  either Left Right
-    <$> either
+      either
       (pure . Left . lexerErrToParseErr)
       (evalStateT (evalStateT (runExceptT p) env))
       (scanTokensText (Pos file 1 1 0) program)
