@@ -238,7 +238,6 @@ fuseStms infusible s1 s2 =
           Just $ Let (basicPat ids) aux2 (Op (Futhark.Screma s_exp fused_inputs
             (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam)))
       where
-
         (o1, o2) = mapT (patNames . stmPat) (s1, s2)
         (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
         (lam_1_output, lam_2_output) = mapT (namesFromRes . res_from_lambda) (lam_1, lam_2)
@@ -260,13 +259,10 @@ fuseStms infusible s1 s2 =
           zip3 (patIdents pats2) (lambdaReturnType lam_2) (res_from_lambda lam_2))
           fused_outputs
 
-
         map1 = makeMap lam_2_inputs i2
         map2 = makeMap o1 lam_1_output
         map4 = makeMap i1 lam_1_inputs
         map3 =  fuse_maps map1 (M.union map2 map4)
-
-
 
 
         lam' = fuseLambda lam_1 lam_2
@@ -275,34 +271,50 @@ fuseStms infusible s1 s2 =
           lambdaReturnType = types,
           lambdaBody = (lambdaBody lam') {bodyResult = body_res}
           }
-    -- -- vertical map-scatter fusion
+    -- vertical map-scatter fusion
     ( Let pats1 aux1 (Op (Futhark.Screma  _ i1 (ScremaForm [] [] lam_1))),
       Let pats2 aux2 (Op (Futhark.Scatter exp i2 lam_2 other)))
       | L.null infusible -- only if map outputs are used exclusivly by the scatter
       -> Just $ Let pats2 aux2 (Op (Futhark.Scatter exp fused_inputs lam other))
         where
         (o1, o2) = mapT (patNames . stmPat) (s1, s2)
-        (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
-        (lam_1_output, lam_2_output) = mapT (namesFromRes . res_from_lambda) (lam_1, lam_2)
-
-
-        map1 = makeMap lam_2_inputs i2
-        map2 = makeMap o1 lam_1_output
-        map4 = makeMap i1 lam_1_inputs
-
-        map3 = fuse_maps map1 (M.union map2 map4)
-
-        fused_inputs = fuse_inputs2 o1 i1 i2
-
-        lparams = change_all (i1 ++ i2)
-          (lambdaParams lam_1 ++ lambdaParams lam_2)
-          fused_inputs
-
-        lam' = fuseLambda lam_1 lam_2
-        lam = substituteNames map3 $ lam' {
-          lambdaParams = lparams
-          }
+        (lam, fused_inputs) = vFuseLambdas lam_1 i1 o1 lam_2 i2 o2
+    -- vertical map-histogram fusion
+    ( Let pats1 aux1 (Op (Futhark.Screma  _ i1 (ScremaForm [] [] lam_1))),
+      Let pats2 aux2 (Op (Futhark.Hist exp i2 other lam_2)))
+      | L.null infusible -- only if map outputs are used exclusivly by the scatter
+        -> Just $ Let pats2 aux2 (Op (Futhark.Hist exp fused_inputs other lam))
+          where
+            (o1, o2) = mapT (patNames . stmPat) (s1, s2)
+            (lam, fused_inputs) = vFuseLambdas lam_1 i1 o1 lam_2 i2 o2
     _ -> Nothing
+
+-- should handle all fusions of lambda at some ponit - now its only perfect fusion
+vFuseLambdas :: Lambda SOACS -> [VName] -> [VName] ->
+                Lambda SOACS -> [VName] -> [VName]
+                -> (Lambda SOACS, [VName])
+vFuseLambdas lam_1 i1 o1 lam_2 i2 o2 = (lam , fused_inputs)
+  where
+    (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
+    (lam_1_output, lam_2_output) = mapT (namesFromRes . res_from_lambda) (lam_1, lam_2)
+
+    map1 = makeMap lam_2_inputs i2
+    map2 = makeMap o1 lam_1_output
+    map4 = makeMap i1 lam_1_inputs
+    map3 = fuse_maps map1 (M.union map2 map4)
+
+    fused_inputs = fuse_inputs2 o1 i1 i2
+
+    lparams = change_all (i1 ++ i2)
+      (lambdaParams lam_1 ++ lambdaParams lam_2)
+      fused_inputs
+
+    lam' = fuseLambda lam_1 lam_2
+    lam = substituteNames map3 $ lam' {
+      lambdaParams = lparams
+      }
+
+
 
 makeMap :: Ord a => [a] -> [b] -> M.Map a b
 makeMap x y = M.fromList $ zip x y
@@ -333,34 +345,15 @@ interweave f [] (b : bs) = f [] b ++ interweave f [] bs
 interweave f [] [] = []
 
 
-
--- fuse_inputs :: [VName] -> [(VName, LParam SOACS)] ->
---                           [(VName, LParam SOACS)] -> [(VName, LParam SOACS)]
--- fuse_inputs fusing inputs1 inputs2 = L.unionBy (\a b -> fst a == fst b) inputs1 filtered_inputs_2
---   where
---     filtered_inputs_2 = filter (\x -> fst x `notElem` fusing) inputs2
-
 fuse_inputs2 :: [VName] -> [VName] -> [VName] -> [VName]
 fuse_inputs2 fusing inputs1 inputs2 =
    inputs1 `L.union` filter (`notElem` fusing) inputs2
-
--- fuse_outputs :: [VName] ->
---   [(Ident, Type, SubExpRes)] ->
---   [(Ident, Type, SubExpRes)] ->
---   [(Ident, Type, SubExpRes)]
--- fuse_outputs infusible outputs1 outputs2 =
---    outputs2 `L.union` filtered_outputs
---   where
---     filtered_outputs = filter (\(x, _, _) -> identName x `elem` infusible) outputs1
-
 
 fuse_outputs2 :: [VName] -> [VName] -> [VName] -> [VName]
 fuse_outputs2 infusible outputs1 outputs2 =
    outputs2 `L.union` filtered_outputs
   where
     filtered_outputs = filter (`elem` infusible) outputs1
-
-
 
 
 fuseLambda :: Lambda SOACS  -> -- [VName] -> [VName] ->
