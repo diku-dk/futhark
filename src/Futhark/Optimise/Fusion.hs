@@ -19,6 +19,7 @@ module Futhark.Optimise.Fusion (fuseSOACs) where
 -- import Control.Monad.State
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
+
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
@@ -33,7 +34,7 @@ import Futhark.IR.SOACS.Simplify
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (maxinum)
+import Futhark.Util (maxinum, chunks)
 
 import Futhark.Optimise.GraphRep
 import qualified Data.Graph.Inductive.Query.DFS as Q
@@ -45,6 +46,13 @@ import Futhark.IR.Aliases (VName(VName))
 import Futhark.Optimise.Fusion.LoopKernel (FusedKer(fusedVars))
 import Data.Tuple (swap)
 import Data.List (deleteFirstsBy)
+import Data.FileEmbed (bsToExp)
+
+
+-- unofficial TODO
+-- lengths of inputs
+-- order outputs in fusion
+-- make fusion stm->stm prettier
 
 
 -- | The pass definition.
@@ -101,7 +109,9 @@ fuseFun _stmts fun = do
 --     case fuseStms [] s1 s2 of
 
 
-
+doMapFusion :: DepGraphAug
+-- go through each node and attempt a map fusion
+doMapFusion g = applyAugs g (map tryFuseNodeInGraph $ labNodes g)
 
 doHorizontalFusion :: DepGraphAug
 doHorizontalFusion g = applyAugs g (map  horizontalFusionOnNode (nodes g))
@@ -115,13 +125,10 @@ horizontalFusionOnNode node g = try_fuse_all incoming_nodes g
 
 
 try_fuse_all :: [Node] -> DepGraphAug
-try_fuse_all nodes g = trace (show $ map (uncurry (d_fusion_feasability g)) pairs) applyAugs g (map (uncurry tryFuseNodesInGraph2) pairs)
+try_fuse_all nodes g = applyAugs g (map (uncurry tryFuseNodesInGraph2) pairs)
   where
     pairs = [(x, y) | x <- nodes, y <- nodes,  x < y]
 
-doMapFusion :: DepGraphAug
--- go through each node and attempt a map fusion
-doMapFusion g = applyAugs g (map tryFuseNodeInGraph $ labNodes g)
 
 
 -- contextFromLNode :: DepGraph -> DepNode -> DepContext
@@ -131,32 +138,39 @@ isRes :: (Node, EdgeT) -> Bool
 isRes (_,Res) = True
 isRes _ = False
 
+isDep :: EdgeT -> Bool
+isDep (Dep _) = True
+isDep (InfDep _) = True
+isDep Res = True -- unintuitive, but i think it works
+isDep _ = False
+
+isInf :: (Node, Node, EdgeT) -> Bool
+isInf (_,_,e) = case e of
+  InfDep vn -> True
+  Cons -> True
+  Fake -> True
+  _ -> False
 
 v_fusion_feasability :: DepGraph -> Node -> Node -> Bool
-v_fusion_feasability g n1 n2 = all is_deps edges && (all (==n2) nodesN1 || all (==n1) nodesN2)
+v_fusion_feasability g n1 n2 =
+  all isDep edges &&
+  not (any isInf (edgesBetween g n1 n2)) &&
+  (all (==n2) nodesN1 || all (==n1) nodesN2)
   where
     (nodesN2, _) = unzip $ filter (not . isRes) $ lsuc g n2
     (nodesN1, edges) = unzip $ filter (not . isRes) $ lpre g n1
-    is_deps (Dep _) = True
-    is_deps (InfDep _) = True
-    is_deps Res = True -- unintuitive, but i think it works
-    is_deps _ = False
-
 
 
 
 d_fusion_feasability :: DepGraph -> Node -> Node -> Bool
-d_fusion_feasability g n1 n2 = lessThanOneDep n1 || lessThanOneDep n2
+d_fusion_feasability g n1 n2 = lessThanOneDep n1 && lessThanOneDep n2
   where
     lessThanOneDep n =
-      let (nodes, _) = unzip $ filter (not . isRes) $ lpre g n
-      in (>=1) $ length (L.nub nodes)
-
-
-
+      let (nodes, _) = unzip $ filter (not . isRes) $ lsuc g n
+      in (<=1) $ length (L.nub nodes)
   -- what are the rules here?
   --  - they have an input in common
-  --  -
+  --  - they only have that input? -
 
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug
@@ -198,7 +212,6 @@ tryFuseNodesInGraph2 node_1 node_2 g
       -- sorry about this
       infusable_nodes = concatMap (depsFromEdge g)
         (concatMap (edgesBetween g node_1) (filter (/=node_2) $ pre g node_1))
-                                  -- L.\\ edges_between g node_1 node_2)
 
 
 
@@ -222,163 +235,161 @@ fuseStms infusible s1 s2 =
   case (s1, s2) of
     (Let pats1 aux1 (Op (Futhark.Screma  _     i1  (ScremaForm scans_1 red_1 lam_1))),
      Let pats2 aux2 (Op (Futhark.Screma  s_exp i2  (ScremaForm scans_2 red_2 lam_2)))) ->
-          Just $ Let (basicPat ids) aux2 (Op (Futhark.Screma s_exp names
+          Just $ Let (basicPat ids) aux2 (Op (Futhark.Screma s_exp fused_inputs
             (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam)))
       where
-        lam_1_inputs = boundByLambda lam_1
-        lam_2_inputs = boundByLambda lam_2
-       -- inputs_2 = i2
-        stm_1_output = (patNames . stmPat) s1
-        lam_1_output = namesFromRes $ bodyResult $ lambdaBody lam_1
 
-        map1 = M.fromList $ zip lam_2_inputs i2
-        map2 = M.fromList $ zip stm_1_output lam_1_output
-        map4 = M.fromList $ zip i1 lam_1_inputs-- I1 II1
+        (o1, o2) = mapT (patNames . stmPat) (s1, s2)
+        (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
+        (lam_1_output, lam_2_output) = mapT (namesFromRes . res_from_lambda) (lam_1, lam_2)
 
-        map3 = M.mapMaybe (\x -> M.lookup x (M.union map2 map4)) map1
+        fused_inputs = fuse_inputs2 o1 i1 i2
+        lparams = change_all (i1 ++ i2)
+          (lambdaParams lam_1 ++ lambdaParams lam_2)
+          fused_inputs
 
-        lam_2' = substituteNames map3 lam_2
+        out_sizes_1  = [Futhark.scanResults scans_1, Futhark.redResults red_1, length lam_1_output]
+        out_sizes_2  = [Futhark.scanResults scans_2, Futhark.redResults red_2, length lam_2_output]
 
-        (names, lam_inputs) = unzip $ fuse_inputs stm_1_output
-                                                (zip i1 (lambdaParams lam_1))
-                                                (zip i2 (lambdaParams lam_2))
+        fused_outputs = interweave (fuse_outputs2 infusible)
+                  (chunks out_sizes_1 o1)
+                  (chunks out_sizes_2 o2)
 
-
-        res_from_lambda =  bodyResult . lambdaBody
-
-        (ids, types, body_res) = unzip3 $ fuse_outputs infusible outputs1 outputs2
-        outputs1 = zip3 (patIdents pats1) (lambdaReturnType lam_1) (res_from_lambda lam_1)
-        outputs2 = zip3 (patIdents pats2) (lambdaReturnType lam_2) (res_from_lambda lam_2)
+        (ids, types, body_res) = unzip3 $ change_all (o1 ++ o2) (
+          zip3 (patIdents pats1) (lambdaReturnType lam_1) (res_from_lambda lam_1) ++
+          zip3 (patIdents pats2) (lambdaReturnType lam_2) (res_from_lambda lam_2))
+          fused_outputs
 
 
-        lam' = fuseLambda lam_1 lam_2'
-        lam = lam' {
-          lambdaParams = lam_inputs,
+        map1 = makeMap lam_2_inputs i2
+        map2 = makeMap o1 lam_1_output
+        map4 = makeMap i1 lam_1_inputs
+        map3 =  fuse_maps map1 (M.union map2 map4)
+
+
+
+
+        lam' = fuseLambda lam_1 lam_2
+        lam = substituteNames map3 $ lam' {
+          lambdaParams = lparams,
           lambdaReturnType = types,
-          lambdaBody = (lambdaBody lam') {bodyResult = substituteNames map3 body_res}
+          lambdaBody = (lambdaBody lam') {bodyResult = body_res}
           }
-    -- vertical map-scatter fusion
-    ( Let pats1 aux1 (Op (Futhark.Screma  _ i1 (ScremaForm scans_1 red_1 lam_1))),
+    -- -- vertical map-scatter fusion
+    ( Let pats1 aux1 (Op (Futhark.Screma  _ i1 (ScremaForm [] [] lam_1))),
       Let pats2 aux2 (Op (Futhark.Scatter exp i2 lam_2 other)))
       | L.null infusible -- only if map outputs are used exclusivly by the scatter
-      -> Just $ Let pats2 aux2 (Op (Futhark.Scatter exp names lam other))
+      -> Just $ Let pats2 aux2 (Op (Futhark.Scatter exp fused_inputs lam other))
         where
-          -- fuse inputs - outputs will not change, ordering of indecies may break,
-        lam_1_inputs = boundByLambda lam_1
-        lam_2_inputs = boundByLambda lam_2
-       -- inputs_2 = i2
-        stm_1_output = (patNames . stmPat) s1
-        lam_1_output = namesFromRes $ bodyResult $ lambdaBody lam_1
-
-        map1 = M.fromList $ zip lam_2_inputs i2
-        map2 = M.fromList $ zip stm_1_output lam_1_output
-        map4 = M.fromList $ zip i1 lam_1_inputs-- I1 II1
-
-        map3 = M.mapMaybe (\x -> M.lookup x (M.union map2 map4)) map1
-
-        lam_2' = substituteNames map3 lam_2
-
-        (names, lam_inputs) = unzip $ fuse_inputs stm_1_output
-                                                (zip i1 (lambdaParams lam_1))
-                                                (zip i2 (lambdaParams lam_2))
+        (o1, o2) = mapT (patNames . stmPat) (s1, s2)
+        (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
+        (lam_1_output, lam_2_output) = mapT (namesFromRes . res_from_lambda) (lam_1, lam_2)
 
 
-        res_from_lambda =  bodyResult . lambdaBody
+        map1 = makeMap lam_2_inputs i2
+        map2 = makeMap o1 lam_1_output
+        map4 = makeMap i1 lam_1_inputs
 
-        (ids, types, body_res) = unzip3 $ fuse_outputs infusible outputs1 outputs2
-        outputs1 = zip3 (patIdents pats1) (lambdaReturnType lam_1) (res_from_lambda lam_1)
-        outputs2 = zip3 (patIdents pats2) (lambdaReturnType lam_2) (res_from_lambda lam_2)
+        map3 = fuse_maps map1 (M.union map2 map4)
 
+        fused_inputs = fuse_inputs2 o1 i1 i2
 
-        lam' = fuseLambda lam_1 lam_2'
-        lam = lam' {
-          lambdaParams = lam_inputs,
-          lambdaReturnType = lambdaReturnType lam_2,
-          lambdaBody = (lambdaBody lam') {bodyResult = substituteNames map3 $ res_from_lambda lam_2}
+        lparams = change_all (i1 ++ i2)
+          (lambdaParams lam_1 ++ lambdaParams lam_2)
+          fused_inputs
+
+        lam' = fuseLambda lam_1 lam_2
+        lam = substituteNames map3 $ lam' {
+          lambdaParams = lparams
           }
-
-    -- problem - literally copy pasted code here.
-    -- also, in cases where the ordering matters on the inputs and outputs,
-    --  not sure how to fix
-
-
     _ -> Nothing
 
+makeMap :: Ord a => [a] -> [b] -> M.Map a b
+makeMap x y = M.fromList $ zip x y
+
+fuse_maps :: Ord b => M.Map a b -> M.Map b c -> M.Map a c
+fuse_maps m1 m2 = M.mapMaybe (`M.lookup` m2 ) m1
 
 
-
-
--- fuseStms_horrizontal :: [VName] ->  Stm SOACS -> Stm SOACS -> Maybe (Stm SOACS)
--- fuseStms_horrizontal infusible s1 s2 =
---   case (s1, s2) of
---     (Let pats1 aux1 (Op (Futhark.Screma  _     i1  (ScremaForm [] reds_1 lam_1))),
---      Let pats2 aux2 (Op (Futhark.Screma  s_exp i2  (ScremaForm [] reds_2 lam_2)))) ->
---           Just $ Let (basicPat ids) aux2 (Op (Futhark.Screma s_exp names
---             (mapSOAC lam)))
---       where
---         lam_1_inputs = boundByLambda lam_1
---         lam_2_inputs = boundByLambda lam_2
---        -- inputs_2 = i2
---         stm_1_output = (patNames . stmPat) s1
---         lam_1_output = namesFromRes $ bodyResult $ lambdaBody lam_1
-
---         map1 = M.fromList $ zip lam_2_inputs i2
---         map2 = M.fromList $ zip stm_1_output lam_1_output
---         map4 = M.fromList $ zip i1 lam_1_inputs-- I1 II1
-
---         map3 = M.mapMaybe (\x -> M.lookup x (M.union map2 map4)) map1
-
---         lam_2' = substituteNames map3 lam_2
-
---         (names, lam_inputs) = unzip $ fuse_inputs stm_1_output
---                                                 (zip i1 (lambdaParams lam_1))
---                                                 (zip i2 (lambdaParams lam_2))
-
-
---         res_from_lambda =  bodyResult . lambdaBody
-
-
---         lam' = fuseLambda lam_1 lam_2'
---         lam = lam' {
---           lambdaParams = lam_inputs,
---           lambdaReturnType = lambdaReturnType lam_2,
---           lambdaBody = (lambdaBody lam') {bodyResult = substituteNames map3 $ res_from_lambda lam_2}
---           }
-
---     _ -> Nothing
-
-
-
-
-
-
-
-
-fuse_inputs :: [VName] -> [(VName, LParam SOACS)] ->
-                          [(VName, LParam SOACS)] -> [(VName, LParam SOACS)]
-fuse_inputs fusing inputs1 inputs2 = L.unionBy (\a b -> fst a == fst b) inputs1 filtered_inputs_2
+change_all :: Ord b => [b] -> [a] -> [b] -> [a]
+change_all orig_names orig_other = mapMaybe (mapping M.!)
   where
-    filtered_inputs_2 = filter (\x -> fst x `notElem` fusing) inputs2
+      mapping = M.map Just $ makeMap orig_names orig_other
 
-fuse_outputs :: [VName] ->
-  [(Ident, Type, SubExpRes)] ->
-  [(Ident, Type, SubExpRes)] ->
-  [(Ident, Type, SubExpRes)]
-fuse_outputs infusible outputs1 outputs2 =
-   trace ("infusible: " ++ show infusible) outputs2 `L.union` filtered_outputs
+
+mapT :: (a -> b) -> (a,a) -> (b,b)
+mapT f (a,b) = (f a, f b)
+
+res_from_lambda :: Lambda rep -> Result
+res_from_lambda =  bodyResult . lambdaBody
+
+
+-- nvm horizontal fusion on its own
+
+interweave :: ([a] -> [a] -> [a]) -> [[a]] -> [[a]] -> [a]
+interweave f (a : as) (b : bs) = f a b ++ interweave f as bs
+interweave f (a : as) [] = f a [] ++ interweave f as []
+interweave f [] (b : bs) = f [] b ++ interweave f [] bs
+interweave f [] [] = []
+
+
+
+-- fuse_inputs :: [VName] -> [(VName, LParam SOACS)] ->
+--                           [(VName, LParam SOACS)] -> [(VName, LParam SOACS)]
+-- fuse_inputs fusing inputs1 inputs2 = L.unionBy (\a b -> fst a == fst b) inputs1 filtered_inputs_2
+--   where
+--     filtered_inputs_2 = filter (\x -> fst x `notElem` fusing) inputs2
+
+fuse_inputs2 :: [VName] -> [VName] -> [VName] -> [VName]
+fuse_inputs2 fusing inputs1 inputs2 =
+   inputs1 `L.union` filter (`notElem` fusing) inputs2
+
+-- fuse_outputs :: [VName] ->
+--   [(Ident, Type, SubExpRes)] ->
+--   [(Ident, Type, SubExpRes)] ->
+--   [(Ident, Type, SubExpRes)]
+-- fuse_outputs infusible outputs1 outputs2 =
+--    outputs2 `L.union` filtered_outputs
+--   where
+--     filtered_outputs = filter (\(x, _, _) -> identName x `elem` infusible) outputs1
+
+
+fuse_outputs2 :: [VName] -> [VName] -> [VName] -> [VName]
+fuse_outputs2 infusible outputs1 outputs2 =
+   outputs2 `L.union` filtered_outputs
   where
-    filtered_outputs = filter (\(x, _, _) -> identName x `elem` infusible) outputs1
+    filtered_outputs = filter (`elem` infusible) outputs1
 
 
 
 
-fuseLambda :: Lambda SOACS -> Lambda SOACS -> Lambda SOACS
-fuseLambda (Lambda inputs l_body_1 _) (Lambda _ l_body_2 output_types) =
-  Lambda inputs l_body_new output_types
+fuseLambda :: Lambda SOACS  -> -- [VName] -> [VName] ->
+              Lambda SOACS -- ->[VName]
+              -> Lambda SOACS
+fuseLambda lam_1 lam_2  =
+  -- Lambda inputs_new body_new output_types_new
+  lam_2 {lambdaBody = l_body_new}
   where
+    l_body_1 = lambdaBody lam_1
+    l_body_2 = lambdaBody lam_2
     l_body_new = insertStms (bodyStms l_body_1) l_body_2
 
+    -- lam_1_inputs = boundByLambda lam_1
+    -- lam_2_inputs = boundByLambda lam_2
+    -- lam_1_output = namesFromRes $ bodyResult $ lambdaBody lam_1
 
+    -- map1 = makeMap lam_2_inputs i2
+    -- map2 = makeMap o1 lam_1_output
+    -- map3 = makeMap i1 lam_1_inputs
+    -- map4 = fuse_maps map1 (M.union map2 map3)
+
+    -- fuse_maps :: M.Map a b -> M.Map b c -> M.Map a c
+    -- fuse_maps m1 m2 = M.mapMaybe (m2 `M.lookup`) m1
+
+    -- makeMap :: [a] -> [b] -> M.Map a b
+    -- makeMap x y = M.fromList $ zip x y
+
+-- the same as that fixed-point function in util
 keeptrying :: DepGraphAug -> DepGraphAug
 keeptrying f g =
   let r = f g in
