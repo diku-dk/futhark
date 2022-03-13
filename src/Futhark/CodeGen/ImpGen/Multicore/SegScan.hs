@@ -11,6 +11,7 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Util.IntegralExp (quot, rem)
 import Prelude hiding (quot, rem)
+import Debug.Trace
 
 -- Compile a SegScan construct
 compileSegScan ::
@@ -79,54 +80,62 @@ scanStage1 pat space scan_ops kbody = do
   -- Stage 1 : each thread partially scans a chunk of the input
   -- Writes directly to the resulting array
 
-  body <- collect $ do
+  fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
-    local_accs <- forM scan_ops $ \scan_op -> do
+    local_accs_pair <- forM scan_ops $ \scan_op -> do
       let shape = segBinOpShape scan_op
           ts = lambdaReturnType $ segBinOpLambda scan_op
       forM (zip3 (xParams scan_op) (segBinOpNeutral scan_op) ts) $ \(p, ne, t) -> do
-        acc <-
+        acc <- -- update accumulator to have type decoration
           case shapeDims shape of
-            [] -> pure $ paramName p
+            [] -> pure (paramName p, paramType p)
             _ -> do
               let pt = elemType t
-              sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
+              name <- sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
+              pure (name, paramType p)
 
         -- Now neutral-initialise the accumulator.
         sLoopNest (segBinOpShape scan_op) $ \vec_is ->
-          copyDWIMFix acc vec_is ne []
+          copyDWIMFix (fst acc) vec_is ne []
 
         pure acc
 
-    generateChunkLoop "SegScan" False $ \i -> do
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-      compileStms mempty (kernelBodyStms kbody) $ do
-        sComment "write mapped values results to memory" $ do
-          let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
-          zipWithM_ (compileThreadResult space) map_arrs map_res
+    let local_accs = map (map fst) local_accs_pair
+    retvals <- fmap concat $ mapM (uncurry toParam) . concat $ local_accs_pair
 
-        forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
-          sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-            -- Read accum value
-            forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
-              copyDWIMFix (paramName p) [] (Var acc') vec_is
+    traceM $ show retvals
 
-            -- Read next value
-            sComment "Read next values" $
-              forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-                copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+    -- Create ISPC kernel function
+    inISPC retvals $ do 
+      generateChunkLoop "SegScan" True $ \i -> do
+        zipWithM_ dPrimV_ is $ unflattenIndex ns' i
+        compileStms mempty (kernelBodyStms kbody) $ do
+          sComment "write mapped values results to memory" $ do
+            let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
+            zipWithM_ (compileThreadResult space) map_arrs map_res
 
-            compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-                \(acc', pe, se) -> do
-                  copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-                  copyDWIMFix acc' vec_is se []
+          forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
+            sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+              -- Read accum value
+              forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
+                copyDWIMFix (paramName p) [] (Var acc') vec_is
 
-  free_params <- freeParams body
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" body free_params
+              -- Read next value
+              sComment "Read next values" $
+                forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
+                  copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+
+              compileStms mempty (bodyStms $ lamBody scan_op) $
+                forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
+                  \(acc', pe, se) -> do
+                    copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+                    copyDWIMFix acc' vec_is se []
+
+  free_params <- freeParams fbody
+  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
 scanStage2 ::
   Pat MCMem ->
@@ -226,7 +235,7 @@ scanStage3 pat space scan_ops kbody = do
           sIf (start .==. 0) read_neutral read_carry_in
         pure acc
 
-    generateChunkLoop "SegScan" False $ \i -> do
+    generateChunkLoop "SegScan" True $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
       sComment "stage 3 scan body" $
         compileStms mempty (kernelBodyStms kbody) $
@@ -278,7 +287,7 @@ compileSegScanBody pat space scan_ops kbody = collect $ do
   sOp $ Imp.GetTaskId (segFlat space)
 
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  generateChunkLoop "SegScan" False $ \segment_i -> do
+  generateChunkLoop "SegScan" True $ \segment_i -> do
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
       let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op
