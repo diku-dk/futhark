@@ -1256,10 +1256,7 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 =
         partition AlgSimplify2.negated $
           offset1 `AlgSimplify2.sub` offset2
       (interval1', interval2') =
-        unzip $
-          intervalPairs
-            (reverse $ sortBy (compare `on` stride) $ reverse interval1)
-            (reverse $ sortBy (compare `on` stride) $ reverse interval2)
+        unzip $ intervalPairs interval1 interval2
    in case ( distributeOffset pos_offset interval1',
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
            ) of
