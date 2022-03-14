@@ -760,6 +760,10 @@ compileOp (ForEachActive name body) = do
       $items:body'
     }|]
 
+compileOp (ISPCBuiltin dest name args) = do
+  cargs <- mapM GC.compileExp args
+  GC.stm [C.cstm|$id:dest = $id:name($args:cargs);|]
+
 compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free

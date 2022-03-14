@@ -38,6 +38,9 @@ data Multicore
     ForEach VName Exp Code
   | -- | ForEach_Active, only valid in ISPC
     ForEachActive VName Code
+  | -- | Escape hatch for generating builtin ISPC functions
+    -- like extract or broadcast
+    ISPCBuiltin VName Name [Exp]
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -138,7 +141,9 @@ instance Pretty Multicore where
   ppr (ForEachActive i body) =
     text "foreach_active" <+> ppr i <+> text "{"
     </> indent 2 (ppr body)
-    <+> text "}" 
+    </> text "}" 
+  ppr (ISPCBuiltin dest name args) =
+    ppr dest <+> "<-" <+> ppr name <+> "(" <+> ppr args <+> ")"
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -165,3 +170,5 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body <> freeIn' bound)
   freeIn' (ForEachActive i body) =
     fvBind (oneName i) (freeIn' body)
+  freeIn' (ISPCBuiltin dest _ args) =
+    freeIn' dest <> freeIn' args

@@ -83,11 +83,15 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
   let slugs1 = zipWith SegBinOpSlug reds thread_res_arrs
       nsubtasks' = tvExp nsubtasks
 
-  reductionStage1 space slugs1 kbody
+  if all ((==Commutative) . segBinOpComm) reds
+  then reductionStage1Comm space slugs1 kbody
+  else reductionStage1 space slugs1 kbody
+
   reds2 <- renameSegBinOp reds
   let slugs2 = zipWith SegBinOpSlug reds2 thread_res_arrs
   reductionStage2 pat space nsubtasks' slugs2
 
+-- Unchanged, previous C codegen
 reductionStage1 ::
   SegSpace ->
   [SegBinOpSlug] ->
@@ -107,7 +111,7 @@ reductionStage1 space slugs kbody = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    (slug_local_accs_pairs, prebody) <- collect' $ do
+    slug_local_accs <- do
       dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
       forM slugs $ \slug -> do
@@ -116,28 +120,22 @@ reductionStage1 space slugs kbody = do
         forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
           -- Declare accumulator variable.
           acc <-
-            let typ = paramType p in
-            case typ of
+            case paramType p of
               Prim pt
-                | shape == mempty -> do
-                  name <- tvVar <$> dPrim "local_acc" pt
-                  pure (name, typ)
-                | otherwise -> do
-                  name <- sAllocArray "local_acc" pt shape DefaultSpace
-                  pure (name, typ)
+                | shape == mempty ->
+                  tvVar <$> dPrim "local_acc" pt
+                | otherwise ->
+                  sAllocArray "local_acc" pt shape DefaultSpace
               _ ->
-                pure (paramName p, typ)
+                pure $ paramName p
 
           -- Now neutral-initialise the accumulator.
           sLoopNest (slugShape slug) $ \vec_is ->
-            copyDWIMFix (fst acc) vec_is ne []
+            copyDWIMFix acc vec_is ne []
 
           pure acc
 
-    let slug_local_accs = map (map fst) slug_local_accs_pairs
-    retvals <- fmap concat $ mapM (uncurry toParam) . concat $ slug_local_accs_pairs
-
-    postbody <- collect $ generateUniformizeLoop $ \i -> do
+    generateChunkLoop "SegRed" False $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
       kbody $ \all_red_res -> do
         let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
@@ -160,6 +158,93 @@ reductionStage1 space slugs kbody = do
                 forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
                   \(local_acc, se) ->
                     copyDWIMFix local_acc vec_is se []
+
+    forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
+      forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
+        copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
+
+  free_params <- freeParams fbody
+  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params
+
+-- TODO(pema): Extract into one function
+reductionStage1Comm ::
+  SegSpace ->
+  [SegBinOpSlug] ->
+  DoSegBody ->
+  MulticoreGen ()
+reductionStage1Comm space slugs kbody = do
+  let (is, ns) = unzip $ unSegSpace space
+      ns' = map toInt64Exp ns
+  -- Create local accumulator variables in which we carry out the
+  -- sequential reduction of this function.  If we are dealing with
+  -- vectorised operators, then this implies a private allocation.  If
+  -- the original operand type of the reduction is a memory block,
+  -- then our hands are unfortunately tied, and we have to use exactly
+  -- that memory.  This is likely to be slow.
+
+  fbody <- collect $ do
+    dPrim_ (segFlat space) int64
+    sOp $ Imp.GetTaskId (segFlat space)
+
+    prebody1 <- collect $ dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+    let genAccs = 
+          collect' $ do
+            forM slugs $ \slug -> do
+              let shape = segBinOpShape $ slugOp slug
+
+              forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
+                -- Declare accumulator variable.
+                acc <-
+                  let typ = paramType p in
+                  case typ of
+                    Prim pt
+                      | shape == mempty -> do
+                        name <- tvVar <$> dPrim "local_acc" pt
+                        pure (name, typ)
+                      | otherwise -> do
+                        name <- sAllocArray "local_acc" pt shape DefaultSpace
+                        pure (name, typ)
+                    _ ->
+                      pure (paramName p, typ)
+
+                -- Now neutral-initialise the accumulator.
+                sLoopNest (slugShape slug) $ \vec_is ->
+                  copyDWIMFix (fst acc) vec_is ne []
+
+                pure acc
+
+    (slug_local_accs_pairs, prebody2) <- genAccs
+    (slug_local_accs_pairs_uni, prebody3) <- genAccs
+    let prebody = prebody1 Imp.:>>: prebody2 Imp.:>>: prebody3
+    
+    -- TODO: Fix and use
+    -- This is a list of lists because we can have multiple fused reduction (multiple binops), and each reduction can return multiple values
+    let slug_local_accs = map (map fst) slug_local_accs_pairs
+    let slug_local_accs_uni = map (map fst) slug_local_accs_pairs_uni
+    retvals <- fmap concat $ mapM (uncurry toParam) . concat $ slug_local_accs_pairs_uni
+
+    postbody <- collect $ generateUniformizeLoop $ \i -> do
+      zipWithM_ dPrimV_ is $ unflattenIndex ns' i
+      forM_ (zip3 slugs slug_local_accs slug_local_accs_uni) $ \(slug, local_accs, local_accs_uni) ->
+        sLoopNest (slugShape slug) $ \vec_is -> do
+          let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
+          -- Load accum params
+          sComment "Load accum params" $
+            forM_ (zip3 (accParams slug) local_accs_uni lamtypes) $
+              \(p, local_acc, t) ->
+                when (primType t) $
+                  copyDWIMFix (paramName p) [] (Var local_acc) vec_is
+
+          sComment "Load next params" $ -- TODO(pema): red_res missing, problem?
+            forM_ (zip (nextParams slug) local_accs) $ \(p, local_acc) -> do
+              copyDWIMFix (paramName p) [] (Var local_acc) vec_is
+              emit $ Imp.Op $ Imp.ISPCBuiltin (paramName p) (nameFromString "extract") [Imp.LeafExp (paramName p) Imp.Unit, untyped i]
+
+          sComment "SegRed body" $
+            compileStms mempty (bodyStms $ slugBody slug) $
+              forM_ (zip local_accs_uni $ map resSubExp $ bodyResult $ slugBody slug) $
+                \(local_acc, se) ->
+                  copyDWIMFix local_acc vec_is se []
 
     inISPC retvals $ do
       emit prebody
