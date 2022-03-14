@@ -364,7 +364,7 @@ compileMulticoreAction fcfg mode outpath =
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
           liftIO $ T.writeFile cpath $ cPrependHeader c
           liftIO $ T.writeFile ispcPath ispc
-          runISPC ispcPath ispcbase cpath ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath ispcbase cpath ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
           --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
