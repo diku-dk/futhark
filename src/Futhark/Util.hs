@@ -57,6 +57,10 @@ module Futhark.Util
     invertMap,
     cartesian,
     fixPoint,
+    ifM,
+    (||^),
+    (&&^),
+    allM,
   )
 where
 
@@ -498,3 +502,15 @@ fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
+
+ifM :: Monad m => m Bool -> m a -> m a -> m a
+ifM b t f = do b' <- b; if b' then t else f
+
+(||^) :: Monad m => m Bool -> m Bool -> m Bool
+(||^) a b = ifM a (pure True) b
+
+(&&^) :: Monad m => m Bool -> m Bool -> m Bool
+(&&^) a b = ifM a b (pure False)
+
+allM :: Monad m => (a -> m Bool) -> [a] -> m Bool
+allM p = foldr ((&&^) . p) (pure True)

@@ -271,18 +271,6 @@ recordMemRefUses td_env bu_env stm =
     addLmads _ _ _ =
       error "Impossible case reached because we have filtered Nothings before"
 
-ifM :: Monad m => m Bool -> m a -> m a -> m a
-ifM b t f = do b <- b; if b then t else f
-
-(||^) :: Monad m => m Bool -> m Bool -> m Bool
-(||^) a b = ifM a (pure True) b
-
-(&&^) :: Monad m => m Bool -> m Bool -> m Bool
-(&&^) a b = ifM a b (pure False)
-
-allM :: Monad m => (a -> m Bool) -> [a] -> m Bool
-allM p = foldr ((&&^) . p) (pure True)
-
 -------------------------------------------------------------
 -- Helper Functions for Partial and Total Loop Aggregation --
 --  of memory references. Please implement as precise as   --
