@@ -274,7 +274,7 @@ varsRes :: [VName] -> Result
 varsRes = map varRes
 
 -- | The result of a body is a sequence of subexpressions.
-type Result = [SubExpRes]
+type Result = [SubExpRes] 
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).

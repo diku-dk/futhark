@@ -22,7 +22,7 @@ import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.CodeGen.Backends.SimpleRep
+import Futhark.CodeGen.Backends.SimpleRep ( defaultMemBlockType )
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
@@ -31,6 +31,8 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC (compilePrimExp)
+import Debug.Trace (traceM)
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -759,7 +761,14 @@ compileOp (ForEachActive name body) = do
     foreach_active ($id:name) {
       $items:body'
     }|]
+    
+compileOp (ISPCBuiltin dest name args) = do
+  cargs <- mapM GC.compileExp args
+  GC.stm [C.cstm|$id:dest = $id:name($args:cargs);|]
 
+compileOp (DeclareUniform vname) = do
+  return ()
+  
 compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free

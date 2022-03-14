@@ -21,8 +21,10 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     segOpString,
     generateChunkLoop,
     generateUniformizeLoop,
+    extractVectorLane,
     inISPC,
     toParam,
+    declareUniform
   )
 where
 
@@ -37,6 +39,8 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
+import Debug.Trace
+import qualified Data.Text as T
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -261,6 +265,15 @@ generateUniformizeLoop m = do
     m $ Imp.le64 i
   emit $ Imp.Op $ Imp.ForEachActive i body
 
+extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.Code -> MulticoreGen ()
+extractVectorLane j code = do
+  let ut_exp = untyped j
+  code' <- code
+  case code' of
+    Imp.SetScalar vname e -> 
+      emit $ Imp.Op $ Imp.ISPCBuiltin vname (nameFromText $ T.pack "extract") [e, ut_exp]
+    _ -> return ()
+
 inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
 inISPC retvals code = do
   (allocs, res) <- extractAllocations <$> collect code
@@ -481,3 +494,7 @@ toIntegral 16 = return int16
 toIntegral 32 = return int32
 toIntegral 64 = return int64
 toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b
+
+declareUniform :: SubExp -> MulticoreGen ()
+declareUniform (Var vname) = emit $ Imp.Op $ Imp.DeclareUniform vname
+declareUniform _ = return ()
