@@ -124,13 +124,13 @@ intervalPairs = intervalPairs' []
 selfOverlap :: [(VName, PrimExp VName)] -> Names -> [Interval] -> Bool
 selfOverlap less_thans non_negatives is =
   -- TODO: Do we need to do something clever using some ranges of known values?
-  selfOverlap' 0 $ reverse is
+  not $ selfOverlap' 0 $ reverse is
   where
     selfOverlap' acc (x : xs) =
       let interval_span = (lowerBound x + numElements x - 1) * stride x
        in AlgSimplify.lessThanish less_thans non_negatives (AlgSimplify.simplify' acc) (AlgSimplify.simplify' $ stride x)
             && selfOverlap' (acc + interval_span) xs
-    selfOverlap' _ [] = False
+    selfOverlap' _ [] = True
 
 primTypeSort :: MonadZ3 z3 => PrimType -> z3 Sort
 primTypeSort (IntType _) = mkIntSort
