@@ -504,4 +504,6 @@ createUniform se = do
   t <- subExpType se
   name <- newVName "uni_acc"
   p <- toParam name t
+  -- TODO:
+  -- addVar name.... such that it compiles
   emit $ Imp.Op $ Imp.DeclareUniform name p
