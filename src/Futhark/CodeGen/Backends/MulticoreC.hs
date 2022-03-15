@@ -792,6 +792,13 @@ compileOp (ForEachActive name body) = do
       $items:body'
     }|]
 
+compileOp (UnmaskedBlock code) = do
+  body <- GC.collect $ GC.compileCode code
+  GC.items [C.citems|
+    $escstm:("unmasked") {
+      $items:body
+    }|]
+
 compileOp (ISPCBuiltin dest name args) = do
   cargs <- mapM GC.compileExp args
   GC.stm [C.cstm|$id:dest = $id:name($args:cargs);|]

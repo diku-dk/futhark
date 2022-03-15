@@ -259,7 +259,8 @@ generateUniformizeLoop m = do
   body <- collect $ do
     addLoopVar i Int64
     m $ Imp.le64 i
-  emit $ Imp.Op $ Imp.ForEachActive i body
+  emit $ Imp.Op $ Imp.ForEachActive i $
+    Imp.Op $ Imp.UnmaskedBlock body
 
 inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
 inISPC retvals code = do
