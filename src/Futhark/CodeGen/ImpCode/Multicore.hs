@@ -18,6 +18,7 @@ where
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Util.Pretty
+import Futhark.IR.Syntax.Core (Type)
 
 -- | An imperative program.
 type Program = Imp.Functions Multicore
@@ -42,7 +43,7 @@ data Multicore
     -- like extract or broadcast
     ISPCBuiltin VName Name [Exp]
   | -- | Wraps a variable to signal it should get generated as uniform
-    DeclareUniform VName SubExp 
+    DeclareUniform VName [Param]
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -174,4 +175,4 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body)
   freeIn' (ISPCBuiltin dest _ args) =
     freeIn' dest <> freeIn' args
-  freeIn' (DeclareUniform vname) = freeIn' vname
+  freeIn' (DeclareUniform vname _) = (freeIn' vname)

@@ -766,8 +766,10 @@ compileOp (ISPCBuiltin dest name args) = do
   cargs <- mapM GC.compileExp args
   GC.stm [C.cstm|$id:dest = $id:name($args:cargs);|]
 
-compileOp (DeclareUniform vname) = do
-  return ()
+compileOp (DeclareUniform vname t) = do
+  ct <- mapM paramToCType t
+  mapM_ (\(x,y) -> [C.cedecl|uniform $ty:x $id:vname;|]) ct
+  
   
 compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free

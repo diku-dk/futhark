@@ -24,7 +24,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     extractVectorLane,
     inISPC,
     toParam,
-    declareUniform
+    createUniform
   )
 where
 
@@ -36,6 +36,7 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem
+import Futhark.IR.Prop.Scope
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
@@ -497,7 +498,10 @@ toIntegral 32 = return int32
 toIntegral 64 = return int64
 toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b
 
+
 createUniform :: SubExp ->  MulticoreGen ()
 createUniform se = do
-  temp <- newName "uni_de_func"
-  emit $ Imp.Op $ Imp.DeclareUniform temp se
+  t <- subExpType se
+  name <- newVName "uni_acc"
+  p <- toParam name t
+  emit $ Imp.Op $ Imp.DeclareUniform name p
