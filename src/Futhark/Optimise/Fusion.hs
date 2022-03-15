@@ -282,8 +282,8 @@ fuseStms infusible s1 s2 =
         --           (chunks out_sizes_2 o2)
 
         scan_input :: [Scan SOACS] -> Int
-        scan_input l = sum (map (length . lambdaParams . scanLambda) l)
-        red_input l = sum (map (length . lambdaParams . redLambda) l)
+        scan_input l = flip div 2 $ sum (map (length . lambdaParams . scanLambda) l)
+        red_input l = flip div 2 $ sum (map (length . lambdaParams . redLambda) l)
 
 
         -- (ids, types, body_res) = unzip3 $ change_all (o1 ++ o2) (
