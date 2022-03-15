@@ -1651,6 +1651,7 @@ $entry_point_decls
   |]
       ispcdefs =
         [untrimming|
+#define bool uint8 // This is a workaround around an ISPC bug, stdbool doesn't get included
 typedef int64 int64_t;
 typedef int32 int32_t;
 typedef int16 int16_t;
