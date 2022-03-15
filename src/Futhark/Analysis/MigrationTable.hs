@@ -228,18 +228,22 @@ type HostUsage = [Id]
 analyseProg :: Prog GPU -> MigrationTable
 analyseProg (Prog consts funs) =
   let hof = hostOnlyFunDefs funs
-      mt = analyseConsts hof consts
+      mt = analyseConsts hof funs consts
       mts = parMap rpar (analyseFunDef hof) funs
    in foldl' merge mt mts
 
 -- | Analyses top-level constants.
-analyseConsts :: HostOnlyFuns -> Stms GPU -> MigrationTable
-analyseConsts hof consts =
-  let usage = M.foldlWithKey f [] (scopeOf consts)
+analyseConsts :: HostOnlyFuns -> [FunDef GPU] -> Stms GPU -> MigrationTable
+analyseConsts hof funs consts =
+  let usage = M.foldlWithKey (f $ freeIn funs) [] (scopeOf consts)
    in analyseStms hof usage consts
   where
-    f usage n t | isScalar t = nameToId n : usage
-    f usage _ _ = usage
+    f free usage n t
+      | isScalar t,
+        n `nameIn` free =
+        nameToId n : usage
+      | otherwise =
+        usage
 
 -- | Analyses a top-level function definition.
 analyseFunDef :: HostOnlyFuns -> FunDef GPU -> MigrationTable

@@ -156,6 +156,11 @@ storeScalar stms se t = do
   case entry of
     Just (_, _, arr, _) -> pure (stms, arr)
     Nothing ->
+      -- How to most efficiently create an array containing the given value
+      -- depends on whether it is a variable or a constant. Creating a constant
+      -- array is a runtime copy of static memory, while creating an array that
+      -- contains a variable results in each element synchronosuly being
+      -- written.
       case se of
         Var n -> do
           n' <- newName n
