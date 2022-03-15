@@ -10,6 +10,7 @@ module Language.Futhark.Parser.Lexer.Wrapper
     AlexPosn (..),
     AlexState (..),
     Byte,
+    LexerError (..),
     alexSetInput,
     alexGetInput,
     alexGetByte,
@@ -23,6 +24,7 @@ import Control.Applicative (liftA)
 import qualified Data.ByteString.Internal as BS (w2c)
 import qualified Data.ByteString.Lazy as BS
 import Data.Int (Int64)
+import Data.Loc (Loc)
 import Data.Word (Word8)
 
 type Byte = Word8
@@ -67,7 +69,7 @@ tabSize :: Int
 tabSize = 8
 
 alexMove :: AlexPosn -> Char -> AlexPosn
-alexMove (AlexPn a l c) '\t' = AlexPn (a + 1) l (c + tabSize - ((c -1) `mod` tabSize))
+alexMove (AlexPn a l c) '\t' = AlexPn (a + 1) l (c + tabSize - ((c - 1) `mod` tabSize))
 alexMove (AlexPn a l _) '\n' = AlexPn (a + 1) (l + 1) 1
 alexMove (AlexPn a l c) _ = AlexPn (a + 1) l (c + 1)
 
@@ -79,7 +81,7 @@ data AlexState = AlexState
     alex_scd :: !Int -- the current startcode
   }
 
-runAlex' :: AlexPosn -> BS.ByteString -> Alex a -> Either String a
+runAlex' :: AlexPosn -> BS.ByteString -> Alex a -> Either LexerError a
 runAlex' start_pos input__ (Alex f) =
   case f
     ( AlexState
@@ -93,7 +95,12 @@ runAlex' start_pos input__ (Alex f) =
     Left msg -> Left msg
     Right (_, a) -> Right a
 
-newtype Alex a = Alex {unAlex :: AlexState -> Either String (AlexState, a)}
+newtype Alex a = Alex {unAlex :: AlexState -> Either LexerError (AlexState, a)}
+
+data LexerError = LexerError Loc String
+
+instance Show LexerError where
+  show (LexerError _ s) = s
 
 instance Functor Alex where
   fmap = liftA
@@ -126,8 +133,8 @@ alexSetInput (pos, c, inp, bpos) =
     } of
     state@AlexState {} -> Right (state, ())
 
-alexError :: String -> Alex a
-alexError message = Alex $ const $ Left message
+alexError :: Loc -> String -> Alex a
+alexError loc message = Alex $ const $ Left $ LexerError loc message
 
 alexGetStartCode :: Alex Int
 alexGetStartCode = Alex $ \s@AlexState {alex_scd = sc} -> Right (s, sc)
