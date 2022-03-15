@@ -279,6 +279,9 @@ data ParseError = ParseError Loc String
 instance Show ParseError where
   show (ParseError _ s) = s
 
+instance Located ParseError where
+  locOf (ParseError loc _) = loc
+
 lexerErrToParseErr :: LexerError -> ParseError
 lexerErrToParseErr (LexerError loc msg) = ParseError loc msg
 
