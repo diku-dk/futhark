@@ -7,7 +7,7 @@ module Language.Futhark.Parser
     parseValue,
     parseValues,
     parseDecOrExpIncrM,
-    ParseError,
+    ParseError (..),
   )
 where
 
