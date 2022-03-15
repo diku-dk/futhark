@@ -42,7 +42,7 @@ data Multicore
     -- like extract or broadcast
     ISPCBuiltin VName Name [Exp]
   | -- | Wraps a variable to signal it should get generated as uniform
-    DeclareUniform VName
+    DeclareUniform VName SubExp 
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!

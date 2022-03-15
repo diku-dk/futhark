@@ -106,8 +106,6 @@ scanStage1 pat space scan_ops kbody = do
     let local_accs = map (map fst) local_accs_pair
     retvals <- fmap concat $ mapM (uncurry toParam) . concat $ local_accs_pair
 
-    traceM $ show retvals
-
     -- Create ISPC kernel function
     inISPC retvals $ do 
       -- Create fpr each
@@ -134,9 +132,9 @@ scanStage1 pat space scan_ops kbody = do
                 sComment "Do stuff" $
                   compileStms mempty (bodyStms $ lamBody scan_op) $
                     forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-                      \(acc', pe, se) -> do
-                        declareUniform se     
-                        copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []                                              
+                      \(acc', pe, se) -> do         
+                                               
+                        copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []      
                         copyDWIMFix acc' vec_is se []
 
   free_params <- freeParams fbody
@@ -240,7 +238,7 @@ scanStage3 pat space scan_ops kbody = do
           sIf (start .==. 0) read_neutral read_carry_in
         pure acc
 
-    generateChunkLoop "SegScan" True $ \i -> do
+    generateChunkLoop "SegScan" False $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
       sComment "stage 3 scan body" $
         compileStms mempty (kernelBodyStms kbody) $

@@ -701,7 +701,6 @@ compileLoopBody mergeparams (Body _ stms ses) = do
 
 compileStms :: Names -> Stms rep -> ImpM rep r op () -> ImpM rep r op ()
 compileStms alive_after_stms all_stms m = do
-  --let t = traceShow (pprBlock all_stms) all_stms K: Maybe come back
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
