@@ -34,7 +34,7 @@ import Futhark.IR.SOACS.Simplify
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (maxinum, chunks)
+import Futhark.Util (maxinum, chunks, splitAt3)
 
 import Futhark.Optimise.GraphRep
 import qualified Data.Graph.Inductive.Query.DFS as Q
@@ -247,17 +247,49 @@ fuseStms infusible s1 s2 =
           (lambdaParams lam_1 ++ lambdaParams lam_2)
           fused_inputs
 
-        out_sizes_1  = [Futhark.scanResults scans_1, Futhark.redResults red_1, length lam_1_output]
-        out_sizes_2  = [Futhark.scanResults scans_2, Futhark.redResults red_2, length lam_2_output]
+        (scan_in_size_1, scan_in_size_2) = mapT scan_input (scans_1, scans_2)
+        (red_in_size_1, red_in_size_2) = mapT red_input (red_1, red_2)
 
-        fused_outputs = interweave (fuse_outputs2 infusible)
-                  (chunks out_sizes_1 o1)
-                  (chunks out_sizes_2 o2)
+        (scan_inputs_1, red_inputs_1, lambda_outputs_1) = splitAt3 scan_in_size_1 red_in_size_1 lam_1_output
+        (scan_inputs_2, red_inputs_2, lambda_outputs_2) = splitAt3 scan_in_size_2 red_in_size_2 lam_2_output
 
-        (ids, types, body_res) = unzip3 $ change_all (o1 ++ o2) (
-          zip3 (patIdents pats1) (lambdaReturnType lam_1) (res_from_lambda lam_1) ++
-          zip3 (patIdents pats2) (lambdaReturnType lam_2) (res_from_lambda lam_2))
-          fused_outputs
+        fused_lambda_outputs = concat [
+          scan_inputs_1 ++ scan_inputs_2,
+          red_inputs_1 ++ red_inputs_2,
+          lambda_outputs_1 ++  lambda_outputs_2]
+
+        (types, body_res) = unzip $ change_all (lam_1_output ++ lam_2_output) (
+          zip (lambdaReturnType lam_1) (res_from_lambda lam_1) ++
+          zip (lambdaReturnType lam_2) (res_from_lambda lam_2)) fused_lambda_outputs
+          -- fuse_outputs2 infusible lambda_outputs_1 lambda_outputs_2
+
+        (scan_outputs_1, red_outputs_1, lambda_used_outputs_1) = splitAt3 (Futhark.scanResults scans_1) (Futhark.redResults red_1) o1
+        (scan_outputs_2, red_outputs_2, lambda_used_outputs_2) = splitAt3 (Futhark.scanResults scans_2) (Futhark.redResults red_2) o2
+
+        fused_outputs = concat [
+          scan_outputs_1 ++ scan_outputs_2,
+          red_outputs_1 ++ red_outputs_2,
+          lambda_used_outputs_1 ++  lambda_used_outputs_2]
+
+
+        ids = change_all (o1 ++ o2) (patIdents pats1 ++ patIdents pats2) fused_outputs
+
+        -- (scan_res_1, red_res_1, map_res_1)  = splitAt3 (Futhark.scanResults scans_1) Int ([a]) [, Futhark.redResults red_1, length lam_1_output]
+        -- out_sizes_2  = [Futhark.scanResults scans_2, Futhark.redResults red_2, length lam_2_output]
+
+        -- fused_outputs = interweave (fuse_outputs2 infusible)
+        --           (chunks out_sizes_1 o1)
+        --           (chunks out_sizes_2 o2)
+
+        scan_input :: [Scan SOACS] -> Int
+        scan_input l = sum (map (length . lambdaParams . scanLambda) l)
+        red_input l = sum (map (length . lambdaParams . redLambda) l)
+
+
+        -- (ids, types, body_res) = unzip3 $ change_all (o1 ++ o2) (
+        --   zip3 (patIdents pats1) (lambdaReturnType lam_1) (res_from_lambda lam_1) ++
+        --   zip3 (patIdents pats2) (lambdaReturnType lam_2) (res_from_lambda lam_2))
+        --   fused_outputs
 
         map1 = makeMap lam_2_inputs i2
         map2 = makeMap o1 lam_1_output
