@@ -768,7 +768,7 @@ compileOp (ISPCBuiltin dest name args) = do
 
 compileOp (DeclareUniform vname t) = do
   ct <- mapM paramToCType t
-  mapM_ (\(x,y) -> [C.cedecl|uniform $ty:x $id:vname;|]) ct
+  mapM_ (\(ty,_) -> GC.item [C.citem|uniform $ty:ty $id:vname;|]) ct
   
   
 compileOp (ParLoop s' body free) = do
