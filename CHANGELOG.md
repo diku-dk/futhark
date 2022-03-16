@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Improved hoisting of size computations.  This could cause some
+  regular nested parallel programs to run into compiler limitations,
+  as if they were irregular.
+
 ## [0.21.7]
 
 ### Added
