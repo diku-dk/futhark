@@ -495,25 +495,23 @@ runInnerFusion :: DepGraphAug
 runInnerFusion g = gmap (runInnerFusionOnContext g) g
 
 runInnerFusionOnContext :: DepGraph -> DepContext -> DepContext
-runInnerFusionOnContext g c@(incomming, node, nodeT, outgoing) = case nodeT of
+runInnerFusionOnContext g c@(incomming, node, nodeT, outgoing) =
+  case nodeT of
   SNode (Let pats aux (If size b1 b2 branchType )) ->
       (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)), outgoing)
     where
-      stms_1 = stmsToList (bodyStms b1)
-      inputs = concatMap (vNameFromAdj g node) incomming
-      results_1 = map ((\(Var x) -> x) . resSubExp) (bodyResult b1)
-      stms_1_new = linearizeGraph $ doAllFusion $ mkDepGraphInner stms_1 results_1 inputs
-
-      stms_2 = stmsToList (bodyStms b2)
-      results_2 = map ((\(Var x) -> x) . resSubExp) (bodyResult b2)
-      stms_2_new = linearizeGraph $ doAllFusion $ mkDepGraphInner stms_2 results_2 inputs
-
-      b1_new = b1 {bodyStms = stmsFromList stms_1_new}
-      b2_new = b2 {bodyStms = stmsFromList stms_2_new}
-
+      b1_new = doFusionInner b1
+      b2_new = doFusionInner b2
+  SNode (Let pats aux (DoLoop params form body)) ->
+    (incomming, node, SNode (Let pats aux (DoLoop params form (doFusionInner body))), outgoing)
   _ -> c
-
-
-
-
-  -- remove the outputs
+  where
+    doFusionInner :: Body SOACS -> Body SOACS
+    doFusionInner b = b_new
+      where
+        inputs = concatMap (vNameFromAdj g node) incomming
+        stms = stmsToList (bodyStms b)
+        results = map ((\(Var x) -> x) . resSubExp) (bodyResult b)
+        stms_new = linearizeGraph $ doAllFusion $ mkDepGraphInner stms results inputs
+        b_new = b {bodyStms = stmsFromList stms_new}
+-- what about inner lambdas??????
