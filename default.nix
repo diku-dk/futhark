@@ -18,7 +18,7 @@
 let
   config = {
     packageOverrides = pkgs: rec {
-      haskellPackages = pkgs.haskellPackages.override {
+      haskellPackages = pkgs.pkgsMusl.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
           aeson =
             haskellPackagesNew.aeson_2_0_2_0;
@@ -38,7 +38,7 @@ let
           # Need to disable the test suite as otherwise we have a
           # circular dependency with quickcheck-instances.
           text-short =
-            pkgs.haskell.lib.dontCheck haskellPackagesNew.text-short_0_1_4;
+            pkgs.pkgsMusl.haskell.lib.dontCheck haskellPackagesNew.text-short_0_1_4;
 
           quickcheck-instances =
             haskellPackagesNew.quickcheck-instances_0_3_27;
@@ -54,6 +54,9 @@ let
 
           futhark-manifest =
             haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
+
+          z3 =
+            haskellPackagesNew.callPackage ./nix/haskell-z3.nix { };
 
           futhark =
             # callCabal2Nix does not do a great job at determining
@@ -72,12 +75,12 @@ let
                            "^assets.*"
                            "^unittests.*"
                           ];
-                cleanSource = src: pkgs.lib.sourceByRegex src sources;
+                cleanSource = src: pkgs.pkgsMusl.lib.sourceByRegex src sources;
             in
-            pkgs.haskell.lib.overrideCabal
-              (pkgs.haskell.lib.addBuildTools
+            pkgs.pkgsMusl.haskell.lib.overrideCabal
+              (pkgs.pkgsMusl.haskell.lib.addBuildTools
                 (haskellPackagesOld.callCabal2nix "futhark" (cleanSource ./.) { })
-                [ pkgs.python39Packages.sphinx ])
+                [ pkgs.pkgsMusl.python39Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;
                 isExecutable = true;
@@ -87,12 +90,12 @@ let
                 configureFlags = [
                   "--ghc-option=-optl=-static"
                   "--ghc-option=-split-sections"
-                  "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
-                  "--extra-lib-dirs=${pkgs.glibc.static}/lib"
-                  "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
-                  "--extra-lib-dirs=${pkgs.zlib.static}/lib"
-                  "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
-                  "--extra-lib-dirs=${pkgs.z3.static}/lib"
+                  "--extra-lib-dirs=${pkgs.pkgsMusl.ncurses}/lib"
+                  "--extra-lib-dirs=${pkgs.pkgsMusl.glibc}/lib"
+                  "--extra-lib-dirs=${pkgs.pkgsMusl.gmp6}/lib"
+                  "--extra-lib-dirs=${pkgs.pkgsMusl.zlib}/lib"
+                  "--extra-lib-dirs=${pkgs.pkgsMusl.libffi}/lib"
+                  "--extra-lib-dirs=${pkgs.pkgsMusl.z3.overrideAttrs (old: { pythonBindings = false;})}/lib"
                 ];
 
                 preBuild = ''
