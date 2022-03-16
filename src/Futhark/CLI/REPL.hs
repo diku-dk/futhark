@@ -238,7 +238,7 @@ readEvalPrint = do
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
 
       case maybe_dec_or_e of
-        Left err -> liftIO $ print err
+        Left (SyntaxError _ err) -> liftIO $ putStrLn err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
@@ -393,15 +393,14 @@ loadCommand file = do
     (False, _) -> throwError $ Load $ T.unpack file
 
 genTypeCommand ::
-  Show err =>
-  (String -> T.Text -> Either err a) ->
+  (String -> T.Text -> Either SyntaxError a) ->
   (Imports -> VNameSource -> T.Env -> a -> (Warnings, Either T.TypeError b)) ->
   (b -> String) ->
   Command
 genTypeCommand f g h e = do
   prompt <- getPrompt
   case f prompt e of
-    Left err -> liftIO $ print err
+    Left (SyntaxError _ err) -> liftIO $ putStrLn err
     Right e' -> do
       (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of
