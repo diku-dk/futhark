@@ -679,9 +679,10 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
 
       block =
         branch_blocker
-          `orIf` ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
+          `orIf` ( (isNotSafe `orIf` isNotCheap `orIf` isNotHoistableBnd)
+                     `andAlso` stmIs (not . desirableToHoist)
+                 )
           `orIf` isConsuming
-          `orIf` isNotHoistableBnd
 
   (hoisted1, body1') <-
     protectIfHoisted cond True $
