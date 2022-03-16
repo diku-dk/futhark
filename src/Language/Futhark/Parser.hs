@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Interface to the Futhark parser.
 module Language.Futhark.Parser
   ( parseFuthark,
@@ -64,3 +66,30 @@ parseValues ::
   T.Text ->
   Either SyntaxError [Value]
 parseValues = parse anyValues
+
+-- | Parse an Futhark expression incrementally from monadic actions, using the
+-- 'FilePath' as the source name for error messages.
+parseExpIncrM ::
+  Monad m =>
+  m T.Text ->
+  FilePath ->
+  T.Text ->
+  m (Either SyntaxError UncheckedExp)
+parseExpIncrM fetch file program =
+  getLinesFromM fetch $ parseInMonad expression file program
+
+-- | Parse either an expression or a declaration incrementally;
+-- favouring declarations in case of ambiguity.
+parseDecOrExpIncrM ::
+  Monad m =>
+  m T.Text ->
+  FilePath ->
+  T.Text ->
+  m (Either SyntaxError (Either UncheckedDec UncheckedExp))
+parseDecOrExpIncrM fetch file input =
+  case parseInMonad declaration file input of
+    Value Left {} -> fmap Right <$> parseExpIncrM fetch file input
+    Value (Right d) -> pure $ Right $ Left d
+    GetLine _ -> do
+      l <- fetch
+      parseDecOrExpIncrM fetch file $ input <> "\n" <> l
