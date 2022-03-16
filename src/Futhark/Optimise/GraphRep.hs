@@ -62,16 +62,23 @@ type EdgeGenerator = NodeT -> [(VName, EdgeT)]
 
 --- Graph Construction ---
 
-emptyG :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
-emptyG stms r inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
+-- emptyG :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
+-- emptyG stms r inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
+--   where
+--     namesFromRes = map ((\(Var x) -> x) . resSubExp)
+--     label_nodes = zip [0..]
+--     snodes = map SNode stms
+--     rnodes = map RNode (namesFromRes r)
+--     inNodes= map (InNode . paramName) $ filter isArray inputs -- there might be a better way
+
+
+emptyG2 :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
+emptyG2 stms res inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
   where
-    namesFromRes = map ((\(Var x) -> x) . resSubExp)
     label_nodes = zip [0..]
     snodes = map SNode stms
-    rnodes = map RNode (namesFromRes r)
-    inNodes= map (InNode . paramName) $ filter isArray inputs -- there might be a better way
-
-
+    rnodes = map RNode res
+    inNodes= map InNode inputs
 
 isArray :: FParam SOACS -> Bool
 isArray p = case paramDec p of
@@ -80,7 +87,20 @@ isArray p = case paramDec p of
 
 mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
 mkDepGraph stms res inputs =
-    applyAugs (emptyG stms res inputs) [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges]
+    addDepEdges (emptyG2 stms resNames inputNames)
+    where
+      namesFromRes = map ((\(Var x) -> x) . resSubExp)
+      resNames = namesFromRes res
+      -- remove inputs which are not arrays - they suck to look at on the graph
+      -- and horizontal fusion on those is a waste.
+      inputNames = map paramName $ filter isArray inputs
+
+addDepEdges :: DepGraphAug
+addDepEdges g = applyAugs g [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges]
+
+mkDepGraphInner :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
+mkDepGraphInner stms outputs inputs = addDepEdges $ emptyG2 stms outputs inputs
+
 
 genEdges :: [DepNode] -> EdgeGenerator -> [LEdge EdgeT]
 genEdges l_stms edge_fun = concatMap gen_edge l_stms
@@ -110,9 +130,9 @@ applyAugs = foldl (flip ($))
 label :: DepNode -> NodeT
 label = snd
 
-stmFromNode :: NodeT -> [Stm SOACS]
-stmFromNode (SNode x) = [x]
-stmFromNode _ = []
+stmFromNode :: NodeT -> Maybe (Stm SOACS)
+stmFromNode (SNode x) = Just x
+stmFromNode _ = Nothing
 
 nodeFromLNode :: DepNode -> Node
 nodeFromLNode = fst
@@ -195,7 +215,7 @@ makeScanInfusible g = emap change_node_to_idep g
     find_scan_results _ = []
 
     scan_res_set :: S.Set VName
-    scan_res_set = S.fromList (concatMap find_scan_results (concatMap (stmFromNode . label) (labNodes g)))
+    scan_res_set = S.fromList (concatMap find_scan_results (mapMaybe (stmFromNode . label) (labNodes g)))
 
 
     is_scan_res :: VName -> Bool
@@ -230,6 +250,7 @@ infusableInputsFromExp (Op soac) = case soac of
   Futhark.Scatter _ _ lam _       -> namesToList $ freeIn lam
   Futhark.Stream  _ _ _ _ lam     -> namesToList $ freeIn lam
 infusableInputsFromExp op@(BasicOp x) = namesToList $ freeIn op
+infusableInputsFromExp op@If {} = namesToList $ freeIn op
 infusableInputsFromExp _ = []
 
 --- /Augmentations ---

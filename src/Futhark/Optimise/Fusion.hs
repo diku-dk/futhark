@@ -47,12 +47,24 @@ import Futhark.Optimise.Fusion.LoopKernel (FusedKer(fusedVars))
 import Data.Tuple (swap)
 import Data.List (deleteFirstsBy)
 import Data.FileEmbed (bsToExp)
+import GHC.TopHandler (runNonIO)
 
 
 -- unofficial TODO
 -- lengths of inputs
 -- order outputs in fusion
 -- make fusion stm->stm prettier
+
+
+-- extra util
+scan_input :: [Scan SOACS] -> Int
+scan_input l = flip div 2 $ sum (map (length . lambdaParams . scanLambda) l)
+red_input :: [Reduce rep] -> Int
+red_input l = flip div 2 $ sum (map (length . lambdaParams . redLambda) l)
+
+
+
+
 
 
 -- | The pass definition.
@@ -71,18 +83,32 @@ fuseSOACs =
 -- some sort of functional decorator pattern
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun _stmts fun = do
-  let body = (funDefBody fun) {bodyStms = stmsFromList stms_new'}
+  let body = (funDefBody fun) {bodyStms = stmsFromList (fuseGraph stms res (funDefParams  fun))}
   return fun {funDefBody = body}
     where
       b   = funDefBody fun
       stms = trace (ppr (bodyStms b)) $ stmsToList $ bodyStms b
       res = bodyResult b
-      graph_not_fused = mkDepGraph stms res (trace (show $ funDefParams  fun) (funDefParams  fun))
+
+fuseGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> [Stm SOACS]
+fuseGraph stms results inputs = trace (unlines (map ppr stms_new)) stms_new
+  where
+      graph_not_fused = mkDepGraph stms results (trace (show inputs) inputs)
       graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
-      graph_fused = doHorizontalFusion $ keeptrying doMapFusion graph_not_fused'
+      graph_fused =  doAllFusion graph_not_fused'
       graph_fused' = trace (pprg graph_fused) graph_fused
-      stms_new = reverse $ concatMap stmFromNode $ Q.topsort' graph_fused'
-      stms_new' = trace (unlines (map ppr stms_new)) stms_new
+      stms_new = linearizeGraph graph_fused'
+
+
+linearizeGraph :: DepGraph -> [Stm SOACS]
+linearizeGraph g = reverse $ mapMaybe stmFromNode $ Q.topsort' g
+
+doAllFusion :: DepGraphAug
+doAllFusion g = applyAugs g [keeptrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, runInnerFusion]
+
+doInnerFusion :: DepGraphAug
+doInnerFusion g = id g
+
 
 -- map-fusion part
 
@@ -107,6 +133,8 @@ fuseFun _stmts fun = do
 --   if not fusible then g else
 --     let (((n1, SNode s1):(n2, SNode s2):rest):_) = groups in
 --     case fuseStms [] s1 s2 of
+
+
 
 
 doMapFusion :: DepGraphAug
@@ -281,10 +309,6 @@ fuseStms infusible s1 s2 =
         --           (chunks out_sizes_1 o1)
         --           (chunks out_sizes_2 o2)
 
-        scan_input :: [Scan SOACS] -> Int
-        scan_input l = flip div 2 $ sum (map (length . lambdaParams . scanLambda) l)
-        red_input l = flip div 2 $ sum (map (length . lambdaParams . redLambda) l)
-
 
         -- (ids, types, body_res) = unzip3 $ change_all (o1 ++ o2) (
         --   zip3 (patIdents pats1) (lambdaReturnType lam_1) (res_from_lambda lam_1) ++
@@ -426,3 +450,70 @@ keeptrying f g =
 
 
 -- getstms
+
+
+removeUnusedOutputs :: DepGraphAug
+removeUnusedOutputs g = gmap (removeUnusedOutputsFromContext g) g
+
+vNameFromAdj :: DepGraph -> Node -> (EdgeT, Node) -> [VName]
+vNameFromAdj g n1 (edge, n2) = depsFromEdge g (n2,n1, edge)
+
+
+removeUnusedOutputsFromContext :: DepGraph -> DepContext  -> DepContext
+removeUnusedOutputsFromContext g (incoming, n1, SNode s, outgoing) =
+  (incoming, n1, SNode new_stm, outgoing)
+  where
+    new_stm = removeOutputsExcept (concatMap (vNameFromAdj g n1) incoming) s
+removeUnusedOutputsFromContext _ context = context
+
+removeOutputsExcept :: [VName] -> Stm SOACS -> Stm SOACS
+removeOutputsExcept toKeep s = case s of
+  (Let pats1 aux1 (Op (Futhark.Screma  size i1  (ScremaForm scans_1 red_1 lam_1)))) ->
+     Let (basicPat (pats_unchanged ++ pats_new)) aux1 (Op (Futhark.Screma  size i1  (ScremaForm scans_1 red_1 lam_new)))
+        where
+          scan_input_size = trace (show toKeep) $ scan_input scans_1
+          red_input_size = red_input red_1
+          scan_output_size = Futhark.scanResults scans_1
+          red_outputs_size = Futhark.redResults red_1
+
+          (pats_unchanged, pats_toChange) = splitAt (scan_output_size + red_outputs_size) (patIdents pats1)
+          (res_unchanged, res_toChange) = splitAt (scan_input_size + red_input_size) (zip (res_from_lambda lam_1) (lambdaReturnType lam_1))
+
+          (pats_new, other) = unzip $ filter (\(x, _) -> identName x  `elem` toKeep) (zip pats_toChange res_toChange)
+          (results, types) = unzip (res_unchanged ++ other)
+          lam_new = lam_1 {
+            lambdaReturnType = types,
+            lambdaBody = (lambdaBody lam_1) {bodyResult = results}
+            }
+  s -> s
+
+
+
+
+-- do fusion on the inner nodes -
+runInnerFusion :: DepGraphAug
+runInnerFusion g = gmap (runInnerFusionOnContext g) g
+
+runInnerFusionOnContext :: DepGraph -> DepContext -> DepContext
+runInnerFusionOnContext g c@(incomming, node, nodeT, outgoing) = case nodeT of
+  SNode (Let pats aux (If size b1 b2 branchType )) ->
+      (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)), outgoing)
+    where
+      stms_1 = stmsToList (bodyStms b1)
+      inputs = concatMap (vNameFromAdj g node) incomming
+      results_1 = map ((\(Var x) -> x) . resSubExp) (bodyResult b1)
+      stms_1_new = linearizeGraph $ doAllFusion $ mkDepGraphInner stms_1 results_1 inputs
+
+      stms_2 = stmsToList (bodyStms b2)
+      results_2 = map ((\(Var x) -> x) . resSubExp) (bodyResult b2)
+      stms_2_new = linearizeGraph $ doAllFusion $ mkDepGraphInner stms_2 results_2 inputs
+
+      b1_new = b1 {bodyStms = stmsFromList stms_1_new}
+      b2_new = b2 {bodyStms = stmsFromList stms_2_new}
+
+  _ -> c
+
+
+
+
+  -- remove the outputs
