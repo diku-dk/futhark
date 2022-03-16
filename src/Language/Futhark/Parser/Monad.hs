@@ -97,6 +97,7 @@ mustBeEmpty loc t =
 
 data ParserEnv = ParserEnv
   { _parserFile :: FilePath,
+    parserInput :: T.Text,
     parserLexical :: ([L Token], Pos)
   }
 
@@ -214,7 +215,13 @@ primNegate (UnsignedValue v) = UnsignedValue $ intNegate v
 primNegate (BoolValue v) = BoolValue $ not v
 
 readLine :: ParserMonad (Maybe T.Text)
-readLine = lift $ lift readLineFromMonad
+readLine = do
+  s <- lift $ lift readLineFromMonad
+  case s of
+    Just s' ->
+      lift $ modify $ \env -> env {parserInput = parserInput env <> "\n" <> s'}
+    Nothing -> pure ()
+  pure s
 
 lexer :: (L Token -> ParserMonad a) -> ParserMonad a
 lexer cont = do
@@ -230,10 +237,7 @@ lexer cont = do
             case line of
               Nothing -> throwError parse_e
               Just line' -> pure $ scanTokensText (advancePos pos '\n') line'
-          (ts'', pos') <-
-            case ts' of
-              Right x -> pure x
-              Left lex_e -> throwError $ lexerErrToParseErr lex_e
+          (ts'', pos') <- either (throwError . lexerErrToParseErr) pure ts'
           case ts'' of
             [] -> cont $ eof pos
             xs -> do
@@ -252,10 +256,13 @@ parseError (L loc EOF, expected) =
 parseError (L loc DOC {}, _) =
   parseErrorAt (srclocOf loc) $
     Just "Documentation comments ('-- |') are only permitted when preceding declarations."
-parseError (L loc tok, expected) =
+parseError (L loc _, expected) = do
+  input <- lift $ gets parserInput
+  let ~(Loc (Pos _ _ _ beg) (Pos _ _ _ end)) = locOf loc
+      tok_src = T.take (end - beg + 1) $ T.drop beg input
   parseErrorAt loc . Just . unlines $
-    [ "Unexpected token: " ++ show tok,
-      "Expected one of the following: " ++ unwords expected
+    [ "Unexpected token: '" <> T.unpack tok_src <> "'",
+      "Expected one of the following: " <> unwords expected
     ]
 
 parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
@@ -285,7 +292,7 @@ parseInMonad p file program =
     (evalStateT (runExceptT p) . env)
     (scanTokensText (Pos file 1 1 0) program)
   where
-    env = ParserEnv file
+    env = ParserEnv file program
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
 parse p file program =
