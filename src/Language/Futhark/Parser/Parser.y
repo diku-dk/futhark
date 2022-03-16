@@ -11,7 +11,7 @@ module Language.Futhark.Parser.Parser
   , anyValue
   , anyValues
   , parse
-  , ParseError(..)
+  , SyntaxError(..)
   , parseDecOrExpIncrM
   )
   where
@@ -1015,7 +1015,7 @@ parseExpIncrM ::
   m T.Text ->
   FilePath ->
   T.Text ->
-  m (Either ParseError UncheckedExp)
+  m (Either SyntaxError UncheckedExp)
 parseExpIncrM fetch file program =
   getLinesFromM fetch $ parseInMonad expression file program
 
@@ -1026,7 +1026,7 @@ parseDecOrExpIncrM ::
   m T.Text ->
   FilePath ->
   T.Text ->
-  m (Either ParseError (Either UncheckedDec UncheckedExp))
+  m (Either SyntaxError (Either UncheckedDec UncheckedExp))
 parseDecOrExpIncrM fetch file input =
   case parseInMonad declaration file input of
     Value Left {} -> fmap Right <$> parseExpIncrM fetch file input

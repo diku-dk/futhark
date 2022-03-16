@@ -31,7 +31,7 @@ module Language.Futhark.Parser.Monad
     addDoc,
     addAttr,
     twoDotsRange,
-    ParseError (..),
+    SyntaxError (..),
     emptyArrayError,
     parseError,
     parseErrorAt,
@@ -100,7 +100,7 @@ newtype ParserEnv = ParserEnv
   }
 
 type ParserMonad =
-  ExceptT ParseError (StateT ParserEnv (StateT ([L Token], Pos) ReadLineMonad))
+  ExceptT SyntaxError (StateT ParserEnv (StateT ([L Token], Pos) ReadLineMonad))
 
 data ReadLineMonad a
   = Value a
@@ -127,17 +127,17 @@ getLinesFromM fetch (GetLine f) = do
   s <- fetch
   getLinesFromM fetch $ f $ Just s
 
-getNoLines :: ReadLineMonad a -> Either ParseError a
+getNoLines :: ReadLineMonad a -> Either SyntaxError a
 getNoLines (Value x) = Right x
 getNoLines (GetLine f) = getNoLines $ f Nothing
 
-combArrayElements :: Value -> [Value] -> Either ParseError Value
+combArrayElements :: Value -> [Value] -> Either SyntaxError Value
 combArrayElements = foldM comb
   where
     comb x y
       | valueType x == valueType y = Right x
       | otherwise =
-        Left . ParseError NoLoc $
+        Left . SyntaxError NoLoc $
           "Elements " <> pretty x <> " and "
             <> pretty y
             <> " cannot exist in same array."
@@ -246,21 +246,21 @@ lexer cont = do
 parseError :: (L Token, [String]) -> ParserMonad a
 parseError (L loc EOF, expected) =
   parseErrorAt (srclocOf loc) . Just . unlines $
-    [ "unexpected end of file.",
+    [ "Unexpected end of file.",
       "Expected one of the following: " ++ unwords expected
     ]
 parseError (L loc DOC {}, _) =
   parseErrorAt (srclocOf loc) $
-    Just "documentation comments ('-- |') are only permitted when preceding declarations."
+    Just "Documentation comments ('-- |') are only permitted when preceding declarations."
 parseError (L loc tok, expected) =
   parseErrorAt loc . Just . unlines $
-    [ "unexpected " ++ show tok,
+    [ "Unexpected token: " ++ show tok,
       "Expected one of the following: " ++ unwords expected
     ]
 
 parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
-parseErrorAt loc Nothing = throwError $ ParseError (locOf loc) $ "Error at " ++ locStr loc ++ ": Parse error."
-parseErrorAt loc (Just s) = throwError $ ParseError (locOf loc) $ "Error at " ++ locStr loc ++ ": " ++ s
+parseErrorAt loc Nothing = throwError $ SyntaxError (locOf loc) "Syntax error."
+parseErrorAt loc (Just s) = throwError $ SyntaxError (locOf loc) s
 
 emptyArrayError :: SrcLoc -> ParserMonad a
 emptyArrayError loc =
@@ -272,19 +272,13 @@ twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
 
 --- Now for the parser interface.
 
--- | A parse error.  Use 'show' to get a human-readable description.
-data ParseError = ParseError Loc String
+-- | A syntax error.
+data SyntaxError = SyntaxError {syntaxErrorLoc :: Loc, syntaxErrorMsg :: String}
 
-instance Show ParseError where
-  show (ParseError _ s) = s
+lexerErrToParseErr :: LexerError -> SyntaxError
+lexerErrToParseErr (LexerError loc msg) = SyntaxError loc msg
 
-instance Located ParseError where
-  locOf (ParseError loc _) = loc
-
-lexerErrToParseErr :: LexerError -> ParseError
-lexerErrToParseErr (LexerError loc msg) = ParseError loc msg
-
-parseInMonad :: ParserMonad a -> FilePath -> T.Text -> ReadLineMonad (Either ParseError a)
+parseInMonad :: ParserMonad a -> FilePath -> T.Text -> ReadLineMonad (Either SyntaxError a)
 parseInMonad p file program =
   either
     (pure . Left . lexerErrToParseErr)
@@ -293,6 +287,6 @@ parseInMonad p file program =
   where
     env = ParserEnv {parserFile = file}
 
-parse :: ParserMonad a -> FilePath -> T.Text -> Either ParseError a
+parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
 parse p file program =
   either Left id $ getNoLines $ parseInMonad p file program

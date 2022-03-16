@@ -7,7 +7,7 @@ module Language.Futhark.Parser
     parseValue,
     parseValues,
     parseDecOrExpIncrM,
-    ParseError (..),
+    SyntaxError (..),
   )
 where
 
@@ -21,7 +21,7 @@ import Language.Futhark.Syntax
 parseFuthark ::
   FilePath ->
   T.Text ->
-  Either ParseError UncheckedProg
+  Either SyntaxError UncheckedProg
 parseFuthark = parse prog
 
 -- | Parse an Futhark expression from the given 'String', using the
@@ -29,7 +29,7 @@ parseFuthark = parse prog
 parseExp ::
   FilePath ->
   T.Text ->
-  Either ParseError UncheckedExp
+  Either SyntaxError UncheckedExp
 parseExp = parse expression
 
 -- | Parse a Futhark module expression from the given 'String', using the
@@ -37,7 +37,7 @@ parseExp = parse expression
 parseModExp ::
   FilePath ->
   T.Text ->
-  Either ParseError (ModExpBase NoInfo Name)
+  Either SyntaxError (ModExpBase NoInfo Name)
 parseModExp = parse modExpression
 
 -- | Parse an Futhark type from the given 'String', using the
@@ -45,7 +45,7 @@ parseModExp = parse modExpression
 parseType ::
   FilePath ->
   T.Text ->
-  Either ParseError UncheckedTypeExp
+  Either SyntaxError UncheckedTypeExp
 parseType = parse futharkType
 
 -- | Parse any Futhark value from the given 'String', using the 'FilePath'
@@ -53,7 +53,7 @@ parseType = parse futharkType
 parseValue ::
   FilePath ->
   T.Text ->
-  Either ParseError Value
+  Either SyntaxError Value
 parseValue = parse anyValue
 
 -- | Parse several Futhark values (separated by anything) from the given
@@ -62,5 +62,5 @@ parseValue = parse anyValue
 parseValues ::
   FilePath ->
   T.Text ->
-  Either ParseError [Value]
+  Either SyntaxError [Value]
 parseValues = parse anyValues
