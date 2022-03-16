@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.MulticoreC
     GC.asLibrary,
     GC.asExecutable,
     GC.asISPCExecutable,
+    GC.asISPCServer,
     GC.asServer,
     operations,
     cliOptions,

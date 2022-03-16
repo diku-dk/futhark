@@ -13,6 +13,7 @@ module Futhark.CodeGen.Backends.GenericC
     asLibrary,
     asExecutable,
     asISPCExecutable,
+    asISPCServer,
     asServer,
 
     -- * Pluggable compiler
@@ -1527,6 +1528,12 @@ asISPCExecutable :: CParts -> (T.Text, T.Text)
 asISPCExecutable parts =
   (c, ispc)
   where c = asExecutable parts
+        ispc = cISPC parts
+
+asISPCServer :: CParts -> (T.Text, T.Text)
+asISPCServer parts =
+  (c, ispc)
+  where c = asServer parts
         ispc = cISPC parts
 
 -- | As executable with command-line interface.

@@ -197,8 +197,8 @@ runCC cpath outpath cflags_def ldflags = do
           ++ gccerr
     Right (ExitSuccess, _, _) ->
       return ()
-runISPC :: String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
-runISPC ispcpath ispcbase cpath ispc_flags cflags_def ldflags = do
+runISPC :: String -> String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
+runISPC ispcpath ispcbase cpath outpath ispc_flags cflags_def ldflags = do
   ret_ispc <-
     liftIO $
       runProgramWithExitCode
@@ -214,7 +214,7 @@ runISPC ispcpath ispcbase cpath ispc_flags cflags_def ldflags = do
         cmdCC
         ( [ispcbase `addExtension` "h"] ++
           [ispcbase `addExtension` "o"] ++
-          [cpath] ++ --, "-o", outpath          
+          [cpath] ++ ["-o", outpath] ++       
           cmdCFLAGS cflags_def ++
             -- The default LDFLAGS are always added.
           ldflags
@@ -364,11 +364,14 @@ compileMulticoreAction fcfg mode outpath =
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
           liftIO $ T.writeFile cpath $ cPrependHeader c
           liftIO $ T.writeFile ispcPath ispc
-          runISPC ispcPath ispcbase cpath ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath ispcbase cpath outpath ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
           --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
-          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          let (c, ispc) = MulticoreC.asISPCServer cprog
+          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile ispcPath ispc
+          --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath ispcbase cpath outpath ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 pythonCommon ::
   (CompilerMode -> String -> prog -> FutharkM (Warnings, T.Text)) ->
