@@ -361,8 +361,8 @@ compileSetRetvalStructValues ::
   [C.Stm]
 compileSetRetvalStructValues struct = zipWith field
   where
-    field name (_, Prim) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=&$id:name;|]
+    field name (ct, Prim) =
+      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=($ty:ct*)&$id:name;|]
     field name (_, MemBlock) =
       [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
     field name (_, RawMem) =
