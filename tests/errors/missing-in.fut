@@ -1,5 +1,5 @@
 -- ==
--- error: unexpected end of file
+-- error: Unexpected end of file
 
 def main (x:i32): f32 =
   let f_ = map f (1..<x)
