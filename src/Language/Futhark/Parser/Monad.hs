@@ -95,12 +95,12 @@ mustBeEmpty _ (Array _ _ _ (ShapeDecl dims))
 mustBeEmpty loc t =
   parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
 
-newtype ParserEnv = ParserEnv
-  { parserFile :: FilePath
+data ParserEnv = ParserEnv
+  { _parserFile :: FilePath,
+    parserLexical :: ([L Token], Pos)
   }
 
-type ParserMonad =
-  ExceptT SyntaxError (StateT ParserEnv (StateT ([L Token], Pos) ReadLineMonad))
+type ParserMonad = ExceptT SyntaxError (StateT ParserEnv ReadLineMonad)
 
 data ReadLineMonad a
   = Value a
@@ -186,10 +186,10 @@ binOp x (L loc (SYMBOL _ qs op)) y =
 binOp _ t _ = error $ "binOp: unexpected " ++ show t
 
 getTokens :: ParserMonad ([L Token], Pos)
-getTokens = lift $ lift get
+getTokens = lift $ gets parserLexical
 
 putTokens :: ([L Token], Pos) -> ParserMonad ()
-putTokens = lift . lift . put
+putTokens l = lift $ modify $ \env -> env {parserLexical = l}
 
 primTypeFromName :: SrcLoc -> Name -> ParserMonad PrimType
 primTypeFromName loc s = maybe boom pure $ M.lookup s namesToPrimTypes
@@ -214,7 +214,7 @@ primNegate (UnsignedValue v) = UnsignedValue $ intNegate v
 primNegate (BoolValue v) = BoolValue $ not v
 
 readLine :: ParserMonad (Maybe T.Text)
-readLine = lift $ lift $ lift readLineFromMonad
+readLine = lift $ lift readLineFromMonad
 
 lexer :: (L Token -> ParserMonad a) -> ParserMonad a
 lexer cont = do
@@ -282,10 +282,10 @@ parseInMonad :: ParserMonad a -> FilePath -> T.Text -> ReadLineMonad (Either Syn
 parseInMonad p file program =
   either
     (pure . Left . lexerErrToParseErr)
-    (evalStateT (evalStateT (runExceptT p) env))
+    (evalStateT (runExceptT p) . env)
     (scanTokensText (Pos file 1 1 0) program)
   where
-    env = ParserEnv {parserFile = file}
+    env = ParserEnv file
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
 parse p file program =
