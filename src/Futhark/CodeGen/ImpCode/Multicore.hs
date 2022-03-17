@@ -176,4 +176,4 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body)
   freeIn' (ISPCBuiltin dest _ args) =
     freeIn' dest <> freeIn' args
-  freeIn' (DeclareUniform _ _) = mempty
+  freeIn' (DeclareUniform _ _) = mempty --todo(K)

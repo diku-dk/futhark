@@ -133,7 +133,7 @@ scanStage1 pat space scan_ops kbody = do
                   compileStms mempty (bodyStms $ lamBody scan_op) $
                     forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
                       \(acc', pe, se) -> do       
-                        name <- createUniform j se (dPrimV "uni_acc")                                                           
+                        name <- createUniform j se (dPrimV "uni_acc")                                                                                                     
                         copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) name []      
                         copyDWIMFix acc' vec_is name []
 

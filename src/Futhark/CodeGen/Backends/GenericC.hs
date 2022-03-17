@@ -103,7 +103,7 @@ import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
-import qualified Language.C.Quote.OpenCL as C
+import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
@@ -177,12 +177,12 @@ type MemoryType op s = SpaceId -> CompilerM op s C.Type
 -- | Write a scalar to the given memory block with the given element
 -- index and in the given memory space.
 type WriteScalar op s =
-  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> C.Exp -> CompilerM op s ()
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Qualifier -> C.Exp -> CompilerM op s ()
 
 -- | Read a scalar from the given memory block with the given element
 -- index and in the given memory space.
 type ReadScalar op s =
-  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> CompilerM op s C.Exp
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Qualifier -> CompilerM op s C.Exp
 
 -- | Allocate a memory block of the given size and with the given tag
 -- in the given memory space, saving a reference in the given variable
@@ -618,7 +618,7 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
+    stm [C.cstm|$exp:dest = (unsigned char*) malloc((typename size_t)$exp:size);|]
 
 freeRawMem ::
   (C.ToExp a, C.ToExp b) =>
@@ -925,7 +925,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       [C.cexp|data|]
       [C.cexp|0|]
       DefaultSpace
-      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+      [C.cexp|((typename size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   new_raw_body <- collect $ do
     prepare_new
@@ -936,7 +936,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       [C.cexp|data|]
       [C.cexp|offset|]
       space
-      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+      [C.cexp|((typename size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
@@ -949,7 +949,7 @@ arrayLibraryFunctions pub space pt signed rank = do
         [C.cexp|arr->mem.mem|]
         [C.cexp|0|]
         space
-        [C.cexp|((size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
+        [C.cexp|((typename size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
 
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -1128,7 +1128,7 @@ opaqueLibraryFunctions desc vds = do
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
   headerDecl
     (OpaqueDecl desc)
-    [C.cedecl|int $id:store_opaque($ty:ctx_ty *ctx, const $ty:opaque_type *obj, void **p, size_t *n);|]
+    [C.cedecl|int $id:store_opaque($ty:ctx_ty *ctx, const $ty:opaque_type *obj, void **p, typename size_t *n);|]
   headerDecl
     (OpaqueDecl desc)
     [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
@@ -1147,7 +1147,7 @@ opaqueLibraryFunctions desc vds = do
           }
 
           int $id:store_opaque($ty:ctx_ty *ctx,
-                               const $ty:opaque_type *obj, void **p, size_t *n) {
+                               const $ty:opaque_type *obj, void **p, typename size_t *n) {
             int ret = 0;
             $items:store_body
             return ret;
@@ -1908,7 +1908,7 @@ cachingMemory lexical f = do
           }
 
       declCached (mem, size) =
-        [ [C.citem|size_t $id:size = 0;|],
+        [ [C.citem|typename size_t $id:size = 0;|],
           [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]
         ]
 
@@ -1969,9 +1969,11 @@ derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
   [C.cexp|(($ty:res_t)$exp:ptr)[$exp:i]|]
 
-volQuals :: Volatility -> [C.TypeQual]
+volQuals :: Qualifier -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
+volQuals Uniform  = [C.ctyquals|uniform|]
+volQuals Varying = [C.ctyquals|varying|]
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do

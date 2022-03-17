@@ -252,7 +252,7 @@ data Env rep r op = Env
     envCopyCompiler :: CopyCompiler rep r op,
     envAllocCompilers :: M.Map Space (AllocCompiler rep r op),
     envDefaultSpace :: Imp.Space,
-    envVolatility :: Imp.Volatility,
+    envVolatility :: Imp.Qualifier,
     -- | User-extensible environment.
     envEnv :: r,
     -- | Name of the function we are compiling, if any.
