@@ -147,6 +147,7 @@ instance Pretty Multicore where
     </> text "}" 
   ppr (ISPCBuiltin dest name args) =
     ppr dest <+> "<-" <+> ppr name <+> "(" <+> ppr args <+> ")"
+  ppr (DeclareUniform _ params) = ppr params
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -175,4 +176,4 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body)
   freeIn' (ISPCBuiltin dest _ args) =
     freeIn' dest <> freeIn' args
-  freeIn' (DeclareUniform vname _) = (freeIn' vname)
+  freeIn' (DeclareUniform _ _) = mempty
