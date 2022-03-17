@@ -49,12 +49,12 @@ import Data.List (deleteFirstsBy)
 import Data.FileEmbed (bsToExp)
 import GHC.TopHandler (runNonIO)
 import qualified Futhark.Util as L
+import Control.Monad (foldM)
 
 
 -- unofficial TODO
 -- lengths of inputs
--- order outputs in fusion
--- make fusion stm->stm prettier
+-- name generations is going to have to occur
 
 
 -- extra util
@@ -176,13 +176,13 @@ isDep _ = False
 isInf :: (Node, Node, EdgeT) -> Bool
 isInf (_,_,e) = case e of
   InfDep vn -> True
-  Cons -> True
+  Cons -> False -- you would think this sholud be true - but mabye this works
   Fake -> True
   _ -> False
 
 v_fusion_feasability :: DepGraph -> Node -> Node -> Bool
 v_fusion_feasability g n1 n2 =
-  all isDep edges &&
+  (all isDep edges || all (==n2) nodesN1 )&&
   not (any isInf (edgesBetween g n1 n2)) &&
   (all (==n2) nodesN1 || all (==n1) nodesN2)
   where
@@ -272,9 +272,10 @@ fuseStms infusible s1 s2 =
         (lam_1_output, lam_2_output) = mapT (namesFromRes . res_from_lambda) (lam_1, lam_2)
 
         fused_inputs = fuse_inputs2 o1 i1 i2
-        lparams = change_all (i1 ++ i2)
+        lparams = trace (show fused_inputs ++ "vs" ++ show i1) $ change_all (i1 ++ i2)
           (lambdaParams lam_1 ++ lambdaParams lam_2)
           fused_inputs
+
 
         (scan_in_size_1, scan_in_size_2) = mapT scan_input (scans_1, scans_2)
         (red_in_size_1, red_in_size_2) = mapT red_input (red_1, red_2)
@@ -316,10 +317,10 @@ fuseStms infusible s1 s2 =
         --   zip3 (patIdents pats2) (lambdaReturnType lam_2) (res_from_lambda lam_2))
         --   fused_outputs
 
-        map1 = makeMap lam_2_inputs i2
+        map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
         map2 = makeMap o1 lam_1_output
         map4 = makeMap i1 lam_1_inputs
-        map3 =  fuse_maps map1 (M.union map2 map4)
+        map3 = fuse_maps map1 (M.union map2 map4)
 
 
         lam' = fuseLambda lam_1 lam_2
@@ -398,7 +399,7 @@ res_from_lambda =  bodyResult . lambdaBody
 
 fuse_inputs2 :: [VName] -> [VName] -> [VName] -> [VName]
 fuse_inputs2 fusing inputs1 inputs2 =
-   inputs1 `L.union` filter (`notElem` fusing) inputs2
+   L.nub $ inputs1 `L.union` filter (`notElem` fusing) inputs2
 
 fuse_outputs2 :: [VName] -> [VName] -> [VName] -> [VName]
 fuse_outputs2 infusible outputs1 outputs2 =
@@ -509,3 +510,82 @@ runInnerFusionOnContext g c@(incomming, node, nodeT, outgoing) =
         stms_new = linearizeGraph $ doAllFusion $ mkDepGraphInner stms results inputs
         b_new = b {bodyStms = stmsFromList stms_new}
 -- what about inner lambdas??????
+
+
+
+
+
+
+
+
+
+
+-- copyNewlyConsumed ::
+--   Names ->
+--   Futhark.SOAC (Aliases.Aliases SOACS) ->
+--   Builder SOACS (Futhark.SOAC SOACS)
+-- copyNewlyConsumed was_consumed soac =
+--   case soac of
+--     Futhark.Screma w arrs (Futhark.ScremaForm scans reds map_lam) -> do
+--       -- Copy any arrays that are consumed now, but were not in the
+--       -- constituents.
+--       arrs' <- mapM copyConsumedArr arrs
+--       -- Any consumed free variables will have to be copied inside the
+--       -- lambda, and we have to substitute the name of the copy for
+--       -- the original.
+--       map_lam' <- copyFreeInLambda map_lam
+
+--       let scans' =
+--             map
+--               ( \scan ->
+--                   scan
+--                     { scanLambda =
+--                         Aliases.removeLambdaAliases
+--                           (scanLambda scan)
+--                     }
+--               )
+--               scans
+
+--       let reds' =
+--             map
+--               ( \red ->
+--                   red
+--                     { redLambda =
+--                         Aliases.removeLambdaAliases
+--                           (redLambda red)
+--                     }
+--               )
+--               reds
+
+--       return $ Futhark.Screma w arrs' $ Futhark.ScremaForm scans' reds' map_lam'
+--     _ -> return $ removeOpAliases soac
+--   where
+--     consumed = consumedInOp soac
+--     newly_consumed = consumed `namesSubtract` was_consumed
+
+--     copyConsumedArr a
+--       | a `nameIn` newly_consumed =
+--         letExp (baseString a <> "_copy") $ BasicOp $ Copy a
+--       | otherwise = return a
+
+--     copyFreeInLambda lam = do
+--       let free_consumed =
+--             consumedByLambda lam
+--               `namesSubtract` namesFromList (map paramName $ lambdaParams lam)
+--       (stms, subst) <-
+--         foldM copyFree (mempty, mempty) $ namesToList free_consumed
+--       let lam' = Aliases.removeLambdaAliases lam
+--       return $
+--         if null stms
+--           then lam'
+--           else
+--             lam'
+--               { lambdaBody =
+--                   insertStms stms $
+--                     substituteNames subst $ lambdaBody lam'
+--               }
+
+--     copyFree (stms, subst) v = do
+--       v_copy <- newVName $ baseString v <> "_copy"
+--       copy <- mkLetNamesM [v_copy] $ BasicOp $ Copy v
+--       return (oneStm copy <> stms, M.insert v v_copy subst)
