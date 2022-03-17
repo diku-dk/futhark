@@ -260,7 +260,7 @@ generateUniformizeLoop m = do
     addLoopVar i Int64
     m $ Imp.le64 i
   emit $ Imp.Op $ Imp.ForEachActive i $
-    Imp.Op $ Imp.UnmaskedBlock body
+    body
 
 inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
 inISPC retvals code = do

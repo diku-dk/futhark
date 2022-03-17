@@ -257,7 +257,7 @@ reductionStage1NonCommScalar space slugs kbody = do
                 sComment "Load next params" $
                   forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) -> do
                     copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-                    emit $ Imp.Op $ Imp.ISPCBuiltin (paramName p) (nameFromString "extract") [Imp.LeafExp (paramName p) Imp.Unit, untyped uni]
+                    emit $ Imp.Op $ Imp.UnmaskedBlock $ Imp.Op $ Imp.ISPCBuiltin (paramName p) (nameFromString "extract") [Imp.LeafExp (paramName p) Imp.Unit, untyped uni]
 
                 sComment "SegRed body" $
                   compileStms mempty (bodyStms $ slugBody slug) $
@@ -343,7 +343,7 @@ reductionStage1CommScalar space slugs kbody = do
           sComment "Load next params" $ -- TODO(pema): red_res missing, problem?
             forM_ (zip (nextParams slug) local_accs) $ \(p, local_acc) -> do
               copyDWIMFix (paramName p) [] (Var local_acc) vec_is
-              emit $ Imp.Op $ Imp.ISPCBuiltin (paramName p) (nameFromString "extract") [Imp.LeafExp (paramName p) Imp.Unit, untyped i]
+              emit $ Imp.Op $ Imp.UnmaskedBlock $ Imp.Op $ Imp.ISPCBuiltin (paramName p) (nameFromString "extract") [Imp.LeafExp (paramName p) Imp.Unit, untyped i]
 
           sComment "SegRed body" $
             compileStms mempty (bodyStms $ slugBody slug) $
