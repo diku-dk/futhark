@@ -239,7 +239,7 @@ reductionStage1NonCommScalar space slugs kbody = do
 
     inISPC retvals $ do
       emit prebody
-      generateChunkLoop "SegRed" False $ \i -> do
+      generateChunkLoop "SegRed" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         kbody $ \all_red_res -> do
           let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
@@ -251,13 +251,14 @@ reductionStage1NonCommScalar space slugs kbody = do
                 sComment "Load accum params" $
                   forM_ (zip3 (accParams slug) local_accs lamtypes) $
                     \(p, local_acc, t) ->
-                      when (primType t) $
+                      when (primType t) $ do
                         copyDWIMFix (paramName p) [] (Var local_acc) vec_is
+                        uniformizeVar (paramName p) (untyped uni)
 
                 sComment "Load next params" $
                   forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) -> do
                     copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-                    emit $ Imp.Op $ Imp.UnmaskedBlock $ Imp.Op $ Imp.ISPCBuiltin (paramName p) (nameFromString "extract") [Imp.LeafExp (paramName p) Imp.Unit, untyped uni]
+                    uniformizeVar (paramName p) (untyped uni)
 
                 sComment "SegRed body" $
                   compileStms mempty (bodyStms $ slugBody slug) $
@@ -337,13 +338,14 @@ reductionStage1CommScalar space slugs kbody = do
           sComment "Load accum params" $
             forM_ (zip3 (accParams slug) local_accs_uni lamtypes) $
               \(p, local_acc, t) ->
-                when (primType t) $
+                when (primType t) $ do
                   copyDWIMFix (paramName p) [] (Var local_acc) vec_is
+                  uniformizeVar (paramName p) (untyped i)
 
           sComment "Load next params" $ -- TODO(pema): red_res missing, problem?
             forM_ (zip (nextParams slug) local_accs) $ \(p, local_acc) -> do
               copyDWIMFix (paramName p) [] (Var local_acc) vec_is
-              emit $ Imp.Op $ Imp.UnmaskedBlock $ Imp.Op $ Imp.ISPCBuiltin (paramName p) (nameFromString "extract") [Imp.LeafExp (paramName p) Imp.Unit, untyped i]
+              uniformizeVar (paramName p) (untyped i)
 
           sComment "SegRed body" $
             compileStms mempty (bodyStms $ slugBody slug) $

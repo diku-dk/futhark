@@ -21,6 +21,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     segOpString,
     generateChunkLoop,
     generateUniformizeLoop,
+    uniformizeVar,
     inISPC,
     toParam,
   )
@@ -260,7 +261,12 @@ generateUniformizeLoop m = do
     addLoopVar i Int64
     m $ Imp.le64 i
   emit $ Imp.Op $ Imp.ForEachActive i $
-    body
+    Imp.Op $ Imp.UnmaskedBlock body
+
+uniformizeVar :: VName -> PrimExp VName -> MulticoreGen ()
+uniformizeVar var idx = do
+  emit $ {-Imp.Op $ Imp.UnmaskedBlock $-} Imp.Op $
+    Imp.ISPCBuiltin var (nameFromString "broadcast") [Imp.LeafExp var Imp.Unit, idx]
 
 inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
 inISPC retvals code = do
