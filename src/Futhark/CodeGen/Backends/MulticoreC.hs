@@ -697,14 +697,15 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                                                 (struct futhark_context uniform * uniform ctx, 
                                                 struct $id:fstruct uniform * uniform args, 
                                                 uniform int iterations);|]
+  aos_name <- newVName "aos"
   GC.stm [C.cstm|$escstm:("#if ISPC")|]
   GC.items [C.citems|
     #if ISPC
-    uniform struct $id:fstruct aos[programCount];
-    aos[programIndex] = $id:(fstruct <> "_");
+    uniform struct $id:fstruct $id:aos_name[programCount];
+    $id:aos_name[programIndex] = $id:(fstruct <> "_");
     foreach_active (i) {
       if (err == 0) {
-        err = $id:schedn(ctx, &aos[i], extract($exp:e', i));
+        err = $id:schedn(ctx, &$id:aos_name[i], extract($exp:e', i));
       }
     }|]
   -- TODO(pema): We can't do much else here^^ than set the error code and hope for the best
