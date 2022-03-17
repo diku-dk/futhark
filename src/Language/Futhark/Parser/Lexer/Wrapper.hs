@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 -- | Utility definitions used by the lexer.  None of the default Alex
@@ -7,7 +8,6 @@ module Language.Futhark.Parser.Lexer.Wrapper
   ( runAlex',
     Alex (..),
     AlexInput,
-    AlexPosn (..),
     AlexState (..),
     Byte,
     LexerError (..),
@@ -24,7 +24,7 @@ import Control.Applicative (liftA)
 import qualified Data.ByteString.Internal as BS (w2c)
 import qualified Data.ByteString.Lazy as BS
 import Data.Int (Int64)
-import Data.Loc (Loc)
+import Data.Loc (Loc, Pos (..))
 import Data.Word (Word8)
 
 type Byte = Word8
@@ -39,7 +39,7 @@ type Byte = Word8
 --
 -- 4. bytes consumed so far
 type AlexInput =
-  ( AlexPosn, -- current position,
+  ( Pos, -- current position,
     Char, -- previous char
     BS.ByteString, -- current input string
     Int64 -- bytes consumed so far
@@ -55,33 +55,24 @@ alexGetByte (p, _, cs, n) =
           n' = n + 1
        in p' `seq` cs' `seq` n' `seq` Just (b, (p', c, cs', n'))
 
--- `Posn' records the location of a token in the input text.  It has three
--- fields: the address (number of chacaters preceding the token), line number
--- and column of a token within the file. `start_pos' gives the position of the
--- start of the file and `eof_pos' a standard encoding for the end of file.
--- `move_pos' calculates the new position after traversing a given character,
--- assuming the usual eight character tab stops.
-
-data AlexPosn = AlexPn !Int !Int !Int
-  deriving (Eq, Show)
-
 tabSize :: Int
 tabSize = 8
 
-alexMove :: AlexPosn -> Char -> AlexPosn
-alexMove (AlexPn a l c) '\t' = AlexPn (a + 1) l (c + tabSize - ((c - 1) `mod` tabSize))
-alexMove (AlexPn a l _) '\n' = AlexPn (a + 1) (l + 1) 1
-alexMove (AlexPn a l c) _ = AlexPn (a + 1) l (c + 1)
+{-# INLINE alexMove #-}
+alexMove :: Pos -> Char -> Pos
+alexMove (Pos !f !l !c !a) '\t' = Pos f l (c + tabSize - ((c - 1) `mod` tabSize)) (a + 1)
+alexMove (Pos !f !l _ !a) '\n' = Pos f (l + 1) 1 (a + 1)
+alexMove (Pos !f !l !c !a) _ = Pos f l (c + 1) (a + 1)
 
 data AlexState = AlexState
-  { alex_pos :: !AlexPosn, -- position at current input location
+  { alex_pos :: !Pos, -- position at current input location
     alex_bpos :: !Int64, -- bytes consumed so far
     alex_inp :: BS.ByteString, -- the current input
     alex_chr :: !Char, -- the character before the input
     alex_scd :: !Int -- the current startcode
   }
 
-runAlex' :: AlexPosn -> BS.ByteString -> Alex a -> Either LexerError a
+runAlex' :: Pos -> BS.ByteString -> Alex a -> Either LexerError a
 runAlex' start_pos input__ (Alex f) =
   case f
     ( AlexState

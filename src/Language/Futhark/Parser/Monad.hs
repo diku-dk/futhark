@@ -50,7 +50,7 @@ import Data.Array hiding (index)
 import qualified Data.Map.Strict as M
 import Data.Monoid
 import qualified Data.Text as T
-import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
+import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (line)
 import Language.Futhark.Parser.Lexer
 import Language.Futhark.Parser.Lexer.Wrapper (LexerError (..))
@@ -89,7 +89,7 @@ mustBe (L loc _) expected =
   parseErrorAt loc . Just $
     "Only the keyword '" <> expected <> "' may appear here."
 
-mustBeEmpty :: SrcLoc -> ValueType -> ParserMonad ()
+mustBeEmpty :: Located loc => loc -> ValueType -> ParserMonad ()
 mustBeEmpty _ (Array _ _ _ (ShapeDecl dims))
   | 0 `elem` dims = pure ()
 mustBeEmpty loc t =
@@ -175,15 +175,15 @@ patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
     field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
 
 eof :: Pos -> L Token
-eof pos = L (SrcLoc $ Loc pos pos) EOF
+eof pos = L (Loc pos pos) EOF
 
-binOpName :: L Token -> (QualName Name, SrcLoc)
+binOpName :: L Token -> (QualName Name, Loc)
 binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)
 binOpName t = error $ "binOpName: unexpected " ++ show t
 
 binOp :: UncheckedExp -> L Token -> UncheckedExp -> UncheckedExp
 binOp x (L loc (SYMBOL _ qs op)) y =
-  AppExp (BinOp (QualName qs op, loc) NoInfo (x, NoInfo) (y, NoInfo) (srcspan x y)) NoInfo
+  AppExp (BinOp (QualName qs op, srclocOf loc) NoInfo (x, NoInfo) (y, NoInfo) (srcspan x y)) NoInfo
 binOp _ t _ = error $ "binOp: unexpected " ++ show t
 
 getTokens :: ParserMonad ([L Token], Pos)
@@ -192,7 +192,7 @@ getTokens = lift $ gets parserLexical
 putTokens :: ([L Token], Pos) -> ParserMonad ()
 putTokens l = lift $ modify $ \env -> env {parserLexical = l}
 
-primTypeFromName :: SrcLoc -> Name -> ParserMonad PrimType
+primTypeFromName :: Loc -> Name -> ParserMonad PrimType
 primTypeFromName loc s = maybe boom pure $ M.lookup s namesToPrimTypes
   where
     boom = parseErrorAt loc $ Just $ "No type named " ++ nameToString s
@@ -249,12 +249,12 @@ lexer cont = do
 
 parseError :: (L Token, [String]) -> ParserMonad a
 parseError (L loc EOF, expected) =
-  parseErrorAt (srclocOf loc) . Just . unlines $
+  parseErrorAt (locOf loc) . Just . unlines $
     [ "Unexpected end of file.",
       "Expected one of the following: " ++ unwords expected
     ]
 parseError (L loc DOC {}, _) =
-  parseErrorAt (srclocOf loc) $
+  parseErrorAt (locOf loc) $
     Just "Documentation comments ('-- |') are only permitted when preceding declarations."
 parseError (L loc _, expected) = do
   input <- lift $ gets parserInput
@@ -265,16 +265,16 @@ parseError (L loc _, expected) = do
       "Expected one of the following: " <> unwords expected
     ]
 
-parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
+parseErrorAt :: Located loc => loc -> Maybe String -> ParserMonad a
 parseErrorAt loc Nothing = throwError $ SyntaxError (locOf loc) "Syntax error."
 parseErrorAt loc (Just s) = throwError $ SyntaxError (locOf loc) s
 
-emptyArrayError :: SrcLoc -> ParserMonad a
+emptyArrayError :: Loc -> ParserMonad a
 emptyArrayError loc =
   parseErrorAt loc $
     Just "write empty arrays as 'empty(t)', for element type 't'.\n"
 
-twoDotsRange :: SrcLoc -> ParserMonad a
+twoDotsRange :: Loc -> ParserMonad a
 twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
 
 --- Now for the parser interface.
