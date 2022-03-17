@@ -250,6 +250,7 @@ infusableInputsFromExp (Op soac) = case soac of
   Futhark.Stream  _ _ _ _ lam     -> namesToList $ freeIn lam
 infusableInputsFromExp op@(BasicOp x) = namesToList $ freeIn op
 infusableInputsFromExp op@If {} = namesToList $ freeIn op
+infusableInputsFromExp op@DoLoop {} = namesToList $ freeIn op
 infusableInputsFromExp _ = []
 
 --- /Augmentations ---
