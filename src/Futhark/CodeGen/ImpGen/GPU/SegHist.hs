@@ -414,8 +414,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
         num_threads = sExt64 $ kernelNumThreads constants
     kernelLoop gtid num_threads total_w_64 $ \offset -> do
       -- Construct segment indices.
-      zipWithM_ dPrimV_ space_is $
-        map sExt32 $ unflattenIndex space_sizes_64 offset
+      dIndexSpace (zip space_is space_sizes_64) offset
 
       -- We execute the bucket function once and update each histogram serially.
       -- We apply the bucket function if j=offset+ltid is less than
@@ -716,7 +715,7 @@ histKernelLocalPass
         sOp $ Imp.Barrier Imp.FenceLocal
 
         kernelLoop pgtid_in_segment threads_per_segment (sExt32 segment_size') $ \ie -> do
-          dPrimV_ i_in_segment ie
+          dPrimV_ i_in_segment $ sExt64 ie
 
           -- We execute the bucket function once and update each histogram
           -- serially.  This also involves writing to the mapout arrays if
