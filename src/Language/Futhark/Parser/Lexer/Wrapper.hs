@@ -47,6 +47,7 @@ type AlexInput =
     Int64 -- bytes consumed so far
   )
 
+{-# INLINE alexGetByte #-}
 alexGetByte :: AlexInput -> Maybe (Byte, AlexInput)
 alexGetByte (p, _, cs, n) =
   case BS.uncons cs of
