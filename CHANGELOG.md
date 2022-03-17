@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   regular nested parallel programs to run into compiler limitations,
   as if they were irregular.
 
+* Rare code generation bug for histograms (#1609).
+
 ## [0.21.7]
 
 ### Added
