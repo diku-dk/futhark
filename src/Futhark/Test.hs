@@ -205,8 +205,8 @@ valuesAsVars server names_and_types _ _ (Values vs) = do
   let types = map snd names_and_types
       vs_types = map (V.valueTypeTextNoDims . V.valueType) vs
   unless (types == vs_types) . throwError . T.unlines $
-    [ "Expected input of types: " <> prettyTextOneLine types,
-      "Provided input of types: " <> prettyTextOneLine vs_types
+    [ "Expected input of types: " <> T.unwords (map prettyTextOneLine types),
+      "Provided input of types: " <> T.unwords (map prettyTextOneLine vs_types)
     ]
   cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
     mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
