@@ -3,7 +3,9 @@
 
 -- | Utility definitions used by the lexer.  None of the default Alex
 -- "wrappers" are precisely what we need.  The code here is based on
--- the "monad-bytestring" wrapper.
+-- the "monad-bytestring" wrapper.  The code here is completely
+-- Futhark-agnostic, and perhaps it can even serve as inspiration for
+-- other Alex lexer wrappers.
 module Language.Futhark.Parser.Lexer.Wrapper
   ( runAlex',
     Alex (..),
@@ -17,6 +19,7 @@ module Language.Futhark.Parser.Lexer.Wrapper
     alexGetStartCode,
     alexMove,
     alexError,
+    alexGetPos,
   )
 where
 
@@ -129,3 +132,6 @@ alexError loc message = Alex $ const $ Left $ LexerError loc message
 
 alexGetStartCode :: Alex Int
 alexGetStartCode = Alex $ \s@AlexState {alex_scd = sc} -> Right (s, sc)
+
+alexGetPos :: Alex Pos
+alexGetPos = Alex $ \s -> Right (s, alex_pos s)
