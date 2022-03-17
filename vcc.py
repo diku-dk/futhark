@@ -22,3 +22,6 @@ for i,G in enumerate(graphs):
     img = subprocess.run(['dot', '-Tpng', 'scratch.txt'], capture_output=True).stdout
     with open(f'visgraph/{sys.argv[1][:-4]}_{i}.png', "w+b") as f:
         f.write(img)
+
+filename = sys.argv[1].split('.')[0]
+os.system("open visgraph/" + filename + "*")

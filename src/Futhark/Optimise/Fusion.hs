@@ -48,6 +48,7 @@ import Data.Tuple (swap)
 import Data.List (deleteFirstsBy)
 import Data.FileEmbed (bsToExp)
 import GHC.TopHandler (runNonIO)
+import qualified Futhark.Util as L
 
 
 -- unofficial TODO
@@ -394,12 +395,6 @@ res_from_lambda =  bodyResult . lambdaBody
 
 -- nvm horizontal fusion on its own
 
-interweave :: ([a] -> [a] -> [a]) -> [[a]] -> [[a]] -> [a]
-interweave f (a : as) (b : bs) = f a b ++ interweave f as bs
-interweave f (a : as) [] = f a [] ++ interweave f as []
-interweave f [] (b : bs) = f [] b ++ interweave f [] bs
-interweave f [] [] = []
-
 
 fuse_inputs2 :: [VName] -> [VName] -> [VName] -> [VName]
 fuse_inputs2 fusing inputs1 inputs2 =
@@ -450,7 +445,6 @@ keeptrying f g =
 
 
 -- getstms
-
 
 removeUnusedOutputs :: DepGraphAug
 removeUnusedOutputs g = gmap (removeUnusedOutputsFromContext g) g
@@ -511,7 +505,7 @@ runInnerFusionOnContext g c@(incomming, node, nodeT, outgoing) =
       where
         inputs = concatMap (vNameFromAdj g node) incomming
         stms = stmsToList (bodyStms b)
-        results = map ((\(Var x) -> x) . resSubExp) (bodyResult b)
+        results = namesFromRes (bodyResult b)
         stms_new = linearizeGraph $ doAllFusion $ mkDepGraphInner stms results inputs
         b_new = b {bodyStms = stmsFromList stms_new}
 -- what about inner lambdas??????

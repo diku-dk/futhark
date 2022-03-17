@@ -40,7 +40,7 @@ instance Show EdgeT where
 
 -- nodeT_to_str
 instance Show NodeT where
-    show (SNode stm@(Let pat _ _)) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
+    show (SNode stm@(Let pat aux _)) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
     show (RNode name)  = ppr $ "Res: "   ++ ppr name
     show (InNode name) = ppr $ "Input: " ++ ppr name
 
@@ -89,7 +89,6 @@ mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
 mkDepGraph stms res inputs =
     addDepEdges (emptyG2 stms resNames inputNames)
     where
-      namesFromRes = map ((\(Var x) -> x) . resSubExp)
       resNames = namesFromRes res
       -- remove inputs which are not arrays - they suck to look at on the graph
       -- and horizontal fusion on those is a waste.
@@ -240,7 +239,7 @@ fusableInputsFromExp (Op soac) = case soac of
 fusableInputsFromExp _ = []
 
 infusableInputs :: Stm SOACS -> [VName]
-infusableInputs (Let _ _ exp) = infusableInputsFromExp exp
+infusableInputs (Let _ aux exp) = infusableInputsFromExp exp ++ namesToList (freeIn aux)
 
 infusableInputsFromExp :: Exp SOACS -> [VName]
 infusableInputsFromExp (Op soac) = case soac of
