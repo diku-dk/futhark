@@ -8,9 +8,8 @@
 -- other Alex lexer wrappers.
 module Language.Futhark.Parser.Lexer.Wrapper
   ( runAlex',
-    Alex (..),
+    Alex,
     AlexInput,
-    AlexState (..),
     Byte,
     LexerError (..),
     alexSetInput,
