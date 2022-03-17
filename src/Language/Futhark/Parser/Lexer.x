@@ -6,11 +6,11 @@
 -- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer
   ( Token(..)
-  , L(..)
   , scanTokens
   , scanTokensText
   ) where
 
+import Data.Bifunctor (second)
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -18,7 +18,7 @@ import qualified Data.Text.Read as T
 import Data.Char (ord, toLower, digitToInt)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
-import Data.Loc (Loc (NoLoc))
+import Data.Loc (Loc (..), L(..), Pos(..))
 import Data.Bits
 import Data.Function (fix)
 import Data.List
@@ -119,9 +119,9 @@ tokens :-
   \" @stringcharlit* \"    { tokenM $ fmap (STRINGLIT . T.pack) . tryRead "string"  }
 
   @identifier              { tokenS keyword }
-  @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
+  @identifier "["          { tokenPosM $ fmap INDEXING . indexing . second (T.takeWhile (/='[')) }
   @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
-  @identifier "." "("      { tokenM $ fmap (QUALPAREN []) . indexing . T.init . T.takeWhile (/='(') }
+  @identifier "." "("      { tokenPosM $ fmap (QUALPAREN []) . indexing . second (T.init . T.takeWhile (/='(')) }
   @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
@@ -161,10 +161,10 @@ keyword s =
 
     _              -> ID $ nameFromText s
 
-indexing :: T.Text -> Alex Name
-indexing s = case keyword s of
+indexing :: (Loc, T.Text) -> Alex Name
+indexing (loc, s) = case keyword s of
   ID v -> return v
-  _    -> alexError NoLoc $ "Cannot index keyword '" ++ T.unpack s ++ "'."
+  _    -> alexError loc $ "Cannot index keyword '" ++ T.unpack s ++ "'."
 
 mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
@@ -193,23 +193,29 @@ tokenC v  = tokenS $ const v
 
 tokenS f = tokenM $ return . f
 
-type Lexeme a = ((Int, Int, Int), (Int, Int, Int), a)
+type Lexeme a = (Pos, Pos, a)
 
 tokenM :: (T.Text -> Alex a)
-       -> (AlexPosn, Char, ByteString.ByteString, Int64)
+       -> (Pos, Char, ByteString.ByteString, Int64)
        -> Int64
        -> Alex (Lexeme a)
-tokenM f (AlexPn addr line col, _, s, _) len = do
-  x <- f $ T.decodeUtf8 $ BS.toStrict s'
-  return (pos, advance pos s', x)
-  where pos = (line, col, addr)
+tokenM f = tokenPosM (f . snd)
+
+tokenPosM :: ((Loc, T.Text) -> Alex a)
+          -> (Pos, Char, ByteString.ByteString, Int64)
+          -> Int64
+          -> Alex (Lexeme a)
+tokenPosM f (pos, _, s, _) len = do
+  x <- f (Loc pos pos', T.decodeUtf8 $ BS.toStrict s')
+  return (pos, pos', x)
+  where pos' = advance pos s'
         s' = BS.take len s
 
-advance :: (Int, Int, Int) -> ByteString.ByteString -> (Int, Int, Int)
+advance :: Pos -> ByteString.ByteString -> Pos
 advance orig_pos = foldl' advance' orig_pos . init . ByteString.unpack
-  where advance' (!line, !col, !addr) c
-          | c == nl   = (line + 1, 1, addr + 1)
-          | otherwise = (line, col + 1, addr + 1)
+  where advance' (Pos f !line !col !addr) c
+          | c == nl   = Pos f (line + 1) 1 (addr + 1)
+          | otherwise = Pos f line (col + 1) (addr + 1)
         nl = fromIntegral $ ord '\n'
 
 symbol :: [Name] -> Name -> Token
@@ -264,23 +270,8 @@ readHexRealLit s =
         return totalVal
     _ -> error "bad hex real literal"
 
-alexGetPosn :: Alex (Int, Int, Int)
-alexGetPosn = Alex $ \s ->
-  let (AlexPn off line col) = alex_pos s
-  in Right (s, (line, col, off))
-
-alexEOF = do
-  posn <- alexGetPosn
-  return (posn, posn, EOF)
-
--- | A value tagged with a source location.
-data L a = L SrcLoc a deriving (Show)
-
-instance Eq a => Eq (L a) where
-  L _ x == L _ y = x == y
-
-instance Located (L a) where
-  locOf (L (SrcLoc loc) _) = loc
+alexGetPos :: Alex Pos
+alexGetPos = Alex $ \s -> Right (s, alex_pos s)
 
 -- | A lexical token.  It does not itself contain position
 -- information, so in practice the parser will consume tokens tagged
@@ -375,35 +366,21 @@ data Token = ID Name
 
              deriving (Show, Eq, Ord)
 
-alexMonadScan = do
-  inp@(_, _, _, n) <- alexGetInput
+getToken :: Alex (Lexeme Token)
+getToken = do
+  inp@(_,_,_,n) <- alexGetInput
   sc <- alexGetStartCode
   case alexScan inp sc of
-    AlexEOF -> alexEOF
-    AlexError ((AlexPn _ line column), _, _, _) -> let pos = Pos "file" line column 0 in
-      alexError (Loc pos pos) ("lexical error at line " ++ (show line) ++ ", column " ++ (show column))
-    AlexSkip inp' _len -> do
+    AlexEOF -> do pos <- alexGetPos
+                  pure (pos, pos, EOF)
+    AlexError (pos,_,_,_) ->
+      alexError (Loc pos pos) "Invalid lexical syntax."
+    AlexSkip  inp' _len -> do
       alexSetInput inp'
-      alexMonadScan
-    AlexToken inp'@(_, _, _, n') _ action -> do
-      let len = n' - n
+      getToken
+    AlexToken inp'@(_,_,_,n') _ action -> let len = n'-n in do
       alexSetInput inp'
       action inp len
-
-getToken :: FilePath -> Alex (Lexeme Token)
-getToken file = do
-  inp__@(_,_,_,n) <- alexGetInput
-  sc <- alexGetStartCode
-  case alexScan inp__ sc of
-    AlexEOF -> alexEOF
-    AlexError ((AlexPn _ line column),_,_,_) -> let pos = Pos file line column 0 in
-      alexError (Loc pos pos) $ "Error at " ++ file ++ ":" ++ show line ++ ":" ++ show column ++ ": lexical error."
-    AlexSkip  inp__' _len -> do
-      alexSetInput inp__'
-      getToken file
-    AlexToken inp__'@(_,_,_,n') _ action -> let len = n'-n in do
-      alexSetInput inp__'
-      action inp__ len
 
 -- | Given a starting position, produce tokens from the given text (or
 -- a lexer error).  Returns the final position.
@@ -411,16 +388,14 @@ scanTokensText :: Pos -> T.Text -> Either LexerError ([L Token], Pos)
 scanTokensText pos = scanTokens pos . BS.fromStrict . T.encodeUtf8
 
 scanTokens :: Pos -> BS.ByteString -> Either LexerError ([L Token], Pos)
-scanTokens (Pos file start_line start_col start_off) str =
-  runAlex' (AlexPn start_off start_line start_col) str $ do
+scanTokens pos str =
+  runAlex' pos str $ do
   fix $ \loop -> do
-    tok <- getToken file
+    tok <- getToken
     case tok of
       (start, end, EOF) ->
-        return ([], posnToPos end)
+        pure ([], end)
       (start, end, t) -> do
         (rest, endpos) <- loop
-        return (L (pos start end) t : rest, endpos)
-  where pos start end = SrcLoc $ Loc (posnToPos start) (posnToPos end)
-        posnToPos (line, col, off) = Pos file line col off
+        pure (L (Loc start end) t : rest, endpos)
 }
