@@ -74,11 +74,21 @@ fuseSOACs =
   Pass
     { passName = "Fuse SOACs",
       passDescription = "Perform higher-order optimisation, i.e., fusion.",
-      passFunction = intraproceduralTransformationWithConsts
-          pure
-          fuseFun
+      passFunction = \p -> intraproceduralTransformationWithConsts
+          (fuseConsts (namesToList $ freeIn (progFuns p)))
+          fuseFun p
           -- (\y x -> pure x)
     }
+
+
+
+fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
+fuseConsts outputs stms =
+  return $ stmsFromList $ fuseGraph stmList results []
+    where
+      stmList = stmsToList stms
+      results = varsRes outputs
+
 
 
 -- some sort of functional decorator pattern
@@ -589,3 +599,12 @@ runInnerFusionOnContext g c@(incomming, node, nodeT, outgoing) =
 --       v_copy <- newVName $ baseString v <> "_copy"
 --       copy <- mkLetNamesM [v_copy] $ BasicOp $ Copy v
 --       return (oneStm copy <> stms, M.insert v v_copy subst)
+
+
+makeCopy :: MonadFreshNames m => DepGraph -> m DepGraph
+makeCopy g =
+  return g
+
+
+makeCopyContext :: MonadFreshNames m => DepContext -> m DepContext
+makeCopyContext c = return c

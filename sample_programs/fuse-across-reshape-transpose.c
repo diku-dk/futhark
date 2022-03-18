@@ -4178,7 +4178,7 @@ struct futhark_context {
     int64_t peak_mem_usage_default;
     int64_t cur_mem_usage_default;
     struct {
-        struct memblock mem_4946;
+        struct memblock mem_4925;
     } constants;
 };
 struct futhark_context *futhark_context_new(struct futhark_context_config *cfg)
@@ -4358,7 +4358,7 @@ int futhark_context_clear_caches(struct futhark_context *ctx)
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_5000);
+                             struct memblock *mem_out_p_4978);
 
 static int init_constants(struct futhark_context *ctx)
 {
@@ -4366,69 +4366,48 @@ static int init_constants(struct futhark_context *ctx)
     
     int err = 0;
     
-    #define mem_4946 (ctx->constants.mem_4946)
+    #define mem_4925 (ctx->constants.mem_4925)
     
-    struct memblock mem_4930;
+    struct memblock mem_4909;
     
-    mem_4930.references = NULL;
-    
-    struct memblock mem_4914;
-    
-    mem_4914.references = NULL;
-    mem_4946.references = NULL;
-    if (memblock_alloc(ctx, &mem_4914, (int64_t) 36, "mem_4914")) {
+    mem_4909.references = NULL;
+    mem_4925.references = NULL;
+    if (memblock_alloc(ctx, &mem_4909, (int64_t) 36, "mem_4909")) {
         err = 1;
         goto cleanup;
     }
-    for (int32_t i_4899 = 0; i_4899 < 9; i_4899++) {
-        int64_t i_4885 = sext_i32_i64(i_4899);
+    for (int32_t i_4895 = 0; i_4895 < 9; i_4895++) {
+        int64_t i_4885 = sext_i32_i64(i_4895);
+        int32_t defunc_0_f_res_4857 = add32(1, i_4895);
         
-        ((int32_t *) mem_4914.mem)[i_4885] = i_4899;
+        ((int32_t *) mem_4909.mem)[i_4885] = defunc_0_f_res_4857;
     }
-    if (memblock_alloc(ctx, &mem_4930, (int64_t) 36, "mem_4930")) {
+    if (memblock_alloc(ctx, &mem_4925, (int64_t) 36, "mem_4925")) {
         err = 1;
         goto cleanup;
     }
-    for (int32_t i_4900 = 0; i_4900 < 9; i_4900++) {
-        int64_t i_4889 = sext_i32_i64(i_4900);
-        int32_t x_4856;
+    for (int32_t i_4896 = 0; i_4896 < 3; i_4896++) {
+        int64_t i_4893 = sext_i32_i64(i_4896);
         
-        x_4856 = ((int32_t *) mem_4914.mem)[i_4889];
-        
-        int32_t defunc_0_f_res_4857 = add32(1, x_4856);
-        
-        ((int32_t *) mem_4930.mem)[i_4889] = defunc_0_f_res_4857;
-    }
-    if (memblock_unref(ctx, &mem_4914, "mem_4914") != 0)
-        return 1;
-    if (memblock_alloc(ctx, &mem_4946, (int64_t) 36, "mem_4946")) {
-        err = 1;
-        goto cleanup;
-    }
-    for (int32_t i_4901 = 0; i_4901 < 3; i_4901++) {
-        int64_t i_4897 = sext_i32_i64(i_4901);
-        
-        for (int32_t i_4902 = 0; i_4902 < 3; i_4902++) {
-            int64_t i_4893 = sext_i32_i64(i_4902);
-            int64_t binop_x_4905 = (int64_t) 3 * i_4893;
-            int64_t new_index_4906 = i_4897 + binop_x_4905;
+        for (int32_t i_4897 = 0; i_4897 < 3; i_4897++) {
+            int64_t i_4889 = sext_i32_i64(i_4897);
+            int64_t binop_x_4900 = (int64_t) 3 * i_4889;
+            int64_t new_index_4901 = i_4893 + binop_x_4900;
             int32_t x_4880;
             
-            x_4880 = ((int32_t *) mem_4930.mem)[new_index_4906];
+            x_4880 = ((int32_t *) mem_4909.mem)[new_index_4901];
             
             int32_t defunc_0_f_res_4881 = mul32(2, x_4880);
             
-            ((int32_t *) mem_4946.mem)[i_4897 * (int64_t) 3 + i_4893] =
+            ((int32_t *) mem_4925.mem)[i_4893 * (int64_t) 3 + i_4889] =
                 defunc_0_f_res_4881;
         }
     }
-    if (memblock_unref(ctx, &mem_4930, "mem_4930") != 0)
+    if (memblock_unref(ctx, &mem_4909, "mem_4909") != 0)
         return 1;
-    if (memblock_unref(ctx, &mem_4930, "mem_4930") != 0)
+    if (memblock_unref(ctx, &mem_4909, "mem_4909") != 0)
         return 1;
-    if (memblock_unref(ctx, &mem_4914, "mem_4914") != 0)
-        return 1;
-    #undef mem_4946
+    #undef mem_4925
     
   cleanup:
     return err;
@@ -4436,8 +4415,8 @@ static int init_constants(struct futhark_context *ctx)
 static int free_constants(struct futhark_context *ctx)
 {
     (void) ctx;
-    if (memblock_unref(ctx, &ctx->constants.mem_4946,
-                       "ctx->constants.mem_4946") != 0)
+    if (memblock_unref(ctx, &ctx->constants.mem_4925,
+                       "ctx->constants.mem_4925") != 0)
         return 1;
     return 0;
 }
@@ -4521,39 +4500,39 @@ const int64_t *futhark_shape_i32_2d(struct futhark_context *ctx,
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_5000)
+                             struct memblock *mem_out_p_4978)
 {
     (void) ctx;
     
     int err = 0;
-    struct memblock mem_4993;
+    struct memblock mem_4972;
     
-    mem_4993.references = NULL;
+    mem_4972.references = NULL;
     
-    struct memblock mem_out_4995;
+    struct memblock mem_out_4974;
     
-    mem_out_4995.references = NULL;
+    mem_out_4974.references = NULL;
     
-    struct memblock mem_4946 = ctx->constants.mem_4946;
+    struct memblock mem_4925 = ctx->constants.mem_4925;
     
-    if (memblock_alloc(ctx, &mem_4993, (int64_t) 36, "mem_4993")) {
+    if (memblock_alloc(ctx, &mem_4972, (int64_t) 36, "mem_4972")) {
         err = 1;
         goto cleanup;
     }
     if ((int64_t) 36 > 0)
-        memmove(mem_4993.mem + (int64_t) 0, mem_4946.mem + (int64_t) 0,
+        memmove(mem_4972.mem + (int64_t) 0, mem_4925.mem + (int64_t) 0,
                 (int64_t) 36);
-    if (memblock_set(ctx, &mem_out_4995, &mem_4993, "mem_4993") != 0)
+    if (memblock_set(ctx, &mem_out_4974, &mem_4972, "mem_4972") != 0)
         return 1;
-    (*mem_out_p_5000).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_5000, &mem_out_4995, "mem_out_4995") != 0)
+    (*mem_out_p_4978).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_4978, &mem_out_4974, "mem_out_4974") != 0)
         return 1;
     
   cleanup:
     {
-        if (memblock_unref(ctx, &mem_4993, "mem_4993") != 0)
+        if (memblock_unref(ctx, &mem_4972, "mem_4972") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_4995, "mem_out_4995") != 0)
+        if (memblock_unref(ctx, &mem_out_4974, "mem_out_4974") != 0)
             return 1;
     }
     return err;
@@ -4566,18 +4545,18 @@ int futhark_entry_main(struct futhark_context *ctx,
     
     lock_lock(&ctx->lock);
     
-    struct memblock mem_out_4995;
+    struct memblock mem_out_4974;
     
-    mem_out_4995.references = NULL;
+    mem_out_4974.references = NULL;
     if (ret == 0) {
-        ret = futrts_entry_main(ctx, &mem_out_4995);
+        ret = futrts_entry_main(ctx, &mem_out_4974);
         if (ret == 0) {
-            struct memblock mem_4946 = ctx->constants.mem_4946;
+            struct memblock mem_4925 = ctx->constants.mem_4925;
             
             assert((*out0 =
                     (struct futhark_i32_2d *) malloc(sizeof(struct futhark_i32_2d))) !=
                 NULL);
-            (*out0)->mem = mem_out_4995;
+            (*out0)->mem = mem_out_4974;
             (*out0)->shape[0] = (int64_t) 3;
             (*out0)->shape[1] = (int64_t) 3;
         }
