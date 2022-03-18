@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.22.0]
+## [0.21.8]
 
 ### Added
 
@@ -13,10 +13,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark literate` now supports a `file:` option in `:img` and
   `:video` directives (#1491).
-
-### Removed
-
-### Changed
 
 ### Fixed
 
