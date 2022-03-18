@@ -47,6 +47,8 @@ compileProg version =
     )
     <=< ImpGen.compileProg
 
+-- | Generate the multicore context definitions.  This is exported
+-- because the WASM backend needs it.
 generateContext :: GC.CompilerM op () ()
 generateContext = do
   mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack schedulerH)|]
@@ -215,6 +217,7 @@ generateContext = do
                    }|]
     )
 
+-- | Multicore-related command line options.
 cliOptions :: [Option]
 cliOptions =
   [ Option
@@ -233,6 +236,7 @@ cliOptions =
       }
   ]
 
+-- | Operations for generating multicore code.
 operations :: GC.Operations Multicore ()
 operations =
   GC.defaultOperations
