@@ -20,6 +20,9 @@ import Futhark.IR.Pretty as PP
 import qualified Futhark.Util.Pretty as PP
 
 import Debug.Trace
+import Futhark.Builder (MonadFreshNames)
+import Futhark.Pass
+import Data.Foldable (foldlM)
 
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
@@ -55,7 +58,8 @@ type DepNode = LNode NodeT
 type DepEdge = LEdge EdgeT
 type DepContext = Context NodeT EdgeT
 type DepGraph = G.Gr NodeT EdgeT
-type DepGraphAug = DepGraph -> DepGraph
+type DepGraphAug = DepGraph -> PassM DepGraph
+
 
 type DepGenerator = Stm SOACS -> [VName]
 type EdgeGenerator = NodeT -> [(VName, EdgeT)]
@@ -85,7 +89,7 @@ isArray p = case paramDec p of
   Array {} -> True
   _ -> False
 
-mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
+mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> PassM DepGraph
 mkDepGraph stms res inputs =
     addDepEdges (emptyG2 stms resNames inputNames)
     where
@@ -95,9 +99,10 @@ mkDepGraph stms res inputs =
       inputNames = map paramName $ filter isArray inputs
 
 addDepEdges :: DepGraphAug
-addDepEdges g = applyAugs g [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges]
+addDepEdges = applyAugs
+  [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges]
 
-mkDepGraphInner :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
+mkDepGraphInner :: [Stm SOACS] -> [VName] -> [VName] -> PassM DepGraph
 mkDepGraphInner stms outputs inputs = addDepEdges $ emptyG2 stms outputs inputs
 
 
@@ -116,10 +121,10 @@ genEdges l_stms edge_fun = concatMap gen_edge l_stms
                                               Just to <- [M.lookup dep name_map]]
 
 depGraphInsertEdges :: [DepEdge] -> DepGraphAug
-depGraphInsertEdges edgs g = mkGraph (labNodes g) (edgs ++ labEdges g)
+depGraphInsertEdges edgs g = return $ mkGraph (labNodes g) (edgs ++ labEdges g)
 
-applyAugs :: DepGraph -> [DepGraphAug] -> DepGraph
-applyAugs = foldl (flip ($))
+applyAugs :: [DepGraphAug] -> DepGraphAug
+applyAugs augs g = foldlM (flip ($)) g augs
 --applyAugs g augs = foldl (flip ($)) g (augs ++ [cleanUpGraph])
 
 --- /Graph Construction
@@ -206,7 +211,7 @@ addResEdges :: DepGraphAug
 addResEdges = augWithFun getStmRes
 
 makeScanInfusible :: DepGraphAug
-makeScanInfusible g = emap change_node_to_idep g
+makeScanInfusible g = return $ emap change_node_to_idep g
   where
     find_scan_results :: Stm SOACS -> [VName]
     find_scan_results  (Let pat _ (Op (Futhark.Screma  _ _ (ScremaForm scns _ _)))) =

@@ -84,41 +84,46 @@ fuseSOACs =
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
-  return $ stmsFromList $ fuseGraph stmList results []
-    where
-      stmList = stmsToList stms
-      results = varsRes outputs
+  do
+    new_stms <- fuseGraph stmList results []
+    return $ stmsFromList new_stms
+  where
+    stmList = stmsToList stms
+    results = varsRes outputs
 
 
 
 -- some sort of functional decorator pattern
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun _stmts fun = do
-  let body = (funDefBody fun) {bodyStms = stmsFromList (fuseGraph stms res (funDefParams  fun))}
+  new_stms <- fuseGraph stms res (funDefParams  fun)
+  let body = (funDefBody fun) {bodyStms = stmsFromList new_stms}
   return fun {funDefBody = body}
     where
       b   = funDefBody fun
       stms = trace (ppr (bodyStms b)) $ stmsToList $ bodyStms b
       res = bodyResult b
 
-fuseGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> [Stm SOACS]
-fuseGraph stms results inputs = trace (unlines (map ppr stms_new)) stms_new
-  where
-      graph_not_fused = mkDepGraph stms results (trace (show inputs) inputs)
-      graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
-      graph_fused =  doAllFusion graph_not_fused'
-      graph_fused' = trace (pprg graph_fused) graph_fused
-      stms_new = linearizeGraph graph_fused'
+fuseGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> PassM [Stm SOACS]
+fuseGraph stms results inputs =
+  do
+    graph_not_fused <- mkDepGraph stms results (trace (show inputs) inputs)
+    let graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
+    graph_fused <-  doAllFusion graph_not_fused'
+    let graph_fused' = trace (pprg graph_fused) graph_fused
+    let stms_new = linearizeGraph graph_fused'
+    return $ trace (unlines (map ppr stms_new)) stms_new
+
 
 
 linearizeGraph :: DepGraph -> [Stm SOACS]
 linearizeGraph g = reverse $ mapMaybe stmFromNode $ Q.topsort' g
 
 doAllFusion :: DepGraphAug
-doAllFusion g = applyAugs g [keeptrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, runInnerFusion]
+doAllFusion = applyAugs [keeptrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, runInnerFusion]
 
 doInnerFusion :: DepGraphAug
-doInnerFusion g = id g
+doInnerFusion g = pure g
 
 
 -- map-fusion part
@@ -150,10 +155,10 @@ doInnerFusion g = id g
 
 doMapFusion :: DepGraphAug
 -- go through each node and attempt a map fusion
-doMapFusion g = applyAugs g (map tryFuseNodeInGraph $ labNodes g)
+doMapFusion g = applyAugs (map tryFuseNodeInGraph $ labNodes g) g
 
 doHorizontalFusion :: DepGraphAug
-doHorizontalFusion g = applyAugs g (map  horizontalFusionOnNode (nodes g))
+doHorizontalFusion g = applyAugs (map  horizontalFusionOnNode (nodes g)) g
 
   -- for each node, find what came before, attempt to fuse
 
@@ -164,7 +169,7 @@ horizontalFusionOnNode node g = try_fuse_all incoming_nodes g
 
 
 try_fuse_all :: [Node] -> DepGraphAug
-try_fuse_all nodes g = applyAugs g (map (uncurry tryFuseNodesInGraph2) pairs)
+try_fuse_all nodes = applyAugs (map (uncurry tryFuseNodesInGraph2) pairs)
   where
     pairs = [(x, y) | x <- nodes, y <- nodes,  x < y]
 
@@ -215,8 +220,8 @@ d_fusion_feasability g n1 n2 = lessThanOneDep n1 && lessThanOneDep n2
 tryFuseNodeInGraph :: DepNode -> DepGraphAug
 tryFuseNodeInGraph node_to_fuse g =
   if gelem node_to_fuse_id g
-  then applyAugs g (map (tryFuseNodesInGraph node_to_fuse_id) fuses_with)
-  else g
+  then applyAugs (map (tryFuseNodesInGraph node_to_fuse_id) fuses_with) g
+  else pure g
   where
     fuses_with = map nodeFromLNode $ output g node_to_fuse
     node_to_fuse_id = nodeFromLNode node_to_fuse
@@ -226,12 +231,12 @@ tryFuseNodesInGraph :: Node -> Node -> DepGraphAug
 -- check that they have no other dependencies
 -- fuse them
 tryFuseNodesInGraph node_1 node_2 g
-  | not (gelem node_1 g && gelem node_2 g) = g
+  | not (gelem node_1 g && gelem node_2 g) = pure g
   | v_fusion_feasability g node_1 node_2 =
     case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
-      Just new_Context -> (&) new_Context $ delNodes [node_1, node_2] g
-      Nothing -> g
-  | otherwise = g
+      Just new_Context -> pure $ (&) new_Context $ delNodes [node_1, node_2] g
+      Nothing -> pure g
+  | otherwise = pure g
     where
       -- sorry about this
       infusable_nodes = concatMap (depsFromEdge g)
@@ -241,12 +246,12 @@ tryFuseNodesInGraph node_1 node_2 g
 -- for horizontal fusion
 tryFuseNodesInGraph2 :: Node -> Node -> DepGraphAug
 tryFuseNodesInGraph2 node_1 node_2 g
-  | not (gelem node_1 g && gelem node_2 g) = g
+  | not (gelem node_1 g && gelem node_2 g) = pure g
   | d_fusion_feasability g node_1 node_2 =
     case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
-      Just new_Context -> (&) new_Context $ delNodes [node_1, node_2] g
-      Nothing -> g
-  | otherwise = g
+      Just new_Context -> pure $ (&) new_Context $ delNodes [node_1, node_2] g
+      Nothing -> pure  g
+  | otherwise = pure g
     where
       -- sorry about this
       infusable_nodes = concatMap (depsFromEdge g)
@@ -447,10 +452,11 @@ fuseLambda lam_1 lam_2  =
 -- the same as that fixed-point function in util
 keeptrying :: DepGraphAug -> DepGraphAug
 keeptrying f g =
-  let r = f g in
-  let r2 = f r in
-    if equal r r2 then r
-    else keeptrying f r2
+  do
+  r  <- f g
+  r2 <- f r
+  if equal r r2 then pure r
+  else keeptrying f r2
 
 -- substituteNames
 
@@ -458,7 +464,7 @@ keeptrying f g =
 -- getstms
 
 removeUnusedOutputs :: DepGraphAug
-removeUnusedOutputs g = gmap (removeUnusedOutputsFromContext g) g
+removeUnusedOutputs g = pure $ gmap (removeUnusedOutputsFromContext g) g
 
 vNameFromAdj :: DepGraph -> Node -> (EdgeT, Node) -> [VName]
 vNameFromAdj g n1 (edge, n2) = depsFromEdge g (n2,n1, edge)
@@ -497,29 +503,47 @@ removeOutputsExcept toKeep s = case s of
 
 -- do fusion on the inner nodes -
 runInnerFusion :: DepGraphAug
-runInnerFusion g = gmap (runInnerFusionOnContext g) g
+runInnerFusion g = applyAugs (map runInnerFusionOnContext (nodes g)) g
 
-runInnerFusionOnContext :: DepGraph -> DepContext -> DepContext
-runInnerFusionOnContext g c@(incomming, node, nodeT, outgoing) =
-  case nodeT of
-  SNode (Let pats aux (If size b1 b2 branchType )) ->
-      (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)), outgoing)
+runInnerFusionOnContext :: Node -> DepGraphAug
+runInnerFusionOnContext n g =
+  case match n g of
+    (Just c, g') -> do c' <- change c
+                       return $ c' & g'
+    (Nothing, g') -> pure g'
     where
-      b1_new = doFusionInner b1
-      b2_new = doFusionInner b2
-  SNode (Let pats aux (DoLoop params form body)) ->
-    (incomming, node, SNode (Let pats aux (DoLoop params form (doFusionInner body))), outgoing)
-  _ -> c
-  where
-    doFusionInner :: Body SOACS -> Body SOACS
-    doFusionInner b = b_new
-      where
-        inputs = concatMap (vNameFromAdj g node) incomming
-        stms = stmsToList (bodyStms b)
-        results = namesFromRes (bodyResult b)
-        stms_new = linearizeGraph $ doAllFusion $ mkDepGraphInner stms results inputs
-        b_new = b {bodyStms = stmsFromList stms_new}
+      change :: DepContext -> PassM DepContext
+      change c@(incomming, node, nodeT, outgoing) =
+        case nodeT of
+          SNode (Let pats aux (If size b1 b2 branchType )) ->
+            do
+              b1_new <- doFusionInner b1
+              b2_new <- doFusionInner b2
+              return (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)), outgoing)
+          SNode (Let pats aux (DoLoop params form body)) ->
+            do
+              b_new <- doFusionInner body
+              return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)), outgoing)
+          _ -> return c
+          where
+            doFusionInner :: Body SOACS -> PassM (Body SOACS)
+            doFusionInner b =
+              do
+                graph <- mkDepGraphInner stms results inputs
+                fused_graph <- doAllFusion graph
+                let new_stms = linearizeGraph graph
+                return b {bodyStms = stmsFromList new_stms}
+              where
+                inputs = concatMap (vNameFromAdj g node) incomming
+                stms = stmsToList (bodyStms b)
+                results = namesFromRes (bodyResult b)
+
+
+
 -- what about inner lambdas??????
+
+
+
 
 
 
