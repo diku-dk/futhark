@@ -26,7 +26,7 @@ import Data.Foldable (foldlM)
 
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
-data EdgeT = InfDep VName | Dep VName | Cons | Fake | Res deriving (Eq, Ord)
+data EdgeT = InfDep VName | Dep VName | Cons VName | Fake | Res VName deriving (Eq, Ord)
 data NodeT = SNode (Stm SOACS) | RNode VName | InNode VName
   deriving (Eq, Ord)
 
@@ -34,9 +34,9 @@ data NodeT = SNode (Stm SOACS) | RNode VName | InNode VName
 instance Show EdgeT where
   show (Dep vName) = "Dep " <> ppr vName
   show (InfDep vName) = "iDep " <> ppr vName
-  show Cons = "Cons"
+  show (Cons _) = "Cons"
   show Fake = "Fake"
-  show Res  = "Res"
+  show (Res _) = "Res"
 
 -- inputs could have their own edges - to facilitate fusion
 
@@ -147,13 +147,11 @@ lNodeFromNode g n = labNode' (context g n)
 labFromEdge :: DepGraph -> DepEdge -> DepNode
 labFromEdge g (n1, n2, lab) = lNodeFromNode g n1
 
-depsFromEdge :: DepGraph -> DepEdge -> [VName]
-depsFromEdge g e = case edgeLabel e of
+depsFromEdge ::  DepEdge -> [VName]
+depsFromEdge e = case edgeLabel e of
   (Dep name) -> [name]
   (InfDep name) -> [name]
-  Res -> case labFromEdge g e of
-    (_, RNode n) -> [n]
-    _ -> []
+  (Res name) -> [name]
   _ -> []
 
 input :: DepGraph -> DepNode -> [DepNode]
@@ -204,7 +202,7 @@ addExtraCons g = depGraphInsertEdges new_edges g
   where
     new_edges = concatMap make_edge (labEdges g)
     make_edge :: DepEdge -> [DepEdge]
-    make_edge (from, to, Cons) = [toLEdge (from, to2) Fake | to2 <- filter (/= from) $ pre g to]
+    make_edge (from, to, Cons _) = [toLEdge (from, to2) Fake | to2 <- filter (/= from) $ pre g to]
     make_edge _ = []
 
 addResEdges :: DepGraphAug
@@ -273,13 +271,13 @@ getStmDeps (SNode s) = map (\x -> (x, Dep x)) names
 getStmDeps _ = []
 
 getStmCons :: EdgeGenerator
-getStmCons (SNode s) = zip names (repeat Cons)
+getStmCons (SNode s) = zip names (map Cons names)
   where
     names =  namesToList . consumedInStm . Alias.analyseStm mempty $ s
 getStmCons _ = []
 
 getStmRes :: EdgeGenerator
-getStmRes (RNode name) = [(name, Res)]
+getStmRes (RNode name) = [(name, Res name)]
 getStmRes _ = []
 
 -- TODO: Figure out where to put this

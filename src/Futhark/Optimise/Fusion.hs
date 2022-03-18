@@ -50,6 +50,7 @@ import Data.FileEmbed (bsToExp)
 import GHC.TopHandler (runNonIO)
 import qualified Futhark.Util as L
 import Control.Monad (foldM)
+import Data.Foldable (foldlM)
 
 
 -- unofficial TODO
@@ -179,19 +180,19 @@ try_fuse_all nodes = applyAugs (map (uncurry tryFuseNodesInGraph2) pairs)
 -- contextFromLNode g lnode = context g $ nodeFromLNode lnode
 
 isRes :: (Node, EdgeT) -> Bool
-isRes (_,Res) = True
+isRes (_,Res _) = True
 isRes _ = False
 
 isDep :: EdgeT -> Bool
 isDep (Dep _) = True
 isDep (InfDep _) = True
-isDep Res = True -- unintuitive, but i think it works
+isDep (Res _) = True -- unintuitive, but i think it works
 isDep _ = False
 
 isInf :: (Node, Node, EdgeT) -> Bool
 isInf (_,_,e) = case e of
   InfDep vn -> True
-  Cons -> False -- you would think this sholud be true - but mabye this works
+  (Cons _) -> False -- you would think this sholud be true - but mabye this works
   Fake -> True
   _ -> False
 
@@ -239,7 +240,7 @@ tryFuseNodesInGraph node_1 node_2 g
   | otherwise = pure g
     where
       -- sorry about this
-      infusable_nodes = concatMap (depsFromEdge g)
+      infusable_nodes = concatMap depsFromEdge
         (concatMap (edgesBetween g node_1) (filter (/=node_2) $ pre g node_1))
                                   -- L.\\ edges_between g node_1 node_2)
 
@@ -254,7 +255,7 @@ tryFuseNodesInGraph2 node_1 node_2 g
   | otherwise = pure g
     where
       -- sorry about this
-      infusable_nodes = concatMap (depsFromEdge g)
+      infusable_nodes = concatMap depsFromEdge
         (concatMap (edgesBetween g node_1) (filter (/=node_2) $ pre g node_1))
 
 
@@ -466,15 +467,15 @@ keeptrying f g =
 removeUnusedOutputs :: DepGraphAug
 removeUnusedOutputs g = pure $ gmap (removeUnusedOutputsFromContext g) g
 
-vNameFromAdj :: DepGraph -> Node -> (EdgeT, Node) -> [VName]
-vNameFromAdj g n1 (edge, n2) = depsFromEdge g (n2,n1, edge)
+vNameFromAdj :: Node -> (EdgeT, Node) -> [VName]
+vNameFromAdj n1 (edge, n2) = depsFromEdge (n2,n1, edge)
 
 
 removeUnusedOutputsFromContext :: DepGraph -> DepContext  -> DepContext
 removeUnusedOutputsFromContext g (incoming, n1, SNode s, outgoing) =
   (incoming, n1, SNode new_stm, outgoing)
   where
-    new_stm = removeOutputsExcept (concatMap (vNameFromAdj g n1) incoming) s
+    new_stm = removeOutputsExcept (concatMap (vNameFromAdj n1) incoming) s
 removeUnusedOutputsFromContext _ context = context
 
 removeOutputsExcept :: [VName] -> Stm SOACS -> Stm SOACS
@@ -499,44 +500,49 @@ removeOutputsExcept toKeep s = case s of
   s -> s
 
 
+mapAcross :: (DepContext -> PassM DepContext) -> DepGraphAug
+mapAcross f g =
+  do
+    let ns = nodes g
+    foldlM (flip helper) g ns
+    where
+      helper :: Node -> DepGraphAug
+      helper n g = case match n g of
+        (Just c, g') ->
+          do
+            c' <- f c
+            return $ c' & g'
+        (Nothing, g') -> pure g'
 
 
 -- do fusion on the inner nodes -
 runInnerFusion :: DepGraphAug
-runInnerFusion g = applyAugs (map runInnerFusionOnContext (nodes g)) g
+runInnerFusion = mapAcross runInnerFusionOnContext
 
-runInnerFusionOnContext :: Node -> DepGraphAug
-runInnerFusionOnContext n g =
-  case match n g of
-    (Just c, g') -> do c' <- change c
-                       return $ c' & g'
-    (Nothing, g') -> pure g'
-    where
-      change :: DepContext -> PassM DepContext
-      change c@(incomming, node, nodeT, outgoing) =
-        case nodeT of
-          SNode (Let pats aux (If size b1 b2 branchType )) ->
-            do
-              b1_new <- doFusionInner b1
-              b2_new <- doFusionInner b2
-              return (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)), outgoing)
-          SNode (Let pats aux (DoLoop params form body)) ->
-            do
-              b_new <- doFusionInner body
-              return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)), outgoing)
-          _ -> return c
-          where
-            doFusionInner :: Body SOACS -> PassM (Body SOACS)
-            doFusionInner b =
-              do
-                graph <- mkDepGraphInner stms results inputs
-                fused_graph <- doAllFusion graph
-                let new_stms = linearizeGraph graph
-                return b {bodyStms = stmsFromList new_stms}
-              where
-                inputs = concatMap (vNameFromAdj g node) incomming
-                stms = stmsToList (bodyStms b)
-                results = namesFromRes (bodyResult b)
+runInnerFusionOnContext :: DepContext -> PassM DepContext
+runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
+  SNode (Let pats aux (If size b1 b2 branchType )) ->
+    do
+      b1_new <- doFusionInner b1
+      b2_new <- doFusionInner b2
+      return (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)), outgoing)
+  SNode (Let pats aux (DoLoop params form body)) ->
+    do
+      b_new <- doFusionInner body
+      return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)), outgoing)
+  _ -> return c
+  where
+    doFusionInner :: Body SOACS -> PassM (Body SOACS)
+    doFusionInner b =
+      do
+        graph <- mkDepGraphInner stms results inputs
+        fused_graph <- doAllFusion graph
+        let new_stms = linearizeGraph graph
+        return b {bodyStms = stmsFromList new_stms}
+      where
+        inputs = concatMap (vNameFromAdj node) incomming
+        stms = stmsToList (bodyStms b)
+        results = namesFromRes (bodyResult b)
 
 
 
