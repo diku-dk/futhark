@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Slightly better parse errors (again).
 
+* `futhark literate` now supports a `file:` option in `:img` and
+  `:video` directives (#1491).
+
 ### Removed
 
 ### Changed

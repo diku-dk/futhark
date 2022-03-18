@@ -11,3 +11,6 @@ let checkerboard_bool =
       (iota 8)
 
 -- > :img checkerboard_bool
+
+-- > :img checkerboard_bool;
+-- file: foo.bar
