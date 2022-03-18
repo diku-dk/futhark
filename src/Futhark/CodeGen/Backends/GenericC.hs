@@ -766,8 +766,13 @@ defineMemorySpace space = do
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
   cached <- isJust <$> cacheMem name
+  fat <- fatMemory space
   unless cached $
-    modify $ \s -> s {compDeclaredMem = (name, space) : compDeclaredMem s}
+    if fat
+      then modify $ \s -> s {compDeclaredMem = (name, space) : compDeclaredMem s}
+      else do
+        ty <- memToCType name space
+        decl [C.cdecl|$ty:ty $id:name;|]
 
 resetMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 resetMem mem space = do
