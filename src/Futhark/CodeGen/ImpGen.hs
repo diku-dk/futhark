@@ -65,6 +65,7 @@ module Futhark.CodeGen.ImpGen
     ToExp (..),
     compileAlloc,
     everythingVolatile,
+    everythingUniform,
     compileBody,
     compileBody',
     compileLoopBody,
@@ -1140,6 +1141,9 @@ dArray name pt shape mem ixfun =
 
 everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
+
+everythingUniform :: ImpM rep r op a -> ImpM rep r op a
+everythingUniform = local $ \env -> env {envVolatility = Imp.Uniform}
 
 -- | Remove the array targets.
 funcallTargets :: [ValueDestination] -> ImpM rep r op [VName]

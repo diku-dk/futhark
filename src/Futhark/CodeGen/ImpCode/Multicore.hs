@@ -42,8 +42,6 @@ data Multicore
   | -- | Escape hatch for generating builtin ISPC functions
     -- like extract or broadcast
     ISPCBuiltin VName Name [Exp]
-  | -- | Wraps a variable to signal it should get generated as uniform
-    DeclareUniform VName [Param]
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -147,7 +145,6 @@ instance Pretty Multicore where
     </> text "}" 
   ppr (ISPCBuiltin dest name args) =
     ppr dest <+> "<-" <+> ppr name <+> "(" <+> ppr args <+> ")"
-  ppr (DeclareUniform _ params) = ppr params
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -176,4 +173,3 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body)
   freeIn' (ISPCBuiltin dest _ args) =
     freeIn' dest <> freeIn' args
-  freeIn' (DeclareUniform _ _) = mempty --todo(K)

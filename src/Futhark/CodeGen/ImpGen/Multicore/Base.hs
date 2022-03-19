@@ -24,7 +24,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     extractVectorLane,
     inISPC,
     toParam,
-    createUniform
+    everythingUniformDWIM
   )
 where
 
@@ -43,6 +43,7 @@ import Prelude hiding (quot, rem)
 import Debug.Trace
 import qualified Data.Text as T
 import Futhark.CodeGen.ImpCode (TExp)
+import Futhark.CodeGen.ImpCode.Multicore (Multicore)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -499,15 +500,61 @@ toIntegral 32 = return int32
 toIntegral 64 = return int64
 toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b
 
-createUniform :: TExp Int64 -> SubExp -> (TExp t -> MulticoreGen (TV t)) ->  MulticoreGen SubExp
-createUniform j se m = do
-  t <- subExpType se
-  e <- toExp se
-  let texp = TPrimExp e
-  (tv, _) <- collect' $ m texp
-  let name = tvVar tv
-  let untyped_j = untyped j
-  p <- toParam name t
-  emit $ Imp.Op $ Imp.DeclareUniform name p
-  emit $ Imp.Op $ Imp.ISPCBuiltin name (nameFromString "extract") [e, untyped_j]  
-  return $ Var name
+-- TODO(k): reimplement
+-- createUniform :: TExp Int64 -> SubExp -> (TExp t -> MulticoreGen (TV t)) ->  MulticoreGen SubExp
+-- createUniform j se m = do
+--   t <- subExpType se
+--   e <- toExp se
+--   let texp = TPrimExp e
+--   (tv, _) <- collect' $ m texp
+--   let name = tvVar tv
+--   let untyped_j = untyped j
+--   p <- toParam name t
+--   emit $ Imp.Op $ Imp.DeclareUniform name p
+--   emit $ Imp.Op $ Imp.ISPCBuiltin name (nameFromString "extract") [e, untyped_j]  
+--   return $ Var name
+-- TODO(k): fix this and make it poolymorphic
+walkCode :: (Imp.Code -> Imp.Code) ->
+ (Multicore -> Multicore)
+ -> Imp.Code
+ -> Imp.Code 
+walkCode f g (x Imp.:>>: y) =
+  f $ walkCode f g x Imp.:>>: walkCode f g y
+walkCode f g (Imp.For i bound code) = 
+  f $ Imp.For i bound $ walkCode f g code
+walkCode f g (Imp.While cond code) = 
+  f $ Imp.While cond $ walkCode f g code
+walkCode f g (Imp.If cond x y) =
+  f $ Imp.If cond (walkCode f g x) (walkCode f g y)
+walkCode f g (Imp.Op kernel) =
+  f $ Imp.Op $ trace "op" $ walkRep g f kernel
+walkCode f _ (Imp.DeclareMem name space) =
+  f $ Imp.DeclareMem name space
+walkCode f _ (Imp.DeclareScalar vname _ pt) =
+  f $ Imp.DeclareScalar vname Imp.Uniform  pt
+walkCode f _ (Imp.DeclareArray vname space pt ac) =
+  f $ Imp.DeclareArray vname space pt ac
+walkCode f g (Imp.Comment s code) =
+  f $ Imp.Comment s $ walkCode f g code
+walkCode f _ code = f code
+
+walkRep :: (Multicore -> Multicore) -> (Imp.Code -> Imp.Code) -> Multicore -> Multicore
+walkRep f g (Imp.ParLoop s code p) =
+  f $ Imp.ParLoop s (walkCode g f code) p
+walkRep f g (Imp.ISPCKernel code p1 p2) =
+  f $ Imp.ISPCKernel (walkCode g f code) p1 p2
+walkRep f g (Imp.ForEach vname e code) =
+  f $ Imp.ForEach vname e $ walkCode g f code
+walkRep f g (Imp.ForEachActive vname code) =
+  f $ trace "here" $ Imp.ForEachActive vname $ walkCode g f code
+walkRep f _ rep = f rep
+ 
+declareUniform :: Imp.Code -> Imp.Code
+declareUniform (Imp.DeclareScalar vname _ pt) =
+  Imp.DeclareScalar vname Imp.Uniform pt
+declareUniform code = code
+
+everythingUniformDWIM :: MulticoreGen () -> MulticoreGen ()
+everythingUniformDWIM m = do
+  code <- collect m
+  emit $ walkCode declareUniform id code

@@ -106,6 +106,7 @@ import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
 import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
+import Debug.Trace (traceM)
 
 -- How public an array type definition sould be.  Public types show up
 -- in the generated API, while private types are used only to
@@ -1973,7 +1974,7 @@ volQuals :: Qualifier -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
 volQuals Uniform  = [C.ctyquals|uniform|]
-volQuals Varying = [C.ctyquals|varying|]
+volQuals Varying = []
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
