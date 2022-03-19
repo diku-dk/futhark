@@ -12,6 +12,7 @@ where
 
 import Control.Monad
 import Data.List (find, foldl', isSuffixOf, sort)
+import Data.List.NonEmpty (NonEmpty (..))
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Construct
@@ -81,14 +82,14 @@ fuseConcatArg xs y =
 
 simplifyConcat :: BuilderOps rep => BottomUpRuleBasicOp rep
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
-simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
+simplifyConcat (vtable, _) pat _ (Concat i (x :| xs) new_d)
   | Just r <- arrayRank <$> ST.lookupType x vtable,
     let perm = [i] ++ [0 .. i -1] ++ [i + 1 .. r -1],
     Just (x', x_cs) <- transposedBy perm x,
     Just (xs', xs_cs) <- unzip <$> mapM (transposedBy perm) xs = Simplify $ do
     concat_rearrange <-
       certifying (x_cs <> mconcat xs_cs) $
-        letExp "concat_rearrange" $ BasicOp $ Concat 0 x' xs' new_d
+        letExp "concat_rearrange" $ BasicOp $ Concat 0 (x' :| xs') new_d
     letBind pat $ BasicOp $ Rearrange perm concat_rearrange
   where
     transposedBy perm1 v =
@@ -99,28 +100,28 @@ simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
 
 -- Removing a concatenation that involves only a single array.  This
 -- may be produced as a result of other simplification rules.
-simplifyConcat _ pat aux (Concat _ x [] _) =
+simplifyConcat _ pat aux (Concat _ (x :| []) _) =
   Simplify $
     -- Still need a copy because Concat produces a fresh array.
     auxing aux $ letBind pat $ BasicOp $ Copy x
 -- concat xs (concat ys zs) == concat xs ys zs
-simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i x xs new_d)
+simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i (x :| xs) new_d)
   | x' /= x || concat xs' /= xs =
     Simplify $
       certifying (cs <> x_cs <> mconcat xs_cs) $
         attributing attrs $
           letBind pat $
-            BasicOp $ Concat i x' (zs ++ concat xs') new_d
+            BasicOp $ Concat i (x' :| zs ++ concat xs') new_d
   where
     (x' : zs, x_cs) = isConcat x
     (xs', xs_cs) = unzip $ map isConcat xs
     isConcat v = case ST.lookupBasicOp v vtable of
-      Just (Concat j y ys _, v_cs) | j == i -> (y : ys, v_cs)
+      Just (Concat j (y :| ys) _, v_cs) | j == i -> (y : ys, v_cs)
       _ -> ([v], mempty)
 
 -- Fusing arguments to the concat when possible.  Only done when
 -- concatenating along the outer dimension for now.
-simplifyConcat (vtable, _) pat aux (Concat 0 x xs outer_w)
+simplifyConcat (vtable, _) pat aux (Concat 0 (x :| xs) outer_w)
   | -- We produce the to-be-concatenated arrays in reverse order, so
     -- reverse them back.
     y : ys <-
@@ -133,7 +134,7 @@ simplifyConcat (vtable, _) pat aux (Concat 0 x xs outer_w)
       elem_type <- lookupType x
       y' <- fromConcatArg elem_type y
       ys' <- mapM (fromConcatArg elem_type) ys
-      auxing aux $ letBind pat $ BasicOp $ Concat 0 y' ys' outer_w
+      auxing aux $ letBind pat $ BasicOp $ Concat 0 (y' :| ys') outer_w
   where
     -- If we fuse so much that there is only a single input left, then
     -- it must have the right size.
@@ -390,6 +391,13 @@ ruleBasicOp vtable pat aux (UpdateAcc acc _ vs)
     Just (_, _, Just (_, ne)) <- ST.entryAccInput =<< ST.lookup token vtable,
     vs == ne =
     Simplify . auxing aux $ letBind pat $ BasicOp $ SubExp $ Var acc
+-- Manifest of a a copy can be simplified to manifesting the original
+-- array, if it is still available.
+ruleBasicOp vtable pat aux (Manifest perm v1)
+  | Just (Copy v2, cs) <- ST.lookupBasicOp v1 vtable,
+    ST.available v2 vtable =
+    Simplify . auxing aux . certifying cs $
+      letBind pat $ BasicOp $ Manifest perm v2
 ruleBasicOp _ _ _ _ =
   Skip
 

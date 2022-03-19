@@ -671,9 +671,7 @@ matchReturnType ::
   [MemInfo SubExp NoUniqueness MemBind] ->
   TC.TypeM rep ()
 matchReturnType rettype res ts = do
-  let (ctx_res, _val_res) = splitFromEnd (length rettype) res
-
-      existentialiseIxFun0 :: IxFun -> ExtIxFun
+  let existentialiseIxFun0 :: IxFun -> ExtIxFun
       existentialiseIxFun0 = fmap $ fmap Free
 
       fetchCtx i = case maybeNth i $ zip res ts of
@@ -715,9 +713,7 @@ matchReturnType rettype res ts = do
                 "\nixfun of body result: ",
                 pretty y_ixfun,
                 "\nixfun of return type: ",
-                pretty x_ixfun,
-                "\nand context elements: ",
-                pretty ctx_res
+                pretty x_ixfun
               ]
       checkMemReturn
         (ReturnsNewBlock x_space x_ext x_ixfun)
@@ -730,8 +726,6 @@ matchReturnType rettype res ts = do
                 </> indent 2 (ppr y_ixfun)
                 </> "Ixfun of return type:"
                 </> indent 2 (ppr x_ixfun)
-                </> "Context elements: "
-                </> indent 2 (ppr ctx_res)
           case x_mem_type of
             MemMem y_space ->
               unless (x_space == y_space) . throwError . unwords $
@@ -767,7 +761,7 @@ matchReturnType rettype res ts = do
 
 matchPatToExp ::
   (Mem rep inner, LetDec rep ~ LetDecMem, TC.Checkable rep) =>
-  Pat (Aliases rep) ->
+  Pat (LetDec (Aliases rep)) ->
   Exp (Aliases rep) ->
   TC.TypeM rep ()
 matchPatToExp pat e = do
@@ -901,7 +895,7 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
             ++ ")"
 
 bodyReturnsFromPat ::
-  PatT (MemBound NoUniqueness) -> [(VName, BodyReturns)]
+  Pat (MemBound NoUniqueness) -> [(VName, BodyReturns)]
 bodyReturnsFromPat pat =
   map asReturns $ patElems pat
   where

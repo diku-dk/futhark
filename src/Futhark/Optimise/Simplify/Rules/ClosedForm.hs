@@ -41,7 +41,7 @@ Motivation:
 foldClosedForm ::
   (ASTRep rep, BuilderOps rep) =>
   VarLookup rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   Lambda rep ->
   [SubExp] ->
   [VName] ->
@@ -79,7 +79,7 @@ foldClosedForm look pat lam accs arrs = do
 -- the do-loop can be expressed in a closed form.
 loopClosedForm ::
   (ASTRep rep, BuilderOps rep) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   [(FParam rep, SubExp)] ->
   Names ->
   IntType ->

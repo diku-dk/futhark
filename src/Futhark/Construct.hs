@@ -47,18 +47,29 @@
 -- z <- letExp "z" $ BasicOp $ BinOp (Add Int32) (Var x) (Var y)
 -- @
 --
+-- == Monadic expression builders
+--
+-- This module also contains "monadic expression" functions that let
+-- us build nested expressions in a "direct" style, rather than using
+-- 'letExp' and friends to bind every sub-part first.  See functions
+-- such as 'eIf' and 'eBody' for example.  See also
+-- "Futhark.Analysis.PrimExp" and the 'ToExp' type class.
+--
 -- == Examples
 --
 -- The "Futhark.Transform.FirstOrderTransform" module is a
 -- (relatively) simple example of how to use these components.  As are
 -- some of the high-level building blocks in this very module.
 module Futhark.Construct
-  ( letSubExp,
-    letSubExps,
+  ( -- * Basic building blocks
+    module Futhark.Builder,
+    letSubExp,
     letExp,
     letTupExp,
     letTupExp',
     letInPlace,
+
+    -- * Monadic expression builders
     eSubExp,
     eParam,
     eIf,
@@ -75,6 +86,8 @@ module Futhark.Construct
     eBlank,
     eAll,
     eOutOfBounds,
+
+    -- * Other building blocks
     asIntZ,
     asIntS,
     resultBody,
@@ -93,7 +106,6 @@ module Futhark.Construct
     isFullSlice,
     sliceAt,
     ifCommon,
-    module Futhark.Builder,
 
     -- * Result types
     instantiateShapes,
@@ -115,6 +127,10 @@ import Futhark.Builder
 import Futhark.IR
 import Futhark.Util (maybeNth)
 
+-- | @letSubExp desc e@ binds the expression @e@, which must produce a
+-- single value.  Returns a t'SubExp' corresponding to the resulting
+-- value.  For expressions that produce multiple values, see
+-- 'letTupExp'.
 letSubExp ::
   MonadBuilder m =>
   String ->
@@ -123,6 +139,7 @@ letSubExp ::
 letSubExp _ (BasicOp (SubExp se)) = return se
 letSubExp desc e = Var <$> letExp desc e
 
+-- | Like 'letSubExp', but returns a name rather than a t'SubExp'.
 letExp ::
   MonadBuilder m =>
   String ->
@@ -138,6 +155,9 @@ letExp desc e = do
     [v] -> return v
     _ -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
+-- | Like 'letExp', but the 'VName' and 'Slice' denote an array that
+-- is 'Update'd with the result of the expression.  The name of the
+-- updated array is returned.
 letInPlace ::
   MonadBuilder m =>
   String ->
@@ -149,13 +169,7 @@ letInPlace desc src slice e = do
   tmp <- letSubExp (desc ++ "_tmp") e
   letExp desc $ BasicOp $ Update Unsafe src slice tmp
 
-letSubExps ::
-  MonadBuilder m =>
-  String ->
-  [Exp (Rep m)] ->
-  m [SubExp]
-letSubExps desc = mapM $ letSubExp desc
-
+-- | Like 'letExp', but the expression may return multiple values.
 letTupExp ::
   (MonadBuilder m) =>
   String ->
@@ -169,6 +183,7 @@ letTupExp name e = do
   letBindNames names e
   pure names
 
+-- | Like 'letTupExp', but returns t'SubExp's instead of 'VName's.
 letTupExp' ::
   (MonadBuilder m) =>
   String ->
@@ -177,18 +192,25 @@ letTupExp' ::
 letTupExp' _ (BasicOp (SubExp se)) = return [se]
 letTupExp' name ses = map Var <$> letTupExp name ses
 
+-- | Turn a subexpression into a monad expression.  Does not actually
+-- lead to any code generation.  This is supposed to be used alongside
+-- the other monadic expression functions, such as 'eIf'.
 eSubExp ::
   MonadBuilder m =>
   SubExp ->
   m (Exp (Rep m))
 eSubExp = pure . BasicOp . SubExp
 
+-- | Treat a parameter as a monadic expression.
 eParam ::
   MonadBuilder m =>
   Param t ->
   m (Exp (Rep m))
 eParam = eSubExp . Var . paramName
 
+-- | Construct an 'If' expression from a monadic condition and monadic
+-- branches.  'eBody' might be convenient for constructing the
+-- branches.
 eIf ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   m (Exp (Rep m)) ->
@@ -233,6 +255,7 @@ bodyExtType (Body _ stms res) =
   where
     stmsscope = scopeOf stms
 
+-- | Construct a v'BinOp' expression with the given operator.
 eBinOp ::
   MonadBuilder m =>
   BinOp ->
@@ -244,6 +267,7 @@ eBinOp op x y = do
   y' <- letSubExp "y" =<< y
   return $ BasicOp $ BinOp op x' y'
 
+-- | Construct a v'CmpOp' expression with the given comparison.
 eCmpOp ::
   MonadBuilder m =>
   CmpOp ->
@@ -255,6 +279,7 @@ eCmpOp op x y = do
   y' <- letSubExp "y" =<< y
   return $ BasicOp $ CmpOp op x' y'
 
+-- | Construct a v'ConvOp' expression with the given conversion.
 eConvOp ::
   MonadBuilder m =>
   ConvOp ->
@@ -264,6 +289,8 @@ eConvOp op x = do
   x' <- letSubExp "x" =<< x
   return $ BasicOp $ ConvOp op x'
 
+-- | Construct a 'SSignum' expression.  Fails if the provided
+-- expression is not of integer type.
 eSignum ::
   MonadBuilder m =>
   m (Exp (Rep m)) ->
@@ -278,12 +305,20 @@ eSignum em = do
     _ ->
       error $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 
+-- | Construct a 'Copy' expression.
 eCopy ::
   MonadBuilder m =>
   m (Exp (Rep m)) ->
   m (Exp (Rep m))
 eCopy e = BasicOp . Copy <$> (letExp "copy_arg" =<< e)
 
+-- | Construct a body from expressions.  If multiple expressions are
+-- provided, their results will be concatenated in order and returned
+-- as the result.
+--
+-- /Beware/: this will not produce correct code if the type of the
+-- body would be existential.  That is, the type of the results being
+-- returned should be invariant to the body.
 eBody ::
   (MonadBuilder m) =>
   [m (Exp (Rep m))] ->
@@ -293,6 +328,9 @@ eBody es = buildBody_ $ do
   xs <- mapM (letTupExp "x") es'
   pure $ varsRes $ concat xs
 
+-- | Bind each lambda parameter to the result of an expression, then
+-- bind the body of the lambda.  The expressions must produce only a
+-- single value each.
 eLambda ::
   MonadBuilder m =>
   Lambda (Rep m) ->
@@ -304,6 +342,9 @@ eLambda lam args = do
   where
     bindParam param arg = letBindNames [paramName param] =<< arg
 
+-- | @eRoundToMultipleOf t x d@ produces an expression that rounds the
+-- integer expression @x@ upwards to be a multiple of @d@, with @t@
+-- being the integer type of the expressions.
 eRoundToMultipleOf ::
   MonadBuilder m =>
   IntType ->
@@ -445,7 +486,7 @@ binLambda bop arg_t ret_t = do
         lambdaBody = body
       }
 
--- | Easily construct a 'Lambda' within a 'MonadBuilder'.
+-- | Easily construct a t'Lambda' within a 'MonadBuilder'.
 mkLambda ::
   MonadBuilder m =>
   [LParam (Rep m)] ->
@@ -492,6 +533,7 @@ isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) (unSlice slice
     allOfIt d (DimSlice _ n _) = d == n
     allOfIt _ _ = False
 
+-- | Produce the common case of an 'IfDec'.
 ifCommon :: [Type] -> IfDec ExtType
 ifCommon ts = IfDec (staticShapes ts) IfNormal
 
@@ -547,7 +589,7 @@ mapResult f (Body _ stms res) =
 -- | Instantiate all existential parts dimensions of the given
 -- type, using a monadic action to create the necessary t'SubExp's.
 -- You should call this function within some monad that allows you to
--- collect the actions performed (say, 'Writer').
+-- collect the actions performed (say, 'State').
 instantiateShapes ::
   Monad m =>
   (Int -> m SubExp) ->
@@ -568,6 +610,9 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
           return se
     instantiate' (Free se) = return se
 
+-- | Like 'instantiateShapes', but obtains names from the provided
+-- list.  If an 'Ext' is out of bounds of this list, the function
+-- fails with 'error'.
 instantiateShapes' :: [VName] -> [TypeBase ExtShape u] -> [TypeBase Shape u]
 instantiateShapes' names ts =
   -- Carefully ensure that the order of idents we produce corresponds
@@ -579,6 +624,8 @@ instantiateShapes' names ts =
         Nothing -> error $ "instantiateShapes': " ++ pretty names ++ ", " ++ show x
         Just name -> pure $ Var name
 
+-- | Remove existentials by imposing sizes from another type where
+-- needed.
 removeExistentials :: ExtType -> Type -> Type
 removeExistentials t1 t2 =
   t1

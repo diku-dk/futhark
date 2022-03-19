@@ -378,7 +378,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
       return (l', do_op')
 
 histKernelGlobalPass ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
   SegSpace ->
@@ -396,7 +396,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
   hist_H_chks <- forM (map (histSize . slugOp) slugs) $ \w ->
     dPrimVE "hist_H_chk" $ w `divUp` sExt64 hist_S
 
-  sKernelThread "seghist_global" num_groups group_size (segFlat space) $ do
+  sKernelThread "seghist_global" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
 
     -- Compute subhistogram index for each thread, per histogram.
@@ -414,8 +414,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
         num_threads = sExt64 $ kernelNumThreads constants
     kernelLoop gtid num_threads total_w_64 $ \offset -> do
       -- Construct segment indices.
-      zipWithM_ dPrimV_ space_is $
-        map sExt32 $ unflattenIndex space_sizes_64 offset
+      dIndexSpace (zip space_is space_sizes_64) offset
 
       -- We execute the bucket function once and update each histogram serially.
       -- We apply the bucket function if j=offset+ltid is less than
@@ -469,7 +468,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
                       do_op (bucket_is ++ is)
 
 histKernelGlobal ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -577,7 +576,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
 histKernelLocalPass ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups (Imp.TExp Int64) ->
   Count GroupSize (Imp.TExp Int64) ->
   SegSpace ->
@@ -625,7 +624,8 @@ histKernelLocalPass
         dPrimVE "init_per_thread" $ sExt32 $ group_hists_size `divUp` unCount group_size
       return (histo_dims, histo_size, init_per_thread)
 
-    sKernelThread "seghist_local" num_groups group_size (segFlat space) $
+    let attrs = (defKernelAttrs num_groups group_size) {kAttrCheckLocalMemory = False}
+    sKernelThread "seghist_local" (segFlat space) attrs $
       virtualiseGroups SegVirt (sExt32 $ unCount groups_per_segment * num_segments) $ \group_id -> do
         constants <- kernelConstants <$> askEnv
 
@@ -715,7 +715,7 @@ histKernelLocalPass
         sOp $ Imp.Barrier Imp.FenceLocal
 
         kernelLoop pgtid_in_segment threads_per_segment (sExt32 segment_size') $ \ie -> do
-          dPrimV_ i_in_segment ie
+          dPrimV_ i_in_segment $ sExt64 ie
 
           -- We execute the bucket function once and update each histogram
           -- serially.  This also involves writing to the mapout arrays if
@@ -824,7 +824,7 @@ histKernelLocalPass
 histKernelLocal ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->
@@ -868,7 +868,7 @@ slugMaxLocalMemPasses slug =
     AtomicLocking _ -> 6
 
 localMemoryCase ::
-  [PatElem GPUMem] ->
+  [PatElem LetDecMem] ->
   Imp.TExp Int32 ->
   SegSpace ->
   Imp.TExp Int64 ->
@@ -1023,7 +1023,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
 -- | Generate code for a segmented histogram called from the host.
 compileSegHist ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
   SegSpace ->

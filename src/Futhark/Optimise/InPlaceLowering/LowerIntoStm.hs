@@ -103,13 +103,13 @@ lowerUpdateGPU scope stm updates = lowerUpdate scope stm updates
 lowerUpdatesIntoSegMap ::
   MonadFreshNames m =>
   Scope (Aliases GPU) ->
-  Pat (Aliases GPU) ->
+  Pat (LetDec (Aliases GPU)) ->
   [DesiredUpdate (LetDec (Aliases GPU))] ->
   SegSpace ->
   KernelBody (Aliases GPU) ->
   Maybe
     ( m
-        ( Pat (Aliases GPU),
+        ( Pat (LetDec (Aliases GPU)),
           KernelBody (Aliases GPU),
           Stms (Aliases GPU)
         )
@@ -176,7 +176,7 @@ lowerUpdateIntoLoop ::
   ) =>
   Scope rep ->
   [DesiredUpdate (LetDec rep)] ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   [(FParam rep, SubExp)] ->
   LoopForm rep ->
   Body rep ->

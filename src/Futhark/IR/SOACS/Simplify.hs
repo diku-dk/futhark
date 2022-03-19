@@ -30,13 +30,13 @@ import Control.Monad.Writer
 import Data.Either
 import Data.Foldable
 import Data.List (partition, transpose, unzip6, zip6)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Futhark.Analysis.DataDependencies
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import qualified Futhark.IR as AST
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -67,24 +67,18 @@ simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda ::
-  (HasScope SOACS m, MonadFreshNames m) =>
-  Lambda ->
-  m Lambda
+  (HasScope SOACS m, MonadFreshNames m) => Lambda SOACS -> m (Lambda SOACS)
 simplifyLambda =
   Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyStms ::
-  (HasScope SOACS m, MonadFreshNames m) =>
-  Stms SOACS ->
-  m (Stms SOACS)
+  (HasScope SOACS m, MonadFreshNames m) => Stms SOACS -> m (Stms SOACS)
 simplifyStms stms = do
   scope <- askScope
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers scope stms
 
 simplifyConsts ::
-  MonadFreshNames m =>
-  Stms SOACS ->
-  m (Stms SOACS)
+  MonadFreshNames m => Stms SOACS -> m (Stms SOACS)
 simplifyConsts =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
@@ -155,9 +149,9 @@ instance TraverseOpStms (Wise SOACS) where
 
 fixLambdaParams ::
   (MonadBuilder m, Buildable (Rep m), BuilderOps (Rep m)) =>
-  AST.Lambda (Rep m) ->
+  Lambda (Rep m) ->
   [Maybe SubExp] ->
-  m (AST.Lambda (Rep m))
+  m (Lambda (Rep m))
 fixLambdaParams lam fixes = do
   body <- runBodyBuilder $
     localScope (scopeOfLParams $ lambdaParams lam) $ do
@@ -176,7 +170,7 @@ fixLambdaParams lam fixes = do
     maybeFix p (Just x) = letBindNames [paramName p] $ BasicOp $ SubExp x
     maybeFix _ Nothing = return ()
 
-removeLambdaResults :: [Bool] -> AST.Lambda rep -> AST.Lambda rep
+removeLambdaResults :: [Bool] -> Lambda rep -> Lambda rep
 removeLambdaResults keep lam =
   lam
     { lambdaBody = lam_body',
@@ -363,11 +357,11 @@ removeReplicateWrite _ _ _ _ = Skip
 removeReplicateInput ::
   Aliased rep =>
   ST.SymbolTable rep ->
-  AST.Lambda rep ->
+  Lambda rep ->
   [VName] ->
   Maybe
-    ( [([VName], Certs, AST.Exp rep)],
-      AST.Lambda rep,
+    ( [([VName], Certs, Exp rep)],
+      Lambda rep,
       [VName]
     )
 removeReplicateInput vtable fun arrs
@@ -472,11 +466,11 @@ mapOpToOp (_, used) pat aux1 e
           | otherwise = DimNew w
     certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
       Reshape (redim : newshape) arr
-  | Just (_, cs, _, BasicOp (Concat d arr arrs dw), ps, outer_arr : outer_arrs) <-
+  | Just (_, cs, _, BasicOp (Concat d (arr :| arrs) dw), ps, outer_arr : outer_arrs) <-
       isMapWithOp pat e,
     (arr : arrs) == map paramName ps =
     Simplify . certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
-      Concat (d + 1) outer_arr outer_arrs dw
+      Concat (d + 1) (outer_arr :| outer_arrs) dw
   | Just
       (map_pe, cs, _, BasicOp (Rearrange perm rearrange_arr), [p], [arr]) <-
       isMapWithOp pat e,
@@ -493,13 +487,13 @@ mapOpToOp (_, used) pat aux1 e
 mapOpToOp _ _ _ _ = Skip
 
 isMapWithOp ::
-  PatT dec ->
+  Pat dec ->
   SOAC (Wise SOACS) ->
   Maybe
-    ( PatElemT dec,
+    ( PatElem dec,
       Certs,
       SubExp,
-      AST.Exp (Wise SOACS),
+      Exp (Wise SOACS),
       [Param Type],
       [VName]
     )
@@ -597,7 +591,7 @@ fuseConcatScatter vtable pat _ (Scatter _ arrs fun dests)
     mix = concat . transpose
     incWrites r (w, n, a) = (w, n * r, a) -- ToDO: is it (n*r) or (n+r-1)??
     isConcat v = case ST.lookupExp v vtable of
-      Just (BasicOp (Concat 0 x ys _), cs) -> do
+      Just (BasicOp (Concat 0 (x :| ys) _), cs) -> do
         x_w <- sizeOf x
         y_ws <- mapM sizeOf ys
         guard $ all (x_w ==) y_ws
@@ -677,6 +671,7 @@ data ArrayOp
   = ArrayIndexing Certs VName (Slice SubExp)
   | ArrayRearrange Certs VName [Int]
   | ArrayRotate Certs VName [SubExp]
+  | ArrayReshape Certs VName (ShapeChange SubExp)
   | ArrayCopy Certs VName
   | -- | Never constructed.
     ArrayVar Certs VName
@@ -686,6 +681,7 @@ arrayOpArr :: ArrayOp -> VName
 arrayOpArr (ArrayIndexing _ arr _) = arr
 arrayOpArr (ArrayRearrange _ arr _) = arr
 arrayOpArr (ArrayRotate _ arr _) = arr
+arrayOpArr (ArrayReshape _ arr _) = arr
 arrayOpArr (ArrayCopy _ arr) = arr
 arrayOpArr (ArrayVar _ arr) = arr
 
@@ -693,33 +689,37 @@ arrayOpCerts :: ArrayOp -> Certs
 arrayOpCerts (ArrayIndexing cs _ _) = cs
 arrayOpCerts (ArrayRearrange cs _ _) = cs
 arrayOpCerts (ArrayRotate cs _ _) = cs
+arrayOpCerts (ArrayReshape cs _ _) = cs
 arrayOpCerts (ArrayCopy cs _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
-isArrayOp :: Certs -> AST.Exp rep -> Maybe ArrayOp
+isArrayOp :: Certs -> Exp rep -> Maybe ArrayOp
 isArrayOp cs (BasicOp (Index arr slice)) =
   Just $ ArrayIndexing cs arr slice
 isArrayOp cs (BasicOp (Rearrange perm arr)) =
   Just $ ArrayRearrange cs arr perm
 isArrayOp cs (BasicOp (Rotate rots arr)) =
   Just $ ArrayRotate cs arr rots
+isArrayOp cs (BasicOp (Reshape new_shape arr)) =
+  Just $ ArrayReshape cs arr new_shape
 isArrayOp cs (BasicOp (Copy arr)) =
   Just $ ArrayCopy cs arr
 isArrayOp _ _ =
   Nothing
 
-fromArrayOp :: ArrayOp -> (Certs, AST.Exp rep)
+fromArrayOp :: ArrayOp -> (Certs, Exp rep)
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
+fromArrayOp (ArrayReshape cs arr new_shape) = (cs, BasicOp $ Reshape new_shape arr)
 fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Copy arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
 arrayOps ::
   forall rep.
   (Buildable rep, HasSOAC rep) =>
-  AST.Body rep ->
-  S.Set (AST.Pat rep, ArrayOp)
+  Body rep ->
+  S.Set (Pat (LetDec rep), ArrayOp)
 arrayOps = mconcat . map onStm . stmsToList . bodyStms
   where
     onStm (Let pat aux e) =
@@ -746,9 +746,9 @@ arrayOps = mconcat . map onStm . stmsToList . bodyStms
 replaceArrayOps ::
   forall rep.
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
-  M.Map (AST.Pat rep, ArrayOp) ArrayOp ->
-  AST.Body rep ->
-  AST.Body rep
+  M.Map (Pat (LetDec rep), ArrayOp) ArrayOp ->
+  Body rep ->
+  Body rep
 replaceArrayOps substs (Body _ stms res) =
   mkBody (fmap onStm stms) res
   where
@@ -907,6 +907,9 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
     arrayIsMapParam (_, ArrayRotate cs arr rots) =
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn rots)
+    arrayIsMapParam (_, ArrayReshape cs arr new_shape) =
+      arr `elem` map_param_names
+        && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn new_shape)
     arrayIsMapParam (_, ArrayCopy cs arr) =
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs)
@@ -927,6 +930,8 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
                 BasicOp $ Rearrange (0 : map (+ 1) perm) arr
               ArrayRotate _ _ rots ->
                 BasicOp $ Rotate (intConst Int64 0 : rots) arr
+              ArrayReshape _ _ new_shape ->
+                BasicOp $ Reshape (DimCoercion w : new_shape) arr
               ArrayCopy {} ->
                 BasicOp $ Copy arr
               ArrayVar {} ->

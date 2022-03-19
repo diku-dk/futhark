@@ -263,7 +263,7 @@ removeUnusedParamsFromKer ker =
       l'
         `SOAC.setLambda` (inps' `SOAC.setInputs` soac)
 
-removeUnusedParams :: Lambda -> [SOAC.Input] -> (Lambda, [SOAC.Input])
+removeUnusedParams :: Lambda SOACS -> [SOAC.Input] -> (Lambda SOACS, [SOAC.Input])
 removeUnusedParams l inps =
   (l {lambdaParams = ps'}, inps')
   where
@@ -700,17 +700,17 @@ iswim _ (SOAC.Screma w form arrs) ots
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
-removeParamOuterDim :: LParam -> LParam
+removeParamOuterDim :: LParam SOACS -> LParam SOACS
 removeParamOuterDim param =
   let t = rowType $ paramType param
    in param {paramDec = t}
 
-setParamOuterDimTo :: SubExp -> LParam -> LParam
+setParamOuterDimTo :: SubExp -> LParam SOACS -> LParam SOACS
 setParamOuterDimTo w param =
   let t = paramType param `setOuterSize` w
    in param {paramDec = t}
 
-setPatOuterDimTo :: SubExp -> Pat -> Pat
+setPatOuterDimTo :: SubExp -> Pat Type -> Pat Type
 setPatOuterDimTo w = fmap (`setOuterSize` w)
 
 -- Now for fiddling with transpositions...

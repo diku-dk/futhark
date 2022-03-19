@@ -112,14 +112,18 @@ emptyEnv rules blockers =
       envVtable = mempty
     }
 
-type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
+-- | A function that protects a hoisted operation (if possible).  The
+-- first operand is the condition of the 'If' we have hoisted out of
+-- (or equivalently, a boolean indicating whether a loop has nonzero
+-- trip count).
+type Protect m = SubExp -> Pat (LetDec (Rep m)) -> Op (Rep m) -> Maybe (m ())
 
 type SimplifyOp rep op = op -> SimpleM rep (op, Stms (Wise rep))
 
 data SimpleOps rep = SimpleOps
   { mkExpDecS ::
       ST.SymbolTable (Wise rep) ->
-      Pat (Wise rep) ->
+      Pat (LetDec (Wise rep)) ->
       Exp (Wise rep) ->
       SimpleM rep (ExpDec (Wise rep)),
     mkBodyS ::
@@ -664,6 +668,13 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
       -- possible.
       isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
+      -- Hoist things that are free.
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Reshape {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Rearrange {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Rotate {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp (Index _ slice))) =
+        null $ sliceDims slice
+      --
       isNotHoistableBnd _ usage (Let pat _ _)
         | any (`UT.isSize` usage) $ patNames pat =
           False
@@ -675,9 +686,10 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
 
       block =
         branch_blocker
-          `orIf` ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
+          `orIf` ( (isNotSafe `orIf` isNotCheap `orIf` isNotHoistableBnd)
+                     `andAlso` stmIs (not . desirableToHoist)
+                 )
           `orIf` isConsuming
-          `orIf` isNotHoistableBnd
 
   (hoisted1, body1') <-
     protectIfHoisted cond True $
@@ -765,7 +777,7 @@ simplifyOp op = do
 simplifyExp ::
   SimplifiableRep rep =>
   UT.UsageTable ->
-  Pat (Wise rep) ->
+  Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
 simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
@@ -933,8 +945,8 @@ instance Simplifiable SubExpRes where
 
 simplifyPat ::
   (SimplifiableRep rep, Simplifiable dec) =>
-  PatT dec ->
-  SimpleM rep (PatT dec)
+  Pat dec ->
+  SimpleM rep (Pat dec)
 simplifyPat (Pat xs) =
   Pat <$> mapM inspect xs
   where

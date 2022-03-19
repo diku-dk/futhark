@@ -10,6 +10,7 @@ module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad.Reader
 import Data.List (find, intercalate, intersperse, transpose)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -128,7 +129,7 @@ generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
 
 entryPoint ::
   Name ->
-  [(E.EntryParam, [I.FParam])] ->
+  [(E.EntryParam, [I.FParam SOACS])] ->
   ( E.EntryType,
     [[I.TypeBase ExtShape Uniqueness]]
   ) ->
@@ -187,20 +188,20 @@ entryPoint name params (eret, crets) =
        in (d + 1, te')
     withoutDims te = (0 :: Int, te)
 
-internaliseBody :: String -> E.Exp -> InternaliseM Body
+internaliseBody :: String -> E.Exp -> InternaliseM (Body SOACS)
 internaliseBody desc e =
   buildBody_ $ subExpsRes <$> internaliseExp (desc <> "_res") e
 
 bodyFromStms ::
   InternaliseM (Result, a) ->
-  InternaliseM (Body, a)
+  InternaliseM (Body SOACS, a)
 bodyFromStms m = do
   ((res, a), stms) <- collectStms m
   (,a) <$> mkBodyM stms res
 
 -- | Only returns those pattern names that are not used in the pattern
 -- itself (the "non-existential" part, you could say).
-letValExp :: String -> I.Exp -> InternaliseM [VName]
+letValExp :: String -> I.Exp SOACS -> InternaliseM [VName]
 letValExp name e = do
   e_t <- expExtType e
   names <- replicateM (length e_t) $ newVName name
@@ -208,11 +209,11 @@ letValExp name e = do
   let ctx = shapeContext e_t
   pure $ map fst $ filter ((`S.notMember` ctx) . snd) $ zip names [0 ..]
 
-letValExp' :: String -> I.Exp -> InternaliseM [SubExp]
+letValExp' :: String -> I.Exp SOACS -> InternaliseM [SubExp]
 letValExp' _ (BasicOp (SubExp se)) = pure [se]
 letValExp' name ses = map I.Var <$> letValExp name ses
 
-eValBody :: [InternaliseM I.Exp] -> InternaliseM I.Body
+eValBody :: [InternaliseM (I.Exp SOACS)] -> InternaliseM (I.Body SOACS)
 eValBody es = buildBody_ $ do
   es' <- sequence es
   varsRes . concat <$> mapM (letValExp "x") es'
@@ -227,7 +228,7 @@ internaliseAppExp desc _ (E.Index e idxs loc) = do
   let index v = do
         v_t <- lookupType v
         return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
-  certifying cs $ letSubExps desc =<< mapM index vs
+  certifying cs $ mapM (letSubExp desc <=< index) vs
 internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
   start' <- internaliseExp1 "range_start" start
   end' <- internaliseExp1 "range_end" $ case end of
@@ -675,7 +676,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
               ks
           return $ I.BasicOp $ I.ArrayLit ks' rt
 
-    letSubExps desc
+    mapM (letSubExp desc)
       =<< if null es'
         then mapM (arraylit []) rowtypes
         else zipWithM arraylit (transpose es') rowtypes
@@ -919,7 +920,7 @@ generateCond orig_p orig_ses = do
           ses''
         )
 
-generateCaseIf :: [I.SubExp] -> Case -> I.Body -> InternaliseM I.Exp
+generateCaseIf :: [I.SubExp] -> Case -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
 generateCaseIf ses (CasePat p eCase _) bFail = do
   (cond, pertinent) <- generateCond p ses
   eCase' <- internalisePat' [] p pertinent eCase (internaliseBody "case")
@@ -1115,7 +1116,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
 internaliseScanOrReduce ::
   String ->
   String ->
-  (SubExp -> I.Lambda -> [SubExp] -> [VName] -> InternaliseM (SOAC SOACS)) ->
+  (SubExp -> I.Lambda SOACS -> [SubExp] -> [VName] -> InternaliseM (SOAC SOACS)) ->
   (E.Exp, E.Exp, E.Exp, SrcLoc) ->
   InternaliseM [SubExp]
 internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
@@ -1332,7 +1333,7 @@ internaliseOperation ::
   InternaliseM [I.SubExp]
 internaliseOperation s e op = do
   vs <- internaliseExpToVars s e
-  letSubExps s =<< mapM (fmap I.BasicOp . op) vs
+  mapM (letSubExp s . I.BasicOp <=< op) vs
 
 certifyingNonzero ::
   SrcLoc ->
@@ -1526,7 +1527,7 @@ findFuncall e =
 
 -- The type of a body.  Watch out: this only works for the degenerate
 -- case where the body does not already return its context.
-bodyExtType :: Body -> InternaliseM [ExtType]
+bodyExtType :: Body SOACS -> InternaliseM [ExtType]
 bodyExtType (Body _ stms res) =
   existentialiseExtTypes (M.keys stmsscope) . staticShapes
     <$> extendedScope (traverse subExpResType res) stmsscope
@@ -1786,8 +1787,8 @@ isOverloadedFunction qname args loc = do
           =<< mapM (fmap (arraysSize 0) . mapM lookupType) [ys]
 
       let conc xarr yarr =
-            I.BasicOp $ I.Concat 0 xarr [yarr] ressize
-      letSubExps desc $ zipWith conc xs ys
+            I.BasicOp $ I.Concat 0 (xarr :| [yarr]) ressize
+      mapM (letSubExp desc) $ zipWith conc xs ys
     handleRest [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
       offset' <- internaliseExp1 "rotation_offset" offset
       internaliseOperation desc e $ \v -> do
@@ -2084,7 +2085,7 @@ askSafety = do
   return $ if check then I.Safe else I.Unsafe
 
 -- Implement partitioning using maps, scans and writes.
-partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], [I.SubExp])
+partitionWithSOACS :: Int -> I.Lambda SOACS -> [I.VName] -> InternaliseM ([I.SubExp], [I.SubExp])
 partitionWithSOACS k lam arrs = do
   arr_ts <- mapM lookupType arrs
   let w = arraysSize 0 arr_ts
@@ -2178,7 +2179,7 @@ partitionWithSOACS k lam arrs = do
       [SubExp] ->
       SubExp ->
       Int ->
-      [I.LParam] ->
+      [I.LParam SOACS] ->
       InternaliseM SubExp
     mkOffsetLambdaBody _ _ _ [] =
       return $ constant (-1 :: Int64)

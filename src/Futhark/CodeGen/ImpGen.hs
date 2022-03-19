@@ -85,6 +85,7 @@ module Futhark.CodeGen.ImpGen
     -- * Constructing code.
     dLParams,
     dFParams,
+    addLoopVar,
     dScope,
     dArray,
     dPrim,
@@ -129,6 +130,7 @@ import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
 import Data.List (find)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -154,13 +156,13 @@ import Language.Futhark.Warnings
 import Prelude hiding (quot)
 
 -- | How to compile an t'Op'.
-type OpCompiler rep r op = Pat rep -> Op rep -> ImpM rep r op ()
+type OpCompiler rep r op = Pat (LetDec rep) -> Op rep -> ImpM rep r op ()
 
 -- | How to compile some 'Stms'.
 type StmsCompiler rep r op = Names -> Stms rep -> ImpM rep r op () -> ImpM rep r op ()
 
 -- | How to compile an 'Exp'.
-type ExpCompiler rep r op = Pat rep -> Exp rep -> ImpM rep r op ()
+type ExpCompiler rep r op = Pat (LetDec rep) -> Exp rep -> ImpM rep r op ()
 
 type CopyCompiler rep r op =
   PrimType ->
@@ -376,7 +378,7 @@ subImpM r ops (ImpM m) = do
 
   putNameSource $ stateNameSource s''
   warnings $ stateWarnings s''
-  return (x, stateCode s'')
+  pure (x, stateCode s'')
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
@@ -390,7 +392,7 @@ collect' m = do
   x <- m
   new_code <- gets stateCode
   modify $ \s -> s {stateCode = prev_code}
-  return (x, new_code)
+  pure (x, new_code)
 
 -- | Execute a code generation action, wrapping the generated code
 -- within a 'Imp.Comment' with the given description.
@@ -560,7 +562,7 @@ compileInParams params eparams = do
           ++ mkExts epts fparams
       mkExts _ _ = []
 
-  return (inparams, arrayds, mkExts eparams val_params)
+  pure (inparams, arrayds, mkExts eparams val_params)
   where
     isArrayDecl x (ArrayDecl y _ _) = x == y
 
@@ -635,7 +637,7 @@ compileOutParams orig_rts maybe_orig_epts = do
   evs <- case maybe_orig_epts of
     Just orig_epts -> compileExternalValues orig_rts orig_epts maybe_params
     Nothing -> pure []
-  return (evs, catMaybes maybe_params, dests)
+  pure (evs, catMaybes maybe_params, dests)
 
 compileFunDef ::
   Mem rep inner =>
@@ -663,9 +665,9 @@ compileFunDef (FunDef entry _ fname rettype params body) =
       compileStms (freeIn ses) stms $
         forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
-      return (outparams, inparams, results, args)
+      pure (outparams, inparams, results, args)
 
-compileBody :: Pat rep -> Body rep -> ImpM rep r op ()
+compileBody :: Pat (LetDec rep) -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ stms ses) = do
   dests <- destinationFromPat pat
   compileStms (freeIn ses) stms $
@@ -691,12 +693,12 @@ compileLoopBody mergeparams (Body _ stms ses) = do
         Prim pt -> do
           emit $ Imp.DeclareScalar tmp Imp.Nonvolatile pt
           emit $ Imp.SetScalar tmp $ toExp' pt se
-          return $ emit $ Imp.SetScalar (paramName p) $ Imp.var tmp pt
+          pure $ emit $ Imp.SetScalar (paramName p) $ Imp.var tmp pt
         Mem space | Var v <- se -> do
           emit $ Imp.DeclareMem tmp space
           emit $ Imp.SetMem tmp v space
-          return $ emit $ Imp.SetMem (paramName p) tmp space
-        _ -> return $ return ()
+          pure $ emit $ Imp.SetMem (paramName p) tmp space
+        _ -> pure $ pure ()
     sequence_ copy_to_merge_params
 
 compileStms :: Names -> Stms rep -> ImpM rep r op () -> ImpM rep r op ()
@@ -733,25 +735,25 @@ defCompileStms alive_after_stms all_stms m =
       mapM_ (emit . uncurry Imp.Free) to_free
       emit bs_code
 
-      return $ freeIn e_code <> live_after
+      pure $ freeIn e_code <> live_after
     compileStms' _ [] = do
       code <- collect m
       emit code
-      return $ freeIn code <> alive_after_stms
+      pure $ freeIn code <> alive_after_stms
 
     patternAllocs = S.fromList . mapMaybe isMemPatElem . patElems
     isMemPatElem pe = case patElemType pe of
       Mem space -> Just (patElemName pe, space)
       _ -> Nothing
 
-compileExp :: Pat rep -> Exp rep -> ImpM rep r op ()
+compileExp :: Pat (LetDec rep) -> Exp rep -> ImpM rep r op ()
 compileExp pat e = do
   ec <- asks envExpCompiler
   ec pat e
 
 defCompileExp ::
   (Mem rep inner) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   Exp rep ->
   ImpM rep r op ()
 defCompileExp pat (If cond tbranch fbranch _) =
@@ -765,9 +767,9 @@ defCompileExp pat (Apply fname args _ _) = do
     compileArg (se, _) = do
       t <- subExpType se
       case (se, t) of
-        (_, Prim pt) -> return $ Just $ Imp.ExpArg $ toExp' pt se
-        (Var v, Mem {}) -> return $ Just $ Imp.MemArg v
-        _ -> return Nothing
+        (_, Prim pt) -> pure $ Just $ Imp.ExpArg $ toExp' pt se
+        (Var v, Mem {}) -> pure $ Just $ Imp.MemArg v
+        _ -> pure Nothing
 defCompileExp pat (BasicOp op) = defCompileBasicOp pat op
 defCompileExp pat (DoLoop merge form body) = do
   attrs <- askAttrs
@@ -786,7 +788,7 @@ defCompileExp pat (DoLoop merge form body) = do
             | Prim _ <- paramType p =
               copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.le64 i]
             | otherwise =
-              return ()
+              pure ()
 
       bound' <- toExp bound
 
@@ -833,7 +835,7 @@ traceArray s t shape se = do
 
 defCompileBasicOp ::
   Mem rep inner =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   BasicOp ->
   ImpM rep r op ()
 defCompileBasicOp (Pat [pe]) (SubExp se) =
@@ -876,7 +878,7 @@ defCompileBasicOp (Pat [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
     copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
 defCompileBasicOp _ Index {} =
-  return ()
+  pure ()
 defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
   case safety of
     Unsafe -> write
@@ -901,7 +903,7 @@ defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se)
     copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.le64) is) se []
     emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 defCompileBasicOp _ Scratch {} =
-  return ()
+  pure ()
 defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
   e' <- toExp e
   s' <- toExp s
@@ -916,7 +918,7 @@ defCompileBasicOp (Pat [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
-defCompileBasicOp (Pat [pe]) (Concat i x ys _) = do
+defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
   offs_glb <- dPrimV "tmp_offs" 0
 
   forM_ (x : ys) $ \y -> do
@@ -950,11 +952,11 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
     isLiteral (Constant v) = Just v
     isLiteral _ = Nothing
 defCompileBasicOp _ Rearrange {} =
-  return ()
+  pure ()
 defCompileBasicOp _ Rotate {} =
-  return ()
+  pure ()
 defCompileBasicOp _ Reshape {} =
-  return ()
+  pure ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
   -- We are abusing the comment mechanism to wrap the operator in
   -- braces when we end up generating code.  This is necessary because
@@ -1024,7 +1026,7 @@ addLoopVar i it = addVar i $ ScalarVar Nothing $ ScalarEntry $ IntType it
 dVars ::
   Mem rep inner =>
   Maybe (Exp rep) ->
-  [PatElem rep] ->
+  [PatElem (LetDec rep)] ->
   ImpM rep r op ()
 dVars e = mapM_ dVar
   where
@@ -1042,7 +1044,7 @@ dPrimVol name t e = do
   emit $ Imp.DeclareScalar name' Imp.Volatile t
   addVar name' $ ScalarVar Nothing $ ScalarEntry t
   name' <~~ untyped e
-  return $ TV name' t
+  pure $ TV name' t
 
 dPrim_ :: VName -> PrimType -> ImpM rep r op ()
 dPrim_ name t = do
@@ -1056,7 +1058,7 @@ dPrim :: String -> PrimType -> ImpM rep r op (TV t)
 dPrim name t = do
   name' <- newVName name
   dPrim_ name' t
-  return $ TV name' t
+  pure $ TV name' t
 
 dPrimV_ :: VName -> Imp.TExp t -> ImpM rep r op ()
 dPrimV_ name e = do
@@ -1069,13 +1071,13 @@ dPrimV :: String -> Imp.TExp t -> ImpM rep r op (TV t)
 dPrimV name e = do
   name' <- dPrim name $ primExpType $ untyped e
   name' <-- e
-  return name'
+  pure name'
 
 dPrimVE :: String -> Imp.TExp t -> ImpM rep r op (Imp.TExp t)
 dPrimVE name e = do
   name' <- dPrim name $ primExpType $ untyped e
   name' <-- e
-  return $ tvExp name'
+  pure $ tvExp name'
 
 memBoundToVarEntry ::
   Maybe (Exp rep) ->
@@ -1119,9 +1121,9 @@ dInfo e name info = do
     ScalarVar _ entry' ->
       emit $ Imp.DeclareScalar name Imp.Nonvolatile $ entryScalarType entry'
     ArrayVar _ _ ->
-      return ()
+      pure ()
     AccVar {} ->
-      return ()
+      pure ()
   addVar name entry
 
 dScope ::
@@ -1147,11 +1149,11 @@ funcallTargets dests =
   concat <$> mapM funcallTarget dests
   where
     funcallTarget (ScalarDestination name) =
-      return [name]
+      pure [name]
     funcallTarget (ArrayDestination _) =
-      return []
+      pure []
     funcallTarget (MemoryDestination name) =
-      return [name]
+      pure [name]
 
 -- | A typed variable, which we can turn into a typed expression, or
 -- use as the target for an assignment.  This is used to aid in type
@@ -1195,11 +1197,11 @@ class ToExp a where
 
 instance ToExp SubExp where
   toExp (Constant v) =
-    return $ Imp.ValueExp v
+    pure $ Imp.ValueExp v
   toExp (Var v) =
     lookupVar v >>= \case
       ScalarVar _ (ScalarEntry pt) ->
-        return $ Imp.var v pt
+        pure $ Imp.var v pt
       _ -> error $ "toExp SubExp: SubExp is not a primitive type: " ++ pretty v
 
   toExp' _ (Constant v) = Imp.ValueExp v
@@ -1229,7 +1231,7 @@ newVNameForFun s = do
 nameForFun :: String -> ImpM rep r op Name
 nameForFun s = do
   fname <- askFunction
-  return $ maybe "" (<> ".") fname <> nameFromString s
+  pure $ maybe "" (<> ".") fname <> nameFromString s
 
 askEnv :: ImpM rep r op r
 askEnv = asks envEnv
@@ -1271,27 +1273,27 @@ localVTable f m = do
   putVTable $ f old_vtable
   a <- m
   putVTable old_vtable
-  return a
+  pure a
 
 lookupVar :: VName -> ImpM rep r op (VarEntry rep)
 lookupVar name = do
   res <- gets $ M.lookup name . stateVTable
   case res of
-    Just entry -> return entry
+    Just entry -> pure entry
     _ -> error $ "Unknown variable: " ++ pretty name
 
 lookupArray :: VName -> ImpM rep r op ArrayEntry
 lookupArray name = do
   res <- lookupVar name
   case res of
-    ArrayVar _ entry -> return entry
+    ArrayVar _ entry -> pure entry
     _ -> error $ "ImpGen.lookupArray: not an array: " ++ pretty name
 
 lookupMemory :: VName -> ImpM rep r op MemEntry
 lookupMemory name = do
   res <- lookupVar name
   case res of
-    MemVar _ entry -> return entry
+    MemVar _ entry -> pure entry
     _ -> error $ "Unknown memory block: " ++ pretty name
 
 lookupArraySpace :: VName -> ImpM rep r op Space
@@ -1326,12 +1328,12 @@ lookupAcc name is = do
             )
         Just (arrs@(arr : _), Nothing) -> do
           space <- lookupArraySpace arr
-          return (acc, space, arrs, map toInt64Exp (shapeDims ispace), Nothing)
+          pure (acc, space, arrs, map toInt64Exp (shapeDims ispace), Nothing)
         Nothing ->
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
-destinationFromPat :: Pat rep -> ImpM rep r op [ValueDestination]
+destinationFromPat :: Pat (LetDec rep) -> ImpM rep r op [ValueDestination]
 destinationFromPat = mapM inspect . patElems
   where
     inspect pe = do
@@ -1339,13 +1341,13 @@ destinationFromPat = mapM inspect . patElems
       entry <- lookupVar name
       case entry of
         ArrayVar _ (ArrayEntry MemLoc {} _) ->
-          return $ ArrayDestination Nothing
+          pure $ ArrayDestination Nothing
         MemVar {} ->
-          return $ MemoryDestination name
+          pure $ MemoryDestination name
         ScalarVar {} ->
-          return $ ScalarDestination name
+          pure $ ScalarDestination name
         AccVar {} ->
-          return $ ArrayDestination Nothing
+          pure $ ArrayDestination Nothing
 
 fullyIndexArray ::
   VName ->
@@ -1370,14 +1372,23 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 -- More complicated read/write operations that use index functions.
 
 copy :: CopyCompiler rep r op
-copy bt dest src =
-  unless
-    ( memLocName dest == memLocName src
-        && memLocIxFun dest `IxFun.equivalent` memLocIxFun src
-    )
-    $ do
-      cc <- asks envCopyCompiler
-      cc bt dest src
+copy
+  bt
+  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmads@(dst_lmad :| _) _ _))
+  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmads@(src_lmad :| _) _ _)) = do
+    -- If we can statically determine that the two index-functions
+    -- are equivalent, don't do anything
+    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn) $
+      -- It's also possible that we can dynamically determine that the two
+      -- index-functions are equivalent.
+      sUnless
+        ( fromBool (dst_name == src_name && length dst_lmads == 1 && length src_lmads == 1)
+            .&&. IxFun.dynamicEqualsLMAD dst_lmad src_lmad
+        )
+        $ do
+          -- If none of the above is true, actually do the copy
+          cc <- asks envCopyCompiler
+          cc bt dst src
 
 -- | Is this copy really a mapping with transpose?
 isMapTransposeCopy ::
@@ -1433,7 +1444,7 @@ mapTransposeForType bt = do
   exists <- hasFunction fname
   unless exists $ emitFunction fname $ mapTransposeFunction fname bt
 
-  return fname
+  pure fname
 
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler rep r op
@@ -1645,10 +1656,10 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
               pretty dest_slice
             ]
     (ArrayDestination Nothing, _) ->
-      return () -- Nothing to do; something else set some memory
+      pure () -- Nothing to do; something else set some memory
       -- somewhere.
     (_, AccVar {}) ->
-      return () -- Nothing to do; accumulators are phantoms.
+      pure () -- Nothing to do; accumulators are phantoms.
 
 -- | Copy from here to there; both destination and source be
 -- indexeded.  If so, they better be arrays of enough dimensions.
@@ -1685,11 +1696,11 @@ copyDWIMFix ::
 copyDWIMFix dest dest_is src src_is =
   copyDWIM dest (map DimFix dest_is) src (map DimFix src_is)
 
--- | @compileAlloc pat size space@ allocates @n@ bytes of memory in @space@,
--- writing the result to @dest@, which must be a single
--- 'MemoryDestination',
+-- | @compileAlloc pat size space@ allocates @n@ bytes of memory in
+-- @space@, writing the result to @pat@, which must contain a single
+-- memory-typed element.
 compileAlloc ::
-  Mem rep inner => Pat rep -> SubExp -> Space -> ImpM rep r op ()
+  Mem rep inner => Pat (LetDec rep) -> SubExp -> Space -> ImpM rep r op ()
 compileAlloc (Pat [mem]) e space = do
   let e' = Imp.bytes $ toInt64Exp e
   allocator <- asks $ M.lookup space . envAllocCompilers
@@ -1770,7 +1781,7 @@ sDeclareMem name space = do
   name' <- newVName name
   emit $ Imp.DeclareMem name' space
   addVar name' $ MemVar Nothing $ MemEntry space
-  return name'
+  pure name'
 
 sAlloc_ :: VName -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM rep r op ()
 sAlloc_ name' size' space = do
@@ -1783,13 +1794,13 @@ sAlloc :: String -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM rep r op VName
 sAlloc name size space = do
   name' <- sDeclareMem name space
   sAlloc_ name' size space
-  return name'
+  pure name'
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> IxFun -> ImpM rep r op VName
 sArray name bt shape mem ixfun = do
   name' <- newVName name
   dArray name' bt shape mem ixfun
-  return name'
+  pure name'
 
 -- | Declare an array in row-major order in the given memory block.
 sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName

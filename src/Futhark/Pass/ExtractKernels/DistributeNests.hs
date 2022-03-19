@@ -42,6 +42,7 @@ import Control.Monad.Trans.Maybe
 import Control.Monad.Writer.Strict
 import Data.Function ((&))
 import Data.List (find, partition, tails)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map as M
 import Data.Maybe
 import Futhark.IR
@@ -65,7 +66,7 @@ import Futhark.Util.Log
 scopeForSOACs :: SameScope rep SOACS => Scope rep -> Scope SOACS
 scopeForSOACs = castScope
 
-data MapLoop = MapLoop SOACS.Pat (StmAux ()) SubExp SOACS.Lambda [VName]
+data MapLoop = MapLoop (Pat Type) (StmAux ()) SubExp (Lambda SOACS) [VName]
 
 mapLoopStm :: MapLoop -> Stm SOACS
 mapLoopStm (MapLoop pat aux w lam arrs) =
@@ -275,7 +276,7 @@ leavingNesting acc =
 
 mapNesting ::
   (MonadFreshNames m, DistRep rep) =>
-  PatT Type ->
+  Pat Type ->
   StmAux () ->
   SubExp ->
   Lambda SOACS ->
@@ -626,7 +627,7 @@ maybeDistributeStm stm@(Let pat aux (BasicOp (Update _ arr slice (Var v)))) acc
               =<< segmentedUpdateKernel nest' perm (stmAuxCerts aux) arr slice v
             return acc'
       _ -> addStmToAcc stm acc
-maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d (x :| xs) w))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, _, nest, acc') ->
       localScope (typeEnvFromDistAcc acc') $
@@ -639,7 +640,7 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
       isSegmentedOp nest [0] mempty mempty [] (x : xs) $
         \pat _ _ _ (x' : xs') ->
           let d' = d + length (snd nest) + 1
-           in addStm $ Let pat aux $ BasicOp $ Concat d' x' xs' w
+           in addStm $ Let pat aux $ BasicOp $ Concat d' (x' :| xs') w
 maybeDistributeStm stm acc =
   addStmToAcc stm acc
 
@@ -648,7 +649,7 @@ distributeSingleUnaryStm ::
   DistAcc rep ->
   Stm SOACS ->
   VName ->
-  (KernelNest -> PatT Type -> VName -> DistNestT rep m (Stms rep)) ->
+  (KernelNest -> Pat Type -> VName -> DistNestT rep m (Stms rep)) ->
   DistNestT rep m (DistAcc rep)
 distributeSingleUnaryStm acc stm stm_arr f =
   distributeSingleStm acc stm >>= \case
@@ -748,7 +749,7 @@ segmentedScatterKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
   KernelNest ->
   [Int] ->
-  PatT Type ->
+  Pat Type ->
   Certs ->
   SubExp ->
   Lambda rep ->
@@ -964,7 +965,7 @@ histKernel ::
   (MonadBuilder m, DistRep (Rep m)) =>
   (Lambda SOACS -> m (Lambda (Rep m))) ->
   SegOpLevel (Rep m) ->
-  PatT Type ->
+  Pat Type ->
   [(VName, SubExp)] ->
   [KernelInput] ->
   Certs ->
@@ -1072,7 +1073,7 @@ isSegmentedOp ::
   Names ->
   [SubExp] ->
   [VName] ->
-  ( PatT Type ->
+  ( Pat Type ->
     [(VName, SubExp)] ->
     [KernelInput] ->
     [SubExp] ->
@@ -1135,7 +1136,7 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
 
         m pat ispace kernel_inps nes' nested_arrs
 
-permutationAndMissing :: PatT Type -> Result -> Maybe ([Int], [PatElemT Type])
+permutationAndMissing :: Pat Type -> Result -> Maybe ([Int], [PatElem Type])
 permutationAndMissing (Pat pes) res = do
   let (_used, unused) =
         partition ((`nameIn` freeIn res) . patElemName) pes
@@ -1146,7 +1147,7 @@ permutationAndMissing (Pat pes) res = do
 
 -- Add extra pattern elements to every kernel nesting level.
 expandKernelNest ::
-  MonadFreshNames m => [PatElemT Type] -> KernelNest -> m KernelNest
+  MonadFreshNames m => [PatElem Type] -> KernelNest -> m KernelNest
 expandKernelNest pes (outer_nest, inner_nests) = do
   let outer_size =
         loopNestingWidth outer_nest :
