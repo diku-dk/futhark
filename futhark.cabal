@@ -211,6 +211,12 @@ library
       Futhark.Internalise.Monad
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.TypesValues
+      Futhark.LSP.Compile
+      Futhark.LSP.Diagnostic
+      Futhark.LSP.Handlers
+      Futhark.LSP.SemanticTokens
+      Futhark.LSP.Tool
+      Futhark.LSP.Utils
       Futhark.MonadFreshNames
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
@@ -343,6 +349,7 @@ library
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
+    , hslogger
     , language-c-quote >=0.12
     , lsp >= 1.4
     , mainland-pretty >=0.7.1
