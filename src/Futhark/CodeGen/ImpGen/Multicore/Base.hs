@@ -514,6 +514,7 @@ toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b
 --   emit $ Imp.Op $ Imp.ISPCBuiltin name (nameFromString "extract") [e, untyped_j]  
 --   return $ Var name
 -- TODO(k): fix this and make it poolymorphic
+
 walkCode :: (Imp.Code -> Imp.Code) ->
  (Multicore -> Multicore)
  -> Imp.Code
