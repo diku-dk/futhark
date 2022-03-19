@@ -635,8 +635,25 @@ test_disjoint3 =
               [ IxFunLMAD.LMADDim n_blab 0 block_size_12121 0 IxFunLMAD.Inc,
                 IxFunLMAD.LMADDim 1 0 block_size_12121 1 IxFunLMAD.Inc
               ]
+
+          lm_blocks =
+            IxFunLMAD.LMAD
+              (block_size_12121 * i_12214 + n_blab + 1)
+              [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (i_12214 + 1) 0 IxFunLMAD.Inc,
+                IxFunLMAD.LMADDim n_blab 0 block_size_12121 1 IxFunLMAD.Inc,
+                IxFunLMAD.LMADDim 1 0 block_size_12121 2 IxFunLMAD.Inc
+              ]
+
+          lm_lower_per =
+            IxFunLMAD.LMAD
+              (block_size_12121 * i_12214)
+              [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (i_12214 + 1) 0 IxFunLMAD.Inc,
+                IxFunLMAD.LMADDim 1 0 (block_size_12121 + 1) 1 IxFunLMAD.Inc
+              ]
+
       res1 <- IxFunLMAD.disjoint3 scmap asserts lessthans (map (`LeafExp` (IntType Int64)) $ namesToList nonnegs) lm1 lm_w
       res2 <- IxFunLMAD.disjoint3 scmap asserts lessthans (map (`LeafExp` (IntType Int64)) $ namesToList nonnegs) lm2 lm_w
+      res3 <- IxFunLMAD.disjoint3 scmap asserts lessthans (map (`LeafExp` (IntType Int64)) $ namesToList nonnegs) lm_lower_per lm_blocks
 
-      res1 && res2 @? "Failed"
+      res1 && res2 && res3 @? "Failed"
   ]
