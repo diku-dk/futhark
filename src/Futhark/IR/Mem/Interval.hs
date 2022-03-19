@@ -4,22 +4,27 @@ module Futhark.IR.Mem.Interval
   ( disjointZ3,
     Interval (..),
     distributeOffset,
+    expandOffset,
     intervalOverlap,
     selfOverlap,
     primBool,
     intervalPairs,
+    lessThanZ3,
+    selfOverlapZ3,
   )
 where
 
 import Control.Monad
 import Control.Monad.IO.Class
-import Data.List (delete, find, intersect, partition, sort, sortBy, zip4, zip5, zipWith5, (\\))
+import Data.Function (on)
+import Data.List (delete, find, intersect, maximumBy, minimumBy, partition, sort, sortBy, zip4, zip5, zipWith5, (\\))
 import qualified Data.Map.Strict as M
 --import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Prop
 import Futhark.IR.Syntax hiding (Result)
+import Futhark.Util
 import Futhark.Util.Pretty
 import Z3.Monad
 
@@ -36,7 +41,7 @@ data Interval = Interval
     numElements :: TPrimExp Int64 VName,
     stride :: TPrimExp Int64 VName
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 instance Pretty Interval where
   ppr (Interval lb ne st) =
@@ -60,11 +65,12 @@ distributeOffset offset (Interval lb ne st0 : is) = do
   --
   -- Example: The offset is `a + b * b * 2` and the stride is `b * b`. The
   -- remaining offset should be `a` and the new lower bound should be `2`.
-  case AlgSimplify.simplify0 $ untyped st0 of
+  case [AlgSimplify.Prod False [untyped st0]] of
+    -- case AlgSimplify.simplify0 $ untyped st0 of
     [AlgSimplify.Prod neg st] ->
       -- We do not support negative strides here. They should've been normalized.
       if neg
-        then trace "stride should be positive" $ fail "Stride should be positive"
+        then trace "stride should be positive" $ error "Stride should be positive"
         else case find (`AlgSimplify.isMultipleOf` st) offset of
           Just t@(AlgSimplify.Prod False as') ->
             distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify.sumToExp [AlgSimplify.Prod False $ traceWith "res" $ traceWith "as'" as' \\ traceWith "st" st])) ne st0 : is
@@ -79,6 +85,41 @@ distributeOffset offset (Interval lb ne st0 : is) = do
     justOne :: [a] -> Maybe a
     justOne [a] = Just a
     justOne _ = Nothing
+
+findMostComplexTerm :: AlgSimplify.SofP -> (AlgSimplify.Prod, AlgSimplify.SofP)
+findMostComplexTerm prods =
+  let max_prod = maximumBy (compare `on` (length . AlgSimplify.atoms)) prods
+   in (max_prod, prods \\ [max_prod])
+
+findClosestStride :: [PrimExp VName] -> [Interval] -> (PrimExp VName, [PrimExp VName])
+findClosestStride offset_term is =
+  let strides = map (untyped . stride) is
+      p =
+        minimumBy
+          ( compare
+              `on` ( (\(AlgSimplify.Prod _ xs) -> length (offset_term \\ xs))
+                       . minimumBy (compare `on` \s -> (length (offset_term \\ AlgSimplify.atoms s)))
+                       . AlgSimplify.simplify0
+                   )
+          )
+          strides
+   in ( p,
+        (offset_term \\) $
+          AlgSimplify.atoms $
+            minimumBy (compare `on` \s -> length (offset_term \\ AlgSimplify.atoms s)) $
+              AlgSimplify.simplify0 p
+      )
+
+expandOffset :: AlgSimplify.SofP -> [Interval] -> Maybe (AlgSimplify.SofP)
+expandOffset [] _ = Nothing
+expandOffset offset i1
+  | (AlgSimplify.Prod b term_to_add, offset_rest) <- traceWith "findMostComplexTerm" $ findMostComplexTerm $ traceWith "Initial offset" offset, -- Find gnb
+    (closest_stride, first_term_divisor) <- traceWith "findClosestStride" $ findClosestStride term_to_add i1, -- find (nb-b, g)
+    target <- [AlgSimplify.Prod b $ closest_stride : first_term_divisor], -- g(nb-b)
+    diff <- traceWith "sumOfProducts" $ AlgSimplify.sumOfProducts $ traceWith "sumToExp" $ AlgSimplify.sumToExp $ AlgSimplify.Prod b term_to_add : map AlgSimplify.negate target, -- gnb - gnb + gb = gnb - g(nb-b)
+    replacement <- target <> diff -- gnb = g(nb-b) + gnb - gnb + gb
+    =
+    Just $ traceWith "Expandoffset returns!" (replacement <> offset_rest)
 
 intervalOverlap :: [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> Bool
 intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
@@ -128,9 +169,29 @@ selfOverlap less_thans non_negatives is =
   where
     selfOverlap' acc (x : xs) =
       let interval_span = (lowerBound x + numElements x - 1) * stride x
-       in AlgSimplify.lessThanish less_thans non_negatives (AlgSimplify.simplify' acc) (AlgSimplify.simplify' $ stride x)
+       in (traceWith ("Is " <> pretty (AlgSimplify.simplify' acc) <> " less than " <> pretty (AlgSimplify.simplify' $ stride x) <> "?") $ AlgSimplify.lessThanish less_thans non_negatives (AlgSimplify.simplify' acc) (AlgSimplify.simplify' $ stride x))
             && selfOverlap' (acc + interval_span) xs
     selfOverlap' _ [] = True
+
+-- | Returns @Nothing@ if there is no overlap or @Just the-problem-interval@
+selfOverlapZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> [Interval] -> IO (Maybe Interval)
+selfOverlapZ3 scope asserts less_thans non_negatives is =
+  selfOverlap' 0 (reverse is)
+  where
+    selfOverlap' acc (x : xs) = do
+      let interval_span = (lowerBound x + numElements x - 1) * stride x
+      res <-
+        lessThanZ3
+          scope
+          asserts
+          less_thans
+          non_negatives
+          (untyped $ AlgSimplify.simplify' acc)
+          (untyped $ AlgSimplify.simplify' $ stride x)
+      if traceWith ("Is (z3) " <> pretty acc <> " less than " <> pretty (stride x)) res
+        then selfOverlap' (acc + interval_span) xs
+        else pure $ Just x
+    selfOverlap' _ [] = pure Nothing
 
 primTypeSort :: MonadZ3 z3 => PrimType -> z3 Sort
 primTypeSort (IntType _) = mkIntSort
@@ -169,6 +230,9 @@ binOpToZ3 (SMax _) x y = mkMax x y
 binOpToZ3 (UMax _) x y = mkMax x y
 binOpToZ3 (SDivUp _ _) x y = mkDiv x y
 binOpToZ3 (SQuot _ _) x y = mkDiv x y
+binOpToZ3 (SMod _ _) x y = mkMod x y
+binOpToZ3 (UMod _ _) x y = mkMod x y
+binOpToZ3 (FMod _) x y = mkMod x y
 binOpToZ3 b _ _ = error $ "Unsupported BinOp " <> pretty b
 
 convOpToZ3 :: MonadZ3 z3 => ConvOp -> AST -> z3 AST
@@ -215,6 +279,47 @@ mkMax e1 e2 = do
   cond <- mkGe e1 e2
   mkIte cond e1 e2
 
+lessThanZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> PrimExp VName -> PrimExp VName -> IO Bool
+lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
+  let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn pe1 <> freeIn pe2
+  result <- evalZ3With Nothing (opt "timeout" (1000 :: Integer)) $ do
+    -- result <- evalZ3 $ do
+    maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
+    case fmap M.fromList maybe_var_table of
+      Nothing -> return Undef
+      Just var_table -> do
+        non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
+        asserts <- mapM (\vn -> primExpToZ3 var_table vn) asserts
+        lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
+        apps <- mapM toApp $ M.elems var_table
+
+        premise <-
+          mkAnd $
+            non_negs
+              <> lts
+              <> asserts
+
+        conclusion <- join $ mkLe <$> primExpToZ3 var_table pe1 <*> primExpToZ3 var_table pe2
+        assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
+        -- sexp <- solverToString
+        -- liftIO $ putStrLn sexp
+        check
+  case -- traceWith'
+    -- ( "lessThanZ3\npe1: " <> pretty pe1
+    --     <> "\npe2: "
+    --     <> pretty pe2
+    --     <> "\nless_thans: "
+    --     <> pretty less_thans
+    --     <> "\nnon_negatives: "
+    --     <> pretty non_negatives
+    --     -- <> "\nasserts: "
+    --     -- <> pretty asserts
+    -- )
+    -- $
+    result of
+    Sat -> return True
+    _ -> return False
+
 disjointZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> Interval -> Interval -> IO Bool
 disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
   | st1 == st2 = do
@@ -235,14 +340,14 @@ disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(
               ]
           apps <- mapM toApp $ M.elems var_table
 
-          implies1 <-
+          premise <-
             mkAnd $
               nes
                 <> non_negs
                 <> lts
                 <> asserts
 
-          implies2 <-
+          conclusion <-
             mkOr
               =<< sequence
                 [ mkAnd
@@ -256,7 +361,7 @@ disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(
                         join $ mkLe <$> primExpToZ3 var_table (untyped $ lb2 + ne2) <*> primExpToZ3 var_table (untyped lb1)
                       ]
                 ]
-          assert =<< mkForallConst [] apps =<< mkImplies implies1 implies2
+          assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
           -- sexp <- solverToString
           -- liftIO $ putStrLn sexp
           check

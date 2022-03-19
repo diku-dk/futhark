@@ -293,8 +293,14 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
           then (actv0, inhibit0)
           else foldl (makeSegMapCoals lvl td_env kernel_body) (actv0, inhibit0) $ zip ps_and_space $ kernelBodyResult kernel_body
 
+  -- Start from empty references, we'll update with aggregates later.
+  let actv0' = M.map (\etry -> etry {memrefs = mempty}) $ actv0 <> actv_return
   -- Process kernel body statements
-  bu_env' <- mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $ bu_env {activeCoals = actv0 <> actv_return, inhibit = inhibit_return}
+  bu_env' <-
+    mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $
+      bu_env {activeCoals = actv0', inhibit = inhibit_return}
+
+  let actv_coals_after = traceWith "actv_coals_after" $ M.mapWithKey (\k etry -> etry {memrefs = memrefs etry <> maybe mempty memrefs (M.lookup k $ actv0 <> actv_return)}) $ traceWith "activeCoals bu_env'" $ activeCoals bu_env'
 
   -- Check partial overlap.
   --
@@ -335,8 +341,7 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
                 ps_and_space
           let source_writes = srcwrts (memrefs entry) <> thread_writes
           destination_uses <-
-            case dstrefs (memrefs entry)
-              `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
+            case dstrefs (memrefs entry) `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
               Set s -> mconcat <$> mapM (\lm -> aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) (Set $ S.singleton lm)) (S.toList s)
               -- Set s -> mconcat <$> mapM undefined (S.toList s)
               Undeterminable -> return Undeterminable
@@ -350,7 +355,7 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
           if traceWith
             ( "blabla pat: " <> pretty (head $ patNames pat) <> " k: " <> pretty k <> " dstmem: " <> pretty (dstmem entry)
                 <> "\nactiveCoals: "
-                <> pretty (map (\(x, y) -> (x, dstmem y)) $ M.toList $ activeCoals bu_env')
+                <> pretty (map (\(x, y) -> (x, dstmem y)) $ M.toList $ actv_coals_after)
                 <> "\ndstrefs: "
                 <> pretty (dstrefs $ memrefs entry)
                 <> "\nother dstrefs: "
@@ -369,8 +374,8 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
               let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) $ traceWith "marking this as failed now" k
               return $ bu_env_f {activeCoals = ac, inhibit = inh}
       )
-      bu_env'
-      $ M.toList $ activeCoals bu_env'
+      (bu_env' {activeCoals = actv_coals_after})
+      $ M.toList actv_coals_after
 
   actv <-
     mapM
@@ -379,8 +384,8 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
           uses <- aggSummaryMapTotal (scalarTable td_env) (unSegSpace space0) $ dstrefs $ memrefs entry
           return $ entry {memrefs = MemRefs uses wrts}
       )
-      $ activeCoals bu_env''
-  let bu_env''' = bu_env'' {activeCoals = actv}
+      $ traceWith "activecoals still" $ activeCoals bu_env''
+  let bu_env''' = bu_env'' {activeCoals = traceWith ("successcoals is: " <> pretty (successCoals bu_env'') <> "\nactivecoals after") actv}
 
   -- Process pattern and return values
   let mergee_writes = mapMaybe (\(p, _) -> fmap (p,) $ getDirAliasedIxfn' td_env (activeCoals bu_env''') $ patElemName p) ps_and_space

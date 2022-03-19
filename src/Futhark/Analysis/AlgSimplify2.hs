@@ -9,6 +9,7 @@ module Futhark.Analysis.AlgSimplify2
     simplify,
     simplify',
     simplifySofP,
+    simplifySofP',
     sumOfProducts,
     sumToExp,
     prodToExp,
@@ -91,6 +92,9 @@ prodToExp (Prod False (a : as)) =
 
 simplifySofP :: SofP -> SofP
 simplifySofP = fixPoint (mapMaybe (applyZero . removeOnes) . constFoldValueExps . removeNegations)
+
+simplifySofP' :: SofP -> SofP
+simplifySofP' = fixPoint (mapMaybe (applyZero . removeOnes) . removeNegations)
 
 simplify0 :: Exp -> SofP
 simplify0 = simplifySofP . sumOfProducts

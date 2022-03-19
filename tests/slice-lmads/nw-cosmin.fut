@@ -103,9 +103,8 @@ entry nw_flat [n]
               (refs: [n]i32)
               : *[n]i32 =
   let row_length = i64.f64 <| f64.sqrt <| f64.i64 n
-  let num_blocks = -- assert ((row_length - 1) % b == 0) <|
-                   (row_length - 1) / block_size
-  let bp1 = block_size + 1
+  let num_blocks = assert ((row_length - 1) % block_size == 0) ((row_length - 1) / block_size)
+  let bp1 = assert (2 * block_size < row_length) (block_size + 1)
 
   let input =
     loop input for i < num_blocks do

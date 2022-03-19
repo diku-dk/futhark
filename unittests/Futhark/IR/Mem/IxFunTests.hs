@@ -5,7 +5,9 @@ module Futhark.IR.Mem.IxFunTests
   )
 where
 
+import Data.Function ((&))
 import qualified Data.List as DL
+import qualified Data.Map as M
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.IR.Mem.IxFun as IxFunLMAD
 import qualified Futhark.IR.Mem.IxFun.Alg as IxFunAlg
@@ -122,9 +124,10 @@ tests =
         test_flatSlice_rotate_slice_iota,
         test_flatSlice_transpose_slice_iota,
         test_rotate_flatSlice_transpose_slice_iota,
-        test_disjoint2,
-        test_lessThanish,
-        test_lessThanOrEqualish
+        -- test_disjoint2,
+        -- test_lessThanish,
+        -- test_lessThanOrEqualish,
+        test_disjoint3
       ]
 
 singleton :: TestTree -> [TestTree]
@@ -517,55 +520,123 @@ test_rotate_flatSlice_transpose_slice_iota =
   where
     flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
 
-test_disjoint2 :: [TestTree]
-test_disjoint2 =
-  let add_nw64 = (+)
+-- test_disjoint2 :: [TestTree]
+-- test_disjoint2 =
+--   let add_nw64 = (+)
 
-      mul_nw64 = (*)
+--       mul_nw64 = (*)
 
-      sub64 = (-)
+--       sub64 = (-)
 
-      vname s i = VName (nameFromString s) i
-   in [ let gtid_8472 = TPrimExp $ LeafExp (vname "gtid" 8472) $ IntType Int64
+--       vname s i = VName (nameFromString s) i
+--    in [ let gtid_8472 = TPrimExp $ LeafExp (vname "gtid" 8472) $ IntType Int64
 
-            gtid_8473 = TPrimExp $ LeafExp (vname "gtid" 8473) $ IntType Int64
+--             gtid_8473 = TPrimExp $ LeafExp (vname "gtid" 8473) $ IntType Int64
 
-            gtid_8474 = TPrimExp $ LeafExp (vname "gtid" 8474) $ IntType Int64
+--             gtid_8474 = TPrimExp $ LeafExp (vname "gtid" 8474) $ IntType Int64
 
-            num_blocks_8284 = TPrimExp $ LeafExp (vname "num_blocks" 8284) $ IntType Int64
+--             num_blocks_8284 = TPrimExp $ LeafExp (vname "num_blocks" 8284) $ IntType Int64
 
-            nonnegs = freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284]
+--             nonnegs = freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284]
 
-            j_m_i_8287 :: TPrimExp Int64 VName
-            j_m_i_8287 = num_blocks_8284 - 1
+--             j_m_i_8287 :: TPrimExp Int64 VName
+--             j_m_i_8287 = num_blocks_8284 - 1
 
-            lessthans :: [(VName, PrimExp VName)]
-            lessthans =
-              [ (head $ namesToList $ freeIn gtid_8472, untyped j_m_i_8287),
-                (head $ namesToList $ freeIn gtid_8473, untyped j_m_i_8287),
-                (head $ namesToList $ freeIn gtid_8474, untyped (16 :: TPrimExp Int64 VName))
+--             lessthans :: [(VName, PrimExp VName)]
+--             lessthans =
+--               [ (head $ namesToList $ freeIn gtid_8472, untyped j_m_i_8287),
+--                 (head $ namesToList $ freeIn gtid_8473, untyped j_m_i_8287),
+--                 (head $ namesToList $ freeIn gtid_8474, untyped (16 :: TPrimExp Int64 VName))
+--               ]
+
+--             lm1 :: IxFunLMAD.LMAD (TPrimExp Int64 VName)
+--             lm1 =
+--               IxFunLMAD.LMAD
+--                 256
+--                 [ IxFunLMAD.LMADDim 256 0 (sub64 (num_blocks_8284) 1) 0 IxFunLMAD.Inc,
+--                   IxFunLMAD.LMADDim 1 0 16 1 IxFunLMAD.Inc,
+--                   IxFunLMAD.LMADDim 16 0 16 2 IxFunLMAD.Inc
+--                 ]
+--             lm2 :: IxFunLMAD.LMAD (TPrimExp Int64 VName)
+--             lm2 =
+--               IxFunLMAD.LMAD
+--                 (add_nw64 (add_nw64 (add_nw64 (add_nw64 (mul_nw64 (256) (num_blocks_8284)) (256)) (mul_nw64 (gtid_8472) (mul_nw64 (256) (num_blocks_8284)))) (mul_nw64 (gtid_8473) (256))) (mul_nw64 (gtid_8474) (16)))
+--                 [IxFunLMAD.LMADDim 1 0 16 0 IxFunLMAD.Inc]
+--          in testCase (pretty lm1 <> " and " <> pretty lm2) $ IxFunLMAD.disjoint2 lessthans nonnegs lm1 lm2 @? "Failed"
+--       ]
+
+-- test_lessThanish :: [TestTree]
+-- test_lessThanish =
+--   [testCase "0 < 1" $ IxFunLMAD.lessThanish mempty mempty 0 1 @? "Failed"]
+
+-- test_lessThanOrEqualish :: [TestTree]
+-- test_lessThanOrEqualish =
+--   [testCase "1 <= 1" $ IxFunLMAD.lessThanOrEqualish mempty mempty 1 1 @? "Failed"]
+
+test_disjoint3 :: [TestTree]
+test_disjoint3 =
+  [ testCase "lm1 and lm2" $ do
+      let nonnegs = freeIn lm1 <> freeIn lm2
+
+          lessthans =
+            [ ( i_12214,
+                sdiv64 (sub64 n_blab (1)) (block_size_12121)
+              ),
+              (gtid_12553, add64 (1) (i_12214))
+            ]
+              & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
+
+          scmap :: M.Map VName Type
+          scmap =
+            M.fromList $
+              map (\x -> (x, Prim $ IntType Int64)) $
+                namesToList $
+                  freeIn lm1 <> freeIn lm2
+
+          asserts :: [PrimExp VName]
+          asserts =
+            [ untyped $ ((2 * block_size_12121 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName),
+              untyped $ ((3 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName)
+            ]
+
+          foo s i = VName (nameFromString s) i
+          add_nw64 = (+)
+          add64 = (+)
+          mul_nw64 = (*)
+          mul64 = (*)
+          sub64 = (-)
+          sdiv64 = (IE.div)
+          sub_nw64 = (-)
+          block_size_12121 = TPrimExp $ LeafExp (foo "block_size" 12121) $ IntType Int64
+
+          i_12214 = TPrimExp $ LeafExp (foo "i" 12214) $ IntType Int64
+
+          n_blab = TPrimExp $ LeafExp (foo "n" 1337) $ IntType Int64
+
+          gtid_12553 = TPrimExp $ LeafExp (foo "gtid" 12553) $ IntType Int64
+
+          lm1 =
+            IxFunLMAD.LMAD
+              (add_nw64 (mul64 (block_size_12121) (i_12214)) (mul_nw64 (add_nw64 (gtid_12553) (1)) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
+              [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (sub_nw64 (sub_nw64 (add64 (1) (i_12214)) (gtid_12553)) (1)) 0 IxFunLMAD.Inc,
+                IxFunLMAD.LMADDim 1 0 (block_size_12121 + 1) 1 IxFunLMAD.Inc
               ]
 
-            lm1 :: IxFunLMAD.LMAD (TPrimExp Int64 VName)
-            lm1 =
-              IxFunLMAD.LMAD
-                256
-                [ IxFunLMAD.LMADDim 256 0 (sub64 (num_blocks_8284) 1) 0 IxFunLMAD.Inc,
-                  IxFunLMAD.LMADDim 1 0 16 1 IxFunLMAD.Inc,
-                  IxFunLMAD.LMADDim 16 0 16 2 IxFunLMAD.Inc
-                ]
-            lm2 :: IxFunLMAD.LMAD (TPrimExp Int64 VName)
-            lm2 =
-              IxFunLMAD.LMAD
-                (add_nw64 (add_nw64 (add_nw64 (add_nw64 (mul_nw64 (256) (num_blocks_8284)) (256)) (mul_nw64 (gtid_8472) (mul_nw64 (256) (num_blocks_8284)))) (mul_nw64 (gtid_8473) (256))) (mul_nw64 (gtid_8474) (16)))
-                [IxFunLMAD.LMADDim 1 0 16 0 IxFunLMAD.Inc]
-         in testCase (pretty lm1 <> " and " <> pretty lm2) $ IxFunLMAD.disjoint2 lessthans nonnegs lm1 lm2 @? "Failed"
-      ]
+          lm2 =
+            IxFunLMAD.LMAD
+              (block_size_12121 * i_12214)
+              [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 gtid_12553 0 IxFunLMAD.Inc,
+                IxFunLMAD.LMADDim 1 0 (1 + block_size_12121) 1 IxFunLMAD.Inc
+              ]
 
-test_lessThanish :: [TestTree]
-test_lessThanish =
-  [testCase "0 < 1" $ IxFunLMAD.lessThanish mempty mempty 0 1 @? "Failed"]
+          lm_w =
+            IxFunLMAD.LMAD
+              (add_nw64 (add64 (add64 (1) n_blab) (mul64 (block_size_12121) (i_12214))) (mul_nw64 (gtid_12553) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
+              [ IxFunLMAD.LMADDim n_blab 0 block_size_12121 0 IxFunLMAD.Inc,
+                IxFunLMAD.LMADDim 1 0 block_size_12121 1 IxFunLMAD.Inc
+              ]
+      res1 <- IxFunLMAD.disjoint3 scmap asserts lessthans (map (`LeafExp` (IntType Int64)) $ namesToList nonnegs) lm1 lm_w
+      res2 <- IxFunLMAD.disjoint3 scmap asserts lessthans (map (`LeafExp` (IntType Int64)) $ namesToList nonnegs) lm2 lm_w
 
-test_lessThanOrEqualish :: [TestTree]
-test_lessThanOrEqualish =
-  [testCase "1 <= 1" $ IxFunLMAD.lessThanOrEqualish mempty mempty 1 1 @? "Failed"]
+      res1 && res2 @? "Failed"
+  ]
