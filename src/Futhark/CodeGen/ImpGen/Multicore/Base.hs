@@ -500,21 +500,6 @@ toIntegral 32 = return int32
 toIntegral 64 = return int64
 toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b
 
--- TODO(k): reimplement
--- createUniform :: TExp Int64 -> SubExp -> (TExp t -> MulticoreGen (TV t)) ->  MulticoreGen SubExp
--- createUniform j se m = do
---   t <- subExpType se
---   e <- toExp se
---   let texp = TPrimExp e
---   (tv, _) <- collect' $ m texp
---   let name = tvVar tv
---   let untyped_j = untyped j
---   p <- toParam name t
---   emit $ Imp.Op $ Imp.DeclareUniform name p
---   emit $ Imp.Op $ Imp.ISPCBuiltin name (nameFromString "extract") [e, untyped_j]  
---   return $ Var name
--- TODO(k): fix this and make it poolymorphic
-
 walkCode :: (Imp.Code -> Imp.Code) ->
  (Multicore -> Multicore)
  -> Imp.Code

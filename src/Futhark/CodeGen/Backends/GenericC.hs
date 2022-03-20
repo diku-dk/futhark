@@ -518,6 +518,7 @@ ispcDecl :: C.Definition  -> CompilerM op s ()
 ispcDecl def = modify $ \s ->
   s {compIspcDecls = compIspcDecls s <> DL.singleton def}
 
+
 earlyDecl :: C.Definition -> CompilerM op s ()
 earlyDecl def = modify $ \s ->
   s {compEarlyDecls = compEarlyDecls s <> DL.singleton def}
@@ -2243,6 +2244,8 @@ compileCode (Read x src (Count iexp) _ ScalarSpace {} _) = do
   stm [C.cstm|$id:x = $id:src[$exp:iexp'];|]
 compileCode (DeclareMem name space) =
   declMem name space
+
+-- TODO (obp) -- target this
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
