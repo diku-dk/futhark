@@ -113,31 +113,30 @@ scanStage1 pat space scan_ops kbody = do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i        
         compileStms mempty (kernelBodyStms kbody) $ do
            -- Vector load and then do sequential scan
-         everythingUniform $
-          generateUniformizeLoop $ \j -> do
-            sComment "write mapped values results to memory" $ do
-              let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
-              traceM "Fucking lol"
-              zipWithM_ (compileThreadResult space) map_arrs map_res
+          everythingUniform $
+            generateUniformizeLoop $ \j -> do
+              sComment "write mapped values results to memory" $ do
+                let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
+                zipWithM_ (compileThreadResult space) map_arrs map_res
 
-            forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
-              sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-                -- Read accum value
-                forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
-                  copyDWIMFix (paramName p) [] (Var acc') vec_is
+              forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
+                sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+                  -- Read accum value
+                  forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
+                    copyDWIMFix (paramName p) [] (Var acc') vec_is
 
-                -- Read next value
-                sComment "Read next values" $
-                  forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->        
-                    extractVectorLane j $ collect $ do
-                    copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
-                sComment "Do stuff" $
-                  compileStms mempty (bodyStms $ lamBody scan_op) $
-                    forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-                      \(acc', pe, se) -> do       
-                        -- name <- createUniform j se (dPrimV "uni_acc")                                                                                                     
-                        copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []      
-                        copyDWIMFix acc' vec_is se []
+                  -- Read next value
+                  sComment "Read next values" $
+                    forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->        
+                      extractVectorLane j $ collect $ do
+                      copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+                  sComment "Do stuff" $
+                    compileStms mempty (bodyStms $ lamBody scan_op) $
+                      forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
+                        \(acc', pe, se) -> do       
+                          -- name <- createUniform j se (dPrimV "uni_acc")                                                                                                     
+                          copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []      
+                          copyDWIMFix acc' vec_is se []
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
@@ -248,26 +247,25 @@ scanStage3 pat space scan_ops kbody = do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         sComment "stage 3 scan body" $
           compileStms mempty (kernelBodyStms kbody) $
-           everythingUniform $
-             generateUniformizeLoop $ \j -> do
-                forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
-                  sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-                    forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
-                      copyDWIMFix (paramName p) [] (Var acc') vec_is
+            everythingUniform $
+              generateUniformizeLoop $ \j -> do
+                 forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
+                   sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+                     forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
+                       copyDWIMFix (paramName p) [] (Var acc') vec_is
 
-                    -- Read next value
-                    forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-                      extractVectorLane j $ collect $ do
-                      copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+                     -- Read next value
+                     forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
+                       extractVectorLane j $ collect $ do
+                       copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
-                    compileStms mempty (bodyStms $ lamBody scan_op) $
-                      forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
-                        \(pe, se, acc') -> do
-                          copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-                          copyDWIMFix acc' vec_is se []
+                     compileStms mempty (bodyStms $ lamBody scan_op) $
+                       forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
+                         \(pe, se, acc') -> do
+                           copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+                           copyDWIMFix acc' vec_is se []
 
   free_params' <- freeParams body
-  traceM $ pretty body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
 
 -- This implementation for a Segmented scan only

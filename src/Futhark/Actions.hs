@@ -197,8 +197,9 @@ runCC cpath outpath cflags_def ldflags = do
           ++ gccerr
     Right (ExitSuccess, _, _) ->
       return ()
-runISPC :: String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
-runISPC ispcpath ispcbase cpath ispc_flags cflags_def ldflags = do
+
+runISPC :: String -> String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
+runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
   ret_ispc <-
     liftIO $
       runProgramWithExitCode
@@ -214,7 +215,7 @@ runISPC ispcpath ispcbase cpath ispc_flags cflags_def ldflags = do
         cmdCC
         ( [ispcbase `addExtension` "h"] ++
           [ispcbase `addExtension` "o"] ++
-          [cpath] ++ --, "-o", outpath          
+          [cpath, "-o", outpath] ++
           cmdCFLAGS cflags_def ++
             -- The default LDFLAGS are always added.
           ldflags
@@ -241,6 +242,8 @@ runISPC ispcpath ispcbase cpath ispc_flags cflags_def ldflags = do
               ++ gccerr
         Right (ExitSuccess, _, _) ->
           return ()
+  where
+    ispcbase = outpath <> ispcextension
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
@@ -351,8 +354,9 @@ compileMulticoreAction fcfg mode outpath =
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
           ispcPath = outpath `addExtension` "ispc"
-          ispcbase = outpath <> "_ispc"
-          ispcHeader = takeBaseName ispcbase `addExtension` "h"
+          ispcExtension = "_ispc"
+          --ispcbase = outpath <> "_ispc"
+          ispcHeader = takeBaseName (outpath <> ispcExtension) `addExtension` "h"
       cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeader <> "\"") (T.pack versionString) prog
       case mode of -- TODO(pema): Library, Server mode
         ToLibrary -> do
@@ -364,7 +368,7 @@ compileMulticoreAction fcfg mode outpath =
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
           liftIO $ T.writeFile cpath $ cPrependHeader c
           liftIO $ T.writeFile ispcPath ispc
-          runISPC ispcPath ispcbase cpath ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath outpath cpath ispcExtension ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
           --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog

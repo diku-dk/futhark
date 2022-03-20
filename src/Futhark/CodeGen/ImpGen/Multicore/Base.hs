@@ -23,8 +23,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     generateUniformizeLoop,
     extractVectorLane,
     inISPC,
-    toParam,
-    everythingUniformDWIM
+    toParam
   )
 where
 
@@ -272,7 +271,6 @@ extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.Code -> MulticoreGen ()
 extractVectorLane j code = do
   let ut_exp = untyped j
   code' <- code
-  traceM $ pretty code'
   case code' of
     Imp.SetScalar vname e -> 
       emit $ Imp.Op $ Imp.ISPCBuiltin vname (nameFromText $ T.pack "extract") [e, ut_exp]    

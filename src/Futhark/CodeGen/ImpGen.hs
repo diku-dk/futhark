@@ -1165,15 +1165,12 @@ everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
 
 declareUniform :: DeclareCompiler rep r op
 declareUniform vname _ pt = do
-  traceM $ "fra uniform: " <> (show vname)
   emit $ Imp.DeclareScalar vname Imp.Uniform pt
 
 
 everythingUniform :: ImpM rep r op a -> ImpM rep r op a
 everythingUniform = do
-  env <-local $ \env -> env {envDeclareCompiler = declareUniform}
-  traceM "everythingUniform localEnv"
-  return env
+  local $ \env -> env {envDeclareCompiler = declareUniform}
 
 -- | Remove the array targets.
 funcallTargets :: [ValueDestination] -> ImpM rep r op [VName]
@@ -1470,11 +1467,8 @@ mapTransposeForType bt = do
 
   return fname
 
--- | Default declare is NonVolatile
 defDeclare :: DeclareCompiler rep r op
 defDeclare vname qual pt = do
-  --emit $ Imp.DeclareScalar vname Imp.Uniform pt
-  traceM $ "fra default: " <> (show vname)
   emit $ Imp.DeclareScalar vname qual pt
 
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.

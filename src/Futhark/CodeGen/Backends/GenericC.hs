@@ -106,7 +106,6 @@ import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
 import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
-import Debug.Trace (traceM)
 
 -- How public an array type definition sould be.  Public types show up
 -- in the generated API, while private types are used only to
