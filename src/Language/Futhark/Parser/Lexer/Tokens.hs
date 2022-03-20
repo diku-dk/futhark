@@ -134,7 +134,7 @@ data Token
   | CASE
   | DOC String
   | EOF
-  | HOLE
+  | HOLE Name
   deriving (Show, Eq, Ord)
 
 keyword :: T.Text -> Token

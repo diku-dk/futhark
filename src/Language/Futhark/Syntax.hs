@@ -834,7 +834,7 @@ data ExpBase f vn
   | -- | A string literal is just a fancy syntax for an array
     -- of bytes.
     StringLit [Word8] SrcLoc
-  | Hole (QualName vn) PatType SrcLoc
+  | Hole vn (f PatType) SrcLoc
   | Var (QualName vn) (f PatType) SrcLoc
   | -- | A parenthesized expression.
     Parens (ExpBase f vn) SrcLoc
