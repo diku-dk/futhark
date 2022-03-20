@@ -350,7 +350,7 @@ library
     , haskeline
     , hslogger
     , language-c-quote >=0.12
-    , lens >=5.1
+    , lens
     , lsp >= 1.4
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1

@@ -11,23 +11,25 @@ import Language.LSP.Server
 import Language.LSP.Types
 import System.Log.Logger (Priority (DEBUG))
 
-main :: IO Int
-main = do
+main :: String -> [String] -> IO ()
+main _prog _args = do
   stateMVar <- newMVar emptyState
   debug "Init with emptyState"
   setupLogger Nothing ["futhark"] DEBUG
-  runServer $
-    ServerDefinition
-      { onConfigurationChange = const $ const $ Right (),
-        defaultConfig = (),
-        doInitialize = \env _req -> do pure $ Right env,
-        staticHandlers = handlers stateMVar,
-        interpretHandler = \env -> Iso (runLspT env) liftIO,
-        options =
-          defaultOptions
-            { textDocumentSync = Just syncOptions
-            }
-      }
+  _ <-
+    runServer $
+      ServerDefinition
+        { onConfigurationChange = const $ const $ Right (),
+          defaultConfig = (),
+          doInitialize = \env _req -> do pure $ Right env,
+          staticHandlers = handlers stateMVar,
+          interpretHandler = \env -> Iso (runLspT env) liftIO,
+          options =
+            defaultOptions
+              { textDocumentSync = Just syncOptions
+              }
+        }
+  pure ()
 
 syncOptions :: TextDocumentSyncOptions
 syncOptions =
