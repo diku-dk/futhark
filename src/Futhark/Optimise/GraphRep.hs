@@ -1,6 +1,8 @@
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use lambda-case" #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Optimise.GraphRep where
 
 import qualified Data.List as L
@@ -20,9 +22,10 @@ import Futhark.IR.Pretty as PP
 import qualified Futhark.Util.Pretty as PP
 
 import Debug.Trace
-import Futhark.Builder (MonadFreshNames)
+import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSource, modifyNameSource)
 import Futhark.Pass
 import Data.Foldable (foldlM)
+import Control.Monad.State
 
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
@@ -58,11 +61,49 @@ type DepNode = LNode NodeT
 type DepEdge = LEdge EdgeT
 type DepContext = Context NodeT EdgeT
 type DepGraph = G.Gr NodeT EdgeT
-type DepGraphAug = DepGraph -> PassM DepGraph
-
 
 type DepGenerator = Stm SOACS -> [VName]
 type EdgeGenerator = NodeT -> [(VName, EdgeT)]
+
+
+data FusionEnv = FusionEnv
+  {
+    nodeMap :: M.Map VName [VName],
+    vNameSource :: VNameSource,
+    scope :: Scope SOACS
+  }
+
+newtype FusionEnvM a = FusionEnvM {fenv :: State FusionEnv a}
+  deriving
+    (
+      Monad,
+      Applicative,
+      Functor,
+      MonadState FusionEnv
+    )
+
+instance MonadFreshNames FusionEnvM where
+  getNameSource = gets vNameSource
+  putNameSource source = do
+    fenv <- get
+    put (fenv {vNameSource = source})
+
+instance HasScope SOACS FusionEnvM where
+  askScope = gets scope
+
+
+runFusionEnvM ::
+  MonadFreshNames m =>
+  FusionEnvM a ->
+  FusionEnv ->
+  m a
+runFusionEnvM (FusionEnvM a) env =
+  let (a', new_env) =  runState a env
+  in modifyNameSource (\src ->  (a', vNameSource (new_env {vNameSource = src})))
+
+
+
+type DepGraphAug = DepGraph -> FusionEnvM DepGraph
 
 --- Graph Construction ---
 
@@ -89,7 +130,7 @@ isArray p = case paramDec p of
   Array {} -> True
   _ -> False
 
-mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> PassM DepGraph
+mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> FusionEnvM DepGraph
 mkDepGraph stms res inputs =
     addDepEdges (emptyG2 stms resNames inputNames)
     where
@@ -102,14 +143,14 @@ addDepEdges :: DepGraphAug
 addDepEdges = applyAugs
   [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges]
 
-mkDepGraphInner :: [Stm SOACS] -> [VName] -> [VName] -> PassM DepGraph
+mkDepGraphInner :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
 mkDepGraphInner stms outputs inputs = addDepEdges $ emptyG2 stms outputs inputs
 
 
-genEdges :: [DepNode] -> EdgeGenerator -> [LEdge EdgeT]
-genEdges l_stms edge_fun = concatMap gen_edge l_stms
+genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug
+genEdges l_stms edge_fun g = depGraphInsertEdges (concatMap gen_edge l_stms) g
   where
-    name_map = gen_names_map l_stms
+    name_map = gen_names_map (labNodes g)
     -- statements -> mapping from declared array names to soac index
     gen_names_map :: [DepNode] -> M.Map VName Node
     gen_names_map s = M.fromList $ concatMap gen_dep_list s
@@ -169,9 +210,8 @@ edgesBetween g n1 n2 = labEdges $ subgraph [n1,n2] g
 
 -- Utility func for augs
 augWithFun :: EdgeGenerator -> DepGraphAug
-augWithFun f g = depGraphInsertEdges new_edges g
-  where
-    new_edges = genEdges (labNodes g) f
+augWithFun f g = genEdges (labNodes g) f g
+
 
 toDep :: DepGenerator -> EdgeGenerator
 toDep f stmt = map (\vname ->  (vname, Dep vname)) (concatMap f (stmFromNode stmt))
