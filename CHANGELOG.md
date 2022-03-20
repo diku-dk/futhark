@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Incomplete simplification would cause some instances of nested
+  parallelism to require irregular allocations (#1610).
+
 ## [0.21.8]
 
 ### Added
