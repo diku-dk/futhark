@@ -112,8 +112,8 @@ scanStage1 pat space scan_ops kbody = do
       generateChunkLoop "SegScan" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i        
         compileStms mempty (kernelBodyStms kbody) $ do
-          -- Vector load and then do sequential scan
-          traceM "Er det ikke fucking lol"
+           -- Vector load and then do sequential scan
+         everythingUniform $
           generateUniformizeLoop $ \j -> do
             sComment "write mapped values results to memory" $ do
               let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
@@ -139,7 +139,7 @@ scanStage1 pat space scan_ops kbody = do
                         copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []      
                         copyDWIMFix acc' vec_is se []
   free_params <- freeParams fbody
-  everythingUniform $ emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
+  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
 scanStage2 ::
   Pat MCMem ->
@@ -248,6 +248,7 @@ scanStage3 pat space scan_ops kbody = do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         sComment "stage 3 scan body" $
           compileStms mempty (kernelBodyStms kbody) $
+           everythingUniform $
              generateUniformizeLoop $ \j -> do
                 forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
                   sLoopNest (segBinOpShape scan_op) $ \vec_is -> do

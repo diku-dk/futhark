@@ -174,7 +174,7 @@ type CopyCompiler rep r op =
 -- | An alternate way of compiling an allocation.
 type AllocCompiler rep r op = VName -> Count Bytes (Imp.TExp Int64) -> ImpM rep r op ()
 
-type DeclareCompiler rep r op = VName -> PrimType-> ImpM rep r op ()
+type DeclareCompiler rep r op = VName -> Imp.Qualifier -> PrimType-> ImpM rep r op ()
 
 data Operations rep r op = Operations
   { opsExpCompiler :: ExpCompiler rep r op,
@@ -199,16 +199,6 @@ defaultOperations opc =
       opsCopyCompiler = defaultCopy,
       opsAllocCompilers = mempty,
       opsDeclareCompiler = defDeclare
-    }
-
-uniformOperations opc =
-  Operations
-    { opsExpCompiler = defCompileExp,
-      opsOpCompiler = opc,
-      opsStmsCompiler = defCompileStms,
-      opsCopyCompiler = defaultCopy,
-      opsAllocCompilers = mempty,
-      opsDeclareCompiler = declareUniform
     }
 
 -- | When an array is declared, this is where it is stored.
@@ -715,7 +705,8 @@ compileLoopBody mergeparams (Body _ stms ses) = do
     copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p, tmp, SubExpRes _ se) ->
       case typeOf p of
         Prim pt -> do
-          emit $ Imp.DeclareScalar tmp Imp.Nonvolatile pt
+          declare <- asks envDeclareCompiler
+          declare tmp Imp.Nonvolatile pt 
           emit $ Imp.SetScalar tmp $ toExp' pt se
           return $ emit $ Imp.SetScalar (paramName p) $ Imp.var tmp pt
         Mem space | Var v <- se -> do
@@ -1065,16 +1056,17 @@ dLParams = dScope Nothing . scopeOfLParams
 dPrimVol :: String -> PrimType -> Imp.TExp t -> ImpM rep r op (TV t)
 dPrimVol name t e = do
   name' <- newVName name
-  emit $ Imp.DeclareScalar name' Imp.Volatile t
+  declare <- asks envDeclareCompiler
+  declare name' Imp.Volatile t
   addVar name' $ ScalarVar Nothing $ ScalarEntry t
   name' <~~ untyped e
   return $ TV name' t
+  
 
 dPrim_ :: VName -> PrimType -> ImpM rep r op ()
 dPrim_ name t = do
   declare <- asks envDeclareCompiler
-  declare name t
-  -- emit $ Imp.DeclareScalar name Imp.Nonvolatile t TODO (obp): Remove if works anglish guud
+  declare name Imp.Nonvolatile t
   addVar name $ ScalarVar Nothing $ ScalarEntry t
 
 -- | The return type is polymorphic, so there is no guarantee it
@@ -1145,7 +1137,9 @@ dInfo e name info = do
     MemVar _ entry' ->
       emit $ Imp.DeclareMem name $ entryMemSpace entry'
     ScalarVar _ entry' ->
-      emit $ Imp.DeclareScalar name Imp.Nonvolatile $ entryScalarType entry'
+      do
+        declare <- asks envDeclareCompiler
+        declare name Imp.Nonvolatile (entryScalarType entry')
     ArrayVar _ _ ->
       return ()
     AccVar {} ->
@@ -1170,10 +1164,10 @@ everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
 
 declareUniform :: DeclareCompiler rep r op
-declareUniform vname pt = do
+declareUniform vname _ pt = do
   traceM $ "fra uniform: " <> (show vname)
   emit $ Imp.DeclareScalar vname Imp.Uniform pt
-  --emit $ Imp.DeclareScalar vname Imp.Nonvolatile pt
+
 
 everythingUniform :: ImpM rep r op a -> ImpM rep r op a
 everythingUniform = do
@@ -1478,10 +1472,10 @@ mapTransposeForType bt = do
 
 -- | Default declare is NonVolatile
 defDeclare :: DeclareCompiler rep r op
-defDeclare vname pt = do
+defDeclare vname qual pt = do
   --emit $ Imp.DeclareScalar vname Imp.Uniform pt
   traceM $ "fra default: " <> (show vname)
-  emit $ Imp.DeclareScalar vname Imp.Nonvolatile pt
+  emit $ Imp.DeclareScalar vname qual pt
 
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler rep r op
@@ -1541,10 +1535,12 @@ copyElementWise bt dest src = do
   (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
   vol <- asks envVolatility
   tmp <- newVName "tmp"
+  declare <- asks envDeclareCompiler
+  scalar <- collect $ declare tmp vol bt
   emit $
     foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
       mconcat
-        [ Imp.DeclareScalar tmp vol bt,
+        [ scalar,
           Imp.Read tmp srcmem srcidx bt srcspace vol,
           Imp.Write destmem destidx bt destspace vol $ Imp.var tmp bt
         ]
