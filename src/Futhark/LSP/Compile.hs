@@ -1,8 +1,7 @@
 module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
 
-import Control.Concurrent.MVar (MVar, putMVar, swapMVar, takeMVar)
+import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import qualified Data.Text as T
 import Futhark.Compiler.Program (LoadedProg, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (errorToDiagnostics, sendDiagnostics, warningsToDiagnostics)
 import Futhark.LSP.Utils (State (..), debug, emptyState)

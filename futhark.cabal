@@ -214,7 +214,6 @@ library
       Futhark.LSP.Compile
       Futhark.LSP.Diagnostic
       Futhark.LSP.Handlers
-      Futhark.LSP.SemanticTokens
       Futhark.LSP.Tool
       Futhark.LSP.Utils
       Futhark.MonadFreshNames
@@ -351,6 +350,7 @@ library
     , haskeline
     , hslogger
     , language-c-quote >=0.12
+    , lens >=5.1
     , lsp >= 1.4
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
