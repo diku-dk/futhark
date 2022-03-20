@@ -130,13 +130,16 @@ scanStage1 pat space scan_ops kbody = do
                     forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->        
                       extractVectorLane j $ collect $ do
                       copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
-                  sComment "Do stuff" $
+
+                  -- BALADEMAGER!!!
+                  everythingDefault $ sComment "Do stuff" $
                     compileStms mempty (bodyStms $ lamBody scan_op) $
-                      forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-                        \(acc', pe, se) -> do       
-                          -- name <- createUniform j se (dPrimV "uni_acc")                                                                                                     
-                          copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []      
-                          copyDWIMFix acc' vec_is se []
+                      everythingUniform $
+                        forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
+                          \(acc', pe, se) -> do       
+                            copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []      
+                            copyDWIMFix acc' vec_is se []
+
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
@@ -259,11 +262,14 @@ scanStage3 pat space scan_ops kbody = do
                        extractVectorLane j $ collect $ do
                        copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
-                     compileStms mempty (bodyStms $ lamBody scan_op) $
-                       forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
-                         \(pe, se, acc') -> do
-                           copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-                           copyDWIMFix acc' vec_is se []
+                     everythingDefault $
+                       compileStms mempty (bodyStms $ lamBody scan_op) $
+                         everythingUniform $
+                           forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
+                             \(pe, se, acc') -> do
+                               copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+                               copyDWIMFix acc' vec_is se []
+                               -- TODO (obp): Extract this
 
   free_params' <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'

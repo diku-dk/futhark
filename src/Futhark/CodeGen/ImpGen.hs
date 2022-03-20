@@ -66,6 +66,7 @@ module Futhark.CodeGen.ImpGen
     compileAlloc,
     everythingVolatile,
     everythingUniform,
+    everythingDefault,
     compileBody,
     compileBody',
     compileLoopBody,
@@ -1167,6 +1168,9 @@ declareUniform :: DeclareCompiler rep r op
 declareUniform vname _ pt = do
   emit $ Imp.DeclareScalar vname Imp.Uniform pt
 
+everythingDefault :: ImpM rep r op a -> ImpM rep r op a
+everythingDefault = do
+  local $ \env -> env {envDeclareCompiler = defDeclare}
 
 everythingUniform :: ImpM rep r op a -> ImpM rep r op a
 everythingUniform = do
