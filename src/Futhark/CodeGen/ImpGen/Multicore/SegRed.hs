@@ -201,7 +201,7 @@ reductionStage1NonCommScalar space slugs kbody = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    (slug_local_accs_pairs, prebody) <- collect' $ do
+    (slug_local_accs_pairs, prebody) <- collect' $ everythingUniform $ do
       dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
       forM slugs $ \slug -> do
@@ -247,24 +247,24 @@ reductionStage1NonCommScalar space slugs kbody = do
             sLoopNest (slugShape slug) $ \vec_is -> do
               let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
               -- Load accum params
-              generateUniformizeLoop $ \uni -> do
-                sComment "Load accum params" $
-                  forM_ (zip3 (accParams slug) local_accs lamtypes) $
-                    \(p, local_acc, t) ->
-                      when (primType t) $ do
-                        copyDWIMFix (paramName p) [] (Var local_acc) vec_is
-                        uniformizeVar (paramName p) (untyped uni)
+              everythingUniform $
+                generateUniformizeLoop $ \uni -> do
+                  sComment "Load accum params" $
+                    forM_ (zip3 (accParams slug) local_accs lamtypes) $
+                      \(p, local_acc, t) ->
+                        when (primType t) $ do
+                          copyDWIMFix (paramName p) [] (Var local_acc) vec_is
 
-                sComment "Load next params" $
-                  forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) -> do
-                    copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-                    uniformizeVar (paramName p) (untyped uni)
+                  sComment "Load next params" $
+                    forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) -> do
+                      extractVectorLane uni $ collect $
+                        copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
 
-                sComment "SegRed body" $
-                  compileStms mempty (bodyStms $ slugBody slug) $
-                    forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
-                      \(local_acc, se) ->
-                        copyDWIMFix local_acc vec_is se []
+                  sComment "SegRed body" $
+                    compileStms mempty (bodyStms $ slugBody slug) $
+                      forM_ (zip local_accs $ map resSubExp $ bodyResult $ slugBody slug) $
+                        \(local_acc, se) ->
+                          copyDWIMFix local_acc vec_is se []
 
     forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
       forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
