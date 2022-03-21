@@ -62,6 +62,7 @@ module Futhark.Util
     (||^),
     (&&^),
     allM,
+    partitionM,
   )
 where
 
@@ -525,3 +526,13 @@ ifM b t f = do b' <- b; if b' then t else f
 
 allM :: Monad m => (a -> m Bool) -> [a] -> m Bool
 allM p = foldr ((&&^) . p) (pure True)
+
+partitionM :: Monad m => (a -> m Bool) -> [a] -> m ([a], [a])
+partitionM f = helper ([], [])
+  where
+    helper (acct, accf) [] = pure (reverse acct, reverse accf)
+    helper (acct, accf) (x : xs) = do
+      res <- f x
+      if res
+        then helper (x : acct, accf) xs
+        else helper (acct, x : accf) xs

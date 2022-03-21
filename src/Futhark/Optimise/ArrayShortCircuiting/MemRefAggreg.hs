@@ -284,11 +284,31 @@ noMemOverlap _ (Set mr) _
   | mr == mempty = return True
 noMemOverlap td_env (Set is0) (Set js0)
   | Just non_negs <- mapM (primExpFromSubExpM (basePMconv (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env = do
-    -- TODO Expand this to be able to handle eg. nw
-    bla1 <- mapM (\i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) asserts less_thans non_negs i j) js) is
-    bla2 <- filterM (fmap not . \i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) asserts less_thans non_negs i j) js) is
-    allM (\i -> allM (\j -> return (IxFun.disjoint less_thans (nonNegatives td_env) i j) ||^ return (IxFun.disjoint2 less_thans (nonNegatives td_env) i j) ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) asserts less_thans non_negs i j) js) is
-      ||^ trace ("it failed\n" <> pretty less_thans <> "\n" <> pretty bla1 <> "\nhalløj?: " <> pretty bla2 <> "\n og: " <> pretty js) (return False)
+    (disjoints, not_disjoints) <-
+      partitionM
+        ( \i ->
+            allM
+              ( \j ->
+                  pure (IxFun.disjoint less_thans (nonNegatives td_env) i j)
+                    ||^ pure (IxFun.disjoint2 less_thans (nonNegatives td_env) i j)
+                    ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) asserts less_thans non_negs i j
+              )
+              js
+        )
+        is
+    pure $
+      null not_disjoints
+        || trace
+          ( "it failed\n"
+              <> pretty less_thans
+              <> "\n"
+              <> pretty disjoints
+              <> "\nhalløj?: "
+              <> pretty not_disjoints
+              <> "\n og: "
+              <> pretty js
+          )
+          False
   where
     less_thans = map (fmap $ fixPoint $ substituteInPrimExp $ scalarTable td_env) $ knownLessThan td_env
     asserts = map (fixPoint (substituteInPrimExp $ scalarTable td_env) . primExpFromSubExp Bool) $ td_asserts td_env
