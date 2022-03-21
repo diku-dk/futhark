@@ -44,7 +44,7 @@ import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
 import Futhark.Util.Pretty (Doc, line, ppr, text, (</>))
 import qualified Language.Futhark as E
-import Language.Futhark.Parser
+import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
 import Language.Futhark.Semantic
 import qualified Language.Futhark.TypeChecker as E
@@ -165,9 +165,8 @@ handleFile ::
   ReaderState -> LoadedFile T.Text -> IO UncheckedImport
 handleFile state_mvar (LoadedFile file_name import_name file_contents mod_time) = do
   case parseFuthark file_name file_contents of
-    Left err ->
-      pure . UncheckedImport . Left . singleError $
-        ProgramError (locOf import_name) $ text $ show err
+    Left (SyntaxError loc err) ->
+      pure . UncheckedImport . Left . singleError $ ProgramError loc $ text err
     Right prog -> do
       let imports = map (uncurry (mkImportFrom import_name)) $ E.progImports prog
       mvars <-

@@ -686,6 +686,7 @@ data ArrayOp
   = ArrayIndexing Certs VName (Slice SubExp)
   | ArrayRearrange Certs VName [Int]
   | ArrayRotate Certs VName [SubExp]
+  | ArrayReshape Certs VName (ShapeChange SubExp)
   | ArrayCopy Certs VName
   | -- | Never constructed.
     ArrayVar Certs VName
@@ -695,6 +696,7 @@ arrayOpArr :: ArrayOp -> VName
 arrayOpArr (ArrayIndexing _ arr _) = arr
 arrayOpArr (ArrayRearrange _ arr _) = arr
 arrayOpArr (ArrayRotate _ arr _) = arr
+arrayOpArr (ArrayReshape _ arr _) = arr
 arrayOpArr (ArrayCopy _ arr) = arr
 arrayOpArr (ArrayVar _ arr) = arr
 
@@ -702,6 +704,7 @@ arrayOpCerts :: ArrayOp -> Certs
 arrayOpCerts (ArrayIndexing cs _ _) = cs
 arrayOpCerts (ArrayRearrange cs _ _) = cs
 arrayOpCerts (ArrayRotate cs _ _) = cs
+arrayOpCerts (ArrayReshape cs _ _) = cs
 arrayOpCerts (ArrayCopy cs _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
@@ -712,6 +715,8 @@ isArrayOp cs (BasicOp (Rearrange perm arr)) =
   Just $ ArrayRearrange cs arr perm
 isArrayOp cs (BasicOp (Rotate rots arr)) =
   Just $ ArrayRotate cs arr rots
+isArrayOp cs (BasicOp (Reshape new_shape arr)) =
+  Just $ ArrayReshape cs arr new_shape
 isArrayOp cs (BasicOp (Copy arr)) =
   Just $ ArrayCopy cs arr
 isArrayOp _ _ =
@@ -721,6 +726,7 @@ fromArrayOp :: ArrayOp -> (Certs, Exp rep)
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
+fromArrayOp (ArrayReshape cs arr new_shape) = (cs, BasicOp $ Reshape new_shape arr)
 fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Copy arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
@@ -916,6 +922,9 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
     arrayIsMapParam (_, ArrayRotate cs arr rots) =
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn rots)
+    arrayIsMapParam (_, ArrayReshape cs arr new_shape) =
+      arr `elem` map_param_names
+        && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn new_shape)
     arrayIsMapParam (_, ArrayCopy cs arr) =
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs)
@@ -936,6 +945,8 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
                 BasicOp $ Rearrange (0 : map (+ 1) perm) arr
               ArrayRotate _ _ rots ->
                 BasicOp $ Rotate (intConst Int64 0 : rots) arr
+              ArrayReshape _ _ new_shape ->
+                BasicOp $ Reshape (DimCoercion w : new_shape) arr
               ArrayCopy {} ->
                 BasicOp $ Copy arr
               ArrayVar {} ->

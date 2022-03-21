@@ -19,8 +19,8 @@ simplifyPrimExp = simplifyAnyPrimExp onLeaf
     onLeaf v pt = do
       se <- simplify $ Var v
       case se of
-        Var v' -> return $ LeafExp v' pt
-        Constant pv -> return $ ValueExp pv
+        Var v' -> pure $ LeafExp v' pt
+        Constant pv -> pure $ ValueExp pv
 
 -- | Like 'simplifyPrimExp', but where leaves may be 'Ext's.
 simplifyExtPrimExp ::
@@ -32,9 +32,9 @@ simplifyExtPrimExp = simplifyAnyPrimExp onLeaf
     onLeaf (Free v) pt = do
       se <- simplify $ Var v
       case se of
-        Var v' -> return $ LeafExp (Free v') pt
-        Constant pv -> return $ ValueExp pv
-    onLeaf (Ext i) pt = return $ LeafExp (Ext i) pt
+        Var v' -> pure $ LeafExp (Free v') pt
+        Constant pv -> pure $ ValueExp pv
+    onLeaf (Ext i) pt = pure $ LeafExp (Ext i) pt
 
 simplifyAnyPrimExp ::
   SimplifiableRep rep =>
@@ -43,7 +43,7 @@ simplifyAnyPrimExp ::
   SimpleM rep (PrimExp a)
 simplifyAnyPrimExp f (LeafExp v pt) = f v pt
 simplifyAnyPrimExp _ (ValueExp pv) =
-  return $ ValueExp pv
+  pure $ ValueExp pv
 simplifyAnyPrimExp f (BinOpExp bop e1 e2) =
   BinOpExp bop <$> simplifyAnyPrimExp f e1 <*> simplifyAnyPrimExp f e2
 simplifyAnyPrimExp f (CmpOpExp cmp e1 e2) =
