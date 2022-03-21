@@ -262,7 +262,7 @@ generateUniformizeLoop m = do
   body <- collect $ do
     addLoopVar i Int64
     m $ Imp.le64 i
-  emit $ Imp.Op $ Imp.ForEachActive i $ Imp.Op $ Imp.UnmaskedBlock body
+  emit $ Imp.Op $ Imp.ForEachActive i $ body
 
 uniformizeVar :: VName -> PrimExp VName -> MulticoreGen ()
 uniformizeVar var idx = do
