@@ -21,8 +21,10 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     segOpString,
     generateChunkLoop,
     generateUniformizeLoop,
+    uniformizeVar,
+    extractVectorLane,
     inISPC,
-    toParam,
+    toParam
   )
 where
 
@@ -37,6 +39,7 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
+import qualified Data.Text as T
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -259,8 +262,22 @@ generateUniformizeLoop m = do
   body <- collect $ do
     addLoopVar i Int64
     m $ Imp.le64 i
-  emit $ Imp.Op $ Imp.ForEachActive i $
-    body
+  emit $ Imp.Op $ Imp.ForEachActive i body
+
+uniformizeVar :: VName -> PrimExp VName -> MulticoreGen ()
+uniformizeVar var idx = do
+  emit $ {-Imp.Op $ Imp.UnmaskedBlock $-} Imp.Op $
+    Imp.ISPCBuiltin var (nameFromString "broadcast") [Imp.LeafExp var Imp.Unit, idx]
+
+extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.Code -> MulticoreGen ()
+extractVectorLane j code = do
+  let ut_exp = untyped j
+  code' <- code
+  case code' of
+    Imp.SetScalar vname e -> 
+      emit $ Imp.Op $ Imp.ISPCBuiltin vname (nameFromText $ T.pack "extract") [e, ut_exp]    
+    _ -> 
+      return ()
 
 inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
 inISPC retvals code = do

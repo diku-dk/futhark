@@ -23,7 +23,7 @@ import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.CodeGen.Backends.SimpleRep
+import Futhark.CodeGen.Backends.SimpleRep ( defaultMemBlockType )
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
