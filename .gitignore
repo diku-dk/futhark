@@ -31,6 +31,7 @@ dist-newstyle
 *.toc
 *.vrb
 *.nav
+*.nix
 
 # Ignore core dumps.
 core
@@ -47,7 +48,6 @@ core.*
 *.c
 *.h
 *.ispc
-*.gch
 
 # Ignore directories often created by testing
 data/

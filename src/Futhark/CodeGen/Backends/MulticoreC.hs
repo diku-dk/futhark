@@ -23,7 +23,7 @@ import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.CodeGen.Backends.SimpleRep
+import Futhark.CodeGen.Backends.SimpleRep ( defaultMemBlockType )
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
@@ -32,6 +32,7 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC (compilePrimExp)
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::

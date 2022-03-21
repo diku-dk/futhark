@@ -44,7 +44,8 @@ callKernelOperations =
       opsCopyCompiler = callKernelCopy,
       opsOpCompiler = opCompiler,
       opsStmsCompiler = defCompileStms,
-      opsAllocCompilers = mempty
+      opsAllocCompilers = mempty,
+      opsDeclareCompiler = error "todo (obp): appropriate error :)"
     }
 
 openclAtomics, cudaAtomics :: AtomicBinOp

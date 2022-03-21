@@ -18,6 +18,7 @@ where
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Util.Pretty
+import Futhark.IR.Syntax.Core (Type)
 
 -- | An imperative program.
 type Program = Imp.Functions Multicore

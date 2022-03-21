@@ -65,10 +65,13 @@ module Futhark.CodeGen.ImpGen
     ToExp (..),
     compileAlloc,
     everythingVolatile,
+    everythingUniform,
+    everythingDefault,
     compileBody,
     compileBody',
     compileLoopBody,
     defCompileStms,
+    defDeclare,
     compileStms,
     compileExp,
     defCompileExp,
@@ -152,6 +155,7 @@ import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
 import Language.Futhark.Warnings
 import Prelude hiding (quot)
+import Debug.Trace
 
 -- | How to compile an t'Op'.
 type OpCompiler rep r op = Pat rep -> Op rep -> ImpM rep r op ()
@@ -171,12 +175,15 @@ type CopyCompiler rep r op =
 -- | An alternate way of compiling an allocation.
 type AllocCompiler rep r op = VName -> Count Bytes (Imp.TExp Int64) -> ImpM rep r op ()
 
+type DeclareCompiler rep r op = VName -> Imp.Qualifier -> PrimType-> ImpM rep r op ()
+
 data Operations rep r op = Operations
   { opsExpCompiler :: ExpCompiler rep r op,
     opsOpCompiler :: OpCompiler rep r op,
     opsStmsCompiler :: StmsCompiler rep r op,
     opsCopyCompiler :: CopyCompiler rep r op,
-    opsAllocCompilers :: M.Map Space (AllocCompiler rep r op)
+    opsAllocCompilers :: M.Map Space (AllocCompiler rep r op),
+    opsDeclareCompiler :: DeclareCompiler rep r op
   }
 
 -- | An operations set for which the expression compiler always
@@ -191,7 +198,8 @@ defaultOperations opc =
       opsOpCompiler = opc,
       opsStmsCompiler = defCompileStms,
       opsCopyCompiler = defaultCopy,
-      opsAllocCompilers = mempty
+      opsAllocCompilers = mempty,
+      opsDeclareCompiler = defDeclare
     }
 
 -- | When an array is declared, this is where it is stored.
@@ -252,14 +260,15 @@ data Env rep r op = Env
     envCopyCompiler :: CopyCompiler rep r op,
     envAllocCompilers :: M.Map Space (AllocCompiler rep r op),
     envDefaultSpace :: Imp.Space,
-    envVolatility :: Imp.Volatility,
+    envVolatility :: Imp.Qualifier,
     -- | User-extensible environment.
     envEnv :: r,
     -- | Name of the function we are compiling, if any.
     envFunction :: Maybe Name,
     -- | The set of attributes that are active on the enclosing
     -- statements (including the one we are currently compiling).
-    envAttrs :: Attrs
+    envAttrs :: Attrs,
+    envDeclareCompiler :: DeclareCompiler rep r op
   }
 
 newEnv :: r -> Operations rep r op -> Imp.Space -> Env rep r op
@@ -274,7 +283,8 @@ newEnv r ops ds =
       envVolatility = Imp.Nonvolatile,
       envEnv = r,
       envFunction = Nothing,
-      envAttrs = mempty
+      envAttrs = mempty,
+      envDeclareCompiler = opsDeclareCompiler ops
     }
 
 -- | The symbol table used during compilation.
@@ -298,6 +308,10 @@ data ImpState rep r op = ImpState
 newState :: VNameSource -> ImpState rep r op
 newState = ImpState mempty mempty mempty mempty mempty
 
+-- Try this
+
+-- 
+
 newtype ImpM rep r op a
   = ImpM (ReaderT (Env rep r op) (State (ImpState rep r op)) a)
   deriving
@@ -307,6 +321,8 @@ newtype ImpM rep r op a
       MonadState (ImpState rep r op),
       MonadReader (Env rep r op)
     )
+
+
 
 instance MonadFreshNames (ImpM rep r op) where
   getNameSource = gets stateNameSource
@@ -361,6 +377,7 @@ subImpM r ops (ImpM m) = do
             envCopyCompiler = opsCopyCompiler ops,
             envOpCompiler = opsOpCompiler ops,
             envAllocCompilers = opsAllocCompilers ops,
+            envDeclareCompiler = opsDeclareCompiler ops,
             envEnv = r
           }
       s' =
@@ -689,7 +706,8 @@ compileLoopBody mergeparams (Body _ stms ses) = do
     copy_to_merge_params <- forM (zip3 mergeparams tmpnames ses) $ \(p, tmp, SubExpRes _ se) ->
       case typeOf p of
         Prim pt -> do
-          emit $ Imp.DeclareScalar tmp Imp.Nonvolatile pt
+          declare <- asks envDeclareCompiler
+          declare tmp Imp.Nonvolatile pt 
           emit $ Imp.SetScalar tmp $ toExp' pt se
           return $ emit $ Imp.SetScalar (paramName p) $ Imp.var tmp pt
         Mem space | Var v <- se -> do
@@ -701,7 +719,6 @@ compileLoopBody mergeparams (Body _ stms ses) = do
 
 compileStms :: Names -> Stms rep -> ImpM rep r op () -> ImpM rep r op ()
 compileStms alive_after_stms all_stms m = do
-  --let t = traceShow (pprBlock all_stms) all_stms K: Maybe come back
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
@@ -1040,14 +1057,17 @@ dLParams = dScope Nothing . scopeOfLParams
 dPrimVol :: String -> PrimType -> Imp.TExp t -> ImpM rep r op (TV t)
 dPrimVol name t e = do
   name' <- newVName name
-  emit $ Imp.DeclareScalar name' Imp.Volatile t
+  declare <- asks envDeclareCompiler
+  declare name' Imp.Volatile t
   addVar name' $ ScalarVar Nothing $ ScalarEntry t
   name' <~~ untyped e
   return $ TV name' t
+  
 
 dPrim_ :: VName -> PrimType -> ImpM rep r op ()
 dPrim_ name t = do
-  emit $ Imp.DeclareScalar name Imp.Nonvolatile t
+  declare <- asks envDeclareCompiler
+  declare name Imp.Nonvolatile t
   addVar name $ ScalarVar Nothing $ ScalarEntry t
 
 -- | The return type is polymorphic, so there is no guarantee it
@@ -1118,7 +1138,9 @@ dInfo e name info = do
     MemVar _ entry' ->
       emit $ Imp.DeclareMem name $ entryMemSpace entry'
     ScalarVar _ entry' ->
-      emit $ Imp.DeclareScalar name Imp.Nonvolatile $ entryScalarType entry'
+      do
+        declare <- asks envDeclareCompiler
+        declare name Imp.Nonvolatile (entryScalarType entry')
     ArrayVar _ _ ->
       return ()
     AccVar {} ->
@@ -1141,6 +1163,18 @@ dArray name pt shape mem ixfun =
 
 everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
+
+declareUniform :: DeclareCompiler rep r op
+declareUniform vname _ pt = do
+  emit $ Imp.DeclareScalar vname Imp.Uniform pt
+
+everythingDefault :: ImpM rep r op a -> ImpM rep r op a
+everythingDefault = do
+  local $ \env -> env {envDeclareCompiler = defDeclare}
+
+everythingUniform :: ImpM rep r op a -> ImpM rep r op a
+everythingUniform = do
+  local $ \env -> env {envDeclareCompiler = declareUniform}
 
 -- | Remove the array targets.
 funcallTargets :: [ValueDestination] -> ImpM rep r op [VName]
@@ -1254,7 +1288,8 @@ localOps ops = local $ \env ->
       envStmsCompiler = opsStmsCompiler ops,
       envCopyCompiler = opsCopyCompiler ops,
       envOpCompiler = opsOpCompiler ops,
-      envAllocCompilers = opsAllocCompilers ops
+      envAllocCompilers = opsAllocCompilers ops,
+      envDeclareCompiler = opsDeclareCompiler ops
     }
 
 -- | Get the current symbol table.
@@ -1436,6 +1471,10 @@ mapTransposeForType bt = do
 
   return fname
 
+defDeclare :: DeclareCompiler rep r op
+defDeclare vname qual pt = do
+  emit $ Imp.DeclareScalar vname qual pt
+
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler rep r op
 defaultCopy pt dest src
@@ -1494,10 +1533,12 @@ copyElementWise bt dest src = do
   (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
   vol <- asks envVolatility
   tmp <- newVName "tmp"
+  declare <- asks envDeclareCompiler
+  scalar <- collect $ declare tmp vol bt
   emit $
     foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
       mconcat
-        [ Imp.DeclareScalar tmp vol bt,
+        [ scalar,
           Imp.Read tmp srcmem srcidx bt srcspace vol,
           Imp.Write destmem destidx bt destspace vol $ Imp.var tmp bt
         ]
