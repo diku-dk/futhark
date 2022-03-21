@@ -5,13 +5,13 @@ where
 
 import Control.Monad
 import Data.List (zip4)
+import Debug.Trace
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Util.IntegralExp (quot, rem)
 import Prelude hiding (quot, rem)
-import Debug.Trace
 
 -- Compile a SegScan construct
 compileSegScan ::
@@ -104,13 +104,13 @@ scanStage1 pat space scan_ops kbody = do
         pure acc
 
     -- Create ISPC kernel function
-    inISPC [] $ do 
+    inISPC [] $ do
       -- Create fpr each
       generateChunkLoop "SegScan" True $ \i -> do
-        zipWithM_ dPrimV_ is $ unflattenIndex ns' i        
+        zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         compileStms mempty (kernelBodyStms kbody) $ do
-           -- Vector load and then do sequential scan
-          everythingUniform $ 
+          -- Vector load and then do sequential scan
+          everythingUniform $
             generateUniformizeLoop $ \j -> do
               sComment "write mapped values results to memory" $ do
                 let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
@@ -124,15 +124,16 @@ scanStage1 pat space scan_ops kbody = do
 
                   -- Read next value
                   sComment "Read next values" $
-                    forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->        
-                      extractVectorLane j $ collect $ do
-                      copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+                    forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
+                      extractVectorLane j $
+                        collect $ do
+                          copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
                   sComment "Do stuff" $
                     compileStms mempty (bodyStms $ lamBody scan_op) $
                       forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
                         \(acc', pe, se) -> do
-                          copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []      
+                          copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
                           copyDWIMFix acc' vec_is se []
 
   free_params <- freeParams fbody
@@ -214,55 +215,53 @@ scanStage3 pat space scan_ops kbody = do
     sOp $ Imp.GetTaskId (segFlat space)
 
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
-    local_accs_pair <- forM (zip scan_ops per_scan_pes) $ \(scan_op, pes) -> do
+    local_accs <- forM (zip scan_ops per_scan_pes) $ \(scan_op, pes) -> do
       let shape = segBinOpShape scan_op
           ts = lambdaReturnType $ segBinOpLambda scan_op
       forM (zip4 (xParams scan_op) pes ts $ segBinOpNeutral scan_op) $ \(p, pe, t, ne) -> do
         acc <-
           case shapeDims shape of
-            [] -> pure $ (paramName p, paramType p)
+            [] -> pure $ paramName p
             _ -> do
               let pt = elemType t
               name <- sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-              pure (name, paramType p)
+              pure name
 
         -- Initialise the accumulator with neutral from previous chunk.
         -- or read neutral if first ``iter``
         (start, _end) <- getLoopBounds
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           let read_carry_in =
-                copyDWIMFix (fst acc) vec_is (Var $ patElemName pe) (start - 1 : vec_is)
+                copyDWIMFix acc vec_is (Var $ patElemName pe) (start - 1 : vec_is)
               read_neutral =
-                copyDWIMFix (fst acc) vec_is ne []
+                copyDWIMFix acc vec_is ne []
           sIf (start .==. 0) read_neutral read_carry_in
         pure acc
 
-    let local_accs = map (map fst) local_accs_pair
-    retvals <- fmap concat $ mapM (uncurry toParam) . concat $ local_accs_pair 
-
-    inISPC retvals $ do
+    inISPC [] $ do
       generateChunkLoop "SegScan" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         sComment "stage 3 scan body" $
           compileStms mempty (kernelBodyStms kbody) $
             everythingUniform $
               generateUniformizeLoop $ \j -> do
-                 forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) -> 
-                   sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-                     forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
-                       copyDWIMFix (paramName p) [] (Var acc') vec_is
+                forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
+                  sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+                    forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
+                      copyDWIMFix (paramName p) [] (Var acc') vec_is
 
-                     -- Read next value
-                     forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-                       extractVectorLane j $ collect $ do
-                       copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+                    -- Read next value
+                    forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
+                      extractVectorLane j $
+                        collect $ do
+                          copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
-                     compileStms mempty (bodyStms $ lamBody scan_op) $
-                       forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
-                         \(pe, se, acc') -> do
-                           copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-                           copyDWIMFix acc' vec_is se []
-                             -- TODO (obp): Extract this
+                    compileStms mempty (bodyStms $ lamBody scan_op) $
+                      forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
+                        \(pe, se, acc') -> do
+                          copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+                          copyDWIMFix acc' vec_is se []
+  -- TODO (obp): Extract this
 
   free_params' <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
