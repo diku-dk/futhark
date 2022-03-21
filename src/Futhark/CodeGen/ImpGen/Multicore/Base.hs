@@ -36,14 +36,10 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem
-import Futhark.IR.Prop.Scope
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
-import Debug.Trace
 import qualified Data.Text as T
-import Futhark.CodeGen.ImpCode (TExp)
-import Futhark.CodeGen.ImpCode.Multicore (Multicore)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =

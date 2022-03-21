@@ -32,7 +32,6 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
-import Futhark.CodeGen.Backends.GenericC (compilePrimExp)
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
