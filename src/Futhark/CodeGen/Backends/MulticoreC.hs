@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.MulticoreC
     GC.asLibrary,
     GC.asExecutable,
     GC.asISPCExecutable,
+    GC.asISPCServer,
     GC.asServer,
     operations,
     cliOptions,
@@ -31,7 +32,6 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
-import Futhark.CodeGen.Backends.GenericC (compilePrimExp)
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -291,6 +291,30 @@ compileKernelInputs = zipWith field
     field name (_, RawMem) = [C.cexp|$id:(getName name)|]
     field name (_, MemBlock) = [C.cexp|&$id:(getName name)|]
 
+compileKernelRetvalParams :: [VName] -> [(C.Type, ValueType)] -> [C.Param]
+compileKernelRetvalParams = zipWith field
+  where
+    field name (ty, Prim) =
+      [C.cparam|uniform $ty:ty * uniform $id:(getName name <> "_esc")|]
+    field name (_, RawMem) =
+      [C.cparam|unsigned char uniform * uniform $id:(getName name <> "_esc")|]
+    field name (_, _) =
+      [C.cparam|uniform typename memblock * uniform $id:(getName name <> "_esc")|]
+
+compileKernelRetvalInputs :: [VName] -> [(C.Type, ValueType)] -> [C.Exp]
+compileKernelRetvalInputs = zipWith field
+  where
+    field name (_, Prim) = [C.cexp|&$id:(getName name)|]
+    field name (_, RawMem) = [C.cexp|$id:(getName name)|]
+    field name (_, MemBlock) = [C.cexp|&$id:(getName name)|]
+
+compileKernelRetvalReadback :: [VName] -> [(C.Type, ValueType)] -> [C.Stm]
+compileKernelRetvalReadback = zipWith field
+  where
+    field name (_, Prim) = [C.cstm|*$id:(getName name <> "_esc") = extract($id:(getName name), 0);|]
+    field name (_, RawMem) = [C.cstm|$id:(getName name <> "_esc") = extract($id:(getName name), 0);|]
+    field name (_, MemBlock) = [C.cstm|*$id:(getName name <> "_esc") = extract($id:(getName name), 0);|]
+
 -- Immediately dereference a memblock passed to the kernel, so we can use it normally
 compileMemblockDeref :: [(VName, VName)] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileMemblockDeref = zipWith deref
@@ -338,8 +362,8 @@ compileSetRetvalStructValues ::
   [C.Stm]
 compileSetRetvalStructValues struct = zipWith field
   where
-    field name (_, Prim) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=&$id:name;|]
+    field name (ct, Prim) =
+      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=($ty:ct*)&$id:name;|]
     field name (_, MemBlock) =
       [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
     field name (_, RawMem) =
@@ -673,14 +697,15 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                                                 (struct futhark_context uniform * uniform ctx, 
                                                 struct $id:fstruct uniform * uniform args, 
                                                 uniform int iterations);|]
+  aos_name <- newVName "aos"
   GC.stm [C.cstm|$escstm:("#if ISPC")|]
   GC.items [C.citems|
     #if ISPC
-    uniform struct $id:fstruct aos[programCount];
-    aos[programIndex] = $id:(fstruct <> "_");
+    uniform struct $id:fstruct $id:aos_name[programCount];
+    $id:aos_name[programIndex] = $id:(fstruct <> "_");
     foreach_active (i) {
       if (err == 0) {
-        err = $id:schedn(ctx, &aos[i], extract($exp:e', i));
+        err = $id:schedn(ctx, &$id:aos_name[i], extract($exp:e', i));
       }
     }|]
   -- TODO(pema): We can't do much else here^^ than set the error code and hope for the best
@@ -700,13 +725,19 @@ compileOp (ISPCKernel body free retvals) = do
   -- rename memblocks so we can pass them as pointers, compile the parameters
   let free_names_esc = map freshMemName free
   let free_args_esc = map paramName free_names_esc
-  let inputs = compileKernelParams free_args_esc free_ctypes
+  let inputs_free = compileKernelParams free_args_esc free_ctypes
 
   -- dereference memblock pointers into the unescaped names
   let mem_args = map paramName $ filter isMemblock free
   let mem_args_esc = map paramName $ filter isMemblock free_names_esc
   mem_ctypes <- mapM paramToCType (filter isMemblock free)
   let memderef = compileMemblockDeref (zip mem_args mem_args_esc) mem_ctypes
+
+  -- handle return values
+  retval_ctypes <- mapM paramToCType retvals
+  let retval_args = map paramName retvals
+  let inputs_retvals = compileKernelRetvalParams retval_args retval_ctypes
+  let readback = compileKernelRetvalReadback retval_args retval_ctypes
 
   -- TODO(pema): We generate code for a new function without calling GC.inNewFunction,
   -- I think this is a hack. If I understand correctly, it can result in double-frees
@@ -722,7 +753,8 @@ compileOp (ISPCKernel body free retvals) = do
         free_mem <- GC.freeAllocatedMem
 
         GC.compileCode body
-        
+        GC.stms readback
+
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]
     --mainBody <- GC.collect $ GC.compileCode body
@@ -731,16 +763,17 @@ compileOp (ISPCKernel body free retvals) = do
         export static uniform int $id:s(struct futhark_context uniform * uniform ctx,
                                  uniform typename int64_t start,
                                  uniform typename int64_t end,
-                                 $params:inputs) {
+                                 $params:inputs_free, $params:inputs_retvals) {
           $decls:memderef
           $items:mainBody
         }|]
 
   -- Generate C code to call into ISPC kernel
-  let ispc_inputs = compileKernelInputs free_args free_ctypes
+  let ispc_inputs_free = compileKernelInputs free_args free_ctypes
+  let ispc_inputs_retvals = compileKernelRetvalInputs retval_args retval_ctypes
   free_all_mem <- GC.freeAllocatedMem -- TODO(pema): Should this be here?
   GC.items [C.citems|
-    err = $id:ispcShim(ctx, start, end, $args:ispc_inputs);
+    err = $id:ispcShim(ctx, start, end, $args:ispc_inputs_free, $args:ispc_inputs_retvals);
     if (err != 0) {
       $items:free_all_mem
       goto cleanup;
@@ -760,11 +793,18 @@ compileOp (ForEachActive name body) = do
     foreach_active ($id:name) {
       $items:body'
     }|]
-    
+
+compileOp (UnmaskedBlock code) = do
+  body <- GC.collect $ GC.compileCode code
+  GC.items [C.citems|
+    $escstm:("unmasked") {
+      $items:body
+    }|]
+
 compileOp (ISPCBuiltin dest name args) = do
   cargs <- mapM GC.compileExp args
-  GC.stm [C.cstm|$id:dest = $id:name($args:cargs);|]  
-  
+  GC.stm [C.cstm|$id:dest = $id:name($args:cargs);|]
+
 compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free

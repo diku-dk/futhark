@@ -368,11 +368,14 @@ compileMulticoreAction fcfg mode outpath =
           let (c, ispc) = MulticoreC.asISPCExecutable cprog
           liftIO $ T.writeFile cpath $ cPrependHeader c
           liftIO $ T.writeFile ispcPath ispc
-          runISPC ispcPath outpath cpath ispcExtension ["-O3"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath outpath cpath ispcExtension ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
           --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
-          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          let (c, ispc) = MulticoreC.asISPCServer cprog
+          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile ispcPath ispc
+          --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath outpath cpath ispcExtension ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 pythonCommon ::
   (CompilerMode -> String -> prog -> FutharkM (Warnings, T.Text)) ->

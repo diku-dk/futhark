@@ -18,7 +18,6 @@ where
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Util.Pretty
-import Futhark.IR.Syntax.Core (Type)
 
 -- | An imperative program.
 type Program = Imp.Functions Multicore
@@ -42,6 +41,8 @@ data Multicore
   | -- | Escape hatch for generating builtin ISPC functions
     -- like extract or broadcast
     ISPCBuiltin VName Name [Exp]
+    -- | Unmasked block of code, only valid in ISPC
+  | UnmaskedBlock Code
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -143,6 +144,8 @@ instance Pretty Multicore where
     text "foreach_active" <+> ppr i <+> text "{"
     </> indent 2 (ppr body)
     </> text "}" 
+  ppr (UnmaskedBlock code) =
+    ppr code
   ppr (ISPCBuiltin dest name args) =
     ppr dest <+> "<-" <+> ppr name <+> "(" <+> ppr args <+> ")"
 
@@ -171,5 +174,7 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body <> freeIn' bound)
   freeIn' (ForEachActive i body) =
     fvBind (oneName i) (freeIn' body)
+  freeIn' (UnmaskedBlock code) =
+    freeIn' code
   freeIn' (ISPCBuiltin dest _ args) =
     freeIn' dest <> freeIn' args

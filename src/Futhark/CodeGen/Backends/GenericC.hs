@@ -13,6 +13,7 @@ module Futhark.CodeGen.Backends.GenericC
     asLibrary,
     asExecutable,
     asISPCExecutable,
+    asISPCServer,
     asServer,
 
     -- * Pluggable compiler
@@ -1530,6 +1531,12 @@ asISPCExecutable parts =
   where c = asExecutable parts
         ispc = cISPC parts
 
+asISPCServer :: CParts -> (T.Text, T.Text)
+asISPCServer parts =
+  (c, ispc)
+  where c = asServer parts
+        ispc = cISPC parts
+
 -- | As executable with command-line interface.
 asExecutable :: CParts -> T.Text
 asExecutable parts =
@@ -1652,6 +1659,7 @@ $entry_point_decls
   |]
       ispcdefs =
         [untrimming|
+#define bool uint8 // This is a workaround around an ISPC bug, stdbool doesn't get included
 typedef int64 int64_t;
 typedef int32 int32_t;
 typedef int16 int16_t;
@@ -1661,6 +1669,8 @@ typedef unsigned int64 uint64_t;
 typedef unsigned int32 uint32_t;
 typedef unsigned int16 uint16_t;
 typedef unsigned int8 uint8_t;
+
+#define fabs(x) abs(x)
 
 $cScalarDefs
 
