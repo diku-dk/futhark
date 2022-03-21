@@ -19,6 +19,7 @@ module Futhark.Util
     takeLast,
     dropLast,
     mapEither,
+    partitionMaybe,
     maybeNth,
     maybeHead,
     splitFromEnd,
@@ -158,6 +159,16 @@ dropLast n = reverse . drop n . reverse
 -- | A combination of 'map' and 'partitionEithers'.
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
+
+-- | A combination of 'partition' and 'mapMaybe'
+partitionMaybe :: (a -> Maybe b) -> [a] -> ([b], [a])
+partitionMaybe f = helper ([], [])
+  where
+    helper (acc1, acc2) [] = (reverse acc1, reverse acc2)
+    helper (acc1, acc2) (x : xs) =
+      case f x of
+        Just x' -> helper (x' : acc1, acc2) xs
+        Nothing -> helper (acc1, x : acc2) xs
 
 -- | Return the list element at the given index, if the index is valid.
 maybeNth :: Integral int => int -> [a] -> Maybe a

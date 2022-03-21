@@ -24,7 +24,7 @@ where
 
 import Data.Bits (xor)
 import Data.Function ((&))
-import Data.List (intersect, partition, sort, (\\))
+import Data.List (findIndex, intersect, partition, sort, (\\))
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
@@ -91,10 +91,12 @@ prodToExp (Prod False (a : as)) =
   foldl (BinOpExp $ Mul Int64 OverflowUndef) a as
 
 simplifySofP :: SofP -> SofP
-simplifySofP = fixPoint (mapMaybe (applyZero . removeOnes) . constFoldValueExps . removeNegations)
+simplifySofP =
+  -- TODO: Maybe 'constFoldValueExps' is not necessary after adding scaleConsts
+  fixPoint (mapMaybe (applyZero . removeOnes) . scaleConsts . constFoldValueExps . removeNegations)
 
 simplifySofP' :: SofP -> SofP
-simplifySofP' = fixPoint (mapMaybe (applyZero . removeOnes) . removeNegations)
+simplifySofP' = fixPoint (mapMaybe (applyZero . removeOnes) . scaleConsts . removeNegations)
 
 simplify0 :: Exp -> SofP
 simplify0 = simplifySofP . sumOfProducts
@@ -127,6 +129,36 @@ constFoldValueExps prods =
   let (value_exps, others) = partition (all isPrimValue . atoms) prods
       value_exps' = sumOfProducts $ constFoldPrimExp $ sumToExp value_exps
    in value_exps' <> others
+
+intFromExp :: Exp -> Maybe Int64
+intFromExp (ValueExp (IntValue x)) = Just $ valueIntegral x
+intFromExp _ = Nothing
+
+-- | Given @-[2, x]@ returns @(-2, [x])@
+prodToScale :: Prod -> (Int64, [Exp])
+prodToScale (Prod b exps) =
+  let (scalars, exps') = partitionMaybe intFromExp exps
+   in if b
+        then (- (product scalars), exps')
+        else (product scalars, exps')
+
+-- | Given @(-2, [x])@ returns @-[1, 2, x]@
+scaleToProd :: (Int64, [Exp]) -> Prod
+scaleToProd (i, exps) =
+  Prod (i < 0) $ ValueExp (IntValue $ Int64Value $ abs i) : exps
+
+-- | Given @[[2, x], -[x]]@ returns @[[x]]@
+scaleConsts :: SofP -> SofP
+scaleConsts =
+  helper [] . map prodToScale
+  where
+    helper :: [Prod] -> [(Int64, [Exp])] -> [Prod]
+    helper acc [] = reverse acc
+    helper acc ((scale, exps) : rest) =
+      case flip focusNth rest =<< findIndex ((==) exps . snd) rest of
+        Nothing -> helper (scaleToProd (scale, exps) : acc) rest
+        Just (before, (scale', _), after) ->
+          helper acc $ (scale + scale', exps) : (before <> after)
 
 isPrimValue :: Exp -> Bool
 isPrimValue (ValueExp _) = True
