@@ -182,7 +182,7 @@ canMergeGPUBodies usage consumed = do
   st <- get
   let stored = stateMemStored st
   let bound = stateHostBound st
-  let onDevice tag = IM.member tag bound || IM.member tag stored
+  let onDevice tag = tag `IM.member` bound || tag `IM.member` stored
 
   -- A dependency returned from a GPUBody can be ignored as that dependency
   -- still will be available after a potential merge, albeit under a different

@@ -481,22 +481,30 @@ addReadsHelper x = do
 -- | Migrate a statement to device, ensuring all its bound variables used on
 -- host will remain available with the same names.
 moveStm :: Stms GPU -> Stm GPU -> ReduceM (Stms GPU)
-moveStm out (Let pat aux (BasicOp (Replicate (Shape [dim]) se)))
-  | dim == intConst Int64 1,
-    Pat [PatElem _ arr_t] <- pat,
-    Just t' <- peelArray 1 arr_t = do
-    -- Create an alias of n.
-    n' <- newName $ VName (nameFromString "x") 0
-    let pat' = Pat [PatElem n' t']
-    let aux' = StmAux mempty mempty ()
-    let stm' = Let pat' aux' (BasicOp $ SubExp se)
+moveStm out (Let pat aux (BasicOp (ArrayLit [se] t')))
+  | Pat [PatElem n _] <- pat =
+    do
+      let n' = VName (baseName n `withSuffix` "_inner") 0
+      let pat' = Pat [PatElem n' t']
+      let e' = BasicOp (SubExp se)
+      let stm' = Let pat' aux e'
 
-    -- Rewrite replicate as a GPUBody rather than simply migrating it. This
-    -- avoids an Index to eliminate added indirection.
-    -- If n has been migrated we cannot simply rewrite the replicate to be an
-    -- alias of n's device location as the replicated array may be consumed.
-    gpubody <- Let pat aux . stmExp <$> inGPUBody (cloneStm stm')
-    pure (out |> gpubody)
+      gpubody <- inGPUBody (cloneStm stm')
+      pure (out |> gpubody {stmPat = pat})
+moveStm out (Let pat aux (BasicOp (Replicate (Shape (dim : dims)) se)))
+  | dim == intConst Int64 1,
+    Pat [PatElem n arr_t] <- pat,
+    Just t' <- peelArray 1 arr_t =
+    do
+      let n' = VName (baseName n `withSuffix` "_inner") 0
+      let pat' = Pat [PatElem n' t']
+      let e' = BasicOp $ case dims of
+            [] -> SubExp se
+            _ -> Replicate (Shape dims) se
+      let stm' = Let pat' aux e'
+
+      gpubody <- inGPUBody (cloneStm stm')
+      pure (out |> gpubody {stmPat = pat})
 moveStm out stm = do
   -- Move the statement to device.
   gpubody <- inGPUBody (cloneStm stm)

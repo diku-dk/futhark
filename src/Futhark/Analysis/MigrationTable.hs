@@ -389,6 +389,11 @@ graphStm stm = do
       -- throughput only will decrease if the GPU utilization decreases as a
       -- result.
       graphSimple bs e
+    BasicOp (Replicate (Shape dims) _)
+      | [(_, t)] <- bs,
+        length dims == arrayRank t, -- i.e. se is a scalar.
+        all (== intConst Int64 1) dims -> do
+        graphSimple bs e
     BasicOp (Index _ slice)
       | isFixed slice ->
         graphRead (one bs)
@@ -434,15 +439,6 @@ graphStm stm = do
     BasicOp Copy {} -> graphHostOnly e
     BasicOp Manifest {} -> graphHostOnly e
     BasicOp Iota {} -> graphHostOnly e
-    BasicOp (Replicate (Shape [dim]) se)
-      | Var _ <- se,
-        b@(_, t) <- one bs,
-        1 <- arrayRank t, -- i.e. se is a scalar.
-        dim == intConst Int64 1 ->
-        -- `gpu { n }` is slightly more efficient than `replicate 1 n`, does
-        -- not require n to be made available to host, and can be merged with
-        -- other gpu bodies.
-        graphAutoMove b
     BasicOp Replicate {} -> graphHostOnly e
     -- END
     BasicOp UpdateAcc {} ->
