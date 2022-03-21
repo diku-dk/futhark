@@ -1254,7 +1254,7 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
       (offset2, interval2) = lmadToIntervals lmad2
       (neg_offset, pos_offset) =
         partition AlgSimplify2.negated $
-          offset1 `AlgSimplify2.sub` offset2
+          AlgSimplify2.simplifySofP $ offset1 `AlgSimplify2.sub` offset2
       (interval1', interval2') =
         unzip $ intervalPairs interval1 interval2
   disjointHelper 4 interval1' interval2' $ offset1 `AlgSimplify2.sub` offset2
