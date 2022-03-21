@@ -41,6 +41,7 @@ module Futhark.CodeGen.Backends.GenericC
     contextContents,
     contextFinalInits,
     runCompilerM,
+    withOperations,
     inNewFunction,
     cachingMemory,
     compileFun,
@@ -425,6 +426,9 @@ runCompilerM ops src userstate (CompilerM m) =
   runState
     (runReaderT m (CompilerEnv ops mempty))
     (newCompilerState src userstate)
+
+withOperations :: Operations op s -> CompilerM op s a -> CompilerM op s a
+withOperations ops = local (\env -> env { envOperations = ops })
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState

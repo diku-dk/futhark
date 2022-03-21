@@ -19,6 +19,8 @@ module Futhark.CodeGen.Backends.MulticoreC
 where
 
 import Control.Monad
+
+import Control.Monad.Reader
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
@@ -248,6 +250,13 @@ operations =
         ( [C.citems|worker_local = &ctx->scheduler.workers[0];|],
           []
         )
+    }
+
+-- TODO(pema.malling): Better error handling
+ispcOperations :: GC.Operations Multicore ()
+ispcOperations =
+  operations
+    { GC.opsError = \_ _ -> GC.items [C.citems|err = FUTHARK_PROGRAM_ERROR;|]
     }
 
 closureFreeStructField :: VName -> Name
@@ -545,19 +554,19 @@ multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
   return $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
 
-multicoreDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
+multicoreDef :: String -> (Name -> GC.CompilerM Multicore () C.Definition) -> GC.CompilerM Multicore () Name
 multicoreDef s f = do
   s' <- multicoreName s
-  GC.libDecl =<< f s'
+  GC.libDecl =<< GC.withOperations operations (f s')
   return s'
 
-ispcDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
+ispcDef :: String -> (Name -> GC.CompilerM Multicore () C.Definition) -> GC.CompilerM Multicore () Name
 ispcDef s f = do
   s' <- multicoreName s
-  GC.ispcDecl =<< f s'
+  GC.ispcDecl =<< GC.withOperations ispcOperations (f s')
   return s'
 
-sharedDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
+sharedDef :: String -> (Name -> GC.CompilerM Multicore () C.Definition) -> GC.CompilerM Multicore () Name
 sharedDef s f = do
   s' <- multicoreName s
   GC.libDecl [C.cedecl|$esc:("#ifndef __ISPC_STRUCT_" <> (nameToString s') <> "__")|]
@@ -575,7 +584,7 @@ generateParLoopFn ::
   a ->
   [(VName, (C.Type, ValueType))] ->
   [(VName, (C.Type, ValueType))] ->
-  GC.CompilerM Multicore s Name
+  GC.CompilerM Multicore () Name
 generateParLoopFn lexical basename code fstruct free retval = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
@@ -609,7 +618,7 @@ prepareTaskStruct ::
   [(C.Type, ValueType)] ->
   [VName] ->
   [(C.Type, ValueType)] ->
-  GC.CompilerM Multicore s Name
+  GC.CompilerM Multicore () Name
 prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
   let makeStruct s = return
         [C.cedecl|struct $id:s {
@@ -655,7 +664,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
-  
+
   toC <- GC.collect $ do
     GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
     GC.stm [C.cstm|$id:ftask_name.args = args;|]
