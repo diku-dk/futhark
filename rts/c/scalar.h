@@ -64,6 +64,12 @@ static inline uint16_t mul16(uint16_t x, uint16_t y) {
   return x * y;
 }
 
+#if ISPC
+static inline uniform uint32_t mul32(uniform uint32_t x, uniform uint32_t y) {
+  return x * y;
+}
+#endif
+
 static inline uint32_t mul32(uint32_t x, uint32_t y) {
   return x * y;
 }
