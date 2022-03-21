@@ -229,20 +229,22 @@ optimizeStm out stm = do
   if move
     then moveStm out stm
     else case stmExp stm of
-      BasicOp (Update safety arr (Slice slice) val) -> do
-        -- TODO: Is it worth running a kernel that copies a scalar to an array
-        --       just to enable this optimization?
-        val' <- resolveSubExp val
-        -- If val' /= val then val is a scalar and val' is a single-element
-        -- array of rank 1 whose only element equals val.
-        if val' == val
-          then pure (out |> stm)
-          else
-            let (outer, [DimFix i]) = splitAt (length slice - 1) slice
-                one = intConst Int64 1
-                slice' = Slice $ outer ++ [DimSlice i one one]
-                stm' = stm {stmExp = BasicOp (Update safety arr slice' val')}
-             in pure (out |> stm')
+      BasicOp (Update safety arr slice (Var n))
+        | Just _ <- sliceIndices slice -> do
+          -- It is faster to copy a scalar variable to device via a GPUBody and
+          -- then asynchronously copy its contents to its destination, compared
+          -- to directly copy it from host to device via a blocking write.
+          let t = Prim $ elemType $ patElemType $ head $ patElems (stmPat stm)
+          (out', dev) <- storeScalar out (Var n) t
+
+          -- Transform the single element Update into a slice Update.
+          let dims = unSlice slice
+          let (outer, [DimFix i]) = splitAt (length dims - 1) dims
+          let one = intConst Int64 1
+          let slice' = Slice $ outer ++ [DimSlice i one one]
+          let stm' = stm {stmExp = BasicOp (Update safety arr slice' (Var dev))}
+
+          pure (out' |> stm')
       BasicOp {} ->
         pure (out |> stm)
       Apply {} ->
