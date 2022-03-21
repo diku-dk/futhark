@@ -85,29 +85,26 @@ scanStage1 pat space scan_ops kbody = do
     sOp $ Imp.GetTaskId (segFlat space)
 
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
-    local_accs_pair <- forM scan_ops $ \scan_op -> do
+    local_accs <- forM scan_ops $ \scan_op -> do
       let shape = segBinOpShape scan_op
           ts = lambdaReturnType $ segBinOpLambda scan_op
       forM (zip3 (xParams scan_op) (segBinOpNeutral scan_op) ts) $ \(p, ne, t) -> do
         acc <- -- update accumulator to have type decoration
           case shapeDims shape of
-            [] -> pure (paramName p, paramType p)
+            [] -> pure $ paramName p
             _ -> do
               let pt = elemType t
               name <- sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-              pure (name, paramType p)
+              pure name
 
         -- Now neutral-initialise the accumulator.
         sLoopNest (segBinOpShape scan_op) $ \vec_is ->
-          copyDWIMFix (fst acc) vec_is ne []
+          copyDWIMFix acc vec_is ne []
 
         pure acc
 
-    let local_accs = map (map fst) local_accs_pair
-    retvals <- fmap concat $ mapM (uncurry toParam) . concat $ local_accs_pair
-
     -- Create ISPC kernel function
-    inISPC retvals $ do 
+    inISPC [] $ do 
       -- Create fpr each
       generateChunkLoop "SegScan" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i        
