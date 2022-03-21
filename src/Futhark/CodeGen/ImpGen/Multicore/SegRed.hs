@@ -12,6 +12,7 @@ import Futhark.IR.MCMem
 import Futhark.Util (chunks)
 import Prelude hiding (quot, rem)
 import Futhark.MonadFreshNames
+import Futhark.Transform.Rename (renameLambda)
 
 type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MulticoreGen ()) -> MulticoreGen ())
 
@@ -71,6 +72,14 @@ slugShape = segBinOpShape . slugOp
 accParams, nextParams :: SegBinOpSlug -> [LParam MCMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
+
+renameSlug :: SegBinOpSlug -> MulticoreGen SegBinOpSlug
+renameSlug slug = do
+  let op = slugOp slug
+  let lambda = segBinOpLambda op
+  lambda' <- renameLambda lambda
+  let op' = op { segBinOpLambda = lambda' }
+  return slug { slugOp = op' }
 
 nonsegmentedReduction ::
   Pat MCMem ->
@@ -293,7 +302,9 @@ reductionStage1CommScalar space slugs kbody = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
+    slugs' <- mapM renameSlug slugs
     prebody1 <- collect $ dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+    prebody2 <- collect $ everythingUniform $ dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs'
     let genAccs =
           collect' $ do
             forM slugs $ \slug -> do
@@ -320,18 +331,18 @@ reductionStage1CommScalar space slugs kbody = do
 
                 pure acc
 
-    (slug_local_accs_pairs, prebody2) <- genAccs
-    (slug_local_accs_pairs_uni, prebody3) <- genAccs
-    let prebody = prebody1 Imp.:>>: prebody2 Imp.:>>: prebody3
+    (slug_local_accs_pairs, prebody3) <- genAccs
+    (slug_local_accs_pairs_uni, prebody4) <- everythingUniform genAccs
+    let prebody = prebody1 <> prebody2 <> prebody3 <> prebody4
 
     -- This is a list of lists because we can have multiple fused reduction (multiple binops), and each reduction can return multiple values
     let slug_local_accs = map (map fst) slug_local_accs_pairs
     let slug_local_accs_uni = map (map fst) slug_local_accs_pairs_uni
     retvals <- fmap concat $ mapM (uncurry toParam) . concat $ slug_local_accs_pairs_uni
 
-    postbody <- collect $ generateUniformizeLoop $ \i -> do
+    postbody <- collect $ everythingUniform $ generateUniformizeLoop $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-      forM_ (zip3 slugs slug_local_accs slug_local_accs_uni) $ \(slug, local_accs, local_accs_uni) ->
+      forM_ (zip3 slugs' slug_local_accs slug_local_accs_uni) $ \(slug, local_accs, local_accs_uni) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
           let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
           -- Load accum params
@@ -340,12 +351,11 @@ reductionStage1CommScalar space slugs kbody = do
               \(p, local_acc, t) ->
                 when (primType t) $ do
                   copyDWIMFix (paramName p) [] (Var local_acc) vec_is
-                  uniformizeVar (paramName p) (untyped i)
 
           sComment "Load next params" $ -- TODO(pema): red_res missing, problem?
             forM_ (zip (nextParams slug) local_accs) $ \(p, local_acc) -> do
-              copyDWIMFix (paramName p) [] (Var local_acc) vec_is
-              uniformizeVar (paramName p) (untyped i)
+              extractVectorLane i $ collect $
+                copyDWIMFix (paramName p) [] (Var local_acc) vec_is
 
           sComment "SegRed body" $
             compileStms mempty (bodyStms $ slugBody slug) $
