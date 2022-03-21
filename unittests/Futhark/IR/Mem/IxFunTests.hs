@@ -575,85 +575,81 @@ test_rotate_flatSlice_transpose_slice_iota =
 
 test_disjoint3 :: [TestTree]
 test_disjoint3 =
-  [ testCase "lm1 and lm2" $ do
-      let nonnegs = freeIn lm1 <> freeIn lm2
+  let lessthans =
+        [ ( i_12214,
+            sdiv64 (sub64 n_blab (1)) (block_size_12121)
+          ),
+          (gtid_12553, add64 (1) (i_12214))
+        ]
+          & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
 
-          lessthans =
-            [ ( i_12214,
-                sdiv64 (sub64 n_blab (1)) (block_size_12121)
-              ),
-              (gtid_12553, add64 (1) (i_12214))
-            ]
-              & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
+      asserts =
+        [ untyped $ ((2 * block_size_12121 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName),
+          untyped $ ((3 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName)
+        ]
 
-          scmap :: M.Map VName Type
-          scmap =
-            M.fromList $
-              map (\x -> (x, Prim $ IntType Int64)) $
-                namesToList $
-                  freeIn lm1 <> freeIn lm2
+      foo s i = VName (nameFromString s) i
+      add_nw64 = (+)
+      add64 = (+)
+      mul_nw64 = (*)
+      mul64 = (*)
+      sub64 = (-)
+      sdiv64 = (IE.div)
+      sub_nw64 = (-)
+      block_size_12121 = TPrimExp $ LeafExp (foo "block_size" 12121) $ IntType Int64
+      i_12214 = TPrimExp $ LeafExp (foo "i" 12214) $ IntType Int64
+      n_blab = TPrimExp $ LeafExp (foo "n" 1337) $ IntType Int64
+      gtid_12553 = TPrimExp $ LeafExp (foo "gtid" 12553) $ IntType Int64
 
-          asserts :: [PrimExp VName]
-          asserts =
-            [ untyped $ ((2 * block_size_12121 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName),
-              untyped $ ((3 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName)
-            ]
+      disjointTester lm1 lm2 =
+        let nonnegs = map (`LeafExp` (IntType Int64)) $ namesToList $ freeIn lm1 <> freeIn lm2
 
-          foo s i = VName (nameFromString s) i
-          add_nw64 = (+)
-          add64 = (+)
-          mul_nw64 = (*)
-          mul64 = (*)
-          sub64 = (-)
-          sdiv64 = (IE.div)
-          sub_nw64 = (-)
-          block_size_12121 = TPrimExp $ LeafExp (foo "block_size" 12121) $ IntType Int64
+            scmap =
+              M.fromList $
+                map (\x -> (x, Prim $ IntType Int64)) $
+                  namesToList $
+                    freeIn lm1 <> freeIn lm2 <> freeIn lessthans <> freeIn asserts
+         in IxFunLMAD.disjoint3 scmap asserts lessthans nonnegs lm1 lm2
+   in [ testCase "lm1 and lm2" $ do
+          let lm1 =
+                IxFunLMAD.LMAD
+                  (add_nw64 (mul64 (block_size_12121) (i_12214)) (mul_nw64 (add_nw64 (gtid_12553) (1)) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (sub_nw64 (sub_nw64 (add64 (1) (i_12214)) (gtid_12553)) (1)) 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 (block_size_12121 + 1) 1 IxFunLMAD.Inc
+                  ]
 
-          i_12214 = TPrimExp $ LeafExp (foo "i" 12214) $ IntType Int64
+              lm2 =
+                IxFunLMAD.LMAD
+                  (block_size_12121 * i_12214)
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 gtid_12553 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 (1 + block_size_12121) 1 IxFunLMAD.Inc
+                  ]
 
-          n_blab = TPrimExp $ LeafExp (foo "n" 1337) $ IntType Int64
+              lm_w =
+                IxFunLMAD.LMAD
+                  (add_nw64 (add64 (add64 (1) n_blab) (mul64 (block_size_12121) (i_12214))) (mul_nw64 (gtid_12553) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
+                  [ IxFunLMAD.LMADDim n_blab 0 block_size_12121 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 block_size_12121 1 IxFunLMAD.Inc
+                  ]
 
-          gtid_12553 = TPrimExp $ LeafExp (foo "gtid" 12553) $ IntType Int64
+              lm_blocks =
+                IxFunLMAD.LMAD
+                  (block_size_12121 * i_12214 + n_blab + 1)
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (i_12214 + 1) 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim n_blab 0 block_size_12121 1 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 block_size_12121 2 IxFunLMAD.Inc
+                  ]
 
-          lm1 =
-            IxFunLMAD.LMAD
-              (add_nw64 (mul64 (block_size_12121) (i_12214)) (mul_nw64 (add_nw64 (gtid_12553) (1)) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
-              [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (sub_nw64 (sub_nw64 (add64 (1) (i_12214)) (gtid_12553)) (1)) 0 IxFunLMAD.Inc,
-                IxFunLMAD.LMADDim 1 0 (block_size_12121 + 1) 1 IxFunLMAD.Inc
-              ]
+              lm_lower_per =
+                IxFunLMAD.LMAD
+                  (block_size_12121 * i_12214)
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (i_12214 + 1) 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 (block_size_12121 + 1) 1 IxFunLMAD.Inc
+                  ]
 
-          lm2 =
-            IxFunLMAD.LMAD
-              (block_size_12121 * i_12214)
-              [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 gtid_12553 0 IxFunLMAD.Inc,
-                IxFunLMAD.LMADDim 1 0 (1 + block_size_12121) 1 IxFunLMAD.Inc
-              ]
+          res1 <- disjointTester lm1 lm_w
+          res2 <- disjointTester lm2 lm_w
+          res3 <- disjointTester lm_lower_per lm_blocks
 
-          lm_w =
-            IxFunLMAD.LMAD
-              (add_nw64 (add64 (add64 (1) n_blab) (mul64 (block_size_12121) (i_12214))) (mul_nw64 (gtid_12553) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
-              [ IxFunLMAD.LMADDim n_blab 0 block_size_12121 0 IxFunLMAD.Inc,
-                IxFunLMAD.LMADDim 1 0 block_size_12121 1 IxFunLMAD.Inc
-              ]
-
-          lm_blocks =
-            IxFunLMAD.LMAD
-              (block_size_12121 * i_12214 + n_blab + 1)
-              [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (i_12214 + 1) 0 IxFunLMAD.Inc,
-                IxFunLMAD.LMADDim n_blab 0 block_size_12121 1 IxFunLMAD.Inc,
-                IxFunLMAD.LMADDim 1 0 block_size_12121 2 IxFunLMAD.Inc
-              ]
-
-          lm_lower_per =
-            IxFunLMAD.LMAD
-              (block_size_12121 * i_12214)
-              [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (i_12214 + 1) 0 IxFunLMAD.Inc,
-                IxFunLMAD.LMADDim 1 0 (block_size_12121 + 1) 1 IxFunLMAD.Inc
-              ]
-
-      res1 <- IxFunLMAD.disjoint3 scmap asserts lessthans (map (`LeafExp` (IntType Int64)) $ namesToList nonnegs) lm1 lm_w
-      res2 <- IxFunLMAD.disjoint3 scmap asserts lessthans (map (`LeafExp` (IntType Int64)) $ namesToList nonnegs) lm2 lm_w
-      res3 <- IxFunLMAD.disjoint3 scmap asserts lessthans (map (`LeafExp` (IntType Int64)) $ namesToList nonnegs) lm_lower_per lm_blocks
-
-      res1 && res2 && res3 @? "Failed"
-  ]
+          res1 && res2 && res3 @? "Failed"
+      ]
