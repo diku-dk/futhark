@@ -134,7 +134,7 @@ scanStage1 pat space scan_ops kbody = do
                   sComment "Do stuff" $
                     compileStms mempty (bodyStms $ lamBody scan_op) $
                       forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-                        \(acc', pe, se) -> do       
+                        \(acc', pe, se) -> do
                           copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []      
                           copyDWIMFix acc' vec_is se []
 
