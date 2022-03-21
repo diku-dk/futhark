@@ -68,7 +68,7 @@ type EdgeGenerator = NodeT -> [(VName, EdgeT)]
 
 data FusionEnv = FusionEnv
   {
-    nodeMap :: M.Map VName [VName],
+    -- nodeMap :: M.Map VName [VName],
     vNameSource :: VNameSource,
     scope :: Scope SOACS
   }
@@ -131,7 +131,9 @@ isArray p = case paramDec p of
   _ -> False
 
 mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> FusionEnvM DepGraph
-mkDepGraph stms res inputs =
+mkDepGraph stms res inputs = do
+    -- env <- get
+    -- put $ env {scope = scopeOf stms <> scopeOf inputs}
     addDepEdges (emptyG2 stms resNames inputNames)
     where
       resNames = namesFromRes res
@@ -193,6 +195,7 @@ depsFromEdge e = case edgeLabel e of
   (Dep name) -> [name]
   (InfDep name) -> [name]
   (Res name) -> [name]
+  (Cons name) -> [name]
   _ -> []
 
 input :: DepGraph -> DepNode -> [DepNode]

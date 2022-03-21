@@ -96,7 +96,7 @@ fuseSOACs =
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
   do
-    new_stms <- runFusionEnvM (fuseGraph stmList results []) (FusionEnv {})
+    new_stms <- runFusionEnvM (fuseGraph stmList results []) (FusionEnv {vNameSource = blankNameSource, scope = mempty})
     return $ stmsFromList new_stms
   where
     stmList = stmsToList stms
@@ -107,7 +107,7 @@ fuseConsts outputs stms =
 -- some sort of functional decorator pattern
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun _stmts fun = do
-  new_stms <- runFusionEnvM (fuseGraph stms res (funDefParams  fun)) (FusionEnv {})
+  new_stms <- runFusionEnvM (fuseGraph stms res (funDefParams  fun)) (FusionEnv {vNameSource = blankNameSource, scope = scopeOf fun})
   let body = (funDefBody fun) {bodyStms = stmsFromList new_stms}
   return fun {funDefBody = body}
     where
@@ -250,10 +250,10 @@ tryFuseNodesInGraph node_1 node_2 g
     do
       case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
         Just new_Context -> do
-          let new_g = delNodes [node_1, node_2] g
-          -- if null fused then pure $ (&) new_Context new_g
-          -- else insertAndCopy new_Context new_g
-          pure $ (&) new_Context new_g
+          let new_g = trace ("gets here at least: " ++ show fused)  $ delNodes [node_1, node_2] g
+          if null fused then pure $ (&) new_Context new_g
+          else insertAndCopy new_Context new_g
+          -- pure $ (&) new_Context new_g
         Nothing -> pure g
   | otherwise = pure g
     where
@@ -263,15 +263,15 @@ tryFuseNodesInGraph node_1 node_2 g
         (concatMap (edgesBetween g node_1) (filter (/=node_2) $ pre g node_1))
                                   -- L.\\ edges_between g node_1 node_2)
 
--- insertAndCopy :: DepContext -> DepGraphAug
--- insertAndCopy (inputs, node, SNode stm, outputs) g =
---   do
---     new_stm <- makeCopies stm
---     let new_g = (&) (inputs, node, SNode new_stm, outputs) g
---     genEdges [(node, SNode new_stm)] (\x -> zip newly_fused $ map Cons newly_fused)  g
---   where
---     newly_fused = namesToList . consumedInStm . Alias.analyseStm mempty $ stm
--- insertAndCopy c g = pure $ (&) c g
+insertAndCopy :: DepContext -> DepGraphAug
+insertAndCopy (inputs, node, SNode stm, outputs) g =
+  do
+    new_stm <- trace "I get here!!!\n" $ makeCopies stm
+    let new_g = (&) (inputs, node, SNode new_stm, outputs) g
+    genEdges [(node, SNode new_stm)] (\x -> zip newly_fused $ map Cons newly_fused)  new_g
+  where
+    newly_fused = namesToList . consumedInStm . Alias.analyseStm mempty $ stm
+insertAndCopy c g = pure $ (&) c g
 
 
 -- tal -> (x -> (x, tal))
@@ -282,25 +282,31 @@ tryFuseNodesInGraph node_1 node_2 g
 
 -- (tal, x) -> (tal, x)
 
--- makeCopies :: Stm SOACS -> PassM (Stm SOACS)
--- makeCopies s@(Let pats aux (Op (Futhark.Screma size inputs  (ScremaForm scans red lam)))) =
---   do
---     newNames <- mapM makeNewName fused_inner
---     --let copies =  map (\ (name, name_fused) -> Let (basicPat name) aux ((BasicOp . Copy) name_fused)) (zip newNames fused_inner)
---     pure s
---     -- newNames
---     -- add new names
---     -- rename old names
+makeCopies :: Stm SOACS -> FusionEnvM (Stm SOACS)
+makeCopies s@(Let pats aux (Op (Futhark.Screma size inputs  (ScremaForm scans red lam)))) =
+  do
+    newNames <- mapM makeNewName fused_inner
+    copies <-  mapM (\ (name, name_fused) -> mkLetNames [name_fused] (BasicOp $ Copy name)) (zip fused_inner newNames)
+      -- Let (basicPat name) aux ((BasicOp . Copy) name_fused)) (zip newNames fused_inner)
+    let
 
---     -- copyFree (stms, subst) v = do
---     --   v_copy <-
---     --   copy <- mkLetNamesM [v_copy] $ BasicOp $ Copy v
---     --   return (oneStm copy <> stms, M.insert v v_copy subst)
+    let l_body = lambdaBody lam
+    let newBody = insertStms (stmsFromList copies) (substituteNames (makeMap fused_inner newNames) l_body)
+    let newLambda = lam {lambdaBody = newBody}
+    pure $ Let pats aux (Op (Futhark.Screma size inputs  (ScremaForm scans red newLambda)))
+    -- newNames
+    -- add new names
+    -- rename old names
 
---   where
---     makeNewName name = newVName $ baseString name <> "_copy"
---     fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
--- makeCopies stm = pure stm
+    -- copyFree (stms, subst) v = do
+    --   v_copy <-
+    --   copy <- mkLetNamesM [v_copy] $ BasicOp $ Copy v
+    --   return (oneStm copy <> stms, M.insert v v_copy subst)
+
+  where
+    makeNewName name = newVName $ baseString name <> "_copy"
+    fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
+makeCopies stm = pure stm
 
 
 -- for horizontal fusion
