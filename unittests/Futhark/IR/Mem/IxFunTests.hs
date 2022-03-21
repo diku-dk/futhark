@@ -660,12 +660,37 @@ test_disjoint3 =
                     IxFunLMAD.LMADDim n_blab 0 block_size_12121 1 IxFunLMAD.Inc
                   ]
 
+              lm2 =
+                IxFunLMAD.LMAD
+                  (add_nw64 (sub64 (sub64 (mul64 n_blab (add64 (1) (mul64 (block_size_12121) (add64 (1) (i_12214))))) (block_size_12121)) (1)) (mul_nw64 (add_nw64 (gtid_12553) (1)) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (sub_nw64 (sub_nw64 (sub64 (sub64 (sdiv64 (sub64 n_blab (1)) (block_size_12121)) (i_12214)) (1)) (gtid_12553)) (1)) 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 (1 + block_size_12121) 1 IxFunLMAD.Inc
+                  ]
+
+              lm3 =
+                IxFunLMAD.LMAD
+                  (add64 n_blab (sub64 (sub64 (mul64 n_blab (add64 (1) (mul64 (block_size_12121) (add64 (1) (i_12214))))) (block_size_12121)) (1)))
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 gtid_12553 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim n_blab 0 block_size_12121 1 IxFunLMAD.Inc
+                  ]
+
+              lm4 =
+                IxFunLMAD.LMAD
+                  (sub64 (sub64 (mul64 n_blab (add64 (1) (mul64 (block_size_12121) (add64 (1) (i_12214))))) (block_size_12121)) (1))
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 gtid_12553 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 (1 + block_size_12121) 1 IxFunLMAD.Inc
+                  ]
+
               lm_w =
                 IxFunLMAD.LMAD
                   (add_nw64 (sub64 (mul64 n_blab (add64 2 (mul64 (block_size_12121) (add64 1 (i_12214))))) (block_size_12121)) (mul_nw64 (gtid_12553) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
                   [ IxFunLMAD.LMADDim n_blab 0 block_size_12121 0 IxFunLMAD.Inc,
                     IxFunLMAD.LMADDim 1 0 block_size_12121 1 IxFunLMAD.Inc
                   ]
-          res <- disjointTester lm1 lm_w
-          res @? "Failed"
+
+          res1 <- disjointTester lm1 lm_w
+          res2 <- disjointTester lm2 lm_w
+          res3 <- disjointTester lm3 lm_w
+          res4 <- disjointTester lm4 lm_w
+          res1 && res2 && res3 && res4 @? "Failed"
       ]
