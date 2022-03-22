@@ -96,7 +96,7 @@ fuseSOACs =
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
   do
-    new_stms <- runFusionEnvM (fuseGraph stmList results []) (FusionEnv {vNameSource = blankNameSource, scope = mempty})
+    new_stms <- runFusionEnvM (fuseGraph stmList results []) (FusionEnv {vNameSource = blankNameSource, scope = scopeOf stms})
     return $ stmsFromList new_stms
   where
     stmList = stmsToList stms
@@ -268,7 +268,8 @@ insertAndCopy (inputs, node, SNode stm, outputs) g =
   do
     new_stm <- trace "I get here!!!\n" $ makeCopies stm
     let new_g = (&) (inputs, node, SNode new_stm, outputs) g
-    genEdges [(node, SNode new_stm)] (\x -> zip newly_fused $ map Cons newly_fused)  new_g
+    -- genEdges [(node, SNode new_stm)] (\x -> zip newly_fused $ map Cons newly_fused)  new_g
+    pure new_g
   where
     newly_fused = namesToList . consumedInStm . Alias.analyseStm mempty $ stm
 insertAndCopy c g = pure $ (&) c g

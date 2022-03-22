@@ -4370,9 +4370,9 @@ int futhark_context_clear_caches(struct futhark_context *ctx)
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_5295,
-                             struct memblock as_mem_5228,
-                             struct memblock bs_mem_5229, int64_t n_5098,
+                             struct memblock *mem_out_p_5296,
+                             struct memblock as_mem_5229,
+                             struct memblock bs_mem_5230, int64_t n_5098,
                              int64_t m_5099);
 
 static int init_constants(struct futhark_context *ctx)
@@ -4668,63 +4668,63 @@ struct futhark_opaque_1f56d567 *futhark_restore_opaque_1f56d567(struct futhark_c
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_5295,
-                             struct memblock as_mem_5228,
-                             struct memblock bs_mem_5229, int64_t n_5098,
+                             struct memblock *mem_out_p_5296,
+                             struct memblock as_mem_5229,
+                             struct memblock bs_mem_5230, int64_t n_5098,
                              int64_t m_5099)
 {
     (void) ctx;
     
     int err = 0;
-    struct memblock mem_5285;
+    struct memblock mem_5286;
     
-    mem_5285.references = NULL;
+    mem_5286.references = NULL;
     
-    struct memblock mem_param_tmp_5291;
+    struct memblock mem_param_tmp_5292;
     
-    mem_param_tmp_5291.references = NULL;
+    mem_param_tmp_5292.references = NULL;
     
-    struct memblock mem_5265;
+    struct memblock mem_5266;
     
-    mem_5265.references = NULL;
+    mem_5266.references = NULL;
     
-    struct memblock mem_5245;
+    struct memblock mem_5246;
     
-    mem_5245.references = NULL;
+    mem_5246.references = NULL;
     
-    struct memblock ext_mem_5258;
+    struct memblock ext_mem_5259;
     
-    ext_mem_5258.references = NULL;
+    ext_mem_5259.references = NULL;
     
-    struct memblock mem_param_5237;
+    struct memblock mem_param_5238;
     
-    mem_param_5237.references = NULL;
+    mem_param_5238.references = NULL;
     
-    struct memblock ext_mem_5278;
+    struct memblock ext_mem_5279;
     
-    ext_mem_5278.references = NULL;
+    ext_mem_5279.references = NULL;
     
-    struct memblock mem_5242;
+    struct memblock mem_5243;
     
-    mem_5242.references = NULL;
+    mem_5243.references = NULL;
     
-    struct memblock mem_5232;
+    struct memblock mem_5233;
     
-    mem_5232.references = NULL;
+    mem_5233.references = NULL;
     
-    struct memblock mem_out_5289;
+    struct memblock mem_out_5290;
     
-    mem_out_5289.references = NULL;
+    mem_out_5290.references = NULL;
     
-    int64_t binop_y_5230 = (int64_t) 4 * n_5098;
-    int64_t bytes_5231 = smax64((int64_t) 0, binop_y_5230);
+    int64_t binop_y_5231 = (int64_t) 4 * n_5098;
+    int64_t bytes_5232 = smax64((int64_t) 0, binop_y_5231);
     
-    if (memblock_alloc(ctx, &mem_5232, bytes_5231, "mem_5232")) {
+    if (memblock_alloc(ctx, &mem_5233, bytes_5232, "mem_5233")) {
         err = 1;
         goto cleanup;
     }
-    for (int64_t i_5290 = 0; i_5290 < n_5098; i_5290++) {
-        ((int32_t *) mem_5232.mem)[i_5290] = 0;
+    for (int64_t i_5291 = 0; i_5291 < n_5098; i_5291++) {
+        ((int32_t *) mem_5233.mem)[i_5291] = 0;
     }
     
     bool y_5197 = slt64((int64_t) 0, n_5098);
@@ -4739,104 +4739,104 @@ static int futrts_entry_main(struct futhark_context *ctx,
         err = FUTHARK_PROGRAM_ERROR;
         goto cleanup;
     }
-    if (memblock_alloc(ctx, &mem_5242, bytes_5231, "mem_5242")) {
+    if (memblock_alloc(ctx, &mem_5243, bytes_5232, "mem_5243")) {
         err = 1;
         goto cleanup;
     }
-    if (memblock_set(ctx, &mem_param_5237, &mem_5232, "mem_5232") != 0)
+    if (memblock_set(ctx, &mem_param_5238, &mem_5233, "mem_5233") != 0)
         return 1;
-    for (int64_t i_5225 = 0; i_5225 < m_5099; i_5225++) {
+    for (int64_t i_5226 = 0; i_5226 < m_5099; i_5226++) {
         bool x_5191;
         
-        x_5191 = ((bool *) bs_mem_5229.mem)[i_5225];
+        x_5191 = ((bool *) bs_mem_5230.mem)[i_5226];
         if (n_5098 * (int64_t) 4 > 0)
-            memmove(mem_5242.mem + (int64_t) 0, as_mem_5228.mem + (int64_t) 0,
+            memmove(mem_5243.mem + (int64_t) 0, as_mem_5229.mem + (int64_t) 0,
                     n_5098 * (int64_t) 4);
         if (x_5191) {
-            if (memblock_alloc(ctx, &mem_5245, bytes_5231, "mem_5245")) {
+            if (memblock_alloc(ctx, &mem_5246, bytes_5232, "mem_5246")) {
                 err = 1;
                 goto cleanup;
             }
-            for (int64_t i_5222 = 0; i_5222 < n_5098; i_5222++) {
-                int32_t defunc_0_f_res_5196 = sext_i64_i32(i_5222);
+            for (int64_t i_5223 = 0; i_5223 < n_5098; i_5223++) {
+                int32_t defunc_0_f_res_5196 = sext_i64_i32(i_5223);
                 
-                ((int32_t *) mem_5245.mem)[i_5222] = defunc_0_f_res_5196;
+                ((int32_t *) mem_5246.mem)[i_5223] = defunc_0_f_res_5196;
             }
-            if (memblock_set(ctx, &ext_mem_5258, &mem_5245, "mem_5245") != 0)
+            if (memblock_set(ctx, &ext_mem_5259, &mem_5246, "mem_5246") != 0)
                 return 1;
         } else {
-            if (memblock_set(ctx, &ext_mem_5258, &mem_5242, "mem_5242") != 0)
+            if (memblock_set(ctx, &ext_mem_5259, &mem_5243, "mem_5243") != 0)
                 return 1;
         }
-        ((int32_t *) ext_mem_5258.mem)[(int64_t) 0] = 42;
-        if (memblock_alloc(ctx, &mem_5265, bytes_5231, "mem_5265")) {
+        ((int32_t *) ext_mem_5259.mem)[(int64_t) 0] = 42;
+        if (memblock_alloc(ctx, &mem_5266, bytes_5232, "mem_5266")) {
             err = 1;
             goto cleanup;
         }
-        for (int64_t i_5218 = 0; i_5218 < n_5098; i_5218++) {
+        for (int64_t i_5219 = 0; i_5219 < n_5098; i_5219++) {
             int32_t x_5207;
             
-            x_5207 = ((int32_t *) mem_param_5237.mem)[i_5218];
+            x_5207 = ((int32_t *) mem_param_5238.mem)[i_5219];
             
             int32_t x_5208;
             
-            x_5208 = ((int32_t *) ext_mem_5258.mem)[i_5218];
+            x_5208 = ((int32_t *) ext_mem_5259.mem)[i_5219];
             
             int32_t defunc_1_f_res_5209 = add32(x_5207, x_5208);
             
-            ((int32_t *) mem_5265.mem)[i_5218] = defunc_1_f_res_5209;
+            ((int32_t *) mem_5266.mem)[i_5219] = defunc_1_f_res_5209;
         }
-        if (memblock_unref(ctx, &ext_mem_5258, "ext_mem_5258") != 0)
+        if (memblock_unref(ctx, &ext_mem_5259, "ext_mem_5259") != 0)
             return 1;
-        if (memblock_set(ctx, &mem_param_tmp_5291, &mem_5265, "mem_5265") != 0)
+        if (memblock_set(ctx, &mem_param_tmp_5292, &mem_5266, "mem_5266") != 0)
             return 1;
-        if (memblock_set(ctx, &mem_param_5237, &mem_param_tmp_5291,
-                         "mem_param_tmp_5291") != 0)
+        if (memblock_set(ctx, &mem_param_5238, &mem_param_tmp_5292,
+                         "mem_param_tmp_5292") != 0)
             return 1;
     }
-    if (memblock_set(ctx, &ext_mem_5278, &mem_param_5237, "mem_param_5237") !=
+    if (memblock_set(ctx, &ext_mem_5279, &mem_param_5238, "mem_param_5238") !=
         0)
         return 1;
-    if (memblock_unref(ctx, &mem_5232, "mem_5232") != 0)
+    if (memblock_unref(ctx, &mem_5233, "mem_5233") != 0)
         return 1;
-    if (memblock_unref(ctx, &mem_5242, "mem_5242") != 0)
+    if (memblock_unref(ctx, &mem_5243, "mem_5243") != 0)
         return 1;
-    if (memblock_alloc(ctx, &mem_5285, bytes_5231, "mem_5285")) {
+    if (memblock_alloc(ctx, &mem_5286, bytes_5232, "mem_5286")) {
         err = 1;
         goto cleanup;
     }
     if (n_5098 * (int64_t) 4 > 0)
-        memmove(mem_5285.mem + (int64_t) 0, ext_mem_5278.mem + (int64_t) 0,
+        memmove(mem_5286.mem + (int64_t) 0, ext_mem_5279.mem + (int64_t) 0,
                 n_5098 * (int64_t) 4);
-    if (memblock_unref(ctx, &ext_mem_5278, "ext_mem_5278") != 0)
+    if (memblock_unref(ctx, &ext_mem_5279, "ext_mem_5279") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_5289, &mem_5285, "mem_5285") != 0)
+    if (memblock_set(ctx, &mem_out_5290, &mem_5286, "mem_5286") != 0)
         return 1;
-    (*mem_out_p_5295).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_5295, &mem_out_5289, "mem_out_5289") != 0)
+    (*mem_out_p_5296).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_5296, &mem_out_5290, "mem_out_5290") != 0)
         return 1;
     
   cleanup:
     {
-        if (memblock_unref(ctx, &mem_5285, "mem_5285") != 0)
+        if (memblock_unref(ctx, &mem_5286, "mem_5286") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_param_tmp_5291, "mem_param_tmp_5291") != 0)
+        if (memblock_unref(ctx, &mem_param_tmp_5292, "mem_param_tmp_5292") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_5265, "mem_5265") != 0)
+        if (memblock_unref(ctx, &mem_5266, "mem_5266") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_5245, "mem_5245") != 0)
+        if (memblock_unref(ctx, &mem_5246, "mem_5246") != 0)
             return 1;
-        if (memblock_unref(ctx, &ext_mem_5258, "ext_mem_5258") != 0)
+        if (memblock_unref(ctx, &ext_mem_5259, "ext_mem_5259") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_param_5237, "mem_param_5237") != 0)
+        if (memblock_unref(ctx, &mem_param_5238, "mem_param_5238") != 0)
             return 1;
-        if (memblock_unref(ctx, &ext_mem_5278, "ext_mem_5278") != 0)
+        if (memblock_unref(ctx, &ext_mem_5279, "ext_mem_5279") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_5242, "mem_5242") != 0)
+        if (memblock_unref(ctx, &mem_5243, "mem_5243") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_5232, "mem_5232") != 0)
+        if (memblock_unref(ctx, &mem_5233, "mem_5233") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_5289, "mem_out_5289") != 0)
+        if (memblock_unref(ctx, &mem_out_5290, "mem_out_5290") != 0)
             return 1;
     }
     return err;
@@ -4852,20 +4852,20 @@ int futhark_entry_main(struct futhark_context *ctx,
     
     lock_lock(&ctx->lock);
     
-    struct memblock mem_out_5289;
+    struct memblock mem_out_5290;
     
-    mem_out_5289.references = NULL;
+    mem_out_5290.references = NULL;
     
-    struct memblock bs_mem_5229;
+    struct memblock bs_mem_5230;
     
-    bs_mem_5229.references = NULL;
+    bs_mem_5230.references = NULL;
     
-    struct memblock as_mem_5228;
+    struct memblock as_mem_5229;
     
-    as_mem_5228.references = NULL;
-    as_mem_5228 = in0->v0->mem;
+    as_mem_5229.references = NULL;
+    as_mem_5229 = in0->v0->mem;
     n_5098 = in0->v0->shape[0];
-    bs_mem_5229 = in0->v1->mem;
+    bs_mem_5230 = in0->v1->mem;
     m_5099 = in0->v1->shape[0];
     if (!(n_5098 == in0->v0->shape[0] && m_5099 == in0->v1->shape[0])) {
         ret = 1;
@@ -4874,13 +4874,13 @@ int futhark_entry_main(struct futhark_context *ctx,
                 msgprintf("Error: entry point arguments have invalid sizes.\n");
     }
     if (ret == 0) {
-        ret = futrts_entry_main(ctx, &mem_out_5289, as_mem_5228, bs_mem_5229,
+        ret = futrts_entry_main(ctx, &mem_out_5290, as_mem_5229, bs_mem_5230,
                                 n_5098, m_5099);
         if (ret == 0) {
             assert((*out0 =
                     (struct futhark_i32_1d *) malloc(sizeof(struct futhark_i32_1d))) !=
                 NULL);
-            (*out0)->mem = mem_out_5289;
+            (*out0)->mem = mem_out_5290;
             (*out0)->shape[0] = n_5098;
         }
     }
