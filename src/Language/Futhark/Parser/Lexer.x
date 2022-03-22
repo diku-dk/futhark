@@ -124,6 +124,7 @@ tokens :-
   @identifier "." "("      { tokenPosM $ fmap (QUALPAREN []) . indexing . second (T.init . T.takeWhile (/='(')) }
   @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
+  "?" @identifier          { tokenS $ HOLE . nameFromText . T.drop 1 }
 
   @binop                   { tokenM $ return . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
