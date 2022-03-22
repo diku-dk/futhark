@@ -287,43 +287,43 @@ transformSOAC _ _ VJP {} =
   error "transformSOAC: unhandled VJP"
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
-    seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs
-    if lambdaContainsParallelism lam
-      then do
-        par_op <- transformMap DoRename transformBody w lam arrs
-        return $ oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
-      else return $ oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
+      seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs
+      if lambdaContainsParallelism lam
+        then do
+          par_op <- transformMap DoRename transformBody w lam arrs
+          return $ oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
+        else return $ oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
   | Just (reds, map_lam) <- isRedomapSOAC form = do
-    (seq_reds_stms, seq_op) <-
-      transformRedomap DoNotRename sequentialiseBody w reds map_lam arrs
-    if lambdaContainsParallelism map_lam
-      then do
-        (par_reds_stms, par_op) <-
-          transformRedomap DoRename transformBody w reds map_lam arrs
-        return $
-          mconcat (seq_reds_stms <> par_reds_stms)
-            <> oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
-      else
-        return $
-          mconcat seq_reds_stms
-            <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
+      (seq_reds_stms, seq_op) <-
+        transformRedomap DoNotRename sequentialiseBody w reds map_lam arrs
+      if lambdaContainsParallelism map_lam
+        then do
+          (par_reds_stms, par_op) <-
+            transformRedomap DoRename transformBody w reds map_lam arrs
+          return $
+            mconcat (seq_reds_stms <> par_reds_stms)
+              <> oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
+        else
+          return $
+            mconcat seq_reds_stms
+              <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
   | Just (scans, map_lam) <- isScanomapSOAC form = do
-    (gtid, space) <- mkSegSpace w
-    kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
-    (scans_stms, scans') <- unzip <$> mapM scanToSegBinOp scans
-    return $
-      mconcat scans_stms
-        <> oneStm
-          ( Let pat (defAux ()) $
-              Op $
-                ParOp Nothing $
-                  SegScan () space scans' (lambdaReturnType map_lam) kbody
-          )
+      (gtid, space) <- mkSegSpace w
+      kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
+      (scans_stms, scans') <- unzip <$> mapM scanToSegBinOp scans
+      return $
+        mconcat scans_stms
+          <> oneStm
+            ( Let pat (defAux ()) $
+                Op $
+                  ParOp Nothing $
+                    SegScan () space scans' (lambdaReturnType map_lam) kbody
+            )
   | otherwise = do
-    -- This screma is too complicated for us to immediately do
-    -- anything, so split it up and try again.
-    scope <- castScope <$> askScope
-    transformStms =<< runBuilderT_ (dissectScrema pat w form arrs) scope
+      -- This screma is too complicated for us to immediately do
+      -- anything, so split it up and try again.
+      scope <- castScope <$> askScope
+      transformStms =<< runBuilderT_ (dissectScrema pat w form arrs) scope
 transformSOAC pat _ (Scatter w ivs lam dests) = do
   (gtid, space) <- mkSegSpace w
 
@@ -361,29 +361,29 @@ transformSOAC pat _ (Hist w arrs hists map_lam) = do
           <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
 transformSOAC pat attrs (Stream w arrs (Parallel _ comm red_lam) red_nes fold_lam)
   | not $ null red_nes = do
-    map_lam <- unstreamLambda attrs red_nes fold_lam
-    (seq_red_stms, seq_op) <-
-      transformParStream
-        DoNotRename
-        sequentialiseBody
-        w
-        comm
-        red_lam
-        red_nes
-        map_lam
-        arrs
+      map_lam <- unstreamLambda attrs red_nes fold_lam
+      (seq_red_stms, seq_op) <-
+        transformParStream
+          DoNotRename
+          sequentialiseBody
+          w
+          comm
+          red_lam
+          red_nes
+          map_lam
+          arrs
 
-    if lambdaContainsParallelism map_lam
-      then do
-        (par_red_stms, par_op) <-
-          transformParStream DoRename transformBody w comm red_lam red_nes map_lam arrs
-        return $
-          seq_red_stms <> par_red_stms
-            <> oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
-      else
-        return $
-          seq_red_stms
-            <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
+      if lambdaContainsParallelism map_lam
+        then do
+          (par_red_stms, par_op) <-
+            transformParStream DoRename transformBody w comm red_lam red_nes map_lam arrs
+          return $
+            seq_red_stms <> par_red_stms
+              <> oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
+        else
+          return $
+            seq_red_stms
+              <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
 transformSOAC pat _ (Stream w arrs _ nes lam) = do
   -- Just remove the stream and transform the resulting stms.
   soacs_scope <- castScope <$> askScope

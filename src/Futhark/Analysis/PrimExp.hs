@@ -202,10 +202,10 @@ constFoldPrimExp (BinOpExp Mul {} x y)
   | oneIshExp y = x
   | zeroIshExp x,
     IntType it <- primExpType y =
-    ValueExp $ IntValue $ intValue it (0 :: Int)
+      ValueExp $ IntValue $ intValue it (0 :: Int)
   | zeroIshExp y,
     IntType it <- primExpType x =
-    ValueExp $ IntValue $ intValue it (0 :: Int)
+      ValueExp $ IntValue $ intValue it (0 :: Int)
 constFoldPrimExp (BinOpExp SDiv {} x y)
   | oneIshExp y = x
 constFoldPrimExp (BinOpExp SQuot {} x y)
@@ -214,7 +214,7 @@ constFoldPrimExp (BinOpExp UDiv {} x y)
   | oneIshExp y = x
 constFoldPrimExp (BinOpExp bop (ValueExp x) (ValueExp y))
   | Just z <- doBinOp bop x y =
-    ValueExp z
+      ValueExp z
 constFoldPrimExp (BinOpExp LogAnd x y)
   | oneIshExp x = y
   | oneIshExp y = x
@@ -311,7 +311,7 @@ instance (NumExp t, Pretty v) => Num (TPrimExp t v) where
           [ asIntOp (`Add` OverflowUndef) x y,
             asFloatOp FAdd x y
           ] =
-      TPrimExp $ constFoldPrimExp z
+        TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "+" (x, y)
 
   TPrimExp x - TPrimExp y
@@ -320,7 +320,7 @@ instance (NumExp t, Pretty v) => Num (TPrimExp t v) where
           [ asIntOp (`Sub` OverflowUndef) x y,
             asFloatOp FSub x y
           ] =
-      TPrimExp $ constFoldPrimExp z
+        TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "-" (x, y)
 
   TPrimExp x * TPrimExp y
@@ -329,7 +329,7 @@ instance (NumExp t, Pretty v) => Num (TPrimExp t v) where
           [ asIntOp (`Mul` OverflowUndef) x y,
             asFloatOp FMul x y
           ] =
-      TPrimExp $ constFoldPrimExp z
+        TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "*" (x, y)
 
   abs (TPrimExp x)
@@ -411,28 +411,28 @@ instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
           [ asIntOp (`SDiv` Unsafe) x y,
             asFloatOp FDiv x y
           ] =
-      TPrimExp $ constFoldPrimExp z
+        TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "div" (x, y)
 
   TPrimExp x `mod` TPrimExp y
     | Just z <- msum [asIntOp (`SMod` Unsafe) x y] =
-      TPrimExp z
+        TPrimExp z
     | otherwise = numBad "mod" (x, y)
 
   TPrimExp x `quot` TPrimExp y
     | oneIshExp y = TPrimExp x
     | Just z <- msum [asIntOp (`SQuot` Unsafe) x y] =
-      TPrimExp $ constFoldPrimExp z
+        TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "quot" (x, y)
 
   TPrimExp x `rem` TPrimExp y
     | Just z <- msum [asIntOp (`SRem` Unsafe) x y] =
-      TPrimExp $ constFoldPrimExp z
+        TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "rem" (x, y)
 
   TPrimExp x `divUp` TPrimExp y
     | Just z <- msum [asIntOp (`SDivUp` Unsafe) x y] =
-      TPrimExp $ constFoldPrimExp z
+        TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "divRoundingUp" (x, y)
 
   sgn (TPrimExp (ValueExp (IntValue i))) = Just $ signum $ valueIntegral i

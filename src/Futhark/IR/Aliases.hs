@@ -148,9 +148,9 @@ instance (ASTRep rep, CanBeAliased (Op rep)) => PrettyRep (Aliases rep) where
           DoLoop merge _ body ->
             let mergeParamAliases fparam als
                   | primType (paramType fparam) =
-                    Nothing
+                      Nothing
                   | otherwise =
-                    resultAliasComment (paramName fparam) als
+                      resultAliasComment (paramName fparam) als
              in maybeComment . catMaybes $
                   zipWith mergeParamAliases (map fst merge) $
                     bodyAliases body

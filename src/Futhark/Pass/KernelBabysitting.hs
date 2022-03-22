@@ -77,8 +77,8 @@ nonlinearInMemory name m =
     nonlinear (pe, t)
       | inner_r <- arrayRank t,
         inner_r > 0 = do
-        let outer_r = arrayRank (patElemType pe) - inner_r
-        return $ Just $ rearrangeInverse $ [inner_r .. inner_r + outer_r -1] ++ [0 .. inner_r -1]
+          let outer_r = arrayRank (patElemType pe) - inner_r
+          return $ Just $ rearrangeInverse $ [inner_r .. inner_r + outer_r - 1] ++ [0 .. inner_r - 1]
       | otherwise = Nothing
 
 transformStm :: ExpMap -> Stm GPU -> BabysitM ExpMap
@@ -88,15 +88,15 @@ transformStm expmap (Let pat aux (Op (SegOp op)))
   -- we should probably look at the component SegThreads, but it
   -- apparently hasn't come up in practice yet.
   | SegThread {} <- segLevel op = do
-    let mapper =
-          identitySegOpMapper
-            { mapOnSegOpBody =
-                transformKernelBody expmap (segLevel op) (segSpace op)
-            }
-    op' <- mapSegOpM mapper op
-    let stm' = Let pat aux $ Op $ SegOp op'
-    addStm stm'
-    return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
+      let mapper =
+            identitySegOpMapper
+              { mapOnSegOpBody =
+                  transformKernelBody expmap (segLevel op) (segSpace op)
+              }
+      op' <- mapSegOpM mapper op
+      let stm' = Let pat aux $ Op $ SegOp op'
+      addStm stm'
+      return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
   let stm' = Let pat aux e'
@@ -255,7 +255,7 @@ ensureCoalescedAccess
           length is == arrayRank t,
           Just is' <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is,
           Just perm <- is' `isPermutationOf` is ->
-          replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
+            replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
         -- Check whether the access is already coalesced because of a
         -- previous rearrange being applied to the current array:
         -- 1. get the permutation of the source-array rearrange
@@ -273,7 +273,7 @@ ensureCoalescedAccess
           DimFix inner_ind <- last slice',
           not $ null thread_gids,
           isGidVariant inner_gid inner_ind ->
-          return Nothing
+            return Nothing
         -- We are not fully indexing an array, but the remaining slice
         -- is invariant to the innermost-kernel dimension. We assume
         -- the remaining slice will be sequentially streamed, hence
@@ -288,7 +288,7 @@ ensureCoalescedAccess
           is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
           not (null thread_gids || null is),
           not (last thread_gids `nameIn` (freeIn is <> freeIn rem_slice)) ->
-          return Nothing
+            return Nothing
         -- We are not fully indexing the array, and the indices are not
         -- a proper prefix of the thread indices, and some indices are
         -- thread local, so we assume (HEURISTIC!)  that the remaining
@@ -299,8 +299,8 @@ ensureCoalescedAccess
           not $ tooSmallSlice (primByteSize pt) rem_slice,
           is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
           any isThreadLocal (namesToList $ freeIn is) -> do
-          let perm = coalescingPermutation (length is) $ arrayRank t
-          replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
+            let perm = coalescingPermutation (length is) $ arrayRank t
+            replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
         -- We are taking a slice of the array with a unit stride.  We
         -- assume that the slice will be traversed sequentially.
@@ -314,26 +314,26 @@ ensureCoalescedAccess
           isThreadLocalSubExp offset,
           Just {} <- sizeSubst len,
           oneIsh stride -> do
-          let num_chunks =
-                if null is
-                  then untyped $ pe32 num_threads
-                  else
-                    untyped $
-                      product $
-                        map pe64 $
-                          drop (length is) thread_gdims
-          replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_chunks arr)
+            let num_chunks =
+                  if null is
+                    then untyped $ pe32 num_threads
+                    else
+                      untyped $
+                        product $
+                          map pe64 $
+                            drop (length is) thread_gdims
+            replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_chunks arr)
 
         -- Everything is fine... assuming that the array is in row-major
         -- order!  Make sure that is the case.
         | Just {} <- nonlinearInMemory arr expmap ->
-          case sliceIndices slice of
-            Just is
-              | Just _ <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is ->
-                replace =<< lift (rowMajorArray arr)
-              | otherwise ->
-                return Nothing
-            _ -> replace =<< lift (rowMajorArray arr)
+            case sliceIndices slice of
+              Just is
+                | Just _ <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is ->
+                    replace =<< lift (rowMajorArray arr)
+                | otherwise ->
+                    return Nothing
+              _ -> replace =<< lift (rowMajorArray arr)
       _ -> return Nothing
     where
       (thread_gids, thread_gdims) = unzip thread_space
@@ -373,19 +373,19 @@ coalescedIndexes free_ker_vars isGidVariant tgids is
   -- 3. the indexes are a prefix of the thread indexes, because that
   -- means multiple threads will be accessing the same element.
   | any isCt is =
-    Nothing
+      Nothing
   | any (`nameIn` free_ker_vars) (subExpVars is) =
-    Nothing
+      Nothing
   | is `isPrefixOf` tgids =
-    Nothing
+      Nothing
   | not (null tgids),
     not (null is),
     Var innergid <- last tgids,
     num_is > 0 && isGidVariant innergid (last is) =
-    Just is
+      Just is
   -- 3. Otherwise try fix coalescing
   | otherwise =
-    Just $ reverse $ foldl move (reverse is) $ zip [0 ..] (reverse tgids)
+      Just $ reverse $ foldl move (reverse is) $ zip [0 ..] (reverse tgids)
   where
     num_is = length is
 
@@ -395,19 +395,19 @@ coalescedIndexes free_ker_vars isGidVariant tgids is
       | Just j <- elemIndex tgid is_rev,
         i /= j,
         i < num_is =
-        swap i j is_rev
+          swap i j is_rev
       | otherwise =
-        is_rev
+          is_rev
 
     swap i j l
       | Just ix <- maybeNth i l,
         Just jx <- maybeNth j l =
-        update i jx $ update j ix l
+          update i jx $ update j ix l
       | otherwise =
-        error $ "coalescedIndexes swap: invalid indices" ++ show (i, j, l)
+          error $ "coalescedIndexes swap: invalid indices" ++ show (i, j, l)
 
     update 0 x (_ : ys) = x : ys
-    update i x (y : ys) = y : update (i -1) x ys
+    update i x (y : ys) = y : update (i - 1) x ys
     update _ _ [] = error "coalescedIndexes: update"
 
     isCt :: SubExp -> Bool
@@ -416,7 +416,7 @@ coalescedIndexes free_ker_vars isGidVariant tgids is
 
 coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
-  [num_is .. rank -1] ++ [0 .. num_is -1]
+  [num_is .. rank - 1] ++ [0 .. num_is - 1]
 
 rearrangeInput ::
   MonadBuilder m =>
@@ -447,7 +447,7 @@ rowMajorArray ::
   m VName
 rowMajorArray arr = do
   rank <- arrayRank <$> lookupType arr
-  letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0 .. rank -1] arr
+  letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0 .. rank - 1] arr
 
 rearrangeSlice ::
   MonadBuilder m =>
@@ -482,7 +482,7 @@ rearrangeSlice d w num_chunks arr = do
           pre_dims = take d arr_dims
           post_dims = drop (d + 1) arr_dims
           extradim_shape = Shape $ pre_dims ++ [num_chunks', per_chunk] ++ post_dims
-          tr_perm = [0 .. d -1] ++ map (+ d) ([1] ++ [2 .. shapeRank extradim_shape -1 - d] ++ [0])
+          tr_perm = [0 .. d - 1] ++ map (+ d) ([1] ++ [2 .. shapeRank extradim_shape - 1 - d] ++ [0])
       arr_extradim <-
         letExp (arr_name <> "_extradim") $
           BasicOp $ Reshape (map DimNew $ shapeDims extradim_shape) arr_padded

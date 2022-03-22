@@ -97,7 +97,7 @@ ensureExtShape ::
 ensureExtShape msg loc t name orig
   | Array {} <- t,
     Var v <- orig =
-    Var <$> ensureShapeVar msg loc t name v
+      Var <$> ensureShapeVar msg loc t name v
   | otherwise = return orig
 
 ensureShape ::
@@ -127,7 +127,7 @@ ensureArgShapes msg loc shapes paramts args =
     ensureArgShape t (Var v)
       | arrayRank t < 1 = return $ Var v
       | otherwise =
-        ensureShape msg loc t (baseString v) $ Var v
+          ensureShape msg loc t (baseString v) $ Var v
 
 ensureShapeVar ::
   ErrorMsg SubExp ->
@@ -138,15 +138,15 @@ ensureShapeVar ::
   InternaliseM VName
 ensureShapeVar msg loc t name v
   | Array {} <- t = do
-    newdims <- arrayDims . removeExistentials t <$> lookupType v
-    olddims <- arrayDims <$> lookupType v
-    if newdims == olddims
-      then return v
-      else do
-        matches <- zipWithM checkDim newdims olddims
-        all_match <- letSubExp "match" =<< eAll matches
-        cs <- assert "empty_or_match_cert" all_match msg loc
-        certifying cs $ letExp name $ shapeCoerce newdims v
+      newdims <- arrayDims . removeExistentials t <$> lookupType v
+      olddims <- arrayDims <$> lookupType v
+      if newdims == olddims
+        then return v
+        else do
+          matches <- zipWithM checkDim newdims olddims
+          all_match <- letSubExp "match" =<< eAll matches
+          cs <- assert "empty_or_match_cert" all_match msg loc
+          certifying cs $ letExp name $ shapeCoerce newdims v
   | otherwise = return v
   where
     checkDim desired has =
