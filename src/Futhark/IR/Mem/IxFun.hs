@@ -1325,26 +1325,30 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
                  distributeOffset (map AlgSimplify2.negate neg_offset) is2
                ) of
             (Just is1', Just is2') -> do
-              overlap1 <- selfOverlapZ3 scope asserts less_thans non_negatives is1'
-              overlap2 <- selfOverlapZ3 scope asserts less_thans non_negatives is2'
+              overlap1 <- selfOverlapZ3 scope asserts less_thans non_negatives $ filter emptyInterval is1'
+              overlap2 <- selfOverlapZ3 scope asserts less_thans non_negatives $ filter emptyInterval is2'
               case (overlap1, overlap2) of
                 (Nothing, Nothing) ->
                   or <$> mapM (uncurry $ disjointZ3 scope asserts less_thans non_negatives) (zip is1' is2')
                 (Just overlapping_dim, _) ->
                   let expanded_offset = AlgSimplify2.simplifySofP' <$> expandOffset offset is1
-                      (point_offset, point_is1, rest_is1) = traceWith "splitting dim 1" $ splitDim overlapping_dim is1'
-                   in ( disjointHelper (i -1) point_is1 is2' point_offset
-                          &&^ disjointHelper (i -1) rest_is1 is2' []
+                      (point_offset, point_is1, rest_is1) = splitDim overlapping_dim is1'
+                   in ( disjointHelper (i - 1) point_is1 is2' point_offset
+                          &&^ disjointHelper (i - 1) rest_is1 is2' []
                       )
-                        ||^ maybe (pure False) (disjointHelper (i -1) is1 is2) expanded_offset
+                        ||^ maybe (pure False) (disjointHelper (i - 1) is1 is2) expanded_offset
                 (_, Just overlapping_dim) ->
                   let expanded_offset = AlgSimplify2.simplifySofP' <$> expandOffset offset is2
-                      (point_offset, point_is2, rest_is2) = traceWith ("splitting dim 2 " <> pretty i) $ splitDim overlapping_dim is2'
-                   in ( disjointHelper (i -1) is1' point_is2 (map AlgSimplify2.negate point_offset)
-                          &&^ disjointHelper (i -1) is1' rest_is2 []
+                      (point_offset, point_is2, rest_is2) = splitDim overlapping_dim is2'
+                   in ( disjointHelper (i - 1) is1' point_is2 (map AlgSimplify2.negate point_offset)
+                          &&^ disjointHelper (i - 1) is1' rest_is2 []
                       )
-                        ||^ maybe (pure False) (disjointHelper (i -1) is1 is2) expanded_offset
+                        ||^ maybe (pure False) (disjointHelper (i - 1) is1 is2) expanded_offset
             _ -> pure False
+
+emptyInterval :: Interval -> Bool
+emptyInterval (Interval 0 1 _) = True
+emptyInterval _ = False
 
 splitDim :: Interval -> [Interval] -> (AlgSimplify2.SofP, [Interval], [Interval])
 splitDim overlapping_dim0 is =
