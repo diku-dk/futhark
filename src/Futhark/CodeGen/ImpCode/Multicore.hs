@@ -41,8 +41,8 @@ data Multicore
   | -- | Escape hatch for generating builtin ISPC functions
     -- like extract or broadcast
     ISPCBuiltin VName Name [Exp]
-    -- | Unmasked block of code, only valid in ISPC
-  | UnmaskedBlock Code
+  | -- | Unmasked block of code, only valid in ISPC
+    UnmaskedBlock Code
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -133,19 +133,15 @@ instance Pretty Multicore where
   ppr (Atomic _) =
     "AtomicOp"
   ppr (ISPCKernel body _ _) =
-    text "ispc {"
-      </> indent 2 (ppr body)
-      </> text "}"
+    "ispc" </> nestedBlock "{" "}" (ppr body)
   ppr (ForEach i limit body) =
-    text "foreach" <+> ppr i <+> langle <+> ppr limit <+> text "{"
-      </> indent 2 (ppr body)
-      </> text "}"
+    "foreach" <+> ppr i <+> langle <+> ppr limit
+      </> nestedBlock "{" "}" (ppr body)
   ppr (ForEachActive i body) =
-    text "foreach_active" <+> ppr i <+> text "{"
-    </> indent 2 (ppr body)
-    </> text "}" 
+    "foreach_active" <+> ppr i
+      </> nestedBlock "{" "}" (ppr body)
   ppr (UnmaskedBlock code) =
-    ppr code
+    "unmasked" </> nestedBlock "{" "}" (ppr code)
   ppr (ISPCBuiltin dest name args) =
     ppr dest <+> "<-" <+> ppr name <+> "(" <+> ppr args <+> ")"
 

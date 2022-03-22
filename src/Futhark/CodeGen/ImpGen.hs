@@ -308,10 +308,6 @@ data ImpState rep r op = ImpState
 newState :: VNameSource -> ImpState rep r op
 newState = ImpState mempty mempty mempty mempty mempty
 
--- Try this
-
--- 
-
 newtype ImpM rep r op a
   = ImpM (ReaderT (Env rep r op) (State (ImpState rep r op)) a)
   deriving
@@ -321,8 +317,6 @@ newtype ImpM rep r op a
       MonadState (ImpState rep r op),
       MonadReader (Env rep r op)
     )
-
-
 
 instance MonadFreshNames (ImpM rep r op) where
   getNameSource = gets stateNameSource
