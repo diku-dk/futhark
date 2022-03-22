@@ -303,7 +303,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
           | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
               text "@" <> parens (align $ ppr t')
         _ -> mempty
-  pprPrec _ (Hole v t _) = pprName v <> inst
+  pprPrec _ (Hole name t _) = pprName name <> inst
     where
       -- TODO: is it possible to move where into one place?
       inst = case unAnnot t of
