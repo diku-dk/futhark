@@ -1674,10 +1674,11 @@ typedef unsigned int32 uint32_t;
 typedef unsigned int16 uint16_t;
 typedef unsigned int8 uint8_t;
 
+$errorsH
+
+#define INFINITY (floatbits((uniform int)0x7f800000))
 #define fabs(x) abs(x)
-
 #define FUTHARK_F64_ENABLED
-
 $cScalarDefs
 
 #ifndef __ISPC_STRUCT_memblock__
@@ -2215,10 +2216,16 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
 compileCode (Write _ _ Unit _ _ _) = pure ()
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
-  deref <-
-    derefPointer dest'
-      <$> compileExp (untyped idx)
-      <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
+  idxexp <- compileExp (untyped idx)
+  -- TODO(pema): This little dance with a temp var is a workaround for ISPC's strange casting behavior.
+  -- It shouldn't affect the other C backends although it is slightly ugly.
+  tmp <- newVName "tmp_idx"
+  decl [C.cdecl|typename int64_t $id:tmp = $exp:idxexp;|]
+  let deref =
+        derefPointer
+          dest'
+          [C.cexp|$id:tmp|]
+          [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
   elemexp' <- toStorage elemtype <$> compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 compileCode (Write dest (Count idx) _ ScalarSpace {} _ elemexp) = do
