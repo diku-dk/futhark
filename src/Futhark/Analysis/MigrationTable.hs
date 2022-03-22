@@ -392,7 +392,7 @@ graphStm stm = do
     BasicOp (Replicate (Shape dims) _)
       | [(_, t)] <- bs,
         length dims == arrayRank t, -- i.e. se is a scalar.
-        all (== intConst Int64 1) dims -> do
+        all (== intConst Int64 1) dims ->
         graphSimple bs e
     BasicOp (Index _ slice)
       | isFixed slice ->
@@ -403,11 +403,14 @@ graphStm stm = do
     -- this would make the effective asymptotic cost of such statements linear
     -- we block them from being migrated on their own.
     --
-    -- The parent statement of an enclosing body may still be migrated,
-    -- including these, given that all its returned arrays are backed by memory
-    -- used by migratable statements within its body ("copyable memory").
-    -- Copied result arrays will then be subsets of arrays that was considered
-    -- ok to be copied and so its asymptotic cost should not change.
+    -- The parent statement of an enclosing body may still be migrated as a
+    -- whole given that each of its returned arrays either
+    --   1) is backed by memory used by a migratable statement within its body.
+    --   2) contains just a single element.
+    -- An array matching either criterium is denoted "copyable memory" because
+    -- the asymptotic cost of copying it is less than or equal to the statement
+    -- that produced it. This makes the parent of statements with sublinear cost
+    -- safe to migrate.
     BasicOp (Index arr s) -> do
       graphInefficientReturn (sliceDims s) e
       one bs `reuses` arr
@@ -1123,7 +1126,13 @@ reusesReturn bs res = do
   body_depth <- metaBodyDepth <$> getMeta
   foldM (reuse body_depth) True (zip bs res)
   where
+    reuse :: Int -> Bool -> ((Id, Type), SubExp) -> Grapher Bool
     reuse body_depth onlyCopyable (b, se)
+      | all (== intConst Int64 1) (arrayDims $ snd b) =
+        -- Single element arrays are immediately recognizable as copyable so
+        -- don't bother recording those. Note that this case also matches
+        -- primitive return values.
+        pure onlyCopyable
       | (i, t) <- b,
         isArray t,
         Var n <- se =
@@ -1150,7 +1159,13 @@ reusesBranches bs b1 b2 = do
   body_depth <- metaBodyDepth <$> getMeta
   foldM (reuse body_depth) True $ zip3 bs b1 b2
   where
+    reuse :: Int -> Bool -> ((Id, Type), SubExp, SubExp) -> Grapher Bool
     reuse body_depth onlyCopyable (b, se1, se2)
+      | all (== intConst Int64 1) (arrayDims $ snd b) =
+        -- Single element arrays are immediately recognizable as copyable so
+        -- don't bother recording those. Note that this case also matches
+        -- primitive return values.
+        pure onlyCopyable
       | (i, t) <- b,
         isArray t,
         Var n1 <- se1,
@@ -1278,7 +1293,8 @@ data State = State
     stateSinks :: Sinks,
     -- | Observed 'UpdateAcc' host statements to be graphed later.
     stateUpdateAccs :: IM.IntMap [Delayed],
-    -- | A map of all encountered arrays that are backed by copyable memory.
+    -- | A map of encountered arrays that are backed by copyable memory.
+    -- Trivial instances such as single element arrays are excluded.
     stateCopyableMemory :: CopyableMemoryMap,
     -- | Information about the current body being graphed.
     stateStats :: BodyStats
