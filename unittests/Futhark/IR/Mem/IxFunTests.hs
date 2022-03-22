@@ -575,20 +575,7 @@ test_rotate_flatSlice_transpose_slice_iota =
 
 test_disjoint3 :: [TestTree]
 test_disjoint3 =
-  let lessthans =
-        [ ( i_12214,
-            sdiv64 (sub64 n_blab (1)) (block_size_12121)
-          ),
-          (gtid_12553, add64 (1) (i_12214))
-        ]
-          & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
-
-      asserts =
-        [ untyped $ ((2 * block_size_12121 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName),
-          untyped $ ((3 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName)
-        ]
-
-      foo s i = VName (nameFromString s) i
+  let foo s i = VName (nameFromString s) i
       add_nw64 = (+)
       add64 = (+)
       mul_nw64 = (*)
@@ -596,12 +583,7 @@ test_disjoint3 =
       sub64 = (-)
       sdiv64 = (IE.div)
       sub_nw64 = (-)
-      block_size_12121 = TPrimExp $ LeafExp (foo "block_size" 12121) $ IntType Int64
-      i_12214 = TPrimExp $ LeafExp (foo "i" 12214) $ IntType Int64
-      n_blab = TPrimExp $ LeafExp (foo "n" 1337) $ IntType Int64
-      gtid_12553 = TPrimExp $ LeafExp (foo "gtid" 12553) $ IntType Int64
-
-      disjointTester lm1 lm2 =
+      disjointTester asserts lessthans lm1 lm2 =
         let nonnegs = map (`LeafExp` (IntType Int64)) $ namesToList $ freeIn lm1 <> freeIn lm2
 
             scmap =
@@ -611,6 +593,24 @@ test_disjoint3 =
                     freeIn lm1 <> freeIn lm2 <> freeIn lessthans <> freeIn asserts
          in IxFunLMAD.disjoint3 scmap asserts lessthans nonnegs lm1 lm2
    in [ testCase "lm1 and lm2" $ do
+          let lessthans =
+                [ ( i_12214,
+                    sdiv64 (sub64 n_blab (1)) (block_size_12121)
+                  ),
+                  (gtid_12553, add64 (1) (i_12214))
+                ]
+                  & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
+
+              asserts =
+                [ untyped $ ((2 * block_size_12121 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName),
+                  untyped $ ((3 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName)
+                ]
+
+              block_size_12121 = TPrimExp $ LeafExp (foo "block_size" 12121) $ IntType Int64
+              i_12214 = TPrimExp $ LeafExp (foo "i" 12214) $ IntType Int64
+              n_blab = TPrimExp $ LeafExp (foo "n" 1337) $ IntType Int64
+              gtid_12553 = TPrimExp $ LeafExp (foo "gtid" 12553) $ IntType Int64
+
           let lm1 =
                 IxFunLMAD.LMAD
                   (add_nw64 (mul64 (block_size_12121) (i_12214)) (mul_nw64 (add_nw64 (gtid_12553) (1)) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
@@ -647,13 +647,31 @@ test_disjoint3 =
                     IxFunLMAD.LMADDim 1 0 (block_size_12121 + 1) 1 IxFunLMAD.Inc
                   ]
 
-          res1 <- disjointTester lm1 lm_w
-          res2 <- disjointTester lm2 lm_w
-          res3 <- disjointTester lm_lower_per lm_blocks
+          res1 <- disjointTester asserts lessthans lm1 lm_w
+          res2 <- disjointTester asserts lessthans lm2 lm_w
+          res3 <- disjointTester asserts lessthans lm_lower_per lm_blocks
 
           res1 && res2 && res3 @? "Failed",
         testCase "nw second half" $ do
-          let lm1 =
+          let lessthans =
+                [ ( i_12214,
+                    sdiv64 (sub64 n_blab (1)) (block_size_12121)
+                  ),
+                  (gtid_12553, add64 (1) (i_12214))
+                ]
+                  & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
+
+              asserts =
+                [ untyped $ ((2 * block_size_12121 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName),
+                  untyped $ ((3 :: TPrimExp Int64 VName) .<. n_blab :: TPrimExp Bool VName)
+                ]
+
+              block_size_12121 = TPrimExp $ LeafExp (foo "block_size" 12121) $ IntType Int64
+              i_12214 = TPrimExp $ LeafExp (foo "i" 12214) $ IntType Int64
+              n_blab = TPrimExp $ LeafExp (foo "n" 1337) $ IntType Int64
+              gtid_12553 = TPrimExp $ LeafExp (foo "gtid" 12553) $ IntType Int64
+
+              lm1 =
                 IxFunLMAD.LMAD
                   (add_nw64 (add64 n_blab (sub64 (sub64 (mul64 n_blab (add64 1 (mul64 (block_size_12121) (add64 1 (i_12214))))) (block_size_12121)) 1)) (mul_nw64 (add_nw64 (gtid_12553) 1) (sub64 (mul64 (block_size_12121) n_blab) (block_size_12121))))
                   [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 (block_size_12121) n_blab) (mul_nw64 (-1) (block_size_12121))) 0 (sub_nw64 (sub_nw64 (sub64 (sub64 (sdiv64 (sub64 n_blab 1) (block_size_12121)) (i_12214)) 1) (gtid_12553)) 1) 0 IxFunLMAD.Inc,
@@ -688,9 +706,54 @@ test_disjoint3 =
                     IxFunLMAD.LMADDim 1 0 block_size_12121 1 IxFunLMAD.Inc
                   ]
 
-          res1 <- disjointTester lm1 lm_w
-          res2 <- disjointTester lm2 lm_w
-          res3 <- disjointTester lm3 lm_w
-          res4 <- disjointTester lm4 lm_w
-          res1 && res2 && res3 && res4 @? "Failed"
+          res1 <- disjointTester asserts lessthans lm1 lm_w
+          res2 <- disjointTester asserts lessthans lm2 lm_w
+          res3 <- disjointTester asserts lessthans lm3 lm_w
+          res4 <- disjointTester asserts lessthans lm4 lm_w
+          res1 && res2 && res3 && res4 @? "Failed " <> pretty [res1, res2, res3, res4],
+        testCase "lud long" $ do
+          let lessthans =
+                [ (step, num_blocks - 1 :: TPrimExp Int64 VName)
+                ]
+                  & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
+
+              step = TPrimExp $ LeafExp (foo "step" 1337) $ IntType Int64
+
+              num_blocks = TPrimExp $ LeafExp (foo "n" 1338) $ IntType Int64
+
+              lm1 =
+                IxFunLMAD.LMAD
+                  (1024 * num_blocks * (1 + step) + 1024 * step)
+                  [ IxFunLMAD.LMADDim (1024 * num_blocks) 0 (num_blocks - step - 1) 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 32 0 32 1 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 32 2 IxFunLMAD.Inc
+                  ]
+
+              lm_w1 =
+                IxFunLMAD.LMAD
+                  (1024 * num_blocks * step + 1024 * step)
+                  [ IxFunLMAD.LMADDim 32 0 32 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 32 1 IxFunLMAD.Inc
+                  ]
+
+              lm_w2 =
+                IxFunLMAD.LMAD
+                  ((1 + step) * 1024 * num_blocks + (1 + step) * 1024)
+                  [ IxFunLMAD.LMADDim (1024 * num_blocks) 0 (num_blocks - step - 1) 0 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1024 0 (num_blocks - step - 1) 1 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1024 0 1 2 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 32 0 1 3 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 128 0 8 4 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 4 0 8 5 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 32 0 4 6 IxFunLMAD.Inc,
+                    IxFunLMAD.LMADDim 1 0 4 7 IxFunLMAD.Inc
+                  ]
+
+              asserts =
+                [ untyped $ ((1 :: TPrimExp Int64 VName) .<. num_blocks :: TPrimExp Bool VName)
+                ]
+
+          res1 <- disjointTester asserts lessthans lm1 lm_w1
+          res2 <- disjointTester asserts lessthans lm1 lm_w2
+          res1 && res2 @? "Failed"
       ]
