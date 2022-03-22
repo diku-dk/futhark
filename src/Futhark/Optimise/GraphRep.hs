@@ -99,8 +99,9 @@ runFusionEnvM ::
   FusionEnv ->
   m a
 runFusionEnvM (FusionEnvM a) env =
-  let (a', new_env) =  runState a env
-  in modifyNameSource (\src ->  (a', vNameSource (new_env {vNameSource = src})))
+  -- let (a', new_env) =  runState a env
+  -- in modifyNameSource (\src ->  (a', vNameSource (new_env {vNameSource = src})))
+  modifyNameSource $ \src -> let (new_a, new_env) = runState a (env {vNameSource = src}) in (new_a, vNameSource new_env)
 
 
 
@@ -133,8 +134,6 @@ isArray p = case paramDec p of
 
 mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
-    -- env <- get
-    -- put $ env {scope = scopeOf stms <> scopeOf inputs}
     addDepEdges (emptyG2 stms resNames inputNames)
     where
       resNames = namesFromRes res
