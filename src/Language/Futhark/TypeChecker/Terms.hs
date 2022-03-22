@@ -269,7 +269,7 @@ checkApplyExp e = do
 checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
-checkExp (Hole _ _ _) = error $ "checkExp: unexpected hole"
+checkExp (Hole vn t loc) = typeError loc mempty $ "Found typed hole: " <+> text (show vn) <+> text (show t) <> "."
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
 checkExp (IntLit val NoInfo loc) = do
