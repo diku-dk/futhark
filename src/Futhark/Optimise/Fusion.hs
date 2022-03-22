@@ -155,6 +155,9 @@ checkForUpdates res (BasicOp (FlatUpdate src slice _)) = do
 checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
   let updt_arrs = map (\(_, _, x) -> x) written_info
   updateKerInPlaces res (updt_arrs, [])
+checkForUpdates res (BasicOp (UpdateAcc src slice _)) = do
+  let ifvs = namesToList $ freeIn slice
+  updateKerInPlaces res ([src], ifvs)
 checkForUpdates res _ = return res
 
 -- | Updates the environment: (i) the @soacs@ (map) by binding each pattern
@@ -575,14 +578,16 @@ horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed) = do
           -- bindings do not use the results of cur_ker
           let curker_outnms = outNames cur_ker
               curker_outset = namesFromList curker_outnms
-              new_ufus_nms = namesFromList $ outNames ker ++ namesToList ufus_nms
+              new_ufus_nms = namesFromList $ filter (`notNameIn` fusedConsumed ker) $ outNames ker ++ namesToList ufus_nms
+              ker_inp = SOAC.inputs $ fsoac ker
+              ker_inp_names = namesFromList (mapMaybe SOAC.isVarInput ker_inp)
+
               -- disable horizontal fusion in the case when an output array of
               -- producer SOAC is a non-trivially transformed input of the consumer
               out_transf_ok =
-                let ker_inp = SOAC.inputs $ fsoac ker
-                    unfuse1 =
+                let unfuse1 =
                       namesFromList (map SOAC.inputArray ker_inp)
-                        `namesSubtract` namesFromList (mapMaybe SOAC.isVarInput ker_inp)
+                        `namesSubtract` ker_inp_names
                     unfuse2 = namesIntersection curker_outset ufus_nms
                  in not $ unfuse1 `namesIntersect` unfuse2
               -- Disable horizontal fusion if consumer has any
@@ -622,18 +627,24 @@ horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed) = do
           if not interm_stms_ok
             then return (False, n, stm_ind, cur_ker, mempty)
             else do
+              -- Avoid keeping results that are consumed by the
+              -- consumer (#1613). The dance here is to still handle
+              -- horizontal fusion of scatter-scatter properly
+              -- (issue1284.fut).
+              let ufus_nms' =
+                    ufus_nms `namesSubtract` (fusedConsumed ker `namesIntersection` ker_inp_names)
               new_ker <-
                 attemptFusion
-                  ufus_nms
+                  ufus_nms'
                   (outNames cur_ker)
                   (fsoac cur_ker)
                   (fusedConsumed cur_ker)
                   ker
               case new_ker of
                 Nothing -> return (False, n, stm_ind, cur_ker, mempty)
-                Just krn ->
+                Just krn -> do
                   let krn' = krn {kerAux = aux <> kerAux krn}
-                   in return (True, n + 1, stm_ind, krn', new_ufus_nms)
+                  return (True, n + 1, stm_ind, krn', new_ufus_nms)
       )
       (True, 0, 0, soac_kernel, infusible_nms)
       kernminds'
