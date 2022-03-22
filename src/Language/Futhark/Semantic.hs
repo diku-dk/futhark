@@ -55,9 +55,9 @@ mkImportFrom (ImportName includer _) includee
     includer_parts = init $ Posix.splitPath includer
     includer'
       | length dotdots > length includer_parts =
-        replicate (length dotdots - length includer_parts) "../"
+          replicate (length dotdots - length includer_parts) "../"
       | otherwise =
-        dropLast (length dotdots) includer_parts
+          dropLast (length dotdots) includer_parts
 
 -- | Create a @.fut@ file corresponding to an 'ImportName'.
 includeToFilePath :: ImportName -> Native.FilePath

@@ -117,7 +117,7 @@ segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
         SegThread
           (segNumGroups lvl)
           (segGroupSize lvl)
-          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims -1]))
+          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
   ((t_v, res_v, res_i), stms) <- runBuilder $ do
     (res_v, res_i) <-
@@ -155,9 +155,9 @@ isTileableRedomap stm
     not (null arrs),
     all primType $ lambdaReturnType map_lam,
     all (primType . paramType) $ lambdaParams map_lam =
-    Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
+      Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
   | otherwise =
-    Nothing
+      Nothing
 
 defVarianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 defVarianceInStm variance stm =
@@ -172,24 +172,24 @@ defVarianceInStm variance stm =
 varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 varianceInStm v0 stm@(Let _ _ (Op (OtherOp Screma {})))
   | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap stm =
-    let v = defVarianceInStm v0 stm
-        red_ps = lambdaParams red_lam
-        map_ps = lambdaParams map_lam
-        card_red = length red_nes
-        acc_lam_f = take (card_red `quot` 2) red_ps
-        arr_lam_f = drop (card_red `quot` 2) red_ps
-        stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
+      let v = defVarianceInStm v0 stm
+          red_ps = lambdaParams red_lam
+          map_ps = lambdaParams map_lam
+          card_red = length red_nes
+          acc_lam_f = take (card_red `quot` 2) red_ps
+          arr_lam_f = drop (card_red `quot` 2) red_ps
+          stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
 
-        f vacc (v_a, v_fm, v_fr_acc, v_fr_var) =
-          let vrc = oneName v_a <> M.findWithDefault mempty v_a vacc
-              vacc' = M.insert v_fm vrc vacc
-              vrc' = oneName v_fm <> vrc
-           in M.insert v_fr_acc (oneName v_fr_var <> vrc') $ M.insert v_fr_var vrc' vacc'
+          f vacc (v_a, v_fm, v_fr_acc, v_fr_var) =
+            let vrc = oneName v_a <> M.findWithDefault mempty v_a vacc
+                vacc' = M.insert v_fm vrc vacc
+                vrc' = oneName v_fm <> vrc
+             in M.insert v_fr_acc (oneName v_fr_var <> vrc') $ M.insert v_fr_var vrc' vacc'
 
-        v' =
-          foldl' f v $
-            zip4 arrs (map paramName map_ps) (map paramName acc_lam_f) (map paramName arr_lam_f)
-     in varianceInStms v' stm_lam
+          v' =
+            foldl' f v $
+              zip4 arrs (map paramName map_ps) (map paramName acc_lam_f) (map paramName arr_lam_f)
+       in varianceInStms v' stm_lam
 varianceInStm v0 stm = defVarianceInStm v0 stm
 
 varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable

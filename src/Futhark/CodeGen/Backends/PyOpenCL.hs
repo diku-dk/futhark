@@ -41,7 +41,7 @@ compileProg mode class_name prog = do
       prog'
     ) <-
     ImpGen.compileProg prog
-  --prepare the strings for assigning the kernels and set them as global
+  -- prepare the strings for assigning the kernels and set them as global
   let assign =
         unlines $
           map

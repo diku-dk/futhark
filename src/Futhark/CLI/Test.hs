@@ -163,16 +163,16 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
       case M.lookup name metrics of
         Nothing
           | expected_occurences > 0 ->
-            throwError $
-              name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
-                <> " times, but did not occur at all in optimised program."
+              throwError $
+                name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
+                  <> " times, but did not occur at all in optimised program."
         Just actual_occurences
           | expected_occurences /= actual_occurences ->
-            throwError $
-              name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
-                <> " times, but occurred "
-                <> T.pack (show actual_occurences)
-                <> " times."
+              throwError $
+                name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
+                  <> " times, but occurred "
+                  <> T.pack (show actual_occurences)
+                  <> " times."
         _ -> return ()
 
 testWarnings :: [WarningTest] -> SBS.ByteString -> TestM ()
@@ -180,10 +180,10 @@ testWarnings warnings futerr = accErrors_ $ map testWarning warnings
   where
     testWarning (ExpectedWarning regex_s regex)
       | not (match regex $ T.unpack $ T.decodeUtf8 futerr) =
-        throwError $
-          "Expected warning:\n  " <> regex_s
-            <> "\nGot warnings:\n  "
-            <> T.decodeUtf8 futerr
+          throwError $
+            "Expected warning:\n  " <> regex_s
+              <> "\nGot warnings:\n  "
+              <> T.decodeUtf8 futerr
       | otherwise = return ()
 
 runInterpretedEntry :: FutharkExe -> FilePath -> InputOutputs -> TestM ()
@@ -318,10 +318,10 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
 checkError :: MonadError T.Text m => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
   | not (match regex $ T.unpack err) =
-    E.throwError $
-      "Expected error:\n  " <> regex_s
-        <> "\nGot error:\n  "
-        <> err
+      E.throwError $
+        "Expected error:\n  " <> regex_s
+          <> "\nGot error:\n  "
+          <> err
 checkError _ _ =
   return ()
 
@@ -520,47 +520,47 @@ runTests config paths = do
       getResults ts
         | null (testStatusRemain ts) = report ts >> return ts
         | otherwise = do
-          report ts
-          msg <- takeMVar reportmvar
-          case msg of
-            TestStarted test -> do
-              unless fancy $
-                putStr $ "Started testing " <> testCaseProgram test <> " "
-              getResults $ ts {testStatusRun = test : testStatusRun ts}
-            TestDone test res -> do
-              let ts' =
-                    ts
-                      { testStatusRemain = test `delete` testStatusRemain ts,
-                        testStatusRun = test `delete` testStatusRun ts,
-                        testStatusRunsRemain =
-                          testStatusRunsRemain ts
-                            - numTestCases test
-                      }
-              case res of
-                Success -> do
-                  let ts'' =
-                        ts'
-                          { testStatusRunPass =
-                              testStatusRunPass ts' + numTestCases test
-                          }
-                  unless fancy $
-                    putStr $ "Finished testing " <> testCaseProgram test <> " "
-                  getResults $ ts'' {testStatusPass = testStatusPass ts + 1}
-                Failure s -> do
-                  when fancy moveCursorToTableTop
-                  clear
-                  putStr $ inBold (testCaseProgram test <> ":\n") <> T.unpack (T.unlines s)
-                  when fancy spaceTable
-                  getResults $
-                    ts'
-                      { testStatusFail = testStatusFail ts' + 1,
-                        testStatusRunPass =
-                          testStatusRunPass ts'
-                            + numTestCases test - length s,
-                        testStatusRunFail =
-                          testStatusRunFail ts'
-                            + length s
-                      }
+            report ts
+            msg <- takeMVar reportmvar
+            case msg of
+              TestStarted test -> do
+                unless fancy $
+                  putStr $ "Started testing " <> testCaseProgram test <> " "
+                getResults $ ts {testStatusRun = test : testStatusRun ts}
+              TestDone test res -> do
+                let ts' =
+                      ts
+                        { testStatusRemain = test `delete` testStatusRemain ts,
+                          testStatusRun = test `delete` testStatusRun ts,
+                          testStatusRunsRemain =
+                            testStatusRunsRemain ts
+                              - numTestCases test
+                        }
+                case res of
+                  Success -> do
+                    let ts'' =
+                          ts'
+                            { testStatusRunPass =
+                                testStatusRunPass ts' + numTestCases test
+                            }
+                    unless fancy $
+                      putStr $ "Finished testing " <> testCaseProgram test <> " "
+                    getResults $ ts'' {testStatusPass = testStatusPass ts + 1}
+                  Failure s -> do
+                    when fancy moveCursorToTableTop
+                    clear
+                    putStr $ inBold (testCaseProgram test <> ":\n") <> T.unpack (T.unlines s)
+                    when fancy spaceTable
+                    getResults $
+                      ts'
+                        { testStatusFail = testStatusFail ts' + 1,
+                          testStatusRunPass =
+                            testStatusRunPass ts'
+                              + numTestCases test - length s,
+                          testStatusRunFail =
+                            testStatusRunFail ts'
+                              + length s
+                        }
 
   when fancy spaceTable
 
@@ -737,7 +737,7 @@ commandLineOptions =
               case reads n of
                 [(n', "")]
                   | n' > 0 ->
-                    Right $ \config -> config {configConcurrency = Just n'}
+                      Right $ \config -> config {configConcurrency = Just n'}
                 _ ->
                   Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
           )

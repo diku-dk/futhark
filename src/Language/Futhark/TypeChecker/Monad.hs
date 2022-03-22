@@ -359,16 +359,16 @@ instance MonadTypeChecker TypeM where
       Just (BoundV _ t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise ->
-          case getType t of
-            Nothing ->
-              typeError loc mempty $
-                "Attempt to use function" <+> pprName name <+> "as value."
-            Just t' ->
-              return
-                ( qn',
-                  fromStruct $
-                    qualifyTypeVars outer_env mempty qs t'
-                )
+            case getType t of
+              Nothing ->
+                typeError loc mempty $
+                  "Attempt to use function" <+> pprName name <+> "as value."
+              Just t' ->
+                return
+                  ( qn',
+                    fromStruct $
+                      qualifyTypeVars outer_env mempty qs t'
+                  )
 
   typeError loc notes s = throwError $ TypeError (locOf loc) notes s
 
@@ -384,19 +384,19 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
   where
     descend scope []
       | Just name' <- M.lookup (space, name) $ envNameMap scope =
-        return (scope, name')
+          return (scope, name')
       | otherwise =
-        unknownVariable space qn loc
+          unknownVariable space qn loc
     descend scope (q : qs)
       | Just (QualName _ q') <- M.lookup (Term, q) $ envNameMap scope,
         Just res <- M.lookup q' $ envModTable scope =
-        case res of
-          ModEnv q_scope -> do
-            (scope', QualName qs' name') <- descend q_scope qs
-            return (scope', QualName (q' : qs') name')
-          ModFun {} -> unappliedFunctor loc
+          case res of
+            ModEnv q_scope -> do
+              (scope', QualName qs' name') <- descend q_scope qs
+              return (scope', QualName (q' : qs') name')
+            ModFun {} -> unappliedFunctor loc
       | otherwise =
-        unknownVariable space qn loc
+          unknownVariable space qn loc
 
 -- | Try to prepend qualifiers to the type names such that they
 -- represent how to access the type in some scope.
@@ -443,15 +443,15 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
 
     qual except (QualName orig_qs name)
       | name `elem` except || reachable orig_qs name outer_env =
-        QualName orig_qs name
+          QualName orig_qs name
       | otherwise =
-        prependAsNecessary [] ref_qs $ QualName orig_qs name
+          prependAsNecessary [] ref_qs $ QualName orig_qs name
 
     prependAsNecessary qs rem_qs (QualName orig_qs name)
       | reachable (qs ++ orig_qs) name outer_env = QualName (qs ++ orig_qs) name
       | otherwise = case rem_qs of
-        q : rem_qs' -> prependAsNecessary (qs ++ [q]) rem_qs' (QualName orig_qs name)
-        [] -> QualName orig_qs name
+          q : rem_qs' -> prependAsNecessary (qs ++ [q]) rem_qs' (QualName orig_qs name)
+          [] -> QualName orig_qs name
 
     reachable [] name env =
       name `M.member` envVtable env
@@ -462,7 +462,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
         matches _ = False
     reachable (q : qs') name env
       | Just (ModEnv env') <- M.lookup q $ envModTable env =
-        reachable qs' name env'
+          reachable qs' name env'
       | otherwise = False
 
 -- | Turn a 'Left' 'TypeError' into an actual error.

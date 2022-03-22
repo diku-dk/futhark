@@ -883,39 +883,39 @@ compileEntryFun ::
   CompilerM op s (Maybe (PyFunDef, (PyExp, PyExp)))
 compileEntryFun sync timing entry
   | Just ename <- Imp.functionEntry $ snd entry = do
-    (params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
-    let (maybe_sync, ret) =
-          case timing of
-            DoNotReturnTiming ->
-              ( [],
-                Return $ tupleOrSingle $ map snd res
-              )
-            ReturnTiming ->
-              ( sync,
-                Return $
-                  Tuple
-                    [ Var "runtime",
-                      tupleOrSingle $ map snd res
-                    ]
-              )
-        (pts, rts) = entryTypes $ snd entry
+      (params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
+      let (maybe_sync, ret) =
+            case timing of
+              DoNotReturnTiming ->
+                ( [],
+                  Return $ tupleOrSingle $ map snd res
+                )
+              ReturnTiming ->
+                ( sync,
+                  Return $
+                    Tuple
+                      [ Var "runtime",
+                        tupleOrSingle $ map snd res
+                      ]
+                )
+          (pts, rts) = entryTypes $ snd entry
 
-        do_run =
-          Assign (Var "time_start") (simpleCall "time.time" []) :
-          body_lib ++ maybe_sync
-            ++ [ Assign (Var "runtime") $
-                   BinOp
-                     "-"
-                     (toMicroseconds (simpleCall "time.time" []))
-                     (toMicroseconds (Var "time_start"))
-               ]
+          do_run =
+            Assign (Var "time_start") (simpleCall "time.time" []) :
+            body_lib ++ maybe_sync
+              ++ [ Assign (Var "runtime") $
+                     BinOp
+                       "-"
+                       (toMicroseconds (simpleCall "time.time" []))
+                       (toMicroseconds (Var "time_start"))
+                 ]
 
-    pure $
-      Just
-        ( Def (nameToString ename) ("self" : params) $
-            prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
-          (String (nameToString ename), Tuple [List (map String pts), List (map String rts)])
-        )
+      pure $
+        Just
+          ( Def (nameToString ename) ("self" : params) $
+              prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
+            (String (nameToString ename), Tuple [List (map String pts), List (map String rts)])
+          )
   | otherwise = pure Nothing
 
 entryTypes :: Imp.Function op -> ([String], [String])
@@ -1109,21 +1109,21 @@ compilePrimValue (IntValue (Int64Value v)) =
   simpleCall "np.int64" [Integer $ toInteger v]
 compilePrimValue (FloatValue (Float16Value v))
   | isInfinite v =
-    if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.inf" else Var "-np.inf"
   | isNaN v =
-    Var "np.nan"
+      Var "np.nan"
   | otherwise = simpleCall "np.float16" [Float $ fromRational $ toRational v]
 compilePrimValue (FloatValue (Float32Value v))
   | isInfinite v =
-    if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.inf" else Var "-np.inf"
   | isNaN v =
-    Var "np.nan"
+      Var "np.nan"
   | otherwise = simpleCall "np.float32" [Float $ fromRational $ toRational v]
 compilePrimValue (FloatValue (Float64Value v))
   | isInfinite v =
-    if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.inf" else Var "-np.inf"
   | isNaN v =
-    Var "np.nan"
+      Var "np.nan"
   | otherwise = simpleCall "np.float64" [Float $ fromRational $ toRational v]
 compilePrimValue (BoolValue v) = Bool v
 compilePrimValue UnitValue = Var "None"

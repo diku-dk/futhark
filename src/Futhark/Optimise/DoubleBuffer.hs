@@ -239,7 +239,7 @@ extractAllocOf bound needle stms = do
     Let (Pat [pe]) _ (Op (Alloc size _))
       | patElemName pe == needle,
         invariant size ->
-        Just (stm, stms')
+          Just (stm, stms')
     _ ->
       let bound' = namesFromList (patNames (stmPat stm)) <> bound
        in second (oneStm stm <>) <$> extractAllocOf bound' needle stms'
@@ -280,47 +280,47 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
         not $ merge_bound `namesIntersect` freeIn (IxFun.base ixfun),
         Var res_v <- resSubExp res,
         Just (res_v_alloc, body_stms'') <- extractAllocOf merge_bound res_v body_stms' = do
-        num_bytes <-
-          letSubExp "num_bytes" =<< toExp (product $ primByteSize pt : IxFun.base ixfun)
-        arr_mem_in <-
-          letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
-        pe_unused <-
-          PatElem
-            <$> newVName (baseString (patElemName pe) <> "_unused")
-            <*> pure (MemMem space)
-        param_out <-
-          newParam (baseString (paramName param) <> "_out") (MemMem space)
-        addStm res_v_alloc
-        pure
-          ( ( M.insert (paramName param) arr_mem_in buffered,
-              substituteNames (M.singleton res_v (paramName param_out)) body_stms''
-            ),
-            ( [pe, pe_unused],
-              [(param, Var arr_mem_in), (param_out, resSubExp res)],
-              [ res {resSubExp = Var $ paramName param_out},
-                subExpRes $ Var $ paramName param
-              ]
+          num_bytes <-
+            letSubExp "num_bytes" =<< toExp (product $ primByteSize pt : IxFun.base ixfun)
+          arr_mem_in <-
+            letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
+          pe_unused <-
+            PatElem
+              <$> newVName (baseString (patElemName pe) <> "_unused")
+              <*> pure (MemMem space)
+          param_out <-
+            newParam (baseString (paramName param) <> "_out") (MemMem space)
+          addStm res_v_alloc
+          pure
+            ( ( M.insert (paramName param) arr_mem_in buffered,
+                substituteNames (M.singleton res_v (paramName param_out)) body_stms''
+              ),
+              ( [pe, pe_unused],
+                [(param, Var arr_mem_in), (param_out, resSubExp res)],
+                [ res {resSubExp = Var $ paramName param_out},
+                  subExpRes $ Var $ paramName param
+                ]
+              )
             )
-          )
       | otherwise =
-        pure
-          ( (buffered, body_stms'),
-            ([pe], [(param, arg)], [res])
-          )
+          pure
+            ( (buffered, body_stms'),
+              ([pe], [(param, arg)], [res])
+            )
 
     maybeCopyInitial buffered (param@(Param _ _ (MemArray _ _ _ (ArrayIn mem _))), Var arg)
       | Just mem' <- mem `M.lookup` buffered = do
-        arg_info <- lookupMemInfo arg
-        case arg_info of
-          MemArray pt shape u (ArrayIn _ arg_ixfun) -> do
-            arg_copy <- newVName (baseString arg <> "_dbcopy")
-            letBind (Pat [PatElem arg_copy $ MemArray pt shape u $ ArrayIn mem' arg_ixfun]) $
-              BasicOp $ Copy arg
-            -- We need to make this parameter unique to avoid invalid
-            -- hoisting (see #1533), because we are invalidating the
-            -- underlying memory.
-            pure (fmap mkUnique param, Var arg_copy)
-          _ -> pure (fmap mkUnique param, Var arg)
+          arg_info <- lookupMemInfo arg
+          case arg_info of
+            MemArray pt shape u (ArrayIn _ arg_ixfun) -> do
+              arg_copy <- newVName (baseString arg <> "_dbcopy")
+              letBind (Pat [PatElem arg_copy $ MemArray pt shape u $ ArrayIn mem' arg_ixfun]) $
+                BasicOp $ Copy arg
+              -- We need to make this parameter unique to avoid invalid
+              -- hoisting (see #1533), because we are invalidating the
+              -- underlying memory.
+              pure (fmap mkUnique param, Var arg_copy)
+            _ -> pure (fmap mkUnique param, Var arg)
     maybeCopyInitial _ (param, arg) = pure (param, arg)
 
     mkUnique (MemArray bt shape _ ret) = MemArray bt shape Unique ret
@@ -372,7 +372,7 @@ doubleBufferMergeParams ctx_and_res bound_in_loop =
           Just (Constant val, False)
         Just (_, SubExpRes _ (Var v'))
           | not $ loopVariant v' ->
-            Just (Var v', False)
+              Just (Var v', False)
         Just _ ->
           Nothing
         Nothing ->
@@ -385,11 +385,11 @@ doubleBufferMergeParams ctx_and_res bound_in_loop =
             Just (dims, b) <-
               mapAndUnzipM loopInvariantSize $ shapeDims shape,
             mem == arraymem =
-            Just
-              ( arraySizeInBytesExp $
-                  Array pt (Shape dims) NoUniqueness,
-                or b
-              )
+              Just
+                ( arraySizeInBytesExp $
+                    Array pt (Shape dims) NoUniqueness,
+                  or b
+                )
         arrayInMem _ = Nothing
 
     buffer (fparam, res) = case paramType fparam of
@@ -397,19 +397,19 @@ doubleBufferMergeParams ctx_and_res bound_in_loop =
         | Just (size, b) <- sizeForMem $ paramName fparam,
           Var res_v <- resSubExp res,
           res_v `nameIn` bound_in_loop -> do
-          -- Let us double buffer this!
-          bufname <- lift $ newVName "double_buffer_mem"
-          modify $ M.insert (paramName fparam) (bufname, b)
-          pure $ BufferAlloc bufname size space b
+            -- Let us double buffer this!
+            bufname <- lift $ newVName "double_buffer_mem"
+            modify $ M.insert (paramName fparam) (bufname, b)
+            pure $ BufferAlloc bufname size space b
       Array {}
         | MemArray _ _ _ (ArrayIn mem ixfun) <- paramDec fparam -> do
-          buffered <- gets $ M.lookup mem
-          case buffered of
-            Just (bufname, b) -> do
-              copyname <- lift $ newVName "double_buffer_array"
-              pure $ BufferCopy bufname ixfun copyname b
-            Nothing ->
-              pure NoBuffer
+            buffered <- gets $ M.lookup mem
+            case buffered of
+              Just (bufname, b) -> do
+                copyname <- lift $ newVName "double_buffer_array"
+                pure $ BufferCopy bufname ixfun copyname b
+              Nothing ->
+                pure NoBuffer
       _ -> pure NoBuffer
 
 allocStms ::

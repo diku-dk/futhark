@@ -139,7 +139,7 @@ sequentialStreamWholeArray pat w nes lam arrs = do
     certifying cs $ case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->
-          letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
+            letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
       _ -> letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
 -- | Split the parameters of a stream reduction lambda into the chunk

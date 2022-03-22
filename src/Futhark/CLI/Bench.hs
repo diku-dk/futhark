@@ -141,28 +141,28 @@ compileBenchmark opts (program, program_spec) = do
       | "nobench" `notElem` testTags spec,
         "disable" `notElem` testTags spec,
         any hasRuns cases ->
-        if optSkipCompilation opts
-          then do
-            exists <- doesFileExist $ binaryName program
-            if exists
-              then pure $ Right (program, cases)
-              else do
-                putStrLn $ binaryName program ++ " does not exist, but --skip-compilation passed."
-                pure $ Left FailedToCompile
-          else do
-            putStr $ "Compiling " ++ program ++ "...\n"
+          if optSkipCompilation opts
+            then do
+              exists <- doesFileExist $ binaryName program
+              if exists
+                then pure $ Right (program, cases)
+                else do
+                  putStrLn $ binaryName program ++ " does not exist, but --skip-compilation passed."
+                  pure $ Left FailedToCompile
+            else do
+              putStr $ "Compiling " ++ program ++ "...\n"
 
-            compile_opts <- compileOptions opts
+              compile_opts <- compileOptions opts
 
-            res <- prepareBenchmarkProgram (optConcurrency opts) compile_opts program cases
+              res <- prepareBenchmarkProgram (optConcurrency opts) compile_opts program cases
 
-            case res of
-              Left (err, errstr) -> do
-                putStrLn $ inRed err
-                maybe (pure ()) SBS.putStrLn errstr
-                pure $ Left FailedToCompile
-              Right () ->
-                pure $ Right (program, cases)
+              case res of
+                Left (err, errstr) -> do
+                  putStrLn $ inRed err
+                  maybe (pure ()) SBS.putStrLn errstr
+                  pure $ Left FailedToCompile
+                Right () ->
+                  pure $ Right (program, cases)
     _ ->
       pure $ Left Skipped
   where
@@ -233,7 +233,7 @@ progressBar cur bound steps =
     cell i
       | i' * step_size <= cur' = char 9
       | otherwise =
-        char (floor (((cur' - (i' - 1) * step_size) * num_chars) / step_size))
+          char (floor (((cur' - (i' - 1) * step_size) * num_chars) / step_size))
       where
         i' = fromIntegral i
 
@@ -250,26 +250,26 @@ interimResult us_sum i runs =
 mkProgressPrompt :: Int -> Int -> String -> IO (Maybe Int -> IO ())
 mkProgressPrompt runs pad_to dataset_desc
   | fancyTerminal = do
-    count <- newIORef (0, 0)
-    pure $ \us -> do
-      putStr "\r" -- Go to start of line.
-      let p s =
-            putStr $
-              descString (atMostChars 40 dataset_desc) pad_to ++ s
-      (us_sum, i) <- readIORef count
-      case us of
-        Nothing -> p $ replicate 13 ' ' ++ progressBar i runs 10
-        Just us' -> do
-          let us_sum' = us_sum + us'
-              i' = i + 1
-          writeIORef count (us_sum', i')
-          p $ interimResult us_sum' i' runs
-      putStr " " -- Just to move the cursor away from the progress bar.
-      hFlush stdout
+      count <- newIORef (0, 0)
+      pure $ \us -> do
+        putStr "\r" -- Go to start of line.
+        let p s =
+              putStr $
+                descString (atMostChars 40 dataset_desc) pad_to ++ s
+        (us_sum, i) <- readIORef count
+        case us of
+          Nothing -> p $ replicate 13 ' ' ++ progressBar i runs 10
+          Just us' -> do
+            let us_sum' = us_sum + us'
+                i' = i + 1
+            writeIORef count (us_sum', i')
+            p $ interimResult us_sum' i' runs
+        putStr " " -- Just to move the cursor away from the progress bar.
+        hFlush stdout
   | otherwise = do
-    putStr $ descString dataset_desc pad_to
-    hFlush stdout
-    pure $ const $ pure ()
+      putStr $ descString dataset_desc pad_to
+      hFlush stdout
+      pure $ const $ pure ()
 
 reportResult :: [RunResult] -> IO ()
 reportResult = putStrLn . reportString
@@ -299,7 +299,7 @@ runBenchmarkCase _ _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
   pure Nothing -- Not our concern, we are not a testing tool.
 runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
-    pure Nothing
+      pure Nothing
 runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   prompt <- mkProgressPrompt (optRuns opts) pad_to dataset_desc
 
@@ -425,7 +425,7 @@ commandLineOptions =
               case reads n of
                 [(n', "")]
                   | n' < max_timeout ->
-                    Right $ \config -> config {optTimeout = fromIntegral n'}
+                      Right $ \config -> config {optTimeout = fromIntegral n'}
                 _ ->
                   Left . optionsError $
                     "'" ++ n ++ "' is not an integer smaller than" ++ show max_timeout ++ "."
@@ -489,7 +489,7 @@ commandLineOptions =
               case reads n of
                 [(n', "")]
                   | n' > 0 ->
-                    Right $ \config -> config {optConcurrency = Just n'}
+                      Right $ \config -> config {optConcurrency = Just n'}
                 _ ->
                   Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
           )

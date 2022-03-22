@@ -110,7 +110,7 @@ resultArray arrs ts = do
   arrs_ts <- mapM lookupType arrs
   let oneArray t@Acc {}
         | Just (v, _) <- find ((== t) . snd) (zip arrs arrs_ts) =
-          pure v
+            pure v
       oneArray t =
         letExp "result" =<< eBlank t
   mapM oneArray ts
@@ -170,13 +170,13 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
               SubExp $ Var $ paramName acc_out_p
           Nothing
             | paramName p `nameIn` lam_cons -> do
-              p' <-
-                letExp (baseString (paramName p)) . BasicOp $
-                  Index arr $ fullSlice arr_t [DimFix $ Var i]
-              letBindNames [paramName p] $ BasicOp $ Copy p'
+                p' <-
+                  letExp (baseString (paramName p)) . BasicOp $
+                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+                letBindNames [paramName p] $ BasicOp $ Copy p'
             | otherwise ->
-              letBindNames [paramName p] $
-                BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
+                letBindNames [paramName p] $
+                  BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.

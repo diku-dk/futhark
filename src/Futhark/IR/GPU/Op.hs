@@ -342,9 +342,9 @@ checkSegLevel (Just SegThread {}) _ =
 checkSegLevel (Just x) y
   | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ pretty x
   | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
-    TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
+      TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
   | otherwise =
-    return ()
+      return ()
 
 typeCheckHostOp ::
   TC.Checkable rep =>

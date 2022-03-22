@@ -243,11 +243,11 @@ compileOpenCLAction fcfg mode outpath =
           jsonpath = outpath `addExtension` "json"
           extra_options
             | System.Info.os == "darwin" =
-              ["-framework", "OpenCL"]
+                ["-framework", "OpenCL"]
             | System.Info.os == "mingw32" =
-              ["-lOpenCL64"]
+                ["-lOpenCL64"]
             | otherwise =
-              ["-lOpenCL"]
+                ["-lOpenCL"]
 
       case mode of
         ToLibrary -> do

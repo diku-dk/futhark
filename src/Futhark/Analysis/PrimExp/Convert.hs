@@ -77,7 +77,7 @@ primExpFromExp f (BasicOp (SubExp se)) =
 primExpFromExp f (Apply fname args ts _)
   | isBuiltInFunction fname,
     [Prim t] <- map declExtTypeOf ts =
-    FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
+      FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp _ _ = fail "Not a PrimExp"
 
 -- | Like 'primExpFromExp', but for a t'SubExp'.

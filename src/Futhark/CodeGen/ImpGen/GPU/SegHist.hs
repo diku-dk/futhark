@@ -195,9 +195,9 @@ data Passage = MustBeSinglePass | MayBeMultiPass deriving (Eq, Ord)
 bodyPassage :: KernelBody GPUMem -> Passage
 bodyPassage kbody
   | mempty == consumedInKernelBody (aliasAnalyseKernelBody mempty kbody) =
-    MayBeMultiPass
+      MayBeMultiPass
   | otherwise =
-    MustBeSinglePass
+      MustBeSinglePass
 
 prepareIntermediateArraysGlobal ::
   Passage ->

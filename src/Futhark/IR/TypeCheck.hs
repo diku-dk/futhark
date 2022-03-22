@@ -255,9 +255,9 @@ instance Semigroup Consumption where
   _ <> ConsumptionError e = ConsumptionError e
   Consumption o1 <> Consumption o2
     | v : _ <- namesToList $ consumed_in_o1 `namesIntersection` used_in_o2 =
-      ConsumptionError $ "Variable " <> pretty v <> " referenced after being consumed."
+        ConsumptionError $ "Variable " <> pretty v <> " referenced after being consumed."
     | otherwise =
-      Consumption $ o1 `seqOccurences` o2
+        Consumption $ o1 `seqOccurences` o2
     where
       consumed_in_o1 = mconcat $ map consumed o1
       used_in_o2 = mconcat $ map consumed o2 <> map observed o2
@@ -418,12 +418,12 @@ consumeOnlyParams consumable m = do
     wasConsumed v
       | Just als <- lookup v consumable = return als
       | otherwise =
-        bad $
-          TypeError $
-            unlines
-              [ pretty v ++ " was invalidly consumed.",
-                what ++ " can be consumed here."
-              ]
+          bad $
+            TypeError $
+              unlines
+                [ pretty v ++ " was invalidly consumed.",
+                  what ++ " can be consumed here."
+                ]
     what
       | null consumable = "Nothing"
       | otherwise = "Only " ++ intercalate ", " (map (pretty . fst) consumable)
@@ -586,9 +586,9 @@ checkProg (Prog consts funs) = do
       foldM expand table funs
     expand ftable (FunDef _ _ name ret params _)
       | M.member name ftable =
-        bad $ DupDefinitionError name
+          bad $ DupDefinitionError name
       | otherwise =
-        return $ M.insert name (ret, params) ftable
+          return $ M.insert name (ret, params) ftable
 
 initialFtable ::
   Checkable rep =>
@@ -677,21 +677,21 @@ checkFun' (fname, rettype, params) consumable check = do
 
     expand seen pname
       | Just _ <- find (== pname) seen =
-        bad $ DupParamError fname pname
+          bad $ DupParamError fname pname
       | otherwise =
-        return $ pname : seen
+          return $ pname : seen
     checkReturnAlias =
       foldM_ checkReturnAlias' mempty . returnAliasing rettype
 
     checkReturnAlias' seen (Unique, names)
       | any (`S.member` S.map fst seen) $ namesToList names =
-        bad $ UniqueReturnAliased fname
+          bad $ UniqueReturnAliased fname
       | otherwise = do
-        consume names
-        return $ seen <> tag Unique names
+          consume names
+          return $ seen <> tag Unique names
     checkReturnAlias' seen (Nonunique, names)
       | any (`S.member` seen) $ tag Unique names =
-        bad $ UniqueReturnAliased fname
+          bad $ UniqueReturnAliased fname
       | otherwise = return $ seen <> tag Nonunique names
 
     tag u = S.fromList . map (,u) . namesToList
@@ -772,23 +772,23 @@ checkLambdaResult ::
   TypeM rep ()
 checkLambdaResult ts es
   | length ts /= length es =
-    bad $
-      TypeError $
-        "Lambda has return type " ++ prettyTuple ts
-          ++ " describing "
-          ++ show (length ts)
-          ++ " values, but body returns "
-          ++ show (length es)
-          ++ " values: "
-          ++ prettyTuple es
-  | otherwise = forM_ (zip ts es) $ \(t, e) -> do
-    et <- checkSubExpRes e
-    unless (et == t) $
       bad $
         TypeError $
-          "Subexpression " ++ pretty e ++ " has type " ++ pretty et
-            ++ " but expected "
-            ++ pretty t
+          "Lambda has return type " ++ prettyTuple ts
+            ++ " describing "
+            ++ show (length ts)
+            ++ " values, but body returns "
+            ++ show (length es)
+            ++ " values: "
+            ++ prettyTuple es
+  | otherwise = forM_ (zip ts es) $ \(t, e) -> do
+      et <- checkSubExpRes e
+      unless (et == t) $
+        bad $
+          TypeError $
+            "Subexpression " ++ pretty e ++ " has type " ++ pretty et
+              ++ " but expected "
+              ++ pretty t
 
 checkBody ::
   Checkable rep =>
@@ -883,20 +883,20 @@ checkBasicOp (Reshape newshape arrexp) = do
       return ()
     checkDimChange rank (DimCoercion se) i
       | i >= rank =
-        bad $
-          TypeError $
-            "Asked to coerce dimension " ++ show i ++ " to " ++ pretty se
-              ++ ", but array "
-              ++ pretty arrexp
-              ++ " has only "
-              ++ pretty rank
-              ++ " dimensions"
+          bad $
+            TypeError $
+              "Asked to coerce dimension " ++ show i ++ " to " ++ pretty se
+                ++ ", but array "
+                ++ pretty arrexp
+                ++ " has only "
+                ++ pretty rank
+                ++ " dimensions"
       | otherwise =
-        return ()
+          return ()
 checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
-  when (length perm /= rank || sort perm /= [0 .. rank -1]) $
+  when (length perm /= rank || sort perm /= [0 .. rank - 1]) $
     bad $ PermutationError perm rank $ Just arr
 checkBasicOp (Rotate rots arr) = do
   arrt <- lookupType arr

@@ -22,9 +22,9 @@ compileSegScan ::
   MulticoreGen Imp.MCCode
 compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
-    nonsegmentedScan pat space reds kbody nsubtasks
+      nonsegmentedScan pat space reds kbody nsubtasks
   | otherwise =
-    segmentedScan pat space reds kbody
+      segmentedScan pat space reds kbody
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
 xParams scan =

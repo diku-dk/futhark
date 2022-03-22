@@ -89,7 +89,7 @@ shapeCoercion = mapM dimCoercion
 fuseReshape :: Eq d => ShapeChange d -> ShapeChange d -> ShapeChange d
 fuseReshape s1 s2
   | length s1 == length s2 =
-    zipWith comb s1 s2
+      zipWith comb s1 s2
   where
     comb (DimNew _) (DimCoercion d2) =
       DimNew d2
@@ -106,7 +106,7 @@ fuseReshape _ s2 = s2
 informReshape :: Eq d => [d] -> ShapeChange d -> ShapeChange d
 informReshape shape sc
   | length shape == length sc =
-    zipWith inform shape sc
+      zipWith inform shape sc
   where
     inform d1 (DimNew d2)
       | d1 == d2 = DimCoercion d2

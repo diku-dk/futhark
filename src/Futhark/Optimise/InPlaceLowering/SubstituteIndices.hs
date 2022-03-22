@@ -63,22 +63,22 @@ substituteIndicesInStm ::
 substituteIndicesInStm substs (Let pat _ (BasicOp (Rotate rots v)))
   | Just (cs, src, src_t, is) <- lookup v substs,
     [v'] <- patNames pat = do
-    src' <-
-      letExp (baseString v' <> "_subst") $
-        BasicOp $ Rotate (replicate (arrayRank src_t - length rots) zero ++ rots) src
-    src_t' <- lookupType src'
-    pure $ (v', (cs, src', src_t', is)) : substs
+      src' <-
+        letExp (baseString v' <> "_subst") $
+          BasicOp $ Rotate (replicate (arrayRank src_t - length rots) zero ++ rots) src
+      src_t' <- lookupType src'
+      pure $ (v', (cs, src', src_t', is)) : substs
   where
     zero = intConst Int64 0
 substituteIndicesInStm substs (Let pat _ (BasicOp (Rearrange perm v)))
   | Just (cs, src, src_t, is) <- lookup v substs,
     [v'] <- patNames pat = do
-    let extra_dims = arrayRank src_t - length perm
-        perm' = [0 .. extra_dims -1] ++ map (+ extra_dims) perm
-    src' <-
-      letExp (baseString v' <> "_subst") $ BasicOp $ Rearrange perm' src
-    src_t' <- lookupType src'
-    pure $ (v', (cs, src', src_t', is)) : substs
+      let extra_dims = arrayRank src_t - length perm
+          perm' = [0 .. extra_dims - 1] ++ map (+ extra_dims) perm
+      src' <-
+        letExp (baseString v' <> "_subst") $ BasicOp $ Rearrange perm' src
+      src_t' <- lookupType src'
+      pure $ (v', (cs, src', src_t', is)) : substs
 substituteIndicesInStm substs (Let pat rep e) = do
   e' <- substituteIndicesInExp substs e
   addStm $ Let pat rep e'
@@ -113,25 +113,25 @@ substituteIndicesInExp substs e = do
     copyAnyConsumed =
       let consumingSubst substs' v
             | Just (cs2, src2, src2dec, is2) <- lookup v substs = do
-              row <-
-                certifying cs2 $
-                  letExp (baseString v ++ "_row") $
-                    BasicOp $ Index src2 $ fullSlice (typeOf src2dec) (unSlice is2)
-              row_copy <-
-                letExp (baseString v ++ "_row_copy") $ BasicOp $ Copy row
-              return $
-                update
-                  v
-                  v
-                  ( mempty,
-                    row_copy,
-                    src2dec
-                      `setType` ( typeOf src2dec
-                                    `setArrayDims` sliceDims is2
-                                ),
-                    Slice []
-                  )
-                  substs'
+                row <-
+                  certifying cs2 $
+                    letExp (baseString v ++ "_row") $
+                      BasicOp $ Index src2 $ fullSlice (typeOf src2dec) (unSlice is2)
+                row_copy <-
+                  letExp (baseString v ++ "_row_copy") $ BasicOp $ Copy row
+                return $
+                  update
+                    v
+                    v
+                    ( mempty,
+                      row_copy,
+                      src2dec
+                        `setType` ( typeOf src2dec
+                                      `setArrayDims` sliceDims is2
+                                  ),
+                      Slice []
+                    )
+                    substs'
           consumingSubst substs' _ =
             return substs'
        in foldM consumingSubst substs . namesToList . consumedInExp
@@ -153,14 +153,14 @@ substituteIndicesInVar ::
   m VName
 substituteIndicesInVar substs v
   | Just (cs2, src2, _, Slice []) <- lookup v substs =
-    certifying cs2 $
-      letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
+      certifying cs2 $
+        letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
   | Just (cs2, src2, src2_dec, Slice is2) <- lookup v substs =
-    certifying cs2 $
-      letExp (baseString src2 <> "_v_idx") $
-        BasicOp $ Index src2 $ fullSlice (typeOf src2_dec) is2
+      certifying cs2 $
+        letExp (baseString src2 <> "_v_idx") $
+          BasicOp $ Index src2 $ fullSlice (typeOf src2_dec) is2
   | otherwise =
-    return v
+      return v
 
 substituteIndicesInBody ::
   (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>

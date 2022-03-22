@@ -362,16 +362,16 @@ synopsisDec visible fm dec = case dec of
   TypeDec t -> synopsisType t
   OpenDec x _
     | Just opened <- synopsisOpened x -> Just $ do
-      opened' <- opened
-      return $ fullRow $ keyword "open " <> opened'
+        opened' <- opened
+        return $ fullRow $ keyword "open " <> opened'
     | otherwise ->
-      Just $
-        return $
-          fullRow $
-            keyword "open" <> fromString (" <" <> pretty x <> ">")
+        Just $
+          return $
+            fullRow $
+              keyword "open" <> fromString (" <" <> pretty x <> ">")
   LocalDec (SigDec s) _
     | sigName s `S.member` visible ->
-      synopsisModType (keyword "local" <> " ") s
+        synopsisModType (keyword "local" <> " ") s
   LocalDec {} -> Nothing
   ImportDec {} -> Nothing
 
@@ -485,9 +485,9 @@ typeHtml t = case t of
   Scalar (Prim et) -> return $ primTypeHtml et
   Scalar (Record fs)
     | Just ts <- areTupleFields fs ->
-      parens . commas <$> mapM typeHtml ts
+        parens . commas <$> mapM typeHtml ts
     | otherwise ->
-      braces . commas <$> mapM ppField (M.toList fs)
+        braces . commas <$> mapM ppField (M.toList fs)
     where
       ppField (name, tp) = do
         tp' <- typeHtml tp
@@ -725,26 +725,26 @@ identifierLinks :: SrcLoc -> String -> DocM String
 identifierLinks _ [] = return []
 identifierLinks loc s
   | Just ((name, namespace, file), s') <- identifierReference s = do
-    let proceed x = (x <>) <$> identifierLinks loc s'
-        unknown = proceed $ "`" <> name <> "`"
-    case knownNamespace namespace of
-      Just namespace' -> do
-        maybe_v <- lookupName (namespace', name, file)
-        case maybe_v of
-          Nothing -> do
-            warn loc $
-              "Identifier '" <> fromString name <> "' not found in namespace '"
-                <> fromString namespace
-                <> "'"
-                <> fromString (maybe "" (" in file " <>) file)
-                <> "."
-            unknown
-          Just v' -> do
-            link <- vnameLink v'
-            proceed $ "[`" <> name <> "`](" <> link <> ")"
-      _ -> do
-        warn loc $ "Unknown namespace '" <> fromString namespace <> "'."
-        unknown
+      let proceed x = (x <>) <$> identifierLinks loc s'
+          unknown = proceed $ "`" <> name <> "`"
+      case knownNamespace namespace of
+        Just namespace' -> do
+          maybe_v <- lookupName (namespace', name, file)
+          case maybe_v of
+            Nothing -> do
+              warn loc $
+                "Identifier '" <> fromString name <> "' not found in namespace '"
+                  <> fromString namespace
+                  <> "'"
+                  <> fromString (maybe "" (" in file " <>) file)
+                  <> "."
+              unknown
+            Just v' -> do
+              link <- vnameLink v'
+              proceed $ "[`" <> name <> "`](" <> link <> ")"
+        _ -> do
+          warn loc $ "Unknown namespace '" <> fromString namespace <> "'."
+          unknown
   where
     knownNamespace "term" = Just Term
     knownNamespace "mtype" = Just Signature
@@ -828,8 +828,8 @@ describeDec _ (ModDec mb) = Just $
 describeDec _ OpenDec {} = Nothing
 describeDec visible (LocalDec (SigDec (SigBind name se doc _)) _)
   | name `S.member` visible = Just $
-    describeGenericMod name IndexModuleType se doc $ \name' ->
-      return $ keyword "local module type " <> name'
+      describeGenericMod name IndexModuleType se doc $ \name' ->
+        return $ keyword "local module type " <> name'
 describeDec _ LocalDec {} = Nothing
 describeDec _ ImportDec {} = Nothing
 
@@ -838,9 +838,9 @@ valBindWhat vb
   | null (valBindParams vb),
     RetType _ t <- unInfo $ valBindRetType vb,
     orderZero t =
-    IndexValue
+      IndexValue
   | otherwise =
-    IxFun
+      IxFun
 
 describeSpecs :: [Spec] -> DocM Html
 describeSpecs specs =

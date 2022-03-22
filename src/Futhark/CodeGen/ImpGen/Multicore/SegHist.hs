@@ -24,9 +24,9 @@ compileSegHist ::
   MulticoreGen Imp.MCCode
 compileSegHist pat space histops kbody nsubtasks
   | [_] <- unSegSpace space =
-    nonsegmentedHist pat space histops kbody nsubtasks
+      nonsegmentedHist pat space histops kbody nsubtasks
   | otherwise =
-    segmentedHist pat space histops kbody
+      segmentedHist pat space histops kbody
 
 -- | Split some list into chunks equal to the number of values
 -- returned by each 'SegBinOp'

@@ -263,8 +263,8 @@ allocsForPat def_space chunkmap some_idents rts hints = do
         pure . PatElem (identName ident) . MemArray bt ident_shape u $ ArrayIn mem ixfn
       MemArray _ extshape _ Nothing
         | Just _ <- knownShape extshape -> do
-          summary <- summaryForBindage def_space chunkmap (identType ident) hint
-          pure $ PatElem (identName ident) summary
+            summary <- summaryForBindage def_space chunkmap (identType ident) hint
+            pure $ PatElem (identName ident) summary
       MemArray bt _ u (Just (ReturnsNewBlock _ i extixfn)) -> do
         let ixfn = instantiateExtIxFun idents extixfn
         pure . PatElem (identName ident) . MemArray bt ident_shape u $
@@ -422,54 +422,54 @@ allocInMergeParams merge m = do
         )
     allocInMergeParam (mergeparam, Var v)
       | param_t@(Array pt shape u) <- paramDeclType mergeparam = do
-        (v_mem, v_ixfun) <- lift $ lookupArraySummary v
-        v_mem_space <- lift $ lookupMemSpace v_mem
+          (v_mem, v_ixfun) <- lift $ lookupArraySummary v
+          v_mem_space <- lift $ lookupMemSpace v_mem
 
-        -- Loop-invariant array parameters that are in scalar space
-        -- are special - we do not wish to existentialise their index
-        -- function at all (but the memory block is still existential).
-        case v_mem_space of
-          ScalarSpace {} ->
-            if anyIsLoopParam (freeIn shape)
-              then do
-                -- Arrays with loop-variant shape cannot be in scalar
-                -- space, so copy them elsewhere and try again.
-                (_, v') <- lift $ allocLinearArray DefaultSpace (baseString v) v
-                allocInMergeParam (mergeparam, Var v')
-              else do
-                p <- newParam "mem_param" $ MemMem v_mem_space
-                tell ([], [p])
+          -- Loop-invariant array parameters that are in scalar space
+          -- are special - we do not wish to existentialise their index
+          -- function at all (but the memory block is still existential).
+          case v_mem_space of
+            ScalarSpace {} ->
+              if anyIsLoopParam (freeIn shape)
+                then do
+                  -- Arrays with loop-variant shape cannot be in scalar
+                  -- space, so copy them elsewhere and try again.
+                  (_, v') <- lift $ allocLinearArray DefaultSpace (baseString v) v
+                  allocInMergeParam (mergeparam, Var v')
+                else do
+                  p <- newParam "mem_param" $ MemMem v_mem_space
+                  tell ([], [p])
 
-                pure
-                  ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName p) v_ixfun},
-                    Var v,
-                    scalarRes param_t v_mem_space v_ixfun
-                  )
-          _ -> do
-            (v', ext_ixfun, substs, v_mem') <-
-              lift $ existentializeArray v_mem_space v
-            v_mem_space' <- lift $ lookupMemSpace v_mem'
+                  pure
+                    ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName p) v_ixfun},
+                      Var v,
+                      scalarRes param_t v_mem_space v_ixfun
+                    )
+            _ -> do
+              (v', ext_ixfun, substs, v_mem') <-
+                lift $ existentializeArray v_mem_space v
+              v_mem_space' <- lift $ lookupMemSpace v_mem'
 
-            (ctx_params, param_ixfun_substs) <-
-              fmap unzip . forM substs $ \e -> do
-                p <- newParam "ctx_param_ext" $ MemPrim $ primExpType $ untyped e
-                pure (p, fmap Free $ le64 $ paramName p)
+              (ctx_params, param_ixfun_substs) <-
+                fmap unzip . forM substs $ \e -> do
+                  p <- newParam "ctx_param_ext" $ MemPrim $ primExpType $ untyped e
+                  pure (p, fmap Free $ le64 $ paramName p)
 
-            tell (ctx_params, [])
+              tell (ctx_params, [])
 
-            param_ixfun <-
-              instantiateIxFun $
-                IxFun.substituteInIxFun
-                  (M.fromList $ zip (fmap Ext [0 ..]) param_ixfun_substs)
-                  ext_ixfun
+              param_ixfun <-
+                instantiateIxFun $
+                  IxFun.substituteInIxFun
+                    (M.fromList $ zip (fmap Ext [0 ..]) param_ixfun_substs)
+                    ext_ixfun
 
-            mem_param <- newParam "mem_param" $ MemMem v_mem_space'
-            tell ([], [mem_param])
-            pure
-              ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName mem_param) param_ixfun},
-                v',
-                ensureArrayIn v_mem_space'
-              )
+              mem_param <- newParam "mem_param" $ MemMem v_mem_space'
+              tell ([], [mem_param])
+              pure
+                ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName mem_param) param_ixfun},
+                  v',
+                  ensureArrayIn v_mem_space'
+                )
     allocInMergeParam (mergeparam, se) = doDefault mergeparam se =<< lift askDefaultSpace
 
     doDefault mergeparam se space = do

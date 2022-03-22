@@ -141,10 +141,10 @@ prepare opts futhark prog = do
         case runExpectedResult trun of
           Succeeds expected
             | null (runTags trun `intersect` ["notune", "disable"]) ->
-              Just
-                ( runDescription trun,
-                  \server -> run server entry_point trun expected
-                )
+                Just
+                  ( runDescription trun,
+                    \server -> run server entry_point trun expected
+                  )
           _ -> Nothing
 
   fmap concat . forM truns $ \ios -> do
@@ -337,18 +337,18 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
                 case dataset_name `M.lookup` best_runtimes of
                   Just rt
                     | fromIntegral rt * epsilon < fromIntegral best_t -> do
-                      putStrLn $
-                        unwords
-                          [ "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
-                            dataset_name,
-                            " was",
-                            show rt,
-                            "but after tuning threshold",
-                            v,
-                            "it is",
-                            show best_t
-                          ]
-                      return best_runtimes
+                        putStrLn $
+                          unwords
+                            [ "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
+                              dataset_name,
+                              " was",
+                              show rt,
+                              "but after tuning threshold",
+                              v,
+                              "it is",
+                              show best_t
+                            ]
+                        return best_runtimes
                   _ ->
                     return $ M.insertWith min dataset_name best_t best_runtimes
               return (Just (newMin, newMax), best_runtimes')

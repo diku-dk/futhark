@@ -89,7 +89,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
     (lam2redparams, unfus_pat, pat, inputmap, makeCopies, makeCopiesInner) =
       fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2
 
---(unfus_accpat, unfus_arrpat) = splitAt (length unfus_accs) unfus_pat
+-- (unfus_accpat, unfus_arrpat) = splitAt (length unfus_accs) unfus_pat
 
 fuseInputs ::
   Buildable rep =>
@@ -126,11 +126,11 @@ fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
     -- Cosmin: @unfus_vars@ is supposed to be the lam2 vars corresponding to unfus_nms (?)
     getVarParPair x = case SOAC.isVarInput (snd x) of
       Just nm -> Just (nm, fst x)
-      Nothing -> Nothing --should not be reached!
+      Nothing -> Nothing -- should not be reached!
     outinsrev = M.fromList $ mapMaybe getVarParPair $ M.toList outins
     unfusible outname
       | outname `nameIn` unfus_nms =
-        outname `M.lookup` M.union outinsrev (M.fromList out1)
+          outname `M.lookup` M.union outinsrev (M.fromList out1)
     unfusible _ = Nothing
     unfus_vars = mapMaybe (unfusible . fst) out1
 
@@ -145,7 +145,7 @@ outParams out1 lam2arrparams inp2 =
     isOutParam (p, inp)
       | Just a <- SOAC.isVarInput inp,
         a `elem` out1 =
-        Just (p, inp)
+          Just (p, inp)
     isOutParam _ = Nothing
 
 filterOutParams ::

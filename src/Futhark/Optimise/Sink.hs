@@ -128,30 +128,30 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
         [pe] <- patElems (stmPat stm),
         primType $ patElemType pe,
         maybe True (== 1) $ M.lookup (patElemName pe) multiplicities =
-        let (stms', sunk) =
-              optimiseStms' vtable' (M.insert (patElemName pe) stm sinking) stms
-         in if patElemName pe `nameIn` sunk
-              then (stms', sunk)
-              else (stm : stms', sunk)
+          let (stms', sunk) =
+                optimiseStms' vtable' (M.insert (patElemName pe) stm sinking) stms
+           in if patElemName pe `nameIn` sunk
+                then (stms', sunk)
+                else (stm : stms', sunk)
       | If cond tbranch fbranch ret <- stmExp stm =
-        let (tbranch', tsunk) = optimiseBranch onOp vtable sinking tbranch
-            (fbranch', fsunk) = optimiseBranch onOp vtable sinking fbranch
-            (stms', sunk) = optimiseStms' vtable' sinking stms
-         in ( stm {stmExp = If cond tbranch' fbranch' ret} : stms',
-              tsunk <> fsunk <> sunk
-            )
+          let (tbranch', tsunk) = optimiseBranch onOp vtable sinking tbranch
+              (fbranch', fsunk) = optimiseBranch onOp vtable sinking fbranch
+              (stms', sunk) = optimiseStms' vtable' sinking stms
+           in ( stm {stmExp = If cond tbranch' fbranch' ret} : stms',
+                tsunk <> fsunk <> sunk
+              )
       | Op op <- stmExp stm =
-        let (op', op_sunk) = onOp vtable sinking op
-            (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-         in ( stm {stmExp = Op op'} : stms',
-              stms_sunk <> op_sunk
-            )
+          let (op', op_sunk) = onOp vtable sinking op
+              (stms', stms_sunk) = optimiseStms' vtable' sinking stms
+           in ( stm {stmExp = Op op'} : stms',
+                stms_sunk <> op_sunk
+              )
       | otherwise =
-        let (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-            (e', stm_sunk) = runState (mapExpM mapper (stmExp stm)) mempty
-         in ( stm {stmExp = e'} : stms',
-              stm_sunk <> stms_sunk
-            )
+          let (stms', stms_sunk) = optimiseStms' vtable' sinking stms
+              (e', stm_sunk) = runState (mapExpM mapper (stmExp stm)) mempty
+           in ( stm {stmExp = e'} : stms',
+                stm_sunk <> stms_sunk
+              )
       where
         vtable' = ST.insertStm stm vtable
         mapper =

@@ -196,26 +196,26 @@ refineEnv loc tset env tname ps t
   | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (TypeName qs v) _)))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
-    if paramsMatch cur_ps ps
-      then
-        return
-          ( tname',
-            QualName qs v `M.delete` tset,
-            substituteTypesInEnv
-              ( flip M.lookup $
-                  M.fromList
-                    [ (qualLeaf tname', Subst cur_ps $ RetType [] t),
-                      (v, Subst ps $ RetType [] t)
-                    ]
-              )
-              env
-          )
-      else
-        typeError loc mempty $
-          "Cannot refine a type having"
-            <+> tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
+      if paramsMatch cur_ps ps
+        then
+          return
+            ( tname',
+              QualName qs v `M.delete` tset,
+              substituteTypesInEnv
+                ( flip M.lookup $
+                    M.fromList
+                      [ (qualLeaf tname', Subst cur_ps $ RetType [] t),
+                        (v, Subst ps $ RetType [] t)
+                      ]
+                )
+                env
+            )
+        else
+          typeError loc mempty $
+            "Cannot refine a type having"
+              <+> tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
-    typeError loc mempty $ pquote (ppr tname) <+> "is not an abstract type in the module type."
+      typeError loc mempty $ pquote (ppr tname) <+> "is not an abstract type in the module type."
   where
     tpMsg [] = "no type parameters"
     tpMsg xs = "type parameters" <+> spread (map ppr xs)
@@ -263,21 +263,21 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
     case findTypeDef (fmap baseName name) mod of
       Just (name', TypeAbbr mod_l ps t)
         | mod_l > name_l ->
-          mismatchedLiftedness
-            name_l
-            (map qualLeaf $ M.keys mod_abs)
-            (qualLeaf name)
-            (mod_l, ps, t)
+            mismatchedLiftedness
+              name_l
+              (map qualLeaf $ M.keys mod_abs)
+              (qualLeaf name)
+              (mod_l, ps, t)
         | name_l < SizeLifted,
           not $ null $ retDims t ->
-          anonymousSizes
-            (map qualLeaf $ M.keys mod_abs)
-            (qualLeaf name)
-            (mod_l, ps, t)
+            anonymousSizes
+              (map qualLeaf $ M.keys mod_abs)
+              (qualLeaf name)
+              (mod_l, ps, t)
         | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
-          return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
+            return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
         | otherwise ->
-          return (qualLeaf name, (name', TypeAbbr name_l ps t))
+            return (qualLeaf name, (name', TypeAbbr name_l ps t))
       _ ->
         missingType loc $ fmap baseName name
   where
@@ -322,7 +322,7 @@ resolveMTyNames = resolveMTyNames'
               Just (QualName _ modname')
                 | Just sig_env_mod <-
                     M.lookup modname' $ envModTable mod_env ->
-                  resolveModNames sig_env_mod mod_env_mod
+                    resolveModNames sig_env_mod mod_env_mod
               _ -> mempty
        in mconcat
             [ resolve Term mod_env $ envVtable sig_env,
@@ -370,8 +370,8 @@ ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructRetType) -> Do
 ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
   | typeLeaf tn `elem` abs,
     map typeParamToArg ps == args =
-    "type" <> ppr l <+> pprName name
-      <+> spread (map ppr ps)
+      "type" <> ppr l <+> pprName name
+        <+> spread (map ppr ps)
 ppTypeAbbr _ name (l, ps, t) =
   "type" <> ppr l <+> pprName name
     <+> spread (map ppr ps)
@@ -548,8 +548,8 @@ matchMTys orig_mty orig_mty_sig =
       pure $ M.singleton x $ SizeSubst $ NamedDim $ qualName y
     matchTypeParam _ (TypeParamType spec_l x _) (TypeParamType l y _)
       | spec_l <= l =
-        pure . M.singleton x . Subst [] . RetType [] $
-          Scalar $ TypeVar () Nonunique (typeName y) []
+          pure . M.singleton x . Subst [] . RetType [] $
+            Scalar $ TypeVar () Nonunique (typeName y) []
     matchTypeParam nomatch _ _ =
       nomatch
 
@@ -582,7 +582,7 @@ matchMTys orig_mty orig_mty_sig =
         Right t
           | noSizes t
               `subtypeOf` noSizes orig_spec_t ->
-            Nothing
+              Nothing
           | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =

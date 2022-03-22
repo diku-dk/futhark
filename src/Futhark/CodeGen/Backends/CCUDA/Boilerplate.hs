@@ -112,7 +112,7 @@ generateConfigFuns sizes = do
                             };|]
     )
 
-  let size_value_inits = zipWith sizeInit [0 .. M.size sizes -1] (M.elems sizes)
+  let size_value_inits = zipWith sizeInit [0 .. M.size sizes - 1] (M.elems sizes)
       sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
         where
           val = fromMaybe 0 $ sizeDefault size

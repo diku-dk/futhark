@@ -48,7 +48,7 @@ failureSwitch failures =
       onPart ErrorVal {} = "%lld"
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
         let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
-            msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg -1]]
+            msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg - 1]]
          in [C.cstm|case $int:i: {ctx->error = msgprintf($string:msg, $args:msgargs); break;}|]
       failure_cases =
         zipWith onFailure [(0 :: Int) ..] failures
@@ -108,7 +108,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                             };|]
     )
 
-  let size_value_inits = zipWith sizeInit [0 .. M.size sizes -1] (M.elems sizes)
+  let size_value_inits = zipWith sizeInit [0 .. M.size sizes - 1] (M.elems sizes)
       sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
         where
           val = fromMaybe 0 $ sizeDefault size

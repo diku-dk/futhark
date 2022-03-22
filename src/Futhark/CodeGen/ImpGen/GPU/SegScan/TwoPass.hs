@@ -96,15 +96,15 @@ writeToScanValues ::
   InKernelGen ()
 writeToScanValues gtids (pes, scan, scan_res)
   | shapeRank (segBinOpShape scan) > 0 =
-    forM_ (zip pes scan_res) $ \(pe, res) ->
-      copyDWIMFix
-        (patElemName pe)
-        (map Imp.le64 gtids)
-        (kernelResultSubExp res)
-        []
+      forM_ (zip pes scan_res) $ \(pe, res) ->
+        copyDWIMFix
+          (patElemName pe)
+          (map Imp.le64 gtids)
+          (kernelResultSubExp res)
+          []
   | otherwise =
-    forM_ (zip (yParams scan) scan_res) $ \(p, res) ->
-      copyDWIMFix (paramName p) [] (kernelResultSubExp res) []
+      forM_ (zip (yParams scan) scan_res) $ \(p, res) ->
+        copyDWIMFix (paramName p) [] (kernelResultSubExp res) []
 
 readToScanValues ::
   [Imp.TExp Int64] ->
@@ -113,10 +113,10 @@ readToScanValues ::
   InKernelGen ()
 readToScanValues is pes scan
   | shapeRank (segBinOpShape scan) > 0 =
-    forM_ (zip (yParams scan) pes) $ \(p, pe) ->
-      copyDWIMFix (paramName p) [] (Var (patElemName pe)) is
+      forM_ (zip (yParams scan) pes) $ \(p, pe) ->
+        copyDWIMFix (paramName p) [] (Var (patElemName pe)) is
   | otherwise =
-    return ()
+      return ()
 
 readCarries ::
   Imp.TExp Int64 ->
@@ -128,21 +128,21 @@ readCarries ::
   InKernelGen ()
 readCarries chunk_id chunk_offset dims' vec_is pes scan
   | shapeRank (segBinOpShape scan) > 0 = do
-    ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-    -- We may have to reload the carries from the output of the
-    -- previous chunk.
-    sIf
-      (chunk_id .>. 0 .&&. ltid .==. 0)
-      ( do
-          let is = unflattenIndex dims' $ chunk_offset - 1
-          forM_ (zip (xParams scan) pes) $ \(p, pe) ->
-            copyDWIMFix (paramName p) [] (Var (patElemName pe)) (is ++ vec_is)
-      )
-      ( forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
-          copyDWIMFix (paramName p) [] ne []
-      )
+      ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+      -- We may have to reload the carries from the output of the
+      -- previous chunk.
+      sIf
+        (chunk_id .>. 0 .&&. ltid .==. 0)
+        ( do
+            let is = unflattenIndex dims' $ chunk_offset - 1
+            forM_ (zip (xParams scan) pes) $ \(p, pe) ->
+              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (is ++ vec_is)
+        )
+        ( forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
+            copyDWIMFix (paramName p) [] ne []
+        )
   | otherwise =
-    return ()
+      return ()
 
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 ::
@@ -300,7 +300,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                     Just f ->
                       f
                         ( tvExp chunk_offset
-                            + sExt64 (kernelGroupSize constants) -1
+                            + sExt64 (kernelGroupSize constants) - 1
                         )
                         ( tvExp chunk_offset
                             + sExt64 (kernelGroupSize constants)
