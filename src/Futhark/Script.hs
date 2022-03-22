@@ -325,12 +325,12 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
       letMatch vs val
         | vals <- V.unCompound val,
           length vs == length vals =
-          pure $ M.fromList (zip vs vals)
+            pure $ M.fromList (zip vs vals)
         | otherwise =
-          throwError $
-            "Pat: " <> prettyTextOneLine vs
-              <> "\nDoes not match value of type: "
-              <> prettyTextOneLine (fmap scriptValueType val)
+            throwError $
+              "Pat: " <> prettyTextOneLine vs
+                <> "\nDoes not match value of type: "
+                <> prettyTextOneLine (fmap scriptValueType val)
 
       evalExp' :: VTable -> Exp -> m ExpValue
       evalExp' _ (ServerVar t v) =
@@ -340,9 +340,9 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         pure $ valToInterVal v
       evalExp' vtable (Call (FuncFut name) es)
         | Just e <- M.lookup name vtable = do
-          unless (null es) $
-            throwError $ "Locally bound name cannot be invoked as a function: " <> prettyText name
-          pure e
+            unless (null es) $
+              throwError $ "Locally bound name cannot be invoked as a function: " <> prettyText name
+            pure e
       evalExp' vtable (Call (FuncFut name) es) = do
         in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
         out_types <- fmap (map outputType) $ cmdEither $ cmdOutputs server name

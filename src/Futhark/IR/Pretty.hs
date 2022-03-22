@@ -108,8 +108,8 @@ instance PrettyRep rep => Pretty (Body rep) where
   ppr (Body _ stms res)
     | null stms = braces (commasep $ map ppr res)
     | otherwise =
-      stack (map ppr $ stmsToList stms)
-        </> text "in" <+> braces (commasep $ map ppr res)
+        stack (map ppr $ stmsToList stms)
+          </> text "in" <+> braces (commasep $ map ppr res)
 
 instance Pretty Attr where
   ppr (AttrName v) = ppr v

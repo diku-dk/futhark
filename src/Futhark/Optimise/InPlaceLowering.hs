@@ -180,7 +180,7 @@ optimiseStms (stm : stms) m = do
     checkIfForwardableUpdate (Let pat (StmAux cs _ _) e)
       | Pat [PatElem v dec] <- pat,
         BasicOp (Update Unsafe src slice (Var ve)) <- e =
-        maybeForward ve v dec cs src slice
+          maybeForward ve v dec cs src slice
     checkIfForwardableUpdate stm' =
       mapM_ seenVar $ namesToList $ freeIn $ stmExp stm'
 

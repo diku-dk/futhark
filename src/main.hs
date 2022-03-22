@@ -116,17 +116,17 @@ reportingIOErrors =
     onError :: SomeException -> IO ()
     onError e
       | Just UserInterrupt <- asyncExceptionFromException e =
-        return () -- This corresponds to CTRL-C, which is not an error.
+          return () -- This corresponds to CTRL-C, which is not an error.
       | otherwise = do
-        T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
-        T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
-        T.hPutStrLn stderr $ T.pack $ show e
-        exitWith $ ExitFailure 1
+          T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
+          T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
+          T.hPutStrLn stderr $ T.pack $ show e
+          exitWith $ ExitFailure 1
 
     onIOException :: IOException -> IO ()
     onIOException e
       | ioe_type e == ResourceVanished =
-        exitWith $ ExitFailure 1
+          exitWith $ ExitFailure 1
       | otherwise = throw e
 
 main :: IO ()
