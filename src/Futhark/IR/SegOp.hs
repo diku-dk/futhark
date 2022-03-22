@@ -1075,20 +1075,20 @@ instance ASTRep rep => ST.IndexOp (SegOp lvl rep) where
         | [v] <- patNames $ stmPat stm,
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm =
-          M.insert v (ST.Indexed (stmCerts stm <> cs) pe) table
+            M.insert v (ST.Indexed (stmCerts stm <> cs) pe) table
         | [v] <- patNames $ stmPat stm,
           BasicOp (Index arr slice) <- stmExp stm,
           length (sliceDims slice) == length excess_is,
           arr `ST.available` vtable,
           Just (slice', cs) <- asPrimExpSlice table slice =
-          let idx =
-                ST.IndexedArray
-                  (stmCerts stm <> cs)
-                  arr
-                  (fixSlice (fmap isInt64 slice') excess_is)
-           in M.insert v idx table
+            let idx =
+                  ST.IndexedArray
+                    (stmCerts stm <> cs)
+                    arr
+                    (fixSlice (fmap isInt64 slice') excess_is)
+             in M.insert v idx table
         | otherwise =
-          table
+            table
 
       asPrimExpSlice table =
         runWriterT . traverse (primExpFromSubExpM (asPrimExp table))
@@ -1096,7 +1096,7 @@ instance ASTRep rep => ST.IndexOp (SegOp lvl rep) where
       asPrimExp table v
         | Just (ST.Indexed cs e) <- M.lookup v table = tell cs >> return e
         | Just (Prim pt) <- ST.lookupType v vtable =
-          return $ LeafExp v pt
+            return $ LeafExp v pt
         | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
 
@@ -1311,18 +1311,18 @@ segOpRuleTopDown ::
   TopDownRuleOp rep
 segOpRuleTopDown vtable pat dec op
   | Just op' <- asSegOp op =
-    topDownSegOp vtable pat dec op'
+      topDownSegOp vtable pat dec op'
   | otherwise =
-    Skip
+      Skip
 
 segOpRuleBottomUp ::
   (HasSegOp rep, BuilderOps rep) =>
   BottomUpRuleOp rep
 segOpRuleBottomUp vtable pat dec op
   | Just op' <- asSegOp op =
-    bottomUpSegOp vtable pat dec op'
+      bottomUpSegOp vtable pat dec op'
   | otherwise =
-    Skip
+      Skip
 
 topDownSegOp ::
   (HasSegOp rep, BuilderOps rep, Buildable rep) =>
@@ -1351,9 +1351,9 @@ topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres
       | cs == mempty,
         rm == ResultMaySimplify,
         isInvariant se = do
-        letBindNames [patElemName pe] $
-          BasicOp $ Replicate (Shape $ segSpaceDims space) se
-        return False
+          letBindNames [patElemName pe] $
+            BasicOp $ Replicate (Shape $ segSpaceDims space) se
+          return False
     checkForInvarianceResult _ =
       return True
 
@@ -1368,12 +1368,12 @@ topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
           chunks (map (length . segBinOpNeutral) ops) $
             zip3 red_pes red_ts red_res,
     any ((> 1) . length) op_groupings = Simplify $ do
-    let (ops', aux) = unzip $ mapMaybe combineOps op_groupings
-        (red_pes', red_ts', red_res') = unzip3 $ concat aux
-        pes' = red_pes' ++ map_pes
-        ts' = red_ts' ++ map_ts
-        kbody' = kbody {kernelBodyResult = red_res' ++ map_res}
-    letBind (Pat pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
+      let (ops', aux) = unzip $ mapMaybe combineOps op_groupings
+          (red_pes', red_ts', red_res') = unzip3 $ concat aux
+          pes' = red_pes' ++ map_pes
+          ts' = red_ts' ++ map_ts
+          kbody' = kbody {kernelBodyResult = red_res' ++ map_res}
+      letBind (Pat pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
   where
     (red_pes, map_pes) = splitAt (segBinOpResults ops) pes
     (red_ts, map_ts) = splitAt (segBinOpResults ops) ts
@@ -1473,40 +1473,40 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
         all (isJust . flip ST.lookup vtable) $
           namesToList $
             freeIn arr <> freeIn remaining_slice =
-        Just (remaining_slice, arr)
+          Just (remaining_slice, arr)
       | otherwise =
-        Nothing
+          Nothing
 
     distribute (kpes', kts', kres', kstms') stm
       | Let (Pat [pe]) _ _ <- stm,
         Just (Slice remaining_slice, arr) <- sliceWithGtidsFixed stm,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
-        let outer_slice =
-              map
-                ( \d ->
-                    DimSlice
-                      (constant (0 :: Int64))
-                      d
-                      (constant (1 :: Int64))
-                )
-                $ segSpaceDims space
-            index kpe' =
-              letBindNames [patElemName kpe'] . BasicOp . Index arr $
-                Slice $ outer_slice <> remaining_slice
-        if patElemName kpe `UT.isConsumed` used
-          then do
-            precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
-            index kpe {patElemName = precopy}
-            letBindNames [patElemName kpe] $ BasicOp $ Copy precopy
-          else index kpe
-        return
-          ( kpes'',
-            kts'',
-            kres'',
-            if patElemName pe `nameIn` free_in_kstms
-              then kstms' <> oneStm stm
-              else kstms'
-          )
+          let outer_slice =
+                map
+                  ( \d ->
+                      DimSlice
+                        (constant (0 :: Int64))
+                        d
+                        (constant (1 :: Int64))
+                  )
+                  $ segSpaceDims space
+              index kpe' =
+                letBindNames [patElemName kpe'] . BasicOp . Index arr $
+                  Slice $ outer_slice <> remaining_slice
+          if patElemName kpe `UT.isConsumed` used
+            then do
+              precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
+              index kpe {patElemName = precopy}
+              letBindNames [patElemName kpe] $ BasicOp $ Copy precopy
+            else index kpe
+          return
+            ( kpes'',
+              kts'',
+              kres'',
+              if patElemName pe `nameIn` free_in_kstms
+                then kstms' <> oneStm stm
+                else kstms'
+            )
     distribute (kpes', kts', kres', kstms') stm =
       return (kpes', kts', kres', kstms' <> oneStm stm)
 
@@ -1516,7 +1516,7 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
           | Just i <- elemIndex kpe kpes,
             i >= num_nonmap_results,
             (kpes'', kts'', kres'') <- unzip3 kpes_and_kres ->
-            Just (kpe, kpes'', kts'', kres'')
+              Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
       where
         matches (_, _, Returns _ _ (Var v)) = v == patElemName pe

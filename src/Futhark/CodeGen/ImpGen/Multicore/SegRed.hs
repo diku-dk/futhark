@@ -44,9 +44,9 @@ compileSegRed' ::
   MulticoreGen Imp.MCCode
 compileSegRed' pat space reds nsubtasks kbody
   | [_] <- unSegSpace space =
-    nonsegmentedReduction pat space reds nsubtasks kbody
+      nonsegmentedReduction pat space reds nsubtasks kbody
   | otherwise =
-    segmentedReduction pat space reds kbody
+      segmentedReduction pat space reds kbody
 
 -- | A SegBinOp with auxiliary information.
 data SegBinOpSlug = SegBinOpSlug
@@ -120,9 +120,9 @@ reductionStage1 space slugs kbody = do
             case paramType p of
               Prim pt
                 | shape == mempty ->
-                  tvVar <$> dPrim "local_acc" pt
+                    tvVar <$> dPrim "local_acc" pt
                 | otherwise ->
-                  sAllocArray "local_acc" pt shape DefaultSpace
+                    sAllocArray "local_acc" pt shape DefaultSpace
               _ ->
                 pure $ paramName p
 

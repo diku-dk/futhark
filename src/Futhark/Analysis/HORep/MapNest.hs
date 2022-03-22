@@ -84,9 +84,9 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
                     ) of
     ([Let pat _ e], res)
       | map resSubExp res == map Var (patNames pat) ->
-        localScope (scopeOfLParams $ lambdaParams lam) $
-          SOAC.fromExp e
-            >>= either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound')
+          localScope (scopeOfLParams $ lambdaParams lam) $
+            SOAC.fromExp e
+              >>= either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound')
     _ ->
       return $ Right Nothing
 
@@ -111,9 +111,9 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
     _ -> do
       let isBound name
             | Just param <- find ((name ==) . identName) bound =
-              Just param
+                Just param
             | otherwise =
-              Nothing
+                Nothing
           boundUsedInBody =
             mapMaybe isBound $ namesToList $ freeIn lam
       newParams <- mapM (newIdent' (++ "_wasfree")) boundUsedInBody
@@ -176,9 +176,9 @@ fixInputs w ourInps = mapM inspect
 
     inspect (_, SOAC.Input ts v _)
       | Just (p, pInp) <- find (isParam v) ourInps = do
-        let pInp' = SOAC.transformRows ts pInp
-        p' <- newNameFromString $ baseString p
-        return (p', pInp')
+          let pInp' = SOAC.transformRows ts pInp
+          p' <- newNameFromString $ baseString p
+          return (p', pInp')
     inspect (param, SOAC.Input ts a t) = do
       param' <- newNameFromString (baseString param ++ "_rep")
       return (param', SOAC.Input (ts SOAC.|> SOAC.Replicate mempty (Shape [w])) a t)

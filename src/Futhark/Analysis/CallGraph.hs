@@ -151,7 +151,7 @@ findNoninlined prog =
     onStm :: Stm SOACS -> S.Set Name
     onStm (Let _ aux (Apply fname _ _ _))
       | "noinline" `inAttrs` stmAuxAttrs aux =
-        S.singleton fname
+          S.singleton fname
     onStm (Let _ _ e) = execWriter $ mapExpM folder e
       where
         folder =
@@ -170,9 +170,9 @@ findNoninlined prog =
 
     noinlineDef fd
       | "noinline" `inAttrs` funDefAttrs fd =
-        S.singleton $ funDefName fd
+          S.singleton $ funDefName fd
       | otherwise =
-        mempty
+          mempty
 
 instance Pretty FunCalls where
   ppr = stack . map f . M.toList . fcMap

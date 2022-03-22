@@ -104,18 +104,18 @@ compileSegRed' ::
   CallKernelGen ()
 compileSegRed' pat lvl space reds body
   | genericLength reds > maxNumOps =
-    compilerLimitationS $
-      "compileSegRed': at most " ++ show maxNumOps ++ " reduction operators are supported."
+      compilerLimitationS $
+        "compileSegRed': at most " ++ show maxNumOps ++ " reduction operators are supported."
   | [(_, Constant (IntValue (Int64Value 1))), _] <- unSegSpace space =
-    nonsegmentedReduction pat num_groups group_size space reds body
+      nonsegmentedReduction pat num_groups group_size space reds body
   | otherwise = do
-    let group_size' = toInt64Exp $ unCount group_size
-        segment_size = toInt64Exp $ last $ segSpaceDims space
-        use_small_segments = segment_size * 2 .<. group_size'
-    sIf
-      use_small_segments
-      (smallSegmentsReduction pat num_groups group_size space reds body)
-      (largeSegmentsReduction pat num_groups group_size space reds body)
+      let group_size' = toInt64Exp $ unCount group_size
+          segment_size = toInt64Exp $ last $ segSpaceDims space
+          use_small_segments = segment_size * 2 .<. group_size'
+      sIf
+        use_small_segments
+        (smallSegmentsReduction pat num_groups group_size space reds body)
+        (largeSegmentsReduction pat num_groups group_size space reds body)
   where
     num_groups = segNumGroups lvl
     group_size = segGroupSize lvl
@@ -167,7 +167,7 @@ groupResultArrays (Count virt_num_groups) (Count group_size) reds =
           full_shape = Shape [extra_dim, virt_num_groups] <> shape <> arrayShape t
           -- Move the groupsize dimension last to ensure coalesced
           -- memory access.
-          perm = [1 .. shapeRank full_shape -1] ++ [0]
+          perm = [1 .. shapeRank full_shape - 1] ++ [0]
       sAllocArrayPerm "segred_tmp" pt full_shape (Space "device") perm
 
 nonsegmentedReduction ::
@@ -561,10 +561,10 @@ segBinOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
     mkAcc p param_arr
       | Prim t <- paramType p,
         shapeRank (segBinOpShape op) == 0 = do
-        acc <- dPrim (baseString (paramName p) <> "_acc") t
-        return (tvVar acc, [])
+          acc <- dPrim (baseString (paramName p) <> "_acc") t
+          return (tvVar acc, [])
       | otherwise =
-        return (param_arr, [sExt64 local_tid, sExt64 group_id])
+          return (param_arr, [sExt64 local_tid, sExt64 group_id])
 
 reductionStageZero ::
   KernelConstants ->

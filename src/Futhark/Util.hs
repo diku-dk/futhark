@@ -373,9 +373,9 @@ interactWithFileSafely m =
   where
     couldNotRead e
       | isDoesNotExistError e =
-        return Nothing
+          return Nothing
       | otherwise =
-        return $ Just $ Left $ show e
+          return $ Just $ Left $ show e
 
 -- | Read a file, returning 'Nothing' if the file does not exist, and
 -- 'Left' if some other error occurs.
@@ -473,7 +473,7 @@ encodeAsUnicodeCharar c =
 -- characters "..." if truncation is necessary.
 atMostChars :: Int -> String -> String
 atMostChars n s
-  | length s > n = take (n -3) s ++ "..."
+  | length s > n = take (n - 3) s ++ "..."
   | otherwise = s
 
 -- | Invert a map, handling duplicate values (now keys) by
