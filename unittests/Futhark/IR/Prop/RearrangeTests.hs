@@ -33,7 +33,7 @@ newtype Permutation = Permutation [Int]
 instance Arbitrary Permutation where
   arbitrary = do
     Positive n <- arbitrary
-    Permutation <$> shuffle [0 .. n -1]
+    Permutation <$> shuffle [0 .. n - 1]
 
 isMapTransposeProp :: TestTree
 isMapTransposeProp = testProperty "isMapTranspose corresponds to a map of transpose" prop
@@ -50,5 +50,5 @@ isMapTransposeProp = testProperty "isMapTranspose corresponds to a map of transp
               r1 + r2 + r3 == length perm,
               let (mapped, notmapped) = splitAt r1 perm
                   (pretrans, posttrans) = splitAt r2 notmapped
-               in mapped ++ posttrans ++ pretrans == [0 .. length perm -1]
+               in mapped ++ posttrans ++ pretrans == [0 .. length perm - 1]
             ]
