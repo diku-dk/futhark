@@ -6,9 +6,7 @@
 {-# HLINT ignore "Use camelCase" #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# HLINT ignore "Use intercalate" #-}
-{-# LANGUAGE LambdaCase #-}
 {-# HLINT ignore "Use zipWith" #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -Wno-missing-fields #-}
 
 -- | Perform horizontal and vertical fusion of SOACs.  See the paper
@@ -41,6 +39,7 @@ import Futhark.Util (maxinum, chunks, splitAt3)
 
 import Futhark.Optimise.GraphRep
 import qualified Data.Graph.Inductive.Query.DFS as Q
+import qualified Data.Graph.Inductive.Query.TransClos as TC
 import Data.Graph.Inductive.Graph
 -- import qualified Control.Monad.Identity as Control.Monad
 
@@ -118,11 +117,25 @@ fuseFun _stmts fun = do
 fuseGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> FusionEnvM [Stm SOACS]
 fuseGraph stms results inputs = do
     graph_not_fused <- mkDepGraph stms results (trace (show inputs) inputs)
+    env <- get
+    put $ env {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused}
     let graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
     graph_fused <-  doAllFusion graph_not_fused'
     let graph_fused' = trace (pprg graph_fused) graph_fused
     let stms_new = linearizeGraph graph_fused'
     return $ trace (unlines (map ppr stms_new)) stms_new
+
+
+unreachableEitherDir :: Node -> Node -> FusionEnvM Bool
+unreachableEitherDir a b = do
+  b1 <- reachable a b
+  b2 <- reachable b a
+  pure $ not (b1 || b2)
+
+reachable :: Node -> Node -> FusionEnvM Bool
+reachable source target = do
+  rg <- gets reachabilityG
+  pure $ hasEdge rg (source, target)
 
 
 
@@ -138,27 +151,6 @@ doInnerFusion g = pure g
 
 -- map-fusion part
 
--- horizontally_fusible_groups :: DepGraph -> [[DepNode]]
--- horizontally_fusible_groups g = let hfg =(horizontally_fusible_groups g) in (not $ null hfg, hfg)
-
--- horizontally_fusible_groups :: DepGraph -> [[DepNode]]
--- horizontally_fusible_groups g =
---   map (\l -> concatMap snd $ M.toList $ M.fromListWith (++) [(l, [v]) | v@(_,SNode (Let _ _ (Op (Futhark.Screma l _ _)))) <- l]) scremas
---   where
---     ins = map (map (lNodeFromNode g) . pre g) (nodes g)
---     scremas =
---       filter (\x -> length x > 1) $
---       map (catMaybes . filter (\case
---         Just (_,SNode (Let _ _ (Op Futhark.Screma{}))) -> True
---         _ -> False
---       )) ins
-
--- fuse_horizontally :: DepGraphAug
--- fuse_horizontally g =
---   let (fusible, groups) = horizontally_fusible g in
---   if not fusible then g else
---     let (((n1, SNode s1):(n2, SNode s2):rest):_) = groups in
---     case fuseStms [] s1 s2 of
 
 
 
@@ -209,23 +201,51 @@ isCons :: DepEdge -> Bool
 isCons (_,_, Cons _) = True
 isCons _ = False
 
-v_fusion_feasability :: DepGraph -> Node -> Node -> Bool
+
+-- how to check that no other successor of source reaches target:
+-- all mapM (not reachable) (suc graph source - target)
+v_fusion_feasability :: DepGraph -> Node -> Node -> FusionEnvM Bool
 v_fusion_feasability g n1 n2 =
-  (all isDep edges || all (==n2) nodesN1 )&&
-  not (any isInf (edgesBetween g n1 n2)) &&
-  (all (==n2) nodesN1 || all (==n1) nodesN2)
+  do
+    --let b1 = all isDep edges || all (==n2) nodesN1
+    let b2 = not (any isInf (edgesBetween g n1 n2)) 
+    reach <- mapM (reachable n2) (filter (/=n2) (pre g n1))
+    pure $ b2 && all not reach
   where
     (nodesN2, _) = unzip $ filter (not . isRes) $ lsuc g n2
     (nodesN1, edges) = unzip $ filter (not . isRes) $ lpre g n1
 
+-- horizontally_fusible_groups :: DepGraph -> [[DepNode]]
+-- horizontally_fusible_groups g = let hfg =(horizontally_fusible_groups g) in (not $ null hfg, hfg)
 
+-- horizontally_fusible_groups :: DepGraph -> [[DepNode]]
+-- horizontally_fusible_groups g =
+--   map (\l -> concatMap snd $ M.toList $ M.fromListWith (++) [(l, [v]) | v@(_,SNode (Let _ _ (Op (Futhark.Screma l _ _)))) <- l]) scremas
+--   where
+--     ins = map (map (lNodeFromNode g) . pre g) (nodes g)
+--     scremas =
+--       filter (\x -> length x > 1) $
+--       map (catMaybes . filter (\case
+--         Just (_,SNode (Let _ _ (Op Futhark.Screma{}))) -> True
+--         _ -> False
+--       )) ins
 
-d_fusion_feasability :: DepGraph -> Node -> Node -> Bool
-d_fusion_feasability g n1 n2 = lessThanOneDep n1 && lessThanOneDep n2
-  where
-    lessThanOneDep n =
-      let (nodes, _) = unzip $ filter (not . isRes) $ lsuc g n
-      in (<=1) $ length (L.nub nodes)
+-- fuse_horizontally :: DepGraphAug
+-- fuse_horizontally g =
+--   let (fusible, groups) = horizontally_fusible g in
+--   if not fusible then g else
+--     let (((n1, SNode s1):(n2, SNode s2):rest):_) = groups in
+--     case fuseStms [] s1 s2 of
+
+-- todo: add length check
+h_fusion_feasability :: Node -> Node -> FusionEnvM Bool
+h_fusion_feasability = unreachableEitherDir
+  -- lessThanOneDep n1 && lessThanOneDep n2
+  -- where
+  --   lessThanOneDep n =
+  --     let (nodes, _) = unzip $ filter (not . isRes) $ lsuc g n
+  --     in (<=1) $ length (L.nub nodes)
+    
   -- what are the rules here?
   --  - they have an input in common
   --  - they only have that input? -
@@ -246,16 +266,18 @@ tryFuseNodesInGraph :: Node -> Node -> DepGraphAug
 -- fuse them
 tryFuseNodesInGraph node_1 node_2 g
   | not (gelem node_1 g && gelem node_2 g) = pure g
-  | v_fusion_feasability g node_1 node_2 =
+  | otherwise =
     do
-      case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
-        Just new_Context -> do
-          let new_g = trace ("gets here at least: " ++ show fused)  $ delNodes [node_1, node_2] g
-          if null fused then pure $ (&) new_Context new_g
-          else insertAndCopy new_Context new_g
-          -- pure $ (&) new_Context new_g
-        Nothing -> pure g
-  | otherwise = pure g
+      b <- v_fusion_feasability g node_1 node_2
+      if b then
+        case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
+          Just newcxt@(inputs, node, SNode stm, outputs) -> 
+            if null fused then contractEdge node_2 newcxt g
+            else do
+              new_stm <- makeCopies stm
+              contractEdge node_2 (inputs, node, SNode new_stm, outputs) g
+          Nothing -> pure g
+      else pure g
     where
       -- sorry about this
       fused = concatMap depsFromEdge $ filter isCons $ edgesBetween g node_1 node_2
@@ -263,15 +285,15 @@ tryFuseNodesInGraph node_1 node_2 g
         (concatMap (edgesBetween g node_1) (filter (/=node_2) $ pre g node_1))
                                   -- L.\\ edges_between g node_1 node_2)
 
-insertAndCopy :: DepContext -> DepGraphAug
-insertAndCopy (inputs, node, SNode stm, outputs) g =
-  do
-    new_stm <- trace "I get here!!!\n" $ makeCopies stm
-    let new_g = (&) (inputs, node, SNode new_stm, outputs) g
-    genEdges [(node, SNode new_stm)] (\x -> zip newly_fused $ map Cons newly_fused)  new_g
-  where
-    newly_fused = namesToList . consumedInStm . Alias.analyseStm mempty $ stm
-insertAndCopy c g = pure $ (&) c g
+-- insertAndCopy :: DepContext -> DepGraphAug
+-- insertAndCopy (inputs, node, SNode stm, outputs) g =
+--   do
+--     new_stm <- trace "I get here!!!\n" $ makeCopies stm
+--     let new_g = (&) (inputs, node, SNode new_stm, outputs) g
+--     genEdges [(node, SNode new_stm)] (\x -> zip newly_fused $ map Cons newly_fused)  new_g
+--   where
+--     newly_fused = namesToList . consumedInStm . Alias.analyseStm mempty $ stm
+-- insertAndCopy c g = pure $ (&) c g
 
 
 -- tal -> (x -> (x, tal))
@@ -288,12 +310,14 @@ makeCopies s@(Let pats aux (Op (Futhark.Screma size inputs  (ScremaForm scans re
     newNames <- mapM makeNewName fused_inner
     copies <-  mapM (\ (name, name_fused) -> mkLetNames [name_fused] (BasicOp $ Copy name)) (zip fused_inner newNames)
       -- Let (basicPat name) aux ((BasicOp . Copy) name_fused)) (zip newNames fused_inner)
-    let
 
     let l_body = lambdaBody lam
     let newBody = insertStms (stmsFromList copies) (substituteNames (makeMap fused_inner newNames) l_body)
     let newLambda = lam {lambdaBody = newBody}
     pure $ Let pats aux (Op (Futhark.Screma size inputs  (ScremaForm scans red newLambda)))
+  where
+    makeNewName name = newVName $ baseString name <> "_copy"
+    fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
     -- newNames
     -- add new names
     -- rename old names
@@ -303,9 +327,6 @@ makeCopies s@(Let pats aux (Op (Futhark.Screma size inputs  (ScremaForm scans re
     --   copy <- mkLetNamesM [v_copy] $ BasicOp $ Copy v
     --   return (oneStm copy <> stms, M.insert v v_copy subst)
 
-  where
-    makeNewName name = newVName $ baseString name <> "_copy"
-    fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
 makeCopies stm = pure stm
 
 
@@ -313,11 +334,12 @@ makeCopies stm = pure stm
 tryFuseNodesInGraph2 :: Node -> Node -> DepGraphAug
 tryFuseNodesInGraph2 node_1 node_2 g
   | not (gelem node_1 g && gelem node_2 g) = pure g
-  | d_fusion_feasability g node_1 node_2 =
-    case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
-      Just new_Context -> pure $ (&) new_Context $ delNodes [node_1, node_2] g
-      Nothing -> pure  g
-  | otherwise = pure g
+  | otherwise = do
+    b <- h_fusion_feasability node_1 node_2
+    if b then case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
+      Just new_Context -> contractEdge node_2 new_Context g 
+      Nothing -> pure g
+    else pure g
     where
       -- sorry about this
       infusable_nodes = concatMap depsFromEdge
@@ -329,14 +351,11 @@ tryFuseNodesInGraph2 node_1 node_2 g
 fuseContexts :: [VName] -> DepContext -> DepContext -> Maybe DepContext
 -- fuse the nodes / contexts
 fuseContexts infusable
-            (inp1, n1, SNode s1, outp1)
-            (inp2, n2, SNode s2, outp2)
+            c1@(inp1, n1, SNode s1, outp1)
+            c2@(inp2, n2, SNode s2, outp2)
             = case fuseStms infusable s1 s2 of
-              Just s3 -> Just (new_inp, n1, SNode s3, new_outp)
+              Just s3 -> Just (mergedContext (SNode s3) c1 c2)
               Nothing -> Nothing
-  where
-    new_inp  = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (inp1  `L.union` inp2)
-    new_outp = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (outp1 `L.union` outp2)
 fuseContexts _ _ _ = Nothing
 
 
