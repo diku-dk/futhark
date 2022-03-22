@@ -107,7 +107,7 @@ mapNames :: (VName -> VName) -> Names -> Names
 mapNames f vs = namesFromList $ map f $ namesToList vs
 
 -- | A computation to build a free variable set.
-newtype FV = FV {unFV :: Names}  
+newtype FV = FV {unFV :: Names}
 
 -- Right now the variable set is just stored explicitly, without the
 -- fancy functional representation that GHC uses.  Turns out it's
