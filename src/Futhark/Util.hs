@@ -25,6 +25,7 @@ module Futhark.Util
     splitFromEnd,
     splitAt3,
     focusNth,
+    focusMaybe,
     hashText,
     unixEnvironment,
     isEnvVarAtLeast,
@@ -77,7 +78,7 @@ import Data.Char
 import Data.Either
 import Data.Foldable (toList)
 import Data.Function ((&))
-import Data.List (foldl', genericDrop, genericSplitAt, sortBy)
+import Data.List (findIndex, foldl', genericDrop, genericSplitAt, sortBy)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe
@@ -199,6 +200,15 @@ focusNth :: Integral int => int -> [a] -> Maybe ([a], a, [a])
 focusNth i xs
   | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
+
+-- | Return the first list element that satisifes a predicate, along with the
+-- elements before and after.
+focusMaybe :: (a -> Maybe b) -> [a] -> Maybe ([a], b, [a])
+focusMaybe f xs = do
+  idx <- findIndex (isJust . f) xs
+  (before, focus, after) <- focusNth idx xs
+  res <- f focus
+  return (before, res, after)
 
 -- | Compute a hash of a text that is stable across OS versions.
 -- Returns the hash as a text as well, ready for human consumption.

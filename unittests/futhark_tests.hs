@@ -3,6 +3,7 @@ module Main (main) where
 import qualified Futhark.Analysis.AlgSimplify2Tests
 import qualified Futhark.Analysis.AlgSimplifyTests
 import qualified Futhark.BenchTests
+import qualified Futhark.IR.Mem.IntervalTests
 import qualified Futhark.IR.Mem.IxFunTests
 import qualified Futhark.IR.PrimitiveTests
 import qualified Futhark.IR.PropTests
@@ -22,6 +23,7 @@ allTests =
       Futhark.IR.PropTests.tests,
       Futhark.IR.Syntax.CoreTests.tests,
       Futhark.Pkg.SolveTests.tests,
+      Futhark.IR.Mem.IntervalTests.tests,
       Futhark.IR.Mem.IxFunTests.tests,
       Futhark.IR.PrimitiveTests.tests,
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests.tests,

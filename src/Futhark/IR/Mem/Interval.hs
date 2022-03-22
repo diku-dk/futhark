@@ -59,32 +59,18 @@ distributeOffset :: MonadFail m => AlgSimplify.SofP -> [Interval] -> m [Interval
 distributeOffset [] interval = return interval
 distributeOffset offset [] = fail $ "Cannot distribute offset " <> pretty offset <> " across empty interval"
 distributeOffset offset [Interval lb ne 1] = return [Interval (lb + TPrimExp (AlgSimplify.sumToExp offset)) ne 1]
-distributeOffset offset (Interval lb ne st0 : is) = do
-  -- If a term 't' in the offset contains a multiple of the stride: Subtract `t`
-  -- from the offset, add `t / st` to the lower bound.
-  --
-  -- Example: The offset is `a + b * b * 2` and the stride is `b * b`. The
-  -- remaining offset should be `a` and the new lower bound should be `2`.
-  case [AlgSimplify.Prod False [untyped st0]] of
-    -- case AlgSimplify.simplify0 $ untyped st0 of
-    [AlgSimplify.Prod neg st] ->
-      -- We do not support negative strides here. They should've been normalized.
-      if neg
-        then trace "stride should be positive" $ error "Stride should be positive"
-        else case find (`AlgSimplify.isMultipleOf` st) offset of
-          Just t@(AlgSimplify.Prod False as') ->
-            distributeOffset (t `delete` offset) $ Interval (lb + TPrimExp (AlgSimplify.sumToExp [AlgSimplify.Prod False $ traceWith "res" $ traceWith "as'" as' \\ traceWith "st" st])) ne st0 : is
-          Just (AlgSimplify.Prod True _) -> trace "offset term should be positive" $ fail "Offset term should be positive"
-          Nothing -> do
-            rest <- distributeOffset offset is
-            return $ Interval lb ne st0 : rest
-    _ -> do
+distributeOffset offset (Interval lb ne st0 : is)
+  | st <- AlgSimplify.Prod False [untyped st0],
+    Just (before, quotient, after) <- focusMaybe (`AlgSimplify.maybeDivide` st) offset =
+      distributeOffset (before <> after) $
+      Interval (lb + TPrimExp (AlgSimplify.sumToExp [quotient])) ne st0 : is
+  | [st] <- AlgSimplify.simplify0 $ untyped st0,
+    Just (before, quotient, after) <- focusMaybe (`AlgSimplify.maybeDivide` st) offset =
+      distributeOffset (before <> after) $
+      Interval (lb + TPrimExp (AlgSimplify.sumToExp [quotient])) ne st0 : is
+  | otherwise = do
       rest <- distributeOffset offset is
       return $ Interval lb ne st0 : rest
-  where
-    justOne :: [a] -> Maybe a
-    justOne [a] = Just a
-    justOne _ = Nothing
 
 findMostComplexTerm :: AlgSimplify.SofP -> (AlgSimplify.Prod, AlgSimplify.SofP)
 findMostComplexTerm prods =

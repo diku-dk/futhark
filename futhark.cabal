@@ -400,6 +400,7 @@ test-suite unit
       Futhark.IR.PropTests
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
+      Futhark.IR.Mem.IntervalTests
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper

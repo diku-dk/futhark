@@ -17,6 +17,7 @@ module Futhark.Analysis.AlgSimplify2
     sub,
     negate,
     isMultipleOf,
+    maybeDivide,
     removeLessThans,
     lessThanish,
   )
@@ -177,6 +178,25 @@ isMultipleOf :: Prod -> [Exp] -> Bool
 isMultipleOf (Prod _ as) term =
   let quotient = as \\ term
    in sort (quotient <> term) == sort as
+
+maybeDivide :: Prod -> Prod -> Maybe Prod
+maybeDivide dividend divisor
+  | Prod dividend_b dividend_factors <- dividend,
+    Prod divisor_b divisor_factors <- divisor,
+    quotient <- dividend_factors \\ divisor_factors,
+    sort (quotient <> divisor_factors) == sort dividend_factors =
+    Just $ Prod (dividend_b `xor` divisor_b) quotient
+  | (dividend_scale, dividend_rest) <- prodToScale dividend,
+    (divisor_scale, divisor_rest) <- prodToScale divisor,
+    dividend_scale `mod` divisor_scale == 0,
+    null $ divisor_rest \\ dividend_rest =
+    Just $
+      Prod
+        (signum (dividend_scale `div` divisor_scale) < 0)
+        ( ValueExp (IntValue $ Int64Value $ dividend_scale `div` divisor_scale) :
+          (dividend_rest \\ divisor_rest)
+        )
+  | otherwise = Nothing
 
 -- | Given a list of 'Names' that we know are non-negative (>= 0), determine
 -- whether we can say for sure that the given 'AlgSimplify2.SofP' is
