@@ -133,17 +133,17 @@ instance Pretty Multicore where
   ppr (Atomic _) =
     "AtomicOp"
   ppr (ISPCKernel body _ _) =
-    "ispc" </> nestedBlock "{" "}" (ppr body)
+    "ispc" <+> nestedBlock "{" "}" (ppr body)
   ppr (ForEach i limit body) =
     "foreach" <+> ppr i <+> langle <+> ppr limit
-      </> nestedBlock "{" "}" (ppr body)
+      <+> nestedBlock "{" "}" (ppr body)
   ppr (ForEachActive i body) =
     "foreach_active" <+> ppr i
-      </> nestedBlock "{" "}" (ppr body)
+      <+> nestedBlock "{" "}" (ppr body)
   ppr (UnmaskedBlock code) =
-    "unmasked" </> nestedBlock "{" "}" (ppr code)
+    nestedBlock "unmasked {" "}" (ppr code)
   ppr (ISPCBuiltin dest name args) =
-    ppr dest <+> "<-" <+> ppr name <+> "(" <+> ppr args <+> ")"
+    ppr dest <+> "<-" <+> ppr name <+> parens (commasep $ map ppr args)
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
