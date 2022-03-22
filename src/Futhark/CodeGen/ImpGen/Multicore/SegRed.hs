@@ -352,7 +352,7 @@ reductionStage1CommScalar space slugs kbody = do
                 when (primType t) $ do
                   copyDWIMFix (paramName p) [] (Var local_acc) vec_is
 
-          sComment "Load next params" $ -- TODO(pema): red_res missing, problem?
+          sComment "Load next params" $
             forM_ (zip (nextParams slug) local_accs) $ \(p, local_acc) -> do
               extractVectorLane i $ collect $
                 copyDWIMFix (paramName p) [] (Var local_acc) vec_is
@@ -368,8 +368,6 @@ reductionStage1CommScalar space slugs kbody = do
       case local_accs of
         Imp.ScalarParam name pt -> dPrim_ name pt
         _ -> undefined
-    -- TODO(pema): Arrays and such are already allocated above, move
-    -- the prebody out of and pass it in?
 
     inISPC retvals $ do
       emit prebody

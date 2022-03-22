@@ -45,7 +45,7 @@ callKernelOperations =
       opsOpCompiler = opCompiler,
       opsStmsCompiler = defCompileStms,
       opsAllocCompilers = mempty,
-      opsDeclareCompiler = error "todo (obp): appropriate error :)"
+      opsDeclareCompiler = defDeclare
     }
 
 openclAtomics, cudaAtomics :: AtomicBinOp

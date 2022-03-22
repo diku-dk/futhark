@@ -358,7 +358,7 @@ compileMulticoreAction fcfg mode outpath =
           --ispcbase = outpath <> "_ispc"
           ispcHeader = takeBaseName (outpath <> ispcExtension) `addExtension` "h"
       cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeader <> "\"") (T.pack versionString) prog
-      case mode of -- TODO(pema): Library, Server mode
+      case mode of -- TODO(pema): Library mode
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header

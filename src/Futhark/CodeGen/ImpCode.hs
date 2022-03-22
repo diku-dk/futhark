@@ -460,7 +460,7 @@ instance Pretty op => Pretty (Code op) where
         Volatile -> text "volatile "
         Nonvolatile -> mempty
         Uniform -> text "uniform "
-        Varying -> mempty -- TODO(k): is this correct
+        Varying -> mempty
   ppr (DeclareArray name space t vs) =
     text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t
       <+> equals
