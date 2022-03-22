@@ -8,7 +8,7 @@
 -- standards.
 module Language.Futhark.Parser.Monad
   ( ParserMonad,
-    ParserEnv,
+    ParserState,
     ReadLineMonad (..),
     parseInMonad,
     parse,
@@ -95,13 +95,13 @@ mustBeEmpty _ (Array _ _ _ (ShapeDecl dims))
 mustBeEmpty loc t =
   parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
 
-data ParserEnv = ParserEnv
+data ParserState = ParserState
   { _parserFile :: FilePath,
     parserInput :: T.Text,
     parserLexical :: ([L Token], Pos)
   }
 
-type ParserMonad = ExceptT SyntaxError (StateT ParserEnv ReadLineMonad)
+type ParserMonad = ExceptT SyntaxError (StateT ParserState ReadLineMonad)
 
 data ReadLineMonad a
   = Value a
@@ -292,7 +292,7 @@ parseInMonad p file program =
     (evalStateT (runExceptT p) . env)
     (scanTokensText (Pos file 1 1 0) program)
   where
-    env = ParserEnv file program
+    env = ParserState file program
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
 parse p file program =
