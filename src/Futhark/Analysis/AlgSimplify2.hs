@@ -20,6 +20,7 @@ module Futhark.Analysis.AlgSimplify2
     maybeDivide,
     removeLessThans,
     lessThanish,
+    compareComplexity,
   )
 where
 
@@ -247,3 +248,23 @@ removeLessThans =
               to_remove' | to_remove' == to_remove -> sofp \\ to_remove
               _ -> sofp
     )
+
+compareComplexity :: SofP -> SofP -> Ordering
+compareComplexity xs0 ys0 =
+  case length xs0 `compare` length ys0 of
+    EQ -> helper xs0 ys0
+    c -> c
+  where
+    helper [] [] = EQ
+    helper [] _ = LT
+    helper _ [] = GT
+    helper (px : xs) (py : ys) =
+      case (prodToScale px, prodToScale py) of
+        ((ix, []), (iy, [])) -> case ix `compare` iy of
+          EQ -> helper xs ys
+          c -> c
+        ((_, []), (_, _)) -> LT
+        ((_, _), (_, [])) -> GT
+        ((_, x), (_, y)) -> case length x `compare` length y of
+          EQ -> helper xs ys
+          c -> c

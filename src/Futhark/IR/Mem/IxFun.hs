@@ -1210,7 +1210,11 @@ disjoint2 less_thans non_negatives lmad1 lmad2 =
       (neg_offset, pos_offset) =
         partition AlgSimplify2.negated $
           offset1 `AlgSimplify2.sub` offset2
-      (interval1', interval2') = unzip $ intervalPairs interval1 interval2
+      (interval1', interval2') =
+        unzip $
+          reverse $
+            sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride . fst)) $
+              intervalPairs interval1 interval2
    in case ( distributeOffset pos_offset interval1',
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
            ) of
@@ -1256,7 +1260,10 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
         partition AlgSimplify2.negated $
           AlgSimplify2.simplifySofP $ offset1 `AlgSimplify2.sub` offset2
       (interval1', interval2') =
-        unzip $ intervalPairs interval1 interval2
+        unzip $
+          reverse $
+            sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride . fst)) $
+              intervalPairs interval1 interval2
   disjointHelper 4 interval1' interval2' $ offset1 `AlgSimplify2.sub` offset2
   where
     -- res <- disjointHelper 1 interval1' interval2' $ offset1 `AlgSimplify2.sub` offset2
@@ -1308,7 +1315,11 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
     disjointHelper :: Int -> [Interval] -> [Interval] -> AlgSimplify2.SofP -> IO Bool
     disjointHelper 0 _ _ _ = pure False
     disjointHelper i is10 is20 offset =
-      let (is1, is2) = unzip $ intervalPairs is10 is20
+      let (is1, is2) =
+            unzip $
+              reverse $
+                sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride . fst)) $
+                  intervalPairs is10 is20
           (neg_offset, pos_offset) = partition AlgSimplify2.negated offset
        in case ( distributeOffset pos_offset is1,
                  distributeOffset (map AlgSimplify2.negate neg_offset) is2
