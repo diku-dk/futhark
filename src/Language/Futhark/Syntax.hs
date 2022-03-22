@@ -917,6 +917,7 @@ instance Located (ExpBase f vn) where
   locOf (Update _ _ _ pos) = locOf pos
   locOf (RecordUpdate _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc
+  locOf (Hole _ _ loc) = locOf loc
   locOf (OpSection _ _ loc) = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc) = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc

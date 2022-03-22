@@ -122,6 +122,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Var name t loc) =
     Var <$> mapOnQualName tv name <*> traverse (mapOnPatType tv) t
       <*> pure loc
+  astMap tv (Hole vn t loc) =
+    Hole <$> mapOnName tv vn <*> traverse (mapOnPatType tv) t
+      <*> pure loc
   astMap _ (Literal val loc) =
     pure $ Literal val loc
   astMap _ (StringLit vs loc) =
@@ -427,6 +430,7 @@ bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
 -- name/scope information.
 bareExp :: ExpBase Info VName -> ExpBase NoInfo VName
 bareExp (Var name _ loc) = Var name NoInfo loc
+bareExp (Hole name _ loc) = Hole name NoInfo loc
 bareExp (Literal v loc) = Literal v loc
 bareExp (IntLit val _ loc) = IntLit val NoInfo loc
 bareExp (FloatLit val _ loc) = FloatLit val NoInfo loc
