@@ -140,7 +140,7 @@ reachable source target = do
 
 
 linearizeGraph :: DepGraph -> [Stm SOACS]
-linearizeGraph g = reverse $ mapMaybe stmFromNode $ Q.topsort' g
+linearizeGraph g = reverse $ concatMap stmFromNode $ Q.topsort' g
 
 doAllFusion :: DepGraphAug
 doAllFusion = applyAugs [keeptrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, runInnerFusion]
@@ -208,7 +208,7 @@ v_fusion_feasability :: DepGraph -> Node -> Node -> FusionEnvM Bool
 v_fusion_feasability g n1 n2 =
   do
     --let b1 = all isDep edges || all (==n2) nodesN1
-    let b2 = not (any isInf (edgesBetween g n1 n2)) 
+    let b2 = not (any isInf (edgesBetween g n1 n2))
     reach <- mapM (reachable n2) (filter (/=n2) (pre g n1))
     pure $ b2 && all not reach
   where
@@ -245,7 +245,7 @@ h_fusion_feasability = unreachableEitherDir
   --   lessThanOneDep n =
   --     let (nodes, _) = unzip $ filter (not . isRes) $ lsuc g n
   --     in (<=1) $ length (L.nub nodes)
-    
+
   -- what are the rules here?
   --  - they have an input in common
   --  - they only have that input? -
@@ -271,7 +271,7 @@ tryFuseNodesInGraph node_1 node_2 g
       b <- v_fusion_feasability g node_1 node_2
       if b then
         case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
-          Just newcxt@(inputs, node, SNode stm, outputs) -> 
+          Just newcxt@(inputs, node, SNode stm, outputs) ->
             if null fused then contractEdge node_2 newcxt g
             else do
               new_stm <- makeCopies stm
@@ -339,7 +339,7 @@ tryFuseNodesInGraph2 node_1 node_2 g
   | otherwise = do
     b <- h_fusion_feasability node_1 node_2
     if b then case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
-      Just new_Context -> contractEdge node_2 new_Context g 
+      Just new_Context -> contractEdge node_2 new_Context g
       Nothing -> pure g
     else pure g
     where

@@ -177,9 +177,9 @@ applyAugs augs g = foldlM (flip ($)) g augs
 label :: DepNode -> NodeT
 label = snd
 
-stmFromNode :: NodeT -> Maybe (Stm SOACS)
-stmFromNode (SNode x) = Just x
-stmFromNode _ = Nothing
+stmFromNode :: NodeT -> [Stm SOACS]
+stmFromNode (SNode x) = [x]
+stmFromNode _ = []
 
 nodeFromLNode :: DepNode -> Node
 nodeFromLNode = fst
@@ -242,14 +242,14 @@ cleanUpGraph g = undefined
 mergedContext :: (Eq b) => a -> Context a b -> Context a b -> Context a b
 mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
   let new_inp  = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (inp1  `L.union` inp2) in
-  let new_out = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (out1 `L.union` out2) 
+  let new_out = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (out1 `L.union` out2)
   in (new_inp, n1, mergedlabel, new_out)
 
 -- n1 remains
 contractEdge :: Node -> DepContext -> DepGraphAug
 contractEdge n2 cxt g = do
   let n1 = node' cxt
-  
+
   -- Modify reachabilityG
   rg <- gets reachabilityG
   let newContext = mergedContext () (context rg n1) (context rg n2)
@@ -279,7 +279,7 @@ makeScanInfusible g = return $ emap change_node_to_idep g
     find_scan_results _ = []
 
     scan_res_set :: S.Set VName
-    scan_res_set = S.fromList (concatMap find_scan_results (mapMaybe (stmFromNode . label) (labNodes g)))
+    scan_res_set = S.fromList (concatMap find_scan_results (concatMap (stmFromNode . label) (labNodes g)))
 
 
     is_scan_res :: VName -> Bool
