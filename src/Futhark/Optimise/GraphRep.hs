@@ -13,6 +13,7 @@ import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.IR.Prop.Aliases
+import Futhark.Analysis.HORep.SOAC
 
 import qualified Data.Graph.Inductive.Query.DFS as Q
 import qualified Data.Graph.Inductive.Tree as G
@@ -29,8 +30,9 @@ import Control.Monad.State
 
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
+-- SNode: Stm [InputTransforms] [OutputTransforms]
 data EdgeT = InfDep VName | Dep VName | Cons VName | Fake | Res VName deriving (Eq, Ord)
-data NodeT = SNode (Stm SOACS) | RNode VName | InNode VName
+data NodeT = SNode (Stm SOACS) ArrayTransforms ArrayTransforms | RNode VName | InNode VName
   deriving (Eq, Ord)
 
 
@@ -118,12 +120,40 @@ type DepGraphAug = DepGraph -> FusionEnvM DepGraph
 --     rnodes = map RNode (namesFromRes r)
 --     inNodes= map (InNode . paramName) $ filter isArray inputs -- there might be a better way
 
+appendTransformations :: DepGraphAug
+appendTransformations g = do
+  applyAugs (map appendTransform $ labNodes g) g
+
+
+appendTransform :: DepNode -> DepGraphAug
+appendTransform node_to_fuse g =
+  if gelem node_to_fuse g
+  then applyAugs (map (appendT node_to_fuse_id) fuses_to) g
+  else pure g
+  where
+    fuses_to = map nodeFromLNode $ input g node_to_fuse
+    node_to_fuse_id = nodeFromLNode node_to_fuse
+  
+appendT :: Node -> Node -> DepGraphAug
+appendT transformNode to g 
+  | not (gelem node_1 g && gelem node_2 g) = pure g
+  | outdeg g to == 1 =
+    case label . lNodeFromNode $ transformNode g of
+      (SNode (Let _ aux exp) _ _) -> 
+        case transformFromExp (stmAuxCerts aux) exp of
+          Just (vn, transform) -> 
+            if lnodeFromNode $ to g
+            contractEdge transformNode (context to) g
+          Nothing -> pure g
+
+
+
 
 emptyG2 :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
 emptyG2 stms res inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
   where
     label_nodes = zip [0..]
-    snodes = map SNode stms
+    snodes = map (\stm -> SNode stm mempty mempty) stms
     rnodes = map RNode res
     inNodes= map InNode inputs
 
@@ -143,7 +173,7 @@ mkDepGraph stms res inputs = do
 
 addDepEdges :: DepGraphAug
 addDepEdges = applyAugs
-  [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges]
+  [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges, appendTransformations]
 
 mkDepGraphInner :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
 mkDepGraphInner stms outputs inputs = addDepEdges $ emptyG2 stms outputs inputs
