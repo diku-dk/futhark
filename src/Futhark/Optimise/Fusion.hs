@@ -58,14 +58,14 @@ import Control.Monad.State
 
 -- unofficial TODO
 -- lengths of inputs
--- name generations is going to have to occur
+-- rename variables that used to be transpose results.
+-- insert transpose statements at the end.
 
 
 
 
 
 
--- runFusionEnvM ::
 
 -- extra util - scans reduces are "a->a->a" - so half of those are the amount of inputs
 scan_input :: [Scan SOACS] -> Int
@@ -271,11 +271,11 @@ tryFuseNodesInGraph node_1 node_2 g
       b <- v_fusion_feasability g node_1 node_2
       if b then
         case fuseContexts infusable_nodes (context g node_1) (context g node_2) of
-          Just newcxt@(inputs, node, SNode stm, outputs) ->
+          Just newcxt@(inputs, node, SNode stm mempty, outputs) ->
             if null fused then contractEdge node_2 newcxt g
             else do
               new_stm <- makeCopies stm
-              contractEdge node_2 (inputs, node, SNode new_stm, outputs) g
+              contractEdge node_2 (inputs, node, SNode new_stm mempty, outputs) g
           Nothing -> pure g
       else pure g
     where
@@ -353,10 +353,10 @@ tryFuseNodesInGraph2 node_1 node_2 g
 fuseContexts :: [VName] -> DepContext -> DepContext -> Maybe DepContext
 -- fuse the nodes / contexts
 fuseContexts infusable
-            c1@(inp1, n1, SNode s1, outp1)
-            c2@(inp2, n2, SNode s2, outp2)
+            c1@(inp1, n1, SNode s1 _, outp1)
+            c2@(inp2, n2, SNode s2 _, outp2)
             = case fuseStms infusable s1 s2 of
-              Just s3 -> Just (mergedContext (SNode s3) c1 c2)
+              Just s3 -> Just (mergedContext (SNode s3 mempty) c1 c2)
               Nothing -> Nothing
 fuseContexts _ _ _ = Nothing
 
@@ -489,8 +489,7 @@ change_all orig_names orig_other = mapMaybe (mapping M.!)
       mapping = M.map Just $ makeMap orig_names orig_other
 
 
-mapT :: (a -> b) -> (a,a) -> (b,b)
-mapT f (a,b) = (f a, f b)
+
 
 res_from_lambda :: Lambda rep -> Result
 res_from_lambda =  bodyResult . lambdaBody
@@ -558,8 +557,8 @@ vNameFromAdj n1 (edge, n2) = depsFromEdge (n2,n1, edge)
 
 
 removeUnusedOutputsFromContext :: DepGraph -> DepContext  -> DepContext
-removeUnusedOutputsFromContext g (incoming, n1, SNode s, outgoing) =
-  (incoming, n1, SNode new_stm, outgoing)
+removeUnusedOutputsFromContext g (incoming, n1, SNode s outputTs, outgoing) =
+  (incoming, n1, SNode new_stm outputTs, outgoing)
   where
     new_stm = removeOutputsExcept (concatMap (vNameFromAdj n1) incoming) s
 removeUnusedOutputsFromContext _ context = context
@@ -607,15 +606,15 @@ runInnerFusion = mapAcross runInnerFusionOnContext
 
 runInnerFusionOnContext :: DepContext -> FusionEnvM DepContext
 runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
-  SNode (Let pats aux (If size b1 b2 branchType )) ->
+  SNode (Let pats aux (If size b1 b2 branchType )) _ ->
     do
       b1_new <- doFusionInner b1
       b2_new <- doFusionInner b2
-      return (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)), outgoing)
-  SNode (Let pats aux (DoLoop params form body)) ->
+      return (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)) mempty, outgoing)
+  SNode (Let pats aux (DoLoop params form body)) _ ->
     do
       b_new <- doFusionInner body
-      return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)), outgoing)
+      return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
   _ -> return c
   where
     doFusionInner :: Body SOACS -> FusionEnvM (Body SOACS)

@@ -13,7 +13,7 @@ import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.IR.Prop.Aliases
-import Futhark.Analysis.HORep.SOAC
+import qualified Futhark.Analysis.HORep.SOAC as HOREPSOAC
 
 import qualified Data.Graph.Inductive.Query.DFS as Q
 import qualified Data.Graph.Inductive.Tree as G
@@ -32,7 +32,7 @@ import Control.Monad.State
 
 -- SNode: Stm [InputTransforms] [OutputTransforms]
 data EdgeT = InfDep VName | Dep VName | Cons VName | Fake | Res VName deriving (Eq, Ord)
-data NodeT = SNode (Stm SOACS) ArrayTransforms ArrayTransforms | RNode VName | InNode VName
+data NodeT = SNode (Stm SOACS) HOREPSOAC.ArrayTransforms | RNode VName | InNode VName
   deriving (Eq, Ord)
 
 
@@ -48,7 +48,7 @@ instance Show EdgeT where
 
 -- nodeT_to_str
 instance Show NodeT where
-    show (SNode stm@(Let pat aux _)) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
+    show (SNode stm@(Let pat aux _) _) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
     show (RNode name)  = ppr $ "Res: "   ++ ppr name
     show (InNode name) = ppr $ "Input: " ++ ppr name
 
@@ -127,24 +127,43 @@ appendTransformations g = do
 
 appendTransform :: DepNode -> DepGraphAug
 appendTransform node_to_fuse g =
-  if gelem node_to_fuse g
+  if gelem (nodeFromLNode node_to_fuse) g
   then applyAugs (map (appendT node_to_fuse_id) fuses_to) g
   else pure g
   where
     fuses_to = map nodeFromLNode $ input g node_to_fuse
     node_to_fuse_id = nodeFromLNode node_to_fuse
-  
+
+
+-- replaceName :: VName -> VName ->
+
+
+
 appendT :: Node -> Node -> DepGraphAug
-appendT transformNode to g 
-  | not (gelem node_1 g && gelem node_2 g) = pure g
+appendT transformNode to g
+  | not (gelem transformNode g && gelem to g) = pure g
   | outdeg g to == 1 =
-    case label . lNodeFromNode $ transformNode g of
-      (SNode (Let _ aux exp) _ _) -> 
-        case transformFromExp (stmAuxCerts aux) exp of
-          Just (vn, transform) -> 
-            if lnodeFromNode $ to g
-            contractEdge transformNode (context to) g
-          Nothing -> pure g
+    case mapT (lFromNode g) (transformNode, to) of
+      (SNode (Let _ aux_1 exp_1) _, SNode s@(Let _ aux_2 (Op (Futhark.Screma sub_exp ouputs scremaform))) outTrans) ->
+        case (HOREPSOAC.transformFromExp (stmAuxCerts aux_1) exp_1, isMapSOAC scremaform) of
+          (Just (vn,transform), Just lam) -> do
+            let newNodeL = SNode s (outTrans HOREPSOAC.|> transform)
+            let newContext = mergedContext newNodeL (context g to) (context g transformNode)
+            contractEdge transformNode newContext g
+          _ -> pure g
+      _ -> pure g
+  | otherwise = pure g
+
+
+
+
+
+      -- (SNode (Let _ aux exp) _ _) ->
+      --   case transformFromExp (stmAuxCerts aux) exp of
+      --     Just (vn, transform) ->
+      --       if lnodeFromNode $ to g
+      --       contractEdge transformNode (context to) g
+      --     Nothing -> pure g
 
 
 
@@ -153,7 +172,7 @@ emptyG2 :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
 emptyG2 stms res inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
   where
     label_nodes = zip [0..]
-    snodes = map (\stm -> SNode stm mempty mempty) stms
+    snodes = map (\stm -> SNode stm mempty) stms
     rnodes = map RNode res
     inNodes= map InNode inputs
 
@@ -208,7 +227,7 @@ label :: DepNode -> NodeT
 label = snd
 
 stmFromNode :: NodeT -> [Stm SOACS]
-stmFromNode (SNode x) = [x]
+stmFromNode (SNode x _) = [x]
 stmFromNode _ = []
 
 nodeFromLNode :: DepNode -> Node
@@ -216,6 +235,9 @@ nodeFromLNode = fst
 
 lNodeFromNode :: DepGraph -> Node -> DepNode
 lNodeFromNode g n = labNode' (context g n)
+
+lFromNode g n = label $ lNodeFromNode g n
+
 
 labFromEdge :: DepGraph -> DepEdge -> DepNode
 labFromEdge g (n1, n2, lab) = lNodeFromNode g n1
@@ -357,13 +379,13 @@ getStmNames s = case s of
   Let pat _ _ -> patNames pat
 
 getStmDeps :: EdgeGenerator
-getStmDeps (SNode s) = map (\x -> (x, Dep x)) names
+getStmDeps (SNode s _) = map (\x -> (x, Dep x)) names
   where
     names = (traceShowId . namesToList . freeIn) s
 getStmDeps _ = []
 
 getStmCons :: EdgeGenerator
-getStmCons (SNode s) = zip names (map Cons names)
+getStmCons (SNode s _) = zip names (map Cons names)
   where
     names =  namesToList . consumedInStm . Alias.analyseStm mempty $ s
 getStmCons _ = []
@@ -383,8 +405,14 @@ namesFromRes = concatMap ((\x -> case x of
 
 getOutputs :: NodeT -> [VName]
 getOutputs node = case node of
-  (SNode stm) -> getStmNames stm
+  (SNode stm _) -> getStmNames stm
   (RNode _)   -> []
   (InNode name) -> [name]
 
 --- /Inspecting Stms ---
+
+
+
+
+mapT :: (a -> b) -> (a,a) -> (b,b)
+mapT f (a,b) = (f a, f b)
