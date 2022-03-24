@@ -620,9 +620,12 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     doFusionInner :: Body SOACS -> FusionEnvM (Body SOACS)
     doFusionInner b =
       do
+        outerReachabilityG <- gets reachabilityG
         graph <- mkDepGraphInner stms results inputs
+        modify (\s -> s{reachabilityG = TC.tc $ nmap (const ()) graph})
         fused_graph <- doAllFusion graph
         let new_stms = linearizeGraph graph
+        modify (\s -> s {reachabilityG = outerReachabilityG})
         return b {bodyStms = stmsFromList new_stms}
       where
         inputs = concatMap (vNameFromAdj node) incomming

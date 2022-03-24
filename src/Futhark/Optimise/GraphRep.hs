@@ -172,7 +172,7 @@ emptyG2 :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
 emptyG2 stms res inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
   where
     label_nodes = zip [0..]
-    snodes = map (\stm -> SNode stm mempty) stms
+    snodes = map (`SNode` mempty) stms
     rnodes = map RNode res
     inNodes= map InNode inputs
 
@@ -192,7 +192,7 @@ mkDepGraph stms res inputs = do
 
 addDepEdges :: DepGraphAug
 addDepEdges = applyAugs
-  [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges, appendTransformations]
+  [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges] --, appendTransformations]
 
 mkDepGraphInner :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
 mkDepGraphInner stms outputs inputs = addDepEdges $ emptyG2 stms outputs inputs
