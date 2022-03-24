@@ -20,6 +20,10 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     getReturnParams,
     segOpString,
     generateChunkLoop,
+    generateUniformizeLoop,
+    extractVectorLane,
+    inISPC,
+    toParam
   )
 where
 
@@ -34,6 +38,7 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
+import qualified Data.Text as T
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -232,10 +237,10 @@ extractAllocations segop_code = f segop_code
 -- iteration.
 generateChunkLoop ::
   String ->
+  Bool ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
-generateChunkLoop desc m = do
-  emit $ Imp.DebugPrint (desc <> " " <> "fbody") Nothing
+generateChunkLoop desc vec m = do
   (start, end) <- getLoopBounds
   n <- dPrimVE "n" $ end - start
   i <- newVName (desc <> "_i")
@@ -244,7 +249,36 @@ generateChunkLoop desc m = do
       addLoopVar i Int64
       m $ start + Imp.le64 i
   emit body_allocs
-  emit $ Imp.For i (untyped n) body
+  -- Emit either foreach or normal for loop
+  let bound = untyped n
+  if vec
+  then emit $ Imp.Op $ Imp.ForEach i bound body
+  else emit $ Imp.For i bound body
+
+generateUniformizeLoop :: (Imp.TExp Int64 -> MulticoreGen ()) -> MulticoreGen ()
+generateUniformizeLoop m = do
+  i <- newVName "uni_i"
+  body <- collect $ do
+    addLoopVar i Int64
+    m $ Imp.le64 i
+  emit $ Imp.Op $ Imp.ForEachActive i $ body
+
+extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.Code -> MulticoreGen ()
+extractVectorLane j code = do
+  let ut_exp = untyped j
+  code' <- code
+  case code' of
+    Imp.SetScalar vname e -> 
+      emit $ Imp.Op $ Imp.ISPCBuiltin vname (nameFromText $ T.pack "extract") [e, ut_exp]    
+    _ -> 
+      return ()
+
+inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
+inISPC retvals code = do
+  (allocs, res) <- extractAllocations <$> collect code
+  free <- freeParams res
+  emit allocs
+  emit $ Imp.Op $ Imp.ISPCKernel res free retvals
 
 -------------------------------
 ------- SegHist helpers -------

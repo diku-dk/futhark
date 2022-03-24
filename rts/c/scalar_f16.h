@@ -9,7 +9,7 @@
 // under emulation, so the compiler will have to be careful when
 // generating reads or writes.
 
-#if !defined(cl_khr_fp16) && !(defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600)
+#if !defined(cl_khr_fp16) && !(defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600) && !(defined(ISPC))
 #define EMULATE_F16
 #endif
 
@@ -22,6 +22,9 @@
 // Note that the half-precision storage format is still 16 bits - the
 // compiler will have to be real careful!
 typedef float f16;
+
+#elif ISPC
+typedef float16 f16;
 
 #else
 
@@ -81,14 +84,17 @@ static inline f16 uitofp_i16_f16(uint16_t x) {
 }
 
 static inline f16 uitofp_i32_f16(uint32_t x) {
+  #pragma ignore warning(perf)
   return (f16) x;
 }
 
 static inline f16 uitofp_i64_f16(uint64_t x) {
+  #pragma ignore warning(perf)
   return (f16) x;
 }
 
 static inline int8_t fptosi_f16_i8(f16 x) {
+  #pragma ignore warning(perf)
   return (int8_t) (float) x;
 }
 
@@ -105,24 +111,29 @@ static inline int64_t fptosi_f16_i64(f16 x) {
 }
 
 static inline uint8_t fptoui_f16_i8(f16 x) {
+  #pragma ignore warning(perf)
   return (uint8_t) (float) x;
 }
 
 static inline uint16_t fptoui_f16_i16(f16 x) {
+  #pragma ignore warning(perf)
   return (uint16_t) x;
 }
 
 static inline uint32_t fptoui_f16_i32(f16 x) {
+  #pragma ignore warning(perf)
   return (uint32_t) x;
 }
 
 static inline uint64_t fptoui_f16_i64(f16 x) {
+  #pragma ignore warning(perf)
   return (uint64_t) x;
 }
 
 #ifndef EMULATE_F16
 
 #ifdef __OPENCL_VERSION__
+
 static inline f16 fabs16(f16 x) {
   return fabs(x);
 }
@@ -139,6 +150,22 @@ static inline f16 fpow16(f16 x, f16 y) {
   return pow(x, y);
 }
 
+#elif ISPC
+static inline f16 fabs16(f16 x) {
+  return abs(x);
+}
+
+static inline f16 fmax16(f16 x, f16 y) {
+  return max(x, y);
+}
+
+static inline f16 fmin16(f16 x, f16 y) {
+  return min(x, y);
+}
+
+static inline f16 fpow16(f16 x, f16 y) {
+  return pow(x, y);
+}
 #else // Assuming CUDA.
 
 static inline f16 fabs16(f16 x) {
@@ -162,9 +189,20 @@ static inline bool futrts_isnan16(f16 x) {
   return isnan((float)x);
 }
 
+#if ISPC
+static inline bool futrts_isinf16(float x) {
+  return !futrts_isnan16(x) && futrts_isnan16(x - x); //TODO: Find cleaner solution                           
+}
+static inline bool futrts_isfinite16(float x) {
+  return !futrts_isnan16(x) && !futrts_isinf16(x);
+}
+
+#else
+
 static inline bool futrts_isinf16(f16 x) {
   return isinf((float)x);
 }
+#endif
 
 #ifdef __OPENCL_VERSION__
 static inline f16 futrts_log16(f16 x) {
@@ -277,6 +315,125 @@ static inline f16 futrts_mad16(f16 a, f16 b, f16 c) {
 
 static inline f16 futrts_fma16(f16 a, f16 b, f16 c) {
   return fma(a, b, c);
+}
+#elif ISPC
+
+static inline f16 futrts_log16(f16 x) {
+  return log(x);
+}
+
+static inline f16 futrts_log2_16(f16 x) {
+  return log(x) / log(2.0f16);
+}
+
+static inline f16 futrts_log10_16(f16 x) {
+  return log(x) / log(10.0f16);
+}
+
+static inline f16 futrts_sqrt16(f16 x) {
+  return (float16)sqrt((float)x);
+}
+
+static inline f16 futrts_exp16(f16 x) {
+  return exp(x);
+}
+
+static inline f16 futrts_cos16(f16 x) {
+  return (float16)cos((float)x);
+}
+
+static inline f16 futrts_sin16(f16 x) {
+  return (float16)sin((float)x);
+}
+
+static inline f16 futrts_tan16(f16 x) {
+  return (float16)tan((float)x);
+}
+
+static inline f16 futrts_acos16(f16 x) {
+  return (float16)acos((float)x);
+}
+
+static inline f16 futrts_asin16(f16 x) {
+  return (float16)asin((float)x);
+}
+
+static inline f16 futrts_atan16(f16 x) {
+  return (float16)atan((float)x);
+}
+
+static inline f16 futrts_cosh16(f16 x) {
+  return (exp(x)+exp(-x)) / 2.0f16; 
+}
+
+static inline f16 futrts_sinh16(f16 x) {
+  return (exp(x)-exp(-x)) / 2.0f16; 
+}
+
+static inline f16 futrts_tanh16(f16 x) {
+  return futrts_sinh16(x)/futrts_cosh16(x);
+}
+
+static inline f16 futrts_acosh16(f16 x) {
+  float16 f = x+(float16)sqrt((float)(x*x-1));
+  if(futrts_isfinite16(f)) return log(f);
+  return f;
+}
+
+static inline f16 futrts_asinh16(f16 x) {
+  float16 f = x+(float16)sqrt((float)(x*x+1));
+  if(futrts_isfinite16(f)) return log(f);
+  return f;
+}
+
+static inline f16 futrts_atanh16(f16 x) {
+  float16 f = (1+x)/(1-x);
+  if(futrts_isfinite16(f)) return log(f)/2.0f16;
+  return f;
+}
+
+static inline f16 futrts_atan2_16(f16 x, f16 y) {
+  return (float16)atan2((float)x, (float)y);
+}
+
+static inline f16 futrts_hypot16(f16 x, f16 y) {
+  return (float16)futrts_hypot32((float)x, (float)y);
+}
+
+static inline f16 futrts_gamma16(f16 x) {
+  return 0; //TODO(LOUIS): Call C
+}
+
+static inline f16 futrts_lgamma16(f16 x) {
+  return 0; //TODO(LOUIS): Call C
+}
+
+static inline f16 fmod16(f16 x, f16 y) {
+  return x - y * (float16)trunc((float) (x/y)); //TODO: Check if correct behavior, else use round()
+}
+
+static inline f16 futrts_round16(f16 x) {
+  return (float16)round((float)x);
+}
+
+static inline f16 futrts_floor16(f16 x) {
+  return (float16)floor((float)x);
+}
+
+static inline f16 futrts_ceil16(f16 x) {
+  return (float16)ceil((float)x);
+}
+
+static inline f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
+  return v0 + (v1 - v0) * t;
+}
+
+static inline f16 futrts_mad16(f16 a, f16 b, f16 c) {
+  return a * b + c;
+}
+
+static inline f16 futrts_fma16(f16 a, f16 b, f16 c) {
+  return a * b + c;
 }
 
 #else // Assume CUDA.
@@ -403,6 +560,17 @@ static inline int16_t futrts_to_bits16(f16 x) {
 }
 static inline f16 futrts_from_bits16(int16_t x) {
   return __ushort_as_half(x);
+}
+#elif ISPC
+
+static inline int16_t futrts_to_bits16(f16 x) {
+  return *((int16_t *)(f16 *)&x); //This causes weird error (primitive/float_convop.fut)
+  //return (int16)intbits(x); //Would be the more correct solution but same error
+  //return 0; //TODO: Fix
+}
+
+static inline f16 futrts_from_bits16(int16_t x) {
+  return *((float16 *)&x);
 }
 #else
 static inline int16_t futrts_to_bits16(f16 x) {
@@ -592,7 +760,7 @@ static inline f16 futrts_from_bits16(int16_t x) {
 }
 
 static inline f16 fsignum16(f16 x) {
-  return futrts_isnan16(x) ? x : (x > 0) - (x < 0);
+  return futrts_isnan16(x) ? x : (x > 0 ? 1 : 0) - (x < 0 ? 1 : 0);
 }
 
 #endif
@@ -608,7 +776,7 @@ static inline float fpconv_f16_f32(f16 x) {
 }
 
 static inline f16 fpconv_f32_f16(float x) {
-  return x;
+  return (f16) x;
 }
 
 #ifdef FUTHARK_F64_ENABLED

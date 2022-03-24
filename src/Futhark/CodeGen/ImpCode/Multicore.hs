@@ -32,6 +32,17 @@ type Code = Imp.Code Multicore
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String Code [Param]
+  | -- | Emit code in ISPC
+    ISPCKernel Code [Param] [Param]
+  | -- | ForEach, only valid in ISPC
+    ForEach VName Exp Code
+  | -- | ForEach_Active, only valid in ISPC
+    ForEachActive VName Code
+  | -- | Escape hatch for generating builtin ISPC functions
+    -- like extract or broadcast
+    ISPCBuiltin VName Name [Exp]
+  | -- | Unmasked block of code, only valid in ISPC
+    UnmaskedBlock Code
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -119,7 +130,20 @@ instance Pretty Multicore where
           [ nestedBlock "params {" "}" (ppr params),
             nestedBlock "body {" "}" (ppr body)
           ]
-  ppr (Atomic _) = "AtomicOp"
+  ppr (Atomic _) =
+    "AtomicOp"
+  ppr (ISPCKernel body _ _) =
+    "ispc" <+> nestedBlock "{" "}" (ppr body)
+  ppr (ForEach i limit body) =
+    "foreach" <+> ppr i <+> langle <+> ppr limit
+      <+> nestedBlock "{" "}" (ppr body)
+  ppr (ForEachActive i body) =
+    "foreach_active" <+> ppr i
+      <+> nestedBlock "{" "}" (ppr body)
+  ppr (UnmaskedBlock code) =
+    nestedBlock "unmasked {" "}" (ppr code)
+  ppr (ISPCBuiltin dest name args) =
+    ppr dest <+> "<-" <+> ppr name <+> parens (commasep $ map ppr args)
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -138,4 +162,15 @@ instance FreeIn Multicore where
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
   freeIn' (ParLoop _ body _) =
     freeIn' body
-  freeIn' (Atomic aop) = freeIn' aop
+  freeIn' (Atomic aop) =
+    freeIn' aop
+  freeIn' (ISPCKernel body _ _) =
+    freeIn' body
+  freeIn' (ForEach i bound body) =
+    fvBind (oneName i) (freeIn' body <> freeIn' bound)
+  freeIn' (ForEachActive i body) =
+    fvBind (oneName i) (freeIn' body)
+  freeIn' (UnmaskedBlock code) =
+    freeIn' code
+  freeIn' (ISPCBuiltin dest _ args) =
+    freeIn' dest <> freeIn' args

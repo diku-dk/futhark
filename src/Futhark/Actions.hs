@@ -24,7 +24,6 @@ module Futhark.Actions
     compilePyOpenCLAction,
   )
 where
-
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (intercalate)
@@ -199,6 +198,53 @@ runCC cpath outpath cflags_def ldflags = do
     Right (ExitSuccess, _, _) ->
       return ()
 
+runISPC :: String -> String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
+runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
+  ret_ispc <-
+    liftIO $
+      runProgramWithExitCode
+        "ispc"
+        ( [ispcpath, "-o", ispcbase `addExtension` "o"] ++
+          ["-h", ispcbase `addExtension` "h"] ++ 
+          cmdCFLAGS ispc_flags
+        )
+        mempty
+  ret <- -- TODO(kris): Clean this shit up
+    liftIO $
+      runProgramWithExitCode
+        cmdCC
+        ( [ispcbase `addExtension` "h"] ++
+          [ispcbase `addExtension` "o"] ++
+          [cpath, "-o", outpath] ++
+          cmdCFLAGS cflags_def ++
+            -- The default LDFLAGS are always added.
+          ldflags
+        )
+        mempty
+  case ret_ispc of
+    Left err ->
+      externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
+    Right (ExitFailure code, _, gccerr) ->
+      externalErrorS $
+        cmdCC ++ " failed with code "
+          ++ show code
+          ++ ":\n"
+          ++ gccerr
+    Right (ExitSuccess, _, _) ->
+      case ret of
+        Left err ->
+          externalErrorS $ "Failed to run " ++ "ispc" ++ ": " ++ show err
+        Right (ExitFailure code, _, gccerr) ->
+          externalErrorS $
+            cmdCC ++ " failed with code "
+              ++ show code
+              ++ ":\n"
+              ++ gccerr
+        Right (ExitSuccess, _, _) ->
+          return ()
+  where
+    ispcbase = outpath <> ispcextension
+
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCAction fcfg mode outpath =
@@ -304,23 +350,32 @@ compileMulticoreAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack versionString) prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
-
-      case mode of
+          ispcPath = outpath `addExtension` "ispc"
+          ispcExtension = "_ispc"
+          --ispcbase = outpath <> "_ispc"
+          ispcHeader = takeBaseName (outpath <> ispcExtension) `addExtension` "h"
+      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeader <> "\"") (T.pack versionString) prog
+      case mode of -- TODO(pema): Library mode
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
-          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          let (c, ispc) = MulticoreC.asISPCExecutable cprog
+          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile ispcPath ispc
+          runISPC ispcPath outpath cpath ispcExtension ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
-          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
-          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          let (c, ispc) = MulticoreC.asISPCServer cprog
+          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile ispcPath ispc
+          --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcPath outpath cpath ispcExtension ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 pythonCommon ::
   (CompilerMode -> String -> prog -> FutharkM (Warnings, T.Text)) ->

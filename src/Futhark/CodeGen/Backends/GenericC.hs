@@ -12,6 +12,8 @@ module Futhark.CodeGen.Backends.GenericC
     CParts (..),
     asLibrary,
     asExecutable,
+    asISPCExecutable,
+    asISPCServer,
     asServer,
 
     -- * Pluggable compiler
@@ -39,6 +41,7 @@ module Futhark.CodeGen.Backends.GenericC
     contextContents,
     contextFinalInits,
     runCompilerM,
+    withOperations,
     inNewFunction,
     cachingMemory,
     compileFun,
@@ -60,6 +63,7 @@ module Futhark.CodeGen.Backends.GenericC
     onClear,
     HeaderSection (..),
     libDecl,
+    ispcDecl,
     earlyDecl,
     publicName,
     contextType,
@@ -81,7 +85,6 @@ module Futhark.CodeGen.Backends.GenericC
     copyMemoryDefaultSpace,
   )
 where
-
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -101,8 +104,8 @@ import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (prettyText)
-import qualified Language.C.Quote.OpenCL as C
+import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
+import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
@@ -123,6 +126,7 @@ data CompilerState s = CompilerState
     compUserState :: s,
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
     compLibDecls :: DL.DList C.Definition,
+    compIspcDecls :: DL.DList C.Definition,
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe C.Stm),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
@@ -141,6 +145,7 @@ newCompilerState src s =
       compUserState = s,
       compHeaderDecls = mempty,
       compLibDecls = mempty,
+      compIspcDecls = mempty,
       compCtxFields = mempty,
       compProfileItems = mempty,
       compClearItems = mempty,
@@ -174,12 +179,12 @@ type MemoryType op s = SpaceId -> CompilerM op s C.Type
 -- | Write a scalar to the given memory block with the given element
 -- index and in the given memory space.
 type WriteScalar op s =
-  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> C.Exp -> CompilerM op s ()
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Qualifier -> C.Exp -> CompilerM op s ()
 
 -- | Read a scalar from the given memory block with the given element
 -- index and in the given memory space.
 type ReadScalar op s =
-  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> CompilerM op s C.Exp
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Qualifier -> CompilerM op s C.Exp
 
 -- | Allocate a memory block of the given size and with the given tag
 -- in the given memory space, saving a reference in the given variable
@@ -422,6 +427,9 @@ runCompilerM ops src userstate (CompilerM m) =
     (runReaderT m (CompilerEnv ops mempty))
     (newCompilerState src userstate)
 
+withOperations :: Operations op s -> CompilerM op s a -> CompilerM op s a
+withOperations ops = local (\env -> env { envOperations = ops })
+
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
 
@@ -509,6 +517,11 @@ headerDecl sec def = modify $ \s ->
 libDecl :: C.Definition -> CompilerM op s ()
 libDecl def = modify $ \s ->
   s {compLibDecls = compLibDecls s <> DL.singleton def}
+
+ispcDecl :: C.Definition  -> CompilerM op s ()
+ispcDecl def = modify $ \s ->
+  s {compIspcDecls = compIspcDecls s <> DL.singleton def}
+
 
 earlyDecl :: C.Definition -> CompilerM op s ()
 earlyDecl def = modify $ \s ->
@@ -611,7 +624,7 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
+    stm [C.cstm|$exp:dest = (unsigned char*) malloc((typename size_t)$exp:size);|]
 
 freeRawMem ::
   (C.ToExp a, C.ToExp b) =>
@@ -626,15 +639,24 @@ freeRawMem mem space desc =
       free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:desc|] sid
     _ -> item [C.citem|free($exp:mem);|]
 
-defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.BlockItem)
+defineMemorySpace :: Space -> CompilerM op s ([C.Definition], [C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
-  let structdef =
-        [C.cedecl|struct $id:sname { int *references;
-                                     $ty:rm mem;
-                                     typename int64_t size;
-                                     const char *desc; };|]
+  -- TODO(pema, K): This is hacky, we shouldn't touch generic-c
+  let structGuard =
+        "#ifndef __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
+  let structDefine = "#define __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
 
+  let structdef =
+        [C.cunit|$esc:(structGuard)
+                 $esc:(structDefine)
+                 struct $id:sname {
+                     int *references;
+                     $ty:rm mem;
+                     typename int64_t size;
+                     const char *desc;
+                 };
+                 $esc:("#endif")|]
   contextField peakname [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   contextField usagename [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
@@ -909,7 +931,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       [C.cexp|data|]
       [C.cexp|0|]
       DefaultSpace
-      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+      [C.cexp|((typename size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   new_raw_body <- collect $ do
     prepare_new
@@ -920,7 +942,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       [C.cexp|data|]
       [C.cexp|offset|]
       space
-      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+      [C.cexp|((typename size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
@@ -933,7 +955,7 @@ arrayLibraryFunctions pub space pt signed rank = do
         [C.cexp|arr->mem.mem|]
         [C.cexp|0|]
         space
-        [C.cexp|((size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
+        [C.cexp|((typename size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
 
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -1112,7 +1134,7 @@ opaqueLibraryFunctions desc vds = do
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
   headerDecl
     (OpaqueDecl desc)
-    [C.cedecl|int $id:store_opaque($ty:ctx_ty *ctx, const $ty:opaque_type *obj, void **p, size_t *n);|]
+    [C.cedecl|int $id:store_opaque($ty:ctx_ty *ctx, const $ty:opaque_type *obj, void **p, typename size_t *n);|]
   headerDecl
     (OpaqueDecl desc)
     [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
@@ -1131,7 +1153,7 @@ opaqueLibraryFunctions desc vds = do
           }
 
           int $id:store_opaque($ty:ctx_ty *ctx,
-                               const $ty:opaque_type *obj, void **p, size_t *n) {
+                               const $ty:opaque_type *obj, void **p, typename size_t *n) {
             int ret = 0;
             $items:store_body
             return ret;
@@ -1460,7 +1482,9 @@ data CParts = CParts
     cServer :: T.Text,
     cLib :: T.Text,
     -- | The manifest, in JSON format.
-    cJsonManifest :: T.Text
+    cJsonManifest :: T.Text,
+    -- | ISPC header
+    cISPC :: T.Text
   }
 
 gnuSource :: T.Text
@@ -1504,6 +1528,18 @@ asLibrary parts =
     gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts,
     cJsonManifest parts
   )
+
+asISPCExecutable :: CParts -> (T.Text, T.Text)
+asISPCExecutable parts =
+  (c, ispc)
+  where c = asExecutable parts
+        ispc = cISPC parts
+
+asISPCServer :: CParts -> (T.Text, T.Text)
+asISPCServer parts =
+  (c, ispc)
+  where c = asServer parts
+        ispc = cISPC parts
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> T.Text
@@ -1593,6 +1629,8 @@ $timingH
 
   let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
       lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
+      ispc_decls = T.unlines $ map prettyText $ DL.toList $ compIspcDecls endstate
+      -- ispc_header =
       clidefs = cliDefs options manifest
       serverdefs = serverDefs options manifest
       libdefs =
@@ -1605,7 +1643,6 @@ $timingH
 #include <errno.h>
 #include <assert.h>
 #include <ctype.h>
-
 $header_extra
 
 $lockH
@@ -1624,6 +1661,38 @@ $definitions
 
 $entry_point_decls
   |]
+      ispcdefs =
+        [untrimming|
+#define bool uint8 // This is a workaround around an ISPC bug, stdbool doesn't get included
+typedef int64 int64_t;
+typedef int32 int32_t;
+typedef int16 int16_t;
+typedef int8 int8_t;
+typedef int8 char;
+typedef unsigned int64 uint64_t;
+typedef unsigned int32 uint32_t;
+typedef unsigned int16 uint16_t;
+typedef unsigned int8 uint8_t;
+
+$errorsH
+
+#define INFINITY (floatbits((uniform int)0x7f800000))
+#define fabs(x) abs(x)
+#define FUTHARK_F64_ENABLED
+$cScalarDefs
+
+#ifndef __ISPC_STRUCT_memblock__
+#define __ISPC_STRUCT_memblock__
+struct memblock {
+    int32_t * references;
+    uint8_t * mem;
+    int64_t size;
+    const int8_t * desc;
+};
+#endif
+
+$ispc_decls
+        |]
 
   return
     CParts
@@ -1632,6 +1701,7 @@ $entry_point_decls
         cCLI = clidefs,
         cServer = serverdefs,
         cLib = libdefs,
+        cISPC = ispcdefs,
         cJsonManifest = Manifest.manifestToJSON manifest
       }
   where
@@ -1647,7 +1717,7 @@ $entry_point_decls
       (prototypes, functions) <-
         unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
-      mapM_ earlyDecl memstructs
+      mapM_ (mapM_ earlyDecl) memstructs
       (entry_points, entry_points_manifest) <-
         unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
 
@@ -1856,7 +1926,7 @@ cachingMemory lexical f = do
           }
 
       declCached (mem, size) =
-        [ [C.citem|size_t $id:size = 0;|],
+        [ [C.citem|typename size_t $id:size = 0;|],
           [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]
         ]
 
@@ -1917,9 +1987,11 @@ derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
   [C.cexp|(($ty:res_t)$exp:ptr)[$exp:i]|]
 
-volQuals :: Volatility -> [C.TypeQual]
+volQuals :: Qualifier -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
+volQuals Uniform  = [C.ctyquals|uniform|]
+volQuals Varying = []
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
@@ -1970,10 +2042,10 @@ compilePrimExp f (UnOpExp (FAbs Float64) x) = do
   return [C.cexp|fabs($exp:x')|]
 compilePrimExp f (UnOpExp SSignum {} x) = do
   x' <- compilePrimExp f x
-  return [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
+  return [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0)|]
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
-  return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
+  return [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
 compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
   return [C.cexp|$id:(pretty op)($exp:x')|]
@@ -2144,10 +2216,16 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
 compileCode (Write _ _ Unit _ _ _) = pure ()
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
-  deref <-
-    derefPointer dest'
-      <$> compileExp (untyped idx)
-      <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
+  idxexp <- compileExp (untyped idx)
+  -- TODO(pema): This little dance with a temp var is a workaround for ISPC's strange casting behavior.
+  -- It shouldn't affect the other C backends although it is slightly ugly.
+  tmp <- newVName "tmp_idx"
+  decl [C.cdecl|typename int64_t $id:tmp = $exp:idxexp;|]
+  let deref =
+        derefPointer
+          dest'
+          [C.cexp|$id:tmp|]
+          [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
   elemexp' <- toStorage elemtype <$> compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 compileCode (Write dest (Count idx) _ ScalarSpace {} _ elemexp) = do
@@ -2188,6 +2266,8 @@ compileCode (Read x src (Count iexp) _ ScalarSpace {} _) = do
   stm [C.cstm|$id:x = $id:src[$exp:iexp'];|]
 compileCode (DeclareMem name space) =
   declMem name space
+
+-- TODO (obp) -- target this
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]

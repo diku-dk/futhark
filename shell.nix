@@ -1,6 +1,16 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
+  unstable = import <nixos-unstable> {};
+
+ispc = pkgs.ispc.overrideAttrs (oldAttrs: rec {
+    version = "1.17.0";
+    src = builtins.fetchTarball {
+      url = "https://github.com/ispc/ispc/archive/refs/tags/v${version}.tar.gz";
+      sha256 = "1klk1mhxjvyhzf1kqznimdb2f96czp76k8riv8yda87gfrk7cmfn";
+    };
+    patches = [];
+  });
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
@@ -11,7 +21,10 @@ pkgs.stdenv.mkDerivation {
     pkgs.file
     pkgs.git
     pkgs.git-annex
-    pkgs.ghc
+    #pkgs.ghc
+    unstable.haskell.compiler.ghc902
+    #pkgs.ispc
+    pkgs.stack
     pkgs.haskellPackages.weeder
     pkgs.hlint
     pkgs.pkgconfig
@@ -26,9 +39,13 @@ pkgs.stdenv.mkDerivation {
     pkgs.python3Packages.jsonschema
     pkgs.python3Packages.sphinx
     pkgs.imagemagick # needed for literate tests
+    ispc
   ]
   ++ pkgs.lib.optionals (pkgs.stdenv.isLinux)
     [ pkgs.opencl-headers
       pkgs.ocl-icd ]
   ;
+  shellHooks=''
+    export PATH=$PATH:~/.local/bin
+  '';
 }
