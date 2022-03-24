@@ -785,10 +785,15 @@ static inline double fpconv_f16_f64(f16 x) {
   return (double) x;
 }
 
+#if ISPC
+static inline f16 fpconv_f64_f16(double x) {
+  return (f16) ((float)x);
+}
+#else
 static inline f16 fpconv_f64_f16(double x) {
   return (f16) x;
 }
-
+#endif
 #endif
 
 
