@@ -50,6 +50,7 @@ instance Show EdgeT where
 -- nodeT_to_str
 instance Show NodeT where
     show (SNode stm@(Let pat aux _) _) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
+
     show (RNode name)  = ppr $ "Res: "   ++ ppr name
     show (InNode name) = ppr $ "Input: " ++ ppr name
 
@@ -392,7 +393,7 @@ getStmNames s = case s of
 getStmDeps :: EdgeGenerator
 getStmDeps (SNode s _) = map (\x -> (x, Dep x)) names
   where
-    names = (traceShowId . namesToList . freeIn) s
+    names = (namesToList . freeIn) s
 getStmDeps _ = []
 
 getStmCons :: EdgeGenerator

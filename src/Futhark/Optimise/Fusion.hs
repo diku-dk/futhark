@@ -381,7 +381,7 @@ fuseStms infusible s1 s2 =
         (lam_1_output, lam_2_output) = mapT (namesFromRes . res_from_lambda) (lam_1, lam_2)
 
         fused_inputs = fuse_inputs2 o1 i1 i2
-        lparams = trace (show fused_inputs ++ "vs" ++ show i1) $ change_all (i1 ++ i2)
+        lparams = change_all (i1 ++ i2)
           (lambdaParams lam_1 ++ lambdaParams lam_2)
           fused_inputs
 
@@ -557,25 +557,25 @@ keeptrying f g =
 -- getstms
 
 removeUnusedOutputs :: DepGraphAug
-removeUnusedOutputs g = pure $ gmap (removeUnusedOutputsFromContext g) g
+removeUnusedOutputs g = mapAcross (removeUnusedOutputsFromContext g) g
 
 vNameFromAdj :: Node -> (EdgeT, Node) -> [VName]
 vNameFromAdj n1 (edge, n2) = depsFromEdge (n2,n1, edge)
 
 
-removeUnusedOutputsFromContext :: DepGraph -> DepContext  -> DepContext
+removeUnusedOutputsFromContext :: DepGraph -> DepContext  -> FusionEnvM DepContext
 removeUnusedOutputsFromContext g (incoming, n1, SNode s outputTs, outgoing) =
-  (incoming, n1, SNode new_stm outputTs, outgoing)
+  pure (incoming, n1, SNode new_stm outputTs, outgoing)
   where
     new_stm = removeOutputsExcept (concatMap (vNameFromAdj n1) incoming) s
-removeUnusedOutputsFromContext _ context = context
+removeUnusedOutputsFromContext _ context = pure context
 
 removeOutputsExcept :: [VName] -> Stm SOACS -> Stm SOACS
 removeOutputsExcept toKeep s = case s of
   (Let pats1 aux1 (Op (Futhark.Screma  size i1  (ScremaForm scans_1 red_1 lam_1)))) ->
      Let (basicPat (pats_unchanged ++ pats_new)) aux1 (Op (Futhark.Screma  size i1  (ScremaForm scans_1 red_1 lam_new)))
         where
-          scan_input_size = trace (show toKeep) $ scan_input scans_1
+          scan_input_size = scan_input scans_1
           red_input_size = red_input red_1
           scan_output_size = Futhark.scanResults scans_1
           red_outputs_size = Futhark.redResults red_1
@@ -585,7 +585,7 @@ removeOutputsExcept toKeep s = case s of
 
           (pats_new, other) = unzip $ filter (\(x, _) -> identName x  `elem` toKeep) (zip pats_toChange res_toChange)
           (results, types) = unzip (res_unchanged ++ other)
-          lam_new = lam_1 {
+          lam_new = trace ("getshere: " ++ show toKeep) lam_1 {
             lambdaReturnType = types,
             lambdaBody = (lambdaBody lam_1) {bodyResult = results}
             }
