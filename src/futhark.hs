@@ -22,6 +22,7 @@ import qualified Futhark.CLI.Doc as Doc
 import qualified Futhark.CLI.Literate as Literate
 import qualified Futhark.CLI.Misc as Misc
 import qualified Futhark.CLI.Multicore as Multicore
+import qualified Futhark.CLI.MulticoreISPC as MulticoreISPC
 import qualified Futhark.CLI.MulticoreWASM as MulticoreWASM
 import qualified Futhark.CLI.OpenCL as OpenCL
 import qualified Futhark.CLI.Pkg as Pkg
@@ -59,6 +60,7 @@ commands =
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),
       ("wasm", (WASM.main, "Compile to WASM with sequential C")),
       ("wasm-multicore", (MulticoreWASM.main, "Compile to WASM with multicore C")),
+      ("ispc-multicore", (MulticoreISPC.main, "Compile to multicore ISPC")),
       ("test", (Test.main, "Test Futhark programs.")),
       ("bench", (Bench.main, "Benchmark Futhark programs.")),
       ("dataset", (Dataset.main, "Generate random test data.")),

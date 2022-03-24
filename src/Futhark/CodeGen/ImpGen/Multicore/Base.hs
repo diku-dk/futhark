@@ -269,7 +269,7 @@ extractVectorLane j code = do
   code' <- code
   case code' of
     Imp.SetScalar vname e -> 
-      emit $ Imp.Op $ Imp.ISPCBuiltin vname (nameFromText $ T.pack "extract") [e, ut_exp]    
+      emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp    
     _ -> 
       return ()
 
