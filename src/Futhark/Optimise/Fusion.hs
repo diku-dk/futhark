@@ -122,7 +122,7 @@ fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
 
 fuseGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM [Stm SOACS]
 fuseGraph stms results inputs = do
-    old_reachabilityG <- gets reachabilityG
+    old_reachabilityG <- trace (unlines (map ppr stms)) $ gets reachabilityG
     graph_not_fused <- mkDepGraph stms results (trace (show inputs) inputs)
     modify (\s -> s {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused})
     let graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
@@ -557,18 +557,18 @@ keeptrying f g =
 -- getstms
 
 removeUnusedOutputs :: DepGraphAug
-removeUnusedOutputs g = mapAcross (removeUnusedOutputsFromContext g) g
+removeUnusedOutputs g = mapAcross (removeUnusedOutputsFromContext) g
 
 vNameFromAdj :: Node -> (EdgeT, Node) -> [VName]
 vNameFromAdj n1 (edge, n2) = depsFromEdge (n2,n1, edge)
 
 
-removeUnusedOutputsFromContext :: DepGraph -> DepContext  -> FusionEnvM DepContext
-removeUnusedOutputsFromContext g (incoming, n1, SNode s outputTs, outgoing) =
+removeUnusedOutputsFromContext :: DepContext  -> FusionEnvM DepContext
+removeUnusedOutputsFromContext (incoming, n1, SNode s outputTs, outgoing) =
   pure (incoming, n1, SNode new_stm outputTs, outgoing)
   where
     new_stm = removeOutputsExcept (concatMap (vNameFromAdj n1) incoming) s
-removeUnusedOutputsFromContext _ context = pure context
+removeUnusedOutputsFromContext context = pure context
 
 removeOutputsExcept :: [VName] -> Stm SOACS -> Stm SOACS
 removeOutputsExcept toKeep s = case s of

@@ -109,6 +109,11 @@ runFusionEnvM (FusionEnvM a) env =
 
 
 
+
+
+
+
+
 type DepGraphAug = DepGraph -> FusionEnvM DepGraph
 
 --- Graph Construction ---
@@ -254,13 +259,17 @@ lFromNode g n = label $ lNodeFromNode g n
 labFromEdge :: DepGraph -> DepEdge -> DepNode
 labFromEdge g (n1, n2, lab) = lNodeFromNode g n1
 
-depsFromEdge ::  DepEdge -> [VName]
-depsFromEdge e = case edgeLabel e of
-  (Dep name) -> [name]
-  (InfDep name) -> [name]
-  (Res name) -> [name]
-  (Cons name) -> [name]
+depsFromEdgeT :: EdgeT -> [VName]
+depsFromEdgeT e = case e of
+  Dep name    -> [name]
+  InfDep name -> [name]
+  Res name    -> [name]
+  Cons name   -> [name]
   _ -> []
+
+depsFromEdge ::  DepEdge -> [VName]
+depsFromEdge = depsFromEdgeT . edgeLabel
+
 
 input :: DepGraph -> DepNode -> [DepNode]
 input g node = map (labNode' . context g) $ suc g $ nodeFromLNode node
@@ -328,7 +337,10 @@ addExtraCons g = depGraphInsertEdges new_edges g
   where
     new_edges = concatMap make_edge (labEdges g)
     make_edge :: DepEdge -> [DepEdge]
-    make_edge (from, to, Cons _) = [toLEdge (from, to2) Fake | to2 <- filter (/= from) $ pre g to]
+    make_edge (from, to, Cons cname) = [toLEdge (from, to2) Fake | (to2, _) <- filter (\(tonode,toedge)->
+      tonode /= from
+      && cname `elem` depsFromEdgeT toedge
+      ) $ lpre g to]
     make_edge _ = []
 
 addResEdges :: DepGraphAug
