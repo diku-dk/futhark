@@ -33,7 +33,7 @@ atomicsH :: T.Text
 atomicsH = $(embedStringFile "rts/c/atomics.h")
 {-# NOINLINE atomicsH #-}
 
--- | @rts/c/atomics.h@
+-- | @rts/c/uniform.h@
 uniformH :: T.Text
 uniformH = $(embedStringFile "rts/c/uniform.h")
 {-# NOINLINE uniformH #-}

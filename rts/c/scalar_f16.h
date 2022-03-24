@@ -1,6 +1,6 @@
 // Start of scalar_f16.h.
 
-// Half-precision is emulated if needed (e.g. in straight C) with the
+// Half-precision is emulated if needed (e.g. in straight C) with textern "C" uniform double futrts_ispc_from_bits64(uniform int64_t x);
 // native type used if possible.  The emulation works by typedef'ing
 // 'float' to 'f16', and then implementing all operations on single
 // precision.  To cut down on duplication, we use the same code for
@@ -400,12 +400,21 @@ static inline f16 futrts_hypot16(f16 x, f16 y) {
   return (float16)futrts_hypot32((float)x, (float)y);
 }
 
+
 static inline f16 futrts_gamma16(f16 x) {
-  return 0; //TODO(LOUIS): Call C
+  uniform f16 y[programCount];
+  foreach_active(i){
+    y[i] = (f16)futrts_ispc_gamma32(extract((float)x,i));
+  }
+  return *((varying f16 * uniform)&y);
 }
 
 static inline f16 futrts_lgamma16(f16 x) {
-  return 0; //TODO(LOUIS): Call C
+  uniform f16 y[programCount];
+  foreach_active(i){
+    y[i] = (f16)futrts_ispc_lgamma32(extract((float)x,i));
+  }
+  return *((varying f16 * uniform)&y);
 }
 
 static inline f16 fmod16(f16 x, f16 y) {
@@ -564,9 +573,7 @@ static inline f16 futrts_from_bits16(int16_t x) {
 #elif ISPC
 
 static inline int16_t futrts_to_bits16(f16 x) {
-  return *((int16_t *)(f16 *)&x); //This causes weird error (primitive/float_convop.fut)
-  //return (int16)intbits(x); //Would be the more correct solution but same error
-  //return 0; //TODO: Fix
+  return *((int16_t *)&x); //TODO: Now that linker bug is fixed, try to simplify
 }
 
 static inline f16 futrts_from_bits16(int16_t x) {

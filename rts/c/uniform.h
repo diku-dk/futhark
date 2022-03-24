@@ -1686,7 +1686,7 @@ static inline uniform f16 futrts_fma16(uniform f16 a, uniform f16 b, uniform f16
 }
 
 static inline uniform int16_t futrts_to_bits16(uniform f16 x) {
-  return *((uniform int16_t *)(uniform f16 *)&x); //TODO: Now that linker bug is fixed, try to simplify
+  return *((uniform int16_t *)&x); //TODO: Now that linker bug is fixed, try to simplify
 }
 
 static inline uniform f16 futrts_from_bits16(uniform int16_t x) {
