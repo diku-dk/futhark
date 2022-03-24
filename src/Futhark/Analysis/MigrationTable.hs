@@ -361,11 +361,10 @@ graphStm stm = do
     BasicOp (ArrayLit arr t)
       | isScalar t,
         any (isJust . subExpVar) arr ->
-        -- Migrating an array literal of n scalars saves n synchronous writes.
-        -- If all scalars are constants then the compiler generates more
-        -- efficient code that copies static device memory.
+        -- Migrating an array literal saves a synchronous write for every scalar
+        -- variable it contains. If all scalars are constants then the compiler
+        -- generates more efficient code that copies static device memory.
         graphAutoMove (one bs)
-    BasicOp ArrayLit {} -> graphSimple bs e
     BasicOp UnOp {} -> graphSimple bs e
     BasicOp BinOp {} -> graphSimple bs e
     BasicOp CmpOp {} -> graphSimple bs e
@@ -438,9 +437,27 @@ graphStm stm = do
     -- threaded. For sufficiently large arrays the cost may exceed what is saved
     -- by avoiding reads. We therefore also block these from being migrated,
     -- as well as their parents.
-    BasicOp Concat {} -> graphHostOnly e
-    BasicOp Copy {} -> graphHostOnly e
-    BasicOp Manifest {} -> graphHostOnly e
+    BasicOp ArrayLit {} ->
+      -- An array literal purely of primitive constants can be hoisted out to be
+      -- a top-level constant, unless it is to be returned or consumed.
+      -- Otherwise its runtime implementation will copy a precomputed static
+      -- array and thus behave like a Copy.
+      -- Whether the rows are primitive constants or arrays, without any scalar
+      -- variable operands such ArrayLit cannot directly prevent a scalar read.
+      graphHostOnly e
+    BasicOp Concat {} ->
+      -- Is unlikely to prevent a scalar read as the only SubExp operand in
+      -- practice is a computation of host-only size variables.
+      graphHostOnly e
+    BasicOp Copy {} ->
+      -- Only takes an array operand, so cannot directly prevent a scalar read.
+      graphHostOnly e
+    BasicOp Manifest {} ->
+      -- Takes no scalar operands so cannot directly prevent a scalar read.
+      -- It is introduced as part of the BlkRegTiling kernel optimization and
+      -- is thus unlikely to prevent the migration of a parent which was not
+      -- already by some host-only operation.
+      graphHostOnly e
     BasicOp Iota {} -> graphHostOnly e
     BasicOp Replicate {} -> graphHostOnly e
     -- END
@@ -848,7 +865,7 @@ graphWithAcc bs inputs f = do
 -- the accumulator/operator, its combining function if any, and all associated
 -- 'UpdateAcc' statements outside kernels.
 graphAcc :: Id -> [Type] -> Maybe (Lambda GPU) -> [Delayed] -> Grapher ()
-graphAcc i _ _ [] = addSource (i, Prim Unit) -- only used on device
+graphAcc i _ _ [] = addSource (i, Prim Unit) -- Only used on device.
 graphAcc i types op delayed = do
   -- Accumulators are intended for use within SegOps but in principle the AST
   -- allows their 'UpdateAcc's to be used outside a kernel. This case handles
