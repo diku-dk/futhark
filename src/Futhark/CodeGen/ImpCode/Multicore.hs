@@ -38,9 +38,8 @@ data Multicore
     ForEach VName Exp Code
   | -- | ForEach_Active, only valid in ISPC
     ForEachActive VName Code
-  | -- | Escape hatch for generating builtin ISPC functions
-    -- like extract or broadcast
-    ISPCBuiltin VName Name [Exp]
+  | -- | Extract a lane to a uniform in ISPC
+    ExtractLane VName Exp Exp
   | -- | Unmasked block of code, only valid in ISPC
     UnmaskedBlock Code
   | -- | Retrieve inclusive start and exclusive end indexes of the
@@ -142,8 +141,8 @@ instance Pretty Multicore where
       <+> nestedBlock "{" "}" (ppr body)
   ppr (UnmaskedBlock code) =
     nestedBlock "unmasked {" "}" (ppr code)
-  ppr (ISPCBuiltin dest name args) =
-    ppr dest <+> "<-" <+> ppr name <+> parens (commasep $ map ppr args)
+  ppr (ExtractLane dest tar lane) =
+    ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -172,5 +171,5 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body)
   freeIn' (UnmaskedBlock code) =
     freeIn' code
-  freeIn' (ISPCBuiltin dest _ args) =
-    freeIn' dest <> freeIn' args
+  freeIn' (ExtractLane dest tar lane) =
+    freeIn' dest <> freeIn' tar <> freeIn' lane

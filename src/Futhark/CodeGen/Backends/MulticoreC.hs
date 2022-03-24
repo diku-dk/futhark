@@ -687,21 +687,17 @@ compileOp (ParLoop s' body free) = do
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
 compileOp (Atomic aop) =
   atomicOps aop
-compileOp (ISPCKernel body _ _) = do
+compileOp (ISPCKernel body _ _) =
   scopedBlock body
-compileOp (ForEach i bound body) = do
-  bound' <- GC.compileExp bound
-  body' <- GC.collect $ GC.compileCode body
-  GC.stm [C.cstm|
-    for (typename int64_t $id:i = 0; $id:i < $exp:bound'; $id:i++) {
-      $items:body'
-    }|]
+compileOp (ForEach i bound body) =
+  GC.compileCode (For i bound body)
 compileOp (ForEachActive _ body) =
   scopedBlock body
 compileOp (UnmaskedBlock code) =
   scopedBlock code
-compileOp (ISPCBuiltin {}) =
-  pure ()
+compileOp (ExtractLane dest tar _) = do
+  tar' <- GC.compileExp tar
+  GC.stm [C.cstm|$id:dest = $exp:tar';|]
 
 scopedBlock :: Code -> GC.CompilerM Multicore s ()
 scopedBlock code = do 

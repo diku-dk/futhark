@@ -303,8 +303,9 @@ compileOp (UnmaskedBlock code) = do
       $items:body
     }|]
 
-compileOp (ISPCBuiltin dest name args) = do
-  cargs <- mapM GC.compileExp args
-  GC.stm [C.cstm|$id:dest = $id:name($args:cargs);|]
+compileOp (ExtractLane dest tar lane) = do
+  tar' <- GC.compileExp tar
+  lane' <- GC.compileExp lane
+  GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 
 compileOp op = MC.compileOp op
