@@ -26,12 +26,6 @@ static inline uint16_t add16(uint16_t x, uint16_t y) {
   return x + y;
 }
 
-#if ISPC
-static uniform inline uint32_t add32(uniform uint32_t x, uniform uint32_t y) {
-  return x + y;
-}
-#endif
-
 static inline uint32_t add32(uint32_t x, uint32_t y) {
   return x + y;
 }
