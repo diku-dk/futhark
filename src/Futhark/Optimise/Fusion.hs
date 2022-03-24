@@ -95,7 +95,7 @@ fuseSOACs =
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
   do
-    new_stms <- runFusionEnvM (fuseGraph stmList results []) (FusionEnv {vNameSource = blankNameSource, scope = scopeOf stms})
+    new_stms <- runFusionEnvM (fuseGraphLZ stmList results []) (FusionEnv {vNameSource = blankNameSource, scope = scopeOf stms})
     return $ stmsFromList new_stms
   where
     stmList = stmsToList stms
@@ -106,7 +106,7 @@ fuseConsts outputs stms =
 -- some sort of functional decorator pattern
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun _stmts fun = do
-  new_stms <- runFusionEnvM (fuseGraph stms res (funDefParams  fun)) (FusionEnv {vNameSource = blankNameSource, scope = scopeOf fun})
+  new_stms <- runFusionEnvM (fuseGraphLZ stms res (funDefParams  fun)) (FusionEnv {vNameSource = blankNameSource, scope = scopeOf fun})
   let body = (funDefBody fun) {bodyStms = stmsFromList new_stms}
   return fun {funDefBody = body}
     where
@@ -114,15 +114,22 @@ fuseFun _stmts fun = do
       stms = trace (ppr (bodyStms b)) $ stmsToList $ bodyStms b
       res = bodyResult b
 
-fuseGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> FusionEnvM [Stm SOACS]
+fuseGraphLZ :: [Stm SOACS] -> Result -> [Param DeclType] -> FusionEnvM [Stm SOACS]
+fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
+  where
+    resNames = namesFromRes results
+    inputNames = map paramName $ filter isArray inputs
+
+fuseGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM [Stm SOACS]
 fuseGraph stms results inputs = do
+    old_reachabilityG <- gets reachabilityG
     graph_not_fused <- mkDepGraph stms results (trace (show inputs) inputs)
-    env <- get
-    put $ env {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused}
+    modify (\s -> s {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused})
     let graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
     graph_fused <-  doAllFusion graph_not_fused'
     let graph_fused' = trace (pprg graph_fused) graph_fused
     let stms_new = linearizeGraph graph_fused'
+    modify (\s -> s{reachabilityG = old_reachabilityG})
     return $ trace (unlines (map ppr stms_new)) stms_new
 
 
@@ -620,12 +627,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     doFusionInner :: Body SOACS -> FusionEnvM (Body SOACS)
     doFusionInner b =
       do
-        outerReachabilityG <- gets reachabilityG
-        graph <- mkDepGraphInner stms results inputs
-        modify (\s -> s{reachabilityG = TC.tc $ nmap (const ()) graph})
-        fused_graph <- doAllFusion graph
-        let new_stms = linearizeGraph graph
-        modify (\s -> s {reachabilityG = outerReachabilityG})
+        new_stms <- fuseGraph stms results inputs
         return b {bodyStms = stmsFromList new_stms}
       where
         inputs = concatMap (vNameFromAdj node) incomming

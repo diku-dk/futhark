@@ -181,14 +181,15 @@ isArray p = case paramDec p of
   Array {} -> True
   _ -> False
 
-mkDepGraph :: [Stm SOACS] -> Result -> [FParam SOACS] -> FusionEnvM DepGraph
-mkDepGraph stms res inputs = do
-    addDepEdges (emptyG2 stms resNames inputNames)
-    where
-      resNames = namesFromRes res
-      -- remove inputs which are not arrays - they suck to look at on the graph
-      -- and horizontal fusion on those is a waste.
-      inputNames = map paramName $ filter isArray inputs
+mkDepGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
+mkDepGraph stms res inputs = addDepEdges $ emptyG2 stms res inputs
+
+    -- addDepEdges (emptyG2 stms resNames inputNames)
+    -- where
+    --
+    --   -- remove inputs which are not arrays - they suck to look at on the graph
+    --   -- and horizontal fusion on those is a waste.
+    --   inputNames = map paramName $ filter isArray inputs
 
 addDepEdges :: DepGraphAug
 addDepEdges = applyAugs
