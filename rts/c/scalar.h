@@ -26,12 +26,6 @@ static inline uint16_t add16(uint16_t x, uint16_t y) {
   return x + y;
 }
 
-#if ISPC
-static uniform inline uint32_t add32(uniform uint32_t x, uniform uint32_t y) {
-  return x + y;
-}
-#endif
-
 static inline uint32_t add32(uint32_t x, uint32_t y) {
   return x + y;
 }
@@ -63,12 +57,6 @@ static inline uint8_t mul8(uint8_t x, uint8_t y) {
 static inline uint16_t mul16(uint16_t x, uint16_t y) {
   return x * y;
 }
-
-#if ISPC
-static inline uniform uint32_t mul32(uniform uint32_t x, uniform uint32_t y) {
-  return x * y;
-}
-#endif
 
 static inline uint32_t mul32(uint32_t x, uint32_t y) {
   return x * y;
@@ -1571,12 +1559,22 @@ static inline float futrts_hypot32(float x, float y) {
 
 }
 
+extern "C" uniform int64_t futrts_ispc_gamma32(uniform float x);
 static inline float futrts_gamma32(float x) {
-  return 0.0f; // TODO: Call C
+  uniform float y[programCount];
+  foreach_active(i){
+    y[i] = futrts_ispc_gamma32(extract(x,i));
+  }
+  return *((varying float * uniform)&y);
 }
 
+extern "C" uniform int64_t futrts_ispc_lgamma32(uniform float x);
 static inline float futrts_lgamma32(float x) {
-  return 0.0f; // TODO: Call C
+  uniform float y[programCount];
+  foreach_active(i){
+    y[i] = futrts_ispc_lgamma32(extract(x,i));
+  }
+  return *((varying float * uniform)&y);
 }
 
 static inline float fmod32(float x, float y) {
@@ -1685,10 +1683,16 @@ static inline float futrts_hypot32(float x, float y) {
   return hypotf(x, y);
 }
 
+float futrts_ispc_gamma32(float x) {
+  return tgammaf(x);
+}
 static inline float futrts_gamma32(float x) {
   return tgammaf(x);
 }
 
+float futrts_ispc_lgamma32(float x) {
+  return lgammaf(x);
+}
 static inline float futrts_lgamma32(float x) {
   return lgammaf(x);
 }
@@ -1917,44 +1921,31 @@ static inline double futrts_atan2_64(double x, double y) {
   return atan2(x, y);
 }
 
+extern "C" uniform double futrts_ispc_hypot64(uniform double x, uniform double y);
 static inline double futrts_hypot64(double x, double y) {
-  //if (futrts_isfinite64(x) && futrts_isfinite64(y)) {
-  //  x = abs(x);
-  //  y = abs(y);
-  //  double a;
-  //  double b;
-  //  if (x >= y){
-  //      a = x;
-  //      b = y;
-  //  } else {
-  //      a = y;
-  //      b = x;
-  //  }
-  //  if(b == 0){
-  //    return a;
-  //  }
-  //  int e;
-  //  double an;
-  //  double bn;
-  //  an = frexp (a, &e);
-  //  bn = ldexp (b, - e);
-  //  double cn;
-  //  cn = sqrt (an * an + bn * bn);
-  //  return ldexp (cn, e);
-  //} else {
-  //  #pragma ignore warning(all)
-  //  if (futrts_isinf64 (x) || futrts_isinf64 (y)) return 1.0d / 0.0d; //TODO(LOUIS): Define infinity
-  //  else return x + y;
-  //}
-  return 0.0d; //TODO: Call C
+  uniform double z[programCount];
+  foreach_active(i){
+    z[i] = futrts_ispc_hypot64(extract(x,i),extract(y,i));
+  }
+  return *((varying double * uniform)&z);
 }
 
+extern "C" uniform double futrts_ispc_gamma64(uniform double x);
 static inline double futrts_gamma64(double x) {
-  return 0.0d; //TODO: Call C
+  uniform double y[programCount];
+  foreach_active(i){
+    y[i] = futrts_ispc_gamma64(extract(x,i));
+  }
+  return *((varying double * uniform)&y);
 }
 
+extern "C" uniform double futrts_ispc_lgamma64(uniform double x);
 static inline double futrts_lgamma64(double x) {
-  return 0.0d; //TODO: Call C
+  uniform double y[programCount];
+  foreach_active(i){
+    y[i] = futrts_ispc_lgamma64(extract(x,i));
+  }
+  return *((varying double * uniform)&y);
 }
 
 static inline double futrts_fma64(double a, double b, double c) {
@@ -2041,12 +2032,23 @@ static inline uint64_t fptoui_f64_i64(double x) {
   }
 }
 
+extern "C" uniform int64_t futrts_ispc_to_bits64(uniform double x);
 static inline int64_t futrts_to_bits64(double x) {
-  return 0; //TODO: Call C
+  uniform int64_t y[programCount];
+  foreach_active(i){
+    y[i] = futrts_ispc_to_bits64(extract(x,i));
+  }
+  return *((varying int64_t * uniform)&y);
 }
 
+
+extern "C" uniform double futrts_ispc_from_bits64(uniform int64_t x);
 static inline double futrts_from_bits64(int64_t x) {
-  return 0; //TODO: Call C
+  uniform double y[programCount];
+  foreach_active(i){
+    y[i] = futrts_ispc_from_bits64(extract(x,i));
+  }
+  return *((varying double * uniform)&y);
 }
 
 static inline double fmod64(double x, double y) {
@@ -2227,14 +2229,23 @@ static inline double futrts_atan2_64(double x, double y) {
   return atan2(x, y);
 }
 
+double futrts_ispc_hypot64(double x, double y) {
+  return hypot(x,y);
+}
 static inline double futrts_hypot64(double x, double y) {
   return hypot(x, y);
 }
 
+double futrts_ispc_gamma64(double x) {
+  return tgamma(x);
+}
 static inline double futrts_gamma64(double x) {
   return tgamma(x);
 }
 
+double futrts_ispc_lgamma64(double x) {
+  return lgamma(x);
+}
 static inline double futrts_lgamma64(double x) {
   return lgamma(x);
 }
@@ -2337,7 +2348,26 @@ static inline int64_t futrts_to_bits64(double x) {
   return p.t;
 }
 
+static inline int64_t futrts_ispc_to_bits64(double x) {
+  union {
+    double f;
+    int64_t t;
+  } p;
+
+  p.f = x;
+  return p.t;
+}
+
 static inline double futrts_from_bits64(int64_t x) {
+  union {
+    int64_t f;
+    double t;
+  } p;
+
+  p.f = x;
+  return p.t;
+}
+double futrts_ispc_from_bits64(int64_t x) {
   union {
     int64_t f;
     double t;
