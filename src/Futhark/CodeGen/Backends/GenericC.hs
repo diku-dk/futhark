@@ -428,7 +428,11 @@ runCompilerM ops src userstate (CompilerM m) =
     (newCompilerState src userstate)
 
 withOperations :: Operations op s -> CompilerM op s a -> CompilerM op s a
-withOperations ops = local (\env -> env { envOperations = ops })
+withOperations ops m = do
+  -- TODO(pema): This is a bit of a hack, we don't override opsCompiler
+  -- in order to prevent erroneously switching between ISPC and C
+  orig <- asks envOpCompiler
+  local (\env -> env { envOperations = ops { opsCompiler = orig } }) m
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState

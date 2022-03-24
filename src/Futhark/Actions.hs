@@ -19,6 +19,7 @@ module Futhark.Actions
     compileOpenCLAction,
     compileCUDAAction,
     compileMulticoreAction,
+    compileMulticoreToISPCAction,
     compileMulticoreToWASMAction,
     compilePythonAction,
     compilePyOpenCLAction,
@@ -39,6 +40,7 @@ import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
 import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
+import qualified Futhark.CodeGen.Backends.MulticoreISPC as MulticoreISPC
 import qualified Futhark.CodeGen.Backends.MulticoreWASM as MulticoreWASM
 import qualified Futhark.CodeGen.Backends.PyOpenCL as PyOpenCL
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
@@ -350,6 +352,33 @@ compileMulticoreAction fcfg mode outpath =
     }
   where
     helper prog = do
+      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack versionString) prog
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+          jsonpath = outpath `addExtension` "json"
+
+      case mode of
+        ToLibrary -> do
+          let (header, impl, manifest) = MulticoreC.asLibrary cprog
+          liftIO $ T.writeFile hpath $ cPrependHeader header
+          liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jsonpath manifest
+        ToExecutable -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
+          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+        ToServer -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
+          runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+
+compileMulticoreToISPCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
+compileMulticoreToISPCAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to multicore ISPC",
+      actionDescription = "Compile to multicore ISPC",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
@@ -357,7 +386,7 @@ compileMulticoreAction fcfg mode outpath =
           ispcExtension = "_ispc"
           --ispcbase = outpath <> "_ispc"
           ispcHeader = takeBaseName (outpath <> ispcExtension) `addExtension` "h"
-      cprog <- handleWarnings fcfg $ MulticoreC.compileProg (T.pack $ "#include \"" <> ispcHeader <> "\"") (T.pack versionString) prog
+      cprog <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack $ "#include \"" <> ispcHeader <> "\"") (T.pack versionString) prog
       case mode of -- TODO(pema): Library mode
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
@@ -369,12 +398,10 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ T.writeFile cpath $ cPrependHeader c
           liftIO $ T.writeFile ispcPath ispc
           runISPC ispcPath outpath cpath ispcExtension ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
-          --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           let (c, ispc) = MulticoreC.asISPCServer cprog
           liftIO $ T.writeFile cpath $ cPrependHeader c
           liftIO $ T.writeFile ispcPath ispc
-          --runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
           runISPC ispcPath outpath cpath ispcExtension ["-O3", "--pic"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 pythonCommon ::
