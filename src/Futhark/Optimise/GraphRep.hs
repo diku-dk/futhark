@@ -27,6 +27,7 @@ import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSou
 import Futhark.Pass
 import Data.Foldable (foldlM)
 import Control.Monad.State
+import Futhark.CodeGen.Backends.CCUDA.Boilerplate (failureSwitch)
 
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
@@ -184,19 +185,11 @@ isArray p = case paramDec p of
 mkDepGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = addDepEdges $ emptyG2 stms res inputs
 
-    -- addDepEdges (emptyG2 stms resNames inputNames)
-    -- where
-    --
-    --   -- remove inputs which are not arrays - they suck to look at on the graph
-    --   -- and horizontal fusion on those is a waste.
-    --   inputNames = map paramName $ filter isArray inputs
 
 addDepEdges :: DepGraphAug
 addDepEdges = applyAugs
   [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges] --, appendTransformations]
 
-mkDepGraphInner :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
-mkDepGraphInner stms outputs inputs = addDepEdges $ emptyG2 stms outputs inputs
 
 
 genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug
@@ -230,6 +223,23 @@ label = snd
 stmFromNode :: NodeT -> [Stm SOACS]
 stmFromNode (SNode x _) = [x]
 stmFromNode _ = []
+
+
+
+-- -- started this - but seems unreasonably hard.
+-- finalizeStmFromNode :: NodeT -> FusionEnvM [Stm SOACS]
+-- finalizeStmFromNode (SNode stm transforms)
+--   | HOREPSOAC.nullTransforms transforms = pure [stm]
+--   | otherwise = case stm of
+--     Let pat sa (Op (Futhark.Screma size inputs  (ScremaForm [] [] lam))) ->
+--       let names = patNames pat
+
+
+
+--       pure []
+--     _ -> error "transformations applied to non-map"
+-- finalizeStmFromNode _ = pure []
+
 
 nodeFromLNode :: DepNode -> Node
 nodeFromLNode = fst

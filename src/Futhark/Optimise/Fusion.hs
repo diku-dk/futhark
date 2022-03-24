@@ -201,7 +201,7 @@ isInf :: (Node, Node, EdgeT) -> Bool
 isInf (_,_,e) = case e of
   InfDep vn -> True
   (Cons _) -> False -- you would think this sholud be true - but mabye this works
-  Fake -> True
+  Fake -> True -- this is infusible to avoid simultaneous cons/dep edges
   _ -> False
 
 isCons :: DepEdge -> Bool
@@ -615,26 +615,24 @@ runInnerFusionOnContext :: DepContext -> FusionEnvM DepContext
 runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
   SNode (Let pats aux (If size b1 b2 branchType )) _ ->
     do
-      b1_new <- doFusionInner b1
-      b2_new <- doFusionInner b2
+      b1_new <- doFusionInner b1 []
+      b2_new <- doFusionInner b2 []
       return (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)) mempty, outgoing)
   SNode (Let pats aux (DoLoop params form body)) _ ->
     do
-      b_new <- doFusionInner body
+      b_new <- doFusionInner body (map (paramName . fst) params)
       return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
   _ -> return c
   where
-    doFusionInner :: Body SOACS -> FusionEnvM (Body SOACS)
-    doFusionInner b =
+    doFusionInner :: Body SOACS -> [VName] -> FusionEnvM (Body SOACS)
+    doFusionInner b extraInputs =
       do
         new_stms <- fuseGraph stms results inputs
         return b {bodyStms = stmsFromList new_stms}
       where
-        inputs = concatMap (vNameFromAdj node) incomming
+        inputs = concatMap (vNameFromAdj node) outgoing ++ extraInputs
         stms = stmsToList (bodyStms b)
         results = namesFromRes (bodyResult b)
-
-
 
 -- what about inner lambdas??????
 
