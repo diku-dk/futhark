@@ -1637,7 +1637,7 @@ $timingH
       -- ispc_header =
       clidefs = cliDefs options manifest
       serverdefs = serverDefs options manifest
-      libdefs =
+      libdefs = -- TODO(pema): The uniform define is a hack!
         [untrimming|
 #ifdef _MSC_VER
 #define inline __inline
@@ -1652,6 +1652,7 @@ $header_extra
 $lockH
 
 #define FUTHARK_F64_ENABLED
+#define uniform
 
 $cScalarDefs
 

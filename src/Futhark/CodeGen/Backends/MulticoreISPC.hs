@@ -135,6 +135,19 @@ sharedDef s f = do
   GC.ispcDecl =<< f s'
   return s'
 
+-- TODO(pema, K): This is a ugly hack to work around the 'size' fields
+-- of lexical memory blocks. At the ImpCode level, we cannot know if the size
+-- field exists or not, since we can't know if the memory block is lexical.
+-- Therefore, the size field is not a free variable in Allocation statements
+-- and will be missing the from the free variable set. We manually add it here.
+addLexicalMemSize :: Param -> GC.CompilerM op s [Param]
+addLexicalMemSize param@(MemParam name _) = do
+  cached <- GC.cacheMem name
+  case cached of
+    Just cur_size -> pure [param, ScalarParam cur_size (IntType Int64)]
+    _ -> pure [param]
+addLexicalMemSize param = pure [param]
+
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ()
 compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) = do
@@ -220,7 +233,9 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     }|]
   GC.stm [C.cstm|$escstm:("#endif")|]
 
-compileOp (ISPCKernel body free retvals) = do
+compileOp (ISPCKernel body free' retvals) = do
+  free <- concat <$> mapM addLexicalMemSize free'
+
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
 
