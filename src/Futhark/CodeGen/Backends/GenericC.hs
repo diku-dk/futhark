@@ -83,6 +83,9 @@ module Futhark.CodeGen.Backends.GenericC
     primTypeToCType,
     intTypeToCType,
     copyMemoryDefaultSpace,
+    volQuals,
+    linearCode,
+    allocMem,
   )
 where
 import Control.Monad.Identity

@@ -148,6 +148,70 @@ addLexicalMemSize param@(MemParam name _) = do
     _ -> pure [param]
 addLexicalMemSize param = pure [param]
 
+-- Compile a block of code with ISPC specific semantics, falling back
+-- to generic C when this semantics is not needed.
+compileCodeISPC :: Code -> GC.CompilerM Multicore s ()
+compileCodeISPC (Comment s code) = do
+  xs <- GC.collect $ compileCodeISPC code
+  let comment = "// " ++ s
+  GC.stm
+    [C.cstm|$comment:comment
+              { $items:xs }
+             |]
+compileCodeISPC (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
+  where
+    go (DeclareScalar name vol t : SetScalar dest e : code)
+      | name == dest = do
+        let ct = GC.primTypeToCType t
+        e' <- GC.compileExp e
+        GC.item [C.citem|$tyquals:(GC.volQuals vol) $ty:ct $id:name = $exp:e';|]
+        go code
+    go (x : xs) = compileCodeISPC x >> go xs
+    go [] = pure ()
+compileCodeISPC (Allocate name (Count (TPrimExp e)) space) = do
+  size <- GC.compileExp e
+  cached <- GC.cacheMem name
+  case cached of
+    Just cur_size ->
+      GC.stm
+        [C.cstm|if ($exp:cur_size < $exp:size) {
+                 err = lexical_realloc(&ctx->error, &$exp:name, &$exp:cur_size, $exp:size);
+                 if (err != FUTHARK_SUCCESS) {
+                   goto cleanup;
+                 }
+                }|]
+    _ ->
+      GC.allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
+compileCodeISPC (For i bound body) = do
+  let i' = C.toIdent i
+      t = GC.primTypeToCType $ primExpType bound
+  bound' <- GC.compileExp bound
+  body' <- GC.collect $ compileCodeISPC body
+  GC.stm
+    [C.cstm|for ($ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+            $items:body'
+          }|]
+compileCodeISPC (While cond body) = do
+  cond' <- GC.compileExp $ untyped cond
+  body' <- GC.collect $ compileCodeISPC body
+  GC.stm
+    [C.cstm|while ($exp:cond') {
+            $items:body'
+          }|]
+compileCodeISPC (If cond tbranch fbranch) = do
+  cond' <- GC.compileExp $ untyped cond
+  tbranch' <- GC.collect $ compileCodeISPC tbranch
+  fbranch' <- GC.collect $ compileCodeISPC fbranch
+  GC.stm $ case (tbranch', fbranch') of
+    (_, []) ->
+      [C.cstm|if ($exp:cond') { $items:tbranch' }|]
+    ([], _) ->
+      [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
+    _ ->
+      [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
+compileCodeISPC code =
+  GC.compileCode code
+
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ()
 compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) = do
@@ -269,12 +333,12 @@ compileOp (ISPCKernel body free' retvals) = do
         mapM_ GC.item =<< GC.declAllocatedMem
         free_mem <- GC.freeAllocatedMem
 
-        GC.compileCode body
+        compileCodeISPC body
         GC.stms readback
 
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]
-    --mainBody <- GC.collect $ GC.compileCode body
+
     return
       [C.cedecl|
         export static uniform int $id:s(struct futhark_context uniform * uniform ctx,
@@ -298,21 +362,21 @@ compileOp (ISPCKernel body free' retvals) = do
 
 compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
-  body' <- GC.collect $ GC.compileCode body
+  body' <- GC.collect $ compileCodeISPC body
   GC.stm [C.cstm|
     foreach ($id:i = 0 ... extract($exp:bound', 0)) {
       $items:body'
     }|]
 
 compileOp (ForEachActive name body) = do
-  body' <- GC.collect $ GC.compileCode body
+  body' <- GC.collect $ compileCodeISPC body
   GC.stm [C.cstm|
     foreach_active ($id:name) {
       $items:body'
     }|]
 
 compileOp (UnmaskedBlock code) = do
-  body <- GC.collect $ GC.compileCode code
+  body <- GC.collect $ compileCodeISPC code
   GC.items [C.citems|
     $escstm:("unmasked") {
       $items:body
