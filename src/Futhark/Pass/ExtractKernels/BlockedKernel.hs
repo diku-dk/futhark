@@ -149,10 +149,10 @@ dummyDim pat = do
       ispace,
       forM_ (zip (patNames pat') (patNames pat)) $ \(from, to) -> do
         from_t <- lookupType from
-        letBindNames [to] $
-          BasicOp $
-            Index from $
-              fullSlice from_t [DimFix $ intConst Int64 0]
+        letBindNames [to] . BasicOp $
+          case from_t of
+            Acc {} -> SubExp $ Var from
+            _ -> Index from $ fullSlice from_t [DimFix $ intConst Int64 0]
     )
 
 nonSegRed ::
