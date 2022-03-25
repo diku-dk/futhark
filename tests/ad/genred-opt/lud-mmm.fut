@@ -5,7 +5,6 @@
 -- Alternatively try this with default_tile_size=8 and default_reg_tile_size=2
 -- compiled random input {[256][16][16]f32 [256][16][16]f32 [256][256][16][16]f32} auto output
 
-
 let ludMult [m][b] (top_per: [m][b][b]f32, lft_per: [m][b][b]f32, mat_slice: [m][m][b][b]f32)
               : *[m][m][b][b]f32 =
   -- let top_slice = map transpose top_per in
@@ -21,11 +20,14 @@ let ludMult [m][b] (top_per: [m][b][b]f32, lft_per: [m][b][b]f32, mat_slice: [m]
            ) (zip (mat_arr) (top_per) )
      ) (zip (mat_slice) (lft_per) )
 
-let main [m][b] (top_per: [m][b][b]f32)
+let b = 32i64
+
+let main [m]    (top_per: [m][b][b]f32)
                 (lft_per: [m][b][b]f32)
                 (mat_slice: [m][m][b][b]f32 )
                 (res_adj: [m][m][b][b]f32) =
-    vjp ludMult (top_per, lft_per, mat_slice) res_adj
+    ludMult (top_per, lft_per, mat_slice)
+    --vjp ludMult (top_per, lft_per, mat_slice) res_adj
 
 
 
