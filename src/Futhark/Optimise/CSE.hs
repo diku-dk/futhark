@@ -226,7 +226,7 @@ cseInStm ::
   CSEM rep a
 cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
-  let e' = normExp $substituteNames nsubsts e
+  let e' = normExp $ substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
   if any (bad cse_arrays) $ patElems pat
     then m [Let pat' (StmAux cs attrs edec) e']

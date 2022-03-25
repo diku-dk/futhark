@@ -448,14 +448,14 @@ updateAdjIndex v (check, i) se = do
         =<< case v_adj_t of
           Acc {}
             | check == OutOfBounds ->
-              pure v_adj
+                pure v_adj
             | otherwise -> do
-              dims <- arrayDims <$> lookupType se_v
-              ~[v_adj'] <-
-                tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
-                  letTupExp "acc" $
-                    BasicOp $ UpdateAcc v_adj' (i : map Var is) [Var se_v']
-              pure v_adj'
+                dims <- arrayDims <$> lookupType se_v
+                ~[v_adj'] <-
+                  tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
+                    letTupExp "acc" $
+                      BasicOp $ UpdateAcc v_adj' (i : map Var is) [Var se_v']
+                pure v_adj'
           _ -> do
             let stms s = do
                   v_adj_i <- letExp (baseString v_adj <> "_i") $ BasicOp $ Index v_adj $ fullSlice v_adj_t [DimFix i]

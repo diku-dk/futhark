@@ -230,30 +230,30 @@ diffStm (Let pat aux (BasicOp e)) m =
   diffBasicOp pat aux e m
 diffStm stm@(Let pat _ (Apply f args _ _)) m
   | Just (ret, argts) <- M.lookup f builtInFunctions = do
-    addStm stm
-    m
+      addStm stm
+      m
 
-    pat_adj <- lookupAdjVal =<< patName pat
-    let arg_pes = zipWith primExpFromSubExp argts (map fst args)
-        pat_adj' = primExpFromSubExp ret (Var pat_adj)
-        convert ft tt
-          | ft == tt = id
-        convert (IntType ft) (IntType tt) =
-          ConvOpExp (SExt ft tt)
-        convert (FloatType ft) (FloatType tt) =
-          ConvOpExp (FPConv ft tt)
-        convert ft tt =
-          error $ "diffStm.convert: " ++ pretty (ft, tt)
+      pat_adj <- lookupAdjVal =<< patName pat
+      let arg_pes = zipWith primExpFromSubExp argts (map fst args)
+          pat_adj' = primExpFromSubExp ret (Var pat_adj)
+          convert ft tt
+            | ft == tt = id
+          convert (IntType ft) (IntType tt) =
+            ConvOpExp (SExt ft tt)
+          convert (FloatType ft) (FloatType tt) =
+            ConvOpExp (FPConv ft tt)
+          convert ft tt =
+            error $ "diffStm.convert: " ++ pretty (ft, tt)
 
-    contribs <-
-      case pdBuiltin f arg_pes of
-        Nothing ->
-          error $ "No partial derivative defined for builtin function: " ++ pretty f
-        Just derivs ->
-          forM (zip derivs argts) $ \(deriv, argt) ->
-            letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
+      contribs <-
+        case pdBuiltin f arg_pes of
+          Nothing ->
+            error $ "No partial derivative defined for builtin function: " ++ pretty f
+          Just derivs ->
+            forM (zip derivs argts) $ \(deriv, argt) ->
+              letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
 
-    zipWithM_ updateSubExpAdj (map fst args) contribs
+      zipWithM_ updateSubExpAdj (map fst args) contribs
 diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
   addStm stm
   m
@@ -283,13 +283,13 @@ diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
 diffStms :: Stms SOACS -> ADM ()
 diffStms all_stms
   | Just (stm, stms) <- stmsHead all_stms = do
-    (subst, copy_stms) <- copyConsumedArrsInStm stm
-    let (stm', stms') = substituteNames subst (stm, stms)
-    diffStms copy_stms >> diffStm stm' (diffStms stms')
-    forM_ (M.toList subst) $ \(from, to) ->
-      setAdj from =<< lookupAdj to
+      (subst, copy_stms) <- copyConsumedArrsInStm stm
+      let (stm', stms') = substituteNames subst (stm, stms)
+      diffStms copy_stms >> diffStm stm' (diffStms stms')
+      forM_ (M.toList subst) $ \(from, to) ->
+        setAdj from =<< lookupAdj to
   | otherwise =
-    pure ()
+      pure ()
 
 -- | Preprocess statements before differentiating.
 -- For now, it's just stripmining.
