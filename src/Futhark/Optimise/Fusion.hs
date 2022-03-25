@@ -264,7 +264,7 @@ tryFuseNodeInGraph node_to_fuse g =
   then applyAugs (map (tryFuseNodesInGraph node_to_fuse_id) fuses_with) g
   else pure g
   where
-    fuses_with = map nodeFromLNode $ output g node_to_fuse
+    fuses_with = map fst $ filter (isDep . snd) $ lpre g (nodeFromLNode node_to_fuse)
     node_to_fuse_id = nodeFromLNode node_to_fuse
 
 tryFuseNodesInGraph :: Node -> Node -> DepGraphAug
