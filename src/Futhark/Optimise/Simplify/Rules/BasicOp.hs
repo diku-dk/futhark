@@ -346,8 +346,7 @@ ruleBasicOp vtable pat aux (Update safety arr_x (Slice slice_x) (Var v))
   | Just _ <- sliceIndices (Slice slice_x),
     Just (Index arr_y (Slice slice_y), cs_y) <- ST.lookupBasicOp v vtable,
     ST.available arr_y vtable,
-    -- XXX: we should check for proper aliasing here instead.
-    arr_y /= arr_x,
+    not $ ST.aliases arr_x arr_y vtable,
     Just (slice_x_bef, DimFix i, []) <- focusNth (length slice_x - 1) slice_x,
     Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = Simplify $ do
       let slice_x' = Slice $ slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]
