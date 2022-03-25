@@ -38,7 +38,6 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
-import qualified Data.Text as T
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -261,7 +260,7 @@ generateUniformizeLoop m = do
   body <- collect $ do
     addLoopVar i Int64
     m $ Imp.le64 i
-  emit $ Imp.Op $ Imp.ForEachActive i $ body
+  emit $ Imp.Op $ Imp.ForEachActive i body
 
 extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.Code -> MulticoreGen ()
 extractVectorLane j code = do

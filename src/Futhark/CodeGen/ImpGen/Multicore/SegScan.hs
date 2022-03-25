@@ -5,7 +5,6 @@ where
 
 import Control.Monad
 import Data.List (zip4)
-import Debug.Trace
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -65,7 +64,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
 
     --traceM $ "arrays: " ++ show arrays ++ " scalars " ++ show scalars
     let (scanStage1, scanStage3)
-         | scalars  = (scanStage1Ispc, scanStage3Ispc) 
+         | scalars  = (scanStage1Ispc, scanStage3Ispc)
          | otherwise = (scanStage1PureC, scanStage3PureC)
 
     scanStage1 pat space scan_ops kbody
@@ -74,7 +73,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
       scan_ops2 <- renameSegBinOp scan_ops
       scanStage2 pat nsubtasks space scan_ops2 kbody
       scan_ops3 <- renameSegBinOp scan_ops
-      scanStage3 pat space scan_ops3 kbody  
+      scanStage3 pat space scan_ops3 kbody
 
 scanStage1Ispc ::
   Pat MCMem ->
@@ -106,8 +105,7 @@ scanStage1Ispc pat space scan_ops kbody = do
             [] -> pure $ paramName p
             _ -> do
               let pt = elemType t
-              name <- sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-              pure name
+              sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 
         -- Now neutral-initialise the accumulator.
         sLoopNest (segBinOpShape scan_op) $ \vec_is ->
@@ -151,7 +149,7 @@ scanStage1Ispc pat space scan_ops kbody = do
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
-  
+
 scanStage1PureC ::
   Pat MCMem ->
   SegSpace ->
@@ -302,8 +300,7 @@ scanStage3Ispc pat space scan_ops kbody = do
             [] -> pure $ paramName p
             _ -> do
               let pt = elemType t
-              name <- sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-              pure name
+              sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 
         -- Initialise the accumulator with neutral from previous chunk.
         -- or read neutral if first ``iter``
