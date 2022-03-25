@@ -350,7 +350,7 @@ graphStm stm = do
   -- IMPORTANT! It is generally assumed that all scalars within types and
   -- shapes are present on host. Any expression of a type wherein one of its
   -- scalar operands appears must therefore ensure that that scalar operand is
-  -- marked as a size variable (see 'hostSize' function).
+  -- marked as a size variable (see the 'hostSize' function).
   case e of
     BasicOp (SubExp se) -> do
       graphSimple bs e
@@ -472,6 +472,28 @@ graphStm stm = do
     WithAcc inputs f ->
       graphWithAcc bs inputs f
     Op _ ->
+      -- At the time of writing no prior pass introduces GPUBody statements
+      -- into the AST. If this changes then GPUBody kernels may block the
+      -- migration of parent statements. One of at least two things can be done
+      -- to remedy this, should it happen:
+      --
+      --  (1) Do not treat GPUBody as host-only. A GPUBody that is migrated
+      --      into another GPUBody is then replaced by the statements of its
+      --      body, followed by a binding of each of its results wrapped as
+      --      an array with an outer dimension of one.
+      --      Handling a GPUBody inside an accumulator operator requires
+      --      special consideration (see 'graphAcc'). The most simple solution
+      --      is probably to just let GPUBody kernels be considered host-only
+      --      statements within such operators, where they are unlikely to
+      --      happen.
+      --
+      --  (2) Do not treat GPUBody as host-only. Add support in the code
+      --      generator for embedding GPUBody within other GPUBody kernels
+      --      and SegOps.
+      --      This might make sense if accumulators begin to see usage outside
+      --      kernels and a given accumulator operator is used on both host and
+      --      device.
+      -- .
       graphHostOnly e
   where
     one [x] = x
@@ -1360,7 +1382,9 @@ asks :: (Env -> a) -> Grapher a
 asks = lift . R.asks
 
 -- | Register that the body contains a host-only statement. This means its
--- parent statement and any parent bodies themselves are host-only.
+-- parent statement and any parent bodies themselves are host-only. A host-only
+-- statement should not be migrated, either because it cannot run on device or
+-- because it would be inefficient to do so.
 tellHostOnly :: Grapher ()
 tellHostOnly =
   modify $ \st -> st {stateStats = (stateStats st) {bodyHostOnly = True}}
