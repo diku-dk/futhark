@@ -371,9 +371,11 @@ fuseContexts _ _ _ = Nothing
 fuseStms :: [VName] ->  Stm SOACS -> Stm SOACS -> Maybe (Stm SOACS)
 fuseStms infusible s1 s2 =
   case (s1, s2) of
-    (Let pats1 aux1 (Op (Futhark.Screma  _     i1  (ScremaForm scans_1 red_1 lam_1))),
-     Let pats2 aux2 (Op (Futhark.Screma  s_exp i2  (ScremaForm scans_2 red_2 lam_2)))) ->
-          Just $ Let (basicPat ids) aux2 (Op (Futhark.Screma s_exp fused_inputs
+    (Let pats1 aux1 (Op (Futhark.Screma  s_exp1 i1  (ScremaForm scans_1 red_1 lam_1))),
+     Let pats2 aux2 (Op (Futhark.Screma  s_exp2 i2  (ScremaForm scans_2 red_2 lam_2))))
+     | s_exp1 == s_exp2
+     ->
+          Just $ Let (basicPat ids) aux2 (Op (Futhark.Screma s_exp2 fused_inputs
             (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam)))
       where
         (o1, o2) = mapT (patNames . stmPat) (s1, s2)
@@ -439,18 +441,20 @@ fuseStms infusible s1 s2 =
           lambdaBody = (lambdaBody lam') {bodyResult = body_res}
           }
     -- vertical map-scatter fusion
-    ( Let pats1 aux1 (Op (Futhark.Screma  _ i1 (ScremaForm [] [] lam_1))),
-      Let pats2 aux2 (Op (Futhark.Scatter exp i2 lam_2 other)))
+    ( Let pats1 aux1 (Op (Futhark.Screma  s_exp1 i1 (ScremaForm [] [] lam_1))),
+      Let pats2 aux2 (Op (Futhark.Scatter s_exp2 i2 lam_2 other)))
       | L.null infusible -- only if map outputs are used exclusivly by the scatter
-      -> Just $ Let pats2 aux2 (Op (Futhark.Scatter exp fused_inputs lam other))
+      && s_exp1 == s_exp2
+      -> Just $ Let pats2 aux2 (Op (Futhark.Scatter s_exp2 fused_inputs lam other))
         where
         (o1, o2) = mapT (patNames . stmPat) (s1, s2)
         (lam, fused_inputs) = vFuseLambdas lam_1 i1 o1 lam_2 i2 o2
     -- vertical map-histogram fusion
-    ( Let pats1 aux1 (Op (Futhark.Screma  _ i1 (ScremaForm [] [] lam_1))),
-      Let pats2 aux2 (Op (Futhark.Hist exp i2 other lam_2)))
+    ( Let pats1 aux1 (Op (Futhark.Screma s_exp1 i1 (ScremaForm [] [] lam_1))),
+      Let pats2 aux2 (Op (Futhark.Hist   s_exp2 i2 other lam_2)))
       | L.null infusible -- only if map outputs are used exclusivly by the scatter
-        -> Just $ Let pats2 aux2 (Op (Futhark.Hist exp fused_inputs other lam))
+      && s_exp1 == s_exp2
+        -> Just $ Let pats2 aux2 (Op (Futhark.Hist s_exp2 fused_inputs other lam))
           where
             (o1, o2) = mapT (patNames . stmPat) (s1, s2)
             (lam, fused_inputs) = vFuseLambdas lam_1 i1 o1 lam_2 i2 o2
