@@ -471,29 +471,11 @@ graphStm stm = do
       graphLoop bs params lform body
     WithAcc inputs f ->
       graphWithAcc bs inputs f
+    Op GPUBody {} ->
+      -- A GPUBody can be migrated into a parent GPUBody by replacing it with
+      -- its body statements and binding its return values inside 'ArrayLit's.
+      tellGPUBody
     Op _ ->
-      -- At the time of writing no prior pass introduces GPUBody statements
-      -- into the AST. If this changes then GPUBody kernels may block the
-      -- migration of parent statements. One of at least two things can be done
-      -- to remedy this, should it happen:
-      --
-      --  (1) Do not treat GPUBody as host-only. A GPUBody that is migrated
-      --      into another GPUBody is then replaced by the statements of its
-      --      body, followed by a binding of each of its results wrapped as
-      --      an array with an outer dimension of one.
-      --      Handling a GPUBody inside an accumulator operator requires
-      --      special consideration (see 'graphAcc'). The most simple solution
-      --      is probably to just let GPUBody kernels be considered host-only
-      --      statements within such operators, where they are unlikely to
-      --      happen.
-      --
-      --  (2) Do not treat GPUBody as host-only. Add support in the code
-      --      generator for embedding GPUBody within other GPUBody kernels
-      --      and SegOps.
-      --      This might make sense if accumulators begin to see usage outside
-      --      kernels and a given accumulator operator is used on both host and
-      --      device.
-      -- .
       graphHostOnly e
   where
     one [x] = x
@@ -900,7 +882,12 @@ graphAcc i types op delayed = do
   let lambda = fromMaybe (Lambda [] (Body () SQ.empty []) []) op
   let m = graphBody (lambdaBody lambda)
   let stats = R.runReader (evalStateT (captureBodyStats m) st) env
-  let host_only = bodyHostOnly stats
+  -- We treat GPUBody kernels as host-only to not bother rewriting them inside
+  -- operators and to simplify the analysis. They are unlikely to occur anyway.
+  --
+  -- NOTE: Performance may degrade if a GPUBody is replaced with its contents
+  --       but the containing operator also is used on host.
+  let host_only = bodyHostOnly stats || bodyHasGPUBody stats
 
   -- op operands are read from arrays and written back so if any of the operands
   -- are scalar then a read can be avoided by moving the UpdateAcc usages to
@@ -1267,6 +1254,8 @@ type Operands = IdSet
 data BodyStats = BodyStats
   { -- | Whether the body contained any host-only statements.
     bodyHostOnly :: Bool,
+    -- | Whether the body contained any GPUBody kernels.
+    bodyHasGPUBody :: Bool,
     -- | Whether the body performed any reads.
     bodyReads :: Bool,
     -- | All scalar variables represented in the graph that have been used
@@ -1281,9 +1270,10 @@ data BodyStats = BodyStats
   }
 
 instance Semigroup BodyStats where
-  (BodyStats ho1 r1 o1 hop1) <> (BodyStats ho2 r2 o2 hop2) =
+  (BodyStats ho1 gb1 r1 o1 hop1) <> (BodyStats ho2 gb2 r2 o2 hop2) =
     BodyStats
       { bodyHostOnly = ho1 || ho2,
+        bodyHasGPUBody = gb1 || gb2,
         bodyReads = r1 || r2,
         bodyOperands = IS.union o1 o2,
         bodyHostOnlyParents = IS.union hop1 hop2
@@ -1293,6 +1283,7 @@ instance Monoid BodyStats where
   mempty =
     BodyStats
       { bodyHostOnly = False,
+        bodyHasGPUBody = False,
         bodyReads = False,
         bodyOperands = IS.empty,
         bodyHostOnlyParents = IS.empty
@@ -1388,6 +1379,11 @@ asks = lift . R.asks
 tellHostOnly :: Grapher ()
 tellHostOnly =
   modify $ \st -> st {stateStats = (stateStats st) {bodyHostOnly = True}}
+
+-- | Register that the body contains a GPUBody kernel.
+tellGPUBody :: Grapher ()
+tellGPUBody =
+  modify $ \st -> st {stateStats = (stateStats st) {bodyHasGPUBody = True}}
 
 -- | Register that the current body contains a statement that reads device
 -- memory.

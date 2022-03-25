@@ -5,6 +5,7 @@ import Control.Monad.Trans.Class
 import qualified Control.Monad.Trans.Reader as R
 import Control.Monad.Trans.State.Strict hiding (State)
 import Control.Parallel.Strategies (parMap, rpar)
+import Data.Foldable
 import qualified Data.IntMap.Strict as IM
 import Data.List (unzip4, zip4)
 import qualified Data.Map.Strict as M
@@ -474,9 +475,9 @@ addReadsToKernelBody kbody = do
 addReadsHelper :: (FreeIn a, Substitute a) => a -> ReduceM (a, Stms GPU)
 addReadsHelper x = do
   let from = namesToList (freeIn x)
-  (to, st) <- runStateT (mapM rename from) initialCloneState
+  (to, st) <- runStateT (mapM rename from) initialRState
   let rename_map = M.fromList (zip from to)
-  pure (substituteNames rename_map x, clonePrologue st)
+  pure (substituteNames rename_map x, rewritePrologue st)
 
 -- | Migrate a statement to device, ensuring all its bound variables used on
 -- host will remain available with the same names.
@@ -489,7 +490,7 @@ moveStm out (Let pat aux (BasicOp (ArrayLit [se] t')))
       let e' = BasicOp (SubExp se)
       let stm' = Let pat' aux e'
 
-      gpubody <- inGPUBody (cloneStm stm')
+      gpubody <- inGPUBody (rewriteStm stm')
       pure (out |> gpubody {stmPat = pat})
 moveStm out (Let pat aux (BasicOp (Replicate (Shape (dim : dims)) se)))
   | dim == intConst Int64 1,
@@ -503,11 +504,11 @@ moveStm out (Let pat aux (BasicOp (Replicate (Shape (dim : dims)) se)))
             _ -> Replicate (Shape dims) se
       let stm' = Let pat' aux e'
 
-      gpubody <- inGPUBody (cloneStm stm')
+      gpubody <- inGPUBody (rewriteStm stm')
       pure (out |> gpubody {stmPat = pat})
 moveStm out stm = do
   -- Move the statement to device.
-  gpubody <- inGPUBody (cloneStm stm)
+  gpubody <- inGPUBody (rewriteStm stm)
 
   -- Read non-scalars and scalars that are used on host.
   let arrs = zip (patElems $ stmPat stm) (patElems $ stmPat gpubody)
@@ -529,10 +530,10 @@ moveStm out stm = do
 
 -- | Create a GPUBody kernel that executes a single statement, returning its
 -- result values wrapped in single element arrays.
-inGPUBody :: CloneM (Stm GPU) -> ReduceM (Stm GPU)
+inGPUBody :: RewriteM (Stm GPU) -> ReduceM (Stm GPU)
 inGPUBody m = do
-  (stm, st) <- runStateT m initialCloneState
-  let prologue = clonePrologue st
+  (stm, st) <- runStateT m initialRState
+  let prologue = rewritePrologue st
 
   let pes = patElems (stmPat stm)
   pat <- Pat <$> mapM arrayizePatElem pes
@@ -543,70 +544,86 @@ inGPUBody m = do
   let e = Op (GPUBody types body)
   pure (Let pat aux e)
 
-type CloneM = StateT CloneState ReduceM
+type RewriteM = StateT RState ReduceM
 
-data CloneState = CloneState
-  { -- | Maps variables in the original program to names to be used by clones.
-    cloneRenames :: IM.IntMap VName,
-    -- | Statements to be added as a prologue before cloned statements.
-    clonePrologue :: Stms GPU
+data RState = RState
+  { -- | Maps variables in the original program to names to be used by rewrites.
+    rewriteRenames :: IM.IntMap VName,
+    -- | Statements to be added as a prologue before rewritten statements.
+    rewritePrologue :: Stms GPU
   }
 
-initialCloneState :: CloneState
-initialCloneState =
-  CloneState
-    { cloneRenames = IM.empty,
-      clonePrologue = empty
+initialRState :: RState
+initialRState =
+  RState
+    { rewriteRenames = IM.empty,
+      rewritePrologue = empty
     }
 
--- | Create a fresh name, registering which name it is based on.
-cloneName :: VName -> CloneM VName
-cloneName n = do
+-- | Create a fresh name, registering which name it is a rewrite of.
+rewriteName :: VName -> RewriteM VName
+rewriteName n = do
   n' <- lift (newName n)
-  modify $ \st -> st {cloneRenames = IM.insert (baseTag n) n' (cloneRenames st)}
+  modify $ \st -> st {rewriteRenames = IM.insert (baseTag n) n' (rewriteRenames st)}
   pure n'
 
-cloneBody :: Body GPU -> CloneM (Body GPU)
-cloneBody (Body _ stms res) = do
-  stms' <- cloneStms stms
+rewriteBody :: Body GPU -> RewriteM (Body GPU)
+rewriteBody (Body _ stms res) = do
+  stms' <- rewriteStms stms
   res' <- renameResult res
   pure (Body () stms' res')
 
-cloneStms :: Stms GPU -> CloneM (Stms GPU)
-cloneStms = mapM cloneStm
+rewriteStms :: Stms GPU -> RewriteM (Stms GPU)
+rewriteStms = foldM rewriteTo empty
+  where
+    rewriteTo out stm = do
+      stm' <- rewriteStm stm
+      pure $ case stmExp stm' of
+        Op (GPUBody _ (Body _ stms res)) ->
+          let pes = patElems (stmPat stm')
+           in foldl' bnd (out >< stms) (zip pes res)
+        _ -> out |> stm'
 
-cloneStm :: Stm GPU -> CloneM (Stm GPU)
-cloneStm (Let pat aux e) = do
-  e' <- cloneExp e
-  pat' <- clonePat pat
-  aux' <- cloneStmAux aux
+    bnd :: Stms GPU -> (PatElem Type, SubExpRes) -> Stms GPU
+    bnd out (pe, SubExpRes cs se)
+      | Just t' <- peelArray 1 (typeOf pe) =
+        out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ ArrayLit [se] t')
+      | otherwise =
+        out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ SubExp se)
+
+-- | NOTE: GPUBody kernels must be rewritten through 'rewriteStms'.
+rewriteStm :: Stm GPU -> RewriteM (Stm GPU)
+rewriteStm (Let pat aux e) = do
+  e' <- rewriteExp e
+  pat' <- rewritePat pat
+  aux' <- rewriteStmAux aux
   pure (Let pat' aux' e')
 
-clonePat :: Pat Type -> CloneM (Pat Type)
-clonePat pat = Pat <$> mapM clonePatElem (patElems pat)
+rewritePat :: Pat Type -> RewriteM (Pat Type)
+rewritePat pat = Pat <$> mapM rewritePatElem (patElems pat)
 
-clonePatElem :: PatElem Type -> CloneM (PatElem Type)
-clonePatElem (PatElem n t) = do
-  n' <- cloneName n
+rewritePatElem :: PatElem Type -> RewriteM (PatElem Type)
+rewritePatElem (PatElem n t) = do
+  n' <- rewriteName n
   t' <- renameType t
   pure (PatElem n' t')
 
-cloneStmAux :: StmAux () -> CloneM (StmAux ())
-cloneStmAux (StmAux certs attrs _) = do
+rewriteStmAux :: StmAux () -> RewriteM (StmAux ())
+rewriteStmAux (StmAux certs attrs _) = do
   certs' <- renameCerts certs
   pure (StmAux certs' attrs ())
 
-cloneExp :: Exp GPU -> CloneM (Exp GPU)
-cloneExp =
+rewriteExp :: Exp GPU -> RewriteM (Exp GPU)
+rewriteExp =
   mapExpM $
     Mapper
       { mapOnSubExp = renameSubExp,
-        mapOnBody = const cloneBody,
+        mapOnBody = const rewriteBody,
         mapOnVName = rename,
         mapOnRetType = renameExtType,
         mapOnBranchType = renameExtType,
-        mapOnFParam = cloneParam,
-        mapOnLParam = cloneParam,
+        mapOnFParam = rewriteParam,
+        mapOnLParam = rewriteParam,
         mapOnOp = const opError
       }
   where
@@ -614,51 +631,51 @@ cloneExp =
     -- table produced by the MigrationTable module.
     opError = compilerBugS "Cannot migrate a host-only operation to device."
 
-cloneParam :: Param (TypeBase Shape u) -> CloneM (Param (TypeBase Shape u))
-cloneParam (Param attrs n t) = do
-  n' <- cloneName n
+rewriteParam :: Param (TypeBase Shape u) -> RewriteM (Param (TypeBase Shape u))
+rewriteParam (Param attrs n t) = do
+  n' <- rewriteName n
   t' <- renameType t
   pure (Param attrs n' t')
 
--- | Return the name to use for a clone dependency.
-rename :: VName -> CloneM VName
+-- | Return the name to use for a rewrite dependency.
+rename :: VName -> RewriteM VName
 rename n = do
   st <- get
-  let renames = cloneRenames st
+  let renames = rewriteRenames st
   let idx = baseTag n
   case IM.lookup idx renames of
     Just n' -> pure n'
     _ ->
       do
-        let stms = clonePrologue st
+        let stms = rewritePrologue st
         (stms', n') <- lift $ useScalar stms n
         modify $ \st' ->
           st'
-            { cloneRenames = IM.insert idx n' renames,
-              clonePrologue = stms'
+            { rewriteRenames = IM.insert idx n' renames,
+              rewritePrologue = stms'
             }
         pure n'
 
-renameResult :: Result -> CloneM Result
+renameResult :: Result -> RewriteM Result
 renameResult = mapM renameSubExpRes
 
-renameSubExpRes :: SubExpRes -> CloneM SubExpRes
+renameSubExpRes :: SubExpRes -> RewriteM SubExpRes
 renameSubExpRes (SubExpRes certs se) = do
   certs' <- renameCerts certs
   se' <- renameSubExp se
   pure (SubExpRes certs' se')
 
-renameCerts :: Certs -> CloneM Certs
+renameCerts :: Certs -> RewriteM Certs
 renameCerts cs = Certs <$> mapM rename (unCerts cs)
 
-renameSubExp :: SubExp -> CloneM SubExp
+renameSubExp :: SubExp -> RewriteM SubExp
 renameSubExp (Var n) = Var <$> rename n
 renameSubExp se = pure se
 
-renameType :: TypeBase Shape u -> CloneM (TypeBase Shape u)
+renameType :: TypeBase Shape u -> RewriteM (TypeBase Shape u)
 -- Note: mapOnType also maps the VName token of accumulators
 renameType = mapOnType renameSubExp
 
-renameExtType :: TypeBase ExtShape u -> CloneM (TypeBase ExtShape u)
+renameExtType :: TypeBase ExtShape u -> RewriteM (TypeBase ExtShape u)
 -- Note: mapOnExtType also maps the VName token of accumulators
 renameExtType = mapOnExtType renameSubExp
