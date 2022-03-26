@@ -41,7 +41,6 @@ module Futhark.CodeGen.Backends.GenericC
     contextContents,
     contextFinalInits,
     runCompilerM,
-    withOperations,
     inNewFunction,
     cachingMemory,
     compileFun,
@@ -84,6 +83,7 @@ module Futhark.CodeGen.Backends.GenericC
     intTypeToCType,
     copyMemoryDefaultSpace,
     volQuals,
+    variQuals,
     linearCode,
     allocMem,
   )
@@ -182,12 +182,12 @@ type MemoryType op s = SpaceId -> CompilerM op s C.Type
 -- | Write a scalar to the given memory block with the given element
 -- index and in the given memory space.
 type WriteScalar op s =
-  C.Exp -> C.Exp -> C.Type -> SpaceId -> Qualifier -> C.Exp -> CompilerM op s ()
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> C.Exp -> CompilerM op s ()
 
 -- | Read a scalar from the given memory block with the given element
 -- index and in the given memory space.
 type ReadScalar op s =
-  C.Exp -> C.Exp -> C.Type -> SpaceId -> Qualifier -> CompilerM op s C.Exp
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> CompilerM op s C.Exp
 
 -- | Allocate a memory block of the given size and with the given tag
 -- in the given memory space, saving a reference in the given variable
@@ -429,13 +429,6 @@ runCompilerM ops src userstate (CompilerM m) =
   runState
     (runReaderT m (CompilerEnv ops mempty))
     (newCompilerState src userstate)
-
-withOperations :: Operations op s -> CompilerM op s a -> CompilerM op s a
-withOperations ops m = do
-  -- TODO(pema): This is a bit of a hack, we don't override opsCompiler
-  -- in order to prevent erroneously switching between ISPC and C
-  orig <- asks envOpCompiler
-  local (\env -> env { envOperations = ops { opsCompiler = orig } }) m
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
@@ -1999,11 +1992,14 @@ derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
   [C.cexp|(($ty:res_t)$exp:ptr)[$exp:i]|]
 
-volQuals :: Qualifier -> [C.TypeQual]
+volQuals :: Volatility -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
-volQuals Uniform  = [C.ctyquals|uniform|]
-volQuals Varying = []
+
+variQuals :: Variability  -> [C.TypeQual]
+variQuals Uniform = [C.ctyquals|uniform|]
+variQuals Unbound = []
+variQuals Varying = []
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
@@ -2278,8 +2274,6 @@ compileCode (Read x src (Count iexp) _ ScalarSpace {} _) = do
   stm [C.cstm|$id:x = $id:src[$exp:iexp'];|]
 compileCode (DeclareMem name space) =
   declMem name space
-
--- TODO (obp) -- target this
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]

@@ -11,6 +11,7 @@ module Futhark.CodeGen.ImpCode.Multicore
     SchedulerInfo (..),
     AtomicOp (..),
     ParallelTask (..),
+    lexicalMemoryUsageMC,
     module Futhark.CodeGen.ImpCode,
   )
 where
@@ -18,6 +19,7 @@ where
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Util.Pretty
+import qualified Data.Map as M
 
 -- | An imperative program.
 type Program = Imp.Functions Multicore
@@ -40,8 +42,8 @@ data Multicore
     ForEachActive VName Code
   | -- | Extract a lane to a uniform in ISPC
     ExtractLane VName Exp Exp
-  | -- | Unmasked block of code, only valid in ISPC
-    UnmaskedBlock Code
+  | -- | Specifies the variability of all declarations within this scope
+    VariabilityBlock Variability Code
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -139,8 +141,8 @@ instance Pretty Multicore where
   ppr (ForEachActive i body) =
     "foreach_active" <+> ppr i
       <+> nestedBlock "{" "}" (ppr body)
-  ppr (UnmaskedBlock code) =
-    nestedBlock "unmasked {" "}" (ppr code)
+  ppr (VariabilityBlock qual code) =
+    nestedBlock (show qual <> " {") "}" (ppr code)
   ppr (ExtractLane dest tar lane) =
     ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
 
@@ -169,7 +171,53 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body <> freeIn' bound)
   freeIn' (ForEachActive i body) =
     fvBind (oneName i) (freeIn' body)
-  freeIn' (UnmaskedBlock code) =
+  freeIn' (VariabilityBlock _ code) =
     freeIn' code
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
+
+
+-- TODO(pema): This is a bit hacky
+-- Like @lexicalMemoryUsage@, but traverses inner ops
+lexicalMemoryUsageMC :: Function -> M.Map VName Space
+lexicalMemoryUsageMC func =
+  M.filterWithKey (const . not . (`nameIn` nonlexical)) $
+    declared $ Imp.functionBody func
+  where
+    nonlexical =
+      set (Imp.functionBody func)
+        <> namesFromList (map Imp.paramName (Imp.functionOutput func))
+
+    go _ f (x Imp.:>>: y) = f x <> f y
+    go _ f (Imp.If _ x y) = f x <> f y
+    go _ f (Imp.For _ _ x) = f x
+    go _ f (Imp.While _ x) = f x
+    go _ f (Imp.Comment _ x) = f x
+    go opt f (Imp.Op op) = opt f op
+    go _ _ _ = mempty
+
+    -- We want nested SetMem's to be visible so we don't erroneously
+    -- treat a memblock that needs refcounting as lexical
+    goOpSet f (ISPCKernel code _ _) = go goOpSet f code
+    goOpSet f (ForEach _ _ body) = go goOpSet f body
+    goOpSet f (ForEachActive _ body) = go goOpSet f body
+    goOpSet f (VariabilityBlock _ code) = go goOpSet f code
+    goOpSet _ _ = mempty
+
+    -- We want nested declarations to NOT be visible so we don't
+    -- declare the same memory multiple times in different scopes.
+    goOpDeclare f (ForEach _ _ body) = go goOpDeclare f body
+    goOpDeclare f (ForEachActive _ body) = go goOpDeclare f body
+    goOpDeclare f (VariabilityBlock _ code) = go goOpDeclare f code
+    goOpDeclare _ _ = mempty
+
+    declared (Imp.DeclareMem mem spc) =
+      M.singleton mem spc
+    declared x = go goOpDeclare declared x
+
+    set (Imp.SetMem x y _) = namesFromList [x, y]
+    set (Imp.Call _ _ args) = foldMap onArg args
+      where
+        onArg Imp.ExpArg {} = mempty
+        onArg (Imp.MemArg x) = oneName x
+    set x = go goOpSet set x

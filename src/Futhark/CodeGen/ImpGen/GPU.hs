@@ -44,8 +44,7 @@ callKernelOperations =
       opsCopyCompiler = callKernelCopy,
       opsOpCompiler = opCompiler,
       opsStmsCompiler = defCompileStms,
-      opsAllocCompilers = mempty,
-      opsDeclareCompiler = defDeclare
+      opsAllocCompilers = mempty
     }
 
 openclAtomics, cudaAtomics :: AtomicBinOp

@@ -29,7 +29,8 @@ module Futhark.CodeGen.ImpCode
     PrimValue (..),
     Exp,
     TExp,
-    Qualifier (..),
+    Volatility (..),
+    Variability (..),
     Arg (..),
     var,
     ErrorMsg (..),
@@ -209,7 +210,7 @@ data Code a
     -- can be used for reading or writing.
     DeclareMem VName Space
   | -- | Declare a scalar variable with an initially undefined value.
-    DeclareScalar VName Qualifier PrimType
+    DeclareScalar VName Volatility PrimType
   | -- | Create an array containing the given values.  The
     -- lifetime of the array will be the entire application.
     -- This is mostly used for constant arrays, but also for
@@ -243,13 +244,13 @@ data Code a
     -- 'Space' argument is the memory space of @mem@
     -- (technically redundant, but convenient).  Note that
     -- /reading/ is done with an 'Exp' ('Read').
-    Write VName (Count Elements (TExp Int64)) PrimType Space Qualifier Exp
+    Write VName (Count Elements (TExp Int64)) PrimType Space Volatility Exp
   | -- | Set a scalar variable.
     SetScalar VName Exp
   | -- | Read a scalar from memory from memory.  The first 'VName' is
     -- the target scalar variable, and the remaining arguments have
     -- the same meaning as with 'Write'.
-    Read VName VName (Count Elements (TExp Int64)) PrimType Space Qualifier
+    Read VName VName (Count Elements (TExp Int64)) PrimType Space Volatility
   | -- | Must be in same space.
     SetMem VName VName Space
   | -- | Function call.  The results are written to the
@@ -282,7 +283,10 @@ data Code a
 -- | The volatility of a memory access or variable.  Feel free to
 -- ignore this for backends where it makes no sense (anything but C
 -- and similar low-level things)
-data Qualifier = Volatile | Nonvolatile | Uniform | Varying
+data Volatility = Volatile | Nonvolatile
+  deriving (Eq, Ord, Show)
+
+data Variability = Uniform | Varying | Unbound
   deriving (Eq, Ord, Show)
 
 instance Semigroup (Code a) where
@@ -459,8 +463,6 @@ instance Pretty op => Pretty (Code op) where
       vol' = case vol of
         Volatile -> text "volatile "
         Nonvolatile -> mempty
-        Uniform -> text "uniform "
-        Varying -> mempty
   ppr (DeclareArray name space t vs) =
     text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t
       <+> equals
@@ -477,8 +479,6 @@ instance Pretty op => Pretty (Code op) where
       vol' = case vol of
         Volatile -> text "volatile "
         Nonvolatile -> mempty
-        Uniform -> text "uniform "
-        Varying -> mempty
   ppr (Read name v is bt space vol) =
     ppr name <+> text "<-"
       <+> ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
@@ -486,8 +486,6 @@ instance Pretty op => Pretty (Code op) where
       vol' = case vol of
         Volatile -> text "volatile "
         Nonvolatile -> mempty
-        Uniform -> text "uniform "
-        Varying -> mempty
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
   ppr (SetMem dest from DefaultSpace) =

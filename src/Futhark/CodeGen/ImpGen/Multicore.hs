@@ -154,12 +154,11 @@ compileSegOp ::
   SegOp () MCMem ->
   TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.Code
-  -- TODO (obp) : everythingDefault here is actually fucking retarded...
 compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
-  everythingDefault $ compileSegHist pat space histops kbody ntasks
+  compileSegHist pat space histops kbody ntasks
 compileSegOp pat (SegScan _ space scans _ kbody) ntasks =
-  everythingDefault $ compileSegScan pat space scans kbody ntasks
+  compileSegScan pat space scans kbody ntasks
 compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
-  everythingDefault $ compileSegRed pat space reds kbody ntasks
+  compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =
-  everythingDefault $ compileSegMap pat space kbody
+  compileSegMap pat space kbody
