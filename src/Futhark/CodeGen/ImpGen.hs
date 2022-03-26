@@ -121,6 +121,7 @@ module Futhark.CodeGen.ImpGen
     module Language.Futhark.Warnings,
   )
 where
+
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
@@ -1118,7 +1119,7 @@ dInfo e name info = do
     MemVar _ entry' ->
       emit $ Imp.DeclareMem name $ entryMemSpace entry'
     ScalarVar _ entry' ->
-      emit $ Imp.DeclareScalar name Imp.Nonvolatile (entryScalarType entry')
+      emit $ Imp.DeclareScalar name Imp.Nonvolatile $ entryScalarType entry'
     ArrayVar _ _ ->
       return ()
     AccVar {} ->
@@ -1494,11 +1495,10 @@ copyElementWise bt dest src = do
   (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
   vol <- asks envVolatility
   tmp <- newVName "tmp"
-  let scalar = Imp.DeclareScalar tmp vol bt
   emit $
     foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
       mconcat
-        [ scalar,
+        [ Imp.DeclareScalar tmp vol bt,
           Imp.Read tmp srcmem srcidx bt srcspace vol,
           Imp.Write destmem destidx bt destspace vol $ Imp.var tmp bt
         ]

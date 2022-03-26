@@ -559,8 +559,6 @@ instance Traversable Code where
     (:>>:) <$> traverse f x <*> traverse f y
   traverse f (For i bound code) =
     For i bound <$> traverse f code
-  --traverse f (ForEach i bound code) =
-  --  ForEach i bound <$> traverse f code
   traverse f (While cond code) =
     While cond <$> traverse f code
   traverse f (If cond x y) =
