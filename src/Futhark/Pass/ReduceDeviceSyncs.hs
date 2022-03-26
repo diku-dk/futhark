@@ -36,6 +36,9 @@ import Futhark.Transform.Substitute
 
 -- TODO: merge6.fut test with gpubody that consumes another gpu result
 
+-- TODO: It is not safe to migrate statements to GPU within accumulator ops.
+--       This is an issue for the Update and Replicate transformations.
+
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
   Pass
@@ -271,6 +274,18 @@ optimizeStm out stm = do
           case v_kept_on_device of
             False -> pure (out |> stm)
             True
+              | all (== intConst Int64 1) dims,
+                Just t' <- peelArray 1 arr_t -> do
+                let n' = VName (baseName n `withSuffix` "_inner") 0
+                let pat' = Pat [PatElem n' t']
+                let e' = BasicOp $ Replicate (Shape $ tail dims) (Var v)
+                let stm' = Let pat' (stmAux stm) e'
+
+                -- `gpu { v }` is slightly faster than `replicate 1 v` and
+                -- can merge with the GPUBody that v was computed by.
+                gpubody <- inGPUBody (rewriteStm stm')
+                pure (out |> gpubody {stmPat = stmPat stm})
+            True
               | last dims == intConst Int64 1 ->
                 let e' = BasicOp $ Replicate (Shape $ init dims) (Var v')
                     stm' = stm {stmExp = e'}
@@ -280,9 +295,9 @@ optimizeStm out stm = do
               -- v_kept_on_device implies that v is a scalar.
               let dims' = dims ++ [intConst Int64 1]
               let arr_t' = Array (elemType arr_t) (Shape dims') NoUniqueness
-              let pe' = PatElem n' arr_t'
+              let pat' = Pat [PatElem n' arr_t']
               let e' = BasicOp $ Replicate (Shape dims) (Var v')
-              let repl = Let (Pat [pe']) (stmAux stm) e'
+              let repl = Let pat' (stmAux stm) e'
 
               let aux = StmAux mempty mempty ()
               let slice = map sliceDim (arrayDims arr_t)
@@ -533,20 +548,6 @@ moveStm out (Let pat aux (BasicOp (ArrayLit [se] t')))
       let n' = VName (baseName n `withSuffix` "_inner") 0
       let pat' = Pat [PatElem n' t']
       let e' = BasicOp (SubExp se)
-      let stm' = Let pat' aux e'
-
-      gpubody <- inGPUBody (rewriteStm stm')
-      pure (out |> gpubody {stmPat = pat})
-moveStm out (Let pat aux (BasicOp (Replicate (Shape (dim : dims)) se)))
-  | dim == intConst Int64 1,
-    Pat [PatElem n arr_t] <- pat,
-    Just t' <- peelArray 1 arr_t =
-    do
-      let n' = VName (baseName n `withSuffix` "_inner") 0
-      let pat' = Pat [PatElem n' t']
-      let e' = BasicOp $ case dims of
-            [] -> SubExp se
-            _ -> Replicate (Shape dims) se
       let stm' = Let pat' aux e'
 
       gpubody <- inGPUBody (rewriteStm stm')
