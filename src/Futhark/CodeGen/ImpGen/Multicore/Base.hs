@@ -274,10 +274,9 @@ extractVectorLane j code = do
 
 inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
 inISPC retvals code = do
-  (allocs, res) <- extractAllocations <$> collect code
-  free <- freeParams res
-  emit allocs
-  emit $ Imp.Op $ Imp.ISPCKernel res free retvals
+  code' <- collect code
+  free <- freeParams code'
+  emit $ Imp.Op $ Imp.ISPCKernel code' free retvals
 
 -------------------------------
 ------- SegHist helpers -------

@@ -103,7 +103,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH, uniformH)
+import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH, uniformH, ispcUtilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
@@ -1690,6 +1690,8 @@ $errorsH
 $cScalarDefs
 
 $uniformH
+
+$ispcUtilH
 
 #ifndef __ISPC_STRUCT_memblock__
 #define __ISPC_STRUCT_memblock__

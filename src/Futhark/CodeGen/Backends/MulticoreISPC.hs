@@ -53,7 +53,10 @@ operations =
 ispcOperations :: GC.Operations Multicore ()
 ispcOperations =
   operations
-    { GC.opsError = \_ _ -> GC.items [C.citems|err = FUTHARK_PROGRAM_ERROR;|]
+    { GC.opsError = \_ _ ->
+        GC.items [C.citems|
+          err = FUTHARK_PROGRAM_ERROR;
+          |]
     }
     
 getName :: VName -> Name
@@ -175,10 +178,7 @@ compileCodeISPC (Allocate name (Count (TPrimExp e)) space) = do
     Just cur_size ->
       GC.stm
         [C.cstm|if ($exp:cur_size < $exp:size) {
-                 err = lexical_realloc(&ctx->error, &$exp:name, &$exp:cur_size, $exp:size);
-                 if (err != FUTHARK_SUCCESS) {
-                   goto cleanup;
-                 }
+                 err = lexical_realloc_ispc(&$exp:name, &$exp:cur_size, $exp:size);
                 }|]
     _ ->
       GC.allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
