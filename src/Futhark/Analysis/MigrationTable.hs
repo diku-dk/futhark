@@ -388,14 +388,20 @@ graphStm stm = do
       -- throughput only will decrease if the GPU utilization decreases as a
       -- result.
       graphSimple bs e
-    BasicOp (Replicate (Shape dims) _)
-      | [(_, t)] <- bs,
-        length dims == arrayRank t, -- i.e. se is a scalar.
-        all (== intConst Int64 1) dims ->
-        graphSimple bs e
     BasicOp (Index _ slice)
       | isFixed slice ->
         graphRead (one bs)
+    BasicOp {}
+      | [(_, t)] <- bs,
+        dims <- arrayDims t,
+        dims /= [], -- i.e. produces an array
+        all (== intConst Int64 1) dims ->
+        -- An expression that produces an array that only contains a single
+        -- primitive value is as efficient to compute and copy as a scalar,
+        -- and introduces no size variables.
+        --
+        -- This is an exception to the inefficiency rules that comes next.
+        graphSimple bs e
     -- Expressions with a cost sublinear to the size of their result arrays are
     -- risky to migrate as we cannot guarantee that their results are not
     -- returned from a GPUBody, which always copies its return values. Since
