@@ -20,9 +20,21 @@ import Futhark.MonadFreshNames (VNameSource, getNameSource, putNameSource)
 import Futhark.Pass
 import Futhark.Transform.Substitute
 
--- TODO: Add documentation (ReduceDeviceSyncs + MergeGPUBodies)
+-- TODO: Update MigrationTable with Thesis reference.
 
 -- TODO: Run ormolu and hlint (all contributed files)
+
+-- TODO: Write tests
+
+-- TODO: Add documentation (ReduceDeviceSyncs)
+
+-- TODO: Expand GPUBody around parent if or loop statement.
+
+-- TODO: Reuse arrays created by `storeScalar`?
+
+-- TODO: Measure whether it is better to block delays through loops.
+
+-- TODO: merge6.fut test with gpubody that consumes another gpu result
 
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
@@ -164,6 +176,8 @@ storeScalar stms se t = do
       -- written.
       case se of
         Var n -> do
+          -- TODO: Transfer to device right after declaration of n, allowing the
+          --       array to be reused for as long n is in scope.
           n' <- newName n
           let stm = bind (PatElem n' t) (BasicOp $ SubExp se)
 
@@ -172,6 +186,10 @@ storeScalar stms se t = do
 
           pure (stms |> gpubody, dev)
         _ -> do
+          -- TODO: Store constant arrays as top-level declarations.
+          --       Can be implemented as an optimization that hoists arrays to
+          --       parent scopes. Array must not be aliased by function result,
+          --       be consumed, or depend on a value within its current scope.
           let n = VName (nameFromString "const") 0
           pe <- arrayizePatElem (PatElem n t)
           let stm = bind pe (BasicOp $ ArrayLit [se] t)
