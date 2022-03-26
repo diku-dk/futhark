@@ -246,6 +246,33 @@ optimizeStm out stm = do
           let stm' = stm {stmExp = BasicOp (Update safety arr slice' (Var dev))}
 
           pure (out' |> stm')
+      BasicOp (Replicate (Shape dims) (Var v))
+        | Pat [PatElem n arr_t] <- stmPat stm -> do
+          v' <- resolveName v
+          let v_kept_on_device = v /= v'
+          case v_kept_on_device of
+            False -> pure (out |> stm)
+            True
+              | last dims == intConst Int64 1 ->
+                let e' = BasicOp $ Replicate (Shape $ init dims) (Var v')
+                    stm' = stm {stmExp = e'}
+                 in pure (out |> stm')
+            True -> do
+              n' <- newName n
+              -- v_kept_on_device implies that v is a scalar.
+              let dims' = dims ++ [intConst Int64 1]
+              let arr_t' = Array (elemType arr_t) (Shape dims') NoUniqueness
+              let pe' = PatElem n' arr_t'
+              let e' = BasicOp $ Replicate (Shape dims) (Var v')
+              let repl = Let (Pat [pe']) (stmAux stm) e'
+
+              let aux = StmAux mempty mempty ()
+              let slice = map sliceDim (arrayDims arr_t)
+              let slice' = slice ++ [DimFix $ intConst Int64 0]
+              let idx = BasicOp $ Index n' (Slice slice')
+              let index = Let (stmPat stm) aux idx
+
+              pure (out |> repl |> index)
       BasicOp {} ->
         pure (out |> stm)
       Apply {} ->

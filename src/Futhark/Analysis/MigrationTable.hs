@@ -960,6 +960,10 @@ graphedScalarOperands e =
       -- element slice. If the scalar originates from device memory its read
       -- can thus be prevented without requiring the 'Update' to be migrated.
       collectFree slice
+    collectBasic (BasicOp (Replicate shape _)) =
+      -- The replicate of a scalar can be rewritten as a replicate of a single
+      -- element array followed by a slice index.
+      collectFree shape
     collectBasic e' =
       -- Note: Plain VName values only refer to arrays.
       walkExpM (identityWalker {walkOnSubExp = collectSubExp}) e'
