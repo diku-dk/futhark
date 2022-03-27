@@ -24,17 +24,17 @@ type Program = Functions Multicore
 -- | A multicore operation.
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
-  | ParLoop String (Code Multicore) [Param]
+  | ParLoop String MCCode [Param]
   | -- | Emit code in ISPC
-    ISPCKernel (Code Multicore) [Param]
+    ISPCKernel MCCode [Param]
   | -- | ForEach, only valid in ISPC
-    ForEach VName Exp (Code Multicore)
+    ForEach VName Exp MCCode
   | -- | ForEach_Active, only valid in ISPC
-    ForEachActive VName (Code Multicore)
+    ForEachActive VName MCCode
   | -- | Extract a lane to a uniform in ISPC
     ExtractLane VName Exp Exp
   | -- | Specifies the variability of all declarations within this scope
-    VariabilityBlock Variability (Code Multicore)
+    VariabilityBlock Variability MCCode
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -82,7 +82,7 @@ data SchedulerInfo = SchedulerInfo
   }
 
 -- | A task for a v'SegOp'.
-newtype ParallelTask = ParallelTask (Code Multicore)
+newtype ParallelTask = ParallelTask MCCode
 
 -- | Whether the Scheduler should schedule the tasks as Dynamic
 -- or it is restainted to Static
