@@ -106,6 +106,11 @@ sharedDef s f = do
   GC.ispcDecl =<< f s'
   return s'
 
+isConstExp :: PrimExp VName -> Bool
+isConstExp = isSimple . constFoldPrimExp
+  where isSimple (ValueExp _) = True
+        isSimple _ = False
+
 -- TODO(pema, K): This is a ugly hack to work around the 'size' fields
 -- of lexical memory blocks. At the ImpCode level, we cannot know if the size
 -- field exists or not, since we can't know if the memory block is lexical.
@@ -153,20 +158,21 @@ compileCodeISPC _ (Allocate name (Count (TPrimExp e)) space) = do
                 }|]
     _ ->
       GC.allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
-compileCodeISPC vari (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
-  dest' <- GC.rawMem dest
-  idxexp <- GC.compileExp (untyped idx)
-  tmp <- newVName "tmp_idx"
-  --TODO(pema): Uncomment, breaks scan
-  --GC.decl [C.cdecl|$tyquals:(GC.variQuals vari) typename int64_t $id:tmp = $exp:idxexp;|]
-  GC.decl [C.cdecl|typename int64_t $id:tmp = $exp:idxexp;|]
-  let deref =
-        GC.derefPointer
-          dest'
-          [C.cexp|$id:tmp|]
-          [C.cty|$tyquals:(GC.volQuals vol) $ty:(primStorageType elemtype)*|]
-  elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
-  GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
+compileCodeISPC vari code@(Write dest (Count idx) elemtype DefaultSpace vol elemexp)
+  | isConstExp (untyped idx) = do
+    dest' <- GC.rawMem dest
+    idxexp <- GC.compileExp (untyped idx)
+    tmp <- newVName "tmp_idx"
+    -- Disambiguate the variability of the constant index
+    GC.decl [C.cdecl|$tyquals:(GC.variQuals vari) typename int64_t $id:tmp = $exp:idxexp;|]
+    let deref =
+          GC.derefPointer
+            dest'
+            [C.cexp|$id:tmp|]
+            [C.cty|$tyquals:(GC.volQuals vol) $ty:(primStorageType elemtype)*|]
+    elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
+    GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
+  | otherwise = GC.compileCode code
 compileCodeISPC vari (For i bound body) = do
   let i' = C.toIdent i
       t = GC.primTypeToCType $ primExpType bound
