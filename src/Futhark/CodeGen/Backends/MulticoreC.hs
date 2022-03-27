@@ -691,7 +691,8 @@ compileOp (ISPCKernel body _) =
   scopedBlock body
 compileOp (ForEach i bound body) =
   GC.compileCode (For i bound body)
-compileOp (ForEachActive _ body) =
+compileOp (ForEachActive i body) = do
+  GC.decl [C.cdecl|typename int64_t $id:i = 0;|]
   scopedBlock body
 compileOp (VariabilityBlock _ code) =
   GC.compileCode code
