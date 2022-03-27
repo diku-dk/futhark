@@ -97,7 +97,7 @@ runBenchmarks opts paths = do
   maybe_results <-
     mapM
       (runBenchmark opts futhark)
-      (sortBy (comparing fst) compiled_benchmarks)
+      compiled_benchmarks
   let results = concat $ catMaybes maybe_results
   case optJSON opts of
     Nothing -> return ()

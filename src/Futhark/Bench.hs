@@ -21,6 +21,7 @@ where
 import Control.Applicative
 import Control.Monad.Except
 import qualified Data.Aeson as JSON
+import qualified Data.Aeson.Encoding as JSON
 import qualified Data.Aeson.Key as JSON
 import qualified Data.Aeson.KeyMap as JSON
 import qualified Data.ByteString.Char8 as SBS
@@ -108,9 +109,16 @@ benchResultJSON (BenchResult prog r) =
     JSON.object [("datasets", JSON.toJSON $ DataResults r)]
   )
 
+benchResultJSON' :: BenchResult -> JSON.Series
+benchResultJSON' (BenchResult prog r) =
+  JSON.pair (JSON.fromString prog) $
+    JSON.pairs $ JSON.pair "datasets" $ JSON.toEncoding $ DataResults r
+
 instance JSON.ToJSON BenchResults where
   toJSON (BenchResults rs) =
     JSON.object $ map benchResultJSON rs
+  toEncoding (BenchResults rs) =
+    JSON.pairs $ foldMap benchResultJSON' rs
 
 instance JSON.FromJSON BenchResults where
   parseJSON = JSON.withObject "benchmarks" $ \o ->
