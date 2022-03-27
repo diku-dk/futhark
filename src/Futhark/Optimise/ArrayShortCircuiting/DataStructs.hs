@@ -264,12 +264,12 @@ getArrMemAssoc pat =
 
 -- | Get the names of arrays in a list of 'FParam' and the corresponding
 -- 'ArrayMemBound' information for each array.
-getArrMemAssocFParam :: [Param FParamMem] -> [(VName, ArrayMemBound)]
+getArrMemAssocFParam :: [Param FParamMem] -> [(VName, Uniqueness, ArrayMemBound)]
 getArrMemAssocFParam =
   mapMaybe
     ( \param -> case paramDec param of
-        (MemArray tp shp _ (ArrayIn mem_nm indfun)) ->
-          Just (paramName param, MemBlock tp shp mem_nm indfun)
+        (MemArray tp shp u (ArrayIn mem_nm indfun)) ->
+          Just (paramName param, u, MemBlock tp shp mem_nm indfun)
         MemMem _ -> Nothing
         MemPrim _ -> Nothing
         MemAcc {} -> Nothing

@@ -546,19 +546,31 @@ fixPointCoalesce ::
 fixPointCoalesce lutab fpar bdy topenv = do
   buenv <- mkCoalsTabStms lutab (bodyStms bdy) topenv (emptyBotUpEnv {inhibit = inhibited topenv})
   let (succ_tab, actv_tab, inhb_tab) = (successCoals buenv, activeCoals buenv, inhibit buenv)
-      -- remove @fpar@ from @actv_tab@, as function's parameters cannot be merged
-      mems = map ((\(MemBlock _ _ m _) -> m) . snd) $ getArrMemAssocFParam fpar
-      (actv_tab', inhb_tab') =
-        foldl markFailedCoal (actv_tab, inhb_tab) $ traceWith "marking these as failed" mems
+      -- Allow short-circuiting function parameters that are unique and have
+      -- matching index functions, otherwise mark as failed
+      (actv_tab', inhb_tab', succ_tab') =
+        foldl
+          ( \(a, i, s) (_, u, MemBlock _ shp m ixf) ->
+              case (u, M.lookup m a) of
+                (Unique, Just entry)
+                  | dstind entry == ixf ->
+                    let (a', s') = markSuccessCoal (a, s) m entry
+                     in (a', i, s')
+                _ ->
+                  let (a', i') = markFailedCoal (a, i) m
+                   in (a', i', s)
+          )
+          (actv_tab, inhb_tab, succ_tab)
+          $ getArrMemAssocFParam fpar
 
-      (succ_tab', failed_optdeps) = fixPointFilterDeps succ_tab M.empty
+      (succ_tab'', failed_optdeps) = fixPointFilterDeps succ_tab' M.empty
       inhb_tab'' = M.unionWith (<>) failed_optdeps inhb_tab'
    in --new_inhibited = M.unionWith (<>) inhb_tab'' (inhibited topenv)
       if not $ M.null actv_tab'
         then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab'))
         else
           if M.null $ inhb_tab'' `M.difference` inhibited topenv
-            then return $ traceWith "succ_tab'" succ_tab'
+            then return $ traceWith "succ_tab''" succ_tab''
             else fixPointCoalesce lutab fpar bdy (topenv {inhibited = inhb_tab''}) --new_inhibited })
             -- helper to helper
   where

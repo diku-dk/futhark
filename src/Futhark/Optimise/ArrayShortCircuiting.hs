@@ -32,10 +32,32 @@ data Env inner = Env
 type ReplaceM inner a = Reader (Env inner) a
 
 optimiseSeqMem :: Pass SeqMem SeqMem
-optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab return
+optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab return undefined
 
 optimiseGPUMem :: Pass GPUMem GPUMem
-optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp
+optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp replaceInFParamsGPU
+
+replaceInFParamsGPU :: CoalsTab -> [FParam (Aliases GPUMem)] -> (Names, [FParam (Aliases GPUMem)])
+replaceInFParamsGPU coalstab fparams =
+  let (mem_allocs_to_remove, fparams') =
+        foldl
+          ( \(to_remove, acc) (Param attrs name dec) ->
+              case dec of
+                MemMem DefaultSpace
+                  | Just entry <- M.lookup name coalstab ->
+                    (oneName (dstmem entry) <> to_remove, Param attrs (dstmem entry) dec : acc)
+                MemArray pt shp u (ArrayIn m ixf)
+                  | Just entry <- M.lookup m coalstab ->
+                    (to_remove, Param attrs name (MemArray pt shp u $ ArrayIn (dstmem entry) ixf) : acc)
+                _ -> (to_remove, Param attrs name dec : acc)
+          )
+          (mempty, mempty)
+          fparams
+   in (mem_allocs_to_remove, reverse fparams')
+
+removeStms :: Names -> Body rep -> Body rep
+removeStms to_remove (Body dec stms res) =
+  Body dec (stmsFromList $ filter (not . flip nameIn to_remove . head . patNames . stmPat) $ stmsToList stms) res
 
 pass ::
   (Mem rep inner, LetDec rep ~ LetDecMem, CanBeAliased inner) =>
@@ -43,12 +65,21 @@ pass ::
   String ->
   (FunDef (Aliases rep) -> Pass.PassM CoalsTab) ->
   (inner -> ReplaceM inner inner) ->
+  (CoalsTab -> [FParam (Aliases rep)] -> (Names, [FParam (Aliases rep)])) ->
   Pass rep rep
-pass flag desc mk on_inner =
+pass flag desc mk on_inner on_fparams =
   Pass flag desc $
     Pass.intraproceduralTransformationWithConsts return $ \_ f -> do
-      coaltab <- foldMap vartab . M.elems <$> mk (AnlAls.analyseFun f)
-      return $ f {funDefBody = onBody coaltab $ funDefBody f}
+      coaltab <- mk (AnlAls.analyseFun f)
+      let (mem_allocs_to_remove, new_fparams) = on_fparams coaltab $ funDefParams f
+      return $
+        f
+          { funDefBody =
+              onBody (foldMap vartab $ M.elems coaltab) $
+                removeStms mem_allocs_to_remove $
+                  funDefBody f,
+            funDefParams = new_fparams
+          }
   where
     onBody coaltab body =
       body {bodyStms = runReader (mapM replaceInStm $ bodyStms body) (Env coaltab on_inner)}
