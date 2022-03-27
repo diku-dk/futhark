@@ -52,8 +52,8 @@ import Futhark.Passes
 import Futhark.Util.Log
 import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
-import Language.Futhark.Core (nameFromString)
-import Language.Futhark.Parser (parseFuthark)
+import Language.Futhark.Core (locStr, nameFromString)
+import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import System.Exit
 import System.FilePath
 import System.IO
@@ -643,13 +643,14 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               . intersperse ""
               . map (if futharkPrintAST config then show else pretty)
 
-          readProgram' = readProgram (futharkEntryPoints (futharkConfig config)) file
+          readProgram' = readProgramFile (futharkEntryPoints (futharkConfig config)) file
 
       case futharkPipeline config of
         PrettyPrint -> liftIO $ do
           maybe_prog <- parseFuthark file <$> T.readFile file
           case maybe_prog of
-            Left err -> fail $ show err
+            Left (SyntaxError loc err) ->
+              fail $ "Syntax error at " <> locStr loc <> ":\n" <> err
             Right prog
               | futharkPrintAST config -> print prog
               | otherwise -> putStrLn $ pretty prog

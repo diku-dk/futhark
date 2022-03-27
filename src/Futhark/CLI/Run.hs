@@ -18,7 +18,7 @@ import Futhark.Util (toPOSIX)
 import Futhark.Util.Options
 import Language.Futhark
 import qualified Language.Futhark.Interpreter as I
-import Language.Futhark.Parser hiding (EOF)
+import Language.Futhark.Parser
 import qualified Language.Futhark.Semantic as T
 import qualified Language.Futhark.TypeChecker as T
 import System.Exit
@@ -47,8 +47,8 @@ interpret config fp = do
 
   inps <-
     case vr of
-      Left err -> do
-        hPutStrLn stderr $ "Error when reading input: " ++ show err
+      Left (SyntaxError loc err) -> do
+        hPutStrLn stderr $ "Input syntax error at " <> locStr loc <> ":\n" <> err
         exitFailure
       Right vs ->
         return vs
@@ -57,7 +57,7 @@ interpret config fp = do
     case M.lookup (T.Term, entry) $ T.envNameMap tenv of
       Just fname
         | Just (T.BoundV _ t) <- M.lookup (qualLeaf fname) $ T.envVtable tenv ->
-          return (fname, toStructural $ snd $ unfoldFunType t)
+            return (fname, toStructural $ snd $ unfoldFunType t)
       _ -> do
         hPutStrLn stderr $ "Invalid entry point: " ++ pretty entry
         exitFailure
@@ -117,7 +117,7 @@ newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft show
       =<< liftIO
-        ( runExceptT (readProgram [] file)
+        ( runExceptT (readProgramFile [] file)
             `catch` \(err :: IOException) ->
               return (externalErrorS (show err))
         )

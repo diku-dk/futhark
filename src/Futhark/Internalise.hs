@@ -5,6 +5,41 @@
 --
 -- This module implements a transformation from source to core
 -- Futhark.
+--
+-- The source and core language is similar in spirit, but the core
+-- language is much more regular (and mostly much simpler) in order to
+-- make it easier to write program transformations.
+--
+-- * "Language.Futhark.Syntax" contains the source language definition.
+--
+-- * "Futhark.IR.Syntax" contains the core IR definition.
+--
+-- Specifically, internalisation generates the SOACS dialect of the
+-- core IR ("Futhark.IR.SOACS").  This is then initially used by the
+-- compiler middle-end.  The main differences between the source and
+-- core IR are as follows:
+--
+-- * The core IR has no modules.  These are removed in
+--   "Futhark.Internalise.Defunctorise".
+--
+-- * The core IR is monomorphic.  Polymorphic functions are monomorphised in
+--   "Futhark.Internalise.Monomorphise"
+--
+-- * The core IR is first-order. "Futhark.Internalise.Defunctionalise"
+--   removes higher-order functions.
+--
+-- * The core IR is in [ANF](https://en.wikipedia.org/wiki/A-normal_form).
+--
+-- * The core IR does not have arrays of tuples (or tuples or records
+--   at all, really).  Arrays of tuples are turned into multiple
+--   arrays.  For example, a source language transposition of an array
+--   of pairs becomes a core IR that contains two transpositions of
+--   two distinct arrays.  The guts of this transformation is in
+--   "Futhark.Internalise.Exps".
+--
+-- * For the above reason, SOACs also accept multiple input arrays.
+--   The available primitive operations are also somewhat different
+--   than in the source language.  See 'Futhark.IR.SOACS.SOAC.SOAC'.
 module Futhark.Internalise (internaliseProg) where
 
 import qualified Data.Text as T

@@ -35,12 +35,13 @@ import Futhark.Util (splitFromEnd)
 
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.
-data SeqLoop = SeqLoop [Int] Pat [(FParam, SubExp)] (LoopForm SOACS) Body
+data SeqLoop
+  = SeqLoop [Int] (Pat Type) [(FParam SOACS, SubExp)] (LoopForm SOACS) (Body SOACS)
 
 loopPerm :: SeqLoop -> [Int]
 loopPerm (SeqLoop perm _ _ _ _) = perm
 
-seqLoopStm :: SeqLoop -> Stm
+seqLoopStm :: SeqLoop -> Stm SOACS
 seqLoopStm (SeqLoop _ pat merge form body) =
   Let pat (defAux ()) $ DoLoop merge form body
 
@@ -90,13 +91,13 @@ interchangeLoop
 
       copyOrRemoveParam (param, arr)
         | not (paramName param `nameIn` free_in_body) =
-          return Nothing
+            return Nothing
         | otherwise =
-          return $ Just (param, arr)
+            return $ Just (param, arr)
 
       expandedInit _ (Var v)
         | Just arr <- isMapParameter v =
-          pure $ Var arr
+            pure $ Var arr
       expandedInit param_name se =
         letSubExp (param_name <> "_expanded_init") $
           BasicOp $ Replicate (Shape [w]) se
@@ -129,7 +130,7 @@ maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
   where
     f (p, Var arg)
       | isMapInput arg =
-        (p,) <$> letSubExp (baseString (paramName p) <> "_inter_copy") (BasicOp $ Copy arg)
+          (p,) <$> letSubExp (baseString (paramName p) <> "_inter_copy") (BasicOp $ Copy arg)
     f (p, arg) =
       pure (p, arg)
 
@@ -162,29 +163,31 @@ interchangeLoops full_nest = recurse (kernelNestLoops full_nest)
   where
     recurse nest loop
       | (ns, [n]) <- splitFromEnd 1 nest = do
-        let isMapParameter v =
-              snd <$> find ((== v) . paramName . fst) (loopNestingParamsAndArrs n)
-            isMapInput v =
-              v `elem` map snd (loopNestingParamsAndArrs n)
-        (loop', stms) <-
-          runBuilder . localScope (scopeOfKernelNest full_nest) $
-            maybeCopyInitial isMapInput
-              =<< interchangeLoop isMapParameter loop n
+          let isMapParameter v =
+                snd <$> find ((== v) . paramName . fst) (loopNestingParamsAndArrs n)
+              isMapInput v =
+                v `elem` map snd (loopNestingParamsAndArrs n)
+          (loop', stms) <-
+            runBuilder . localScope (scopeOfKernelNest full_nest) $
+              maybeCopyInitial isMapInput
+                =<< interchangeLoop isMapParameter loop n
 
-        -- Only safe to continue interchanging if we didn't need to add
-        -- any new statements; otherwise we manifest the remaining nests
-        -- as Maps and hand them back to the flattener.
-        if null stms
-          then recurse ns loop'
-          else
-            let loop_stm = seqLoopStm loop'
-                names = rearrangeShape (loopPerm loop') (patNames (stmPat loop_stm))
-             in pure $ snd $ manifestMaps ns names $ stms <> oneStm loop_stm
+          -- Only safe to continue interchanging if we didn't need to add
+          -- any new statements; otherwise we manifest the remaining nests
+          -- as Maps and hand them back to the flattener.
+          if null stms
+            then recurse ns loop'
+            else
+              let loop_stm = seqLoopStm loop'
+                  names = rearrangeShape (loopPerm loop') (patNames (stmPat loop_stm))
+               in pure $ snd $ manifestMaps ns names $ stms <> oneStm loop_stm
       | otherwise = pure $ oneStm $ seqLoopStm loop
 
-data Branch = Branch [Int] Pat SubExp Body Body (IfDec (BranchType SOACS))
+-- | An encoding of a branch with alongside its result pattern.
+data Branch
+  = Branch [Int] (Pat Type) SubExp (Body SOACS) (Body SOACS) (IfDec (BranchType SOACS))
 
-branchStm :: Branch -> Stm
+branchStm :: Branch -> Stm SOACS
 branchStm (Branch _ pat cond tbranch fbranch ret) =
   Let pat (defAux ()) $ If cond tbranch fbranch ret
 
@@ -214,7 +217,7 @@ interchangeBranch1
     tbranch' <- mkBranch tbranch
     fbranch' <- mkBranch fbranch
     return $
-      Branch [0 .. patSize pat -1] pat' cond tbranch' fbranch' $
+      Branch [0 .. patSize pat - 1] pat' cond tbranch' fbranch' $
         IfDec ret' if_sort
 
 interchangeBranch ::
@@ -227,10 +230,11 @@ interchangeBranch nest loop = do
     runBuilder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
   return $ stms <> oneStm (branchStm loop')
 
+-- | An encoding of a WithAcc with alongside its result pattern.
 data WithAccStm
-  = WithAccStm [Int] Pat [(Shape, [VName], Maybe (Lambda, [SubExp]))] Lambda
+  = WithAccStm [Int] (Pat Type) [(Shape, [VName], Maybe (Lambda SOACS, [SubExp]))] (Lambda SOACS)
 
-withAccStm :: WithAccStm -> Stm
+withAccStm :: WithAccStm -> Stm SOACS
 withAccStm (WithAccStm _ pat inputs lam) =
   Let pat (defAux ()) $ WithAcc inputs lam
 
@@ -283,7 +287,7 @@ interchangeWithAcc1
       trType :: TypeBase shape u -> TypeBase shape u
       trType (Acc acc ispace ts u)
         | acc `elem` acc_certs =
-          Acc acc (Shape [w] <> ispace) ts u
+            Acc acc (Shape [w] <> ispace) ts u
       trType t = t
 
       trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)
@@ -311,7 +315,7 @@ interchangeWithAcc1
         pure $ case acc_t of
           Acc cert _ _ _
             | cert `elem` acc_certs ->
-              BasicOp $ UpdateAcc acc (i : is) ses
+                BasicOp $ UpdateAcc acc (i : is) ses
           _ ->
             BasicOp $ UpdateAcc acc is ses
       trExp i e = mapExpM mapper e

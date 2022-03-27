@@ -154,25 +154,25 @@ pkgInfo ::
   m (Either T.Text (PkgInfo m))
 pkgInfo path
   | ["github.com", owner, repo] <- T.splitOn "/" path =
-    let (repo', vs) = majorRevOfPkg repo
-     in ghPkgInfo owner repo' vs
+      let (repo', vs) = majorRevOfPkg repo
+       in ghPkgInfo owner repo' vs
   | "github.com" : owner : repo : _ <- T.splitOn "/" path =
-    return $
-      Left $
-        T.intercalate
-          "\n"
-          [nope, "Do you perhaps mean 'github.com/" <> owner <> "/" <> repo <> "'?"]
+      return $
+        Left $
+          T.intercalate
+            "\n"
+            [nope, "Do you perhaps mean 'github.com/" <> owner <> "/" <> repo <> "'?"]
   | ["gitlab.com", owner, repo] <- T.splitOn "/" path =
-    let (repo', vs) = majorRevOfPkg repo
-     in glPkgInfo owner repo' vs
+      let (repo', vs) = majorRevOfPkg repo
+       in glPkgInfo owner repo' vs
   | "gitlab.com" : owner : repo : _ <- T.splitOn "/" path =
-    return $
-      Left $
-        T.intercalate
-          "\n"
-          [nope, "Do you perhaps mean 'gitlab.com/" <> owner <> "/" <> repo <> "'?"]
+      return $
+        Left $
+          T.intercalate
+            "\n"
+            [nope, "Do you perhaps mean 'gitlab.com/" <> owner <> "/" <> repo <> "'?"]
   | otherwise =
-    return $ Left nope
+      return $ Left nope
   where
     nope = "Unable to handle package paths of the form '" <> path <> "'"
 
@@ -286,17 +286,17 @@ ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir owner repo versio
         "v" `T.isPrefixOf` t,
         Right v <- parseVersion $ T.drop 1 t,
         _svMajor v `elem` versions = do
-        pinfo <-
-          ghglLookupCommit
-            (mk_archive_url t)
-            (mk_manifest_url t)
-            mk_zip_dir
-            owner
-            repo
-            (prettySemVer v)
-            t
-            hash
-        return $ Just (v, pinfo)
+          pinfo <-
+            ghglLookupCommit
+              (mk_archive_url t)
+              (mk_manifest_url t)
+              mk_zip_dir
+              owner
+              repo
+              (prettySemVer v)
+              t
+              hash
+          return $ Just (v, pinfo)
       | otherwise = return Nothing
 
 ghPkgInfo ::
@@ -431,31 +431,31 @@ lookupPackageRev ::
   m (PkgRevInfo m)
 lookupPackageRev p v
   | Just commit <- isCommitVersion v =
-    snd <$> lookupPackageCommit p (Just commit)
+      snd <$> lookupPackageCommit p (Just commit)
   | otherwise = do
-    pinfo <- lookupPackage p
-    case lookupPkgRev v pinfo of
-      Nothing ->
-        let versions = case M.keys $ pkgVersions pinfo of
-              [] -> "Package " <> p <> " has no versions.  Invalid package path?"
-              ks ->
-                "Known versions: "
-                  <> T.concat (intersperse ", " $ map prettySemVer ks)
-            major
-              | (_, vs) <- majorRevOfPkg p,
-                _svMajor v `notElem` vs =
-                "\nFor major version " <> T.pack (show (_svMajor v))
-                  <> ", use package path "
-                  <> p
-                  <> "@"
-                  <> T.pack (show (_svMajor v))
-              | otherwise = mempty
-         in fail $
-              T.unpack $
-                "package " <> p <> " does not have a version " <> prettySemVer v <> ".\n"
-                  <> versions
-                  <> major
-      Just v' -> return v'
+      pinfo <- lookupPackage p
+      case lookupPkgRev v pinfo of
+        Nothing ->
+          let versions = case M.keys $ pkgVersions pinfo of
+                [] -> "Package " <> p <> " has no versions.  Invalid package path?"
+                ks ->
+                  "Known versions: "
+                    <> T.concat (intersperse ", " $ map prettySemVer ks)
+              major
+                | (_, vs) <- majorRevOfPkg p,
+                  _svMajor v `notElem` vs =
+                    "\nFor major version " <> T.pack (show (_svMajor v))
+                      <> ", use package path "
+                      <> p
+                      <> "@"
+                      <> T.pack (show (_svMajor v))
+                | otherwise = mempty
+           in fail $
+                T.unpack $
+                  "package " <> p <> " does not have a version " <> prettySemVer v <> ".\n"
+                    <> versions
+                    <> major
+        Just v' -> return v'
 
 -- | Find the newest version of a package.
 lookupNewestRev ::

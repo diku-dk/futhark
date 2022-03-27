@@ -13,6 +13,9 @@ entry f32_to_i32 = map i32.f32
 entry f32_to_u32 = map u32.f32
 entry f64_to_i32 = map i32.f64
 entry f64_to_u32 = map u32.f64
+entry f16_to_bool = map bool.f16
+entry f32_to_bool = map bool.f32
+entry f64_to_bool = map bool.f64
 
 -- ==
 -- entry: f16_to_f32
@@ -78,3 +81,18 @@ entry f64_to_u32 = map u32.f64
 -- entry: f64_to_u32
 -- input { [f64.nan, f64.inf, -f64.inf, -1f64, 1f64, 3.5f64, -3.5f64] }
 -- output { [0u32, 0u32, 0u32, 4294967295u32, 1u32, 3u32, 4294967293u32] }
+
+-- ==
+-- entry: f16_to_bool
+-- input { [f16.nan, f16.inf, -f16.inf, -1f16, 1f16, 0f16] }
+-- output { [true, true, true, true, true, false] }
+
+-- ==
+-- entry: f32_to_bool
+-- input { [f32.nan, f32.inf, -f32.inf, -1f32, 1f32, 0f32] }
+-- output { [true, true, true, true, true, false] }
+
+-- ==
+-- entry: f64_to_bool
+-- input { [f64.nan, f64.inf, -f64.inf, -1f64, 1f64, 0f64] }
+-- output { [true, true, true, true, true, false] }

@@ -14,17 +14,17 @@ import Prelude hiding (quot, rem)
 
 -- Compile a SegScan construct
 compileSegScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
-    nonsegmentedScan pat space reds kbody nsubtasks
+      nonsegmentedScan pat space reds kbody nsubtasks
   | otherwise =
-    segmentedScan pat space reds kbody
+      segmentedScan pat space reds kbody
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
 xParams scan =
@@ -45,12 +45,12 @@ resultArrays s segops =
       sAllocArray s pt full_shape DefaultSpace
 
 nonsegmentedScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
   collect $ do
@@ -76,7 +76,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
       scanStage3 pat space scan_ops3 kbody
 
 scanStage1Ispc ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -150,7 +150,7 @@ scanStage1Ispc pat space scan_ops kbody = do
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
 scanStage1PureC ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -215,7 +215,7 @@ scanStage1PureC pat space scan_ops kbody = do
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" body free_params
 
 scanStage2 ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   TV Int32 ->
   SegSpace ->
   [SegBinOp MCMem] ->
@@ -273,7 +273,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
 -- Stage 3 : Finally each thread partially scans a chunk of the input
 --           reading its corresponding carry-in
 scanStage3Ispc ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -340,7 +340,7 @@ scanStage3Ispc pat space scan_ops kbody = do
   free_params' <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
 scanStage3PureC ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -405,11 +405,11 @@ scanStage3PureC pat space scan_ops kbody = do
 -- parallelize over the segments and each segment is
 -- scanned sequentially.
 segmentedScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 segmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   collect $ do
@@ -418,11 +418,11 @@ segmentedScan pat space scan_ops kbody = do
     emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
 
 compileSegScanBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegScanBody pat space scan_ops kbody = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns

@@ -14,7 +14,6 @@ import qualified Data.Text as T
 import Data.Void
 import Futhark.IR.Primitive.Parse (constituent, keyword, lexeme)
 import Futhark.IR.PrimitiveTests ()
-import Futhark.Util.Pretty (prettyText)
 import Language.Futhark
 import Language.Futhark.Parser
 import Test.QuickCheck
@@ -62,7 +61,7 @@ instance IsString v => IsString (QualName v) where
 
 instance IsString UncheckedTypeExp where
   fromString =
-    either (error . show) id . parseType "IsString UncheckedTypeExp" . fromString
+    either (error . syntaxErrorMsg) id . parseType "IsString UncheckedTypeExp" . fromString
 
 type Parser = Parsec Void T.Text
 

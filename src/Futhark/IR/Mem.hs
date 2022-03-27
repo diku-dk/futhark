@@ -440,11 +440,11 @@ instance Substitute MemReturn where
 instance FixExt MemReturn where
   fixExt i (Var v) (ReturnsNewBlock _ j ixfun)
     | j == i =
-      ReturnsInBlock v $
-        fixExtIxFun
-          i
-          (primExpFromSubExp int64 (Var v))
-          ixfun
+        ReturnsInBlock v $
+          fixExtIxFun
+            i
+            (primExpFromSubExp int64 (Var v))
+            ixfun
   fixExt i se (ReturnsNewBlock space j ixfun) =
     ReturnsNewBlock
       space
@@ -452,7 +452,7 @@ instance FixExt MemReturn where
       (fixExtIxFun i (primExpFromSubExp int64 se) ixfun)
     where
       j'
-        | i < j = j -1
+        | i < j = j - 1
         | otherwise = j
   fixExt i se (ReturnsInBlock mem ixfun) =
     ReturnsInBlock mem (fixExtIxFun i (primExpFromSubExp int64 se) ixfun)
@@ -582,13 +582,13 @@ matchFunctionReturnType rettype result = do
         MemAcc {} -> return ()
         MemArray _ _ _ (ArrayIn _ ixfun)
           | IxFun.isLinear ixfun ->
-            return ()
+              return ()
           | otherwise ->
-            TC.bad $
-              TC.TypeError $
-                "Array " ++ pretty v
-                  ++ " returned by function, but has nontrivial index function "
-                  ++ pretty ixfun
+              TC.bad $
+                TC.TypeError $
+                  "Array " ++ pretty v
+                    ++ " returned by function, but has nontrivial index function "
+                    ++ pretty ixfun
 
 matchLoopResultMem ::
   (Mem rep inner, TC.Checkable rep) =>
@@ -619,9 +619,9 @@ matchLoopResultMem params = matchRetTypeToResult rettype
     toRet (MemArray pt shape u (ArrayIn mem ixfun))
       | Just i <- mem `elemIndex` param_names,
         Param _ _ (MemMem space) : _ <- drop i params =
-        MemArray pt shape' u $ ReturnsNewBlock space i ixfun'
+          MemArray pt shape' u $ ReturnsNewBlock space i ixfun'
       | otherwise =
-        MemArray pt shape' u $ ReturnsInBlock mem ixfun'
+          MemArray pt shape' u $ ReturnsInBlock mem ixfun'
       where
         shape' = fmap toExtSE shape
         ixfun' = existentialiseIxFun param_names ixfun
@@ -671,9 +671,7 @@ matchReturnType ::
   [MemInfo SubExp NoUniqueness MemBind] ->
   TC.TypeM rep ()
 matchReturnType rettype res ts = do
-  let (ctx_res, _val_res) = splitFromEnd (length rettype) res
-
-      existentialiseIxFun0 :: IxFun -> ExtIxFun
+  let existentialiseIxFun0 :: IxFun -> ExtIxFun
       existentialiseIxFun0 = fmap $ fmap Free
 
       fetchCtx i = case maybeNth i $ zip res ts of
@@ -687,21 +685,21 @@ matchReturnType rettype res ts = do
         | x == y = return ()
       checkReturn (MemAcc xacc xispace xts _) (MemAcc yacc yispace yts _)
         | (xacc, xispace, xts) == (yacc, yispace, yts) =
-          return ()
+            return ()
       checkReturn
         (MemArray x_pt x_shape _ x_ret)
         (MemArray y_pt y_shape _ y_ret)
           | x_pt == y_pt,
             shapeRank x_shape == shapeRank y_shape = do
-            zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
-            checkMemReturn x_ret y_ret
+              zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
+              checkMemReturn x_ret y_ret
       checkReturn x y =
         throwError $ unwords ["Expected", pretty x, "but got", pretty y]
 
       checkDim (Free x) y
         | x == y = return ()
         | otherwise =
-          throwError $ unwords ["Expected dim", pretty x, "but got", pretty y]
+            throwError $ unwords ["Expected dim", pretty x, "but got", pretty y]
       checkDim (Ext i) y = do
         (x, _) <- fetchCtx i
         unless (x == y) . throwError . unwords $
@@ -709,16 +707,14 @@ matchReturnType rettype res ts = do
 
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
         | x_mem == y_mem =
-          unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
-            throwError . unwords $
-              [ "Index function unification failed (ReturnsInBlock)",
-                "\nixfun of body result: ",
-                pretty y_ixfun,
-                "\nixfun of return type: ",
-                pretty x_ixfun,
-                "\nand context elements: ",
-                pretty ctx_res
-              ]
+            unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
+              throwError . unwords $
+                [ "Index function unification failed (ReturnsInBlock)",
+                  "\nixfun of body result: ",
+                  pretty y_ixfun,
+                  "\nixfun of return type: ",
+                  pretty x_ixfun
+                ]
       checkMemReturn
         (ReturnsNewBlock x_space x_ext x_ixfun)
         (ArrayIn y_mem y_ixfun) = do
@@ -730,8 +726,6 @@ matchReturnType rettype res ts = do
                 </> indent 2 (ppr y_ixfun)
                 </> "Ixfun of return type:"
                 </> indent 2 (ppr x_ixfun)
-                </> "Context elements: "
-                </> indent 2 (ppr ctx_res)
           case x_mem_type of
             MemMem y_space ->
               unless (x_space == y_space) . throwError . unwords $
@@ -767,7 +761,7 @@ matchReturnType rettype res ts = do
 
 matchPatToExp ::
   (Mem rep inner, LetDec rep ~ LetDecMem, TC.Checkable rep) =>
-  Pat (Aliases rep) ->
+  Pat (LetDec (Aliases rep)) ->
   Exp (Aliases rep) ->
   TC.TypeM rep ()
 matchPatToExp pat e = do
@@ -901,7 +895,7 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
             ++ ")"
 
 bodyReturnsFromPat ::
-  PatT (MemBound NoUniqueness) -> [(VName, BodyReturns)]
+  Pat (MemBound NoUniqueness) -> [(VName, BodyReturns)]
 bodyReturnsFromPat pat =
   map asReturns $ patElems pat
   where
@@ -909,7 +903,7 @@ bodyReturnsFromPat pat =
 
     ext (Var v)
       | Just (i, _) <- find ((== v) . patElemName . snd) $ zip [0 ..] ctx =
-        Ext i
+          Ext i
     ext se = Free se
 
     asReturns pe =
@@ -937,14 +931,14 @@ extReturns ets =
       return $ MemMem space
     addDec t@(Array bt shape u)
       | existential t = do
-        i <- get <* modify (+ 1)
-        return $
-          MemArray bt shape u $
-            Just $
-              ReturnsNewBlock DefaultSpace i $
-                IxFun.iota $ map convert $ shapeDims shape
+          i <- get <* modify (+ 1)
+          return $
+            MemArray bt shape u $
+              Just $
+                ReturnsNewBlock DefaultSpace i $
+                  IxFun.iota $ map convert $ shapeDims shape
       | otherwise =
-        return $ MemArray bt shape u Nothing
+          return $ MemArray bt shape u Nothing
     addDec (Acc acc ispace ts u) =
       return $ MemAcc acc ispace ts u
     convert (Ext i) = le64 (Ext i)
@@ -1045,9 +1039,9 @@ expReturns e@(DoLoop merge _ _) = do
           )
             | Just (i, mem_p) <- isMergeVar mem,
               Mem space <- paramType mem_p ->
-              return $ MemArray pt shape u $ Just $ ReturnsNewBlock space i ixfun'
+                return $ MemArray pt shape u $ Just $ ReturnsNewBlock space i ixfun'
             | otherwise ->
-              return $ MemArray pt shape u $ Just $ ReturnsInBlock mem ixfun'
+                return $ MemArray pt shape u $ Just $ ReturnsInBlock mem ixfun'
             where
               ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
         (Array {}, _) ->
@@ -1124,9 +1118,9 @@ applyFunReturns ::
   Maybe [FunReturns]
 applyFunReturns rets params args
   | Just _ <- applyRetType rettype params args =
-    Just $ map correctDims rets
+      Just $ map correctDims rets
   | otherwise =
-    Nothing
+      Nothing
   where
     rettype = map declExtTypeOf rets
     parammap :: M.Map VName (SubExp, Type)

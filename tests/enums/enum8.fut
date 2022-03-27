@@ -1,5 +1,5 @@
 -- Invalid constructor format.
 -- ==
--- error: unexpected ID
+-- error: Unexpected token: 'bar'
 
 type foo = #foo | bar

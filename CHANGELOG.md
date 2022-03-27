@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+* Incomplete simplification would cause some instances of nested
+  parallelism to require irregular allocations (#1610).
+
+## [0.21.8]
+
+### Added
+
+* Slightly better parse errors (again).
+
+* `futhark literate` now supports a `file:` option in `:img` and
+  `:video` directives (#1491).
+
+### Fixed
+
+* Improved hoisting of size computations.  This could cause some
+  regular nested parallel programs to run into compiler limitations,
+  as if they were irregular.
+
+* Rare code generation bug for histograms (#1609).
+
+## [0.21.7]
+
+### Added
+
+* `futhark check-syntax`: check syntactic validity of a program
+  file, without type-checking.
+
+* Parsing multi-file programs is now parallelised, making it
+  *slightly* faster.
+
+* Reloading a large program in `futhark repl` is now faster, as long
+  as not too many of its files have been modified (#1597).
+
+### Fixed
+
+* Mistake in occurs check could cause infinite loop in type checker
+  for programs with type errors (#1599).
+
+## [0.21.6]
+
+### Added
+
 * `futhark bench` now explicitly notes when a tuning file is not
   present.
 
@@ -17,10 +65,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Generated C code is now a lot smaller for large programs, as error
   recovery has been more centralised (#1584).
-
-### Removed
-
-### Changed
 
 ### Fixed
 

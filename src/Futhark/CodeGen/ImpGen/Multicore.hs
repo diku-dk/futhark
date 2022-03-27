@@ -40,6 +40,7 @@ gccAtomics = flip lookup cpu
         (Or Int64, Imp.AtomicOr Int64)
       ]
 
+-- | Compile the program.
 compileProg ::
   MonadFreshNames m =>
   Prog MCMem ->
@@ -83,7 +84,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                 error $ "Missing locks for " ++ pretty acc
 
 withAcc ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   [(Shape, [VName], Maybe (Lambda MCMem, [SubExp]))] ->
   Lambda MCMem ->
   MulticoreGen ()
@@ -97,15 +98,15 @@ withAcc pat inputs lam = do
     locksForInputs atomics ((c, (_, _, op)) : inputs')
       | Just (op_lam, _) <- op,
         AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
-        let num_locks = 100151
-        locks_arr <-
-          sStaticArray "withacc_locks" DefaultSpace int32 $
-            Imp.ArrayZeros num_locks
-        let locks = Locks locks_arr num_locks
-            extend env = env {hostLocks = M.insert c locks $ hostLocks env}
-        localEnv extend $ locksForInputs atomics inputs'
+          let num_locks = 100151
+          locks_arr <-
+            sStaticArray "withacc_locks" DefaultSpace int32 $
+              Imp.ArrayZeros num_locks
+          let locks = Locks locks_arr num_locks
+              extend env = env {hostLocks = M.insert c locks $ hostLocks env}
+          localEnv extend $ locksForInputs atomics inputs'
       | otherwise =
-        locksForInputs atomics inputs'
+          locksForInputs atomics inputs'
 
 compileMCExp :: ExpCompiler MCMem HostEnv Imp.Multicore
 compileMCExp _ (BasicOp (UpdateAcc acc is vs)) =
@@ -116,7 +117,7 @@ compileMCExp dest e =
   defCompileExp dest e
 
 compileMCOp ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
@@ -151,10 +152,10 @@ compileMCOp pat (ParOp par_op op) = do
       scheduling_info (decideScheduling' op seq_code)
 
 compileSegOp ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegOp () MCMem ->
   TV Int32 ->
-  ImpM MCMem HostEnv Imp.Multicore Imp.Code
+  ImpM MCMem HostEnv Imp.Multicore Imp.MCCode
 compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
   compileSegHist pat space histops kbody ntasks
 compileSegOp pat (SegScan _ space scans _ kbody) ntasks =

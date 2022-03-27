@@ -11,7 +11,7 @@ import Data.FileEmbed
 import Data.List (nubBy)
 import qualified Data.Text.Lazy as T
 import qualified Data.Text.Lazy.IO as T
-import Futhark.Compiler (Imports, dumpError, fileProg, newFutharkConfig, readLibrary)
+import Futhark.Compiler (Imports, dumpError, fileProg, newFutharkConfig, readProgramFiles)
 import Futhark.Doc.Generator
 import Futhark.Pipeline (FutharkM, Verbosity (..), runFutharkM)
 import Futhark.Util (directoryContents, trim)
@@ -49,7 +49,7 @@ main = mainWithOptions initialDocConfig commandLineOptions "options... -o outdir
             liftIO $ do
               mapM_ (hPutStrLn stderr . ("Found source file " <>)) files
               hPutStrLn stderr "Reading files..."
-          (_w, imports, _vns) <- readLibrary [] files
+          (_w, imports, _vns) <- readProgramFiles [] files
           liftIO $ printDecs config outdir files $ nubBy sameImport imports
 
     sameImport (x, _) (y, _) = x == y

@@ -126,7 +126,7 @@ addLexicalMemSize param = pure [param]
 
 -- Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
-compileCodeISPC :: Imp.Variability -> Code -> GC.CompilerM Multicore s ()
+compileCodeISPC :: Imp.Variability -> MCCode -> GC.CompilerM Multicore s ()
 compileCodeISPC vari (Comment s code) = do
   xs <- GC.collect $ compileCodeISPC vari code
   let comment = "// " ++ s

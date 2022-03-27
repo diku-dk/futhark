@@ -469,9 +469,9 @@ generaliseExtTypes rt1 rt2 =
     unifyExtDims (Free se1) (Free se2)
       | se1 == se2 = return $ Free se1 -- Arbitrary
       | otherwise = do
-        (n, m) <- get
-        put (n + 1, m)
-        return $ Ext n
+          (n, m) <- get
+          put (n + 1, m)
+          return $ Ext n
     unifyExtDims (Ext x) (Ext y)
       | x == y = Ext <$> (maybe (new x) return =<< gets (M.lookup x . snd))
     unifyExtDims (Ext x) _ = Ext <$> new x
@@ -492,7 +492,7 @@ existentialiseExtTypes inaccessible = map makeBoundShapesFree
       modifyArrayShape $ fmap checkDim
     checkDim (Free (Var v))
       | Just i <- v `elemIndex` inaccessible =
-        Ext i
+          Ext i
     checkDim d = d
 
 -- | Produce a mapping for the dimensions context.
@@ -554,7 +554,7 @@ instance Typed Ident where
 instance Typed dec => Typed (Param dec) where
   typeOf = typeOf . paramDec
 
-instance Typed dec => Typed (PatElemT dec) where
+instance Typed dec => Typed (PatElem dec) where
   typeOf = typeOf . patElemDec
 
 instance Typed b => Typed (a, b) where
@@ -594,7 +594,7 @@ instance SetType Type where
 instance SetType b => SetType (a, b) where
   setType (a, b) t = (a, setType b t)
 
-instance SetType dec => SetType (PatElemT dec) where
+instance SetType dec => SetType (PatElem dec) where
   setType (PatElem name dec) t =
     PatElem name $ setType dec t
 

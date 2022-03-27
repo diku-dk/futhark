@@ -62,6 +62,8 @@ compileProg version =
     )
     <=< ImpGen.compileProg
 
+-- | Generate the multicore context definitions.  This is exported
+-- because the WASM backend needs it.
 generateContext :: GC.CompilerM op () ()
 generateContext = do
   mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack schedulerH)|]
@@ -230,6 +232,7 @@ generateContext = do
                    }|]
     )
 
+-- | Multicore-related command line options.
 cliOptions :: [Option]
 cliOptions =
   [ Option
@@ -248,6 +251,7 @@ cliOptions =
       }
   ]
 
+-- | Operations for generating multicore code.
 operations :: GC.Operations Multicore ()
 operations =
   GC.defaultOperations
@@ -506,7 +510,7 @@ generateParLoopFn ::
   C.ToIdent a =>
   M.Map VName Space ->
   String ->
-  Code ->
+  MCCode ->
   a ->
   [(VName, (C.Type, ValueType))] ->
   [(VName, (C.Type, ValueType))] ->
@@ -700,7 +704,7 @@ compileOp (ExtractLane dest tar _) = do
   tar' <- GC.compileExp tar
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
 
-scopedBlock :: Code -> GC.CompilerM Multicore s ()
+scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
 scopedBlock code = do 
   inner <- GC.collect $ GC.compileCode code
   GC.stm [C.cstm|{$items:inner}|]
