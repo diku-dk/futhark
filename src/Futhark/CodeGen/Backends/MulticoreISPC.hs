@@ -157,6 +157,7 @@ compileCodeISPC vari (Write dest (Count idx) elemtype DefaultSpace vol elemexp) 
   dest' <- GC.rawMem dest
   idxexp <- GC.compileExp (untyped idx)
   tmp <- newVName "tmp_idx"
+  --TODO(pema): Uncomment, breaks scan
   --GC.decl [C.cdecl|$tyquals:(GC.variQuals vari) typename int64_t $id:tmp = $exp:idxexp;|]
   GC.decl [C.cdecl|typename int64_t $id:tmp = $exp:idxexp;|]
   let deref =

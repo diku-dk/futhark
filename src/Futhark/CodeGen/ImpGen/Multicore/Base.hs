@@ -26,7 +26,8 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     everythingDefault,
     everythingVarying,
     inISPC,
-    toParam
+    toParam,
+    sLoopNestVectorized,
   )
 where
 
@@ -295,6 +296,37 @@ inISPC code = do
   code' <- collect code
   free <- freeParams code'
   emit $ Imp.Op $ Imp.ISPCKernel code' free
+
+-------------------------------
+------- SegRed helpers  -------
+-------------------------------
+sForVectorized' :: VName -> Imp.Exp -> MulticoreGen () -> MulticoreGen ()
+sForVectorized' i bound body = do
+  let it = case primExpType bound of
+        IntType bound_t -> bound_t
+        t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
+  addLoopVar i it
+  body' <- collect body
+  emit $ Imp.Op $ Imp.ForEach i bound body'
+
+sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
+sForVectorized i bound body = do
+  i' <- newVName i
+  sForVectorized' i' (untyped bound) $
+    body $ TPrimExp $ Imp.var i' $ primExpType $ untyped bound
+
+-- Like sLoopNest, but puts a foreach at the innermost layer
+sLoopNestVectorized ::
+  Shape ->
+  ([Imp.TExp Int64] -> MulticoreGen ()) ->
+  MulticoreGen ()
+sLoopNestVectorized = sLoopNest' [] . shapeDims
+  where
+    sLoopNest' is [] f = f $ reverse is
+    sLoopNest' is [d] f =
+      sForVectorized "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) [] f
+    sLoopNest' is (d : ds) f =
+      sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
 
 -------------------------------
 ------- SegHist helpers -------

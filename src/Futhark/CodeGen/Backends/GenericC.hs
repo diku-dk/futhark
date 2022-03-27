@@ -86,6 +86,7 @@ module Futhark.CodeGen.Backends.GenericC
     variQuals,
     linearCode,
     allocMem,
+    derefPointer,
   )
 where
 import Control.Monad.Identity
