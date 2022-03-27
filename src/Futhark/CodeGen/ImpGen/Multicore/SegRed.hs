@@ -163,7 +163,6 @@ getExtract ::
   -> Imp.TExp Int64
   -> MulticoreGen Imp.Code
   -> MulticoreGen ()
-getExtract Comm = extractVectorLane
 getExtract NonComm = extractVectorLane
 getExtract Uniformize = extractVectorLane
 getExtract _ = \_ body -> body >>= emit
