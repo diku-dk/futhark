@@ -687,7 +687,7 @@ compileOp (ParLoop s' body free) = do
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
 compileOp (Atomic aop) =
   atomicOps aop
-compileOp (ISPCKernel body _ _) =
+compileOp (ISPCKernel body _) =
   scopedBlock body
 compileOp (ForEach i bound body) =
   GC.compileCode (For i bound body)

@@ -290,11 +290,11 @@ extractVectorLane j code = do
     _ -> 
       return ()
 
-inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
-inISPC retvals code = do
+inISPC :: MulticoreGen () -> MulticoreGen ()
+inISPC code = do
   code' <- collect code
   free <- freeParams code'
-  emit $ Imp.Op $ Imp.ISPCKernel code' free retvals
+  emit $ Imp.Op $ Imp.ISPCKernel code' free
 
 -------------------------------
 ------- SegHist helpers -------

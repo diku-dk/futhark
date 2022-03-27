@@ -35,7 +35,7 @@ data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String Code [Param]
   | -- | Emit code in ISPC
-    ISPCKernel Code [Param] [Param]
+    ISPCKernel Code [Param]
   | -- | ForEach, only valid in ISPC
     ForEach VName Exp Code
   | -- | ForEach_Active, only valid in ISPC
@@ -133,7 +133,7 @@ instance Pretty Multicore where
           ]
   ppr (Atomic _) =
     "AtomicOp"
-  ppr (ISPCKernel body _ _) =
+  ppr (ISPCKernel body _) =
     "ispc" <+> nestedBlock "{" "}" (ppr body)
   ppr (ForEach i limit body) =
     "foreach" <+> ppr i <+> langle <+> ppr limit
@@ -165,7 +165,7 @@ instance FreeIn Multicore where
     freeIn' body
   freeIn' (Atomic aop) =
     freeIn' aop
-  freeIn' (ISPCKernel body _ _) =
+  freeIn' (ISPCKernel body _) =
     freeIn' body
   freeIn' (ForEach i bound body) =
     fvBind (oneName i) (freeIn' body <> freeIn' bound)
@@ -198,7 +198,7 @@ lexicalMemoryUsageMC func =
 
     -- We want nested SetMem's to be visible so we don't erroneously
     -- treat a memblock that needs refcounting as lexical
-    goOpSet f (ISPCKernel code _ _) = go goOpSet f code
+    goOpSet f (ISPCKernel code _) = go goOpSet f code
     goOpSet f (ForEach _ _ body) = go goOpSet f body
     goOpSet f (ForEachActive _ body) = go goOpSet f body
     goOpSet f (VariabilityBlock _ code) = go goOpSet f code

@@ -115,7 +115,7 @@ scanStage1Ispc pat space scan_ops kbody = do
     -- Is it nested arrays?
 
     -- Create ISPC kernel function
-    inISPC [] $ do
+    inISPC $ do
       -- Create fpr each
       generateChunkLoop "SegScan" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
@@ -313,7 +313,7 @@ scanStage3Ispc pat space scan_ops kbody = do
         pure acc
     -- Is it nested arrays?
 
-    inISPC [] $ do
+    inISPC $ do
       generateChunkLoop "SegScan" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         sComment "stage 3 scan body" $

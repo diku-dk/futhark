@@ -115,6 +115,32 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
   let slugs2 = zipWith SegBinOpSlug reds2 thread_res_arrs
   reductionStage2 pat space nsubtasks' slugs2
 
+genAccumulators :: [SegBinOpSlug] -> MulticoreGen ([[VName]], Imp.Code)
+genAccumulators slugs =
+  collect' $ do
+    dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+
+    forM slugs $ \slug -> do
+      let shape = segBinOpShape $ slugOp slug
+
+      forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
+        -- Declare accumulator variable.
+        acc <-
+          case paramType p of
+            Prim pt
+              | shape == mempty ->
+                tvVar <$> dPrim "local_acc" pt
+              | otherwise ->
+                sAllocArray "local_acc" pt shape DefaultSpace
+            _ ->
+              pure $ paramName p
+
+        -- Now neutral-initialise the accumulator.
+        sLoopNest (slugShape slug) $ \vec_is ->
+          copyDWIMFix acc vec_is ne []
+
+        pure acc
+
 -- Pure sequential C codegen
 reductionStage1 ::
   SegSpace ->
@@ -135,29 +161,8 @@ reductionStage1 space slugs kbody = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    slug_local_accs <- do
-      dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-
-      forM slugs $ \slug -> do
-        let shape = segBinOpShape $ slugOp slug
-
-        forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
-          -- Declare accumulator variable.
-          acc <-
-            case paramType p of
-              Prim pt
-                | shape == mempty ->
-                  tvVar <$> dPrim "local_acc" pt
-                | otherwise ->
-                  sAllocArray "local_acc" pt shape DefaultSpace
-              _ ->
-                pure $ paramName p
-
-          -- Now neutral-initialise the accumulator.
-          sLoopNest (slugShape slug) $ \vec_is ->
-            copyDWIMFix acc vec_is ne []
-
-          pure acc
+    (slug_local_accs, prebody) <- genAccumulators slugs
+    emit prebody
 
     generateChunkLoop "SegRed" False $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
@@ -210,43 +215,9 @@ reductionStage1NonCommScalar space slugs kbody = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    (slug_local_accs_pairs, prebody) <- collect' $ do
-      dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+    (slug_local_accs, prebody) <- genAccumulators slugs
 
-      forM slugs $ \slug -> do
-        let shape = segBinOpShape $ slugOp slug
-
-        forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
-          -- Declare accumulator variable.
-          acc <-
-            let typ = paramType p in
-            case typ of
-              Prim pt
-                | shape == mempty -> do
-                  name <- tvVar <$> dPrim "local_acc" pt
-                  pure (name, typ)
-                | otherwise -> do
-                  name <- sAllocArray "local_acc" pt shape DefaultSpace
-                  pure (name, typ)
-              _ ->
-                pure (paramName p, typ)
-
-          -- Now neutral-initialise the accumulator.
-          sLoopNest (slugShape slug) $ \vec_is ->
-            copyDWIMFix (fst acc) vec_is ne []
-
-          pure acc
-
-    let slug_local_accs = map (map fst) slug_local_accs_pairs
-    retvals <- fmap concat $ mapM (uncurry toParam) . concat $ slug_local_accs_pairs
-
-    -- Declare result vars
-    forM_ retvals $ \local_accs ->
-      case local_accs of
-        Imp.ScalarParam name pt -> dPrim_ name pt
-        _ -> undefined
-
-    inISPC retvals $ everythingUniform $ do
+    inISPC $ everythingUniform $ do
       emit prebody
       generateChunkLoop "SegRed" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
@@ -274,9 +245,9 @@ reductionStage1NonCommScalar space slugs kbody = do
                       \(local_acc, se) ->
                         copyDWIMFix local_acc vec_is se []
 
-    forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
-      forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
-        copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
+      forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
+        forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
+          copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params
@@ -302,43 +273,9 @@ reductionStage1CommScalar space slugs kbody = do
     sOp $ Imp.GetTaskId (segFlat space)
 
     slugs' <- mapM renameSlug slugs
-    prebody1 <- collect $ dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-    prebody2 <- collect $ dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs'
-    let genAccs =
-          collect' $ do
-            forM slugs $ \slug -> do
-              let shape = segBinOpShape $ slugOp slug
 
-              forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
-                -- Declare accumulator variable.
-                acc <-
-                  let typ = paramType p in
-                  case typ of
-                    Prim pt
-                      | shape == mempty -> do
-                        name <- tvVar <$> dPrim "local_acc" pt
-                        pure (name, typ)
-                      | otherwise -> do
-                        name <- sAllocArray "local_acc" pt shape DefaultSpace
-                        pure (name, typ)
-                    _ ->
-                      pure (paramName p, typ)
-
-                -- Now neutral-initialise the accumulator.
-                sLoopNest (slugShape slug) $ \vec_is ->
-                  copyDWIMFix (fst acc) vec_is ne []
-
-                pure acc
-
-    (slug_local_accs_pairs, prebody3) <- genAccs
-    (slug_local_accs_pairs_uni, prebody4) <- genAccs
-    let default_prebody = prebody1 <> prebody3
-    let uniform_prebody = prebody2 <> prebody4
-
-    -- This is a list of lists because we can have multiple fused reduction (multiple binops), and each reduction can return multiple values
-    let slug_local_accs = map (map fst) slug_local_accs_pairs
-    let slug_local_accs_uni = map (map fst) slug_local_accs_pairs_uni
-    retvals <- fmap concat $ mapM (uncurry toParam) . concat $ slug_local_accs_pairs_uni
+    (slug_local_accs, default_prebody) <- genAccumulators slugs
+    (slug_local_accs_uni, uniform_prebody) <- genAccumulators slugs'
 
     postbody <- collect $ generateUniformizeLoop $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
@@ -363,13 +300,7 @@ reductionStage1CommScalar space slugs kbody = do
                 \(local_acc, se) ->
                   copyDWIMFix local_acc vec_is se []
 
-    -- Declare result vars
-    forM_ retvals $ \local_accs ->
-      case local_accs of
-        Imp.ScalarParam name pt -> dPrim_ name pt
-        _ -> undefined
-
-    inISPC retvals $
+    inISPC $ do
       everythingUniform $ do
         emit uniform_prebody
         everythingVarying $ do
@@ -399,10 +330,10 @@ reductionStage1CommScalar space slugs kbody = do
                           copyDWIMFix local_acc vec_is se []
           emit postbody
 
-    -- Read back results
-    forM_ (zip slugs slug_local_accs_uni) $ \(slug, local_accs) ->
-      forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
-        copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
+        -- Read back results
+        forM_ (zip slugs slug_local_accs_uni) $ \(slug, local_accs) ->
+          forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
+            copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params
@@ -487,7 +418,7 @@ reductionStage1Array space slugs kbody = do
     let slug_local_accs = map (map fst) slug_local_accs_pairs
 
     emit prebody_uniform
-    inISPC [] $ do
+    inISPC $ do
       emit prebody_default
       everythingUniform $ do
         generateChunkLoop "SegRed" False $ \i -> do
