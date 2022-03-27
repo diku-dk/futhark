@@ -54,6 +54,7 @@ import qualified Futhark.Util as L
 import Control.Monad (foldM)
 import Data.Foldable (foldlM)
 import Control.Monad.State
+import Futhark.IR.SOACS.SOAC (SOAC(Screma))
 
 
 -- unofficial TODO
@@ -63,7 +64,8 @@ import Control.Monad.State
 
 
 
-
+-- TODO ALSO:
+--  make vname -> Node a monadic thing
 
 
 
@@ -147,13 +149,13 @@ reachable source target = do
 
 
 linearizeGraph :: DepGraph -> [Stm SOACS]
-linearizeGraph g = reverse $ concatMap stmFromNode $ Q.topsort' g
+linearizeGraph g = concatMap stmFromNode $ reverse $ Q.topsort' g
 
 doAllFusion :: DepGraphAug
-doAllFusion = applyAugs [keeptrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, runInnerFusion]
+doAllFusion = applyAugs [keeptrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, makeCopiesOfConsAliased, runInnerFusion]
 
-doInnerFusion :: DepGraphAug
-doInnerFusion g = pure g
+-- doInnerFusion :: DepGraphAug
+-- doInnerFusion g = pure g
 
 
 -- map-fusion part
@@ -200,12 +202,12 @@ isDep _ = False
 isInf :: (Node, Node, EdgeT) -> Bool
 isInf (_,_,e) = case e of
   InfDep vn -> True
-  (Cons _) -> False -- you would think this sholud be true - but mabye this works
-  Fake -> True -- this is infusible to avoid simultaneous cons/dep edges
+  Cons _ -> False -- you would think this sholud be true - but mabye this works
+  Fake _ -> True -- this is infusible to avoid simultaneous cons/dep edges
   _ -> False
 
-isCons :: DepEdge -> Bool
-isCons (_,_, Cons _) = True
+isCons :: EdgeT -> Bool
+isCons (Cons _) = True
 isCons _ = False
 
 
@@ -287,7 +289,7 @@ tryFuseNodesInGraph node_1 node_2 g
       else pure g
     where
       -- sorry about this
-      fused = concatMap depsFromEdge $ filter isCons $ edgesBetween g node_1 node_2
+      fused = concatMap depsFromEdge $ filter (isCons . edgeLabel) $ edgesBetween g node_1 node_2
       infusable_nodes = concatMap depsFromEdge
         (concatMap (edgesBetween g node_1) (filter (/=node_2) $ pre g node_1))
                                   -- L.\\ edges_between g node_1 node_2)
@@ -316,27 +318,42 @@ tryFuseNodesInGraph node_1 node_2 g
 makeCopies :: Stm SOACS -> FusionEnvM (Stm SOACS)
 makeCopies s@(Let pats aux (Op (Futhark.Screma size inputs  (ScremaForm scans red lam)))) =
   do
-    newNames <- mapM makeNewName fused_inner
-    copies <-  mapM (\ (name, name_fused) -> mkLetNames [name_fused] (BasicOp $ Copy name)) (zip fused_inner newNames)
-      -- Let (basicPat name) aux ((BasicOp . Copy) name_fused)) (zip newNames fused_inner)
+    let fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
+    makeCopiesInStm fused_inner s
 
-    let l_body = lambdaBody lam
-    let newBody = insertStms (stmsFromList copies) (substituteNames (makeMap fused_inner newNames) l_body)
-    let newLambda = lam {lambdaBody = newBody}
-    pure $ Let pats aux (Op (Futhark.Screma size inputs  (ScremaForm scans red newLambda)))
-  where
-    makeNewName name = newVName $ baseString name <> "_copy"
-    fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
-    -- newNames
-    -- add new names
-    -- rename old names
-
-    -- copyFree (stms, subst) v = do
-    --   v_copy <-
-    --   copy <- mkLetNamesM [v_copy] $ BasicOp $ Copy v
-    --   return (oneStm copy <> stms, M.insert v v_copy subst)
 
 makeCopies stm = pure stm
+
+makeCopiesInStm :: [VName] -> Stm SOACS -> FusionEnvM (Stm SOACS)
+makeCopiesInStm toCopy s@(Let sz os (Op (Screma szi is (Futhark.ScremaForm scan red lam)))) =
+  do
+    newLam <- makeCopiesInLambda toCopy lam
+    pure $ Let sz os (Op (Screma szi is (Futhark.ScremaForm scan red newLam)))
+makeCopiesInStm _ s = pure s -- BUG
+-- IMPORTANT TODO
+-- this should be a traversal. even if it means making copies where absolutely meaningless
+
+
+makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionEnvM (Lambda SOACS)
+makeCopiesInLambda toCopy lam =
+  do
+    (copies, nameMap) <- makeCopyStms toCopy
+    let l_body = lambdaBody lam
+    let newBody = insertStms (stmsFromList copies) (substituteNames nameMap l_body)
+    let newLambda = lam {lambdaBody = newBody}
+    pure newLambda
+
+
+makeCopyStms :: [VName] -> FusionEnvM ([Stm SOACS], M.Map VName VName)
+makeCopyStms toCopy = do
+  newNames <- mapM makeNewName toCopy
+  copies  <-  mapM (\ (name, name_fused) -> mkLetNames [name_fused] (BasicOp $ Copy name)) (zip toCopy newNames)
+  pure (copies, makeMap toCopy newNames)
+    where
+    makeNewName name = newVName $ baseString name <> "_copy"
+
+
+
 
 
 -- for horizontal fusion
@@ -428,9 +445,12 @@ fuseStms infusible s1 s2 =
         --   zip3 (patIdents pats2) (lambdaReturnType lam_2) (res_from_lambda lam_2))
         --   fused_outputs
 
+        fused_inputs_inner = change_all (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
+
+
         map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
         map2 = makeMap o1 lam_1_output
-        map4 = makeMap i1 lam_1_inputs
+        map4 = makeMap fused_inputs fused_inputs_inner
         map3 = fuse_maps map1 (M.union map2 map4)
 
 
@@ -469,21 +489,24 @@ vFuseLambdas lam_1 i1 o1 lam_2 i2 o2 = (lam , fused_inputs)
     (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
     (lam_1_output, lam_2_output) = mapT (namesFromRes . res_from_lambda) (lam_1, lam_2)
 
-    map1 = makeMap lam_2_inputs i2
+    fused_inputs = trace ("things: " ++ show (fuse_inputs2 o1 i1 i2)) fuse_inputs2 o1 i1 i2
+    fused_inputs_inner = change_all (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
+
+    map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
     map2 = makeMap o1 lam_1_output
-    map4 = makeMap i1 lam_1_inputs
+    map4 = makeMap fused_inputs fused_inputs_inner
     map3 = fuse_maps map1 (M.union map2 map4)
 
-    fused_inputs = fuse_inputs2 o1 i1 i2
+
 
     lparams = change_all (i1 ++ i2)
       (lambdaParams lam_1 ++ lambdaParams lam_2)
       fused_inputs
 
     lam' = fuseLambda lam_1 lam_2
-    lam = substituteNames map3 $ lam' {
+    lam = substituteNames map3 (lam' {
       lambdaParams = lparams
-      }
+      })
 
 
 
@@ -561,7 +584,7 @@ keeptrying f g =
 -- getstms
 
 removeUnusedOutputs :: DepGraphAug
-removeUnusedOutputs g = mapAcross (removeUnusedOutputsFromContext) g
+removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 
 vNameFromAdj :: Node -> (EdgeT, Node) -> [VName]
 vNameFromAdj n1 (edge, n2) = depsFromEdge (n2,n1, edge)
@@ -641,14 +664,38 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
 -- what about inner lambdas??????
 
 
+isAlias (Alias _) = True
+isAlias _ = False
 
-makeCopy :: MonadFreshNames m => DepGraph -> m DepGraph
-makeCopy g =
-  return g
+isFake (Fake _) = True
+isFake _ = False
+
+makeCopiesOfConsAliased :: DepGraphAug
+makeCopiesOfConsAliased = mapAcross copyAlised
+  where
+    copyAlised :: DepContext -> FusionEnvM DepContext
+    copyAlised c@(incoming, node, SNode s trnz, outgoing) = do
+      let incoming' = concatMap depsFromEdgeT $ filter isFake (map fst incoming)
+      let outgoing' = concatMap depsFromEdgeT $ filter isAlias (map fst outgoing)
+      let toMakeCopies =  incoming' `L.intersect` outgoing'
+      if not $ null toMakeCopies then do
+        (new_stms, nameMapping) <- makeCopyStms toMakeCopies
+        return (incoming, node, FinalNode (new_stms ++ [substituteNames nameMapping s]), outgoing)
+      else pure c
+    copyAlised c = pure c
+
+-- make the context to context function and add that on top d
 
 
-makeCopyContext :: MonadFreshNames m => DepContext -> m DepContext
-makeCopyContext c = return c
+
+
+-- makeCopy :: MonadFreshNames m => DepGraph -> m DepGraph
+-- makeCopy g =
+--   return g
+
+
+-- makeCopyContext :: MonadFreshNames m => DepContext -> m DepContext
+-- makeCopyContext c = return c
 
 
 -- Problems with copying fusion

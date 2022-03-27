@@ -32,8 +32,8 @@ import Futhark.CodeGen.Backends.CCUDA.Boilerplate (failureSwitch)
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
 -- SNode: Stm [InputTransforms] [OutputTransforms]
-data EdgeT = InfDep VName | Dep VName | Cons VName | Fake | Res VName deriving (Eq, Ord)
-data NodeT = SNode (Stm SOACS) HOREPSOAC.ArrayTransforms | RNode VName | InNode VName
+data EdgeT = Alias VName | InfDep VName | Dep VName | Cons VName | Fake VName | Res VName deriving (Eq, Ord)
+data NodeT = SNode (Stm SOACS) HOREPSOAC.ArrayTransforms | RNode VName | InNode VName | FinalNode [Stm SOACS]
   deriving (Eq, Ord)
 
 
@@ -41,8 +41,9 @@ instance Show EdgeT where
   show (Dep vName) = "Dep " <> ppr vName
   show (InfDep vName) = "iDep " <> ppr vName
   show (Cons _) = "Cons"
-  show Fake = "Fake"
+  show (Fake _) = "Fake"
   show (Res _) = "Res"
+  show (Alias _) = "Alias"
 
 -- inputs could have their own edges - to facilitate fusion
 
@@ -50,7 +51,7 @@ instance Show EdgeT where
 -- nodeT_to_str
 instance Show NodeT where
     show (SNode stm@(Let pat aux _) _) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
-
+    show (FinalNode stms) = concatMap ppr stms
     show (RNode name)  = ppr $ "Res: "   ++ ppr name
     show (InNode name) = ppr $ "Input: " ++ ppr name
 
@@ -116,17 +117,8 @@ runFusionEnvM (FusionEnvM a) env =
 
 type DepGraphAug = DepGraph -> FusionEnvM DepGraph
 
---- Graph Construction ---
 
--- emptyG :: [Stm SOACS] -> Result -> [FParam SOACS] -> DepGraph
--- emptyG stms r inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
---   where
---     namesFromRes = map ((\(Var x) -> x) . resSubExp)
---     label_nodes = zip [0..]
---     snodes = map SNode stms
---     rnodes = map RNode (namesFromRes r)
---     inNodes= map (InNode . paramName) $ filter isArray inputs -- there might be a better way
-
+-- transform functions for fusing over transforms
 appendTransformations :: DepGraphAug
 appendTransformations g = do
   applyAugs (map appendTransform $ labNodes g) g
@@ -144,7 +136,7 @@ appendTransform node_to_fuse g =
 
 -- replaceName :: VName -> VName ->
 
-
+--- Graph Construction ---
 
 appendT :: Node -> Node -> DepGraphAug
 appendT transformNode to g
@@ -194,7 +186,7 @@ mkDepGraph stms res inputs = addDepEdges $ emptyG2 stms res inputs
 
 addDepEdges :: DepGraphAug
 addDepEdges = applyAugs
-  [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges] --, appendTransformations]
+  [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges, addAliases] --, appendTransformations]
 
 
 
@@ -228,6 +220,7 @@ label = snd
 
 stmFromNode :: NodeT -> [Stm SOACS]
 stmFromNode (SNode x _) = [x]
+stmFromNode (FinalNode x) = x
 stmFromNode _ = []
 
 
@@ -265,7 +258,8 @@ depsFromEdgeT e = case e of
   InfDep name -> [name]
   Res name    -> [name]
   Cons name   -> [name]
-  _ -> []
+  Fake name   -> [name]
+  Alias name  -> [name]
 
 depsFromEdge ::  DepEdge -> [VName]
 depsFromEdge = depsFromEdgeT . edgeLabel
@@ -289,6 +283,9 @@ augWithFun :: EdgeGenerator -> DepGraphAug
 augWithFun f g = genEdges (labNodes g) f g
 
 
+toAlias :: DepGenerator -> EdgeGenerator
+toAlias f stmt = map (\vname ->  (vname, Alias vname)) (concatMap f (stmFromNode stmt))
+
 toDep :: DepGenerator -> EdgeGenerator
 toDep f stmt = map (\vname ->  (vname, Dep vname)) (concatMap f (stmFromNode stmt))
 
@@ -301,9 +298,12 @@ toInfDep f stmt = map (\vname ->  (vname, InfDep vname)) (concatMap f (stmFromNo
 addInfDeps :: DepGraphAug
 addInfDeps = augWithFun $ toInfDep infusableInputs
 
---unused?
-addDeps :: DepGraphAug
-addDeps = augWithFun getStmDeps
+
+addAliases :: DepGraphAug
+addAliases = augWithFun $ toAlias aliasInputs
+-- --unused?
+-- addDeps :: DepGraphAug
+-- addDeps = augWithFun getStmDeps
 
 addCons :: DepGraphAug
 addCons = augWithFun getStmCons
@@ -337,7 +337,7 @@ addExtraCons g = depGraphInsertEdges new_edges g
   where
     new_edges = concatMap make_edge (labEdges g)
     make_edge :: DepEdge -> [DepEdge]
-    make_edge (from, to, Cons cname) = [toLEdge (from, to2) Fake | (to2, _) <- filter (\(tonode,toedge)->
+    make_edge (from, to, Cons cname) = [toLEdge (from, to2) (Fake cname) | (to2, e) <- filter (\(tonode,toedge)->
       tonode /= from
       && cname `elem` depsFromEdgeT toedge
       ) $ lpre g to]
@@ -368,6 +368,9 @@ makeScanInfusible g = return $ emap change_node_to_idep g
     change_node_to_idep e = e
 
 -- Utils for fusibility/infusibility
+-- find dependencies - either fusable or infusable. edges are generated based on these
+
+
 fusableInputs :: Stm SOACS -> [VName]
 fusableInputs (Let _ _ exp) = fusableInputsFromExp exp
 
@@ -386,13 +389,20 @@ infusableInputsFromExp :: Exp SOACS -> [VName]
 infusableInputsFromExp (Op soac) = case soac of
   Futhark.Screma  e _ s  ->
     namesToList $ freeIn $ Futhark.Screma e [] s
-  Futhark.Hist    _ _ _ lam       -> namesToList $ freeIn lam
-  Futhark.Scatter _ _ lam _       -> namesToList $ freeIn lam
-  Futhark.Stream  _ _ _ _ lam     -> namesToList $ freeIn lam
+  Futhark.Hist    e _ histops lam ->
+    namesToList $ freeIn $ Futhark.Hist e [] histops lam
+  Futhark.Scatter e _ lam other       ->
+    namesToList $ freeIn $ Futhark.Scatter e [] lam other
+  Futhark.Stream  a1 _ a3 a4 lam     ->
+    namesToList $ freeIn $ Futhark.Stream a1 [] a3 a4 lam
 -- infusableInputsFromExp op@(BasicOp x) = namesToList $ freeIn op
 -- infusableInputsFromExp op@If {} = namesToList $ freeIn op
 -- infusableInputsFromExp op@DoLoop {} = namesToList $ freeIn op
 infusableInputsFromExp op = namesToList $ freeIn op
+
+aliasInputs :: Stm SOACS -> [VName]
+aliasInputs op = case op of
+  Let pat sa exp -> concatMap namesToList $ expAliases $ Alias.analyseExp mempty exp
 
 --- /Augmentations ---
 
@@ -402,11 +412,11 @@ getStmNames :: Stm SOACS -> [VName]
 getStmNames s = case s of
   Let pat _ _ -> patNames pat
 
-getStmDeps :: EdgeGenerator
-getStmDeps (SNode s _) = map (\x -> (x, Dep x)) names
-  where
-    names = (namesToList . freeIn) s
-getStmDeps _ = []
+-- getStmDeps :: EdgeGenerator
+-- getStmDeps (SNode s _) = map (\x -> (x, Dep x)) names
+--   where
+--     names = (namesToList . freeIn) s
+-- getStmDeps _ = []
 
 getStmCons :: EdgeGenerator
 getStmCons (SNode s _) = zip names (map Cons names)
@@ -432,6 +442,7 @@ getOutputs node = case node of
   (SNode stm _) -> getStmNames stm
   (RNode _)   -> []
   (InNode name) -> [name]
+  (FinalNode stms) -> concatMap getStmNames stms
 
 --- /Inspecting Stms ---
 
