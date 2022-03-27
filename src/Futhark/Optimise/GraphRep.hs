@@ -361,6 +361,8 @@ makeScanInfusible g = return $ emap change_node_to_idep g
     find_scan_results  (Let pat _ (Op (Futhark.Screma  _ _ (ScremaForm scns rdcs _)))) =
       let resLen = scanResults scns + redResults rdcs
       in take resLen (patNames pat)
+    -- find_scan_results  (Let pat _ (Op Futhark.Scatter {})) = patNames pat
+    -- find_scan_results  (Let pat _ (Op Futhark.Hist {})) = patNames pat
     find_scan_results _ = []
 
     scan_res_set :: S.Set VName
