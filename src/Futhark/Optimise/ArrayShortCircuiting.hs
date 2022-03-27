@@ -32,13 +32,13 @@ data Env inner = Env
 type ReplaceM inner a = Reader (Env inner) a
 
 optimiseSeqMem :: Pass SeqMem SeqMem
-optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab return undefined
+optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab return replaceInParams
 
 optimiseGPUMem :: Pass GPUMem GPUMem
-optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp replaceInFParamsGPU
+optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp replaceInParams
 
-replaceInFParamsGPU :: CoalsTab -> [FParam (Aliases GPUMem)] -> (Names, [FParam (Aliases GPUMem)])
-replaceInFParamsGPU coalstab fparams =
+replaceInParams :: CoalsTab -> [Param FParamMem] -> (Names, [Param FParamMem])
+replaceInParams coalstab fparams =
   let (mem_allocs_to_remove, fparams') =
         foldl
           ( \(to_remove, acc) (Param attrs name dec) ->
