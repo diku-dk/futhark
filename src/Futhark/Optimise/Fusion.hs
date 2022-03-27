@@ -116,22 +116,28 @@ fuseFun _stmts fun = do
       stms = trace (ppr (bodyStms b)) $ stmsToList $ bodyStms b
       res = bodyResult b
 
+-- lazy version of fuse graph - removes inputs from the graph that are not arrays
 fuseGraphLZ :: [Stm SOACS] -> Result -> [Param DeclType] -> FusionEnvM [Stm SOACS]
 fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
   where
     resNames = namesFromRes results
     inputNames = map paramName $ filter isArray inputs
 
+-- main fusion function.
 fuseGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM [Stm SOACS]
 fuseGraph stms results inputs = do
     old_reachabilityG <- trace (unlines (map ppr stms)) $ gets reachabilityG
+    old_mappings <- gets producerMapping
     graph_not_fused <- mkDepGraph stms results (trace (show inputs) inputs)
+ -- I have no idea why this is neccessary
+    oldScope <- gets scope
+    modify (\s -> s {scope = M.union (scopeOf stms) oldScope})
     modify (\s -> s {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused})
     let graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
     graph_fused <-  doAllFusion graph_not_fused'
     let graph_fused' = trace (pprg graph_fused) graph_fused
     let stms_new = linearizeGraph graph_fused'
-    modify (\s -> s{reachabilityG = old_reachabilityG})
+    modify (\s -> s{reachabilityG = old_reachabilityG, producerMapping=old_mappings} )
     return $ trace (unlines (map ppr stms_new)) stms_new
 
 
@@ -147,7 +153,6 @@ reachable source target = do
   pure $ hasEdge rg (source, target)
 
 
-
 linearizeGraph :: DepGraph -> [Stm SOACS]
 linearizeGraph g = concatMap stmFromNode $ reverse $ Q.topsort' g
 
@@ -159,7 +164,6 @@ doAllFusion = applyAugs [keeptrying doMapFusion, doHorizontalFusion, removeUnuse
 
 
 -- map-fusion part
-
 
 
 
@@ -329,9 +333,7 @@ makeCopiesInStm toCopy s@(Let sz os (Op (Screma szi is (Futhark.ScremaForm scan 
   do
     newLam <- makeCopiesInLambda toCopy lam
     pure $ Let sz os (Op (Screma szi is (Futhark.ScremaForm scan red newLam)))
-makeCopiesInStm _ s = pure s -- BUG
--- IMPORTANT TODO
--- this should be a traversal. even if it means making copies where absolutely meaningless
+makeCopiesInStm _ s = pure s
 
 
 makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionEnvM (Lambda SOACS)
@@ -645,8 +647,10 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
       b1_new <- doFusionInner b1 []
       b2_new <- doFusionInner b2 []
       return (incomming, node, SNode (Let pats aux (If size b1_new b2_new branchType)) mempty, outgoing)
-  SNode (Let pats aux (DoLoop params form body)) _ ->
+  SNode stm@(Let pats aux (DoLoop params form body)) _ ->
     do
+      oldScope <- gets scope
+      modify (\s -> s {scope = M.union (scopeOfFParams (map fst params)) oldScope})
       b_new <- doFusionInner body (map (paramName . fst) params)
       return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
   _ -> return c

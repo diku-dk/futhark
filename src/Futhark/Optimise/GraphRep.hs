@@ -67,16 +67,19 @@ type DepEdge = LEdge EdgeT
 type DepContext = Context NodeT EdgeT
 type DepGraph = G.Gr NodeT EdgeT
 
+-- depGenerators can be used to make edgeGenerators
 type DepGenerator = Stm SOACS -> [VName]
+-- for each node, what producer should the node depend on and what type
 type EdgeGenerator = NodeT -> [(VName, EdgeT)]
 
-
+-- monadic state environment for fusion.
 data FusionEnv = FusionEnv
   {
     -- nodeMap :: M.Map VName [VName],
     vNameSource :: VNameSource,
     scope :: Scope SOACS,
-    reachabilityG :: G.Gr () ()
+    reachabilityG :: G.Gr () (),
+    producerMapping :: M.Map VName Node
   }
 
 newtype FusionEnvM a = FusionEnvM {fenv :: State FusionEnv a}
@@ -104,17 +107,11 @@ runFusionEnvM ::
   FusionEnv ->
   m a
 runFusionEnvM (FusionEnvM a) env =
-  -- let (a', new_env) =  runState a env
-  -- in modifyNameSource (\src ->  (a', vNameSource (new_env {vNameSource = src})))
   modifyNameSource $ \src -> let (new_a, new_env) = runState a (env {vNameSource = src}) in (new_a, vNameSource new_env)
 
 
-
-
-
-
-
-
+-- most everything is going to be a graph augmentation g -> M g.
+-- these can be efficiently strung together using applyAugs
 type DepGraphAug = DepGraph -> FusionEnvM DepGraph
 
 
@@ -133,8 +130,6 @@ appendTransform node_to_fuse g =
     fuses_to = map nodeFromLNode $ input g node_to_fuse
     node_to_fuse_id = nodeFromLNode node_to_fuse
 
-
--- replaceName :: VName -> VName ->
 
 --- Graph Construction ---
 
@@ -165,7 +160,8 @@ appendT transformNode to g
       --     Nothing -> pure g
 
 
-
+    -- gen_names_map :: [DepNode] -> M.Map VName Node
+    -- gen_names_map s = M.fromList $ concatMap gen_dep_list s
 
 emptyG2 :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
 emptyG2 stms res inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
@@ -181,7 +177,9 @@ isArray p = case paramDec p of
   _ -> False
 
 mkDepGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
-mkDepGraph stms res inputs = addDepEdges $ emptyG2 stms res inputs
+mkDepGraph stms res inputs = do
+  g <- addDepEdges $ emptyG2 stms res inputs
+  makeMapping g
 
 
 addDepEdges :: DepGraphAug
@@ -189,19 +187,25 @@ addDepEdges = applyAugs
   [addDeps2, makeScanInfusible, addInfDeps, addCons, addExtraCons, addResEdges, addAliases] --, appendTransformations]
 
 
+makeMapping :: DepGraphAug
+makeMapping g = do
+  let mapping = M.fromList $ concatMap gen_dep_list (labNodes g)
+  modify (\s -> s{producerMapping = mapping})
+  pure g
+    where
+      gen_dep_list :: DepNode -> [(VName, Node)]
+      gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
 
+-- creates deps for the given nodes on the graph using the edgeGenerator
 genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug
-genEdges l_stms edge_fun g = depGraphInsertEdges (concatMap gen_edge l_stms) g
+genEdges l_stms edge_fun g = do
+  makeMapping g
+  name_map <- gets producerMapping
+  depGraphInsertEdges (concatMap (gen_edge name_map) l_stms) g
   where
-    name_map = gen_names_map (labNodes g)
     -- statements -> mapping from declared array names to soac index
-    gen_names_map :: [DepNode] -> M.Map VName Node
-    gen_names_map s = M.fromList $ concatMap gen_dep_list s
-      where
-        gen_dep_list :: DepNode -> [(VName, Node)]
-        gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]-- getStmNames (stmFromNode node)]
-    gen_edge :: DepNode -> [LEdge EdgeT]
-    gen_edge (from, node) = [toLEdge (from,to) edgeT  | (dep, edgeT) <- edge_fun node,
+    gen_edge ::  M.Map VName Node -> DepNode -> [LEdge EdgeT]
+    gen_edge name_map (from, node) = [toLEdge (from,to) edgeT  | (dep, edgeT) <- edge_fun node,
                                               Just to <- [M.lookup dep name_map]]
 
 depGraphInsertEdges :: [DepEdge] -> DepGraphAug
@@ -209,7 +213,6 @@ depGraphInsertEdges edgs g = return $ mkGraph (labNodes g) (edgs ++ labEdges g)
 
 applyAugs :: [DepGraphAug] -> DepGraphAug
 applyAugs augs g = foldlM (flip ($)) g augs
---applyAugs g augs = foldl (flip ($)) g (augs ++ [cleanUpGraph])
 
 --- /Graph Construction
 
@@ -224,7 +227,7 @@ stmFromNode (FinalNode x) = x
 stmFromNode _ = []
 
 
-
+-- possibly should be combined with the copy aliased
 -- -- started this - but seems unreasonably hard.
 -- finalizeStmFromNode :: NodeT -> FusionEnvM [Stm SOACS]
 -- finalizeStmFromNode (SNode stm transforms)
@@ -317,6 +320,8 @@ mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
   let new_inp  = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (inp1  `L.union` inp2) in
   let new_out = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (out1 `L.union` out2)
   in (new_inp, n1, mergedlabel, new_out)
+  -- update keys of gen n2 with n1
+
 
 -- n1 remains
 contractEdge :: Node -> DepContext -> DepGraphAug
@@ -327,8 +332,10 @@ contractEdge n2 cxt g = do
   rg <- gets reachabilityG
   let newContext = mergedContext () (context rg n1) (context rg n2)
   modify (\s -> s {reachabilityG = (&) newContext $ delNodes [n1, n2] rg})
-
   pure $ (&) cxt $ delNodes [n1, n2] g
+-- BUG: should modify name_mappings
+
+
 
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it
@@ -346,17 +353,18 @@ addExtraCons g = depGraphInsertEdges new_edges g
 addResEdges :: DepGraphAug
 addResEdges = augWithFun getStmRes
 
+-- and reduce, actually
 makeScanInfusible :: DepGraphAug
 makeScanInfusible g = return $ emap change_node_to_idep g
   where
     find_scan_results :: Stm SOACS -> [VName]
-    find_scan_results  (Let pat _ (Op (Futhark.Screma  _ _ (ScremaForm scns _ _)))) =
-      take (length scns) (patNames pat)
+    find_scan_results  (Let pat _ (Op (Futhark.Screma  _ _ (ScremaForm scns rdcs _)))) =
+      let resLen = scanResults scns + redResults rdcs
+      in take resLen (patNames pat)
     find_scan_results _ = []
 
     scan_res_set :: S.Set VName
     scan_res_set = S.fromList (concatMap find_scan_results (concatMap (stmFromNode . label) (labNodes g)))
-
 
     is_scan_res :: VName -> Bool
     is_scan_res name = S.member name scan_res_set
@@ -412,11 +420,6 @@ getStmNames :: Stm SOACS -> [VName]
 getStmNames s = case s of
   Let pat _ _ -> patNames pat
 
--- getStmDeps :: EdgeGenerator
--- getStmDeps (SNode s _) = map (\x -> (x, Dep x)) names
---   where
---     names = (namesToList . freeIn) s
--- getStmDeps _ = []
 
 getStmCons :: EdgeGenerator
 getStmCons (SNode s _) = zip names (map Cons names)
