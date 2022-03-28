@@ -11,6 +11,8 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Util.IntegralExp (quot, rem)
 import Prelude hiding (quot, rem)
+import Data.Maybe
+import Data.Foldable
 
 -- Compile a SegScan construct
 compileSegScan ::
@@ -34,6 +36,33 @@ yParams scan =
 
 lamBody :: SegBinOp MCMem -> Body MCMem
 lamBody = lambdaBody . segBinOpLambda
+
+knownBinOp :: BinOp -> Maybe String
+knownBinOp (Add _ _) = Just "scan_add"
+knownBinOp (And _)   = Just "scan_and"
+knownBinOp (Or _)    = Just "scan_or"
+knownBinOp _         = Nothing
+
+-- TODO(pema): Please forgive me for this
+knownLambda :: Lambda MCMem -> Maybe String
+knownLambda lam =
+  let body = lambdaBody lam
+      n2 = length (lambdaParams lam) `div` 2
+      (xps, yps) = splitAt n2 (lambdaParams lam)
+
+      okComponent c = join $ find isJust $ okBinOp c <$> bodyStms body
+      okBinOp
+        (xp, yp, SubExpRes _ (Var r))
+        (Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
+          Just (patElemName pe == r)
+            >> Just ( (x == paramName xp && y == paramName yp)
+                   || (y == paramName xp && x == paramName yp)
+               )
+            >> knownBinOp op
+      okBinOp _ _ = Nothing
+   in Just (n2 * 2 == length (lambdaParams lam))
+        >> Just (n2 == length (bodyResult body))
+        >> join (find isJust $ okComponent <$> zip3 xps yps (bodyResult body))
 
 -- Arrays for storing worker results.
 resultArrays :: String -> [SegBinOp MCMem] -> MulticoreGen [[VName]]

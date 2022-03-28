@@ -703,6 +703,12 @@ compileOp (VariabilityBlock _ code) =
 compileOp (ExtractLane dest tar _) = do
   tar' <- GC.compileExp tar
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
+compileOp (ScanLane op dests lhs rhs) = do
+  mapM_ (scanLaneOp op) $ zip3 dests lhs rhs 
+
+scanLaneOp :: String -> (VName, VName, VName) -> GC.CompilerM Multicore s ()
+scanLaneOp op (dest, lhs, rhs) = do
+  GC.stm [C.cstm|$id:dest = $id:op($id:lhs, $id:rhs);|] 
 
 scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
 scopedBlock code = do 
