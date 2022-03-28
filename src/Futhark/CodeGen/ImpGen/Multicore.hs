@@ -40,6 +40,7 @@ gccAtomics = flip lookup cpu
         (Or Int64, Imp.AtomicOr Int64)
       ]
 
+-- | Compile the program.
 compileProg ::
   MonadFreshNames m =>
   Prog MCMem ->

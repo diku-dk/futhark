@@ -1109,9 +1109,9 @@ closeEnough ixf1 ixf2 =
 equivalent :: Eq num => IxFun num -> IxFun num -> Bool
 equivalent ixf1 ixf2 =
   NE.length (ixfunLMADs ixf1) == NE.length (ixfunLMADs ixf2)
-    && all closeEnoughLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
+    && all equivalentLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
   where
-    closeEnoughLMADs (lmad1, lmad2) =
+    equivalentLMADs (lmad1, lmad2) =
       length (lmadDims lmad1) == length (lmadDims lmad2)
         && map ldPerm (lmadDims lmad1)
         == map ldPerm (lmadDims lmad2)

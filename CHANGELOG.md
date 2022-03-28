@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Incomplete simplification would cause some instances of nested
+  parallelism to require irregular allocations (#1610).
+
+* Missing alias checking for a simplification rule related to in-place
+  updates (#1615).
+
+## [0.21.8]
+
+### Added
+
+* Slightly better parse errors (again).
+
+* `futhark literate` now supports a `file:` option in `:img` and
+  `:video` directives (#1491).
+
+### Fixed
+
+* Improved hoisting of size computations.  This could cause some
+  regular nested parallel programs to run into compiler limitations,
+  as if they were irregular.
+
+* Rare code generation bug for histograms (#1609).
+
 ## [0.21.7]
 
 ### Added

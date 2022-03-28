@@ -2,10 +2,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Type checking of patterns.
 module Language.Futhark.TypeChecker.Terms.Pat
   ( binding,
     bindingParams,
-    checkPat,
     bindingPat,
     bindingIdent,
     bindingSizes,
@@ -66,6 +66,9 @@ checkIfUsed occs v
   | otherwise =
       return ()
 
+-- | Bind these identifiers locally while running the provided action.
+-- Checks that the identifiers are used properly within the scope
+-- (e.g. consumption).
 binding :: [Ident] -> TermTypeM a -> TermTypeM a
 binding stms = check . handleVars
   where
@@ -170,6 +173,7 @@ typeParamIdent (TypeParamDim v loc) =
   Just $ Ident v (Info $ Scalar $ Prim $ Signed Int64) loc
 typeParamIdent _ = Nothing
 
+-- | Bind a single term-level identifier.
 bindingIdent ::
   IdentBase NoInfo Name ->
   PatType ->
@@ -181,6 +185,8 @@ bindingIdent (Ident v NoInfo vloc) t m =
     let ident = Ident v' (Info t) vloc
     binding [ident] $ m ident
 
+-- | Bind @let@-bound sizes.  This is usually followed by 'bindingPat'
+-- immediately afterwards.
 bindingSizes :: [SizeBinder Name] -> ([SizeBinder VName] -> TermTypeM a) -> TermTypeM a
 bindingSizes [] m = m [] -- Minor optimisation.
 bindingSizes sizes m = do
@@ -217,6 +223,7 @@ patternDims (PatAscription p (TypeDecl _ (Info t)) _) =
     dimIdent _ NamedDim {} = Nothing
 patternDims _ = []
 
+-- | Check and bind a @let@-pattern.
 bindingPat ::
   [SizeBinder VName] ->
   PatBase NoInfo Name ->
@@ -394,6 +401,7 @@ checkPat sizes p t m = do
     [] ->
       bindNameMap (patNameMap p') $ m p'
 
+-- | Check and bind type and value parameters.
 bindingParams ::
   [UncheckedTypeParam] ->
   [UncheckedPat] ->

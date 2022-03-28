@@ -182,16 +182,16 @@ ruleBasicOp vtable pat _ (Update _ dest destis (Var v))
           True
     arrayFrom _ =
       False
--- ruleBasicOp vtable pat _ (Update _ dest is se)
---   | Just dest_t <- ST.lookupType dest vtable,
---     isFullSlice (arrayShape dest_t) is = Simplify $
---     case se of
---       Var v | not $ null $ sliceDims is -> do
---         v_reshaped <-
---           letExp (baseString v ++ "_reshaped") $
---             BasicOp $ Reshape (map DimNew $ arrayDims dest_t) v
---         letBind pat $ BasicOp $ Copy v_reshaped
---       _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
+ruleBasicOp vtable pat _ (Update _ dest is se)
+  | Just dest_t <- ST.lookupType dest vtable,
+    isFullSlice (arrayShape dest_t) is = Simplify $
+      case se of
+        Var v | not $ null $ sliceDims is -> do
+          v_reshaped <-
+            letExp (baseString v ++ "_reshaped") $
+              BasicOp $ Reshape (map DimNew $ arrayDims dest_t) v
+          letBind pat $ BasicOp $ Copy v_reshaped
+        _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
 ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update safety1 dest1 is1 (Var v1))
   | Just (Update safety2 dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
     Just (Copy v3, cs3) <- ST.lookupBasicOp dest2 vtable,
@@ -346,8 +346,7 @@ ruleBasicOp vtable pat aux (Update safety arr_x (Slice slice_x) (Var v))
   | Just _ <- sliceIndices (Slice slice_x),
     Just (Index arr_y (Slice slice_y), cs_y) <- ST.lookupBasicOp v vtable,
     ST.available arr_y vtable,
-    -- XXX: we should check for proper aliasing here instead.
-    arr_y /= arr_x,
+    not $ ST.aliases arr_x arr_y vtable,
     Just (slice_x_bef, DimFix i, []) <- focusNth (length slice_x - 1) slice_x,
     Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = Simplify $ do
       let slice_x' = Slice $ slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]

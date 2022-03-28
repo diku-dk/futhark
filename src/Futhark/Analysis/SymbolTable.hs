@@ -30,6 +30,7 @@ module Futhark.Analysis.SymbolTable
     lookupAliases,
     lookupLoopVar,
     lookupLoopParam,
+    aliases,
     available,
     consume,
     index,
@@ -264,10 +265,19 @@ lookupLoopVar name vtable = do
   LoopVar e <- entryType <$> M.lookup name (bindings vtable)
   return $ loopVarBound e
 
+-- | Look up the initial value and eventual result of a loop
+-- parameter.  Note that the result almost certainly refers to
+-- something that is not part of the symbol table.
 lookupLoopParam :: VName -> SymbolTable rep -> Maybe (SubExp, SubExp)
 lookupLoopParam name vtable = do
   FParam e <- entryType <$> M.lookup name (bindings vtable)
   fparamMerge e
+
+-- | Do these two names alias each other?  This is expected to be a
+-- commutative relationship, so the order of arguments does not
+-- matter.
+aliases :: VName -> VName -> SymbolTable rep -> Bool
+aliases x y vtable = x == y || (x `nameIn` lookupAliases y vtable)
 
 -- | In symbol table and not consumed.
 available :: VName -> SymbolTable rep -> Bool

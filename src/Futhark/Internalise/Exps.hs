@@ -228,7 +228,7 @@ internaliseAppExp desc _ (E.Index e idxs loc) = do
   let index v = do
         v_t <- lookupType v
         return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
-  certifying cs $ letSubExps desc =<< mapM index vs
+  certifying cs $ mapM (letSubExp desc <=< index) vs
 internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
   start' <- internaliseExp1 "range_start" start
   end' <- internaliseExp1 "range_end" $ case end of
@@ -676,7 +676,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
                 ks
             return $ I.BasicOp $ I.ArrayLit ks' rt
 
-      letSubExps desc
+      mapM (letSubExp desc)
         =<< if null es'
           then mapM (arraylit []) rowtypes
           else zipWithM arraylit (transpose es') rowtypes
@@ -1333,7 +1333,7 @@ internaliseOperation ::
   InternaliseM [I.SubExp]
 internaliseOperation s e op = do
   vs <- internaliseExpToVars s e
-  letSubExps s =<< mapM (fmap I.BasicOp . op) vs
+  mapM (letSubExp s . I.BasicOp <=< op) vs
 
 certifyingNonzero ::
   SrcLoc ->
@@ -1788,7 +1788,7 @@ isOverloadedFunction qname args loc = do
 
       let conc xarr yarr =
             I.BasicOp $ I.Concat 0 (xarr :| [yarr]) ressize
-      letSubExps desc $ zipWith conc xs ys
+      mapM (letSubExp desc) $ zipWith conc xs ys
     handleRest [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
       offset' <- internaliseExp1 "rotation_offset" offset
       internaliseOperation desc e $ \v -> do

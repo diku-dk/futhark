@@ -28,3 +28,12 @@ let checkerboard_bool =
 
 ![](img-img/0f6dfe6c60396642fa77352f2ff84c81-img.png)
 
+
+```
+> :img checkerboard_bool;
+file: foo.bar
+```
+
+
+![](img-img/foo.bar)
+

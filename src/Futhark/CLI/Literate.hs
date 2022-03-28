@@ -57,11 +57,21 @@ import Text.Megaparsec hiding (State, failure, token)
 import Text.Megaparsec.Char
 import Text.Printf
 
+newtype ImgParams = ImgParams
+  { imgFile :: Maybe FilePath
+  }
+  deriving (Show)
+
+defaultImgParams :: ImgParams
+defaultImgParams =
+  ImgParams {imgFile = Nothing}
+
 data VideoParams = VideoParams
   { videoFPS :: Maybe Int,
     videoLoop :: Maybe Bool,
     videoAutoplay :: Maybe Bool,
-    videoFormat :: Maybe T.Text
+    videoFormat :: Maybe T.Text,
+    videoFile :: Maybe FilePath
   }
   deriving (Show)
 
@@ -71,14 +81,15 @@ defaultVideoParams =
     { videoFPS = Nothing,
       videoLoop = Nothing,
       videoAutoplay = Nothing,
-      videoFormat = Nothing
+      videoFormat = Nothing,
+      videoFile = Nothing
     }
 
 data Directive
   = DirectiveRes Exp
   | DirectiveBrief Directive
   | DirectiveCovert Directive
-  | DirectiveImg Exp
+  | DirectiveImg Exp ImgParams
   | DirectivePlot Exp (Maybe (Int, Int))
   | DirectiveGnuplot Exp T.Text
   | DirectiveVideo Exp VideoParams
@@ -88,7 +99,7 @@ varsInDirective :: Directive -> S.Set EntryName
 varsInDirective (DirectiveRes e) = varsInExp e
 varsInDirective (DirectiveBrief d) = varsInDirective d
 varsInDirective (DirectiveCovert d) = varsInDirective d
-varsInDirective (DirectiveImg e) = varsInExp e
+varsInDirective (DirectiveImg e _) = varsInExp e
 varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveVideo e _) = varsInExp e
@@ -100,8 +111,17 @@ pprDirective _ (DirectiveBrief f) =
   pprDirective False f
 pprDirective _ (DirectiveCovert f) =
   pprDirective False f
-pprDirective _ (DirectiveImg e) =
+pprDirective _ (DirectiveImg e params) =
   "> :img " <> PP.align (PP.ppr e)
+    <> if null params' then mempty else PP.stack $ ";" : params'
+  where
+    params' =
+      catMaybes
+        [ p "file" imgFile PP.ppr
+        ]
+    p s f ppr = do
+      x <- f params
+      Just $ s <> ": " <> ppr x
 pprDirective True (DirectivePlot e (Just (h, w))) =
   PP.stack
     [ "> :plot2d " <> PP.ppr e <> ";",
@@ -126,7 +146,8 @@ pprDirective True (DirectiveVideo e params) =
         [ p "fps" videoFPS PP.ppr,
           p "loop" videoLoop ppBool,
           p "autoplay" videoAutoplay ppBool,
-          p "format" videoFormat PP.strictText
+          p "format" videoFormat PP.strictText,
+          p "file" videoFile PP.ppr
         ]
     ppBool b = if b then "true" else "false"
     p s f ppr = do
@@ -191,6 +212,35 @@ parsePlotParams =
       *> token "("
       *> ((,) <$> parseInt <* token "," <*> parseInt) <* token ")"
 
+withPredicate :: (a -> Bool) -> String -> Parser a -> Parser a
+withPredicate f msg p = do
+  r <- lookAhead p
+  if f r then p else fail msg
+
+parseFilePath :: Parser FilePath
+parseFilePath =
+  withPredicate ok "filename must not have directory component" p
+  where
+    p = T.unpack <$> lexeme (takeWhileP Nothing (not . isSpace))
+    ok f = takeFileName f == f
+
+parseImgParams :: Parser ImgParams
+parseImgParams =
+  fmap (fromMaybe defaultImgParams) $
+    optional $ ";" *> hspace *> eol *> "-- " *> parseParams defaultImgParams
+  where
+    parseParams params =
+      choice
+        [ choice
+            [pFile params]
+            >>= parseParams,
+          pure params
+        ]
+    pFile params = do
+      token "file:"
+      b <- parseFilePath
+      pure params {imgFile = Just b}
+
 parseVideoParams :: Parser VideoParams
 parseVideoParams =
   fmap (fromMaybe defaultVideoParams) $
@@ -246,7 +296,8 @@ parseBlock =
           directiveName "brief" $> DirectiveBrief
             <*> parseDirective,
           directiveName "img" $> DirectiveImg
-            <*> parseExp postlexeme <* eol,
+            <*> parseExp postlexeme
+            <*> parseImgParams <* eol,
           directiveName "plot2d" $> DirectivePlot
             <*> parseExp postlexeme
             <*> parsePlotParams <* eol,
@@ -533,9 +584,9 @@ data Env = Env
     envHash :: T.Text
   }
 
-newFileWorker :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM (FilePath, FilePath)
-newFileWorker env template m = do
-  let fname_base = T.unpack (envHash env) <> "-" <> template
+newFileWorker :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM (FilePath, FilePath)
+newFileWorker env (fname_desired, template) m = do
+  let fname_base = fromMaybe (T.unpack (envHash env) <> "-" <> template) fname_desired
       fname = envImgDir env </> fname_base
       fname_rel = envRelImgDir env </> fname_base
   exists <- liftIO $ doesFileExist fname
@@ -549,12 +600,12 @@ newFileWorker env template m = do
   modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
   pure (fname, fname_rel)
 
-newFile :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM FilePath
-newFile env template m = snd <$> newFileWorker env template m
+newFile :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM FilePath
+newFile env f m = snd <$> newFileWorker env f m
 
-newFileContents :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM T.Text
-newFileContents env template m =
-  liftIO . T.readFile . fst =<< newFileWorker env template m
+newFileContents :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM T.Text
+newFileContents env f m =
+  liftIO . T.readFile . fst =<< newFileWorker env f m
 
 processDirective :: Env -> Directive -> ScriptM T.Text
 processDirective env (DirectiveBrief d) =
@@ -563,7 +614,7 @@ processDirective env (DirectiveCovert d) =
   processDirective env d
 processDirective env (DirectiveRes e) = do
   result <-
-    newFileContents env "eval.txt" $ \resultf -> do
+    newFileContents env (Nothing, "eval.txt") $ \resultf -> do
       v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
       liftIO $ T.writeFile resultf $ prettyText v
   pure $
@@ -578,8 +629,8 @@ processDirective env (DirectiveRes e) = do
     nope t =
       throwError $ "Cannot show value of type " <> prettyText t
 --
-processDirective env (DirectiveImg e) = do
-  fmap imgBlock . newFile env "img.png" $ \pngfile -> do
+processDirective env (DirectiveImg e params) = do
+  fmap imgBlock . newFile env (imgFile params, "img.png") $ \pngfile -> do
     maybe_v <- evalExpToGround literateBuiltin (envServer env) e
     case maybe_v of
       Right (ValueAtom v)
@@ -598,7 +649,7 @@ processDirective env (DirectiveImg e) = do
         "Cannot create image from value of type " <> prettyText t
 --
 processDirective env (DirectivePlot e size) = do
-  fmap imgBlock . newFile env "plot.png" $ \pngfile -> do
+  fmap imgBlock . newFile env (Nothing, "plot.png") $ \pngfile -> do
     maybe_v <- evalExpToGround literateBuiltin (envServer env) e
     case maybe_v of
       Right v
@@ -642,7 +693,7 @@ processDirective env (DirectivePlot e size) = do
         void $ system "gnuplot" [] script
 --
 processDirective env (DirectiveGnuplot e script) = do
-  fmap imgBlock . newFile env "plot.png" $ \pngfile -> do
+  fmap imgBlock . newFile env (Nothing, "plot.png") $ \pngfile -> do
     maybe_v <- evalExpToGround literateBuiltin (envServer env) e
     case maybe_v of
       Right (ValueRecord m)
@@ -667,7 +718,8 @@ processDirective env (DirectiveVideo e params) = do
   when (format `notElem` ["webm", "gif"]) $
     throwError $ "Unknown video format: " <> format
 
-  fmap (videoBlock params) . newFile env ("video" <.> T.unpack format) $ \videofile -> do
+  let file = (videoFile params, "video" <.> T.unpack format)
+  fmap (videoBlock params) . newFile env file $ \videofile -> do
     v <- evalExp literateBuiltin (envServer env) e
     let nope =
           throwError $

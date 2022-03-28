@@ -177,7 +177,7 @@ tryMakeGenerator t
   | Just vs <- readValues $ BS.pack t =
       return $ \_ fmt _ -> mapM_ (outValue fmt) vs
   | otherwise = do
-      t' <- toValueType =<< either (Left . show) Right (parseType name (T.pack t))
+      t' <- toValueType =<< either (Left . syntaxErrorMsg) Right (parseType name (T.pack t))
       return $ \conf fmt seed -> do
         let v = randomValue conf t' seed
         outValue fmt v

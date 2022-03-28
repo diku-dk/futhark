@@ -12,8 +12,7 @@
 #
 # Also remember this guide: https://github.com/Gabriel439/haskell-nix/blob/master/project1/README.md
 
-{ compiler ? "ghc883", # ignored ATM
-  suffix ? "nightly",
+{ suffix ? "nightly",
   commit ? "" }:
 let
   config = {
@@ -21,7 +20,10 @@ let
       haskellPackages = pkgs.pkgsMusl.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
           aeson =
-            haskellPackagesNew.aeson_2_0_2_0;
+            haskellPackagesNew.aeson_2_0_3_0;
+
+          attoparsec =
+            haskellPackagesNew.attoparsec_0_14_4;
 
           time-compat =
             haskellPackagesNew.time-compat_1_9_6_1;
@@ -30,7 +32,7 @@ let
             haskellPackagesNew.semialign_1_2_0_1;
 
           hashable =
-            haskellPackagesNew.hashable_1_4_0_1;
+            haskellPackagesNew.hashable_1_4_0_2;
 
           OneTuple =
             haskellPackagesNew.OneTuple_0_3_1;
@@ -38,7 +40,7 @@ let
           # Need to disable the test suite as otherwise we have a
           # circular dependency with quickcheck-instances.
           text-short =
-            pkgs.pkgsMusl.haskell.lib.dontCheck haskellPackagesNew.text-short_0_1_4;
+            pkgs.haskell.lib.dontCheck haskellPackagesNew.text-short_0_1_5;
 
           quickcheck-instances =
             haskellPackagesNew.quickcheck-instances_0_3_27;

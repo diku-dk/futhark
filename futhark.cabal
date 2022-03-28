@@ -296,6 +296,8 @@ library
       Language.Futhark.Interpreter
       Language.Futhark.Parser
       Language.Futhark.Parser.Monad
+      Language.Futhark.Parser.Lexer.Tokens
+      Language.Futhark.Parser.Lexer.Wrapper
       Language.Futhark.Prelude
       Language.Futhark.Pretty
       Language.Futhark.Prop

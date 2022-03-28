@@ -130,11 +130,10 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
         where
           -- A non-unique merge variable is invariant if one of the
           -- following is true:
-          --
-          -- (0) The result is a variable of the same name as the
-          -- parameter, where all existential parameters are already
-          -- known to be invariant
           isInvariant
+            -- (0) The result is a variable of the same name as the
+            -- parameter, where all existential parameters are already
+            -- known to be invariant
             | Var v2 <- resSubExp resExp,
               paramName mergeParam == v2 =
                 allExistentialInvariant

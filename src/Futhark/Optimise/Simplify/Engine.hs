@@ -668,6 +668,13 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
       -- possible.
       isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
+      -- Hoist things that are free.
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Reshape {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Rearrange {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Rotate {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp (Index _ slice))) =
+        null $ sliceDims slice
+      --
       isNotHoistableBnd _ usage (Let pat _ _)
         | any (`UT.isSize` usage) $ patNames pat =
             False
@@ -679,9 +686,10 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
 
       block =
         branch_blocker
-          `orIf` ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
+          `orIf` ( (isNotSafe `orIf` isNotCheap `orIf` isNotHoistableBnd)
+                     `andAlso` stmIs (not . desirableToHoist)
+                 )
           `orIf` isConsuming
-          `orIf` isNotHoistableBnd
 
   (hoisted1, body1') <-
     protectIfHoisted cond True $

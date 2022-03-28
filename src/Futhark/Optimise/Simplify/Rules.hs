@@ -194,6 +194,32 @@ ruleIf _ pat _ (cond, tb, fb, _)
               cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
               letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond_neg
             else Skip
+-- Simplify
+--
+--   let z = if c then x else y
+--
+-- to
+--
+--   let z = y
+--
+-- in the case where 'x' is a loop parameter with initial value 'y'
+-- and the new value of the loop parameter is 'z'.  ('x' and 'y' can
+-- be flipped.)
+ruleIf vtable (Pat [pe]) aux (_c, tb, fb, IfDec [_] _)
+  | Body _ tstms [SubExpRes xcs x] <- tb,
+    null tstms,
+    Body _ fstms [SubExpRes ycs y] <- fb,
+    null fstms,
+    matches x y || matches y x =
+      Simplify $
+        certifying (stmAuxCerts aux <> xcs <> ycs) $
+          letBind (Pat [pe]) $ BasicOp $ SubExp y
+  where
+    z = patElemName pe
+    matches (Var x) y
+      | Just (initial, res) <- ST.lookupLoopParam x vtable =
+          initial == y && res == Var z
+    matches _ _ = False
 ruleIf _ _ _ _ = Skip
 
 -- | Move out results of a conditional expression whose computation is
