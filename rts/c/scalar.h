@@ -1553,7 +1553,7 @@ static inline float futrts_hypot32(float x, float y) {
     return ldexp (cn, e);
   } else {
     #pragma ignore warning(all)
-    if (futrts_isinf32(x) || futrts_isinf32(y)) return 1.0f / 0.0f; //TODO(LOUIS): Define infinity
+    if (futrts_isinf32(x) || futrts_isinf32(y)) return INFINITY;
     else return x + y;
   }
 

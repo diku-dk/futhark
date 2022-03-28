@@ -1,6 +1,6 @@
 // Start of scalar_f16.h.
 
-// Half-precision is emulated if needed (e.g. in straight C) with textern "C" uniform double futrts_ispc_from_bits64(uniform int64_t x);
+// Half-precision is emulated if needed (e.g. in straight C) with 
 // native type used if possible.  The emulation works by typedef'ing
 // 'float' to 'f16', and then implementing all operations on single
 // precision.  To cut down on duplication, we use the same code for
