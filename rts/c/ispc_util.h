@@ -101,6 +101,12 @@ static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
   }
 }
 
+// TODO (obp) : does this even make sense?
+//static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
+//				  varying struct memblock * uniform block,
+//				  uniform int64_t size,
+//				  uniform const char * uniform block_desc)
+
 static int memblock_set (struct futhark_context *ctx, struct memblock *lhs, struct memblock *rhs, const char *lhs_desc) {
   int ret = memblock_unref(ctx,  lhs, 0); //TODO(K, O): Make error handling
   if (rhs->references != NULL) {
@@ -109,4 +115,6 @@ static int memblock_set (struct futhark_context *ctx, struct memblock *lhs, stru
   *lhs = *rhs;
   return ret;
 }
+
+
 

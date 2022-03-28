@@ -147,6 +147,7 @@ compileCodeISPC vari (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
         go code
     go (x : xs) = compileCodeISPC vari x >> go xs
     go [] = pure ()
+
 compileCodeISPC _ (Allocate name (Count (TPrimExp e)) space) = do
   size <- GC.compileExp e
   cached <- GC.cacheMem name
@@ -157,7 +158,11 @@ compileCodeISPC _ (Allocate name (Count (TPrimExp e)) space) = do
                  err = lexical_realloc_ispc(&$exp:name, &$exp:cur_size, $exp:size);
                 }|]
     _ ->
-      GC.allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
+      GC.allocMemNoError name size space [C.cstm|{err = 1; goto cleanup;}|]
+
+compileCodeISPC _ (SetMem dest src space) =
+  GC.setMemNoError dest src space
+
 compileCodeISPC vari code@(Write dest (Count idx) elemtype DefaultSpace vol elemexp)
   | isConstExp (untyped idx) = do
     dest' <- GC.rawMem dest
