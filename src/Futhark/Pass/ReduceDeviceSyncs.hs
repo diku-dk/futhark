@@ -9,7 +9,7 @@ import Data.Foldable
 import qualified Data.IntMap.Strict as IM
 import Data.List (unzip4, zip4)
 import qualified Data.Map.Strict as M
-import Data.Sequence (Seq (..), empty, (<|), (><), (|>))
+import Data.Sequence ((<|), (><), (|>))
 import qualified Data.Text as T
 import Futhark.Analysis.MigrationTable
 import Futhark.Construct (fullSlice, sliceDim)
@@ -68,7 +68,7 @@ initialState :: VNameSource -> State
 initialState ns =
   State
     { stateNameSource = ns,
-      stateMigrated = IM.empty,
+      stateMigrated = mempty,
       stateGPUBodyOk = True
     }
 
@@ -237,28 +237,24 @@ resolveResult = mapM resolveSubExpRes
 
 optimizeProgram :: Prog GPU -> ReduceM (Prog GPU)
 optimizeProgram (Prog consts funs) = do
-  consts' <- optimizeStms empty consts
+  consts' <- optimizeStms consts
   funs' <- sequence $ parMap rpar optimizeFunDef funs
   pure (Prog consts' funs')
 
 optimizeFunDef :: FunDef GPU -> ReduceM (FunDef GPU)
 optimizeFunDef fd = do
   let body = funDefBody fd
-  stms' <- optimizeStms empty (bodyStms body)
+  stms' <- optimizeStms (bodyStms body)
   pure $ fd {funDefBody = body {bodyStms = stms'}}
 
 optimizeBody :: Body GPU -> ReduceM (Body GPU)
 optimizeBody (Body _ stms res) = do
-  stms' <- optimizeStms empty stms
+  stms' <- optimizeStms stms
   res' <- resolveResult res
   pure (Body () stms' res')
 
-optimizeStms :: Stms GPU -> Stms GPU -> ReduceM (Stms GPU)
-optimizeStms out Empty =
-  pure out
-optimizeStms out (stm :<| stms) = do
-  out' <- optimizeStm out stm
-  optimizeStms out' stms
+optimizeStms :: Stms GPU -> ReduceM (Stms GPU)
+optimizeStms = foldM optimizeStm mempty
 
 optimizeStm :: Stms GPU -> Stm GPU -> ReduceM (Stms GPU)
 optimizeStm out stm = do
@@ -330,8 +326,8 @@ optimizeStm out stm = do
       If cond (Body _ tstms0 tres) (Body _ fstms0 fres) (IfDec btypes sort) ->
         do
           -- Rewrite branches.
-          tstms1 <- optimizeStms empty tstms0
-          fstms1 <- optimizeStms empty fstms0
+          tstms1 <- optimizeStms tstms0
+          fstms1 <- optimizeStms fstms0
 
           -- Ensure return values and types match if one or both branches
           -- return a result that now reside on device.
@@ -421,7 +417,7 @@ optimizeStm out stm = do
         inputs' <- mapM (uncurry optimizeWithAccInput) accs
 
         let body = lambdaBody lmd
-        stms' <- optimizeStms empty (bodyStms body)
+        stms' <- optimizeStms (bodyStms body)
 
         let rewrite (SubExpRes certs se, t, pe) =
               do
@@ -503,7 +499,7 @@ optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
       --
       -- op may be used on both host and device so we must avoid introducing
       -- any GPUBody statements.
-      stms' <- noGPUBody $ optimizeStms empty (bodyStms body)
+      stms' <- noGPUBody $ optimizeStms (bodyStms body)
       let op' = op {lambdaBody = body {bodyStms = stms'}}
       pure (shape, arrs, Just (op', nes))
 
@@ -622,8 +618,8 @@ data RState = RState
 initialRState :: RState
 initialRState =
   RState
-    { rewriteRenames = IM.empty,
-      rewritePrologue = empty
+    { rewriteRenames = mempty,
+      rewritePrologue = mempty
     }
 
 -- | Create a fresh name, registering which name it is a rewrite of.
@@ -640,7 +636,7 @@ rewriteBody (Body _ stms res) = do
   pure (Body () stms' res')
 
 rewriteStms :: Stms GPU -> RewriteM (Stms GPU)
-rewriteStms = foldM rewriteTo empty
+rewriteStms = foldM rewriteTo mempty
   where
     rewriteTo out stm = do
       stm' <- rewriteStm stm
