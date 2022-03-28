@@ -427,9 +427,9 @@ fuseStms infusible s1 s2 =
         (scan_outputs_2, red_outputs_2, lambda_used_outputs_2) = splitAt3 (Futhark.scanResults scans_2) (Futhark.redResults red_2) o2
 
         fused_outputs = concat [
-          scan_outputs_1 ++ scan_outputs_2,
-          red_outputs_1 ++ red_outputs_2,
-          lambda_used_outputs_1 ++  lambda_used_outputs_2]
+          scan_outputs_1,        scan_outputs_2,
+          red_outputs_1,         red_outputs_2,
+          lambda_used_outputs_1, lambda_used_outputs_2]
 
 
         ids = change_all (o1 ++ o2) (patIdents pats1 ++ patIdents pats2) fused_outputs

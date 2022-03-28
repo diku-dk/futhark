@@ -178,8 +178,10 @@ isArray p = case paramDec p of
 
 mkDepGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
-  g <- addDepEdges $ emptyG2 stms res inputs
+  let g = emptyG2 stms res inputs
   makeMapping g
+  addDepEdges g
+
 
 
 addDepEdges :: DepGraphAug
@@ -199,7 +201,6 @@ makeMapping g = do
 -- creates deps for the given nodes on the graph using the edgeGenerator
 genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug
 genEdges l_stms edge_fun g = do
-  makeMapping g
   name_map <- gets producerMapping
   depGraphInsertEdges (concatMap (gen_edge name_map) l_stms) g
   where
