@@ -114,6 +114,7 @@ module Futhark.CodeGen.ImpGen
     sWrite,
     sUpdate,
     sLoopNest,
+    sLoopSpace,
     (<--),
     (<~~),
     function,
@@ -1843,15 +1844,23 @@ sWrite arr is v = do
 sUpdate :: VName -> Slice (Imp.TExp Int64) -> SubExp -> ImpM rep r op ()
 sUpdate arr slice v = copyDWIM arr (unSlice slice) v []
 
+-- | Create a sequential 'Imp.For' loop covering a space of the given
+-- shape.  The function is calling with the indexes for a given
+-- iteration.
+sLoopSpace ::
+  [Imp.TExp t] ->
+  ([Imp.TExp t] -> ImpM rep r op ()) ->
+  ImpM rep r op ()
+sLoopSpace = nest []
+  where
+    nest is [] f = f $ reverse is
+    nest is (d : ds) f = sFor "nest_i" d $ \i -> nest (i : is) ds f
+
 sLoopNest ::
   Shape ->
   ([Imp.TExp Int64] -> ImpM rep r op ()) ->
   ImpM rep r op ()
-sLoopNest = sLoopNest' [] . shapeDims
-  where
-    sLoopNest' is [] f = f $ reverse is
-    sLoopNest' is (d : ds) f =
-      sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
+sLoopNest = sLoopSpace . map toInt64Exp . shapeDims
 
 -- | Untyped assignment.
 (<~~) :: VName -> Imp.Exp -> ImpM rep r op ()

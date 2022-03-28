@@ -52,7 +52,7 @@ import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Util (chunks, dropLast, mapAccumLM, nubOrd, takeLast)
+import Futhark.Util (chunks, dropLast, mapAccumLM, nubOrd, splitFromEnd, takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
@@ -289,8 +289,19 @@ groupCoverSpace ::
   [Imp.TExp t] ->
   ([Imp.TExp t] -> InKernelGen ()) ->
   InKernelGen ()
-groupCoverSpace ds f =
-  groupLoop (product ds) $ f . unflattenIndex ds
+groupCoverSpace ds f = do
+  constants <- kernelConstants <$> askEnv
+  let group_size = kernelGroupSize constants
+  case splitFromEnd 1 ds of
+    -- Optimise the case where the inner dimension of the space is
+    -- equal to the group size.
+    (ds', [last_d])
+      | last_d == (group_size `sExtAs` last_d) -> do
+          let ltid = kernelLocalThreadId constants `sExtAs` last_d
+          sLoopSpace ds' $ \ds_is ->
+            f $ ds_is ++ [ltid]
+    _ ->
+      groupLoop (product ds) $ f . unflattenIndex ds
 
 localThreadIDs :: [SubExp] -> InKernelGen [Imp.TExp Int64]
 localThreadIDs dims = do
