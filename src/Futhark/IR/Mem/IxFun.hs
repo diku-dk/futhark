@@ -1281,8 +1281,8 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
                  distributeOffset (map AlgSimplify2.negate neg_offset) is2
                ) of
             (Just is1', Just is2') -> do
-              overlap1 <- selfOverlapZ3 scope asserts less_thans non_negatives is1'
-              overlap2 <- selfOverlapZ3 scope asserts less_thans non_negatives is2'
+              overlap1 <- selfOverlapZ3 scope asserts less_thans non_negatives $ filter emptyInterval is1'
+              overlap2 <- selfOverlapZ3 scope asserts less_thans non_negatives $ filter emptyInterval is2'
               case (overlap1, overlap2) of
                 (Nothing, Nothing) ->
                   or <$> mapM (uncurry $ disjointZ3 scope asserts less_thans non_negatives) (zip is1' is2')
@@ -1312,6 +1312,10 @@ joinDims = helper []
       if stride x == stride y && lowerBound x == 0 && lowerBound y == 0
         then helper acc $ x {numElements = numElements x * numElements y} : rest
         else helper (x : acc) (y : rest)
+
+emptyInterval :: Interval -> Bool
+emptyInterval (Interval 0 1 _) = True
+emptyInterval _ = False
 
 splitDim :: Interval -> [Interval] -> [(AlgSimplify2.SofP, [Interval])]
 splitDim overlapping_dim0 is
