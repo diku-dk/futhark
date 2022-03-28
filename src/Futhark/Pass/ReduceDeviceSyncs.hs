@@ -34,8 +34,6 @@ import Futhark.Transform.Substitute
 
 -- TODO: Measure whether it is better to block delays through loops.
 
--- TODO: merge6.fut test with gpubody that consumes another gpu result
-
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
   Pass
