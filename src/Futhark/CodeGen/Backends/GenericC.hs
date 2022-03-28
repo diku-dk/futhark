@@ -468,6 +468,7 @@ inNewFunction m = do
   where
     noCached env = env {envCachedMem = mempty}
 
+
 item :: C.BlockItem -> CompilerM op s ()
 item x = modify $ \s -> s {compItems = DL.snoc (compItems s) x}
 

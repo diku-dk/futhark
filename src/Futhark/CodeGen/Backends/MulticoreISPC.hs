@@ -270,6 +270,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                                                 (struct futhark_context uniform * uniform ctx, 
                                                 struct $id:fstruct uniform * uniform args, 
                                                 uniform int iterations);|]
+
   aos_name <- newVName "aos"
   GC.stm [C.cstm|$escstm:("#if ISPC")|]
   GC.items [C.citems|
@@ -311,14 +312,14 @@ compileOp (ISPCKernel body free') = do
   let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
   -- Generate ISPC kernel
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
-    mainBody <- GC.cachingMemory lexical $ \decl_cached free_cached ->
+    mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
         GC.decl [C.cdecl|uniform int err = 0;|]
+        body' <- GC.collect $ compileCodeISPC Imp.Varying body
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
+        mapM_ GC.item body'
         free_mem <- GC.freeAllocatedMem
-
-        compileCodeISPC Imp.Varying body
 
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]

@@ -1,5 +1,17 @@
 // TODO(pema): Error handling
 
+#ifndef __ISPC_STRUCT_memblock__
+#define __ISPC_STRUCT_memblock__
+struct memblock {
+    int32_t * references;
+    uint8_t * mem;
+    int64_t size;
+    const int8_t * desc;
+};
+#endif
+
+
+
 typedef unsigned char uchar;
 
 static inline void free(void* ptr) {
@@ -53,15 +65,31 @@ static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying *
   *old_size = new_size;
   return FUTHARK_SUCCESS;
 }
-static int $id:(fatMemSet space) (futhark_context *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
-  int ret = $id:(fatMemUnRef space)(ctx, lhs, 0); //TODO(K, oliber): Make error handling
+
+
+extern unmasked uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
+					   uniform struct memblock * uniform lhs,
+					   uniform const char * uniform lhs_desc);
+
+static uniform int memblock_unref(uniform struct futhark_context * varying ctx,
+				    uniform struct memblock * varying lhs,
+				    uniform const char * uniform lhs_desc)
+{
+  foreach_active(i){
+    memblock_unref((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
+		   (uniform struct memblock * uniform)(extract((varying int64_t)lhs,i)),
+		   lhs_desc);
+  }
+}
+
+
+
+static int memblock_set (struct futhark_context *ctx, struct memblock *lhs, struct memblock *rhs, const char *lhs_desc) {
+  int ret = memblock_unref(ctx,  lhs, 0); //TODO(K, O): Make error handling
   if (rhs->references != NULL) {
     (*(rhs->references))++;
   }
   *lhs = *rhs;
   return ret;
 }
-
-
-
 
