@@ -290,7 +290,7 @@ extractVectorLane j code = do
     Imp.SetScalar vname e -> 
       emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp    
     _ -> 
-      return ()
+      emit code'
 
 inISPC :: MulticoreGen () -> MulticoreGen ()
 inISPC code = do
