@@ -36,9 +36,6 @@ import Futhark.Transform.Substitute
 
 -- TODO: merge6.fut test with gpubody that consumes another gpu result
 
--- TODO: It is not safe to migrate statements to GPU within accumulator ops.
---       This is an issue for the Update and Replicate transformations.
-
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
   Pass
@@ -65,14 +62,16 @@ data State = State
     --   * Type of the original variable.
     --   * Name of the single element array holding the migrated value.
     --   * Whether the original variable still can be used on the host.
-    stateMigrated :: IM.IntMap (Name, Type, VName, Bool)
+    stateMigrated :: IM.IntMap (Name, Type, VName, Bool),
+    stateGPUBodyOk :: Bool
   }
 
 initialState :: VNameSource -> State
 initialState ns =
   State
     { stateNameSource = ns,
-      stateMigrated = IM.empty
+      stateMigrated = IM.empty,
+      stateGPUBodyOk = True
     }
 
 -- | Retrieve a function of the current environment.
@@ -82,6 +81,16 @@ asks = lift . R.asks
 -- | Fetch the value of the environment.
 ask :: ReduceM MigrationTable
 ask = lift R.ask
+
+-- | Perform non-migration optimizations without introducing any GPUBody
+-- kernels.
+noGPUBody :: ReduceM a -> ReduceM a
+noGPUBody m = do
+  prev <- gets stateGPUBodyOk
+  modify $ \st -> st {stateGPUBodyOk = False}
+  res <- m
+  modify $ \st -> st {stateGPUBodyOk = prev}
+  pure res
 
 -- | Produce a fresh name, using the given name as a template.
 newName :: VName -> ReduceM VName
@@ -171,14 +180,15 @@ storeScalar stms se t = do
     _ -> pure Nothing
   case entry of
     Just (_, _, arr, _) -> pure (stms, arr)
-    Nothing ->
+    Nothing -> do
       -- How to most efficiently create an array containing the given value
       -- depends on whether it is a variable or a constant. Creating a constant
       -- array is a runtime copy of static memory, while creating an array that
       -- contains a variable results in each element synchronosuly being
       -- written.
+      gpubody_ok <- gets stateGPUBodyOk
       case se of
-        Var n -> do
+        Var n | gpubody_ok -> do
           -- TODO: Transfer to device right after declaration of n, allowing the
           --       array to be reused for as long n is in scope.
           n' <- newName n
@@ -188,6 +198,13 @@ storeScalar stms se t = do
           let dev = patElemName $ head $ patElems (stmPat gpubody)
 
           pure (stms |> gpubody, dev)
+        Var n -> do
+          -- TODO: Transfer to device right after declaration of n, allowing the
+          --       array to be reused for as long n is in scope.
+          pe <- arrayizePatElem (PatElem n t)
+          let shape = Shape [intConst Int64 1]
+          let stm = bind pe (BasicOp $ Replicate shape se)
+          pure (stms |> stm, patElemName pe)
         _ -> do
           -- TODO: Store constant arrays as top-level declarations.
           --       Can be implemented as an optimization that hoists arrays to
@@ -269,13 +286,15 @@ optimizeStm out stm = do
           pure (out' |> stm')
       BasicOp (Replicate (Shape dims) (Var v))
         | Pat [PatElem n arr_t] <- stmPat stm -> do
+          gpubody_ok <- gets stateGPUBodyOk
           v' <- resolveName v
           let v_kept_on_device = v /= v'
           case v_kept_on_device of
             False -> pure (out |> stm)
             True
               | all (== intConst Int64 1) dims,
-                Just t' <- peelArray 1 arr_t -> do
+                Just t' <- peelArray 1 arr_t,
+                gpubody_ok -> do
                 let n' = VName (baseName n `withSuffix` "_inner") 0
                 let pat' = Pat [PatElem n' t']
                 let e' = BasicOp $ Replicate (Shape $ tail dims) (Var v)
@@ -483,7 +502,10 @@ optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
     else do
       let body = lambdaBody op
       -- To pass type check neither parameters nor results can change.
-      stms' <- optimizeStms empty (bodyStms body)
+      --
+      -- op may be used on both host and device so we must avoid introducing
+      -- any GPUBody statements.
+      stms' <- noGPUBody $ optimizeStms empty (bodyStms body)
       let op' = op {lambdaBody = body {bodyStms = stms'}}
       pure (shape, arrs, Just (op', nes))
 

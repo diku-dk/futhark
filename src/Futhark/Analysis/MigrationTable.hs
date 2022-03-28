@@ -892,7 +892,7 @@ graphAcc i types op delayed = do
   -- operators and to simplify the analysis. They are unlikely to occur anyway.
   --
   -- NOTE: Performance may degrade if a GPUBody is replaced with its contents
-  --       but the containing operator also is used on host.
+  --       but the containing operator is used on host.
   let host_only = bodyHostOnly stats || bodyHasGPUBody stats
 
   -- op operands are read from arrays and written back so if any of the operands
@@ -911,7 +911,7 @@ graphAcc i types op delayed = do
     (True, _) -> do
       -- If the operator cannot run well in a GPUBody then all non-kernel
       -- UpdateAcc statements are host-only. The current analysis is ignorant
-      -- of what happens within kernels so we must assume that the operator
+      -- of what happens inside kernels so we must assume that the operator
       -- is used within a kernel, meaning that we cannot migrate its statements.
       --
       -- TODO: Improve analysis if UpdateAcc ever is used outside kernels.
