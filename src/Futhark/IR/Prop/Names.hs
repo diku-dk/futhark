@@ -11,6 +11,7 @@ module Futhark.IR.Prop.Names
     Names,
     namesIntMap,
     nameIn,
+    notNameIn,
     oneName,
     namesFromList,
     namesToList,
@@ -77,6 +78,10 @@ instance Pretty Names where
 -- | Does the set of names contain this name?
 nameIn :: VName -> Names -> Bool
 nameIn v (Names vs) = baseTag v `IM.member` vs
+
+-- | Does the set of names not contain this name?
+notNameIn :: VName -> Names -> Bool
+notNameIn v (Names vs) = baseTag v `IM.notMember` vs
 
 -- | Construct a name set from a list.  Slow.
 namesFromList :: [VName] -> Names
@@ -337,7 +342,7 @@ instance FreeIn shape => FreeIn (TypeBase shape u) where
 instance FreeIn dec => FreeIn (Param dec) where
   freeIn' (Param attrs _ dec) = freeIn' attrs <> freeIn' dec
 
-instance FreeIn dec => FreeIn (PatElemT dec) where
+instance FreeIn dec => FreeIn (PatElem dec) where
   freeIn' (PatElem _ dec) = freeIn' dec
 
 instance FreeIn (LParamInfo rep) => FreeIn (LoopForm rep) where
@@ -362,7 +367,7 @@ instance FreeIn d => FreeIn (FlatSlice d) where
 instance FreeIn SubExpRes where
   freeIn' (SubExpRes cs se) = freeIn' cs <> freeIn' se
 
-instance FreeIn dec => FreeIn (PatT dec) where
+instance FreeIn dec => FreeIn (Pat dec) where
   freeIn' (Pat xs) =
     fvBind bound_here $ freeIn' xs
     where

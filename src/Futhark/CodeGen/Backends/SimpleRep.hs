@@ -195,25 +195,25 @@ instance C.ToExp IntValue where
 instance C.ToExp FloatValue where
   toExp (Float16Value x) _
     | isInfinite x =
-      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+        if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
     | isNaN x =
-      [C.cexp|NAN|]
+        [C.cexp|NAN|]
     | otherwise =
-      [C.cexp|$float:(fromRational (toRational x))|]
+        [C.cexp|$float:(fromRational (toRational x))|]
   toExp (Float32Value x) _
     | isInfinite x =
-      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+        if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
     | isNaN x =
-      [C.cexp|NAN|]
+        [C.cexp|NAN|]
     | otherwise =
-      [C.cexp|$float:x|]
+        [C.cexp|$float:x|]
   toExp (Float64Value x) _
     | isInfinite x =
-      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+        if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
     | isNaN x =
-      [C.cexp|NAN|]
+        [C.cexp|NAN|]
     | otherwise =
-      [C.cexp|$double:x|]
+        [C.cexp|$double:x|]
 
 instance C.ToExp PrimValue where
   toExp (IntValue v) = C.toExp v
@@ -230,6 +230,9 @@ instance C.ToExp SubExp where
 cScalarDefs :: T.Text
 cScalarDefs = scalarH <> scalarF16H
 
+-- | @storageSize pt rank shape@ produces an expression giving size
+-- taken when storing this value in the binary value format.  It is
+-- assumed that the @shape@ is an array with @rank@ dimensions.
 storageSize :: PrimType -> Int -> C.Exp -> C.Exp
 storageSize pt rank shape =
   [C.cexp|$int:header_size +
@@ -239,7 +242,7 @@ storageSize pt rank shape =
     header_size, pt_size :: Int
     header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
     pt_size = primByteSize pt
-    dims = [[C.cexp|$exp:shape[$int:i]|] | i <- [0 .. rank -1]]
+    dims = [[C.cexp|$exp:shape[$int:i]|] | i <- [0 .. rank - 1]]
 
 typeStr :: Signedness -> PrimType -> String
 typeStr sign pt =
@@ -258,6 +261,8 @@ typeStr sign pt =
     (TypeUnsigned, IntType Int32) -> " u32"
     (TypeUnsigned, IntType Int64) -> " u64"
 
+-- | Produce code for storing the header (everything besides the
+-- actual payload) for a value of this type.
 storeValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
 storeValueHeader sign pt rank shape dest =
   [C.cstms|
@@ -272,10 +277,12 @@ storeValueHeader sign pt rank shape dest =
     copy_shape
       | rank == 0 = []
       | otherwise =
-        [C.cstms|
+          [C.cstms|
                 memcpy($exp:dest, $exp:shape, $int:rank*sizeof(typename int64_t));
                 $exp:dest += $int:rank*sizeof(typename int64_t);|]
 
+-- | Produce code for loading the header (everything besides the
+-- actual payload) for a value of this type.
 loadValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
 loadValueHeader sign pt rank shape src =
   [C.cstms|

@@ -66,7 +66,7 @@ import Futhark.Transform.Rename
 import Futhark.Util
 import Futhark.Util.Log
 
-type Target = (PatT Type, Result)
+type Target = (Pat Type, Result)
 
 -- | First pair element is the very innermost ("current") target.  In
 -- the list, the outermost target comes first.  Invariant: Every
@@ -120,7 +120,7 @@ targetsScope :: DistRep rep => Targets -> Scope rep
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting
-  { loopNestingPat :: PatT Type,
+  { loopNestingPat :: Pat Type,
     loopNestingAux :: StmAux (),
     loopNestingWidth :: SubExp,
     loopNestingParamsAndArrs :: [(Param Type, VName)]
@@ -214,7 +214,7 @@ pushInnerKernelNesting target newnest (nest, nests) =
       [] -> nest
       n : _ -> n
 
-fixNestingPatOrder :: LoopNesting -> Target -> PatT Type -> LoopNesting
+fixNestingPatOrder :: LoopNesting -> Target -> Pat Type -> LoopNesting
 fixNestingPatOrder nest (_, res) inner_pat =
   nest {loopNestingPat = basicPat pat'}
   where
@@ -297,12 +297,12 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
         snd <$> find ((== kernelInputArray inp) . paramName . fst) params_and_arrs
       fixupInput inp
         | Just arr <- isParam inp =
-          inp
-            { kernelInputArray = arr,
-              kernelInputIndices = Var i : kernelInputIndices inp
-            }
+            inp
+              { kernelInputArray = arr,
+                kernelInputIndices = Var i : kernelInputIndices inp
+              }
         | otherwise =
-          inp
+            inp
 
   return ((i, nesting_w) : ispace, extra_inps i <> inps')
   where
@@ -320,7 +320,7 @@ data DistributionBody = DistributionBody
     distributionExpandTarget :: Target -> Target
   }
 
-distributionInnerPat :: DistributionBody -> PatT Type
+distributionInnerPat :: DistributionBody -> Pat Type
 distributionInnerPat = fst . innerTarget . distributionTarget
 
 distributionBodyFromStms ::
@@ -373,7 +373,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
     distributeAtNesting ::
       Nesting ->
-      PatT Type ->
+      Pat Type ->
       (LoopNesting -> KernelNest, Names) ->
       M.Map VName Ident ->
       [Ident] ->
@@ -490,9 +490,9 @@ removeUnusedNestingParts used (MapNesting pat aux w params_and_arrs) =
 
 removeIdentityMappingGeneral ::
   Names ->
-  PatT Type ->
+  Pat Type ->
   Result ->
-  ( PatT Type,
+  ( Pat Type,
     Result,
     M.Map VName Ident,
     Target -> Target
@@ -520,9 +520,9 @@ removeIdentityMappingGeneral bound pat res =
 
 removeIdentityMappingFromNesting ::
   Names ->
-  PatT Type ->
+  Pat Type ->
   Result ->
-  ( PatT Type,
+  ( Pat Type,
     Result,
     M.Map VName Ident,
     Target -> Target
@@ -545,8 +545,8 @@ tryDistribute ::
   m (Maybe (Targets, Stms rep))
 tryDistribute _ _ targets stms
   | null stms =
-    -- No point in distributing an empty kernel.
-    return $ Just (targets, mempty)
+      -- No point in distributing an empty kernel.
+      return $ Just (targets, mempty)
 tryDistribute mk_lvl nest targets stms =
   createKernelNest nest dist_body
     >>= \case

@@ -99,14 +99,14 @@ solveDeps deps =
     checkHash p v pinfo (Just h)
       | h == pkgRevCommit pinfo = return ()
       | otherwise =
-        fail $
-          T.unpack $
-            "Package " <> p <> " " <> prettySemVer v
-              <> " has commit hash "
-              <> pkgRevCommit pinfo
-              <> ", but expected "
-              <> h
-              <> " from package manifest."
+          fail $
+            T.unpack $
+              "Package " <> p <> " " <> prettySemVer v
+                <> " has commit hash "
+                <> pkgRevCommit pinfo
+                <> ", but expected "
+                <> h
+                <> " from package manifest."
 
 -- | A mapping of package revisions to the dependencies of that
 -- package.  Can be considered a 'PkgRegistry' without the option of

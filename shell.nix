@@ -32,12 +32,13 @@ pkgs.stdenv.mkDerivation {
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
-    pkgs.ormolu
+    pkgs.haskell.packages.ghc921.ormolu_0_4_0_0
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
     pkgs.python3Packages.jsonschema
     pkgs.python3Packages.sphinx
+    pkgs.python3Packages.sphinxcontrib-bibtex
     pkgs.imagemagick # needed for literate tests
     ispc
   ]

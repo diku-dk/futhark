@@ -13,7 +13,7 @@ import Futhark.Transform.Rename
 
 writeResult ::
   [VName] ->
-  PatElemT dec ->
+  PatElem dec ->
   KernelResult ->
   MulticoreGen ()
 writeResult is pe (Returns _ _ se) =
@@ -29,10 +29,10 @@ writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
 compileSegMapBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
@@ -40,17 +40,17 @@ compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   sOp $ Imp.GetTaskId (segFlat space)
   kstms' <- mapM renameStm kstms
   let kstms'' = kstms'
-  inISPC [] $
+  inISPC $
     generateChunkLoop "SegMap" True $ \i -> do
       dIndexSpace (zip is ns') i
       compileStms (freeIn kres) kstms'' $
         zipWithM_ (writeResult is) (patElems pat) kres
 
 compileSegMap ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegMap pat space kbody = collect $ do
   body <- compileSegMapBody pat space kbody
   free_params <- freeParams body

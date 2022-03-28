@@ -15,7 +15,6 @@ module Futhark.IR.GPU.Simplify
   )
 where
 
-import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR.GPU
 import qualified Futhark.IR.SOACS.Simplify as SOAC
 import Futhark.MonadFreshNames
@@ -26,7 +25,6 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 import Futhark.Tools
-import qualified Futhark.Transform.FirstOrderTransform as FOT
 
 simpleGPU :: Simplify.SimpleOps GPU
 simpleGPU = Simplify.bindableSimpleOps $ simplifyKernelOp SOAC.simplifySOAC
@@ -95,23 +93,10 @@ kernelRules :: RuleBook (Wise GPU)
 kernelRules =
   standardRules <> segOpRules
     <> ruleBook
-      [ RuleOp redomapIotaToLoop,
-        RuleOp SOAC.simplifyKnownIterationSOAC,
+      [ RuleOp SOAC.simplifyKnownIterationSOAC,
         RuleOp SOAC.removeReplicateMapping,
         RuleOp SOAC.liftIdentityMapping,
         RuleOp SOAC.simplifyMapIota
       ]
       [ RuleBasicOp removeUnnecessaryCopy
       ]
-
--- We turn reductions over (solely) iotas into do-loops, because there
--- is no useful structure here anyway.  This is mostly a hack to work
--- around the fact that loop tiling would otherwise pointlessly tile
--- them.
-redomapIotaToLoop :: TopDownRuleOp (Wise GPU)
-redomapIotaToLoop vtable pat aux (OtherOp soac@(Screma _ [arr] form))
-  | Just _ <- isRedomapSOAC form,
-    Just (Iota {}, _) <- ST.lookupBasicOp arr vtable =
-    Simplify $ certifying (stmAuxCerts aux) $ FOT.transformSOAC pat soac
-redomapIotaToLoop _ _ _ _ =
-  Skip

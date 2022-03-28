@@ -1331,6 +1331,14 @@ static inline uint64_t fptoui_f32_i64(float x) {
   }
 }
 
+static inline bool ftob_f32_bool(float x) {
+  return x != 0;
+}
+
+static inline float btof_bool_f32(bool x) {
+  return x ? 1 : 0;
+}
+
 #ifdef __OPENCL_VERSION__
 static inline float futrts_log32(float x) {
   return log(x);
@@ -1559,7 +1567,7 @@ static inline float futrts_hypot32(float x, float y) {
 
 }
 
-extern "C" uniform int64_t futrts_ispc_gamma32(uniform float x);
+extern "C" unmasked uniform int64_t futrts_ispc_gamma32(uniform float x);
 static inline float futrts_gamma32(float x) {
   uniform float y[programCount];
   foreach_active(i){
@@ -1568,7 +1576,7 @@ static inline float futrts_gamma32(float x) {
   return *((varying float * uniform)&y);
 }
 
-extern "C" uniform int64_t futrts_ispc_lgamma32(uniform float x);
+extern "C" unmasked uniform int64_t futrts_ispc_lgamma32(uniform float x);
 static inline float futrts_lgamma32(float x) {
   uniform float y[programCount];
   foreach_active(i){
@@ -1921,7 +1929,7 @@ static inline double futrts_atan2_64(double x, double y) {
   return atan2(x, y);
 }
 
-extern "C" uniform double futrts_ispc_hypot64(uniform double x, uniform double y);
+extern "C" unmasked uniform double futrts_ispc_hypot64(uniform double x, uniform double y);
 static inline double futrts_hypot64(double x, double y) {
   uniform double z[programCount];
   foreach_active(i){
@@ -1930,7 +1938,7 @@ static inline double futrts_hypot64(double x, double y) {
   return *((varying double * uniform)&z);
 }
 
-extern "C" uniform double futrts_ispc_gamma64(uniform double x);
+extern "C" unmasked uniform double futrts_ispc_gamma64(uniform double x);
 static inline double futrts_gamma64(double x) {
   uniform double y[programCount];
   foreach_active(i){
@@ -1939,7 +1947,7 @@ static inline double futrts_gamma64(double x) {
   return *((varying double * uniform)&y);
 }
 
-extern "C" uniform double futrts_ispc_lgamma64(uniform double x);
+extern "C" unmasked uniform double futrts_ispc_lgamma64(uniform double x);
 static inline double futrts_lgamma64(double x) {
   uniform double y[programCount];
   foreach_active(i){
@@ -2032,7 +2040,7 @@ static inline uint64_t fptoui_f64_i64(double x) {
   }
 }
 
-extern "C" uniform int64_t futrts_ispc_to_bits64(uniform double x);
+extern "C" unmasked uniform int64_t futrts_ispc_to_bits64(uniform double x);
 static inline int64_t futrts_to_bits64(double x) {
   uniform int64_t y[programCount];
   foreach_active(i){
@@ -2042,7 +2050,7 @@ static inline int64_t futrts_to_bits64(double x) {
 }
 
 
-extern "C" uniform double futrts_ispc_from_bits64(uniform int64_t x);
+extern "C" unmasked uniform double futrts_ispc_from_bits64(uniform int64_t x);
 static inline double futrts_from_bits64(int64_t x) {
   uniform double y[programCount];
   foreach_active(i){
@@ -2336,6 +2344,14 @@ static inline uint64_t fptoui_f64_i64(double x) {
   } else {
     return (uint64_t) (int64_t) x;
   }
+}
+
+static inline bool ftob_f64_bool(double x) {
+  return x != 0;
+}
+
+static inline double btof_bool_f64(bool x) {
+  return x ? 1 : 0;
 }
 
 static inline int64_t futrts_to_bits64(double x) {

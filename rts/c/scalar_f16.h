@@ -1,6 +1,6 @@
 // Start of scalar_f16.h.
 
-// Half-precision is emulated if needed (e.g. in straight C) with 
+// Half-precision is emulated if needed (e.g. in straight C) with the
 // native type used if possible.  The emulation works by typedef'ing
 // 'float' to 'f16', and then implementing all operations on single
 // precision.  To cut down on duplication, we use the same code for
@@ -130,6 +130,14 @@ static inline uint64_t fptoui_f16_i64(f16 x) {
   return (uint64_t) x;
 }
 
+static inline bool ftob_f16_bool(f16 x) {
+  return x != (f16)0;
+}
+
+static inline f16 btof_bool_f16(bool x) {
+  return x ? 1 : 0;
+}
+
 #ifndef EMULATE_F16
 
 #ifdef __OPENCL_VERSION__
@@ -191,7 +199,7 @@ static inline bool futrts_isnan16(f16 x) {
 
 #if ISPC
 static inline bool futrts_isinf16(float x) {
-  return !futrts_isnan16(x) && futrts_isnan16(x - x); //TODO: Find cleaner solution                           
+  return !futrts_isnan16(x) && futrts_isnan16(x - x); //TODO: Find cleaner solution
 }
 static inline bool futrts_isfinite16(float x) {
   return !futrts_isnan16(x) && !futrts_isinf16(x);
@@ -363,11 +371,11 @@ static inline f16 futrts_atan16(f16 x) {
 }
 
 static inline f16 futrts_cosh16(f16 x) {
-  return (exp(x)+exp(-x)) / 2.0f16; 
+  return (exp(x)+exp(-x)) / 2.0f16;
 }
 
 static inline f16 futrts_sinh16(f16 x) {
-  return (exp(x)-exp(-x)) / 2.0f16; 
+  return (exp(x)-exp(-x)) / 2.0f16;
 }
 
 static inline f16 futrts_tanh16(f16 x) {

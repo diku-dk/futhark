@@ -76,7 +76,7 @@ type Transformer m =
 
 transformBody ::
   (Transformer m, LetDec (Rep m) ~ LetDec SOACS) =>
-  Body ->
+  Body SOACS ->
   m (AST.Body (Rep m))
 transformBody (Body () stms res) = buildBody_ $ do
   mapM_ transformStmRecursively stms
@@ -85,9 +85,7 @@ transformBody (Body () stms res) = buildBody_ $ do
 -- | First transform any nested t'Body' or t'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
 transformStmRecursively ::
-  (Transformer m, LetDec (Rep m) ~ LetDec SOACS) =>
-  Stm ->
-  m ()
+  (Transformer m, LetDec (Rep m) ~ LetDec SOACS) => Stm SOACS -> m ()
 transformStmRecursively (Let pat aux (Op soac)) =
   auxing aux $ transformSOAC pat =<< mapSOACM soacTransform soac
   where
@@ -112,7 +110,7 @@ resultArray arrs ts = do
   arrs_ts <- mapM lookupType arrs
   let oneArray t@Acc {}
         | Just (v, _) <- find ((== t) . snd) (zip arrs arrs_ts) =
-          pure v
+            pure v
       oneArray t =
         letExp "result" =<< eBlank t
   mapM oneArray ts
@@ -122,7 +120,7 @@ resultArray arrs ts = do
 -- on the given rep.
 transformSOAC ::
   Transformer m =>
-  AST.Pat (Rep m) ->
+  Pat (LetDec (Rep m)) ->
   SOAC (Rep m) ->
   m ()
 transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
@@ -172,13 +170,13 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
               SubExp $ Var $ paramName acc_out_p
           Nothing
             | paramName p `nameIn` lam_cons -> do
-              p' <-
-                letExp (baseString (paramName p)) . BasicOp $
-                  Index arr $ fullSlice arr_t [DimFix $ Var i]
-              letBindNames [paramName p] $ BasicOp $ Copy p'
+                p' <-
+                  letExp (baseString (paramName p)) . BasicOp $
+                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+                letBindNames [paramName p] $ BasicOp $ Copy p'
             | otherwise ->
-              letBindNames [paramName p] $
-                BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
+                letBindNames [paramName p] $
+                  BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -365,7 +363,7 @@ transformLambda ::
     LetDec rep ~ LetDec SOACS,
     CanBeAliased (Op rep)
   ) =>
-  Lambda ->
+  Lambda SOACS ->
   m (AST.Lambda rep)
 transformLambda (Lambda params body rettype) = do
   body' <-

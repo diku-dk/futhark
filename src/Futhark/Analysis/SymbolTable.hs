@@ -264,6 +264,9 @@ lookupLoopVar name vtable = do
   LoopVar e <- entryType <$> M.lookup name (bindings vtable)
   return $ loopVarBound e
 
+-- | Look up the initial value and eventual result of a loop
+-- parameter.  Note that the result almost certainly refers to
+-- something that is not part of the symbol table.
 lookupLoopParam :: VName -> SymbolTable rep -> Maybe (SubExp, SubExp)
 lookupLoopParam name vtable = do
   FParam e <- entryType <$> M.lookup name (bindings vtable)
@@ -299,7 +302,7 @@ index' name is vtable = do
       | Just k <-
           elemIndex name . patNames . stmPat $
             letBoundStm entry' ->
-        letBoundIndex entry' k is
+          letBoundIndex entry' k is
     FreeVar entry' ->
       freeVarIndex entry' name is
     LParam entry' -> lparamIndex entry' is
@@ -338,18 +341,18 @@ indexExp _ (BasicOp (Iota _ x s to_it)) _ [i] =
 indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
     Just (Prim t) <- lookupSubExpType v table =
-    Just $ Indexed mempty $ primExpFromSubExp t v
+      Just $ Indexed mempty $ primExpFromSubExp t v
 indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_ : is) = do
   guard $ v `available` table
   index' v is table
 indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
-    let is' =
-          reshapeIndex
-            (map pe64 oldshape)
-            (map pe64 $ newDims newshape)
-            is
-     in index' v is' table
+      let is' =
+            reshapeIndex
+              (map pe64 oldshape)
+              (map pe64 $ newDims newshape)
+              is
+       in index' v is' table
 indexExp table (BasicOp (Index v slice)) _ is = do
   guard $ v `available` table
   index' v (adjust (unSlice slice) is) table
@@ -366,7 +369,7 @@ indexExp _ _ _ _ = Nothing
 defBndEntry ::
   (ASTRep rep, IndexOp (Op rep)) =>
   SymbolTable rep ->
-  PatElem rep ->
+  PatElem (LetDec rep) ->
   Names ->
   Stm rep ->
   LetBoundEntry rep
@@ -572,15 +575,15 @@ hideIf hide vtable = vtable {bindings = M.map maybeHide $ bindings vtable}
   where
     maybeHide entry
       | hide entry =
-        entry
-          { entryType =
-              FreeVar
-                FreeVarEntry
-                  { freeVarDec = entryInfo entry,
-                    freeVarIndex = \_ _ -> Nothing,
-                    freeVarAliases = entryAliases $ entryType entry
-                  }
-          }
+          entry
+            { entryType =
+                FreeVar
+                  FreeVarEntry
+                    { freeVarDec = entryInfo entry,
+                      freeVarIndex = \_ _ -> Nothing,
+                      freeVarAliases = entryAliases $ entryType entry
+                    }
+            }
       | otherwise = entry
 
 -- | Hide these definitions, if they are protected by certificates in

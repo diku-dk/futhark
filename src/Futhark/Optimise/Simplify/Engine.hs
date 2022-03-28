@@ -112,14 +112,18 @@ emptyEnv rules blockers =
       envVtable = mempty
     }
 
-type Protect m = SubExp -> Pat (Rep m) -> Op (Rep m) -> Maybe (m ())
+-- | A function that protects a hoisted operation (if possible).  The
+-- first operand is the condition of the 'If' we have hoisted out of
+-- (or equivalently, a boolean indicating whether a loop has nonzero
+-- trip count).
+type Protect m = SubExp -> Pat (LetDec (Rep m)) -> Op (Rep m) -> Maybe (m ())
 
 type SimplifyOp rep op = op -> SimpleM rep (op, Stms (Wise rep))
 
 data SimpleOps rep = SimpleOps
   { mkExpDecS ::
       ST.SymbolTable (Wise rep) ->
-      Pat (Wise rep) ->
+      Pat (LetDec (Wise rep)) ->
       Exp (Wise rep) ->
       SimpleM rep (ExpDec (Wise rep)),
     mkBodyS ::
@@ -308,7 +312,7 @@ protectLoopHoisted merge form m = do
         WhileLoop cond
           | Just (_, cond_init) <-
               find ((== cond) . paramName . fst) merge ->
-            return cond_init
+              return cond_init
           | otherwise -> return $ constant True -- infinite loop
         ForLoop _ it bound _ ->
           letSubExp "loop_nonempty" $
@@ -331,19 +335,19 @@ protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
-    auxing aux m
+      auxing aux m
 protectIf _ f taken (Let pat aux e)
   | f e =
-    case makeSafe e of
-      Just e' ->
-        auxing aux $ letBind pat e'
-      Nothing -> do
-        taken_body <- eBody [pure e]
-        untaken_body <-
-          eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
-        if_ts <- expTypesFromPat pat
-        auxing aux . letBind pat $
-          If taken taken_body untaken_body $ IfDec if_ts IfFallback
+      case makeSafe e of
+        Just e' ->
+          auxing aux $ letBind pat e'
+        Nothing -> do
+          taken_body <- eBody [pure e]
+          untaken_body <-
+            eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
+          if_ts <- expTypesFromPat pat
+          auxing aux . letBind pat $
+            If taken taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -452,20 +456,20 @@ hoistStms rules block orig_stms final = do
       case res of
         Nothing -- Nothing to optimise - see if hoistable.
           | block vtable usage stm ->
-            -- No, not hoistable.
-            pure
-              ( x,
-                expandUsage usageInStm vtable usage stm
-                  `UT.without` provides stm,
-                Left stm : stms
-              )
+              -- No, not hoistable.
+              pure
+                ( x,
+                  expandUsage usageInStm vtable usage stm
+                    `UT.without` provides stm,
+                  Left stm : stms
+                )
           | otherwise ->
-            -- Yes, hoistable.
-            pure
-              ( x,
-                expandUsage usageInStm vtable usage stm,
-                Right stm : stms
-              )
+              -- Yes, hoistable.
+              pure
+                ( x,
+                  expandUsage usageInStm vtable usage stm,
+                  Right stm : stms
+                )
         Just optimstms -> do
           changed
           descend usageInStm optimstms $ pure (x, usage, stms)
@@ -507,9 +511,9 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
       (blocked <> namesFromList (provides need), Left need)
     block blocked (Right need)
       | blocked `namesIntersect` freeIn need =
-        (blocked <> namesFromList (provides need), Left need)
+          (blocked <> namesFromList (provides need), Left need)
       | otherwise =
-        (blocked, Right need)
+          (blocked, Right need)
 
 provides :: Stm rep -> [VName]
 provides = patNames . stmPat
@@ -664,9 +668,16 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
       -- possible.
       isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
+      -- Hoist things that are free.
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Reshape {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Rearrange {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp Rotate {})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp (Index _ slice))) =
+        null $ sliceDims slice
+      --
       isNotHoistableBnd _ usage (Let pat _ _)
         | any (`UT.isSize` usage) $ patNames pat =
-          False
+            False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
@@ -675,9 +686,10 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
 
       block =
         branch_blocker
-          `orIf` ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
+          `orIf` ( (isNotSafe `orIf` isNotCheap `orIf` isNotHoistableBnd)
+                     `andAlso` stmIs (not . desirableToHoist)
+                 )
           `orIf` isConsuming
-          `orIf` isNotHoistableBnd
 
   (hoisted1, body1') <-
     protectIfHoisted cond True $
@@ -765,7 +777,7 @@ simplifyOp op = do
 simplifyExp ::
   SimplifiableRep rep =>
   UT.UsageTable ->
-  Pat (Wise rep) ->
+  Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
 simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
@@ -859,9 +871,9 @@ simplifyExpBase :: SimplifiableRep rep => Exp (Wise rep) -> SimpleM rep (Exp (Wi
 -- more identical, which helps CSE.
 simplifyExpBase (BasicOp (BinOp op x y))
   | commutativeBinOp op = do
-    x' <- simplify x
-    y' <- simplify y
-    pure $ BasicOp $ BinOp op (min x' y') (max x' y')
+      x' <- simplify x
+      y' <- simplify y
+      pure $ BasicOp $ BinOp op (min x' y') (max x' y')
 simplifyExpBase e = mapExpM hoist e
   where
     hoist =
@@ -933,8 +945,8 @@ instance Simplifiable SubExpRes where
 
 simplifyPat ::
   (SimplifiableRep rep, Simplifiable dec) =>
-  PatT dec ->
-  SimpleM rep (PatT dec)
+  Pat dec ->
+  SimpleM rep (Pat dec)
 simplifyPat (Pat xs) =
   Pat <$> mapM inspect xs
   where

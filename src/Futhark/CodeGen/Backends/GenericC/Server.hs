@@ -110,7 +110,7 @@ typeBoilerplate (tname, TypeArray _ et rank ops) =
   let type_name = typeStructName tname
       aux_name = type_name ++ "_aux"
       info_name = T.unpack et ++ "_info"
-      shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank -1]]
+      shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       array_new_wrap = arrayNew ops <> "_wrap"
    in ( [C.cinit|&$id:type_name|],
         [C.cunit|

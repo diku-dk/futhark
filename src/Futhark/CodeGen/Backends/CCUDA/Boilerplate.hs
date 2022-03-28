@@ -112,7 +112,7 @@ generateConfigFuns sizes = do
                             };|]
     )
 
-  let size_value_inits = zipWith sizeInit [0 .. M.size sizes -1] (M.elems sizes)
+  let size_value_inits = zipWith sizeInit [0 .. M.size sizes - 1] (M.elems sizes)
       sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
         where
           val = fromMaybe 0 $ sizeDefault size
@@ -391,7 +391,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
 
                  if (ctx->error != NULL) {
-                   return NULL;
+                   futhark_panic(1, "%s\n", ctx->error);
                  }
 
                  typename int32_t no_error = -1;

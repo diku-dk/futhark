@@ -5,7 +5,6 @@ where
 
 import Control.Monad
 import Data.List (zip4)
-import Debug.Trace
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -15,17 +14,17 @@ import Prelude hiding (quot, rem)
 
 -- Compile a SegScan construct
 compileSegScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
-    nonsegmentedScan pat space reds kbody nsubtasks
+      nonsegmentedScan pat space reds kbody nsubtasks
   | otherwise =
-    segmentedScan pat space reds kbody
+      segmentedScan pat space reds kbody
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
 xParams scan =
@@ -46,12 +45,12 @@ resultArrays s segops =
       sAllocArray s pt full_shape DefaultSpace
 
 nonsegmentedScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   TV Int32 ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
   collect $ do
@@ -65,7 +64,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
 
     --traceM $ "arrays: " ++ show arrays ++ " scalars " ++ show scalars
     let (scanStage1, scanStage3)
-         | scalars  = (scanStage1Ispc, scanStage3Ispc) 
+         | scalars  = (scanStage1Ispc, scanStage3Ispc)
          | otherwise = (scanStage1PureC, scanStage3PureC)
 
     scanStage1 pat space scan_ops kbody
@@ -74,10 +73,10 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
       scan_ops2 <- renameSegBinOp scan_ops
       scanStage2 pat nsubtasks space scan_ops2 kbody
       scan_ops3 <- renameSegBinOp scan_ops
-      scanStage3 pat space scan_ops3 kbody  
+      scanStage3 pat space scan_ops3 kbody
 
 scanStage1Ispc ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -106,8 +105,7 @@ scanStage1Ispc pat space scan_ops kbody = do
             [] -> pure $ paramName p
             _ -> do
               let pt = elemType t
-              name <- sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-              pure name
+              sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 
         -- Now neutral-initialise the accumulator.
         sLoopNest (segBinOpShape scan_op) $ \vec_is ->
@@ -117,43 +115,42 @@ scanStage1Ispc pat space scan_ops kbody = do
     -- Is it nested arrays?
 
     -- Create ISPC kernel function
-    inISPC [] $ do
+    inISPC $ do
       -- Create fpr each
       generateChunkLoop "SegScan" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         compileStms mempty (kernelBodyStms kbody) $ do
           -- Vector load and then do sequential scan
-          everythingUniform $
-            generateUniformizeLoop $ \j -> do
-              sComment "write mapped values results to memory" $ do
-                let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
-                zipWithM_ (compileThreadResult space) map_arrs map_res
+          generateUniformizeLoop $ \j -> do
+            sComment "write mapped values results to memory" $ do
+              let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
+              zipWithM_ (compileThreadResult space) map_arrs map_res
 
-              forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
-                sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-                  -- Read accum value
-                  forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
-                    copyDWIMFix (paramName p) [] (Var acc') vec_is
+            forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
+              sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+                -- Read accum value
+                forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
+                  copyDWIMFix (paramName p) [] (Var acc') vec_is
 
-                  -- Read next value
-                  sComment "Read next values" $
-                    forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-                      extractVectorLane j $
-                        collect $ do
-                          copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+                -- Read next value
+                sComment "Read next values" $
+                  forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
+                    extractVectorLane j $
+                      collect $ do
+                        copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
-                  sComment "Do stuff" $
-                    compileStms mempty (bodyStms $ lamBody scan_op) $
-                      forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-                        \(acc', pe, se) -> do
-                          copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-                          copyDWIMFix acc' vec_is se []
+                sComment "Do stuff" $
+                  compileStms mempty (bodyStms $ lamBody scan_op) $
+                    forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
+                      \(acc', pe, se) -> do
+                        copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+                        copyDWIMFix acc' vec_is se []
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
-  
+
 scanStage1PureC ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -218,7 +215,7 @@ scanStage1PureC pat space scan_ops kbody = do
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" body free_params
 
 scanStage2 ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   TV Int32 ->
   SegSpace ->
   [SegBinOp MCMem] ->
@@ -276,7 +273,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
 -- Stage 3 : Finally each thread partially scans a chunk of the input
 --           reading its corresponding carry-in
 scanStage3Ispc ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -302,8 +299,7 @@ scanStage3Ispc pat space scan_ops kbody = do
             [] -> pure $ paramName p
             _ -> do
               let pt = elemType t
-              name <- sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-              pure name
+              sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 
         -- Initialise the accumulator with neutral from previous chunk.
         -- or read neutral if first ``iter``
@@ -317,35 +313,34 @@ scanStage3Ispc pat space scan_ops kbody = do
         pure acc
     -- Is it nested arrays?
 
-    inISPC [] $ do
+    inISPC $ do
       generateChunkLoop "SegScan" True $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         sComment "stage 3 scan body" $
           compileStms mempty (kernelBodyStms kbody) $
-            everythingUniform $
-              generateUniformizeLoop $ \j -> do
-                forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
-                  sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-                    forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
-                      copyDWIMFix (paramName p) [] (Var acc') vec_is
+            generateUniformizeLoop $ \j -> do
+              forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
+                sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+                  forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
+                    copyDWIMFix (paramName p) [] (Var acc') vec_is
 
-                    -- Read next value
-                    forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-                      extractVectorLane j $
-                        collect $ do
-                          copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+                  -- Read next value
+                  forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
+                    extractVectorLane j $
+                      collect $ do
+                        copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
-                    compileStms mempty (bodyStms $ lamBody scan_op) $
-                      forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
-                        \(pe, se, acc') -> do
-                          copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-                          copyDWIMFix acc' vec_is se []
+                  compileStms mempty (bodyStms $ lamBody scan_op) $
+                    forM_ (zip3 pes (map resSubExp $ bodyResult $ lamBody scan_op) acc) $
+                      \(pe, se, acc') -> do
+                        copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+                        copyDWIMFix acc' vec_is se []
   -- TODO (obp): Extract this
 
   free_params' <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
 scanStage3PureC ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -410,11 +405,11 @@ scanStage3PureC pat space scan_ops kbody = do
 -- parallelize over the segments and each segment is
 -- scanned sequentially.
 segmentedScan ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 segmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   collect $ do
@@ -423,11 +418,11 @@ segmentedScan pat space scan_ops kbody = do
     emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
 
 compileSegScanBody ::
-  Pat MCMem ->
+  Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  MulticoreGen Imp.Code
+  MulticoreGen Imp.MCCode
 compileSegScanBody pat space scan_ops kbody = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map toInt64Exp ns

@@ -129,6 +129,7 @@ instance Semigroup Usages where
 instance Monoid Usages where
   mempty = Usages 0
 
+-- | A kind of usage.
 consumedU, inResultU, presentU, sizeU :: Usages
 consumedU = Usages 1
 inResultU = Usages 2

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | The futhark command line tool.
+-- | The @futhark@ command line program.
 module Main (main) where
 
 import Control.Exception
@@ -68,7 +68,8 @@ commands =
       ("dataget", (Misc.mainDataget, "Extract test data.")),
       ("doc", (Doc.main, "Generate documentation for Futhark code.")),
       ("pkg", (Pkg.main, "Manage local packages.")),
-      ("check", (Check.main, "Type check a program.")),
+      ("check", (Check.main, "Type-check a program.")),
+      ("check-syntax", (Misc.mainCheckSyntax, "Syntax-check a program.")),
       ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files.")),
       ("hash", (Misc.mainHash, "Print hash of program AST.")),
       ("autotune", (Autotune.main, "Autotune threshold parameters.")),
@@ -117,17 +118,17 @@ reportingIOErrors =
     onError :: SomeException -> IO ()
     onError e
       | Just UserInterrupt <- asyncExceptionFromException e =
-        return () -- This corresponds to CTRL-C, which is not an error.
+          return () -- This corresponds to CTRL-C, which is not an error.
       | otherwise = do
-        T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
-        T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
-        T.hPutStrLn stderr $ T.pack $ show e
-        exitWith $ ExitFailure 1
+          T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
+          T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
+          T.hPutStrLn stderr $ T.pack $ show e
+          exitWith $ ExitFailure 1
 
     onIOException :: IOException -> IO ()
     onIOException e
       | ioe_type e == ResourceVanished =
-        exitWith $ ExitFailure 1
+          exitWith $ ExitFailure 1
       | otherwise = throw e
 
 main :: IO ()

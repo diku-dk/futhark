@@ -55,9 +55,9 @@ mkImportFrom (ImportName includer _) includee
     includer_parts = init $ Posix.splitPath includer
     includer'
       | length dotdots > length includer_parts =
-        replicate (length dotdots - length includer_parts) "../"
+          replicate (length dotdots - length includer_parts) "../"
       | otherwise =
-        dropLast (length dotdots) includer_parts
+          dropLast (length dotdots) includer_parts
 
 -- | Create a @.fut@ file corresponding to an 'ImportName'.
 includeToFilePath :: ImportName -> Native.FilePath
@@ -66,7 +66,7 @@ includeToFilePath (ImportName s _) = fromPOSIX $ Posix.normalise s Posix.<.> "fu
 -- | Produce a human-readable canonicalized string from an
 -- 'ImportName'.
 includeToString :: ImportName -> String
-includeToString (ImportName s _) = Posix.normalise $ Posix.makeRelative "/" s
+includeToString (ImportName s _) = Posix.normalise s
 
 -- | The result of type checking some file.  Can be passed to further
 -- invocations of the type checker.

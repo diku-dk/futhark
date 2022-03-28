@@ -8,11 +8,9 @@
 -- operation that allows one to execute an OpenCL kernel.
 module Futhark.CodeGen.ImpCode.OpenCL
   ( Program (..),
-    Function,
-    FunctionT (Function),
-    Code,
     KernelName,
     KernelArg (..),
+    CLCode,
     OpenCL (..),
     KernelSafety (..),
     numFailureParams,
@@ -25,8 +23,7 @@ where
 
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Futhark.CodeGen.ImpCode hiding (Code, Function)
-import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.CodeGen.ImpCode
 import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty
 
@@ -52,11 +49,8 @@ data FailureMsg = FailureMsg
     failureBacktrace :: String
   }
 
--- | A function calling OpenCL kernels.
-type Function = Imp.Function OpenCL
-
 -- | A piece of code calling OpenCL.
-type Code = Imp.Code OpenCL
+type CLCode = Code OpenCL
 
 -- | The name of a kernel.
 type KernelName = Name

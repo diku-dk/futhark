@@ -13,6 +13,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     renameHistOpLambda,
     atomicUpdateLocking,
     AtomicUpdate (..),
+    DoAtomicUpdate,
     Locking (..),
     getSpace,
     getLoopBounds,
@@ -22,8 +23,12 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     generateChunkLoop,
     generateUniformizeLoop,
     extractVectorLane,
+    everythingUniform,
+    everythingDefault,
+    everythingVarying,
     inISPC,
-    toParam
+    toParam,
+    sLoopNestVectorized,
   )
 where
 
@@ -38,7 +43,6 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
-import qualified Data.Text as T
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -108,7 +112,7 @@ getIterationDomain _ space = do
 
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
-getReturnParams :: Pat MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
+getReturnParams :: Pat LetDecMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} =
   -- It's a good idea to make sure any prim values are initialised, as
   -- we will load them (redundantly) in the task code, and
@@ -128,7 +132,7 @@ renameSegBinOp segbinops =
 
 compileThreadResult ::
   SegSpace ->
-  PatElem MCMem ->
+  PatElem LetDecMem ->
   KernelResult ->
   MulticoreGen ()
 compileThreadResult space pe (Returns _ _ what) = do
@@ -161,7 +165,7 @@ groupResultArrays s num_threads reds =
       let full_shape = Shape [num_threads] <> shape <> arrayShape t
       sAllocArray s (elemType t) full_shape DefaultSpace
 
-isLoadBalanced :: Imp.Code -> Bool
+isLoadBalanced :: Imp.MCCode -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
@@ -173,7 +177,7 @@ isLoadBalanced _ = True
 segBinOpComm' :: [SegBinOp rep] -> Commutativity
 segBinOpComm' = mconcat . map segBinOpComm
 
-decideScheduling' :: SegOp () rep -> Imp.Code -> Imp.Scheduling
+decideScheduling' :: SegOp () rep -> Imp.MCCode -> Imp.Scheduling
 decideScheduling' SegHist {} _ = Imp.Static
 decideScheduling' SegScan {} _ = Imp.Static
 decideScheduling' (SegRed _ _ reds _ _) code =
@@ -182,16 +186,16 @@ decideScheduling' (SegRed _ _ reds _ _) code =
     Noncommutative -> Imp.Static
 decideScheduling' SegMap {} code = decideScheduling code
 
-decideScheduling :: Imp.Code -> Imp.Scheduling
+decideScheduling :: Imp.MCCode -> Imp.Scheduling
 decideScheduling code =
   if isLoadBalanced code
     then Imp.Static
     else Imp.Dynamic
 
 -- | Try to extract invariant allocations.  If we assume that the
--- given 'Imp.Code' is the body of a 'SegOp', then it is always safe
+-- given 'Imp.MCCode' is the body of a 'SegOp', then it is always safe
 -- to move the immediate allocations to the prebody.
-extractAllocations :: Imp.Code -> (Imp.Code, Imp.Code)
+extractAllocations :: Imp.MCCode -> (Imp.MCCode, Imp.MCCode)
 extractAllocations segop_code = f segop_code
   where
     declared = Imp.declaredIn segop_code
@@ -200,7 +204,7 @@ extractAllocations segop_code = f segop_code
       (Imp.DeclareMem name space, mempty)
     f (Imp.Allocate name size space)
       | not $ freeIn size `namesIntersect` declared =
-        (Imp.Allocate name size space, mempty)
+          (Imp.Allocate name size space, mempty)
     f (x Imp.:>>: y) = f x <> f y
     f (Imp.While cond body) =
       (mempty, Imp.While cond body)
@@ -261,9 +265,24 @@ generateUniformizeLoop m = do
   body <- collect $ do
     addLoopVar i Int64
     m $ Imp.le64 i
-  emit $ Imp.Op $ Imp.ForEachActive i $ body
+  emit $ Imp.Op $ Imp.ForEachActive i body
 
-extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.Code -> MulticoreGen ()
+everythingWithVariability :: Imp.Variability -> ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
+everythingWithVariability vari m = do
+  (res, code) <- collect' m
+  emit $ Imp.Op $ Imp.VariabilityBlock vari code
+  pure res
+
+everythingUniform :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
+everythingUniform = everythingWithVariability Imp.Uniform 
+
+everythingVarying :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
+everythingVarying = everythingWithVariability Imp.Varying 
+
+everythingDefault :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
+everythingDefault = everythingWithVariability Imp.Unbound 
+
+extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.MCCode -> MulticoreGen ()
 extractVectorLane j code = do
   let ut_exp = untyped j
   code' <- code
@@ -273,12 +292,42 @@ extractVectorLane j code = do
     _ -> 
       return ()
 
-inISPC :: [Imp.Param] -> MulticoreGen () -> MulticoreGen ()
-inISPC retvals code = do
-  (allocs, res) <- extractAllocations <$> collect code
-  free <- freeParams res
-  emit allocs
-  emit $ Imp.Op $ Imp.ISPCKernel res free retvals
+inISPC :: MulticoreGen () -> MulticoreGen ()
+inISPC code = do
+  code' <- collect code
+  free <- freeParams code'
+  emit $ Imp.Op $ Imp.ISPCKernel code' free
+
+-------------------------------
+------- SegRed helpers  -------
+-------------------------------
+sForVectorized' :: VName -> Imp.Exp -> MulticoreGen () -> MulticoreGen ()
+sForVectorized' i bound body = do
+  let it = case primExpType bound of
+        IntType bound_t -> bound_t
+        t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
+  addLoopVar i it
+  body' <- collect body
+  emit $ Imp.Op $ Imp.ForEach i bound body'
+
+sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
+sForVectorized i bound body = do
+  i' <- newVName i
+  sForVectorized' i' (untyped bound) $
+    body $ TPrimExp $ Imp.var i' $ primExpType $ untyped bound
+
+-- Like sLoopNest, but puts a foreach at the innermost layer
+sLoopNestVectorized ::
+  Shape ->
+  ([Imp.TExp Int64] -> MulticoreGen ()) ->
+  MulticoreGen ()
+sLoopNestVectorized = sLoopNest' [] . shapeDims
+  where
+    sLoopNest' is [] f = f $ reverse is
+    sLoopNest' is [d] f =
+      sForVectorized "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) [] f
+    sLoopNest' is (d : ds) f =
+      sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
 
 -------------------------------
 ------- SegHist helpers -------
@@ -327,23 +376,23 @@ atomicUpdateLocking ::
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
-    primOrCas ops_and_ts $ \arrs bucket ->
-      -- If the operator is a vectorised binary operator on 32-bit values,
-      -- we can use a particularly efficient implementation. If the
-      -- operator has an atomic implementation we use that, otherwise it
-      -- is still a binary operator which can be implemented by atomic
-      -- compare-and-swap if 32 bits.
-      forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
-        -- Common variables.
-        old <- dPrim "old" t
+      primOrCas ops_and_ts $ \arrs bucket ->
+        -- If the operator is a vectorised binary operator on 32-bit values,
+        -- we can use a particularly efficient implementation. If the
+        -- operator has an atomic implementation we use that, otherwise it
+        -- is still a binary operator which can be implemented by atomic
+        -- compare-and-swap if 32 bits.
+        forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
+          -- Common variables.
+          old <- dPrim "old" t
 
-        (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
+          (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
 
-        case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
-          Just f -> sOp $ f $ Imp.var y t
-          Nothing ->
-            atomicUpdateCAS t a (tvVar old) bucket x $
-              x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
+          case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
+            Just f -> sOp $ f $ Imp.var y t
+            Nothing ->
+              atomicUpdateCAS t a (tvVar old) bucket x $
+                x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport old arr' bucket' bop = do
       let atomic f = Imp.Atomic . f old arr' bucket'
@@ -358,9 +407,9 @@ atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
-    old <- dPrim "old" t
-    atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
-      compileBody' [xp] $ lambdaBody op
+      old <- dPrim "old" t
+      atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
+        compileBody' [xp] $ lambdaBody op
 atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)

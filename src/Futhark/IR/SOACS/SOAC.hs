@@ -80,7 +80,7 @@ import Prelude hiding (id, (.))
 -- | A second-order array combinator (SOAC).
 data SOAC rep
   = Stream SubExp [VName] (StreamForm rep) [SubExp] (Lambda rep)
-  | -- | @Scatter <length> <lambda> <inputs> <outputs>@
+  | -- | @Scatter <length> <inputs> <lambda> <outputs>@
     --
     -- Scatter maps values from a set of input arrays to indices and values of a
     -- set of output arrays. It is able to write multiple values to multiple
@@ -116,13 +116,11 @@ data SOAC rep
     -- arr2. Additionally, the results are grouped, so the first 6 index values
     -- will correspond to the first two output values, and so on. For this
     -- example, <lambda> should return a total of 11 values, 8 index values and
-    -- 3 output values.
+    -- 3 output values.  See also 'splitScatterResults'.
     Scatter SubExp [VName] (Lambda rep) [(Shape, Int, VName)]
-  | -- | @Hist <length> <dest-arrays-and-ops> <bucket fun> <input arrays>@
+  | -- | @Hist <length> <input arrays> <dest-arrays-and-ops> <bucket fun>@
     --
-    -- The first SubExp is the length of the input arrays. The first
-    -- list describes the operations to perform.  The t'Lambda' is the
-    -- bucket function.  Finally comes the input images.
+    -- The final lambda produces indexes and values for the 'HistOp's.
     Hist SubExp [VName] [HistOp rep] (Lambda rep)
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
@@ -637,14 +635,14 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm,
           all (`ST.elem` vtable) (unCerts $ stmCerts stm) =
-          M.insert v (pe, stmCerts stm <> cs) table
+            M.insert v (pe, stmCerts stm <> cs) table
         | otherwise =
-          table
+            table
 
       asPrimExp table v
         | Just (e, cs) <- M.lookup v table = tell cs >> return e
         | Just (Prim pt) <- ST.lookupType v vtable =
-          return $ LeafExp v pt
+            return $ LeafExp v pt
         | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
 
@@ -871,28 +869,28 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
   ppr (Screma w arrs (ScremaForm scans reds map_lam))
     | null scans,
       null reds =
-      text "map"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> ppr map_lam
-          )
+        text "map"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> ppr map_lam
+            )
     | null scans =
-      text "redomap"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
-              </> ppr map_lam
-          )
+        text "redomap"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
+                </> ppr map_lam
+            )
     | null reds =
-      text "scanomap"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
-              </> ppr map_lam
-          )
+        text "scanomap"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
+                </> ppr map_lam
+            )
   ppr (Screma w arrs form) = ppScrema w arrs form
 
 -- | Prettyprint the given Screma.

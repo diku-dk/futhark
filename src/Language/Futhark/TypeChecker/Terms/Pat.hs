@@ -2,10 +2,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Type checking of patterns.
 module Language.Futhark.TypeChecker.Terms.Pat
   ( binding,
     bindingParams,
-    checkPat,
     bindingPat,
     bindingIdent,
     bindingSizes,
@@ -40,15 +40,15 @@ nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
   where
     onDim (NamedDim (QualName _ v))
       | Just size <- find ((== v) . sizeName) sizes = do
-        prev <- gets $ lookup v
-        case prev of
-          Nothing -> do
-            v' <- lift $ newID $ baseName v
-            lift $ constrain v' $ Size Nothing $ mkUsage' $ srclocOf size
-            modify ((v, v') :)
-            pure $ NamedDim $ qualName v'
-          Just v' ->
-            pure $ NamedDim $ qualName v'
+          prev <- gets $ lookup v
+          case prev of
+            Nothing -> do
+              v' <- lift $ newID $ baseName v
+              lift $ constrain v' $ Size Nothing $ mkUsage' $ srclocOf size
+              modify ((v, v') :)
+              pure $ NamedDim $ qualName v'
+            Just v' ->
+              pure $ NamedDim $ qualName v'
     onDim d = pure d
 
 -- | The set of in-scope variables that are being aliased.
@@ -62,10 +62,13 @@ checkIfUsed :: Occurrences -> Ident -> TermTypeM ()
 checkIfUsed occs v
   | not $ identName v `S.member` allOccurring occs,
     not $ "_" `isPrefixOf` prettyName (identName v) =
-    warn (srclocOf v) $ "Unused variable" <+> pquote (pprName $ identName v) <+> "."
+      warn (srclocOf v) $ "Unused variable" <+> pquote (pprName $ identName v) <+> "."
   | otherwise =
-    return ()
+      return ()
 
+-- | Bind these identifiers locally while running the provided action.
+-- Checks that the identifiers are used properly within the scope
+-- (e.g. consumption).
 binding :: [Ident] -> TermTypeM a -> TermTypeM a
 binding stms = check . handleVars
   where
@@ -170,6 +173,7 @@ typeParamIdent (TypeParamDim v loc) =
   Just $ Ident v (Info $ Scalar $ Prim $ Signed Int64) loc
 typeParamIdent _ = Nothing
 
+-- | Bind a single term-level identifier.
 bindingIdent ::
   IdentBase NoInfo Name ->
   PatType ->
@@ -181,6 +185,8 @@ bindingIdent (Ident v NoInfo vloc) t m =
     let ident = Ident v' (Info t) vloc
     binding [ident] $ m ident
 
+-- | Bind @let@-bound sizes.  This is usually followed by 'bindingPat'
+-- immediately afterwards.
 bindingSizes :: [SizeBinder Name] -> ([SizeBinder VName] -> TermTypeM a) -> TermTypeM a
 bindingSizes [] m = m [] -- Minor optimisation.
 bindingSizes sizes m = do
@@ -191,12 +197,12 @@ bindingSizes sizes m = do
   where
     lookForDuplicates prev size
       | Just prevloc <- M.lookup (sizeName size) prev =
-        typeError size mempty $
-          "Size name also bound at "
-            <> text (locStrRel (srclocOf size) prevloc)
-            <> "."
+          typeError size mempty $
+            "Size name also bound at "
+              <> text (locStrRel (srclocOf size) prevloc)
+              <> "."
       | otherwise =
-        pure $ M.insert (sizeName size) (srclocOf size) prev
+          pure $ M.insert (sizeName size) (srclocOf size) prev
 
     sizeWithSpace size =
       (Term, sizeName size)
@@ -217,6 +223,7 @@ patternDims (PatAscription p (TypeDecl _ (Info t)) _) =
     dimIdent _ NamedDim {} = Nothing
 patternDims _ = []
 
+-- | Check and bind a @let@-pattern.
 bindingPat ::
   [SizeBinder VName] ->
   PatBase NoInfo Name ->
@@ -260,7 +267,7 @@ checkPat' sizes (PatAttr attr p loc) t =
   PatAttr <$> checkAttr attr <*> checkPat' sizes p t <*> pure loc
 checkPat' _ (Id name _ loc) _
   | name' `elem` doNotShadow =
-    typeError loc mempty $ "The" <+> text name' <+> "operator may not be redefined."
+      typeError loc mempty $ "The" <+> text name' <+> "operator may not be redefined."
   where
     name' = nameToString name
 checkPat' _ (Id name NoInfo loc) (Ascribed t) = do
@@ -278,9 +285,9 @@ checkPat' _ (Wildcard NoInfo loc) NoneInferred = do
 checkPat' sizes (TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,
     length ts == length ps =
-    TuplePat
-      <$> zipWithM (checkPat' sizes) ps (map Ascribed ts)
-      <*> pure loc
+      TuplePat
+        <$> zipWithM (checkPat' sizes) ps (map Ascribed ts)
+        <*> pure loc
 checkPat' sizes p@(TuplePat ps loc) (Ascribed t) = do
   ps_t <- replicateM (length ps) (newTypeVar loc "t")
   unify (mkUsage loc "matching a tuple pattern") (Scalar (tupleRecord ps_t)) $ toStruct t
@@ -290,12 +297,12 @@ checkPat' sizes (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (\p -> checkPat' sizes p NoneInferred) ps <*> pure loc
 checkPat' _ (RecordPat p_fs _) _
   | Just (f, fp) <- find (("_" `isPrefixOf`) . nameToString . fst) p_fs =
-    typeError fp mempty $
-      "Underscore-prefixed fields are not allowed."
-        </> "Did you mean" <> dquotes (text (drop 1 (nameToString f)) <> "=_") <> "?"
+      typeError fp mempty $
+        "Underscore-prefixed fields are not allowed."
+          </> "Did you mean" <> dquotes (text (drop 1 (nameToString f)) <> "=_") <> "?"
 checkPat' sizes (RecordPat p_fs loc) (Ascribed (Scalar (Record t_fs)))
   | sort (map fst p_fs) == sort (M.keys t_fs) =
-    RecordPat . M.toList <$> check <*> pure loc
+      RecordPat . M.toList <$> check <*> pure loc
   where
     check =
       traverse (uncurry (checkPat' sizes)) $
@@ -350,8 +357,8 @@ checkPat' _ (PatLit l NoInfo loc) NoneInferred = do
   return $ PatLit l (Info (fromStruct t')) loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
   | Just ts <- M.lookup n cs = do
-    ps' <- zipWithM (checkPat' sizes) ps $ map Ascribed ts
-    return $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
+      ps' <- zipWithM (checkPat' sizes) ps $ map Ascribed ts
+      return $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed t) = do
   t' <- newTypeVar loc "t"
   ps' <- mapM (\p -> checkPat' sizes p NoneInferred) ps
@@ -394,6 +401,7 @@ checkPat sizes p t m = do
     [] ->
       bindNameMap (patNameMap p') $ m p'
 
+-- | Check and bind type and value parameters.
 bindingParams ::
   [UncheckedTypeParam] ->
   [UncheckedPat] ->

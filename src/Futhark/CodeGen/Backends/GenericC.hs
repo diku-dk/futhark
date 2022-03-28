@@ -41,7 +41,6 @@ module Futhark.CodeGen.Backends.GenericC
     contextContents,
     contextFinalInits,
     runCompilerM,
-    withOperations,
     inNewFunction,
     cachingMemory,
     compileFun,
@@ -83,6 +82,11 @@ module Futhark.CodeGen.Backends.GenericC
     primTypeToCType,
     intTypeToCType,
     copyMemoryDefaultSpace,
+    volQuals,
+    variQuals,
+    linearCode,
+    allocMem,
+    derefPointer,
   )
 where
 import Control.Monad.Identity
@@ -100,7 +104,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH, uniformH)
+import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH, uniformH, ispcUtilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
@@ -179,12 +183,12 @@ type MemoryType op s = SpaceId -> CompilerM op s C.Type
 -- | Write a scalar to the given memory block with the given element
 -- index and in the given memory space.
 type WriteScalar op s =
-  C.Exp -> C.Exp -> C.Type -> SpaceId -> Qualifier -> C.Exp -> CompilerM op s ()
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> C.Exp -> CompilerM op s ()
 
 -- | Read a scalar from the given memory block with the given element
 -- index and in the given memory space.
 type ReadScalar op s =
-  C.Exp -> C.Exp -> C.Type -> SpaceId -> Qualifier -> CompilerM op s C.Exp
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> CompilerM op s C.Exp
 
 -- | Allocate a memory block of the given size and with the given tag
 -- in the given memory space, saving a reference in the given variable
@@ -282,7 +286,7 @@ defCall dests fname args = do
   case dests of
     [dest]
       | isBuiltInFunction fname ->
-        stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
+          stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
     _ ->
       item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; goto cleanup; }|]
 
@@ -426,13 +430,6 @@ runCompilerM ops src userstate (CompilerM m) =
   runState
     (runReaderT m (CompilerEnv ops mempty))
     (newCompilerState src userstate)
-
-withOperations :: Operations op s -> CompilerM op s a -> CompilerM op s a
-withOperations ops m = do
-  -- TODO(pema): This is a bit of a hack, we don't override opsCompiler
-  -- in order to prevent erroneously switching between ISPC and C
-  orig <- asks envOpCompiler
-  local (\env -> env { envOperations = ops { opsCompiler = orig } }) m
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
@@ -792,8 +789,13 @@ defineMemorySpace space = do
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
   cached <- isJust <$> cacheMem name
+  fat <- fatMemory space
   unless cached $
-    modify $ \s -> s {compDeclaredMem = (name, space) : compDeclaredMem s}
+    if fat
+      then modify $ \s -> s {compDeclaredMem = (name, space) : compDeclaredMem s}
+      else do
+        ty <- memToCType name space
+        decl [C.cdecl|$ty:ty $id:name;|]
 
 resetMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 resetMem mem space = do
@@ -1293,9 +1295,9 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       let rank = length shape
           maybeCopyDim (Var d) i
             | not $ d `nameIn` arg_names =
-              ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
-                [C.cexp|$id:d == $exp:src->shape[$int:i]|]
-              )
+                ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
+                  [C.cexp|$id:d == $exp:src->shape[$int:i]|]
+                )
           maybeCopyDim x i =
             ( Nothing,
               [C.cexp|$exp:x == $exp:src->shape[$int:i]|]
@@ -1688,6 +1690,8 @@ $cScalarDefs
 
 $uniformH
 
+$ispcUtilH
+
 #ifndef __ISPC_STRUCT_memblock__
 #define __ISPC_STRUCT_memblock__
 struct memblock {
@@ -1994,11 +1998,14 @@ derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
   [C.cexp|(($ty:res_t)$exp:ptr)[$exp:i]|]
 
-volQuals :: Qualifier -> [C.TypeQual]
+volQuals :: Volatility -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
-volQuals Uniform  = [C.ctyquals|uniform|]
-volQuals Varying = []
+
+variQuals :: Variability  -> [C.TypeQual]
+variQuals Uniform = [C.ctyquals|uniform|]
+variQuals Unbound = []
+variQuals Varying = []
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
@@ -2139,10 +2146,10 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name vol t : SetScalar dest e : code)
       | name == dest = do
-        let ct = primTypeToCType t
-        e' <- compileExp e
-        item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-        go code
+          let ct = primTypeToCType t
+          e' <- compileExp e
+          item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
+          go code
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
 compileCode (Assert e msg (loc, locs)) = do
@@ -2223,16 +2230,10 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
 compileCode (Write _ _ Unit _ _ _) = pure ()
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
-  idxexp <- compileExp (untyped idx)
-  -- TODO(pema): This little dance with a temp var is a workaround for ISPC's strange casting behavior.
-  -- It shouldn't affect the other C backends although it is slightly ugly.
-  tmp <- newVName "tmp_idx"
-  decl [C.cdecl|typename int64_t $id:tmp = $exp:idxexp;|]
-  let deref =
-        derefPointer
-          dest'
-          [C.cexp|$id:tmp|]
-          [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
+  deref <-
+    derefPointer dest'
+      <$> compileExp (untyped idx)
+      <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
   elemexp' <- toStorage elemtype <$> compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 compileCode (Write dest (Count idx) _ ScalarSpace {} _ elemexp) = do
@@ -2273,8 +2274,6 @@ compileCode (Read x src (Count iexp) _ ScalarSpace {} _) = do
   stm [C.cstm|$id:x = $id:src[$exp:iexp'];|]
 compileCode (DeclareMem name space) =
   declMem name space
-
--- TODO (obp) -- target this
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
@@ -2308,8 +2307,8 @@ compileCode (DeclareArray name (Space space) t vs) =
 compileCode (SetScalar dest (BinOpExp op (LeafExp x _) y))
   | dest == x,
     Just f <- assignmentOperator op = do
-    y' <- compileExp y
-    stm [C.cstm|$exp:(f dest y');|]
+      y' <- compileExp y
+      stm [C.cstm|$exp:(f dest y');|]
 compileCode (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]

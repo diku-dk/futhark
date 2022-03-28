@@ -21,7 +21,6 @@ module Futhark.IR.TypeCheck
     TypeM,
     bad,
     context,
-    message,
     Checkable (..),
     CheckableOp (..),
     lookupVar,
@@ -42,14 +41,12 @@ module Futhark.IR.TypeCheck
     matchExtPat,
     matchExtBranchType,
     argType,
-    argAliases,
     noArgAliases,
     checkArg,
     checkSOACArrayArgs,
     checkLambda,
     checkBody,
     consume,
-    consumeOnlyParams,
     binding,
     alternative,
   )
@@ -60,6 +57,7 @@ import Control.Monad.State.Strict
 import Control.Parallel.Strategies
 import Data.Bifunctor (second)
 import Data.List (find, intercalate, isPrefixOf, sort)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -78,7 +76,7 @@ data ErrorCase rep
   | DupDefinitionError Name
   | DupParamError Name VName
   | DupPatError VName
-  | InvalidPatError (Pat (Aliases rep)) [ExtType] (Maybe String)
+  | InvalidPatError (Pat (LetDec (Aliases rep))) [ExtType] (Maybe String)
   | UnknownVariableError VName
   | UnknownFunctionError Name
   | ParameterMismatch (Maybe Name) [Type] [Type]
@@ -257,9 +255,9 @@ instance Semigroup Consumption where
   _ <> ConsumptionError e = ConsumptionError e
   Consumption o1 <> Consumption o2
     | v : _ <- namesToList $ consumed_in_o1 `namesIntersection` used_in_o2 =
-      ConsumptionError $ "Variable " <> pretty v <> " referenced after being consumed."
+        ConsumptionError $ "Variable " <> pretty v <> " referenced after being consumed."
     | otherwise =
-      Consumption $ o1 `seqOccurences` o2
+        Consumption $ o1 `seqOccurences` o2
     where
       consumed_in_o1 = mconcat $ map consumed o1
       used_in_o2 = mconcat $ map consumed o2 <> map observed o2
@@ -316,6 +314,7 @@ runTypeM ::
 runTypeM env (TypeM m) =
   second stateCons <$> runStateT (runReaderT m env) (TState mempty mempty)
 
+-- | Signal a type error.
 bad :: ErrorCase rep -> TypeM rep a
 bad e = do
   messages <- asks envContext
@@ -393,6 +392,9 @@ checkConsumption :: Consumption -> TypeM rep Occurences
 checkConsumption (ConsumptionError e) = bad $ TypeError e
 checkConsumption (Consumption os) = return os
 
+-- | Type check two mutually control flow branches.  Think @if@.  This
+-- interacts with consumption checking, as it is OK for an array to be
+-- consumed in both branches.
 alternative :: TypeM rep a -> TypeM rep b -> TypeM rep (a, b)
 alternative m1 m2 = do
   (x, os1) <- collectOccurences m1
@@ -416,12 +418,12 @@ consumeOnlyParams consumable m = do
     wasConsumed v
       | Just als <- lookup v consumable = return als
       | otherwise =
-        bad $
-          TypeError $
-            unlines
-              [ pretty v ++ " was invalidly consumed.",
-                what ++ " can be consumed here."
-              ]
+          bad $
+            TypeError $
+              unlines
+                [ pretty v ++ " was invalidly consumed.",
+                  what ++ " can be consumed here."
+                ]
     what
       | null consumable = "Nothing"
       | otherwise = "Only " ++ intercalate ", " (map (pretty . fst) consumable)
@@ -584,9 +586,9 @@ checkProg (Prog consts funs) = do
       foldM expand table funs
     expand ftable (FunDef _ _ name ret params _)
       | M.member name ftable =
-        bad $ DupDefinitionError name
+          bad $ DupDefinitionError name
       | otherwise =
-        return $ M.insert name (ret, params) ftable
+          return $ M.insert name (ret, params) ftable
 
 initialFtable ::
   Checkable rep =>
@@ -675,21 +677,21 @@ checkFun' (fname, rettype, params) consumable check = do
 
     expand seen pname
       | Just _ <- find (== pname) seen =
-        bad $ DupParamError fname pname
+          bad $ DupParamError fname pname
       | otherwise =
-        return $ pname : seen
+          return $ pname : seen
     checkReturnAlias =
       foldM_ checkReturnAlias' mempty . returnAliasing rettype
 
     checkReturnAlias' seen (Unique, names)
       | any (`S.member` S.map fst seen) $ namesToList names =
-        bad $ UniqueReturnAliased fname
+          bad $ UniqueReturnAliased fname
       | otherwise = do
-        consume names
-        return $ seen <> tag Unique names
+          consume names
+          return $ seen <> tag Unique names
     checkReturnAlias' seen (Nonunique, names)
       | any (`S.member` seen) $ tag Unique names =
-        bad $ UniqueReturnAliased fname
+          bad $ UniqueReturnAliased fname
       | otherwise = return $ seen <> tag Nonunique names
 
     tag u = S.fromList . map (,u) . namesToList
@@ -770,23 +772,23 @@ checkLambdaResult ::
   TypeM rep ()
 checkLambdaResult ts es
   | length ts /= length es =
-    bad $
-      TypeError $
-        "Lambda has return type " ++ prettyTuple ts
-          ++ " describing "
-          ++ show (length ts)
-          ++ " values, but body returns "
-          ++ show (length es)
-          ++ " values: "
-          ++ prettyTuple es
-  | otherwise = forM_ (zip ts es) $ \(t, e) -> do
-    et <- checkSubExpRes e
-    unless (et == t) $
       bad $
         TypeError $
-          "Subexpression " ++ pretty e ++ " has type " ++ pretty et
-            ++ " but expected "
-            ++ pretty t
+          "Lambda has return type " ++ prettyTuple ts
+            ++ " describing "
+            ++ show (length ts)
+            ++ " values, but body returns "
+            ++ show (length es)
+            ++ " values: "
+            ++ prettyTuple es
+  | otherwise = forM_ (zip ts es) $ \(t, e) -> do
+      et <- checkSubExpRes e
+      unless (et == t) $
+        bad $
+          TypeError $
+            "Subexpression " ++ pretty e ++ " has type " ++ pretty et
+              ++ " but expected "
+              ++ pretty t
 
 checkBody ::
   Checkable rep =>
@@ -881,20 +883,20 @@ checkBasicOp (Reshape newshape arrexp) = do
       return ()
     checkDimChange rank (DimCoercion se) i
       | i >= rank =
-        bad $
-          TypeError $
-            "Asked to coerce dimension " ++ show i ++ " to " ++ pretty se
-              ++ ", but array "
-              ++ pretty arrexp
-              ++ " has only "
-              ++ pretty rank
-              ++ " dimensions"
+          bad $
+            TypeError $
+              "Asked to coerce dimension " ++ show i ++ " to " ++ pretty se
+                ++ ", but array "
+                ++ pretty arrexp
+                ++ " has only "
+                ++ pretty rank
+                ++ " dimensions"
       | otherwise =
-        return ()
+          return ()
 checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
-  when (length perm /= rank || sort perm /= [0 .. rank -1]) $
+  when (length perm /= rank || sort perm /= [0 .. rank - 1]) $
     bad $ PermutationError perm rank $ Just arr
 checkBasicOp (Rotate rots arr) = do
   arrt <- lookupType arr
@@ -907,7 +909,7 @@ checkBasicOp (Rotate rots arr) = do
           ++ " dimensions of "
           ++ show rank
           ++ "-dimensional array."
-checkBasicOp (Concat i arr1exp arr2exps ressize) = do
+checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
   arr1t <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
   let success =
@@ -1230,7 +1232,7 @@ checkBinOpArgs t e1 e2 = do
 
 checkPatElem ::
   Checkable rep =>
-  PatElemT (LetDec rep) ->
+  PatElem (LetDec rep) ->
   TypeM rep ()
 checkPatElem (PatElem name dec) =
   context ("When checking pattern element " ++ pretty name) $
@@ -1287,7 +1289,7 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
 
 matchExtPat ::
   Checkable rep =>
-  Pat (Aliases rep) ->
+  Pat (LetDec (Aliases rep)) ->
   [ExtType] ->
   TypeM rep ()
 matchExtPat pat ts =
@@ -1490,7 +1492,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   checkLParamDec :: VName -> LParamInfo rep -> TypeM rep ()
   checkLetBoundDec :: VName -> LetDec rep -> TypeM rep ()
   checkRetType :: [RetType rep] -> TypeM rep ()
-  matchPat :: Pat (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
+  matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   primFParam :: VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   matchReturnType :: [RetType rep] -> Result -> TypeM rep ()
   matchBranchType :: [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
@@ -1514,7 +1516,7 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   default checkRetType :: RetType rep ~ DeclExtType => [RetType rep] -> TypeM rep ()
   checkRetType = mapM_ $ checkExtType . declExtTypeOf
 
-  default matchPat :: Pat (Aliases rep) -> Exp (Aliases rep) -> TypeM rep ()
+  default matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   matchPat pat = matchExtPat pat <=< expExtType
 
   default primFParam :: FParamInfo rep ~ DeclType => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
