@@ -149,7 +149,7 @@ lastUseStm (Let pat _ e) (lutab, used_nms) =
     -- analyse the expression and get the
     --  (i)  a new last-use table (in case the @e@ contains bodies of stmts)
     -- (ii) the set of variables lastly used in the current binding.
-    --(iii)  aliased transitive-closure of used names, and
+    -- (iii)  aliased transitive-closure of used names, and
     (lutab', last_uses, used_nms') <- lastUseExp e used_nms
     -- filter-out the binded names from the set of used variables,
     -- since they go out of scope, and update the last-use table.

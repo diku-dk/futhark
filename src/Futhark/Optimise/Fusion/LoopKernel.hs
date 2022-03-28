@@ -98,7 +98,7 @@ applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certs)
 applyTransform (SOAC.Rearrange cs perm) v =
   (Rearrange perm' $ identName v, cs)
   where
-    perm' = perm ++ drop (length perm) [0 .. arrayRank (identType v) -1]
+    perm' = perm ++ drop (length perm) [0 .. arrayRank (identType v) - 1]
 applyTransform (SOAC.Reshape cs shape) v =
   (Reshape shape $ identName v, cs)
 applyTransform (SOAC.ReshapeOuter cs shape) v =
@@ -177,9 +177,9 @@ tryOptimizeSOAC unfus_nms outVars soac consumed ker = do
   where
     addInitialTransformIfRelevant ots inp
       | SOAC.inputArray inp `elem` outVars =
-        SOAC.addInitialTransforms ots inp
+          SOAC.addInitialTransforms ots inp
       | otherwise =
-        inp
+          inp
 
 tryOptimizeKernel ::
   Names ->
@@ -219,7 +219,7 @@ fixInputTypes outIdents ker =
       map fixInputType (SOAC.inputs soac) `SOAC.setInputs` soac
     fixInputType (SOAC.Input ts v _)
       | Just v' <- find ((== v) . identName) outIdents =
-        SOAC.Input ts v $ identType v'
+          SOAC.Input ts v $ identType v'
     fixInputType inp = inp
 
 applyFusionRules ::
@@ -345,39 +345,39 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       )
         | mapFusionOK (drop (Futhark.scanResults scans_p + Futhark.redResults reds_p) outVars) ker
             || horizFuse -> do
-          let red_nes_p = concatMap redNeutral reds_p
-              red_nes_c = concatMap redNeutral reds_c
-              scan_nes_p = concatMap scanNeutral scans_p
-              scan_nes_c = concatMap scanNeutral scans_c
-              (res_lam', new_inp) =
-                fuseRedomap
-                  unfus_set
-                  outVars
-                  lam_p
-                  scan_nes_p
-                  red_nes_p
-                  inp_p_arr
-                  outPairs
-                  lam_c
-                  scan_nes_c
-                  red_nes_c
-                  inp_c_arr
-              (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
-                splitAt3 (length scan_nes_p) (length red_nes_p) outVars
-              (soac_c_scanout, soac_c_redout, soac_c_mapout) =
-                splitAt3 (length scan_nes_c) (length red_nes_c) $ outNames ker
-              unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
-          success
-            ( soac_p_scanout ++ soac_c_scanout
-                ++ soac_p_redout
-                ++ soac_c_redout
-                ++ soac_c_mapout
-                ++ unfus_arrs
-            )
-            $ SOAC.Screma
-              w
-              (ScremaForm (scans_p ++ scans_c) (reds_p ++ reds_c) res_lam')
-              new_inp
+            let red_nes_p = concatMap redNeutral reds_p
+                red_nes_c = concatMap redNeutral reds_c
+                scan_nes_p = concatMap scanNeutral scans_p
+                scan_nes_c = concatMap scanNeutral scans_c
+                (res_lam', new_inp) =
+                  fuseRedomap
+                    unfus_set
+                    outVars
+                    lam_p
+                    scan_nes_p
+                    red_nes_p
+                    inp_p_arr
+                    outPairs
+                    lam_c
+                    scan_nes_c
+                    red_nes_c
+                    inp_c_arr
+                (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
+                  splitAt3 (length scan_nes_p) (length red_nes_p) outVars
+                (soac_c_scanout, soac_c_redout, soac_c_mapout) =
+                  splitAt3 (length scan_nes_c) (length red_nes_c) $ outNames ker
+                unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
+            success
+              ( soac_p_scanout ++ soac_c_scanout
+                  ++ soac_p_redout
+                  ++ soac_c_redout
+                  ++ soac_c_mapout
+                  ++ unfus_arrs
+              )
+              $ SOAC.Screma
+                w
+                (ScremaForm (scans_p ++ scans_c) (reds_p ++ reds_c) res_lam')
+                new_inp
 
     ------------------
     -- Scatter fusion --
@@ -397,9 +397,9 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
           not (any (`nameIn` unfus_set) outVars),
           -- 2. all arrays produced by the map are input to the scatter.
           mapWriteFusionOK outVars ker -> do
-          let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-          success (outNames ker ++ extra_nms) $
-            SOAC.Scatter w res_lam' new_inp dests
+            let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
+            success (outNames ker ++ extra_nms) $
+              SOAC.Scatter w res_lam' new_inp dests
 
     -- Map-Hist fusion.
     --
@@ -415,64 +415,64 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
           not (any (`nameIn` unfus_set) outVars),
           -- 2. all arrays produced by the map are input to the scatter.
           mapWriteFusionOK outVars ker -> do
-          let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-          success (outNames ker ++ extra_nms) $
-            SOAC.Hist w ops res_lam' new_inp
+            let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
+            success (outNames ker ++ extra_nms) $
+              SOAC.Hist w ops res_lam' new_inp
 
     -- Hist-Hist fusion
     ( SOAC.Hist _ ops_c _ _,
       SOAC.Hist _ ops_p _ _
       )
         | horizFuse -> do
-          let p_num_buckets = length ops_p
-              c_num_buckets = length ops_c
-              (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
-              body' =
-                Body
-                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
-                    bodyStms = bodyStms body_p <> bodyStms body_c,
-                    bodyResult =
-                      take c_num_buckets (bodyResult body_c)
-                        ++ take p_num_buckets (bodyResult body_p)
-                        ++ drop c_num_buckets (bodyResult body_c)
-                        ++ drop p_num_buckets (bodyResult body_p)
-                  }
-              lam' =
-                Lambda
-                  { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
-                    lambdaBody = body',
-                    lambdaReturnType =
-                      replicate (c_num_buckets + p_num_buckets) (Prim int64)
-                        ++ drop c_num_buckets (lambdaReturnType lam_c)
-                        ++ drop p_num_buckets (lambdaReturnType lam_p)
-                  }
-          success (outNames ker ++ returned_outvars) $
-            SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
+            let p_num_buckets = length ops_p
+                c_num_buckets = length ops_c
+                (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
+                body' =
+                  Body
+                    { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
+                      bodyStms = bodyStms body_p <> bodyStms body_c,
+                      bodyResult =
+                        take c_num_buckets (bodyResult body_c)
+                          ++ take p_num_buckets (bodyResult body_p)
+                          ++ drop c_num_buckets (bodyResult body_c)
+                          ++ drop p_num_buckets (bodyResult body_p)
+                    }
+                lam' =
+                  Lambda
+                    { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
+                      lambdaBody = body',
+                      lambdaReturnType =
+                        replicate (c_num_buckets + p_num_buckets) (Prim int64)
+                          ++ drop c_num_buckets (lambdaReturnType lam_c)
+                          ++ drop p_num_buckets (lambdaReturnType lam_p)
+                    }
+            success (outNames ker ++ returned_outvars) $
+              SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
 
     -- Scatter-write fusion.
     ( SOAC.Scatter _len_c _lam_c ivs_c as_c,
       SOAC.Scatter _len_p _lam_p ivs_p as_p
       )
         | horizFuse -> do
-          let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
-                where
-                  (xs_indices, xs_vals) = splitScatterResults as_xs xs
-                  (ys_indices, ys_vals) = splitScatterResults as_ys ys
-          let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
-          let body' =
-                Body
-                  { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
-                    bodyStms = bodyStms body_p <> bodyStms body_c,
-                    bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
-                  }
-          let lam' =
-                Lambda
-                  { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
-                    lambdaBody = body',
-                    lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
-                  }
-          success (outNames ker ++ returned_outvars) $
-            SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
+            let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
+                  where
+                    (xs_indices, xs_vals) = splitScatterResults as_xs xs
+                    (ys_indices, ys_vals) = splitScatterResults as_ys ys
+            let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
+            let body' =
+                  Body
+                    { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
+                      bodyStms = bodyStms body_p <> bodyStms body_c,
+                      bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
+                    }
+            let lam' =
+                  Lambda
+                    { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
+                      lambdaBody = body',
+                      lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
+                    }
+            success (outNames ker ++ returned_outvars) $
+              SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
     (SOAC.Scatter {}, _) ->
       fail "Cannot fuse a write with anything else than a write or a map"
     (_, SOAC.Scatter {}) ->
@@ -482,9 +482,9 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ----------------------------
     (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ nes _)
       | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
-        -- fuse two SEQUENTIAL streams
-        (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
-        success res_nms res_stream
+          -- fuse two SEQUENTIAL streams
+          (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
+          success res_nms res_stream
     (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ _ _) ->
       fail "Fusion conditions not met for two SEQ streams!"
     (SOAC.Stream _ Sequential _ _ _, SOAC.Stream {}) ->
@@ -493,9 +493,9 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       fail "Cannot fuse a parallel with a sequential Stream!"
     (SOAC.Stream {}, SOAC.Stream _ _ _ nes _)
       | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
-        -- fuse two PARALLEL streams
-        (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
-        success res_nms res_stream
+          -- fuse two PARALLEL streams
+          (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
+          success res_nms res_stream
     (SOAC.Stream {}, SOAC.Stream {}) ->
       fail "Fusion conditions not met for two PAR streams!"
     -------------------------------------------------------------------
@@ -662,41 +662,41 @@ iswim _ (SOAC.Screma w form arrs) ots
   | Just [Futhark.Scan scan_fun nes] <- Futhark.isScanSOAC form,
     Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun,
     Just nes_names <- mapM subExpVar nes = do
-    let nes_idents = zipWith Ident nes_names $ lambdaReturnType scan_fun
-        map_nes = map SOAC.identInput nes_idents
-        map_arrs' = map_nes ++ map (SOAC.transposeInput 0 1) arrs
-        (scan_acc_params, scan_elem_params) =
-          splitAt (length arrs) $ lambdaParams scan_fun
-        map_params =
-          map removeParamOuterDim scan_acc_params
-            ++ map (setParamOuterDimTo w) scan_elem_params
-        map_rettype = map (`setOuterSize` w) $ lambdaReturnType scan_fun
+      let nes_idents = zipWith Ident nes_names $ lambdaReturnType scan_fun
+          map_nes = map SOAC.identInput nes_idents
+          map_arrs' = map_nes ++ map (SOAC.transposeInput 0 1) arrs
+          (scan_acc_params, scan_elem_params) =
+            splitAt (length arrs) $ lambdaParams scan_fun
+          map_params =
+            map removeParamOuterDim scan_acc_params
+              ++ map (setParamOuterDimTo w) scan_elem_params
+          map_rettype = map (`setOuterSize` w) $ lambdaReturnType scan_fun
 
-        scan_params = lambdaParams map_fun
-        scan_body = lambdaBody map_fun
-        scan_rettype = lambdaReturnType map_fun
-        scan_fun' = Lambda scan_params scan_body scan_rettype
-        nes' = map Var $ take (length map_nes) $ map paramName map_params
-        arrs' = drop (length map_nes) $ map paramName map_params
+          scan_params = lambdaParams map_fun
+          scan_body = lambdaBody map_fun
+          scan_rettype = lambdaReturnType map_fun
+          scan_fun' = Lambda scan_params scan_body scan_rettype
+          nes' = map Var $ take (length map_nes) $ map paramName map_params
+          arrs' = drop (length map_nes) $ map paramName map_params
 
-    scan_form <- scanSOAC [Futhark.Scan scan_fun' nes']
+      scan_form <- scanSOAC [Futhark.Scan scan_fun' nes']
 
-    let map_body =
-          mkBody
-            ( oneStm $
-                Let (setPatOuterDimTo w map_pat) (defAux ()) $
-                  Op $ Futhark.Screma w arrs' scan_form
-            )
-            $ varsRes $ patNames map_pat
-        map_fun' = Lambda map_params map_body map_rettype
-        perm = case lambdaReturnType map_fun of
-          [] -> []
-          t : _ -> 1 : 0 : [2 .. arrayRank t]
+      let map_body =
+            mkBody
+              ( oneStm $
+                  Let (setPatOuterDimTo w map_pat) (defAux ()) $
+                    Op $ Futhark.Screma w arrs' scan_form
+              )
+              $ varsRes $ patNames map_pat
+          map_fun' = Lambda map_params map_body map_rettype
+          perm = case lambdaReturnType map_fun of
+            [] -> []
+            t : _ -> 1 : 0 : [2 .. arrayRank t]
 
-    return
-      ( SOAC.Screma map_w (ScremaForm [] [] map_fun') map_arrs',
-        ots SOAC.|> SOAC.Rearrange map_cs perm
-      )
+      return
+        ( SOAC.Screma map_w (ScremaForm [] [] map_fun') map_arrs',
+          ots SOAC.|> SOAC.Rearrange map_cs perm
+        )
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
@@ -760,7 +760,7 @@ pullRearrange soac ots = do
   if rearrangeReach perm <= mapDepth nest
     then do
       let -- Expand perm to cover the full extent of the input dimensionality
-          perm' inp = take r perm ++ [length perm .. r -1]
+          perm' inp = take r perm ++ [length perm .. r - 1]
             where
               r = SOAC.inputRank inp
           addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
@@ -830,7 +830,7 @@ fixupInputs inpIds inps =
     fixupInput d perm inp
       | r <- SOAC.inputRank inp,
         r >= d =
-        Just $ SOAC.addTransform (SOAC.Rearrange mempty $ take r perm) inp
+          Just $ SOAC.addTransform (SOAC.Rearrange mempty $ take r perm) inp
       | otherwise = Nothing
 
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
@@ -838,40 +838,40 @@ pullReshape (SOAC.Screma _ form inps) ots
   | Just maplam <- Futhark.isMapSOAC form,
     SOAC.Reshape cs shape SOAC.:< ots' <- SOAC.viewf ots,
     all primType $ lambdaReturnType maplam = do
-    let mapw' = case reverse $ newDims shape of
-          [] -> intConst Int64 0
-          d : _ -> d
-        inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) inps
-        inputTypes = map SOAC.inputType inputs'
+      let mapw' = case reverse $ newDims shape of
+            [] -> intConst Int64 0
+            d : _ -> d
+          inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) inps
+          inputTypes = map SOAC.inputType inputs'
 
-    let outersoac ::
-          ([SOAC.Input] -> SOAC) ->
-          (SubExp, [SubExp]) ->
-          TryFusion ([SOAC.Input] -> SOAC)
-        outersoac inner (w, outershape) = do
-          let addDims t = arrayOf t (Shape outershape) NoUniqueness
-              retTypes = map addDims $ lambdaReturnType maplam
+      let outersoac ::
+            ([SOAC.Input] -> SOAC) ->
+            (SubExp, [SubExp]) ->
+            TryFusion ([SOAC.Input] -> SOAC)
+          outersoac inner (w, outershape) = do
+            let addDims t = arrayOf t (Shape outershape) NoUniqueness
+                retTypes = map addDims $ lambdaReturnType maplam
 
-          ps <- forM inputTypes $ \inpt ->
-            newParam "pullReshape_param" $
-              stripArray (length shape - length outershape) inpt
+            ps <- forM inputTypes $ \inpt ->
+              newParam "pullReshape_param" $
+                stripArray (length shape - length outershape) inpt
 
-          inner_body <-
-            runBodyBuilder $
-              eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
-          let inner_fun =
-                Lambda
-                  { lambdaParams = ps,
-                    lambdaReturnType = retTypes,
-                    lambdaBody = inner_body
-                  }
-          return $ SOAC.Screma w $ Futhark.mapSOAC inner_fun
+            inner_body <-
+              runBodyBuilder $
+                eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
+            let inner_fun =
+                  Lambda
+                    { lambdaParams = ps,
+                      lambdaReturnType = retTypes,
+                      lambdaBody = inner_body
+                    }
+            return $ SOAC.Screma w $ Futhark.mapSOAC inner_fun
 
-    op' <-
-      foldM outersoac (SOAC.Screma mapw' $ Futhark.mapSOAC maplam) $
-        zip (drop 1 $ reverse $ newDims shape) $
-          drop 1 $ reverse $ drop 1 $ tails $ newDims shape
-    return (op' inputs', ots')
+      op' <-
+        foldM outersoac (SOAC.Screma mapw' $ Futhark.mapSOAC maplam) $
+          zip (drop 1 $ reverse $ newDims shape) $
+            drop 1 $ reverse $ drop 1 $ tails $ newDims shape
+      return (op' inputs', ots')
 pullReshape _ _ = fail "Cannot pull reshape"
 
 -- Tie it all together in exposeInputs (for making inputs to a
@@ -911,7 +911,7 @@ exposeInputs inpIds ker =
       case commonTransforms inpIds $ inputs ker' of
         (ot', inps')
           | all exposed inps' ->
-            return (ker' {fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
+              return (ker' {fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
         _ -> fail "Cannot expose"
 
     exposed (SOAC.Input ts _ _)

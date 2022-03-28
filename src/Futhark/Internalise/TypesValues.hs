@@ -125,10 +125,10 @@ internaliseDim exts d =
     namedDim (E.QualName _ name)
       | Just x <- name `M.lookup` exts = pure $ I.Ext x
       | otherwise = do
-        subst <- liftInternaliseM $ lookupSubst name
-        case subst of
-          Just [v] -> pure $ I.Free v
-          _ -> pure $ I.Free $ I.Var name
+          subst <- liftInternaliseM $ lookupSubst name
+          case subst of
+            Just [v] -> pure $ I.Free v
+            _ -> pure $ I.Free $ I.Var name
 
 internaliseTypeM ::
   M.Map VName Int ->
@@ -147,14 +147,14 @@ internaliseTypeM exts orig_t =
       -- arrays of unit will lose their sizes.
       | null ets -> return [I.Prim I.Unit]
       | otherwise ->
-        concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
+          concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
       | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.typeLeaf tn) == "acc" -> do
-        ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
-        acc_param <- liftInternaliseM $ newVName "acc_cert"
-        let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
-        return [acc_t]
+          ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
+          acc_param <- liftInternaliseM $ newVName "acc_cert"
+          let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
+          return [acc_t]
     E.Scalar E.TypeVar {} ->
       error "internaliseTypeM: cannot handle type variable."
     E.Scalar E.Arrow {} ->
@@ -185,15 +185,15 @@ internaliseConstructors cs =
       where
         f (ts', js, new_ts) t
           | Just (_, j) <- find ((== fromDecl t) . fst) ts' =
-            ( delete (fromDecl t, j) ts',
-              js ++ [j],
-              new_ts
-            )
+              ( delete (fromDecl t, j) ts',
+                js ++ [j],
+                new_ts
+              )
           | otherwise =
-            ( ts',
-              js ++ [length ts + length new_ts],
-              new_ts ++ [t]
-            )
+              ( ts',
+                js ++ [length ts + length new_ts],
+                new_ts ++ [t]
+              )
 
 internaliseSumType ::
   M.Map Name [E.StructType] ->

@@ -485,14 +485,14 @@ compileConsts used_consts stms = do
       extract x <> extract y
     extract (Imp.DeclareMem name space)
       | name `nameIn` used_consts =
-        ( DL.singleton $ Imp.MemParam name space,
-          mempty
-        )
+          ( DL.singleton $ Imp.MemParam name space,
+            mempty
+          )
     extract (Imp.DeclareScalar name _ t)
       | name `nameIn` used_consts =
-        ( DL.singleton $ Imp.ScalarParam name t,
-          mempty
-        )
+          ( DL.singleton $ Imp.ScalarParam name t,
+            mempty
+          )
     extract s =
       (mempty, s)
 
@@ -529,9 +529,9 @@ compileInParams params eparams = do
         where
           memSummary param
             | MemMem space <- paramDec param =
-              Just (paramName param, space)
+                Just (paramName param, space)
             | otherwise =
-              Nothing
+                Nothing
 
       findMemInfo :: VName -> Maybe Space
       findMemInfo = flip M.lookup summaries
@@ -787,9 +787,9 @@ defCompileExp pat (DoLoop merge form body) = do
     ForLoop i _ bound loopvars -> do
       let setLoopParam (p, a)
             | Prim _ <- paramType p =
-              copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.le64 i]
+                copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.le64 i]
             | otherwise =
-              pure ()
+                pure ()
 
       bound' <- toExp bound
 
@@ -877,7 +877,7 @@ defCompileBasicOp _ (Assert e msg loc) = do
     uncurry warn loc "Safety check required at run-time."
 defCompileBasicOp (Pat [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
-    copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
+      copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
 defCompileBasicOp _ Index {} =
   pure ()
 defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
@@ -899,10 +899,10 @@ defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
 defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se)
   | Acc {} <- patElemType pe = pure ()
   | otherwise = do
-    ds' <- mapM toExp ds
-    is <- replicateM (length ds) (newVName "i")
-    copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.le64) is) se []
-    emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
+      ds' <- mapM toExp ds
+      is <- replicateM (length ds) (newVName "i")
+      copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.le64) is) se []
+      emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 defCompileBasicOp _ Scratch {} =
   pure ()
 defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
@@ -935,20 +935,20 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
     offs_glb <-- tvExp offs_glb + rows
 defCompileBasicOp (Pat [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
-    dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
-    dest_space <- entryMemSpace <$> lookupMemory (memLocName dest_mem)
-    let t = primValueType v
-    static_array <- newVNameForFun "static_array"
-    emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
-    let static_src =
-          MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
-            IxFun.iota [fromIntegral $ length es]
-        entry = MemVar Nothing $ MemEntry dest_space
-    addVar static_array entry
-    copy t dest_mem static_src
+      dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
+      dest_space <- entryMemSpace <$> lookupMemory (memLocName dest_mem)
+      let t = primValueType v
+      static_array <- newVNameForFun "static_array"
+      emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
+      let static_src =
+            MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
+              IxFun.iota [fromIntegral $ length es]
+          entry = MemVar Nothing $ MemEntry dest_space
+      addVar static_array entry
+      copy t dest_mem static_src
   | otherwise =
-    forM_ (zip [0 ..] es) $ \(i, e) ->
-      copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
+      forM_ (zip [0 ..] es) $ \(i, e) ->
+        copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
   where
     isLiteral (Constant v) = Just v
     isLiteral _ = Nothing
@@ -1408,14 +1408,14 @@ isMapTransposeCopy bt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
     (perm, destshape) <- unzip perm_and_destshape,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk destshape swap r1 r2 dest_offset src_offset
+      isOk destshape swap r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
     (perm, srcshape) <- unzip perm_and_srcshape,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk srcshape id r1 r2 dest_offset src_offset
+      isOk srcshape id r1 r2 dest_offset src_offset
   | otherwise =
-    Nothing
+      Nothing
   where
     bt_size = primByteSize bt
     swap (x, y) = (y, x)
@@ -1452,31 +1452,31 @@ defaultCopy :: CopyCompiler rep r op
 defaultCopy pt dest src
   | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
       isMapTransposeCopy pt dest src = do
-    fname <- mapTransposeForType pt
-    emit $
-      Imp.Call
-        []
-        fname
-        $ transposeArgs
-          pt
-          destmem
-          (bytes destoffset)
-          srcmem
-          (bytes srcoffset)
-          num_arrays
-          size_x
-          size_y
+      fname <- mapTransposeForType pt
+      emit $
+        Imp.Call
+          []
+          fname
+          $ transposeArgs
+            pt
+            destmem
+            (bytes destoffset)
+            srcmem
+            (bytes srcoffset)
+            num_arrays
+            size_x
+            size_y
   | Just destoffset <-
       IxFun.linearWithOffset dest_ixfun pt_size,
     Just srcoffset <-
       IxFun.linearWithOffset src_ixfun pt_size = do
-    srcspace <- entryMemSpace <$> lookupMemory srcmem
-    destspace <- entryMemSpace <$> lookupMemory destmem
-    if isScalarSpace srcspace || isScalarSpace destspace
-      then copyElementWise pt dest src
-      else sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt
+      srcspace <- entryMemSpace <$> lookupMemory srcmem
+      destspace <- entryMemSpace <$> lookupMemory destmem
+      if isScalarSpace srcspace || isScalarSpace destspace
+        then copyElementWise pt dest src
+        else sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt
   | otherwise =
-    copyElementWise pt dest src
+      copyElementWise pt dest src
   where
     pt_size = primByteSize pt
     num_elems = Imp.elements $ product $ IxFun.shape $ memLocIxFun src
@@ -1523,38 +1523,38 @@ copyArrayDWIM
       Just srcis <- mapM dimFix srcslice,
       length srcis == length srcshape,
       length destis == length destshape = do
-      (targetmem, destspace, targetoffset) <-
-        fullyIndexArray' destlocation destis
-      (srcmem, srcspace, srcoffset) <-
-        fullyIndexArray' srclocation srcis
-      vol <- asks envVolatility
-      collect $ do
-        tmp <- tvVar <$> dPrim "tmp" bt
-        emit $ Imp.Read tmp srcmem srcoffset bt srcspace vol
-        emit $ Imp.Write targetmem targetoffset bt destspace vol $ Imp.var tmp bt
+        (targetmem, destspace, targetoffset) <-
+          fullyIndexArray' destlocation destis
+        (srcmem, srcspace, srcoffset) <-
+          fullyIndexArray' srclocation srcis
+        vol <- asks envVolatility
+        collect $ do
+          tmp <- tvVar <$> dPrim "tmp" bt
+          emit $ Imp.Read tmp srcmem srcoffset bt srcspace vol
+          emit $ Imp.Write targetmem targetoffset bt destspace vol $ Imp.var tmp bt
     | otherwise = do
-      let destslice' = fullSliceNum (map toInt64Exp destshape) destslice
-          srcslice' = fullSliceNum (map toInt64Exp srcshape) srcslice
-          destrank = length $ sliceDims destslice'
-          srcrank = length $ sliceDims srcslice'
-          destlocation' = sliceMemLoc destlocation destslice'
-          srclocation' = sliceMemLoc srclocation srcslice'
-      if destrank /= srcrank
-        then
-          error $
-            "copyArrayDWIM: cannot copy to "
-              ++ pretty (memLocName destlocation)
-              ++ " from "
-              ++ pretty (memLocName srclocation)
-              ++ " because ranks do not match ("
-              ++ pretty destrank
-              ++ " vs "
-              ++ pretty srcrank
-              ++ ")"
-        else
-          if destlocation' == srclocation'
-            then pure mempty -- Copy would be no-op.
-            else collect $ copy bt destlocation' srclocation'
+        let destslice' = fullSliceNum (map toInt64Exp destshape) destslice
+            srcslice' = fullSliceNum (map toInt64Exp srcshape) srcslice
+            destrank = length $ sliceDims destslice'
+            srcrank = length $ sliceDims srcslice'
+            destlocation' = sliceMemLoc destlocation destslice'
+            srclocation' = sliceMemLoc srclocation srcslice'
+        if destrank /= srcrank
+          then
+            error $
+              "copyArrayDWIM: cannot copy to "
+                ++ pretty (memLocName destlocation)
+                ++ " from "
+                ++ pretty (memLocName srclocation)
+                ++ " because ranks do not match ("
+                ++ pretty destrank
+                ++ " vs "
+                ++ pretty srcrank
+                ++ ")"
+          else
+            if destlocation' == srclocation'
+              then pure mempty -- Copy would be no-op.
+              else collect $ copy bt destlocation' srclocation'
 
 -- | Like 'copyDWIM', but the target is a 'ValueDestination'
 -- instead of a variable name.
@@ -1601,34 +1601,34 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
         unwords ["copyDWIMDest: source", pretty src, "is a memory block."]
     (_, ScalarVar _ (ScalarEntry _))
       | not $ null src_slice ->
-        error $
-          unwords ["copyDWIMDest: prim-typed source", pretty src, "with slice", pretty src_slice]
+          error $
+            unwords ["copyDWIMDest: prim-typed source", pretty src, "with slice", pretty src_slice]
     (ScalarDestination name, _)
       | not $ null dest_slice ->
-        error $
-          unwords ["copyDWIMDest: prim-typed target", pretty name, "with slice", pretty dest_slice]
+          error $
+            unwords ["copyDWIMDest: prim-typed target", pretty name, "with slice", pretty dest_slice]
     (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) ->
       emit $ Imp.SetScalar name $ Imp.var src pt
     (ScalarDestination name, ArrayVar _ arr)
       | Just src_is <- mapM dimFix src_slice,
         length src_slice == length (entryArrayShape arr) -> do
-        let bt = entryArrayElemType arr
-        (mem, space, i) <-
-          fullyIndexArray' (entryArrayLoc arr) src_is
-        vol <- asks envVolatility
-        emit $ Imp.Read name mem i bt space vol
+          let bt = entryArrayElemType arr
+          (mem, space, i) <-
+            fullyIndexArray' (entryArrayLoc arr) src_is
+          vol <- asks envVolatility
+          emit $ Imp.Read name mem i bt space vol
       | otherwise ->
-        error $
-          unwords
-            [ "copyDWIMDest: prim-typed target",
-              pretty name,
-              "and array-typed source",
-              pretty src,
-              "of shape",
-              pretty (entryArrayShape arr),
-              "sliced with",
-              pretty src_slice
-            ]
+          error $
+            unwords
+              [ "copyDWIMDest: prim-typed target",
+                pretty name,
+                "and array-typed source",
+                pretty src,
+                "of shape",
+                pretty (entryArrayShape arr),
+                "sliced with",
+                pretty src_slice
+              ]
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
       let src_loc = entryArrayLoc src_arr
           bt = entryArrayElemType src_arr
@@ -1636,17 +1636,17 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
     (ArrayDestination (Just dest_loc), ScalarVar _ (ScalarEntry bt))
       | Just dest_is <- mapM dimFix dest_slice,
         length dest_is == length (memLocShape dest_loc) -> do
-        (dest_mem, dest_space, dest_i) <- fullyIndexArray' dest_loc dest_is
-        vol <- asks envVolatility
-        emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)
+          (dest_mem, dest_space, dest_i) <- fullyIndexArray' dest_loc dest_is
+          vol <- asks envVolatility
+          emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)
       | otherwise ->
-        error $
-          unwords
-            [ "copyDWIMDest: array-typed target and prim-typed source",
-              pretty src,
-              "with slice",
-              pretty dest_slice
-            ]
+          error $
+            unwords
+              [ "copyDWIMDest: array-typed target and prim-typed source",
+                pretty src,
+                "with slice",
+                pretty dest_slice
+              ]
     (ArrayDestination Nothing, _) ->
       pure () -- Nothing to do; something else set some memory
       -- somewhere.

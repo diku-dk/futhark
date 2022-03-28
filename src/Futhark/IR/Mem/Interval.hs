@@ -19,7 +19,7 @@ import Control.Monad.IO.Class
 import Data.Function (on)
 import Data.List (delete, find, intersect, maximumBy, minimumBy, partition, sort, sortBy, zip4, zip5, zipWith5, (\\))
 import qualified Data.Map.Strict as M
---import Debug.Trace
+-- import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Prop
@@ -63,11 +63,11 @@ distributeOffset offset (Interval lb ne st0 : is)
   | st <- AlgSimplify.Prod False [untyped st0],
     Just (before, quotient, after) <- focusMaybe (`AlgSimplify.maybeDivide` st) offset =
       distributeOffset (before <> after) $
-      Interval (lb + TPrimExp (AlgSimplify.sumToExp [quotient])) ne st0 : is
+        Interval (lb + TPrimExp (AlgSimplify.sumToExp [quotient])) ne st0 : is
   | [st] <- AlgSimplify.simplify0 $ untyped st0,
     Just (before, quotient, after) <- focusMaybe (`AlgSimplify.maybeDivide` st) offset =
       distributeOffset (before <> after) $
-      Interval (lb + TPrimExp (AlgSimplify.sumToExp [quotient])) ne st0 : is
+        Interval (lb + TPrimExp (AlgSimplify.sumToExp [quotient])) ne st0 : is
   | otherwise = do
       rest <- distributeOffset offset is
       return $ Interval lb ne st0 : rest
@@ -105,18 +105,18 @@ expandOffset offset i1
     diff <- traceWith "sumOfProducts" $ AlgSimplify.sumOfProducts $ traceWith "sumToExp" $ AlgSimplify.sumToExp $ AlgSimplify.Prod b term_to_add : map AlgSimplify.negate target, -- gnb - gnb + gb = gnb - g(nb-b)
     replacement <- target <> diff -- gnb = g(nb-b) + gnb - gnb + gb
     =
-    Just $ traceWith "Expandoffset returns!" (replacement <> offset_rest)
+      Just $ traceWith "Expandoffset returns!" (replacement <> offset_rest)
 
 intervalOverlap :: [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> Bool
 intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
   | st1 == st2,
     AlgSimplify.lessThanish less_thans non_negatives lb1 lb2,
     AlgSimplify.lessThanish less_thans non_negatives (lb1 + ne1 - 1) lb2 =
-    False
+      False
   | st1 == st2,
     AlgSimplify.lessThanish less_thans non_negatives lb2 lb1,
     AlgSimplify.lessThanish less_thans non_negatives (lb2 + ne2 - 1) lb1 =
-    False
+      False
   | otherwise = True
 
 primBool :: TPrimExp Bool VName -> Maybe Bool
@@ -139,11 +139,11 @@ intervalPairs = intervalPairs' []
     intervalPairs' acc (i1@(Interval lb1 _ st1) : is1) (i2@(Interval lb2 _ st2) : is2)
       | st1 == st2 = intervalPairs' ((i1, i2) : acc) is1 is2
       | otherwise =
-        let res1 = intervalPairs' ((i1, Interval lb1 1 st1) : acc) is1 (i2 : is2)
-            res2 = intervalPairs' ((Interval lb2 1 st2, i2) : acc) (i1 : is1) is2
-         in if length res1 <= length res2
-              then res1
-              else res2
+          let res1 = intervalPairs' ((i1, Interval lb1 1 st1) : acc) is1 (i2 : is2)
+              res2 = intervalPairs' ((Interval lb2 1 st2, i2) : acc) (i1 : is1) is2
+           in if length res1 <= length res2
+                then res1
+                else res2
 
 -- | Returns true if the intervals are self-overlapping, meaning that for a
 -- given dimension d, the stride of d is larger than the aggregate spans of the
@@ -250,9 +250,9 @@ primExpToZ3 var_table (ConvOpExp c e) = convOpToZ3 c =<< primExpToZ3 var_table e
 primExpToZ3 var_table (UnOpExp u e) = unOpToZ3 u =<< primExpToZ3 var_table e
 primExpToZ3 var_table (FunExp name [e1] _)
   | name == "sqrt64" || name == "sqrt32" || name == "sqrt16" = do
-    e1' <- primExpToZ3 var_table e1
-    exponent <- mkRealNum 0.5
-    mkPower e1' exponent
+      e1' <- primExpToZ3 var_table e1
+      exponent <- mkRealNum 0.5
+      mkPower e1' exponent
 primExpToZ3 var_table e = error $ "Unsupported exp " <> pretty e
 
 mkMin :: MonadZ3 z3 => AST -> AST -> z3 AST
@@ -290,79 +290,67 @@ lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
         -- sexp <- solverToString
         -- liftIO $ putStrLn sexp
         check
-  case -- traceWith'
-    -- ( "lessThanZ3\npe1: " <> pretty pe1
-    --     <> "\npe2: "
-    --     <> pretty pe2
-    --     <> "\nless_thans: "
-    --     <> pretty less_thans
-    --     <> "\nnon_negatives: "
-    --     <> pretty non_negatives
-    --     -- <> "\nasserts: "
-    --     -- <> pretty asserts
-    -- )
-    -- $
-    result of
+  case result of
     Sat -> return True
     _ -> return False
 
 disjointZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> Interval -> Interval -> IO Bool
 disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
   | st1 == st2 = do
-    let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2
-    result <- evalZ3With Nothing (opt "timeout" (1000 :: Integer)) $ do
-      -- result <- evalZ3 $ do
-      maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
-      case fmap M.fromList maybe_var_table of
-        Nothing -> return Undef
-        Just var_table -> do
-          non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
-          asserts <- mapM (\vn -> primExpToZ3 var_table vn) asserts
-          lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
-          nes <-
-            sequence
-              [ join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne1),
-                join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne2)
-              ]
-          apps <- mapM toApp $ M.elems var_table
-
-          premise <-
-            mkAnd $
-              nes
-                <> non_negs
-                <> lts
-                <> asserts
-
-          conclusion <-
-            mkOr
-              =<< sequence
-                [ mkAnd
-                    =<< sequence
-                      [ join $ mkLt <$> primExpToZ3 var_table (untyped lb1) <*> primExpToZ3 var_table (untyped lb2),
-                        join $ mkLe <$> primExpToZ3 var_table (untyped $ lb1 + ne1) <*> primExpToZ3 var_table (untyped lb2)
-                      ],
-                  mkAnd
-                    =<< sequence
-                      [ join $ mkLt <$> primExpToZ3 var_table (untyped lb2) <*> primExpToZ3 var_table (untyped lb1),
-                        join $ mkLe <$> primExpToZ3 var_table (untyped $ lb2 + ne2) <*> primExpToZ3 var_table (untyped lb1)
-                      ]
+      let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2
+      result <- evalZ3With Nothing (opt "timeout" (1000 :: Integer)) $ do
+        -- result <- evalZ3 $ do
+        maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
+        case fmap M.fromList maybe_var_table of
+          Nothing -> return Undef
+          Just var_table -> do
+            non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
+            asserts <- mapM (\vn -> primExpToZ3 var_table vn) asserts
+            lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
+            nes <-
+              sequence
+                [ join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne1),
+                  join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne2)
                 ]
-          assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
-          -- sexp <- solverToString
-          -- liftIO $ putStrLn sexp
-          check
-    case traceWith'
-      ( "disjointZ3\ni1: " <> pretty i1
-          <> "\ni2: "
-          <> pretty i2
-          <> "\nless_thans: "
-          <> pretty less_thans
-          <> "\nnon_negatives: "
-          <> pretty non_negatives
-      )
-      $ result of
-      Sat -> return True
-      _ -> return False
+            apps <- mapM toApp $ M.elems var_table
+
+            premise <-
+              mkAnd $
+                nes
+                  <> non_negs
+                  <> lts
+                  <> asserts
+
+            conclusion <-
+              mkOr
+                =<< sequence
+                  [ mkAnd
+                      =<< sequence
+                        [ join $ mkLt <$> primExpToZ3 var_table (untyped lb1) <*> primExpToZ3 var_table (untyped lb2),
+                          join $ mkLe <$> primExpToZ3 var_table (untyped $ lb1 + ne1) <*> primExpToZ3 var_table (untyped lb2)
+                        ],
+                    mkAnd
+                      =<< sequence
+                        [ join $ mkLt <$> primExpToZ3 var_table (untyped lb2) <*> primExpToZ3 var_table (untyped lb1),
+                          join $ mkLe <$> primExpToZ3 var_table (untyped $ lb2 + ne2) <*> primExpToZ3 var_table (untyped lb1)
+                        ]
+                  ]
+            assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
+            -- sexp <- solverToString
+            -- liftIO $ putStrLn sexp
+            check
+      case traceWith'
+        ( "disjointZ3\ni1: " <> pretty i1
+            <> "\ni2: "
+            <> pretty i2
+            <> "\nless_thans: "
+            <> pretty less_thans
+            <> "\nnon_negatives: "
+            <> pretty non_negatives
+        )
+        $ result of
+        Sat -> return True
+        _ -> return False
   | otherwise = return False
 
 vname s i = VName (nameFromString s) i

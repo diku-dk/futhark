@@ -57,7 +57,7 @@ interpret config fp = do
     case M.lookup (T.Term, entry) $ T.envNameMap tenv of
       Just fname
         | Just (T.BoundV _ t) <- M.lookup (qualLeaf fname) $ T.envVtable tenv ->
-          return (fname, toStructural $ snd $ unfoldFunType t)
+            return (fname, toStructural $ snd $ unfoldFunType t)
       _ -> do
         hPutStrLn stderr $ "Invalid entry point: " ++ pretty entry
         exitFailure

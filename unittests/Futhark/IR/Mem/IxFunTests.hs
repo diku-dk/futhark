@@ -34,7 +34,7 @@ allPoints :: [Int] -> [[Int]]
 allPoints dims =
   let total = product dims
       strides = drop 1 $ DL.reverse $ scanl (*) 1 $ DL.reverse dims
-   in map (unflatInd strides) [0 .. total -1]
+   in map (unflatInd strides) [0 .. total - 1]
   where
     unflatInd :: [Int] -> Int -> [Int]
     unflatInd strides x =
@@ -283,9 +283,9 @@ test_reshape_slice_iota2 =
             slc =
               Slice
                 [ DimFix (n `P.div` 2),
-                  DimSlice (n -1) n (-1),
+                  DimSlice (n - 1) n (-1),
                   DimSlice 0 n 1,
-                  DimSlice (n -1) n (-1)
+                  DimSlice (n - 1) n (-1)
                 ]
          in reshape (slice (iota [n, n, n, n]) slc) newdims
 
@@ -318,9 +318,9 @@ test_complex1 =
               ]
             slice33 =
               Slice
-                [ DimSlice (n -1) (n `P.div` 3) (-1),
-                  DimSlice (n -1) n (-1),
-                  DimSlice (n -1) n (-1),
+                [ DimSlice (n - 1) (n `P.div` 3) (-1),
+                  DimSlice (n - 1) n (-1),
+                  DimSlice (n - 1) n (-1),
                   DimSlice 0 n 1
                 ]
             ixfun = permute (slice (iota [n, n, n, n, n]) slice33) [3, 1, 2, 0]
@@ -328,9 +328,9 @@ test_complex1 =
             slice1 =
               Slice
                 [ DimSlice 0 n 1,
-                  DimSlice (n -1) n (-1),
-                  DimSlice (n -1) n (-1),
-                  DimSlice 1 (m -2) (-1)
+                  DimSlice (n - 1) n (-1),
+                  DimSlice (n - 1) n (-1),
+                  DimSlice 1 (m - 2) (-1)
                 ]
             ixfun' = reshape (rotate (slice ixfun slice1) [1, 2, 3, 4]) newdims
          in ixfun'
@@ -348,9 +348,9 @@ test_complex2 =
             slc2 =
               Slice
                 [ DimFix (n `P.div` 2),
-                  DimSlice (n -1) (n `P.div` 3) (-1),
-                  DimSlice (n -1) n (-1),
-                  DimSlice (n -1) n (-1),
+                  DimSlice (n - 1) (n `P.div` 3) (-1),
+                  DimSlice (n - 1) n (-1),
+                  DimSlice (n - 1) n (-1),
                   DimSlice 0 n 1
                 ]
             ixfun = permute (slice (iota [n, n, n, n, n]) slc2) [3, 1, 2, 0]
@@ -358,9 +358,9 @@ test_complex2 =
             slice1 =
               Slice
                 [ DimSlice 0 n 1,
-                  DimSlice (n -1) n (-1),
-                  DimSlice (n -1) n (-1),
-                  DimSlice 1 (m -2) (-1)
+                  DimSlice (n - 1) n (-1),
+                  DimSlice (n - 1) n (-1),
+                  DimSlice 1 (m - 2) (-1)
                 ]
             ixfun' = reshape (rotate (slice ixfun slice1) [1, 0, 0, 2]) newdims
          in ixfun'
@@ -373,11 +373,11 @@ test_rebase1 =
         let slice_base =
               Slice
                 [ DimFix (n `P.div` 2),
-                  DimSlice 2 (n -2) 1,
-                  DimSlice 3 (n -3) 1
+                  DimSlice 2 (n - 2) 1,
+                  DimSlice 3 (n - 3) 1
                 ]
             ixfn_base = rotate (permute (slice (iota [n, n, n]) slice_base) [1, 0]) [2, 1]
-            ixfn_orig = rotate (permute (iota [n -3, n -2]) [1, 0]) [1, 2]
+            ixfn_orig = rotate (permute (iota [n - 3, n - 2]) [1, 0]) [1, 2]
             ixfn_rebase = rebase ixfn_base ixfn_orig
          in ixfn_rebase
 
@@ -389,16 +389,16 @@ test_rebase2 =
         let slice_base =
               Slice
                 [ DimFix (n `P.div` 2),
-                  DimSlice (n -1) (n -2) (-1),
-                  DimSlice (n -1) (n -3) (-1)
+                  DimSlice (n - 1) (n - 2) (-1),
+                  DimSlice (n - 1) (n - 3) (-1)
                 ]
             slice_orig =
               Slice
-                [ DimSlice (n -4) (n -3) (-1),
-                  DimSlice (n -3) (n -2) (-1)
+                [ DimSlice (n - 4) (n - 3) (-1),
+                  DimSlice (n - 3) (n - 2) (-1)
                 ]
             ixfn_base = rotate (permute (slice (iota [n, n, n]) slice_base) [1, 0]) [2, 1]
-            ixfn_orig = rotate (permute (slice (iota [n -3, n -2]) slice_orig) [1, 0]) [1, 2]
+            ixfn_orig = rotate (permute (slice (iota [n - 3, n - 2]) slice_orig) [1, 0]) [1, 2]
             ixfn_rebase = rebase ixfn_base ixfn_orig
          in ixfn_rebase
 
@@ -407,18 +407,18 @@ test_rebase3 =
   singleton $
     testCase "rebase full orig but not monotonic" $
       compareOps $
-        let n2 = (n -2) `P.div` 3
-            n3 = (n -3) `P.div` 2
+        let n2 = (n - 2) `P.div` 3
+            n3 = (n - 3) `P.div` 2
             slice_base =
               Slice
                 [ DimFix (n `P.div` 2),
-                  DimSlice (n -1) n2 (-3),
-                  DimSlice (n -1) n3 (-2)
+                  DimSlice (n - 1) n2 (-3),
+                  DimSlice (n - 1) n3 (-2)
                 ]
             slice_orig =
               Slice
-                [ DimSlice (n3 -1) n3 (-1),
-                  DimSlice (n2 -1) n2 (-1)
+                [ DimSlice (n3 - 1) n3 (-1),
+                  DimSlice (n2 - 1) n2 (-1)
                 ]
             ixfn_base = rotate (permute (slice (iota [n, n, n]) slice_base) [1, 0]) [2, 1]
             ixfn_orig = rotate (permute (slice (iota [n3, n2]) slice_orig) [1, 0]) [1, 2]
@@ -427,17 +427,17 @@ test_rebase3 =
 
 test_rebase4_5 :: [TestTree]
 test_rebase4_5 =
-  let n2 = (n -2) `P.div` 3
-      n3 = (n -3) `P.div` 2
+  let n2 = (n - 2) `P.div` 3
+      n3 = (n - 3) `P.div` 2
       slice_base =
         Slice
           [ DimFix (n `P.div` 2),
-            DimSlice (n -1) n2 (-3),
+            DimSlice (n - 1) n2 (-3),
             DimSlice 3 n3 2
           ]
       slice_orig =
         Slice
-          [ DimSlice (n3 -1) n3 (-1),
+          [ DimSlice (n3 - 1) n3 (-1),
             DimSlice 0 n2 1
           ]
       ixfn_base = rotate (permute (slice (iota [n, n, n]) slice_base) [1, 0]) [2, 1]

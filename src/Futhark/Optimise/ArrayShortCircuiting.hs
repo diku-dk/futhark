@@ -45,10 +45,10 @@ replaceInParams coalstab fparams =
               case dec of
                 MemMem DefaultSpace
                   | Just entry <- M.lookup name coalstab ->
-                    (oneName (dstmem entry) <> to_remove, Param attrs (dstmem entry) dec : acc)
+                      (oneName (dstmem entry) <> to_remove, Param attrs (dstmem entry) dec : acc)
                 MemArray pt shp u (ArrayIn m ixf)
                   | Just entry <- M.lookup m coalstab ->
-                    (to_remove, Param attrs name (MemArray pt shp u $ ArrayIn (dstmem entry) ixf) : acc)
+                      (to_remove, Param attrs name (MemArray pt shp u $ ArrayIn (dstmem entry) ixf) : acc)
                 _ -> (to_remove, Param attrs name dec : acc)
           )
           (mempty, mempty)

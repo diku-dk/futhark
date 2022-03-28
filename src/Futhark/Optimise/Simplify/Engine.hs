@@ -312,7 +312,7 @@ protectLoopHoisted merge form m = do
         WhileLoop cond
           | Just (_, cond_init) <-
               find ((== cond) . paramName . fst) merge ->
-            return cond_init
+              return cond_init
           | otherwise -> return $ constant True -- infinite loop
         ForLoop _ it bound _ ->
           letSubExp "loop_nonempty" $
@@ -335,19 +335,19 @@ protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
-    auxing aux m
+      auxing aux m
 protectIf _ f taken (Let pat aux e)
   | f e =
-    case makeSafe e of
-      Just e' ->
-        auxing aux $ letBind pat e'
-      Nothing -> do
-        taken_body <- eBody [pure e]
-        untaken_body <-
-          eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
-        if_ts <- expTypesFromPat pat
-        auxing aux . letBind pat $
-          If taken taken_body untaken_body $ IfDec if_ts IfFallback
+      case makeSafe e of
+        Just e' ->
+          auxing aux $ letBind pat e'
+        Nothing -> do
+          taken_body <- eBody [pure e]
+          untaken_body <-
+            eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
+          if_ts <- expTypesFromPat pat
+          auxing aux . letBind pat $
+            If taken taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -456,20 +456,20 @@ hoistStms rules block orig_stms final = do
       case res of
         Nothing -- Nothing to optimise - see if hoistable.
           | block vtable usage stm ->
-            -- No, not hoistable.
-            pure
-              ( x,
-                expandUsage usageInStm vtable usage stm
-                  `UT.without` provides stm,
-                Left stm : stms
-              )
+              -- No, not hoistable.
+              pure
+                ( x,
+                  expandUsage usageInStm vtable usage stm
+                    `UT.without` provides stm,
+                  Left stm : stms
+                )
           | otherwise ->
-            -- Yes, hoistable.
-            pure
-              ( x,
-                expandUsage usageInStm vtable usage stm,
-                Right stm : stms
-              )
+              -- Yes, hoistable.
+              pure
+                ( x,
+                  expandUsage usageInStm vtable usage stm,
+                  Right stm : stms
+                )
         Just optimstms -> do
           changed
           descend usageInStm optimstms $ pure (x, usage, stms)
@@ -511,9 +511,9 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
       (blocked <> namesFromList (provides need), Left need)
     block blocked (Right need)
       | blocked `namesIntersect` freeIn need =
-        (blocked <> namesFromList (provides need), Left need)
+          (blocked <> namesFromList (provides need), Left need)
       | otherwise =
-        (blocked, Right need)
+          (blocked, Right need)
 
 provides :: Stm rep -> [VName]
 provides = patNames . stmPat
@@ -670,7 +670,7 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
       isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
       isNotHoistableBnd _ usage (Let pat _ _)
         | any (`UT.isSize` usage) $ patNames pat =
-          False
+            False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
@@ -863,9 +863,9 @@ simplifyExpBase :: SimplifiableRep rep => Exp (Wise rep) -> SimpleM rep (Exp (Wi
 -- more identical, which helps CSE.
 simplifyExpBase (BasicOp (BinOp op x y))
   | commutativeBinOp op = do
-    x' <- simplify x
-    y' <- simplify y
-    pure $ BasicOp $ BinOp op (min x' y') (max x' y')
+      x' <- simplify x
+      y' <- simplify y
+      pure $ BasicOp $ BinOp op (min x' y') (max x' y')
 simplifyExpBase e = mapExpM hoist e
   where
     hoist =

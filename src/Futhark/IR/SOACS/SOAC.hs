@@ -637,14 +637,14 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm,
           all (`ST.elem` vtable) (unCerts $ stmCerts stm) =
-          M.insert v (pe, stmCerts stm <> cs) table
+            M.insert v (pe, stmCerts stm <> cs) table
         | otherwise =
-          table
+            table
 
       asPrimExp table v
         | Just (e, cs) <- M.lookup v table = tell cs >> return e
         | Just (Prim pt) <- ST.lookupType v vtable =
-          return $ LeafExp v pt
+            return $ LeafExp v pt
         | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
 
@@ -871,28 +871,28 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
   ppr (Screma w arrs (ScremaForm scans reds map_lam))
     | null scans,
       null reds =
-      text "map"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> ppr map_lam
-          )
+        text "map"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> ppr map_lam
+            )
     | null scans =
-      text "redomap"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
-              </> ppr map_lam
-          )
+        text "redomap"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
+                </> ppr map_lam
+            )
     | null reds =
-      text "scanomap"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
-              </> ppr map_lam
-          )
+        text "scanomap"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
+                </> ppr map_lam
+            )
   ppr (Screma w arrs form) = ppScrema w arrs form
 
 -- | Prettyprint the given Screma.

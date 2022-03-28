@@ -109,7 +109,7 @@ sumOfProducts e =
       BinOpExp (Sub Int64 o) (ValueExp (IntValue (Int64Value 0))) e'
         | NestedSum (Sum o' terms) <- sumOfProducts e',
           o == o' ->
-          Sum o $ fmap Negated terms
+            Sum o $ fmap Negated terms
       BinOpExp (Sub Int64 o) e1 e2 ->
         let terms =
               ( case sumOfProducts e1 of

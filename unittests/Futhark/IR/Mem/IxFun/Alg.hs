@@ -173,7 +173,7 @@ allPoints :: (IntegralExp num, Enum num) => [num] -> [[num]]
 allPoints dims =
   let total = product dims
       strides = drop 1 $ DL.reverse $ scanl (*) 1 $ DL.reverse dims
-   in map (unflatInd strides) [0 .. total -1]
+   in map (unflatInd strides) [0 .. total - 1]
   where
     unflatInd strides x =
       fst $

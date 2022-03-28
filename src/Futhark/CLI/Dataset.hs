@@ -40,22 +40,22 @@ main = mainWithOptions initialDataOptions commandLineOptions "options..." f
   where
     f [] config
       | null $ optOrders config = Just $ do
-        maybe_vs <- readValues <$> BS.getContents
-        case maybe_vs of
-          Nothing -> do
-            hPutStrLn stderr "Malformed data on standard input."
-            exitFailure
-          Just vs ->
-            case format config of
-              Text -> mapM_ (T.putStrLn . V.valueText) vs
-              Binary -> mapM_ (BS.putStr . Bin.encode) vs
-              Type -> mapM_ (T.putStrLn . V.valueTypeText . V.valueType) vs
+          maybe_vs <- readValues <$> BS.getContents
+          case maybe_vs of
+            Nothing -> do
+              hPutStrLn stderr "Malformed data on standard input."
+              exitFailure
+            Just vs ->
+              case format config of
+                Text -> mapM_ (T.putStrLn . V.valueText) vs
+                Binary -> mapM_ (BS.putStr . Bin.encode) vs
+                Type -> mapM_ (T.putStrLn . V.valueTypeText . V.valueType) vs
       | otherwise =
-        Just $
-          zipWithM_
-            ($)
-            (optOrders config)
-            [fromIntegral (optSeed config) ..]
+          Just $
+            zipWithM_
+              ($)
+              (optOrders config)
+              [fromIntegral (optSeed config) ..]
     f _ _ =
       Nothing
 
@@ -175,12 +175,12 @@ tryMakeGenerator ::
   Either String (RandomConfiguration -> OutputFormat -> Word64 -> IO ())
 tryMakeGenerator t
   | Just vs <- readValues $ BS.pack t =
-    return $ \_ fmt _ -> mapM_ (outValue fmt) vs
+      return $ \_ fmt _ -> mapM_ (outValue fmt) vs
   | otherwise = do
-    t' <- toValueType =<< either (Left . show) Right (parseType name (T.pack t))
-    return $ \conf fmt seed -> do
-      let v = randomValue conf t' seed
-      outValue fmt v
+      t' <- toValueType =<< either (Left . show) Right (parseType name (T.pack t))
+      return $ \conf fmt seed -> do
+        let v = randomValue conf t' seed
+        outValue fmt v
   where
     name = "option " ++ t
     outValue Text = T.putStrLn . V.valueText
@@ -309,11 +309,11 @@ randomVector range final ds seed = runST $ do
   arr <- USVec.new n
   let fill g i
         | i < n = do
-          let (v, g') = uniformR range g
-          USVec.write arr i v
-          g' `seq` fill g' $! i + 1
+            let (v, g') = uniformR range g
+            USVec.write arr i v
+            g' `seq` fill g' $! i + 1
         | otherwise =
-          pure ()
+            pure ()
   fill (mkStdGen $ fromIntegral seed) 0
   final (SVec.fromList ds) . SVec.convert <$> freeze arr
   where

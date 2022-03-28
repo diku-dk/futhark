@@ -50,7 +50,7 @@ getAllocsSegOp (SegHist _ _ _ _ body) =
 setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem
 setAllocsStm m stm@(Let (Pat [PatElem name _]) _ (Op (Alloc _ _)))
   | Just s <- M.lookup name m =
-    stm {stmExp = BasicOp $ SubExp s}
+      stm {stmExp = BasicOp $ SubExp s}
 setAllocsStm _ stm@(Let _ _ (Op (Alloc _ _))) = stm
 setAllocsStm m stm@(Let _ _ (Op (Inner (SegOp segop)))) =
   stm {stmExp = Op $ Inner $ SegOp $ setAllocsSegOp m segop}

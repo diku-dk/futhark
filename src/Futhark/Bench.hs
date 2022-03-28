@@ -164,8 +164,8 @@ benchmarkDataset ::
 benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
   output_types <- cmdEither $ cmdOutputs server entry
   input_types <- cmdEither $ cmdInputs server entry
-  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
-      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
+  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types - 1]]
+      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types - 1]]
 
   cmdMaybe . liftIO $ cmdClear server
 
@@ -179,9 +179,9 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,
           [(x, "")] <- reads $ T.unpack l' =
-          Just x
+            Just x
         | otherwise =
-          Nothing
+            Nothing
 
       doRun = do
         call_lines <- cmdEither (cmdCall server entry outs ins)
@@ -197,7 +197,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
     -- First one uncounted warmup run.
     void $ cmdEither $ cmdCall server entry outs ins
     freeOuts
-    xs <- replicateM (runRuns opts -1) (doRun <* freeOuts)
+    xs <- replicateM (runRuns opts - 1) (doRun <* freeOuts)
     y <- doRun
     pure $ xs ++ [y]
 

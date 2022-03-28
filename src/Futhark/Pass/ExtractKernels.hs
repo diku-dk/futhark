@@ -298,8 +298,8 @@ sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ _ form)))
   | Just (_, lam2) <- isRedomapSOAC form,
     unbalancedLambda lam2,
     lambdaContainsParallelism lam2 = do
-    types <- asksScope scopeForSOACs
-    Just . snd <$> runBuilderT (FOT.transformSOAC pat soac) types
+      types <- asksScope scopeForSOACs
+      Just . snd <$> runBuilderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedStm _ =
   pure Nothing
 
@@ -349,11 +349,11 @@ transformLambda path (Lambda params body ret) =
 transformStm :: KernelPath -> Stm SOACS -> DistribM GPUStms
 transformStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
-    runBuilder_ $ FOT.transformStmRecursively stm
+      runBuilder_ $ FOT.transformStmRecursively stm
 transformStm path (Let pat aux (Op soac))
   | "sequential_outer" `inAttrs` stmAuxAttrs aux =
-    transformStms path . stmsToList . fmap (certify (stmAuxCerts aux))
-      =<< runBuilder_ (FOT.transformSOAC pat soac)
+      transformStms path . stmsToList . fmap (certify (stmAuxCerts aux))
+        =<< runBuilder_ (FOT.transformSOAC pat soac)
 transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb
@@ -376,138 +376,138 @@ transformStm path (Let pat aux (DoLoop merge form body)) =
         ForLoop i it bound ps
 transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form =
-    onMap path $ MapLoop pat aux w lam arrs
+      onMap path $ MapLoop pat aux w lam arrs
 transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
   | Just scans <- isScanSOAC form,
     Scan scan_lam nes <- singleScan scans,
     Just do_iswim <- iswim res_pat w scan_lam $ zip nes arrs = do
-    types <- asksScope scopeForSOACs
-    transformStms path . stmsToList . snd =<< runBuilderT (certifying cs do_iswim) types
+      types <- asksScope scopeForSOACs
+      transformStms path . stmsToList . snd =<< runBuilderT (certifying cs do_iswim) types
   | Just (scans, map_lam) <- isScanomapSOAC form = runBuilder_ $ do
-    scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
-      (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
-      let scan_lam'' = soacsLambdaToGPU scan_lam'
-      pure $ SegBinOp Noncommutative scan_lam'' nes' shape
-    let map_lam_sequential = soacsLambdaToGPU map_lam
-    lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-    addStms . fmap (certify cs)
-      =<< segScan lvl res_pat mempty w scan_ops map_lam_sequential arrs [] []
+      scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
+        (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
+        let scan_lam'' = soacsLambdaToGPU scan_lam'
+        pure $ SegBinOp Noncommutative scan_lam'' nes' shape
+      let map_lam_sequential = soacsLambdaToGPU map_lam
+      lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
+      addStms . fmap (certify cs)
+        =<< segScan lvl res_pat mempty w scan_ops map_lam_sequential arrs [] []
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'
           | commutativeLambda red_fun = Commutative
           | otherwise = comm,
     Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
-    types <- asksScope scopeForSOACs
-    stms <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
-    transformStms path $ stmsToList stms
+      types <- asksScope scopeForSOACs
+      stms <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
+      transformStms path $ stmsToList stms
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
-    let paralleliseOuter = runBuilder_ $ do
-          red_ops <- forM reds $ \(Reduce comm red_lam nes) -> do
-            (red_lam', nes', shape) <- determineReduceOp red_lam nes
-            let comm'
-                  | commutativeLambda red_lam' = Commutative
-                  | otherwise = comm
-                red_lam'' = soacsLambdaToGPU red_lam'
-            pure $ SegBinOp comm' red_lam'' nes' shape
-          let map_lam_sequential = soacsLambdaToGPU map_lam
-          lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
-          addStms . fmap (certify cs)
-            =<< nonSegRed lvl pat w red_ops map_lam_sequential arrs
+      let paralleliseOuter = runBuilder_ $ do
+            red_ops <- forM reds $ \(Reduce comm red_lam nes) -> do
+              (red_lam', nes', shape) <- determineReduceOp red_lam nes
+              let comm'
+                    | commutativeLambda red_lam' = Commutative
+                    | otherwise = comm
+                  red_lam'' = soacsLambdaToGPU red_lam'
+              pure $ SegBinOp comm' red_lam'' nes' shape
+            let map_lam_sequential = soacsLambdaToGPU map_lam
+            lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
+            addStms . fmap (certify cs)
+              =<< nonSegRed lvl pat w red_ops map_lam_sequential arrs
 
-        outerParallelBody =
-          renameBody
-            =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patNames pat)))
+          outerParallelBody =
+            renameBody
+              =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patNames pat)))
 
-        paralleliseInner path' = do
-          (mapstm, redstm) <-
-            redomapToMapAndReduce pat (w, reds, map_lam, arrs)
-          types <- asksScope scopeForSOACs
-          transformStms path' . stmsToList <=< (`runBuilderT_` types) $
-            addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
+          paralleliseInner path' = do
+            (mapstm, redstm) <-
+              redomapToMapAndReduce pat (w, reds, map_lam, arrs)
+            types <- asksScope scopeForSOACs
+            transformStms path' . stmsToList <=< (`runBuilderT_` types) $
+              addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
 
-        innerParallelBody path' =
-          renameBody
-            =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
+          innerParallelBody path' =
+            renameBody
+              =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
-    if not (lambdaContainsParallelism map_lam)
-      || "sequential_inner" `inAttrs` stmAuxAttrs aux
-      then paralleliseOuter
-      else do
-        ((outer_suff, outer_suff_key), suff_stms) <-
-          sufficientParallelism "suff_outer_redomap" [w] path Nothing
+      if not (lambdaContainsParallelism map_lam)
+        || "sequential_inner" `inAttrs` stmAuxAttrs aux
+        then paralleliseOuter
+        else do
+          ((outer_suff, outer_suff_key), suff_stms) <-
+            sufficientParallelism "suff_outer_redomap" [w] path Nothing
 
-        outer_stms <- outerParallelBody
-        inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
+          outer_stms <- outerParallelBody
+          inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
 
-        (suff_stms <>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
+          (suff_stms <>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs Parallel {} [] map_fun)))
   | not ("sequential_inner" `inAttrs` stmAuxAttrs aux) = do
-    -- No reduction part.  Remove the stream and leave the body
-    -- parallel.  It will be distributed.
-    types <- asksScope scopeForSOACs
-    transformStms path . stmsToList . snd
-      =<< runBuilderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types
+      -- No reduction part.  Remove the stream and leave the body
+      -- parallel.  It will be distributed.
+      types <- asksScope scopeForSOACs
+      transformStms path . stmsToList . snd
+        =<< runBuilderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o comm red_fun) nes fold_fun)))
   | "sequential_inner" `inAttrs` stmAuxAttrs aux =
-    paralleliseOuter path
+      paralleliseOuter path
   | otherwise = do
-    ((outer_suff, outer_suff_key), suff_stms) <-
-      sufficientParallelism "suff_outer_stream" [w] path Nothing
+      ((outer_suff, outer_suff_key), suff_stms) <-
+        sufficientParallelism "suff_outer_stream" [w] path Nothing
 
-    outer_stms <- outerParallelBody ((outer_suff_key, True) : path)
-    inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
+      outer_stms <- outerParallelBody ((outer_suff_key, True) : path)
+      inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
 
-    (suff_stms <>)
-      <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
+      (suff_stms <>)
+        <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
   where
     paralleliseOuter path'
       | not $ all primType $ lambdaReturnType red_fun = do
-        -- Split into a chunked map and a reduction, with the latter
-        -- further transformed.
-        let fold_fun' = soacsLambdaToGPU fold_fun
+          -- Split into a chunked map and a reduction, with the latter
+          -- further transformed.
+          let fold_fun' = soacsLambdaToGPU fold_fun
 
-        let (red_pat_elems, concat_pat_elems) =
-              splitAt (length nes) $ patElems pat
-            red_pat = Pat red_pat_elems
+          let (red_pat_elems, concat_pat_elems) =
+                splitAt (length nes) $ patElems pat
+              red_pat = Pat red_pat_elems
 
-        ((num_threads, red_results), stms) <-
-          streamMap
-            segThreadCapped
-            (map (baseString . patElemName) red_pat_elems)
-            concat_pat_elems
-            w
-            Noncommutative
-            fold_fun'
-            nes
-            arrs
+          ((num_threads, red_results), stms) <-
+            streamMap
+              segThreadCapped
+              (map (baseString . patElemName) red_pat_elems)
+              concat_pat_elems
+              w
+              Noncommutative
+              fold_fun'
+              nes
+              arrs
 
-        reduce_soac <- reduceSOAC [Reduce comm' red_fun nes]
+          reduce_soac <- reduceSOAC [Reduce comm' red_fun nes]
 
-        (stms <>)
-          <$> inScopeOf
-            stms
-            ( transformStm path' $
-                Let red_pat aux {stmAuxAttrs = mempty} $
-                  Op (Screma num_threads red_results reduce_soac)
-            )
+          (stms <>)
+            <$> inScopeOf
+              stms
+              ( transformStm path' $
+                  Let red_pat aux {stmAuxAttrs = mempty} $
+                    Op (Screma num_threads red_results reduce_soac)
+              )
       | otherwise = do
-        let red_fun_sequential = soacsLambdaToGPU red_fun
-            fold_fun_sequential = soacsLambdaToGPU fold_fun
-        fmap (certify cs)
-          <$> streamRed
-            segThreadCapped
-            pat
-            w
-            comm'
-            red_fun_sequential
-            fold_fun_sequential
-            nes
-            arrs
+          let red_fun_sequential = soacsLambdaToGPU red_fun
+              fold_fun_sequential = soacsLambdaToGPU fold_fun
+          fmap (certify cs)
+            <$> streamRed
+              segThreadCapped
+              pat
+              w
+              comm'
+              red_fun_sequential
+              fold_fun_sequential
+              nes
+              arrs
 
     outerParallelBody path' =
       renameBody
@@ -596,22 +596,22 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
       sum $ interest <$> bodyStms body
     interest stm
       | "sequential" `inAttrs` attrs =
-        0 :: Int
+          0 :: Int
       | Op (Screma w _ form) <- stmExp stm,
         Just lam' <- isMapSOAC form =
-        mapLike w lam'
+          mapLike w lam'
       | Op (Scatter w _ lam' _) <- stmExp stm =
-        mapLike w lam'
+          mapLike w lam'
       | DoLoop _ _ body <- stmExp stm =
-        bodyInterest body * 10
+          bodyInterest body * 10
       | If _ tbody fbody _ <- stmExp stm =
-        max (bodyInterest tbody) (bodyInterest fbody)
+          max (bodyInterest tbody) (bodyInterest fbody)
       | Op (Screma w _ (ScremaForm _ _ lam')) <- stmExp stm =
-        zeroIfTooSmall w + bodyInterest (lambdaBody lam')
+          zeroIfTooSmall w + bodyInterest (lambdaBody lam')
       | Op (Stream _ _ Sequential _ lam') <- stmExp stm =
-        bodyInterest $ lambdaBody lam'
+          bodyInterest $ lambdaBody lam'
       | otherwise =
-        0
+          0
       where
         attrs = stmAuxAttrs $ stmAux stm
         sequential_inner = "sequential_inner" `inAttrs` attrs
@@ -634,29 +634,29 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
       sum $ interest <$> bodyStms body
     interest stm
       | "sequential" `inAttrs` attrs =
-        0 :: Int
+          0 :: Int
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm,
         isJust $ isMapSOAC form =
-        if sequential_inner
-          then 0
-          else bodyInterest (lambdaBody lam')
+          if sequential_inner
+            then 0
+            else bodyInterest (lambdaBody lam')
       | Op Scatter {} <- stmExp stm =
-        0 -- Basically a map.
+          0 -- Basically a map.
       | DoLoop _ ForLoop {} body <- stmExp stm =
-        bodyInterest body * 10
+          bodyInterest body * 10
       | WithAcc _ withacc_lam <- stmExp stm =
-        bodyInterest (lambdaBody withacc_lam)
+          bodyInterest (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm =
-        1 + bodyInterest (lambdaBody lam')
-          +
-          -- Give this a bigger score if it's a redomap, as these
-          -- are often tileable and thus benefit more from
-          -- sequentialisation.
-          case isRedomapSOAC form of
-            Just _ -> 1
-            Nothing -> 0
+          1 + bodyInterest (lambdaBody lam')
+            +
+            -- Give this a bigger score if it's a redomap, as these
+            -- are often tileable and thus benefit more from
+            -- sequentialisation.
+            case isRedomapSOAC form of
+              Just _ -> 1
+              Nothing -> 0
       | otherwise =
-        0
+          0
       where
         attrs = stmAuxAttrs $ stmAux stm
         sequential_inner = "sequential_inner" `inAttrs` attrs
@@ -753,57 +753,57 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
     --
     Nothing
       | Just m <- mkSeqAlts -> do
-        (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
-        par_body <-
-          renameBody =<< mkBody
-            <$> mk_par_stms ((outer_suff_key, False) : path) <*> pure res
-        (outer_suff_stms <>) <$> kernelAlternatives pat par_body [(outer_suff, seq_body)]
+          (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
+          par_body <-
+            renameBody =<< mkBody
+              <$> mk_par_stms ((outer_suff_key, False) : path) <*> pure res
+          (outer_suff_stms <>) <$> kernelAlternatives pat par_body [(outer_suff, seq_body)]
       --
       | otherwise -> do
-        par_body <- renameBody =<< mkBody <$> mk_par_stms path <*> pure res
-        kernelAlternatives pat par_body []
+          par_body <- renameBody =<< mkBody <$> mk_par_stms path <*> pure res
+          kernelAlternatives pat par_body []
     --
     Just intra'@(_, _, log, intra_prelude, intra_stms)
       | onlyExploitIntra attrs -> do
-        addLog log
-        group_par_body <- renameBody $ mkBody intra_stms res
-        (intra_prelude <>) <$> kernelAlternatives pat group_par_body []
+          addLog log
+          group_par_body <- renameBody $ mkBody intra_stms res
+          (intra_prelude <>) <$> kernelAlternatives pat group_par_body []
       --
       | otherwise -> do
-        addLog log
+          addLog log
 
-        case mkSeqAlts of
-          Nothing -> do
-            (group_par_body, intra_ok, intra_suff_key, intra_suff_stms) <-
-              checkSuffIntraPar path intra'
+          case mkSeqAlts of
+            Nothing -> do
+              (group_par_body, intra_ok, intra_suff_key, intra_suff_stms) <-
+                checkSuffIntraPar path intra'
 
-            par_body <-
-              renameBody =<< mkBody
-                <$> mk_par_stms ((intra_suff_key, False) : path) <*> pure res
+              par_body <-
+                renameBody =<< mkBody
+                  <$> mk_par_stms ((intra_suff_key, False) : path) <*> pure res
 
-            (intra_suff_stms <>)
-              <$> kernelAlternatives pat par_body [(intra_ok, group_par_body)]
-          Just m -> do
-            (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
+              (intra_suff_stms <>)
+                <$> kernelAlternatives pat par_body [(intra_ok, group_par_body)]
+            Just m -> do
+              (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
 
-            (group_par_body, intra_ok, intra_suff_key, intra_suff_stms) <-
-              checkSuffIntraPar ((outer_suff_key, False) : path) intra'
+              (group_par_body, intra_ok, intra_suff_key, intra_suff_stms) <-
+                checkSuffIntraPar ((outer_suff_key, False) : path) intra'
 
-            par_body <-
-              renameBody =<< mkBody
-                <$> mk_par_stms
-                  ( [ (outer_suff_key, False),
-                      (intra_suff_key, False)
-                    ]
-                      ++ path
-                  )
-                  <*> pure res
+              par_body <-
+                renameBody =<< mkBody
+                  <$> mk_par_stms
+                    ( [ (outer_suff_key, False),
+                        (intra_suff_key, False)
+                      ]
+                        ++ path
+                    )
+                    <*> pure res
 
-            ((outer_suff_stms <> intra_suff_stms) <>)
-              <$> kernelAlternatives
-                pat
-                par_body
-                [(outer_suff, seq_body), (intra_ok, group_par_body)]
+              ((outer_suff_stms <> intra_suff_stms) <>)
+                <$> kernelAlternatives
+                  pat
+                  par_body
+                  [(outer_suff, seq_body), (intra_ok, group_par_body)]
   where
     nest_ws = kernelNestWidths loopnest
     res = varsRes $ patNames pat
@@ -813,13 +813,13 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
     mkSeqAlts
       | worthSequentialising lam,
         mayExploitOuter attrs = Just $ do
-        ((outer_suff, outer_suff_key), outer_suff_stms) <- checkSuffOuterPar
-        seq_body <-
-          renameBody =<< mkBody
-            <$> mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
-        pure (outer_suff, outer_suff_key, outer_suff_stms, seq_body)
+          ((outer_suff, outer_suff_key), outer_suff_stms) <- checkSuffOuterPar
+          seq_body <-
+            renameBody =<< mkBody
+              <$> mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
+          pure (outer_suff, outer_suff_key, outer_suff_stms, seq_body)
       | otherwise =
-        Nothing
+          Nothing
 
     checkSuffOuterPar =
       sufficientParallelism "suff_outer_par" nest_ws path Nothing
@@ -875,14 +875,14 @@ onInnerMap ::
 onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
   | unbalancedLambda lam,
     lambdaContainsParallelism lam =
-    addStmToAcc (mapLoopStm maploop) acc
+      addStmToAcc (mapLoopStm maploop) acc
   | otherwise =
-    distributeSingleStm acc (mapLoopStm maploop) >>= \case
-      Just (post_kernels, res, nest, acc')
-        | Just (perm, pat', lam') <- removeUnusedMapResults pat res lam -> do
-          addPostStms post_kernels
-          multiVersion perm nest acc' pat' lam'
-      _ -> distributeMap maploop acc
+      distributeSingleStm acc (mapLoopStm maploop) >>= \case
+        Just (post_kernels, res, nest, acc')
+          | Just (perm, pat', lam') <- removeUnusedMapResults pat res lam -> do
+              addPostStms post_kernels
+              multiVersion perm nest acc' pat' lam'
+        _ -> distributeMap maploop acc
   where
     discardTargets acc' =
       -- FIXME: work around bogus targets.

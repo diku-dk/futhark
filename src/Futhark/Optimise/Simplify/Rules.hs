@@ -72,7 +72,7 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
     -- bottom-up rules in a kind of deepest-first order.
     not (patElemName d `UT.isInResult` used) || (patElemName d `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
-    Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
+      Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where
     -- We need to make sure we can even consume the original.  The big
     -- missing piece here is that we cannot do copy removal inside of
@@ -95,10 +95,10 @@ constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
   | Just args' <- mapM (isConst . fst) args,
     Just (_, _, fun) <- M.lookup (nameToString fname) primFuns,
     Just result <- fun args' =
-    Simplify $
-      certifying cs $
-        attributing attrs $
-          letBind pat $ BasicOp $ SubExp $ Constant result
+      Simplify $
+        certifying cs $
+          attributing attrs $
+            letBind pat $ BasicOp $ SubExp $ Constant result
   where
     isConst (Constant v) = Just v
     isConst _ = Nothing
@@ -107,14 +107,14 @@ constantFoldPrimFun _ _ = Skip
 simplifyIndex :: BuilderOps rep => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed = Simplify $ do
-    res <- m
-    attributing attrs $ case res of
-      SubExpResult cs' se ->
-        certifying (cs <> cs') $
-          letBindNames (patNames pat) $ BasicOp $ SubExp se
-      IndexResult extra_cs idd' inds' ->
-        certifying (cs <> extra_cs) $
-          letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
+      res <- m
+      attributing attrs $ case res of
+        SubExpResult cs' se ->
+          certifying (cs <> cs') $
+            letBindNames (patNames pat) $ BasicOp $ SubExp se
+        IndexResult extra_cs idd' inds' ->
+          certifying (cs <> extra_cs) $
+            letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
   where
     consumed = patElemName pe `UT.isConsumed` used
     seType (Var v) = ST.lookupType v vtable
@@ -125,12 +125,12 @@ ruleIf :: BuilderOps rep => TopDownRuleIf rep
 ruleIf _ pat _ (e1, tb, fb, IfDec _ ifsort)
   | Just branch <- checkBranch,
     ifsort /= IfFallback || isCt1 e1 = Simplify $ do
-    let ses = bodyResult branch
-    addStms $ bodyStms branch
-    sequence_
-      [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-        | (p, SubExpRes cs se) <- zip (patElems pat) ses
-      ]
+      let ses = bodyResult branch
+      addStms $ bodyStms branch
+      sequence_
+        [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
+          | (p, SubExpRes cs se) <- zip (patElems pat) ses
+        ]
   where
     checkBranch
       | isCt1 e1 = Just tb
@@ -154,46 +154,46 @@ ruleIf
     | null tstms,
       null fstms,
       [Prim Bool] <- map extTypeOf ts =
-      Simplify $ certifying (tcs <> fcs) $ letBind pat $ BasicOp $ BinOp LogOr cond se
+        Simplify $ certifying (tcs <> fcs) $ letBind pat $ BasicOp $ BinOp LogOr cond se
 -- When type(x)==bool, if c then x else y == (c && x) || (!c && y)
 ruleIf _ pat _ (cond, tb, fb, IfDec ts _)
   | Body _ tstms [SubExpRes tcs tres] <- tb,
     Body _ fstms [SubExpRes fcs fres] <- fb,
     all (safeExp . stmExp) $ tstms <> fstms,
     all ((== Prim Bool) . extTypeOf) ts = Simplify $ do
-    addStms tstms
-    addStms fstms
-    e <-
-      eBinOp
-        LogOr
-        (pure $ BasicOp $ BinOp LogAnd cond tres)
-        ( eBinOp
-            LogAnd
-            (pure $ BasicOp $ UnOp Not cond)
-            (pure $ BasicOp $ SubExp fres)
-        )
-    certifying (tcs <> fcs) $ letBind pat e
+      addStms tstms
+      addStms fstms
+      e <-
+        eBinOp
+          LogOr
+          (pure $ BasicOp $ BinOp LogAnd cond tres)
+          ( eBinOp
+              LogAnd
+              (pure $ BasicOp $ UnOp Not cond)
+              (pure $ BasicOp $ SubExp fres)
+          )
+      certifying (tcs <> fcs) $ letBind pat e
 ruleIf _ pat _ (_, tbranch, _, IfDec _ IfFallback)
   | all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
-    let ses = bodyResult tbranch
-    addStms $ bodyStms tbranch
-    sequence_
-      [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-        | (p, SubExpRes cs se) <- zip (patElems pat) ses
-      ]
+      let ses = bodyResult tbranch
+      addStms $ bodyStms tbranch
+      sequence_
+        [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
+          | (p, SubExpRes cs se) <- zip (patElems pat) ses
+        ]
 ruleIf _ pat _ (cond, tb, fb, _)
   | Body _ _ [SubExpRes tcs (Constant (IntValue t))] <- tb,
     Body _ _ [SubExpRes fcs (Constant (IntValue f))] <- fb =
-    if oneIshInt t && zeroIshInt f && tcs == mempty && fcs == mempty
-      then
-        Simplify $
-          letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond
-      else
-        if zeroIshInt t && oneIshInt f
-          then Simplify $ do
-            cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
-            letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond_neg
-          else Skip
+      if oneIshInt t && zeroIshInt f && tcs == mempty && fcs == mempty
+        then
+          Simplify $
+            letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond
+        else
+          if zeroIshInt t && oneIshInt f
+            then Simplify $ do
+              cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
+              letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond_neg
+            else Skip
 ruleIf _ _ _ _ = Skip
 
 -- | Move out results of a conditional expression whose computation is
@@ -229,9 +229,9 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
     branchInvariant (i, pe, t, (tse, fse))
       -- Do both branches return the same value?
       | tse == fse = do
-        certifying (resCerts tse <> resCerts fse) $
-          letBindNames [patElemName pe] $ BasicOp $ SubExp $ resSubExp tse
-        hoisted i pe
+          certifying (resCerts tse <> resCerts fse) $
+            letBindNames [patElemName pe] $ BasicOp $ SubExp $ resSubExp tse
+          hoisted i pe
 
       -- Do both branches return values that are free in the
       -- branch, and are we not the only pattern element?  The
@@ -240,15 +240,15 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
         invariant $ resSubExp fse,
         patSize pat > 1,
         Prim _ <- patElemType pe = do
-        bt <- expTypesFromPat $ Pat [pe]
-        letBindNames [patElemName pe]
-          =<< ( If cond <$> resultBodyM [resSubExp tse]
-                  <*> resultBodyM [resSubExp fse]
-                  <*> pure (IfDec bt ifsort)
-              )
-        hoisted i pe
+          bt <- expTypesFromPat $ Pat [pe]
+          letBindNames [patElemName pe]
+            =<< ( If cond <$> resultBodyM [resSubExp tse]
+                    <*> resultBodyM [resSubExp fse]
+                    <*> pure (IfDec bt ifsort)
+                )
+          hoisted i pe
       | otherwise =
-        pure $ Right (pe, t, (tse, fse))
+          pure $ Right (pe, t, (tse, fse))
 
     hoisted i pe = pure $ Left $ Just (i, Var $ patElemName pe)
 
@@ -278,18 +278,18 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
     patused <- map (`UT.isUsedDirectly` used) $ patNames pat,
     -- If they are not all used, then this rule applies.
     not (and patused) =
-    -- Remove the parts of the branch-results that correspond to dead
-    -- return value bindings.  Note that this leaves dead code in the
-    -- branch bodies, but that will be removed later.
-    let tses = bodyResult tb
-        fses = bodyResult fb
-        pick :: [a] -> [a]
-        pick = map snd . filter fst . zip patused
-        tb' = tb {bodyResult = pick tses}
-        fb' = fb {bodyResult = pick fses}
-        pat' = pick $ patElems pat
-        rettype' = pick rettype
-     in Simplify $ letBind (Pat pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
+      -- Remove the parts of the branch-results that correspond to dead
+      -- return value bindings.  Note that this leaves dead code in the
+      -- branch bodies, but that will be removed later.
+      let tses = bodyResult tb
+          fses = bodyResult fb
+          pick :: [a] -> [a]
+          pick = map snd . filter fst . zip patused
+          tb' = tb {bodyResult = pick tses}
+          fb' = fb {bodyResult = pick fses}
+          pat' = pick $ patElems pat
+          rettype' = pick rettype
+       in Simplify $ letBind (Pat pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
   | otherwise = Skip
 
 withAccTopDown :: BuilderOps rep => TopDownRuleGeneric rep
@@ -335,21 +335,21 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
     tryMoveAcc (pes, (_, arrs, _), (_, acc_p), SubExpRes cs (Var v))
       | paramName acc_p == v,
         cs == mempty = do
-        forM_ (zip pes arrs) $ \(pe, arr) ->
-          letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var arr
-        pure Nothing
+          forM_ (zip pes arrs) $ \(pe, arr) ->
+            letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var arr
+          pure Nothing
     tryMoveAcc x =
       pure $ Just x
 
     tryMoveNonAcc (pe, SubExpRes cs (Var v))
       | v `ST.elem` vtable,
         cs == mempty = do
-        letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
-        pure Nothing
+          letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
+          pure Nothing
     tryMoveNonAcc (pe, SubExpRes cs (Constant v))
       | cs == mempty = do
-        letBindNames [patElemName pe] $ BasicOp $ SubExp $ Constant v
-        pure Nothing
+          letBindNames [patElemName pe] $ BasicOp $ SubExp $ Constant v
+          pure Nothing
     tryMoveNonAcc x =
       pure $ Just x
 withAccTopDown _ _ = Skip
@@ -364,8 +364,8 @@ elimUpdates get_rid_of = flip runState mempty . onBody
     onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc acc _ _)))
       | Acc c _ _ _ <- typeOf dec,
         c `elem` get_rid_of = do
-        modify (insert c)
-        pure $ Let pat aux $ BasicOp $ SubExp $ Var acc
+          modify (insert c)
+          pure $ Let pat aux $ BasicOp $ SubExp $ Var acc
     onStm (Let pat aux e) = Let pat aux <$> onExp e
     onExp = mapExpM mapper
       where
@@ -379,37 +379,37 @@ withAccBottomUp :: (TraverseOpStms rep, BuilderOps rep) => BottomUpRuleGeneric r
 -- Eliminate dead results.  See Note [Dead Code Elimination for WithAcc]
 withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
   | not $ all (`UT.used` utable) $ patNames pat = Simplify $ do
-    let (acc_res, nonacc_res) =
-          splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
-        (acc_pes, nonacc_pes) =
-          splitFromEnd num_nonaccs $ patElems pat
-        (cert_params, acc_params) =
-          splitAt (length inputs) $ lambdaParams lam
+      let (acc_res, nonacc_res) =
+            splitFromEnd num_nonaccs $ bodyResult $ lambdaBody lam
+          (acc_pes, nonacc_pes) =
+            splitFromEnd num_nonaccs $ patElems pat
+          (cert_params, acc_params) =
+            splitAt (length inputs) $ lambdaParams lam
 
-    -- Eliminate unused accumulator results
-    let get_rid_of =
-          map snd . filter getRidOf $
-            zip
-              (chunks (map inputArrs inputs) acc_pes)
-              $ map paramName cert_params
+      -- Eliminate unused accumulator results
+      let get_rid_of =
+            map snd . filter getRidOf $
+              zip
+                (chunks (map inputArrs inputs) acc_pes)
+                $ map paramName cert_params
 
-    -- Eliminate unused non-accumulator results
-    let (nonacc_pes', nonacc_res') =
-          unzip $ filter keepNonAccRes $ zip nonacc_pes nonacc_res
+      -- Eliminate unused non-accumulator results
+      let (nonacc_pes', nonacc_res') =
+            unzip $ filter keepNonAccRes $ zip nonacc_pes nonacc_res
 
-    when (null get_rid_of && nonacc_pes' == nonacc_pes) cannotSimplify
+      when (null get_rid_of && nonacc_pes' == nonacc_pes) cannotSimplify
 
-    let (body', eliminated) = elimUpdates get_rid_of $ lambdaBody lam
+      let (body', eliminated) = elimUpdates get_rid_of $ lambdaBody lam
 
-    when (null eliminated && nonacc_pes' == nonacc_pes) cannotSimplify
+      when (null eliminated && nonacc_pes' == nonacc_pes) cannotSimplify
 
-    let pes' = acc_pes ++ nonacc_pes'
+      let pes' = acc_pes ++ nonacc_pes'
 
-    lam' <- mkLambda (cert_params ++ acc_params) $ do
-      void $ bodyBind body'
-      pure $ acc_res ++ nonacc_res'
+      lam' <- mkLambda (cert_params ++ acc_params) $ do
+        void $ bodyBind body'
+        pure $ acc_res ++ nonacc_res'
 
-    auxing aux $ letBind (Pat pes') $ WithAcc inputs lam'
+      auxing aux $ letBind (Pat pes') $ WithAcc inputs lam'
   where
     num_nonaccs = length (lambdaReturnType lam) - length inputs
     inputArrs (_, arrs, _) = length arrs

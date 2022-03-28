@@ -21,7 +21,7 @@ where
 
 import qualified Data.Map.Strict as M
 import Data.Maybe
---import Debug.Trace
+-- import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
@@ -199,12 +199,12 @@ topdwnTravBinding env stm@(Let (Pat _) _ (BasicOp (Assert se _ _))) =
   env {td_asserts = se : td_asserts env}
 topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
-    let ixfn_inv = getInvAliasFromExp e
-     in env
-          { v_alias = M.insert (patElemName pe) (x, ixfn, ixfn_inv) (v_alias env),
-            scope = scope env <> scopeOf stm,
-            nonNegatives = nonNegatives env <> nonNegativesInPat (stmPat stm)
-          }
+      let ixfn_inv = getInvAliasFromExp e
+       in env
+            { v_alias = M.insert (patElemName pe) (x, ixfn, ixfn_inv) (v_alias env),
+              scope = scope env <> scopeOf stm,
+              nonNegatives = nonNegatives env <> nonNegativesInPat (stmPat stm)
+            }
 topdwnTravBinding env stm =
   env
     { scope = scope env <> scopeOf stm,
@@ -280,11 +280,11 @@ walkAliasTab ::
   Maybe Coalesced
 walkAliasTab _ vtab x
   | Just c <- M.lookup x vtab =
-    Just c -- @x@ is in @vartab@ together with its new ixfun
+      Just c -- @x@ is in @vartab@ together with its new ixfun
 walkAliasTab alias_tab vtab x
   | Just (x0, alias0, _) <- M.lookup x alias_tab = do
-    Coalesced knd (MemBlock pt shp vname ixf) substs <- walkAliasTab alias_tab vtab x0
-    return $ Coalesced knd (MemBlock pt shp vname $ alias0 ixf) substs
+      Coalesced knd (MemBlock pt shp vname ixf) substs <- walkAliasTab alias_tab vtab x0
+      return $ Coalesced knd (MemBlock pt shp vname $ alias0 ixf) substs
 walkAliasTab _ _ _ = Nothing
 
 -- | We assume @x@ is in @vartab@ and we add the variables that @x@ aliases
@@ -306,17 +306,17 @@ addInvAliassesVarTab ::
   Maybe (M.Map VName Coalesced)
 addInvAliassesVarTab td_env vtab x
   | Just (Coalesced _ (MemBlock _ _ m_y x_ixfun) fv_subs) <- M.lookup x vtab =
-    case M.lookup x (v_alias td_env) of
-      Nothing -> Just vtab
-      Just (_, _, Nothing) -> Nothing -- can't invert ixfun, conservatively fail!
-      Just (x0, _, Just inv_alias0) ->
-        let x_ixfn0 = inv_alias0 x_ixfun
-         in case getScopeMemInfo x0 (scope td_env) of
-              Nothing -> error "impossible"
-              Just (MemBlock ptp shp _ _) ->
-                let coal = Coalesced TransitiveCoal (MemBlock ptp shp m_y x_ixfn0) fv_subs
-                    vartab' = M.insert x0 coal vtab
-                 in addInvAliassesVarTab td_env vartab' x0
+      case M.lookup x (v_alias td_env) of
+        Nothing -> Just vtab
+        Just (_, _, Nothing) -> Nothing -- can't invert ixfun, conservatively fail!
+        Just (x0, _, Just inv_alias0) ->
+          let x_ixfn0 = inv_alias0 x_ixfun
+           in case getScopeMemInfo x0 (scope td_env) of
+                Nothing -> error "impossible"
+                Just (MemBlock ptp shp _ _) ->
+                  let coal = Coalesced TransitiveCoal (MemBlock ptp shp m_y x_ixfn0) fv_subs
+                      vartab' = M.insert x0 coal vtab
+                   in addInvAliassesVarTab td_env vartab' x0
 addInvAliassesVarTab _ _ _ = error "impossible"
 
 areAliased :: TopDnEnv rep -> VName -> VName -> Bool

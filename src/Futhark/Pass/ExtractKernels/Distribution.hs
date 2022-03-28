@@ -297,12 +297,12 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
         snd <$> find ((== kernelInputArray inp) . paramName . fst) params_and_arrs
       fixupInput inp
         | Just arr <- isParam inp =
-          inp
-            { kernelInputArray = arr,
-              kernelInputIndices = Var i : kernelInputIndices inp
-            }
+            inp
+              { kernelInputArray = arr,
+                kernelInputIndices = Var i : kernelInputIndices inp
+              }
         | otherwise =
-          inp
+            inp
 
   return ((i, nesting_w) : ispace, extra_inps i <> inps')
   where
@@ -545,8 +545,8 @@ tryDistribute ::
   m (Maybe (Targets, Stms rep))
 tryDistribute _ _ targets stms
   | null stms =
-    -- No point in distributing an empty kernel.
-    return $ Just (targets, mempty)
+      -- No point in distributing an empty kernel.
+      return $ Just (targets, mempty)
 tryDistribute mk_lvl nest targets stms =
   createKernelNest nest dist_body
     >>= \case

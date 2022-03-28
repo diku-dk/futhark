@@ -23,7 +23,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
---import Debug.Trace
+-- import Debug.Trace
 import Futhark.Analysis.AlgSimplify2
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
@@ -70,7 +70,7 @@ freeVarSubstitutions scope0 scals0 indfun =
     getSubstitution v
       | Just pe <- M.lookup v scals0,
         IntType _ <- primExpType pe =
-        Just (M.singleton v $ TPrimExp pe, namesToList $ freeIn pe)
+          Just (M.singleton v $ TPrimExp pe, namesToList $ freeIn pe)
     getSubstitution _v = Nothing
 
 -- | Translates free variables in an access summary
@@ -78,9 +78,9 @@ translateAccessSummary :: ScopeTab rep -> ScalarTab -> AccessSummary -> AccessSu
 translateAccessSummary _ _ Undeterminable = Undeterminable
 translateAccessSummary scope0 scals0 (Set slmads)
   | Just subs <- freeVarSubstitutions scope0 scals0 slmads =
-    slmads
-      & S.map (IxFun.substituteInLMAD subs)
-      & Set
+      slmads
+        & S.map (IxFun.substituteInLMAD subs)
+        & Set
 translateAccessSummary _ _ _ = Undeterminable
 
 -- | This function computes the written and read memory references for the current statement
@@ -95,9 +95,9 @@ getUseSumFromStm ::
 getUseSumFromStm td_env coal_tab (Let p _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc = do
-    (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab arr
-    let new_ixfn = IxFun.slice ixfn_arr $ Slice $ map (fmap pe64) slc
-    return ([], [(mem_b, mem_arr, new_ixfn)])
+      (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab arr
+      let new_ixfn = IxFun.slice ixfn_arr $ Slice $ map (fmap pe64) slc
+      return ([], [(mem_b, mem_arr, new_ixfn)])
   where
     isFix DimFix {} = True
     isFix _ = False
@@ -144,11 +144,11 @@ getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) 
         Var x -> Just (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
 getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
   | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) =
-    let x_ixfn_slc = IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
-        r1 = (m_b, m_x, x_ixfn_slc)
-     in case getDirAliasedIxfn td_env coal_tab v of
-          Nothing -> Just ([r1], [r1])
-          Just r2 -> Just ([r1], [r1, r2])
+      let x_ixfn_slc = IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
+          r1 = (m_b, m_x, x_ixfn_slc)
+       in case getDirAliasedIxfn td_env coal_tab v of
+            Nothing -> Just ([r1], [r1])
+            Just r2 -> Just ([r1], [r1, r2])
 getUseSumFromStm _ _ (Let Pat {} _ BasicOp {}) = Just ([], [])
 getUseSumFromStm _ _ (Let Pat {} _ (Op (Alloc _ _))) = Just ([], [])
 getUseSumFromStm _ _ _ =
@@ -264,7 +264,7 @@ recordMemRefUses td_env bu_env stm =
     mbLmad indfun
       | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
         (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subs indfun =
-        Just lmad
+          Just lmad
     mbLmad _ = Nothing
     addLmads (Just wrts) uses etry =
       etry {memrefs = MemRefs uses wrts <> memrefs etry}
@@ -284,31 +284,31 @@ noMemOverlap _ (Set mr) _
   | mr == mempty = return True
 noMemOverlap td_env (Set is0) (Set js0)
   | Just non_negs <- mapM (primExpFromSubExpM (basePMconv (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env = do
-    (disjoints, not_disjoints) <-
-      partitionM
-        ( \i ->
-            allM
-              ( \j ->
-                  pure (IxFun.disjoint less_thans (nonNegatives td_env) i j)
-                    ||^ pure (IxFun.disjoint2 less_thans (nonNegatives td_env) i j)
-                    ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) asserts less_thans non_negs i j
-              )
-              js
-        )
-        is
-    pure $
-      null not_disjoints
-        || trace
-          ( "it failed\n"
-              <> pretty less_thans
-              <> "\n"
-              <> pretty disjoints
-              <> "\nhalløj?: "
-              <> pretty not_disjoints
-              <> "\n og: "
-              <> pretty js
+      (disjoints, not_disjoints) <-
+        partitionM
+          ( \i ->
+              allM
+                ( \j ->
+                    pure (IxFun.disjoint less_thans (nonNegatives td_env) i j)
+                      ||^ pure (IxFun.disjoint2 less_thans (nonNegatives td_env) i j)
+                      ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) asserts less_thans non_negs i j
+                )
+                js
           )
-          False
+          is
+      pure $
+        null not_disjoints
+          || trace
+            ( "it failed\n"
+                <> pretty less_thans
+                <> "\n"
+                <> pretty disjoints
+                <> "\nhalløj?: "
+                <> pretty not_disjoints
+                <> "\n og: "
+                <> pretty js
+            )
+            False
   where
     less_thans = map (fmap $ fixPoint $ substituteInPrimExp $ scalarTable td_env) $ knownLessThan td_env
     asserts = map (fixPoint (substituteInPrimExp $ scalarTable td_env) . primExpFromSubExp Bool) $ td_asserts td_env
@@ -338,7 +338,7 @@ aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
   | Set ls <- translateAccessSummary scope_loop scals_loop access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
     all inBeforeScope $ namesToList nms = do
-    return $ Set ls
+      return $ Set ls
   where
     inBeforeScope v =
       case M.lookup v scope_bef of
@@ -455,40 +455,40 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
   | iterator_var `nameIn` freeIn dims0 = return Undeterminable
   | not $ iterator_var `nameIn` freeIn offset0 = return $ Set $ S.singleton lmad
   | otherwise = do
-    new_var <- newVName "k"
-    let offset = replaceIteratorWith (typedLeafExp new_var) offset0
-        offsetp1 = replaceIteratorWith (typedLeafExp new_var + 1) offset0
-        new_stride = TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
-        new_offset = replaceIteratorWith lower_bound offset0
-        new_lmad =
-          IxFun.LMAD new_offset $
-            IxFun.LMADDim new_stride 0 spn 0 IxFun.Inc : map incPerm dims0
-    if new_var `nameIn` freeIn new_lmad
-      then
-        return $
-          trace
-            ( "aggSummaryOne: " <> pretty lmad
-                <> "\niterator_var: "
-                <> pretty iterator_var
-                <> "\nlower_bound: "
-                <> pretty lower_bound
-                <> "\nspn: "
-                <> pretty spn
-                <> "\nnew_var: "
-                <> pretty new_var
-                <> "\noffset: "
-                <> pretty offset
-                <> "\noffsetp1: "
-                <> pretty offsetp1
-                <> "\nnew_stride: "
-                <> pretty new_stride
-                <> "\nnew_offset: "
-                <> pretty new_offset
-                <> "\nnew_lmad: "
-                <> pretty new_lmad
-            )
-            Undeterminable
-      else return $ Set $ S.singleton new_lmad
+      new_var <- newVName "k"
+      let offset = replaceIteratorWith (typedLeafExp new_var) offset0
+          offsetp1 = replaceIteratorWith (typedLeafExp new_var + 1) offset0
+          new_stride = TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
+          new_offset = replaceIteratorWith lower_bound offset0
+          new_lmad =
+            IxFun.LMAD new_offset $
+              IxFun.LMADDim new_stride 0 spn 0 IxFun.Inc : map incPerm dims0
+      if new_var `nameIn` freeIn new_lmad
+        then
+          return $
+            trace
+              ( "aggSummaryOne: " <> pretty lmad
+                  <> "\niterator_var: "
+                  <> pretty iterator_var
+                  <> "\nlower_bound: "
+                  <> pretty lower_bound
+                  <> "\nspn: "
+                  <> pretty spn
+                  <> "\nnew_var: "
+                  <> pretty new_var
+                  <> "\noffset: "
+                  <> pretty offset
+                  <> "\noffsetp1: "
+                  <> pretty offsetp1
+                  <> "\nnew_stride: "
+                  <> pretty new_stride
+                  <> "\nnew_offset: "
+                  <> pretty new_offset
+                  <> "\nnew_lmad: "
+                  <> pretty new_lmad
+              )
+              Undeterminable
+        else return $ Set $ S.singleton new_lmad
   where
     incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
     replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped

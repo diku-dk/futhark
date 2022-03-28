@@ -86,7 +86,7 @@ sumToExp (x : xs) =
 
 prodToExp :: Prod -> Exp
 prodToExp (Prod _ []) = val 1
-prodToExp (Prod True [ValueExp (IntValue (Int64Value i))]) = ValueExp $ IntValue $ Int64Value (- i)
+prodToExp (Prod True [ValueExp (IntValue (Int64Value i))]) = ValueExp $ IntValue $ Int64Value (-i)
 prodToExp (Prod True as) =
   foldl (BinOpExp $ Mul Int64 OverflowUndef) (val (-1)) as
 prodToExp (Prod False (a : as)) =
@@ -141,7 +141,7 @@ prodToScale :: Prod -> (Int64, [Exp])
 prodToScale (Prod b exps) =
   let (scalars, exps') = partitionMaybe intFromExp exps
    in if b
-        then (- (product scalars), exps')
+        then (-(product scalars), exps')
         else (product scalars, exps')
 
 -- | Given @(-2, [x])@ returns @-[1, 2, x]@
@@ -186,17 +186,17 @@ maybeDivide dividend divisor
     Prod divisor_b divisor_factors <- divisor,
     quotient <- dividend_factors \\ divisor_factors,
     sort (quotient <> divisor_factors) == sort dividend_factors =
-    Just $ Prod (dividend_b `xor` divisor_b) quotient
+      Just $ Prod (dividend_b `xor` divisor_b) quotient
   | (dividend_scale, dividend_rest) <- prodToScale dividend,
     (divisor_scale, divisor_rest) <- prodToScale divisor,
     dividend_scale `mod` divisor_scale == 0,
     null $ divisor_rest \\ dividend_rest =
-    Just $
-      Prod
-        (signum (dividend_scale `div` divisor_scale) < 0)
-        ( ValueExp (IntValue $ Int64Value $ dividend_scale `div` divisor_scale) :
-          (dividend_rest \\ divisor_rest)
-        )
+      Just $
+        Prod
+          (signum (dividend_scale `div` divisor_scale) < 0)
+          ( ValueExp (IntValue $ Int64Value $ dividend_scale `div` divisor_scale) :
+            (dividend_rest \\ divisor_rest)
+          )
   | otherwise = Nothing
 
 -- | Given a list of 'Names' that we know are non-negative (>= 0), determine

@@ -277,7 +277,7 @@ defCall dests fname args = do
   case dests of
     [dest]
       | isBuiltInFunction fname ->
-        stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
+          stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
     _ ->
       item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; goto cleanup; }|]
 
@@ -1267,9 +1267,9 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       let rank = length shape
           maybeCopyDim (Var d) i
             | not $ d `nameIn` arg_names =
-              ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
-                [C.cexp|$id:d == $exp:src->shape[$int:i]|]
-              )
+                ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
+                  [C.cexp|$id:d == $exp:src->shape[$int:i]|]
+                )
           maybeCopyDim x i =
             ( Nothing,
               [C.cexp|$exp:x == $exp:src->shape[$int:i]|]
@@ -2060,10 +2060,10 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name vol t : SetScalar dest e : code)
       | name == dest = do
-        let ct = primTypeToCType t
-        e' <- compileExp e
-        item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-        go code
+          let ct = primTypeToCType t
+          e' <- compileExp e
+          item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
+          go code
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
 compileCode (Assert e msg (loc, locs)) = do
@@ -2221,8 +2221,8 @@ compileCode (DeclareArray name (Space space) t vs) =
 compileCode (SetScalar dest (BinOpExp op (LeafExp x _) y))
   | dest == x,
     Just f <- assignmentOperator op = do
-    y' <- compileExp y
-    stm [C.cstm|$exp:(f dest y');|]
+      y' <- compileExp y
+      stm [C.cstm|$exp:(f dest y');|]
 compileCode (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]
