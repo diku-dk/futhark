@@ -1,33 +1,43 @@
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-{-# HLINT ignore "Use lambda-case" #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Futhark.Optimise.GraphRep where
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE LambdaCase #-}
+module Futhark.Optimise.GraphRep (module Futhark.Optimise.GraphRep)
+  -- (FusionEnvM, 
+  -- FusionEnv,
+  -- runFusionEnvM,
+  -- freshFusionEnv, 
+  -- mkDepGraph,
+  -- isArray,
+  -- pprg) 
+  where
 
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe
+-- import Data.Maybe
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.IR.Prop.Aliases
 import qualified Futhark.Analysis.HORep.SOAC as HOREPSOAC
 
-import qualified Data.Graph.Inductive.Query.DFS as Q
+--import qualified Data.Graph.Inductive.Query.DFS as Q
 import qualified Data.Graph.Inductive.Tree as G
 import Data.Graph.Inductive.Graph
 import Data.Graph.Inductive.Dot
-import Futhark.IR.Pretty as PP
+--import Futhark.IR.Pretty as PP
 import qualified Futhark.Util.Pretty as PP
 
-import Debug.Trace
-import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSource, modifyNameSource)
-import Futhark.Pass
+--import Debug.Trace
+import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSource, modifyNameSource, blankNameSource)
+--import Futhark.Pass
 import Data.Foldable (foldlM)
 import Control.Monad.State
-import Futhark.CodeGen.Backends.CCUDA.Boilerplate (failureSwitch)
+--import Futhark.CodeGen.Backends.CCUDA.Boilerplate (failureSwitch)
 
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
@@ -50,7 +60,7 @@ instance Show EdgeT where
 
 -- nodeT_to_str
 instance Show NodeT where
-    show (SNode stm@(Let pat aux _) _) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
+    show (SNode (Let pat _ _) _) = ppr $ L.intercalate ", " $ map ppr $ patNames pat -- show (namesToList $ freeIn stm)
     show (FinalNode stms) = concatMap ppr stms
     show (RNode name)  = ppr $ "Res: "   ++ ppr name
     show (InNode name) = ppr $ "Input: " ++ ppr name
@@ -82,7 +92,10 @@ data FusionEnv = FusionEnv
     producerMapping :: M.Map VName Node
   }
 
-newtype FusionEnvM a = FusionEnvM {fenv :: State FusionEnv a}
+freshFusionEnv :: Scope SOACS -> FusionEnv
+freshFusionEnv stms_scope = FusionEnv {vNameSource = blankNameSource, scope = stms_scope, reachabilityG = empty, producerMapping = M.empty}
+
+newtype FusionEnvM a = FusionEnvM (State FusionEnv a)
   deriving
     (
       Monad,
@@ -93,9 +106,8 @@ newtype FusionEnvM a = FusionEnvM {fenv :: State FusionEnv a}
 
 instance MonadFreshNames FusionEnvM where
   getNameSource = gets vNameSource
-  putNameSource source = do
-    fenv <- get
-    put (fenv {vNameSource = source})
+  putNameSource source = 
+    modify (\env -> env {vNameSource = source})
 
 instance HasScope SOACS FusionEnvM where
   askScope = gets scope
@@ -116,37 +128,36 @@ type DepGraphAug = DepGraph -> FusionEnvM DepGraph
 
 
 -- transform functions for fusing over transforms
-appendTransformations :: DepGraphAug
-appendTransformations g = do
-  applyAugs (map appendTransform $ labNodes g) g
+-- appendTransformations :: DepGraphAug
+-- appendTransformations g = applyAugs (map appendTransform $ labNodes g) g
 
 
-appendTransform :: DepNode -> DepGraphAug
-appendTransform node_to_fuse g =
-  if gelem (nodeFromLNode node_to_fuse) g
-  then applyAugs (map (appendT node_to_fuse_id) fuses_to) g
-  else pure g
-  where
-    fuses_to = map nodeFromLNode $ input g node_to_fuse
-    node_to_fuse_id = nodeFromLNode node_to_fuse
+-- appendTransform :: DepNode -> DepGraphAug
+-- appendTransform node_to_fuse g =
+--   if gelem (nodeFromLNode node_to_fuse) g
+--   then applyAugs (map (appendT node_to_fuse_id) fuses_to) g
+--   else pure g
+--   where
+--     fuses_to = map nodeFromLNode $ input g node_to_fuse
+--     node_to_fuse_id = nodeFromLNode node_to_fuse
 
 
---- Graph Construction ---
+-- --- Graph Construction ---
 
-appendT :: Node -> Node -> DepGraphAug
-appendT transformNode to g
-  | not (gelem transformNode g && gelem to g) = pure g
-  | outdeg g to == 1 =
-    case mapT (lFromNode g) (transformNode, to) of
-      (SNode (Let _ aux_1 exp_1) _, SNode s@(Let _ aux_2 (Op (Futhark.Screma sub_exp ouputs scremaform))) outTrans) ->
-        case (HOREPSOAC.transformFromExp (stmAuxCerts aux_1) exp_1, isMapSOAC scremaform) of
-          (Just (vn,transform), Just lam) -> do
-            let newNodeL = SNode s (outTrans HOREPSOAC.|> transform)
-            let newContext = mergedContext newNodeL (context g to) (context g transformNode)
-            contractEdge transformNode newContext g
-          _ -> pure g
-      _ -> pure g
-  | otherwise = pure g
+-- appendT :: Node -> Node -> DepGraphAug
+-- appendT transformNode to g
+--   | not (gelem transformNode g && gelem to g) = pure g
+--   | outdeg g to == 1 =
+--     case mapT (lFromNode g) (transformNode, to) of
+--       (SNode (Let _ aux_1 exp_1) _, SNode s@(Let _ aux_2 (Op (Futhark.Screma sub_exp ouputs scremaform))) outTrans) ->
+--         case (HOREPSOAC.transformFromExp (stmAuxCerts aux_1) exp_1, isMapSOAC scremaform) of
+--           (Just (vn,transform), Just lam) -> do
+--             let newNodeL = SNode s (outTrans HOREPSOAC.|> transform)
+--             let newContext = mergedContext newNodeL (context g to) (context g transformNode)
+--             contractEdge transformNode newContext g
+--           _ -> pure g
+--       _ -> pure g
+--   | otherwise = pure g
 
 
 
@@ -178,8 +189,9 @@ isArray p = case paramDec p of
 
 mkDepGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
-  g <- addDepEdges $ emptyG2 stms res inputs
-  makeMapping g
+  let g = emptyG2 stms res inputs
+  _ <- makeMapping g
+  addDepEdges g
 
 
 addDepEdges :: DepGraphAug
@@ -199,7 +211,6 @@ makeMapping g = do
 -- creates deps for the given nodes on the graph using the edgeGenerator
 genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug
 genEdges l_stms edge_fun g = do
-  makeMapping g
   name_map <- gets producerMapping
   depGraphInsertEdges (concatMap (gen_edge name_map) l_stms) g
   where
@@ -249,11 +260,12 @@ nodeFromLNode = fst
 lNodeFromNode :: DepGraph -> Node -> DepNode
 lNodeFromNode g n = labNode' (context g n)
 
+lFromNode :: DepGraph -> Node -> NodeT
 lFromNode g n = label $ lNodeFromNode g n
 
 
 labFromEdge :: DepGraph -> DepEdge -> DepNode
-labFromEdge g (n1, n2, lab) = lNodeFromNode g n1
+labFromEdge g (n1, _, _) = lNodeFromNode g n1
 
 depsFromEdgeT :: EdgeT -> [VName]
 depsFromEdgeT e = case e of
@@ -311,8 +323,6 @@ addAliases = augWithFun $ toAlias aliasInputs
 addCons :: DepGraphAug
 addCons = augWithFun getStmCons
 
-cleanUpGraph :: DepGraphAug
-cleanUpGraph g = undefined
 
 -- Merges two contexts
 mergedContext :: (Eq b) => a -> Context a b -> Context a b -> Context a b
@@ -344,7 +354,7 @@ addExtraCons g = depGraphInsertEdges new_edges g
   where
     new_edges = concatMap make_edge (labEdges g)
     make_edge :: DepEdge -> [DepEdge]
-    make_edge (from, to, Cons cname) = [toLEdge (from, to2) (Fake cname) | (to2, e) <- filter (\(tonode,toedge)->
+    make_edge (from, to, Cons cname) = [toLEdge (from, to2) (Fake cname) | (to2, _) <- filter (\(tonode,toedge)->
       tonode /= from
       && cname `elem` depsFromEdgeT toedge
       ) $ lpre g to]
@@ -382,7 +392,7 @@ makeScanInfusible g = return $ emap change_node_to_idep g
 
 
 fusableInputs :: Stm SOACS -> [VName]
-fusableInputs (Let _ _ exp) = fusableInputsFromExp exp
+fusableInputs (Let _ _ expr) = fusableInputsFromExp expr
 
 fusableInputsFromExp :: Exp SOACS -> [VName]
 fusableInputsFromExp (Op soac) = case soac of
@@ -393,7 +403,7 @@ fusableInputsFromExp (Op soac) = case soac of
 fusableInputsFromExp _ = []
 
 infusableInputs :: Stm SOACS -> [VName]
-infusableInputs (Let _ aux exp) = infusableInputsFromExp exp ++ namesToList (freeIn aux)
+infusableInputs (Let _ aux expr) = infusableInputsFromExp expr ++ namesToList (freeIn aux)
 
 infusableInputsFromExp :: Exp SOACS -> [VName]
 infusableInputsFromExp (Op soac) = case soac of
@@ -412,7 +422,7 @@ infusableInputsFromExp op = namesToList $ freeIn op
 
 aliasInputs :: Stm SOACS -> [VName]
 aliasInputs op = case op of
-  Let pat sa exp -> concatMap namesToList $ expAliases $ Alias.analyseExp mempty exp
+  Let _ _ expr -> concatMap namesToList $ expAliases $ Alias.analyseExp mempty expr
 
 --- /Augmentations ---
 
@@ -435,7 +445,7 @@ getStmRes _ = []
 
 -- TODO: Figure out where to put this
 namesFromRes :: [SubExpRes] -> [VName]
-namesFromRes = concatMap ((\x -> case x of
+namesFromRes = concatMap ((\case
      Var z -> [z]
      Constant _ -> []
   ) . resSubExp)
