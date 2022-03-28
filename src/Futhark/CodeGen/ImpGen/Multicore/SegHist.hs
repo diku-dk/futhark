@@ -267,7 +267,7 @@ subHistogram pat space histops num_histos kbody = do
       nsubtasks <- dPrim "nsubtasks" int32
       sOp $ Imp.GetNumTasks $ tvVar nsubtasks
       emit <=< compileSegRed' (Pat red_pes) segred_space [segred_op] nsubtasks $ \red_cont ->
-        red_cont $
+        red_cont $ segBinOpChunks [segred_op] $
           flip map hists $ \subhisto ->
             ( Var subhisto,
               map Imp.le64 $

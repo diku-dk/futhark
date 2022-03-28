@@ -10,12 +10,10 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
-import Futhark.Util (chunks)
 import Prelude hiding (quot, rem)
 import Futhark.Transform.Rename (renameLambda)
 
-type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MulticoreGen ()) -> MulticoreGen ())
-type DoSegBodyChunked = (([[(SubExp, [Imp.TExp Int64])]] -> MulticoreGen ()) -> MulticoreGen ())
+type DoSegBody = (([[(SubExp, [Imp.TExp Int64])]] -> MulticoreGen ()) -> MulticoreGen ())
 
 -- | Generate code for a SegRed construct
 compileSegRed ::
@@ -34,7 +32,7 @@ compileSegRed pat space reds kbody nsubtasks =
         let map_arrs = drop (segBinOpResults reds) $ patElems pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
-      red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+      red_cont $ segBinOpChunks reds $ zip (map kernelResultSubExp red_res) $ repeat []
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
@@ -177,30 +175,13 @@ getNestLoop :: RedLoopType
 getNestLoop Nested = sLoopNestVectorized
 getNestLoop _ = sLoopNest
 
--- Given a DoSegBody and some slugs, use the results of the
--- the kernel body as the source of data for reduction.
-redSourceKbody :: DoSegBody -> [SegBinOpSlug] -> DoSegBodyChunked
-redSourceKbody kbody slugs m =
-  kbody $ \all_red_res -> do
-    m $ segBinOpChunks (map slugOp slugs) all_red_res
-
 -- Given a list of accumulators, use them as the source
 -- data for reduction.
-redSourceAccs :: [[VName]] -> DoSegBodyChunked
+redSourceAccs :: [[VName]] -> DoSegBody
 redSourceAccs slug_local_accs m =
   m $ map (map (\x -> (Var x, []))) slug_local_accs
 
-genBodyReductionLoop ::
-  RedLoopType
-  -> DoSegBody
-  -> [SegBinOpSlug]
-  -> [[VName]]
-  -> SegSpace
-  -> Imp.TExp Int64
-  -> MulticoreGen ()
-genBodyReductionLoop typ kbody slugs =
-  genReductionLoop typ (redSourceKbody kbody slugs) slugs
-
+-- Generate a reduction loop for uniformizing vectors
 genPostbodyReductionLoop ::
   [[VName]]
   -> [SegBinOpSlug]
@@ -215,7 +196,7 @@ genPostbodyReductionLoop accs =
 -- when put inside a chunked loop.
 genReductionLoop ::
   RedLoopType
-  -> DoSegBodyChunked
+  -> DoSegBody
   -> [SegBinOpSlug]
   -> [[VName]]
   -> SegSpace
@@ -268,7 +249,7 @@ reductionStage1Fallback space slugs kbody = do
     slug_local_accs <- genAccumulators slugs
     -- Generate main reduction loop
     generateChunkLoop "SegRed" False $
-      genBodyReductionLoop Seq kbody slugs slug_local_accs space
+      genReductionLoop Seq kbody slugs slug_local_accs space
     -- Write back results
     genWriteBack slugs slug_local_accs space
   free_params <- freeParams fbody
@@ -287,7 +268,7 @@ reductionStage1NonCommScalar space slugs kbody = do
       slug_local_accs <- genAccumulators slugs
       -- Generate main reduction loop
       generateChunkLoop "SegRed" True $
-        genBodyReductionLoop NonComm kbody slugs slug_local_accs space
+        genReductionLoop NonComm kbody slugs slug_local_accs space
       -- Write back results
       genWriteBack slugs slug_local_accs space
   free_params <- freeParams fbody
@@ -312,7 +293,7 @@ reductionStage1CommScalar space slugs kbody = do
         slug_local_accs <- genAccumulators slugs
         -- Generate the main reduction loop over vectors
         generateChunkLoop "SegRed" True $
-          genBodyReductionLoop Comm kbody slugs slug_local_accs space
+          genReductionLoop Comm kbody slugs slug_local_accs space
         -- Now reduce over those vector accumulators to get scalar results
         generateUniformizeLoop $
           genPostbodyReductionLoop slug_local_accs slugs' slug_local_accs_uni space
@@ -339,7 +320,7 @@ reductionStage1Array space slugs kbody = do
       emit lparams
       -- Generate the main reduction loop
       generateChunkLoop "SegRed" False $
-        genBodyReductionLoop Nested kbody slugs slug_local_accs space
+        genReductionLoop Nested kbody slugs slug_local_accs space
       -- Write back results
       genWriteBack slugs slug_local_accs space
   free_params <- freeParams fbody
@@ -426,8 +407,7 @@ compileSegRedBody pat space reds kbody = do
           (map (`mkTV` int64) $ init is)
           (unflattenIndex (init ns_64) (sExt64 n_segments))
         dPrimV_ (last is) i
-        kbody $ \all_red_res -> do
-          let red_res' = chunks (map (length . segBinOpNeutral) reds) all_red_res
+        kbody $ \red_res' -> do
           forM_ (zip3 per_red_pes reds red_res') $ \(pes, red, res') ->
             sLoopNest (segBinOpShape red) $ \vec_is -> do
               sComment "load accum" $ do
