@@ -142,7 +142,12 @@ genAccumulators slugs =
 
 -- Datatype to represent all the different ways we can generate
 -- code for a reduction.
-data RedLoopType = Seq | Comm | NonComm | Nested | Uniformize
+data RedLoopType =
+    RedSeq        -- Fully sequential
+  | RedComm       -- Commutative scalar
+  | RedNonComm    -- Noncommutative scalar
+  | RedNested     -- Nested vectorized operator
+  | RedUniformize -- Uniformize over scalar acc
 
 -- Given a type of reduction and the loop index, should we wrap
 -- the loop body in some extra code?
@@ -151,8 +156,8 @@ getRedLoop ::
   -> Imp.TExp Int64
   -> (Imp.TExp Int64 -> MulticoreGen ())
   -> MulticoreGen ()
-getRedLoop NonComm _ = generateUniformizeLoop
-getRedLoop Uniformize uni = \body -> body uni
+getRedLoop RedNonComm _ = generateUniformizeLoop
+getRedLoop RedUniformize uni = \body -> body uni
 getRedLoop _ _ = \body -> body 0
 
 -- Given a type of reduction, should we perform extracts on
@@ -162,17 +167,18 @@ getExtract ::
   -> Imp.TExp Int64
   -> MulticoreGen Imp.MCCode
   -> MulticoreGen ()
-getExtract NonComm = extractVectorLane
-getExtract Uniformize = extractVectorLane
+getExtract RedNonComm = extractVectorLane
+getExtract RedUniformize = extractVectorLane
 getExtract _ = \_ body -> body >>= emit
 
 -- Given a type of reduction, should we vectorize the inner
 -- map, if it exists?
-getNestLoop :: RedLoopType
+getNestLoop ::
+  RedLoopType
   -> Shape
   -> ([Imp.TExp Int64] -> MulticoreGen ())
   -> MulticoreGen ()
-getNestLoop Nested = sLoopNestVectorized
+getNestLoop RedNested = sLoopNestVectorized
 getNestLoop _ = sLoopNest
 
 -- Given a list of accumulators, use them as the source
@@ -190,7 +196,7 @@ genPostbodyReductionLoop ::
   -> Imp.TExp Int64
   -> MulticoreGen ()
 genPostbodyReductionLoop accs =
-  genReductionLoop Uniformize (redSourceAccs accs)
+  genReductionLoop RedUniformize (redSourceAccs accs)
 
 -- Generate a potentially vectorized body of code that performs reduction
 -- when put inside a chunked loop.
@@ -249,7 +255,7 @@ reductionStage1Fallback space slugs kbody = do
     slug_local_accs <- genAccumulators slugs
     -- Generate main reduction loop
     generateChunkLoop "SegRed" False $
-      genReductionLoop Seq kbody slugs slug_local_accs space
+      genReductionLoop RedSeq kbody slugs slug_local_accs space
     -- Write back results
     genWriteBack slugs slug_local_accs space
   free_params <- freeParams fbody
@@ -268,7 +274,7 @@ reductionStage1NonCommScalar space slugs kbody = do
       slug_local_accs <- genAccumulators slugs
       -- Generate main reduction loop
       generateChunkLoop "SegRed" True $
-        genReductionLoop NonComm kbody slugs slug_local_accs space
+        genReductionLoop RedNonComm kbody slugs slug_local_accs space
       -- Write back results
       genWriteBack slugs slug_local_accs space
   free_params <- freeParams fbody
@@ -293,7 +299,7 @@ reductionStage1CommScalar space slugs kbody = do
         slug_local_accs <- genAccumulators slugs
         -- Generate the main reduction loop over vectors
         generateChunkLoop "SegRed" True $
-          genReductionLoop Comm kbody slugs slug_local_accs space
+          genReductionLoop RedComm kbody slugs slug_local_accs space
         -- Now reduce over those vector accumulators to get scalar results
         generateUniformizeLoop $
           genPostbodyReductionLoop slug_local_accs slugs' slug_local_accs_uni space
@@ -320,7 +326,7 @@ reductionStage1Array space slugs kbody = do
       emit lparams
       -- Generate the main reduction loop
       generateChunkLoop "SegRed" False $
-        genReductionLoop Nested kbody slugs slug_local_accs space
+        genReductionLoop RedNested kbody slugs slug_local_accs space
       -- Write back results
       genWriteBack slugs slug_local_accs space
   free_params <- freeParams fbody
