@@ -89,7 +89,7 @@ compileMemblockDeref = zipWith deref
     deref (v1, v2) (ty, MC.Prim) = [C.cdecl|$ty:ty $id:v1 = $id:(getName v2);|]
     deref (v1, v2) (_, MC.RawMem) = [C.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
     deref (v1, v2) (ty, MC.MemBlock) = [C.cdecl|uniform $ty:ty $id:v1 = *$id:(getName v2);|]
-
+ 
 ispcDef :: MC.DefSpecifier
 ispcDef s f = do
   s' <- MC.multicoreName s
@@ -319,7 +319,7 @@ compileOp (ISPCKernel body free') = do
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
         mapM_ GC.item body'
-        free_mem <- GC.freeAllocatedMem
+        free_mem <- GC.freeAllocatedMemNoError
 
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]

@@ -83,6 +83,23 @@ static uniform int memblock_unref(uniform struct futhark_context * varying ctx,
 }
 
 
+extern unmasked int memblock_alloc(uniform struct futhark_context * uniform ctx,
+				  uniform struct memblock * uniform block,
+				  uniform int64_t size,
+				  uniform const char * uniform block_desc);
+
+static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
+				  uniform struct memblock * varying block,
+				  varying int64_t size,
+				  uniform const char * uniform block_desc)
+{
+  foreach_active(i){
+    memblock_alloc((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
+		   (uniform struct memblock * uniform)(extract((varying int64_t)block,i)),
+		   extract(size, i),
+		   block_desc);
+  }
+}
 
 static int memblock_set (struct futhark_context *ctx, struct memblock *lhs, struct memblock *rhs, const char *lhs_desc) {
   int ret = memblock_unref(ctx,  lhs, 0); //TODO(K, O): Make error handling

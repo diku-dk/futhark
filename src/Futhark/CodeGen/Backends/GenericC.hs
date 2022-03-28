@@ -76,6 +76,7 @@ module Futhark.CodeGen.Backends.GenericC
     fatMemType,
     declAllocatedMem,
     freeAllocatedMem,
+    freeAllocatedMemNoError,
     collect,
 
     -- * Building Blocks
@@ -257,8 +258,18 @@ errorMsgString (ErrorMsg parts) = do
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   pure (mconcat formatstrs, formatargs)
 
+freeAllocatedMem'
+  :: (VName -> Space -> CompilerM op s ())
+  -> CompilerM op s [C.BlockItem]
+freeAllocatedMem' f = collect $ mapM_ (uncurry f) =<< gets compDeclaredMem
+
+
 freeAllocatedMem :: CompilerM op s [C.BlockItem]
-freeAllocatedMem = collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+freeAllocatedMem = freeAllocatedMem' unRefMem
+
+freeAllocatedMemNoError :: CompilerM op s [C.BlockItem]
+freeAllocatedMemNoError = freeAllocatedMem' unRefMemNoError
+
 
 declAllocatedMem :: CompilerM op s [C.BlockItem]
 declAllocatedMem = collect $ mapM_ f =<< gets compDeclaredMem
@@ -832,16 +843,29 @@ setMem dest src space = do
                   }|]
       _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
-unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
-unRefMem mem space = do
+unRefMem' :: C.ToExp a => a -> Space -> (Space -> a -> String -> C.Stm) -> CompilerM op s ()
+unRefMem' mem space cstm = do
   refcount <- fatMemory space
   cached <- isJust <$> cacheMem mem
   let mem_s = pretty $ C.toExp mem noLoc
   when (refcount && not cached) $
-    stm
-      [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
-                  return 1;
-                }|]
+    stm $ cstm space mem mem_s
+
+unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
+unRefMem mem space = unRefMem' mem space cstm
+  where
+    cstm = \s m m_s ->
+             [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, $string:m_s) != 0) {
+                         return 1;
+                       }|]
+
+unRefMemNoError :: C.ToExp a => a -> Space -> CompilerM op s ()
+unRefMemNoError  mem space = unRefMem' mem space cstm
+  where
+    cstm = \s m _ ->
+             [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, 0) != 0) {
+                         return 1;
+                       }|]
 
 allocMem ::
   (C.ToExp a, C.ToExp b) =>
