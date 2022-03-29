@@ -91,12 +91,12 @@ data FusionEnv = FusionEnv
     -- nodeMap :: M.Map VName [VName],
     vNameSource :: VNameSource,
     scope :: Scope SOACS,
-    reachabilityG :: G.Gr () (),
+    --reachabilityG :: G.Gr () (),
     producerMapping :: M.Map VName Node
   }
 
 freshFusionEnv :: Scope SOACS -> FusionEnv
-freshFusionEnv stms_scope = FusionEnv {vNameSource = blankNameSource, scope = stms_scope, reachabilityG = empty, producerMapping = M.empty}
+freshFusionEnv stms_scope = FusionEnv {vNameSource = blankNameSource, scope = stms_scope, producerMapping = M.empty}
 
 newtype FusionEnvM a = FusionEnvM (State FusionEnv a)
   deriving
@@ -340,10 +340,11 @@ contractEdge :: Node -> DepContext -> DepGraphAug
 contractEdge n2 cxt g = do
   let n1 = node' cxt
 
-  -- Modify reachabilityG
-  rg <- gets reachabilityG
-  let newContext = mergedContext () (context rg n1) (context rg n2)
-  modify (\s -> s {reachabilityG = (&) newContext $ delNodes [n1, n2] rg})
+  -- -- Modify reachabilityG
+  -- rg <- gets reachabilityG
+  -- let newContext = mergedContext () (context rg n1) (context rg n2)
+  -- modify (\s -> s {reachabilityG = (&) newContext $ delNodes [n1, n2] rg})
+
   pure $ (&) cxt $ delNodes [n1, n2] g
 -- BUG: should modify name_mappings
 

@@ -28,7 +28,7 @@ import Futhark.Util (splitAt3)
 
 import Futhark.Optimise.GraphRep
 import qualified Data.Graph.Inductive.Query.DFS as Q
-import qualified Data.Graph.Inductive.Query.TransClos as TC
+--import qualified Data.Graph.Inductive.Query.TransClos as TC
 import Data.Graph.Inductive.Graph
 -- import qualified Control.Monad.Identity as Control.Monad
 
@@ -111,34 +111,32 @@ fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
 -- main fusion function.
 fuseGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM [Stm SOACS]
 fuseGraph stms results inputs = do
-    old_reachabilityG <- trace (unlines (map ppr stms)) $ gets reachabilityG
+    -- old_reachabilityG <- trace (unlines (map ppr stms)) $ gets reachabilityG
     old_mappings <- gets producerMapping
     graph_not_fused <- mkDepGraph stms results (trace (show inputs) inputs)
  -- I have no idea why this is neccessary
 
     oldScope <- gets scope
     modify (\s -> s {scope = M.union (scopeOf stms) oldScope})
-    modify (\s -> s {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused})
-    rg' <- gets reachabilityG
-    let graph_not_fused' = trace (show "COMPONENTS: " ++ show (Q.scc rg')) $ trace (pprg graph_not_fused) graph_not_fused
+    -- modify (\s -> s {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused})
+    -- rg' <- gets reachabilityG
+    let graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
     graph_fused <-  doAllFusion graph_not_fused'
     let graph_fused' = trace (pprg graph_fused) graph_fused
-    rg <- gets reachabilityG
-    let stms_new = trace (show "COMPONENTS: " ++ show (Q.scc rg)) linearizeGraph graph_fused'
-    modify (\s -> s{reachabilityG = old_reachabilityG, producerMapping=old_mappings} )
+    -- rg <- gets reachabilityG
+    let stms_new = linearizeGraph graph_fused'
+    modify (\s -> s{producerMapping=old_mappings} )
     return $ trace (unlines (map ppr stms_new)) stms_new
 
 
-unreachableEitherDir :: Node -> Node -> FusionEnvM Bool
-unreachableEitherDir a b = do
-  b1 <- reachable a b
-  b2 <- reachable b a
+unreachableEitherDir :: DepGraph -> Node -> Node -> FusionEnvM Bool
+unreachableEitherDir g a b = do
+  b1 <- reachable g a b
+  b2 <- reachable g b a
   pure $ not (b1 || b2)
 
-reachable :: Node -> Node -> FusionEnvM Bool
-reachable source target = do
-  rg <- gets reachabilityG
-  pure $ hasEdge rg (source, target)
+reachable :: DepGraph -> Node -> Node -> FusionEnvM Bool
+reachable g source target = pure $ target `elem` Q.reachable source g
 
 
 linearizeGraph :: DepGraph -> [Stm SOACS]
@@ -210,7 +208,7 @@ vFusionFeasability g n1 n2 =
   do
     --let b1 = all isDep edges || all (==n2) nodesN1
     let b2 = not (any isInf (edgesBetween g n1 n2))
-    reach <- mapM (reachable n2) (filter (/=n2) (pre g n1))
+    reach <- mapM (reachable g n2) (filter (/=n2) (pre g n1))
     pure $ b2 && all not reach
 
 -- horizontally_fusible_groups :: DepGraph -> [[DepNode]]
@@ -236,7 +234,7 @@ vFusionFeasability g n1 n2 =
 --     case fuseStms [] s1 s2 of
 
 -- todo: add length check
-hFusionFeasability :: Node -> Node -> FusionEnvM Bool
+hFusionFeasability :: DepGraph -> Node -> Node -> FusionEnvM Bool
 hFusionFeasability = unreachableEitherDir
   -- lessThanOneDep n1 && lessThanOneDep n2
   -- where
@@ -349,7 +347,7 @@ tryFuseNodesInGraph2 :: Node -> Node -> DepGraphAug
 tryFuseNodesInGraph2 node_1 node_2 g
   | not (gelem node_1 g && gelem node_2 g) = pure g
   | otherwise = do
-    b <- hFusionFeasability node_1 node_2
+    b <- hFusionFeasability g node_1 node_2
     if b then case fuseContexts2 (context g node_1) (context g node_2) of
       Just new_Context -> contractEdge node_2 new_Context g
       Nothing -> pure g
