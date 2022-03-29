@@ -1259,8 +1259,8 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
       (neg_offset, pos_offset) =
         partition AlgSimplify2.negated $
           AlgSimplify2.simplifySofP $ offset1 `AlgSimplify2.sub` offset2
-      interval1' = joinDims $ sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride)) interval1
-      interval2' = joinDims $ sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride)) interval2
+      interval1' = fixPoint (mergeDims . joinDims) $ reverse $ sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride)) interval1
+      interval2' = fixPoint (mergeDims . joinDims) $ reverse $ sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride)) interval2
       (interval1'', interval2'') =
         unzip $
           reverse $
@@ -1310,6 +1310,16 @@ joinDims = helper []
     helper acc [x] = reverse $ x : acc
     helper acc (x : y : rest) =
       if stride x == stride y && lowerBound x == 0 && lowerBound y == 0
+        then helper acc $ x {numElements = numElements x * numElements y} : rest
+        else helper (x : acc) (y : rest)
+
+mergeDims :: [Interval] -> [Interval]
+mergeDims = helper [] . reverse
+  where
+    helper acc [] = acc
+    helper acc [x] = x : acc
+    helper acc (x : y : rest) =
+      if stride x * numElements x == stride y && lowerBound x == 0 && lowerBound y == 0
         then helper acc $ x {numElements = numElements x * numElements y} : rest
         else helper (x : acc) (y : rest)
 

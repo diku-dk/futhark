@@ -409,6 +409,7 @@ aggSummaryMapPartial scalars ((gtid, size) : rest) as = do
 
 aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
 aggSummaryMapPartialOne _ _ Undeterminable = return Undeterminable
+aggSummaryMapPartialOne scalars (gtid, (Constant n)) (Set lmads0) | oneIsh n = return mempty
 aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
   mapM
     helper
