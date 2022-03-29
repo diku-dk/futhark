@@ -50,17 +50,17 @@ knownLambda lam =
       n2 = length (lambdaParams lam) `div` 2
       (xps, yps) = splitAt n2 (lambdaParams lam)
 
-      okComponent c = join $ find isJust $ okBinOp c <$> bodyStms body
+      okComponent c = asum $ okBinOp c <$> bodyStms body
       okBinOp
         (xp, yp, SubExpRes _ (Var r))
         (Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
           guard ((patElemName pe == r)
-               && ((x == paramName xp && y == paramName yp)
-                || (y == paramName xp && x == paramName yp)))
+              && ((x == paramName xp && y == paramName yp)
+              || (y == paramName xp && x == paramName yp)))
             *> knownBinOp op
       okBinOp _ _ = Nothing
    in guard ((n2 * 2 == length (lambdaParams lam)) && (n2 == length (bodyResult body)))
-        *> join (find isJust $ okComponent <$> zip3 xps yps (bodyResult body))
+        *> asum (okComponent <$> zip3 xps yps (bodyResult body))
 
 -- Arrays for storing worker results.
 resultArrays :: String -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
@@ -145,7 +145,7 @@ genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
           -- Read next value
           sComment "Read next values" $
             forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-              getExtract kernel j $ collect $ 
+              getExtract kernel j $ collect $
                 copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
           -- Scan body
           sComment "Scan body" $
