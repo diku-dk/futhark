@@ -261,12 +261,10 @@ scanStage3 kernel pat space scan_ops kbody = do
                 copyDWIMFix acc vec_is ne []
           sIf (start .==. 0) read_neutral read_carry_in
         pure acc
-    -- Is it nested arrays?
 
     (if kernel then inISPC else id) $ do
       generateChunkLoop "SegScan" kernel $
         genScanLoop pat space kbody scan_ops local_accs False kernel
-  -- TODO (obp): Extract this
 
   free_params' <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'

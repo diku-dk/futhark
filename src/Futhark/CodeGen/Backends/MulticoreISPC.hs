@@ -111,19 +111,6 @@ isConstExp = isSimple . constFoldPrimExp
   where isSimple (ValueExp _) = True
         isSimple _ = False
 
--- TODO(pema, K): This is a ugly hack to work around the 'size' fields
--- of lexical memory blocks. At the ImpCode level, we cannot know if the size
--- field exists or not, since we can't know if the memory block is lexical.
--- Therefore, the size field is not a free variable in Allocation statements
--- and will be missing the from the free variable set. We manually add it here.
-addLexicalMemSize :: Param -> GC.CompilerM op s [Param]
-addLexicalMemSize param@(MemParam name _) = do
-  cached <- GC.cacheMem name
-  case cached of
-    Just cur_size -> pure [param, ScalarParam cur_size (IntType Int64)]
-    _ -> pure [param]
-addLexicalMemSize param = pure [param]
-
 -- Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
 compileCodeISPC :: Imp.Variability -> MCCode -> GC.CompilerM Multicore s ()
@@ -269,8 +256,6 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
         $items:toC
     }|]
 
-  free_all_mem <- GC.freeAllocatedMem -- TODO(pema): Should this free be here?
-
   void $ ispcDef "" $ \_ -> return [C.cedecl| extern "C" unmasked uniform int $id:schedn 
                                                 (struct futhark_context uniform * uniform ctx, 
                                                 struct $id:fstruct uniform * uniform args, 
@@ -292,14 +277,11 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   GC.items [C.citems|
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
     if (err != 0) {
-      $items:free_all_mem
       goto cleanup;
     }|]
   GC.stm [C.cstm|$escstm:("#endif")|]
 
-compileOp (ISPCKernel body free') = do
-  free <- concat <$> mapM addLexicalMemSize free'
-
+compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
 
@@ -341,11 +323,9 @@ compileOp (ISPCKernel body free') = do
 
   -- Generate C code to call into ISPC kernel
   let ispc_inputs_free = compileKernelInputs free_args free_ctypes
-  free_all_mem <- GC.freeAllocatedMem -- TODO(pema): Should this be here?
   GC.items [C.citems|
     err = $id:ispcShim(ctx, start, end, $args:ispc_inputs_free);
     if (err != 0) {
-      $items:free_all_mem
       goto cleanup;
     }|]
 
