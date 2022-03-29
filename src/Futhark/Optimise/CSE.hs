@@ -300,6 +300,8 @@ instance
   where
   cseInOp (GPU.SegOp op) = GPU.SegOp <$> cseInOp op
   cseInOp (GPU.OtherOp op) = GPU.OtherOp <$> cseInOp op
+  cseInOp (GPU.GPUBody types body) =
+    subCSE $ GPU.GPUBody types <$> cseInBody (map (const Observe) types) body
   cseInOp x = return x
 
 instance
