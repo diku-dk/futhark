@@ -37,6 +37,11 @@ import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSou
 --import Futhark.Pass
 import Data.Foldable (foldlM)
 import Control.Monad.State
+import qualified Data.Graph.Inductive.Query as Q
+import Debug.Trace (trace)
+import qualified Data.Graph.Inductive.Query.TransClos as TC
+-- import Data.List (sortBy)
+-- import qualified Data.Graph.Inductive.Query.TransClos as TC
 --import Futhark.CodeGen.Backends.CCUDA.Boilerplate (failureSwitch)
 
 
@@ -329,7 +334,7 @@ addCons = augWithFun getStmCons
 -- Merges two contexts
 mergedContext :: (Eq b) => a -> Context a b -> Context a b -> Context a b
 mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
-  let new_inp  = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (inp1  `L.union` inp2) in
+  let new_inp = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (inp1  `L.union` inp2) in
   let new_out = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (out1 `L.union` out2)
   in (new_inp, n1, mergedlabel, new_out)
   -- update keys of gen n2 with n1
@@ -343,8 +348,14 @@ contractEdge n2 cxt g = do
   -- Modify reachabilityG
   rg <- gets reachabilityG
   let newContext = mergedContext () (context rg n1) (context rg n2)
-  modify (\s -> s {reachabilityG = (&) newContext $ delNodes [n1, n2] rg})
-  pure $ (&) cxt $ delNodes [n1, n2] g
+  -- modify (\s -> s {reachabilityG = (&) newContext $ delNodes [n1, n2] rg})
+  let g' =  (&) cxt $ delNodes [n1, n2] (trace (show "L: " ++ show (filter (\x -> length x > 1) (Q.scc g))) g)
+  let tc1 = TC.tc $ nmap (const ()) g'
+  let tc2 = (&) newContext $ delNodes [n1, n2] rg
+  trace (show "tg: " ++ show (tc1 == tc2))$ modify (\s -> s {reachabilityG = tc2})
+  pure g'
+
+
 -- BUG: should modify name_mappings
 
 

@@ -5044,38 +5044,38 @@ int futhark_context_clear_caches(struct futhark_context *ctx)
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_39834,
-                             struct memblock *mem_out_p_39835,
-                             struct memblock *mem_out_p_39836,
-                             struct memblock *mem_out_p_39837,
-                             struct memblock *mem_out_p_39838,
-                             struct memblock *mem_out_p_39839,
-                             struct memblock *mem_out_p_39840,
-                             struct memblock tketau_mem_37755,
-                             struct memblock tketaup1_mem_37756,
-                             struct memblock tketaum1_mem_37757,
-                             struct memblock dtketau_mem_37758,
-                             struct memblock dtketaup1_mem_37759,
-                             struct memblock dtketaum1_mem_37760,
-                             struct memblock utau_mem_37761,
-                             struct memblock vtau_mem_37762,
-                             struct memblock wtau_mem_37763,
-                             struct memblock maskU_mem_37764,
-                             struct memblock maskV_mem_37765,
-                             struct memblock maskW_mem_37766,
-                             struct memblock dxt_mem_37767,
-                             struct memblock dxu_mem_37768,
-                             struct memblock dyt_mem_37769,
-                             struct memblock dyu_mem_37770,
-                             struct memblock dzzt_mem_37771,
-                             struct memblock dzzw_mem_37772,
-                             struct memblock cost_mem_37773,
-                             struct memblock cosu_mem_37774,
-                             struct memblock kbot_mem_37775,
-                             struct memblock kappaM_mem_37776,
-                             struct memblock mxl_mem_37777,
-                             struct memblock forc_mem_37778,
-                             struct memblock forc_tke_surface_mem_37779,
+                             struct memblock *mem_out_p_39807,
+                             struct memblock *mem_out_p_39808,
+                             struct memblock *mem_out_p_39809,
+                             struct memblock *mem_out_p_39810,
+                             struct memblock *mem_out_p_39811,
+                             struct memblock *mem_out_p_39812,
+                             struct memblock *mem_out_p_39813,
+                             struct memblock tketau_mem_37734,
+                             struct memblock tketaup1_mem_37735,
+                             struct memblock tketaum1_mem_37736,
+                             struct memblock dtketau_mem_37737,
+                             struct memblock dtketaup1_mem_37738,
+                             struct memblock dtketaum1_mem_37739,
+                             struct memblock utau_mem_37740,
+                             struct memblock vtau_mem_37741,
+                             struct memblock wtau_mem_37742,
+                             struct memblock maskU_mem_37743,
+                             struct memblock maskV_mem_37744,
+                             struct memblock maskW_mem_37745,
+                             struct memblock dxt_mem_37746,
+                             struct memblock dxu_mem_37747,
+                             struct memblock dyt_mem_37748,
+                             struct memblock dyu_mem_37749,
+                             struct memblock dzzt_mem_37750,
+                             struct memblock dzzw_mem_37751,
+                             struct memblock cost_mem_37752,
+                             struct memblock cosu_mem_37753,
+                             struct memblock kbot_mem_37754,
+                             struct memblock kappaM_mem_37755,
+                             struct memblock mxl_mem_37756,
+                             struct memblock forc_mem_37757,
+                             struct memblock forc_tke_surface_mem_37758,
                              int64_t xdim_31402, int64_t ydim_31403,
                              int64_t zzdim_31404);
 
@@ -5407,180 +5407,198 @@ const int64_t *futhark_shape_f32_3d(struct futhark_context *ctx,
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_39834,
-                             struct memblock *mem_out_p_39835,
-                             struct memblock *mem_out_p_39836,
-                             struct memblock *mem_out_p_39837,
-                             struct memblock *mem_out_p_39838,
-                             struct memblock *mem_out_p_39839,
-                             struct memblock *mem_out_p_39840,
-                             struct memblock tketau_mem_37755,
-                             struct memblock tketaup1_mem_37756,
-                             struct memblock tketaum1_mem_37757,
-                             struct memblock dtketau_mem_37758,
-                             struct memblock dtketaup1_mem_37759,
-                             struct memblock dtketaum1_mem_37760,
-                             struct memblock utau_mem_37761,
-                             struct memblock vtau_mem_37762,
-                             struct memblock wtau_mem_37763,
-                             struct memblock maskU_mem_37764,
-                             struct memblock maskV_mem_37765,
-                             struct memblock maskW_mem_37766,
-                             struct memblock dxt_mem_37767,
-                             struct memblock dxu_mem_37768,
-                             struct memblock dyt_mem_37769,
-                             struct memblock dyu_mem_37770,
-                             struct memblock dzzt_mem_37771,
-                             struct memblock dzzw_mem_37772,
-                             struct memblock cost_mem_37773,
-                             struct memblock cosu_mem_37774,
-                             struct memblock kbot_mem_37775,
-                             struct memblock kappaM_mem_37776,
-                             struct memblock mxl_mem_37777,
-                             struct memblock forc_mem_37778,
-                             struct memblock forc_tke_surface_mem_37779,
+                             struct memblock *mem_out_p_39807,
+                             struct memblock *mem_out_p_39808,
+                             struct memblock *mem_out_p_39809,
+                             struct memblock *mem_out_p_39810,
+                             struct memblock *mem_out_p_39811,
+                             struct memblock *mem_out_p_39812,
+                             struct memblock *mem_out_p_39813,
+                             struct memblock tketau_mem_37734,
+                             struct memblock tketaup1_mem_37735,
+                             struct memblock tketaum1_mem_37736,
+                             struct memblock dtketau_mem_37737,
+                             struct memblock dtketaup1_mem_37738,
+                             struct memblock dtketaum1_mem_37739,
+                             struct memblock utau_mem_37740,
+                             struct memblock vtau_mem_37741,
+                             struct memblock wtau_mem_37742,
+                             struct memblock maskU_mem_37743,
+                             struct memblock maskV_mem_37744,
+                             struct memblock maskW_mem_37745,
+                             struct memblock dxt_mem_37746,
+                             struct memblock dxu_mem_37747,
+                             struct memblock dyt_mem_37748,
+                             struct memblock dyu_mem_37749,
+                             struct memblock dzzt_mem_37750,
+                             struct memblock dzzw_mem_37751,
+                             struct memblock cost_mem_37752,
+                             struct memblock cosu_mem_37753,
+                             struct memblock kbot_mem_37754,
+                             struct memblock kappaM_mem_37755,
+                             struct memblock mxl_mem_37756,
+                             struct memblock forc_mem_37757,
+                             struct memblock forc_tke_surface_mem_37758,
                              int64_t xdim_31402, int64_t ydim_31403,
                              int64_t zzdim_31404)
 {
     (void) ctx;
     
     int err = 0;
-    size_t mem_37784_cached_sizze_39841 = 0;
-    unsigned char *mem_37784 = NULL;
-    size_t mem_37885_cached_sizze_39842 = 0;
-    unsigned char *mem_37885 = NULL;
-    size_t mem_37900_cached_sizze_39843 = 0;
-    unsigned char *mem_37900 = NULL;
-    size_t mem_37917_cached_sizze_39844 = 0;
-    unsigned char *mem_37917 = NULL;
-    size_t mem_37935_cached_sizze_39845 = 0;
-    unsigned char *mem_37935 = NULL;
-    size_t mem_37982_cached_sizze_39846 = 0;
-    unsigned char *mem_37982 = NULL;
-    size_t mem_38029_cached_sizze_39847 = 0;
-    unsigned char *mem_38029 = NULL;
-    size_t mem_38076_cached_sizze_39848 = 0;
-    unsigned char *mem_38076 = NULL;
-    size_t mem_38137_cached_sizze_39849 = 0;
-    unsigned char *mem_38137 = NULL;
-    size_t mem_38140_cached_sizze_39850 = 0;
-    unsigned char *mem_38140 = NULL;
-    size_t mem_38143_cached_sizze_39851 = 0;
-    unsigned char *mem_38143 = NULL;
-    size_t mem_38146_cached_sizze_39852 = 0;
-    unsigned char *mem_38146 = NULL;
-    size_t mem_38197_cached_sizze_39853 = 0;
-    unsigned char *mem_38197 = NULL;
-    size_t mem_38200_cached_sizze_39854 = 0;
-    unsigned char *mem_38200 = NULL;
-    size_t mem_38203_cached_sizze_39855 = 0;
-    unsigned char *mem_38203 = NULL;
-    size_t mem_38206_cached_sizze_39856 = 0;
-    unsigned char *mem_38206 = NULL;
-    size_t mem_38257_cached_sizze_39857 = 0;
-    unsigned char *mem_38257 = NULL;
-    size_t mem_38272_cached_sizze_39858 = 0;
-    unsigned char *mem_38272 = NULL;
-    size_t mem_38275_cached_sizze_39859 = 0;
-    unsigned char *mem_38275 = NULL;
-    size_t mem_38302_cached_sizze_39860 = 0;
-    unsigned char *mem_38302 = NULL;
-    size_t mem_38305_cached_sizze_39861 = 0;
-    unsigned char *mem_38305 = NULL;
-    size_t mem_38332_cached_sizze_39862 = 0;
-    unsigned char *mem_38332 = NULL;
-    size_t mem_38347_cached_sizze_39863 = 0;
-    unsigned char *mem_38347 = NULL;
-    size_t mem_38350_cached_sizze_39864 = 0;
-    unsigned char *mem_38350 = NULL;
-    size_t mem_38377_cached_sizze_39865 = 0;
-    unsigned char *mem_38377 = NULL;
-    size_t mem_38380_cached_sizze_39866 = 0;
-    unsigned char *mem_38380 = NULL;
-    size_t mem_38407_cached_sizze_39867 = 0;
-    unsigned char *mem_38407 = NULL;
-    size_t mem_38493_cached_sizze_39868 = 0;
-    unsigned char *mem_38493 = NULL;
-    size_t mem_38595_cached_sizze_39869 = 0;
-    unsigned char *mem_38595 = NULL;
-    size_t mem_38643_cached_sizze_39870 = 0;
-    unsigned char *mem_38643 = NULL;
-    size_t mem_38746_cached_sizze_39871 = 0;
-    unsigned char *mem_38746 = NULL;
-    size_t mem_38849_cached_sizze_39872 = 0;
-    unsigned char *mem_38849 = NULL;
-    size_t mem_38952_cached_sizze_39873 = 0;
-    unsigned char *mem_38952 = NULL;
-    size_t mem_39055_cached_sizze_39874 = 0;
-    unsigned char *mem_39055 = NULL;
-    size_t mem_39158_cached_sizze_39875 = 0;
-    unsigned char *mem_39158 = NULL;
-    size_t mem_39261_cached_sizze_39876 = 0;
-    unsigned char *mem_39261 = NULL;
-    size_t mem_39364_cached_sizze_39877 = 0;
-    unsigned char *mem_39364 = NULL;
-    size_t mem_39467_cached_sizze_39878 = 0;
-    unsigned char *mem_39467 = NULL;
-    struct memblock mem_39581;
+    size_t mem_37763_cached_sizze_39814 = 0;
+    unsigned char *mem_37763 = NULL;
+    size_t mem_37768_cached_sizze_39815 = 0;
+    unsigned char *mem_37768 = NULL;
+    size_t mem_37773_cached_sizze_39816 = 0;
+    unsigned char *mem_37773 = NULL;
+    size_t mem_37778_cached_sizze_39817 = 0;
+    unsigned char *mem_37778 = NULL;
+    size_t mem_38173_cached_sizze_39818 = 0;
+    unsigned char *mem_38173 = NULL;
+    size_t mem_38188_cached_sizze_39819 = 0;
+    unsigned char *mem_38188 = NULL;
+    size_t mem_38205_cached_sizze_39820 = 0;
+    unsigned char *mem_38205 = NULL;
+    size_t mem_38210_cached_sizze_39821 = 0;
+    unsigned char *mem_38210 = NULL;
+    size_t mem_38215_cached_sizze_39822 = 0;
+    unsigned char *mem_38215 = NULL;
+    size_t mem_38220_cached_sizze_39823 = 0;
+    unsigned char *mem_38220 = NULL;
+    size_t mem_38280_cached_sizze_39824 = 0;
+    unsigned char *mem_38280 = NULL;
+    size_t mem_38327_cached_sizze_39825 = 0;
+    unsigned char *mem_38327 = NULL;
+    size_t mem_38374_cached_sizze_39826 = 0;
+    unsigned char *mem_38374 = NULL;
+    size_t mem_38421_cached_sizze_39827 = 0;
+    unsigned char *mem_38421 = NULL;
+    size_t mem_38482_cached_sizze_39828 = 0;
+    unsigned char *mem_38482 = NULL;
+    size_t mem_38485_cached_sizze_39829 = 0;
+    unsigned char *mem_38485 = NULL;
+    size_t mem_38488_cached_sizze_39830 = 0;
+    unsigned char *mem_38488 = NULL;
+    size_t mem_38491_cached_sizze_39831 = 0;
+    unsigned char *mem_38491 = NULL;
+    size_t mem_38542_cached_sizze_39832 = 0;
+    unsigned char *mem_38542 = NULL;
+    size_t mem_38545_cached_sizze_39833 = 0;
+    unsigned char *mem_38545 = NULL;
+    size_t mem_38548_cached_sizze_39834 = 0;
+    unsigned char *mem_38548 = NULL;
+    size_t mem_38551_cached_sizze_39835 = 0;
+    unsigned char *mem_38551 = NULL;
+    size_t mem_38602_cached_sizze_39836 = 0;
+    unsigned char *mem_38602 = NULL;
+    size_t mem_38617_cached_sizze_39837 = 0;
+    unsigned char *mem_38617 = NULL;
+    size_t mem_38620_cached_sizze_39838 = 0;
+    unsigned char *mem_38620 = NULL;
+    size_t mem_38647_cached_sizze_39839 = 0;
+    unsigned char *mem_38647 = NULL;
+    size_t mem_38650_cached_sizze_39840 = 0;
+    unsigned char *mem_38650 = NULL;
+    size_t mem_38677_cached_sizze_39841 = 0;
+    unsigned char *mem_38677 = NULL;
+    size_t mem_38692_cached_sizze_39842 = 0;
+    unsigned char *mem_38692 = NULL;
+    size_t mem_38695_cached_sizze_39843 = 0;
+    unsigned char *mem_38695 = NULL;
+    size_t mem_38722_cached_sizze_39844 = 0;
+    unsigned char *mem_38722 = NULL;
+    size_t mem_38725_cached_sizze_39845 = 0;
+    unsigned char *mem_38725 = NULL;
+    size_t mem_38752_cached_sizze_39846 = 0;
+    unsigned char *mem_38752 = NULL;
+    size_t mem_39090_cached_sizze_39847 = 0;
+    unsigned char *mem_39090 = NULL;
+    size_t mem_39193_cached_sizze_39848 = 0;
+    unsigned char *mem_39193 = NULL;
+    size_t mem_39296_cached_sizze_39849 = 0;
+    unsigned char *mem_39296 = NULL;
+    size_t mem_39398_cached_sizze_39850 = 0;
+    unsigned char *mem_39398 = NULL;
+    size_t mem_39403_cached_sizze_39851 = 0;
+    unsigned char *mem_39403 = NULL;
+    struct memblock mem_39560;
     
-    mem_39581.references = NULL;
+    mem_39560.references = NULL;
     
-    struct memblock mem_39576;
+    struct memblock mem_39555;
     
-    mem_39576.references = NULL;
+    mem_39555.references = NULL;
     
-    struct memblock mem_39570;
+    struct memblock mem_39549;
     
-    mem_39570.references = NULL;
+    mem_39549.references = NULL;
     
-    struct memblock mem_out_39758;
+    struct memblock mem_out_39731;
     
-    mem_out_39758.references = NULL;
+    mem_out_39731.references = NULL;
     
-    struct memblock mem_out_39757;
+    struct memblock mem_out_39730;
     
-    mem_out_39757.references = NULL;
+    mem_out_39730.references = NULL;
     
-    struct memblock mem_out_39756;
+    struct memblock mem_out_39729;
     
-    mem_out_39756.references = NULL;
+    mem_out_39729.references = NULL;
     
-    struct memblock mem_out_39755;
+    struct memblock mem_out_39728;
     
-    mem_out_39755.references = NULL;
+    mem_out_39728.references = NULL;
     
-    struct memblock mem_out_39754;
+    struct memblock mem_out_39727;
     
-    mem_out_39754.references = NULL;
+    mem_out_39727.references = NULL;
     
-    struct memblock mem_out_39753;
+    struct memblock mem_out_39726;
     
-    mem_out_39753.references = NULL;
+    mem_out_39726.references = NULL;
     
-    struct memblock mem_out_39752;
+    struct memblock mem_out_39725;
     
-    mem_out_39752.references = NULL;
+    mem_out_39725.references = NULL;
     
     int64_t y_35716 = sub64(xdim_31402, (int64_t) 2);
     int64_t y_35717 = sub64(ydim_31403, (int64_t) 2);
     int64_t y_35718 = sub64(zzdim_31404, (int64_t) 1);
-    int64_t binop_x_37780 = xdim_31402 * ydim_31403;
-    int64_t binop_x_37781 = zzdim_31404 * binop_x_37780;
-    int64_t binop_y_37782 = (int64_t) 4 * binop_x_37781;
-    int64_t bytes_37783 = smax64((int64_t) 0, binop_y_37782);
+    int64_t binop_x_37759 = xdim_31402 * ydim_31403;
+    int64_t binop_x_37760 = zzdim_31404 * binop_x_37759;
+    int64_t binop_y_37761 = (int64_t) 4 * binop_x_37760;
+    int64_t bytes_37762 = smax64((int64_t) 0, binop_y_37761);
     
-    if (mem_37784_cached_sizze_39841 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_37784,
-                              &mem_37784_cached_sizze_39841, bytes_37783);
+    if (mem_37763_cached_sizze_39814 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_37763,
+                              &mem_37763_cached_sizze_39814, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_37768_cached_sizze_39815 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_37768,
+                              &mem_37768_cached_sizze_39815, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_37773_cached_sizze_39816 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_37773,
+                              &mem_37773_cached_sizze_39816, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_37778_cached_sizze_39817 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_37778,
+                              &mem_37778_cached_sizze_39817, bytes_37762);
         if (err != FUTHARK_SUCCESS)
             goto cleanup;
     }
     
-    int64_t ctx_val_37797 = ydim_31403 * zzdim_31404;
+    int64_t ctx_val_37824 = ydim_31403 * zzdim_31404;
     
-    for (int64_t i_37136 = 0; i_37136 < xdim_31402; i_37136++) {
-        bool cond_35721 = sle64((int64_t) 2, i_37136);
-        bool cond_t_res_35722 = slt64(i_37136, y_35716);
+    for (int64_t i_37166 = 0; i_37166 < xdim_31402; i_37166++) {
+        bool cond_35721 = sle64((int64_t) 2, i_37166);
+        bool cond_t_res_35722 = slt64(i_37166, y_35716);
         bool x_35723 = cond_35721 && cond_t_res_35722;
         
         for (int64_t i_37132 = 0; i_37132 < ydim_31403; i_37132++) {
@@ -5614,13 +5632,13 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float y_35740;
                     
-                    y_35740 = ((float *) dzzt_mem_37771.mem)[i_35735];
+                    y_35740 = ((float *) dzzt_mem_37750.mem)[i_35735];
                     
                     float x_35741 = 1.0F / y_35740;
                     float x_35742 = 0.5F * x_35741;
                     float x_35755;
                     
-                    x_35755 = ((float *) kappaM_mem_37776.mem)[i_37136 *
+                    x_35755 = ((float *) kappaM_mem_37755.mem)[i_37166 *
                                                                (zzdim_31404 *
                                                                 ydim_31403) +
                                                                i_37132 *
@@ -5632,7 +5650,7 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!bounds_check_35738) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37136, ", ",
+                                      "Index [", (long long) i_37166, ", ",
                                       (long long) i_37132, ", ",
                                       (long long) i_35735,
                                       "] out of bounds for array of shape [",
@@ -5646,7 +5664,7 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float y_35759;
                     
-                    y_35759 = ((float *) kappaM_mem_37776.mem)[i_37136 *
+                    y_35759 = ((float *) kappaM_mem_37755.mem)[i_37166 *
                                                                (zzdim_31404 *
                                                                 ydim_31403) +
                                                                i_37132 *
@@ -5660,1790 +5678,44 @@ static int futrts_entry_main(struct futhark_context *ctx,
                 } else {
                     defunc_0_f_res_35734 = 0.0F;
                 }
-                ((float *) mem_37784)[i_37136 * ctx_val_37797 + i_37132 *
+                ((float *) mem_37763)[i_37166 * ctx_val_37824 + i_37132 *
                                       zzdim_31404 + i_37128] =
                     defunc_0_f_res_35734;
             }
         }
-    }
-    
-    int32_t i64_res_35854 = sext_i64_i32(ydim_31403);
-    int32_t y_35855 = sub32(i64_res_35854, 2);
-    int32_t i64_res_35852 = sext_i64_i32(xdim_31402);
-    int32_t y_35853 = sub32(i64_res_35852, 2);
-    int64_t binop_y_37883 = (int64_t) 4 * zzdim_31404;
-    int64_t bytes_37884 = smax64((int64_t) 0, binop_y_37883);
-    
-    if (mem_37885_cached_sizze_39842 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_37885,
-                              &mem_37885_cached_sizze_39842, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37140 = 0; i_37140 < zzdim_31404; i_37140++) {
-        int32_t defunc_0_f_res_35851 = sext_i64_i32(i_37140);
         
-        ((int32_t *) mem_37885)[i_37140] = defunc_0_f_res_35851;
-    }
-    
-    int64_t binop_y_37898 = (int64_t) 4 * ydim_31403;
-    int64_t bytes_37899 = smax64((int64_t) 0, binop_y_37898);
-    
-    if (mem_37900_cached_sizze_39843 < bytes_37899) {
-        err = lexical_realloc(&ctx->error, &mem_37900,
-                              &mem_37900_cached_sizze_39843, bytes_37899);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37144 = 0; i_37144 < ydim_31403; i_37144++) {
-        int32_t defunc_0_f_res_35847 = sext_i64_i32(i_37144);
+        bool cond_36502 = sle64((int64_t) 1, i_37166);
+        bool x_36504 = cond_t_res_35722 && cond_36502;
         
-        ((int32_t *) mem_37900)[i_37144] = defunc_0_f_res_35847;
-    }
-    if (mem_37917_cached_sizze_39844 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_37917,
-                              &mem_37917_cached_sizze_39844, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    
-    int64_t binop_x_37932 = ydim_31403 * zzdim_31404;
-    int64_t binop_y_37933 = (int64_t) 4 * binop_x_37932;
-    int64_t bytes_37934 = smax64((int64_t) 0, binop_y_37933);
-    
-    if (mem_37935_cached_sizze_39845 < bytes_37934) {
-        err = lexical_realloc(&ctx->error, &mem_37935,
-                              &mem_37935_cached_sizze_39845, bytes_37934);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_37982_cached_sizze_39846 < bytes_37934) {
-        err = lexical_realloc(&ctx->error, &mem_37982,
-                              &mem_37982_cached_sizze_39846, bytes_37934);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38029_cached_sizze_39847 < bytes_37934) {
-        err = lexical_realloc(&ctx->error, &mem_38029,
-                              &mem_38029_cached_sizze_39847, bytes_37934);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38076_cached_sizze_39848 < bytes_37934) {
-        err = lexical_realloc(&ctx->error, &mem_38076,
-                              &mem_38076_cached_sizze_39848, bytes_37934);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38137_cached_sizze_39849 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38137,
-                              &mem_38137_cached_sizze_39849, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38140_cached_sizze_39850 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38140,
-                              &mem_38140_cached_sizze_39850, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38143_cached_sizze_39851 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38143,
-                              &mem_38143_cached_sizze_39851, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38146_cached_sizze_39852 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38146,
-                              &mem_38146_cached_sizze_39852, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38197_cached_sizze_39853 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38197,
-                              &mem_38197_cached_sizze_39853, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38200_cached_sizze_39854 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38200,
-                              &mem_38200_cached_sizze_39854, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38203_cached_sizze_39855 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38203,
-                              &mem_38203_cached_sizze_39855, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38206_cached_sizze_39856 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38206,
-                              &mem_38206_cached_sizze_39856, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38257_cached_sizze_39857 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38257,
-                              &mem_38257_cached_sizze_39857, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38272_cached_sizze_39858 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38272,
-                              &mem_38272_cached_sizze_39858, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38275_cached_sizze_39859 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38275,
-                              &mem_38275_cached_sizze_39859, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38302_cached_sizze_39860 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38302,
-                              &mem_38302_cached_sizze_39860, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38305_cached_sizze_39861 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38305,
-                              &mem_38305_cached_sizze_39861, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38332_cached_sizze_39862 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38332,
-                              &mem_38332_cached_sizze_39862, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38347_cached_sizze_39863 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38347,
-                              &mem_38347_cached_sizze_39863, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38350_cached_sizze_39864 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38350,
-                              &mem_38350_cached_sizze_39864, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38377_cached_sizze_39865 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38377,
-                              &mem_38377_cached_sizze_39865, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38380_cached_sizze_39866 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38380,
-                              &mem_38380_cached_sizze_39866, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    if (mem_38407_cached_sizze_39867 < bytes_37884) {
-        err = lexical_realloc(&ctx->error, &mem_38407,
-                              &mem_38407_cached_sizze_39867, bytes_37884);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37270 = 0; i_37270 < xdim_31402; i_37270++) {
-        int32_t defunc_0_f_res_35843 = sext_i64_i32(i_37270);
-        bool cond_35859 = sle32(2, defunc_0_f_res_35843);
-        bool cond_t_res_35860 = slt32(defunc_0_f_res_35843, y_35853);
-        bool x_35861 = cond_35859 && cond_t_res_35860;
-        
-        for (int64_t i_37152 = 0; i_37152 < ydim_31403; i_37152++) {
-            int32_t x_35864;
-            
-            x_35864 = ((int32_t *) mem_37900)[i_37152];
-            
-            bool cond_t_res_35865 = sle32(2, x_35864);
-            bool x_35866 = x_35861 && cond_t_res_35865;
-            bool cond_t_res_35867 = slt32(x_35864, y_35855);
-            bool x_35868 = x_35866 && cond_t_res_35867;
-            
-            for (int64_t i_37148 = 0; i_37148 < zzdim_31404; i_37148++) {
-                float x_35870;
-                
-                x_35870 = ((float *) tketau_mem_37755.mem)[i_37270 *
-                                                           (zzdim_31404 *
-                                                            ydim_31403) +
-                                                           i_37152 *
-                                                           zzdim_31404 +
-                                                           i_37148];
-                
-                int32_t x_35871;
-                
-                x_35871 = ((int32_t *) mem_37885)[i_37148];
-                
-                float max_res_35872 = fmax32(0.0F, x_35870);
-                float sqrt_res_35873;
-                
-                sqrt_res_35873 = futrts_sqrt32(max_res_35872);
-                
-                float defunc_3_f_res_35874;
-                
-                if (x_35868) {
-                    int64_t x_35875 = sext_i32_i64(defunc_0_f_res_35843);
-                    bool x_35876 = sle64((int64_t) 0, x_35875);
-                    bool y_35877 = slt64(x_35875, xdim_31402);
-                    bool bounds_check_35878 = x_35876 && y_35877;
-                    int64_t y_35879 = sext_i32_i64(x_35864);
-                    bool x_35880 = sle64((int64_t) 0, y_35879);
-                    bool y_35881 = slt64(y_35879, ydim_31403);
-                    bool bounds_check_35882 = x_35880 && y_35881;
-                    bool index_ok_35883 = bounds_check_35878 &&
-                         bounds_check_35882;
-                    bool index_certs_35884;
-                    
-                    if (!index_ok_35883) {
-                        ctx->error =
-                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) x_35875, ", ",
-                                      (long long) y_35879,
-                                      "] out of bounds for array of shape [",
-                                      (long long) xdim_31402, "][",
-                                      (long long) ydim_31403, "].",
-                                      "-> #0  sample_programs/tke.fut:135:38-46\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                        err = FUTHARK_PROGRAM_ERROR;
-                        goto cleanup;
-                    }
-                    
-                    int32_t x_35885;
-                    
-                    x_35885 = ((int32_t *) kbot_mem_37775.mem)[x_35875 *
-                                                               ydim_31403 +
-                                                               y_35879];
-                    
-                    int32_t ks_val_35886 = sub32(x_35885, 1);
-                    bool land_mask_35887 = sle32(0, ks_val_35886);
-                    bool edge_mask_t_res_35888 = x_35871 == ks_val_35886;
-                    bool x_35889 = land_mask_35887 && edge_mask_t_res_35888;
-                    bool water_mask_t_res_35890 = sle32(ks_val_35886, x_35871);
-                    bool x_35891 = land_mask_35887 && water_mask_t_res_35890;
-                    bool cond_35892 = !x_35891;
-                    float defunc_3_f_res_t_res_35893;
-                    
-                    if (cond_35892) {
-                        defunc_3_f_res_t_res_35893 = 1.0F;
-                    } else {
-                        float defunc_3_f_res_t_res_f_res_35894;
-                        
-                        if (x_35889) {
-                            int64_t zz_35895 = sext_i32_i64(x_35871);
-                            bool x_35896 = sle64((int64_t) 0, zz_35895);
-                            bool y_35897 = slt64(zz_35895, zzdim_31404);
-                            bool bounds_check_35898 = x_35896 && y_35897;
-                            bool y_35899 = bounds_check_35878 &&
-                                 bounds_check_35898;
-                            bool index_ok_35900 = bounds_check_35882 && y_35899;
-                            bool index_certs_35901;
-                            
-                            if (!index_ok_35900) {
-                                ctx->error =
-                                    msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                              "Index [", (long long) x_35875,
-                                              ", ", (long long) y_35879, ", ",
-                                              (long long) zz_35895,
-                                              "] out of bounds for array of shape [",
-                                              (long long) xdim_31402, "][",
-                                              (long long) ydim_31403, "][",
-                                              (long long) zzdim_31404, "].",
-                                              "-> #0  sample_programs/tke.fut:143:33-44\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                                err = FUTHARK_PROGRAM_ERROR;
-                                goto cleanup;
-                            }
-                            
-                            float x_35902;
-                            
-                            x_35902 = ((float *) mem_37784)[x_35875 *
-                                                            ctx_val_37797 +
-                                                            y_35879 *
-                                                            zzdim_31404 +
-                                                            zz_35895];
-                            
-                            bool index_certs_35903;
-                            
-                            if (!bounds_check_35898) {
-                                ctx->error =
-                                    msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                              "Index [", (long long) zz_35895,
-                                              "] out of bounds for array of shape [",
-                                              (long long) zzdim_31404, "].",
-                                              "-> #0  sample_programs/tke.fut:143:48-53\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                                err = FUTHARK_PROGRAM_ERROR;
-                                goto cleanup;
-                            }
-                            
-                            float y_35904;
-                            
-                            y_35904 = ((float *) dzzw_mem_37772.mem)[zz_35895];
-                            
-                            float y_35905 = x_35902 / y_35904;
-                            float x_35906 = 1.0F + y_35905;
-                            float y_35908;
-                            
-                            y_35908 = ((float *) mxl_mem_37777.mem)[x_35875 *
-                                                                    (zzdim_31404 *
-                                                                     ydim_31403) +
-                                                                    y_35879 *
-                                                                    zzdim_31404 +
-                                                                    zz_35895];
-                            
-                            float x_35909 = 0.7F / y_35908;
-                            float y_35910 = sqrt_res_35873 * x_35909;
-                            float defunc_3_f_res_t_res_f_res_t_res_35911 =
-                                  x_35906 + y_35910;
-                            
-                            defunc_3_f_res_t_res_f_res_35894 =
-                                defunc_3_f_res_t_res_f_res_t_res_35911;
-                        } else {
-                            bool cond_35912 = slt32(0, x_35871);
-                            int32_t i64_res_35913 = sext_i64_i32(zzdim_31404);
-                            int32_t y_35914 = sub32(i64_res_35913, 1);
-                            bool cond_t_res_35915 = slt32(x_35871, y_35914);
-                            bool x_35916 = cond_35912 && cond_t_res_35915;
-                            float defunc_3_f_res_t_res_f_res_f_res_35917;
-                            
-                            if (x_35916) {
-                                int64_t zz_35918 = sext_i32_i64(x_35871);
-                                bool x_35919 = sle64((int64_t) 0, zz_35918);
-                                bool y_35920 = slt64(zz_35918, zzdim_31404);
-                                bool bounds_check_35921 = x_35919 && y_35920;
-                                bool y_35922 = bounds_check_35878 &&
-                                     bounds_check_35921;
-                                bool index_ok_35923 = bounds_check_35882 &&
-                                     y_35922;
-                                bool index_certs_35924;
-                                
-                                if (!index_ok_35923) {
-                                    ctx->error =
-                                        msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                                  "Index [",
-                                                  (long long) x_35875, ", ",
-                                                  (long long) y_35879, ", ",
-                                                  (long long) zz_35918,
-                                                  "] out of bounds for array of shape [",
-                                                  (long long) xdim_31402, "][",
-                                                  (long long) ydim_31403, "][",
-                                                  (long long) zzdim_31404, "].",
-                                                  "-> #0  sample_programs/tke.fut:147:43-56\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                                    err = FUTHARK_PROGRAM_ERROR;
-                                    goto cleanup;
-                                }
-                                
-                                float x_35925;
-                                
-                                x_35925 = ((float *) mem_37784)[x_35875 *
-                                                                ctx_val_37797 +
-                                                                y_35879 *
-                                                                zzdim_31404 +
-                                                                zz_35918];
-                                
-                                int32_t i_35926 = sub32(x_35871, 1);
-                                int64_t i_35927 = sext_i32_i64(i_35926);
-                                bool x_35928 = sle64((int64_t) 0, i_35927);
-                                bool y_35929 = slt64(i_35927, zzdim_31404);
-                                bool bounds_check_35930 = x_35928 && y_35929;
-                                bool y_35931 = bounds_check_35878 &&
-                                     bounds_check_35930;
-                                bool index_ok_35932 = bounds_check_35882 &&
-                                     y_35931;
-                                bool index_certs_35933;
-                                
-                                if (!index_ok_35932) {
-                                    ctx->error =
-                                        msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                                  "Index [",
-                                                  (long long) x_35875, ", ",
-                                                  (long long) y_35879, ", ",
-                                                  (long long) i_35927,
-                                                  "] out of bounds for array of shape [",
-                                                  (long long) xdim_31402, "][",
-                                                  (long long) ydim_31403, "][",
-                                                  (long long) zzdim_31404, "].",
-                                                  "-> #0  sample_programs/tke.fut:147:60-75\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                                    err = FUTHARK_PROGRAM_ERROR;
-                                    goto cleanup;
-                                }
-                                
-                                float y_35934;
-                                
-                                y_35934 = ((float *) mem_37784)[x_35875 *
-                                                                ctx_val_37797 +
-                                                                y_35879 *
-                                                                zzdim_31404 +
-                                                                i_35927];
-                                
-                                float x_35935 = x_35925 + y_35934;
-                                bool index_certs_35936;
-                                
-                                if (!bounds_check_35921) {
-                                    ctx->error =
-                                        msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                                  "Index [",
-                                                  (long long) zz_35918,
-                                                  "] out of bounds for array of shape [",
-                                                  (long long) zzdim_31404, "].",
-                                                  "-> #0  sample_programs/tke.fut:147:80-85\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                                    err = FUTHARK_PROGRAM_ERROR;
-                                    goto cleanup;
-                                }
-                                
-                                float y_35937;
-                                
-                                y_35937 =
-                                    ((float *) dzzw_mem_37772.mem)[zz_35918];
-                                
-                                float y_35938 = x_35935 / y_35937;
-                                float x_35939 = 1.0F + y_35938;
-                                float x_35941 = 0.7F * sqrt_res_35873;
-                                float y_35942;
-                                
-                                y_35942 =
-                                    ((float *) mxl_mem_37777.mem)[x_35875 *
-                                                                  (zzdim_31404 *
-                                                                   ydim_31403) +
-                                                                  y_35879 *
-                                                                  zzdim_31404 +
-                                                                  zz_35918];
-                                
-                                float y_35943 = x_35941 / y_35942;
-                                float
-                                defunc_3_f_res_t_res_f_res_f_res_t_res_35944 =
-                                x_35939 + y_35943;
-                                
-                                defunc_3_f_res_t_res_f_res_f_res_35917 =
-                                    defunc_3_f_res_t_res_f_res_f_res_t_res_35944;
-                            } else {
-                                bool cond_35945 = x_35871 == y_35914;
-                                float
-                                defunc_3_f_res_t_res_f_res_f_res_f_res_35946;
-                                
-                                if (cond_35945) {
-                                    int32_t i_35947 = sub32(x_35871, 1);
-                                    int64_t i_35948 = sext_i32_i64(i_35947);
-                                    bool x_35949 = sle64((int64_t) 0, i_35948);
-                                    bool y_35950 = slt64(i_35948, zzdim_31404);
-                                    bool bounds_check_35951 = x_35949 &&
-                                         y_35950;
-                                    bool y_35952 = bounds_check_35878 &&
-                                         bounds_check_35951;
-                                    bool index_ok_35953 = bounds_check_35882 &&
-                                         y_35952;
-                                    bool index_certs_35954;
-                                    
-                                    if (!index_ok_35953) {
-                                        ctx->error =
-                                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                                      "Index [",
-                                                      (long long) x_35875, ", ",
-                                                      (long long) y_35879, ", ",
-                                                      (long long) i_35948,
-                                                      "] out of bounds for array of shape [",
-                                                      (long long) xdim_31402,
-                                                      "][",
-                                                      (long long) ydim_31403,
-                                                      "][",
-                                                      (long long) zzdim_31404,
-                                                      "].",
-                                                      "-> #0  sample_programs/tke.fut:151:42-57\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                                        err = FUTHARK_PROGRAM_ERROR;
-                                        goto cleanup;
-                                    }
-                                    
-                                    float x_35955;
-                                    
-                                    x_35955 = ((float *) mem_37784)[x_35875 *
-                                                                    ctx_val_37797 +
-                                                                    y_35879 *
-                                                                    zzdim_31404 +
-                                                                    i_35948];
-                                    
-                                    int64_t zz_35956 = sext_i32_i64(x_35871);
-                                    bool x_35957 = sle64((int64_t) 0, zz_35956);
-                                    bool y_35958 = slt64(zz_35956, zzdim_31404);
-                                    bool bounds_check_35959 = x_35957 &&
-                                         y_35958;
-                                    bool index_certs_35960;
-                                    
-                                    if (!bounds_check_35959) {
-                                        ctx->error =
-                                            msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                                      "Index [",
-                                                      (long long) zz_35956,
-                                                      "] out of bounds for array of shape [",
-                                                      (long long) zzdim_31404,
-                                                      "].",
-                                                      "-> #0  sample_programs/tke.fut:151:68-73\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                                        err = FUTHARK_PROGRAM_ERROR;
-                                        goto cleanup;
-                                    }
-                                    
-                                    float y_35961;
-                                    
-                                    y_35961 =
-                                        ((float *) dzzw_mem_37772.mem)[zz_35956];
-                                    
-                                    float y_35962 = 0.5F * y_35961;
-                                    float y_35963 = x_35955 / y_35962;
-                                    float x_35964 = 1.0F + y_35963;
-                                    bool y_35966 = bounds_check_35878 &&
-                                         bounds_check_35959;
-                                    bool index_ok_35967 = bounds_check_35882 &&
-                                         y_35966;
-                                    bool index_certs_35968;
-                                    
-                                    if (!index_ok_35967) {
-                                        ctx->error =
-                                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                                      "Index [",
-                                                      (long long) x_35875, ", ",
-                                                      (long long) y_35879, ", ",
-                                                      (long long) zz_35956,
-                                                      "] out of bounds for array of shape [",
-                                                      (long long) xdim_31402,
-                                                      "][",
-                                                      (long long) ydim_31403,
-                                                      "][",
-                                                      (long long) zzdim_31404,
-                                                      "].",
-                                                      "-> #0  sample_programs/tke.fut:152:52-61\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
-                                        err = FUTHARK_PROGRAM_ERROR;
-                                        goto cleanup;
-                                    }
-                                    
-                                    float y_35969;
-                                    
-                                    y_35969 =
-                                        ((float *) mxl_mem_37777.mem)[x_35875 *
-                                                                      (zzdim_31404 *
-                                                                       ydim_31403) +
-                                                                      y_35879 *
-                                                                      zzdim_31404 +
-                                                                      zz_35956];
-                                    
-                                    float x_35970 = 0.7F / y_35969;
-                                    float y_35971 = sqrt_res_35873 * x_35970;
-                                    float
-                                    defunc_3_f_res_t_res_f_res_f_res_f_res_t_res_35972
-                                    = x_35964 + y_35971;
-                                    
-                                    defunc_3_f_res_t_res_f_res_f_res_f_res_35946 =
-                                        defunc_3_f_res_t_res_f_res_f_res_f_res_t_res_35972;
-                                } else {
-                                    defunc_3_f_res_t_res_f_res_f_res_f_res_35946 =
-                                        0.0F;
-                                }
-                                defunc_3_f_res_t_res_f_res_f_res_35917 =
-                                    defunc_3_f_res_t_res_f_res_f_res_f_res_35946;
-                            }
-                            defunc_3_f_res_t_res_f_res_35894 =
-                                defunc_3_f_res_t_res_f_res_f_res_35917;
-                        }
-                        defunc_3_f_res_t_res_35893 =
-                            defunc_3_f_res_t_res_f_res_35894;
-                    }
-                    defunc_3_f_res_35874 = defunc_3_f_res_t_res_35893;
-                } else {
-                    defunc_3_f_res_35874 = 0.0F;
-                }
-                ((float *) mem_37935)[i_37152 * zzdim_31404 + i_37148] =
-                    defunc_3_f_res_35874;
-            }
-        }
-        
-        bool cond_36029 = sle64((int64_t) 2, i_37270);
-        bool cond_t_res_36030 = slt64(i_37270, y_35716);
-        bool x_36031 = cond_36029 && cond_t_res_36030;
-        
-        for (int64_t i_37160 = 0; i_37160 < ydim_31403; i_37160++) {
-            bool cond_t_res_36034 = sle64((int64_t) 2, i_37160);
-            bool x_36035 = x_36031 && cond_t_res_36034;
-            bool cond_t_res_36036 = slt64(i_37160, y_35717);
-            bool x_36037 = x_36035 && cond_t_res_36036;
-            
-            for (int64_t i_37156 = 0; i_37156 < zzdim_31404; i_37156++) {
-                float defunc_0_f_res_36040;
-                
-                if (x_36037) {
-                    int32_t x_36049;
-                    
-                    x_36049 = ((int32_t *) kbot_mem_37775.mem)[i_37270 *
-                                                               ydim_31403 +
-                                                               i_37160];
-                    
-                    int32_t ks_val_36050 = sub32(x_36049, 1);
-                    bool land_mask_36051 = sle32(0, ks_val_36050);
-                    int32_t i64_res_36052 = sext_i64_i32(i_37156);
-                    bool water_mask_t_res_36053 = sle32(ks_val_36050,
-                                                        i64_res_36052);
-                    bool x_36054 = land_mask_36051 && water_mask_t_res_36053;
-                    bool cond_36055 = !x_36054;
-                    float defunc_0_f_res_t_res_36056;
-                    
-                    if (cond_36055) {
-                        defunc_0_f_res_t_res_36056 = 0.0F;
-                    } else {
-                        float x_36063;
-                        
-                        x_36063 = ((float *) tketau_mem_37755.mem)[i_37270 *
-                                                                   (zzdim_31404 *
-                                                                    ydim_31403) +
-                                                                   i_37160 *
-                                                                   zzdim_31404 +
-                                                                   i_37156];
-                        
-                        float y_36064;
-                        
-                        y_36064 = ((float *) forc_mem_37778.mem)[i_37270 *
-                                                                 (zzdim_31404 *
-                                                                  ydim_31403) +
-                                                                 i_37160 *
-                                                                 zzdim_31404 +
-                                                                 i_37156];
-                        
-                        float tmp_36066 = x_36063 + y_36064;
-                        bool cond_36068 = i_37156 == y_35718;
-                        float defunc_0_f_res_t_res_f_res_36069;
-                        
-                        if (cond_36068) {
-                            float y_36070;
-                            
-                            y_36070 =
-                                ((float *) forc_tke_surface_mem_37779.mem)[i_37270 *
-                                                                           ydim_31403 +
-                                                                           i_37160];
-                            
-                            float y_36073;
-                            
-                            y_36073 = ((float *) dzzw_mem_37772.mem)[i_37156];
-                            
-                            float y_36074 = 0.5F * y_36073;
-                            float y_36075 = y_36070 / y_36074;
-                            float defunc_0_f_res_t_res_f_res_t_res_36076 =
-                                  tmp_36066 + y_36075;
-                            
-                            defunc_0_f_res_t_res_f_res_36069 =
-                                defunc_0_f_res_t_res_f_res_t_res_36076;
-                        } else {
-                            defunc_0_f_res_t_res_f_res_36069 = tmp_36066;
-                        }
-                        defunc_0_f_res_t_res_36056 =
-                            defunc_0_f_res_t_res_f_res_36069;
-                    }
-                    defunc_0_f_res_36040 = defunc_0_f_res_t_res_36056;
-                } else {
-                    defunc_0_f_res_36040 = 0.0F;
-                }
-                ((float *) mem_37982)[i_37160 * zzdim_31404 + i_37156] =
-                    defunc_0_f_res_36040;
-            }
-        }
-        for (int64_t i_37168 = 0; i_37168 < ydim_31403; i_37168++) {
-            bool cond_t_res_35986 = sle64((int64_t) 2, i_37168);
-            bool x_35987 = cond_t_res_35986 && x_36031;
-            bool cond_t_res_35988 = slt64(i_37168, y_35717);
-            bool x_35989 = x_35987 && cond_t_res_35988;
-            
-            for (int64_t i_37164 = 0; i_37164 < zzdim_31404; i_37164++) {
-                bool cond_t_res_35992 = slt64(i_37164, y_35718);
-                bool x_35993 = x_35989 && cond_t_res_35992;
-                float defunc_0_f_res_35994;
-                
-                if (x_35993) {
-                    int32_t x_36003;
-                    
-                    x_36003 = ((int32_t *) kbot_mem_37775.mem)[i_37270 *
-                                                               ydim_31403 +
-                                                               i_37168];
-                    
-                    int32_t ks_val_36004 = sub32(x_36003, 1);
-                    bool land_mask_36005 = sle32(0, ks_val_36004);
-                    int32_t i64_res_36006 = sext_i64_i32(i_37164);
-                    bool water_mask_t_res_36007 = sle32(ks_val_36004,
-                                                        i64_res_36006);
-                    bool x_36008 = land_mask_36005 && water_mask_t_res_36007;
-                    bool cond_36009 = !x_36008;
-                    float defunc_0_f_res_t_res_36010;
-                    
-                    if (cond_36009) {
-                        defunc_0_f_res_t_res_36010 = 0.0F;
-                    } else {
-                        float negate_arg_36017;
-                        
-                        negate_arg_36017 = ((float *) mem_37784)[i_37270 *
-                                                                 ctx_val_37797 +
-                                                                 i_37168 *
-                                                                 zzdim_31404 +
-                                                                 i_37164];
-                        
-                        float x_36018 = 0.0F - negate_arg_36017;
-                        float y_36020;
-                        
-                        y_36020 = ((float *) dzzw_mem_37772.mem)[i_37164];
-                        
-                        float defunc_0_f_res_t_res_f_res_36021 = x_36018 /
-                              y_36020;
-                        
-                        defunc_0_f_res_t_res_36010 =
-                            defunc_0_f_res_t_res_f_res_36021;
-                    }
-                    defunc_0_f_res_35994 = defunc_0_f_res_t_res_36010;
-                } else {
-                    defunc_0_f_res_35994 = 0.0F;
-                }
-                ((float *) mem_38029)[i_37168 * zzdim_31404 + i_37164] =
-                    defunc_0_f_res_35994;
-            }
-        }
-        for (int64_t i_37176 = 0; i_37176 < ydim_31403; i_37176++) {
-            bool cond_t_res_35774 = sle64((int64_t) 2, i_37176);
-            bool x_35775 = cond_t_res_35774 && x_36031;
-            bool cond_t_res_35776 = slt64(i_37176, y_35717);
-            bool x_35777 = x_35775 && cond_t_res_35776;
-            
-            for (int64_t i_37172 = 0; i_37172 < zzdim_31404; i_37172++) {
-                float defunc_0_f_res_35780;
-                
-                if (x_35777) {
-                    int32_t x_35789;
-                    
-                    x_35789 = ((int32_t *) kbot_mem_37775.mem)[i_37270 *
-                                                               ydim_31403 +
-                                                               i_37176];
-                    
-                    int32_t ks_val_35790 = sub32(x_35789, 1);
-                    bool land_mask_35791 = sle32(0, ks_val_35790);
-                    int32_t i64_res_35792 = sext_i64_i32(i_37172);
-                    bool edge_mask_t_res_35793 = i64_res_35792 == ks_val_35790;
-                    bool x_35794 = land_mask_35791 && edge_mask_t_res_35793;
-                    bool water_mask_t_res_35795 = sle32(ks_val_35790,
-                                                        i64_res_35792);
-                    bool x_35796 = land_mask_35791 && water_mask_t_res_35795;
-                    bool cond_f_res_35797 = !x_35796;
-                    bool x_35798 = !x_35794;
-                    bool y_35799 = cond_f_res_35797 && x_35798;
-                    bool cond_35800 = x_35794 || y_35799;
-                    float defunc_0_f_res_t_res_35801;
-                    
-                    if (cond_35800) {
-                        defunc_0_f_res_t_res_35801 = 0.0F;
-                    } else {
-                        bool cond_35802 = slt64((int64_t) 0, i_37172);
-                        bool cond_t_res_35804 = slt64(i_37172, y_35718);
-                        bool x_35805 = cond_35802 && cond_t_res_35804;
-                        float defunc_0_f_res_t_res_f_res_35806;
-                        
-                        if (x_35805) {
-                            int64_t i_35807 = sub64(i_37172, (int64_t) 1);
-                            bool x_35808 = sle64((int64_t) 0, i_35807);
-                            bool y_35809 = slt64(i_35807, zzdim_31404);
-                            bool bounds_check_35810 = x_35808 && y_35809;
-                            bool index_certs_35813;
-                            
-                            if (!bounds_check_35810) {
-                                ctx->error =
-                                    msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                              "Index [", (long long) i_37270,
-                                              ", ", (long long) i_37176, ", ",
-                                              (long long) i_35807,
-                                              "] out of bounds for array of shape [",
-                                              (long long) xdim_31402, "][",
-                                              (long long) ydim_31403, "][",
-                                              (long long) zzdim_31404, "].",
-                                              "-> #0  sample_programs/tke.fut:123:43-56\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:112:17-128:17\n   #10 sample_programs/tke.fut:57:1-363:81\n");
-                                err = FUTHARK_PROGRAM_ERROR;
-                                goto cleanup;
-                            }
-                            
-                            float negate_arg_35814;
-                            
-                            negate_arg_35814 = ((float *) mem_37784)[i_37270 *
-                                                                     ctx_val_37797 +
-                                                                     i_37176 *
-                                                                     zzdim_31404 +
-                                                                     i_35807];
-                            
-                            float x_35815 = 0.0F - negate_arg_35814;
-                            float y_35820;
-                            
-                            y_35820 = ((float *) dzzw_mem_37772.mem)[i_37172];
-                            
-                            float defunc_0_f_res_t_res_f_res_t_res_35821 =
-                                  x_35815 / y_35820;
-                            
-                            defunc_0_f_res_t_res_f_res_35806 =
-                                defunc_0_f_res_t_res_f_res_t_res_35821;
-                        } else {
-                            bool cond_35822 = i_37172 == y_35718;
-                            float defunc_0_f_res_t_res_f_res_f_res_35823;
-                            
-                            if (cond_35822) {
-                                int64_t i_35824 = sub64(i_37172, (int64_t) 1);
-                                bool x_35825 = sle64((int64_t) 0, i_35824);
-                                bool y_35826 = slt64(i_35824, zzdim_31404);
-                                bool bounds_check_35827 = x_35825 && y_35826;
-                                bool index_certs_35830;
-                                
-                                if (!bounds_check_35827) {
-                                    ctx->error =
-                                        msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                                  "Index [",
-                                                  (long long) i_37270, ", ",
-                                                  (long long) i_37176, ", ",
-                                                  (long long) i_35824,
-                                                  "] out of bounds for array of shape [",
-                                                  (long long) xdim_31402, "][",
-                                                  (long long) ydim_31403, "][",
-                                                  (long long) zzdim_31404, "].",
-                                                  "-> #0  sample_programs/tke.fut:125:43-58\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:112:17-128:17\n   #10 sample_programs/tke.fut:57:1-363:81\n");
-                                    err = FUTHARK_PROGRAM_ERROR;
-                                    goto cleanup;
-                                }
-                                
-                                float negate_arg_35831;
-                                
-                                negate_arg_35831 =
-                                    ((float *) mem_37784)[i_37270 *
-                                                          ctx_val_37797 +
-                                                          i_37176 *
-                                                          zzdim_31404 +
-                                                          i_35824];
-                                
-                                float x_35832 = 0.0F - negate_arg_35831;
-                                float y_35837;
-                                
-                                y_35837 =
-                                    ((float *) dzzw_mem_37772.mem)[i_37172];
-                                
-                                float y_35838 = 0.5F * y_35837;
-                                float
-                                defunc_0_f_res_t_res_f_res_f_res_t_res_35839 =
-                                x_35832 / y_35838;
-                                
-                                defunc_0_f_res_t_res_f_res_f_res_35823 =
-                                    defunc_0_f_res_t_res_f_res_f_res_t_res_35839;
-                            } else {
-                                defunc_0_f_res_t_res_f_res_f_res_35823 = 0.0F;
-                            }
-                            defunc_0_f_res_t_res_f_res_35806 =
-                                defunc_0_f_res_t_res_f_res_f_res_35823;
-                        }
-                        defunc_0_f_res_t_res_35801 =
-                            defunc_0_f_res_t_res_f_res_35806;
-                    }
-                    defunc_0_f_res_35780 = defunc_0_f_res_t_res_35801;
-                } else {
-                    defunc_0_f_res_35780 = 0.0F;
-                }
-                ((float *) mem_38076)[i_37176 * zzdim_31404 + i_37172] =
-                    defunc_0_f_res_35780;
-            }
-        }
-        for (int64_t i_37266 = 0; i_37266 < ydim_31403; i_37266++) {
-            float b0_36088;
-            
-            b0_36088 = ((float *) mem_37935)[i_37266 * zzdim_31404];
-            for (int64_t i_37186 = 0; i_37186 < zzdim_31404; i_37186++) {
-                float x_elem_37122;
-                
-                x_elem_37122 = ((float *) mem_37935)[i_37266 * zzdim_31404 +
-                                                     i_37186];
-                
-                float x_elem_37123;
-                
-                x_elem_37123 = ((float *) mem_38076)[i_37266 * zzdim_31404 +
-                                                     i_37186];
-                
-                bool cond_36094 = slt64((int64_t) 0, i_37186);
-                float defunc_0_f_res_36095;
-                
-                if (cond_36094) {
-                    defunc_0_f_res_36095 = 1.0F;
-                } else {
-                    defunc_0_f_res_36095 = 0.0F;
-                }
-                
-                float defunc_0_f_res_36096;
-                
-                if (cond_36094) {
-                    defunc_0_f_res_36096 = 0.0F;
-                } else {
-                    defunc_0_f_res_36096 = 1.0F;
-                }
-                
-                float defunc_0_f_res_36097;
-                
-                if (cond_36094) {
-                    defunc_0_f_res_36097 = x_elem_37122;
-                } else {
-                    defunc_0_f_res_36097 = 1.0F;
-                }
-                
-                float defunc_0_f_res_36098;
-                
-                if (cond_36094) {
-                    int64_t i_36101 = sub64(i_37186, (int64_t) 1);
-                    float y_36102;
-                    
-                    y_36102 = ((float *) mem_38029)[i_37266 * zzdim_31404 +
-                                                    i_36101];
-                    
-                    float y_36103 = y_36102 * x_elem_37123;
-                    float defunc_0_f_res_t_res_36104 = 0.0F - y_36103;
-                    
-                    defunc_0_f_res_36098 = defunc_0_f_res_t_res_36104;
-                } else {
-                    defunc_0_f_res_36098 = 0.0F;
-                }
-                ((float *) mem_38137)[i_37186] = defunc_0_f_res_36097;
-                ((float *) mem_38140)[i_37186] = defunc_0_f_res_36098;
-                ((float *) mem_38143)[i_37186] = defunc_0_f_res_36095;
-                ((float *) mem_38146)[i_37186] = defunc_0_f_res_36096;
-            }
-            
-            float discard_37208;
-            float discard_37209;
-            float discard_37210;
-            float discard_37211;
-            float scanacc_37195;
-            float scanacc_37196;
-            float scanacc_37197;
-            float scanacc_37198;
-            
-            scanacc_37195 = 1.0F;
-            scanacc_37196 = 0.0F;
-            scanacc_37197 = 0.0F;
-            scanacc_37198 = 1.0F;
-            for (int64_t i_37203 = 0; i_37203 < zzdim_31404; i_37203++) {
-                float x_36134;
-                
-                x_36134 = ((float *) mem_38137)[i_37203];
-                
-                float x_36135;
-                
-                x_36135 = ((float *) mem_38140)[i_37203];
-                
-                float x_36136;
-                
-                x_36136 = ((float *) mem_38143)[i_37203];
-                
-                float x_36137;
-                
-                x_36137 = ((float *) mem_38146)[i_37203];
-                
-                float y_36117 = x_36134 * scanacc_37195;
-                float value_36118 = 1.0F / y_36117;
-                float y_36119 = x_36135 * scanacc_37197;
-                float x_36120 = y_36117 + y_36119;
-                float defunc_1_op_res_36121 = value_36118 * x_36120;
-                float x_36122 = x_36134 * scanacc_37196;
-                float y_36123 = x_36135 * scanacc_37198;
-                float x_36124 = x_36122 + y_36123;
-                float defunc_1_op_res_36125 = value_36118 * x_36124;
-                float x_36126 = x_36136 * scanacc_37195;
-                float y_36127 = x_36137 * scanacc_37197;
-                float x_36128 = x_36126 + y_36127;
-                float defunc_1_op_res_36129 = value_36118 * x_36128;
-                float x_36130 = x_36136 * scanacc_37196;
-                float y_36131 = x_36137 * scanacc_37198;
-                float x_36132 = x_36130 + y_36131;
-                float defunc_1_op_res_36133 = value_36118 * x_36132;
-                
-                ((float *) mem_38197)[i_37203] = defunc_1_op_res_36121;
-                ((float *) mem_38200)[i_37203] = defunc_1_op_res_36125;
-                ((float *) mem_38203)[i_37203] = defunc_1_op_res_36129;
-                ((float *) mem_38206)[i_37203] = defunc_1_op_res_36133;
-                
-                float scanacc_tmp_39778 = defunc_1_op_res_36121;
-                float scanacc_tmp_39779 = defunc_1_op_res_36125;
-                float scanacc_tmp_39780 = defunc_1_op_res_36129;
-                float scanacc_tmp_39781 = defunc_1_op_res_36133;
-                
-                scanacc_37195 = scanacc_tmp_39778;
-                scanacc_37196 = scanacc_tmp_39779;
-                scanacc_37197 = scanacc_tmp_39780;
-                scanacc_37198 = scanacc_tmp_39781;
-            }
-            discard_37208 = scanacc_37195;
-            discard_37209 = scanacc_37196;
-            discard_37210 = scanacc_37197;
-            discard_37211 = scanacc_37198;
-            for (int64_t i_37214 = 0; i_37214 < zzdim_31404; i_37214++) {
-                float x_36139;
-                
-                x_36139 = ((float *) mem_38197)[i_37214];
-                
-                float x_36140;
-                
-                x_36140 = ((float *) mem_38200)[i_37214];
-                
-                float x_36141;
-                
-                x_36141 = ((float *) mem_38203)[i_37214];
-                
-                float x_36142;
-                
-                x_36142 = ((float *) mem_38206)[i_37214];
-                
-                float x_36143 = b0_36088 * x_36139;
-                float x_36144 = x_36140 + x_36143;
-                float x_36145 = b0_36088 * x_36141;
-                float y_36146 = x_36142 + x_36145;
-                float defunc_0_f_res_36147 = x_36144 / y_36146;
-                
-                ((float *) mem_38257)[i_37214] = defunc_0_f_res_36147;
-            }
-            
-            float y0_36148;
-            
-            y0_36148 = ((float *) mem_37982)[i_37266 * zzdim_31404];
-            for (int64_t i_37220 = 0; i_37220 < zzdim_31404; i_37220++) {
-                float x_elem_37124;
-                
-                x_elem_37124 = ((float *) mem_37982)[i_37266 * zzdim_31404 +
-                                                     i_37220];
-                
-                float x_elem_37125;
-                
-                x_elem_37125 = ((float *) mem_38076)[i_37266 * zzdim_31404 +
-                                                     i_37220];
-                
-                bool cond_36152 = slt64((int64_t) 0, i_37220);
-                float defunc_0_f_res_36153;
-                
-                if (cond_36152) {
-                    defunc_0_f_res_36153 = x_elem_37124;
-                } else {
-                    defunc_0_f_res_36153 = 0.0F;
-                }
-                
-                float defunc_0_f_res_36154;
-                
-                if (cond_36152) {
-                    int64_t i_36157 = sub64(i_37220, (int64_t) 1);
-                    float y_36158;
-                    
-                    y_36158 = ((float *) mem_38257)[i_36157];
-                    
-                    float y_36159 = x_elem_37125 / y_36158;
-                    float defunc_0_f_res_t_res_36160 = 0.0F - y_36159;
-                    
-                    defunc_0_f_res_36154 = defunc_0_f_res_t_res_36160;
-                } else {
-                    defunc_0_f_res_36154 = 1.0F;
-                }
-                ((float *) mem_38272)[i_37220] = defunc_0_f_res_36153;
-                ((float *) mem_38275)[i_37220] = defunc_0_f_res_36154;
-            }
-            
-            float discard_37232;
-            float discard_37233;
-            float scanacc_37225;
-            float scanacc_37226;
-            
-            scanacc_37225 = 0.0F;
-            scanacc_37226 = 1.0F;
-            for (int64_t i_37229 = 0; i_37229 < zzdim_31404; i_37229++) {
-                float x_36170;
-                
-                x_36170 = ((float *) mem_38272)[i_37229];
-                
-                float x_36171;
-                
-                x_36171 = ((float *) mem_38275)[i_37229];
-                
-                float y_36167 = x_36171 * scanacc_37225;
-                float defunc_1_op_res_36168 = y_36167 + x_36170;
-                float defunc_1_op_res_36169 = x_36171 * scanacc_37226;
-                
-                ((float *) mem_38302)[i_37229] = defunc_1_op_res_36168;
-                ((float *) mem_38305)[i_37229] = defunc_1_op_res_36169;
-                
-                float scanacc_tmp_39789 = defunc_1_op_res_36168;
-                float scanacc_tmp_39790 = defunc_1_op_res_36169;
-                
-                scanacc_37225 = scanacc_tmp_39789;
-                scanacc_37226 = scanacc_tmp_39790;
-            }
-            discard_37232 = scanacc_37225;
-            discard_37233 = scanacc_37226;
-            for (int64_t i_37236 = 0; i_37236 < zzdim_31404; i_37236++) {
-                float x_36173;
-                
-                x_36173 = ((float *) mem_38302)[i_37236];
-                
-                float x_36174;
-                
-                x_36174 = ((float *) mem_38305)[i_37236];
-                
-                float y_36175 = y0_36148 * x_36174;
-                float defunc_0_f_res_36176 = x_36173 + y_36175;
-                
-                ((float *) mem_38332)[i_37236] = defunc_0_f_res_36176;
-            }
-            
-            float x_36177;
-            
-            x_36177 = ((float *) mem_38332)[y_35718];
-            
-            float y_36178;
-            
-            y_36178 = ((float *) mem_38257)[y_35718];
-            
-            float yn_36179 = x_36177 / y_36178;
-            
-            for (int64_t i_37242 = 0; i_37242 < zzdim_31404; i_37242++) {
-                int64_t x_36183 = sub64(zzdim_31404, i_37242);
-                int64_t i_36184 = sub64(x_36183, (int64_t) 1);
-                bool cond_36185 = slt64((int64_t) 0, i_37242);
-                float defunc_0_f_res_36186;
-                float defunc_0_f_res_36187;
-                
-                if (cond_36185) {
-                    float x_36188;
-                    
-                    x_36188 = ((float *) mem_38332)[i_36184];
-                    
-                    float y_36189;
-                    
-                    y_36189 = ((float *) mem_38257)[i_36184];
-                    
-                    float defunc_0_f_res_t_res_36190 = x_36188 / y_36189;
-                    float x_36191;
-                    
-                    x_36191 = ((float *) mem_38029)[i_37266 * zzdim_31404 +
-                                                    i_36184];
-                    
-                    float y_36192 = x_36191 / y_36189;
-                    float defunc_0_f_res_t_res_36193 = 0.0F - y_36192;
-                    
-                    defunc_0_f_res_36186 = defunc_0_f_res_t_res_36190;
-                    defunc_0_f_res_36187 = defunc_0_f_res_t_res_36193;
-                } else {
-                    defunc_0_f_res_36186 = 0.0F;
-                    defunc_0_f_res_36187 = 1.0F;
-                }
-                ((float *) mem_38347)[i_37242] = defunc_0_f_res_36186;
-                ((float *) mem_38350)[i_37242] = defunc_0_f_res_36187;
-            }
-            
-            float discard_37254;
-            float discard_37255;
-            float scanacc_37247;
-            float scanacc_37248;
-            
-            scanacc_37247 = 0.0F;
-            scanacc_37248 = 1.0F;
-            for (int64_t i_37251 = 0; i_37251 < zzdim_31404; i_37251++) {
-                float x_36203;
-                
-                x_36203 = ((float *) mem_38347)[i_37251];
-                
-                float x_36204;
-                
-                x_36204 = ((float *) mem_38350)[i_37251];
-                
-                float y_36200 = x_36204 * scanacc_37247;
-                float defunc_1_op_res_36201 = y_36200 + x_36203;
-                float defunc_1_op_res_36202 = x_36204 * scanacc_37248;
-                
-                ((float *) mem_38377)[i_37251] = defunc_1_op_res_36201;
-                ((float *) mem_38380)[i_37251] = defunc_1_op_res_36202;
-                
-                float scanacc_tmp_39796 = defunc_1_op_res_36201;
-                float scanacc_tmp_39797 = defunc_1_op_res_36202;
-                
-                scanacc_37247 = scanacc_tmp_39796;
-                scanacc_37248 = scanacc_tmp_39797;
-            }
-            discard_37254 = scanacc_37247;
-            discard_37255 = scanacc_37248;
-            for (int64_t i_37258 = 0; i_37258 < zzdim_31404; i_37258++) {
-                float x_36206;
-                
-                x_36206 = ((float *) mem_38377)[i_37258];
-                
-                float x_36207;
-                
-                x_36207 = ((float *) mem_38380)[i_37258];
-                
-                float y_36208 = yn_36179 * x_36207;
-                float defunc_0_f_res_36209 = x_36206 + y_36208;
-                
-                ((float *) mem_38407)[i_37258] = defunc_0_f_res_36209;
-            }
-            for (int64_t i_37262 = 0; i_37262 < zzdim_31404; i_37262++) {
-                int64_t x_36212 = sub64(zzdim_31404, i_37262);
-                int64_t i_36213 = sub64(x_36212, (int64_t) 1);
-                
-                if ((int64_t) 4 > 0)
-                    memmove(mem_37917 + (i_37270 * ctx_val_37797 + i_37266 *
-                                         zzdim_31404 + i_37262) * (int64_t) 4,
-                            mem_38407 + ((int64_t) 0 + (int64_t) 1 * i_36213) *
-                            (int64_t) 4, (int64_t) 4);
-            }
-        }
-    }
-    if (mem_38493_cached_sizze_39868 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_38493,
-                              &mem_38493_cached_sizze_39868, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37282 = 0; i_37282 < xdim_31402; i_37282++) {
-        bool cond_36225 = sle64((int64_t) 2, i_37282);
-        bool cond_t_res_36226 = slt64(i_37282, y_35716);
-        bool x_36227 = cond_36225 && cond_t_res_36226;
-        
-        for (int64_t i_37278 = 0; i_37278 < ydim_31403; i_37278++) {
-            int32_t x_36235;
-            
-            x_36235 = ((int32_t *) kbot_mem_37775.mem)[i_37282 * ydim_31403 +
-                                                       i_37278];
-            
-            int32_t ks_val_36236 = sub32(x_36235, 1);
-            bool cond_36237 = sle32(0, ks_val_36236);
-            bool cond_t_res_36238 = sle64((int64_t) 2, i_37278);
-            bool x_36239 = x_36227 && cond_t_res_36238;
-            bool cond_t_res_36240 = slt64(i_37278, y_35717);
-            bool x_36241 = x_36239 && cond_t_res_36240;
-            
-            for (int64_t i_37274 = 0; i_37274 < zzdim_31404; i_37274++) {
-                int32_t i64_res_36244 = sext_i64_i32(i_37274);
-                bool water_mask_t_res_36245 = sle32(ks_val_36236,
-                                                    i64_res_36244);
-                bool x_36246 = cond_36237 && water_mask_t_res_36245;
-                bool x_36247 = x_36241 && x_36246;
-                float defunc_0_f_res_36248;
-                
-                if (x_36247) {
-                    float defunc_0_f_res_t_res_36261;
-                    
-                    defunc_0_f_res_t_res_36261 = ((float *) mem_37917)[i_37282 *
-                                                                       ctx_val_37797 +
-                                                                       i_37278 *
-                                                                       zzdim_31404 +
-                                                                       i_37274];
-                    defunc_0_f_res_36248 = defunc_0_f_res_t_res_36261;
-                } else {
-                    float defunc_0_f_res_f_res_36274;
-                    
-                    defunc_0_f_res_f_res_36274 =
-                        ((float *) tketaup1_mem_37756.mem)[i_37282 *
-                                                           (zzdim_31404 *
-                                                            ydim_31403) +
-                                                           i_37278 *
-                                                           zzdim_31404 +
-                                                           i_37274];
-                    defunc_0_f_res_36248 = defunc_0_f_res_f_res_36274;
-                }
-                ((float *) mem_38493)[i_37282 * ctx_val_37797 + i_37278 *
-                                      zzdim_31404 + i_37274] =
-                    defunc_0_f_res_36248;
-            }
-        }
-    }
-    
-    int64_t binop_y_38593 = (int64_t) 4 * binop_x_37780;
-    int64_t bytes_38594 = smax64((int64_t) 0, binop_y_38593);
-    
-    if (mem_38595_cached_sizze_39869 < bytes_38594) {
-        err = lexical_realloc(&ctx->error, &mem_38595,
-                              &mem_38595_cached_sizze_39869, bytes_38594);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37290 = 0; i_37290 < xdim_31402; i_37290++) {
-        bool cond_36277 = sle64((int64_t) 2, i_37290);
-        bool cond_t_res_36278 = slt64(i_37290, y_35716);
-        bool x_36279 = cond_36277 && cond_t_res_36278;
-        
-        for (int64_t i_37286 = 0; i_37286 < ydim_31403; i_37286++) {
-            bool cond_t_res_36282 = sle64((int64_t) 2, i_37286);
-            bool x_36283 = x_36279 && cond_t_res_36282;
-            bool cond_t_res_36284 = slt64(i_37286, y_35717);
-            bool x_36285 = x_36283 && cond_t_res_36284;
-            float defunc_0_f_res_36286;
-            
-            if (x_36285) {
-                bool x_36294 = sle64((int64_t) 0, y_35718);
-                bool y_36295 = slt64(y_35718, zzdim_31404);
-                bool bounds_check_36296 = x_36294 && y_36295;
-                bool index_certs_36299;
-                
-                if (!bounds_check_36296) {
-                    ctx->error =
-                        msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                  "Index [", (long long) i_37290, ", ",
-                                  (long long) i_37286, ", ",
-                                  (long long) y_35718,
-                                  "] out of bounds for array of shape [",
-                                  (long long) xdim_31402, "][",
-                                  (long long) ydim_31403, "][",
-                                  (long long) zzdim_31404, "].",
-                                  "-> #0  sample_programs/tke.fut:237:39-60\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  sample_programs/tke.fut:234:25-242:21\n   #7  sample_programs/tke.fut:57:1-363:81\n");
-                    err = FUTHARK_PROGRAM_ERROR;
-                    goto cleanup;
-                }
-                
-                float tke_val_36300;
-                
-                tke_val_36300 = ((float *) mem_38493)[i_37290 * ctx_val_37797 +
-                                                      i_37286 * zzdim_31404 +
-                                                      y_35718];
-                
-                bool cond_36301 = tke_val_36300 < 0.0F;
-                float defunc_0_f_res_t_res_36302;
-                
-                if (cond_36301) {
-                    float x_36303 = 0.0F - tke_val_36300;
-                    float x_36304 = 0.5F * x_36303;
-                    bool index_certs_36305;
-                    
-                    if (!bounds_check_36296) {
-                        ctx->error =
-                            msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) y_35718,
-                                      "] out of bounds for array of shape [",
-                                      (long long) zzdim_31404, "].",
-                                      "-> #0  sample_programs/tke.fut:239:51-61\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  sample_programs/tke.fut:234:25-242:21\n   #7  sample_programs/tke.fut:57:1-363:81\n");
-                        err = FUTHARK_PROGRAM_ERROR;
-                        goto cleanup;
-                    }
-                    
-                    float y_36306;
-                    
-                    y_36306 = ((float *) dzzw_mem_37772.mem)[y_35718];
-                    
-                    float x_36307 = x_36304 * y_36306;
-                    
-                    defunc_0_f_res_t_res_36302 = x_36307;
-                } else {
-                    defunc_0_f_res_t_res_36302 = 0.0F;
-                }
-                defunc_0_f_res_36286 = defunc_0_f_res_t_res_36302;
-            } else {
-                defunc_0_f_res_36286 = 0.0F;
-            }
-            ((float *) mem_38595)[i_37290 * ydim_31403 + i_37286] =
-                defunc_0_f_res_36286;
-        }
-    }
-    if (mem_38643_cached_sizze_39870 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_38643,
-                              &mem_38643_cached_sizze_39870, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37302 = 0; i_37302 < xdim_31402; i_37302++) {
-        bool cond_36310 = sle64((int64_t) 2, i_37302);
-        bool cond_t_res_36311 = slt64(i_37302, y_35716);
-        bool x_36312 = cond_36310 && cond_t_res_36311;
-        
-        for (int64_t i_37298 = 0; i_37298 < ydim_31403; i_37298++) {
-            bool cond_t_res_36315 = sle64((int64_t) 2, i_37298);
-            bool x_36316 = x_36312 && cond_t_res_36315;
-            bool cond_t_res_36317 = slt64(i_37298, y_35717);
-            bool x_36318 = x_36316 && cond_t_res_36317;
-            
-            for (int64_t i_37294 = 0; i_37294 < zzdim_31404; i_37294++) {
-                bool cond_t_res_36321 = i_37294 == y_35718;
-                bool x_36322 = x_36318 && cond_t_res_36321;
-                float defunc_0_f_res_36323;
-                
-                if (x_36322) {
-                    float tke_val_36336;
-                    
-                    tke_val_36336 = ((float *) mem_38493)[i_37302 *
-                                                          ctx_val_37797 +
-                                                          i_37298 *
-                                                          zzdim_31404 +
-                                                          i_37294];
-                    
-                    bool cond_36337 = tke_val_36336 < 0.0F;
-                    float defunc_0_f_res_t_res_36338;
-                    
-                    if (cond_36337) {
-                        defunc_0_f_res_t_res_36338 = 0.0F;
-                    } else {
-                        defunc_0_f_res_t_res_36338 = tke_val_36336;
-                    }
-                    defunc_0_f_res_36323 = defunc_0_f_res_t_res_36338;
-                } else {
-                    float defunc_0_f_res_f_res_36351;
-                    
-                    defunc_0_f_res_f_res_36351 = ((float *) mem_38493)[i_37302 *
-                                                                       ctx_val_37797 +
-                                                                       i_37298 *
-                                                                       zzdim_31404 +
-                                                                       i_37294];
-                    defunc_0_f_res_36323 = defunc_0_f_res_f_res_36351;
-                }
-                ((float *) mem_38643)[i_37302 * ctx_val_37797 + i_37298 *
-                                      zzdim_31404 + i_37294] =
-                    defunc_0_f_res_36323;
-            }
-        }
-    }
-    
-    int64_t y_36352 = sub64(xdim_31402, (int64_t) 1);
-    
-    if (mem_38746_cached_sizze_39871 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_38746,
-                              &mem_38746_cached_sizze_39871, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37314 = 0; i_37314 < xdim_31402; i_37314++) {
-        bool cond_36355 = slt64(i_37314, y_36352);
-        
-        for (int64_t i_37310 = 0; i_37310 < ydim_31403; i_37310++) {
-            for (int64_t i_37306 = 0; i_37306 < zzdim_31404; i_37306++) {
-                float defunc_0_f_res_36360;
-                
-                if (cond_36355) {
-                    int64_t i_36361 = add64((int64_t) 1, i_37314);
-                    bool x_36362 = sle64((int64_t) 0, i_36361);
-                    bool y_36363 = slt64(i_36361, xdim_31402);
-                    bool bounds_check_36364 = x_36362 && y_36363;
-                    bool index_certs_36373;
-                    
-                    if (!bounds_check_36364) {
-                        ctx->error =
-                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_36361, ", ",
-                                      (long long) i_37310, ", ",
-                                      (long long) i_37306,
-                                      "] out of bounds for array of shape [",
-                                      (long long) xdim_31402, "][",
-                                      (long long) ydim_31403, "][",
-                                      (long long) zzdim_31404, "].",
-                                      "-> #0  sample_programs/tke.fut:257:40-56\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:254:21-261:5\n   #10 sample_programs/tke.fut:57:1-363:81\n");
-                        err = FUTHARK_PROGRAM_ERROR;
-                        goto cleanup;
-                    }
-                    
-                    float x_36374;
-                    
-                    x_36374 = ((float *) tketau_mem_37755.mem)[i_36361 *
-                                                               (zzdim_31404 *
-                                                                ydim_31403) +
-                                                               i_37310 *
-                                                               zzdim_31404 +
-                                                               i_37306];
-                    
-                    float y_36381;
-                    
-                    y_36381 = ((float *) tketau_mem_37755.mem)[i_37314 *
-                                                               (zzdim_31404 *
-                                                                ydim_31403) +
-                                                               i_37310 *
-                                                               zzdim_31404 +
-                                                               i_37306];
-                    
-                    float y_36382 = x_36374 - y_36381;
-                    float x_36383 = 2000.0F * y_36382;
-                    float x_36385;
-                    
-                    x_36385 = ((float *) cost_mem_37773.mem)[i_37310];
-                    
-                    float y_36387;
-                    
-                    y_36387 = ((float *) dxu_mem_37768.mem)[i_37314];
-                    
-                    float y_36388 = x_36385 * y_36387;
-                    float x_36389 = x_36383 / y_36388;
-                    float y_36390;
-                    
-                    y_36390 = ((float *) maskU_mem_37764.mem)[i_37314 *
-                                                              (zzdim_31404 *
-                                                               ydim_31403) +
-                                                              i_37310 *
-                                                              zzdim_31404 +
-                                                              i_37306];
-                    
-                    float defunc_0_f_res_t_res_36391 = x_36389 * y_36390;
-                    
-                    defunc_0_f_res_36360 = defunc_0_f_res_t_res_36391;
-                } else {
-                    defunc_0_f_res_36360 = 0.0F;
-                }
-                ((float *) mem_38746)[i_37314 * ctx_val_37797 + i_37310 *
-                                      zzdim_31404 + i_37306] =
-                    defunc_0_f_res_36360;
-            }
-        }
-    }
-    
-    int64_t y_36392 = sub64(ydim_31403, (int64_t) 1);
-    
-    if (mem_38849_cached_sizze_39872 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_38849,
-                              &mem_38849_cached_sizze_39872, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37326 = 0; i_37326 < xdim_31402; i_37326++) {
-        for (int64_t i_37322 = 0; i_37322 < ydim_31403; i_37322++) {
-            bool cond_36397 = slt64(i_37322, y_36392);
-            
-            for (int64_t i_37318 = 0; i_37318 < zzdim_31404; i_37318++) {
-                float defunc_0_f_res_36400;
-                
-                if (cond_36397) {
-                    int64_t i_36404 = add64((int64_t) 1, i_37322);
-                    bool x_36405 = sle64((int64_t) 0, i_36404);
-                    bool y_36406 = slt64(i_36404, ydim_31403);
-                    bool bounds_check_36407 = x_36405 && y_36406;
-                    bool index_certs_36413;
-                    
-                    if (!bounds_check_36407) {
-                        ctx->error =
-                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37326, ", ",
-                                      (long long) i_36404, ", ",
-                                      (long long) i_37318,
-                                      "] out of bounds for array of shape [",
-                                      (long long) xdim_31402, "][",
-                                      (long long) ydim_31403, "][",
-                                      (long long) zzdim_31404, "].",
-                                      "-> #0  sample_programs/tke.fut:266:40-56\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:263:22-269:21\n   #10 sample_programs/tke.fut:57:1-363:81\n");
-                        err = FUTHARK_PROGRAM_ERROR;
-                        goto cleanup;
-                    }
-                    
-                    float x_36414;
-                    
-                    x_36414 = ((float *) tketau_mem_37755.mem)[i_37326 *
-                                                               (zzdim_31404 *
-                                                                ydim_31403) +
-                                                               i_36404 *
-                                                               zzdim_31404 +
-                                                               i_37318];
-                    
-                    float y_36420;
-                    
-                    y_36420 = ((float *) tketau_mem_37755.mem)[i_37326 *
-                                                               (zzdim_31404 *
-                                                                ydim_31403) +
-                                                               i_37322 *
-                                                               zzdim_31404 +
-                                                               i_37318];
-                    
-                    float y_36421 = x_36414 - y_36420;
-                    float x_36422 = 2000.0F * y_36421;
-                    float y_36424;
-                    
-                    y_36424 = ((float *) dyu_mem_37770.mem)[i_37322];
-                    
-                    float x_36425 = x_36422 / y_36424;
-                    float y_36426;
-                    
-                    y_36426 = ((float *) maskV_mem_37765.mem)[i_37326 *
-                                                              (zzdim_31404 *
-                                                               ydim_31403) +
-                                                              i_37322 *
-                                                              zzdim_31404 +
-                                                              i_37318];
-                    
-                    float x_36427 = x_36425 * y_36426;
-                    float y_36428;
-                    
-                    y_36428 = ((float *) cosu_mem_37774.mem)[i_37322];
-                    
-                    float defunc_0_f_res_t_res_36429 = x_36427 * y_36428;
-                    
-                    defunc_0_f_res_36400 = defunc_0_f_res_t_res_36429;
-                } else {
-                    defunc_0_f_res_36400 = 0.0F;
-                }
-                ((float *) mem_38849)[i_37326 * ctx_val_37797 + i_37322 *
-                                      zzdim_31404 + i_37318] =
-                    defunc_0_f_res_36400;
-            }
-        }
-    }
-    if (mem_38952_cached_sizze_39873 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_38952,
-                              &mem_38952_cached_sizze_39873, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37338 = 0; i_37338 < xdim_31402; i_37338++) {
-        bool cond_36435 = sle64((int64_t) 2, i_37338);
-        bool cond_t_res_36436 = slt64(i_37338, y_35716);
-        bool x_36437 = cond_36435 && cond_t_res_36436;
-        
-        for (int64_t i_37334 = 0; i_37334 < ydim_31403; i_37334++) {
-            bool cond_t_res_36443 = sle64((int64_t) 2, i_37334);
-            bool x_36444 = x_36437 && cond_t_res_36443;
-            bool cond_t_res_36445 = slt64(i_37334, y_35717);
-            bool x_36446 = x_36444 && cond_t_res_36445;
-            
-            for (int64_t i_37330 = 0; i_37330 < zzdim_31404; i_37330++) {
-                float previous_36455;
-                
-                previous_36455 = ((float *) mem_38643)[i_37338 * ctx_val_37797 +
-                                                       i_37334 * zzdim_31404 +
-                                                       i_37330];
-                
-                bool cond_t_res_36456 = i_37330 == y_35718;
-                bool x_36457 = x_36446 && cond_t_res_36456;
-                float defunc_0_f_res_36458;
-                
-                if (x_36457) {
-                    float y_36468;
-                    
-                    y_36468 = ((float *) maskW_mem_37766.mem)[i_37338 *
-                                                              (zzdim_31404 *
-                                                               ydim_31403) +
-                                                              i_37334 *
-                                                              zzdim_31404 +
-                                                              i_37330];
-                    
-                    float x_36469;
-                    
-                    x_36469 = ((float *) mem_38746)[i_37338 * ctx_val_37797 +
-                                                    i_37334 * zzdim_31404 +
-                                                    i_37330];
-                    
-                    int64_t i_36470 = sub64(i_37338, (int64_t) 1);
-                    bool x_36471 = sle64((int64_t) 0, i_36470);
-                    bool y_36472 = slt64(i_36470, xdim_31402);
-                    bool bounds_check_36473 = x_36471 && y_36472;
-                    bool index_certs_36476;
-                    
-                    if (!bounds_check_36473) {
-                        ctx->error =
-                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_36470, ", ",
-                                      (long long) i_37334, ", ",
-                                      (long long) i_37330,
-                                      "] out of bounds for array of shape [",
-                                      (long long) xdim_31402, "][",
-                                      (long long) ydim_31403, "][",
-                                      (long long) zzdim_31404, "].",
-                                      "-> #0  sample_programs/tke.fut:275:54-73\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:271:20-280:21\n   #10 sample_programs/tke.fut:57:1-363:81\n");
-                        err = FUTHARK_PROGRAM_ERROR;
-                        goto cleanup;
-                    }
-                    
-                    float y_36477;
-                    
-                    y_36477 = ((float *) mem_38746)[i_36470 * ctx_val_37797 +
-                                                    i_37334 * zzdim_31404 +
-                                                    i_37330];
-                    
-                    float x_36478 = x_36469 - y_36477;
-                    float x_36480;
-                    
-                    x_36480 = ((float *) cost_mem_37773.mem)[i_37334];
-                    
-                    float y_36482;
-                    
-                    y_36482 = ((float *) dxt_mem_37767.mem)[i_37338];
-                    
-                    float y_36483 = x_36480 * y_36482;
-                    float x_36484 = x_36478 / y_36483;
-                    float x_36485;
-                    
-                    x_36485 = ((float *) mem_38849)[i_37338 * ctx_val_37797 +
-                                                    i_37334 * zzdim_31404 +
-                                                    i_37330];
-                    
-                    int64_t i_36486 = sub64(i_37334, (int64_t) 1);
-                    bool x_36487 = sle64((int64_t) 0, i_36486);
-                    bool y_36488 = slt64(i_36486, ydim_31403);
-                    bool bounds_check_36489 = x_36487 && y_36488;
-                    bool index_certs_36491;
-                    
-                    if (!bounds_check_36489) {
-                        ctx->error =
-                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37338, ", ",
-                                      (long long) i_36486, ", ",
-                                      (long long) i_37330,
-                                      "] out of bounds for array of shape [",
-                                      (long long) xdim_31402, "][",
-                                      (long long) ydim_31403, "][",
-                                      (long long) zzdim_31404, "].",
-                                      "-> #0  sample_programs/tke.fut:277:56-76\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:271:20-280:21\n   #10 sample_programs/tke.fut:57:1-363:81\n");
-                        err = FUTHARK_PROGRAM_ERROR;
-                        goto cleanup;
-                    }
-                    
-                    float y_36492;
-                    
-                    y_36492 = ((float *) mem_38849)[i_37338 * ctx_val_37797 +
-                                                    i_36486 * zzdim_31404 +
-                                                    i_37330];
-                    
-                    float x_36493 = x_36485 - y_36492;
-                    float y_36494;
-                    
-                    y_36494 = ((float *) dyt_mem_37769.mem)[i_37334];
-                    
-                    float y_36495 = x_36480 * y_36494;
-                    float y_36496 = x_36493 / y_36495;
-                    float y_36497 = x_36484 + y_36496;
-                    float y_36498 = y_36468 * y_36497;
-                    float defunc_0_f_res_t_res_36499 = previous_36455 + y_36498;
-                    
-                    defunc_0_f_res_36458 = defunc_0_f_res_t_res_36499;
-                } else {
-                    defunc_0_f_res_36458 = previous_36455;
-                }
-                ((float *) mem_38952)[i_37338 * ctx_val_37797 + i_37334 *
-                                      zzdim_31404 + i_37330] =
-                    defunc_0_f_res_36458;
-            }
-        }
-    }
-    if (mem_39055_cached_sizze_39874 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_39055,
-                              &mem_39055_cached_sizze_39874, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37350 = 0; i_37350 < xdim_31402; i_37350++) {
-        bool cond_36502 = sle64((int64_t) 1, i_37350);
-        bool cond_t_res_36503 = slt64(i_37350, y_35716);
-        bool x_36504 = cond_36502 && cond_t_res_36503;
-        
-        for (int64_t i_37346 = 0; i_37346 < ydim_31403; i_37346++) {
-            bool cond_t_res_36507 = sle64((int64_t) 2, i_37346);
+        for (int64_t i_37140 = 0; i_37140 < ydim_31403; i_37140++) {
+            bool cond_t_res_36507 = sle64((int64_t) 2, i_37140);
             bool x_36508 = x_36504 && cond_t_res_36507;
-            bool cond_t_res_36509 = slt64(i_37346, y_35717);
+            bool cond_t_res_36509 = slt64(i_37140, y_35717);
             bool x_36510 = x_36508 && cond_t_res_36509;
             
-            for (int64_t i_37342 = 0; i_37342 < zzdim_31404; i_37342++) {
+            for (int64_t i_37136 = 0; i_37136 < zzdim_31404; i_37136++) {
                 float defunc_0_f_res_36513;
                 
                 if (x_36510) {
                     float x_36518;
                     
-                    x_36518 = ((float *) cost_mem_37773.mem)[i_37346];
+                    x_36518 = ((float *) cost_mem_37752.mem)[i_37140];
                     
                     float y_36523;
                     
-                    y_36523 = ((float *) dxt_mem_37767.mem)[i_37350];
+                    y_36523 = ((float *) dxt_mem_37746.mem)[i_37166];
                     
                     float dx_36524 = x_36518 * y_36523;
                     float velS_36531;
                     
-                    velS_36531 = ((float *) utau_mem_37761.mem)[i_37350 *
+                    velS_36531 = ((float *) utau_mem_37740.mem)[i_37166 *
                                                                 (zzdim_31404 *
                                                                  ydim_31403) +
-                                                                i_37346 *
+                                                                i_37140 *
                                                                 zzdim_31404 +
-                                                                i_37342];
+                                                                i_37136];
                     
-                    int64_t i_36532 = sub64(i_37350, (int64_t) 1);
+                    int64_t i_36532 = sub64(i_37166, (int64_t) 1);
                     bool x_36533 = sle64((int64_t) 0, i_36532);
                     bool y_36534 = slt64(i_36532, xdim_31402);
                     bool bounds_check_36535 = x_36533 && y_36534;
@@ -7453,8 +5725,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
                                       "Index [", (long long) i_36532, ", ",
-                                      (long long) i_37346, ", ",
-                                      (long long) i_37342,
+                                      (long long) i_37140, ", ",
+                                      (long long) i_37136,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
                                       (long long) ydim_31403, "][",
@@ -7466,23 +5738,23 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float maskWm1_36539;
                     
-                    maskWm1_36539 = ((float *) maskW_mem_37766.mem)[i_36532 *
+                    maskWm1_36539 = ((float *) maskW_mem_37745.mem)[i_36532 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
-                                                                    i_37346 *
+                                                                    i_37140 *
                                                                     zzdim_31404 +
-                                                                    i_37342];
+                                                                    i_37136];
                     
                     float maskWs_36540;
                     
-                    maskWs_36540 = ((float *) maskW_mem_37766.mem)[i_37350 *
+                    maskWs_36540 = ((float *) maskW_mem_37745.mem)[i_37166 *
                                                                    (zzdim_31404 *
                                                                     ydim_31403) +
-                                                                   i_37346 *
+                                                                   i_37140 *
                                                                    zzdim_31404 +
-                                                                   i_37342];
+                                                                   i_37136];
                     
-                    int64_t i_36541 = add64((int64_t) 1, i_37350);
+                    int64_t i_36541 = add64((int64_t) 1, i_37166);
                     bool x_36542 = sle64((int64_t) 0, i_36541);
                     bool y_36543 = slt64(i_36541, xdim_31402);
                     bool bounds_check_36544 = x_36542 && y_36543;
@@ -7492,8 +5764,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
                                       "Index [", (long long) i_36541, ", ",
-                                      (long long) i_37346, ", ",
-                                      (long long) i_37342,
+                                      (long long) i_37140, ", ",
+                                      (long long) i_37136,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
                                       (long long) ydim_31403, "][",
@@ -7505,14 +5777,14 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float maskWp1_36548;
                     
-                    maskWp1_36548 = ((float *) maskW_mem_37766.mem)[i_36541 *
+                    maskWp1_36548 = ((float *) maskW_mem_37745.mem)[i_36541 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
-                                                                    i_37346 *
+                                                                    i_37140 *
                                                                     zzdim_31404 +
-                                                                    i_37342];
+                                                                    i_37136];
                     
-                    int64_t i_36549 = add64((int64_t) 2, i_37350);
+                    int64_t i_36549 = add64((int64_t) 2, i_37166);
                     bool x_36550 = sle64((int64_t) 0, i_36549);
                     bool y_36551 = slt64(i_36549, xdim_31402);
                     bool bounds_check_36552 = x_36550 && y_36551;
@@ -7522,8 +5794,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
                                       "Index [", (long long) i_36549, ", ",
-                                      (long long) i_37346, ", ",
-                                      (long long) i_37342,
+                                      (long long) i_37140, ", ",
+                                      (long long) i_37136,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
                                       (long long) ydim_31403, "][",
@@ -7535,50 +5807,51 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float maskwp2_36556;
                     
-                    maskwp2_36556 = ((float *) maskW_mem_37766.mem)[i_36549 *
+                    maskwp2_36556 = ((float *) maskW_mem_37745.mem)[i_36549 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
-                                                                    i_37346 *
+                                                                    i_37140 *
                                                                     zzdim_31404 +
-                                                                    i_37342];
+                                                                    i_37136];
                     
                     float varSM1_36557;
                     
-                    varSM1_36557 = ((float *) tketau_mem_37755.mem)[i_36532 *
+                    varSM1_36557 = ((float *) tketau_mem_37734.mem)[i_36532 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
-                                                                    i_37346 *
+                                                                    i_37140 *
                                                                     zzdim_31404 +
-                                                                    i_37342];
+                                                                    i_37136];
                     
                     float varS_36558;
                     
-                    varS_36558 = ((float *) tketau_mem_37755.mem)[i_37350 *
+                    varS_36558 = ((float *) tketau_mem_37734.mem)[i_37166 *
                                                                   (zzdim_31404 *
                                                                    ydim_31403) +
-                                                                  i_37346 *
+                                                                  i_37140 *
                                                                   zzdim_31404 +
-                                                                  i_37342];
+                                                                  i_37136];
                     
                     float varSP1_36559;
                     
-                    varSP1_36559 = ((float *) tketau_mem_37755.mem)[i_36541 *
+                    varSP1_36559 = ((float *) tketau_mem_37734.mem)[i_36541 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
-                                                                    i_37346 *
+                                                                    i_37140 *
                                                                     zzdim_31404 +
-                                                                    i_37342];
+                                                                    i_37136];
                     
                     float varSP2_36560;
                     
-                    varSP2_36560 = ((float *) tketau_mem_37755.mem)[i_36549 *
+                    varSP2_36560 = ((float *) tketau_mem_37734.mem)[i_36549 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
-                                                                    i_37346 *
+                                                                    i_37140 *
                                                                     zzdim_31404 +
-                                                                    i_37342];
+                                                                    i_37136];
                     
-                    bool cond_36562 = slt64(i_37350, y_36352);
+                    int64_t y_36561 = sub64(xdim_31402, (int64_t) 1);
+                    bool cond_36562 = slt64(i_37166, y_36561);
                     float maskUtr_36563;
                     
                     if (cond_36562) {
@@ -7664,52 +5937,41 @@ static int futrts_entry_main(struct futhark_context *ctx,
                 } else {
                     defunc_0_f_res_36513 = 0.0F;
                 }
-                ((float *) mem_39055)[i_37350 * ctx_val_37797 + i_37346 *
-                                      zzdim_31404 + i_37342] =
+                ((float *) mem_37768)[i_37166 * ctx_val_37824 + i_37140 *
+                                      zzdim_31404 + i_37136] =
                     defunc_0_f_res_36513;
             }
         }
-    }
-    if (mem_39158_cached_sizze_39875 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_39158,
-                              &mem_39158_cached_sizze_39875, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37362 = 0; i_37362 < xdim_31402; i_37362++) {
-        bool cond_t_res_36572 = sle64((int64_t) 2, i_37362);
-        bool cond_t_res_36573 = slt64(i_37362, y_35716);
-        
-        for (int64_t i_37358 = 0; i_37358 < ydim_31403; i_37358++) {
-            bool cond_36576 = sle64((int64_t) 1, i_37358);
-            bool cond_t_res_36577 = slt64(i_37358, y_35717);
+        for (int64_t i_37148 = 0; i_37148 < ydim_31403; i_37148++) {
+            bool cond_36576 = sle64((int64_t) 1, i_37148);
+            bool cond_t_res_36577 = slt64(i_37148, y_35717);
             bool x_36578 = cond_36576 && cond_t_res_36577;
-            bool x_36579 = cond_t_res_36572 && x_36578;
-            bool x_36580 = cond_t_res_36573 && x_36579;
+            bool x_36579 = cond_35721 && x_36578;
+            bool x_36580 = cond_t_res_35722 && x_36579;
             
-            for (int64_t i_37354 = 0; i_37354 < zzdim_31404; i_37354++) {
+            for (int64_t i_37144 = 0; i_37144 < zzdim_31404; i_37144++) {
                 float defunc_0_f_res_36583;
                 
                 if (x_36580) {
                     float x_36588;
                     
-                    x_36588 = ((float *) cost_mem_37773.mem)[i_37358];
+                    x_36588 = ((float *) cost_mem_37752.mem)[i_37148];
                     
                     float y_36589;
                     
-                    y_36589 = ((float *) dyt_mem_37769.mem)[i_37358];
+                    y_36589 = ((float *) dyt_mem_37748.mem)[i_37148];
                     
                     float dx_36590 = x_36588 * y_36589;
                     float velS_36600;
                     
-                    velS_36600 = ((float *) vtau_mem_37762.mem)[i_37362 *
+                    velS_36600 = ((float *) vtau_mem_37741.mem)[i_37166 *
                                                                 (zzdim_31404 *
                                                                  ydim_31403) +
-                                                                i_37358 *
+                                                                i_37148 *
                                                                 zzdim_31404 +
-                                                                i_37354];
+                                                                i_37144];
                     
-                    int64_t i_36601 = sub64(i_37358, (int64_t) 1);
+                    int64_t i_36601 = sub64(i_37148, (int64_t) 1);
                     bool x_36602 = sle64((int64_t) 0, i_36601);
                     bool y_36603 = slt64(i_36601, ydim_31403);
                     bool bounds_check_36604 = x_36602 && y_36603;
@@ -7718,9 +5980,9 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!bounds_check_36604) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37362, ", ",
+                                      "Index [", (long long) i_37166, ", ",
                                       (long long) i_36601, ", ",
-                                      (long long) i_37354,
+                                      (long long) i_37144,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
                                       (long long) ydim_31403, "][",
@@ -7732,23 +5994,23 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float maskWm1_36607;
                     
-                    maskWm1_36607 = ((float *) maskW_mem_37766.mem)[i_37362 *
+                    maskWm1_36607 = ((float *) maskW_mem_37745.mem)[i_37166 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
                                                                     i_36601 *
                                                                     zzdim_31404 +
-                                                                    i_37354];
+                                                                    i_37144];
                     
                     float maskWs_36608;
                     
-                    maskWs_36608 = ((float *) maskW_mem_37766.mem)[i_37362 *
+                    maskWs_36608 = ((float *) maskW_mem_37745.mem)[i_37166 *
                                                                    (zzdim_31404 *
                                                                     ydim_31403) +
-                                                                   i_37358 *
+                                                                   i_37148 *
                                                                    zzdim_31404 +
-                                                                   i_37354];
+                                                                   i_37144];
                     
-                    int64_t i_36609 = add64((int64_t) 1, i_37358);
+                    int64_t i_36609 = add64((int64_t) 1, i_37148);
                     bool x_36610 = sle64((int64_t) 0, i_36609);
                     bool y_36611 = slt64(i_36609, ydim_31403);
                     bool bounds_check_36612 = x_36610 && y_36611;
@@ -7757,9 +6019,9 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!bounds_check_36612) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37362, ", ",
+                                      "Index [", (long long) i_37166, ", ",
                                       (long long) i_36609, ", ",
-                                      (long long) i_37354,
+                                      (long long) i_37144,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
                                       (long long) ydim_31403, "][",
@@ -7771,14 +6033,14 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float maskWp1_36615;
                     
-                    maskWp1_36615 = ((float *) maskW_mem_37766.mem)[i_37362 *
+                    maskWp1_36615 = ((float *) maskW_mem_37745.mem)[i_37166 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
                                                                     i_36609 *
                                                                     zzdim_31404 +
-                                                                    i_37354];
+                                                                    i_37144];
                     
-                    int64_t i_36616 = add64((int64_t) 2, i_37358);
+                    int64_t i_36616 = add64((int64_t) 2, i_37148);
                     bool x_36617 = sle64((int64_t) 0, i_36616);
                     bool y_36618 = slt64(i_36616, ydim_31403);
                     bool bounds_check_36619 = x_36617 && y_36618;
@@ -7787,9 +6049,9 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!bounds_check_36619) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37362, ", ",
+                                      "Index [", (long long) i_37166, ", ",
                                       (long long) i_36616, ", ",
-                                      (long long) i_37354,
+                                      (long long) i_37144,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
                                       (long long) ydim_31403, "][",
@@ -7801,50 +6063,51 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float maskwp2_36622;
                     
-                    maskwp2_36622 = ((float *) maskW_mem_37766.mem)[i_37362 *
+                    maskwp2_36622 = ((float *) maskW_mem_37745.mem)[i_37166 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
                                                                     i_36616 *
                                                                     zzdim_31404 +
-                                                                    i_37354];
+                                                                    i_37144];
                     
                     float varSM1_36623;
                     
-                    varSM1_36623 = ((float *) tketau_mem_37755.mem)[i_37362 *
+                    varSM1_36623 = ((float *) tketau_mem_37734.mem)[i_37166 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
                                                                     i_36601 *
                                                                     zzdim_31404 +
-                                                                    i_37354];
+                                                                    i_37144];
                     
                     float varS_36624;
                     
-                    varS_36624 = ((float *) tketau_mem_37755.mem)[i_37362 *
+                    varS_36624 = ((float *) tketau_mem_37734.mem)[i_37166 *
                                                                   (zzdim_31404 *
                                                                    ydim_31403) +
-                                                                  i_37358 *
+                                                                  i_37148 *
                                                                   zzdim_31404 +
-                                                                  i_37354];
+                                                                  i_37144];
                     
                     float varSP1_36625;
                     
-                    varSP1_36625 = ((float *) tketau_mem_37755.mem)[i_37362 *
+                    varSP1_36625 = ((float *) tketau_mem_37734.mem)[i_37166 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
                                                                     i_36609 *
                                                                     zzdim_31404 +
-                                                                    i_37354];
+                                                                    i_37144];
                     
                     float varSP2_36626;
                     
-                    varSP2_36626 = ((float *) tketau_mem_37755.mem)[i_37362 *
+                    varSP2_36626 = ((float *) tketau_mem_37734.mem)[i_37166 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
                                                                     i_36616 *
                                                                     zzdim_31404 +
-                                                                    i_37354];
+                                                                    i_37144];
                     
-                    bool cond_36628 = slt64(i_37358, y_36392);
+                    int64_t y_36627 = sub64(ydim_31403, (int64_t) 1);
+                    bool cond_36628 = slt64(i_37148, y_36627);
                     float maskVtr_36629;
                     
                     if (cond_36628) {
@@ -7881,7 +6144,7 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     float calcflux_arg_36635;
                     
                     calcflux_arg_36635 =
-                        ((float *) cosu_mem_37774.mem)[i_37358];
+                        ((float *) cosu_mem_37753.mem)[i_37148];
                     
                     float scaledVel_37045 = velS_36600 * calcflux_arg_36635;
                     float real_abs_arg_37047 = scaledVel_37045 / dx_36590;
@@ -7936,30 +6199,19 @@ static int futrts_entry_main(struct futhark_context *ctx,
                 } else {
                     defunc_0_f_res_36583 = 0.0F;
                 }
-                ((float *) mem_39158)[i_37362 * ctx_val_37797 + i_37358 *
-                                      zzdim_31404 + i_37354] =
+                ((float *) mem_37773)[i_37166 * ctx_val_37824 + i_37148 *
+                                      zzdim_31404 + i_37144] =
                     defunc_0_f_res_36583;
             }
         }
-    }
-    if (mem_39261_cached_sizze_39876 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_39261,
-                              &mem_39261_cached_sizze_39876, bytes_37783);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_37374 = 0; i_37374 < xdim_31402; i_37374++) {
-        bool cond_t_res_36639 = sle64((int64_t) 2, i_37374);
-        bool cond_t_res_36640 = slt64(i_37374, y_35716);
-        
-        for (int64_t i_37370 = 0; i_37370 < ydim_31403; i_37370++) {
-            bool cond_t_res_36643 = sle64((int64_t) 2, i_37370);
-            bool cond_t_res_36644 = slt64(i_37370, y_35717);
+        for (int64_t i_37156 = 0; i_37156 < ydim_31403; i_37156++) {
+            bool cond_t_res_36643 = sle64((int64_t) 2, i_37156);
+            bool cond_t_res_36644 = slt64(i_37156, y_35717);
             
-            for (int64_t i_37366 = 0; i_37366 < zzdim_31404; i_37366++) {
-                bool cond_36647 = slt64(i_37366, y_35718);
-                bool x_36648 = cond_t_res_36639 && cond_36647;
-                bool x_36649 = cond_t_res_36640 && x_36648;
+            for (int64_t i_37152 = 0; i_37152 < zzdim_31404; i_37152++) {
+                bool cond_36647 = slt64(i_37152, y_35718);
+                bool x_36648 = cond_35721 && cond_36647;
+                bool x_36649 = cond_t_res_35722 && x_36648;
                 bool x_36650 = cond_t_res_36643 && x_36649;
                 bool x_36651 = cond_t_res_36644 && x_36650;
                 float defunc_0_f_res_36652;
@@ -7967,19 +6219,19 @@ static int futrts_entry_main(struct futhark_context *ctx,
                 if (x_36651) {
                     float velS_36665;
                     
-                    velS_36665 = ((float *) wtau_mem_37763.mem)[i_37374 *
+                    velS_36665 = ((float *) wtau_mem_37742.mem)[i_37166 *
                                                                 (zzdim_31404 *
                                                                  ydim_31403) +
-                                                                i_37370 *
+                                                                i_37156 *
                                                                 zzdim_31404 +
-                                                                i_37366];
+                                                                i_37152];
                     
-                    bool cond_36666 = i_37366 == (int64_t) 0;
+                    bool cond_36666 = i_37152 == (int64_t) 0;
                     bool cond_36667 = !cond_36666;
                     float varSM1_36668;
                     
                     if (cond_36667) {
-                        int64_t i_36669 = sub64(i_37366, (int64_t) 1);
+                        int64_t i_36669 = sub64(i_37152, (int64_t) 1);
                         bool x_36670 = sle64((int64_t) 0, i_36669);
                         bool y_36671 = slt64(i_36669, zzdim_31404);
                         bool bounds_check_36672 = x_36670 && y_36671;
@@ -7988,8 +6240,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         if (!bounds_check_36672) {
                             ctx->error =
                                 msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                          "Index [", (long long) i_37374, ", ",
-                                          (long long) i_37370, ", ",
+                                          "Index [", (long long) i_37166, ", ",
+                                          (long long) i_37156, ", ",
                                           (long long) i_36669,
                                           "] out of bounds for array of shape [",
                                           (long long) xdim_31402, "][",
@@ -8003,10 +6255,10 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         float varSM1_t_res_36676;
                         
                         varSM1_t_res_36676 =
-                            ((float *) tketau_mem_37755.mem)[i_37374 *
+                            ((float *) tketau_mem_37734.mem)[i_37166 *
                                                              (zzdim_31404 *
                                                               ydim_31403) +
-                                                             i_37370 *
+                                                             i_37156 *
                                                              zzdim_31404 +
                                                              i_36669];
                         varSM1_36668 = varSM1_t_res_36676;
@@ -8016,19 +6268,19 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float varS_36677;
                     
-                    varS_36677 = ((float *) tketau_mem_37755.mem)[i_37374 *
+                    varS_36677 = ((float *) tketau_mem_37734.mem)[i_37166 *
                                                                   (zzdim_31404 *
                                                                    ydim_31403) +
-                                                                  i_37370 *
+                                                                  i_37156 *
                                                                   zzdim_31404 +
-                                                                  i_37366];
+                                                                  i_37152];
                     
                     int64_t y_36678 = sub64(zzdim_31404, (int64_t) 2);
-                    bool cond_36679 = slt64(i_37366, y_36678);
+                    bool cond_36679 = slt64(i_37152, y_36678);
                     float varSP2_36680;
                     
                     if (cond_36679) {
-                        int64_t i_36681 = add64((int64_t) 2, i_37366);
+                        int64_t i_36681 = add64((int64_t) 2, i_37152);
                         bool x_36682 = sle64((int64_t) 0, i_36681);
                         bool y_36683 = slt64(i_36681, zzdim_31404);
                         bool bounds_check_36684 = x_36682 && y_36683;
@@ -8037,8 +6289,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         if (!bounds_check_36684) {
                             ctx->error =
                                 msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                          "Index [", (long long) i_37374, ", ",
-                                          (long long) i_37370, ", ",
+                                          "Index [", (long long) i_37166, ", ",
+                                          (long long) i_37156, ", ",
                                           (long long) i_36681,
                                           "] out of bounds for array of shape [",
                                           (long long) xdim_31402, "][",
@@ -8052,10 +6304,10 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         float varSP2_t_res_36688;
                         
                         varSP2_t_res_36688 =
-                            ((float *) tketau_mem_37755.mem)[i_37374 *
+                            ((float *) tketau_mem_37734.mem)[i_37166 *
                                                              (zzdim_31404 *
                                                               ydim_31403) +
-                                                             i_37370 *
+                                                             i_37156 *
                                                              zzdim_31404 +
                                                              i_36681];
                         varSP2_36680 = varSP2_t_res_36688;
@@ -8063,7 +6315,7 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         varSP2_36680 = 0.0F;
                     }
                     
-                    int64_t i_36689 = add64((int64_t) 1, i_37366);
+                    int64_t i_36689 = add64((int64_t) 1, i_37152);
                     bool x_36690 = sle64((int64_t) 0, i_36689);
                     bool y_36691 = slt64(i_36689, zzdim_31404);
                     bool bounds_check_36692 = x_36690 && y_36691;
@@ -8072,8 +6324,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!bounds_check_36692) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37374, ", ",
-                                      (long long) i_37370, ", ",
+                                      "Index [", (long long) i_37166, ", ",
+                                      (long long) i_37156, ", ",
                                       (long long) i_36689,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
@@ -8086,17 +6338,17 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float varSP1_36696;
                     
-                    varSP1_36696 = ((float *) tketau_mem_37755.mem)[i_37374 *
+                    varSP1_36696 = ((float *) tketau_mem_37734.mem)[i_37166 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
-                                                                    i_37370 *
+                                                                    i_37156 *
                                                                     zzdim_31404 +
                                                                     i_36689];
                     
                     float maskWm1_36697;
                     
                     if (cond_36667) {
-                        int64_t i_36698 = sub64(i_37366, (int64_t) 1);
+                        int64_t i_36698 = sub64(i_37152, (int64_t) 1);
                         bool x_36699 = sle64((int64_t) 0, i_36698);
                         bool y_36700 = slt64(i_36698, zzdim_31404);
                         bool bounds_check_36701 = x_36699 && y_36700;
@@ -8105,8 +6357,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         if (!bounds_check_36701) {
                             ctx->error =
                                 msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                          "Index [", (long long) i_37374, ", ",
-                                          (long long) i_37370, ", ",
+                                          "Index [", (long long) i_37166, ", ",
+                                          (long long) i_37156, ", ",
                                           (long long) i_36698,
                                           "] out of bounds for array of shape [",
                                           (long long) xdim_31402, "][",
@@ -8120,10 +6372,10 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         float maskWm1_t_res_36705;
                         
                         maskWm1_t_res_36705 =
-                            ((float *) maskW_mem_37766.mem)[i_37374 *
+                            ((float *) maskW_mem_37745.mem)[i_37166 *
                                                             (zzdim_31404 *
                                                              ydim_31403) +
-                                                            i_37370 *
+                                                            i_37156 *
                                                             zzdim_31404 +
                                                             i_36698];
                         maskWm1_36697 = maskWm1_t_res_36705;
@@ -8133,26 +6385,26 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float maskWs_36706;
                     
-                    maskWs_36706 = ((float *) maskW_mem_37766.mem)[i_37374 *
+                    maskWs_36706 = ((float *) maskW_mem_37745.mem)[i_37166 *
                                                                    (zzdim_31404 *
                                                                     ydim_31403) +
-                                                                   i_37370 *
+                                                                   i_37156 *
                                                                    zzdim_31404 +
-                                                                   i_37366];
+                                                                   i_37152];
                     
                     float maskWp1_36707;
                     
-                    maskWp1_36707 = ((float *) maskW_mem_37766.mem)[i_37374 *
+                    maskWp1_36707 = ((float *) maskW_mem_37745.mem)[i_37166 *
                                                                     (zzdim_31404 *
                                                                      ydim_31403) +
-                                                                    i_37370 *
+                                                                    i_37156 *
                                                                     zzdim_31404 +
                                                                     i_36689];
                     
                     float maskwp2_36708;
                     
                     if (cond_36679) {
-                        int64_t i_36709 = add64((int64_t) 2, i_37366);
+                        int64_t i_36709 = add64((int64_t) 2, i_37152);
                         bool x_36710 = sle64((int64_t) 0, i_36709);
                         bool y_36711 = slt64(i_36709, zzdim_31404);
                         bool bounds_check_36712 = x_36710 && y_36711;
@@ -8161,8 +6413,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         if (!bounds_check_36712) {
                             ctx->error =
                                 msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                          "Index [", (long long) i_37374, ", ",
-                                          (long long) i_37370, ", ",
+                                          "Index [", (long long) i_37166, ", ",
+                                          (long long) i_37156, ", ",
                                           (long long) i_36709,
                                           "] out of bounds for array of shape [",
                                           (long long) xdim_31402, "][",
@@ -8176,10 +6428,10 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         float maskwp2_t_res_36716;
                         
                         maskwp2_t_res_36716 =
-                            ((float *) maskW_mem_37766.mem)[i_37374 *
+                            ((float *) maskW_mem_37745.mem)[i_37166 *
                                                             (zzdim_31404 *
                                                              ydim_31403) +
-                                                            i_37370 *
+                                                            i_37156 *
                                                             zzdim_31404 +
                                                             i_36709];
                         maskwp2_36708 = maskwp2_t_res_36716;
@@ -8192,7 +6444,7 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     float maskWtrM1_36719 = maskWm1_36697 * maskWs_36706;
                     float dx_36721;
                     
-                    dx_36721 = ((float *) dzzw_mem_37772.mem)[i_37366];
+                    dx_36721 = ((float *) dzzw_mem_37751.mem)[i_37152];
                     
                     float real_abs_arg_37091 = velS_36665 / dx_36721;
                     float abs_res_37092 = (float) fabs(real_abs_arg_37091);
@@ -8246,49 +6498,1280 @@ static int futrts_entry_main(struct futhark_context *ctx,
                 } else {
                     defunc_0_f_res_36652 = 0.0F;
                 }
-                ((float *) mem_39261)[i_37374 * ctx_val_37797 + i_37370 *
-                                      zzdim_31404 + i_37366] =
+                ((float *) mem_37778)[i_37166 * ctx_val_37824 + i_37156 *
+                                      zzdim_31404 + i_37152] =
                     defunc_0_f_res_36652;
             }
         }
     }
-    if (mem_39364_cached_sizze_39877 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_39364,
-                              &mem_39364_cached_sizze_39877, bytes_37783);
+    
+    int64_t y_36392 = sub64(ydim_31403, (int64_t) 1);
+    int64_t y_36352 = sub64(xdim_31402, (int64_t) 1);
+    int32_t i64_res_35854 = sext_i64_i32(ydim_31403);
+    int32_t y_35855 = sub32(i64_res_35854, 2);
+    int32_t i64_res_35852 = sext_i64_i32(xdim_31402);
+    int32_t y_35853 = sub32(i64_res_35852, 2);
+    int64_t binop_y_38171 = (int64_t) 4 * zzdim_31404;
+    int64_t bytes_38172 = smax64((int64_t) 0, binop_y_38171);
+    
+    if (mem_38173_cached_sizze_39818 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38173,
+                              &mem_38173_cached_sizze_39818, bytes_38172);
         if (err != FUTHARK_SUCCESS)
             goto cleanup;
     }
-    for (int64_t i_37386 = 0; i_37386 < xdim_31402; i_37386++) {
-        bool cond_36725 = sle64((int64_t) 2, i_37386);
-        bool cond_t_res_36726 = slt64(i_37386, y_35716);
-        bool x_36727 = cond_36725 && cond_t_res_36726;
+    for (int64_t i_37173 = 0; i_37173 < zzdim_31404; i_37173++) {
+        int32_t defunc_0_f_res_35851 = sext_i64_i32(i_37173);
         
-        for (int64_t i_37382 = 0; i_37382 < ydim_31403; i_37382++) {
-            bool cond_t_res_36730 = sle64((int64_t) 2, i_37382);
-            bool x_36731 = x_36727 && cond_t_res_36730;
-            bool cond_t_res_36732 = slt64(i_37382, y_35717);
+        ((int32_t *) mem_38173)[i_37173] = defunc_0_f_res_35851;
+    }
+    
+    int64_t binop_y_38186 = (int64_t) 4 * ydim_31403;
+    int64_t bytes_38187 = smax64((int64_t) 0, binop_y_38186);
+    
+    if (mem_38188_cached_sizze_39819 < bytes_38187) {
+        err = lexical_realloc(&ctx->error, &mem_38188,
+                              &mem_38188_cached_sizze_39819, bytes_38187);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    for (int64_t i_37177 = 0; i_37177 < ydim_31403; i_37177++) {
+        int32_t defunc_0_f_res_35847 = sext_i64_i32(i_37177);
+        
+        ((int32_t *) mem_38188)[i_37177] = defunc_0_f_res_35847;
+    }
+    if (mem_38205_cached_sizze_39820 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_38205,
+                              &mem_38205_cached_sizze_39820, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38210_cached_sizze_39821 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_38210,
+                              &mem_38210_cached_sizze_39821, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38215_cached_sizze_39822 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_38215,
+                              &mem_38215_cached_sizze_39822, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38220_cached_sizze_39823 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_38220,
+                              &mem_38220_cached_sizze_39823, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    
+    int64_t binop_x_38277 = ydim_31403 * zzdim_31404;
+    int64_t binop_y_38278 = (int64_t) 4 * binop_x_38277;
+    int64_t bytes_38279 = smax64((int64_t) 0, binop_y_38278);
+    
+    if (mem_38280_cached_sizze_39824 < bytes_38279) {
+        err = lexical_realloc(&ctx->error, &mem_38280,
+                              &mem_38280_cached_sizze_39824, bytes_38279);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38327_cached_sizze_39825 < bytes_38279) {
+        err = lexical_realloc(&ctx->error, &mem_38327,
+                              &mem_38327_cached_sizze_39825, bytes_38279);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38374_cached_sizze_39826 < bytes_38279) {
+        err = lexical_realloc(&ctx->error, &mem_38374,
+                              &mem_38374_cached_sizze_39826, bytes_38279);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38421_cached_sizze_39827 < bytes_38279) {
+        err = lexical_realloc(&ctx->error, &mem_38421,
+                              &mem_38421_cached_sizze_39827, bytes_38279);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38482_cached_sizze_39828 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38482,
+                              &mem_38482_cached_sizze_39828, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38485_cached_sizze_39829 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38485,
+                              &mem_38485_cached_sizze_39829, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38488_cached_sizze_39830 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38488,
+                              &mem_38488_cached_sizze_39830, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38491_cached_sizze_39831 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38491,
+                              &mem_38491_cached_sizze_39831, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38542_cached_sizze_39832 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38542,
+                              &mem_38542_cached_sizze_39832, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38545_cached_sizze_39833 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38545,
+                              &mem_38545_cached_sizze_39833, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38548_cached_sizze_39834 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38548,
+                              &mem_38548_cached_sizze_39834, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38551_cached_sizze_39835 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38551,
+                              &mem_38551_cached_sizze_39835, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38602_cached_sizze_39836 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38602,
+                              &mem_38602_cached_sizze_39836, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38617_cached_sizze_39837 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38617,
+                              &mem_38617_cached_sizze_39837, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38620_cached_sizze_39838 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38620,
+                              &mem_38620_cached_sizze_39838, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38647_cached_sizze_39839 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38647,
+                              &mem_38647_cached_sizze_39839, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38650_cached_sizze_39840 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38650,
+                              &mem_38650_cached_sizze_39840, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38677_cached_sizze_39841 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38677,
+                              &mem_38677_cached_sizze_39841, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38692_cached_sizze_39842 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38692,
+                              &mem_38692_cached_sizze_39842, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38695_cached_sizze_39843 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38695,
+                              &mem_38695_cached_sizze_39843, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38722_cached_sizze_39844 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38722,
+                              &mem_38722_cached_sizze_39844, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38725_cached_sizze_39845 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38725,
+                              &mem_38725_cached_sizze_39845, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_38752_cached_sizze_39846 < bytes_38172) {
+        err = lexical_realloc(&ctx->error, &mem_38752,
+                              &mem_38752_cached_sizze_39846, bytes_38172);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    for (int64_t i_37333 = 0; i_37333 < xdim_31402; i_37333++) {
+        int32_t defunc_0_f_res_35843 = sext_i64_i32(i_37333);
+        bool cond_35859 = sle32(2, defunc_0_f_res_35843);
+        bool cond_t_res_35860 = slt32(defunc_0_f_res_35843, y_35853);
+        bool x_35861 = cond_35859 && cond_t_res_35860;
+        
+        for (int64_t i_37185 = 0; i_37185 < ydim_31403; i_37185++) {
+            int32_t x_35864;
+            
+            x_35864 = ((int32_t *) mem_38188)[i_37185];
+            
+            bool cond_t_res_35865 = sle32(2, x_35864);
+            bool x_35866 = x_35861 && cond_t_res_35865;
+            bool cond_t_res_35867 = slt32(x_35864, y_35855);
+            bool x_35868 = x_35866 && cond_t_res_35867;
+            
+            for (int64_t i_37181 = 0; i_37181 < zzdim_31404; i_37181++) {
+                float x_35870;
+                
+                x_35870 = ((float *) tketau_mem_37734.mem)[i_37333 *
+                                                           (zzdim_31404 *
+                                                            ydim_31403) +
+                                                           i_37185 *
+                                                           zzdim_31404 +
+                                                           i_37181];
+                
+                int32_t x_35871;
+                
+                x_35871 = ((int32_t *) mem_38173)[i_37181];
+                
+                float max_res_35872 = fmax32(0.0F, x_35870);
+                float sqrt_res_35873;
+                
+                sqrt_res_35873 = futrts_sqrt32(max_res_35872);
+                
+                float defunc_3_f_res_35874;
+                
+                if (x_35868) {
+                    int64_t x_35875 = sext_i32_i64(defunc_0_f_res_35843);
+                    bool x_35876 = sle64((int64_t) 0, x_35875);
+                    bool y_35877 = slt64(x_35875, xdim_31402);
+                    bool bounds_check_35878 = x_35876 && y_35877;
+                    int64_t y_35879 = sext_i32_i64(x_35864);
+                    bool x_35880 = sle64((int64_t) 0, y_35879);
+                    bool y_35881 = slt64(y_35879, ydim_31403);
+                    bool bounds_check_35882 = x_35880 && y_35881;
+                    bool index_ok_35883 = bounds_check_35878 &&
+                         bounds_check_35882;
+                    bool index_certs_35884;
+                    
+                    if (!index_ok_35883) {
+                        ctx->error =
+                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                      "Index [", (long long) x_35875, ", ",
+                                      (long long) y_35879,
+                                      "] out of bounds for array of shape [",
+                                      (long long) xdim_31402, "][",
+                                      (long long) ydim_31403, "].",
+                                      "-> #0  sample_programs/tke.fut:135:38-46\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                        err = FUTHARK_PROGRAM_ERROR;
+                        goto cleanup;
+                    }
+                    
+                    int32_t x_35885;
+                    
+                    x_35885 = ((int32_t *) kbot_mem_37754.mem)[x_35875 *
+                                                               ydim_31403 +
+                                                               y_35879];
+                    
+                    int32_t ks_val_35886 = sub32(x_35885, 1);
+                    bool land_mask_35887 = sle32(0, ks_val_35886);
+                    bool edge_mask_t_res_35888 = x_35871 == ks_val_35886;
+                    bool x_35889 = land_mask_35887 && edge_mask_t_res_35888;
+                    bool water_mask_t_res_35890 = sle32(ks_val_35886, x_35871);
+                    bool x_35891 = land_mask_35887 && water_mask_t_res_35890;
+                    bool cond_35892 = !x_35891;
+                    float defunc_3_f_res_t_res_35893;
+                    
+                    if (cond_35892) {
+                        defunc_3_f_res_t_res_35893 = 1.0F;
+                    } else {
+                        float defunc_3_f_res_t_res_f_res_35894;
+                        
+                        if (x_35889) {
+                            int64_t zz_35895 = sext_i32_i64(x_35871);
+                            bool x_35896 = sle64((int64_t) 0, zz_35895);
+                            bool y_35897 = slt64(zz_35895, zzdim_31404);
+                            bool bounds_check_35898 = x_35896 && y_35897;
+                            bool y_35899 = bounds_check_35878 &&
+                                 bounds_check_35898;
+                            bool index_ok_35900 = bounds_check_35882 && y_35899;
+                            bool index_certs_35901;
+                            
+                            if (!index_ok_35900) {
+                                ctx->error =
+                                    msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                              "Index [", (long long) x_35875,
+                                              ", ", (long long) y_35879, ", ",
+                                              (long long) zz_35895,
+                                              "] out of bounds for array of shape [",
+                                              (long long) xdim_31402, "][",
+                                              (long long) ydim_31403, "][",
+                                              (long long) zzdim_31404, "].",
+                                              "-> #0  sample_programs/tke.fut:143:33-44\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                                err = FUTHARK_PROGRAM_ERROR;
+                                goto cleanup;
+                            }
+                            
+                            float x_35902;
+                            
+                            x_35902 = ((float *) mem_37763)[x_35875 *
+                                                            ctx_val_37824 +
+                                                            y_35879 *
+                                                            zzdim_31404 +
+                                                            zz_35895];
+                            
+                            bool index_certs_35903;
+                            
+                            if (!bounds_check_35898) {
+                                ctx->error =
+                                    msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                              "Index [", (long long) zz_35895,
+                                              "] out of bounds for array of shape [",
+                                              (long long) zzdim_31404, "].",
+                                              "-> #0  sample_programs/tke.fut:143:48-53\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                                err = FUTHARK_PROGRAM_ERROR;
+                                goto cleanup;
+                            }
+                            
+                            float y_35904;
+                            
+                            y_35904 = ((float *) dzzw_mem_37751.mem)[zz_35895];
+                            
+                            float y_35905 = x_35902 / y_35904;
+                            float x_35906 = 1.0F + y_35905;
+                            float y_35908;
+                            
+                            y_35908 = ((float *) mxl_mem_37756.mem)[x_35875 *
+                                                                    (zzdim_31404 *
+                                                                     ydim_31403) +
+                                                                    y_35879 *
+                                                                    zzdim_31404 +
+                                                                    zz_35895];
+                            
+                            float x_35909 = 0.7F / y_35908;
+                            float y_35910 = sqrt_res_35873 * x_35909;
+                            float defunc_3_f_res_t_res_f_res_t_res_35911 =
+                                  x_35906 + y_35910;
+                            
+                            defunc_3_f_res_t_res_f_res_35894 =
+                                defunc_3_f_res_t_res_f_res_t_res_35911;
+                        } else {
+                            bool cond_35912 = slt32(0, x_35871);
+                            int32_t i64_res_35913 = sext_i64_i32(zzdim_31404);
+                            int32_t y_35914 = sub32(i64_res_35913, 1);
+                            bool cond_t_res_35915 = slt32(x_35871, y_35914);
+                            bool x_35916 = cond_35912 && cond_t_res_35915;
+                            float defunc_3_f_res_t_res_f_res_f_res_35917;
+                            
+                            if (x_35916) {
+                                int64_t zz_35918 = sext_i32_i64(x_35871);
+                                bool x_35919 = sle64((int64_t) 0, zz_35918);
+                                bool y_35920 = slt64(zz_35918, zzdim_31404);
+                                bool bounds_check_35921 = x_35919 && y_35920;
+                                bool y_35922 = bounds_check_35878 &&
+                                     bounds_check_35921;
+                                bool index_ok_35923 = bounds_check_35882 &&
+                                     y_35922;
+                                bool index_certs_35924;
+                                
+                                if (!index_ok_35923) {
+                                    ctx->error =
+                                        msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                                  "Index [",
+                                                  (long long) x_35875, ", ",
+                                                  (long long) y_35879, ", ",
+                                                  (long long) zz_35918,
+                                                  "] out of bounds for array of shape [",
+                                                  (long long) xdim_31402, "][",
+                                                  (long long) ydim_31403, "][",
+                                                  (long long) zzdim_31404, "].",
+                                                  "-> #0  sample_programs/tke.fut:147:43-56\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                                    err = FUTHARK_PROGRAM_ERROR;
+                                    goto cleanup;
+                                }
+                                
+                                float x_35925;
+                                
+                                x_35925 = ((float *) mem_37763)[x_35875 *
+                                                                ctx_val_37824 +
+                                                                y_35879 *
+                                                                zzdim_31404 +
+                                                                zz_35918];
+                                
+                                int32_t i_35926 = sub32(x_35871, 1);
+                                int64_t i_35927 = sext_i32_i64(i_35926);
+                                bool x_35928 = sle64((int64_t) 0, i_35927);
+                                bool y_35929 = slt64(i_35927, zzdim_31404);
+                                bool bounds_check_35930 = x_35928 && y_35929;
+                                bool y_35931 = bounds_check_35878 &&
+                                     bounds_check_35930;
+                                bool index_ok_35932 = bounds_check_35882 &&
+                                     y_35931;
+                                bool index_certs_35933;
+                                
+                                if (!index_ok_35932) {
+                                    ctx->error =
+                                        msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                                  "Index [",
+                                                  (long long) x_35875, ", ",
+                                                  (long long) y_35879, ", ",
+                                                  (long long) i_35927,
+                                                  "] out of bounds for array of shape [",
+                                                  (long long) xdim_31402, "][",
+                                                  (long long) ydim_31403, "][",
+                                                  (long long) zzdim_31404, "].",
+                                                  "-> #0  sample_programs/tke.fut:147:60-75\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                                    err = FUTHARK_PROGRAM_ERROR;
+                                    goto cleanup;
+                                }
+                                
+                                float y_35934;
+                                
+                                y_35934 = ((float *) mem_37763)[x_35875 *
+                                                                ctx_val_37824 +
+                                                                y_35879 *
+                                                                zzdim_31404 +
+                                                                i_35927];
+                                
+                                float x_35935 = x_35925 + y_35934;
+                                bool index_certs_35936;
+                                
+                                if (!bounds_check_35921) {
+                                    ctx->error =
+                                        msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                                  "Index [",
+                                                  (long long) zz_35918,
+                                                  "] out of bounds for array of shape [",
+                                                  (long long) zzdim_31404, "].",
+                                                  "-> #0  sample_programs/tke.fut:147:80-85\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                                    err = FUTHARK_PROGRAM_ERROR;
+                                    goto cleanup;
+                                }
+                                
+                                float y_35937;
+                                
+                                y_35937 =
+                                    ((float *) dzzw_mem_37751.mem)[zz_35918];
+                                
+                                float y_35938 = x_35935 / y_35937;
+                                float x_35939 = 1.0F + y_35938;
+                                float x_35941 = 0.7F * sqrt_res_35873;
+                                float y_35942;
+                                
+                                y_35942 =
+                                    ((float *) mxl_mem_37756.mem)[x_35875 *
+                                                                  (zzdim_31404 *
+                                                                   ydim_31403) +
+                                                                  y_35879 *
+                                                                  zzdim_31404 +
+                                                                  zz_35918];
+                                
+                                float y_35943 = x_35941 / y_35942;
+                                float
+                                defunc_3_f_res_t_res_f_res_f_res_t_res_35944 =
+                                x_35939 + y_35943;
+                                
+                                defunc_3_f_res_t_res_f_res_f_res_35917 =
+                                    defunc_3_f_res_t_res_f_res_f_res_t_res_35944;
+                            } else {
+                                bool cond_35945 = x_35871 == y_35914;
+                                float
+                                defunc_3_f_res_t_res_f_res_f_res_f_res_35946;
+                                
+                                if (cond_35945) {
+                                    int32_t i_35947 = sub32(x_35871, 1);
+                                    int64_t i_35948 = sext_i32_i64(i_35947);
+                                    bool x_35949 = sle64((int64_t) 0, i_35948);
+                                    bool y_35950 = slt64(i_35948, zzdim_31404);
+                                    bool bounds_check_35951 = x_35949 &&
+                                         y_35950;
+                                    bool y_35952 = bounds_check_35878 &&
+                                         bounds_check_35951;
+                                    bool index_ok_35953 = bounds_check_35882 &&
+                                         y_35952;
+                                    bool index_certs_35954;
+                                    
+                                    if (!index_ok_35953) {
+                                        ctx->error =
+                                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                                      "Index [",
+                                                      (long long) x_35875, ", ",
+                                                      (long long) y_35879, ", ",
+                                                      (long long) i_35948,
+                                                      "] out of bounds for array of shape [",
+                                                      (long long) xdim_31402,
+                                                      "][",
+                                                      (long long) ydim_31403,
+                                                      "][",
+                                                      (long long) zzdim_31404,
+                                                      "].",
+                                                      "-> #0  sample_programs/tke.fut:151:42-57\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                                        err = FUTHARK_PROGRAM_ERROR;
+                                        goto cleanup;
+                                    }
+                                    
+                                    float x_35955;
+                                    
+                                    x_35955 = ((float *) mem_37763)[x_35875 *
+                                                                    ctx_val_37824 +
+                                                                    y_35879 *
+                                                                    zzdim_31404 +
+                                                                    i_35948];
+                                    
+                                    int64_t zz_35956 = sext_i32_i64(x_35871);
+                                    bool x_35957 = sle64((int64_t) 0, zz_35956);
+                                    bool y_35958 = slt64(zz_35956, zzdim_31404);
+                                    bool bounds_check_35959 = x_35957 &&
+                                         y_35958;
+                                    bool index_certs_35960;
+                                    
+                                    if (!bounds_check_35959) {
+                                        ctx->error =
+                                            msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                                      "Index [",
+                                                      (long long) zz_35956,
+                                                      "] out of bounds for array of shape [",
+                                                      (long long) zzdim_31404,
+                                                      "].",
+                                                      "-> #0  sample_programs/tke.fut:151:68-73\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                                        err = FUTHARK_PROGRAM_ERROR;
+                                        goto cleanup;
+                                    }
+                                    
+                                    float y_35961;
+                                    
+                                    y_35961 =
+                                        ((float *) dzzw_mem_37751.mem)[zz_35956];
+                                    
+                                    float y_35962 = 0.5F * y_35961;
+                                    float y_35963 = x_35955 / y_35962;
+                                    float x_35964 = 1.0F + y_35963;
+                                    bool y_35966 = bounds_check_35878 &&
+                                         bounds_check_35959;
+                                    bool index_ok_35967 = bounds_check_35882 &&
+                                         y_35966;
+                                    bool index_certs_35968;
+                                    
+                                    if (!index_ok_35967) {
+                                        ctx->error =
+                                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                                      "Index [",
+                                                      (long long) x_35875, ", ",
+                                                      (long long) y_35879, ", ",
+                                                      (long long) zz_35956,
+                                                      "] out of bounds for array of shape [",
+                                                      (long long) xdim_31402,
+                                                      "][",
+                                                      (long long) ydim_31403,
+                                                      "][",
+                                                      (long long) zzdim_31404,
+                                                      "].",
+                                                      "-> #0  sample_programs/tke.fut:152:52-61\n   #1  sample_programs/tke.fut:43:37-46\n   #2  /prelude/soacs.fut:67:19-23\n   #3  /prelude/soacs.fut:67:3-37\n   #4  sample_programs/tke.fut:43:21-44:54\n   #5  /prelude/soacs.fut:67:19-23\n   #6  /prelude/soacs.fut:67:3-37\n   #7  sample_programs/tke.fut:42:13-45:50\n   #8  /prelude/soacs.fut:67:19-23\n   #9  /prelude/soacs.fut:67:3-37\n   #10 sample_programs/tke.fut:41:5-46:39\n   #11 sample_programs/tke.fut:130:17-155:9\n   #12 sample_programs/tke.fut:57:1-363:81\n");
+                                        err = FUTHARK_PROGRAM_ERROR;
+                                        goto cleanup;
+                                    }
+                                    
+                                    float y_35969;
+                                    
+                                    y_35969 =
+                                        ((float *) mxl_mem_37756.mem)[x_35875 *
+                                                                      (zzdim_31404 *
+                                                                       ydim_31403) +
+                                                                      y_35879 *
+                                                                      zzdim_31404 +
+                                                                      zz_35956];
+                                    
+                                    float x_35970 = 0.7F / y_35969;
+                                    float y_35971 = sqrt_res_35873 * x_35970;
+                                    float
+                                    defunc_3_f_res_t_res_f_res_f_res_f_res_t_res_35972
+                                    = x_35964 + y_35971;
+                                    
+                                    defunc_3_f_res_t_res_f_res_f_res_f_res_35946 =
+                                        defunc_3_f_res_t_res_f_res_f_res_f_res_t_res_35972;
+                                } else {
+                                    defunc_3_f_res_t_res_f_res_f_res_f_res_35946 =
+                                        0.0F;
+                                }
+                                defunc_3_f_res_t_res_f_res_f_res_35917 =
+                                    defunc_3_f_res_t_res_f_res_f_res_f_res_35946;
+                            }
+                            defunc_3_f_res_t_res_f_res_35894 =
+                                defunc_3_f_res_t_res_f_res_f_res_35917;
+                        }
+                        defunc_3_f_res_t_res_35893 =
+                            defunc_3_f_res_t_res_f_res_35894;
+                    }
+                    defunc_3_f_res_35874 = defunc_3_f_res_t_res_35893;
+                } else {
+                    defunc_3_f_res_35874 = 0.0F;
+                }
+                ((float *) mem_38280)[i_37185 * zzdim_31404 + i_37181] =
+                    defunc_3_f_res_35874;
+            }
+        }
+        
+        bool cond_36029 = sle64((int64_t) 2, i_37333);
+        bool cond_t_res_36030 = slt64(i_37333, y_35716);
+        bool x_36031 = cond_36029 && cond_t_res_36030;
+        
+        for (int64_t i_37193 = 0; i_37193 < ydim_31403; i_37193++) {
+            bool cond_t_res_36034 = sle64((int64_t) 2, i_37193);
+            bool x_36035 = x_36031 && cond_t_res_36034;
+            bool cond_t_res_36036 = slt64(i_37193, y_35717);
+            bool x_36037 = x_36035 && cond_t_res_36036;
+            
+            for (int64_t i_37189 = 0; i_37189 < zzdim_31404; i_37189++) {
+                float defunc_0_f_res_36040;
+                
+                if (x_36037) {
+                    int32_t x_36049;
+                    
+                    x_36049 = ((int32_t *) kbot_mem_37754.mem)[i_37333 *
+                                                               ydim_31403 +
+                                                               i_37193];
+                    
+                    int32_t ks_val_36050 = sub32(x_36049, 1);
+                    bool land_mask_36051 = sle32(0, ks_val_36050);
+                    int32_t i64_res_36052 = sext_i64_i32(i_37189);
+                    bool water_mask_t_res_36053 = sle32(ks_val_36050,
+                                                        i64_res_36052);
+                    bool x_36054 = land_mask_36051 && water_mask_t_res_36053;
+                    bool cond_36055 = !x_36054;
+                    float defunc_0_f_res_t_res_36056;
+                    
+                    if (cond_36055) {
+                        defunc_0_f_res_t_res_36056 = 0.0F;
+                    } else {
+                        float x_36063;
+                        
+                        x_36063 = ((float *) tketau_mem_37734.mem)[i_37333 *
+                                                                   (zzdim_31404 *
+                                                                    ydim_31403) +
+                                                                   i_37193 *
+                                                                   zzdim_31404 +
+                                                                   i_37189];
+                        
+                        float y_36064;
+                        
+                        y_36064 = ((float *) forc_mem_37757.mem)[i_37333 *
+                                                                 (zzdim_31404 *
+                                                                  ydim_31403) +
+                                                                 i_37193 *
+                                                                 zzdim_31404 +
+                                                                 i_37189];
+                        
+                        float tmp_36066 = x_36063 + y_36064;
+                        bool cond_36068 = i_37189 == y_35718;
+                        float defunc_0_f_res_t_res_f_res_36069;
+                        
+                        if (cond_36068) {
+                            float y_36070;
+                            
+                            y_36070 =
+                                ((float *) forc_tke_surface_mem_37758.mem)[i_37333 *
+                                                                           ydim_31403 +
+                                                                           i_37193];
+                            
+                            float y_36073;
+                            
+                            y_36073 = ((float *) dzzw_mem_37751.mem)[i_37189];
+                            
+                            float y_36074 = 0.5F * y_36073;
+                            float y_36075 = y_36070 / y_36074;
+                            float defunc_0_f_res_t_res_f_res_t_res_36076 =
+                                  tmp_36066 + y_36075;
+                            
+                            defunc_0_f_res_t_res_f_res_36069 =
+                                defunc_0_f_res_t_res_f_res_t_res_36076;
+                        } else {
+                            defunc_0_f_res_t_res_f_res_36069 = tmp_36066;
+                        }
+                        defunc_0_f_res_t_res_36056 =
+                            defunc_0_f_res_t_res_f_res_36069;
+                    }
+                    defunc_0_f_res_36040 = defunc_0_f_res_t_res_36056;
+                } else {
+                    defunc_0_f_res_36040 = 0.0F;
+                }
+                ((float *) mem_38327)[i_37193 * zzdim_31404 + i_37189] =
+                    defunc_0_f_res_36040;
+            }
+        }
+        for (int64_t i_37201 = 0; i_37201 < ydim_31403; i_37201++) {
+            bool cond_t_res_35986 = sle64((int64_t) 2, i_37201);
+            bool x_35987 = cond_t_res_35986 && x_36031;
+            bool cond_t_res_35988 = slt64(i_37201, y_35717);
+            bool x_35989 = x_35987 && cond_t_res_35988;
+            
+            for (int64_t i_37197 = 0; i_37197 < zzdim_31404; i_37197++) {
+                bool cond_t_res_35992 = slt64(i_37197, y_35718);
+                bool x_35993 = x_35989 && cond_t_res_35992;
+                float defunc_0_f_res_35994;
+                
+                if (x_35993) {
+                    int32_t x_36003;
+                    
+                    x_36003 = ((int32_t *) kbot_mem_37754.mem)[i_37333 *
+                                                               ydim_31403 +
+                                                               i_37201];
+                    
+                    int32_t ks_val_36004 = sub32(x_36003, 1);
+                    bool land_mask_36005 = sle32(0, ks_val_36004);
+                    int32_t i64_res_36006 = sext_i64_i32(i_37197);
+                    bool water_mask_t_res_36007 = sle32(ks_val_36004,
+                                                        i64_res_36006);
+                    bool x_36008 = land_mask_36005 && water_mask_t_res_36007;
+                    bool cond_36009 = !x_36008;
+                    float defunc_0_f_res_t_res_36010;
+                    
+                    if (cond_36009) {
+                        defunc_0_f_res_t_res_36010 = 0.0F;
+                    } else {
+                        float negate_arg_36017;
+                        
+                        negate_arg_36017 = ((float *) mem_37763)[i_37333 *
+                                                                 ctx_val_37824 +
+                                                                 i_37201 *
+                                                                 zzdim_31404 +
+                                                                 i_37197];
+                        
+                        float x_36018 = 0.0F - negate_arg_36017;
+                        float y_36020;
+                        
+                        y_36020 = ((float *) dzzw_mem_37751.mem)[i_37197];
+                        
+                        float defunc_0_f_res_t_res_f_res_36021 = x_36018 /
+                              y_36020;
+                        
+                        defunc_0_f_res_t_res_36010 =
+                            defunc_0_f_res_t_res_f_res_36021;
+                    }
+                    defunc_0_f_res_35994 = defunc_0_f_res_t_res_36010;
+                } else {
+                    defunc_0_f_res_35994 = 0.0F;
+                }
+                ((float *) mem_38374)[i_37201 * zzdim_31404 + i_37197] =
+                    defunc_0_f_res_35994;
+            }
+        }
+        for (int64_t i_37209 = 0; i_37209 < ydim_31403; i_37209++) {
+            bool cond_t_res_35774 = sle64((int64_t) 2, i_37209);
+            bool x_35775 = cond_t_res_35774 && x_36031;
+            bool cond_t_res_35776 = slt64(i_37209, y_35717);
+            bool x_35777 = x_35775 && cond_t_res_35776;
+            
+            for (int64_t i_37205 = 0; i_37205 < zzdim_31404; i_37205++) {
+                float defunc_0_f_res_35780;
+                
+                if (x_35777) {
+                    int32_t x_35789;
+                    
+                    x_35789 = ((int32_t *) kbot_mem_37754.mem)[i_37333 *
+                                                               ydim_31403 +
+                                                               i_37209];
+                    
+                    int32_t ks_val_35790 = sub32(x_35789, 1);
+                    bool land_mask_35791 = sle32(0, ks_val_35790);
+                    int32_t i64_res_35792 = sext_i64_i32(i_37205);
+                    bool edge_mask_t_res_35793 = i64_res_35792 == ks_val_35790;
+                    bool x_35794 = land_mask_35791 && edge_mask_t_res_35793;
+                    bool water_mask_t_res_35795 = sle32(ks_val_35790,
+                                                        i64_res_35792);
+                    bool x_35796 = land_mask_35791 && water_mask_t_res_35795;
+                    bool cond_f_res_35797 = !x_35796;
+                    bool x_35798 = !x_35794;
+                    bool y_35799 = cond_f_res_35797 && x_35798;
+                    bool cond_35800 = x_35794 || y_35799;
+                    float defunc_0_f_res_t_res_35801;
+                    
+                    if (cond_35800) {
+                        defunc_0_f_res_t_res_35801 = 0.0F;
+                    } else {
+                        bool cond_35802 = slt64((int64_t) 0, i_37205);
+                        bool cond_t_res_35804 = slt64(i_37205, y_35718);
+                        bool x_35805 = cond_35802 && cond_t_res_35804;
+                        float defunc_0_f_res_t_res_f_res_35806;
+                        
+                        if (x_35805) {
+                            int64_t i_35807 = sub64(i_37205, (int64_t) 1);
+                            bool x_35808 = sle64((int64_t) 0, i_35807);
+                            bool y_35809 = slt64(i_35807, zzdim_31404);
+                            bool bounds_check_35810 = x_35808 && y_35809;
+                            bool index_certs_35813;
+                            
+                            if (!bounds_check_35810) {
+                                ctx->error =
+                                    msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                              "Index [", (long long) i_37333,
+                                              ", ", (long long) i_37209, ", ",
+                                              (long long) i_35807,
+                                              "] out of bounds for array of shape [",
+                                              (long long) xdim_31402, "][",
+                                              (long long) ydim_31403, "][",
+                                              (long long) zzdim_31404, "].",
+                                              "-> #0  sample_programs/tke.fut:123:43-56\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:112:17-128:17\n   #10 sample_programs/tke.fut:57:1-363:81\n");
+                                err = FUTHARK_PROGRAM_ERROR;
+                                goto cleanup;
+                            }
+                            
+                            float negate_arg_35814;
+                            
+                            negate_arg_35814 = ((float *) mem_37763)[i_37333 *
+                                                                     ctx_val_37824 +
+                                                                     i_37209 *
+                                                                     zzdim_31404 +
+                                                                     i_35807];
+                            
+                            float x_35815 = 0.0F - negate_arg_35814;
+                            float y_35820;
+                            
+                            y_35820 = ((float *) dzzw_mem_37751.mem)[i_37205];
+                            
+                            float defunc_0_f_res_t_res_f_res_t_res_35821 =
+                                  x_35815 / y_35820;
+                            
+                            defunc_0_f_res_t_res_f_res_35806 =
+                                defunc_0_f_res_t_res_f_res_t_res_35821;
+                        } else {
+                            bool cond_35822 = i_37205 == y_35718;
+                            float defunc_0_f_res_t_res_f_res_f_res_35823;
+                            
+                            if (cond_35822) {
+                                int64_t i_35824 = sub64(i_37205, (int64_t) 1);
+                                bool x_35825 = sle64((int64_t) 0, i_35824);
+                                bool y_35826 = slt64(i_35824, zzdim_31404);
+                                bool bounds_check_35827 = x_35825 && y_35826;
+                                bool index_certs_35830;
+                                
+                                if (!bounds_check_35827) {
+                                    ctx->error =
+                                        msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                                  "Index [",
+                                                  (long long) i_37333, ", ",
+                                                  (long long) i_37209, ", ",
+                                                  (long long) i_35824,
+                                                  "] out of bounds for array of shape [",
+                                                  (long long) xdim_31402, "][",
+                                                  (long long) ydim_31403, "][",
+                                                  (long long) zzdim_31404, "].",
+                                                  "-> #0  sample_programs/tke.fut:125:43-58\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:112:17-128:17\n   #10 sample_programs/tke.fut:57:1-363:81\n");
+                                    err = FUTHARK_PROGRAM_ERROR;
+                                    goto cleanup;
+                                }
+                                
+                                float negate_arg_35831;
+                                
+                                negate_arg_35831 =
+                                    ((float *) mem_37763)[i_37333 *
+                                                          ctx_val_37824 +
+                                                          i_37209 *
+                                                          zzdim_31404 +
+                                                          i_35824];
+                                
+                                float x_35832 = 0.0F - negate_arg_35831;
+                                float y_35837;
+                                
+                                y_35837 =
+                                    ((float *) dzzw_mem_37751.mem)[i_37205];
+                                
+                                float y_35838 = 0.5F * y_35837;
+                                float
+                                defunc_0_f_res_t_res_f_res_f_res_t_res_35839 =
+                                x_35832 / y_35838;
+                                
+                                defunc_0_f_res_t_res_f_res_f_res_35823 =
+                                    defunc_0_f_res_t_res_f_res_f_res_t_res_35839;
+                            } else {
+                                defunc_0_f_res_t_res_f_res_f_res_35823 = 0.0F;
+                            }
+                            defunc_0_f_res_t_res_f_res_35806 =
+                                defunc_0_f_res_t_res_f_res_f_res_35823;
+                        }
+                        defunc_0_f_res_t_res_35801 =
+                            defunc_0_f_res_t_res_f_res_35806;
+                    }
+                    defunc_0_f_res_35780 = defunc_0_f_res_t_res_35801;
+                } else {
+                    defunc_0_f_res_35780 = 0.0F;
+                }
+                ((float *) mem_38421)[i_37209 * zzdim_31404 + i_37205] =
+                    defunc_0_f_res_35780;
+            }
+        }
+        for (int64_t i_37299 = 0; i_37299 < ydim_31403; i_37299++) {
+            float b0_36088;
+            
+            b0_36088 = ((float *) mem_38280)[i_37299 * zzdim_31404];
+            for (int64_t i_37219 = 0; i_37219 < zzdim_31404; i_37219++) {
+                float x_elem_37122;
+                
+                x_elem_37122 = ((float *) mem_38280)[i_37299 * zzdim_31404 +
+                                                     i_37219];
+                
+                float x_elem_37123;
+                
+                x_elem_37123 = ((float *) mem_38421)[i_37299 * zzdim_31404 +
+                                                     i_37219];
+                
+                bool cond_36094 = slt64((int64_t) 0, i_37219);
+                float defunc_0_f_res_36095;
+                
+                if (cond_36094) {
+                    defunc_0_f_res_36095 = 1.0F;
+                } else {
+                    defunc_0_f_res_36095 = 0.0F;
+                }
+                
+                float defunc_0_f_res_36096;
+                
+                if (cond_36094) {
+                    defunc_0_f_res_36096 = 0.0F;
+                } else {
+                    defunc_0_f_res_36096 = 1.0F;
+                }
+                
+                float defunc_0_f_res_36097;
+                
+                if (cond_36094) {
+                    defunc_0_f_res_36097 = x_elem_37122;
+                } else {
+                    defunc_0_f_res_36097 = 1.0F;
+                }
+                
+                float defunc_0_f_res_36098;
+                
+                if (cond_36094) {
+                    int64_t i_36101 = sub64(i_37219, (int64_t) 1);
+                    float y_36102;
+                    
+                    y_36102 = ((float *) mem_38374)[i_37299 * zzdim_31404 +
+                                                    i_36101];
+                    
+                    float y_36103 = y_36102 * x_elem_37123;
+                    float defunc_0_f_res_t_res_36104 = 0.0F - y_36103;
+                    
+                    defunc_0_f_res_36098 = defunc_0_f_res_t_res_36104;
+                } else {
+                    defunc_0_f_res_36098 = 0.0F;
+                }
+                ((float *) mem_38482)[i_37219] = defunc_0_f_res_36097;
+                ((float *) mem_38485)[i_37219] = defunc_0_f_res_36098;
+                ((float *) mem_38488)[i_37219] = defunc_0_f_res_36095;
+                ((float *) mem_38491)[i_37219] = defunc_0_f_res_36096;
+            }
+            
+            float discard_37241;
+            float discard_37242;
+            float discard_37243;
+            float discard_37244;
+            float scanacc_37228;
+            float scanacc_37229;
+            float scanacc_37230;
+            float scanacc_37231;
+            
+            scanacc_37228 = 1.0F;
+            scanacc_37229 = 0.0F;
+            scanacc_37230 = 0.0F;
+            scanacc_37231 = 1.0F;
+            for (int64_t i_37236 = 0; i_37236 < zzdim_31404; i_37236++) {
+                float x_36134;
+                
+                x_36134 = ((float *) mem_38482)[i_37236];
+                
+                float x_36135;
+                
+                x_36135 = ((float *) mem_38485)[i_37236];
+                
+                float x_36136;
+                
+                x_36136 = ((float *) mem_38488)[i_37236];
+                
+                float x_36137;
+                
+                x_36137 = ((float *) mem_38491)[i_37236];
+                
+                float y_36117 = x_36134 * scanacc_37228;
+                float value_36118 = 1.0F / y_36117;
+                float y_36119 = x_36135 * scanacc_37230;
+                float x_36120 = y_36117 + y_36119;
+                float defunc_1_op_res_36121 = value_36118 * x_36120;
+                float x_36122 = x_36134 * scanacc_37229;
+                float y_36123 = x_36135 * scanacc_37231;
+                float x_36124 = x_36122 + y_36123;
+                float defunc_1_op_res_36125 = value_36118 * x_36124;
+                float x_36126 = x_36136 * scanacc_37228;
+                float y_36127 = x_36137 * scanacc_37230;
+                float x_36128 = x_36126 + y_36127;
+                float defunc_1_op_res_36129 = value_36118 * x_36128;
+                float x_36130 = x_36136 * scanacc_37229;
+                float y_36131 = x_36137 * scanacc_37231;
+                float x_36132 = x_36130 + y_36131;
+                float defunc_1_op_res_36133 = value_36118 * x_36132;
+                
+                ((float *) mem_38542)[i_37236] = defunc_1_op_res_36121;
+                ((float *) mem_38545)[i_37236] = defunc_1_op_res_36125;
+                ((float *) mem_38548)[i_37236] = defunc_1_op_res_36129;
+                ((float *) mem_38551)[i_37236] = defunc_1_op_res_36133;
+                
+                float scanacc_tmp_39763 = defunc_1_op_res_36121;
+                float scanacc_tmp_39764 = defunc_1_op_res_36125;
+                float scanacc_tmp_39765 = defunc_1_op_res_36129;
+                float scanacc_tmp_39766 = defunc_1_op_res_36133;
+                
+                scanacc_37228 = scanacc_tmp_39763;
+                scanacc_37229 = scanacc_tmp_39764;
+                scanacc_37230 = scanacc_tmp_39765;
+                scanacc_37231 = scanacc_tmp_39766;
+            }
+            discard_37241 = scanacc_37228;
+            discard_37242 = scanacc_37229;
+            discard_37243 = scanacc_37230;
+            discard_37244 = scanacc_37231;
+            for (int64_t i_37247 = 0; i_37247 < zzdim_31404; i_37247++) {
+                float x_36139;
+                
+                x_36139 = ((float *) mem_38542)[i_37247];
+                
+                float x_36140;
+                
+                x_36140 = ((float *) mem_38545)[i_37247];
+                
+                float x_36141;
+                
+                x_36141 = ((float *) mem_38548)[i_37247];
+                
+                float x_36142;
+                
+                x_36142 = ((float *) mem_38551)[i_37247];
+                
+                float x_36143 = b0_36088 * x_36139;
+                float x_36144 = x_36140 + x_36143;
+                float x_36145 = b0_36088 * x_36141;
+                float y_36146 = x_36142 + x_36145;
+                float defunc_0_f_res_36147 = x_36144 / y_36146;
+                
+                ((float *) mem_38602)[i_37247] = defunc_0_f_res_36147;
+            }
+            
+            float y0_36148;
+            
+            y0_36148 = ((float *) mem_38327)[i_37299 * zzdim_31404];
+            for (int64_t i_37253 = 0; i_37253 < zzdim_31404; i_37253++) {
+                float x_elem_37124;
+                
+                x_elem_37124 = ((float *) mem_38327)[i_37299 * zzdim_31404 +
+                                                     i_37253];
+                
+                float x_elem_37125;
+                
+                x_elem_37125 = ((float *) mem_38421)[i_37299 * zzdim_31404 +
+                                                     i_37253];
+                
+                bool cond_36152 = slt64((int64_t) 0, i_37253);
+                float defunc_0_f_res_36153;
+                
+                if (cond_36152) {
+                    defunc_0_f_res_36153 = x_elem_37124;
+                } else {
+                    defunc_0_f_res_36153 = 0.0F;
+                }
+                
+                float defunc_0_f_res_36154;
+                
+                if (cond_36152) {
+                    int64_t i_36157 = sub64(i_37253, (int64_t) 1);
+                    float y_36158;
+                    
+                    y_36158 = ((float *) mem_38602)[i_36157];
+                    
+                    float y_36159 = x_elem_37125 / y_36158;
+                    float defunc_0_f_res_t_res_36160 = 0.0F - y_36159;
+                    
+                    defunc_0_f_res_36154 = defunc_0_f_res_t_res_36160;
+                } else {
+                    defunc_0_f_res_36154 = 1.0F;
+                }
+                ((float *) mem_38617)[i_37253] = defunc_0_f_res_36153;
+                ((float *) mem_38620)[i_37253] = defunc_0_f_res_36154;
+            }
+            
+            float discard_37265;
+            float discard_37266;
+            float scanacc_37258;
+            float scanacc_37259;
+            
+            scanacc_37258 = 0.0F;
+            scanacc_37259 = 1.0F;
+            for (int64_t i_37262 = 0; i_37262 < zzdim_31404; i_37262++) {
+                float x_36170;
+                
+                x_36170 = ((float *) mem_38617)[i_37262];
+                
+                float x_36171;
+                
+                x_36171 = ((float *) mem_38620)[i_37262];
+                
+                float y_36167 = x_36171 * scanacc_37258;
+                float defunc_1_op_res_36168 = y_36167 + x_36170;
+                float defunc_1_op_res_36169 = x_36171 * scanacc_37259;
+                
+                ((float *) mem_38647)[i_37262] = defunc_1_op_res_36168;
+                ((float *) mem_38650)[i_37262] = defunc_1_op_res_36169;
+                
+                float scanacc_tmp_39774 = defunc_1_op_res_36168;
+                float scanacc_tmp_39775 = defunc_1_op_res_36169;
+                
+                scanacc_37258 = scanacc_tmp_39774;
+                scanacc_37259 = scanacc_tmp_39775;
+            }
+            discard_37265 = scanacc_37258;
+            discard_37266 = scanacc_37259;
+            for (int64_t i_37269 = 0; i_37269 < zzdim_31404; i_37269++) {
+                float x_36173;
+                
+                x_36173 = ((float *) mem_38647)[i_37269];
+                
+                float x_36174;
+                
+                x_36174 = ((float *) mem_38650)[i_37269];
+                
+                float y_36175 = y0_36148 * x_36174;
+                float defunc_0_f_res_36176 = x_36173 + y_36175;
+                
+                ((float *) mem_38677)[i_37269] = defunc_0_f_res_36176;
+            }
+            
+            float x_36177;
+            
+            x_36177 = ((float *) mem_38677)[y_35718];
+            
+            float y_36178;
+            
+            y_36178 = ((float *) mem_38602)[y_35718];
+            
+            float yn_36179 = x_36177 / y_36178;
+            
+            for (int64_t i_37275 = 0; i_37275 < zzdim_31404; i_37275++) {
+                int64_t x_36183 = sub64(zzdim_31404, i_37275);
+                int64_t i_36184 = sub64(x_36183, (int64_t) 1);
+                bool cond_36185 = slt64((int64_t) 0, i_37275);
+                float defunc_0_f_res_36186;
+                float defunc_0_f_res_36187;
+                
+                if (cond_36185) {
+                    float x_36188;
+                    
+                    x_36188 = ((float *) mem_38677)[i_36184];
+                    
+                    float y_36189;
+                    
+                    y_36189 = ((float *) mem_38602)[i_36184];
+                    
+                    float defunc_0_f_res_t_res_36190 = x_36188 / y_36189;
+                    float x_36191;
+                    
+                    x_36191 = ((float *) mem_38374)[i_37299 * zzdim_31404 +
+                                                    i_36184];
+                    
+                    float y_36192 = x_36191 / y_36189;
+                    float defunc_0_f_res_t_res_36193 = 0.0F - y_36192;
+                    
+                    defunc_0_f_res_36186 = defunc_0_f_res_t_res_36190;
+                    defunc_0_f_res_36187 = defunc_0_f_res_t_res_36193;
+                } else {
+                    defunc_0_f_res_36186 = 0.0F;
+                    defunc_0_f_res_36187 = 1.0F;
+                }
+                ((float *) mem_38692)[i_37275] = defunc_0_f_res_36186;
+                ((float *) mem_38695)[i_37275] = defunc_0_f_res_36187;
+            }
+            
+            float discard_37287;
+            float discard_37288;
+            float scanacc_37280;
+            float scanacc_37281;
+            
+            scanacc_37280 = 0.0F;
+            scanacc_37281 = 1.0F;
+            for (int64_t i_37284 = 0; i_37284 < zzdim_31404; i_37284++) {
+                float x_36203;
+                
+                x_36203 = ((float *) mem_38692)[i_37284];
+                
+                float x_36204;
+                
+                x_36204 = ((float *) mem_38695)[i_37284];
+                
+                float y_36200 = x_36204 * scanacc_37280;
+                float defunc_1_op_res_36201 = y_36200 + x_36203;
+                float defunc_1_op_res_36202 = x_36204 * scanacc_37281;
+                
+                ((float *) mem_38722)[i_37284] = defunc_1_op_res_36201;
+                ((float *) mem_38725)[i_37284] = defunc_1_op_res_36202;
+                
+                float scanacc_tmp_39781 = defunc_1_op_res_36201;
+                float scanacc_tmp_39782 = defunc_1_op_res_36202;
+                
+                scanacc_37280 = scanacc_tmp_39781;
+                scanacc_37281 = scanacc_tmp_39782;
+            }
+            discard_37287 = scanacc_37280;
+            discard_37288 = scanacc_37281;
+            for (int64_t i_37291 = 0; i_37291 < zzdim_31404; i_37291++) {
+                float x_36206;
+                
+                x_36206 = ((float *) mem_38722)[i_37291];
+                
+                float x_36207;
+                
+                x_36207 = ((float *) mem_38725)[i_37291];
+                
+                float y_36208 = yn_36179 * x_36207;
+                float defunc_0_f_res_36209 = x_36206 + y_36208;
+                
+                ((float *) mem_38752)[i_37291] = defunc_0_f_res_36209;
+            }
+            for (int64_t i_37295 = 0; i_37295 < zzdim_31404; i_37295++) {
+                int64_t x_36212 = sub64(zzdim_31404, i_37295);
+                int64_t i_36213 = sub64(x_36212, (int64_t) 1);
+                
+                if ((int64_t) 4 > 0)
+                    memmove(mem_38205 + (i_37333 * ctx_val_37824 + i_37299 *
+                                         zzdim_31404 + i_37295) * (int64_t) 4,
+                            mem_38752 + ((int64_t) 0 + (int64_t) 1 * i_36213) *
+                            (int64_t) 4, (int64_t) 4);
+            }
+        }
+        for (int64_t i_37307 = 0; i_37307 < ydim_31403; i_37307++) {
+            bool cond_t_res_36730 = sle64((int64_t) 2, i_37307);
+            bool x_36731 = x_36031 && cond_t_res_36730;
+            bool cond_t_res_36732 = slt64(i_37307, y_35717);
             bool x_36733 = x_36731 && cond_t_res_36732;
             
-            for (int64_t i_37378 = 0; i_37378 < zzdim_31404; i_37378++) {
+            for (int64_t i_37303 = 0; i_37303 < zzdim_31404; i_37303++) {
                 float tmp_36736;
                 
                 if (x_36733) {
                     float x_36749;
                     
-                    x_36749 = ((float *) maskW_mem_37766.mem)[i_37386 *
+                    x_36749 = ((float *) maskW_mem_37745.mem)[i_37333 *
                                                               (zzdim_31404 *
                                                                ydim_31403) +
-                                                              i_37382 *
+                                                              i_37307 *
                                                               zzdim_31404 +
-                                                              i_37378];
+                                                              i_37303];
                     
                     float x_36750;
                     
-                    x_36750 = ((float *) mem_39055)[i_37386 * ctx_val_37797 +
-                                                    i_37382 * zzdim_31404 +
-                                                    i_37378];
+                    x_36750 = ((float *) mem_37768)[i_37333 * ctx_val_37824 +
+                                                    i_37307 * zzdim_31404 +
+                                                    i_37303];
                     
-                    int64_t i_36751 = sub64(i_37386, (int64_t) 1);
+                    int64_t i_36751 = sub64(i_37333, (int64_t) 1);
                     bool x_36752 = sle64((int64_t) 0, i_36751);
                     bool y_36753 = slt64(i_36751, xdim_31402);
                     bool bounds_check_36754 = x_36752 && y_36753;
@@ -8298,8 +7781,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
                                       "Index [", (long long) i_36751, ", ",
-                                      (long long) i_37382, ", ",
-                                      (long long) i_37378,
+                                      (long long) i_37307, ", ",
+                                      (long long) i_37303,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
                                       (long long) ydim_31403, "][",
@@ -8311,29 +7794,29 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float y_36758;
                     
-                    y_36758 = ((float *) mem_39055)[i_36751 * ctx_val_37797 +
-                                                    i_37382 * zzdim_31404 +
-                                                    i_37378];
+                    y_36758 = ((float *) mem_37768)[i_36751 * ctx_val_37824 +
+                                                    i_37307 * zzdim_31404 +
+                                                    i_37303];
                     
                     float negate_arg_36759 = x_36750 - y_36758;
                     float x_36760 = 0.0F - negate_arg_36759;
                     float x_36762;
                     
-                    x_36762 = ((float *) cost_mem_37773.mem)[i_37382];
+                    x_36762 = ((float *) cost_mem_37752.mem)[i_37307];
                     
                     float y_36764;
                     
-                    y_36764 = ((float *) dxt_mem_37767.mem)[i_37386];
+                    y_36764 = ((float *) dxt_mem_37746.mem)[i_37333];
                     
                     float y_36765 = x_36762 * y_36764;
                     float x_36766 = x_36760 / y_36765;
                     float x_36767;
                     
-                    x_36767 = ((float *) mem_39158)[i_37386 * ctx_val_37797 +
-                                                    i_37382 * zzdim_31404 +
-                                                    i_37378];
+                    x_36767 = ((float *) mem_37773)[i_37333 * ctx_val_37824 +
+                                                    i_37307 * zzdim_31404 +
+                                                    i_37303];
                     
-                    int64_t i_36768 = sub64(i_37382, (int64_t) 1);
+                    int64_t i_36768 = sub64(i_37307, (int64_t) 1);
                     bool x_36769 = sle64((int64_t) 0, i_36768);
                     bool y_36770 = slt64(i_36768, ydim_31403);
                     bool bounds_check_36771 = x_36769 && y_36770;
@@ -8342,9 +7825,9 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!bounds_check_36771) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37386, ", ",
+                                      "Index [", (long long) i_37333, ", ",
                                       (long long) i_36768, ", ",
-                                      (long long) i_37378,
+                                      (long long) i_37303,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
                                       (long long) ydim_31403, "][",
@@ -8356,14 +7839,14 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float y_36774;
                     
-                    y_36774 = ((float *) mem_39158)[i_37386 * ctx_val_37797 +
+                    y_36774 = ((float *) mem_37773)[i_37333 * ctx_val_37824 +
                                                     i_36768 * zzdim_31404 +
-                                                    i_37378];
+                                                    i_37303];
                     
                     float x_36775 = x_36767 - y_36774;
                     float y_36776;
                     
-                    y_36776 = ((float *) dyt_mem_37769.mem)[i_37382];
+                    y_36776 = ((float *) dyt_mem_37748.mem)[i_37307];
                     
                     float y_36777 = x_36762 * y_36776;
                     float y_36778 = x_36775 / y_36777;
@@ -8375,16 +7858,16 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     float tmp_f_res_36793;
                     
                     tmp_f_res_36793 =
-                        ((float *) dtketau_mem_37758.mem)[i_37386 *
+                        ((float *) dtketau_mem_37737.mem)[i_37333 *
                                                           (zzdim_31404 *
                                                            ydim_31403) +
-                                                          i_37382 *
+                                                          i_37307 *
                                                           zzdim_31404 +
-                                                          i_37378];
+                                                          i_37303];
                     tmp_36736 = tmp_f_res_36793;
                 }
                 
-                bool cond_36794 = i_37378 == (int64_t) 0;
+                bool cond_36794 = i_37303 == (int64_t) 0;
                 float zz0_update_36795;
                 
                 if (cond_36794) {
@@ -8394,8 +7877,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!y_36802) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37386, ", ",
-                                      (long long) i_37382, ", ",
+                                      "Index [", (long long) i_37333, ", ",
+                                      (long long) i_37307, ", ",
                                       (long long) (int64_t) 0,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
@@ -8408,8 +7891,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float x_36806;
                     
-                    x_36806 = ((float *) mem_39261)[i_37386 * ctx_val_37797 +
-                                                    i_37382 * zzdim_31404];
+                    x_36806 = ((float *) mem_37778)[i_37333 * ctx_val_37824 +
+                                                    i_37307 * zzdim_31404];
                     
                     bool index_certs_36807;
                     
@@ -8426,7 +7909,7 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float y_36808;
                     
-                    y_36808 = ((float *) dzzw_mem_37772.mem)[(int64_t) 0];
+                    y_36808 = ((float *) dzzw_mem_37751.mem)[(int64_t) 0];
                     
                     float y_36809 = x_36806 / y_36808;
                     float zz0_update_t_res_36810 = tmp_36736 - y_36809;
@@ -8436,19 +7919,19 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     zz0_update_36795 = tmp_36736;
                 }
                 
-                bool cond_36811 = sle64((int64_t) 1, i_37378);
-                bool cond_t_res_36812 = slt64(i_37378, y_35718);
+                bool cond_36811 = sle64((int64_t) 1, i_37303);
+                bool cond_t_res_36812 = slt64(i_37303, y_35718);
                 bool x_36813 = cond_36811 && cond_t_res_36812;
                 float zz_middle_update_36814;
                 
                 if (x_36813) {
                     float x_36827;
                     
-                    x_36827 = ((float *) mem_39261)[i_37386 * ctx_val_37797 +
-                                                    i_37382 * zzdim_31404 +
-                                                    i_37378];
+                    x_36827 = ((float *) mem_37778)[i_37333 * ctx_val_37824 +
+                                                    i_37307 * zzdim_31404 +
+                                                    i_37303];
                     
-                    int64_t i_36828 = sub64(i_37378, (int64_t) 1);
+                    int64_t i_36828 = sub64(i_37303, (int64_t) 1);
                     bool x_36829 = sle64((int64_t) 0, i_36828);
                     bool y_36830 = slt64(i_36828, zzdim_31404);
                     bool bounds_check_36831 = x_36829 && y_36830;
@@ -8457,8 +7940,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!bounds_check_36831) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37386, ", ",
-                                      (long long) i_37382, ", ",
+                                      "Index [", (long long) i_37333, ", ",
+                                      (long long) i_37307, ", ",
                                       (long long) i_36828,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
@@ -8471,14 +7954,14 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float y_36835;
                     
-                    y_36835 = ((float *) mem_39261)[i_37386 * ctx_val_37797 +
-                                                    i_37382 * zzdim_31404 +
+                    y_36835 = ((float *) mem_37778)[i_37333 * ctx_val_37824 +
+                                                    i_37307 * zzdim_31404 +
                                                     i_36828];
                     
                     float x_36836 = x_36827 - y_36835;
                     float y_36838;
                     
-                    y_36838 = ((float *) dzzw_mem_37772.mem)[i_37378];
+                    y_36838 = ((float *) dzzw_mem_37751.mem)[i_37303];
                     
                     float y_36839 = x_36836 / y_36838;
                     float zz_middle_update_t_res_36840 = zz0_update_36795 -
@@ -8489,17 +7972,17 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     zz_middle_update_36814 = zz0_update_36795;
                 }
                 
-                bool cond_36841 = i_37378 == y_35718;
+                bool cond_36841 = i_37303 == y_35718;
                 float defunc_0_f_res_36842;
                 
                 if (cond_36841) {
                     float x_36855;
                     
-                    x_36855 = ((float *) mem_39261)[i_37386 * ctx_val_37797 +
-                                                    i_37382 * zzdim_31404 +
-                                                    i_37378];
+                    x_36855 = ((float *) mem_37778)[i_37333 * ctx_val_37824 +
+                                                    i_37307 * zzdim_31404 +
+                                                    i_37303];
                     
-                    int64_t i_36856 = sub64(i_37378, (int64_t) 1);
+                    int64_t i_36856 = sub64(i_37303, (int64_t) 1);
                     bool x_36857 = sle64((int64_t) 0, i_36856);
                     bool y_36858 = slt64(i_36856, zzdim_31404);
                     bool bounds_check_36859 = x_36857 && y_36858;
@@ -8508,8 +7991,8 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     if (!bounds_check_36859) {
                         ctx->error =
                             msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
-                                      "Index [", (long long) i_37386, ", ",
-                                      (long long) i_37382, ", ",
+                                      "Index [", (long long) i_37333, ", ",
+                                      (long long) i_37307, ", ",
                                       (long long) i_36856,
                                       "] out of bounds for array of shape [",
                                       (long long) xdim_31402, "][",
@@ -8522,14 +8005,14 @@ static int futrts_entry_main(struct futhark_context *ctx,
                     
                     float y_36863;
                     
-                    y_36863 = ((float *) mem_39261)[i_37386 * ctx_val_37797 +
-                                                    i_37382 * zzdim_31404 +
+                    y_36863 = ((float *) mem_37778)[i_37333 * ctx_val_37824 +
+                                                    i_37307 * zzdim_31404 +
                                                     i_36856];
                     
                     float x_36864 = x_36855 - y_36863;
                     float y_36866;
                     
-                    y_36866 = ((float *) dzzw_mem_37772.mem)[i_37378];
+                    y_36866 = ((float *) dzzw_mem_37751.mem)[i_37303];
                     
                     float y_36867 = 0.5F * y_36866;
                     float y_36868 = x_36864 / y_36867;
@@ -8540,180 +8023,672 @@ static int futrts_entry_main(struct futhark_context *ctx,
                 } else {
                     defunc_0_f_res_36842 = zz_middle_update_36814;
                 }
-                ((float *) mem_39364)[i_37386 * ctx_val_37797 + i_37382 *
-                                      zzdim_31404 + i_37378] =
+                ((float *) mem_38210)[i_37333 * ctx_val_37824 + i_37307 *
+                                      zzdim_31404 + i_37303] =
                     defunc_0_f_res_36842;
             }
         }
+        for (int64_t i_37315 = 0; i_37315 < ydim_31403; i_37315++) {
+            bool cond_36397 = slt64(i_37315, y_36392);
+            
+            for (int64_t i_37311 = 0; i_37311 < zzdim_31404; i_37311++) {
+                float defunc_0_f_res_36400;
+                
+                if (cond_36397) {
+                    int64_t i_36404 = add64((int64_t) 1, i_37315);
+                    bool x_36405 = sle64((int64_t) 0, i_36404);
+                    bool y_36406 = slt64(i_36404, ydim_31403);
+                    bool bounds_check_36407 = x_36405 && y_36406;
+                    bool index_certs_36413;
+                    
+                    if (!bounds_check_36407) {
+                        ctx->error =
+                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                      "Index [", (long long) i_37333, ", ",
+                                      (long long) i_36404, ", ",
+                                      (long long) i_37311,
+                                      "] out of bounds for array of shape [",
+                                      (long long) xdim_31402, "][",
+                                      (long long) ydim_31403, "][",
+                                      (long long) zzdim_31404, "].",
+                                      "-> #0  sample_programs/tke.fut:266:40-56\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:263:22-269:21\n   #10 sample_programs/tke.fut:57:1-363:81\n");
+                        err = FUTHARK_PROGRAM_ERROR;
+                        goto cleanup;
+                    }
+                    
+                    float x_36414;
+                    
+                    x_36414 = ((float *) tketau_mem_37734.mem)[i_37333 *
+                                                               (zzdim_31404 *
+                                                                ydim_31403) +
+                                                               i_36404 *
+                                                               zzdim_31404 +
+                                                               i_37311];
+                    
+                    float y_36420;
+                    
+                    y_36420 = ((float *) tketau_mem_37734.mem)[i_37333 *
+                                                               (zzdim_31404 *
+                                                                ydim_31403) +
+                                                               i_37315 *
+                                                               zzdim_31404 +
+                                                               i_37311];
+                    
+                    float y_36421 = x_36414 - y_36420;
+                    float x_36422 = 2000.0F * y_36421;
+                    float y_36424;
+                    
+                    y_36424 = ((float *) dyu_mem_37749.mem)[i_37315];
+                    
+                    float x_36425 = x_36422 / y_36424;
+                    float y_36426;
+                    
+                    y_36426 = ((float *) maskV_mem_37744.mem)[i_37333 *
+                                                              (zzdim_31404 *
+                                                               ydim_31403) +
+                                                              i_37315 *
+                                                              zzdim_31404 +
+                                                              i_37311];
+                    
+                    float x_36427 = x_36425 * y_36426;
+                    float y_36428;
+                    
+                    y_36428 = ((float *) cosu_mem_37753.mem)[i_37315];
+                    
+                    float defunc_0_f_res_t_res_36429 = x_36427 * y_36428;
+                    
+                    defunc_0_f_res_36400 = defunc_0_f_res_t_res_36429;
+                } else {
+                    defunc_0_f_res_36400 = 0.0F;
+                }
+                ((float *) mem_38215)[i_37333 * ctx_val_37824 + i_37315 *
+                                      zzdim_31404 + i_37311] =
+                    defunc_0_f_res_36400;
+            }
+        }
+        
+        bool cond_36355 = slt64(i_37333, y_36352);
+        
+        for (int64_t i_37323 = 0; i_37323 < ydim_31403; i_37323++) {
+            for (int64_t i_37319 = 0; i_37319 < zzdim_31404; i_37319++) {
+                float defunc_0_f_res_36360;
+                
+                if (cond_36355) {
+                    int64_t i_36361 = add64((int64_t) 1, i_37333);
+                    bool x_36362 = sle64((int64_t) 0, i_36361);
+                    bool y_36363 = slt64(i_36361, xdim_31402);
+                    bool bounds_check_36364 = x_36362 && y_36363;
+                    bool index_certs_36373;
+                    
+                    if (!bounds_check_36364) {
+                        ctx->error =
+                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                      "Index [", (long long) i_36361, ", ",
+                                      (long long) i_37323, ", ",
+                                      (long long) i_37319,
+                                      "] out of bounds for array of shape [",
+                                      (long long) xdim_31402, "][",
+                                      (long long) ydim_31403, "][",
+                                      (long long) zzdim_31404, "].",
+                                      "-> #0  sample_programs/tke.fut:257:40-56\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:254:21-261:5\n   #10 sample_programs/tke.fut:57:1-363:81\n");
+                        err = FUTHARK_PROGRAM_ERROR;
+                        goto cleanup;
+                    }
+                    
+                    float x_36374;
+                    
+                    x_36374 = ((float *) tketau_mem_37734.mem)[i_36361 *
+                                                               (zzdim_31404 *
+                                                                ydim_31403) +
+                                                               i_37323 *
+                                                               zzdim_31404 +
+                                                               i_37319];
+                    
+                    float y_36381;
+                    
+                    y_36381 = ((float *) tketau_mem_37734.mem)[i_37333 *
+                                                               (zzdim_31404 *
+                                                                ydim_31403) +
+                                                               i_37323 *
+                                                               zzdim_31404 +
+                                                               i_37319];
+                    
+                    float y_36382 = x_36374 - y_36381;
+                    float x_36383 = 2000.0F * y_36382;
+                    float x_36385;
+                    
+                    x_36385 = ((float *) cost_mem_37752.mem)[i_37323];
+                    
+                    float y_36387;
+                    
+                    y_36387 = ((float *) dxu_mem_37747.mem)[i_37333];
+                    
+                    float y_36388 = x_36385 * y_36387;
+                    float x_36389 = x_36383 / y_36388;
+                    float y_36390;
+                    
+                    y_36390 = ((float *) maskU_mem_37743.mem)[i_37333 *
+                                                              (zzdim_31404 *
+                                                               ydim_31403) +
+                                                              i_37323 *
+                                                              zzdim_31404 +
+                                                              i_37319];
+                    
+                    float defunc_0_f_res_t_res_36391 = x_36389 * y_36390;
+                    
+                    defunc_0_f_res_36360 = defunc_0_f_res_t_res_36391;
+                } else {
+                    defunc_0_f_res_36360 = 0.0F;
+                }
+                ((float *) mem_38220)[i_37333 * ctx_val_37824 + i_37323 *
+                                      zzdim_31404 + i_37319] =
+                    defunc_0_f_res_36360;
+            }
+        }
     }
-    if (mem_39467_cached_sizze_39878 < bytes_37783) {
-        err = lexical_realloc(&ctx->error, &mem_39467,
-                              &mem_39467_cached_sizze_39878, bytes_37783);
+    if (mem_39090_cached_sizze_39847 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_39090,
+                              &mem_39090_cached_sizze_39847, bytes_37762);
         if (err != FUTHARK_SUCCESS)
             goto cleanup;
     }
-    for (int64_t i_37398 = 0; i_37398 < xdim_31402; i_37398++) {
-        for (int64_t i_37394 = 0; i_37394 < ydim_31403; i_37394++) {
-            for (int64_t i_37390 = 0; i_37390 < zzdim_31404; i_37390++) {
+    for (int64_t i_37348 = 0; i_37348 < xdim_31402; i_37348++) {
+        bool cond_36225 = sle64((int64_t) 2, i_37348);
+        bool cond_t_res_36226 = slt64(i_37348, y_35716);
+        bool x_36227 = cond_36225 && cond_t_res_36226;
+        
+        for (int64_t i_37344 = 0; i_37344 < ydim_31403; i_37344++) {
+            int32_t x_36235;
+            
+            x_36235 = ((int32_t *) kbot_mem_37754.mem)[i_37348 * ydim_31403 +
+                                                       i_37344];
+            
+            int32_t ks_val_36236 = sub32(x_36235, 1);
+            bool cond_36237 = sle32(0, ks_val_36236);
+            bool cond_t_res_36238 = sle64((int64_t) 2, i_37344);
+            bool x_36239 = x_36227 && cond_t_res_36238;
+            bool cond_t_res_36240 = slt64(i_37344, y_35717);
+            bool x_36241 = x_36239 && cond_t_res_36240;
+            
+            for (int64_t i_37340 = 0; i_37340 < zzdim_31404; i_37340++) {
+                int32_t i64_res_36244 = sext_i64_i32(i_37340);
+                bool water_mask_t_res_36245 = sle32(ks_val_36236,
+                                                    i64_res_36244);
+                bool x_36246 = cond_36237 && water_mask_t_res_36245;
+                bool x_36247 = x_36241 && x_36246;
+                float defunc_0_f_res_36248;
+                
+                if (x_36247) {
+                    float defunc_0_f_res_t_res_36261;
+                    
+                    defunc_0_f_res_t_res_36261 = ((float *) mem_38205)[i_37348 *
+                                                                       ctx_val_37824 +
+                                                                       i_37344 *
+                                                                       zzdim_31404 +
+                                                                       i_37340];
+                    defunc_0_f_res_36248 = defunc_0_f_res_t_res_36261;
+                } else {
+                    float defunc_0_f_res_f_res_36274;
+                    
+                    defunc_0_f_res_f_res_36274 =
+                        ((float *) tketaup1_mem_37735.mem)[i_37348 *
+                                                           (zzdim_31404 *
+                                                            ydim_31403) +
+                                                           i_37344 *
+                                                           zzdim_31404 +
+                                                           i_37340];
+                    defunc_0_f_res_36248 = defunc_0_f_res_f_res_36274;
+                }
+                ((float *) mem_39090)[i_37348 * ctx_val_37824 + i_37344 *
+                                      zzdim_31404 + i_37340] =
+                    defunc_0_f_res_36248;
+            }
+        }
+    }
+    if (mem_39193_cached_sizze_39848 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_39193,
+                              &mem_39193_cached_sizze_39848, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    for (int64_t i_37360 = 0; i_37360 < xdim_31402; i_37360++) {
+        bool cond_36310 = sle64((int64_t) 2, i_37360);
+        bool cond_t_res_36311 = slt64(i_37360, y_35716);
+        bool x_36312 = cond_36310 && cond_t_res_36311;
+        
+        for (int64_t i_37356 = 0; i_37356 < ydim_31403; i_37356++) {
+            bool cond_t_res_36315 = sle64((int64_t) 2, i_37356);
+            bool x_36316 = x_36312 && cond_t_res_36315;
+            bool cond_t_res_36317 = slt64(i_37356, y_35717);
+            bool x_36318 = x_36316 && cond_t_res_36317;
+            
+            for (int64_t i_37352 = 0; i_37352 < zzdim_31404; i_37352++) {
+                bool cond_t_res_36321 = i_37352 == y_35718;
+                bool x_36322 = x_36318 && cond_t_res_36321;
+                float defunc_0_f_res_36323;
+                
+                if (x_36322) {
+                    float tke_val_36336;
+                    
+                    tke_val_36336 = ((float *) mem_39090)[i_37360 *
+                                                          ctx_val_37824 +
+                                                          i_37356 *
+                                                          zzdim_31404 +
+                                                          i_37352];
+                    
+                    bool cond_36337 = tke_val_36336 < 0.0F;
+                    float defunc_0_f_res_t_res_36338;
+                    
+                    if (cond_36337) {
+                        defunc_0_f_res_t_res_36338 = 0.0F;
+                    } else {
+                        defunc_0_f_res_t_res_36338 = tke_val_36336;
+                    }
+                    defunc_0_f_res_36323 = defunc_0_f_res_t_res_36338;
+                } else {
+                    float defunc_0_f_res_f_res_36351;
+                    
+                    defunc_0_f_res_f_res_36351 = ((float *) mem_39090)[i_37360 *
+                                                                       ctx_val_37824 +
+                                                                       i_37356 *
+                                                                       zzdim_31404 +
+                                                                       i_37352];
+                    defunc_0_f_res_36323 = defunc_0_f_res_f_res_36351;
+                }
+                ((float *) mem_39193)[i_37360 * ctx_val_37824 + i_37356 *
+                                      zzdim_31404 + i_37352] =
+                    defunc_0_f_res_36323;
+            }
+        }
+    }
+    if (mem_39296_cached_sizze_39849 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_39296,
+                              &mem_39296_cached_sizze_39849, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    for (int64_t i_37372 = 0; i_37372 < xdim_31402; i_37372++) {
+        bool cond_36435 = sle64((int64_t) 2, i_37372);
+        bool cond_t_res_36436 = slt64(i_37372, y_35716);
+        bool x_36437 = cond_36435 && cond_t_res_36436;
+        
+        for (int64_t i_37368 = 0; i_37368 < ydim_31403; i_37368++) {
+            bool cond_t_res_36443 = sle64((int64_t) 2, i_37368);
+            bool x_36444 = x_36437 && cond_t_res_36443;
+            bool cond_t_res_36445 = slt64(i_37368, y_35717);
+            bool x_36446 = x_36444 && cond_t_res_36445;
+            
+            for (int64_t i_37364 = 0; i_37364 < zzdim_31404; i_37364++) {
+                float previous_36455;
+                
+                previous_36455 = ((float *) mem_39193)[i_37372 * ctx_val_37824 +
+                                                       i_37368 * zzdim_31404 +
+                                                       i_37364];
+                
+                bool cond_t_res_36456 = i_37364 == y_35718;
+                bool x_36457 = x_36446 && cond_t_res_36456;
+                float defunc_0_f_res_36458;
+                
+                if (x_36457) {
+                    float y_36468;
+                    
+                    y_36468 = ((float *) maskW_mem_37745.mem)[i_37372 *
+                                                              (zzdim_31404 *
+                                                               ydim_31403) +
+                                                              i_37368 *
+                                                              zzdim_31404 +
+                                                              i_37364];
+                    
+                    float x_36469;
+                    
+                    x_36469 = ((float *) mem_38220)[i_37372 * ctx_val_37824 +
+                                                    i_37368 * zzdim_31404 +
+                                                    i_37364];
+                    
+                    int64_t i_36470 = sub64(i_37372, (int64_t) 1);
+                    bool x_36471 = sle64((int64_t) 0, i_36470);
+                    bool y_36472 = slt64(i_36470, xdim_31402);
+                    bool bounds_check_36473 = x_36471 && y_36472;
+                    bool index_certs_36476;
+                    
+                    if (!bounds_check_36473) {
+                        ctx->error =
+                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                      "Index [", (long long) i_36470, ", ",
+                                      (long long) i_37368, ", ",
+                                      (long long) i_37364,
+                                      "] out of bounds for array of shape [",
+                                      (long long) xdim_31402, "][",
+                                      (long long) ydim_31403, "][",
+                                      (long long) zzdim_31404, "].",
+                                      "-> #0  sample_programs/tke.fut:275:54-73\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:271:20-280:21\n   #10 sample_programs/tke.fut:57:1-363:81\n");
+                        err = FUTHARK_PROGRAM_ERROR;
+                        goto cleanup;
+                    }
+                    
+                    float y_36477;
+                    
+                    y_36477 = ((float *) mem_38220)[i_36470 * ctx_val_37824 +
+                                                    i_37368 * zzdim_31404 +
+                                                    i_37364];
+                    
+                    float x_36478 = x_36469 - y_36477;
+                    float x_36480;
+                    
+                    x_36480 = ((float *) cost_mem_37752.mem)[i_37368];
+                    
+                    float y_36482;
+                    
+                    y_36482 = ((float *) dxt_mem_37746.mem)[i_37372];
+                    
+                    float y_36483 = x_36480 * y_36482;
+                    float x_36484 = x_36478 / y_36483;
+                    float x_36485;
+                    
+                    x_36485 = ((float *) mem_38215)[i_37372 * ctx_val_37824 +
+                                                    i_37368 * zzdim_31404 +
+                                                    i_37364];
+                    
+                    int64_t i_36486 = sub64(i_37368, (int64_t) 1);
+                    bool x_36487 = sle64((int64_t) 0, i_36486);
+                    bool y_36488 = slt64(i_36486, ydim_31403);
+                    bool bounds_check_36489 = x_36487 && y_36488;
+                    bool index_certs_36491;
+                    
+                    if (!bounds_check_36489) {
+                        ctx->error =
+                            msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                      "Index [", (long long) i_37372, ", ",
+                                      (long long) i_36486, ", ",
+                                      (long long) i_37364,
+                                      "] out of bounds for array of shape [",
+                                      (long long) xdim_31402, "][",
+                                      (long long) ydim_31403, "][",
+                                      (long long) zzdim_31404, "].",
+                                      "-> #0  sample_programs/tke.fut:277:56-76\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  /prelude/functional.fut:39:59-65\n   #7  /prelude/soacs.fut:59:3-10\n   #8  /prelude/array.fut:211:3-39\n   #9  sample_programs/tke.fut:271:20-280:21\n   #10 sample_programs/tke.fut:57:1-363:81\n");
+                        err = FUTHARK_PROGRAM_ERROR;
+                        goto cleanup;
+                    }
+                    
+                    float y_36492;
+                    
+                    y_36492 = ((float *) mem_38215)[i_37372 * ctx_val_37824 +
+                                                    i_36486 * zzdim_31404 +
+                                                    i_37364];
+                    
+                    float x_36493 = x_36485 - y_36492;
+                    float y_36494;
+                    
+                    y_36494 = ((float *) dyt_mem_37748.mem)[i_37368];
+                    
+                    float y_36495 = x_36480 * y_36494;
+                    float y_36496 = x_36493 / y_36495;
+                    float y_36497 = x_36484 + y_36496;
+                    float y_36498 = y_36468 * y_36497;
+                    float defunc_0_f_res_t_res_36499 = previous_36455 + y_36498;
+                    
+                    defunc_0_f_res_36458 = defunc_0_f_res_t_res_36499;
+                } else {
+                    defunc_0_f_res_36458 = previous_36455;
+                }
+                ((float *) mem_39296)[i_37372 * ctx_val_37824 + i_37368 *
+                                      zzdim_31404 + i_37364] =
+                    defunc_0_f_res_36458;
+            }
+        }
+    }
+    
+    int64_t binop_y_39396 = (int64_t) 4 * binop_x_37759;
+    int64_t bytes_39397 = smax64((int64_t) 0, binop_y_39396);
+    
+    if (mem_39398_cached_sizze_39850 < bytes_39397) {
+        err = lexical_realloc(&ctx->error, &mem_39398,
+                              &mem_39398_cached_sizze_39850, bytes_39397);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_39403_cached_sizze_39851 < bytes_37762) {
+        err = lexical_realloc(&ctx->error, &mem_39403,
+                              &mem_39403_cached_sizze_39851, bytes_37762);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    for (int64_t i_37390 = 0; i_37390 < xdim_31402; i_37390++) {
+        bool cond_36277 = sle64((int64_t) 2, i_37390);
+        bool cond_t_res_36278 = slt64(i_37390, y_35716);
+        bool x_36279 = cond_36277 && cond_t_res_36278;
+        
+        for (int64_t i_37376 = 0; i_37376 < ydim_31403; i_37376++) {
+            bool cond_t_res_36282 = sle64((int64_t) 2, i_37376);
+            bool x_36283 = x_36279 && cond_t_res_36282;
+            bool cond_t_res_36284 = slt64(i_37376, y_35717);
+            bool x_36285 = x_36283 && cond_t_res_36284;
+            float defunc_0_f_res_36286;
+            
+            if (x_36285) {
+                bool x_36294 = sle64((int64_t) 0, y_35718);
+                bool y_36295 = slt64(y_35718, zzdim_31404);
+                bool bounds_check_36296 = x_36294 && y_36295;
+                bool index_certs_36299;
+                
+                if (!bounds_check_36296) {
+                    ctx->error =
+                        msgprintf("Error: %s%lld%s%lld%s%lld%s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                  "Index [", (long long) i_37390, ", ",
+                                  (long long) i_37376, ", ",
+                                  (long long) y_35718,
+                                  "] out of bounds for array of shape [",
+                                  (long long) xdim_31402, "][",
+                                  (long long) ydim_31403, "][",
+                                  (long long) zzdim_31404, "].",
+                                  "-> #0  sample_programs/tke.fut:237:39-60\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  sample_programs/tke.fut:234:25-242:21\n   #7  sample_programs/tke.fut:57:1-363:81\n");
+                    err = FUTHARK_PROGRAM_ERROR;
+                    goto cleanup;
+                }
+                
+                float tke_val_36300;
+                
+                tke_val_36300 = ((float *) mem_39090)[i_37390 * ctx_val_37824 +
+                                                      i_37376 * zzdim_31404 +
+                                                      y_35718];
+                
+                bool cond_36301 = tke_val_36300 < 0.0F;
+                float defunc_0_f_res_t_res_36302;
+                
+                if (cond_36301) {
+                    float x_36303 = 0.0F - tke_val_36300;
+                    float x_36304 = 0.5F * x_36303;
+                    bool index_certs_36305;
+                    
+                    if (!bounds_check_36296) {
+                        ctx->error =
+                            msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s",
+                                      "Index [", (long long) y_35718,
+                                      "] out of bounds for array of shape [",
+                                      (long long) zzdim_31404, "].",
+                                      "-> #0  sample_programs/tke.fut:239:51-61\n   #1  /prelude/soacs.fut:59:3-10\n   #2  /prelude/array.fut:195:3-17\n   #3  /prelude/functional.fut:39:59-65\n   #4  /prelude/soacs.fut:59:3-10\n   #5  /prelude/array.fut:203:3-34\n   #6  sample_programs/tke.fut:234:25-242:21\n   #7  sample_programs/tke.fut:57:1-363:81\n");
+                        err = FUTHARK_PROGRAM_ERROR;
+                        goto cleanup;
+                    }
+                    
+                    float y_36306;
+                    
+                    y_36306 = ((float *) dzzw_mem_37751.mem)[y_35718];
+                    
+                    float x_36307 = x_36304 * y_36306;
+                    
+                    defunc_0_f_res_t_res_36302 = x_36307;
+                } else {
+                    defunc_0_f_res_t_res_36302 = 0.0F;
+                }
+                defunc_0_f_res_36286 = defunc_0_f_res_t_res_36302;
+            } else {
+                defunc_0_f_res_36286 = 0.0F;
+            }
+            ((float *) mem_39398)[i_37390 * ydim_31403 + i_37376] =
+                defunc_0_f_res_36286;
+        }
+        for (int64_t i_37384 = 0; i_37384 < ydim_31403; i_37384++) {
+            for (int64_t i_37380 = 0; i_37380 < zzdim_31404; i_37380++) {
                 float x_36888;
                 
-                x_36888 = ((float *) mem_38952)[i_37398 * ctx_val_37797 +
-                                                i_37394 * zzdim_31404 +
-                                                i_37390];
+                x_36888 = ((float *) mem_39296)[i_37390 * ctx_val_37824 +
+                                                i_37384 * zzdim_31404 +
+                                                i_37380];
                 
                 float y_36889;
                 
-                y_36889 = ((float *) mem_39364)[i_37398 * ctx_val_37797 +
-                                                i_37394 * zzdim_31404 +
-                                                i_37390];
+                y_36889 = ((float *) mem_38210)[i_37390 * ctx_val_37824 +
+                                                i_37384 * zzdim_31404 +
+                                                i_37380];
                 
                 float x_36890 = 1.6F * y_36889;
                 float y_36891;
                 
-                y_36891 = ((float *) dtketaum1_mem_37760.mem)[i_37398 *
+                y_36891 = ((float *) dtketaum1_mem_37739.mem)[i_37390 *
                                                               (zzdim_31404 *
                                                                ydim_31403) +
-                                                              i_37394 *
+                                                              i_37384 *
                                                               zzdim_31404 +
-                                                              i_37390];
+                                                              i_37380];
                 
                 float y_36892 = 0.6F * y_36891;
                 float y_36893 = x_36890 - y_36892;
                 float defunc_0_f_res_36894 = x_36888 + y_36893;
                 
-                ((float *) mem_39467)[i_37398 * ctx_val_37797 + i_37394 *
-                                      zzdim_31404 + i_37390] =
+                ((float *) mem_39403)[i_37390 * ctx_val_37824 + i_37384 *
+                                      zzdim_31404 + i_37380] =
                     defunc_0_f_res_36894;
             }
         }
     }
-    if (memblock_alloc(ctx, &mem_39570, bytes_37783, "mem_39570")) {
+    if (memblock_alloc(ctx, &mem_39549, bytes_37762, "mem_39549")) {
         err = 1;
         goto cleanup;
     }
     if (xdim_31402 * ydim_31403 * zzdim_31404 * (int64_t) 4 > 0)
-        memmove(mem_39570.mem + (int64_t) 0, mem_39467 + (int64_t) 0,
+        memmove(mem_39549.mem + (int64_t) 0, mem_39403 + (int64_t) 0,
                 xdim_31402 * ydim_31403 * zzdim_31404 * (int64_t) 4);
-    if (memblock_alloc(ctx, &mem_39576, bytes_37783, "mem_39576")) {
+    if (memblock_alloc(ctx, &mem_39555, bytes_37762, "mem_39555")) {
         err = 1;
         goto cleanup;
     }
     if (xdim_31402 * ydim_31403 * zzdim_31404 * (int64_t) 4 > 0)
-        memmove(mem_39576.mem + (int64_t) 0, mem_39364 + (int64_t) 0,
+        memmove(mem_39555.mem + (int64_t) 0, mem_38210 + (int64_t) 0,
                 xdim_31402 * ydim_31403 * zzdim_31404 * (int64_t) 4);
-    if (memblock_alloc(ctx, &mem_39581, bytes_38594, "mem_39581")) {
+    if (memblock_alloc(ctx, &mem_39560, bytes_39397, "mem_39560")) {
         err = 1;
         goto cleanup;
     }
     if (xdim_31402 * ydim_31403 * (int64_t) 4 > 0)
-        memmove(mem_39581.mem + (int64_t) 0, mem_38595 + (int64_t) 0,
+        memmove(mem_39560.mem + (int64_t) 0, mem_39398 + (int64_t) 0,
                 xdim_31402 * ydim_31403 * (int64_t) 4);
-    if (memblock_set(ctx, &mem_out_39752, &tketau_mem_37755,
-                     "tketau_mem_37755") != 0)
+    if (memblock_set(ctx, &mem_out_39725, &tketau_mem_37734,
+                     "tketau_mem_37734") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_39753, &mem_39570, "mem_39570") != 0)
+    if (memblock_set(ctx, &mem_out_39726, &mem_39549, "mem_39549") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_39754, &tketaum1_mem_37757,
-                     "tketaum1_mem_37757") != 0)
+    if (memblock_set(ctx, &mem_out_39727, &tketaum1_mem_37736,
+                     "tketaum1_mem_37736") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_39755, &mem_39576, "mem_39576") != 0)
+    if (memblock_set(ctx, &mem_out_39728, &mem_39555, "mem_39555") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_39756, &dtketaup1_mem_37759,
-                     "dtketaup1_mem_37759") != 0)
+    if (memblock_set(ctx, &mem_out_39729, &dtketaup1_mem_37738,
+                     "dtketaup1_mem_37738") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_39757, &dtketaum1_mem_37760,
-                     "dtketaum1_mem_37760") != 0)
+    if (memblock_set(ctx, &mem_out_39730, &dtketaum1_mem_37739,
+                     "dtketaum1_mem_37739") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_39758, &mem_39581, "mem_39581") != 0)
+    if (memblock_set(ctx, &mem_out_39731, &mem_39560, "mem_39560") != 0)
         return 1;
-    (*mem_out_p_39834).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_39834, &mem_out_39752, "mem_out_39752") !=
+    (*mem_out_p_39807).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_39807, &mem_out_39725, "mem_out_39725") !=
         0)
         return 1;
-    (*mem_out_p_39835).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_39835, &mem_out_39753, "mem_out_39753") !=
+    (*mem_out_p_39808).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_39808, &mem_out_39726, "mem_out_39726") !=
         0)
         return 1;
-    (*mem_out_p_39836).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_39836, &mem_out_39754, "mem_out_39754") !=
+    (*mem_out_p_39809).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_39809, &mem_out_39727, "mem_out_39727") !=
         0)
         return 1;
-    (*mem_out_p_39837).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_39837, &mem_out_39755, "mem_out_39755") !=
+    (*mem_out_p_39810).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_39810, &mem_out_39728, "mem_out_39728") !=
         0)
         return 1;
-    (*mem_out_p_39838).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_39838, &mem_out_39756, "mem_out_39756") !=
+    (*mem_out_p_39811).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_39811, &mem_out_39729, "mem_out_39729") !=
         0)
         return 1;
-    (*mem_out_p_39839).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_39839, &mem_out_39757, "mem_out_39757") !=
+    (*mem_out_p_39812).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_39812, &mem_out_39730, "mem_out_39730") !=
         0)
         return 1;
-    (*mem_out_p_39840).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_39840, &mem_out_39758, "mem_out_39758") !=
+    (*mem_out_p_39813).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_39813, &mem_out_39731, "mem_out_39731") !=
         0)
         return 1;
     
   cleanup:
     {
-        free(mem_37784);
-        free(mem_37885);
-        free(mem_37900);
-        free(mem_37917);
-        free(mem_37935);
-        free(mem_37982);
-        free(mem_38029);
-        free(mem_38076);
-        free(mem_38137);
-        free(mem_38140);
-        free(mem_38143);
-        free(mem_38146);
-        free(mem_38197);
-        free(mem_38200);
-        free(mem_38203);
-        free(mem_38206);
-        free(mem_38257);
-        free(mem_38272);
-        free(mem_38275);
-        free(mem_38302);
-        free(mem_38305);
-        free(mem_38332);
-        free(mem_38347);
-        free(mem_38350);
-        free(mem_38377);
-        free(mem_38380);
-        free(mem_38407);
-        free(mem_38493);
-        free(mem_38595);
-        free(mem_38643);
-        free(mem_38746);
-        free(mem_38849);
-        free(mem_38952);
-        free(mem_39055);
-        free(mem_39158);
-        free(mem_39261);
-        free(mem_39364);
-        free(mem_39467);
-        if (memblock_unref(ctx, &mem_39581, "mem_39581") != 0)
+        free(mem_37763);
+        free(mem_37768);
+        free(mem_37773);
+        free(mem_37778);
+        free(mem_38173);
+        free(mem_38188);
+        free(mem_38205);
+        free(mem_38210);
+        free(mem_38215);
+        free(mem_38220);
+        free(mem_38280);
+        free(mem_38327);
+        free(mem_38374);
+        free(mem_38421);
+        free(mem_38482);
+        free(mem_38485);
+        free(mem_38488);
+        free(mem_38491);
+        free(mem_38542);
+        free(mem_38545);
+        free(mem_38548);
+        free(mem_38551);
+        free(mem_38602);
+        free(mem_38617);
+        free(mem_38620);
+        free(mem_38647);
+        free(mem_38650);
+        free(mem_38677);
+        free(mem_38692);
+        free(mem_38695);
+        free(mem_38722);
+        free(mem_38725);
+        free(mem_38752);
+        free(mem_39090);
+        free(mem_39193);
+        free(mem_39296);
+        free(mem_39398);
+        free(mem_39403);
+        if (memblock_unref(ctx, &mem_39560, "mem_39560") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_39576, "mem_39576") != 0)
+        if (memblock_unref(ctx, &mem_39555, "mem_39555") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_39570, "mem_39570") != 0)
+        if (memblock_unref(ctx, &mem_39549, "mem_39549") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_39758, "mem_out_39758") != 0)
+        if (memblock_unref(ctx, &mem_out_39731, "mem_out_39731") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_39757, "mem_out_39757") != 0)
+        if (memblock_unref(ctx, &mem_out_39730, "mem_out_39730") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_39756, "mem_out_39756") != 0)
+        if (memblock_unref(ctx, &mem_out_39729, "mem_out_39729") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_39755, "mem_out_39755") != 0)
+        if (memblock_unref(ctx, &mem_out_39728, "mem_out_39728") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_39754, "mem_out_39754") != 0)
+        if (memblock_unref(ctx, &mem_out_39727, "mem_out_39727") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_39753, "mem_out_39753") != 0)
+        if (memblock_unref(ctx, &mem_out_39726, "mem_out_39726") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_39752, "mem_out_39752") != 0)
+        if (memblock_unref(ctx, &mem_out_39725, "mem_out_39725") != 0)
             return 1;
     }
     return err;
@@ -8760,213 +8735,213 @@ int futhark_entry_main(struct futhark_context *ctx,
     
     lock_lock(&ctx->lock);
     
-    struct memblock mem_out_39758;
+    struct memblock mem_out_39731;
     
-    mem_out_39758.references = NULL;
+    mem_out_39731.references = NULL;
     
-    struct memblock mem_out_39757;
+    struct memblock mem_out_39730;
     
-    mem_out_39757.references = NULL;
+    mem_out_39730.references = NULL;
     
-    struct memblock mem_out_39756;
+    struct memblock mem_out_39729;
     
-    mem_out_39756.references = NULL;
+    mem_out_39729.references = NULL;
     
-    struct memblock mem_out_39755;
+    struct memblock mem_out_39728;
     
-    mem_out_39755.references = NULL;
+    mem_out_39728.references = NULL;
     
-    struct memblock mem_out_39754;
+    struct memblock mem_out_39727;
     
-    mem_out_39754.references = NULL;
+    mem_out_39727.references = NULL;
     
-    struct memblock mem_out_39753;
+    struct memblock mem_out_39726;
     
-    mem_out_39753.references = NULL;
+    mem_out_39726.references = NULL;
     
-    struct memblock mem_out_39752;
+    struct memblock mem_out_39725;
     
-    mem_out_39752.references = NULL;
+    mem_out_39725.references = NULL;
     
-    struct memblock forc_tke_surface_mem_37779;
+    struct memblock forc_tke_surface_mem_37758;
     
-    forc_tke_surface_mem_37779.references = NULL;
+    forc_tke_surface_mem_37758.references = NULL;
     
-    struct memblock forc_mem_37778;
+    struct memblock forc_mem_37757;
     
-    forc_mem_37778.references = NULL;
+    forc_mem_37757.references = NULL;
     
-    struct memblock mxl_mem_37777;
+    struct memblock mxl_mem_37756;
     
-    mxl_mem_37777.references = NULL;
+    mxl_mem_37756.references = NULL;
     
-    struct memblock kappaM_mem_37776;
+    struct memblock kappaM_mem_37755;
     
-    kappaM_mem_37776.references = NULL;
+    kappaM_mem_37755.references = NULL;
     
-    struct memblock kbot_mem_37775;
+    struct memblock kbot_mem_37754;
     
-    kbot_mem_37775.references = NULL;
+    kbot_mem_37754.references = NULL;
     
-    struct memblock cosu_mem_37774;
+    struct memblock cosu_mem_37753;
     
-    cosu_mem_37774.references = NULL;
+    cosu_mem_37753.references = NULL;
     
-    struct memblock cost_mem_37773;
+    struct memblock cost_mem_37752;
     
-    cost_mem_37773.references = NULL;
+    cost_mem_37752.references = NULL;
     
-    struct memblock dzzw_mem_37772;
+    struct memblock dzzw_mem_37751;
     
-    dzzw_mem_37772.references = NULL;
+    dzzw_mem_37751.references = NULL;
     
-    struct memblock dzzt_mem_37771;
+    struct memblock dzzt_mem_37750;
     
-    dzzt_mem_37771.references = NULL;
+    dzzt_mem_37750.references = NULL;
     
-    struct memblock dyu_mem_37770;
+    struct memblock dyu_mem_37749;
     
-    dyu_mem_37770.references = NULL;
+    dyu_mem_37749.references = NULL;
     
-    struct memblock dyt_mem_37769;
+    struct memblock dyt_mem_37748;
     
-    dyt_mem_37769.references = NULL;
+    dyt_mem_37748.references = NULL;
     
-    struct memblock dxu_mem_37768;
+    struct memblock dxu_mem_37747;
     
-    dxu_mem_37768.references = NULL;
+    dxu_mem_37747.references = NULL;
     
-    struct memblock dxt_mem_37767;
+    struct memblock dxt_mem_37746;
     
-    dxt_mem_37767.references = NULL;
+    dxt_mem_37746.references = NULL;
     
-    struct memblock maskW_mem_37766;
+    struct memblock maskW_mem_37745;
     
-    maskW_mem_37766.references = NULL;
+    maskW_mem_37745.references = NULL;
     
-    struct memblock maskV_mem_37765;
+    struct memblock maskV_mem_37744;
     
-    maskV_mem_37765.references = NULL;
+    maskV_mem_37744.references = NULL;
     
-    struct memblock maskU_mem_37764;
+    struct memblock maskU_mem_37743;
     
-    maskU_mem_37764.references = NULL;
+    maskU_mem_37743.references = NULL;
     
-    struct memblock wtau_mem_37763;
+    struct memblock wtau_mem_37742;
     
-    wtau_mem_37763.references = NULL;
+    wtau_mem_37742.references = NULL;
     
-    struct memblock vtau_mem_37762;
+    struct memblock vtau_mem_37741;
     
-    vtau_mem_37762.references = NULL;
+    vtau_mem_37741.references = NULL;
     
-    struct memblock utau_mem_37761;
+    struct memblock utau_mem_37740;
     
-    utau_mem_37761.references = NULL;
+    utau_mem_37740.references = NULL;
     
-    struct memblock dtketaum1_mem_37760;
+    struct memblock dtketaum1_mem_37739;
     
-    dtketaum1_mem_37760.references = NULL;
+    dtketaum1_mem_37739.references = NULL;
     
-    struct memblock dtketaup1_mem_37759;
+    struct memblock dtketaup1_mem_37738;
     
-    dtketaup1_mem_37759.references = NULL;
+    dtketaup1_mem_37738.references = NULL;
     
-    struct memblock dtketau_mem_37758;
+    struct memblock dtketau_mem_37737;
     
-    dtketau_mem_37758.references = NULL;
+    dtketau_mem_37737.references = NULL;
     
-    struct memblock tketaum1_mem_37757;
+    struct memblock tketaum1_mem_37736;
     
-    tketaum1_mem_37757.references = NULL;
+    tketaum1_mem_37736.references = NULL;
     
-    struct memblock tketaup1_mem_37756;
+    struct memblock tketaup1_mem_37735;
     
-    tketaup1_mem_37756.references = NULL;
+    tketaup1_mem_37735.references = NULL;
     
-    struct memblock tketau_mem_37755;
+    struct memblock tketau_mem_37734;
     
-    tketau_mem_37755.references = NULL;
-    tketau_mem_37755 = in0->mem;
+    tketau_mem_37734.references = NULL;
+    tketau_mem_37734 = in0->mem;
     xdim_31402 = in0->shape[0];
     ydim_31403 = in0->shape[1];
     zzdim_31404 = in0->shape[2];
-    tketaup1_mem_37756 = in1->mem;
+    tketaup1_mem_37735 = in1->mem;
     xdim_31402 = in1->shape[0];
     ydim_31403 = in1->shape[1];
     zzdim_31404 = in1->shape[2];
-    tketaum1_mem_37757 = in2->mem;
+    tketaum1_mem_37736 = in2->mem;
     xdim_31402 = in2->shape[0];
     ydim_31403 = in2->shape[1];
     zzdim_31404 = in2->shape[2];
-    dtketau_mem_37758 = in3->mem;
+    dtketau_mem_37737 = in3->mem;
     xdim_31402 = in3->shape[0];
     ydim_31403 = in3->shape[1];
     zzdim_31404 = in3->shape[2];
-    dtketaup1_mem_37759 = in4->mem;
+    dtketaup1_mem_37738 = in4->mem;
     xdim_31402 = in4->shape[0];
     ydim_31403 = in4->shape[1];
     zzdim_31404 = in4->shape[2];
-    dtketaum1_mem_37760 = in5->mem;
+    dtketaum1_mem_37739 = in5->mem;
     xdim_31402 = in5->shape[0];
     ydim_31403 = in5->shape[1];
     zzdim_31404 = in5->shape[2];
-    utau_mem_37761 = in6->mem;
+    utau_mem_37740 = in6->mem;
     xdim_31402 = in6->shape[0];
     ydim_31403 = in6->shape[1];
     zzdim_31404 = in6->shape[2];
-    vtau_mem_37762 = in7->mem;
+    vtau_mem_37741 = in7->mem;
     xdim_31402 = in7->shape[0];
     ydim_31403 = in7->shape[1];
     zzdim_31404 = in7->shape[2];
-    wtau_mem_37763 = in8->mem;
+    wtau_mem_37742 = in8->mem;
     xdim_31402 = in8->shape[0];
     ydim_31403 = in8->shape[1];
     zzdim_31404 = in8->shape[2];
-    maskU_mem_37764 = in9->mem;
+    maskU_mem_37743 = in9->mem;
     xdim_31402 = in9->shape[0];
     ydim_31403 = in9->shape[1];
     zzdim_31404 = in9->shape[2];
-    maskV_mem_37765 = in10->mem;
+    maskV_mem_37744 = in10->mem;
     xdim_31402 = in10->shape[0];
     ydim_31403 = in10->shape[1];
     zzdim_31404 = in10->shape[2];
-    maskW_mem_37766 = in11->mem;
+    maskW_mem_37745 = in11->mem;
     xdim_31402 = in11->shape[0];
     ydim_31403 = in11->shape[1];
     zzdim_31404 = in11->shape[2];
-    dxt_mem_37767 = in12->mem;
+    dxt_mem_37746 = in12->mem;
     xdim_31402 = in12->shape[0];
-    dxu_mem_37768 = in13->mem;
+    dxu_mem_37747 = in13->mem;
     xdim_31402 = in13->shape[0];
-    dyt_mem_37769 = in14->mem;
+    dyt_mem_37748 = in14->mem;
     ydim_31403 = in14->shape[0];
-    dyu_mem_37770 = in15->mem;
+    dyu_mem_37749 = in15->mem;
     ydim_31403 = in15->shape[0];
-    dzzt_mem_37771 = in16->mem;
+    dzzt_mem_37750 = in16->mem;
     zzdim_31404 = in16->shape[0];
-    dzzw_mem_37772 = in17->mem;
+    dzzw_mem_37751 = in17->mem;
     zzdim_31404 = in17->shape[0];
-    cost_mem_37773 = in18->mem;
+    cost_mem_37752 = in18->mem;
     ydim_31403 = in18->shape[0];
-    cosu_mem_37774 = in19->mem;
+    cosu_mem_37753 = in19->mem;
     ydim_31403 = in19->shape[0];
-    kbot_mem_37775 = in20->mem;
+    kbot_mem_37754 = in20->mem;
     xdim_31402 = in20->shape[0];
     ydim_31403 = in20->shape[1];
-    kappaM_mem_37776 = in21->mem;
+    kappaM_mem_37755 = in21->mem;
     xdim_31402 = in21->shape[0];
     ydim_31403 = in21->shape[1];
     zzdim_31404 = in21->shape[2];
-    mxl_mem_37777 = in22->mem;
+    mxl_mem_37756 = in22->mem;
     xdim_31402 = in22->shape[0];
     ydim_31403 = in22->shape[1];
     zzdim_31404 = in22->shape[2];
-    forc_mem_37778 = in23->mem;
+    forc_mem_37757 = in23->mem;
     xdim_31402 = in23->shape[0];
     ydim_31403 = in23->shape[1];
     zzdim_31404 = in23->shape[2];
-    forc_tke_surface_mem_37779 = in24->mem;
+    forc_tke_surface_mem_37758 = in24->mem;
     xdim_31402 = in24->shape[0];
     ydim_31403 = in24->shape[1];
     if (!((xdim_31402 == in0->shape[0] && (ydim_31403 == in0->shape[1] &&
@@ -9050,67 +9025,67 @@ int futhark_entry_main(struct futhark_context *ctx,
                 msgprintf("Error: entry point arguments have invalid sizes.\n");
     }
     if (ret == 0) {
-        ret = futrts_entry_main(ctx, &mem_out_39752, &mem_out_39753,
-                                &mem_out_39754, &mem_out_39755, &mem_out_39756,
-                                &mem_out_39757, &mem_out_39758,
-                                tketau_mem_37755, tketaup1_mem_37756,
-                                tketaum1_mem_37757, dtketau_mem_37758,
-                                dtketaup1_mem_37759, dtketaum1_mem_37760,
-                                utau_mem_37761, vtau_mem_37762, wtau_mem_37763,
-                                maskU_mem_37764, maskV_mem_37765,
-                                maskW_mem_37766, dxt_mem_37767, dxu_mem_37768,
-                                dyt_mem_37769, dyu_mem_37770, dzzt_mem_37771,
-                                dzzw_mem_37772, cost_mem_37773, cosu_mem_37774,
-                                kbot_mem_37775, kappaM_mem_37776, mxl_mem_37777,
-                                forc_mem_37778, forc_tke_surface_mem_37779,
+        ret = futrts_entry_main(ctx, &mem_out_39725, &mem_out_39726,
+                                &mem_out_39727, &mem_out_39728, &mem_out_39729,
+                                &mem_out_39730, &mem_out_39731,
+                                tketau_mem_37734, tketaup1_mem_37735,
+                                tketaum1_mem_37736, dtketau_mem_37737,
+                                dtketaup1_mem_37738, dtketaum1_mem_37739,
+                                utau_mem_37740, vtau_mem_37741, wtau_mem_37742,
+                                maskU_mem_37743, maskV_mem_37744,
+                                maskW_mem_37745, dxt_mem_37746, dxu_mem_37747,
+                                dyt_mem_37748, dyu_mem_37749, dzzt_mem_37750,
+                                dzzw_mem_37751, cost_mem_37752, cosu_mem_37753,
+                                kbot_mem_37754, kappaM_mem_37755, mxl_mem_37756,
+                                forc_mem_37757, forc_tke_surface_mem_37758,
                                 xdim_31402, ydim_31403, zzdim_31404);
         if (ret == 0) {
             assert((*out0 =
                     (struct futhark_f32_3d *) malloc(sizeof(struct futhark_f32_3d))) !=
                 NULL);
-            (*out0)->mem = mem_out_39752;
+            (*out0)->mem = mem_out_39725;
             (*out0)->shape[0] = xdim_31402;
             (*out0)->shape[1] = ydim_31403;
             (*out0)->shape[2] = zzdim_31404;
             assert((*out1 =
                     (struct futhark_f32_3d *) malloc(sizeof(struct futhark_f32_3d))) !=
                 NULL);
-            (*out1)->mem = mem_out_39753;
+            (*out1)->mem = mem_out_39726;
             (*out1)->shape[0] = xdim_31402;
             (*out1)->shape[1] = ydim_31403;
             (*out1)->shape[2] = zzdim_31404;
             assert((*out2 =
                     (struct futhark_f32_3d *) malloc(sizeof(struct futhark_f32_3d))) !=
                 NULL);
-            (*out2)->mem = mem_out_39754;
+            (*out2)->mem = mem_out_39727;
             (*out2)->shape[0] = xdim_31402;
             (*out2)->shape[1] = ydim_31403;
             (*out2)->shape[2] = zzdim_31404;
             assert((*out3 =
                     (struct futhark_f32_3d *) malloc(sizeof(struct futhark_f32_3d))) !=
                 NULL);
-            (*out3)->mem = mem_out_39755;
+            (*out3)->mem = mem_out_39728;
             (*out3)->shape[0] = xdim_31402;
             (*out3)->shape[1] = ydim_31403;
             (*out3)->shape[2] = zzdim_31404;
             assert((*out4 =
                     (struct futhark_f32_3d *) malloc(sizeof(struct futhark_f32_3d))) !=
                 NULL);
-            (*out4)->mem = mem_out_39756;
+            (*out4)->mem = mem_out_39729;
             (*out4)->shape[0] = xdim_31402;
             (*out4)->shape[1] = ydim_31403;
             (*out4)->shape[2] = zzdim_31404;
             assert((*out5 =
                     (struct futhark_f32_3d *) malloc(sizeof(struct futhark_f32_3d))) !=
                 NULL);
-            (*out5)->mem = mem_out_39757;
+            (*out5)->mem = mem_out_39730;
             (*out5)->shape[0] = xdim_31402;
             (*out5)->shape[1] = ydim_31403;
             (*out5)->shape[2] = zzdim_31404;
             assert((*out6 =
                     (struct futhark_f32_2d *) malloc(sizeof(struct futhark_f32_2d))) !=
                 NULL);
-            (*out6)->mem = mem_out_39758;
+            (*out6)->mem = mem_out_39731;
             (*out6)->shape[0] = xdim_31402;
             (*out6)->shape[1] = ydim_31403;
         }
