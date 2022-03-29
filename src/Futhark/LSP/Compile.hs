@@ -12,7 +12,7 @@ import Language.LSP.Types (TextDocumentVersion, filePathToUri, toNormalizedUri)
 -- try to take state from MVar, if it's empty (Nothing), try to compile.
 tryTakeStateFromMVar :: MVar State -> Maybe FilePath -> LspT () IO State
 tryTakeStateFromMVar stateMVar filePath = do
-  oldState <- liftIO $ takeMVar stateMVar -- TODO: change to modifyMVar for exception handling
+  oldState <- liftIO $ takeMVar stateMVar
   case stateProgram oldState of
     Nothing -> do
       newState <- tryCompile filePath (State $ Just noLoadedProg) (Just 0) -- first compile, version 0
@@ -26,7 +26,7 @@ tryTakeStateFromMVar stateMVar filePath = do
 tryReCompile :: MVar State -> Maybe FilePath -> TextDocumentVersion -> LspT () IO ()
 tryReCompile stateMVar filePath version = do
   debug "(Re)-compiling ..."
-  oldState <- liftIO $ takeMVar stateMVar -- TODO: change to modifyMVar_ for exception handling
+  oldState <- liftIO $ takeMVar stateMVar
   newState <- tryCompile filePath oldState version
   case stateProgram newState of
     Nothing -> do

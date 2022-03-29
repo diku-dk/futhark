@@ -23,7 +23,6 @@ import Language.LSP.Types
     TextDocumentVersion,
   )
 
--- TODO: not sure what version do yet, put (Just 0) for now
 sendDiagnostics :: NormalizedUri -> [Diagnostic] -> TextDocumentVersion -> LspT () IO ()
 sendDiagnostics uri diags version = publishDiagnostics 100 uri version (partitionBySource diags)
 
