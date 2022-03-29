@@ -5,7 +5,6 @@ module Futhark.LSP.Handlers (handlers) where
 import Control.Concurrent.MVar (MVar)
 import Control.Lens ((^.))
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import qualified Data.Text as T
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromMVar)
 import Futhark.LSP.Tool (getHoverInfoFromState)
 import Futhark.LSP.Utils (State (..), debug)
@@ -21,8 +20,7 @@ handlers stateMVar =
       onHoverHandler stateMVar,
       onDocumentOpenHandler stateMVar,
       onDocumentCloseHandler,
-      onDocumentSaveHandler stateMVar,
-      onCompletionHandler stateMVar
+      onDocumentSaveHandler stateMVar
     ]
 
 onInitializeHandler :: Handlers (LspM ())
@@ -61,14 +59,3 @@ onDocumentOpenHandler stateMVar = notificationHandler STextDocumentDidOpen $ \ms
 
 onDocumentCloseHandler :: Handlers (LspM ())
 onDocumentCloseHandler = notificationHandler STextDocumentDidClose $ \_msg -> debug "Closed document"
-
-onCompletionHandler :: MVar State -> Handlers (LspM ())
-onCompletionHandler _stateMVar = requestHandler STextDocumentCompletion $ \req responder -> do
-  debug "Got completion request"
-  let RequestMessage _ _ _ (CompletionParams _doc _pos _workDone _ _) = req
-      completionItem = mkCompletionItem "reduce undefined _ []"
-  responder $ Right $ InL $ List [completionItem]
-
--- TODO: separate completion logic to another file
-mkCompletionItem :: T.Text -> CompletionItem
-mkCompletionItem label = CompletionItem label (Just CiFunction) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
