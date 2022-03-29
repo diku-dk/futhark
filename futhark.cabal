@@ -313,7 +313,8 @@ library
       Paths_futhark
   hs-source-dirs:
       src
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
+  ghc-options:
+  -- -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
   build-tool-depends:
       alex:alex
     , happy:happy

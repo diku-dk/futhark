@@ -37,12 +37,6 @@ import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSou
 --import Futhark.Pass
 import Data.Foldable (foldlM)
 import Control.Monad.State
-import qualified Data.Graph.Inductive.Query as Q
-import Debug.Trace (trace)
-import qualified Data.Graph.Inductive.Query.TransClos as TC
--- import Data.List (sortBy)
--- import qualified Data.Graph.Inductive.Query.TransClos as TC
---import Futhark.CodeGen.Backends.CCUDA.Boilerplate (failureSwitch)
 
 
 
@@ -96,12 +90,12 @@ data FusionEnv = FusionEnv
     -- nodeMap :: M.Map VName [VName],
     vNameSource :: VNameSource,
     scope :: Scope SOACS,
-    reachabilityG :: G.Gr () (),
+    --reachabilityG :: G.Gr () (),
     producerMapping :: M.Map VName Node
   }
 
 freshFusionEnv :: Scope SOACS -> FusionEnv
-freshFusionEnv stms_scope = FusionEnv {vNameSource = blankNameSource, scope = stms_scope, reachabilityG = empty, producerMapping = M.empty}
+freshFusionEnv stms_scope = FusionEnv {vNameSource = blankNameSource, scope = stms_scope, producerMapping = M.empty}
 
 newtype FusionEnvM a = FusionEnvM (State FusionEnv a)
   deriving
@@ -345,17 +339,12 @@ contractEdge :: Node -> DepContext -> DepGraphAug
 contractEdge n2 cxt g = do
   let n1 = node' cxt
 
-  -- Modify reachabilityG
-  rg <- gets reachabilityG
-  let newContext = mergedContext () (context rg n1) (context rg n2)
+  -- -- Modify reachabilityG
+  -- rg <- gets reachabilityG
+  -- let newContext = mergedContext () (context rg n1) (context rg n2)
   -- modify (\s -> s {reachabilityG = (&) newContext $ delNodes [n1, n2] rg})
-  let g' =  (&) cxt $ delNodes [n1, n2] (trace (show "L: " ++ show (filter (\x -> length x > 1) (Q.scc g))) g)
-  let tc1 = TC.tc $ nmap (const ()) g'
-  let tc2 = (&) newContext $ delNodes [n1, n2] rg
-  trace (show "tg: " ++ show (tc1 == tc2))$ modify (\s -> s {reachabilityG = tc2})
-  pure g'
 
-
+  pure $ (&) cxt $ delNodes [n1, n2] g
 -- BUG: should modify name_mappings
 
 
