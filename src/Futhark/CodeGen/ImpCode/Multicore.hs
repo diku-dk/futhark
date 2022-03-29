@@ -176,7 +176,7 @@ instance FreeIn Multicore where
     freeIn' dest <> freeIn' tar <> freeIn' lane
 
 -- TODO(pema): This is a bit hacky
--- Like @lexicalMemoryUsage@, but traverses inner ops
+-- Like @lexicalMemoryUsage@, but traverses inner multicore ops
 lexicalMemoryUsageMC :: Function Multicore -> M.Map VName Space
 lexicalMemoryUsageMC func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
@@ -186,37 +186,33 @@ lexicalMemoryUsageMC func =
       set (functionBody func)
         <> namesFromList (map paramName (functionOutput func))
 
-    go _ f (x :>>: y) = f x <> f y
-    go _ f (If _ x y) = f x <> f y
-    go _ f (For _ _ x) = f x
-    go _ f (While _ x) = f x
-    go _ f (Comment _ x) = f x
-    go opt f (Op op) = opt f op
-    go _ _ _ = mempty
+    go f (x :>>: y) = f x <> f y
+    go f (If _ x y) = f x <> f y
+    go f (For _ _ x) = f x
+    go f (While _ x) = f x
+    go f (Comment _ x) = f x
+    go f (Op op) = goOp f op
+    go _ _ = mempty
 
-    -- We want nested SetMem's to be visible so we don't erroneously
-    -- treat a memblock that needs refcounting as lexical
-    -- goOpSet f (ISPCKernel code _) = go goOpSet f code
-    goOpSet f (ForEach _ _ body) = go goOpSet f body
-    goOpSet f (ForEachActive _ body) = go goOpSet f body
-    goOpSet f (VariabilityBlock _ code) = go goOpSet f code
-    goOpSet _ _ = mempty
-
-    -- We want nested declarations to NOT be visible so we don't
-    -- declare the same memory multiple times in different scopes.
-    goOpDeclare f (ForEach _ _ body) = go goOpDeclare f body
-    goOpDeclare f (ForEachActive _ body) = go goOpDeclare f body
-    goOpDeclare f (VariabilityBlock _ code) = go goOpDeclare f code
-    goOpDeclare _ _ = mempty
+    -- We want SetMems and declarations to be visible through custom control flow
+    -- so we don't erroneously treat a memblock that could be lexical as needing
+    -- refcounting. Importantly, we do not look into kernels, though, since they
+    -- go into new functions.
+    goOp f (ForEach _ _ body) = go f body
+    goOp f (ForEachActive _ body) = go f body
+    goOp f (VariabilityBlock _ code) = go f code
+    goOp _ _ = mempty
 
     declared (DeclareMem mem spc) =
       M.singleton mem spc
-    declared x = go goOpDeclare declared x
+    declared x = go declared x
 
     set (SetMem x y _) = namesFromList [x, y]
     set (Call _ _ args) = foldMap onArg args
       where
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
+    -- Treat inputs to kernels as non lexical, so we don't mix up the types
+    -- inside of a kernel!
     set (Op (ISPCKernel _ args)) = namesFromList $ map paramName args
-    set x = go goOpSet set x
+    set x = go set x
