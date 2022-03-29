@@ -13,6 +13,7 @@ module Futhark.Analysis.Alias
 
     -- * Ad-hoc utilities
     analyseFun,
+    analyseStm,
     analyseStms,
     analyseExp,
     analyseBody,
