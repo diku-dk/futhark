@@ -89,7 +89,7 @@ compileMemblockDeref = zipWith deref
     deref (v1, v2) (ty, MC.Prim) = [C.cdecl|$ty:ty $id:v1 = $id:(getName v2);|]
     deref (v1, v2) (_, MC.RawMem) = [C.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
     deref (v1, v2) (ty, MC.MemBlock) = [C.cdecl|uniform $ty:ty $id:v1 = *$id:(getName v2);|]
-
+ 
 ispcDef :: MC.DefSpecifier
 ispcDef s f = do
   s' <- MC.multicoreName s
@@ -147,6 +147,7 @@ compileCodeISPC vari (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
         go code
     go (x : xs) = compileCodeISPC vari x >> go xs
     go [] = pure ()
+
 compileCodeISPC _ (Allocate name (Count (TPrimExp e)) space) = do
   size <- GC.compileExp e
   cached <- GC.cacheMem name
@@ -157,7 +158,11 @@ compileCodeISPC _ (Allocate name (Count (TPrimExp e)) space) = do
                  err = lexical_realloc_ispc(&$exp:name, &$exp:cur_size, $exp:size);
                 }|]
     _ ->
-      GC.allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
+      GC.allocMemNoError name size space [C.cstm|{err = 1; goto cleanup;}|]
+
+compileCodeISPC _ (SetMem dest src space) =
+  GC.setMemNoError dest src space
+
 compileCodeISPC vari code@(Write dest (Count idx) elemtype DefaultSpace vol elemexp)
   | isConstExp (untyped idx) = do
     dest' <- GC.rawMem dest
@@ -270,6 +275,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                                                 (struct futhark_context uniform * uniform ctx, 
                                                 struct $id:fstruct uniform * uniform args, 
                                                 uniform int iterations);|]
+
   aos_name <- newVName "aos"
   GC.stm [C.cstm|$escstm:("#if ISPC")|]
   GC.items [C.citems|
@@ -311,14 +317,14 @@ compileOp (ISPCKernel body free') = do
   let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
   -- Generate ISPC kernel
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
-    mainBody <- GC.cachingMemory lexical $ \decl_cached free_cached ->
+    mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
         GC.decl [C.cdecl|uniform int err = 0;|]
+        body' <- GC.collect $ compileCodeISPC Imp.Varying body
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
-        free_mem <- GC.freeAllocatedMem
-
-        compileCodeISPC Imp.Varying body
+        mapM_ GC.item body'
+        free_mem <- GC.freeAllocatedMemNoError
 
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]

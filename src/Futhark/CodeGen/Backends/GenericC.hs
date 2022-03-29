@@ -76,7 +76,9 @@ module Futhark.CodeGen.Backends.GenericC
     fatMemType,
     declAllocatedMem,
     freeAllocatedMem,
+    freeAllocatedMemNoError,
     collect,
+    setMemNoError,
 
     -- * Building Blocks
     primTypeToCType,
@@ -86,6 +88,7 @@ module Futhark.CodeGen.Backends.GenericC
     variQuals,
     linearCode,
     allocMem,
+    allocMemNoError,
     derefPointer,
   )
 where
@@ -257,8 +260,18 @@ errorMsgString (ErrorMsg parts) = do
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   pure (mconcat formatstrs, formatargs)
 
+freeAllocatedMem'
+  :: (VName -> Space -> CompilerM op s ())
+  -> CompilerM op s [C.BlockItem]
+freeAllocatedMem' f = collect $ mapM_ (uncurry f) =<< gets compDeclaredMem
+
+
 freeAllocatedMem :: CompilerM op s [C.BlockItem]
-freeAllocatedMem = collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+freeAllocatedMem = freeAllocatedMem' unRefMem
+
+freeAllocatedMemNoError :: CompilerM op s [C.BlockItem]
+freeAllocatedMemNoError = freeAllocatedMem' unRefMemNoError
+
 
 declAllocatedMem :: CompilerM op s [C.BlockItem]
 declAllocatedMem = collect $ mapM_ f =<< gets compDeclaredMem
@@ -467,6 +480,7 @@ inNewFunction m = do
   return x
   where
     noCached env = env {envCachedMem = mempty}
+
 
 item :: C.BlockItem -> CompilerM op s ()
 item x = modify $ \s -> s {compItems = DL.snoc (compItems s) x}
@@ -807,17 +821,18 @@ resetMem mem space = do
       when refcount $
         stm [C.cstm|$exp:mem.references = NULL;|]
 
-setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
-setMem dest src space = do
+setMem'
+  :: (C.ToExp a, C.ToExp b) => a
+  -> b
+  -> Space
+  -> (Space -> a -> b -> String -> C.Stm)
+  -> CompilerM op s ()
+setMem' dest src space stmt = do
   refcount <- fatMemory space
   let src_s = pretty $ C.toExp src noLoc
   if refcount
     then
-      stm
-        [C.cstm|if ($id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src,
-                                               $string:src_s) != 0) {
-                       return 1;
-                     }|]
+      stm $ stmt space dest src src_s
     else case space of
       ScalarSpace ds _ -> do
         i' <- newVName "i"
@@ -831,16 +846,67 @@ setMem dest src space = do
                   }|]
       _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
-unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
-unRefMem mem space = do
+
+setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
+setMem dest src space = setMem' dest src space stmt
+  where
+    stmt = \space' dest' src' src_s' ->
+        [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src',
+                                               $string:src_s') != 0) {
+                       return 1;
+                     }|]
+    
+setMemNoError :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
+setMemNoError dest src space = setMem' dest src space stmt
+  where
+    stmt = \space' dest' src' _ ->
+        [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src',
+                                               0) != 0) {
+                       return 1;
+                     }|]
+
+  
+unRefMem' :: C.ToExp a => a -> Space -> (Space -> a -> String -> C.Stm) -> CompilerM op s ()
+unRefMem' mem space cstm = do
   refcount <- fatMemory space
   cached <- isJust <$> cacheMem mem
   let mem_s = pretty $ C.toExp mem noLoc
   when (refcount && not cached) $
-    stm
-      [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
-                  return 1;
-                }|]
+    stm $ cstm space mem mem_s
+
+unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
+unRefMem mem space = unRefMem' mem space cstm
+  where
+    cstm = \s m m_s ->
+             [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, $string:m_s) != 0) {
+                         return 1;
+                       }|]
+
+unRefMemNoError :: C.ToExp a => a -> Space -> CompilerM op s ()
+unRefMemNoError  mem space = unRefMem' mem space cstm
+  where
+    cstm = \s m _ ->
+             [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, 0) != 0) {
+                         return 1;
+                       }|]
+
+allocMem' :: 
+  (C.ToExp a, C.ToExp b) =>
+  a ->
+  b ->
+  Space ->
+  C.Stm ->
+  (Space -> a -> b -> String -> C.Stm -> C.Stm) ->
+  CompilerM op s ()
+allocMem' mem size space on_failure stmt = do
+  refcount <- fatMemory space
+  let mem_s = pretty $ C.toExp mem noLoc
+  if refcount
+    then
+      stm $ stmt space mem size mem_s on_failure
+    else do
+      freeRawMem mem space mem_s
+      allocRawMem mem size space [C.cexp|desc|]
 
 allocMem ::
   (C.ToExp a, C.ToExp b) =>
@@ -849,19 +915,28 @@ allocMem ::
   Space ->
   C.Stm ->
   CompilerM op s ()
-allocMem mem size space on_failure = do
-  refcount <- fatMemory space
-  let mem_s = pretty $ C.toExp mem noLoc
-  if refcount
-    then
-      stm
-        [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:mem, $exp:size,
-                                                 $string:mem_s)) {
-                       $stm:on_failure
+allocMem mem size space on_failure = allocMem' mem size space on_failure stmt
+  where
+    stmt = \space' mem' size' mem_s' on_failure' ->
+        [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
+                                                 $string:mem_s')) {
+                       $stm:on_failure'
                      }|]
-    else do
-      freeRawMem mem space mem_s
-      allocRawMem mem size space [C.cexp|desc|]
+
+allocMemNoError ::
+  (C.ToExp a, C.ToExp b) =>
+  a ->
+  b ->
+  Space ->
+  C.Stm ->
+  CompilerM op s ()
+allocMemNoError mem size space on_failure = allocMem' mem size space on_failure stmt
+  where
+    stmt = \space' mem' size' _ on_failure' ->
+        [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
+                                                 0)) {
+                       $stm:on_failure'
+                     }|]
 
 copyMemoryDefaultSpace ::
   C.Exp ->

@@ -205,7 +205,7 @@ lexicalMemoryUsageMC func =
 
     -- We want nested SetMem's to be visible so we don't erroneously
     -- treat a memblock that needs refcounting as lexical
-    goOpSet f (ISPCKernel code _) = go goOpSet f code
+    -- goOpSet f (ISPCKernel code _) = go goOpSet f code
     goOpSet f (ForEach _ _ body) = go goOpSet f body
     goOpSet f (ForEachActive _ body) = go goOpSet f body
     goOpSet f (VariabilityBlock _ code) = go goOpSet f code
@@ -227,4 +227,5 @@ lexicalMemoryUsageMC func =
       where
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
+    set (Op (ISPCKernel _ args)) = namesFromList $ map paramName args
     set x = go goOpSet set x
