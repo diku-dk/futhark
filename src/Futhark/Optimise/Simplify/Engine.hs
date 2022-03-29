@@ -632,7 +632,7 @@ hoistCommon ::
   UT.UsageTable ->
   [UT.Usages] ->
   SubExp ->
-  IfSort ->
+  IfDec (BranchType rep) ->
   Body (Wise rep) ->
   Body (Wise rep) ->
   SimpleM
@@ -641,7 +641,7 @@ hoistCommon ::
       Body (Wise rep),
       Stms (Wise rep)
     )
-hoistCommon res_usage res_usages cond ifsort body1 body2 = do
+hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
   is_alloc_fun <- asksEngineEnv $ isAllocation . envHoistBlockers
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   vtable <- askVtable
@@ -662,6 +662,9 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
                  && cond_loop_invariant
                  && ifsort /= IfFallback
                  && loopInvariantStm vtable stm
+                 -- Avoid hoisting out something that might change the
+                 -- asymptotics of the program.
+                 && all primType (patTypes (stmPat stm))
              )
 
       -- No matter what, we always want to hoist constants as much as
@@ -780,7 +783,7 @@ simplifyExp ::
   Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
-simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
+simplifyExp usage (Pat pes) (If cond tbranch fbranch ifdec@(IfDec ts ifsort)) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
   -- across branches.
@@ -788,7 +791,7 @@ simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
   cond' <- simplify cond
   ts' <- mapM simplify ts
   (tbranch', fbranch', hoisted) <-
-    hoistCommon usage pes_usages cond' ifsort tbranch fbranch
+    hoistCommon usage pes_usages cond' ifdec tbranch fbranch
   return (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted)
 simplifyExp _ _ (DoLoop merge form loopbody) = do
   let (params, args) = unzip merge

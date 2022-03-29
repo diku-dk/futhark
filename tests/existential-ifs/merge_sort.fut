@@ -61,3 +61,10 @@ def merge_sort_by_key [n] 't 'k (key: t -> k) ((<=): k -> k -> bool) (xs: [n]t):
 -- output { [1,2,3,3,4,5] }
 
 entry sort_i32 (xs: []i32) = merge_sort (i32.<=) xs
+
+-- ==
+-- entry: map_sort_i32
+-- input { [[5,4,3,2,1,0],[5,4,3,3,2,1]] }
+-- output { [[0,1,2,3,4,5],[1,2,3,3,4,5]] }
+
+entry map_sort_i32 (xss: [][]i32) = #[unsafe] map (merge_sort (i32.<=)) xss
