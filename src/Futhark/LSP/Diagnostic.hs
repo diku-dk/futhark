@@ -49,7 +49,7 @@ rangeFromSrcLoc srcloc = do
 
 rangeFromLoc :: Loc -> Range
 rangeFromLoc (Loc start end) = Range (getPosition start) (getPosition end)
-rangeFromLoc NoLoc = Range (Position 10 0) (Position 10 10) -- only when file not found
+rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
 
 getPosition :: Pos -> Position
 getPosition pos = do
