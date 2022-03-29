@@ -123,7 +123,7 @@ instance ASTMappable (ExpBase Info VName) where
     Var <$> mapOnQualName tv name <*> traverse (mapOnPatType tv) t
       <*> pure loc
   astMap _ (Hole name t loc) =
-    pure $ (Hole name t loc)
+    pure $ Hole name t loc
   astMap _ (Literal val loc) =
     pure $ Literal val loc
   astMap _ (StringLit vs loc) =

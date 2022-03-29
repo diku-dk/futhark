@@ -593,7 +593,8 @@ internaliseAppExp _ _ e@E.BinOp {} =
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
-internaliseExp desc (E.Hole _ _ _) = error $ "internaliseExp: Unexpected Hole " ++ desc
+internaliseExp desc E.Hole {} =
+  error $ "internaliseExp: Unexpected Hole " ++ desc
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 internaliseExp desc (E.StringLit vs _) =
