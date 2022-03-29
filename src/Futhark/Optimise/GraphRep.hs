@@ -451,7 +451,7 @@ namesFromRes = concatMap ((\case
      Var z -> [z]
      Constant _ -> []
   ) . resSubExp)
-
+-- THIS IS BUGGY!!!! Constants are yeeted from lambda outputs after fusion
 
 
 getOutputs :: NodeT -> [VName]

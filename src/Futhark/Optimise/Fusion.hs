@@ -536,7 +536,7 @@ hFuseStms s1 s2 = case (s1, s2) of
         --o1 = patNames pats1
 
         (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
-        (lam_1_output, lam_2_output) = mapT (namesFromRes . resFromLambda) (lam_1, lam_2)
+        (lam_1_output, lam_2_output) = mapT resFromLambda (lam_1, lam_2)
 
         fused_inputs = fuseInputs2 [] i1 i2
         fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
