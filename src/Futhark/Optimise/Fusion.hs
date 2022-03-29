@@ -688,6 +688,12 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
       modify (\s -> s {scope = M.union (scopeOfFParams (map fst params)) oldScope})
       b_new <- doFusionInner body (map (paramName . fst) params)
       return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
+  SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm [] [] lambda)))) _ ->
+    do
+      newbody <- doFusionInner (lambdaBody lambda) []
+      let newLam = lambda {lambdaBody = newbody}
+      let nodeNew = SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm [] [] newLam)))) mempty
+      pure (incomming, node, nodeNew, outgoing)
   _ -> return c
   where
     doFusionInner :: Body SOACS -> [VName] -> FusionEnvM (Body SOACS)
