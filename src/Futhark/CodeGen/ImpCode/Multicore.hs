@@ -35,9 +35,6 @@ data Multicore
     ExtractLane VName Exp Exp
   | -- | Specifies the variability of all declarations within this scope
     VariabilityBlock Variability MCCode
-  | -- | A special case vector scan that can be performed efficiently
-    -- with an intrinsic
-    ScanLane String [VName] [VName] [VName]
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -147,10 +144,6 @@ instance Pretty Multicore where
     nestedBlock (show qual <> " {") "}" (ppr code)
   ppr (ExtractLane dest tar lane) =
     ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
-  ppr (ScanLane op dests lhs rhs) =
-    parens (commasep $ map ppr dests) <+> "<-" <+> ppr op <+>
-      parens (commasep $ map ppr lhs) <+>
-      parens (commasep $ map ppr rhs) 
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -181,8 +174,6 @@ instance FreeIn Multicore where
     freeIn' code
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
-  freeIn' (ScanLane _ dests lhs rhs) =
-    freeIn' dests <> freeIn' lhs <> freeIn' rhs
 
 -- TODO(pema): This is a bit hacky
 -- Like @lexicalMemoryUsage@, but traverses inner ops
