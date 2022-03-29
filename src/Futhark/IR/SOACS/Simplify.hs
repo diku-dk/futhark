@@ -406,23 +406,26 @@ removeUnusedSOACInput _ pat aux (Screma w arrs (ScremaForm scan reduce map_lam))
 removeUnusedSOACInput _ _ _ _ = Skip
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
-removeDeadMapping (_, used) pat aux (Screma w arrs form)
-  | Just fun <- isMapSOAC form =
-      let ses = bodyResult $ lambdaBody fun
+removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm scans reds lam))
+  | (nonmap_pes, map_pes) <- splitAt num_nonmap_res pes,
+    not $ null map_pes =
+      let (nonmap_res, map_res) = splitAt num_nonmap_res $ bodyResult $ lambdaBody lam
+          (nonmap_ts, map_ts) = splitAt num_nonmap_res $ lambdaReturnType lam
           isUsed (bindee, _, _) = (`UT.used` used) $ patElemName bindee
-          (pat', ses', ts') =
-            unzip3 . filter isUsed . zip3 (patElems pat) ses $
-              lambdaReturnType fun
-          fun' =
-            fun
-              { lambdaBody = (lambdaBody fun) {bodyResult = ses'},
-                lambdaReturnType = ts'
+          (map_pes', map_res', map_ts') =
+            unzip3 $ filter isUsed $ zip3 map_pes map_res map_ts
+          lam' =
+            lam
+              { lambdaBody = (lambdaBody lam) {bodyResult = nonmap_res <> map_res'},
+                lambdaReturnType = nonmap_ts <> map_ts'
               }
-       in if pat /= Pat pat'
+       in if map_pes /= map_pes'
             then
               Simplify . auxing aux $
-                letBind (Pat pat') $ Op $ Screma w arrs $ mapSOAC fun'
+                letBind (Pat $ nonmap_pes <> map_pes') $ Op $ Screma w arrs $ ScremaForm scans reds lam'
             else Skip
+  where
+    num_nonmap_res = scanResults scans + redResults reds
 removeDeadMapping _ _ _ _ = Skip
 
 removeDuplicateMapOutput :: TopDownRuleOp (Wise SOACS)
