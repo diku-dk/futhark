@@ -219,6 +219,8 @@ binOpToZ3 (SQuot _ _) x y = mkDiv x y
 binOpToZ3 (SMod _ _) x y = mkMod x y
 binOpToZ3 (UMod _ _) x y = mkMod x y
 binOpToZ3 (FMod _) x y = mkMod x y
+binOpToZ3 (Pow _) x y = mkPower x y
+binOpToZ3 (FPow _) x y = mkPower x y
 binOpToZ3 b _ _ = error $ "Unsupported BinOp " <> pretty b
 
 convOpToZ3 :: MonadZ3 z3 => ConvOp -> AST -> z3 AST
