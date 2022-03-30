@@ -129,7 +129,8 @@ maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
   SeqLoop perm loop_pat <$> mapM f merge <*> pure form <*> pure body
   where
     f (p, Var arg)
-      | isMapInput arg =
+      | isMapInput arg,
+        Array {} <- paramType p =
           (p,) <$> letSubExp (baseString (paramName p) <> "_inter_copy") (BasicOp $ Copy arg)
     f (p, arg) =
       pure (p, arg)
