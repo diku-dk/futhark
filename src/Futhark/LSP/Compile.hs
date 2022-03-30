@@ -11,30 +11,30 @@ import Language.LSP.Types (TextDocumentVersion, filePathToUri, toNormalizedUri)
 
 -- try to take state from MVar, if it's empty (Nothing), try to compile.
 tryTakeStateFromMVar :: MVar State -> Maybe FilePath -> LspT () IO State
-tryTakeStateFromMVar stateMVar filePath = do
-  oldState <- liftIO $ takeMVar stateMVar
+tryTakeStateFromMVar state_mvar filePath = do
+  oldState <- liftIO $ takeMVar state_mvar
   case stateProgram oldState of
     Nothing -> do
       newState <- tryCompile filePath (State $ Just noLoadedProg) (Just 0) -- first compile, version 0
-      liftIO $ putMVar stateMVar newState
+      liftIO $ putMVar state_mvar newState
       pure newState
     Just _ -> do
-      liftIO $ putMVar stateMVar oldState
+      liftIO $ putMVar state_mvar oldState
       pure oldState
 
 -- try to (re)-compile, replace old state if successful.
 tryReCompile :: MVar State -> Maybe FilePath -> TextDocumentVersion -> LspT () IO ()
-tryReCompile stateMVar filePath version = do
+tryReCompile state_mvar filePath version = do
   debug "(Re)-compiling ..."
-  oldState <- liftIO $ takeMVar stateMVar
+  oldState <- liftIO $ takeMVar state_mvar
   newState <- tryCompile filePath oldState version
   case stateProgram newState of
     Nothing -> do
       debug "Failed to (re)-compile, using old state or Nothing"
-      liftIO $ putMVar stateMVar oldState
+      liftIO $ putMVar state_mvar oldState
     Just _ -> do
       debug "(Re)-compile successful"
-      liftIO $ putMVar stateMVar newState
+      liftIO $ putMVar state_mvar newState
 
 -- try to compile file, publish diagnostics on warnings or error, return newly compiled state.
 -- single point where the compilation is done, and shouldn't be exported.

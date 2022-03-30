@@ -13,7 +13,7 @@ import System.Log.Logger (Priority (DEBUG))
 
 main :: String -> [String] -> IO ()
 main _prog _args = do
-  stateMVar <- newMVar emptyState
+  state_mvar <- newMVar emptyState
   debug "Init with emptyState"
   setupLogger Nothing ["futhark"] DEBUG
   _ <-
@@ -22,7 +22,7 @@ main _prog _args = do
         { onConfigurationChange = const $ const $ Right (),
           defaultConfig = (),
           doInitialize = \env _req -> do pure $ Right env,
-          staticHandlers = handlers stateMVar,
+          staticHandlers = handlers state_mvar,
           interpretHandler = \env -> Iso (runLspT env) liftIO,
           options =
             defaultOptions

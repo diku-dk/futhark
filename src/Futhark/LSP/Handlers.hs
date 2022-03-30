@@ -14,26 +14,26 @@ import Language.LSP.Types
 import Language.LSP.Types.Lens (HasUri (uri), HasVersion (version))
 
 handlers :: MVar State -> Handlers (LspM ())
-handlers stateMVar =
+handlers state_mvar =
   mconcat
     [ onInitializeHandler,
-      onHoverHandler stateMVar,
-      onDocumentOpenHandler stateMVar,
+      onHoverHandler state_mvar,
+      onDocumentOpenHandler state_mvar,
       onDocumentCloseHandler,
-      onDocumentSaveHandler stateMVar
+      onDocumentSaveHandler state_mvar
     ]
 
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SInitialized $ \_msg -> debug "Initialized"
 
 onHoverHandler :: MVar State -> Handlers (LspM ())
-onHoverHandler stateMVar = requestHandler STextDocumentHover $ \req responder -> do
+onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -> do
   debug "Got hover request"
   let RequestMessage _ _ _ (HoverParams doc pos _workDone) = req
       Position l c = pos
       range = Range pos pos
       filePath = uriToFilePath $ doc ^. uri
-  state <- tryTakeStateFromMVar stateMVar filePath
+  state <- tryTakeStateFromMVar state_mvar filePath
   result <- liftIO $ getHoverInfoFromState state filePath (fromEnum l + 1) (fromEnum c + 1)
   case result of
     Just msg -> do
@@ -43,19 +43,19 @@ onHoverHandler stateMVar = requestHandler STextDocumentHover $ \req responder ->
     Nothing -> responder (Right Nothing)
 
 onDocumentSaveHandler :: MVar State -> Handlers (LspM ())
-onDocumentSaveHandler stateMVar = notificationHandler STextDocumentDidSave $ \msg -> do
+onDocumentSaveHandler state_mvar = notificationHandler STextDocumentDidSave $ \msg -> do
   let NotificationMessage _ _ (DidSaveTextDocumentParams doc _text) = msg
       filePath = uriToFilePath $ doc ^. uri
   versionedDoc <- getVersionedTextDoc doc
   debug $ "Saved document: " ++ show versionedDoc
-  tryReCompile stateMVar filePath (versionedDoc ^. version)
+  tryReCompile state_mvar filePath (versionedDoc ^. version)
 
 onDocumentOpenHandler :: MVar State -> Handlers (LspM ())
-onDocumentOpenHandler stateMVar = notificationHandler STextDocumentDidOpen $ \msg -> do
+onDocumentOpenHandler state_mvar = notificationHandler STextDocumentDidOpen $ \msg -> do
   let NotificationMessage _ _ (DidOpenTextDocumentParams doc) = msg
       filePath = uriToFilePath $ doc ^. uri
   debug $ "Opened document: " ++ pretty filePath
-  tryReCompile stateMVar filePath (Just $ doc ^. version)
+  tryReCompile state_mvar filePath (Just $ doc ^. version)
 
 onDocumentCloseHandler :: Handlers (LspM ())
 onDocumentCloseHandler = notificationHandler STextDocumentDidClose $ \_msg -> debug "Closed document"
