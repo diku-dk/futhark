@@ -571,7 +571,7 @@ typeOf (StringLit vs _) =
     (ShapeDecl [ConstDim $ genericLength vs])
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
-typeOf (Hole _ (Info t) _) = t
+typeOf (Hole (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Negate e _) = typeOf e
 typeOf (Not e _) = typeOf e

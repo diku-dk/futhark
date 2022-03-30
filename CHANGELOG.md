@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Sun Haoran has implemented typed holes, with syntax `?foo`.
+* Sun Haoran has implemented unnamed typed holes, with syntax `???`.
 
 ### Removed
 

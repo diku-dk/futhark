@@ -96,6 +96,7 @@ tokens :-
   "."                      { tokenC DOT }
   "!"                      { tokenC BANG }
   "$"                      { tokenC DOLLAR }
+  "???"                    { tokenC HOLE }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
@@ -124,7 +125,6 @@ tokens :-
   @identifier "." "("      { tokenPosM $ fmap (QUALPAREN []) . indexing . second (T.init . T.takeWhile (/='(')) }
   @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
-  "?" @identifier          { tokenS $ HOLE . nameFromText . T.drop 1 }
 
   @binop                   { tokenM $ return . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }

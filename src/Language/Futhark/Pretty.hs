@@ -303,7 +303,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
           | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
               text "@" <> parens (align $ ppr t')
         _ -> mempty
-  pprPrec _ (Hole name t _) = pprName name <> inst
+  pprPrec _ (Hole t _) = inst
     where
       inst = case unAnnot t of
         Just t'
