@@ -267,7 +267,7 @@ mkMax e1 e2 = do
 
 lessThanZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> PrimExp VName -> PrimExp VName -> IO Bool
 lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
-  let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn pe1 <> freeIn pe2
+  let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn pe1 <> freeIn pe2 <> freeIn asserts
   result <- evalZ3With Nothing (opt "timeout" (1000 :: Integer)) $ do
     -- result <- evalZ3 $ do
     maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
@@ -297,7 +297,7 @@ lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
 disjointZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> Interval -> Interval -> IO Bool
 disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
   | st1 == st2 = do
-      let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2
+      let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2 <> freeIn asserts
       result <- evalZ3With Nothing (opt "timeout" (1000 :: Integer)) $ do
         -- result <- evalZ3 $ do
         maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
