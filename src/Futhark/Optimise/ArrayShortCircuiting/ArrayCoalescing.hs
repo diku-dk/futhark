@@ -19,7 +19,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
-import Debug.Trace
+-- import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
@@ -32,6 +32,8 @@ import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Futhark.Util
 import Futhark.Util.Pretty (Pretty)
+
+trace _ a = a
 
 traceWith :: Pretty a => String -> a -> a
 traceWith s a = trace (s <> ": " <> pretty a) a
