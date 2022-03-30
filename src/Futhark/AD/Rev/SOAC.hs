@@ -77,7 +77,7 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
 vjpSOAC ops pat aux soac@(Screma w as form) m
   | Just lam <- isMapSOAC form = do
       pat_adj <- commonSOAC pat aux soac m
-      vjpMap ops pat_adj w lam as
+      vjpMap ops pat_adj aux w lam as
 vjpSOAC ops pat _aux (Screma w as form) m
   | Just (reds, map_lam) <-
       isRedomapSOAC form = do

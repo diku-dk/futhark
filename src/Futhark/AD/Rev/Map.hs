@@ -77,8 +77,8 @@ withAcc inputs m = do
     subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params
   letTupExp "withacc_res" $ WithAcc inputs acc_lam
 
-vjpMap :: VjpOps -> [Adj] -> SubExp -> Lambda SOACS -> [VName] -> ADM ()
-vjpMap ops res_adjs w map_lam as
+vjpMap :: VjpOps -> [Adj] -> StmAux () -> SubExp -> Lambda SOACS -> [VName] -> ADM ()
+vjpMap ops res_adjs _ w map_lam as
   | Just res_ivs <- mapM isSparse res_adjs = returnSweepCode $ do
       -- Since at most only a constant number of adjoint are nonzero
       -- (length res_ivs), there is no need for the return sweep code to
@@ -145,7 +145,7 @@ vjpMap ops res_adjs w map_lam as
       Just ivs
     isSparse _ =
       Nothing
-vjpMap ops pat_adj w map_lam as = returnSweepCode $ do
+vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
   pat_adj_vals <- mapM adjVal pat_adj
   pat_adj_params <-
     mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj_vals
@@ -170,7 +170,7 @@ vjpMap ops pat_adj w map_lam as = returnSweepCode $ do
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
-        letTupExp "map_adjs" . Op $
+        auxing aux . letTupExp "map_adjs" . Op $
           Screma w (as ++ pat_adj_vals ++ free_adjs) (mapSOAC lam_rev)
 
     -- Crucial that we handle the free contribs first in case 'free'
