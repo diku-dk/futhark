@@ -349,7 +349,11 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
           let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
 
           -- build epilogue.
-          epilogue_res_list <- kkLoopBody TilePartial full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
+          epilogue_res_list <- case (common_dim, tk) of
+            (Constant (IntValue c1), Constant (IntValue c2))
+              | valueIntegral c1 `mod` valueIntegral c2 == (0 :: Integer) ->
+                  return [prologue_res]
+            _ -> kkLoopBody TilePartial full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
 
           let redomap_res : _ = epilogue_res_list
 
