@@ -32,9 +32,9 @@ onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -
   let RequestMessage _ _ _ (HoverParams doc pos _workDone) = req
       Position l c = pos
       range = Range pos pos
-      filePath = uriToFilePath $ doc ^. uri
-  state <- tryTakeStateFromMVar state_mvar filePath
-  result <- liftIO $ getHoverInfoFromState state filePath (fromEnum l + 1) (fromEnum c + 1)
+      file_path = uriToFilePath $ doc ^. uri
+  state <- tryTakeStateFromMVar state_mvar file_path
+  result <- liftIO $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
   case result of
     Just msg -> do
       let ms = HoverContents $ MarkupContent MkMarkdown msg
@@ -45,17 +45,17 @@ onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -
 onDocumentSaveHandler :: MVar State -> Handlers (LspM ())
 onDocumentSaveHandler state_mvar = notificationHandler STextDocumentDidSave $ \msg -> do
   let NotificationMessage _ _ (DidSaveTextDocumentParams doc _text) = msg
-      filePath = uriToFilePath $ doc ^. uri
-  versionedDoc <- getVersionedTextDoc doc
-  debug $ "Saved document: " ++ show versionedDoc
-  tryReCompile state_mvar filePath (versionedDoc ^. version)
+      file_path = uriToFilePath $ doc ^. uri
+  versioned_doc <- getVersionedTextDoc doc
+  debug $ "Saved document: " ++ show versioned_doc
+  tryReCompile state_mvar file_path (versioned_doc ^. version)
 
 onDocumentOpenHandler :: MVar State -> Handlers (LspM ())
 onDocumentOpenHandler state_mvar = notificationHandler STextDocumentDidOpen $ \msg -> do
   let NotificationMessage _ _ (DidOpenTextDocumentParams doc) = msg
-      filePath = uriToFilePath $ doc ^. uri
-  debug $ "Opened document: " ++ pretty filePath
-  tryReCompile state_mvar filePath (Just $ doc ^. version)
+      file_path = uriToFilePath $ doc ^. uri
+  debug $ "Opened document: " ++ pretty file_path
+  tryReCompile state_mvar file_path (Just $ doc ^. version)
 
 onDocumentCloseHandler :: Handlers (LspM ())
 onDocumentCloseHandler = notificationHandler STextDocumentDidClose $ \_msg -> debug "Closed document"
