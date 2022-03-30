@@ -32,7 +32,7 @@ mkDiagnostic range severity msg = Diagnostic range (Just severity) Nothing (Just
 warningsToDiagnostics :: [(SrcLoc, Doc)] -> [Diagnostic]
 warningsToDiagnostics =
   map
-    ( \(srcloc, msg) -> do
+    ( \(srcloc, msg) ->
         mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (T.pack $ pretty msg)
     )
 
