@@ -28,6 +28,7 @@ import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.SeqAccs
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -93,6 +94,8 @@ kernelsPipeline =
         simplifyGPU,
         unstreamGPU,
         performCSE True,
+        simplifyGPU,
+        seqAccsGPU,
         simplifyGPU,
         sinkGPU,
         inPlaceLoweringGPU
