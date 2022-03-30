@@ -73,6 +73,10 @@ pdBinOp (SDivUp it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
+pdBinOp (SQuot it _) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
 pdBinOp (UDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
