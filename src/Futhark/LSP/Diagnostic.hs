@@ -37,7 +37,7 @@ warningsToDiagnostics =
     )
 
 errorToDiagnostics :: NE.NonEmpty ProgramError -> [Diagnostic]
-errorToDiagnostics progErr = map onError (NE.toList progErr)
+errorToDiagnostics prog_error = map onError (NE.toList prog_error)
   where
     onError (ProgramError loc msg) = mkDiagnostic (rangeFromLoc loc) DsError (T.pack $ pretty msg)
 
