@@ -14,8 +14,8 @@ getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> IO (Maybe T.Te
 getHoverInfoFromState state (Just path) l c = do
   case stateProgram state of
     Nothing -> pure $ Just "No information available"
-    Just loadedProg -> do
-      let imports = lpImports loadedProg
+    Just loaded_prog -> do
+      let imports = lpImports loaded_prog
       case atPos imports $ Pos path l c 0 of
         Nothing -> pure $ Just "No information available"
         Just (AtName qn def _loc) -> do
