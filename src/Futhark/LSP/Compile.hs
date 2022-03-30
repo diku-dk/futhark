@@ -11,49 +11,49 @@ import Language.LSP.Types (TextDocumentVersion, filePathToUri, toNormalizedUri)
 
 -- try to take state from MVar, if it's empty (Nothing), try to compile.
 tryTakeStateFromMVar :: MVar State -> Maybe FilePath -> LspT () IO State
-tryTakeStateFromMVar state_mvar filePath = do
-  oldState <- liftIO $ takeMVar state_mvar
-  case stateProgram oldState of
+tryTakeStateFromMVar state_mvar file_path = do
+  old_state <- liftIO $ takeMVar state_mvar
+  case stateProgram old_state of
     Nothing -> do
-      newState <- tryCompile filePath (State $ Just noLoadedProg) (Just 0) -- first compile, version 0
-      liftIO $ putMVar state_mvar newState
-      pure newState
+      new_state <- tryCompile file_path (State $ Just noLoadedProg) (Just 0) -- first compile, version 0
+      liftIO $ putMVar state_mvar new_state
+      pure new_state
     Just _ -> do
-      liftIO $ putMVar state_mvar oldState
-      pure oldState
+      liftIO $ putMVar state_mvar old_state
+      pure old_state
 
 -- try to (re)-compile, replace old state if successful.
 tryReCompile :: MVar State -> Maybe FilePath -> TextDocumentVersion -> LspT () IO ()
-tryReCompile state_mvar filePath version = do
+tryReCompile state_mvar file_path version = do
   debug "(Re)-compiling ..."
-  oldState <- liftIO $ takeMVar state_mvar
-  newState <- tryCompile filePath oldState version
-  case stateProgram newState of
+  old_state <- liftIO $ takeMVar state_mvar
+  new_state <- tryCompile file_path old_state version
+  case stateProgram new_state of
     Nothing -> do
       debug "Failed to (re)-compile, using old state or Nothing"
-      liftIO $ putMVar state_mvar oldState
+      liftIO $ putMVar state_mvar old_state
     Just _ -> do
       debug "(Re)-compile successful"
-      liftIO $ putMVar state_mvar newState
+      liftIO $ putMVar state_mvar new_state
 
 -- try to compile file, publish diagnostics on warnings or error, return newly compiled state.
 -- single point where the compilation is done, and shouldn't be exported.
 tryCompile :: Maybe FilePath -> State -> TextDocumentVersion -> LspT () IO State
 tryCompile Nothing _ _ = pure emptyState
 tryCompile (Just path) state version = do
-  let oldLoadedProg = getLoadedProg state
-  res <- liftIO $ reloadProg oldLoadedProg [path]
+  let old_loaded_prog = getLoadedProg state
+  res <- liftIO $ reloadProg old_loaded_prog [path]
   case res of
-    Right (warnings, newLoadedProg) -> do
+    Right (warnings, new_loaded_prog) -> do
       let diags = warningsToDiagnostics $ listWarnings warnings
       sendDiagnostics (toNormalizedUri $ filePathToUri path) diags version
-      pure $ State (Just newLoadedProg)
-    Left progErr -> do
+      pure $ State (Just new_loaded_prog)
+    Left prog_error -> do
       debug "Compilation failed, publishing diagnostics"
-      let diags = errorToDiagnostics progErr
+      let diags = errorToDiagnostics prog_error
       sendDiagnostics (toNormalizedUri $ filePathToUri path) diags version
       pure emptyState
 
 getLoadedProg :: State -> LoadedProg
-getLoadedProg (State (Just loadedProg)) = loadedProg
+getLoadedProg (State (Just loaded_prog)) = loaded_prog
 getLoadedProg (State Nothing) = noLoadedProg
