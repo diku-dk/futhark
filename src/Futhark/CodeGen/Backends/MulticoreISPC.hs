@@ -28,6 +28,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType)
+import Data.Maybe
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -162,6 +163,9 @@ compileCodeISPC vari code@(Write dest (Count idx) elemtype DefaultSpace vol elem
     elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
     GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = GC.compileCode code
+compileCodeISPC _ (Free name space) = do
+  cached <- isJust <$> GC.cacheMem name
+  unless cached $ GC.unRefMemNoError name space
 compileCodeISPC vari (For i bound body) = do
   let i' = C.toIdent i
       t = GC.primTypeToCType $ primExpType bound

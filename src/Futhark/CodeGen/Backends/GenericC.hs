@@ -77,6 +77,8 @@ module Futhark.CodeGen.Backends.GenericC
     declAllocatedMem,
     freeAllocatedMem,
     freeAllocatedMemNoError,
+    unRefMem,
+    unRefMemNoError,
     collect,
     setMemNoError,
 
@@ -860,7 +862,7 @@ setMemNoError :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMemNoError dest src space = setMem' dest src space stmt
   where
     stmt space' dest' src' _ =
-      [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src', 0) != 0) {
+      [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src') != 0) {
                 err = 1;
               }|]
 
@@ -880,10 +882,11 @@ unRefMem mem space = unRefMem' mem space cstm
                       return 1;
                     }|]
 
+-- TODO(pema, K, obp): Don't pass nullptr for the error message.
 unRefMemNoError :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMemNoError  mem space = unRefMem' mem space cstm
   where
-    cstm s m _ = [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, 0) != 0) {
+    cstm s m _ = [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m) != 0) {
                       err = 1;
                     }|]
 
@@ -930,7 +933,7 @@ allocMemNoError ::
 allocMemNoError mem size space on_failure = allocMem' mem size space on_failure stmt
   where
     stmt space' mem' size' _ on_failure' =
-      [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size', 0)) {
+      [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size')) {
                 $stm:on_failure'
               }|]
 
