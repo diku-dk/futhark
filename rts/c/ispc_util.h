@@ -67,7 +67,7 @@ static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying *
 }
 
 
-extern unmasked uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
+extern "C" unmasked uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
 					   uniform struct memblock * uniform lhs,
 					   uniform const char * uniform lhs_desc);
 
@@ -81,9 +81,19 @@ static uniform int memblock_unref(uniform struct futhark_context * varying ctx,
 		   lhs_desc);
   }
 }
+static uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
+				    varying struct memblock * uniform lhs,
+				    uniform const char * uniform lhs_desc)
+{
+  uniform struct memblock * varying _lhs = (uniform struct memblock * varying) lhs;    
+  foreach_active(i){
+    memblock_unref(ctx,
+		   (uniform struct memblock * uniform)(extract((varying int64_t)_lhs,i)),
+		   lhs_desc);
+  }
+}
 
-
-extern unmasked int memblock_alloc(uniform struct futhark_context * uniform ctx,
+extern "C" unmasked int memblock_alloc(uniform struct futhark_context * uniform ctx,
 				  uniform struct memblock * uniform block,
 				  uniform int64_t size,
 				  uniform const char * uniform block_desc);
@@ -91,6 +101,19 @@ extern unmasked int memblock_alloc(uniform struct futhark_context * uniform ctx,
 static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
 				  uniform struct memblock * varying block,
 				  varying int64_t size,
+				  uniform const char * uniform block_desc)
+{
+  uniform struct memblock * varying _block = (uniform struct memblock * varying) block;
+  foreach_active(i){
+    memblock_alloc(ctx,
+		   (uniform struct memblock * uniform)(extract((varying int64_t)_block,i)),
+		   size,
+		   block_desc);
+  }
+}
+static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
+				  varying struct memblock * uniform block,
+				  uniform int64_t size,
 				  uniform const char * uniform block_desc)
 {
   foreach_active(i){
@@ -107,14 +130,30 @@ static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
 //				  uniform int64_t size,
 //				  uniform const char * uniform block_desc)
 
-static int memblock_set (struct futhark_context *ctx, struct memblock *lhs, struct memblock *rhs, const char *lhs_desc) {
-  int ret = memblock_unref(ctx,  lhs, 0); //TODO(K, O): Make error handling
-  if (rhs->references != NULL) {
-    (*(rhs->references))++;
+// static int memblock_set (struct futhark_context *ctx, struct memblock *lhs, struct memblock *rhs, const char *lhs_desc) {
+//   int ret = memblock_unref(ctx,  lhs, 0); //TODO(K, O): Make error handling
+//   if (rhs->references != NULL) {
+//     (*(rhs->references))++;
+//   }
+//   *lhs = *rhs;
+//   return ret;
+// }
+
+extern "C" unmasked int memblock_set(uniform struct futhark_context * uniform ctx,
+                                 uniform struct memblock * uniform lhs,
+                                 uniform struct memblock * uniform rhs,
+                                 uniform const char * uniform lhs_desc);
+
+static uniform int memblock_set (uniform struct futhark_context * uniform ctx, 
+                        varying struct memblock * uniform lhs,
+                        varying struct memblock * uniform rhs,
+                        uniform const char * uniform lhs_desc) {    
+  uniform struct memblock * varying _lhs = (uniform struct memblock * varying) lhs;    
+  uniform struct memblock * varying _rhs = (uniform struct memblock * varying) rhs;
+  foreach_active(i) {
+      memblock_set(ctx, 
+      (uniform struct memblock * uniform)extract((varying int64_t ) _lhs, i), 
+      (uniform struct memblock * uniform)extract((varying int64_t) _rhs, i),
+        lhs_desc);
   }
-  *lhs = *rhs;
-  return ret;
 }
-
-
-

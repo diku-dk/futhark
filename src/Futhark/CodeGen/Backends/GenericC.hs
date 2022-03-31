@@ -862,7 +862,7 @@ setMemNoError dest src space = setMem' dest src space stmt
     stmt = \space' dest' src' _ ->
         [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src',
                                                0) != 0) {
-                       return 1;
+                       err = 1;
                      }|]
 
   
@@ -887,7 +887,7 @@ unRefMemNoError  mem space = unRefMem' mem space cstm
   where
     cstm = \s m _ ->
              [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, 0) != 0) {
-                         return 1;
+                         err = 1;
                        }|]
 
 allocMem' :: 

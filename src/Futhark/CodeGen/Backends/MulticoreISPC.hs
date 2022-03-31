@@ -158,7 +158,7 @@ compileCodeISPC _ (Allocate name (Count (TPrimExp e)) space) = do
                  err = lexical_realloc_ispc(&$exp:name, &$exp:cur_size, $exp:size);
                 }|]
     _ ->
-      GC.allocMemNoError name size space [C.cstm|{err = 1; goto cleanup;}|]
+      GC.allocMemNoError name size space [C.cstm|{err = 1;}|]
 
 compileCodeISPC _ (SetMem dest src space) =
   GC.setMemNoError dest src space
