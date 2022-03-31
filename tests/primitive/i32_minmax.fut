@@ -9,5 +9,5 @@
 -- input { [0i32, 1i32, -1i32, 1i32] 
 --         [1i32, 1i32, 1i32, -1i32]}
 -- output { [0i32, 1i32, -1i32, -1i32] }
-entry testMax = map2 (i32.max)
-entry testMin = map2 (i32.min)
+entry testMax = map2 i32.max
+entry testMin = map2 i32.min
