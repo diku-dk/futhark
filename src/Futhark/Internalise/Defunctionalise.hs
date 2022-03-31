@@ -509,6 +509,8 @@ defuncExp e@(Var qn (Info t) loc) = do
     _ ->
       let tp = typeFromSV sv
        in return (Var qn (Info tp) loc, sv)
+defuncExp (Hole (Info t) loc) =
+  pure (Hole (Info t) loc, IntrinsicSV)
 defuncExp (Ascript e0 tydecl loc)
   | orderZero (typeOf e0) = do
       (e0', sv) <- defuncExp e0
