@@ -681,7 +681,7 @@ defineMemorySpace space = do
   free <- collect $ freeRawMem [C.cexp|block->mem|] space [C.cexp|desc|]
   ctx_ty <- contextType
   let unrefdef =
-        [C.cedecl|static int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
+        [C.cedecl|int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
@@ -707,7 +707,7 @@ defineMemorySpace space = do
     collect $
       allocRawMem [C.cexp|block->mem|] [C.cexp|size|] space [C.cexp|desc|]
   let allocdef =
-        [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
+        [C.cedecl|int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   if (size < 0) {
     futhark_panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
@@ -761,7 +761,7 @@ defineMemorySpace space = do
   -- Memory setting - unreference the destination and increase the
   -- count of the source by one.
   let setdef =
-        [C.cedecl|static int $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
+        [C.cedecl|int $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
   int ret = $id:(fatMemUnRef space)(ctx, lhs, lhs_desc);
   if (rhs->references != NULL) {
     (*(rhs->references))++;
@@ -850,22 +850,21 @@ setMem' dest src space stmt = do
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = setMem' dest src space stmt
   where
-    stmt = \space' dest' src' src_s' ->
-        [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src',
-                                               $string:src_s') != 0) {
-                       return 1;
-                     }|]
-    
+    stmt space' dest' src' src_s' =
+      [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src',
+                $string:src_s') != 0) {
+                return 1;
+              }|]
+
 setMemNoError :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMemNoError dest src space = setMem' dest src space stmt
   where
-    stmt = \space' dest' src' _ ->
-        [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src',
-                                               0) != 0) {
-                       return 1;
-                     }|]
+    stmt space' dest' src' _ =
+      [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src', 0) != 0) {
+                err = 1;
+              }|]
 
-  
+
 unRefMem' :: C.ToExp a => a -> Space -> (Space -> a -> String -> C.Stm) -> CompilerM op s ()
 unRefMem' mem space cstm = do
   refcount <- fatMemory space
@@ -877,20 +876,18 @@ unRefMem' mem space cstm = do
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = unRefMem' mem space cstm
   where
-    cstm = \s m m_s ->
-             [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, $string:m_s) != 0) {
-                         return 1;
-                       }|]
+    cstm s m m_s = [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, $string:m_s) != 0) {
+                      return 1;
+                    }|]
 
 unRefMemNoError :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMemNoError  mem space = unRefMem' mem space cstm
   where
-    cstm = \s m _ ->
-             [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, 0) != 0) {
-                         return 1;
-                       }|]
+    cstm s m _ = [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, 0) != 0) {
+                      err = 1;
+                    }|]
 
-allocMem' :: 
+allocMem' ::
   (C.ToExp a, C.ToExp b) =>
   a ->
   b ->
@@ -917,11 +914,11 @@ allocMem ::
   CompilerM op s ()
 allocMem mem size space on_failure = allocMem' mem size space on_failure stmt
   where
-    stmt = \space' mem' size' mem_s' on_failure' ->
-        [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
-                                                 $string:mem_s')) {
-                       $stm:on_failure'
-                     }|]
+    stmt space' mem' size' mem_s' on_failure' =
+      [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
+                $string:mem_s')) {
+                $stm:on_failure'
+              }|]
 
 allocMemNoError ::
   (C.ToExp a, C.ToExp b) =>
@@ -932,11 +929,10 @@ allocMemNoError ::
   CompilerM op s ()
 allocMemNoError mem size space on_failure = allocMem' mem size space on_failure stmt
   where
-    stmt = \space' mem' size' _ on_failure' ->
-        [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
-                                                 0)) {
-                       $stm:on_failure'
-                     }|]
+    stmt space' mem' size' _ on_failure' =
+      [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size', 0)) {
+                $stm:on_failure'
+              }|]
 
 copyMemoryDefaultSpace ::
   C.Exp ->
