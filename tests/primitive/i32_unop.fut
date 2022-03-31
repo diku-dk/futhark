@@ -1,26 +1,20 @@
 -- Test unary operators for i32.
---
+
 -- ==
--- input { 0  0i32 } output {  0i32 }
--- input { 0  1i32 } output { -1i32 }
--- input { 0 -1i32 } output {  1i32 }
--- input { 0  8i32 } output { -8i32 }
--- input { 0 -8i32 } output {  8i32 }
---
--- input { 1  0i32 } output { 0i32 }
--- input { 1  1i32 } output { 1i32 }
--- input { 1 -1i32 } output { 1i32 }
--- input { 1  8i32 } output { 8i32 }
--- input { 1 -8i32 } output { 8i32 }
---
--- input { 2  0i32 } output {  0i32 }
--- input { 2  1i32 } output {  1i32 }
--- input { 2 -1i32 } output { -1i32 }
--- input { 2  8i32 } output {  1i32 }
--- input { 2 -8i32 } output { -1i32 }
+-- entry: negatei32
+-- input { [0i32, 1i32, -1i32, 8i32, -8i32] }
+-- output { [0i32, -1i32, 1i32, -8i32, 8i32] }
 
+-- ==
+-- entry: absi32
+-- input { [0i32, 1i32, -1i32, 8i32, -8i32] }
+-- output { [0i32, 1i32, 1i32, 8i32, 8i32] }
 
-def main (f: i32) (x: i32): i32 =
-  if      f == 0 then -x
-  else if f == 1 then i32.abs(x)
-  else                i32.sgn(x)
+-- ==
+-- entry: sgni32
+-- input { [0i32, 1i32, -1i32, 8i32, -8i32] }
+-- output { [0i32, 1i32, -1i32, 1i32, -1i32] }
+
+entry negatei32 = map (\x : i32 -> -x)
+entry absi32 = map (i32.abs)
+entry sgni32 = map (i32.sgn)
