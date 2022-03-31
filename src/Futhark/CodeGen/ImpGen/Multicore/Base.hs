@@ -256,7 +256,7 @@ generateChunkLoop desc vec m = do
   -- Emit either foreach or normal for loop
   let bound = untyped n
   if vec
-  then emit $ Imp.Op $ Imp.ForEach i bound body
+  then emit $ Imp.Op $ Imp.ForEach [i] [bound] body
   else emit $ Imp.For i bound body
 
 generateUniformizeLoop :: (Imp.TExp Int64 -> MulticoreGen ()) -> MulticoreGen ()
@@ -308,7 +308,7 @@ sForVectorized' i bound body = do
         t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
   addLoopVar i it
   body' <- collect body
-  emit $ Imp.Op $ Imp.ForEach i bound body'
+  emit $ Imp.Op $ Imp.ForEach [i] [bound] body'
 
 sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
 sForVectorized i bound body = do

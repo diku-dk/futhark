@@ -325,9 +325,9 @@ compileOp (ISPCKernel body free) = do
     if (err != 0) {
       goto cleanup;
     }|]
-
+    
 compileOp (ForEach i bound body) = do
-  bound' <- GC.compileExp bound
+  bound' <- mapM GC.compileExp bound  
   body' <- GC.collect $ compileCodeISPC Imp.Varying body
   GC.stm [C.cstm|
     foreach ($id:i = 0 ... extract($exp:bound', 0)) {
