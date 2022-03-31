@@ -13,7 +13,7 @@
 -- input { [2.718281828459045f32, 2f32, 10f32] } 
 -- output { [0.4342944819032518f32, 0.3010299956639812f32, 1f32] } 
 
-entry logf32 = map (f32.log)
-entry log2f32 = map (f32.log2)
-entry log10f32 = map (f32.log10)
+entry logf32 = map f32.log
+entry log2f32 = map f32.log2
+entry log10f32 = map f32.log10
 

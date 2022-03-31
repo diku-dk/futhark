@@ -18,6 +18,6 @@
 -- output { [1f32, -1f32, -1f32] }
 
 entry testInf (xs: []f32) (ys: []f32) = map2 (\x y -> f32.isinf(x/y)) xs ys
-entry testNaN (xs: []f32) (ys: []f32) = map (f32.sqrt) xs
-entry testToBits (xs: []f32) (ys: []f32) = map (f32.to_bits) xs
+entry testNaN (xs: []f32) (ys: []f32) = map f32.sqrt xs
+entry testToBits (xs: []f32) (ys: []f32) = map f32.to_bits xs
 entry testFromBits (xs: []f32) (ys: []f32) = map (\x -> f32.from_bits(f32.to_bits(x))) xs

@@ -7,10 +7,10 @@
 
 -- ==
 -- entry: lerpf32
--- input { [0.0, 0.0, 0.0, 0.0] 
---         [1.0, 10.0, 10.0, 10.0]
---         [0.0, 0.25, 0.5, 0.75] }
+-- input { [0.0f32, 0.0f32, 0.0f32, 0.0f32] 
+--         [1.0f32, 10.0f32, 10.0f32, 10.0f32]
+--         [0.0f32, 0.25f32, 0.5f32, 0.75f32] }
 -- output { [0f32, 2.5f32, 5.0f32, 7.5f32] }
 
-entry lerpf64 = map3 (f64.lerp)
-entry lerpf32 = map3 (\x y z -> f32.lerp (f32.f64 x) (f32.f64 y) (f32.f64 z))
+entry lerpf64 = map3 f64.lerp
+entry lerpf32 = map3 f32.lerp

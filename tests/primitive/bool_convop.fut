@@ -39,11 +39,11 @@
 -- input { [false, true] }
 -- output { [0f64, 1f64] }
 
-entry castB = map (bool.bool)
-entry castI8 = map (i8.bool)
-entry castI16 = map (i16.bool)
-entry castI32 = map (i32.bool)
-entry castI64 = map (i64.bool)
-entry castF16 = map (f16.bool)
-entry castF32 = map (f32.bool)
-entry castF64 = map (f64.bool)
+entry castB = map bool.bool
+entry castI8 = map i8.bool
+entry castI16 = map i16.bool
+entry castI32 = map i32.bool
+entry castI64 = map i64.bool
+entry castF16 = map f16.bool
+entry castF32 = map f32.bool
+entry castF64 = map f64.bool
