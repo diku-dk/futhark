@@ -172,7 +172,7 @@ compileCodeISPC vari (For i bound body) = do
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCodeISPC vari body
   GC.stm
-    [C.cstm|for ($tyquals:(GC.variQuals vari) $ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+    [C.cstm|for (uniform $ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 compileCodeISPC vari (While cond body) = do
