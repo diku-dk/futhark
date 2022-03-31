@@ -52,6 +52,7 @@ freeVars expr = case expr of
   IntLit {} -> mempty
   FloatLit {} -> mempty
   StringLit {} -> mempty
+  Hole {} -> mempty
   Parens e _ -> freeVars e
   QualParens _ e _ -> freeVars e
   TupLit es _ -> foldMap freeVars es

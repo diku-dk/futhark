@@ -994,6 +994,7 @@ evalAppExp env (Match e cs _) = do
 
 eval :: Env -> Exp -> EvalM Value
 eval _ (Literal v _) = return $ ValuePrim v
+eval env (Hole (Info t) loc) = bad loc env $ "Hole of type: " <> prettyOneLine t
 eval env (Parens e _) = eval env e
 eval env (QualParens (qv, _) e loc) = do
   m <- evalModuleVar env qv

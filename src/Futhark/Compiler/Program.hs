@@ -42,7 +42,7 @@ import qualified Data.Text.IO as T
 import Data.Time.Clock (UTCTime)
 import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
-import Futhark.Util.Pretty (Doc, line, ppr, text, (</>))
+import Futhark.Util.Pretty (Doc, align, line, ppr, text, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
@@ -261,11 +261,13 @@ typeCheckProg orig_imports orig_src =
               then ppr ws' </> line <> ppr err'
               else ppr err'
         (prog_ws, Right (m, src')) ->
-          Right
-            ( ws <> prog_ws,
-              imports ++ [LoadedFile path import_name (src, m) mod_time],
-              src'
-            )
+          let warnHole (loc, t) =
+                singleWarning (E.srclocOf loc) $ "Hole of type: " <> align (ppr t)
+           in Right
+                ( ws <> prog_ws <> foldMap warnHole (E.progHoles (fileProg m)),
+                  imports ++ [LoadedFile path import_name (src, m) mod_time],
+                  src'
+                )
 
 setEntryPoints ::
   [E.Name] ->

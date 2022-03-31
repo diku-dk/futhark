@@ -172,6 +172,7 @@ import Language.Futhark.Parser.Monad
       open            { L $$ OPEN }
       local           { L $$ LOCAL }
       doc             { L _  (DOC _) }
+      hole            { L $$ HOLE }
 
 %left bottom
 %left ifprec letprec caseprec typeprec enumprec sumprec
@@ -651,6 +652,7 @@ Atom : PrimLit        { Literal (fst $1) (srclocOf (snd $1)) }
      | floatlit       { let L loc (FLOATLIT x) = $1 in FloatLit x NoInfo (srclocOf loc) }
      | stringlit      { let L loc (STRINGLIT s) = $1 in
                         StringLit (BS.unpack (T.encodeUtf8 s)) (srclocOf loc) }
+     | hole           { Hole NoInfo (srclocOf $1) }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 (srcspan $1 ($3:map snd $>)))

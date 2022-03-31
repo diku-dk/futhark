@@ -269,6 +269,9 @@ checkApplyExp e = do
 checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
+checkExp (Hole _ loc) = do
+  t <- newTypeVar loc "t"
+  pure $ Hole (Info $ t `setUniqueness` Unique) loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
 checkExp (IntLit val NoInfo loc) = do
@@ -1126,6 +1129,9 @@ causalityCheck binding_body = do
             bad
       onExp known (ArrayLit [] (Info t) loc)
         | Just bad <- checkCausality "empty array" known t loc =
+            bad
+      onExp known (Hole (Info t) loc)
+        | Just bad <- checkCausality "hole" known t loc =
             bad
       onExp known (Lambda params _ _ _ _)
         | bad : _ <- mapMaybe (checkParamCausality known) params =

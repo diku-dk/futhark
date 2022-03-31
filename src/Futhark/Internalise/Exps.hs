@@ -22,7 +22,7 @@ import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
-import Futhark.Util.Pretty (prettyOneLine)
+import Futhark.Util.Pretty (align, ppr, prettyOneLine)
 import Language.Futhark as E hiding (TypeArg)
 
 -- | Convert a program in source Futhark to a program in the Futhark
@@ -380,32 +380,39 @@ internaliseAppExp desc ext (E.Coerce e (TypeDecl dt (Info et)) loc) = do
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseAppExp desc _ e@E.Apply {} = do
-  (qfname, args) <- findFuncall e
+internaliseAppExp desc _ e@E.Apply {} =
+  case findFuncall e of
+    (FunctionHole t loc, _args) -> do
+      -- The function we are supposed to call doesn't exist, but we
+      -- have to synthesize some fake values of the right type.  The
+      -- easy way to do this is to just ignore the arguments and
+      -- create a hole whose type is the type of the entire
+      -- application.
+      internaliseExp desc (E.Hole (Info (snd $ E.unfoldFunType t)) loc)
+    (FunctionName qfname, args) -> do
+      -- Argument evaluation is outermost-in so that any existential sizes
+      -- created by function applications can be brought into scope.
+      let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
+          loc = srclocOf e
+          arg_desc = nameToString fname ++ "_arg"
 
-  -- Argument evaluation is outermost-in so that any existential sizes
-  -- created by function applications can be brought into scope.
-  let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
-      loc = srclocOf e
-      arg_desc = nameToString fname ++ "_arg"
-
-  -- Some functions are magical (overloaded) and we handle that here.
-  case () of
-    -- Overloaded functions never take array arguments (except
-    -- equality, but those cannot be existential), so we can safely
-    -- ignore the existential dimensions.
-    ()
-      | Just internalise <- isOverloadedFunction qfname (map fst args) loc ->
-          internalise desc
-      | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-        Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
-          let tag ses = [(se, I.Observe) | se <- ses]
-          args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-          let args'' = concatMap tag args'
-          letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
-      | otherwise -> do
-          args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-          fst <$> funcall desc qfname args' loc
+      -- Some functions are magical (overloaded) and we handle that here.
+      case () of
+        -- Overloaded functions never take array arguments (except
+        -- equality, but those cannot be existential), so we can safely
+        -- ignore the existential dimensions.
+        ()
+          | Just internalise <- isOverloadedFunction qfname (map fst args) loc ->
+              internalise desc
+          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+            Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
+              let tag ses = [(se, I.Observe) | se <- ses]
+              args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
+              let args'' = concatMap tag args'
+              letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+          | otherwise -> do
+              args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
+              fst <$> funcall desc qfname args' loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e body (internaliseExp desc)
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
@@ -593,6 +600,16 @@ internaliseAppExp _ _ e@E.BinOp {} =
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
+internaliseExp desc (E.Hole (Info t) loc) = do
+  let msg = pretty $ "Reached hole of type: " <> align (ppr t)
+  c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
+  ts <- internaliseType (E.toStruct t)
+  case mapM hasStaticShape ts of
+    Nothing ->
+      error $ "Hole at " <> locStr loc <> " has existential type:\n" <> show ts
+    Just ts' ->
+      -- Make sure we always generate a binding, even for primitives.
+      certifying c $ mapM (fmap I.Var . letExp desc <=< eBlank . I.fromDecl) ts'
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 internaliseExp desc (E.StringLit vs _) =
@@ -1510,20 +1527,22 @@ simpleCmpOp ::
 simpleCmpOp desc op x y =
   letTupExp' desc $ I.BasicOp $ I.CmpOp op x y
 
-findFuncall ::
-  E.AppExp ->
-  InternaliseM
-    ( E.QualName VName,
-      [(E.Exp, Maybe VName)]
-    )
+data Function
+  = FunctionName (E.QualName VName)
+  | FunctionHole E.PatType SrcLoc
+  deriving (Show)
+
+findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName)])
 findFuncall (E.Apply f arg (Info (_, argext)) _)
-  | E.AppExp f_e _ <- f = do
-      (fname, args) <- findFuncall f_e
-      return (fname, args ++ [(arg, argext)])
+  | E.AppExp f_e _ <- f =
+      let (f_e', args) = findFuncall f_e
+       in (f_e', args ++ [(arg, argext)])
   | E.Var fname _ _ <- f =
-      return (fname, [(arg, argext)])
+      (FunctionName fname, [(arg, argext)])
+  | E.Hole (Info t) loc <- f =
+      (FunctionHole t loc, [(arg, argext)])
 findFuncall e =
-  error $ "Invalid function expression in application: " ++ pretty e
+  error $ "Invalid function expression in application:\n" ++ pretty e
 
 -- The type of a body.  Watch out: this only works for the degenerate
 -- case where the body does not already return its context.

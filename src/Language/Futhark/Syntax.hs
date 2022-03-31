@@ -834,6 +834,7 @@ data ExpBase f vn
   | -- | A string literal is just a fancy syntax for an array
     -- of bytes.
     StringLit [Word8] SrcLoc
+  | Hole (f PatType) SrcLoc
   | Var (QualName vn) (f PatType) SrcLoc
   | -- | A parenthesized expression.
     Parens (ExpBase f vn) SrcLoc
@@ -916,6 +917,7 @@ instance Located (ExpBase f vn) where
   locOf (Update _ _ _ pos) = locOf pos
   locOf (RecordUpdate _ _ _ _ pos) = locOf pos
   locOf (Lambda _ _ _ _ loc) = locOf loc
+  locOf (Hole _ loc) = locOf loc
   locOf (OpSection _ _ loc) = locOf loc
   locOf (OpSectionLeft _ _ _ _ _ loc) = locOf loc
   locOf (OpSectionRight _ _ _ _ _ loc) = locOf loc

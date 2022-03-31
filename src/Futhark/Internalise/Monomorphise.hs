@@ -435,6 +435,8 @@ transformExp (Var fname (Info t) loc) = do
     Nothing -> do
       t' <- transformType t
       transformFName loc fname (toStruct t')
+transformExp (Hole t loc) =
+  Hole <$> traverse transformType t <*> pure loc
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
 transformExp (Negate e loc) =
