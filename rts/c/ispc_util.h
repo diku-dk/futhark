@@ -103,11 +103,10 @@ static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
 				  varying int64_t size,
 				  uniform const char * uniform block_desc)
 {
-  uniform struct memblock * varying _block = (uniform struct memblock * varying) block;
   foreach_active(i){
-    memblock_alloc(ctx,
-		   (uniform struct memblock * uniform)(extract((varying int64_t)_block,i)),
-		   size,
+    memblock_alloc((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
+		   (uniform struct memblock * uniform)(extract((varying int64_t)block,i)),
+		   extract(size, i),
 		   block_desc);
   }
 }
@@ -116,10 +115,17 @@ static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
 				  uniform int64_t size,
 				  uniform const char * uniform block_desc)
 {
+  // foreach_active(i){
+  //   memblock_alloc((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
+	// 	   (uniform struct memblock * uniform)(extract((varying int64_t)block,i)),
+	// 	   extract(size, i),
+	// 	   block_desc);
+  // }
+  uniform struct memblock * varying _block = (uniform struct memblock * varying) block;
   foreach_active(i){
-    memblock_alloc((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
-		   (uniform struct memblock * uniform)(extract((varying int64_t)block,i)),
-		   extract(size, i),
+    memblock_alloc(ctx,
+		   (uniform struct memblock * uniform)(extract((varying int64_t)_block,i)),
+		   size,
 		   block_desc);
   }
 }
