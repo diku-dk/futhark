@@ -1013,11 +1013,11 @@ static int32_t futrts_clzz64(int64_t x) {
 #elif ISPC
 
 static int32_t futrts_clzz8(int8_t x) {
-  return count_leading_zeros((int32_t)x)-24;
+  return x == 0 ? 8 : count_leading_zeros((int32_t)x);
 }
 
 static int32_t futrts_clzz16(int16_t x) {
-  return count_leading_zeros((int32_t)x)-16;
+  return x == 0 ? 16 : max(count_leading_zeros((int32_t)x)-16,0);
 }
 
 static int32_t futrts_clzz32(int32_t x) {
@@ -1216,11 +1216,11 @@ static inline float fabs32(float x) {
 }
 
 static inline float fmax32(float x, float y) {
-  return max(x, y);
+  return isnan(x) ? y : isnan(y) ? x : max(x, y);
 }
 
 static inline float fmin32(float x, float y) {
-  return min(x, y);
+  return isnan(x) ? y : isnan(y) ? x : min(x, y);
 }
 
 static inline float fpow32(float x, float y) {
@@ -1531,7 +1531,7 @@ static inline float futrts_atanh32(float x) {
 }
 
 static inline float futrts_atan2_32(float x, float y) {
-  return atan2(x, y);
+  return (x == 0.0f && y == 0.0f) ? 0.0f : atan2(x, y);
 }
 
 static inline float futrts_hypot32(float x, float y) {
@@ -1839,11 +1839,11 @@ static inline double fabs64(double x) {
 }
 
 static inline double fmax64(double x, double y) {
-  return max(x, y);
+  return isnan(x) ? y : isnan(y) ? x : max(x, y);
 }
 
 static inline double fmin64(double x, double y) {
-  return min(x, y);
+  return isnan(x) ? y : isnan(y) ? x : min(x, y);
 }
 
 static inline double fpow64(double x, double y) {
