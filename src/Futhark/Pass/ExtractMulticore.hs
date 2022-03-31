@@ -82,7 +82,10 @@ reduceToSegBinOp :: Reduce SOACS -> ExtractM (Stms MC, SegBinOp MC)
 reduceToSegBinOp (Reduce comm lam nes) = do
   ((lam', nes', shape), stms) <- runBuilder $ determineReduceOp lam nes
   lam'' <- transformLambda lam'
-  return (stms, SegBinOp comm lam'' nes' shape)
+  let comm'
+        | commutativeLambda lam' = Commutative
+        | otherwise = comm
+  return (stms, SegBinOp comm' lam'' nes' shape)
 
 scanToSegBinOp :: Scan SOACS -> ExtractM (Stms MC, SegBinOp MC)
 scanToSegBinOp (Scan lam nes) = do
