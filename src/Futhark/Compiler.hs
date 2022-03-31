@@ -36,7 +36,7 @@ import Futhark.MonadFreshNames
 import Futhark.Pipeline
 import Futhark.Util.Console (inRed)
 import Futhark.Util.Log
-import Futhark.Util.Pretty (Doc, align, line, ppr, prettyText, punctuate, stack, text, (<+>), (</>))
+import Futhark.Util.Pretty (Doc, line, ppr, prettyText, punctuate, stack, text, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings
@@ -112,14 +112,8 @@ runPipelineOnProgram config pipeline file = do
       (\(a, b, c) -> (a, (b, c)))
         <$> readProgramFile (futharkEntryPoints config) file
 
-  case foldMap (E.progHoles . fileProg . snd) prog_imports of
-    [] -> pure ()
-    holes -> do
-      let pprHole (loc, t) =
-            text (locStr (srclocOf loc)) <> ":" <+> align (ppr t)
-      externalError $
-        "Program contains holes with the following inferred types:"
-          </> stack (map pprHole holes)
+  unless (null $ foldMap (E.progHoles . fileProg . snd) prog_imports) $
+    externalError "Cannot compile program with holes."
 
   putNameSource namesrc
   int_prog <- internaliseProg config prog_imports
