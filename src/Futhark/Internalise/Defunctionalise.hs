@@ -442,7 +442,6 @@ defuncFun tparams pats e0 ret loc = do
 -- | Defunctionalization of an expression. Returns the residual expression and
 -- the associated static value in the defunctionalization monad.
 defuncExp :: Exp -> DefM (Exp, StaticVal)
-defuncExp e@Hole {} = error $ "defuncExp: unexpected hole: " ++ pretty e
 defuncExp e@Literal {} =
   return (e, Dynamic $ typeOf e)
 defuncExp e@IntLit {} =
@@ -510,6 +509,8 @@ defuncExp e@(Var qn (Info t) loc) = do
     _ ->
       let tp = typeFromSV sv
        in return (Var qn (Info tp) loc, sv)
+defuncExp (Hole (Info t) loc) =
+  pure (Hole (Info t) loc, IntrinsicSV)
 defuncExp (Ascript e0 tydecl loc)
   | orderZero (typeOf e0) = do
       (e0', sv) <- defuncExp e0

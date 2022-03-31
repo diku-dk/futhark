@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -303,7 +304,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
           | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
               text "@" <> parens (align $ ppr t')
         _ -> mempty
-  pprPrec _ (Hole t _) = inst
+  pprPrec _ (Hole t _) = "???" <> inst
     where
       inst = case unAnnot t of
         Just t'

@@ -112,9 +112,6 @@ runPipelineOnProgram config pipeline file = do
       (\(a, b, c) -> (a, (b, c)))
         <$> readProgramFile (futharkEntryPoints config) file
 
-  unless (null $ foldMap (E.progHoles . fileProg . snd) prog_imports) $
-    externalError "Cannot compile program with holes."
-
   putNameSource namesrc
   int_prog <- internaliseProg config prog_imports
   when (pipelineVerbose pipeline_config) $

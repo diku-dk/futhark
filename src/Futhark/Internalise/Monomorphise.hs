@@ -397,7 +397,6 @@ transformAppExp (Match e cs loc) res =
 -- Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
 transformExp e@Literal {} = return e
-transformExp e@Hole {} = error $ "transformExp: unexpected hole: " ++ show e
 transformExp e@IntLit {} = return e
 transformExp e@FloatLit {} = return e
 transformExp e@StringLit {} = return e
@@ -436,6 +435,8 @@ transformExp (Var fname (Info t) loc) = do
     Nothing -> do
       t' <- transformType t
       transformFName loc fname (toStruct t')
+transformExp (Hole t loc) =
+  Hole <$> traverse transformType t <*> pure loc
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
 transformExp (Negate e loc) =
