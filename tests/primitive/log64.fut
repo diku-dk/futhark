@@ -13,6 +13,6 @@
 -- input { [2.718281828459045f64, 2f64, 10f64] } 
 -- output { [0.4342944819032518f64, 0.3010299956639812f64, 1f64] } 
 
-entry logf64 = map (f64.log)
-entry log2f64 = map (f64.log2)
-entry log10f64 = map (f64.log10)
+entry logf64 = map f64.log
+entry log2f64 = map f64.log2
+entry log10f64 = map f64.log10

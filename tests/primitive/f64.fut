@@ -18,6 +18,6 @@
 -- output { [1f64, -1f64, -1f64] }
 
 entry testInf (xs: []f64) (ys: []f64) = map2 (\x y -> f64.isinf(x/y)) xs ys
-entry testNaN (xs: []f64) (ys: []f64) = map (f64.sqrt) xs
-entry testToBits (xs: []f64) (ys: []f64) = map (f64.to_bits) xs
+entry testNaN (xs: []f64) (ys: []f64) = map f64.sqrt xs
+entry testToBits (xs: []f64) (ys: []f64) = map f64.to_bits xs
 entry testFromBits (xs: []f64) (ys: []f64) = map (\x -> f64.from_bits(f64.to_bits(x))) xs

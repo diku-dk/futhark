@@ -22,8 +22,8 @@
 -- input { -1f16 1f16 } output { false true 0xbc00u16 -1f16 }
 
 entry testInf (xs: []f16) (ys: []f16) = map2 (\x y -> f16.isinf(x/y)) xs ys
-entry testNaN (xs: []f16) (ys: []f16) = map (f16.sqrt) xs
-entry testToBits (xs: []f16) (ys: []f16) = map (f16.to_bits) xs
+entry testNaN (xs: []f16) (ys: []f16) = map f16.sqrt xs
+entry testToBits (xs: []f16) (ys: []f16) = map f16.to_bits xs
 entry testFromBits (xs: []f16) (ys: []f16) = map (\x -> f16.from_bits(f16.to_bits(x))) xs
 
 
