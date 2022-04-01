@@ -1,4 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Futhark.CLI.LSP (main) where
@@ -8,7 +9,28 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Futhark.LSP.Handlers (handlers)
 import Futhark.LSP.Utils (debug, emptyState)
 import Language.LSP.Server
+  ( Options (textDocumentSync),
+    ServerDefinition
+      ( ServerDefinition,
+        defaultConfig,
+        doInitialize,
+        interpretHandler,
+        onConfigurationChange,
+        options,
+        staticHandlers
+      ),
+    defaultOptions,
+    runLspT,
+    runServer,
+    setupLogger,
+    type (<~>) (Iso),
+  )
 import Language.LSP.Types
+  ( SaveOptions (SaveOptions),
+    TextDocumentSyncKind (TdSyncIncremental),
+    TextDocumentSyncOptions (..),
+    type (|?) (InR),
+  )
 import System.Log.Logger (Priority (DEBUG))
 
 main :: String -> [String] -> IO ()
