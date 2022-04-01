@@ -18,14 +18,14 @@ import Language.Futhark.Syntax (locStr)
 getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> IO (Maybe T.Text)
 getHoverInfoFromState state (Just path) l c = do
   case stateProgram state of
-    Nothing -> pure $ Just "No information available"
+    Nothing -> pure Nothing
     Just loaded_prog -> do
       let imports = lpImports loaded_prog
       case atPos imports $ Pos path l c 0 of
-        Nothing -> pure $ Just "No information available"
+        Nothing -> pure Nothing
         Just (AtName qn def _loc) -> do
           case def of
-            Nothing -> pure $ Just "No information available"
+            Nothing -> pure Nothing
             Just (BoundTerm t defloc) -> do
               pure $ Just $ T.pack $ pretty qn ++ " :: " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
             Just (BoundType defloc) ->
@@ -34,4 +34,4 @@ getHoverInfoFromState state (Just path) l c = do
               pure $ Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
             Just (BoundModuleType defloc) ->
               pure $ Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
-getHoverInfoFromState _ _ _ _ = pure $ Just "No information available"
+getHoverInfoFromState _ _ _ _ = pure Nothing
