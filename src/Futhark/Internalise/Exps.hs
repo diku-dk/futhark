@@ -22,7 +22,7 @@ import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
-import Futhark.Util.Pretty (prettyOneLine)
+import Futhark.Util.Pretty (align, ppr, prettyOneLine)
 import Language.Futhark as E hiding (TypeArg)
 
 -- | Convert a program in source Futhark to a program in the Futhark
@@ -159,15 +159,15 @@ entryPoint name params (eret, crets) =
 
     entryPointType t ts
       | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-        I.TypeUnsigned u
+          I.TypeUnsigned u
       | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
-        I.TypeUnsigned u
+          I.TypeUnsigned u
       | E.Scalar E.Prim {} <- E.entryType t =
-        I.TypeDirect u
+          I.TypeDirect u
       | E.Array _ _ E.Prim {} _ <- E.entryType t =
-        I.TypeDirect u
+          I.TypeDirect u
       | otherwise =
-        I.TypeOpaque u desc $ length ts
+          I.TypeOpaque u desc $ length ts
       where
         u = foldl max Nonunique $ map I.uniqueness ts
         desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
@@ -380,32 +380,39 @@ internaliseAppExp desc ext (E.Coerce e (TypeDecl dt (Info et)) loc) = do
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseAppExp desc _ e@E.Apply {} = do
-  (qfname, args) <- findFuncall e
+internaliseAppExp desc _ e@E.Apply {} =
+  case findFuncall e of
+    (FunctionHole t loc, _args) -> do
+      -- The function we are supposed to call doesn't exist, but we
+      -- have to synthesize some fake values of the right type.  The
+      -- easy way to do this is to just ignore the arguments and
+      -- create a hole whose type is the type of the entire
+      -- application.
+      internaliseExp desc (E.Hole (Info (snd $ E.unfoldFunType t)) loc)
+    (FunctionName qfname, args) -> do
+      -- Argument evaluation is outermost-in so that any existential sizes
+      -- created by function applications can be brought into scope.
+      let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
+          loc = srclocOf e
+          arg_desc = nameToString fname ++ "_arg"
 
-  -- Argument evaluation is outermost-in so that any existential sizes
-  -- created by function applications can be brought into scope.
-  let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
-      loc = srclocOf e
-      arg_desc = nameToString fname ++ "_arg"
-
-  -- Some functions are magical (overloaded) and we handle that here.
-  case () of
-    -- Overloaded functions never take array arguments (except
-    -- equality, but those cannot be existential), so we can safely
-    -- ignore the existential dimensions.
-    ()
-      | Just internalise <- isOverloadedFunction qfname (map fst args) loc ->
-        internalise desc
-      | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-        Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
-        let tag ses = [(se, I.Observe) | se <- ses]
-        args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-        let args'' = concatMap tag args'
-        letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
-      | otherwise -> do
-        args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-        fst <$> funcall desc qfname args' loc
+      -- Some functions are magical (overloaded) and we handle that here.
+      case () of
+        -- Overloaded functions never take array arguments (except
+        -- equality, but those cannot be existential), so we can safely
+        -- ignore the existential dimensions.
+        ()
+          | Just internalise <- isOverloadedFunction qfname (map fst args) loc ->
+              internalise desc
+          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+            Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
+              let tag ses = [(se, I.Observe) | se <- ses]
+              args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
+              let args'' = concatMap tag args'
+              letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+          | otherwise -> do
+              args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
+              fst <$> funcall desc qfname args' loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e body (internaliseExp desc)
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
@@ -522,7 +529,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
                   case se of
                     I.Var v
                       | not $ primType $ paramType p ->
-                        Reshape (map DimCoercion $ arrayDims $ paramType p) v
+                          Reshape (map DimCoercion $ arrayDims $ paramType p) v
                     _ -> SubExp se
           internaliseExp1 "loop_cond" cond
 
@@ -546,7 +553,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
                     case se of
                       I.Var v
                         | not $ primType $ paramType p ->
-                          Reshape (map DimCoercion $ arrayDims $ paramType p) v
+                            Reshape (map DimCoercion $ arrayDims $ paramType p) v
                       _ -> SubExp se
             subExpsRes <$> internaliseExp "loop_cond" cond
           loop_end_cond <- bodyBind loop_end_cond_body
@@ -593,6 +600,16 @@ internaliseAppExp _ _ e@E.BinOp {} =
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
+internaliseExp desc (E.Hole (Info t) loc) = do
+  let msg = pretty $ "Reached hole of type: " <> align (ppr t)
+  c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
+  ts <- internaliseType (E.toStruct t)
+  case mapM hasStaticShape ts of
+    Nothing ->
+      error $ "Hole at " <> locStr loc <> " has existential type:\n" <> show ts
+    Just ts' ->
+      -- Make sure we always generate a binding, even for primitives.
+      certifying c $ mapM (fmap I.Var . letExp desc <=< eBlank . I.fromDecl) ts'
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 internaliseExp desc (E.StringLit vs _) =
@@ -636,50 +653,50 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
     not $ null eshape,
     all ((eshape ==) . fst) es',
     Just basetype <- E.peelArray (length eshape) arr_t = do
-    let flat_lit = E.ArrayLit (e' ++ concatMap snd es') (Info basetype) loc
-        new_shape = length es : eshape
-    flat_arrs <- internaliseExpToVars "flat_literal" flat_lit
-    forM flat_arrs $ \flat_arr -> do
-      flat_arr_t <- lookupType flat_arr
-      let new_shape' =
-            reshapeOuter
-              (map (DimNew . intConst Int64 . toInteger) new_shape)
-              1
-              $ I.arrayShape flat_arr_t
-      letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
+      let flat_lit = E.ArrayLit (e' ++ concatMap snd es') (Info basetype) loc
+          new_shape = length es : eshape
+      flat_arrs <- internaliseExpToVars "flat_literal" flat_lit
+      forM flat_arrs $ \flat_arr -> do
+        flat_arr_t <- lookupType flat_arr
+        let new_shape' =
+              reshapeOuter
+                (map (DimNew . intConst Int64 . toInteger) new_shape)
+                1
+                $ I.arrayShape flat_arr_t
+        letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
   | otherwise = do
-    es' <- mapM (internaliseExp "arr_elem") es
-    arr_t_ext <- internaliseType $ E.toStruct arr_t
+      es' <- mapM (internaliseExp "arr_elem") es
+      arr_t_ext <- internaliseType $ E.toStruct arr_t
 
-    rowtypes <-
-      case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
-        Just ts -> pure ts
-        Nothing ->
-          -- XXX: the monomorphiser may create single-element array
-          -- literals with an unknown row type.  In those cases we
-          -- need to look at the types of the actual elements.
-          -- Fixing this in the monomorphiser is a lot more tricky
-          -- than just working around it here.
-          case es' of
-            [] -> error $ "internaliseExp ArrayLit: existential type: " ++ pretty arr_t
-            e' : _ -> mapM subExpType e'
+      rowtypes <-
+        case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
+          Just ts -> pure ts
+          Nothing ->
+            -- XXX: the monomorphiser may create single-element array
+            -- literals with an unknown row type.  In those cases we
+            -- need to look at the types of the actual elements.
+            -- Fixing this in the monomorphiser is a lot more tricky
+            -- than just working around it here.
+            case es' of
+              [] -> error $ "internaliseExp ArrayLit: existential type: " ++ pretty arr_t
+              e' : _ -> mapM subExpType e'
 
-    let arraylit ks rt = do
-          ks' <-
-            mapM
-              ( ensureShape
-                  "shape of element differs from shape of first element"
-                  loc
-                  rt
-                  "elem_reshaped"
-              )
-              ks
-          return $ I.BasicOp $ I.ArrayLit ks' rt
+      let arraylit ks rt = do
+            ks' <-
+              mapM
+                ( ensureShape
+                    "shape of element differs from shape of first element"
+                    loc
+                    rt
+                    "elem_reshaped"
+                )
+                ks
+            return $ I.BasicOp $ I.ArrayLit ks' rt
 
-    mapM (letSubExp desc)
-      =<< if null es'
-        then mapM (arraylit []) rowtypes
-        else zipWithM arraylit (transpose es') rowtypes
+      mapM (letSubExp desc)
+        =<< if null es'
+          then mapM (arraylit []) rowtypes
+          else zipWithM arraylit (transpose es') rowtypes
   where
     isArrayLiteral :: E.Exp -> Maybe ([Int], [E.Exp])
     isArrayLiteral (E.ArrayLit inner_es _ _) = do
@@ -737,14 +754,14 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
   where
     replace (E.Scalar (E.Record m)) (f : fs) ve' src'
       | Just t <- M.lookup f m = do
-        i <-
-          fmap sum $
-            mapM (internalisedTypeSize . snd) $
-              takeWhile ((/= f) . fst) $ sortFields m
-        k <- internalisedTypeSize t
-        let (bef, to_update, aft) = splitAt3 i k src'
-        src'' <- replace t fs ve' to_update
-        return $ bef ++ src'' ++ aft
+          i <-
+            fmap sum $
+              mapM (internalisedTypeSize . snd) $
+                takeWhile ((/= f) . fst) $ sortFields m
+          k <- internalisedTypeSize t
+          let (bef, to_update, aft) = splitAt3 i k src'
+          src'' <- replace t fs ve' to_update
+          return $ bef ++ src'' ++ aft
     replace _ _ ve' _ = return ve'
 internaliseExp desc (E.Attr attr e loc) = do
   attr' <- internaliseAttr attr
@@ -764,9 +781,9 @@ internaliseExp desc (E.Attr attr e loc) = do
     f attr' env
       | attr' == "unsafe",
         not $ envSafe env =
-        env {envDoBoundsChecks = False}
+          env {envDoBoundsChecks = False}
       | otherwise =
-        env {envAttrs = envAttrs env <> oneAttr attr'}
+          env {envAttrs = envAttrs env <> oneAttr attr'}
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
   c <- assert "assert_c" e1' (errorMsg [ErrorString $ "Assertion is false: " <> check]) loc
@@ -792,10 +809,10 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
   where
     clauses j (t : ts) js_to_es
       | Just e <- j `lookup` js_to_es =
-        (e :) <$> clauses (j + 1) ts js_to_es
+          (e :) <$> clauses (j + 1) ts js_to_es
       | otherwise = do
-        blank <- letSubExp "zero" =<< eBlank t
-        (blank :) <$> clauses (j + 1) ts js_to_es
+          blank <- letSubExp "zero" =<< eBlank t
+          (blank :) <$> clauses (j + 1) ts js_to_es
     clauses _ [] _ =
       return []
 internaliseExp _ (E.Constr _ _ (Info t) loc) =
@@ -1164,7 +1181,7 @@ internaliseHist dim desc rf hist op ne buckets img loc = do
       "hist_ne_right_shape"
       n
   ne_ts <- mapM I.subExpType ne_shp
-  his_ts <- mapM (fmap (I.stripArray (dim -1)) . lookupType) hist'
+  his_ts <- mapM (fmap (I.stripArray (dim - 1)) . lookupType) hist'
   op' <- internaliseFoldLambda internaliseLambda op ne_ts his_ts
 
   -- reshape return type of bucket function to have same size as neutral element
@@ -1510,20 +1527,22 @@ simpleCmpOp ::
 simpleCmpOp desc op x y =
   letTupExp' desc $ I.BasicOp $ I.CmpOp op x y
 
-findFuncall ::
-  E.AppExp ->
-  InternaliseM
-    ( E.QualName VName,
-      [(E.Exp, Maybe VName)]
-    )
+data Function
+  = FunctionName (E.QualName VName)
+  | FunctionHole E.PatType SrcLoc
+  deriving (Show)
+
+findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName)])
 findFuncall (E.Apply f arg (Info (_, argext)) _)
-  | E.AppExp f_e _ <- f = do
-    (fname, args) <- findFuncall f_e
-    return (fname, args ++ [(arg, argext)])
+  | E.AppExp f_e _ <- f =
+      let (f_e', args) = findFuncall f_e
+       in (f_e', args ++ [(arg, argext)])
   | E.Var fname _ _ <- f =
-    return (fname, [(arg, argext)])
+      (FunctionName fname, [(arg, argext)])
+  | E.Hole (Info t) loc <- f =
+      (FunctionHole t loc, [(arg, argext)])
 findFuncall e =
-  error $ "Invalid function expression in application: " ++ pretty e
+  error $ "Invalid function expression in application:\n" ++ pretty e
 
 -- The type of a body.  Watch out: this only works for the degenerate
 -- case where the body does not already return its context.
@@ -1575,21 +1594,21 @@ isOverloadedFunction qname args loc = do
 
     handleIntrinsicOps [x] s
       | Just unop <- find ((== s) . pretty) allUnOps = Just $ \desc -> do
-        x' <- internaliseExp1 "x" x
-        fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp unop x'
+          x' <- internaliseExp1 "x" x
+          fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp unop x'
     handleIntrinsicOps [TupLit [x, y] _] s
       | Just bop <- find ((== s) . pretty) allBinOps = Just $ \desc -> do
-        x' <- internaliseExp1 "x" x
-        y' <- internaliseExp1 "y" y
-        fmap pure $ letSubExp desc $ I.BasicOp $ I.BinOp bop x' y'
+          x' <- internaliseExp1 "x" x
+          y' <- internaliseExp1 "y" y
+          fmap pure $ letSubExp desc $ I.BasicOp $ I.BinOp bop x' y'
       | Just cmp <- find ((== s) . pretty) allCmpOps = Just $ \desc -> do
-        x' <- internaliseExp1 "x" x
-        y' <- internaliseExp1 "y" y
-        fmap pure $ letSubExp desc $ I.BasicOp $ I.CmpOp cmp x' y'
+          x' <- internaliseExp1 "x" x
+          y' <- internaliseExp1 "y" y
+          fmap pure $ letSubExp desc $ I.BasicOp $ I.CmpOp cmp x' y'
     handleIntrinsicOps [x] s
       | Just conv <- find ((== s) . pretty) allConvOps = Just $ \desc -> do
-        x' <- internaliseExp1 "x" x
-        fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
+          x' <- internaliseExp1 "x" x
+          fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
     handleIntrinsicOps _ _ = Nothing
 
     -- Short-circuiting operators are magical.
@@ -1607,10 +1626,10 @@ isOverloadedFunction qname args loc = do
     -- arrays.
     handleOps [xe, ye] op
       | Just cmp_f <- isEqlOp op = Just $ \desc -> do
-        xe' <- internaliseExp "x" xe
-        ye' <- internaliseExp "y" ye
-        rs <- zipWithM (doComparison desc) xe' ye'
-        cmp_f desc =<< letSubExp "eq" =<< eAll rs
+          xe' <- internaliseExp "x" xe
+          ye' <- internaliseExp "y" ye
+          rs <- zipWithM (doComparison desc) xe' ye'
+          cmp_f desc =<< letSubExp "eq" =<< eAll rs
       where
         isEqlOp "!=" = Just $ \desc eq ->
           letTupExp' desc $ I.BasicOp $ I.UnOp I.Not eq
@@ -1657,13 +1676,13 @@ isOverloadedFunction qname args loc = do
                   ifCommon [I.Prim I.Bool]
     handleOps [x, y] name
       | Just bop <- find ((name ==) . pretty) [minBound .. maxBound :: E.BinOp] =
-        Just $ \desc -> do
-          x' <- internaliseExp1 "x" x
-          y' <- internaliseExp1 "y" y
-          case (E.typeOf x, E.typeOf y) of
-            (E.Scalar (E.Prim t1), E.Scalar (E.Prim t2)) ->
-              internaliseBinOp loc desc bop x' y' t1 t2
-            _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
+          Just $ \desc -> do
+            x' <- internaliseExp1 "x" x
+            y' <- internaliseExp1 "y" y
+            case (E.typeOf x, E.typeOf y) of
+              (E.Scalar (E.Prim t1), E.Scalar (E.Prim t2)) ->
+                internaliseBinOp loc desc bop x' y' t1 t2
+              _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
     handleOps _ _ = Nothing
 
     handleSOACs [TupLit [lam, arr] _] "map" = Just $ \desc -> do

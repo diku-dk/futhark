@@ -42,7 +42,7 @@ import qualified Data.Text.IO as T
 import Data.Time.Clock (UTCTime)
 import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
-import Futhark.Util.Pretty (Doc, line, ppr, text, (</>))
+import Futhark.Util.Pretty (Doc, align, line, ppr, text, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
@@ -91,25 +91,25 @@ orderedImports = fmap reverse . flip execStateT [] . mapM_ (spelunk [])
   where
     spelunk steps (include, mvar)
       | include `elem` steps = do
-        let problem =
-              ProgramError (locOf include) . text $
-                "Import cycle: "
-                  <> intercalate
-                    " -> "
-                    (map includeToString $ reverse $ include : steps)
-        modify ((include, Left (singleError problem)) :)
+          let problem =
+                ProgramError (locOf include) . text $
+                  "Import cycle: "
+                    <> intercalate
+                      " -> "
+                      (map includeToString $ reverse $ include : steps)
+          modify ((include, Left (singleError problem)) :)
       | otherwise = do
-        prev <- gets $ lookup include
-        case prev of
-          Just _ -> pure ()
-          Nothing -> do
-            res <- unChecked <$> liftIO (readMVar mvar)
-            case res of
-              Left errors ->
-                modify ((include, Left errors) :)
-              Right (file, more_imports) -> do
-                mapM_ (spelunk (include : steps)) more_imports
-                modify ((include, Right file) :)
+          prev <- gets $ lookup include
+          case prev of
+            Just _ -> pure ()
+            Nothing -> do
+              res <- unChecked <$> liftIO (readMVar mvar)
+              case res of
+                Left errors ->
+                  modify ((include, Left errors) :)
+                Right (file, more_imports) -> do
+                  mapM_ (spelunk (include : steps)) more_imports
+                  modify ((include, Right file) :)
 
 errorsToTop ::
   [(ImportName, WithErrors (LoadedFile E.UncheckedProg))] ->
@@ -261,11 +261,13 @@ typeCheckProg orig_imports orig_src =
               then ppr ws' </> line <> ppr err'
               else ppr err'
         (prog_ws, Right (m, src')) ->
-          Right
-            ( ws <> prog_ws,
-              imports ++ [LoadedFile path import_name (src, m) mod_time],
-              src'
-            )
+          let warnHole (loc, t) =
+                singleWarning (E.srclocOf loc) $ "Hole of type: " <> align (ppr t)
+           in Right
+                ( ws <> prog_ws <> foldMap warnHole (E.progHoles (fileProg m)),
+                  imports ++ [LoadedFile path import_name (src, m) mod_time],
+                  src'
+                )
 
 setEntryPoints ::
   [E.Name] ->
@@ -277,15 +279,15 @@ setEntryPoints extra_eps fps = map onFile
     fps' = map normalise fps
     onFile lf
       | includeToFilePath (lfImportName lf) `elem` fps' =
-        lf {lfMod = prog {E.progDecs = map onDec (E.progDecs prog)}}
+          lf {lfMod = prog {E.progDecs = map onDec (E.progDecs prog)}}
       | otherwise =
-        lf
+          lf
       where
         prog = lfMod lf
 
     onDec (E.ValDec vb)
       | E.valBindName vb `elem` extra_eps =
-        E.ValDec vb {E.valBindEntryPoint = Just E.NoInfo}
+          E.ValDec vb {E.valBindEntryPoint = Just E.NoInfo}
     onDec dec = dec
 
 prependRoots :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
@@ -324,14 +326,14 @@ unchangedImports ::
 unchangedImports src [] = pure ([], src)
 unchangedImports src (f : fs)
   | "/prelude" `isPrefixOf` includeToFilePath (lfImportName f) =
-    first (f :) <$> unchangedImports src fs
+      first (f :) <$> unchangedImports src fs
   | otherwise = do
-    changed <-
-      maybe True (either (const True) (> lfModTime f))
-        <$> liftIO (interactWithFileSafely (getModificationTime $ lfPath f))
-    if changed
-      then pure ([], fst $ lfMod f)
-      else first (f :) <$> unchangedImports src fs
+      changed <-
+        maybe True (either (const True) (> lfModTime f))
+          <$> liftIO (interactWithFileSafely (getModificationTime $ lfPath f))
+      if changed
+        then pure ([], fst $ lfMod f)
+        else first (f :) <$> unchangedImports src fs
 
 -- | A "loaded program" containing no actual files.  Use this as a
 -- starting point for 'reloadProg'
@@ -349,10 +351,10 @@ noLoadedProg =
 usableLoadedProg :: MonadIO m => LoadedProg -> [FilePath] -> m LoadedProg
 usableLoadedProg (LoadedProg roots imports src) new_roots
   | sort roots == sort new_roots = do
-    (imports', src') <- unchangedImports src imports
-    pure $ LoadedProg [] imports' src'
+      (imports', src') <- unchangedImports src imports
+      pure $ LoadedProg [] imports' src'
   | otherwise =
-    pure noLoadedProg
+      pure noLoadedProg
 
 -- | Extend a loaded program with (possibly new) files.
 extendProg ::

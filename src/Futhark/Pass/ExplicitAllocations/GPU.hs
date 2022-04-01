@@ -113,10 +113,10 @@ mapResultHint lvl space = hint
 
     hint t Returns {}
       | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
-        chunkmap <- asks chunkMap
-        let space_dims = segSpaceDims space
-            t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
-        return $ Hint (innermost space_dims t_dims) DefaultSpace
+          chunkmap <- asks chunkMap
+          let space_dims = segSpaceDims space
+              t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
+          return $ Hint (innermost space_dims t_dims) DefaultSpace
     hint t (ConcatReturns _ SplitStrided {} w _ _) = do
       chunkmap <- asks chunkMap
       let t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
@@ -133,8 +133,8 @@ innermost space_dims t_dims =
   let r = length t_dims
       dims = space_dims ++ t_dims
       perm =
-        [length space_dims .. length space_dims + r -1]
-          ++ [0 .. length space_dims -1]
+        [length space_dims .. length space_dims + r - 1]
+          ++ [0 .. length space_dims - 1]
       perm_inv = rearrangeInverse perm
       dims_perm = rearrangeShape perm dims
       ixfun_base = IxFun.iota $ map pe64 dims_perm
@@ -148,21 +148,21 @@ semiStatic consts (Var v) = v `S.member` consts
 inGroupExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
 inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
   | any private $ kernelBodyResult body = do
-    consts <- asks envConsts
-    pure $ do
-      (t, r) <- zip ts $ kernelBodyResult body
-      pure $
-        if private r && all (semiStatic consts) (arrayDims t)
-          then
-            let seg_dims = map pe64 $ segSpaceDims space
-                dims = seg_dims ++ map pe64 (arrayDims t)
-                nilSlice d = DimSlice 0 d 0
-             in Hint
-                  ( IxFun.slice (IxFun.iota dims) $
-                      fullSliceNum dims $ map nilSlice seg_dims
-                  )
-                  $ ScalarSpace (arrayDims t) $ elemType t
-          else NoHint
+      consts <- asks envConsts
+      pure $ do
+        (t, r) <- zip ts $ kernelBodyResult body
+        pure $
+          if private r && all (semiStatic consts) (arrayDims t)
+            then
+              let seg_dims = map pe64 $ segSpaceDims space
+                  dims = seg_dims ++ map pe64 (arrayDims t)
+                  nilSlice d = DimSlice 0 d 0
+               in Hint
+                    ( IxFun.slice (IxFun.iota dims) $
+                        fullSliceNum dims $ map nilSlice seg_dims
+                    )
+                    $ ScalarSpace (arrayDims t) $ elemType t
+            else NoHint
   where
     private (Returns ResultPrivate _ _) = True
     private _ = False
@@ -176,10 +176,10 @@ inThreadExpHints e = do
     maybePrivate consts t
       | Just (Array pt shape _) <- hasStaticShape t,
         all (semiStatic consts) $ shapeDims shape = do
-        let ixfun = IxFun.iota $ map pe64 $ shapeDims shape
-        pure $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
+          let ixfun = IxFun.iota $ map pe64 $ shapeDims shape
+          pure $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
       | otherwise =
-        pure NoHint
+          pure NoHint
 
 -- | The pass from 'GPU' to 'GPUMem'.
 explicitAllocations :: Pass GPU GPUMem

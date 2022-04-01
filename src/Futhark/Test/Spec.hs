@@ -370,11 +370,11 @@ pProgramTest = do
   case maybe_spec of
     Just spec
       | RunCases old_cases structures warnings <- testAction spec -> do
-        cases <- many $ pInputOutputs <* many pNonTestLine
-        pure spec {testAction = RunCases (old_cases ++ concat cases) structures warnings}
+          cases <- many $ pInputOutputs <* many pNonTestLine
+          pure spec {testAction = RunCases (old_cases ++ concat cases) structures warnings}
       | otherwise ->
-        many pNonTestLine *> notFollowedBy "-- ==" *> pure spec
-          <?> "no more test blocks, since first test block specifies type error."
+          many pNonTestLine *> notFollowedBy "-- ==" *> pure spec
+            <?> "no more test blocks, since first test block specifies type error."
     Nothing ->
       eof $> noTest
   where

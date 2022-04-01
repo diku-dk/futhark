@@ -181,7 +181,7 @@ kerneliseLambda nes lam = do
 
       mkAccInit p (Var v)
         | not $ primType $ paramType p =
-          mkLet [paramIdent p] $ BasicOp $ Copy v
+            mkLet [paramIdent p] $ BasicOp $ Copy v
       mkAccInit p x = mkLet [paramIdent p] $ BasicOp $ SubExp x
       acc_init_stms = stmsFromList $ zipWith mkAccInit fold_acc_params nes
   return

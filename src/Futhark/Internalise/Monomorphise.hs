@@ -203,27 +203,27 @@ transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname t
   | baseTag (qualLeaf fname) <= maxIntrinsicTag = return $ var fname
   | otherwise = do
-    t' <- removeTypeVariablesInType t
-    let mono_t = monoType t'
-    maybe_fname <- lookupLifted (qualLeaf fname) mono_t
-    maybe_funbind <- lookupFun $ qualLeaf fname
-    case (maybe_fname, maybe_funbind) of
-      -- The function has already been monomorphised.
-      (Just (fname', infer), _) ->
-        return $ applySizeArgs fname' t' $ infer t'
-      -- An intrinsic function.
-      (Nothing, Nothing) -> return $ var fname
-      -- A polymorphic function.
-      (Nothing, Just funbind) -> do
-        (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
-        tell $ Seq.singleton (qualLeaf fname, funbind')
-        addLifted (qualLeaf fname) mono_t (fname', infer)
-        return $ applySizeArgs fname' t' $ infer t'
+      t' <- removeTypeVariablesInType t
+      let mono_t = monoType t'
+      maybe_fname <- lookupLifted (qualLeaf fname) mono_t
+      maybe_funbind <- lookupFun $ qualLeaf fname
+      case (maybe_fname, maybe_funbind) of
+        -- The function has already been monomorphised.
+        (Just (fname', infer), _) ->
+          return $ applySizeArgs fname' t' $ infer t'
+        -- An intrinsic function.
+        (Nothing, Nothing) -> return $ var fname
+        -- A polymorphic function.
+        (Nothing, Just funbind) -> do
+          (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
+          tell $ Seq.singleton (qualLeaf fname, funbind')
+          addLifted (qualLeaf fname) mono_t (fname', infer)
+          return $ applySizeArgs fname' t' $ infer t'
   where
     var fname' = Var fname' (Info (fromStruct t)) loc
 
     applySizeArg (i, f) size_arg =
-      ( i -1,
+      ( i - 1,
         AppExp
           (Apply f size_arg (Info (Observe, Nothing)) loc)
           (Info $ AppRes (foldFunType (replicate i i64) (RetType [] (fromStruct t))) [])
@@ -252,7 +252,7 @@ transformType t = do
   rrs <- asks envRecordReplacements
   let replace (AliasBound v)
         | Just d <- M.lookup v rrs =
-          S.fromList $ map (AliasBound . fst) $ M.elems d
+            S.fromList $ map (AliasBound . fst) $ M.elems d
       replace x = S.singleton x
   -- As an attempt at an optimisation, only transform the aliases if
   -- they refer to a variable we have record-replaced.
@@ -295,23 +295,23 @@ transformAppExp (LetPat sizes pat e1 e2 loc) res = do
     <*> pure (Info res)
 transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) res
   | not $ null tparams = do
-    -- Retrieve the lifted monomorphic function bindings that are produced,
-    -- filter those that are monomorphic versions of the current let-bound
-    -- function and insert them at this point, and propagate the rest.
-    rr <- asks envRecordReplacements
-    let funbind = PolyBinding rr (fname, tparams, params, ret, body, mempty, loc)
-    pass $ do
-      (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
-      -- Do not remember this one for next time we monomorphise this
-      -- function.
-      modifyLifts $ filter ((/= fname) . fst . fst)
-      let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
-      return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
+      -- Retrieve the lifted monomorphic function bindings that are produced,
+      -- filter those that are monomorphic versions of the current let-bound
+      -- function and insert them at this point, and propagate the rest.
+      rr <- asks envRecordReplacements
+      let funbind = PolyBinding rr (fname, tparams, params, ret, body, mempty, loc)
+      pass $ do
+        (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
+        -- Do not remember this one for next time we monomorphise this
+        -- function.
+        modifyLifts $ filter ((/= fname) . fst . fst)
+        let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
+        return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
   | otherwise = do
-    body' <- transformExp body
-    AppExp
-      <$> (LetFun fname (tparams, params, retdecl, Info ret, body') <$> transformExp e <*> pure loc)
-      <*> pure (Info res)
+      body' <- transformExp body
+      AppExp
+        <$> (LetFun fname (tparams, params, retdecl, Info ret, body') <$> transformExp e <*> pure loc)
+        <*> pure (Info res)
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> pure (Info res)
 transformAppExp (Apply e1 e2 d loc) res =
@@ -435,6 +435,8 @@ transformExp (Var fname (Info t) loc) = do
     Nothing -> do
       t' <- transformType t
       transformFName loc fname (toStruct t')
+transformExp (Hole t loc) =
+  Hole <$> traverse transformType t <*> pure loc
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
 transformExp (Negate e loc) =
@@ -484,7 +486,7 @@ transformExp (Project n e tp loc) = do
   case maybe_fs of
     Just m
       | Just (v, _) <- M.lookup n m ->
-        return $ Var (qualName v) tp loc
+          return $ Var (qualName v) tp loc
     _ -> do
       e' <- transformExp e
       return $ Project n e' tp loc
@@ -593,7 +595,7 @@ desugarProjectSection fields (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
       case typeOf e of
         Scalar (Record fs)
           | Just t <- M.lookup field fs ->
-            Project field e (Info t) mempty
+              Project field e (Info t) mempty
         t ->
           error $
             "desugarOpSection: type " ++ pretty t
@@ -825,7 +827,7 @@ typeSubstsM loc orig_t1 orig_t2 =
     sub t1@Array {} t2@Array {}
       | Just t1' <- peelArray (arrayRank t1) t1,
         Just t2' <- peelArray (arrayRank t1) t2 =
-        sub t1' t2'
+          sub t1' t2'
     sub (Scalar (TypeVar _ _ v _)) t =
       unless (baseTag (typeLeaf v) <= maxIntrinsicTag) $
         addSubst v $ RetType [] t

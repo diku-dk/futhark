@@ -155,6 +155,9 @@ checkForUpdates res (BasicOp (FlatUpdate src slice _)) = do
 checkForUpdates res (Op (Futhark.Scatter _ _ _ written_info)) = do
   let updt_arrs = map (\(_, _, x) -> x) written_info
   updateKerInPlaces res (updt_arrs, [])
+checkForUpdates res (BasicOp (UpdateAcc src slice _)) = do
+  let ifvs = namesToList $ freeIn slice
+  updateKerInPlaces res ([src], ifvs)
 checkForUpdates res _ = return res
 
 -- | Updates the environment: (i) the @soacs@ (map) by binding each pattern
@@ -575,14 +578,16 @@ horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed) = do
           -- bindings do not use the results of cur_ker
           let curker_outnms = outNames cur_ker
               curker_outset = namesFromList curker_outnms
-              new_ufus_nms = namesFromList $ outNames ker ++ namesToList ufus_nms
+              new_ufus_nms = namesFromList $ filter (`notNameIn` fusedConsumed ker) $ outNames ker ++ namesToList ufus_nms
+              ker_inp = SOAC.inputs $ fsoac ker
+              ker_inp_names = namesFromList (mapMaybe SOAC.isVarInput ker_inp)
+
               -- disable horizontal fusion in the case when an output array of
               -- producer SOAC is a non-trivially transformed input of the consumer
               out_transf_ok =
-                let ker_inp = SOAC.inputs $ fsoac ker
-                    unfuse1 =
+                let unfuse1 =
                       namesFromList (map SOAC.inputArray ker_inp)
-                        `namesSubtract` namesFromList (mapMaybe SOAC.isVarInput ker_inp)
+                        `namesSubtract` ker_inp_names
                     unfuse2 = namesIntersection curker_outset ufus_nms
                  in not $ unfuse1 `namesIntersect` unfuse2
               -- Disable horizontal fusion if consumer has any
@@ -606,7 +611,7 @@ horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed) = do
                           -- (i) check that the in-between bindings do
                           --     not use the result of current kernel OR
                           ||
-                          --(ii) that the pattern-binding corresponds to
+                          -- (ii) that the pattern-binding corresponds to
                           --     the result of the consumer kernel; in the
                           --     latter case it means it corresponds to a
                           --     kernel that has been fused in the consumer,
@@ -622,18 +627,24 @@ horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed) = do
           if not interm_stms_ok
             then return (False, n, stm_ind, cur_ker, mempty)
             else do
+              -- Avoid keeping results that are consumed by the
+              -- consumer (#1613). The dance here is to still handle
+              -- horizontal fusion of scatter-scatter properly
+              -- (issue1284.fut).
+              let ufus_nms' =
+                    ufus_nms `namesSubtract` (fusedConsumed ker `namesIntersection` ker_inp_names)
               new_ker <-
                 attemptFusion
-                  ufus_nms
+                  ufus_nms'
                   (outNames cur_ker)
                   (fsoac cur_ker)
                   (fusedConsumed cur_ker)
                   ker
               case new_ker of
                 Nothing -> return (False, n, stm_ind, cur_ker, mempty)
-                Just krn ->
+                Just krn -> do
                   let krn' = krn {kerAux = aux <> kerAux krn}
-                   in return (True, n + 1, stm_ind, krn', new_ufus_nms)
+                  return (True, n + 1, stm_ind, krn', new_ufus_nms)
       )
       (True, 0, 0, soac_kernel, infusible_nms)
       kernminds'
@@ -684,59 +695,59 @@ fusionGatherStms
   (Let (Pat pes) stmtp (DoLoop merge (ForLoop i it w loop_vars) body) : stms)
   res
     | not $ null loop_vars = do
-      let (merge_params, merge_init) = unzip merge
-          (loop_params, loop_arrs) = unzip loop_vars
-      chunk_param <- newParam "chunk_size" $ Prim int64
-      offset_param <- newParam "offset" $ Prim $ IntType it
-      let offset = paramName offset_param
-          chunk_size = paramName chunk_param
+        let (merge_params, merge_init) = unzip merge
+            (loop_params, loop_arrs) = unzip loop_vars
+        chunk_param <- newParam "chunk_size" $ Prim int64
+        offset_param <- newParam "offset" $ Prim $ IntType it
+        let offset = paramName offset_param
+            chunk_size = paramName chunk_param
 
-      acc_params <- forM merge_params $ \p ->
-        newParam (baseString (paramName p) ++ "_outer") (paramType p)
+        acc_params <- forM merge_params $ \p ->
+          newParam (baseString (paramName p) ++ "_outer") (paramType p)
 
-      chunked_params <- forM loop_vars $ \(p, arr) ->
-        newParam
-          (baseString arr ++ "_chunk")
-          (paramType p `arrayOfRow` Futhark.Var chunk_size)
+        chunked_params <- forM loop_vars $ \(p, arr) ->
+          newParam
+            (baseString arr ++ "_chunk")
+            (paramType p `arrayOfRow` Futhark.Var chunk_size)
 
-      let lam_params = chunk_param : acc_params ++ [offset_param] ++ chunked_params
+        let lam_params = chunk_param : acc_params ++ [offset_param] ++ chunked_params
 
-      lam_body <- runBodyBuilder $
-        localScope (scopeOfLParams lam_params) $ do
-          let merge' = zip merge_params $ map (Futhark.Var . paramName) acc_params
-          j <- newVName "j"
-          loop_body <- runBodyBuilder $ do
-            forM_ (zip loop_params chunked_params) $ \(p, a_p) ->
-              letBindNames [paramName p] $
-                BasicOp $
-                  Index (paramName a_p) $
-                    fullSlice (paramType a_p) [DimFix $ Futhark.Var j]
-            letBindNames [i] $ BasicOp $ BinOp (Add it OverflowUndef) (Futhark.Var offset) (Futhark.Var j)
-            return body
-          eBody
-            [ pure $
-                DoLoop merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
-              pure $
-                BasicOp $ BinOp (Add Int64 OverflowUndef) (Futhark.Var offset) (Futhark.Var chunk_size)
-            ]
-      let lam =
-            Lambda
-              { lambdaParams = lam_params,
-                lambdaBody = lam_body,
-                lambdaReturnType = map paramType $ acc_params ++ [offset_param]
-              }
-          stream = Futhark.Stream w loop_arrs Sequential (merge_init ++ [intConst it 0]) lam
+        lam_body <- runBodyBuilder $
+          localScope (scopeOfLParams lam_params) $ do
+            let merge' = zip merge_params $ map (Futhark.Var . paramName) acc_params
+            j <- newVName "j"
+            loop_body <- runBodyBuilder $ do
+              forM_ (zip loop_params chunked_params) $ \(p, a_p) ->
+                letBindNames [paramName p] $
+                  BasicOp $
+                    Index (paramName a_p) $
+                      fullSlice (paramType a_p) [DimFix $ Futhark.Var j]
+              letBindNames [i] $ BasicOp $ BinOp (Add it OverflowUndef) (Futhark.Var offset) (Futhark.Var j)
+              return body
+            eBody
+              [ pure $
+                  DoLoop merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
+                pure $
+                  BasicOp $ BinOp (Add Int64 OverflowUndef) (Futhark.Var offset) (Futhark.Var chunk_size)
+              ]
+        let lam =
+              Lambda
+                { lambdaParams = lam_params,
+                  lambdaBody = lam_body,
+                  lambdaReturnType = map paramType $ acc_params ++ [offset_param]
+                }
+            stream = Futhark.Stream w loop_arrs Sequential (merge_init ++ [intConst it 0]) lam
 
-      -- It is important that the (discarded) final-offset is not the
-      -- first element in the pattern, as we use the first element to
-      -- identify the SOAC in the second phase of fusion.
-      discard <- newVName "discard"
-      let discard_pe = PatElem discard $ Prim int64
+        -- It is important that the (discarded) final-offset is not the
+        -- first element in the pattern, as we use the first element to
+        -- identify the SOAC in the second phase of fusion.
+        discard <- newVName "discard"
+        let discard_pe = PatElem discard $ Prim int64
 
-      fusionGatherStms
-        fres
-        (Let (Pat (pes <> [discard_pe])) stmtp (Op stream) : stms)
-        res
+        fusionGatherStms
+          fres
+          (Let (Pat (pes <> [discard_pe])) stmtp (Op stream) : stms)
+          res
 fusionGatherStms fres (stm@(Let pat _ e) : stms) res = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
@@ -769,12 +780,12 @@ fusionGatherStms fres (stm@(Let pat _ e) : stms) res = do
     _
       | Pat [pe] <- pat,
         Just (src, trns) <- SOAC.transformFromExp (stmCerts stm) e ->
-        bindingTransform pe src trns $ fusionGatherStms fres stms res
+          bindingTransform pe src trns $ fusionGatherStms fres stms res
       | otherwise -> do
-        let pat_vars = map (BasicOp . SubExp . Var) $ patNames pat
-        bres <- gatherStmPat pat e $ fusionGatherStms fres stms res
-        bres' <- checkForUpdates bres e
-        foldM fusionGatherExp bres' (e : pat_vars)
+          let pat_vars = map (BasicOp . SubExp . Var) $ patNames pat
+          bres <- gatherStmPat pat e $ fusionGatherStms fres stms res
+          bres' <- checkForUpdates bres e
+          foldM fusionGatherExp bres' (e : pat_vars)
   where
     aux = stmAux stm
     rem_stms = stm : stms
@@ -876,11 +887,11 @@ fusionGatherLam (u_set, fres) (Lambda idds body _) = do
 fuseInStms :: Stms SOACS -> FusionGM (Stms SOACS)
 fuseInStms stms
   | Just (Let pat aux e, stms') <- stmsHead stms = do
-    stms'' <- bindingPat pat $ fuseInStms stms'
-    soac_stms <- replaceSOAC pat aux e
-    pure $ soac_stms <> stms''
+      stms'' <- bindingPat pat $ fuseInStms stms'
+      soac_stms <- replaceSOAC pat aux e
+      pure $ soac_stms <> stms''
   | otherwise =
-    pure mempty
+      pure mempty
 
 fuseInBody :: Body SOACS -> FusionGM (Body SOACS)
 fuseInBody (Body _ stms res) =
@@ -1031,7 +1042,7 @@ copyNewlyConsumed was_consumed soac =
 
     copyConsumedArr a
       | a `nameIn` newly_consumed =
-        letExp (baseString a <> "_copy") $ BasicOp $ Copy a
+          letExp (baseString a <> "_copy") $ BasicOp $ Copy a
       | otherwise = return a
 
     copyFreeInLambda lam = do
