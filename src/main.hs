@@ -73,7 +73,8 @@ commands =
       ("autotune", (Autotune.main, "Autotune threshold parameters.")),
       ("defs", (Defs.main, "Show location and name of all definitions.")),
       ("query", (Query.main, "Query semantic information about program.")),
-      ("literate", (Literate.main, "Process a literate Futhark program."))
+      ("literate", (Literate.main, "Process a literate Futhark program.")),
+      ("thanks", (Misc.mainThanks, "Express gratitude."))
     ]
 
 msg :: String
