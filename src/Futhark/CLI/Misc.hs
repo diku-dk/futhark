@@ -6,6 +6,7 @@ module Futhark.CLI.Misc
     mainHash,
     mainDataget,
     mainCheckSyntax,
+    mainThanks,
   )
 where
 
@@ -23,6 +24,7 @@ import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
+import System.Random
 
 isBuiltin :: String -> Bool
 isBuiltin = ("/prelude/" `isPrefixOf`)
@@ -88,3 +90,20 @@ mainCheckSyntax = mainWithOptions () [] "program" $ \args () ->
   case args of
     [file] -> Just $ void $ readUntypedProgramOrDie file
     _ -> Nothing
+
+-- | @futhark thanks@
+mainThanks :: String -> [String] -> IO ()
+mainThanks = mainWithOptions () [] "" $ \args () ->
+  case args of
+    [] -> Just $ do
+      i <- randomRIO (0, n - 1)
+      putStrLn $ responses !! i
+    _ -> Nothing
+  where
+    n = length responses
+    responses =
+      [ "You're welcome!",
+        "Tell all your friends about Futhark!",
+        "Likewise!",
+        "And thank you in return for trying the language!"
+      ]
