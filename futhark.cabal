@@ -215,7 +215,7 @@ library
       Futhark.LSP.Diagnostic
       Futhark.LSP.Handlers
       Futhark.LSP.Tool
-      Futhark.LSP.Utils
+      Futhark.LSP.State
       Futhark.MonadFreshNames
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE

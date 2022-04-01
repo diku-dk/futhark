@@ -4,7 +4,7 @@ module Futhark.LSP.Tool (getHoverInfoFromState) where
 
 import qualified Data.Text as T
 import Futhark.Compiler (lpImports)
-import Futhark.LSP.Utils (State (..))
+import Futhark.LSP.State (State (..))
 import Futhark.Util.Loc (srclocOf)
 import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Query

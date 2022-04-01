@@ -7,7 +7,8 @@ module Futhark.CLI.LSP (main) where
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Futhark.LSP.Handlers (handlers)
-import Futhark.LSP.Utils (debug, emptyState)
+import Futhark.LSP.State (emptyState)
+import Futhark.Util (debug)
 import Language.LSP.Server
   ( Options (textDocumentSync),
     ServerDefinition

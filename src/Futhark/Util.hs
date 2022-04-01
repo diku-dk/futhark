@@ -18,6 +18,7 @@ module Futhark.Util
     dropAt,
     takeLast,
     dropLast,
+    debug,
     mapEither,
     maybeNth,
     maybeHead,
@@ -63,6 +64,7 @@ import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash.MD5 as MD5
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
@@ -89,6 +91,7 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
+import System.Log.Logger (debugM)
 import System.Process.ByteString
 import Text.Read (readMaybe)
 
@@ -489,3 +492,6 @@ fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
+
+debug :: MonadIO m => String -> m ()
+debug msg = liftIO $ debugM "futhark" msg
