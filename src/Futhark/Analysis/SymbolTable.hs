@@ -30,6 +30,7 @@ module Futhark.Analysis.SymbolTable
     lookupAliases,
     lookupLoopVar,
     lookupLoopParam,
+    aliases,
     available,
     consume,
     index,
@@ -271,6 +272,12 @@ lookupLoopParam :: VName -> SymbolTable rep -> Maybe (SubExp, SubExp)
 lookupLoopParam name vtable = do
   FParam e <- entryType <$> M.lookup name (bindings vtable)
   fparamMerge e
+
+-- | Do these two names alias each other?  This is expected to be a
+-- commutative relationship, so the order of arguments does not
+-- matter.
+aliases :: VName -> VName -> SymbolTable rep -> Bool
+aliases x y vtable = x == y || (x `nameIn` lookupAliases y vtable)
 
 -- | In symbol table and not consumed.
 available :: VName -> SymbolTable rep -> Bool

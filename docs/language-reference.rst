@@ -446,6 +446,7 @@ literals and variables, but also more complicated forms.
        : | "(" `qualbinop` `exp` ")"
        : | "(" ( "." `field` )+ ")"
        : | "(" "." "[" `index` ("," `index`)* "]" ")"
+       : | "???"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -609,6 +610,14 @@ Evaluates to an empty tuple.
 .........
 
 Evaluates to the result of ``e``.
+
+``???``
+.......
+
+A *typed hole*, usable as a placeholder expression.  The type checker
+will infer any necessary type for this expression.  This can sometimes
+result in an ambiguous type, which can be resolved using a type
+ascription.  Evaluating a typed hole results in a run-time error.
 
 ``(e1, e2, ..., eN)``
 .....................
