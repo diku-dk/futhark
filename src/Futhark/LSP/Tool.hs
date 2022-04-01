@@ -8,6 +8,11 @@ import Futhark.LSP.State (State (..))
 import Futhark.Util.Loc (srclocOf)
 import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Query
+  ( AtPos (AtName),
+    BoundTo (BoundModule, BoundModuleType, BoundTerm, BoundType),
+    Pos (Pos),
+    atPos,
+  )
 import Language.Futhark.Syntax (locStr)
 
 getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> IO (Maybe T.Text)
