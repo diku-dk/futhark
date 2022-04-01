@@ -171,7 +171,7 @@ compileCodeISPC vari (For i bound body) = do
       t = GC.primTypeToCType $ primExpType bound
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCodeISPC vari body
-  GC.stm
+  GC.stm -- TODO(pema): This is unsafe is the bound is varying
     [C.cstm|for (uniform $ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
