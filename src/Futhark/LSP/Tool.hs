@@ -3,17 +3,17 @@
 module Futhark.LSP.Tool (getHoverInfoFromState) where
 
 import qualified Data.Text as T
-import Futhark.Compiler (lpImports)
+import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.State (State (..))
 import Futhark.Util.Loc (srclocOf)
 import Futhark.Util.Pretty (pretty)
+import Language.Futhark.Core (locStr)
 import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (BoundModule, BoundModuleType, BoundTerm, BoundType),
     Pos (Pos),
     atPos,
   )
-import Language.Futhark.Syntax (locStr)
 
 getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> IO (Maybe T.Text)
 getHoverInfoFromState state (Just path) l c = do
