@@ -27,7 +27,7 @@ getHoverInfoFromState state (Just path) l c = do
           case def of
             Nothing -> pure Nothing
             Just (BoundTerm t defloc) -> do
-              pure $ Just $ T.pack $ pretty qn ++ " :: " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
+              pure $ Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
             Just (BoundType defloc) ->
               pure $ Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
             Just (BoundModule defloc) ->
