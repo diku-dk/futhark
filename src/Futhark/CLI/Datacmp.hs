@@ -15,7 +15,7 @@ readFileSafely :: String -> IO (Either String BS.ByteString)
 readFileSafely filepath =
   (Right <$> BS.readFile filepath) `catch` couldNotRead
   where
-    couldNotRead e = return $ Left $ show (e :: IOError)
+    couldNotRead e = pure $ Left $ show (e :: IOError)
 
 -- | Run @futhark datacmp@
 main :: String -> [String] -> IO ()
@@ -43,7 +43,7 @@ main = mainWithOptions () [] "<file> <file>" f
               exitFailure
             (Just vs_a, Just vs_b) ->
               case compareSeveralValues (Tolerance 0.002) vs_a vs_b of
-                [] -> return ()
+                [] -> pure ()
                 es -> do
                   mapM_ print es
                   exitWith $ ExitFailure 2

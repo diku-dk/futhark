@@ -931,7 +931,7 @@ main :: String -> [String] -> IO ()
 main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts ->
   case args of
     [prog] -> Just $ do
-      futhark <- maybe getExecutablePath return $ scriptFuthark opts
+      futhark <- maybe getExecutablePath pure $ scriptFuthark opts
 
       script <- parseProgFile prog
 
