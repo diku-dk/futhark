@@ -84,11 +84,11 @@ newNamesForMTy :: MTy -> TypeM (MTy, M.Map VName VName)
 newNamesForMTy orig_mty = do
   pairs <- forM (S.toList $ allNamesInMTy orig_mty) $ \v -> do
     v' <- newName v
-    return (v, v')
+    pure (v, v')
   let substs = M.fromList pairs
       rev_substs = M.fromList $ map (uncurry $ flip (,)) pairs
 
-  return (substituteInMTy substs orig_mty, rev_substs)
+  pure (substituteInMTy substs orig_mty, rev_substs)
   where
     substituteInMTy :: M.Map VName VName -> MTy -> MTy
     substituteInMTy substs (MTy mty_abs mty_mod) =
@@ -198,7 +198,7 @@ refineEnv loc tset env tname ps t
     QualName (qualQuals tname') v `M.member` tset =
       if paramsMatch cur_ps ps
         then
-          return
+          pure
             ( tname',
               QualName qs v `M.delete` tset,
               substituteTypesInEnv
@@ -241,11 +241,11 @@ findTypeDef :: QualName Name -> Mod -> Maybe (QualName VName, TypeBinding)
 findTypeDef _ ModFun {} = Nothing
 findTypeDef (QualName [] name) (ModEnv the_env) = do
   (name', tb) <- findBinding envTypeTable Type name the_env
-  return (qualName name', tb)
+  pure (qualName name', tb)
 findTypeDef (QualName (q : qs) name) (ModEnv the_env) = do
   (q', q_mod) <- findBinding envModTable Term q the_env
   (QualName qs' name', tb) <- findTypeDef (QualName qs name) q_mod
-  return (QualName (q' : qs') name', tb)
+  pure (QualName (q' : qs') name', tb)
 
 resolveAbsTypes ::
   TySet ->
@@ -275,9 +275,9 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
               (qualLeaf name)
               (mod_l, ps, t)
         | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
-            return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
+            pure (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
         | otherwise ->
-            return (qualLeaf name, (name', TypeAbbr name_l ps t))
+            pure (qualLeaf name, (name', TypeAbbr name_l ps t))
       _ ->
         missingType loc $ fmap baseName name
   where
@@ -422,7 +422,7 @@ matchMTys orig_mty orig_mty_sig =
             old_abs_subst_to_type <> M.map (substFromAbbr . snd) abs_substs
           abs_name_substs = M.map (qualLeaf . fst) abs_substs
       substs <- matchMods abs_subst_to_type mod sig loc
-      return (substs <> abs_name_substs)
+      pure (substs <> abs_name_substs)
 
     matchMods ::
       M.Map VName (Subst StructRetType) ->
@@ -455,7 +455,7 @@ matchMTys orig_mty orig_mty_sig =
             abs_name_substs = M.map (qualLeaf . fst) abs_substs
         pmod_substs <- matchMods abs_subst_to_type mod_pmod sig_pmod loc
         mod_substs <- matchMTys' abs_subst_to_type mod_mod sig_mod loc
-        return (pmod_substs <> mod_substs <> abs_name_substs)
+        pure (pmod_substs <> mod_substs <> abs_name_substs)
 
     matchEnvs ::
       M.Map VName (Subst StructRetType) ->
@@ -497,7 +497,7 @@ matchMTys orig_mty orig_mty_sig =
             Nothing ->
               missingMod loc $ baseName name
 
-      return $ val_substs <> mod_substs <> abbr_name_substs
+      pure $ val_substs <> mod_substs <> abbr_name_substs
 
     matchTypeAbbr ::
       Loc ->
@@ -522,7 +522,7 @@ matchMTys orig_mty orig_mty_sig =
       -- an array of size 'n' somewhere inside.
       when (M.member spec_name abs_subst_to_type) $
         case S.toList (mustBeExplicitInType (retType t)) `intersect` map typeParamName ps of
-          [] -> return ()
+          [] -> pure ()
           d : _ ->
             Left . TypeError loc mempty $
               "Type"
@@ -533,7 +533,7 @@ matchMTys orig_mty orig_mty_sig =
 
       let spec_t' = applySubst (`M.lookup` (param_substs <> abs_subst_to_type)) spec_t
       if spec_t' == t
-        then return (spec_name, name)
+        then pure (spec_name, name)
         else nomatch spec_t'
       where
         nomatch spec_t' =
@@ -562,7 +562,7 @@ matchMTys orig_mty orig_mty_sig =
       Either TypeError (VName, VName)
     matchVal loc spec_name spec_v name v =
       case matchValBinding loc spec_v v of
-        Nothing -> return (spec_name, name)
+        Nothing -> pure (spec_name, name)
         Just problem ->
           Left $
             TypeError loc mempty $
@@ -610,4 +610,4 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
       type_subst = M.mapMaybe isSub p_subst
       body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'
-  return (body_mty'', p_subst, body_subst)
+  pure (body_mty'', p_subst, body_subst)

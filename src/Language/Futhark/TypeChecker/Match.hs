@@ -144,7 +144,7 @@ findUnmatched pmat n
     incompleteCase pt cs = do
       u <- findUnmatched (defaultMat pmat) (n - 1)
       if null cs
-        then return $ MatchWild pt : u
+        then pure $ MatchWild pt : u
         else case pt of
           Scalar (Sum all_cs) -> do
             -- Figure out which constructors are missing.

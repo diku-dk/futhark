@@ -50,13 +50,13 @@ data ASTMapper m = ASTMapper
 identityMapper :: Monad m => ASTMapper m
 identityMapper =
   ASTMapper
-    { mapOnExp = return,
-      mapOnName = return,
-      mapOnQualName = return,
-      mapOnStructType = return,
-      mapOnPatType = return,
-      mapOnStructRetType = return,
-      mapOnPatRetType = return
+    { mapOnExp = pure,
+      mapOnName = pure,
+      mapOnQualName = pure,
+      mapOnStructType = pure,
+      mapOnPatType = pure,
+      mapOnStructRetType = pure,
+      mapOnPatRetType = pure
     }
 
 -- | The class of things that we can map an 'ASTMapper' across.
@@ -252,9 +252,9 @@ instance ASTMappable (DimIndexBase Info VName) where
   astMap tv (DimFix j) = DimFix <$> mapOnExp tv j
   astMap tv (DimSlice i j stride) =
     DimSlice
-      <$> maybe (return Nothing) (fmap Just . mapOnExp tv) i
-      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) j
-      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) stride
+      <$> maybe (pure Nothing) (fmap Just . mapOnExp tv) i
+      <*> maybe (pure Nothing) (fmap Just . mapOnExp tv) j
+      <*> maybe (pure Nothing) (fmap Just . mapOnExp tv) stride
 
 instance ASTMappable Alias where
   astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v

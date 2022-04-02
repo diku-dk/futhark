@@ -24,7 +24,7 @@ main = mainWithOptions () [] "program line col" $ \args () ->
             putStrLn $ "Name: " ++ pretty qn
             putStrLn $ "Position: " ++ locStr (srclocOf loc)
             case def of
-              Nothing -> return ()
+              Nothing -> pure ()
               Just (BoundTerm t defloc) -> do
                 putStrLn $ "Type: " ++ pretty t
                 putStrLn $ "Definition: " ++ locStr (srclocOf defloc)

@@ -229,7 +229,7 @@ mustBeExplicitAux t =
     onDim _ _ (NamedDim d) =
       modify $ M.insertWith (&&) (qualLeaf d) True
     onDim _ _ _ =
-      return ()
+      pure ()
 
 -- | Figure out which of the sizes in a parameter type must be passed
 -- explicitly, because their first use is as something else than just
@@ -486,7 +486,7 @@ matchDims onDims = matchDims' mempty
           Scalar (TypeVar als2 _ _ targs2)
           ) ->
             Scalar . TypeVar (als1 <> als2) u v <$> zipWithM matchTypeArg targs1 targs2
-        _ -> return t1
+        _ -> pure t1
 
     matchTypeArg ta@TypeArgType {} _ = pure ta
     matchTypeArg a _ = pure a
@@ -1225,7 +1225,7 @@ intrinsics =
     mkIntrinsicBinOp :: BinOp -> Maybe (String, Intrinsic)
     mkIntrinsicBinOp op = do
       op' <- intrinsicBinOp op
-      return (pretty op, op')
+      pure (pretty op, op')
 
     binOp ts = Just $ IntrinsicOverloadedFun ts [Nothing, Nothing] Nothing
     ordering = Just $ IntrinsicOverloadedFun anyPrimType [Nothing, Nothing] (Just Bool)

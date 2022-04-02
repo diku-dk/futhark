@@ -78,7 +78,7 @@ expDefs e =
       identityMapper {mapOnExp = onExp}
     onExp e' = do
       modify (<> expDefs e')
-      return e'
+      pure e'
 
     identDefs (Ident v (Info vt) vloc) =
       M.singleton v $ DefBound $ BoundTerm (toStruct vt) $ locOf vloc
