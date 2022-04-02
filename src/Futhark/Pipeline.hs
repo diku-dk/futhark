@@ -121,7 +121,7 @@ data PipelineConfig = PipelineConfig
 newtype Pipeline fromrep torep = Pipeline {unPipeline :: PipelineConfig -> Prog fromrep -> FutharkM (Prog torep)}
 
 instance Category Pipeline where
-  id = Pipeline $ const return
+  id = Pipeline $ const pure
   p2 . p1 = Pipeline perform
     where
       perform cfg prog =
@@ -151,8 +151,8 @@ onePass pass = Pipeline perform
       when (pipelineValidate cfg) $
         case checkProg prog'' of
           Left err -> validationError pass prog'' $ show err
-          Right () -> return ()
-      return prog'
+          Right () -> pure ()
+      pure prog'
 
 -- | Create a pipeline from a list of passes.
 passes ::
@@ -180,4 +180,4 @@ runPass pass prog = do
   (prog', logged) <- runPassM (passFunction pass prog)
   verb <- asks $ (>= VeryVerbose) . futharkVerbose
   when verb $ addLog logged
-  return prog'
+  pure prog'

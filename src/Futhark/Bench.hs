@@ -181,7 +181,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
         case mapMaybe runtime call_lines of
           [call_runtime] -> do
             liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) call_runtime
-            return (RunResult call_runtime, call_lines)
+            pure (RunResult call_runtime, call_lines)
           [] -> throwError "Could not find runtime in output."
           ls -> throwError $ "Ambiguous runtimes: " <> T.pack (show ls)
 
@@ -206,13 +206,13 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   vs <- readResults server outs <* freeOuts
 
   maybe_expected <-
-    liftIO $ maybe (return Nothing) (fmap Just . getExpectedValues) expected_spec
+    liftIO $ maybe (pure Nothing) (fmap Just . getExpectedValues) expected_spec
 
   case maybe_expected of
     Just expected -> checkResult program expected vs
     Nothing -> pure ()
 
-  return
+  pure
     ( map fst call_logs,
       T.unlines $ map (T.unlines . snd) call_logs <> report
     )
@@ -248,7 +248,7 @@ prepareBenchmarkProgram concurrency opts program cases = do
   ref_res <- runExceptT $ ensureReferenceOutput concurrency (FutharkExe futhark) "c" program cases
   case ref_res of
     Left err ->
-      return $
+      pure $
         Left
           ( "Reference output generation for " ++ program ++ " failed:\n"
               ++ unlines (map T.unpack err),
@@ -265,6 +265,6 @@ prepareBenchmarkProgram concurrency opts program cases = do
             ""
 
       case futcode of
-        ExitSuccess -> return $ Right ()
-        ExitFailure 127 -> return $ Left (progNotFound futhark, Nothing)
-        ExitFailure _ -> return $ Left ("Compilation of " ++ program ++ " failed:\n", Just futerr)
+        ExitSuccess -> pure $ Right ()
+        ExitFailure 127 -> pure $ Left (progNotFound futhark, Nothing)
+        ExitFailure _ -> pure $ Left ("Compilation of " ++ program ++ " failed:\n", Just futerr)

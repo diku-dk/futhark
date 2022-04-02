@@ -87,7 +87,7 @@ runCompilerOnProgram config pipeline action file = do
       dumpError config err
       exitWith $ ExitFailure 2
     Right () ->
-      return ()
+      pure ()
   where
     compile = do
       prog <- runPipelineOnProgram config pipeline file
@@ -129,7 +129,7 @@ typeCheckInternalProgram :: I.Prog I.SOACS -> FutharkM ()
 typeCheckInternalProgram prog =
   case I.checkProg prog' of
     Left err -> internalErrorS ("After internalisation:\n" ++ show err) (ppr prog')
-    Right () -> return ()
+    Right () -> pure ()
   where
     prog' = Alias.aliasAnalysis prog
 
@@ -188,7 +188,7 @@ orDie m = liftIO $ do
     Left err -> do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
-    Right res' -> return res'
+    Right res' -> pure res'
 
 -- | Not verbose, and terminates process on error.
 readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
@@ -211,4 +211,4 @@ handleWarnings config m = do
     when (futharkWerror config) $
       externalErrorS "Treating above warnings as errors due to --Werror."
 
-  return a
+  pure a

@@ -136,7 +136,7 @@ letSubExp ::
   String ->
   Exp (Rep m) ->
   m SubExp
-letSubExp _ (BasicOp (SubExp se)) = return se
+letSubExp _ (BasicOp (SubExp se)) = pure se
 letSubExp desc e = Var <$> letExp desc e
 
 -- | Like 'letSubExp', but returns a name rather than a t'SubExp'.
@@ -146,13 +146,13 @@ letExp ::
   Exp (Rep m) ->
   m VName
 letExp _ (BasicOp (SubExp (Var v))) =
-  return v
+  pure v
 letExp desc e = do
   n <- length <$> expExtType e
   vs <- replicateM n $ newVName desc
   letBindNames vs e
   case vs of
-    [v] -> return v
+    [v] -> pure v
     _ -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 -- | Like 'letExp', but the 'VName' and 'Slice' denote an array that
@@ -176,7 +176,7 @@ letTupExp ::
   Exp (Rep m) ->
   m [VName]
 letTupExp _ (BasicOp (SubExp (Var v))) =
-  return [v]
+  pure [v]
 letTupExp name e = do
   e_t <- expExtType e
   names <- replicateM (length e_t) $ newVName name
@@ -189,7 +189,7 @@ letTupExp' ::
   String ->
   Exp (Rep m) ->
   m [SubExp]
-letTupExp' _ (BasicOp (SubExp se)) = return [se]
+letTupExp' _ (BasicOp (SubExp se)) = pure [se]
 letTupExp' name ses = map Var <$> letTupExp name ses
 
 -- | Turn a subexpression into a monad expression.  Does not actually
@@ -236,7 +236,7 @@ eIf' ce te fe if_sort = do
   te'' <- addContextForBranch ts te'
   fe'' <- addContextForBranch ts fe'
   let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
-  return $ If ce' te'' fe'' $ IfDec ts' if_sort
+  pure $ If ce' te'' fe'' $ IfDec ts' if_sort
   where
     addContextForBranch ts (Body _ stms val_res) = do
       body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
@@ -265,7 +265,7 @@ eBinOp ::
 eBinOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
-  return $ BasicOp $ BinOp op x' y'
+  pure $ BasicOp $ BinOp op x' y'
 
 -- | Construct a v'CmpOp' expression with the given comparison.
 eCmpOp ::
@@ -277,7 +277,7 @@ eCmpOp ::
 eCmpOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
-  return $ BasicOp $ CmpOp op x' y'
+  pure $ BasicOp $ CmpOp op x' y'
 
 -- | Construct a v'ConvOp' expression with the given conversion.
 eConvOp ::
@@ -287,7 +287,7 @@ eConvOp ::
   m (Exp (Rep m))
 eConvOp op x = do
   x' <- letSubExp "x" =<< x
-  return $ BasicOp $ ConvOp op x'
+  pure $ BasicOp $ ConvOp op x'
 
 -- | Construct a 'SSignum' expression.  Fails if the provided
 -- expression is not of integer type.
@@ -301,7 +301,7 @@ eSignum em = do
   t <- subExpType e'
   case t of
     Prim (IntType int_t) ->
-      return $ BasicOp $ UnOp (SSignum int_t) e'
+      pure $ BasicOp $ UnOp (SSignum int_t) e'
     _ ->
       error $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 
@@ -371,7 +371,7 @@ eSliceArray d arr i n = do
   let skips = map (slice (constant (0 :: Int64))) $ take d $ arrayDims arr_t
   i' <- letSubExp "slice_i" =<< i
   n' <- letSubExp "slice_n" =<< n
-  return $ BasicOp $ Index arr $ fullSlice arr_t $ skips ++ [slice i' n']
+  pure $ BasicOp $ Index arr $ fullSlice arr_t $ skips ++ [slice i' n']
   where
     slice j m = DimSlice j m (constant (1 :: Int64))
 
@@ -398,8 +398,8 @@ eOutOfBounds arr is = do
 
 -- | Construct an unspecified value of the given type.
 eBlank :: MonadBuilder m => Type -> m (Exp (Rep m))
-eBlank (Prim t) = return $ BasicOp $ SubExp $ Constant $ blankPrimValue t
-eBlank (Array t shape _) = return $ BasicOp $ Scratch t $ shapeDims shape
+eBlank (Prim t) = pure $ BasicOp $ SubExp $ Constant $ blankPrimValue t
+eBlank (Array t shape _) = pure $ BasicOp $ Scratch t $ shapeDims shape
 eBlank Acc {} = error "eBlank: cannot create blank accumulator"
 eBlank Mem {} = error "eBlank: cannot create blank memory"
 
@@ -421,7 +421,7 @@ asInt ext to_it e = do
   e_t <- subExpType e
   case e_t of
     Prim (IntType from_it)
-      | to_it == from_it -> return e
+      | to_it == from_it -> pure e
       | otherwise -> letSubExp s $ BasicOp $ ConvOp (ext from_it to_it) e
     _ -> error "asInt: wrong type"
   where
@@ -437,7 +437,7 @@ foldBinOp ::
   [SubExp] ->
   m (Exp (Rep m))
 foldBinOp _ ne [] =
-  return $ BasicOp $ SubExp ne
+  pure $ BasicOp $ SubExp ne
 foldBinOp bop ne (e : es) =
   eBinOp bop (pure $ BasicOp $ SubExp e) (foldBinOp bop ne es)
 
@@ -476,7 +476,7 @@ binLambda bop arg_t ret_t = do
   body <-
     buildBody_ . fmap (pure . subExpRes) $
       letSubExp "binlam_res" $ BasicOp $ bop (Var x) (Var y)
-  return
+  pure
     Lambda
       { lambdaParams =
           [ Param mempty x (Prim arg_t),
@@ -599,16 +599,16 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
   where
     instantiate t = do
       shape <- mapM instantiate' $ shapeDims $ arrayShape t
-      return $ t `setArrayShape` Shape shape
+      pure $ t `setArrayShape` Shape shape
     instantiate' (Ext x) = do
       m <- get
       case M.lookup x m of
-        Just se -> return se
+        Just se -> pure se
         Nothing -> do
           se <- lift $ f x
           put $ M.insert x se m
-          return se
-    instantiate' (Free se) = return se
+          pure se
+    instantiate' (Free se) = pure se
 
 -- | Like 'instantiateShapes', but obtains names from the provided
 -- list.  If an 'Ext' is out of bounds of this list, the function
@@ -652,7 +652,7 @@ simpleMkLetNames ::
 simpleMkLetNames names e = do
   et <- expExtType e
   let ts = instantiateShapes' names et
-  return $ Let (Pat $ zipWith PatElem names ts) (defAux ()) e
+  pure $ Let (Pat $ zipWith PatElem names ts) (defAux ()) e
 
 -- | Instances of this class can be converted to Futhark expressions
 -- within a 'MonadBuilder'.
@@ -660,10 +660,10 @@ class ToExp a where
   toExp :: MonadBuilder m => a -> m (Exp (Rep m))
 
 instance ToExp SubExp where
-  toExp = return . BasicOp . SubExp
+  toExp = pure . BasicOp . SubExp
 
 instance ToExp VName where
-  toExp = return . BasicOp . SubExp . Var
+  toExp = pure . BasicOp . SubExp . Var
 
 -- | A convenient composition of 'letSubExp' and 'toExp'.
 toSubExp :: (MonadBuilder m, ToExp a) => String -> a -> m SubExp
