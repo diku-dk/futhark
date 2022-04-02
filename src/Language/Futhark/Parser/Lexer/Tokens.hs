@@ -168,13 +168,13 @@ keyword s =
 
 indexing :: (Loc, T.Text) -> Alex Name
 indexing (loc, s) = case keyword s of
-  ID v -> return v
+  ID v -> pure v
   _ -> alexError loc $ "Cannot index keyword '" ++ T.unpack s ++ "'."
 
 mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
   [] -> error "mkQualId: no components"
-  k : qs -> return (map nameFromText (reverse qs), nameFromText k)
+  k : qs -> pure (map nameFromText (reverse qs), nameFromText k)
 
 -- | Suffix a zero if the last character is dot.
 suffZero :: T.Text -> T.Text
@@ -182,7 +182,7 @@ suffZero s = if T.last s == '.' then s <> "0" else s
 
 tryRead :: Read a => String -> T.Text -> Alex a
 tryRead desc s = case reads s' of
-  [(x, "")] -> return x
+  [(x, "")] -> pure x
   _ -> error $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
   where
     s' = T.unpack s
@@ -200,7 +200,7 @@ tokenC :: a -> (Pos, Char, BS.ByteString, Int64) -> Int64 -> Alex (Lexeme a)
 tokenC v = tokenS $ const v
 
 tokenS :: (T.Text -> a) -> (Pos, Char, BS.ByteString, Int64) -> Int64 -> Alex (Lexeme a)
-tokenS f = tokenM $ return . f
+tokenS f = tokenM $ pure . f
 
 type Lexeme a = (Pos, Pos, a)
 
@@ -218,7 +218,7 @@ tokenPosM ::
   Alex (Lexeme a)
 tokenPosM f (pos, _, s, _) len = do
   x <- f (Loc pos pos', T.decodeUtf8 $ BS.toStrict s')
-  return (pos, pos', x)
+  pure (pos, pos', x)
   where
     pos' = advance pos s'
     s' = BS.take len s
@@ -280,5 +280,5 @@ readHexRealLit s =
                   fracLen = fromIntegral $ T.length f
                   fracVal = fracPart / (16.0 ** fracLen)
                   totalVal = (intPart + fracVal) * (2.0 ** exponent)
-               in return totalVal
+               in pure totalVal
             _ -> error "bad hex real literal"

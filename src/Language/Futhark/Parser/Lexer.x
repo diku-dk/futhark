@@ -63,7 +63,7 @@ $opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
 tokens :-
 
   $white+                               ;
-  @doc                     { tokenM $ return . DOC . T.unpack . T.unlines .
+  @doc                     { tokenM $ pure . DOC . T.unpack . T.unlines .
                                       map (T.drop 3 . T.stripStart) .
                                            T.split (== '\n') . ("--"<>) .
                                            T.drop 4 }
@@ -98,15 +98,15 @@ tokens :-
   "$"                      { tokenC DOLLAR }
   "???"                    { tokenC HOLE }
 
-  @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
-  @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
-  @intlit i32              { tokenM $ return . I32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
-  @intlit i64              { tokenM $ return . I64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
-  @intlit u8               { tokenM $ return . U8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
-  @intlit u16              { tokenM $ return . U16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
-  @intlit u32              { tokenM $ return . U32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
-  @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
-  @intlit                  { tokenM $ return . INTLIT . readIntegral . T.filter (/= '_') }
+  @intlit i8               { tokenM $ pure . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i16              { tokenM $ pure . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i32              { tokenM $ pure . I32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i64              { tokenM $ pure . I64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit u8               { tokenM $ pure . U8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u16              { tokenM $ pure . U16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u32              { tokenM $ pure . U32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u64              { tokenM $ pure . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit                  { tokenM $ pure . INTLIT . readIntegral . T.filter (/= '_') }
 
   @reallit f16             { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
@@ -126,8 +126,8 @@ tokens :-
   @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
-  @binop                   { tokenM $ return . symbol [] . nameFromText }
-  @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
+  @binop                   { tokenM $ pure . symbol [] . nameFromText }
+  @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; pure (symbol qs k) }
 
   "." [0-9]+               { tokenS $ PROJ_INTFIELD . nameFromText . T.drop 1 }
 {

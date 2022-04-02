@@ -111,7 +111,6 @@ readLineFromMonad :: ReadLineMonad (Maybe T.Text)
 readLineFromMonad = GetLine Value
 
 instance Monad ReadLineMonad where
-  return = pure
   Value x >>= f = f x
   GetLine g >>= f = GetLine $ g >=> f
 
