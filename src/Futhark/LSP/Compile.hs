@@ -2,7 +2,7 @@ module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
 
 import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Futhark.Compiler.Program (LoadedProg, noLoadedProg, reloadProg)
+import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (errorToDiagnostics, sendDiagnostics, warningsToDiagnostics)
 import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
@@ -45,8 +45,8 @@ tryCompile (Just path) state version = do
   let old_loaded_prog = getLoadedProg state
   res <- liftIO $ reloadProg old_loaded_prog [path]
   case res of
-    Right (warnings, new_loaded_prog) -> do
-      let diags = warningsToDiagnostics $ listWarnings warnings
+    Right new_loaded_prog -> do
+      let diags = warningsToDiagnostics $ listWarnings $ lpWarnings new_loaded_prog
       sendDiagnostics (toNormalizedUri $ filePathToUri path) diags version
       pure $ State (Just new_loaded_prog)
     Left prog_error -> do
