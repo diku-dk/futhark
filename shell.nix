@@ -13,6 +13,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.git-annex
     pkgs.ghc
     pkgs.haskellPackages.weeder
+    pkgs.haskellPackages.apply-refact
     pkgs.hlint
     pkgs.pkgconfig
     pkgs.zlib
