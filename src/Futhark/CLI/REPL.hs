@@ -181,7 +181,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
 
       pure (prog, tenv, ienv')
 
-  return
+  pure
     FutharkiState
       { futharkiProg = prog,
         futharkiCount = count,
@@ -321,7 +321,7 @@ breakForReason s top _ =
     && locOf top `notElem` futharkiSkipBreaks s
 
 runInterpreter :: F I.ExtOp a -> FutharkiM (Either I.InterpreterError a)
-runInterpreter m = runF m (return . Right) intOp
+runInterpreter m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) =
       pure $ Left err
@@ -374,7 +374,7 @@ runInterpreter m = runF m (return . Right) intOp
       c
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
-runInterpreter' m = runF m (return . Right) intOp
+runInterpreter' m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
