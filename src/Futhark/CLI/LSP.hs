@@ -10,22 +10,6 @@ import Futhark.LSP.Handlers (handlers)
 import Futhark.LSP.State (emptyState)
 import Futhark.Util (debug)
 import Language.LSP.Server
-  ( Options (textDocumentSync),
-    ServerDefinition
-      ( ServerDefinition,
-        defaultConfig,
-        doInitialize,
-        interpretHandler,
-        onConfigurationChange,
-        options,
-        staticHandlers
-      ),
-    defaultOptions,
-    runLspT,
-    runServer,
-    setupLogger,
-    type (<~>) (Iso),
-  )
 import Language.LSP.Types
   ( SaveOptions (SaveOptions),
     TextDocumentSyncKind (TdSyncIncremental),
