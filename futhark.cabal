@@ -87,6 +87,7 @@ library
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Literate
+      Futhark.CLI.LSP
       Futhark.CLI.Misc
       Futhark.CLI.Multicore
       Futhark.CLI.MulticoreWASM
@@ -210,6 +211,11 @@ library
       Futhark.Internalise.Monad
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.TypesValues
+      Futhark.LSP.Compile
+      Futhark.LSP.Diagnostic
+      Futhark.LSP.Handlers
+      Futhark.LSP.Tool
+      Futhark.LSP.State
       Futhark.MonadFreshNames
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
@@ -342,7 +348,10 @@ library
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
+    , hslogger
     , language-c-quote >=0.12
+    , lens
+    , lsp >= 1.4
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
     , megaparsec >=9.0.0

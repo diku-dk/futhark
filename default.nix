@@ -48,6 +48,13 @@ let
           hashable-time =
             haskellPackagesNew.hashable-time_0_3;
 
+          lsp-types =
+            haskellPackagesNew.lsp-types_1_4_0_1;
+
+          # Test suite not compatible with aeson 2.0.3.
+          lsp =
+            pkgs.haskell.lib.dontCheck haskellPackagesNew.lsp_1_4_0_0;
+
           futhark-data =
             haskellPackagesNew.callPackage ./nix/futhark-data.nix { };
 
