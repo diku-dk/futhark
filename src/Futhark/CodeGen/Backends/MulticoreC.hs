@@ -693,8 +693,9 @@ compileOp (Atomic aop) =
   atomicOps aop
 compileOp (ISPCKernel body _) =
   scopedBlock body
-compileOp (ForEach i bound body) =
-  GC.compileCode (For i bound body)
+compileOp (ForEach i bound body) =  
+  -- TODO(olivbak, k): make sure loops are in proper order
+  GC.compileCode $ foldr (\(i', b) acc -> For i' b acc) body $ zip i bound 
 compileOp (ForEachActive i body) = do
   GC.decl [C.cdecl|typename int64_t $id:i = 0;|]
   scopedBlock body

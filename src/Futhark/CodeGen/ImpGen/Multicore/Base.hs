@@ -301,33 +301,43 @@ inISPC code = do
 -------------------------------
 ------- SegRed helpers  -------
 -------------------------------
-sForVectorized' :: VName -> Imp.Exp -> MulticoreGen () -> MulticoreGen ()
-sForVectorized' i bound body = do
-  let it = case primExpType bound of
+-- sForVectorized' :: VName -> Imp.Exp -> MulticoreGen () -> MulticoreGen ()
+-- sForVectorized' i bound body = do
+--   let it = case primExpType bound of
+--         IntType bound_t -> bound_t
+--         t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
+--   addLoopVar i it
+--   body' <- collect body
+--   emit $ Imp.Op $ Imp.ForEach [i] [bound] body'
+
+-- sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
+-- sForVectorized i bound body = do
+--   is' <- newVName i
+--   sForVectorized' i' (untyped bound) $
+--     body $ TPrimExp $ Imp.var i' $ primExpType $ untyped bound
+
+sForVectorized' :: [VName] -> [Imp.Exp] -> MulticoreGen () -> MulticoreGen ()
+sForVectorized' is bounds body = do
+  let it bound = case primExpType bound of
         IntType bound_t -> bound_t
         t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
-  addLoopVar i it
+  let its = map it bounds
+  mapM (\(i, it) -> addLoopVar i it) $ zip is its
   body' <- collect body
-  emit $ Imp.Op $ Imp.ForEach [i] [bound] body'
+  emit $ Imp.Op $ Imp.ForEach is bounds body'
 
-sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
-sForVectorized i bound body = do
-  i' <- newVName i
-  sForVectorized' i' (untyped bound) $
-    body $ TPrimExp $ Imp.var i' $ primExpType $ untyped bound
+sForVectorized :: String -> [Imp.TExp t] -> ([Imp.TExp t] -> MulticoreGen ()) -> MulticoreGen ()
+sForVectorized i bounds body = do
+  is <- replicateM (length bounds) $ newVName i
+  let ubounds = map untyped bounds
+  let texps = map (\(i', ubound) -> TPrimExp $ Imp.var i' $ primExpType ubound) $ zip is ubounds
+  sForVectorized' is ubounds $ body texps
 
--- Like sLoopNest, but puts a foreach at the innermost layer
-sLoopNestVectorized ::
-  Shape ->
-  ([Imp.TExp Int64] -> MulticoreGen ()) ->
-  MulticoreGen ()
-sLoopNestVectorized = sLoopNest' [] . shapeDims
+-- Like sLoopNest, but puts everything in a multidimensional foreach
+sLoopNestVectorized :: Shape -> ([Imp.TExp Int64] -> MulticoreGen ()) -> MulticoreGen ()
+sLoopNestVectorized = sLoopNest' . shapeDims
   where
-    sLoopNest' is [] f = f $ reverse is
-    sLoopNest' is [d] f =
-      sForVectorized "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) [] f
-    sLoopNest' is (d : ds) f =
-      sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
+    sLoopNest' ds = sForVectorized "nest_i" $ map toInt64Exp ds
 
 -------------------------------
 ------- SegHist helpers -------
