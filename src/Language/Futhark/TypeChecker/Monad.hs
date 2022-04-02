@@ -364,7 +364,7 @@ instance MonadTypeChecker TypeM where
                 typeError loc mempty $
                   "Attempt to use function" <+> pprName name <+> "as value."
               Just t' ->
-                return
+                pure
                   ( qn',
                     fromStruct $
                       qualifyTypeVars outer_env mempty qs t'
@@ -467,7 +467,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
 
 -- | Turn a 'Left' 'TypeError' into an actual error.
 badOnLeft :: Either TypeError a -> TypeM a
-badOnLeft = either throwError return
+badOnLeft = either throwError pure
 
 -- | All signed integer types.
 anySignedType :: [PrimType]

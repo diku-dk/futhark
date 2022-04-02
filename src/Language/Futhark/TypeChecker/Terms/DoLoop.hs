@@ -319,7 +319,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               \mergepat' -> onlySelfAliasing . tapOccurrences $ do
                 loopbody' <- noSizeEscape $ checkExp loopbody
                 (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                return
+                pure
                   ( sparams,
                     mergepat'',
                     For i' uboundexp',
@@ -337,7 +337,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                       \mergepat' -> onlySelfAliasing . tapOccurrences $ do
                         loopbody' <- noSizeEscape $ checkExp loopbody
                         (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                        return
+                        pure
                           ( sparams,
                             mergepat'',
                             ForIn xpat' e',
@@ -357,7 +357,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               $ \cond' _ -> do
                 loopbody' <- noSizeEscape $ checkExp loopbody
                 (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                return
+                pure
                   ( sparams,
                     mergepat'',
                     While cond',
