@@ -135,7 +135,7 @@ optionString = concat . mapMaybe optionStringChunk
   where
     optionStringChunk option = do
       short <- optionShortName option
-      return $
+      pure $
         short :
         case optionArgument option of
           NoArgument -> ""

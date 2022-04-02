@@ -41,7 +41,7 @@ instance RepTypes GPUMem where
   type Op GPUMem = MemOp (HostOp GPUMem ())
 
 instance ASTRep GPUMem where
-  expTypesFromPat = return . map snd . bodyReturnsFromPat
+  expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
 instance OpReturns (HostOp GPUMem ()) where
   opReturns (SegOp op) = segOpReturns op
@@ -59,27 +59,27 @@ instance TC.CheckableOp GPUMem where
       typeCheckMemoryOp _ (Alloc size _) =
         TC.require [Prim int64] size
       typeCheckMemoryOp lvl (Inner op) =
-        typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ return ()) op
+        typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ pure ()) op
 
 instance TC.Checkable GPUMem where
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ $ TC.checkExtType . declExtTypeOf
-  primFParam name t = return $ Param mempty name (MemPrim t)
+  primFParam name t = pure $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem
 
 instance BuilderOps GPUMem where
-  mkExpDecB _ _ = return ()
-  mkBodyB stms res = return $ Body () stms res
+  mkExpDecB _ _ = pure ()
+  mkBodyB stms res = pure $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
 instance BuilderOps (Engine.Wise GPUMem) where
-  mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
-  mkBodyB stms res = return $ Engine.mkWiseBody () stms res
+  mkExpDecB pat e = pure $ Engine.mkWiseExpDec pat () e
+  mkBodyB stms res = pure $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
 
 instance TraverseOpStms (Engine.Wise GPUMem) where
@@ -94,7 +94,7 @@ simplifyStms = simplifyStmsGeneric simpleGPUMem
 
 simpleGPUMem :: Engine.SimpleOps GPUMem
 simpleGPUMem =
-  simpleGeneric usage $ simplifyKernelOp $ const $ return ((), mempty)
+  simpleGeneric usage $ simplifyKernelOp $ const $ pure ((), mempty)
   where
     -- Slightly hackily and very inefficiently, we look at the inside
     -- of SegOps to figure out the sizes of local memory allocations,

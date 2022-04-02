@@ -97,7 +97,7 @@ cannotSimplify = RuleM $ lift $ lift Nothing
 
 liftMaybe :: Maybe a -> RuleM rep a
 liftMaybe Nothing = cannotSimplify
-liftMaybe (Just x) = return x
+liftMaybe (Just x) = pure x
 
 -- | An efficient way of encoding whether a simplification rule should even be attempted.
 data Rule rep

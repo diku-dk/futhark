@@ -51,7 +51,7 @@ transformStms expmap stms = collectStms_ $ foldM_ transformStm expmap stms
 transformBody :: ExpMap -> Body GPU -> BabysitM (Body GPU)
 transformBody expmap (Body () stms res) = do
   stms' <- transformStms expmap stms
-  return $ Body () stms' res
+  pure $ Body () stms' res
 
 -- | Map from variable names to defining expression.  We use this to
 -- hackily determine whether something is transposed or otherwise
@@ -78,7 +78,7 @@ nonlinearInMemory name m =
       | inner_r <- arrayRank t,
         inner_r > 0 = do
           let outer_r = arrayRank (patElemType pe) - inner_r
-          return $ Just $ rearrangeInverse $ [inner_r .. inner_r + outer_r - 1] ++ [0 .. inner_r - 1]
+          pure $ Just $ rearrangeInverse $ [inner_r .. inner_r + outer_r - 1] ++ [0 .. inner_r - 1]
       | otherwise = Nothing
 
 transformStm :: ExpMap -> Stm GPU -> BabysitM ExpMap
@@ -96,12 +96,12 @@ transformStm expmap (Let pat aux (Op (SegOp op)))
       op' <- mapSegOpM mapper op
       let stm' = Let pat aux $ Op $ SegOp op'
       addStm stm'
-      return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
+      pure $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
 transformStm expmap (Let pat aux e) = do
   e' <- mapExpM (transform expmap) e
   let stm' = Let pat aux e'
   addStm stm'
-  return $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
+  pure $ M.fromList [(name, stm') | name <- patNames pat] <> expmap
 
 transform :: ExpMap -> Mapper GPU GPU BabysitM
 transform expmap =
@@ -209,7 +209,7 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
 
     onOp ctx (OtherOp soac) =
       OtherOp <$> mapSOACM identitySOACMapper {mapOnSOACLambda = onLambda ctx} soac
-    onOp _ op = return op
+    onOp _ op = pure op
 
     mapper ctx =
       identityMapper
@@ -273,7 +273,7 @@ ensureCoalescedAccess
           DimFix inner_ind <- last slice',
           not $ null thread_gids,
           isGidVariant inner_gid inner_ind ->
-            return Nothing
+            pure Nothing
         -- We are not fully indexing an array, but the remaining slice
         -- is invariant to the innermost-kernel dimension. We assume
         -- the remaining slice will be sequentially streamed, hence
@@ -288,7 +288,7 @@ ensureCoalescedAccess
           is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
           not (null thread_gids || null is),
           not (last thread_gids `nameIn` (freeIn is <> freeIn rem_slice)) ->
-            return Nothing
+            pure Nothing
         -- We are not fully indexing the array, and the indices are not
         -- a proper prefix of the thread indices, and some indices are
         -- thread local, so we assume (HEURISTIC!)  that the remaining
@@ -332,15 +332,15 @@ ensureCoalescedAccess
                 | Just _ <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is ->
                     replace =<< lift (rowMajorArray arr)
                 | otherwise ->
-                    return Nothing
+                    pure Nothing
               _ -> replace =<< lift (rowMajorArray arr)
-      _ -> return Nothing
+      _ -> pure Nothing
     where
       (thread_gids, thread_gdims) = unzip thread_space
 
       replace arr' = do
         modify $ M.insert (arr, slice) arr'
-        return $ Just (arr', slice)
+        pure $ Just (arr', slice)
 
       isThreadLocalSubExp (Var v) = isThreadLocal v
       isThreadLocalSubExp Constant {} = False
@@ -425,9 +425,9 @@ rearrangeInput ::
   VName ->
   m VName
 rearrangeInput (Just (Just current_perm)) perm arr
-  | current_perm == perm = return arr -- Already has desired representation.
+  | current_perm == perm = pure arr -- Already has desired representation.
 rearrangeInput Nothing perm arr
-  | sort perm == perm = return arr -- We don't know the current
+  | sort perm == perm = pure arr -- We don't know the current
   -- representation, but the indexing
   -- is linear, so let's hope the
   -- array is too.
@@ -437,7 +437,7 @@ rearrangeInput manifest perm arr = do
   -- We may first manifest the array to ensure that it is flat in
   -- memory.  This is sometimes unnecessary, in which case the copy
   -- will hopefully be removed by the simplifier.
-  manifested <- if isJust manifest then rowMajorArray arr else return arr
+  manifested <- if isJust manifest then rowMajorArray arr else pure arr
   letExp (baseString arr ++ "_coalesced") $
     BasicOp $ Manifest perm manifested
 
@@ -508,7 +508,7 @@ paddedScanReduceInput w stride = do
     letSubExp "padded_size"
       =<< eRoundToMultipleOf Int64 (eSubExp w) (eSubExp stride)
   padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int64 OverflowUndef) w_padded w
-  return (w_padded, padding)
+  pure (w_padded, padding)
 
 --- Computing variance.
 

@@ -34,7 +34,7 @@ instance RepTypes GPU where
   type Op GPU = HostOp GPU (SOAC GPU)
 
 instance ASTRep GPU where
-  expTypesFromPat = return . expExtTypesFromPat
+  expTypesFromPat = pure . expExtTypesFromPat
 
 instance TC.CheckableOp GPU where
   checkOp = typeCheckGPUOp Nothing

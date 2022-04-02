@@ -35,7 +35,7 @@ instance RepTypes Seq where
   type Op Seq = ()
 
 instance ASTRep Seq where
-  expTypesFromPat = return . expExtTypesFromPat
+  expTypesFromPat = pure . expExtTypesFromPat
 
 instance TC.CheckableOp Seq where
   checkOp = pure

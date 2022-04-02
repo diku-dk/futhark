@@ -42,7 +42,7 @@ instance RepTypes MC where
   type Op MC = MCOp MC (SOAC MC)
 
 instance ASTRep MC where
-  expTypesFromPat = return . expExtTypesFromPat
+  expTypesFromPat = pure . expExtTypesFromPat
 
 instance TypeCheck.CheckableOp MC where
   checkOp = typeCheckMCOp typeCheckSOAC

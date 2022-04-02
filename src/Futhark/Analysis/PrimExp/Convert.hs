@@ -43,7 +43,7 @@ instance ToExp v => ToExp (PrimExp v) where
   toExp (ConvOpExp op x) =
     BasicOp <$> (ConvOp op <$> toSubExp "convop_x" x)
   toExp (ValueExp v) =
-    return $ BasicOp $ SubExp $ Constant v
+    pure $ BasicOp $ SubExp $ Constant v
   toExp (FunExp h args t) =
     Apply (nameFromString h) <$> args' <*> pure [primRetType t]
       <*> pure (Safe, mempty, [])
@@ -131,7 +131,7 @@ replaceInPrimExpM ::
 replaceInPrimExpM f (LeafExp v pt) =
   f v pt
 replaceInPrimExpM _ (ValueExp v) =
-  return $ ValueExp v
+  pure $ ValueExp v
 replaceInPrimExpM f (BinOpExp bop pe1 pe2) =
   constFoldPrimExp
     <$> (BinOpExp bop <$> replaceInPrimExpM f pe1 <*> replaceInPrimExpM f pe2)
@@ -151,7 +151,7 @@ replaceInPrimExp ::
   PrimExp b
 replaceInPrimExp f e = runIdentity $ replaceInPrimExpM f' e
   where
-    f' x y = return $ f x y
+    f' x y = pure $ f x y
 
 -- | Substituting names in a PrimExp with other PrimExps
 substituteInPrimExp ::

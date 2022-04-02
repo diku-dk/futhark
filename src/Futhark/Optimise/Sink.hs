@@ -164,7 +164,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
                         sinking
                         body
                 modify (<> sunk)
-                return body'
+                pure body'
             }
 
 optimiseBody ::
@@ -198,12 +198,12 @@ optimiseSegOp onOp vtable sinking op =
                   optimiseBody onOp op_vtable sinking $
                     lambdaBody lam
             modify (<> sunk)
-            return lam {lambdaBody = body},
+            pure lam {lambdaBody = body},
           mapOnSegOpBody = \body -> do
             let (body', sunk) =
                   optimiseKernelBody onOp op_vtable sinking body
             modify (<> sunk)
-            return body'
+            pure body'
         }
       where
         op_vtable = ST.fromScope scope <> vtable
@@ -226,7 +226,7 @@ sink onOp =
     onFun _ fd = do
       let vtable = ST.insertFParams (funDefParams fd) mempty
           (body, _) = optimiseBody onOp vtable mempty $ funDefBody fd
-      return fd {funDefBody = body}
+      pure fd {funDefBody = body}
 
     onConsts consts =
       pure $

@@ -161,7 +161,7 @@ precomputedConstants pre m = do
     mkMap ltid dims = do
       let dims' = map toInt64Exp dims
       ids' <- dIndexSpace' "ltid_pre" dims' (sExt64 ltid)
-      return (dims, map sExt32 ids')
+      pure (dims, map sExt32 ids')
 
 keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
@@ -179,7 +179,7 @@ kernelAlloc ::
 kernelAlloc (Pat [_]) _ ScalarSpace {} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
-  return ()
+  pure ()
 kernelAlloc (Pat [mem]) size (Space "local") =
   allocLocal (patElemName mem) $ Imp.bytes $ toInt64Exp size
 kernelAlloc (Pat [mem]) _ _ =
@@ -406,7 +406,7 @@ compileGroupExp dest e =
   defCompileExp dest e
 
 sanityCheckLevel :: SegLevel -> InKernelGen ()
-sanityCheckLevel SegThread {} = return ()
+sanityCheckLevel SegThread {} = pure ()
 sanityCheckLevel SegGroup {} =
   error "compileGroupOp: unexpected group-level SegOp."
 
@@ -431,9 +431,9 @@ prepareIntraGroupSegHist group_size =
       let local_subhistos = histDest op
 
       case (l, atomicUpdateLocking atomicBinOp $ histOp op) of
-        (_, AtomicPrim f) -> return (l, f (Space "local") local_subhistos)
-        (_, AtomicCAS f) -> return (l, f (Space "local") local_subhistos)
-        (Just l', AtomicLocking f) -> return (l, f l' (Space "local") local_subhistos)
+        (_, AtomicPrim f) -> pure (l, f (Space "local") local_subhistos)
+        (_, AtomicCAS f) -> pure (l, f (Space "local") local_subhistos)
+        (Just l', AtomicLocking f) -> pure (l, f l' (Space "local") local_subhistos)
         (Nothing, AtomicLocking f) -> do
           locks <- newVName "locks"
 
@@ -450,7 +450,7 @@ prepareIntraGroupSegHist group_size =
             groupCoverSpace [kernelGroupSize constants] $ \is ->
               copyDWIMFix locks is (intConst Int32 0) []
 
-          return (Just l', f l' (Space "local") local_subhistos)
+          pure (Just l', f l' (Space "local") local_subhistos)
 
 -- Which fence do we need to protect shared access to this memory space?
 fenceForSpace :: Space -> Imp.Fence
@@ -1057,14 +1057,14 @@ readsFromSet free =
       t <- lookupType var
       vtable <- getVTable
       case t of
-        Array {} -> return Nothing
-        Acc {} -> return Nothing
-        Mem (Space "local") -> return Nothing
-        Mem {} -> return $ Just $ Imp.MemoryUse var
+        Array {} -> pure Nothing
+        Acc {} -> pure Nothing
+        Mem (Space "local") -> pure Nothing
+        Mem {} -> pure $ Just $ Imp.MemoryUse var
         Prim bt ->
           isConstExp vtable (Imp.var var bt) >>= \case
-            Just ce -> return $ Just $ Imp.ConstUse var ce
-            Nothing -> return $ Just $ Imp.ScalarUse var bt
+            Just ce -> pure $ Just $ Imp.ConstUse var ce
+            Nothing -> pure $ Just $ Imp.ScalarUse var bt
 
 isConstExp ::
   VTable GPUMem ->
@@ -1078,7 +1078,7 @@ isConstExp vtable size = do
       constExp (Op (Inner (SizeOp (GetSize key _)))) =
         Just $ LeafExp (Imp.SizeConst $ keyWithEntryPoint fname key) int32
       constExp e = primExpFromExp lookupConstExp e
-  return $ replaceInPrimExpM onLeaf size
+  pure $ replaceInPrimExpM onLeaf size
   where
     hasExp (ArrayVar e _) = e
     hasExp (AccVar e _) = e
@@ -1162,7 +1162,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
         sOp (Imp.GetLockstepWidth wave_size)
         sOp (Imp.GetGroupId group_id 0)
 
-  return (constants, set_constants)
+  pure (constants, set_constants)
 
 isActive :: [(VName, SubExp)] -> Imp.TExp Bool
 isActive limit = case actives of
@@ -1225,7 +1225,7 @@ groupReduceWithOffset offset w lam arrs = do
         | Prim _ <- paramType param =
             copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
         | otherwise =
-            return ()
+            pure ()
 
   let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
 
@@ -1541,7 +1541,7 @@ computeMapKernelGroups kernel_size = do
   let group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty $ tvVar group_size
   sOp $ Imp.GetSize (tvVar group_size) group_size_key Imp.SizeGroup
   num_groups <- dPrimV "num_groups" $ kernel_size `divUp` tvExp group_size
-  return (tvExp num_groups, tvExp group_size)
+  pure (tvExp num_groups, tvExp group_size)
 
 simpleKernelConstants ::
   Imp.TExp Int64 ->
@@ -1560,7 +1560,7 @@ simpleKernelConstants kernel_size desc = do
         sOp (Imp.GetLocalId thread_ltid 0)
         sOp (Imp.GetGroupId group_id 0)
 
-  return
+  pure
     ( KernelConstants
         (Imp.le32 thread_gtid)
         (Imp.le32 thread_ltid)
@@ -1805,7 +1805,7 @@ replicateForType bt = do
           IxFun.iota $ map pe64 $ shapeDims shape
       sReplicateKernel arr $ Var val
 
-  return fname
+  pure fname
 
 replicateIsFill :: VName -> SubExp -> CallKernelGen (Maybe (CallKernelGen ()))
 replicateIsFill arr v = do
@@ -1813,7 +1813,7 @@ replicateIsFill arr v = do
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | IxFun.isLinear arr_ixfun -> return $
+      | IxFun.isLinear arr_ixfun -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1824,7 +1824,7 @@ replicateIsFill arr v = do
                   Imp.ExpArg $ untyped $ product $ map toInt64Exp arr_shape,
                   Imp.ExpArg $ toExp' v_t' v
                 ]
-    _ -> return Nothing
+    _ -> pure Nothing
 
 -- | Perform a Replicate with a kernel.
 sReplicate :: VName -> SubExp -> CallKernelGen ()
@@ -1900,7 +1900,7 @@ iotaForType bt = do
           IxFun.iota $ map pe64 $ shapeDims shape
       sIotaKernel arr (sExt64 n') x' s' bt
 
-  return fname
+  pure fname
 
 -- | Perform an Iota with a kernel.
 sIota ::
@@ -2010,7 +2010,7 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
         tile_dim_start <-
           dPrimVE "tile_dim_start" $
             reg_tile * (group_tile * group_tile_i + reg_tile_i)
-        return $ DimSlice tile_dim_start reg_tile 1
+        pure $ DimSlice tile_dim_start reg_tile 1
   reg_tile_slices <-
     Slice
       <$> zipWithM
@@ -2082,5 +2082,5 @@ arrayInLocalMemory (Var name) = do
     ArrayVar _ entry ->
       (Space "local" ==) . entryMemSpace
         <$> lookupMemory (memLocName (entryArrayLoc entry))
-    _ -> return False
-arrayInLocalMemory Constant {} = return False
+    _ -> pure False
+arrayInLocalMemory Constant {} = pure False

@@ -54,21 +54,21 @@ injectSOACS ::
   Rephraser m from to
 injectSOACS f =
   Rephraser
-    { rephraseExpDec = return,
-      rephraseBodyDec = return,
-      rephraseLetBoundDec = return,
-      rephraseFParamDec = return,
-      rephraseLParamDec = return,
+    { rephraseExpDec = pure,
+      rephraseBodyDec = pure,
+      rephraseLetBoundDec = pure,
+      rephraseFParamDec = pure,
+      rephraseLParamDec = pure,
       rephraseOp = fmap f . onSOAC,
-      rephraseRetType = return,
-      rephraseBranchType = return
+      rephraseRetType = pure,
+      rephraseBranchType = pure
     }
   where
     onSOAC = SOAC.mapSOACM mapper
     mapper =
       SOAC.SOACMapper
-        { SOAC.mapOnSOACSubExp = return,
-          SOAC.mapOnSOACVName = return,
+        { SOAC.mapOnSOACSubExp = pure,
+          SOAC.mapOnSOACVName = pure,
           SOAC.mapOnSOACLambda = rephraseLambda $ injectSOACS f
         }
 

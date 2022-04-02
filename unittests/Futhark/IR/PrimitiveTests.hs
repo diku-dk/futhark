@@ -74,4 +74,4 @@ arbitraryPrimValOfType (FloatType Float16) = FloatValue . Float16Value <$> arbit
 arbitraryPrimValOfType (FloatType Float32) = FloatValue . Float32Value <$> arbitrary
 arbitraryPrimValOfType (FloatType Float64) = FloatValue . Float32Value <$> arbitrary
 arbitraryPrimValOfType Bool = BoolValue <$> arbitrary
-arbitraryPrimValOfType Unit = return UnitValue
+arbitraryPrimValOfType Unit = pure UnitValue

@@ -263,7 +263,7 @@ lookupAliases name vtable =
 lookupLoopVar :: VName -> SymbolTable rep -> Maybe SubExp
 lookupLoopVar name vtable = do
   LoopVar e <- entryType <$> M.lookup name (bindings vtable)
-  return $ loopVarBound e
+  pure $ loopVarBound e
 
 -- | Look up the initial value and eventual result of a loop
 -- parameter.  Note that the result almost certainly refers to
@@ -295,7 +295,7 @@ index name is table = do
   where
     asPrimExp i = do
       Prim t <- lookupSubExpType i table
-      return $ TPrimExp $ primExpFromSubExp t i
+      pure $ TPrimExp $ primExpFromSubExp t i
 
 index' ::
   VName ->
@@ -397,7 +397,7 @@ bindingEntries ::
   [LetBoundEntry rep]
 bindingEntries stm@(Let pat _ _) vtable = do
   pat_elem <- patElems pat
-  return $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) stm
+  pure $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) stm
 
 adjustSeveral :: Ord k => (v -> v) -> [k] -> M.Map k v -> M.Map k v
 adjustSeveral f = flip $ foldl' $ flip $ M.adjust f

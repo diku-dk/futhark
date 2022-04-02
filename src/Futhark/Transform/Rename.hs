@@ -61,7 +61,7 @@ renameProg prog = modifyNameSource $
   runRenamer $
     renamingStms (progConsts prog) $ \consts -> do
       funs <- mapM rename (progFuns prog)
-      return prog {progConsts = consts, progFuns = funs}
+      pure prog {progConsts = consts, progFuns = funs}
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the expression is unaffected, under the assumption that the
@@ -83,7 +83,7 @@ renameStm ::
   m (Stm rep)
 renameStm binding = do
   e <- renameExp $ stmExp binding
-  return binding {stmExp = e}
+  pure binding {stmExp = e}
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the body is unaffected, under the assumption that the body was
@@ -144,7 +144,7 @@ renamerSubstitutions = asks envNameMap
 substituteRename :: Substitute a => a -> RenameM a
 substituteRename x = do
   substs <- renamerSubstitutions
-  return $ substituteNames substs x
+  pure $ substituteNames substs x
 
 -- | Members of class 'Rename' can be uniquely renamed.
 class Rename a where
@@ -167,19 +167,19 @@ instance (Rename a, Rename b, Rename c) => Rename (a, b, c) where
     a' <- rename a
     b' <- rename b
     c' <- rename c
-    return (a', b', c')
+    pure (a', b', c')
 
 instance Rename a => Rename (Maybe a) where
-  rename = maybe (return Nothing) (fmap Just . rename)
+  rename = maybe (pure Nothing) (fmap Just . rename)
 
 instance Rename Bool where
-  rename = return
+  rename = pure
 
 instance Rename Ident where
   rename (Ident name tp) = do
     name' <- rename name
     tp' <- rename tp
-    return $ Ident name' tp'
+    pure $ Ident name' tp'
 
 -- | Rename variables in binding position.  The provided VNames are
 -- associated with new, fresh names in the renaming environment.
@@ -214,11 +214,11 @@ instance Renameable rep => Rename (FunDef rep) where
       params' <- mapM rename params
       body' <- rename body
       ret' <- rename ret
-      return $ FunDef entry attrs fname ret' params' body'
+      pure $ FunDef entry attrs fname ret' params' body'
 
 instance Rename SubExp where
   rename (Var v) = Var <$> rename v
-  rename (Constant v) = return $ Constant v
+  rename (Constant v) = pure $ Constant v
 
 instance Rename dec => Rename (Param dec) where
   rename (Param attrs name dec) =
@@ -271,7 +271,7 @@ instance Renameable rep => Rename (Exp rep) where
           arr_params' <- mapM rename arr_params
           i' <- rename i
           loopbody' <- rename loopbody
-          return $
+          pure $
             DoLoop
               (zip params' args')
               (ForLoop i' it boundexp' $ zip arr_params' loop_arrs')
@@ -281,7 +281,7 @@ instance Renameable rep => Rename (Exp rep) where
           params' <- mapM rename params
           loopbody' <- rename loopbody
           cond' <- rename cond
-          return $ DoLoop (zip params' args') (WhileLoop cond') loopbody'
+          pure $ DoLoop (zip params' args') (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where
       mapper =
@@ -301,7 +301,7 @@ instance Rename PrimType where
 
 instance Rename shape => Rename (TypeBase shape u) where
   rename (Array et size u) = Array <$> rename et <*> rename size <*> pure u
-  rename (Prim t) = return $ Prim t
+  rename (Prim t) = pure $ Prim t
   rename (Mem space) = pure $ Mem space
   rename (Acc acc ispace ts u) =
     Acc <$> rename acc <*> rename ispace <*> rename ts <*> pure u
@@ -312,23 +312,23 @@ instance Renameable rep => Rename (Lambda rep) where
       params' <- mapM rename params
       body' <- rename body
       ret' <- mapM rename ret
-      return $ Lambda params' body' ret'
+      pure $ Lambda params' body' ret'
 
 instance Rename Names where
   rename = fmap namesFromList . mapM rename . namesToList
 
 instance Rename Rank where
-  rename = return
+  rename = pure
 
 instance Rename d => Rename (ShapeBase d) where
   rename (Shape l) = Shape <$> mapM rename l
 
 instance Rename ExtSize where
   rename (Free se) = Free <$> rename se
-  rename (Ext x) = return $ Ext x
+  rename (Ext x) = pure $ Ext x
 
 instance Rename () where
-  rename = return
+  rename = pure
 
 instance Rename d => Rename (DimIndex d) where
   rename (DimFix i) = DimFix <$> rename i

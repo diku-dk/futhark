@@ -101,7 +101,7 @@ censorStms ::
 censorStms f m = do
   (x, stms) <- collectStms m
   addStms $ f stms
-  return x
+  pure x
 
 -- | Add the given attributes to any statements added by this action.
 attributing :: MonadBuilder m => Attrs -> m a -> m a

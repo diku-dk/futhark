@@ -521,24 +521,24 @@ numBad s x =
 -- errors.
 evalPrimExp :: (Pretty v, MonadFail m) => (v -> m PrimValue) -> PrimExp v -> m PrimValue
 evalPrimExp f (LeafExp v _) = f v
-evalPrimExp _ (ValueExp v) = return v
+evalPrimExp _ (ValueExp v) = pure v
 evalPrimExp f (BinOpExp op x y) = do
   x' <- evalPrimExp f x
   y' <- evalPrimExp f y
-  maybe (evalBad op (x, y)) return $ doBinOp op x' y'
+  maybe (evalBad op (x, y)) pure $ doBinOp op x' y'
 evalPrimExp f (CmpOpExp op x y) = do
   x' <- evalPrimExp f x
   y' <- evalPrimExp f y
-  maybe (evalBad op (x, y)) (return . BoolValue) $ doCmpOp op x' y'
+  maybe (evalBad op (x, y)) (pure . BoolValue) $ doCmpOp op x' y'
 evalPrimExp f (UnOpExp op x) = do
   x' <- evalPrimExp f x
-  maybe (evalBad op x) return $ doUnOp op x'
+  maybe (evalBad op x) pure $ doUnOp op x'
 evalPrimExp f (ConvOpExp op x) = do
   x' <- evalPrimExp f x
-  maybe (evalBad op x) return $ doConvOp op x'
+  maybe (evalBad op x) pure $ doConvOp op x'
 evalPrimExp f (FunExp h args _) = do
   args' <- mapM (evalPrimExp f) args
-  maybe (evalBad h args) return $ do
+  maybe (evalBad h args) pure $ do
     (_, _, fun) <- M.lookup h primFuns
     fun args'
 

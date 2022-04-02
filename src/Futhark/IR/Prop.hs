@@ -266,5 +266,5 @@ lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
       guard $ paramName xp == x
       guard $ paramName yp == y
       Prim t <- Just $ patElemType pe
-      return (op, t, paramName xp, paramName yp)
+      pure (op, t, paramName xp, paramName yp)
     splitStm _ = Nothing

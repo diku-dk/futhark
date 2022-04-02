@@ -286,7 +286,7 @@ pBasicOp =
           w <- pSubExp <* pComma
           x <- pVName
           ys <- many (pComma *> pVName)
-          return $ Concat d (x :| ys) w,
+          pure $ Concat d (x :| ys) w,
       pIota,
       try $
         flip Update

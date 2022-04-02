@@ -240,7 +240,7 @@ requiredInManifest p =
 removeRequiredFromManifest :: PkgPath -> PkgManifest -> Maybe (PkgManifest, Required)
 removeRequiredFromManifest p pm = do
   r <- requiredInManifest p pm
-  return
+  pure
     ( pm {manifestRequire = filter (not . matches) <$> manifestRequire pm},
       r
     )
@@ -264,7 +264,7 @@ pPkgManifest = do
       <|> pure []
   c3 <- pComments
   eof
-  return $ PkgManifest (Commented c1 p) (Commented c2 required) c3
+  pure $ PkgManifest (Commented c1 p) (Commented c2 required) c3
   where
     lexeme :: Parser a -> Parser a
     lexeme p = p <* space
@@ -312,7 +312,7 @@ parsePkgManifestFromFile f = do
   s <- T.readFile f
   case parsePkgManifest f s of
     Left err -> fail $ errorBundlePretty err
-    Right m -> return m
+    Right m -> pure m
 
 -- | A mapping from package paths to their chosen revisions.  This is
 -- the result of the version solver.

@@ -71,7 +71,7 @@ handleHostOp ::
   HostOp GPU (SOAC GPU) ->
   AllocM GPU GPUMem (MemOp (HostOp GPUMem ()))
 handleHostOp (SizeOp op) =
-  return $ Inner $ SizeOp op
+  pure $ Inner $ SizeOp op
 handleHostOp (OtherOp op) =
   error $ "Cannot allocate memory in SOAC: " ++ pretty op
 handleHostOp (SegOp op) =
@@ -83,7 +83,7 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
       ixfun = IxFun.permute (IxFun.iota $ map pe64 dims') perm_inv
-  return [Hint ixfun DefaultSpace]
+  pure [Hint ixfun DefaultSpace]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@SegThread {} space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
 kernelExpHints (Op (Inner (SegOp (SegRed lvl@SegThread {} space reds ts body)))) =
@@ -92,7 +92,7 @@ kernelExpHints (Op (Inner (SegOp (SegRed lvl@SegThread {} space reds ts body))))
     num_reds = segBinOpResults reds
     (red_res, map_res) = splitAt num_reds $ kernelBodyResult body
 kernelExpHints e =
-  return $ replicate (expExtTypeSize e) NoHint
+  pure $ replicate (expExtTypeSize e) NoHint
 
 mapResultHint ::
   SegLevel ->
@@ -116,17 +116,17 @@ mapResultHint lvl space = hint
           chunkmap <- asks chunkMap
           let space_dims = segSpaceDims space
               t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
-          return $ Hint (innermost space_dims t_dims) DefaultSpace
+          pure $ Hint (innermost space_dims t_dims) DefaultSpace
     hint t (ConcatReturns _ SplitStrided {} w _ _) = do
       chunkmap <- asks chunkMap
       let t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
-      return $ Hint (innermost [w] t_dims) DefaultSpace
+      pure $ Hint (innermost [w] t_dims) DefaultSpace
     hint Prim {} (ConcatReturns _ SplitContiguous w elems_per_thread _) = do
       let ixfun_base = IxFun.iota [sExt64 num_threads, pe64 elems_per_thread]
           ixfun_tr = IxFun.permute ixfun_base [1, 0]
           ixfun = IxFun.reshape ixfun_tr $ map (DimNew . pe64) [w]
-      return $ Hint ixfun DefaultSpace
-    hint _ _ = return NoHint
+      pure $ Hint ixfun DefaultSpace
+    hint _ _ = pure NoHint
 
 innermost :: [SubExp] -> [SubExp] -> IxFun
 innermost space_dims t_dims =

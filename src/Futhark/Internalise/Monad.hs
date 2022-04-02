@@ -125,7 +125,7 @@ lookupSubst :: VName -> InternaliseM (Maybe [SubExp])
 lookupSubst v = do
   env_substs <- asks $ M.lookup v . envSubsts
   const_substs <- gets $ M.lookup v . stateConstSubsts
-  return $ env_substs `mplus` const_substs
+  pure $ env_substs `mplus` const_substs
 
 -- | Add a function definition to the program being constructed.
 addFunDef :: FunDef SOACS -> InternaliseM ()
@@ -135,7 +135,7 @@ lookupFunction' :: VName -> InternaliseM (Maybe FunInfo)
 lookupFunction' fname = gets $ M.lookup fname . stateFunTable
 
 lookupFunction :: VName -> InternaliseM FunInfo
-lookupFunction fname = maybe bad return =<< lookupFunction' fname
+lookupFunction fname = maybe bad pure =<< lookupFunction' fname
   where
     bad = error $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
@@ -189,7 +189,7 @@ asserting m = do
   doBoundsChecks <- asks envDoBoundsChecks
   if doBoundsChecks
     then m
-    else return mempty
+    else pure mempty
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

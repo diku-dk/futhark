@@ -224,11 +224,11 @@ instance OpMetrics SizeOp where
 typeCheckSizeOp :: TC.Checkable rep => SizeOp -> TC.TypeM rep ()
 typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
   case o of
-    SplitContiguous -> return ()
+    SplitContiguous -> pure ()
     SplitStrided stride -> TC.require [Prim int64] stride
   mapM_ (TC.require [Prim int64]) [w, i, elems_per_thread]
-typeCheckSizeOp GetSize {} = return ()
-typeCheckSizeOp GetSizeMax {} = return ()
+typeCheckSizeOp GetSize {} = pure ()
+typeCheckSizeOp GetSizeMax {} = pure ()
 typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int64] x
 typeCheckSizeOp (CalcNumGroups w _ group_size) = do
   TC.require [Prim int64] w
@@ -344,7 +344,7 @@ checkSegLevel (Just x) y
   | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
       TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
   | otherwise =
-      return ()
+      pure ()
 
 typeCheckHostOp ::
   TC.Checkable rep =>

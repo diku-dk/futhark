@@ -55,22 +55,22 @@ data HostEnv = HostEnv
 type MulticoreGen = ImpM MCMem HostEnv Imp.Multicore
 
 segOpString :: SegOp () MCMem -> MulticoreGen String
-segOpString SegMap {} = return "segmap"
-segOpString SegRed {} = return "segred"
-segOpString SegScan {} = return "segscan"
-segOpString SegHist {} = return "seghist"
+segOpString SegMap {} = pure "segmap"
+segOpString SegRed {} = pure "segred"
+segOpString SegScan {} = pure "segscan"
+segOpString SegHist {} = pure "seghist"
 
 arrParam :: VName -> MulticoreGen Imp.Param
 arrParam arr = do
   name_entry <- lookupVar arr
   case name_entry of
     ArrayVar _ (ArrayEntry (MemLoc mem _ _) _) ->
-      return $ Imp.MemParam mem DefaultSpace
+      pure $ Imp.MemParam mem DefaultSpace
     _ -> error $ "arrParam: could not handle array " ++ show arr
 
 toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
-toParam name (Prim pt) = return [Imp.ScalarParam name pt]
-toParam name (Mem space) = return [Imp.MemParam name space]
+toParam name (Prim pt) = pure [Imp.ScalarParam name pt]
+toParam name (Mem space) = pure [Imp.MemParam name space]
 toParam name Array {} = pure <$> arrParam name
 toParam _name Acc {} = pure [] -- FIXME?  Are we sure this works?
 
@@ -91,16 +91,16 @@ getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64
 getIterationDomain SegMap {} space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
-  return $ product ns_64
+  pure $ product ns_64
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
   case unSegSpace space of
-    [_] -> return $ product ns_64
+    [_] -> pure $ product ns_64
     -- A segmented SegOp is over the segments
     -- so we drop the last dimension, which is
     -- executed sequentially
-    _ -> return $ product $ init ns_64
+    _ -> pure $ product $ init ns_64
 
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
@@ -114,13 +114,13 @@ getReturnParams pat SegRed {} =
       Prim pt -> patElemName pe <~~ ValueExp (blankPrimValue pt)
       _ -> pure ()
     toParam (patElemName pe) (patElemType pe)
-getReturnParams _ _ = return mempty
+getReturnParams _ _ = pure mempty
 
 renameSegBinOp :: [SegBinOp MCMem] -> MulticoreGen [SegBinOp MCMem]
 renameSegBinOp segbinops =
   forM segbinops $ \(SegBinOp comm lam ne shape) -> do
     lam' <- renameLambda lam
-    return $ SegBinOp comm lam' ne shape
+    pure $ SegBinOp comm lam' ne shape
 
 compileThreadResult ::
   SegSpace ->
@@ -254,7 +254,7 @@ renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
 renameHistOpLambda hist_ops =
   forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
     lam' <- renameLambda lam
-    return $ HistOp w rf dest neutral shape lam'
+    pure $ HistOp w rf dest neutral shape lam'
 
 -- | Locking strategy used for an atomic update.
 data Locking = Locking
@@ -455,8 +455,8 @@ supportedPrims _ = False
 
 -- Supported bytes lengths by GCC (and clang) compiler
 toIntegral :: Int -> MulticoreGen PrimType
-toIntegral 8 = return int8
-toIntegral 16 = return int16
-toIntegral 32 = return int32
-toIntegral 64 = return int64
+toIntegral 8 = pure int8
+toIntegral 16 = pure int16
+toIntegral 32 = pure int32
+toIntegral 64 = pure int64
 toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b

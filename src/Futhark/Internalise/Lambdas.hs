@@ -51,7 +51,7 @@ internaliseStreamMapLambda internaliseLambda lam args = do
     let orig_chunk_param : params = lam_params
     body <- runBodyBuilder $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
-      return orig_body
+      pure orig_body
     mkLambda (chunk_param : params) $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       ensureResultShape
@@ -117,7 +117,7 @@ internalisePartitionLambda internaliseLambda k lam args = do
   body' <-
     localScope (scopeOfLParams params) $
       lambdaWithIncrement body
-  return $ I.Lambda params body' rettype
+  pure $ I.Lambda params body' rettype
   where
     rettype = replicate (k + 2) $ I.Prim int64
     result i =
@@ -125,7 +125,7 @@ internalisePartitionLambda internaliseLambda k lam args = do
         fromIntegral i :
         (replicate i 0 ++ [1 :: Int64] ++ replicate (k - i) 0)
 
-    mkResult _ i | i >= k = return $ result i
+    mkResult _ i | i >= k = pure $ result i
     mkResult eq_class i = do
       is_i <-
         letSubExp "is_i" $

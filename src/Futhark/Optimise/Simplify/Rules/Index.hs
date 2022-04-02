@@ -129,7 +129,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
         ds' /= ds ->
           Just $ do
             arr <- letExp "smaller_replicate" $ BasicOp $ Replicate (Shape ds') v
-            return $ IndexResult cs arr $ Slice $ ds_inds' ++ rest_inds
+            pure $ IndexResult cs arr $ Slice $ ds_inds' ++ rest_inds
       where
         index DimFix {} = Nothing
         index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int64)) n s)
@@ -184,7 +184,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
 
           let add n m = do
                 added <- letSubExp "index_concat_add" $ BasicOp $ BinOp (Add Int64 OverflowWrap) n m
-                return (added, n)
+                pure (added, n)
           (_, starts) <- mapAccumLM add x_len xs_lens
           let xs_and_starts = reverse $ zip xs starts
 
@@ -222,7 +222,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
   where
     defOf v = do
       (BasicOp op, def_cs) <- ST.lookupExp v vtable
-      return (op, def_cs)
+      pure (op, def_cs)
     worthInlining e
       | primExpSizeAtLeast 20 e = False -- totally ad-hoc.
       | otherwise = worthInlining' e

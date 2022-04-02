@@ -86,9 +86,9 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
       | map resSubExp res == map Var (patNames pat) ->
           localScope (scopeOfLParams $ lambdaParams lam) $
             SOAC.fromExp e
-              >>= either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound')
+              >>= either (pure . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound')
     _ ->
-      return $ Right Nothing
+      pure $ Right Nothing
 
   case maybenest of
     -- Do we have a nested MapNest?
@@ -106,7 +106,7 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
                 nestingReturnType = typeOf mn,
                 nestingWidth = inner_w
               }
-      return $ Just $ MapNest w body' (n' : ns') inps''
+      pure $ Just $ MapNest w body' (n' : ns') inps''
     -- No nested MapNest it seems.
     _ -> do
       let isBound name
@@ -133,10 +133,10 @@ fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
                   lambdaParams lam
                     ++ [Param mempty name t | Ident name t <- newParams]
               }
-      return $ Just $ MapNest w lam' [] inps'
+      pure $ Just $ MapNest w lam' [] inps'
   where
     bound' = bound <> map paramIdent (lambdaParams lam)
-fromSOAC' _ _ = return Nothing
+fromSOAC' _ _ = pure Nothing
 
 toSOAC ::
   ( MonadFreshNames m,
@@ -148,21 +148,21 @@ toSOAC ::
   MapNest rep ->
   m (SOAC rep)
 toSOAC (MapNest w lam [] inps) =
-  return $ SOAC.Screma w (Futhark.mapSOAC lam) inps
+  pure $ SOAC.Screma w (Futhark.mapSOAC lam) inps
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
   let nparams = zipWith (Param mempty) npnames $ map SOAC.inputRowType inps
   body <- runBodyBuilder $
     localScope (scopeOfLParams nparams) $ do
       letBindNames nres =<< SOAC.toExp
         =<< toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
-      return $ resultBody $ map Var nres
+      pure $ resultBody $ map Var nres
   let outerlam =
         Lambda
           { lambdaParams = nparams,
             lambdaBody = body,
             lambdaReturnType = nrettype
           }
-  return $ SOAC.Screma w (Futhark.mapSOAC outerlam) inps
+  pure $ SOAC.Screma w (Futhark.mapSOAC outerlam) inps
 
 fixInputs ::
   MonadFreshNames m =>
@@ -178,7 +178,7 @@ fixInputs w ourInps = mapM inspect
       | Just (p, pInp) <- find (isParam v) ourInps = do
           let pInp' = SOAC.transformRows ts pInp
           p' <- newNameFromString $ baseString p
-          return (p', pInp')
+          pure (p', pInp')
     inspect (param, SOAC.Input ts a t) = do
       param' <- newNameFromString (baseString param ++ "_rep")
-      return (param', SOAC.Input (ts SOAC.|> SOAC.Replicate mempty (Shape [w])) a t)
+      pure (param', SOAC.Input (ts SOAC.|> SOAC.Replicate mempty (Shape [w])) a t)

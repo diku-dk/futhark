@@ -50,7 +50,7 @@ foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
 
   t <- case patTypes pat of
-    [Prim t] -> return t
+    [Prim t] -> pure t
     _ -> cannotSimplify
 
   closedBody <-
@@ -88,7 +88,7 @@ loopClosedForm ::
   RuleM rep ()
 loopClosedForm pat merge i it bound body = do
   t <- case patTypes pat of
-    [Prim t] -> return t
+    [Prim t] -> pure t
     _ -> cannotSimplify
 
   closedBody <-

@@ -125,14 +125,14 @@ instance Substitutable rep => Substitute (Body rep) where
 replace :: Substitutable rep => M.Map VName VName -> Mapper rep rep Identity
 replace substs =
   Mapper
-    { mapOnVName = return . substituteNames substs,
-      mapOnSubExp = return . substituteNames substs,
-      mapOnBody = const $ return . substituteNames substs,
-      mapOnRetType = return . substituteNames substs,
-      mapOnBranchType = return . substituteNames substs,
-      mapOnFParam = return . substituteNames substs,
-      mapOnLParam = return . substituteNames substs,
-      mapOnOp = return . substituteNames substs
+    { mapOnVName = pure . substituteNames substs,
+      mapOnSubExp = pure . substituteNames substs,
+      mapOnBody = const $ pure . substituteNames substs,
+      mapOnRetType = pure . substituteNames substs,
+      mapOnBranchType = pure . substituteNames substs,
+      mapOnFParam = pure . substituteNames substs,
+      mapOnLParam = pure . substituteNames substs,
+      mapOnOp = pure . substituteNames substs
     }
 
 instance Substitute Rank where
