@@ -289,7 +289,7 @@ generateConfigFuns sizes = do
                          return 1;
                        }|]
     )
-  return cfg
+  pure cfg
 
 generateContextFuns ::
   String ->

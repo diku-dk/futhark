@@ -678,9 +678,9 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
                         clGetDeviceInfo(ctx->device, $id:s',
                                         sizeof($id:v), &$id:v,
                                         NULL);|]
-        Just _ -> return ()
+        Just _ -> pure ()
 
-      return [C.cexp|$id:v|]
+      pure [C.cexp|$id:v|]
 
 -- Output size information if logging is enabled.
 --

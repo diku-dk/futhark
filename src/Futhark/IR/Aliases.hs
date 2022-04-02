@@ -179,14 +179,14 @@ resultAliasComment name als =
 removeAliases :: CanBeAliased (Op rep) => Rephraser Identity (Aliases rep) rep
 removeAliases =
   Rephraser
-    { rephraseExpDec = return . snd,
-      rephraseLetBoundDec = return . snd,
-      rephraseBodyDec = return . snd,
-      rephraseFParamDec = return,
-      rephraseLParamDec = return,
-      rephraseRetType = return,
-      rephraseBranchType = return,
-      rephraseOp = return . removeOpAliases
+    { rephraseExpDec = pure . snd,
+      rephraseLetBoundDec = pure . snd,
+      rephraseBodyDec = pure . snd,
+      rephraseFParamDec = pure,
+      rephraseLParamDec = pure,
+      rephraseRetType = pure,
+      rephraseBranchType = pure,
+      rephraseOp = pure . removeOpAliases
     }
 
 -- | Remove alias information from an aliased scope.
@@ -237,7 +237,7 @@ removeLambdaAliases = runIdentity . rephraseLambda removeAliases
 removePatAliases ::
   Pat (AliasDec, a) ->
   Pat a
-removePatAliases = runIdentity . rephrasePat (return . snd)
+removePatAliases = runIdentity . rephrasePat (pure . snd)
 
 -- | Augment a body decoration with aliasing information provided by
 -- the statements and result of that body.
@@ -372,7 +372,7 @@ instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
     env <- asksScope removeScopeAliases
     flip runReaderT env $ do
       Let pat dec _ <- mkLetNames names $ removeExpAliases e
-      return $ mkAliasedLetStm pat dec e
+      pure $ mkAliasedLetStm pat dec e
 
   mkBody stms res =
     let Body bodyrep _ _ = mkBody (fmap removeStmAliases stms) res

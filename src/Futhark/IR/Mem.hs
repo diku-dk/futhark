@@ -359,7 +359,7 @@ instance
   Engine.Simplifiable (MemInfo d u ret)
   where
   simplify (MemPrim bt) =
-    return $ MemPrim bt
+    pure $ MemPrim bt
   simplify (MemMem space) =
     pure $ MemMem space
   simplify (MemArray bt shape u ret) =
@@ -573,16 +573,16 @@ matchFunctionReturnType rettype result = do
   mapM_ (checkResultSubExp . resSubExp) result
   where
     checkResultSubExp Constant {} =
-      return ()
+      pure ()
     checkResultSubExp (Var v) = do
       dec <- varMemInfo v
       case dec of
-        MemPrim _ -> return ()
-        MemMem {} -> return ()
-        MemAcc {} -> return ()
+        MemPrim _ -> pure ()
+        MemMem {} -> pure ()
+        MemAcc {} -> pure ()
         MemArray _ _ _ (ArrayIn _ ixfun)
           | IxFun.isLinear ixfun ->
-              return ()
+              pure ()
           | otherwise ->
               TC.bad $
                 TC.TypeError $
@@ -677,15 +677,15 @@ matchReturnType rettype res ts = do
       fetchCtx i = case maybeNth i $ zip res ts of
         Nothing ->
           throwError $ "Cannot find variable #" ++ show i ++ " in results: " ++ pretty res
-        Just (se, t) -> return (se, t)
+        Just (se, t) -> pure (se, t)
 
       checkReturn (MemPrim x) (MemPrim y)
-        | x == y = return ()
+        | x == y = pure ()
       checkReturn (MemMem x) (MemMem y)
-        | x == y = return ()
+        | x == y = pure ()
       checkReturn (MemAcc xacc xispace xts _) (MemAcc yacc yispace yts _)
         | (xacc, xispace, xts) == (yacc, yispace, yts) =
-            return ()
+            pure ()
       checkReturn
         (MemArray x_pt x_shape _ x_ret)
         (MemArray y_pt y_shape _ y_ret)
@@ -697,7 +697,7 @@ matchReturnType rettype res ts = do
         throwError $ unwords ["Expected", pretty x, "but got", pretty y]
 
       checkDim (Free x) y
-        | x == y = return ()
+        | x == y = pure ()
         | otherwise =
             throwError $ unwords ["Expected dim", pretty x, "but got", pretty y]
       checkDim (Ext i) y = do
@@ -757,7 +757,7 @@ matchReturnType rettype res ts = do
                 </> indent 2 (ppTuple' ts)
                 </> text s
 
-  either bad return =<< runExceptT (zipWithM_ checkReturn rettype ts)
+  either bad pure =<< runExceptT (zipWithM_ checkReturn rettype ts)
 
 matchPatToExp ::
   (Mem rep inner, LetDec rep ~ LetDecMem, TC.Checkable rep) =>
@@ -837,11 +837,11 @@ lookupMemInfo ::
 lookupMemInfo = fmap nameInfoToMemInfo . lookupInfo
 
 subExpMemInfo ::
-  (HasScope rep m, Monad m, Mem rep inner) =>
+  (HasScope rep m, Mem rep inner) =>
   SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
 subExpMemInfo (Var v) = lookupMemInfo v
-subExpMemInfo (Constant v) = return $ MemPrim $ primValueType v
+subExpMemInfo (Constant v) = pure $ MemPrim $ primValueType v
 
 lookupArraySummary ::
   (Mem rep inner, HasScope rep m, Monad m) =>
@@ -851,7 +851,7 @@ lookupArraySummary name = do
   summary <- lookupMemInfo name
   case summary of
     MemArray _ _ _ (ArrayIn mem ixfun) ->
-      return (mem, ixfun)
+      pure (mem, ixfun)
     _ ->
       error $
         "Expected " ++ pretty name ++ " to be array but bound to:\n"
@@ -862,16 +862,16 @@ checkMemInfo ::
   VName ->
   MemInfo SubExp u MemBind ->
   TC.TypeM rep ()
-checkMemInfo _ (MemPrim _) = return ()
+checkMemInfo _ (MemPrim _) = pure ()
 checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int64]) d
-checkMemInfo _ (MemMem _) = return ()
+checkMemInfo _ (MemMem _) = pure ()
 checkMemInfo _ (MemAcc acc ispace ts u) =
   TC.checkType $ Acc acc ispace ts u
 checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
   t <- lookupType v
   case t of
     Mem {} ->
-      return ()
+      pure ()
     _ ->
       TC.bad $
         TC.TypeError $
@@ -926,21 +926,21 @@ extReturns ets =
   evalState (mapM addDec ets) 0
   where
     addDec (Prim bt) =
-      return $ MemPrim bt
+      pure $ MemPrim bt
     addDec (Mem space) =
-      return $ MemMem space
+      pure $ MemMem space
     addDec t@(Array bt shape u)
       | existential t = do
           i <- get <* modify (+ 1)
-          return $
+          pure $
             MemArray bt shape u $
               Just $
                 ReturnsNewBlock DefaultSpace i $
                   IxFun.iota $ map convert $ shapeDims shape
       | otherwise =
-          return $ MemArray bt shape u Nothing
+          pure $ MemArray bt shape u Nothing
     addDec (Acc acc ispace ts u) =
-      return $ MemAcc acc ispace ts u
+      pure $ MemAcc acc ispace ts u
     convert (Ext i) = le64 (Ext i)
     convert (Free v) = Free <$> pe64 v
 
@@ -952,7 +952,7 @@ arrayVarReturns v = do
   summary <- lookupMemInfo v
   case summary of
     MemArray et shape _ (ArrayIn mem ixfun) ->
-      return (et, Shape $ shapeDims shape, mem, ixfun)
+      pure (et, Shape $ shapeDims shape, mem, ixfun)
     _ ->
       error $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
@@ -964,15 +964,15 @@ varReturns v = do
   summary <- lookupMemInfo v
   case summary of
     MemPrim bt ->
-      return $ MemPrim bt
+      pure $ MemPrim bt
     MemArray et shape _ (ArrayIn mem ixfun) ->
-      return $
+      pure $
         MemArray et (fmap Free shape) NoUniqueness $
           Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
     MemMem space ->
-      return $ MemMem space
+      pure $ MemMem space
     MemAcc acc ispace ts u ->
-      return $ MemAcc acc ispace ts u
+      pure $ MemAcc acc ispace ts u
 
 subExpReturns :: (HasScope rep m, Monad m, Mem rep inner) => SubExp -> m ExpReturns
 subExpReturns (Var v) =
@@ -995,7 +995,7 @@ expReturns (BasicOp (Opaque _ (Var v))) =
   pure <$> varReturns v
 expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
-  return
+  pure
     [ MemArray et (Shape $ map (Free . newDim) newshape) NoUniqueness $
         Just $
           ReturnsInBlock mem $
@@ -1006,7 +1006,7 @@ expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm
       dims' = rearrangeShape perm dims
-  return
+  pure
     [ MemArray et (Shape $ map Free dims') NoUniqueness $
         Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
     ]
@@ -1014,7 +1014,7 @@ expReturns (BasicOp (Rotate offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let offsets' = map pe64 offsets
       ixfun' = IxFun.rotate ixfun offsets'
-  return
+  pure
     [ MemArray et (Shape $ map Free dims) NoUniqueness $
         Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
     ]
@@ -1039,25 +1039,25 @@ expReturns e@(DoLoop merge _ _) = do
           )
             | Just (i, mem_p) <- isMergeVar mem,
               Mem space <- paramType mem_p ->
-                return $ MemArray pt shape u $ Just $ ReturnsNewBlock space i ixfun'
+                pure $ MemArray pt shape u $ Just $ ReturnsNewBlock space i ixfun'
             | otherwise ->
-                return $ MemArray pt shape u $ Just $ ReturnsInBlock mem ixfun'
+                pure $ MemArray pt shape u $ Just $ ReturnsInBlock mem ixfun'
             where
               ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
         (Array {}, _) ->
           error "expReturns: Array return type but not array merge variable."
         (Acc acc ispace ts u, _) ->
-          return $ MemAcc acc ispace ts u
+          pure $ MemAcc acc ispace ts u
         (Prim pt, _) ->
-          return $ MemPrim pt
+          pure $ MemPrim pt
         (Mem space, _) ->
           pure $ MemMem space
     isMergeVar v = find ((== v) . paramName . snd) $ zip [0 ..] mergevars
     mergevars = map fst merge
 expReturns (Apply _ _ ret _) =
-  return $ map funReturnsToExpReturns ret
+  pure $ map funReturnsToExpReturns ret
 expReturns (If _ _ _ (IfDec ret _)) =
-  return $ map bodyReturnsToExpReturns ret
+  pure $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =
   opReturns op
 expReturns (WithAcc inputs lam) =
@@ -1079,9 +1079,9 @@ sliceInfo ::
 sliceInfo v slice = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   case sliceDims slice of
-    [] -> return $ MemPrim et
+    [] -> pure $ MemPrim et
     dims ->
-      return $
+      pure $
         MemArray et (Shape dims) NoUniqueness . ArrayIn mem $
           IxFun.slice ixfun (fmap pe64 slice)
 

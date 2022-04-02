@@ -117,7 +117,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
         valBindEntryPoint = Nothing
       }
 
-  return $
+  pure $
     apply
       (Var (qualName fname) (Info (augType $ free_dims ++ free_nondims)) mempty)
       $ free_dims ++ free_nondims

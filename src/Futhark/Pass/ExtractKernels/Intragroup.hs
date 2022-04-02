@@ -125,7 +125,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
           Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
-  return
+  pure
     ( (intra_min_par, intra_avail_par),
       Var group_size,
       log,
@@ -325,7 +325,7 @@ intraGroupParalleliseBody ::
 intraGroupParalleliseBody lvl body = do
   (IntraAcc min_ws avail_ws log, kstms) <-
     runIntraGroupM $ intraGroupStms lvl $ bodyStms body
-  return
+  pure
     ( S.toList min_ws,
       S.toList avail_ws,
       log,

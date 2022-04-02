@@ -82,11 +82,11 @@ analyzeHostOp m (SegOp (SegScan _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m (SegOp (SegHist _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
-analyzeHostOp _ _ = return mempty
+analyzeHostOp _ _ = pure mempty
 
 analyzeStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => MemAliases -> Stm rep -> MemAliasesM inner MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
-  return $ m <> singleton vname mempty
+  pure $ m <> singleton vname mempty
 analyzeStm m (Let _ _ (Op (Inner inner))) = do
   on_inner <- asks onInner
   on_inner m inner
@@ -98,7 +98,7 @@ analyzeStm m (Let pat _ (If _ then_body else_body _)) = do
     <> zip (patNames pat) (map resSubExp $ bodyResult else_body)
     & mapMaybe (filterFun m')
     & foldr (uncurry addAlias) m'
-    & return
+    & pure
 analyzeStm m (Let pat _ (DoLoop params _ body)) = do
   let m_init =
         map snd params
@@ -112,8 +112,8 @@ analyzeStm m (Let pat _ (DoLoop params _ body)) = do
   zip (patNames pat) (map resSubExp $ bodyResult body)
     & mapMaybe (filterFun m_body)
     & foldr (uncurry addAlias) m_body
-    & return
-analyzeStm m _ = return m
+    & pure
+analyzeStm m _ = pure m
 
 filterFun :: MemAliases -> (VName, SubExp) -> Maybe (VName, VName)
 filterFun m' (v, Var v') | v' `isIn` m' = Just (v, v')
@@ -145,7 +145,7 @@ transitiveClosure ma@(MemAliases m) =
     <> ma
 
 analyzeSeqMem :: Prog SeqMem -> MemAliases
-analyzeSeqMem prog = completeBijection $ runReader (analyze prog) $ Env $ \x _ -> return x
+analyzeSeqMem prog = completeBijection $ runReader (analyze prog) $ Env $ \x _ -> pure x
 
 analyzeGPUMem :: Prog GPUMem -> MemAliases
 analyzeGPUMem prog = completeBijection $ runReader (analyze prog) $ Env analyzeHostOp

@@ -115,7 +115,7 @@ irwim res_pat w comm red_fun red_input
         case irwim red_pat w comm red_fun' red_input' of
           Nothing -> do
             reduce_soac <- reduceSOAC [Reduce comm red_fun' $ map fst red_input']
-            return $
+            pure $
               mkBody
                 ( oneStm $
                     Let red_pat (defAux ()) $
@@ -124,7 +124,7 @@ irwim res_pat w comm red_fun red_input
                 $ varsRes $ patNames map_pat
           Just m -> localScope (scopeOfLParams map_params) $ do
             map_body_stms <- collectStms_ m
-            return $ mkBody map_body_stms $ varsRes $ patNames map_pat
+            pure $ mkBody map_body_stms $ varsRes $ patNames map_pat
 
       let map_fun' = Lambda map_params map_body map_rettype
 
