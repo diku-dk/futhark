@@ -9,7 +9,7 @@ where
 
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
-import Futhark.Compiler.Program (ProgramError (ProgramError))
+import Futhark.Compiler.Program (ProgError (ProgError))
 import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf)
 import Futhark.Util.Pretty (Doc, pretty)
 import Language.LSP.Diagnostics (partitionBySource)
@@ -36,10 +36,10 @@ warningsToDiagnostics =
         mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (T.pack $ pretty msg)
     )
 
-errorToDiagnostics :: NE.NonEmpty ProgramError -> [Diagnostic]
+errorToDiagnostics :: NE.NonEmpty ProgError -> [Diagnostic]
 errorToDiagnostics prog_error = map onError (NE.toList prog_error)
   where
-    onError (ProgramError loc msg) = mkDiagnostic (rangeFromLoc loc) DsError (T.pack $ pretty msg)
+    onError (ProgError loc msg) = mkDiagnostic (rangeFromLoc loc) DsError (T.pack $ pretty msg)
 
 -- the ending appears to be one col too short
 rangeFromSrcLoc :: SrcLoc -> Range
