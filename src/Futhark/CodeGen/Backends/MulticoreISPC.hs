@@ -331,11 +331,12 @@ compileOp (ISPCKernel body free) = do
     }|]
 
 compileOp (ForEach i bound body) = do
+  let body' = uniformize (oneName i) body
   bound' <- GC.compileExp bound
-  body' <- GC.collect $ compileCodeISPC Imp.Varying body
+  body'' <- GC.collect $ compileCodeISPC Imp.Varying body'
   GC.stm [C.cstm|
     foreach ($id:i = 0 ... extract($exp:bound', 0)) {
-      $items:body'
+      $items:body''
     }|]
 
 compileOp (ForEachActive name body) = do
@@ -352,5 +353,9 @@ compileOp (ExtractLane dest tar lane) = do
 
 compileOp (VariabilityBlock vari code) = do
   compileCodeISPC vari code
+
+compileOp (DeclareScalarVari name vari t) = do
+  let ct = GC.primTypeToCType t
+  GC.decl [C.cdecl|$tyquals:(GC.variQuals vari) $ty:ct $id:name;|]
 
 compileOp op = MC.compileOp op
