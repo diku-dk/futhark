@@ -60,14 +60,15 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
     -- Are we only working on scalars
     let scalars = all (all (isScalar . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (==[]) dims
     -- Do we have nested vector operations
-    --let vectorized = all (/=[]) dims
-    scanStage1 scalars pat space scan_ops kbody
+    let vectorized = all (/=[]) dims
+    scanStage1 vectorized scalars pat space scan_ops kbody
+    
     let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do
       scan_ops2 <- renameSegBinOp scan_ops
       scanStage2 pat nsubtasks space scan_ops2 kbody
       scan_ops3 <- renameSegBinOp scan_ops
-      scanStage3 scalars pat space scan_ops3 kbody
+      scanStage3 vectorized scalars pat space scan_ops3 kbody
 
 -- Given a boolean indicating if we are generating a kernel, give a function
 -- to inject into the loop the body
@@ -81,12 +82,19 @@ getExtract :: Bool -> Imp.TExp Int64 -> MulticoreGen Imp.MCCode -> MulticoreGen 
 getExtract True = extractVectorLane
 getExtract False = \_ body -> body >>= emit
 
+getNestLoop :: Bool
+  -> Shape
+  -> ([Imp.TExp Int64] -> MulticoreGen ())
+  -> MulticoreGen ()
+getNestLoop True = sLoopNestVectorized
+getNestLoop False = sLoopNest
 -- Generate a loop which performs a potentially vectorized scan.
 -- The @kernel@ flag controls indicates whether we are generating code
 -- for an external kernel, and @mapout@ indicates whether this loop
 -- is fused with a map.
 genScanLoop ::
-  Pat LetDecMem
+  Bool
+  -> Pat LetDecMem
   -> SegSpace
   -> KernelBody MCMem
   -> [SegBinOp MCMem]
@@ -95,7 +103,7 @@ genScanLoop ::
   -> Bool
   -> Imp.TExp Int64
   -> ImpM MCMem HostEnv Imp.Multicore ()
-genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
+genScanLoop vectorized pat space kbody scan_ops local_accs mapout kernel i = do
   let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res = segBinOpChunks scan_ops all_scan_res
       per_scan_pes = segBinOpChunks scan_ops $ patElems pat
@@ -111,7 +119,7 @@ genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
           let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
           zipWithM_ (compileThreadResult space) map_arrs map_res
       forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
-        sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+        getNestLoop vectorized (segBinOpShape scan_op) $ \vec_is -> do
           -- Read accum value
           forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
             copyDWIMFix (paramName p) [] (Var acc') vec_is
@@ -130,12 +138,13 @@ genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
 
 scanStage1 ::
   Bool ->
+  Bool ->
   Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   MulticoreGen ()
-scanStage1 kernel pat space scan_ops kbody = do
+scanStage1 vectorized kernel pat space scan_ops kbody = do
   -- Stage 1 : each thread partially scans a chunk of the input
   -- Writes directly to the resulting array
 
@@ -163,7 +172,7 @@ scanStage1 kernel pat space scan_ops kbody = do
 
     (if kernel then inISPC else id) $ do
       generateChunkLoop "SegScan" kernel $
-        genScanLoop pat space kbody scan_ops local_accs True kernel
+        genScanLoop vectorized pat space kbody scan_ops local_accs True kernel
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
@@ -228,12 +237,13 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
 --           reading its corresponding carry-in
 scanStage3 ::
   Bool ->
+  Bool ->
   Pat LetDecMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   MulticoreGen ()
-scanStage3 kernel pat space scan_ops kbody = do
+scanStage3 vectorized kernel pat space scan_ops kbody = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
   body <- collect $ do
     dPrim_ (segFlat space) int64
@@ -264,7 +274,7 @@ scanStage3 kernel pat space scan_ops kbody = do
 
     (if kernel then inISPC else id) $ do
       generateChunkLoop "SegScan" kernel $
-        genScanLoop pat space kbody scan_ops local_accs False kernel
+        genScanLoop vectorized pat space kbody scan_ops local_accs False kernel
 
   free_params' <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
