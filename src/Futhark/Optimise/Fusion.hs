@@ -24,7 +24,7 @@ import qualified Futhark.IR.SOACS as Futhark
 import Futhark.Pass
 --import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (splitAt3)
+import Futhark.Util (splitAt3, chunk)
 
 import Futhark.Optimise.GraphRep
 import qualified Data.Graph.Inductive.Query.DFS as Q
@@ -44,6 +44,7 @@ import Debug.Trace
 import Data.Foldable (foldlM)
 import Control.Monad.State
 import Futhark.IR.SOACS.SOAC (SOAC(Screma))
+import Futhark.Transform.Rename (renameLambda)
 
 
 -- unofficial TODO
@@ -143,7 +144,7 @@ linearizeGraph :: DepGraph -> [Stm SOACS]
 linearizeGraph g = concatMap stmFromNode $ reverse $ Q.topsort' g
 
 doAllFusion :: DepGraphAug
-doAllFusion = applyAugs [keepTrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, makeCopiesOfConsAliased, runInnerFusion]
+doAllFusion = testingTurnToStream--applyAugs [keepTrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, makeCopiesOfConsAliased, runInnerFusion]
 
 -- doInnerFusion :: DepGraphAug
 -- doInnerFusion g = pure g
@@ -748,3 +749,51 @@ makeCopiesOfConsAliased = mapAcross copyAlised
 -- Problems with copying fusion
 -- need new Cons-edges + fake edges
 --
+
+testingTurnToStream :: DepGraphAug
+testingTurnToStream = mapAcross toStream
+  where
+    toStream :: DepContext -> FusionEnvM DepContext
+    toStream ctx@(incoming, n, nodeT, outputs) = case nodeT of
+      SNode (Let sz inputs (Op soac)) at -> do
+        res <- soacToStream soac
+        case res of
+          Nothing -> pure ctx
+          Just stream ->
+            let nodeT2 = SNode (Let sz inputs (Op stream)) at
+            in pure (incoming, n, nodeT2, outputs)
+      _ -> pure ctx
+
+
+
+
+
+soacToStream :: SOAC SOACS -> FusionEnvM (Maybe (SOAC SOACS))
+soacToStream soac = do
+  chunk_param <- newParam "chunk" $ Prim int64
+  let chvar = Futhark.Var $ paramName chunk_param
+  case soac of
+    Futhark.Screma sz inNames sform
+      | Just lam <- isMapSOAC sform -> do
+        -- lam' <- renameLambda lam
+        let empty_lam = Lambda [] (mkBody mempty []) []
+
+        let new_out_types =  [arrayOfRow t chvar | t <- lambdaReturnType lam]
+
+        let paramTypes = map paramType (lambdaParams lam)
+        let new_in_types =  [arrayOfRow t chvar | t <- paramTypes]
+        newParams <- mapM (newParam "inp") new_in_types
+        let new_lam_params = chunk_param : newParams
+
+        strm_resids <- mapM (newIdent "res") new_out_types
+        -- strm_inpids <- mapM (newParam "inp" . paramName) (lambdaParams lam)
+        -- -- let strm_inpids' = [arrayOfRow t chvar | t <- strm_inpids]
+        -- -- (map paramName strm_inpids)
+
+        let stm = mkLet strm_resids (Op (Futhark.Screma chvar (map paramName newParams) (mapSOAC lam))) :: Stm SOACS
+        let newBody = mkBody (oneStm stm) $ map (subExpRes . Futhark.Var . identName) strm_resids
+
+        let new_outer_lam = Lambda new_lam_params newBody new_out_types
+
+        pure $ Just $ Futhark.Stream sz inNames (Parallel Disorder Commutative empty_lam) [] new_outer_lam
+    _ -> pure Nothing
