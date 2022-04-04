@@ -16,7 +16,7 @@ import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Core (locStr)
 import Language.Futhark.Query
   ( AtPos (AtName),
-    BoundTo (BoundModule, BoundModuleType, BoundTerm, BoundType),
+    BoundTo (BoundTerm),
     atPos,
     boundLoc,
   )
@@ -31,12 +31,8 @@ getHoverInfoFromState state (Just path) l c = do
         Nothing -> Nothing
         Just (BoundTerm t defloc) -> do
           Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
-        Just (BoundType defloc) ->
-          Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
-        Just (BoundModule defloc) ->
-          Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
-        Just (BoundModuleType defloc) ->
-          Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
+        Just bound ->
+          Just $ T.pack $ "Definition: " ++ locStr (boundLoc bound)
 getHoverInfoFromState _ _ _ _ = Nothing
 
 findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Range

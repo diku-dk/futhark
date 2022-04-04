@@ -55,8 +55,7 @@ goToDefinitionHandler state_mvar = requestHandler STextDocumentDefinition $ \req
       Position l c = pos
       file_path = uriToFilePath $ doc ^. uri
   state <- tryTakeStateFromMVar state_mvar file_path
-  let maybe_range = findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1)
-  case maybe_range of
+  case findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1) of
     Nothing -> responder $ Right $ InR $ InL $ List []
     Just range -> responder $ Right $ InL $ Location (doc ^. uri) range
 
