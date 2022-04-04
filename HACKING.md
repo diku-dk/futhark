@@ -9,6 +9,8 @@ depending on your preference of build system.
 * [Reference documentation for the latest
   release](http://hackage.haskell.org/package/futhark)
 
+* [Haskell style guide](STYLE.md)
+
 If you feel that the documentation is incomplete, or something lacks
 an explanation, then feel free to [report it as an
 issue](https://github.com/diku-dk/futhark/issues). Documentation bugs
