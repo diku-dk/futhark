@@ -154,7 +154,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
     Nothing -> do
       -- Load the builtins through the type checker.
       prog <-
-        badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [])
+        badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [] Nothing)
       -- Then into the interpreter.
       ienv <-
         foldM
@@ -167,7 +167,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
 
       pure (prog, tenv, ienv')
     Just file -> do
-      prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file])
+      prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file] Nothing)
       liftIO $ putStrLn $ pretty $ lpWarnings prog
 
       ienv <-
@@ -264,7 +264,7 @@ onDec d = do
       files = map (T.includeToFilePath . mkImport) $ decImports d
 
   cur_prog <- gets futharkiProg
-  imp_r <- liftIO $ extendProg cur_prog files
+  imp_r <- liftIO $ extendProg cur_prog files Nothing
   case imp_r of
     Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgErrors e
     Right prog -> do
@@ -296,15 +296,15 @@ onExp e = do
     (_, Left err) -> liftIO $ putStrLn $ pretty err
     (_, Right (tparams, e'))
       | null tparams -> do
-          r <- runInterpreter $ I.interpretExp ienv e'
-          case r of
-            Left err -> liftIO $ print err
-            Right v -> liftIO $ putStrLn $ pretty v
+        r <- runInterpreter $ I.interpretExp ienv e'
+        case r of
+          Left err -> liftIO $ print err
+          Right v -> liftIO $ putStrLn $ pretty v
       | otherwise -> liftIO $ do
-          putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
-          putStrLn $
-            "The following types are ambiguous: "
-              ++ intercalate ", " (map (prettyName . typeParamName) tparams)
+        putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
+        putStrLn $
+          "The following types are ambiguous: "
+            ++ intercalate ", " (map (prettyName . typeParamName) tparams)
 
 prettyBreaking :: Breaking -> String
 prettyBreaking b =
@@ -441,15 +441,15 @@ frameCommand which = do
   case (maybe_stack, readMaybe $ T.unpack which) of
     (Just stack, Just i)
       | frame : _ <- NE.drop i stack -> do
-          let breaking = Breaking stack i
-              ctx = I.stackFrameCtx frame
-              tenv = I.typeCheckerEnv $ I.ctxEnv ctx
-          modify $ \s ->
-            s
-              { futharkiEnv = (tenv, ctx),
-                futharkiBreaking = Just breaking
-              }
-          liftIO $ putStrLn $ prettyBreaking breaking
+        let breaking = Breaking stack i
+            ctx = I.stackFrameCtx frame
+            tenv = I.typeCheckerEnv $ I.ctxEnv ctx
+        modify $ \s ->
+          s
+            { futharkiEnv = (tenv, ctx),
+              futharkiBreaking = Just breaking
+            }
+        liftIO $ putStrLn $ prettyBreaking breaking
     (Just _, _) ->
       liftIO $ putStrLn $ "Invalid stack index: " ++ T.unpack which
     (Nothing, _) ->
@@ -462,9 +462,9 @@ cdCommand :: Command
 cdCommand dir
   | T.null dir = liftIO $ putStrLn "Usage: ':cd <dir>'."
   | otherwise =
-      liftIO $
-        setCurrentDirectory (T.unpack dir)
-          `catch` \(err :: IOException) -> print err
+    liftIO $
+      setCurrentDirectory (T.unpack dir)
+        `catch` \(err :: IOException) -> print err
 
 helpCommand :: Command
 helpCommand _ = liftIO $
