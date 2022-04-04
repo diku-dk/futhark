@@ -8,6 +8,7 @@ module Futhark.LSP.Tool
   )
 where
 
+import Data.List (isPrefixOf)
 import qualified Data.Text as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.State (State (..))
@@ -37,14 +38,19 @@ getHoverInfoFromState _ _ _ _ = Nothing
 
 findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Range
 findDefinitionRange state (Just path) l c = do
-  -- some unnessecary operations inside `queryAtPos` for this functionality
+  -- some unnessecary operations inside `queryAtPos` for this function
   -- but shouldn't affect performance much since "Go to definition" is called less fequently
   case queryAtPos state $ Pos path l c 0 of
     Nothing -> Nothing
     Just (AtName _qn def _loc) -> do
       case def of
         Nothing -> Nothing
-        Just def' -> Just $ rangeFromLoc (boundLoc def')
+        Just bound -> do
+          let loc = boundLoc bound
+              Loc (Pos file_path _ _ _) _ = loc
+          if isBuiltin file_path -- TODO: discuss wether to bundle prelude
+            then Nothing
+            else Just $ rangeFromLoc loc
 findDefinitionRange _ _ _ _ = Nothing
 
 queryAtPos :: State -> Pos -> Maybe AtPos
@@ -52,6 +58,10 @@ queryAtPos state pos =
   case stateProgram state of
     Nothing -> Nothing
     Just loaded_prog -> atPos (lpImports loaded_prog) pos
+
+-- TODO: Delete on #1623
+isBuiltin :: String -> Bool
+isBuiltin = ("/prelude/" `isPrefixOf`)
 
 -- the ending appears to be one col too short
 rangeFromSrcLoc :: SrcLoc -> Range
