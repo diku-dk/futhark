@@ -7,7 +7,6 @@ import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Compiler
-import Futhark.Util (isBuiltin)
 import Futhark.Util.Loc
 import Futhark.Util.Options
 import Language.Futhark

@@ -17,9 +17,10 @@ import Data.List (isInfixOf, nubBy)
 import qualified Data.Text.IO as T
 import Futhark.Compiler
 import Futhark.Test
-import Futhark.Util (hashText, isBuiltin)
+import Futhark.Util (hashText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyTextOneLine)
+import Language.Futhark.Prop (isBuiltin)
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath

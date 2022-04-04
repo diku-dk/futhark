@@ -96,7 +96,6 @@ import Data.List (find, isPrefixOf, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import Futhark.Util (isBuiltin)
 import Futhark.Util.Pretty hiding (bool, group, space)
 import Language.Futhark
 import Language.Futhark.Semantic (includeToFilePath)

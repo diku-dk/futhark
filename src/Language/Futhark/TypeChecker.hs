@@ -28,7 +28,6 @@ import Data.Maybe
 import Data.Ord
 import qualified Data.Set as S
 import Futhark.FreshNames hiding (newName)
-import Futhark.Util (isBuiltin)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic

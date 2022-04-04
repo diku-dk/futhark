@@ -27,7 +27,6 @@ module Futhark.Util
     focusNth,
     hashText,
     unixEnvironment,
-    isBuiltin,
     isEnvVarAtLeast,
     startupTime,
     fancyTerminal,
@@ -72,7 +71,7 @@ import qualified Data.ByteString.Base16 as Base16
 import Data.Char
 import Data.Either
 import Data.Function ((&))
-import Data.List (foldl', genericDrop, genericSplitAt, isPrefixOf, sortBy)
+import Data.List (foldl', genericDrop, genericSplitAt, sortBy)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe
@@ -496,7 +495,3 @@ fixPoint f x =
 
 debug :: MonadIO m => String -> m ()
 debug msg = liftIO $ debugM "futhark" msg
-
--- | Check if a file is Prelude.
-isBuiltin :: String -> Bool
-isBuiltin = ("/prelude/" `isPrefixOf`)
