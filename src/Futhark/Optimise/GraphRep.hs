@@ -44,7 +44,15 @@ import Control.Monad.State
 -- TODO: Move to IR/Graph.hs at some point, for now keeping in Optimise/
 
 -- SNode: Stm [InputTransforms] [OutputTransforms]
-data EdgeT = Alias VName | InfDep VName | Dep VName | Cons VName | Fake VName | Res VName deriving (Eq, Ord)
+data EdgeT =
+    Alias VName
+  | InfDep VName
+  | Dep VName
+  | Cons VName
+  | Fake VName
+  | Res VName
+  | ScanRed VName
+  deriving (Eq, Ord)
 data NodeT = SNode (Stm SOACS) HOREPSOAC.ArrayTransforms | RNode VName | InNode VName | FinalNode [Stm SOACS]
   deriving (Eq, Ord)
 
@@ -56,6 +64,7 @@ instance Show EdgeT where
   show (Fake _) = "Fake"
   show (Res _) = "Res"
   show (Alias _) = "Alias"
+  show (ScanRed vName) = "SR " <> ppr vName
 
 -- inputs could have their own edges - to facilitate fusion
 
@@ -276,6 +285,7 @@ depsFromEdgeT e = case e of
   Cons name   -> [name]
   Fake name   -> [name]
   Alias name  -> [name]
+  ScanRed name-> [name]
 
 depsFromEdge ::  DepEdge -> [VName]
 depsFromEdge = depsFromEdgeT . edgeLabel
@@ -385,7 +395,7 @@ makeScanInfusible g = return $ emap change_node_to_idep g
 
     change_node_to_idep :: EdgeT -> EdgeT
     change_node_to_idep (Dep name) = if is_scan_res name
-      then InfDep name
+      then ScanRed name
       else Dep name
     change_node_to_idep e = e
 
