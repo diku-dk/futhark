@@ -376,9 +376,9 @@ interactWithFileSafely m =
   where
     couldNotRead e
       | isDoesNotExistError e =
-          pure Nothing
+        pure Nothing
       | otherwise =
-          pure $ Just $ Left $ show e
+        pure $ Just $ Left $ show e
 
 -- | Read a file, returning 'Nothing' if the file does not exist, and
 -- 'Left' if some other error occurs.

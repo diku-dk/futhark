@@ -3,7 +3,6 @@
 -- | @futhark defs@
 module Futhark.CLI.Defs (main) where
 
-import Data.List (isPrefixOf)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -11,9 +10,6 @@ import Futhark.Compiler
 import Futhark.Util.Loc
 import Futhark.Util.Options
 import Language.Futhark
-
-isBuiltin :: String -> Bool
-isBuiltin = ("/prelude/" `isPrefixOf`)
 
 data DefKind = Value | Module | ModuleType | Type
 
