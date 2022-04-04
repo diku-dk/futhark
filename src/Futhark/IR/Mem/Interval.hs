@@ -46,9 +46,9 @@ instance FreeIn Interval where
   freeIn' (Interval lb ne st) = freeIn' lb <> freeIn' ne <> freeIn' st
 
 distributeOffset :: MonadFail m => AlgSimplify.SofP -> [Interval] -> m [Interval]
-distributeOffset [] interval = return interval
+distributeOffset [] interval = pure interval
 distributeOffset offset [] = fail $ "Cannot distribute offset " <> pretty offset <> " across empty interval"
-distributeOffset offset [Interval lb ne 1] = return [Interval (lb + TPrimExp (AlgSimplify.sumToExp offset)) ne 1]
+distributeOffset offset [Interval lb ne 1] = pure [Interval (lb + TPrimExp (AlgSimplify.sumToExp offset)) ne 1]
 distributeOffset offset (Interval lb ne st0 : is)
   | st <- AlgSimplify.Prod False [untyped st0],
     Just (before, quotient, after) <- focusMaybe (`AlgSimplify.maybeDivide` st) offset =
@@ -60,7 +60,7 @@ distributeOffset offset (Interval lb ne st0 : is)
         Interval (lb + TPrimExp (AlgSimplify.sumToExp [quotient])) ne st0 : is
   | otherwise = do
       rest <- distributeOffset offset is
-      return $ Interval lb ne st0 : rest
+      pure $ Interval lb ne st0 : rest
 
 findMostComplexTerm :: AlgSimplify.SofP -> (AlgSimplify.Prod, AlgSimplify.SofP)
 findMostComplexTerm prods =
@@ -74,7 +74,7 @@ findClosestStride offset_term is =
         minimumBy
           ( compare
               `on` ( (\(AlgSimplify.Prod _ xs) -> length (offset_term \\ xs))
-                       . minimumBy (compare `on` \s -> (length (offset_term \\ AlgSimplify.atoms s)))
+                       . minimumBy (compare `on` \s -> length (offset_term \\ AlgSimplify.atoms s))
                        . AlgSimplify.simplify0
                    )
           )
@@ -86,7 +86,7 @@ findClosestStride offset_term is =
               AlgSimplify.simplify0 p
       )
 
-expandOffset :: AlgSimplify.SofP -> [Interval] -> Maybe (AlgSimplify.SofP)
+expandOffset :: AlgSimplify.SofP -> [Interval] -> Maybe AlgSimplify.SofP
 expandOffset [] _ = Nothing
 expandOffset offset i1
   | (AlgSimplify.Prod b term_to_add, offset_rest) <- findMostComplexTerm offset, -- Find gnb
@@ -95,7 +95,7 @@ expandOffset offset i1
     diff <- AlgSimplify.sumOfProducts $ AlgSimplify.sumToExp $ AlgSimplify.Prod b term_to_add : map AlgSimplify.negate target, -- gnb - gnb + gb = gnb - g(nb-b)
     replacement <- target <> diff -- gnb = g(nb-b) + gnb - gnb + gb
     =
-      Just $ (replacement <> offset_rest)
+      Just (replacement <> offset_rest)
 
 intervalOverlap :: [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> Bool
 intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
@@ -140,7 +140,7 @@ selfOverlap less_thans non_negatives is =
   where
     selfOverlap' acc (x : xs) =
       let interval_span = (lowerBound x + numElements x - 1) * stride x
-       in (AlgSimplify.lessThanish less_thans non_negatives (AlgSimplify.simplify' acc) (AlgSimplify.simplify' $ stride x))
+       in AlgSimplify.lessThanish less_thans non_negatives (AlgSimplify.simplify' acc) (AlgSimplify.simplify' $ stride x)
             && selfOverlap' (acc + interval_span) xs
     selfOverlap' _ [] = True
 
@@ -175,7 +175,7 @@ valToZ3 scope vname =
   case M.lookup vname scope of
     Just (Prim pt) -> fmap Just (mkFreshVar (pretty vname) =<< primTypeSort pt)
     Just _ -> error $ "Unsupported type for vname " <> pretty vname
-    Nothing -> return Nothing
+    Nothing -> pure Nothing
 
 cmpOpToZ3 :: MonadZ3 z3 => CmpOp -> AST -> AST -> z3 AST
 cmpOpToZ3 (CmpEq _) = mkEq
@@ -208,7 +208,7 @@ binOpToZ3 (FPow _) x y = mkPower x y
 binOpToZ3 b _ _ = error $ "Unsupported BinOp " <> pretty b
 
 convOpToZ3 :: MonadZ3 z3 => ConvOp -> AST -> z3 AST
-convOpToZ3 (SExt _ _) x = return x
+convOpToZ3 (SExt _ _) x = pure x
 convOpToZ3 (SIToFP _ _) x = mkInt2Real x
 convOpToZ3 (UIToFP _ _) x = mkInt2Real x
 convOpToZ3 (FPToSI _ _) x = mkReal2Int x
@@ -220,7 +220,7 @@ unOpToZ3 Not x = mkNot x
 unOpToZ3 u _ = error $ "Unsupported UnOp " <> pretty u
 
 primExpToZ3 :: MonadZ3 z3 => M.Map VName AST -> PrimExp VName -> z3 AST
-primExpToZ3 var_table (LeafExp vn _) = return $ var_table M.! vn
+primExpToZ3 var_table (LeafExp vn _) = pure $ var_table M.! vn
 primExpToZ3 _ (ValueExp (IntValue v)) = mkInteger $ valueIntegral v
 primExpToZ3 _ (ValueExp (FloatValue v)) = mkRealNum $ valueRational v
 primExpToZ3 _ (ValueExp (BoolValue b)) = mkBool b
@@ -258,11 +258,11 @@ lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
     -- result <- evalZ3 $ do
     maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
     case fmap M.fromList maybe_var_table of
-      Nothing -> return Undef
+      Nothing -> pure Undef
       Just var_table -> do
         non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
-        asserts' <- mapM (\vn -> primExpToZ3 var_table vn) asserts
-        lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
+        asserts' <- mapM (primExpToZ3 var_table) asserts
+        lts <- mapM (\(vn, pe) -> mkLt (var_table M.! vn) =<< primExpToZ3 var_table pe) less_thans
         apps <- mapM toApp $ M.elems var_table
 
         premise <-
@@ -275,8 +275,8 @@ lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
         assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
         check
   case result of
-    Sat -> return True
-    _ -> return False
+    Sat -> pure True
+    _ -> pure False
 
 disjointZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> Interval -> Interval -> IO Bool
 disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
@@ -286,11 +286,11 @@ disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(
         -- result <- evalZ3 $ do
         maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
         case fmap M.fromList maybe_var_table of
-          Nothing -> return Undef
+          Nothing -> pure Undef
           Just var_table -> do
             non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
-            asserts' <- mapM (\vn -> primExpToZ3 var_table vn) asserts
-            lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
+            asserts' <- mapM (primExpToZ3 var_table) asserts
+            lts <- mapM (\(vn, pe) -> mkLt (var_table M.! vn) =<< primExpToZ3 var_table pe) less_thans
             nes <-
               sequence
                 [ join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne1),
@@ -322,6 +322,6 @@ disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(
             assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
             check
       case result of
-        Sat -> return True
-        _ -> return False
-  | otherwise = return False
+        Sat -> pure True
+        _ -> pure False
+  | otherwise = pure False

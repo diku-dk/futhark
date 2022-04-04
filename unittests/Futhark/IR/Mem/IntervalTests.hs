@@ -14,13 +14,12 @@ import Test.Tasty.HUnit
 -- Actual tests.
 tests :: TestTree
 tests =
-  testGroup "IntervalTests" $
-    concat
-      [ testDistributeOffset
-      ]
+  testGroup
+    "IntervalTests"
+    testDistributeOffset
 
 name :: String -> Int -> VName
-name s i = VName (nameFromString s) i
+name s = VName (nameFromString s)
 
 testDistributeOffset :: [TestTree]
 testDistributeOffset =
@@ -29,7 +28,7 @@ testDistributeOffset =
           b = TPrimExp $ LeafExp (name "b" 2) $ IntType Int64
       res <-
         distributeOffset
-          [Prod False [untyped $ (n * b - b :: TPrimExp Int64 VName)]]
+          [Prod False [untyped (n * b - b :: TPrimExp Int64 VName)]]
           [ Interval 0 1 (n * b - b),
             Interval 0 b b,
             Interval 0 b 1

@@ -32,7 +32,7 @@ data Env inner = Env
 type ReplaceM inner a = Reader (Env inner) a
 
 optimiseSeqMem :: Pass SeqMem SeqMem
-optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab return replaceInParams
+optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab pure replaceInParams
 
 optimiseGPUMem :: Pass GPUMem GPUMem
 optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp replaceInParams
@@ -69,10 +69,10 @@ pass ::
   Pass rep rep
 pass flag desc mk on_inner on_fparams =
   Pass flag desc $
-    Pass.intraproceduralTransformationWithConsts return $ \_ f -> do
+    Pass.intraproceduralTransformationWithConsts pure $ \_ f -> do
       coaltab <- mk (AnlAls.analyseFun f)
       let (mem_allocs_to_remove, new_fparams) = on_fparams coaltab $ funDefParams f
-      return $
+      pure $
         f
           { funDefBody =
               onBody (foldMap vartab $ M.elems coaltab) $
@@ -88,47 +88,47 @@ replaceInStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stm rep -> ReplaceM i
 replaceInStm (Let (Pat elems) d e) = do
   elems' <- mapM replaceInPatElem elems
   e' <- replaceInExp elems' e
-  return $ Let (Pat elems') d e'
+  pure $ Let (Pat elems') d e'
   where
     replaceInPatElem :: PatElem LetDecMem -> ReplaceM inner (PatElem LetDecMem)
     replaceInPatElem p@(PatElem vname (MemArray _ _ u _)) =
       fromMaybe p <$> lookupAndReplace vname PatElem u
-    replaceInPatElem p = return p
+    replaceInPatElem p = pure p
 
 replaceInExp :: (Mem rep inner, LetDec rep ~ LetDecMem) => [PatElem LetDecMem] -> Exp rep -> ReplaceM inner (Exp rep)
-replaceInExp _ e@(BasicOp _) = return e
+replaceInExp _ e@(BasicOp _) = pure e
 replaceInExp pat_elems (If se then_body else_body dec) = do
   then_body' <- replaceInIfBody then_body
   else_body' <- replaceInIfBody else_body
   if_rets <- zipWithM (generalizeIxfun pat_elems) pat_elems $ ifReturns dec
   let dec' = dec {ifReturns = if_rets}
-  return $ If se then_body' else_body' dec'
+  pure $ If se then_body' else_body' dec'
 replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
   loop_inits' <- mapM (replaceInFParam . fst) loop_inits
   stms' <- mapM replaceInStm stms
-  return $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res
-replaceInExp _ e@(Op (Alloc _ _)) = return e
+  pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res
+replaceInExp _ e@(Op (Alloc _ _)) = pure e
 replaceInExp _ (Op (Inner i)) = do
   on_op <- asks onInner
   Op . Inner <$> on_op i
 replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
-replaceInExp _ e@WithAcc {} = return e
-replaceInExp _ e@Apply {} = return e
+replaceInExp _ e@WithAcc {} = pure e
+replaceInExp _ e@Apply {} = pure e
 
 replaceInHostOp :: HostOp GPUMem () -> ReplaceM (HostOp GPUMem ()) (HostOp GPUMem ())
 replaceInHostOp (SegOp (SegMap lvl sp tps body)) = do
   stms <- mapM replaceInStm $ kernelBodyStms body
-  return $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
 replaceInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
   stms <- mapM replaceInStm $ kernelBodyStms body
-  return $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
 replaceInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
   stms <- mapM replaceInStm $ kernelBodyStms body
-  return $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
 replaceInHostOp (SegOp (SegHist lvl sp hist_ops tps body)) = do
   stms <- mapM replaceInStm $ kernelBodyStms body
-  return $ SegOp $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
-replaceInHostOp op = return op
+  pure $ SegOp $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
+replaceInHostOp op = pure op
 
 generalizeIxfun :: [PatElem dec] -> PatElem LetDecMem -> BodyReturns -> ReplaceM inner BodyReturns
 generalizeIxfun
@@ -141,19 +141,19 @@ generalizeIxfun
         existentialiseIxFun (map patElemName pat_elems) ixf
           & ReturnsInBlock mem
           & MemArray pt shp u
-          & return
-      else return m
-generalizeIxfun _ _ m = return m
+          & pure
+      else pure m
+generalizeIxfun _ _ m = pure m
 
 replaceInIfBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> ReplaceM inner (Body rep)
 replaceInIfBody b@(Body _ stms _) = do
   stms' <- mapM replaceInStm stms
-  return $ b {bodyStms = stms'}
+  pure $ b {bodyStms = stms'}
 
 replaceInFParam :: Param FParamMem -> ReplaceM inner (Param FParamMem)
 replaceInFParam p@(Param _ vname (MemArray _ _ u _)) = do
   fromMaybe p <$> lookupAndReplace vname (Param mempty) u
-replaceInFParam p = return p
+replaceInFParam p = pure p
 
 lookupAndReplace ::
   VName ->
@@ -170,5 +170,5 @@ lookupAndReplace vname f u = do
         & MemArray pt shp u
         & f vname
         & Just
-        & return
-    Nothing -> return Nothing
+        & pure
+    Nothing -> pure Nothing

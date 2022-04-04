@@ -86,7 +86,7 @@ modifyNameSourceIO m = do
   src <- getNameSource
   (x, src') <- liftIO $ m src
   putNameSource src'
-  return x
+  pure x
 
 -- | Produce a fresh name, using the given name as a template.
 newName :: MonadFreshNames m => VName -> m VName

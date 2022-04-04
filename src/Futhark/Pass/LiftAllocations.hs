@@ -17,12 +17,12 @@ import Futhark.Pass (Pass (..))
 liftAllocationsSeqMem :: Pass SeqMem SeqMem
 liftAllocationsSeqMem =
   Pass "lift allocations" "lift allocations" $ \prog@Prog {progFuns} ->
-    return $
+    pure $
       prog
         { progFuns =
             fmap
               ( \f@FunDef {funDefBody} ->
-                  f {funDefBody = runReader (liftAllocationsInBody funDefBody) (Env return)}
+                  f {funDefBody = runReader (liftAllocationsInBody funDefBody) (Env pure)}
               )
               progFuns
         }
@@ -30,7 +30,7 @@ liftAllocationsSeqMem =
 liftAllocationsGPUMem :: Pass GPUMem GPUMem
 liftAllocationsGPUMem =
   Pass "lift allocations gpu" "lift allocations gpu" $ \prog@Prog {progFuns} ->
-    return $
+    pure $
       prog
         { progFuns =
             fmap
@@ -48,7 +48,7 @@ type LiftM inner a = Reader (Env inner) a
 liftAllocationsInBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> LiftM inner (Body rep)
 liftAllocationsInBody body = do
   stms <- liftAllocationsInStms (bodyStms body) mempty mempty mempty
-  return $ body {bodyStms = stms}
+  pure $ body {bodyStms = stms}
 
 liftAllocationsInStms ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
@@ -61,7 +61,7 @@ liftAllocationsInStms ::
   -- | Names we need to lift
   Names ->
   LiftM inner (Stms rep)
-liftAllocationsInStms Empty lifted acc _ = return $ lifted <> acc
+liftAllocationsInStms Empty lifted acc _ = pure $ lifted <> acc
 liftAllocationsInStms (stms :|> stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ _)))) lifted acc to_lift =
   liftAllocationsInStms stms (stm :<| lifted) acc ((freeIn stm <> to_lift) `namesSubtract` oneName vname)
 liftAllocationsInStms (stms :|> stm@(Let pat _ (Op (Inner inner)))) lifted acc to_lift = do
@@ -106,14 +106,14 @@ liftAllocationsInStms (stms :|> stm@(Let pat _ _)) lifted acc to_lift = do
 liftAllocationsInHostOp :: HostOp GPUMem () -> LiftM (HostOp GPUMem ()) (HostOp GPUMem ())
 liftAllocationsInHostOp (SegOp (SegMap lvl sp tps body)) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  return $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
 liftAllocationsInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  return $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
 liftAllocationsInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  return $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
 liftAllocationsInHostOp (SegOp (SegHist lvl sp histops tps body)) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  return $ SegOp $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
-liftAllocationsInHostOp op = return op
+  pure $ SegOp $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
+liftAllocationsInHostOp op = pure op

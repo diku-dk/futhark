@@ -211,7 +211,7 @@ focusMaybe f xs = do
   idx <- findIndex (isJust . f) xs
   (before, focus, after) <- focusNth idx xs
   res <- f focus
-  return (before, res, after)
+  pure (before, res, after)
 
 -- | Compute a hash of a text that is stable across OS versions.
 -- Returns the hash as a text as well, ready for human consumption.
@@ -532,7 +532,7 @@ ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM b t f = do b' <- b; if b' then t else f
 
 (||^) :: Monad m => m Bool -> m Bool -> m Bool
-(||^) a b = ifM a (pure True) b
+(||^) a = ifM a (pure True)
 
 (&&^) :: Monad m => m Bool -> m Bool -> m Bool
 (&&^) a b = ifM a b (pure False)

@@ -221,7 +221,7 @@ kernelsProg name rep =
 
 seqMemProg :: String -> UntypedPassState -> FutharkM (Prog SeqMem.SeqMem)
 seqMemProg _ (SeqMem prog) =
-  return prog
+  pure prog
 seqMemProg name rep =
   externalErrorS $
     "Pass " ++ name ++ " expects SeqMem representation, but got " ++ representation rep

@@ -225,7 +225,7 @@ lessThanOrEqualish less_thans0 non_negatives e1 e2 =
     [] -> True
     simplified ->
       nonNegativeish non_negatives $
-        fixPoint (`removeLessThans` less_thans) $ simplified
+        fixPoint (`removeLessThans` less_thans) simplified
   where
     less_thans =
       concatMap
@@ -233,8 +233,8 @@ lessThanOrEqualish less_thans0 non_negatives e1 e2 =
         less_thans0
 
 lessThanish :: [(VName, PrimExp VName)] -> Names -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
-lessThanish less_thans non_negatives e1 e2 =
-  lessThanOrEqualish less_thans non_negatives (e1 + 1) e2
+lessThanish less_thans non_negatives e1 =
+  lessThanOrEqualish less_thans non_negatives (e1 + 1)
 
 removeLessThans :: SofP -> [(SubExp, PrimExp VName)] -> SofP
 removeLessThans =

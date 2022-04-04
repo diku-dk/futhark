@@ -20,12 +20,12 @@ import Futhark.Pass (Pass (..))
 lowerAllocationsSeqMem :: Pass SeqMem SeqMem
 lowerAllocationsSeqMem =
   Pass "lower allocations" "lower allocations" $ \prog@Prog {progFuns} ->
-    return $
+    pure $
       prog
         { progFuns =
             fmap
               ( \f@FunDef {funDefBody} ->
-                  f {funDefBody = runReader (lowerAllocationsInBody funDefBody) (Env return)}
+                  f {funDefBody = runReader (lowerAllocationsInBody funDefBody) (Env pure)}
               )
               progFuns
         }
@@ -33,7 +33,7 @@ lowerAllocationsSeqMem =
 lowerAllocationsGPUMem :: Pass GPUMem GPUMem
 lowerAllocationsGPUMem =
   Pass "lower allocations gpu" "lower allocations gpu" $ \prog@Prog {progFuns} ->
-    return $
+    pure $
       prog
         { progFuns =
             fmap
@@ -51,7 +51,7 @@ type LowerM inner a = Reader (Env inner) a
 lowerAllocationsInBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> LowerM inner (Body rep)
 lowerAllocationsInBody body = do
   stms <- lowerAllocationsInStms (bodyStms body) mempty mempty
-  return $ body {bodyStms = stms}
+  pure $ body {bodyStms = stms}
 
 lowerAllocationsInStms ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
@@ -62,7 +62,7 @@ lowerAllocationsInStms ::
   -- | The other statements processed so far
   Stms rep ->
   LowerM inner (Stms rep)
-lowerAllocationsInStms Empty allocs acc = return $ acc <> Seq.fromList (M.elems allocs)
+lowerAllocationsInStms Empty allocs acc = pure $ acc <> Seq.fromList (M.elems allocs)
 lowerAllocationsInStms (stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) :<| stms) allocs acc =
   lowerAllocationsInStms stms (M.insert vname stm allocs) acc
 lowerAllocationsInStms (stm0@(Let _ _ (Op (Inner inner))) :<| stms) alloc0 acc0 = do
@@ -101,14 +101,14 @@ insertLoweredAllocs frees alloc acc =
 lowerAllocationsInHostOp :: HostOp GPUMem () -> LowerM (HostOp GPUMem ()) (HostOp GPUMem ())
 lowerAllocationsInHostOp (SegOp (SegMap lvl sp tps body)) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  return $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
 lowerAllocationsInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  return $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
 lowerAllocationsInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  return $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
+  pure $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
 lowerAllocationsInHostOp (SegOp (SegHist lvl sp histops tps body)) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  return $ SegOp $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
-lowerAllocationsInHostOp op = return op
+  pure $ SegOp $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
+lowerAllocationsInHostOp op = pure op

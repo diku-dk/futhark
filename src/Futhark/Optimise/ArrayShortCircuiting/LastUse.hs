@@ -90,7 +90,7 @@ lastUseBody bdy@(Body _ stms result) (lutab, used_nms) = do
   -- Clean up the used names by recomputing the aliasing transitive-closure
   -- of the free names in body based on the current alias table @alstab@.
   used_in_body <- aliasTransitiveClosure $ freeIn bdy
-  return (lutab', used_nms <> used_in_body)
+  pure (lutab', used_nms <> used_in_body)
 
 -- | Performing the last-use analysis on a body.
 --
@@ -116,7 +116,7 @@ lastUseKernelBody bdy@(KernelBody _ stms result) (lutab, used_nms) = do
   -- Clean up the used names by recomputing the aliasing transitive-closure
   -- of the free names in body based on the current alias table @alstab@.
   used_in_body <- aliasTransitiveClosure $ freeIn bdy
-  return (lutab', used_nms <> used_in_body)
+  pure (lutab', used_nms <> used_in_body)
 
 lastUseStms ::
   (ASTRep rep, FreeIn (OpWithAliases (Op rep))) =>
@@ -126,7 +126,7 @@ lastUseStms ::
   LastUseM rep (LUTabFun, Names)
 lastUseStms Empty (lutab, nms) res_nms = do
   aliases <- mconcat <$> mapM aliasLookup res_nms
-  return (lutab, nms <> aliases)
+  pure (lutab, nms <> aliases)
 lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms = do
   let extra_alias = case e of
         BasicOp (Update _ old _ _) -> oneName old
@@ -137,7 +137,7 @@ lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms = do
   -- But compute last use bottom-up
   (lutab', nms') <- lastUseStms stms (lutab, nms) res_nms
   (lutab'', nms'') <- lastUseStm stm (lutab', nms')
-  return (lutab'', nms'')
+  pure (lutab'', nms'')
 
 lastUseStm ::
   (ASTRep rep, FreeIn (OpWithAliases (Op rep))) =>
@@ -157,7 +157,7 @@ lastUseStm (Let pat _ e) (lutab, used_nms) =
         used_nms'' = used_nms' `namesSubtract` namesFromList patnms
         lutab'' =
           M.union lutab' $ M.insert (head patnms) last_uses lutab
-    return (lutab'', used_nms'')
+    pure (lutab'', used_nms'')
 
 --------------------------------
 
@@ -184,7 +184,7 @@ lastUseExp (If _ then_body else_body _) used_nms = do
   let free_in_body_else = freeIn else_body
   let used_nms' = then_used_nms <> else_used_nms
   (_, last_used_arrs) <- lastUsedInNames used_nms $ free_in_body_then <> free_in_body_else
-  return (then_lutab <> else_lutab, last_used_arrs, used_nms')
+  pure (then_lutab <> else_lutab, last_used_arrs, used_nms')
 lastUseExp (DoLoop var_ses _ body) used_nms0 = do
   free_in_body <- aliasTransitiveClosure $ freeIn body
   -- compute the aliasing transitive closure of initializers that are not last-uses
@@ -209,58 +209,58 @@ lastUseExp (DoLoop var_ses _ body) used_nms0 = do
       -- the last-uses at loop-statement level are the loop free variables that
       -- do not belong to @used_nms0@; this includes the initializers of b), @lu_ini_b@
       lu_arrs = used_nms' `namesSubtract` used_nms0
-  return (lutab_res, lu_arrs, used_nms_res)
+  pure (lutab_res, lu_arrs, used_nms_res)
   where
     initHelper free_and_used (fp, se) = do
       names <- aliasTransitiveClosure $ maybe mempty oneName $ subExpVar se
       if names `namesIntersect` free_and_used
-        then return Nothing
-        else return $ Just (identName $ paramIdent fp, names)
+        then pure Nothing
+        else pure $ Just (identName $ paramIdent fp, names)
 lastUseExp (Op op) used_nms = do
   on_op <- reader onOp
   on_op op used_nms
 lastUseExp e used_nms = do
   let free_in_e = freeIn e
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
-  return (M.empty, lu_vars, used_nms')
+  pure (M.empty, lu_vars, used_nms')
 
 lastUseGPUOp :: Op (Aliases GPUMem) -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
 lastUseGPUOp (Alloc se sp) used_nms = do
   let free_in_e = freeIn se <> freeIn sp
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
-  return (M.empty, lu_vars, used_nms')
+  pure (M.empty, lu_vars, used_nms')
 lastUseGPUOp (Inner (OtherOp ())) used_nms =
-  return (mempty, mempty, used_nms)
+  pure (mempty, mempty, used_nms)
 lastUseGPUOp (Inner (SizeOp sop)) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn sop
-  return (mempty, lu_vars, used_nms')
+  pure (mempty, lu_vars, used_nms')
 lastUseGPUOp (Inner (SegOp (SegMap _ _ tps kbody))) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
-  return (body_lutab, lu_vars, used_nms' <> used_nms'')
+  pure (body_lutab, lu_vars, used_nms' <> used_nms'')
 lastUseGPUOp (Inner (SegOp (SegRed _ _ _ tps kbody))) used_nms = do
   -- TODO: Handle SegBinOp
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
-  return (body_lutab, lu_vars, used_nms' <> used_nms'')
+  pure (body_lutab, lu_vars, used_nms' <> used_nms'')
 lastUseGPUOp (Inner (SegOp (SegScan _ _ _ tps kbody))) used_nms = do
   -- TODO: Handle SegBinOp
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
-  return (body_lutab, lu_vars, used_nms' <> used_nms'')
+  pure (body_lutab, lu_vars, used_nms' <> used_nms'')
 lastUseGPUOp (Inner (SegOp (SegHist _ _ _ tps kbody))) used_nms = do
   -- TODO: Handle SegBinOp
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
-  return (body_lutab, lu_vars, used_nms' <> used_nms'')
+  pure (body_lutab, lu_vars, used_nms' <> used_nms'')
 
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do
   let free_in_e = freeIn se <> freeIn sp
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
-  return (mempty, lu_vars, used_nms')
+  pure (mempty, lu_vars, used_nms')
 lastUseSeqOp (Inner ()) used_nms = do
-  return (mempty, mempty, used_nms)
+  pure (mempty, mempty, used_nms)
 
 ------------------------------------------------------
 
@@ -284,18 +284,18 @@ lastUsedInNames used_nms new_uses = do
   -- all other variables in its alias set
   last_uses <- filterM isLastUse $ namesToList new_uses
   last_uses' <- aliasTransitiveClosure $ namesFromList last_uses
-  return (used_nms <> new_uses_with_aliases, last_uses')
+  pure (used_nms <> new_uses_with_aliases, last_uses')
   where
     isLastUse x = do
       with_aliases <- aliasTransitiveClosure $ oneName x
-      return $ not $ with_aliases `namesIntersect` used_nms
+      pure $ not $ with_aliases `namesIntersect` used_nms
 
 -- | Compute the transitive closure of the aliases of a set of 'Names'.
 aliasTransitiveClosure :: Names -> LastUseM rep Names
 aliasTransitiveClosure args = do
   res <- foldl (<>) args <$> mapM aliasLookup (namesToList args)
   if res == args
-    then return res
+    then pure res
     else aliasTransitiveClosure res
 
 -- | For each 'PatElem' in the 'Pat', add its aliases to the 'AliasTab' in

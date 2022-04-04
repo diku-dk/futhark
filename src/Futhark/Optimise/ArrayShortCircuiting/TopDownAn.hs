@@ -242,7 +242,7 @@ getDirAliasedIxfn td_env coals_tab x =
       case M.lookup m_x coals_tab of
         Just coal_etry -> do
           (Coalesced _ (MemBlock _ _ m ixf) _) <- walkAliasTab (v_alias td_env) (vartab coal_etry) x
-          return (m_x, m, ixf)
+          pure (m_x, m, ixf)
         Nothing ->
           -- This value is not subject to coalescing at the moment. Just return the
           -- original index function
@@ -258,7 +258,7 @@ getDirAliasedIxfn' td_env coals_tab x =
       case M.lookup m_x coals_tab of
         Just coal_etry -> do
           (Coalesced _ (MemBlock _ _ m ixf) _) <- walkAliasTab (v_alias td_env) (vartab coal_etry) x
-          return (m_x, m, ixf)
+          pure (m_x, m, ixf)
         Nothing ->
           -- This value is not subject to coalescing at the moment. Just return the
           -- original index function
@@ -277,7 +277,7 @@ walkAliasTab _ vtab x
 walkAliasTab alias_tab vtab x
   | Just (x0, alias0, _) <- M.lookup x alias_tab = do
       Coalesced knd (MemBlock pt shp vname ixf) substs <- walkAliasTab alias_tab vtab x0
-      return $ Coalesced knd (MemBlock pt shp vname $ alias0 ixf) substs
+      pure $ Coalesced knd (MemBlock pt shp vname $ alias0 ixf) substs
 walkAliasTab _ _ _ = Nothing
 
 -- | We assume @x@ is in @vartab@ and we add the variables that @x@ aliases

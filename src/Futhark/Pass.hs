@@ -88,14 +88,14 @@ parPass :: (a -> PassM b) -> [a] -> PassM [b]
 parPass f as = do
   (x, log) <- modifyNameSourceIO $ \src -> do
     (bs, logs, srcs) <- unzip3 <$> sequence (parMap rpar (f' src) as)
-    return ((bs, mconcat logs), mconcat srcs)
+    pure ((bs, mconcat logs), mconcat srcs)
 
   addLog log
   pure x
   where
     f' src a = do
       ((x', log), src') <- runStateT (runPassM (f a)) src
-      return (x', log, src')
+      pure (x', log, src')
 
 -- | Apply some operation to the top-level constants.  Then applies an
 -- operation to all the function function definitions, which are also

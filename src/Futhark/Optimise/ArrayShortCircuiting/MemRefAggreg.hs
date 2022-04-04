@@ -89,7 +89,7 @@ getUseSumFromStm td_env coal_tab (Let _ _ (BasicOp (Index arr (Slice slc))))
     length slc == length (shapeDims shp) && all isFix slc = do
       (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab arr
       let new_ixfn = IxFun.slice ixfn_arr $ Slice $ map (fmap pe64) slc
-      return ([], [(mem_b, mem_arr, new_ixfn)])
+      pure ([], [(mem_b, mem_arr, new_ixfn)])
   where
     isFix DimFix {} = True
     isFix _ = False
@@ -118,7 +118,7 @@ getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) = do
   -- y = copy x
   wrt <- getDirAliasedIxfn td_env coal_tab $ patElemName y
   rd <- getDirAliasedIxfn td_env coal_tab x
-  return ([wrt], [wrt, rd])
+  pure ([wrt], [wrt, rd])
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Copy {})) = error "Impossible"
 getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i (a :| bs) _ses))) =
   -- concat
@@ -180,7 +180,7 @@ recordMemRefUses td_env bu_env stm =
                     else state
               )
               (active_tab, inhibit_tab)
-            & return
+            & pure
         Just (stm_wrts, stm_uses) -> do
           (mb_wrts, prev_uses, mb_lmads) <-
             fmap unzip3 $
@@ -220,7 +220,7 @@ recordMemRefUses td_env bu_env stm =
                             if no_overlap
                               then Just wrt_lmads''
                               else Nothing
-                      return (wrt_lmads, prev_use, lmads)
+                      pure (wrt_lmads, prev_use, lmads)
                   )
                   active_etries
 
@@ -244,7 +244,7 @@ recordMemRefUses td_env bu_env stm =
                     filter (isNothing . fst) $
                       zip mb_wrts active_etries
               (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) $ M.keys failed_tab
-          return (active_tab1, inhibit_tab1)
+          pure (active_tab1, inhibit_tab1)
   where
     tupFst (a, _, _) = a
     tupSnd (_, b, _) = b
@@ -271,9 +271,9 @@ recordMemRefUses td_env bu_env stm =
 -------------------------------------------------------------
 noMemOverlap :: (CanBeAliased (Op rep), RepTypes rep) => TopDnEnv rep -> AccessSummary -> AccessSummary -> IO Bool
 noMemOverlap _ _ (Set mr)
-  | mr == mempty = return True
+  | mr == mempty = pure True
 noMemOverlap _ (Set mr) _
-  | mr == mempty = return True
+  | mr == mempty = pure True
 noMemOverlap td_env (Set is0) (Set js0)
   | Just non_negs <- mapM (primExpFromSubExpM (basePMconv (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env = do
       (_, not_disjoints) <-
@@ -283,7 +283,7 @@ noMemOverlap td_env (Set is0) (Set js0)
                 ( \j ->
                     pure (IxFun.disjoint less_thans (nonNegatives td_env) i j)
                       ||^ pure (IxFun.disjoint2 less_thans (nonNegatives td_env) i j)
-                      ||^ IxFun.disjoint3 (fmap typeOf $ scope td_env) asserts less_thans non_negs i j
+                      ||^ IxFun.disjoint3 (typeOf <$> scope td_env) asserts less_thans non_negs i j
                 )
                 js
           )
@@ -294,7 +294,7 @@ noMemOverlap td_env (Set is0) (Set js0)
     asserts = map (fixPoint (substituteInPrimExp $ scalarTable td_env) . primExpFromSubExp Bool) $ td_asserts td_env
     is = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList is0
     js = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList js0
-noMemOverlap _ _ _ = return False
+noMemOverlap _ _ _ = pure False
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1
@@ -311,14 +311,14 @@ aggSummaryLoopTotal ::
   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
   m AccessSummary
-aggSummaryLoopTotal _ _ _ _ Undeterminable = return Undeterminable
+aggSummaryLoopTotal _ _ _ _ Undeterminable = pure Undeterminable
 aggSummaryLoopTotal _ _ _ _ (Set l)
-  | l == mempty = return $ Set mempty
+  | l == mempty = pure $ Set mempty
 aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
   | Set ls <- translateAccessSummary scope_loop scals_loop access,
     nms <- foldl (<>) mempty $ map freeIn $ S.toList ls,
     all inBeforeScope $ namesToList nms = do
-      return $ Set ls
+      pure $ Set ls
   where
     inBeforeScope v =
       case M.lookup v scope_bef of
@@ -331,7 +331,7 @@ aggSummaryLoopTotal _ _ scalars_loop (Just (iterator_var, (lower_bound, upper_bo
           . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
       )
       (S.toList lmads)
-aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
+aggSummaryLoopTotal _ _ _ _ _ = pure Undeterminable
 
 -- | Partially aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1. This means that it
@@ -344,8 +344,8 @@ aggSummaryLoopPartial ::
   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
   m AccessSummary
-aggSummaryLoopPartial _ _ _ _ Undeterminable = return Undeterminable
-aggSummaryLoopPartial _ _ _ Nothing _ = return Undeterminable
+aggSummaryLoopPartial _ _ _ _ Undeterminable = pure Undeterminable
+aggSummaryLoopPartial _ _ _ Nothing _ = pure Undeterminable
 aggSummaryLoopPartial _ _ scalars_loop (Just (iterator_var, (_, upper_bound))) (Set lmads) = do
   -- map over each index function in the access summary
   --   Substitube a fresh variable k for the loop iterator
@@ -364,9 +364,9 @@ aggSummaryLoopPartial _ _ scalars_loop (Just (iterator_var, (_, upper_bound))) (
       (S.toList lmads)
 
 aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
-aggSummaryMapPartial _ [] _ = return mempty
+aggSummaryMapPartial _ [] _ = pure mempty
 aggSummaryMapPartial _ _ (Set lmads)
-  | lmads == mempty = return mempty
+  | lmads == mempty = pure mempty
 aggSummaryMapPartial scalars ((gtid, size) : rest) as = do
   total_inner <-
     foldM
@@ -379,17 +379,17 @@ aggSummaryMapPartial scalars ((gtid, size) : rest) as = do
                       primExpFromSubExp (IntType Int64) size'
                 )
                 (S.toList lmads)
-          Undeterminable -> return Undeterminable
+          Undeterminable -> pure Undeterminable
       )
       as
       $ reverse rest
   this_dim <- aggSummaryMapPartialOne scalars (gtid, size) total_inner
   rest' <- aggSummaryMapPartial scalars rest as
-  return $ this_dim <> rest'
+  pure $ this_dim <> rest'
 
 aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
-aggSummaryMapPartialOne _ _ Undeterminable = return Undeterminable
-aggSummaryMapPartialOne _ (_, (Constant n)) (Set _) | oneIsh n = return mempty
+aggSummaryMapPartialOne _ _ Undeterminable = pure Undeterminable
+aggSummaryMapPartialOne _ (_, Constant n) (Set _) | oneIsh n = pure mempty
 aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
   mapM
     helper
@@ -400,14 +400,14 @@ aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
     ]
     <&> mconcat
   where
-    lmads = map (fixPoint ((IxFun.substituteInLMAD $ fmap TPrimExp scalars))) $ S.toList lmads0
+    lmads = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $ S.toList lmads0
     helper (x, y) = mconcat <$> mapM (aggSummaryOne gtid x y) lmads
 
 aggSummaryMapTotal :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
-aggSummaryMapTotal _ [] _ = return mempty
+aggSummaryMapTotal _ [] _ = pure mempty
 aggSummaryMapTotal _ _ (Set lmads)
-  | lmads == mempty = return mempty
-aggSummaryMapTotal _ _ Undeterminable = return Undeterminable
+  | lmads == mempty = pure mempty
+aggSummaryMapTotal _ _ Undeterminable = pure Undeterminable
 aggSummaryMapTotal scalars segspace (Set lmads0) =
   foldM
     ( \as' (gtid', size') -> case as' of
@@ -419,7 +419,7 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
                     primExpFromSubExp (IntType Int64) size'
               )
               (S.toList lmads')
-        Undeterminable -> return Undeterminable
+        Undeterminable -> pure Undeterminable
     )
     (Set lmads)
     (reverse segspace)
@@ -431,8 +431,8 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
 
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
-  | iterator_var `nameIn` freeIn dims0 = return Undeterminable
-  | not $ iterator_var `nameIn` freeIn offset0 = return $ Set $ S.singleton lmad
+  | iterator_var `nameIn` freeIn dims0 = pure Undeterminable
+  | not $ iterator_var `nameIn` freeIn offset0 = pure $ Set $ S.singleton lmad
   | otherwise = do
       new_var <- newVName "k"
       let offset = replaceIteratorWith (typedLeafExp new_var) offset0
@@ -443,10 +443,8 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
             IxFun.LMAD new_offset $
               IxFun.LMADDim new_stride 0 spn 0 IxFun.Inc : map incPerm dims0
       if new_var `nameIn` freeIn new_lmad
-        then
-          return $
-            Undeterminable
-        else return $ Set $ S.singleton new_lmad
+        then pure Undeterminable
+        else pure $ Set $ S.singleton new_lmad
   where
     incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
     replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped
