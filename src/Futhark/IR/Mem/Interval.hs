@@ -15,11 +15,9 @@ module Futhark.IR.Mem.Interval
 where
 
 import Control.Monad
-import Control.Monad.IO.Class
 import Data.Function (on)
-import Data.List (delete, find, intersect, maximumBy, minimumBy, partition, sort, sortBy, zip4, zip5, zipWith5, (\\))
+import Data.List (maximumBy, minimumBy, (\\))
 import qualified Data.Map.Strict as M
--- import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Prop
@@ -27,14 +25,6 @@ import Futhark.IR.Syntax hiding (Result)
 import Futhark.Util
 import Futhark.Util.Pretty
 import Z3.Monad
-
-traceWith' :: Show a => String -> a -> a
-traceWith' _ a = a
-
-traceWith :: Pretty a => String -> a -> a
-traceWith _ a = a
-
-trace _ a = a
 
 data Interval = Interval
   { lowerBound :: TPrimExp Int64 VName,
@@ -99,13 +89,13 @@ findClosestStride offset_term is =
 expandOffset :: AlgSimplify.SofP -> [Interval] -> Maybe (AlgSimplify.SofP)
 expandOffset [] _ = Nothing
 expandOffset offset i1
-  | (AlgSimplify.Prod b term_to_add, offset_rest) <- traceWith "findMostComplexTerm" $ findMostComplexTerm $ traceWith "Initial offset" offset, -- Find gnb
-    (closest_stride, first_term_divisor) <- traceWith "findClosestStride" $ findClosestStride term_to_add i1, -- find (nb-b, g)
+  | (AlgSimplify.Prod b term_to_add, offset_rest) <- findMostComplexTerm offset, -- Find gnb
+    (closest_stride, first_term_divisor) <- findClosestStride term_to_add i1, -- find (nb-b, g)
     target <- [AlgSimplify.Prod b $ closest_stride : first_term_divisor], -- g(nb-b)
-    diff <- traceWith "sumOfProducts" $ AlgSimplify.sumOfProducts $ traceWith "sumToExp" $ AlgSimplify.sumToExp $ AlgSimplify.Prod b term_to_add : map AlgSimplify.negate target, -- gnb - gnb + gb = gnb - g(nb-b)
+    diff <- AlgSimplify.sumOfProducts $ AlgSimplify.sumToExp $ AlgSimplify.Prod b term_to_add : map AlgSimplify.negate target, -- gnb - gnb + gb = gnb - g(nb-b)
     replacement <- target <> diff -- gnb = g(nb-b) + gnb - gnb + gb
     =
-      Just $ traceWith "Expandoffset returns!" (replacement <> offset_rest)
+      Just $ (replacement <> offset_rest)
 
 intervalOverlap :: [(VName, PrimExp VName)] -> Names -> Interval -> Interval -> Bool
 intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne2 st2)
@@ -122,11 +112,6 @@ intervalOverlap less_thans non_negatives (Interval lb1 ne1 st1) (Interval lb2 ne
 primBool :: TPrimExp Bool VName -> Maybe Bool
 primBool p
   | Just (BoolValue b) <- evalPrimExp (const Nothing) $ untyped p = Just b
-  | otherwise = Nothing
-
-primInt :: TPrimExp Int64 VName -> Maybe Int64
-primInt p
-  | Just (IntValue (Int64Value i)) <- evalPrimExp (const Nothing) $ untyped p = Just i
   | otherwise = Nothing
 
 intervalPairs :: [Interval] -> [Interval] -> [(Interval, Interval)]
@@ -155,7 +140,7 @@ selfOverlap less_thans non_negatives is =
   where
     selfOverlap' acc (x : xs) =
       let interval_span = (lowerBound x + numElements x - 1) * stride x
-       in (traceWith ("Is " <> pretty (AlgSimplify.simplify' acc) <> " less than " <> pretty (AlgSimplify.simplify' $ stride x) <> "?") $ AlgSimplify.lessThanish less_thans non_negatives (AlgSimplify.simplify' acc) (AlgSimplify.simplify' $ stride x))
+       in (AlgSimplify.lessThanish less_thans non_negatives (AlgSimplify.simplify' acc) (AlgSimplify.simplify' $ stride x))
             && selfOverlap' (acc + interval_span) xs
     selfOverlap' _ [] = True
 
@@ -174,7 +159,7 @@ selfOverlapZ3 scope asserts less_thans non_negatives is =
           non_negatives
           (untyped $ AlgSimplify.simplify' acc)
           (untyped $ AlgSimplify.simplify' $ stride x)
-      if traceWith ("Is (z3) " <> pretty acc <> " less than " <> pretty (stride x)) res
+      if res
         then selfOverlap' (acc + interval_span) xs
         else pure $ Just x
     selfOverlap' _ [] = pure Nothing
@@ -190,7 +175,7 @@ valToZ3 scope vname =
   case M.lookup vname scope of
     Just (Prim pt) -> fmap Just (mkFreshVar (pretty vname) =<< primTypeSort pt)
     Just _ -> error $ "Unsupported type for vname " <> pretty vname
-    Nothing -> trace ("Couldn't find vname " <> pretty vname) $ return Nothing
+    Nothing -> return Nothing
 
 cmpOpToZ3 :: MonadZ3 z3 => CmpOp -> AST -> AST -> z3 AST
 cmpOpToZ3 (CmpEq _) = mkEq
@@ -214,7 +199,6 @@ binOpToZ3 (SMin _) x y = mkMin x y
 binOpToZ3 (UMin _) x y = mkMin x y
 binOpToZ3 (SMax _) x y = mkMax x y
 binOpToZ3 (UMax _) x y = mkMax x y
-binOpToZ3 (SDivUp _ _) x y = mkDiv x y
 binOpToZ3 (SQuot _ _) x y = mkDiv x y
 binOpToZ3 (SMod _ _) x y = mkMod x y
 binOpToZ3 (UMod _ _) x y = mkMod x y
@@ -237,9 +221,9 @@ unOpToZ3 u _ = error $ "Unsupported UnOp " <> pretty u
 
 primExpToZ3 :: MonadZ3 z3 => M.Map VName AST -> PrimExp VName -> z3 AST
 primExpToZ3 var_table (LeafExp vn _) = return $ var_table M.! vn
-primExpToZ3 var_table (ValueExp (IntValue v)) = mkInteger $ valueIntegral v
-primExpToZ3 var_table (ValueExp (FloatValue v)) = mkRealNum $ valueRational v
-primExpToZ3 var_table (ValueExp (BoolValue b)) = mkBool b
+primExpToZ3 _ (ValueExp (IntValue v)) = mkInteger $ valueIntegral v
+primExpToZ3 _ (ValueExp (FloatValue v)) = mkRealNum $ valueRational v
+primExpToZ3 _ (ValueExp (BoolValue b)) = mkBool b
 primExpToZ3 var_table (BinOpExp bop e1 e2) =
   join $
     binOpToZ3 bop <$> primExpToZ3 var_table e1
@@ -253,9 +237,9 @@ primExpToZ3 var_table (UnOpExp u e) = unOpToZ3 u =<< primExpToZ3 var_table e
 primExpToZ3 var_table (FunExp name [e1] _)
   | name == "sqrt64" || name == "sqrt32" || name == "sqrt16" = do
       e1' <- primExpToZ3 var_table e1
-      exponent <- mkRealNum 0.5
-      mkPower e1' exponent
-primExpToZ3 var_table e = error $ "Unsupported exp " <> pretty e
+      expt <- mkRealNum (0.5 :: Double)
+      mkPower e1' expt
+primExpToZ3 _ e = error $ "Unsupported exp " <> pretty e
 
 mkMin :: MonadZ3 z3 => AST -> AST -> z3 AST
 mkMin e1 e2 = do
@@ -277,7 +261,7 @@ lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
       Nothing -> return Undef
       Just var_table -> do
         non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
-        asserts <- mapM (\vn -> primExpToZ3 var_table vn) asserts
+        asserts' <- mapM (\vn -> primExpToZ3 var_table vn) asserts
         lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
         apps <- mapM toApp $ M.elems var_table
 
@@ -285,12 +269,10 @@ lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
           mkAnd $
             non_negs
               <> lts
-              <> asserts
+              <> asserts'
 
         conclusion <- join $ mkLe <$> primExpToZ3 var_table pe1 <*> primExpToZ3 var_table pe2
         assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
-        -- sexp <- solverToString
-        -- liftIO $ putStrLn sexp
         check
   case result of
     Sat -> return True
@@ -307,7 +289,7 @@ disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(
           Nothing -> return Undef
           Just var_table -> do
             non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
-            asserts <- mapM (\vn -> primExpToZ3 var_table vn) asserts
+            asserts' <- mapM (\vn -> primExpToZ3 var_table vn) asserts
             lts <- mapM (\(vn, pe) -> join $ mkLt <$> return (var_table M.! vn) <*> primExpToZ3 var_table pe) less_thans
             nes <-
               sequence
@@ -321,7 +303,7 @@ disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(
                 nes
                   <> non_negs
                   <> lts
-                  <> asserts
+                  <> asserts'
 
             conclusion <-
               mkOr
@@ -338,69 +320,8 @@ disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(
                         ]
                   ]
             assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
-            -- sexp <- solverToString
-            -- liftIO $ putStrLn sexp
             check
-      case traceWith'
-        ( "disjointZ3\ni1: " <> pretty i1
-            <> "\ni2: "
-            <> pretty i2
-            <> "\nless_thans: "
-            <> pretty less_thans
-            <> "\nnon_negatives: "
-            <> pretty non_negatives
-        )
-        $ result of
+      case result of
         Sat -> return True
         _ -> return False
   | otherwise = return False
-
-vname s i = VName (nameFromString s) i
-
-b_8622 = vname "b" 8622
-
-i_9625 = vname "i" 9625
-
-i_9633 = vname "i" 9633
-
-gtid_8705 = vname "gtid" 8705
-
-num_blocks_8621 = vname "num_blocks" 8621
-
-u name = LeafExp name (IntType Int64)
-
-t = TPrimExp . u
-
-add_nw64 = (+)
-
-mul_nw64 = (*)
-
-sub64 = (-)
-
-sub_nw64 = (-)
-
-types =
-  M.fromList
-    [ (b_8622, Prim $ IntType Int64),
-      (i_9625, Prim $ IntType Int64),
-      (i_9633, Prim $ IntType Int64),
-      (gtid_8705, Prim $ IntType Int64),
-      (num_blocks_8621, Prim $ IntType Int64)
-    ]
-
-lessthans =
-  [ (i_9633, u b_8622),
-    (i_9625, untyped $ sub64 (t num_blocks_8621) (1 :: TPrimExp Int64 VName)),
-    (gtid_8705, untyped $ sub64 (t num_blocks_8621) 1)
-  ]
-
-nonnegs = namesFromList [b_8622, i_9625, i_9633, gtid_8705, num_blocks_8621]
-
-int1 = Interval (add_nw64 (add_nw64 (mul_nw64 (t b_8622) (t b_8622)) (mul_nw64 (mul_nw64 (t b_8622) (t b_8622)) (t i_9625))) (t i_9633)) 1 1
-
-int2 = Interval 0 (t b_8622) 1
-
--- i1: {lowerBound: add_nw64 (add_nw64 (mul_nw64 (b_8622) (b_8622)) (mul_nw64 (mul_nw64 (b_8622) (b_8622)) (i_9625))) (i_9633);
---  numElements: 1i64; stride: 1i64}
-
--- i2: {lowerBound: 0i64; numElements: b_8622; stride: 1i64}

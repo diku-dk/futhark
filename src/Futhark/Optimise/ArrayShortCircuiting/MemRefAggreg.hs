@@ -15,7 +15,6 @@ where
 
 import Control.Monad
 import Control.Monad.IO.Class
-import Data.Char (ord)
 import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.List (intersect, uncons)
@@ -23,7 +22,6 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
--- import Debug.Trace
 import Futhark.Analysis.AlgSimplify2
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
@@ -33,12 +31,6 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
 import Futhark.Util
-import Futhark.Util.Pretty (Pretty)
-
-trace _ x = x
-
-traceWith :: Pretty a => String -> a -> a
-traceWith s a = trace (s <> ": " <> pretty a) a
 
 -----------------------------------------------------
 -- Some translations of Accesses and Ixfuns        --
@@ -92,7 +84,7 @@ getUseSumFromStm ::
   -- | A pair of written and written+read memory locations, along with their
   -- associated array and the index function used
   Maybe ([(VName, VName, IxFun)], [(VName, VName, IxFun)])
-getUseSumFromStm td_env coal_tab (Let p _ (BasicOp (Index arr (Slice slc))))
+getUseSumFromStm td_env coal_tab (Let _ _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc = do
       (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab arr
@@ -284,7 +276,7 @@ noMemOverlap _ (Set mr) _
   | mr == mempty = return True
 noMemOverlap td_env (Set is0) (Set js0)
   | Just non_negs <- mapM (primExpFromSubExpM (basePMconv (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env = do
-      (disjoints, not_disjoints) <-
+      (_, not_disjoints) <-
         partitionM
           ( \i ->
               allM
@@ -296,19 +288,7 @@ noMemOverlap td_env (Set is0) (Set js0)
                 js
           )
           is
-      pure $
-        null not_disjoints
-          || trace
-            ( "it failed\n"
-                <> pretty less_thans
-                <> "\n"
-                <> pretty disjoints
-                <> "\nhalløj?: "
-                <> pretty not_disjoints
-                <> "\n og: "
-                <> pretty js
-            )
-            False
+      pure $ null not_disjoints
   where
     less_thans = map (fmap $ fixPoint $ substituteInPrimExp $ scalarTable td_env) $ knownLessThan td_env
     asserts = map (fixPoint (substituteInPrimExp $ scalarTable td_env) . primExpFromSubExp Bool) $ td_asserts td_env
@@ -350,7 +330,7 @@ aggSummaryLoopTotal _ _ scalars_loop (Just (iterator_var, (lower_bound, upper_bo
       ( aggSummaryOne iterator_var lower_bound upper_bound
           . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
       )
-      (trace "aggSummaryLoopTotal" $ S.toList lmads)
+      (S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = return Undeterminable
 
 -- | Partially aggregate the iteration-level summaries
@@ -381,7 +361,7 @@ aggSummaryLoopPartial _ _ scalars_loop (Just (iterator_var, (_, upper_bound))) (
           (upper_bound - typedLeafExp iterator_var - 1)
           . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
       )
-      (trace "aggSummaryLoopTotal" $ S.toList lmads)
+      (S.toList lmads)
 
 aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapPartial _ [] _ = return mempty
@@ -402,14 +382,14 @@ aggSummaryMapPartial scalars ((gtid, size) : rest) as = do
           Undeterminable -> return Undeterminable
       )
       as
-      $ trace "aggSummaryMapPartial" $ reverse rest
-  this_dim <- aggSummaryMapPartialOne scalars (gtid, size) $ traceWith "total_inner" total_inner
+      $ reverse rest
+  this_dim <- aggSummaryMapPartialOne scalars (gtid, size) total_inner
   rest' <- aggSummaryMapPartial scalars rest as
   return $ this_dim <> rest'
 
 aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
 aggSummaryMapPartialOne _ _ Undeterminable = return Undeterminable
-aggSummaryMapPartialOne scalars (gtid, (Constant n)) (Set lmads0) | oneIsh n = return mempty
+aggSummaryMapPartialOne _ (_, (Constant n)) (Set _) | oneIsh n = return mempty
 aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
   mapM
     helper
@@ -419,9 +399,8 @@ aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
       )
     ]
     <&> mconcat
-    <&> traceWith ("aggSummaryMapPartialOne. (gtid, size): " <> pretty (gtid, size) <> "\nlmads: " <> pretty lmads <> "\nresult")
   where
-    lmads = map (fixPoint (traceWith "fixpoint" . (IxFun.substituteInLMAD $ fmap TPrimExp scalars))) $ S.toList lmads0
+    lmads = map (fixPoint ((IxFun.substituteInLMAD $ fmap TPrimExp scalars))) $ S.toList lmads0
     helper (x, y) = mconcat <$> mapM (aggSummaryOne gtid x y) lmads
 
 aggSummaryMapTotal :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
@@ -446,10 +425,9 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
     (reverse segspace)
   where
     lmads =
-      trace "aggSummaryMapTotal" $
-        S.fromList $
-          map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $
-            S.toList lmads0
+      S.fromList $
+        map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $
+          S.toList lmads0
 
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
@@ -467,28 +445,7 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
       if new_var `nameIn` freeIn new_lmad
         then
           return $
-            trace
-              ( "aggSummaryOne: " <> pretty lmad
-                  <> "\niterator_var: "
-                  <> pretty iterator_var
-                  <> "\nlower_bound: "
-                  <> pretty lower_bound
-                  <> "\nspn: "
-                  <> pretty spn
-                  <> "\nnew_var: "
-                  <> pretty new_var
-                  <> "\noffset: "
-                  <> pretty offset
-                  <> "\noffsetp1: "
-                  <> pretty offsetp1
-                  <> "\nnew_stride: "
-                  <> pretty new_stride
-                  <> "\nnew_offset: "
-                  <> pretty new_offset
-                  <> "\nnew_lmad: "
-                  <> pretty new_lmad
-              )
-              Undeterminable
+            Undeterminable
         else return $ Set $ S.singleton new_lmad
   where
     incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
@@ -496,141 +453,3 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
 
 typedLeafExp :: VName -> TPrimExp Int64 VName
 typedLeafExp vname = isInt64 $ LeafExp vname (IntType Int64)
-
-vname s = VName (nameFromString s) (sum $ map ord s)
-
-var s = TPrimExp $ LeafExp (vname s) $ IntType Int64
-
-gtid_8472 = TPrimExp $ LeafExp (foo "gtid" 8472) $ IntType Int64
-
-gtid_8473 = TPrimExp $ LeafExp (foo "gtid" 8473) $ IntType Int64
-
-gtid_8474 = TPrimExp $ LeafExp (foo "gtid" 8474) $ IntType Int64
-
-num_blocks_8284 = TPrimExp $ LeafExp (foo "num_blocks" 8284) $ IntType Int64
-
-add_nw64 = (+)
-
-mul_nw64 = (*)
-
-sub64 = (-)
-
-sub_nw64 = (-)
-
-foo s i = VName (nameFromString s) i
-
-nonnegs = freeIn [gtid_8472, gtid_8473, gtid_8474, num_blocks_8284]
-
--- lm1 :: IxFun.LMAD (TPrimExp Int64 VName)
--- lm1 =
---   LMAD
---     ( add_nw64
---         (mul_nw64 (256) (num_blocks_8284))
---         (256)
---     )
---     [ LMADDim (mul_nw64 (num_blocks_8284) (256)) 0 (sub_nw64 (gtid_8472) (1)) 0 Inc,
---       LMADDim 256 0 (sub64 (num_blocks_8284) (1)) 1 Inc,
---       LMADDim 16 0 16 2 Inc,
---       LMADDim 1 0 16 3 Inc
---     ]
-
--- lm2 :: IxFun.LMAD (TPrimExp Int64 VName)
--- lm2 =
---   LMAD
---     ( add_nw64
---         ( add_nw64
---             ( add_nw64
---                 ( add_nw64
---                     (mul_nw64 (256) (num_blocks_8284))
---                     (256)
---                 )
---                 ( mul_nw64
---                     (gtid_8472)
---                     (mul_nw64 (256) (num_blocks_8284))
---                 )
---             )
---             (mul_nw64 (gtid_8473) (256))
---         )
---         (mul_nw64 (gtid_8474) (16))
---     )
---     [LMADDim 1 0 16 0 Inc]
-
-j_m_i_8287 :: TPrimExp Int64 VName
-j_m_i_8287 = num_blocks_8284 - 1
-
-lessthans :: [(VName, PrimExp VName)]
-lessthans =
-  [ (head $ namesToList $ freeIn gtid_8472, untyped j_m_i_8287),
-    (head $ namesToList $ freeIn gtid_8473, untyped j_m_i_8287),
-    (head $ namesToList $ freeIn gtid_8474, untyped (16 :: TPrimExp Int64 VName))
-  ]
-
-segspcs :: [(VName, SubExp)]
-segspcs =
-  [ (head $ namesToList $ freeIn gtid_8472, Var $ foo "j_m_i" 8287),
-    (head $ namesToList $ freeIn gtid_8473, Var $ foo "j_m_i" 8287),
-    (head $ namesToList $ freeIn gtid_8474, Constant $ IntValue $ Int64Value 16)
-  ]
-
-scalst :: ScalarTab
-scalst = M.fromList [(foo "j_m_i" 8287, untyped $ (sub64 (num_blocks_8284) 1 :: TPrimExp Int64 VName))]
-
--- {offset: 256i64; strides: [256i64, 1i64, 16i64]; rotates: [0i64, 0i64, 0i64];
---   shape: [sub64 (num_blocks_8284) (1i64), 16i64, 16i64]; permutation: [0, 1, 2];
---   monotonicity: [Inc, Inc, Inc]
-
--- One of these
---
--- [{offset: add_nw64 (add_nw64 (mul_nw64 (add_nw64 (1i64) (gtid_8472)) (mul_nw64 (256i64) (num_blocks_8284))) (mul_nw64 (add_nw64 (1i64) (gtid_8473)) (256i64))) (mul_nw64 (gtid_8474) (16i64));
---   strides: [1i64]; rotates: [0i64]; shape: [16i64]; permutation: [0];
---   monotonicity: [Inc]},
---  {offset: add_nw64 (mul_nw64 (add_nw64 (1i64) (gtid_8472)) (mul_nw64 (256i64) (num_blocks_8284))) (mul_nw64 (gtid_8474) (16i64));
---   strides: [1i64]; rotates: [0i64]; shape: [16i64]; permutation: [0];
---   monotonicity: [Inc]},
---  {offset: mul_nw64 (add_nw64 (1i64) (gtid_8473)) (256i64);
---   strides: [1i64, 16i64]; rotates: [0i64, 0i64]; shape: [16i64, 16i64];
---   permutation: [0, 1]; monotonicity: [Inc, Inc]}]
---
--- turn into
---
--- {offset: add_nw64 (mul_nw64 (256i64) (num_blocks_8284)) (256i64);
---  strides: [mul_nw64 (num_blocks_8284) (256i64), 256i64, 16i64, 1i64];
---  rotates: [0i64, 0i64, 0i64, 0i64];
---  shape: [sub_nw64 (gtid_8472) (1i64), sub64 (num_blocks_8284) (1i64), 16i64, 16i64];
---  permutation: [0, 1, 2, 3]; monotonicity: [Inc, Inc, Inc, Inc]}
-
-lm1 :: IxFun.LMAD (TPrimExp Int64 VName)
-lm1 =
-  IxFun.LMAD
-    ( add_nw64
-        ( add_nw64
-            ( mul_nw64
-                (add_nw64 (1) (gtid_8472))
-                (mul_nw64 (256) (num_blocks_8284))
-            )
-            (mul_nw64 (add_nw64 (1) (gtid_8473)) (256))
-        )
-        (mul_nw64 (gtid_8474) (16))
-    )
-    [IxFun.LMADDim 1 0 16 0 IxFun.Inc]
-
-lm2 :: IxFun.LMAD (TPrimExp Int64 VName)
-lm2 =
-  IxFun.LMAD
-    ( add_nw64
-        ( add_nw64
-            ( add_nw64
-                ( add_nw64
-                    (mul_nw64 (256) (num_blocks_8284))
-                    (256)
-                )
-                ( mul_nw64
-                    (gtid_8472)
-                    (mul_nw64 (256) (num_blocks_8284))
-                )
-            )
-            (mul_nw64 (gtid_8473) (256))
-        )
-        (mul_nw64 (gtid_8474) (16))
-    )
-    [IxFun.LMADDim 1 0 16 0 IxFun.Inc]

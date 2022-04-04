@@ -21,18 +21,11 @@ where
 
 import qualified Data.Map.Strict as M
 import Data.Maybe
--- import Debug.Trace
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
-import Futhark.Util.Pretty
-
-trace _ x = x
-
-traceWith :: Pretty a => String -> a -> a
-traceWith s a = trace (s <> ": " <> pretty a) a
 
 type DirAlias = IxFun -> IxFun
 -- ^ A direct aliasing transformation
@@ -89,7 +82,7 @@ getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Reshape shp_chg x)) =
   Just (x, (`IxFun.reshape` map (fmap pe64) shp_chg))
-getDirAliasFromExp (BasicOp (Rearrange perm x)) =
+getDirAliasFromExp (BasicOp (Rearrange _ _)) =
   Nothing
 getDirAliasFromExp (BasicOp (Rotate rs x)) =
   Just (x, (`IxFun.rotate` fmap pe64 rs))
@@ -143,9 +136,9 @@ class TopDownHelper inner where
 
 instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
   innerNonNegatives _ (SegOp seg_op) =
-    traceWith "innerNonNegatives1" $ foldMap (oneName . fst) $ unSegSpace $ segSpace seg_op
-  innerNonNegatives [vname] (SizeOp (GetSize _ _)) = traceWith "innerNonNegatives2" $ oneName vname
-  innerNonNegatives [vname] (SizeOp (GetSizeMax _)) = traceWith "innerNonNegatives2" $ oneName vname
+    foldMap (oneName . fst) $ unSegSpace $ segSpace seg_op
+  innerNonNegatives [vname] (SizeOp (GetSize _ _)) = oneName vname
+  innerNonNegatives [vname] (SizeOp (GetSizeMax _)) = oneName vname
   innerNonNegatives _ _ = mempty
 
   innerKnownLessThan (SegOp seg_op) =
@@ -195,7 +188,7 @@ topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
 --           scope = scope env <> scopeOf stm,
 --           usage_table = usageInStm stm <> usage_table env
 --         }
-topdwnTravBinding env stm@(Let (Pat _) _ (BasicOp (Assert se _ _))) =
+topdwnTravBinding env (Let (Pat _) _ (BasicOp (Assert se _ _))) =
   env {td_asserts = se : td_asserts env}
 topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
@@ -213,9 +206,9 @@ topdwnTravBinding env stm =
           <> nonNegativesInPat (stmPat stm)
     }
 
-nonNegativesInPat :: (Pretty rep, Typed rep) => Pat rep -> Names
+nonNegativesInPat :: Typed rep => Pat rep -> Names
 nonNegativesInPat (Pat elems) =
-  traceWith ("NonNegatives in pat " <> pretty (Pat elems)) $ foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
+  foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
 
 topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
 topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
@@ -225,7 +218,7 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
           <> scopeOf lform
       non_negatives =
         nonNegatives td_env <> case lform of
-          ForLoop v _ _ _ -> traceWith "ForLoop" $ oneName v
+          ForLoop v _ _ _ -> oneName v
           _ -> mempty
       less_than =
         case lform of
@@ -253,24 +246,24 @@ getDirAliasedIxfn td_env coals_tab x =
         Nothing ->
           -- This value is not subject to coalescing at the moment. Just return the
           -- original index function
-          trace ("Didn't find m_x (" <> pretty m_x <> ") in coals_tab") $ Just (m_x, m_x, orig_ixfun)
-    Nothing -> trace "Didn't find scope mem info" Nothing
+          Just (m_x, m_x, orig_ixfun)
+    Nothing -> Nothing
 
 -- | Like 'getDirAliasedIxfn', but this version returns 'Nothing' if the value
 -- is not currently subject to coalescing.
 getDirAliasedIxfn' :: HasMemBlock (Aliases rep) => TopDnEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn' td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
-    Just (MemBlock _ _ m_x orig_ixfun) ->
+    Just (MemBlock _ _ m_x _) ->
       case M.lookup m_x coals_tab of
         Just coal_etry -> do
           (Coalesced _ (MemBlock _ _ m ixf) _) <- walkAliasTab (v_alias td_env) (vartab coal_etry) x
-          return $ traceWith "getDirAliasedIxfn'" (m_x, m, ixf)
+          return (m_x, m, ixf)
         Nothing ->
           -- This value is not subject to coalescing at the moment. Just return the
           -- original index function
-          trace ("Didn't find m_x (" <> pretty m_x <> ") in coals_tab") Nothing
-    Nothing -> trace "Didn't find scope mem info" Nothing
+          Nothing
+    Nothing -> Nothing
 
 -- | Given a 'VName', walk the 'VarAliasTab' until found in the 'Map'.
 walkAliasTab ::

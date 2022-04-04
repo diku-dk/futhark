@@ -45,18 +45,15 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.Char
 import Data.Function (on, (&))
-import Data.List (delete, elemIndex, find, intersect, partition, sort, sortBy, zip4, zip5, zipWith5, (\\))
+import Data.List (elemIndex, partition, sort, sortBy, zip4, zip5, zipWith5)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust, isJust)
--- import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 import Futhark.IR.Mem.Interval
 import Futhark.IR.Prop
@@ -67,13 +64,10 @@ import Futhark.IR.Syntax
     FlatSlice (..),
     ShapeChange,
     Slice (..),
-    SubExp (..),
     Type,
-    TypeBase (..),
     dimFix,
     flatSliceDims,
     flatSliceStrides,
-    nameFromString,
     unitSlice,
   )
 import Futhark.IR.Syntax.Core (Ext (..), VName (..))
@@ -82,13 +76,7 @@ import Futhark.Transform.Substitute
 import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
-import Z3.Monad
 import Prelude hiding (gcd, id, mod, (.))
-
-trace _ x = x
-
-traceWith :: Pretty a => String -> a -> a
-traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Shape num = [num]
 
@@ -1219,36 +1207,11 @@ disjoint2 less_thans non_negatives lmad1 lmad2 =
              distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
            ) of
         (Just interval1'', Just interval2'') ->
-          traceWith
-            ( unlines
-                [ "Disjoint2 ?",
-                  "less_thans: " <> pretty less_thans,
-                  "non_negatives: " <> pretty non_negatives,
-                  "lmad1: " <> pretty lmad1,
-                  "lmad2: " <> pretty lmad2,
-                  "of1: " <> pretty (AlgSimplify2.simplify0 $ untyped $ lmadOffset lmad1),
-                  "of2: " <> pretty (AlgSimplify2.simplify0 $ untyped $ lmadOffset lmad2),
-                  "offset1: " <> pretty offset1,
-                  "offset2: " <> pretty offset2,
-                  "diff: " <> pretty (offset1 `AlgSimplify2.sub` offset2),
-                  "neg_offset: " <> pretty neg_offset,
-                  "pos_offset: " <> pretty pos_offset,
-                  "interval1: " <> pretty interval1,
-                  "interval2: " <> pretty interval2,
-                  "interval1': " <> pretty interval1',
-                  "interval2': " <> pretty interval2',
-                  "interval1'': " <> pretty interval1'',
-                  "interval2'': " <> pretty interval2'',
-                  "selfoverlap interval1'': " <> pretty (selfOverlap less_thans non_negatives interval1''),
-                  "selfoverlap interval2'': " <> pretty (selfOverlap less_thans non_negatives interval2''),
-                  "intervaloverlap: " <> pretty (map (not . uncurry (intervalOverlap less_thans non_negatives)) (zip interval1'' interval2''))
-                ]
-            )
-            $ not (selfOverlap less_thans non_negatives interval1'')
-              && not (selfOverlap less_thans non_negatives interval2'')
-              && any
-                (not . uncurry (intervalOverlap less_thans non_negatives))
-                (zip interval1'' interval2'')
+          not (selfOverlap less_thans non_negatives interval1'')
+            && not (selfOverlap less_thans non_negatives interval2'')
+            && any
+              (not . uncurry (intervalOverlap less_thans non_negatives))
+              (zip interval1'' interval2'')
         _ ->
           False
 
@@ -1256,9 +1219,6 @@ disjoint3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> 
 disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
-      (neg_offset, pos_offset) =
-        partition AlgSimplify2.negated $
-          AlgSimplify2.simplifySofP $ offset1 `AlgSimplify2.sub` offset2
       interval1' = fixPoint (mergeDims . joinDims) $ reverse $ sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride)) interval1
       interval2' = fixPoint (mergeDims . joinDims) $ reverse $ sortBy (AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride)) interval2
       (interval1'', interval2'') =
@@ -1327,9 +1287,9 @@ splitDim :: Interval -> [Interval] -> [(AlgSimplify2.SofP, [Interval])]
 splitDim overlapping_dim0 is
   | [st] <- AlgSimplify2.simplify0 $ untyped $ stride overlapping_dim0,
     [st1] <- AlgSimplify2.simplify0 $ untyped $ stride overlapping_dim,
-    [span] <- AlgSimplify2.simplify0 $ untyped $ stride overlapping_dim * numElements overlapping_dim,
+    [spn] <- AlgSimplify2.simplify0 $ untyped $ stride overlapping_dim * numElements overlapping_dim,
     lowerBound overlapping_dim == 0,
-    Just big_dim_elems <- AlgSimplify2.maybeDivide span st,
+    Just big_dim_elems <- AlgSimplify2.maybeDivide spn st,
     Just small_dim_elems <- AlgSimplify2.maybeDivide st st1 =
       [ ( [],
           init before
@@ -1348,7 +1308,7 @@ splitDim overlapping_dim0 is
   where
     (before, overlapping_dim, after) =
       fromJust $
-        elemIndex (traceWith "overlapping_dim" overlapping_dim0) (traceWith "is" is)
+        elemIndex overlapping_dim0 is
           >>= (flip focusNth is . (+ 1))
 
 lmadToIntervals :: LMAD (TPrimExp Int64 VName) -> (AlgSimplify2.SofP, [Interval])
@@ -1361,97 +1321,6 @@ lmadToIntervals lmad@(LMAD offset dims0) =
     helper :: LMADDim (TPrimExp Int64 VName) -> Interval
     helper (LMADDim strd _ shp _ _) = do
       Interval 0 (AlgSimplify2.simplify' shp) (AlgSimplify2.simplify' strd)
-
-vname s = VName (nameFromString s) (sum $ map ord s)
-
-var s = TPrimExp $ LeafExp (vname s) $ IntType Int64
-
-gtid_8472 = TPrimExp $ LeafExp (foo "gtid" 8472) $ IntType Int64
-
-gtid_8473 = TPrimExp $ LeafExp (foo "gtid" 8473) $ IntType Int64
-
-gtid_8474 = TPrimExp $ LeafExp (foo "gtid" 8474) $ IntType Int64
-
-step_14414 = TPrimExp $ LeafExp (foo "step" 14414) $ IntType Int64
-
-gtid_16875 = TPrimExp $ LeafExp (foo "gtid" 16875) $ IntType Int64
-
-gtid_16876 = TPrimExp $ LeafExp (foo "gtid" 16876) $ IntType Int64
-
-m_14362 = TPrimExp $ LeafExp (foo "m" 14362) $ IntType Int64
-
-num_blocks_8284 = TPrimExp $ LeafExp (foo "num_blocks" 8284) $ IntType Int64
-
-gid_y_18126 = TPrimExp $ LeafExp (foo "gid_y" 18126) $ IntType Int64
-
-gid_x_18125 = TPrimExp $ LeafExp (foo "gid_x" 18125) $ IntType Int64
-
-add_nw64 = (+)
-
-add64 = (+)
-
-mul_nw64 = (*)
-
-mul64 = (*)
-
-sub64 = (-)
-
-sdiv64 = (Futhark.Util.IntegralExp.div)
-
-sub_nw64 = (-)
-
-foo s i = VName (nameFromString s) i
-
-nonnegs = freeIn lm1 <> freeIn lm2
-
--- halløj?: {offset: mul_nw64 (add_nw64 (1i64) (gtid_8473)) (256i64);
---  strides: [1i64, 16i64]; rotates: [0i64, 0i64]; shape: [16i64, 16i64];
---  permutation: [0, 1]; monotonicity: [Inc, Inc]}
-
-lm1 :: LMAD (TPrimExp Int64 VName)
-lm1 =
-  LMAD
-    (add_nw64 (mul_nw64 (add_nw64 (add64 (1) (step_14414)) (gtid_16875)) (mul_nw64 (1024) (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32)))) (mul_nw64 (add64 (1) (step_14414)) (1024)))
-    [ LMADDim 1024 0 gtid_16876 0 Inc,
-      LMADDim 1024 0 1 1 Inc,
-      LMADDim 32 0 1 2 Inc,
-      LMADDim 128 0 8 3 Inc,
-      LMADDim 4 0 8 4 Inc,
-      LMADDim 32 0 4 5 Inc,
-      LMADDim 1 0 4 6 Inc
-    ]
-
-lm2 :: LMAD (TPrimExp Int64 VName)
-lm2 =
-  LMAD
-    (add_nw64 (add_nw64 (add_nw64 (add_nw64 (add_nw64 (mul_nw64 (mul_nw64 (1024) (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32))) (add64 (1) (step_14414))) (mul_nw64 (1024) (add64 (1) (step_14414)))) (mul_nw64 (gtid_16875) (mul_nw64 (1024) (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32))))) (mul_nw64 (gtid_16876) (1024))) (mul_nw64 (gid_y_18126) (32))) (gid_x_18125))
-    []
-
-j_m_i_8287 :: TPrimExp Int64 VName
-j_m_i_8287 = num_blocks_8284 - 1
-
-lessthans :: [(VName, PrimExp VName)]
-lessthans =
-  [ ( step_14414,
-      sub64 (sdiv64 (mul64 (32) (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32))) (32)) (1)
-    ),
-    ( gtid_16875,
-      sub64 (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32)) (add64 (1) (step_14414))
-    ),
-    ( gtid_16876,
-      sub64 (sdiv64 (sub64 (add64 (32) (m_14362)) (1)) (32)) (add64 (1) (step_14414))
-    ),
-    (gid_y_18126, 1),
-    (gid_x_18125, 1)
-  ]
-    & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
-
-scmap :: M.Map VName Type
-scmap =
-  M.fromList $
-    map (\x -> (x, Prim $ IntType Int64)) $
-      namesToList $
-        freeIn lm1 <> freeIn lm2
 
 -- | Dynamically determine if two 'LMADDim' are equal.
 --

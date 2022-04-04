@@ -2,7 +2,7 @@ packages: futhark.cabal
 index-state: 2022-02-03T19:05:34Z
 
 package futhark
-  ghc-options: -j -fwrite-ide-info -hiedir=.hie
+  ghc-options: -Werror -j -fwrite-ide-info -hiedir=.hie
 
 source-repository-package
     type: git
