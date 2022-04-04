@@ -208,7 +208,7 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
     -- We only want this simplification if the result does not refer
     -- to 'i' at all, or does not contain accesses.
     onLoopVar (p, arr) Nothing =
-      return (Just (p, arr), mempty)
+      pure (Just (p, arr), mempty)
     onLoopVar (p, arr) (Just m) = do
       (x, x_stms) <- collectStms m
       case x of
@@ -223,15 +223,15 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
                 certifying cs $
                   letExp "for_in_partial" . BasicOp . Index arr' . Slice $
                     DimSlice (intConst Int64 0) w (intConst Int64 1) : slice'
-              return (Just (p, for_in_partial), mempty)
+              pure (Just (p, for_in_partial), mempty)
         SubExpResult cs se
           | all (notIndex . stmExp) x_stms -> do
               x_stms' <- collectStms_ $
                 certifying cs $ do
                   addStms x_stms
                   letBindNames [paramName p] $ BasicOp $ SubExp se
-              return (Nothing, x_stms')
-        _ -> return (Just (p, arr), mempty)
+              pure (Nothing, x_stms')
+        _ -> pure (Just (p, arr), mempty)
 
     notIndex (BasicOp Index {}) = False
     notIndex _ = True
@@ -247,7 +247,7 @@ unroll ::
   RuleM rep [SubExpRes]
 unroll n merge (iv, it, i) loop_vars body
   | i >= n =
-      return $ map snd merge
+      pure $ map snd merge
   | otherwise = do
       iter_body <- insertStmsM $ do
         forM_ merge $ \(mergevar, SubExpRes cs mergeinit) ->

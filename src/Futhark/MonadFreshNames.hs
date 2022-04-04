@@ -76,7 +76,7 @@ modifyNameSource m = do
   src <- getNameSource
   let (x, src') = m src
   putNameSource src'
-  return x
+  pure x
 
 -- | Run a computation needing a fresh name source and returning a new
 -- one, using 'getNameSource' and 'putNameSource' before and after the
@@ -112,7 +112,7 @@ newIdent ::
   m Ident
 newIdent s t = do
   s' <- newID $ nameFromString s
-  return $ Ident s' t
+  pure $ Ident s' t
 
 -- | Produce a fresh 'Ident', using the given 'Ident' as a template,
 -- but possibly modifying the name.
@@ -134,7 +134,7 @@ newParam ::
   m (Param dec)
 newParam s t = do
   s' <- newID $ nameFromString s
-  return $ Param mempty s' t
+  pure $ Param mempty s' t
 
 -- Utility instance defintions for MTL classes.  This requires
 -- UndecidableInstances, but saves on typing elsewhere.

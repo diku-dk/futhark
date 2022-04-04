@@ -18,6 +18,7 @@ module Futhark.Util
     dropAt,
     takeLast,
     dropLast,
+    debug,
     mapEither,
     partitionMaybe,
     maybeNth,
@@ -71,6 +72,7 @@ import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash.MD5 as MD5
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
@@ -98,6 +100,7 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
+import System.Log.Logger (debugM)
 import System.Process.ByteString
 import Text.Read (readMaybe)
 
@@ -118,11 +121,11 @@ mapAccumLM ::
   acc ->
   [x] ->
   m (acc, [y])
-mapAccumLM _ acc [] = return (acc, [])
+mapAccumLM _ acc [] = pure (acc, [])
 mapAccumLM f acc (x : xs) = do
   (acc', x') <- f acc x
   (acc'', xs') <- mapAccumLM f acc' xs
-  return (acc'', x' : xs')
+  pure (acc'', x' : xs')
 
 -- | @chunk n a@ splits @a@ into @n@-size-chunks.  If the length of
 -- @a@ is not divisible by @n@, the last chunk will have fewer than
@@ -246,7 +249,7 @@ fancyTerminal :: Bool
 fancyTerminal = unsafePerformIO $ do
   isTTY <- hIsTerminalDevice stdout
   isDumb <- (Just "dumb" ==) <$> lookupEnv "TERM"
-  return $ isTTY && not isDumb
+  pure $ isTTY && not isDumb
 
 -- | Like 'readProcessWithExitCode', but also wraps exceptions when
 -- the indicated binary cannot be launched, or some other exception is
@@ -258,7 +261,7 @@ runProgramWithExitCode ::
   IO (Either IOException (ExitCode, String, String))
 runProgramWithExitCode exe args inp =
   (Right . postprocess <$> readProcessWithExitCode exe args inp)
-    `catch` \e -> return (Left e)
+    `catch` \e -> pure (Left e)
   where
     decode = T.unpack . T.decodeUtf8With T.lenientDecode
     postprocess (code, out, err) =
@@ -267,10 +270,10 @@ runProgramWithExitCode exe args inp =
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]
 directoryContents dir = do
-  _ Dir.:/ tree <- Dir.readDirectoryWith return dir
+  _ Dir.:/ tree <- Dir.readDirectoryWith pure dir
   case Dir.failures tree of
     Dir.Failed _ err : _ -> throw err
-    _ -> return $ mapMaybe isFile $ Dir.flattenDir tree
+    _ -> pure $ mapMaybe isFile $ Dir.flattenDir tree
   where
     isFile (Dir.File _ path) = Just path
     isFile _ = Nothing
@@ -401,9 +404,9 @@ interactWithFileSafely m =
   where
     couldNotRead e
       | isDoesNotExistError e =
-          return Nothing
+          pure Nothing
       | otherwise =
-          return $ Just $ Left $ show e
+          pure $ Just $ Left $ show e
 
 -- | Read a file, returning 'Nothing' if the file does not exist, and
 -- 'Left' if some other error occurs.
@@ -546,3 +549,6 @@ partitionM f = helper ([], [])
       if res
         then helper (x : acct, accf) xs
         else helper (acct, x : accf) xs
+
+debug :: MonadIO m => String -> m ()
+debug msg = liftIO $ debugM "futhark" msg

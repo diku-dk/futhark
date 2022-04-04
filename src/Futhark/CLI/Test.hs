@@ -63,7 +63,7 @@ accErrors :: [TestM a] -> TestM [a]
 accErrors tests = do
   eithers <- lift $ mapM runExceptT tests
   let errors = traverse eitherToErrors eithers
-  ExceptT $ return $ runErrors errors
+  ExceptT $ pure $ runErrors errors
 
 accErrors_ :: [TestM a] -> TestM ()
 accErrors_ = void . accErrors
@@ -135,13 +135,13 @@ optimisedProgramMetrics programs pipeline program =
       check []
   where
     check opt = do
-      futhark <- liftIO $ maybe getExecutablePath return $ configFuthark programs
+      futhark <- liftIO $ maybe getExecutablePath pure $ configFuthark programs
       let opts = ["dev"] ++ opt ++ ["--metrics", program]
       (code, output, err) <- liftIO $ readProcessWithExitCode futhark opts ""
       let output' = T.decodeUtf8 output
       case code of
         ExitSuccess
-          | [(m, [])] <- reads $ T.unpack output' -> return m
+          | [(m, [])] <- reads $ T.unpack output' -> pure m
           | otherwise -> throwError $ "Could not read metrics output:\n" <> output'
         ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
         ExitFailure _ -> throwError $ T.decodeUtf8 err
@@ -173,7 +173,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
                   <> " times, but occurred "
                   <> T.pack (show actual_occurences)
                   <> " times."
-        _ -> return ()
+        _ -> pure ()
 
 testWarnings :: [WarningTest] -> SBS.ByteString -> TestM ()
 testWarnings warnings futerr = accErrors_ $ map testWarning warnings
@@ -184,7 +184,7 @@ testWarnings warnings futerr = accErrors_ $ map testWarning warnings
             "Expected warning:\n  " <> regex_s
               <> "\nGot warnings:\n  "
               <> T.decodeUtf8 futerr
-      | otherwise = return ()
+      | otherwise = pure ()
 
 runInterpretedEntry :: FutharkExe -> FilePath -> InputOutputs -> TestM ()
 runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) =
@@ -209,7 +209,7 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
 
 runTestCase :: TestCase -> TestM ()
 runTestCase (TestCase mode program testcase progs) = do
-  futhark <- liftIO $ maybe getExecutablePath return $ configFuthark progs
+  futhark <- liftIO $ maybe getExecutablePath pure $ configFuthark progs
   let checkctx =
         mconcat
           [ "Type-checking with '",
@@ -234,7 +234,7 @@ runTestCase (TestCase mode program testcase progs) = do
         (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
 
         case code of
-          ExitSuccess -> return ()
+          ExitSuccess -> pure ()
           ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
           ExitFailure _ -> throwError $ T.decodeUtf8 err
     RunCases ios structures warnings -> do
@@ -323,7 +323,7 @@ checkError (ThisError regex_s regex) err
           <> "\nGot error:\n  "
           <> err
 checkError _ _ =
-  return ()
+  pure ()
 
 runResult ::
   (MonadIO m, MonadError T.Text m) =>
@@ -338,9 +338,9 @@ runResult program ExitSuccess stdout_s _ =
       let actualf = program `addExtension` "actual"
       liftIO $ SBS.writeFile actualf stdout_s
       E.throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
-    Right vs -> return $ SuccessResult vs
+    Right vs -> pure $ SuccessResult vs
 runResult _ (ExitFailure _) _ stderr_s =
-  return $ ErrorResult $ T.decodeUtf8 stderr_s
+  pure $ ErrorResult $ T.decodeUtf8 stderr_s
 
 compileTestProgram :: [String] -> FutharkExe -> String -> FilePath -> [WarningTest] -> TestM ()
 compileTestProgram extra_options futhark backend program warnings = do
@@ -356,7 +356,7 @@ compareResult ::
   RunResult ->
   m ()
 compareResult _ _ _ (Succeeds Nothing) SuccessResult {} =
-  return ()
+  pure ()
 compareResult entry index program (Succeeds (Just expected_vs)) (SuccessResult actual_vs) =
   checkResult
     (program <.> T.unpack entry <.> show index)
@@ -389,7 +389,7 @@ catching :: IO TestResult -> IO TestResult
 catching m = m `catch` save
   where
     save :: SomeException -> IO TestResult
-    save e = return $ Failure [T.pack $ show e]
+    save e = pure $ Failure [T.pack $ show e]
 
 doTest :: TestCase -> IO TestResult
 doTest = catching . runTestM . runTestCase
@@ -518,7 +518,7 @@ runTests config paths = do
               + length wts
 
       getResults ts
-        | null (testStatusRemain ts) = report ts >> return ts
+        | null (testStatusRemain ts) = report ts >> pure ts
         | otherwise = do
             report ts
             msg <- takeMVar reportmvar

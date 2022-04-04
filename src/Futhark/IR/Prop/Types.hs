@@ -315,7 +315,7 @@ mapOnExtType ::
   TypeBase ExtShape u ->
   m (TypeBase ExtShape u)
 mapOnExtType _ (Prim bt) =
-  return $ Prim bt
+  pure $ Prim bt
 mapOnExtType f (Acc acc ispace ts u) =
   Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts <*> pure u
   where
@@ -337,7 +337,7 @@ mapOnType ::
   (SubExp -> m SubExp) ->
   TypeBase Shape u ->
   m (TypeBase Shape u)
-mapOnType _ (Prim bt) = return $ Prim bt
+mapOnType _ (Prim bt) = pure $ Prim bt
 mapOnType f (Acc acc ispace ts u) =
   Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts <*> pure u
   where
@@ -429,11 +429,11 @@ extractShapeContext ts shapes =
     extract' (Ext x) v = do
       seen <- gets $ S.member x
       if seen
-        then return Nothing
+        then pure Nothing
         else do
           modify $ S.insert x
-          return $ Just v
-    extract' (Free _) _ = return Nothing
+          pure $ Just v
+    extract' (Free _) _ = pure Nothing
 
 -- | The 'Ext' integers used for existential sizes in the given types.
 shapeContext :: [TypeBase ExtShape u] -> S.Set Int
@@ -467,19 +467,19 @@ generaliseExtTypes rt1 rt2 =
           (shapeDims $ arrayShape t1)
           (shapeDims $ arrayShape t2)
     unifyExtDims (Free se1) (Free se2)
-      | se1 == se2 = return $ Free se1 -- Arbitrary
+      | se1 == se2 = pure $ Free se1 -- Arbitrary
       | otherwise = do
           (n, m) <- get
           put (n + 1, m)
-          return $ Ext n
+          pure $ Ext n
     unifyExtDims (Ext x) (Ext y)
-      | x == y = Ext <$> (maybe (new x) return =<< gets (M.lookup x . snd))
+      | x == y = Ext <$> (maybe (new x) pure =<< gets (M.lookup x . snd))
     unifyExtDims (Ext x) _ = Ext <$> new x
     unifyExtDims _ (Ext x) = Ext <$> new x
     new x = do
       (n, m) <- get
       put (n + 1, M.insert x n m)
-      return n
+      pure n
 
 -- | Given a list of 'ExtType's and a list of "forbidden" names,
 -- modify the dimensions of the 'ExtType's such that they are 'Ext'

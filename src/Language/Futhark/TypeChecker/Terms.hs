@@ -249,7 +249,7 @@ checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
   t <- expType e1'
   (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
   rt' <- addResultAliases (NameAppRes fname loc) rt
-  return
+  pure
     ( AppExp
         (Apply e1' (argExp arg) (Info (diet t1, argext)) loc)
         (Info $ AppRes rt' exts),
@@ -257,7 +257,7 @@ checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
     )
 checkApplyExp e = do
   e' <- checkExp e
-  return
+  pure
     ( e',
       ( case e' of
           Var qn _ _ -> Just qn
@@ -269,6 +269,9 @@ checkApplyExp e = do
 checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
+checkExp (Hole _ loc) = do
+  t <- newTypeVar loc "t"
+  pure $ Hole (Info $ t `setUniqueness` Unique) loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
 checkExp (IntLit val NoInfo loc) = do
@@ -841,7 +844,7 @@ checkSlice = mapM checkDimIndex
       DimSlice <$> check i <*> check j <*> check s
 
     check =
-      maybe (return Nothing) $
+      maybe (pure Nothing) $
         fmap Just . unifies "use as index" (Scalar $ Prim $ Signed Int64) <=< checkExp
 
 -- The number of dimensions affected by this slice (so the minimum
@@ -1126,6 +1129,9 @@ causalityCheck binding_body = do
             bad
       onExp known (ArrayLit [] (Info t) loc)
         | Just bad <- checkCausality "empty array" known t loc =
+            bad
+      onExp known (Hole (Info t) loc)
+        | Just bad <- checkCausality "hole" known t loc =
             bad
       onExp known (Lambda params _ _ _ _)
         | bad : _ <- mapMaybe (checkParamCausality known) params =
@@ -1607,7 +1613,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           _ -> Nothing
       mkExt ConstDim {} = Nothing
       mkExt AnyDim {} = error "closeOverTypes: AnyDim"
-  return
+  pure
     ( tparams ++ more_tparams,
       injectExt (retext ++ mapMaybe mkExt (nestedDims ret)) ret
     )

@@ -253,7 +253,7 @@ instance
   where
   lookupType name = do
     res <- asks $ fmap typeOf . M.lookup name
-    maybe (ExtendedScope $ lift $ lookupType name) return res
+    maybe (ExtendedScope $ lift $ lookupType name) pure res
   askScope = asks M.union <*> ExtendedScope (lift askScope)
 
 -- | Run a computation in the extended type environment.

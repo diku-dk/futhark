@@ -45,7 +45,7 @@ compileProg mode class_name =
     operations :: GenericPython.Operations Imp.Sequential ()
     operations =
       GenericPython.defaultOperations
-        { GenericPython.opsCompiler = const $ return (),
+        { GenericPython.opsCompiler = const $ pure (),
           GenericPython.opsCopy = copySequentialMemory
         }
 

@@ -83,6 +83,11 @@ futhark query PROGRAM LINE COL
 Print information about the variable at the given position in the
 program.
 
+futhark thanks
+--------------
+
+Expresses gratitude.
+
 SEE ALSO
 ========
 

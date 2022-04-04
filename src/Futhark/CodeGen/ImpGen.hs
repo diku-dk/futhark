@@ -1321,7 +1321,7 @@ lookupAcc name is = do
           space <- lookupArraySpace arr
           let (i_params, ps) = splitAt (length is) $ lambdaParams op
           zipWithM_ dPrimV_ (map paramName i_params) is
-          return
+          pure
             ( acc,
               space,
               arrs,
@@ -1365,7 +1365,7 @@ fullyIndexArray' ::
   ImpM rep r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
 fullyIndexArray' (MemLoc mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
-  return
+  pure
     ( mem,
       space,
       elements $ IxFun.index ixfun indices
@@ -1423,7 +1423,7 @@ isMapTransposeCopy bt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
 
     isOk shape f r1 r2 dest_offset src_offset = do
       let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-      return
+      pure
         ( dest_offset,
           src_offset,
           num_arrays,
@@ -1761,10 +1761,10 @@ sIf cond tbranch fbranch = do
           else Imp.If cond tbranch' fbranch'
 
 sWhen :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op ()
-sWhen cond tbranch = sIf cond tbranch (return ())
+sWhen cond tbranch = sIf cond tbranch (pure ())
 
 sUnless :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op ()
-sUnless cond = sIf cond (return ())
+sUnless cond = sIf cond (pure ())
 
 sOp :: op -> ImpM rep r op ()
 sOp = emit . Imp.Op

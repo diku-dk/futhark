@@ -87,7 +87,7 @@ checkDec files src env name d =
   second (fmap massage) $
     runTypeM env files' name src $ do
       (_, env', d') <- checkOneDec d
-      return (env' <> env, d')
+      pure (env' <> env, d')
   where
     massage ((env', d'), src') =
       (env', d', src')
@@ -146,7 +146,7 @@ checkProgM :: UncheckedProg -> TypeM FileModule
 checkProgM (Prog doc decs) = do
   checkForDuplicateDecs decs
   (abs, env, decs') <- checkDecs decs
-  return (FileModule abs env $ Prog doc decs')
+  pure (FileModule abs env $ Prog doc decs')
 
 dupDefinitionError ::
   MonadTypeChecker m =>
@@ -169,7 +169,7 @@ checkForDuplicateDecs =
       case M.lookup (namespace, name) known of
         Just loc' ->
           dupDefinitionError namespace name loc loc'
-        _ -> return $ M.insert (namespace, name) loc known
+        _ -> pure $ M.insert (namespace, name) loc known
 
     f (ValDec vb) =
       check Term (valBindName vb) (srclocOf vb)
@@ -179,9 +179,9 @@ checkForDuplicateDecs =
       check Signature name loc
     f (ModDec (ModBind name _ _ _ _ loc)) =
       check Term name loc
-    f OpenDec {} = return
-    f LocalDec {} = return
-    f ImportDec {} = return
+    f OpenDec {} = pure
+    f LocalDec {} = pure
+    f ImportDec {} = pure
 
 bindingTypeParams :: [TypeParam] -> TypeM a -> TypeM a
 bindingTypeParams tparams = localEnv env
@@ -215,7 +215,7 @@ checkTypeDecl (TypeDecl te NoInfo) = do
 -- the specific structure of substitutions in case some module type is
 -- redundantly imported multiple times).
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
-checkSpecs [] = return (mempty, mempty, [])
+checkSpecs [] = pure (mempty, mempty, [])
 checkSpecs (ValSpec name tparams vtype doc loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
@@ -228,7 +228,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
             "All function parameters must have non-anonymous sizes."
               </> "Hint: add size parameters to" <+> pquote (pprName name') <> "."
 
-        return (tparams', vtype')
+        pure (tparams', vtype')
 
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
@@ -237,7 +237,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
               envNameMap = M.singleton (Term, name) $ qualName name'
             }
     (abstypes, env, specs') <- localEnv valenv $ checkSpecs specs
-    return
+    pure
       ( abstypes,
         env <> valenv,
         ValSpec name' tparams' vtype' doc loc : specs'
@@ -246,7 +246,7 @@ checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
     (tenv, tdec') <- checkTypeBind tdec
     (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
-    return
+    pure
       ( abstypes,
         env <> tenv,
         TypeAbbrSpec tdec' : specs'
@@ -266,7 +266,7 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
                         map typeParamToArg ps'
               }
       (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
-      return
+      pure
         ( M.insert (qualName name') l abstypes,
           env <> tenv,
           TypeSpec l name' ps' doc loc : specs'
@@ -281,7 +281,7 @@ checkSpecs (ModSpec name sig doc loc : specs) =
               envModTable = M.singleton name' $ mtyMod mty
             }
     (abstypes, env, specs') <- localEnv senv $ checkSpecs specs
-    return
+    pure
       ( M.mapKeys (qualify name') (mtyAbs mty) <> abstypes,
         env <> senv,
         ModSpec name' sig' doc loc : specs'
@@ -292,7 +292,7 @@ checkSpecs (IncludeSpec e loc : specs) = do
   mapM_ (warnIfShadowing . fmap baseName) $ M.keys env_abs
 
   (abstypes, env, specs') <- localEnv e_env $ checkSpecs specs
-  return
+  pure
     ( e_abs <> env_abs <> abstypes,
       env <> e_env,
       IncludeSpec e' loc : specs'
@@ -300,22 +300,22 @@ checkSpecs (IncludeSpec e loc : specs) = do
   where
     warnIfShadowing qn =
       (lookupType loc qn >> warnAbout qn)
-        `catchError` \_ -> return ()
+        `catchError` \_ -> pure ()
     warnAbout qn =
       warn loc $ "Inclusion shadows type" <+> pquote (ppr qn) <+> "."
 
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (TySet, MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
   (abs, mty, e') <- checkSigExp e
-  return (abs, mty, SigParens e' loc)
+  pure (abs, mty, SigParens e' loc)
 checkSigExp (SigVar name NoInfo loc) = do
   (name', mty) <- lookupMTy loc name
   (mty', substs) <- newNamesForMTy mty
-  return (mtyAbs mty', mty', SigVar name' (Info substs) loc)
+  pure (mtyAbs mty', mty', SigVar name' (Info substs) loc)
 checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
   (abstypes, env, specs') <- checkSpecs specs
-  return (abstypes, MTy abstypes $ ModEnv env, SigSpecs specs' loc)
+  pure (abstypes, MTy abstypes $ ModEnv env, SigSpecs specs' loc)
 checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
   (abs, s_abs, s_env, s') <- checkSigExpToEnv s
   checkTypeParams ps $ \ps' -> do
@@ -323,14 +323,14 @@ checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
     unless (null ext) $
       typeError td' mempty "Anonymous dimensions are not allowed here."
     (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
-    return (abs, MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
+    pure (abs, MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
   (e1_abs, MTy s_abs e1_mod, e1') <- checkSigExp e1
   (env_for_e2, maybe_pname') <-
     case maybe_pname of
       Just pname -> bindSpaced [(Term, pname)] $ do
         pname' <- checkName Term pname loc
-        return
+        pure
           ( mempty
               { envNameMap = M.singleton (Term, pname) $ qualName pname',
                 envModTable = M.singleton pname' e1_mod
@@ -338,9 +338,9 @@ checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
             Just pname'
           )
       Nothing ->
-        return (mempty, Nothing)
+        pure (mempty, Nothing)
   (e2_abs, e2_mod, e2') <- localEnv env_for_e2 $ checkSigExp e2
-  return
+  pure
     ( e1_abs <> e2_abs,
       MTy mempty $ ModFun $ FunSig s_abs e1_mod e2_mod,
       SigArrow maybe_pname' e1' e2' loc
@@ -352,7 +352,7 @@ checkSigExpToEnv ::
 checkSigExpToEnv e = do
   (abs, MTy mod_abs mod, e') <- checkSigExp e
   case mod of
-    ModEnv env -> return (abs, mod_abs, env, e')
+    ModEnv env -> pure (abs, mod_abs, env, e')
     ModFun {} -> unappliedFunctor $ srclocOf e
 
 checkSigBind :: SigBindBase NoInfo Name -> TypeM (TySet, Env, SigBindBase Info VName)
@@ -360,7 +360,7 @@ checkSigBind (SigBind name e doc loc) = do
   (abs, env, e') <- checkSigExp e
   bindSpaced [(Signature, name)] $ do
     name' <- checkName Signature name loc
-    return
+    pure
       ( abs,
         mempty
           { envSigTable = M.singleton name' env,
@@ -374,11 +374,11 @@ checkOneModExp ::
   TypeM (TySet, MTy, ModExpBase Info VName)
 checkOneModExp (ModParens e loc) = do
   (abs, mty, e') <- checkOneModExp e
-  return (abs, mty, ModParens e' loc)
+  pure (abs, mty, ModParens e' loc)
 checkOneModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
   (abstypes, env, decs') <- checkDecs decs
-  return
+  pure
     ( abstypes,
       MTy abstypes $ ModEnv env,
       ModDecs decs' loc
@@ -390,10 +390,10 @@ checkOneModExp (ModVar v loc) = do
         && baseTag (qualLeaf v') <= maxIntrinsicTag
     )
     $ typeError loc mempty "The 'intrinsics' module may not be used in module expressions."
-  return (mempty, MTy mempty env, ModVar v' loc)
+  pure (mempty, MTy mempty env, ModVar v' loc)
 checkOneModExp (ModImport name NoInfo loc) = do
   (name', env) <- lookupImport loc name
-  return
+  pure
     ( mempty,
       MTy mempty $ ModEnv env,
       ModImport name (Info name') loc
@@ -404,7 +404,7 @@ checkOneModExp (ModApply f e NoInfo NoInfo loc) = do
     ModFun functor -> do
       (e_abs, e_mty, e') <- checkOneModExp e
       (mty, psubsts, rsubsts) <- applyFunctor (locOf loc) functor e_mty
-      return
+      pure
         ( mtyAbs mty <> f_abs <> e_abs,
           mty,
           ModApply f' e' (Info psubsts) (Info rsubsts) loc
@@ -415,12 +415,12 @@ checkOneModExp (ModAscript me se NoInfo loc) = do
   (me_abs, me_mod, me') <- checkOneModExp me
   (se_abs, se_mty, se') <- checkSigExp se
   match_subst <- badOnLeft $ matchMTys me_mod se_mty (locOf loc)
-  return (se_abs <> me_abs, se_mty, ModAscript me' se' (Info match_subst) loc)
+  pure (se_abs <> me_abs, se_mty, ModAscript me' se' (Info match_subst) loc)
 checkOneModExp (ModLambda param maybe_fsig_e body_e loc) =
   withModParam param $ \param' param_abs param_mod -> do
     (abs, maybe_fsig_e', body_e', mty) <-
       checkModBody (fst <$> maybe_fsig_e) body_e loc
-    return
+    pure
       ( abs,
         MTy mempty $ ModFun $ FunSig param_abs param_mod mty,
         ModLambda param' maybe_fsig_e' body_e' loc
@@ -468,7 +468,7 @@ checkModBody maybe_fsig_e body_e loc = enteringModule $ do
   (body_e_abs, body_mty, body_e') <- checkOneModExp body_e
   case maybe_fsig_e of
     Nothing ->
-      return
+      pure
         ( mtyAbs body_mty <> body_e_abs,
           Nothing,
           body_e',
@@ -477,7 +477,7 @@ checkModBody maybe_fsig_e body_e loc = enteringModule $ do
     Just fsig_e -> do
       (fsig_abs, fsig_mty, fsig_e') <- checkSigExp fsig_e
       fsig_subst <- badOnLeft $ matchMTys body_mty fsig_mty (locOf loc)
-      return
+      pure
         ( fsig_abs <> body_e_abs,
           Just (fsig_e', Info fsig_subst),
           body_e',
@@ -489,7 +489,7 @@ checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
   (e_abs, maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    return
+    pure
       ( e_abs,
         mempty
           { envModTable = M.singleton name' $ mtyMod mty,
@@ -504,7 +504,7 @@ checkModBind (ModBind name (p : ps) maybe_fsig_e body_e doc loc) = do
         let (ps', ps_abs, ps_mod) = unzip3 params_stuff
         (abs, maybe_fsig_e', body_e', mty) <- checkModBody (fst <$> maybe_fsig_e) body_e loc
         let addParam (x, y) mty' = MTy mempty $ ModFun $ FunSig x y mty'
-        return
+        pure
           ( abs,
             p' : ps',
             maybe_fsig_e',
@@ -532,7 +532,7 @@ checkForDuplicateSpecs =
       case M.lookup (namespace, name) known of
         Just loc' ->
           dupDefinitionError namespace name loc loc'
-        _ -> return $ M.insert (namespace, name) loc known
+        _ -> pure $ M.insert (namespace, name) loc known
 
     f (ValSpec name _ _ _ loc) =
       check Term name loc
@@ -543,7 +543,7 @@ checkForDuplicateSpecs =
     f (ModSpec name _ _ loc) =
       check Term name loc
     f IncludeSpec {} =
-      return
+      pure
 
 checkTypeBind ::
   TypeBindBase NoInfo Name ->
@@ -556,7 +556,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
     let used_dims = typeDimNames t
     case filter ((`S.notMember` used_dims) . typeParamName) $
       filter isSizeParam tps' of
-      [] -> return ()
+      [] -> pure ()
       tp : _ ->
         typeError loc mempty $
           "Size parameter" <+> pquote (ppr tp) <+> "unused."
@@ -578,11 +578,11 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
               "Non-lifted type abbreviations may not use existential sizes in their definition."
                 </> "Hint: use 'type~' or add size parameters to"
                 <+> pquote (pprName name) <> "."
-      _ -> return ()
+      _ -> pure ()
 
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
-      return
+      pure
         ( mempty
             { envTypeTable =
                 M.singleton name' $ TypeAbbr l tps' elab_t,
@@ -673,11 +673,11 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
             "Entry point return type\n"
               </> indent 2 (ppr rettype)
               </> "\nwill have an opaque type, so the result will likely not be usable."
-    _ -> return ()
+    _ -> pure ()
 
   attrs' <- mapM checkAttr attrs
   let vb = ValBind entry' fname' maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
-  return
+  pure
     ( mempty
         { envVtable =
             M.singleton fname' $ uncurry BoundV $ valBindTypeScheme vb,
@@ -727,33 +727,33 @@ niceTypeExp _ = False
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkOneDec (ModDec struct) = do
   (abs, modenv, struct') <- checkModBind struct
-  return (abs, modenv, ModDec struct')
+  pure (abs, modenv, ModDec struct')
 checkOneDec (SigDec sig) = do
   (abs, sigenv, sig') <- checkSigBind sig
-  return (abs, sigenv, SigDec sig')
+  pure (abs, sigenv, SigDec sig')
 checkOneDec (TypeDec tdec) = do
   (tenv, tdec') <- checkTypeBind tdec
-  return (mempty, tenv, TypeDec tdec')
+  pure (mempty, tenv, TypeDec tdec')
 checkOneDec (OpenDec x loc) = do
   (x_abs, x_env, x') <- checkOneModExpToEnv x
-  return (x_abs, x_env, OpenDec x' loc)
+  pure (x_abs, x_env, OpenDec x' loc)
 checkOneDec (LocalDec d loc) = do
   (abstypes, env, d') <- checkOneDec d
-  return (abstypes, env, LocalDec d' loc)
+  pure (abstypes, env, LocalDec d' loc)
 checkOneDec (ImportDec name NoInfo loc) = do
   (name', env) <- lookupImport loc name
   when ("/prelude" `isPrefixOf` name) $
     typeError loc mempty $ ppr name <+> "may not be explicitly imported."
-  return (mempty, env, ImportDec name (Info name') loc)
+  pure (mempty, env, ImportDec name (Info name') loc)
 checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
-  return (mempty, env, ValDec vb')
+  pure (mempty, env, ValDec vb')
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
 checkDecs (d : ds) = do
   (d_abstypes, d_env, d') <- checkOneDec d
   (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
-  return
+  pure
     ( d_abstypes <> ds_abstypes,
       case d' of
         LocalDec {} -> ds_env
@@ -762,4 +762,4 @@ checkDecs (d : ds) = do
       d' : ds'
     )
 checkDecs [] =
-  return (mempty, mempty, [])
+  pure (mempty, mempty, [])

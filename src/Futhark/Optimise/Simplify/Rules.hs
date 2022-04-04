@@ -290,7 +290,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
           then letSubExp "branch_ctx_reshaped" (shapeCoerce newshape v)
           else pure $ Var v
     reshapeResult se _ =
-      return se
+      pure se
 
 -- | Remove the return values of a branch, that are not actually used
 -- after a branch.  Standard dead code removal can remove the branch

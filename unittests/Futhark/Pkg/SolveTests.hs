@@ -79,7 +79,7 @@ testEnv =
       let rev' = semverE rev
           onDep (dp, dv) = (dp, (semverE dv, Nothing))
           deps' = PkgRevDeps $ M.fromList $ map onDep deps
-      return ((user <> "/" <> repo, rev'), deps')
+      pure ((user <> "/" <> repo, rev'), deps')
 
 newtype SolverRes = SolverRes BuildList
   deriving (Eq)
