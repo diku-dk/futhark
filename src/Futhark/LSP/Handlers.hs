@@ -4,7 +4,6 @@ module Futhark.LSP.Handlers (handlers) where
 
 import Control.Concurrent.MVar (MVar)
 import Control.Lens ((^.))
-import Control.Monad.IO.Class (MonadIO (liftIO))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromMVar)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)

@@ -24,40 +24,38 @@ import Language.LSP.Types (Position (..), Range (..))
 
 getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> Maybe T.Text
 getHoverInfoFromState state (Just path) l c = do
-  case stateProgram state of
+  case queryAtPos state $ Pos path l c 0 of
     Nothing -> Nothing
-    Just loaded_prog -> do
-      let imports = lpImports loaded_prog
-      case atPos imports $ Pos path l c 0 of
+    Just (AtName qn def _loc) -> do
+      case def of
         Nothing -> Nothing
-        Just (AtName qn def _loc) -> do
-          case def of
-            Nothing -> Nothing
-            Just (BoundTerm t defloc) -> do
-              Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
-            Just (BoundType defloc) ->
-              Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
-            Just (BoundModule defloc) ->
-              Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
-            Just (BoundModuleType defloc) ->
-              Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
+        Just (BoundTerm t defloc) -> do
+          Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
+        Just (BoundType defloc) ->
+          Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
+        Just (BoundModule defloc) ->
+          Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
+        Just (BoundModuleType defloc) ->
+          Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
 getHoverInfoFromState _ _ _ _ = Nothing
 
 findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Range
 findDefinitionRange state (Just path) l c = do
+  -- some unnessecary operations inside `queryAtPos` for this functionality
+  -- but shouldn't affect performance much since "Go to definition" is called less fequently
+  case queryAtPos state $ Pos path l c 0 of
+    Nothing -> Nothing
+    Just (AtName _qn def _loc) -> do
+      case def of
+        Nothing -> Nothing
+        Just def' -> Just $ rangeFromLoc (boundLoc def')
+findDefinitionRange _ _ _ _ = Nothing
+
+queryAtPos :: State -> Pos -> Maybe AtPos
+queryAtPos state pos =
   case stateProgram state of
     Nothing -> Nothing
-    Just loaded_prog -> do
-      let imports = lpImports loaded_prog
-      -- some unnessecary operations inside `atPos`
-      -- but shouldn't affect performance too much
-      case atPos imports $ Pos path l c 0 of
-        Nothing -> Nothing
-        Just (AtName _qn def _loc) -> do
-          case def of
-            Nothing -> Nothing
-            Just def' -> Just $ rangeFromLoc (boundLoc def')
-findDefinitionRange _ _ _ _ = Nothing
+    Just loaded_prog -> atPos (lpImports loaded_prog) pos
 
 -- the ending appears to be one col too short
 rangeFromSrcLoc :: SrcLoc -> Range
