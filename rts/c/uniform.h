@@ -663,19 +663,19 @@ static inline uniform uint64_t pow64(uniform uint64_t x, uniform uint64_t y) {
 }
 
 static inline uniform bool itob_i8_bool(uniform int8_t x) {
-  return x;
+  return x != 0;
 }
 
 static inline uniform bool itob_i16_bool(uniform int16_t x) {
-  return x;
+  return x != 0;
 }
 
 static inline uniform bool itob_i32_bool(uniform int32_t x) {
-  return x;
+  return x != 0;
 }
 
 static inline uniform bool itob_i64_bool(uniform int64_t x) {
-  return x;
+  return x != 0;
 }
 
 static inline uniform int8_t btoi_bool_i8(uniform bool x) {
@@ -1395,6 +1395,14 @@ static inline uniform uint64_t fptoui_f64_i64(uniform double x) {
   } else {
     return (uniform uint64_t) (uniform int64_t) x;
   }
+}
+
+static inline uniform bool ftob_f64_bool(uniform double x) {
+  return x != 0.0;
+}
+
+static inline uniform double btof_bool_f64(uniform bool x) {
+  return x ? 1.0 : 0.0;
 }
 
 static inline uniform int64_t futrts_to_bits64(uniform double x) {

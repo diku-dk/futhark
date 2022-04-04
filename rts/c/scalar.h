@@ -674,6 +674,26 @@ static inline uint64_t pow64(uint64_t x, uint64_t y) {
   return res;
 }
 
+#if ISPC
+
+static inline bool itob_i8_bool(int8_t x) {
+  return x != 0;
+}
+
+static inline bool itob_i16_bool(int16_t x) {
+  return x != 0;
+}
+
+static inline bool itob_i32_bool(int32_t x) {
+  return x != 0;
+}
+
+static inline bool itob_i64_bool(int64_t x) {
+  return x != 0;
+}
+
+#else
+
 static inline bool itob_i8_bool(int8_t x) {
   return x;
 }
@@ -689,6 +709,8 @@ static inline bool itob_i32_bool(int32_t x) {
 static inline bool itob_i64_bool(int64_t x) {
   return x;
 }
+
+#endif 
 
 static inline int8_t btoi_bool_i8(bool x) {
   return x;
@@ -2040,6 +2062,14 @@ static inline uint64_t fptoui_f64_i64(double x) {
   }
 }
 
+static inline bool ftob_f64_bool(double x) {
+  return x != 0.0;
+}
+
+static inline double btof_bool_f64(bool x) {
+  return x ? 1.0 : 0.0;
+}
+
 extern "C" unmasked uniform int64_t futrts_ispc_to_bits64(uniform double x);
 static inline int64_t futrts_to_bits64(double x) {
   uniform int64_t y[programCount];
@@ -2364,7 +2394,7 @@ static inline int64_t futrts_to_bits64(double x) {
   return p.t;
 }
 
-static inline int64_t futrts_ispc_to_bits64(double x) {
+int64_t futrts_ispc_to_bits64(double x) {
   union {
     double f;
     int64_t t;
