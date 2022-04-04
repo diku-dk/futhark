@@ -38,7 +38,6 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    server-protocol.rst
    c-porting-guide.rst
    versus-other-languages.rst
-   hacking.rst
    binary-data-format.rst
 
 .. toctree::
