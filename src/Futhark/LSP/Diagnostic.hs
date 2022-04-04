@@ -10,7 +10,8 @@ where
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
 import Futhark.Compiler.Program (ProgError (ProgError))
-import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf)
+import Futhark.LSP.Tool (rangeFromLoc, rangeFromSrcLoc)
+import Futhark.Util.Loc (SrcLoc)
 import Futhark.Util.Pretty (Doc, pretty)
 import Language.LSP.Diagnostics (partitionBySource)
 import Language.LSP.Server (LspT, publishDiagnostics)
@@ -18,8 +19,7 @@ import Language.LSP.Types
   ( Diagnostic (Diagnostic),
     DiagnosticSeverity (DsError, DsWarning),
     NormalizedUri,
-    Position (Position),
-    Range (Range),
+    Range,
     TextDocumentVersion,
   )
 
@@ -40,18 +40,3 @@ errorToDiagnostics :: NE.NonEmpty ProgError -> [Diagnostic]
 errorToDiagnostics prog_error = map onError (NE.toList prog_error)
   where
     onError (ProgError loc msg) = mkDiagnostic (rangeFromLoc loc) DsError (T.pack $ pretty msg)
-
--- the ending appears to be one col too short
-rangeFromSrcLoc :: SrcLoc -> Range
-rangeFromSrcLoc srcloc = do
-  let Loc start end = locOf srcloc
-  Range (getPosition start) (getPosition end)
-
-rangeFromLoc :: Loc -> Range
-rangeFromLoc (Loc start end) = Range (getPosition start) (getPosition end)
-rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
-
-getPosition :: Pos -> Position
-getPosition pos = do
-  let Pos _ line col _ = pos
-  Position (toEnum line - 1) (toEnum col - 1)
