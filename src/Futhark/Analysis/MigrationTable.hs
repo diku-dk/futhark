@@ -462,7 +462,7 @@ graphStm stm = do
       -- Takes no scalar operands so cannot directly prevent a scalar read.
       -- It is introduced as part of the BlkRegTiling kernel optimization and
       -- is thus unlikely to prevent the migration of a parent which was not
-      -- already by some host-only operation.
+      -- already blocked by some host-only operation.
       graphHostOnly e
     BasicOp Iota {} -> graphHostOnly e
     BasicOp Replicate {} -> graphHostOnly e
@@ -1162,7 +1162,7 @@ reusesReturn bs res = do
   body_depth <- metaBodyDepth <$> getMeta
   foldM (reuse body_depth) True (zip bs res)
   where
-    reuse :: Int -> Bool -> ((Id, Type), SubExp) -> Grapher Bool
+    reuse :: Int -> Bool -> (Binding, SubExp) -> Grapher Bool
     reuse body_depth onlyCopyable (b, se)
       | all (== intConst Int64 1) (arrayDims $ snd b) =
         -- Single element arrays are immediately recognizable as copyable so
@@ -1195,7 +1195,7 @@ reusesBranches bs b1 b2 = do
   body_depth <- metaBodyDepth <$> getMeta
   foldM (reuse body_depth) True $ zip3 bs b1 b2
   where
-    reuse :: Int -> Bool -> ((Id, Type), SubExp, SubExp) -> Grapher Bool
+    reuse :: Int -> Bool -> (Binding, SubExp, SubExp) -> Grapher Bool
     reuse body_depth onlyCopyable (b, se1, se2)
       | all (== intConst Int64 1) (arrayDims $ snd b) =
         -- Single element arrays are immediately recognizable as copyable so

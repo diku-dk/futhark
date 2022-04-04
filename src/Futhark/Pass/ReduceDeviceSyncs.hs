@@ -30,9 +30,15 @@ import Futhark.Transform.Substitute
 
 -- TODO: Expand GPUBody around parent if or loop statement.
 
--- TODO: Reuse arrays created by `storeScalar`?
-
 -- TODO: Measure whether it is better to block delays through loops.
+
+-- TODO: Investigate compiler limitation in migrated if.
+--       It appears that statements that allocate memory cannot be migrated,
+--       except ArrayLit of primitives.
+
+-- TODO: Eliminate duplicate GPUBody results if not consumed.
+
+-- TODO: Use Builder rather than hard-coded RepTypes
 
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
@@ -61,6 +67,8 @@ data State = State
     --   * Name of the single element array holding the migrated value.
     --   * Whether the original variable still can be used on the host.
     stateMigrated :: IM.IntMap (Name, Type, VName, Bool),
+    -- | Whether non-migration optimizations may introduce GPUBody kernels at
+    -- the current location.
     stateGPUBodyOk :: Bool
   }
 
@@ -182,13 +190,19 @@ storeScalar stms se t = do
       -- How to most efficiently create an array containing the given value
       -- depends on whether it is a variable or a constant. Creating a constant
       -- array is a runtime copy of static memory, while creating an array that
-      -- contains a variable results in each element synchronosuly being
-      -- written.
+      -- contains a variable results in a synchronous write. The latter is thus
+      -- replaced with either a mergeable GPUBody kernel or a Replicate.
+      --
+      -- Whether it makes sense to hoist arrays out of bodies to enable CSE is
+      -- left to the simplifier to figure out. If a scalar is stored multiple
+      -- times within a body duplicates will be eliminated.
+      --
+      -- TODO: Enable the simplifier to hoist non-consumed, non-returned arrays
+      --       out of top-level function definitions. All constant arrays
+      --       produced here are in principle top-level hoistable.
       gpubody_ok <- gets stateGPUBodyOk
       case se of
         Var n | gpubody_ok -> do
-          -- TODO: Transfer to device right after declaration of n, allowing the
-          --       array to be reused for as long n is in scope.
           n' <- newName n
           let stm = bind (PatElem n' t) (BasicOp $ SubExp se)
 
@@ -197,17 +211,11 @@ storeScalar stms se t = do
 
           pure (stms |> gpubody, dev)
         Var n -> do
-          -- TODO: Transfer to device right after declaration of n, allowing the
-          --       array to be reused for as long n is in scope.
           pe <- arrayizePatElem (PatElem n t)
           let shape = Shape [intConst Int64 1]
           let stm = bind pe (BasicOp $ Replicate shape se)
           pure (stms |> stm, patElemName pe)
         _ -> do
-          -- TODO: Store constant arrays as top-level declarations.
-          --       Can be implemented as an optimization that hoists arrays to
-          --       parent scopes. Array must not be aliased by function result,
-          --       be consumed, or depend on a value within its current scope.
           let n = VName (nameFromString "const") 0
           pe <- arrayizePatElem (PatElem n t)
           let stm = bind pe (BasicOp $ ArrayLit [se] t)
@@ -468,22 +476,17 @@ rewriteForIn (params, ForLoop i t n elems, body) = do
   let (elems', stms') = foldr (inline mt) ([], bodyStms body) elems
   pure (params, ForLoop i t n elems', body {bodyStms = stms'})
   where
-    inline ::
-      MigrationTable ->
-      (Param Type, VName) ->
-      ([(Param Type, VName)], Stms GPU) ->
-      ([(Param Type, VName)], Stms GPU)
     inline mt (x, arr) (arrs, stms)
       | pn <- paramName x,
         not (usedOnHost pn mt) =
-        let pt = paramDec x
+        let pt = typeOf x
             stm = bind (PatElem pn pt) (BasicOp $ index arr pt)
          in (arrs, stm <| stms)
       | otherwise =
         ((x, arr) : arrs, stms)
 
-    index arr ofType =
-      Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims ofType)
+    index arr of_type =
+      Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims of_type)
 
 optimizeWithAccInput :: VName -> WithAccInput GPU -> ReduceM (WithAccInput GPU)
 optimizeWithAccInput _ (shape, arrs, Nothing) = pure (shape, arrs, Nothing)
