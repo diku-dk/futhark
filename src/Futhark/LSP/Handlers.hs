@@ -42,8 +42,7 @@ onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -
       range = Range pos pos
       file_path = uriToFilePath $ doc ^. uri
   state <- tryTakeStateFromMVar state_mvar file_path
-  result <- liftIO $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
-  case result of
+  case getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1) of
     Just msg -> do
       let ms = HoverContents $ MarkupContent MkMarkdown msg
           rsp = Hover ms (Just range)

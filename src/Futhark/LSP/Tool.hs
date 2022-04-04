@@ -22,26 +22,26 @@ import Language.Futhark.Query
   )
 import Language.LSP.Types (Position (..), Range (..))
 
-getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> IO (Maybe T.Text)
+getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> Maybe T.Text
 getHoverInfoFromState state (Just path) l c = do
   case stateProgram state of
-    Nothing -> pure Nothing
+    Nothing -> Nothing
     Just loaded_prog -> do
       let imports = lpImports loaded_prog
       case atPos imports $ Pos path l c 0 of
-        Nothing -> pure Nothing
+        Nothing -> Nothing
         Just (AtName qn def _loc) -> do
           case def of
-            Nothing -> pure Nothing
+            Nothing -> Nothing
             Just (BoundTerm t defloc) -> do
-              pure $ Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
+              Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
             Just (BoundType defloc) ->
-              pure $ Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
+              Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
             Just (BoundModule defloc) ->
-              pure $ Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
+              Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
             Just (BoundModuleType defloc) ->
-              pure $ Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
-getHoverInfoFromState _ _ _ _ = pure Nothing
+              Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
+getHoverInfoFromState _ _ _ _ = Nothing
 
 findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Range
 findDefinitionRange state (Just path) l c = do
@@ -49,6 +49,8 @@ findDefinitionRange state (Just path) l c = do
     Nothing -> Nothing
     Just loaded_prog -> do
       let imports = lpImports loaded_prog
+      -- some unnessecary operations inside `atPos`
+      -- but shouldn't affect performance too much
       case atPos imports $ Pos path l c 0 of
         Nothing -> Nothing
         Just (AtName _qn def _loc) -> do
