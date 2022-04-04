@@ -3,7 +3,7 @@
 * See [Get Involved](https://futhark-lang.org/getinvolved.html) on
   the main website.
 
-* Read [HACKING.md](hacking.md)
+* Read [HACKING.md](HACKING.md)
 
 #### **Did you find a bug?**
 
