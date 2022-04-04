@@ -17,7 +17,7 @@
 let
   config = {
     packageOverrides = pkgs: rec {
-      haskellPackages = pkgs.pkgsMusl.haskellPackages.override {
+      haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
           aeson =
             haskellPackagesNew.aeson_2_0_3_0;
@@ -64,9 +64,6 @@ let
           futhark-manifest =
             haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
 
-          z3 =
-            haskellPackagesNew.callPackage ./nix/haskell-z3.nix { };
-
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes
@@ -84,12 +81,12 @@ let
                            "^assets.*"
                            "^unittests.*"
                           ];
-                cleanSource = src: pkgs.pkgsMusl.lib.sourceByRegex src sources;
+                cleanSource = src: pkgs.lib.sourceByRegex src sources;
             in
-            pkgs.pkgsMusl.haskell.lib.overrideCabal
-              (pkgs.pkgsMusl.haskell.lib.addBuildTools
+            pkgs.haskell.lib.overrideCabal
+              (pkgs.haskell.lib.addBuildTools
                 (haskellPackagesOld.callCabal2nix "futhark" (cleanSource ./.) { })
-                [ pkgs.pkgsMusl.python39Packages.sphinx ])
+                [ pkgs.python39Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;
                 isExecutable = true;
@@ -99,12 +96,12 @@ let
                 configureFlags = [
                   "--ghc-option=-optl=-static"
                   "--ghc-option=-split-sections"
-                  "--extra-lib-dirs=${pkgs.pkgsMusl.ncurses}/lib"
-                  "--extra-lib-dirs=${pkgs.pkgsMusl.glibc}/lib"
-                  "--extra-lib-dirs=${pkgs.pkgsMusl.gmp6}/lib"
-                  "--extra-lib-dirs=${pkgs.pkgsMusl.zlib}/lib"
-                  "--extra-lib-dirs=${pkgs.pkgsMusl.libffi}/lib"
-                  "--extra-lib-dirs=${pkgs.pkgsMusl.z3.overrideAttrs (old: { pythonBindings = false;})}/lib"
+                  "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
+                  "--extra-lib-dirs=${pkgs.glibc.static}/lib"
+                  "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
+                  "--extra-lib-dirs=${pkgs.zlib.static}/lib"
+                  "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
+                  "--extra-lib-dirs=${pkgs.z3.static}/lib"
                 ];
 
                 preBuild = ''
