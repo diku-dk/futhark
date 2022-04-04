@@ -2,6 +2,7 @@
 
 module Futhark.LSP.Tool
   ( getHoverInfoFromState,
+    findDefinitionRange,
     rangeFromSrcLoc,
     rangeFromLoc,
   )
@@ -17,6 +18,7 @@ import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (BoundModule, BoundModuleType, BoundTerm, BoundType),
     atPos,
+    boundLoc,
   )
 import Language.LSP.Types (Position (..), Range (..))
 
@@ -40,6 +42,20 @@ getHoverInfoFromState state (Just path) l c = do
             Just (BoundModuleType defloc) ->
               pure $ Just $ T.pack $ "Definition: " ++ locStr (srclocOf defloc)
 getHoverInfoFromState _ _ _ _ = pure Nothing
+
+findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Range
+findDefinitionRange state (Just path) l c = do
+  case stateProgram state of
+    Nothing -> Nothing
+    Just loaded_prog -> do
+      let imports = lpImports loaded_prog
+      case atPos imports $ Pos path l c 0 of
+        Nothing -> Nothing
+        Just (AtName _qn def _loc) -> do
+          case def of
+            Nothing -> Nothing
+            Just def' -> Just $ rangeFromLoc (boundLoc def')
+findDefinitionRange _ _ _ _ = Nothing
 
 -- the ending appears to be one col too short
 rangeFromSrcLoc :: SrcLoc -> Range

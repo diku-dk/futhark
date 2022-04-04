@@ -7,10 +7,16 @@ import Control.Lens ((^.))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromMVar)
 import Futhark.LSP.State (State (..))
-import Futhark.LSP.Tool (getHoverInfoFromState)
+import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
 import Futhark.Util (debug)
 import Futhark.Util.Pretty (pretty)
-import Language.LSP.Server (Handlers, LspM, getVersionedTextDoc, notificationHandler, requestHandler)
+import Language.LSP.Server
+  ( Handlers,
+    LspM,
+    getVersionedTextDoc,
+    notificationHandler,
+    requestHandler,
+  )
 import Language.LSP.Types
 import Language.LSP.Types.Lens (HasUri (uri), HasVersion (version))
 
@@ -21,7 +27,8 @@ handlers state_mvar =
       onHoverHandler state_mvar,
       onDocumentOpenHandler state_mvar,
       onDocumentCloseHandler,
-      onDocumentSaveHandler state_mvar
+      onDocumentSaveHandler state_mvar,
+      goToDefinitionHandler state_mvar
     ]
 
 onInitializeHandler :: Handlers (LspM ())
@@ -42,6 +49,18 @@ onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -
           rsp = Hover ms (Just range)
       responder (Right $ Just rsp)
     Nothing -> responder (Right Nothing)
+
+goToDefinitionHandler :: MVar State -> Handlers (LspM ())
+goToDefinitionHandler state_mvar = requestHandler STextDocumentDefinition $ \req responder -> do
+  debug "Got goto definition request"
+  let RequestMessage _ _ _ (DefinitionParams doc pos _workDone _partial) = req
+      Position l c = pos
+      file_path = uriToFilePath $ doc ^. uri
+  state <- tryTakeStateFromMVar state_mvar file_path
+  let maybe_range = findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1)
+  case maybe_range of
+    Nothing -> responder $ Right $ InR $ InL $ List []
+    Just range -> responder $ Right $ InL $ Location (doc ^. uri) range
 
 onDocumentSaveHandler :: MVar State -> Handlers (LspM ())
 onDocumentSaveHandler state_mvar = notificationHandler STextDocumentDidSave $ \msg -> do
