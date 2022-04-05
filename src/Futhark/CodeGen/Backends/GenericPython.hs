@@ -1299,7 +1299,7 @@ compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) _) = do
   stm =<< Assign <$> compileVar name <*> pure allocate'
 compileCode (Imp.Free name _) =
   stm =<< Assign <$> compileVar name <*> pure None
-compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
+compileCode (Imp.Copy dest _ (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
   destoffset' <- compileExp $ Imp.untyped destoffset
   srcoffset' <- compileExp $ Imp.untyped srcoffset
   dest' <- compileVar dest
@@ -1308,7 +1308,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count sr
   let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "ct.c_byte"]
   let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "ct.c_byte"]
   stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, size']
-compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
+compileCode (Imp.Copy dest _ (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
   copy <- asks envCopy
   join $
     copy

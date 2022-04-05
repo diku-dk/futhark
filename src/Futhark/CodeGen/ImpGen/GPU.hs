@@ -293,6 +293,7 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
       emit $
         Imp.Copy
           destmem
+          bt
           (bytes $ sExt64 destoffset)
           destspace
           srcmem
@@ -405,6 +406,7 @@ mapTransposeFunction bt =
       let num_bytes = sExt64 $ Imp.le32 x * Imp.le32 y * primByteSize bt
        in Imp.Copy
             destmem
+            bt
             (Imp.Count $ sExt64 $ Imp.le32 destoffset)
             space
             srcmem

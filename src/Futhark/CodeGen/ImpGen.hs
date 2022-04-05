@@ -1478,6 +1478,7 @@ defaultCopy pt dest src
           emit $
             Imp.Copy
               destmem
+              pt
               (bytes destoffset)
               destspace
               srcmem

@@ -851,6 +851,7 @@ typesInCode Free {} = mempty
 typesInCode
   ( Copy
       _
+      _
       (Count (TPrimExp e1))
       _
       _

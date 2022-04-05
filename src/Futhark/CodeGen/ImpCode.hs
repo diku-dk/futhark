@@ -276,6 +276,7 @@ data Code a
     -- of bytes.
     Copy
       VName
+      PrimType
       (Count Bytes (TExp Int64))
       Space
       VName
@@ -536,7 +537,7 @@ instance Pretty op => Pretty (Code op) where
     ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
   ppr (Assert e msg _) =
     text "assert" <> parens (commasep [ppr msg, ppr e])
-  ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
+  ppr (Copy dest _ destoffset destspace src srcoffset srcspace size) =
     text "memcpy"
       <> parens
         ( ppMemLoc dest destoffset <> ppr destspace <> comma
@@ -619,8 +620,8 @@ instance Traversable Code where
     pure $ Allocate name size s
   traverse _ (Free name space) =
     pure $ Free name space
-  traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
-    pure $ Copy dest destoffset destspace src srcoffset srcspace size
+  traverse _ (Copy dest pt destoffset destspace src srcoffset srcspace size) =
+    pure $ Copy dest pt destoffset destspace src srcoffset srcspace size
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (Read x name i bt space vol) =
@@ -690,7 +691,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
-  freeIn' (Copy dest x _ src y _ n) =
+  freeIn' (Copy dest _ x _ src y _ n) =
     freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y

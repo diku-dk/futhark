@@ -27,8 +27,12 @@ import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType)
+import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, fromStorage)
 import Data.Maybe
+import qualified Data.Map as M
+import Control.Monad.Reader
+import Data.Bifunctor
+import Data.Loc
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -107,6 +111,26 @@ sharedDef s f = do
   GC.ispcDecl =<< f s'
   return s'
 
+-- Copy memory where one of the operands is using an AoS layout.
+copyMemoryAOS ::
+  PrimType ->
+  C.Exp ->
+  C.Exp ->
+  C.Exp ->
+  C.Exp ->
+  C.Exp ->
+  GC.CompilerM op s ()
+copyMemoryAOS pt destmem destidx srcmem srcidx nbytes =
+  GC.stm
+    [C.cstm|if ($exp:nbytes > 0) {
+              $id:overload($exp:destmem + $exp:destidx,
+                      $exp:srcmem + $exp:srcidx,
+                      extract($exp:nbytes, 0));
+            }|]
+  where 
+    size = show (primByteSize pt :: Integer)
+    overload = "memmove_" <> size
+
 isConstExp :: PrimExp VName -> Bool
 isConstExp = isSimple . constFoldPrimExp
   where isSimple (ValueExp _) = True
@@ -148,8 +172,13 @@ compileCodeISPC _ (Allocate name (Count (TPrimExp e)) space) = do
       GC.allocMemNoError name size space [C.cstm|{err = 1;}|]
 compileCodeISPC _ (SetMem dest src space) =
   GC.setMemNoError dest src space
-compileCodeISPC vari code@(Write dest (Count idx) elemtype DefaultSpace vol elemexp)
+compileCodeISPC vari (Write dest (Count idx) elemtype DefaultSpace vol elemexp)
   | isConstExp (untyped idx) = do
+    cached <- isJust <$> GC.cacheMem dest
+    let typ =
+          if cached
+            then [C.cty|varying $ty:(primStorageType elemtype)* uniform|]
+            else [C.cty|$ty:(primStorageType elemtype)*|]
     dest' <- GC.rawMem dest
     idxexp <- GC.compileExp (untyped idx)
     tmp <- newVName "tmp_idx"
@@ -159,10 +188,49 @@ compileCodeISPC vari code@(Write dest (Count idx) elemtype DefaultSpace vol elem
           GC.derefPointer
             dest'
             [C.cexp|$id:tmp|]
-            [C.cty|$tyquals:(GC.volQuals vol) $ty:(primStorageType elemtype)*|]
+            [C.cty|$tyquals:(GC.volQuals vol) $ty:typ|]
     elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
     GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
-  | otherwise = GC.compileCode code
+  | otherwise = do
+    cached <- isJust <$> GC.cacheMem dest
+    let typ =
+          if cached
+            then [C.cty|varying $ty:(primStorageType elemtype)* uniform|]
+            else [C.cty|$ty:(primStorageType elemtype)*|]
+    dest' <- GC.rawMem dest
+    deref <-
+      GC.derefPointer dest'
+        <$> GC.compileExp (untyped idx)
+        <*> pure [C.cty|$tyquals:(GC.volQuals vol) $ty:typ|]
+    elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
+    GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
+compileCodeISPC _ (Read x src (Count iexp) restype DefaultSpace vol) = do
+  src' <- GC.rawMem src
+  cached <- isJust <$> GC.cacheMem src
+  let typ =
+        if cached
+          then [C.cty|varying $ty:(primStorageType restype)* uniform|]
+          else [C.cty|$ty:(primStorageType restype)*|]
+  e <-
+    fmap (fromStorage restype) $
+      GC.derefPointer src'
+        <$> GC.compileExp (untyped iexp)
+        <*> pure [C.cty|$tyquals:(GC.volQuals vol) $ty:typ|]
+  GC.stm [C.cstm|$id:x = $exp:e;|]
+compileCodeISPC _ code@(Copy dest pt (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
+  dm <- isJust <$> GC.cacheMem dest
+  sm <- isJust <$> GC.cacheMem src
+  if dm || sm
+    then
+      join $
+        copyMemoryAOS pt
+          <$> GC.rawMem dest
+          <*> GC.compileExp (untyped destoffset)
+          <*> GC.rawMem src
+          <*> GC.compileExp (untyped srcoffset)
+          <*> GC.compileExp (untyped size)
+    else
+      GC.compileCode code
 compileCodeISPC _ (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ GC.unRefMemNoError name space
@@ -300,7 +368,7 @@ compileOp (ISPCKernel body free) = do
   let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
   -- Generate ISPC kernel
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
-    mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
+    mainBody <- GC.inNewFunction $ cachingMemoryISPC lexical $ \decl_cached free_cached ->
       GC.collect $ do
         GC.decl [C.cdecl|uniform int err = 0;|]
         body' <- GC.collect $ compileCodeISPC Imp.Varying body
@@ -354,3 +422,37 @@ compileOp (VariabilityBlock vari code) = do
   compileCodeISPC vari code
 
 compileOp op = MC.compileOp op
+
+
+cachingMemoryISPC ::
+  M.Map VName Space ->
+  ([C.BlockItem] -> [C.Stm] -> GC.CompilerM op s a) ->
+  GC.CompilerM op s a
+cachingMemoryISPC lexical f = do
+  -- We only consider lexical 'DefaultSpace' memory blocks to be
+  -- cached.  This is not a deep technical restriction, but merely a
+  -- heuristic based on GPU memory usually involving larger
+  -- allocations, that do not suffer from the overhead of reference
+  -- counting.
+  let cached = M.keys $ M.filter (== DefaultSpace) lexical
+
+  cached' <- forM cached $ \mem -> do
+    size <- newVName $ pretty mem <> "_cached_size"
+    return (mem, size)
+
+  let lexMem env =
+        env
+          { GC.envCachedMem =
+              M.fromList (map (first (`C.toExp` noLoc)) cached')
+                <> GC.envCachedMem env
+          }
+
+      declCached (mem, size) =
+        [ [C.citem|typename size_t $id:size = 0;|],
+          [C.citem|varying unsigned char * uniform $id:mem = NULL;|]
+        ]
+
+      freeCached (mem, _) =
+        [C.cstm|free($id:mem);|]
+
+  local lexMem $ f (concatMap declCached cached') (map freeCached cached')
