@@ -525,7 +525,7 @@ fuseStms edgs infusible s1 s2 =
               let lam''' = lam''{lambdaReturnType = lam1Rts <> lambdaReturnType lam''}
               let pat1' = trace (ppr $ lambdaReturnType lam'') patIdents pats1
               -- let lam_new =  lam
-              pure $ Just $ substituteNames mmap $ Let (basicPat [head  (patIdents pats1)] <>pats2) aux (Op $ Futhark.Stream s_exp1 is_new sform1 (nes1 <> nes2) lam''')
+              pure $ Just $ substituteNames mmap $ Let (basicPat (take (length nes1) (patIdents pats1)) <>pats2) aux (Op $ Futhark.Stream s_exp1 is_new sform1 (nes1 <> nes2) lam''')
 
           _ -> pure Nothing -- not fusable soac combos
     _ -> pure Nothing -- not op statements
