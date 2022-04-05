@@ -96,8 +96,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
                 | otherwise =
                     copyPropagateInFun simpleSOACS vtable' fd
 
-              onFun fd =
-                simplifyFun' <=< inlineInFunDef inlinemap $ fd
+              onFun = simplifyFun' <=< inlineInFunDef inlinemap
 
           to_inline_in' <- parMapM onFun to_inline_in
 

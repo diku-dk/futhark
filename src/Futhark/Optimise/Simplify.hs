@@ -149,11 +149,10 @@ simplifyStms ::
   m (Stms rep)
 simplifyStms simpl rules blockers scope =
   fmap (fmap removeStmWisdom)
-    . simplifySomething f id simpl rules blockers vtable
+    . simplifySomething Engine.simplifyStms id simpl rules blockers vtable
     . informStms
   where
     vtable = ST.fromScope $ addScopeWisdom scope
-    f stms = Engine.simplifyStms stms
 
 loopUntilConvergence ::
   (MonadFreshNames m, Engine.SimplifiableRep rep) =>
