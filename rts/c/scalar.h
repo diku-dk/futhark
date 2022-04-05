@@ -1589,7 +1589,7 @@ static inline float futrts_hypot32(float x, float y) {
 
 }
 
-extern "C" unmasked uniform int64_t futrts_ispc_gamma32(uniform float x);
+extern "C" unmasked uniform float futrts_ispc_gamma32(uniform float x);
 static inline float futrts_gamma32(float x) {
   uniform float y[programCount];
   foreach_active(i){
@@ -1598,7 +1598,7 @@ static inline float futrts_gamma32(float x) {
   return *((varying float * uniform)&y);
 }
 
-extern "C" unmasked uniform int64_t futrts_ispc_lgamma32(uniform float x);
+extern "C" unmasked uniform float futrts_ispc_lgamma32(uniform float x);
 static inline float futrts_lgamma32(float x) {
   uniform float y[programCount];
   foreach_active(i){
