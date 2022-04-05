@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Sun Haoran has implemented unnamed typed holes, with syntax `???`.
 
 * Sun Haoran has implemented the beginnings of a language server:
-  `futhark lsp`.  An VSCode language extension is available on the
+  `futhark lsp`.  A VSCode language extension is available on the
   marketplace, but the language server should work with any editor.
 
 * Crucial new command: `futhark thanks`.
