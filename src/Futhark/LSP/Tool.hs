@@ -8,13 +8,13 @@ module Futhark.LSP.Tool
   )
 where
 
-import Data.List (isPrefixOf)
 import qualified Data.Text as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.State (State (..))
 import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf, srclocOf)
 import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Core (locStr)
+import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (BoundTerm),
@@ -58,10 +58,6 @@ queryAtPos state pos =
   case stateProgram state of
     Nothing -> Nothing
     Just loaded_prog -> atPos (lpImports loaded_prog) pos
-
--- TODO: Delete on #1623
-isBuiltin :: String -> Bool
-isBuiltin = ("/prelude/" `isPrefixOf`)
 
 -- the ending appears to be one col too short
 rangeFromSrcLoc :: SrcLoc -> Range
