@@ -224,7 +224,7 @@ mustBeExplicitAux t =
   where
     onDim bound _ (NamedDim d)
       | qualLeaf d `S.member` bound =
-        modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
+          modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
     onDim _ PosImmediate (NamedDim d) =
       modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
     onDim _ _ (NamedDim d) =
@@ -307,9 +307,9 @@ fromStruct t = t `setAliases` S.empty
 peelArray :: Int -> TypeBase dim as -> Maybe (TypeBase dim as)
 peelArray n (Array als u t shape)
   | shapeRank shape == n =
-    Just $ Scalar t `addAliases` const als
+      Just $ Scalar t `addAliases` const als
   | otherwise =
-    Array als u t <$> stripDims n shape
+      Array als u t <$> stripDims n shape
 peelArray _ _ = Nothing
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
@@ -344,9 +344,9 @@ arrayOfWithAliases (Scalar t) as shape u =
 stripArray :: Int -> TypeBase dim as -> TypeBase dim as
 stripArray n (Array als u et shape)
   | Just shape' <- stripDims n shape =
-    Array als u et shape'
+      Array als u et shape'
   | otherwise =
-    Scalar et `setUniqueness` u `setAliases` als
+      Scalar et `setUniqueness` u `setAliases` als
 stripArray _ t = t
 
 -- | Create a record type corresponding to a tuple with the given
@@ -414,18 +414,18 @@ combineTypeShapes ::
   TypeBase dim as
 combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
   | M.keys ts1 == M.keys ts2 =
-    Scalar $
-      Record $
-        M.map
-          (uncurry combineTypeShapes)
-          (M.intersectionWith (,) ts1 ts2)
+      Scalar $
+        Record $
+          M.map
+            (uncurry combineTypeShapes)
+            (M.intersectionWith (,) ts1 ts2)
 combineTypeShapes (Scalar (Sum cs1)) (Scalar (Sum cs2))
   | M.keys cs1 == M.keys cs2 =
-    Scalar $
-      Sum $
-        M.map
-          (uncurry $ zipWith combineTypeShapes)
-          (M.intersectionWith (,) cs1 cs2)
+      Scalar $
+        Sum $
+          M.map
+            (uncurry $ zipWith combineTypeShapes)
+            (M.intersectionWith (,) cs1 cs2)
 combineTypeShapes (Scalar (Arrow als1 p1 a1 (RetType dims1 b1))) (Scalar (Arrow als2 _p2 a2 (RetType _ b2))) =
   Scalar $ Arrow (als1 <> als2) p1 (combineTypeShapes a1 a2) (RetType dims1 (combineTypeShapes b1 b2))
 combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
@@ -587,7 +587,7 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
   where
     arrow (Named v, x) (RetType dims y)
       | v `S.member` typeDimNames y =
-        RetType [] $ Scalar $ Arrow () (Named v) x $ RetType (v : dims) y
+          RetType [] $ Scalar $ Arrow () (Named v) x $ RetType (v : dims) y
     arrow (pn, tx) y =
       RetType [] $ Scalar $ Arrow () pn tx y
 typeOf (OpSection _ (Info t) _) =
@@ -1342,11 +1342,11 @@ identifierReference ('`' : s)
   | (identifier, '`' : '@' : s') <- break (== '`') s,
     (namespace, s'') <- span isAlpha s',
     not $ null namespace =
-    case s'' of
-      '@' : '"' : s'''
-        | (file, '"' : s'''') <- span (/= '"') s''' ->
-          Just ((identifier, namespace, Just file), s'''')
-      _ -> Just ((identifier, namespace, Nothing), s'')
+      case s'' of
+        '@' : '"' : s'''
+          | (file, '"' : s'''') <- span (/= '"') s''' ->
+              Just ((identifier, namespace, Just file), s'''')
+        _ -> Just ((identifier, namespace, Nothing), s'')
 identifierReference _ = Nothing
 
 -- | Given an operator name, return the operator that determines its

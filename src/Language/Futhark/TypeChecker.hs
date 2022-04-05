@@ -563,20 +563,20 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
     case (l, l') of
       (_, Lifted)
         | l < Lifted ->
-          typeError loc mempty $
-            "Non-lifted type abbreviations may not contain functions."
-              </> "Hint: consider using 'type^'."
+            typeError loc mempty $
+              "Non-lifted type abbreviations may not contain functions."
+                </> "Hint: consider using 'type^'."
       (_, SizeLifted)
         | l < SizeLifted ->
-          typeError loc mempty $
-            "Non-size-lifted type abbreviations may not contain size-lifted types."
-              </> "Hint: consider using 'type~'."
+            typeError loc mempty $
+              "Non-size-lifted type abbreviations may not contain size-lifted types."
+                </> "Hint: consider using 'type~'."
       (Unlifted, _)
         | not $ null $ svars ++ dims ->
-          typeError loc mempty $
-            "Non-lifted type abbreviations may not use existential sizes in their definition."
-              </> "Hint: use 'type~' or add size parameters to"
-              <+> pquote (pprName name) <> "."
+            typeError loc mempty $
+              "Non-lifted type abbreviations may not use existential sizes in their definition."
+                </> "Hint: use 'type~' or add size parameters to"
+                <+> pquote (pprName name) <> "."
       _ -> pure ()
 
     bindSpaced [(Type, name)] $ do
@@ -649,29 +649,29 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
   case entry' of
     Just _
       | not $ entryPointNameIsAcceptable fname ->
-        typeError loc mempty "Entry point names must start with a letter and contain only letters, digits, and underscores."
+          typeError loc mempty "Entry point names must start with a letter and contain only letters, digits, and underscores."
       | any isTypeParam tparams' ->
-        typeError loc mempty "Entry point functions may not be polymorphic."
+          typeError loc mempty "Entry point functions may not be polymorphic."
       | not (all patternOrderZero params')
           || not (all orderZero rettype_params)
           || not (orderZero rettype') ->
-        typeError loc mempty "Entry point functions may not be higher-order."
+          typeError loc mempty "Entry point functions may not be higher-order."
       | sizes_only_in_ret <-
           S.fromList (map typeParamName tparams')
             `S.intersection` typeDimNames rettype'
             `S.difference` foldMap typeDimNames (map patternStructType params' ++ rettype_params),
         not $ S.null sizes_only_in_ret ->
-        typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
+          typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
       | p : _ <- filter nastyParameter params' ->
-        warn loc $
-          "Entry point parameter\n"
-            </> indent 2 (ppr p)
-            </> "\nwill have an opaque type, so the entry point will likely not be callable."
+          warn loc $
+            "Entry point parameter\n"
+              </> indent 2 (ppr p)
+              </> "\nwill have an opaque type, so the entry point will likely not be callable."
       | nastyReturnType maybe_tdecl' rettype_t ->
-        warn loc $
-          "Entry point return type\n"
-            </> indent 2 (ppr rettype)
-            </> "\nwill have an opaque type, so the result will likely not be usable."
+          warn loc $
+            "Entry point return type\n"
+              </> indent 2 (ppr rettype)
+              </> "\nwill have an opaque type, so the result will likely not be usable."
     _ -> pure ()
 
   attrs' <- mapM checkAttr attrs
@@ -701,9 +701,9 @@ nastyReturnType (Just te) _
   | niceTypeExp te = False
 nastyReturnType te t
   | Just ts <- isTupleRecord t =
-    case te of
-      Just (TETuple tes _) -> or $ zipWith nastyType' (map Just tes) ts
-      _ -> any nastyType ts
+      case te of
+        Just (TETuple tes _) -> or $ zipWith nastyType' (map Just tes) ts
+        _ -> any nastyType ts
   | otherwise = nastyType' te t
   where
     nastyType' (Just te') _ | niceTypeExp te' = False
