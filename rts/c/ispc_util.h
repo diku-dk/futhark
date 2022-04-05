@@ -66,27 +66,27 @@ static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying *
   return FUTHARK_SUCCESS;
 }
 
+uniform char dummy_error = 0;
+
 extern "C" unmasked uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
 					                                     uniform struct memblock * uniform lhs,
 					                                     uniform const char * uniform lhs_desc);
 
 static uniform int memblock_unref(uniform struct futhark_context * varying ctx,
-				                          uniform struct memblock * varying lhs,
-				                          uniform const char * uniform lhs_desc)
+				                          uniform struct memblock * varying lhs)
 {
   uniform int err = 0;
 
   foreach_active(i){
     err |= memblock_unref((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
 		   (uniform struct memblock * uniform)(extract((varying int64_t)lhs,i)),
-		   lhs_desc);
+		   &dummy_error);
   }
 
   return err;
 }
 static uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
-				                          varying struct memblock * uniform lhs,
-				                          uniform const char * uniform lhs_desc)
+				                          varying struct memblock * uniform lhs)
 {
   uniform int err = 0;
 
@@ -97,7 +97,7 @@ static uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
   foreach_active(i){
     err |= memblock_unref(ctx,
 		   &aos[i],
-		   lhs_desc);
+		   &dummy_error);
   }
 
   *lhs = aos[programIndex];
@@ -112,31 +112,46 @@ extern "C" unmasked uniform int memblock_alloc(uniform struct futhark_context * 
 
 static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
 				                          uniform struct memblock * varying block,
-				                          varying int64_t size,
-				                          uniform const char * uniform block_desc) {
+				                          varying int64_t size) {
   uniform int err = 0;
 
   foreach_active(i){
     err |= memblock_alloc((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
 		   (uniform struct memblock * uniform)(extract((varying int64_t)block,i)),
 		   extract(size, i),
-		   block_desc);
+		   &dummy_error);
   }
 
   return err;
 }
+
 static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
 				                          varying struct memblock * uniform block,
-				                          uniform int64_t size,
-				                          uniform const char * uniform block_desc) {
+				                          uniform int64_t size) {
   uniform int err = 0;
 
   varying struct memblock _block = *block;
   uniform struct memblock aos[programCount];
   aos[programIndex] = _block;
-  //uniform struct memblock * varying _block = (uniform struct memblock * varying) block;
+
   foreach_active(i){
-    err |= memblock_alloc(ctx, &aos[i], size, block_desc);
+    err |= memblock_alloc(ctx, &aos[i], size, &dummy_error);
+  }
+  *block = aos[programIndex];
+
+  return err;
+}
+
+static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
+				                          varying struct memblock * uniform block,
+				                          varying int64_t size) {
+  uniform int err = 0;
+
+  varying struct memblock _block = *block;
+  uniform struct memblock aos[programCount];
+  aos[programIndex] = _block;
+  foreach_active(i){
+    err |= memblock_alloc(ctx, &aos[i], extract(size, i), &dummy_error);
   }
   *block = aos[programIndex];
 
@@ -150,8 +165,7 @@ extern "C" unmasked uniform int memblock_set(uniform struct futhark_context * un
 
 static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
                                  varying struct memblock * uniform lhs,
-                                 varying struct memblock * uniform rhs,
-                                 uniform const char * uniform lhs_desc) {
+                                 varying struct memblock * uniform rhs) {
   uniform int err = 0;
 
   varying struct memblock _lhs = *lhs;
@@ -166,10 +180,30 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
       err |= memblock_set(ctx,
       &aos1[i],
       &aos2[i],
-        lhs_desc);
+      &dummy_error);
   }
   *lhs = aos1[programIndex];
   *rhs = aos2[programIndex];
+
+  return err;
+}
+
+static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
+                                 varying struct memblock * uniform lhs,
+                                 uniform struct memblock * uniform rhs) {
+  uniform int err = 0;
+
+  varying struct memblock _lhs = *lhs;
+  uniform struct memblock aos1[programCount];
+  aos1[programIndex] = _lhs;
+
+  foreach_active(i) {
+      err |= memblock_set(ctx,
+      &aos1[i],
+      rhs,
+      &dummy_error);
+  }
+  *lhs = aos1[programIndex];
 
   return err;
 }
