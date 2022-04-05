@@ -104,18 +104,21 @@ let
                   "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
                   "--extra-lib-dirs=${pkgs.zlib.static}/lib"
                   "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
+                  "--extra-lib-dirs=${pkgs.libcxxabi.override { enableShared = false; }}/lib"
+                  "--extra-lib-dirs=${pkgs.libcxx.override { enableShared = false; }}/lib"
                   "--extra-lib-dirs=${pkgs.z3.overrideAttrs (old: {
                     configurePhase =
                       "${pkgs.python.interpreter} scripts/mk_make.py --prefix=$out --staticlib"
                       + "\n" + "cd build";
 
                     postInstall = ''
-                        mkdir -p $dev $lib
-                        mv $out/lib $lib/lib
-                        mv $out/include $dev/include
+                        # mkdir -p $dev $lib
+                        # mv $out/lib $lib/lib
+                        # mv $out/include $dev/include
                     '';
 
-                    outputs = [ "out" "lib" "dev" ];
+                    outputs = [ "out" # "lib" "dev"
+                              ];
 
                   })}/lib"
 

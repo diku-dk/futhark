@@ -1,5 +1,5 @@
-{ pkgs, mkDerivation, base, containers, fetchgit, gomp, hspec, lib
-, QuickCheck, transformers, z3
+{ mkDerivation, base, containers, fetchgit, hspec, lib
+, QuickCheck, transformers, z3, pkgs
 }:
 mkDerivation {
   pname = "z3";
