@@ -26,6 +26,8 @@ if [ "$#" -ne 1 ]; then
     exit 1
 fi
 
+exit=0
+
 hlintable() {
     (echo "$1" | egrep -q ".l?hs$")
 }
@@ -46,6 +48,7 @@ if [ $? = 0 ]; then
     echo
     echo "${cyan}Trailing whitespace in $file:${NC}"
     echo "$output"
+    exit=1
 fi
 
 output=$(egrep -n "$(printf '\t')" "$file")
@@ -53,12 +56,14 @@ if [ $? = 0 ]; then
     echo
     echo "${cyan}Tab characters found in $file:${NC}"
     echo "$output"
+    exit=1
 fi
 
 output=$(file "$file" | grep -q 'CRLF line terminators')
 if [ $? = 0 ]; then
     echo
     echo "${cyan}CRLF line terminators in $file.${NC}"
+    exit=1
 fi
 
 if hlintable "$file"; then
@@ -67,12 +72,14 @@ if hlintable "$file"; then
         echo
         echo "${cyan}Hlint issues in $file:${NC}"
         echo "$output"
+        exit=1
     fi
 fi
 
 if ! no_trailing_blank_lines "$file"; then
     echo
     echo "${cyan}$file ends in several blank lines.${NC}"
+    exit=1
 fi
 
 if hlintable "$file"; then
@@ -81,5 +88,8 @@ if hlintable "$file"; then
         echo
         echo "${cyan}$file:${NC} is not formatted correctly with Ormolu"
         echo "$output"
+        exit=1
     fi
 fi
+
+exit $exit
