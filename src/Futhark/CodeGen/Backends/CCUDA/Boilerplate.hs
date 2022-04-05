@@ -1,5 +1,4 @@
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | Various boilerplate definitions for the CUDA backend.
 module Futhark.CodeGen.Backends.CCUDA.Boilerplate
