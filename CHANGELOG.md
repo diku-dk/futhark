@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Missing alias checking for a simplification rule related to in-place
   updates (#1615).
 
+* Incorrect code generation for certain copies of transposed arrays
+  (#1627).
+
 ## [0.21.8]
 
 ### Added
