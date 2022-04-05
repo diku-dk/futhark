@@ -4368,7 +4368,7 @@ int futhark_context_clear_caches(struct futhark_context *ctx)
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_4757, int64_t k_4647);
+                             struct memblock *mem_out_p_4709, int64_t k_4647);
 
 static int init_constants(struct futhark_context *ctx)
 {
@@ -4460,70 +4460,52 @@ const int64_t *futhark_shape_i64_1d(struct futhark_context *ctx,
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_4757, int64_t k_4647)
+                             struct memblock *mem_out_p_4709, int64_t k_4647)
 {
     (void) ctx;
     
     int err = 0;
-    size_t mem_4720_cached_sizze_4758 = 0;
-    unsigned char *mem_4720 = NULL;
-    size_t mem_4736_cached_sizze_4759 = 0;
-    unsigned char *mem_4736 = NULL;
-    struct memblock mem_4752;
+    size_t mem_4689_cached_sizze_4710 = 0;
+    unsigned char *mem_4689 = NULL;
+    struct memblock mem_4705;
     
-    mem_4752.references = NULL;
+    mem_4705.references = NULL;
     
-    struct memblock mem_out_4754;
+    struct memblock mem_out_4707;
     
-    mem_out_4754.references = NULL;
-    if (mem_4720_cached_sizze_4758 < (int64_t) 120) {
-        err = lexical_realloc(&ctx->error, &mem_4720,
-                              &mem_4720_cached_sizze_4758, (int64_t) 120);
+    mem_out_4707.references = NULL;
+    if (mem_4689_cached_sizze_4710 < (int64_t) 120) {
+        err = lexical_realloc(&ctx->error, &mem_4689,
+                              &mem_4689_cached_sizze_4710, (int64_t) 120);
         if (err != FUTHARK_SUCCESS)
             goto cleanup;
     }
-    for (int32_t i_4705 = 0; i_4705 < 15; i_4705++) {
-        int64_t i_4695 = sext_i32_i64(i_4705);
-        int64_t defunc_0_f_res_4715 = add64(k_4647, i_4695);
+    for (int32_t i_4685 = 0; i_4685 < 15; i_4685++) {
+        int64_t i_4683 = sext_i32_i64(i_4685);
+        int64_t defunc_0_f_res_4677 = add64(k_4647, i_4683);
+        int64_t defunc_0_f_res_4680 = add64(k_4647, defunc_0_f_res_4677);
         
-        ((int64_t *) mem_4720)[i_4695] = defunc_0_f_res_4715;
+        ((int64_t *) mem_4689)[i_4683] = defunc_0_f_res_4680;
     }
-    if (mem_4736_cached_sizze_4759 < (int64_t) 120) {
-        err = lexical_realloc(&ctx->error, &mem_4736,
-                              &mem_4736_cached_sizze_4759, (int64_t) 120);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int32_t i_4706 = 0; i_4706 < 15; i_4706++) {
-        int64_t i_4703 = sext_i32_i64(i_4706);
-        int64_t x_4709;
-        
-        x_4709 = ((int64_t *) mem_4720)[i_4703];
-        
-        int64_t defunc_0_f_res_4710 = add64(k_4647, x_4709);
-        
-        ((int64_t *) mem_4736)[i_4703] = defunc_0_f_res_4710;
-    }
-    if (memblock_alloc(ctx, &mem_4752, (int64_t) 120, "mem_4752")) {
+    if (memblock_alloc(ctx, &mem_4705, (int64_t) 120, "mem_4705")) {
         err = 1;
         goto cleanup;
     }
     if ((int64_t) 120 > 0)
-        memmove(mem_4752.mem + (int64_t) 0, mem_4736 + (int64_t) 0,
+        memmove(mem_4705.mem + (int64_t) 0, mem_4689 + (int64_t) 0,
                 (int64_t) 120);
-    if (memblock_set(ctx, &mem_out_4754, &mem_4752, "mem_4752") != 0)
+    if (memblock_set(ctx, &mem_out_4707, &mem_4705, "mem_4705") != 0)
         return 1;
-    (*mem_out_p_4757).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_4757, &mem_out_4754, "mem_out_4754") != 0)
+    (*mem_out_p_4709).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_4709, &mem_out_4707, "mem_out_4707") != 0)
         return 1;
     
   cleanup:
     {
-        free(mem_4720);
-        free(mem_4736);
-        if (memblock_unref(ctx, &mem_4752, "mem_4752") != 0)
+        free(mem_4689);
+        if (memblock_unref(ctx, &mem_4705, "mem_4705") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_4754, "mem_out_4754") != 0)
+        if (memblock_unref(ctx, &mem_out_4707, "mem_out_4707") != 0)
             return 1;
     }
     return err;
@@ -4537,17 +4519,17 @@ int futhark_entry_main(struct futhark_context *ctx,
     
     lock_lock(&ctx->lock);
     
-    struct memblock mem_out_4754;
+    struct memblock mem_out_4707;
     
-    mem_out_4754.references = NULL;
+    mem_out_4707.references = NULL;
     k_4647 = in0;
     if (ret == 0) {
-        ret = futrts_entry_main(ctx, &mem_out_4754, k_4647);
+        ret = futrts_entry_main(ctx, &mem_out_4707, k_4647);
         if (ret == 0) {
             assert((*out0 =
                     (struct futhark_i64_1d *) malloc(sizeof(struct futhark_i64_1d))) !=
                 NULL);
-            (*out0)->mem = mem_out_4754;
+            (*out0)->mem = mem_out_4707;
             (*out0)->shape[0] = (int64_t) 15;
         }
     }
