@@ -64,6 +64,9 @@ let
           futhark-manifest =
             haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
 
+          z3 =
+            haskellPackagesNew.callPackage ./nix/z3.nix { };
+
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes
@@ -101,7 +104,22 @@ let
                   "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
                   "--extra-lib-dirs=${pkgs.zlib.static}/lib"
                   "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
-                  "--extra-lib-dirs=${pkgs.z3.static}/lib"
+                  "--extra-lib-dirs=${pkgs.z3.overrideAttrs (old: {
+                    configurePhase =
+                      "${pkgs.python.interpreter} scripts/mk_make.py --prefix=$out --staticlib"
+                      + "\n" + "cd build";
+
+                    postInstall = ''
+                        mkdir -p $dev $lib
+                        mv $out/lib $lib/lib
+                        mv $out/include $dev/include
+                    '';
+
+                    outputs = [ "out" "lib" "dev" ];
+
+                  })}/lib"
+
+
                 ];
 
                 preBuild = ''
