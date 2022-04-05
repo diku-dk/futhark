@@ -7,6 +7,7 @@
 set -e
 
 log=$(mktemp oclgrindgrunner-XXXXXX)
+trap 'rm -f "$log"' EXIT
 
 # We only use one worker thread, because we are probably going to be
 # running this as part of the test suite, where parallelism comes from
