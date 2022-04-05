@@ -160,8 +160,8 @@ updateHisto
 updateHisto op arrs bucket j vary_acc uni_acc = do
   let bind_acc_params =
         forM_ (zip3 vary_acc uni_acc arrs) $ \(acc_v, acc_u, arr) -> do
-          copyDWIMFix (paramName acc_v) [] (Var arr) bucket
-          emit $ Imp.Op $ Imp.ExtractLane (paramName acc_u) (primExpFromSubExp Unit $ (Var $ paramName acc_u)) (untyped j)
+          copyDWIMFix (paramName acc_u) [] (Var arr) bucket
+          --emit $ Imp.Op $ Imp.ExtractLane (paramName acc_u) (primExpFromSubExp Unit $ (Var $ paramName acc_u)) (untyped j)
           
       op_body = compileBody' [] $ lambdaBody $ histOp op
       writeArray arr val = extractVectorLane j $ collect $ copyDWIMFix arr bucket val []
@@ -254,20 +254,24 @@ subHistogram pat space histops num_histos kbody = do
 
               let bucket' = map toInt64Exp bucket
                   dest_shape' = map toInt64Exp $ shapeDims dest_shape
-                  bucket_in_bounds =
-                    inBounds (Slice (map DimFix bucket')) dest_shape'
                   vs_params = takeLast (length vs') $ lambdaParams lam
                   acc_params =  (lambdaParams . histOp) histop
                   acc_params' = (lambdaParams . histOp) histop'
                             
               generateUniformizeLoop $ \j ->
-                sComment "perform updates" $
+                sComment "perform updates" $ do
+                  --bucket'' <- mapM (\x -> extractVectorLane (primExpType . untyped) x) bucket'
+                  temps <- mapM (\x -> dPrim "bla" $ (primExpType . untyped) x) bucket'
+                  mapM_ (\(x,y) -> emit $ Imp.Op $ Imp.ExtractLane (tvVar x) (untyped y) (untyped j)) $ zip temps bucket'
+                  let bucket'' = map tvExp temps
+                      bucket_in_bounds =
+                        inBounds (Slice (map DimFix bucket'')) dest_shape'
                   sWhen bucket_in_bounds $ do
                     genHistOpParams histop' 
                     sLoopNest shape $ \is' -> do
                       forM_ (zip vs_params vs') $ \(p, res) ->
                         extractVectorLane j $ collect $ copyDWIMFix (paramName p) [] res is'
-                      updateHisto histop' histop_subhistograms (bucket' ++ is') j acc_params acc_params'
+                      updateHisto histop' histop_subhistograms (bucket'' ++ is') j acc_params acc_params'
 
     -- Copy the task-local subhistograms to the global subhistograms,
     -- where they will be combined.

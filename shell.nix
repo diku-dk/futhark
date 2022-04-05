@@ -23,6 +23,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.git-annex
     #pkgs.ghc
     unstable.haskell.compiler.ghc902
+    unstable.haskell-language-server
     #pkgs.ispc
     pkgs.stack
     pkgs.haskellPackages.weeder
@@ -32,7 +33,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
-    pkgs.haskell.packages.ghc921.ormolu_0_4_0_0
+    #pkgs.haskell.packages.ghc921.ormolu_0_4_0_0
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
@@ -48,5 +49,6 @@ pkgs.stdenv.mkDerivation {
   ;
   shellHooks=''
     export PATH=$PATH:~/.local/bin
+    alias skkrt='stack build --fast && stack install'
   '';
 }
