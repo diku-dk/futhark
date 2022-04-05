@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Crucial new command: `futhark thanks`.
 
+* The GPU backends now support a caching mechanism for JIT-compiled
+  code, significantly improving startup times.  Use the
+  `futhark_context_config_set_cache_file()` in the C API, or the
+  `--cache-file` option on executables.  These also work for the
+  non-GPU backends, but currently have no effect.  (#1614)
+
 ### Removed
 
 ### Changed
