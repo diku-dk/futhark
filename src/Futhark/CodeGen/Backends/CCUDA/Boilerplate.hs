@@ -109,6 +109,7 @@ generateConfigFuns sizes = do
                               typename int64_t tuning_params[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
+                              const char *cache_fname;
                             };|]
     )
 
@@ -129,6 +130,7 @@ generateConfigFuns sizes = do
                          cfg->num_nvrtc_opts = 0;
                          cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
+                         cfg->cache_fname = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
                                           tuning_param_names, tuning_param_vars,
@@ -388,7 +390,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->total_runtime = 0;
                  $stms:init_fields
 
-                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
 
                  if (ctx->error != NULL) {
                    futhark_panic(1, "%s\n", ctx->error);

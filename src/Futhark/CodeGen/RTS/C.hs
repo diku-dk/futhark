@@ -18,6 +18,7 @@ module Futhark.CodeGen.RTS.C
     utilH,
     valuesH,
     errorsH,
+    cacheH,
   )
 where
 
@@ -106,3 +107,8 @@ valuesH = $(embedStringFile "rts/c/values.h")
 errorsH :: T.Text
 errorsH = $(embedStringFile "rts/c/errors.h")
 {-# NOINLINE errorsH #-}
+
+-- | @rts/c/cache.h@
+cacheH :: T.Text
+cacheH = $(embedStringFile "rts/c/cache.h")
+{-# NOINLINE cacheH #-}

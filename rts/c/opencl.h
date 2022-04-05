@@ -498,6 +498,46 @@ static cl_build_status build_opencl_program(cl_program program, cl_device_id dev
 // available.
 enum opencl_required_type { OPENCL_F64 = 1 };
 
+static char* mk_compile_opts(struct opencl_context *ctx,
+                             const char *extra_build_opts[],
+                             struct opencl_device_option device_option) {
+  int compile_opts_size = 1024;
+
+  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+    compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
+  }
+
+  for (int i = 0; extra_build_opts[i] != NULL; i++) {
+    compile_opts_size += strlen(extra_build_opts[i] + 1);
+  }
+
+  char *compile_opts = (char*) malloc(compile_opts_size);
+
+  int w = snprintf(compile_opts, compile_opts_size,
+                   "-DLOCKSTEP_WIDTH=%d ",
+                   (int)ctx->lockstep_width);
+
+  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "-D%s=%d ",
+                  ctx->cfg.size_vars[i],
+                  (int)ctx->cfg.size_values[i]);
+  }
+
+  for (int i = 0; extra_build_opts[i] != NULL; i++) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "%s ", extra_build_opts[i]);
+  }
+
+  // Oclgrind claims to support cl_khr_fp16, but this is not actually
+  // the case.
+  if (strcmp(device_option.platform_name, "Oclgrind") == 0) {
+    w += snprintf(compile_opts+w, compile_opts_size-w, "-DEMULATE_F16 ");
+  }
+
+  return compile_opts;
+}
+
 // We take as input several strings representing the program, because
 // C does not guarantee that the compiler supports particularly large
 // literals.  Notably, Visual C has a limit of 2048 characters.  The
@@ -506,7 +546,8 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
                                                   cl_command_queue queue,
                                                   const char *srcs[],
                                                   int required_types,
-                                                  const char *extra_build_opts[]) {
+                                                  const char *extra_build_opts[],
+                                                  const char* cache_fname) {
   int error;
 
   free_list_init(&ctx->free_list);
@@ -647,10 +688,19 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     fprintf(stderr, "Default number of groups: %d\n", (int)ctx->cfg.default_num_groups);
   }
 
+  char *compile_opts = mk_compile_opts(ctx, extra_build_opts, device_option);
+
+  if (ctx->cfg.logging) {
+    fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
+  }
+
   char *fut_opencl_src = NULL;
   cl_program prog;
   error = CL_SUCCESS;
 
+  struct cache_hash h;
+
+  int loaded_from_cache = 0;
   if (ctx->cfg.load_binary_from == NULL) {
     size_t src_size = 0;
 
@@ -675,22 +725,60 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     }
 
     if (ctx->cfg.dump_program_to != NULL) {
-      if (ctx->cfg.debugging) {
+      if (ctx->cfg.logging) {
         fprintf(stderr, "Dumping OpenCL source to %s...\n", ctx->cfg.dump_program_to);
       }
 
       dump_file(ctx->cfg.dump_program_to, fut_opencl_src, strlen(fut_opencl_src));
     }
 
-    if (ctx->cfg.debugging) {
-      fprintf(stderr, "Creating OpenCL program...\n");
+    if (cache_fname != NULL) {
+      if (ctx->cfg.logging) {
+        fprintf(stderr, "Restoring cache from from %s...\n", cache_fname);
+      }
+      cache_hash_init(&h);
+      cache_hash(&h, fut_opencl_src, strlen(fut_opencl_src));
+      cache_hash(&h, compile_opts, strlen(compile_opts));
+
+      unsigned char *buf;
+      size_t bufsize;
+      if (cache_restore(cache_fname, &h, &buf, &bufsize) != 0) {
+        if (ctx->cfg.logging) {
+          fprintf(stderr, "Failed to restore cache (errno: %s)\n", strerror(errno));
+        }
+      } else {
+        if (ctx->cfg.logging) {
+          fprintf(stderr, "Cache restored; loading OpenCL binary...\n");
+        }
+
+        cl_int status = 0;
+        prog = clCreateProgramWithBinary(ctx->ctx, 1, &device_option.device,
+                                         &bufsize, (const unsigned char**)&buf,
+                                         &status, &error);
+        if (status == CL_SUCCESS) {
+          loaded_from_cache = 1;
+          if (ctx->cfg.logging) {
+            fprintf(stderr, "Loading succeeded.\n");
+          }
+        } else {
+          if (ctx->cfg.logging) {
+            fprintf(stderr, "Loading failed.\n");
+          }
+        }
+      }
     }
 
-    const char* src_ptr[] = {fut_opencl_src};
-    prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
-    OPENCL_SUCCEED_FATAL(error);
+    if (!loaded_from_cache) {
+      if (ctx->cfg.logging) {
+        fprintf(stderr, "Creating OpenCL program...\n");
+      }
+
+      const char* src_ptr[] = {fut_opencl_src};
+      prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
+      OPENCL_SUCCEED_FATAL(error);
+    }
   } else {
-    if (ctx->cfg.debugging) {
+    if (ctx->cfg.logging) {
       fprintf(stderr, "Loading OpenCL binary from %s...\n", ctx->cfg.load_binary_from);
     }
     size_t binary_size;
@@ -708,42 +796,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     OPENCL_SUCCEED_FATAL(error);
   }
 
-  int compile_opts_size = 1024;
-
-  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
-    compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
-  }
-
-  for (int i = 0; extra_build_opts[i] != NULL; i++) {
-    compile_opts_size += strlen(extra_build_opts[i] + 1);
-  }
-
-  char *compile_opts = (char*) malloc(compile_opts_size);
-
-  int w = snprintf(compile_opts, compile_opts_size,
-                   "-DLOCKSTEP_WIDTH=%d ",
-                   (int)ctx->lockstep_width);
-
-  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
-    w += snprintf(compile_opts+w, compile_opts_size-w,
-                  "-D%s=%d ",
-                  ctx->cfg.size_vars[i],
-                  (int)ctx->cfg.size_values[i]);
-  }
-
-  for (int i = 0; extra_build_opts[i] != NULL; i++) {
-    w += snprintf(compile_opts+w, compile_opts_size-w,
-                  "%s ", extra_build_opts[i]);
-  }
-
-  // Oclgrind claims to support cl_khr_fp16, but this is not actually
-  // the case.
-  if (strcmp(device_option.platform_name, "Oclgrind") == 0) {
-    w += snprintf(compile_opts+w, compile_opts_size-w, "-DEMULATE_F16 ");
-  }
-
-  if (ctx->cfg.debugging) {
-    fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
+  if (ctx->cfg.logging) {
     fprintf(stderr, "Building OpenCL program...\n");
   }
   OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
@@ -751,19 +804,30 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   free(compile_opts);
   free(fut_opencl_src);
 
-  if (ctx->cfg.dump_binary_to != NULL) {
-    if (ctx->cfg.debugging) {
-      fprintf(stderr, "Dumping OpenCL binary to %s...\n", ctx->cfg.dump_binary_to);
-    }
-
-    size_t binary_size;
+  size_t binary_size = 0;
+  unsigned char *binary = NULL;
+  int store_in_cache = cache_fname != NULL && !loaded_from_cache;
+  if (store_in_cache || ctx->cfg.dump_binary_to != NULL) {
     OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARY_SIZES,
                                           sizeof(size_t), &binary_size, NULL));
-    unsigned char *binary = (unsigned char*) malloc(binary_size);
-    unsigned char *binaries[1] = { binary };
+    binary = (unsigned char*) malloc(binary_size);
     OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARIES,
-                                          sizeof(unsigned char*), binaries, NULL));
+                                          sizeof(unsigned char*), &binary, NULL));
+  }
 
+  if (store_in_cache) {
+    if (ctx->cfg.logging) {
+      fprintf(stderr, "Caching OpenCL binary in %s...\n", cache_fname);
+    }
+    if (cache_store(cache_fname, &h, binary, binary_size) != 0) {
+      printf("Failed to cache binary: %s\n", strerror(errno));
+    }
+  }
+
+  if (ctx->cfg.dump_binary_to != NULL) {
+    if (ctx->cfg.logging) {
+      fprintf(stderr, "Dumping OpenCL binary to %s...\n", ctx->cfg.dump_binary_to);
+    }
     dump_file(ctx->cfg.dump_binary_to, binary, binary_size);
   }
 
@@ -773,7 +837,8 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 static cl_program setup_opencl(struct opencl_context *ctx,
                                const char *srcs[],
                                int required_types,
-                               const char *extra_build_opts[]) {
+                               const char *extra_build_opts[],
+                               const char* cache_fname) {
 
   ctx->lockstep_width = 0; // Real value set later.
 
@@ -802,7 +867,8 @@ static cl_program setup_opencl(struct opencl_context *ctx,
                          &clCreateCommandQueue_error);
   OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
-  return setup_opencl_with_command_queue(ctx, queue, srcs, required_types, extra_build_opts);
+  return setup_opencl_with_command_queue(ctx, queue, srcs, required_types, extra_build_opts,
+                                         cache_fname);
 }
 
 // Count up the runtime all the profiling_records that occured during execution.

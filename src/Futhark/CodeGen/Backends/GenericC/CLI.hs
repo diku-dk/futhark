@@ -138,6 +138,14 @@ genericOptions =
                 if (ret != NULL) {
                   futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                 }}|]
+      },
+    Option
+      { optionLongName = "cache-file",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "FILE",
+        optionDescription = "Store program cache here.",
+        optionAction =
+          [C.cstm|futhark_context_config_set_cache_file(cfg, optarg);|]
       }
   ]
   where

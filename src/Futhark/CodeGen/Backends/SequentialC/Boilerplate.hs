@@ -11,7 +11,10 @@ generateBoilerplate :: GC.CompilerM op s ()
 generateBoilerplate = do
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { int debugging; int in_use; };|]
+      [C.cedecl|struct $id:s { int debugging;
+                               int in_use;
+                               const char *cache_fname;
+                             };|]
     )
 
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
@@ -23,6 +26,7 @@ generateBoilerplate = do
                                  }
                                  cfg->in_use = 0;
                                  cfg->debugging = 0;
+                                 cfg->cache_fname = NULL;
                                  return cfg;
                                }|]
     )
