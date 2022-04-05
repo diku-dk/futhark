@@ -17,6 +17,21 @@
 let
   config = {
     packageOverrides = pkgs: rec {
+      z3 = pkgs.z3.overrideAttrs (old: {
+        configurePhase =
+          "${pkgs.python.interpreter} scripts/mk_make.py --prefix=$out --staticlib"
+          + "\n" + "cd build";
+
+        postInstall = ''
+                        # mkdir -p $dev $lib
+                        # mv $out/lib $lib/lib
+                        # mv $out/include $dev/include
+                    '';
+
+        outputs = [ "out" # "lib" "dev"
+                  ];
+      });
+
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
           aeson =
@@ -86,61 +101,48 @@ let
                           ];
                 cleanSource = src: pkgs.lib.sourceByRegex src sources;
             in
-            pkgs.haskell.lib.overrideCabal
-              (pkgs.haskell.lib.addBuildTools
-                (haskellPackagesOld.callCabal2nix "futhark" (cleanSource ./.) { })
-                [ pkgs.python39Packages.sphinx ])
-              ( _drv: {
-                isLibrary = false;
-                isExecutable = true;
-                enableSharedExecutables = false;
-                enableSharedLibraries = false;
-                enableLibraryProfiling = false;
-                configureFlags = [
-                  "--ghc-option=-optl=-static"
-                  "--ghc-option=-split-sections"
-                  "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
-                  "--extra-lib-dirs=${pkgs.glibc.static}/lib"
-                  "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
-                  "--extra-lib-dirs=${pkgs.zlib.static}/lib"
-                  "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
-                  "--extra-lib-dirs=${pkgs.libcxxabi.override { enableShared = false; }}/lib"
-                  "--extra-lib-dirs=${pkgs.libcxx.override { enableShared = false; }}/lib"
-                  "--extra-lib-dirs=${pkgs.z3.overrideAttrs (old: {
-                    configurePhase =
-                      "${pkgs.python.interpreter} scripts/mk_make.py --prefix=$out --staticlib"
-                      + "\n" + "cd build";
-
-                    postInstall = ''
-                        # mkdir -p $dev $lib
-                        # mv $out/lib $lib/lib
-                        # mv $out/include $dev/include
-                    '';
-
-                    outputs = [ "out" # "lib" "dev"
-                              ];
-
-                  })}/lib"
+              pkgs.haskell.lib.overrideCabal
+                (pkgs.haskell.lib.addBuildTools
+                  (haskellPackagesOld.callCabal2nix "futhark" (cleanSource ./.) { })
+                  [ pkgs.python39Packages.sphinx ])
+                ( _drv: {
+                  isLibrary = false;
+                  isExecutable = true;
+                  enableSharedExecutables = false;
+                  enableSharedLibraries = false;
+                  enableLibraryProfiling = false;
+                  configureFlags = [
+                    "--ghc-option=-optl=-static"
+                    "--ghc-option=-optl=-lstdc++"
+                    "--ghc-option=-split-sections"
+                    "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
+                    "--extra-lib-dirs=${pkgs.glibc.static}/lib"
+                    "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
+                    "--extra-lib-dirs=${pkgs.zlib.static}/lib"
+                    "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
+                    "--extra-lib-dirs=${pkgs.libcxxabi.override { enableShared = false; }}/lib"
+                    "--extra-lib-dirs=${pkgs.libcxx.override { enableShared = false; }}/lib"
+                    "--extra-lib-dirs=${pkgs.z3}/lib"
 
 
-                ];
+                  ];
 
-                preBuild = ''
+                  preBuild = ''
         if [ "${commit}" ]; then echo "${commit}" > commit-id; fi
                 '';
 
-                postBuild = (_drv.postBuild or "") + ''
+                  postBuild = (_drv.postBuild or "") + ''
         make -C docs man
         '';
 
-                postInstall = (_drv.postInstall or "") + ''
+                  postInstall = (_drv.postInstall or "") + ''
         mkdir -p $out/share/man/man1
         cp docs/_build/man/*.1 $out/share/man/man1/
         mkdir -p $out/share/futhark/
         cp LICENSE $out/share/futhark/
         '';
-              }
-              );
+                }
+                );
         };
       };
     };
