@@ -103,6 +103,9 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
 
   let path
        | comm && scalars = reductionStage1CommScalar
+       -- TODO(pema): This prevents us from using vectorizing the map part
+       -- Figure out if this is worth doing, or if we should just prefer the
+       -- reductionStage1NonCommScalar path?
        | arrays          = reductionStage1Array
        | scalars         = reductionStage1NonCommScalar
        | otherwise       = reductionStage1Fallback
