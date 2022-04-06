@@ -21,7 +21,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.file
     pkgs.git
     pkgs.git-annex
-    #bla
     unstable.haskell.compiler.ghc902
     unstable.haskell.packages.ghc902.haskell-language-server
     pkgs.stack
