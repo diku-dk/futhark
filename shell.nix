@@ -23,7 +23,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.git-annex
     #pkgs.ghc
     unstable.haskell.compiler.ghc902
-    unstable.haskell-language-server
+    unstable.haskell.packages.ghc902.haskell-language-server
     #pkgs.ispc
     pkgs.stack
     pkgs.haskellPackages.weeder
