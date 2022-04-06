@@ -258,8 +258,7 @@ optimiseSegOp onOp vtable sinking op =
 type SinkRep rep = Aliases rep
 
 sink ::
-  ( ASTRep rep,
-    Buildable rep,
+  ( Buildable rep,
     CanBeAliased (Op rep),
     ST.IndexOp (OpWithAliases (Op rep))
   ) =>
