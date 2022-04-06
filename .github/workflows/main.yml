@@ -39,7 +39,7 @@ jobs:
       run: |
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
-        sudo apt-get install ghc-9.0.1 libz3-dev
+        sudo apt-get install ghc-9.0.1 libz3-4 libz3-dev
         echo "/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v2
@@ -67,7 +67,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y haskell-stack libz3-dev
+        sudo apt-get install -y haskell-stack libz3-4 libz3-dev
 
     - uses: actions/cache@v2
       name: Cache ~/.stack and .stack-work
