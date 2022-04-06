@@ -287,8 +287,15 @@ extractVectorLane j code = do
   let ut_exp = untyped j
   code' <- code
   case code' of
-    Imp.SetScalar vname e -> 
-      emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp    
+    Imp.SetScalar vname e -> do
+      typ <- lookupType vname
+      case typ of
+        Prim (FloatType Float16) -> do
+          tv <- dPrim "hack_extract_f16" (FloatType Float32)     
+          emit $ Imp.SetScalar (tvVar tv) e
+          emit $ Imp.Op $ Imp.ExtractLane vname (untyped $ tvExp tv) ut_exp
+        _ -> emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp
+       
     _ -> 
       emit code'
 
