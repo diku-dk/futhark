@@ -62,8 +62,6 @@ nonsegmentedHist pat space histops kbody num_histos = do
       hist_width = histSize $ head histops
       use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64
 
-  histops' <- renameHistOpLambda histops
-
   -- Only do something if there is actually input.
   collect $
     sUnless (product ns_64 .==. 0) $ do
@@ -72,6 +70,7 @@ nonsegmentedHist pat space histops kbody num_histos = do
         (subHistogram pat space histops num_histos kbody)
         (subHistogram pat space histops num_histos kbody)
         --(atomicHistogram pat space histops' kbody)
+        -- TODO (obp): add atomic path back when finished debugging
 
 -- |
 -- Atomic Histogram approach
