@@ -36,10 +36,6 @@ import Futhark.Transform.Substitute
 --       It appears that statements that allocate memory cannot be migrated,
 --       except ArrayLit of primitives.
 
--- TODO: Eliminate duplicate GPUBody results if not consumed.
-
--- TODO: Use Builder rather than hard-coded RepTypes
-
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
   Pass

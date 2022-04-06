@@ -678,8 +678,6 @@ graphLoop (b : bs) params lform body = do
   -- reach and exhaust their normal entry edges into the loop.
   -- This means a read can be delayed through a loop body but not into it
   -- if that would increase the number of reads done by the body.
-  --
-  -- TODO: Measure whether it is better to block delays through loops.
   let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
   foldM_ connectOperand rbc (IS.elems ops)
 

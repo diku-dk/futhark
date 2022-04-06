@@ -174,26 +174,11 @@ transformExp aliases e =
     BasicOp {} -> pure (removeExpAliases e, depsOf e)
     Apply {} -> pure (removeExpAliases e, depsOf e)
     If c tbody fbody dec -> do
-      -- TODO: Transform into a single GPUBody if both transformed branches
-      --       only contain single GPUBody statements and all return values
-      --       (1) originate from the branch GPUBody statements i.e. is not a
-      --           dependency to its branch body,
-      --       (2) originate from other GPUBody statements that the transformed
-      --           GPUBody can be merged with,
-      --       (3) or are scalar arrays of size 1, whatever their rank.
       (tbody', t_deps) <- transformBody aliases tbody
       (fbody', f_deps) <- transformBody aliases fbody
       let deps = depsOf c <> t_deps <> f_deps <> depsOf dec
       pure (If c tbody' fbody' dec, deps)
     DoLoop merge lform body -> do
-      -- TODO: Transform into a single GPUBody if body only contains a single
-      --       GPUBody statement and all return values
-      --       (1) originate from the branch GPUBody statements i.e. is not a
-      --           dependency to its branch body,
-      --       (2) originate from other GPUBody statements that the transformed
-      --           GPUBody can be merged with,
-      --       (3) or are scalar arrays of size 1, whatever their rank.
-      -- =======================================================================
       -- What merge and lform aliases outside the loop is irrelevant as those
       -- cannot be consumed within the loop.
       (body', body_deps) <- transformBody aliases body
