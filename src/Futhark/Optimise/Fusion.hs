@@ -476,14 +476,14 @@ fuseStms edgs infusible s1 s2 =
               && s_exp1 == s_exp2
               -> pure $ Just $ Let pats2  (aux1 <> aux2) (Op (Futhark.Scatter s_exp2 fused_inputs lam other))
             where
-              (lam, fused_inputs) = vFuseLambdas lam_1 i1 o1 lam_2 i2 o2
+              (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
           ( Futhark.Screma s_exp1 i1 (ScremaForm [] [] lam_1),
             Futhark.Hist   s_exp2 i2 other lam_2)
             | L.null infusible -- only if map outputs are used exclusivly by the hist
             && s_exp1 == s_exp2
              -> pure $ Just $ Let pats2 (aux1 <> aux2) (Op (Futhark.Hist s_exp2 fused_inputs other lam))
             where
-              (lam, fused_inputs) = vFuseLambdas lam_1 i1 o1 lam_2 i2 o2
+              (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
           ( Futhark.Screma s_exp1 i1 sform1,
             Futhark.Screma s_exp2 i2 sform2)
               | Just _ <- isScanomapSOAC sform1,
@@ -504,7 +504,7 @@ fuseStms edgs infusible s1 s2 =
             | getStreamOrder sform1 /= getStreamOrder sform2 ->
               let s1' = toSeqStream soac1 in
               let s2' = toSeqStream soac2 in
-              fuseStms [] []
+              fuseStms [] infusible
                 (Let pats1 aux1 (Op s1'))
                 (Let pats2 aux2 (Op s2'))
           ( Futhark.Stream s_exp1 i1 sform1 nes1 lam1,
@@ -516,16 +516,27 @@ fuseStms edgs infusible s1 s2 =
               let (lam1Rps, lam1ps) = splitAt (length nes1) $ tail $ lambdaParams lam1
               let (lam1Rts, lam1ts) = splitAt (length nes1) $ lambdaReturnType lam1
               let (lam1Rrs, lam1rs) = splitAt (length nes1) $ bodyResult $ lambdaBody lam1
+
+              let (lam2Rps, lam2ps) = splitAt (length nes2) $ tail $ lambdaParams lam2
+              let (lam2Rts, lam2ts) = splitAt (length nes2) $ lambdaReturnType lam2
+              let (lam2Rrs, lam2rs) = splitAt (length nes2) $ bodyResult $ lambdaBody lam2
+
+
               -- let (lam2Rps, lam2ps) = splitAt (length nes2) $ tail $ lambdaParams lam2
               let lam1' = lam1 {lambdaParams = lam1ps, lambdaReturnType = lam1ts, lambdaBody = (lambdaBody lam1) {bodyResult = lam1rs}}
-              let lam2' = lam2 {lambdaParams = tail $ lambdaParams lam2}
-              let (lam, is_new) =  vFuseLambdas lam1' i1 o1 lam2' i2 o2
-              let lam' = lam {lambdaParams = chunk1 : lam1Rps ++ lambdaParams lam}
-              let lam'' = lam'{lambdaBody = (lambdaBody lam') {bodyResult = lam1Rrs ++ bodyResult (lambdaBody lam')}}
-              let lam''' = lam''{lambdaReturnType = lam1Rts <> lambdaReturnType lam''}
+              let lam2' = lam2 {lambdaParams = lam2ps, lambdaReturnType = lam2ts, lambdaBody = (lambdaBody lam2) {bodyResult = lam2rs}}
+              let (lam, is_new) =  vFuseLambdas infusible lam1' i1 o1 lam2' i2 o2
+              let lam' = lam {lambdaParams = chunk1 : lam1Rps ++ lam2Rps ++ lambdaParams lam}
+              let lam'' = lam'{lambdaBody = (lambdaBody lam') {bodyResult = lam1Rrs ++ lam2Rrs ++ bodyResult (lambdaBody lam')}}
+              let lam''' = lam''{lambdaReturnType = lam1Rts <> lam2Rts <> lambdaReturnType lam''}
               let pat1' = trace (ppr $ lambdaReturnType lam'') patIdents pats1
+
+              let toKeep = changeAll o1 (patIdents pats1) infusible
+              let pats = take (length nes1) (patIdents pats1) ++ take (length nes2) (patIdents pats2) ++ toKeep ++ drop (length nes2) (patIdents pats2)
+
+
               -- let lam_new =  lam
-              pure $ Just $ substituteNames mmap $ Let (basicPat (take (length nes1) (patIdents pats1)) <>pats2) aux (Op $ Futhark.Stream s_exp1 is_new sform1 (nes1 <> nes2) lam''')
+              pure $ Just $ substituteNames mmap $ Let (basicPat pats) aux (Op $ Futhark.Stream s_exp1 is_new (mergeForms sform1 sform2) (nes1 <> nes2) lam''')
 
           _ -> pure Nothing -- not fusable soac combos
     _ -> pure Nothing -- not op statements
@@ -539,16 +550,17 @@ fuseStms edgs infusible s1 s2 =
 
 
 
--- should handle all fusions of lambda at some ponit - now its only perfect fusion
-vFuseLambdas :: Lambda SOACS -> [VName] -> [VName] ->
+
+vFuseLambdas :: [VName] ->
+                Lambda SOACS -> [VName] -> [VName] ->
                 Lambda SOACS -> [VName] -> [VName]
                 -> (Lambda SOACS, [VName])
-vFuseLambdas lam_1 i1 o1 lam_2 i2 _ = (lam , fused_inputs)
+vFuseLambdas infusible lam_1 i1 o1 lam_2 i2 o2 = (lam , fused_inputs)
   where
     (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
     (lam_1_output, _) = mapT (namesFromRes . resFromLambda) (lam_1, lam_2)
 
-    fused_inputs = trace ("things: " ++ show (fuseInputs2 o1 i1 i2)) fuseInputs2 o1 i1 i2
+    fused_inputs =  fuseInputs2 o1 i1 i2
     fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
 
     map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
@@ -558,13 +570,20 @@ vFuseLambdas lam_1 i1 o1 lam_2 i2 _ = (lam , fused_inputs)
 
 
 
+    res_toChange = zip (lambdaReturnType lam_1) (bodyResult (lambdaBody lam_1))
+    -- what are the fused variables?
+    (_, other) = unzip $ filter (\(x, _) -> x  `elem` infusible) (zip  o1 res_toChange)
+    (types, results) = unzip other
+
     lparams = changeAll (i1 ++ i2)
       (lambdaParams lam_1 ++ lambdaParams lam_2)
       fused_inputs
 
     lam' = fuseLambda lam_1 lam_2
     lam = substituteNames map3 (lam' {
-      lambdaParams = lparams
+      lambdaParams = lparams,
+      lambdaReturnType = types ++ lambdaReturnType lam_2,
+      lambdaBody = (lambdaBody lam') {bodyResult = results ++ bodyResult (lambdaBody lam')}
       })
 
 
@@ -1002,7 +1021,7 @@ soacToStream soac = do
             strmpar = chunk_param : inpacc_ids ++ strm_inpids
             strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
         lam0 <- renameLambda lamin
-        return $ Just ( Futhark.Stream w inNames (Parallel InOrder comm lam0) nes strmlam, [])
+        return $ Just ( Futhark.Stream w inNames (Parallel InOrder comm lam0) nes strmlam, map paramIdent inpacc_ids)
     _ -> pure Nothing
     where
       mkMapPlusAccLam ::
@@ -1053,3 +1072,24 @@ toSeqStream s@(Futhark.Stream _ _ Sequential _ _) = s
 toSeqStream (Futhark.Stream w is Parallel {} l acc) =
   Futhark.Stream w is Sequential l acc
 toSeqStream _ = error "toSeqStream expects a stream, but given a SOAC."
+
+
+-- also copied
+mergeForms :: StreamForm SOACS -> StreamForm SOACS -> StreamForm SOACS
+mergeForms Sequential Sequential =  Sequential
+mergeForms (Parallel _ comm2 lam2r) (Parallel o1 comm1 lam1r) =
+  Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
+mergeForms s _ = s
+
+
+-- copied
+mergeReduceOps :: Lambda rep -> Lambda rep -> Lambda rep
+mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
+  let body' =
+        Body
+          (bodyDec bdy1)
+          (bodyStms bdy1 <> bodyStms bdy2)
+          (bodyResult bdy1 ++ bodyResult bdy2)
+      (len1, len2) = (length rtp1, length rtp2)
+      par' = take len1 par1 ++ take len2 par2 ++ drop len1 par1 ++ drop len2 par2
+   in Lambda par' body' (rtp1 ++ rtp2)
