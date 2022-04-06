@@ -26,6 +26,7 @@ module Futhark.IR.GPU.Op
 where
 
 import Control.Monad
+import qualified Data.Sequence as SQ
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -278,12 +279,15 @@ instance (ASTRep rep, IsOp op) => IsOp (HostOp rep op) where
   safeOp (SegOp op) = safeOp op
   safeOp (OtherOp op) = safeOp op
   safeOp (SizeOp op) = safeOp op
-  safeOp GPUBody {} = False
+  safeOp GPUBody {} = True
 
   cheapOp (SegOp op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
   cheapOp (SizeOp op) = cheapOp op
-  cheapOp GPUBody {} = False
+  cheapOp (GPUBody types body) =
+    -- Current GPUBody usage only benefits from hoisting kernels that
+    -- transfer scalars to device.
+    SQ.null (bodyStms body) && all ((== 0) . arrayRank) types
 
 instance TypedOp op => TypedOp (HostOp rep op) where
   opType (SegOp op) = opType op
