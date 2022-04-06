@@ -1,7 +1,7 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-  unstable = import <nixos-unstable> {};
+  unstable = import <nix-unstable> {};
 
 ispc = pkgs.ispc.overrideAttrs (oldAttrs: rec {
     version = "1.17.0";
