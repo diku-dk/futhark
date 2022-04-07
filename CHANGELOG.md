@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   parallelism to require irregular allocations (#1610).
 
 * Missing alias checking for a simplification rule related to in-place
-  updates (#1615).
+  updates (#1615, #1628).
 
 * Incorrect code generation for certain copies of transposed arrays
   (#1627).
