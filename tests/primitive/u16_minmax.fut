@@ -1,10 +1,15 @@
 -- ==
--- input { 0u16 1u16 } output { 1u16 0u16 }
--- input { 1u16 1u16 } output { 1u16 1u16 }
--- input { 65535u16 1u16 } output { 65535u16 1u16 }
--- input { 1u16 65535u16 } output { 65535u16 1u16 }
+-- entry: testMax
+-- input { [0u16, 1u16, 65535u16, 1u16]
+--         [1u16, 1u16, 1u16, 65535u16]}
+-- output { [1u16, 1u16, 65535u16, 65535u16] }
 
+-- ==
+-- entry: testMin
+-- input { [0u16, 1u16, 65535u16, 1u16]
+--         [1u16, 1u16, 1u16, 65535u16]}
+-- output { [0u16, 1u16, 1u16, 1u16] }
 
-def main(x: u16) (y: u16): (u16,u16) =
-  (u16.max x y,
-   u16.min x y)
+entry testMax = map2 u16.max
+entry testMin = map2 u16.min
+

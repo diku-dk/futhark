@@ -6,8 +6,7 @@
 --          [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 7u8, 255u8] }
 -- output { [0u8, 2u8, 2u8, 3u8, 5u8, 6u8, 8u8, 3u8] }
 
-entry test_u8_mad_hi (xs: []u8) (ys: []u8) (zs: []u8) =
-  map3 u8.mad_hi xs ys zs
+entry test_u8_mad_hi = map3 u8.mad_hi
 
 -- Test i8.mad_hi
 -- ==
@@ -17,8 +16,7 @@ entry test_u8_mad_hi (xs: []u8) (ys: []u8) (zs: []u8) =
 --          [0i8, 1i8, 2i8, 3i8, 4i8, 5i8, 6i8, 255i8] }
 -- output { [0i8, 2i8, 2i8, 3i8, 5i8, 6i8, 7i8, 5i8] }
 
-entry test_i8_mad_hi (xs: []i8) (ys: []i8) (zs: []i8)=
-  map3 i8.mad_hi xs ys zs
+entry test_i8_mad_hi = map3 i8.mad_hi
 
 -- Test u16.mad_hi
 -- ==
@@ -28,8 +26,7 @@ entry test_i8_mad_hi (xs: []i8) (ys: []i8) (zs: []i8)=
 --          [1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16] }
 -- output { [1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 9u16, 10u16, 12u16, 9u16] }
 
-entry test_u16_mad_hi (xs: []u16) (ys: []u16) (zs: []u16) =
-  map3 u16.mad_hi xs ys zs
+entry test_u16_mad_hi = map3 u16.mad_hi
 
 -- Test i16.mad_hi
 -- ==
@@ -39,8 +36,7 @@ entry test_u16_mad_hi (xs: []u16) (ys: []u16) (zs: []u16) =
 --          [250i16, 251i16, 252i16, 253i16, 254i16, 255i16, 256i16, 257i16, 258i16, 259i16, 260i16] }
 -- output { [250i16, 251i16, 252i16, 253i16, 254i16, 255i16, 256i16, 258i16, 259i16, 261i16, 258i16] }
 
-entry test_i16_mad_hi (xs: []i16) (ys: []i16) (zs: []i16) =
-  map3 i16.mad_hi xs ys zs
+entry test_i16_mad_hi = map3 i16.mad_hi
 
 -- Test u32.mad_hi
 -- ==
@@ -50,8 +46,7 @@ entry test_i16_mad_hi (xs: []i16) (ys: []i16) (zs: []i16) =
 --          [1u32, 2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32, 13u32, 14u32, 15u32] }
 -- output { [1u32, 2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32, 14u32, 18u32, 13u32] }
 
-entry test_u32_mad_hi (xs: []u32) (ys: []u32) (zs: []u32) =
-  map3 u32.mad_hi xs ys zs
+entry test_u32_mad_hi = map3 u32.mad_hi
 
 -- Test i32.mad_hi
 -- ==
@@ -61,8 +56,7 @@ entry test_u32_mad_hi (xs: []u32) (ys: []u32) (zs: []u32) =
 --          [0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32] }
 -- output { [0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 0i32, 1i32, 4i32, -2i32] }
 
-entry test_i32_mad_hi (xs: []i32) (ys: []i32) (zs: []i32) =
-  map3 i32.mad_hi xs ys zs
+entry test_i32_mad_hi = map3 i32.mad_hi
 
 -- Test u64.mad_hi
 -- ==
@@ -72,8 +66,7 @@ entry test_i32_mad_hi (xs: []i32) (ys: []i32) (zs: []i32) =
 --          [1u64, 2u64, 3u64, 4u64, 5u64, 6u64, 7u64, 8u64, 9u64, 10u64, 11u64, 12u64, 13u64, 14u64, 15u64, 16u64, 17u64, 18u64] }
 -- output { [1u64, 2u64, 3u64, 4u64, 5u64, 6u64, 7u64, 8u64, 9u64, 10u64, 11u64, 12u64, 13u64, 14u64, 15u64, 16u64, 18u64, 16u64] }
 
-entry test_u64_mad_hi (xs: []u64) (ys: []u64) (zs: []u64) =
-  map3 u64.mad_hi xs ys zs
+entry test_u64_mad_hi = map3 u64.mad_hi
 
 -- Test i64.mad_hi
 -- ==
@@ -83,5 +76,4 @@ entry test_u64_mad_hi (xs: []u64) (ys: []u64) (zs: []u64) =
 --          [1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 8i64, 9i64, 10i64, 11i64, 12i64, 13i64, 14i64, 15i64, 16i64, 17i64, 18i64] }
 -- output { [1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 8i64, 9i64, 10i64, 11i64, 12i64, 13i64, 14i64, 15i64, 16i64, 18i64, 16i64] }
 
-entry test_i64_mad_hi (xs: []i64) (ys: []i64) (zs: []i64) =
-  map3 i64.mad_hi xs ys zs
+entry test_i64_mad_hi = map3 i64.mad_hi

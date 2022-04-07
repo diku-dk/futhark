@@ -1,8 +1,30 @@
 -- Test of division-like operators for u8 values.
---
--- ==
--- input {  7u8  3u8 } output {  2u8  1u8  2u8  1u8 }
--- input {  128u8  9u8 } output {  14u8  2u8  14u8  2u8 }
 
-def main (x: u8) (y: u8): (u8,u8,u8,u8) =
-  (x / y, x % y, x // y, x %% y)
+-- ==
+-- entry: divide
+-- input { [7u8, 128u8]
+--         [3u8, 9u8] }
+-- output { [2u8, 14u8] }
+
+-- ==
+-- entry: mod
+-- input { [7u8, 128u8]
+--         [3u8, 9u8] }
+-- output { [1u8, 2u8] }
+
+-- ==
+-- entry: quot
+-- input { [7u8, 128u8]
+--         [3u8, 9u8] }
+-- output { [2u8, 14u8] }
+
+-- ==
+-- entry: rem
+-- input { [7u8, 128u8]
+--         [3u8, 9u8] }
+-- output { [1u8, 2u8] }
+
+entry divide = map2 (u8./)
+entry mod = map2 (u8.%)
+entry quot = map2 (u8.//)
+entry rem = map2 (u8.%%)
