@@ -305,7 +305,6 @@ reportResult results bootstrapCI = do
           avg
       )
       bootstrapCI
-      bootstrapCI
       ((minimum runtimes / avg - 1) * 100)
       ((maxinum runtimes / avg - 1) * 100)
 
@@ -558,26 +557,3 @@ main = mainWithOptions initialBenchOptions commandLineOptions "options... progra
   case progs of
     [] -> Nothing
     _ -> Just $ runBenchmarks (excludeBackend config) progs
-
---- The following extracted from hstats package by Marshall Beddoe:
---- https://hackage.haskell.org/package/hstats-0.3
-
--- | Numerically stable mean
--- mean :: Floating a => [a] -> a
--- mean x = fst $ foldl' (\(!m, !n) x' -> (m + (x' - m) / (n + 1), n + 1)) (0, 0) x
-
----- | Standard deviation of population
--- stddevp :: (Floating a) => [a] -> a
--- stddevp xs = sqrt $ pvar xs
-
----- | Population variance
--- pvar :: (Floating a) => [a] -> a
--- pvar xs = centralMoment xs (2 :: Int)
-
----- | Central moments
--- centralMoment :: (Floating b, Integral t) => [b] -> t -> b
--- centralMoment _ 1 = 0
--- centralMoment xs r = sum (map (\x -> (x - m) ^ r) xs) / n
--- where
--- m = mean xs
--- n = fromIntegral $ length xs
