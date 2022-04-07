@@ -12,19 +12,22 @@ pkgs.stdenv.mkDerivation {
     pkgs.git
     pkgs.git-annex
     pkgs.ghc
+    pkgs.parallel
     pkgs.haskellPackages.weeder
+    pkgs.haskellPackages.apply-refact
     pkgs.hlint
     pkgs.pkgconfig
     pkgs.zlib
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
-    pkgs.ormolu
+    pkgs.haskell.packages.ghc922.ormolu_0_4_0_0
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
     pkgs.python3Packages.jsonschema
     pkgs.python3Packages.sphinx
+    pkgs.python3Packages.sphinxcontrib-bibtex
     pkgs.imagemagick # needed for literate tests
   ]
   ++ pkgs.lib.optionals (pkgs.stdenv.isLinux)

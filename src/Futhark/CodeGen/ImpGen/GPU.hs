@@ -106,7 +106,7 @@ compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
 
 opCompiler ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   Op GPUMem ->
   CallKernelGen ()
 opCompiler dest (Alloc e space) =
@@ -158,7 +158,7 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
 sizeClassWithEntryPoint _ size_class = size_class
 
 segOpCompiler ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegOp SegLevel GPUMem ->
   CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
@@ -178,7 +178,7 @@ segOpCompiler pat segop =
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
 -- that makes this a problem, but it might in the future.
-checkLocalMemoryReqs :: Imp.Code -> CallKernelGen (Maybe (Imp.TExp Bool))
+checkLocalMemoryReqs :: Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
 checkLocalMemoryReqs code = do
   scope <- askScope
   let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getGPU code
@@ -186,7 +186,7 @@ checkLocalMemoryReqs code = do
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
   if any (`M.notMember` scope) (namesToList $ freeIn alloc_sizes)
-    then return Nothing
+    then pure Nothing
     else do
       local_memory_capacity :: TV Int32 <- dPrim "local_memory_capacity" int32
       sOp $ Imp.GetSizeMax (tvVar local_memory_capacity) SizeLocalMemory
@@ -195,10 +195,10 @@ checkLocalMemoryReqs code = do
             sExt64 $ tvExp local_memory_capacity
           fits size =
             unCount size .<=. local_memory_capacity_64
-      return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
+      pure $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
   where
     getGPU = foldMap getKernel
-    getKernel (Imp.CallKernel k) = [k]
+    getKernel (Imp.CallKernel k) | Imp.kernelCheckLocalMemory k = [k]
     getKernel _ = []
 
     localAllocSizes = foldMap localAllocSize
@@ -211,7 +211,7 @@ checkLocalMemoryReqs code = do
     alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
 
 withAcc ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   [(Shape, [VName], Maybe (Lambda GPUMem, [SubExp]))] ->
   Lambda GPUMem ->
   CallKernelGen ()
@@ -225,15 +225,15 @@ withAcc pat inputs lam = do
     locksForInputs atomics ((c, (_, _, op)) : inputs')
       | Just (op_lam, _) <- op,
         AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
-        let num_locks = 100151
-        locks_arr <-
-          sStaticArray "withacc_locks" (Space "device") int32 $
-            Imp.ArrayZeros num_locks
-        let locks = Locks locks_arr num_locks
-            extend env = env {hostLocks = M.insert c locks $ hostLocks env}
-        localEnv extend $ locksForInputs atomics inputs'
+          let num_locks = 100151
+          locks_arr <-
+            sStaticArray "withacc_locks" (Space "device") int32 $
+              Imp.ArrayZeros num_locks
+          let locks = Locks locks_arr num_locks
+              extend env = env {hostLocks = M.insert c locks $ hostLocks env}
+          localEnv extend $ locksForInputs atomics inputs'
       | otherwise =
-        locksForInputs atomics inputs'
+          locksForInputs atomics inputs'
 
 expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
@@ -245,10 +245,10 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
 expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
   | Acc {} <- patElemType pe = pure ()
   | otherwise =
-    sReplicate (patElemName pe) se
+      sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
-  return ()
+  pure ()
 expCompiler pat (WithAcc inputs lam) =
   withAcc pat inputs lam
 -- This is a multi-versioning If created by incremental flattening.
@@ -271,34 +271,34 @@ callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
 callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem srcshape srcIxFun)
   | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
       isMapTransposeCopy bt destloc srcloc = do
-    fname <- mapTransposeForType bt
-    emit $
-      Imp.Call
-        []
-        fname
-        [ Imp.MemArg destmem,
-          Imp.ExpArg $ untyped destoffset,
-          Imp.MemArg srcmem,
-          Imp.ExpArg $ untyped srcoffset,
-          Imp.ExpArg $ untyped num_arrays,
-          Imp.ExpArg $ untyped size_x,
-          Imp.ExpArg $ untyped size_y
-        ]
+      fname <- mapTransposeForType bt
+      emit $
+        Imp.Call
+          []
+          fname
+          [ Imp.MemArg destmem,
+            Imp.ExpArg $ untyped destoffset,
+            Imp.MemArg srcmem,
+            Imp.ExpArg $ untyped srcoffset,
+            Imp.ExpArg $ untyped num_arrays,
+            Imp.ExpArg $ untyped size_x,
+            Imp.ExpArg $ untyped size_y
+          ]
   | bt_size <- primByteSize bt,
     Just destoffset <- IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset <- IxFun.linearWithOffset srcIxFun bt_size = do
-    let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
-    srcspace <- entryMemSpace <$> lookupMemory srcmem
-    destspace <- entryMemSpace <$> lookupMemory destmem
-    emit $
-      Imp.Copy
-        destmem
-        (bytes $ sExt64 destoffset)
-        destspace
-        srcmem
-        (bytes $ sExt64 srcoffset)
-        srcspace
-        $ num_elems `Imp.withElemType` bt
+      let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
+      srcspace <- entryMemSpace <$> lookupMemory srcmem
+      destspace <- entryMemSpace <$> lookupMemory destmem
+      emit $
+        Imp.Copy
+          destmem
+          (bytes $ sExt64 destoffset)
+          destspace
+          srcmem
+          (bytes $ sExt64 srcoffset)
+          srcspace
+          $ num_elems `Imp.withElemType` bt
   | otherwise = sCopy bt destloc srcloc
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
@@ -308,12 +308,12 @@ mapTransposeForType bt = do
   exists <- hasFunction fname
   unless exists $ emitFunction fname $ mapTransposeFunction bt
 
-  return fname
+  pure fname
 
 mapTransposeName :: PrimType -> String
 mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
 
-mapTransposeFunction :: PrimType -> Imp.Function
+mapTransposeFunction :: PrimType -> Imp.Function Imp.HostOp
 mapTransposeFunction bt =
   Imp.Function Nothing [] params transpose_code [] []
   where

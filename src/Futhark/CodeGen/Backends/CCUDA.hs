@@ -171,13 +171,16 @@ readCUDAScalar mem idx t "device" _ = do
        }
        |]
   GC.stm [C.cstm|if (futhark_context_sync(ctx) != 0) { return 1; }|]
-  return [C.cexp|$id:val|]
+  pure [C.cexp|$id:val|]
 readCUDAScalar _ _ _ space _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
 allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_alloc(&ctx->cuda, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm
+    [C.cstm|ctx->error =
+     CUDA_SUCCEED_NONFATAL(cuda_alloc(&ctx->cuda, ctx->log,
+                                      (size_t)$exp:size, $exp:tag, &$exp:mem));|]
 allocateCUDABuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
@@ -220,10 +223,10 @@ staticCUDAArray name "device" t vs = do
     ArrayValues vs' -> do
       let vs'' = [[C.cinit|$exp:v|] | v <- vs']
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
-      return $ length vs''
+      pure $ length vs''
     ArrayZeros n -> do
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
-      return n
+      pure n
   -- Fake a memory block.
   GC.contextField (C.toIdent name mempty) [C.cty|struct memblock_device|] Nothing
   -- During startup, copy the data to where we need it.
@@ -245,7 +248,7 @@ staticCUDAArray _ space _ _ =
       ++ "' memory space"
 
 cudaMemoryType :: GC.MemoryType OpenCL ()
-cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
+cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType space =
   error $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
@@ -373,10 +376,10 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       v' <- GC.rawMem v
       arg <- newVName "kernel_arg"
       GC.decl [C.cdecl|typename CUdeviceptr $id:arg = $exp:v';|]
-      return (arg, Nothing)
+      pure (arg, Nothing)
     mkArgs (SharedMemoryKArg (Count c)) = do
       num_bytes <- GC.compileExp c
       size <- newVName "shared_size"
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
-      return (offset, Just (size, offset))
+      pure (offset, Just (size, offset))

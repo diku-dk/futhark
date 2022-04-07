@@ -16,6 +16,10 @@
 -- from variable names to 'NameInfo's.  Convenience facilities are
 -- also provided to communicate that some monad or applicative functor
 -- maintains type information.
+--
+-- A simple example of a monad that maintains such as environment is
+-- 'Reader'.  Indeed, 'HasScope' and 'LocalScope' instances for this
+-- monad are already defined.
 module Futhark.IR.Prop.Scope
   ( HasScope (..),
     NameInfo (..),
@@ -178,12 +182,12 @@ instance Scoped rep (LoopForm rep) where
     M.insert i (IndexName it) $ scopeOfLParams (map fst xs)
 
 -- | The scope of a pattern.
-scopeOfPat :: LetDec rep ~ dec => PatT dec -> Scope rep
+scopeOfPat :: LetDec rep ~ dec => Pat dec -> Scope rep
 scopeOfPat =
   mconcat . map scopeOfPatElem . patElems
 
 -- | The scope of a pattern element.
-scopeOfPatElem :: LetDec rep ~ dec => PatElemT dec -> Scope rep
+scopeOfPatElem :: LetDec rep ~ dec => PatElem dec -> Scope rep
 scopeOfPatElem (PatElem name dec) = M.singleton name $ LetName dec
 
 -- | The scope of some lambda parameters.
@@ -249,7 +253,7 @@ instance
   where
   lookupType name = do
     res <- asks $ fmap typeOf . M.lookup name
-    maybe (ExtendedScope $ lift $ lookupType name) return res
+    maybe (ExtendedScope $ lift $ lookupType name) pure res
   askScope = asks M.union <*> ExtendedScope (lift askScope)
 
 -- | Run a computation in the extended type environment.

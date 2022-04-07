@@ -61,23 +61,23 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
               ixfun_y =
                 IxFun.slice ixfun_base $
                   fullSliceNum base_dims [DimFix other_id]
-          return
+          pure
             ( x {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_x},
               y {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_y}
             )
         Prim bt ->
-          return
+          pure
             ( x {paramDec = MemPrim bt},
               y {paramDec = MemPrim bt}
             )
         Mem space ->
-          return
+          pure
             ( x {paramDec = MemMem space},
               y {paramDec = MemMem space}
             )
         -- This next case will never happen.
         Acc acc ispace ts u ->
-          return
+          pure
             ( x {paramDec = MemAcc acc ispace ts u},
               y {paramDec = MemAcc acc ispace ts u}
             )

@@ -233,11 +233,11 @@ class
   -- 'expExtTypesFromPat'.
   expTypesFromPat ::
     (HasScope rep m, Monad m) =>
-    Pat rep ->
+    Pat (LetDec rep) ->
     m [BranchType rep]
 
 -- | Construct the type of an expression that would match the pattern.
-expExtTypesFromPat :: Typed dec => PatT dec -> [ExtType]
+expExtTypesFromPat :: Typed dec => Pat dec -> [ExtType]
 expExtTypesFromPat pat =
   existentialiseExtTypes (patNames pat) $
     staticShapes $ map patElemType $ patElems pat
@@ -266,5 +266,5 @@ lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
       guard $ paramName xp == x
       guard $ paramName yp == y
       Prim t <- Just $ patElemType pe
-      return (op, t, paramName xp, paramName yp)
+      pure (op, t, paramName xp, paramName yp)
     splitStm _ = Nothing

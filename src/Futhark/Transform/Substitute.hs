@@ -75,7 +75,7 @@ instance Substitute SubExp where
 instance Substitutable rep => Substitute (Exp rep) where
   substituteNames substs = mapExp $ replace substs
 
-instance Substitute dec => Substitute (PatElemT dec) where
+instance Substitute dec => Substitute (PatElem dec) where
   substituteNames substs (PatElem ident dec) =
     PatElem (substituteNames substs ident) (substituteNames substs dec)
 
@@ -100,7 +100,7 @@ instance Substitute SubExpRes where
   substituteNames substs (SubExpRes cs se) =
     SubExpRes (substituteNames substs cs) (substituteNames substs se)
 
-instance Substitute dec => Substitute (PatT dec) where
+instance Substitute dec => Substitute (Pat dec) where
   substituteNames substs (Pat xs) =
     Pat (substituteNames substs xs)
 
@@ -125,14 +125,14 @@ instance Substitutable rep => Substitute (Body rep) where
 replace :: Substitutable rep => M.Map VName VName -> Mapper rep rep Identity
 replace substs =
   Mapper
-    { mapOnVName = return . substituteNames substs,
-      mapOnSubExp = return . substituteNames substs,
-      mapOnBody = const $ return . substituteNames substs,
-      mapOnRetType = return . substituteNames substs,
-      mapOnBranchType = return . substituteNames substs,
-      mapOnFParam = return . substituteNames substs,
-      mapOnLParam = return . substituteNames substs,
-      mapOnOp = return . substituteNames substs
+    { mapOnVName = pure . substituteNames substs,
+      mapOnSubExp = pure . substituteNames substs,
+      mapOnBody = const $ pure . substituteNames substs,
+      mapOnRetType = pure . substituteNames substs,
+      mapOnBranchType = pure . substituteNames substs,
+      mapOnFParam = pure . substituteNames substs,
+      mapOnLParam = pure . substituteNames substs,
+      mapOnOp = pure . substituteNames substs
     }
 
 instance Substitute Rank where

@@ -76,7 +76,7 @@ prepareRedOrScan cs w map_lam arrs ispace inps = do
 segRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   Certs ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
@@ -95,7 +95,7 @@ segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
 segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   Certs ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
@@ -114,7 +114,7 @@ segScan lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   SubExp -> -- segment size
   Lambda rep ->
   [VName] ->
@@ -129,9 +129,9 @@ segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
         SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim ::
-  (MonadFreshNames m, MonadBuilder m, DistRep (Rep m)) =>
-  Pat (Rep m) ->
-  m (Pat (Rep m), [(VName, SubExp)], m ())
+  (MonadFreshNames m, MonadBuilder m) =>
+  Pat Type ->
+  m (Pat Type, [(VName, SubExp)], m ())
 dummyDim pat = do
   -- We add a unit-size segment on top to ensure that the result
   -- of the SegRed is an array, which we then immediately index.
@@ -144,21 +144,21 @@ dummyDim pat = do
   dummy <- newVName "dummy"
   let ispace = [(dummy, intConst Int64 1)]
 
-  return
+  pure
     ( pat',
       ispace,
       forM_ (zip (patNames pat') (patNames pat)) $ \(from, to) -> do
         from_t <- lookupType from
-        letBindNames [to] $
-          BasicOp $
-            Index from $
-              fullSlice from_t [DimFix $ intConst Int64 0]
+        letBindNames [to] . BasicOp $
+          case from_t of
+            Acc {} -> SubExp $ Var from
+            _ -> Index from $ fullSlice from_t [DimFix $ intConst Int64 0]
     )
 
 nonSegRed ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat Type ->
   SubExp ->
   [SegBinOp rep] ->
   Lambda rep ->
@@ -172,7 +172,7 @@ nonSegRed lvl pat w ops map_lam arrs = runBuilder_ $ do
 segHist ::
   (DistRep rep, MonadFreshNames m, HasScope rep m) =>
   SegOpLevel rep ->
-  Pat rep ->
+  Pat Type ->
   SubExp ->
   -- | Segment indexes and sizes.
   [(VName, SubExp)] ->

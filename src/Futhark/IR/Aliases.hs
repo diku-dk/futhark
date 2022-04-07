@@ -5,8 +5,14 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | A representation where all bindings are annotated with aliasing
--- information.
+-- | A representation where all patterns are annotated with aliasing
+-- information.  It also records consumption of variables in bodies.
+--
+-- Note that this module is mostly not concerned with actually
+-- /computing/ the aliasing information; only with shuffling it around
+-- and providing some basic building blocks.  See modules such as
+-- "Futhark.Analysis.Alias" for computing the aliases in the first
+-- place.
 module Futhark.IR.Aliases
   ( -- * The representation definition
     Aliases,
@@ -23,11 +29,9 @@ module Futhark.IR.Aliases
     module Futhark.IR.Syntax,
 
     -- * Adding aliases
-    addAliasesToPat,
-    mkAliasedLetStm,
     mkAliasedBody,
-    mkPatAliases,
-    mkBodyAliases,
+    mkAliasedPat,
+    mkBodyAliasing,
 
     -- * Removing aliases
     removeProgAliases,
@@ -143,9 +147,9 @@ instance (ASTRep rep, CanBeAliased (Op rep)) => PrettyRep (Aliases rep) where
           DoLoop merge _ body ->
             let mergeParamAliases fparam als
                   | primType (paramType fparam) =
-                    Nothing
+                      Nothing
                   | otherwise =
-                    resultAliasComment (paramName fparam) als
+                      resultAliasComment (paramName fparam) als
              in maybeComment . catMaybes $
                   zipWith mergeParamAliases (map fst merge) $
                     bodyAliases body
@@ -175,16 +179,17 @@ resultAliasComment name als =
 removeAliases :: CanBeAliased (Op rep) => Rephraser Identity (Aliases rep) rep
 removeAliases =
   Rephraser
-    { rephraseExpDec = return . snd,
-      rephraseLetBoundDec = return . snd,
-      rephraseBodyDec = return . snd,
-      rephraseFParamDec = return,
-      rephraseLParamDec = return,
-      rephraseRetType = return,
-      rephraseBranchType = return,
-      rephraseOp = return . removeOpAliases
+    { rephraseExpDec = pure . snd,
+      rephraseLetBoundDec = pure . snd,
+      rephraseBodyDec = pure . snd,
+      rephraseFParamDec = pure,
+      rephraseLParamDec = pure,
+      rephraseRetType = pure,
+      rephraseBranchType = pure,
+      rephraseOp = pure . removeOpAliases
     }
 
+-- | Remove alias information from an aliased scope.
 removeScopeAliases :: Scope (Aliases rep) -> Scope rep
 removeScopeAliases = M.map unAlias
   where
@@ -193,49 +198,49 @@ removeScopeAliases = M.map unAlias
     unAlias (LParamName dec) = LParamName dec
     unAlias (IndexName it) = IndexName it
 
+-- | Remove alias information from a program.
 removeProgAliases ::
   CanBeAliased (Op rep) =>
   Prog (Aliases rep) ->
   Prog rep
 removeProgAliases = runIdentity . rephraseProg removeAliases
 
+-- | Remove alias information from a function.
 removeFunDefAliases ::
   CanBeAliased (Op rep) =>
   FunDef (Aliases rep) ->
   FunDef rep
 removeFunDefAliases = runIdentity . rephraseFunDef removeAliases
 
+-- | Remove alias information from an expression.
 removeExpAliases ::
   CanBeAliased (Op rep) =>
   Exp (Aliases rep) ->
   Exp rep
 removeExpAliases = runIdentity . rephraseExp removeAliases
 
+-- | Remove alias information from statements.
 removeStmAliases ::
   CanBeAliased (Op rep) =>
   Stm (Aliases rep) ->
   Stm rep
 removeStmAliases = runIdentity . rephraseStm removeAliases
 
+-- | Remove alias information from lambda.
 removeLambdaAliases ::
   CanBeAliased (Op rep) =>
   Lambda (Aliases rep) ->
   Lambda rep
 removeLambdaAliases = runIdentity . rephraseLambda removeAliases
 
+-- | Remove alias information from pattern.
 removePatAliases ::
-  PatT (AliasDec, a) ->
-  PatT a
-removePatAliases = runIdentity . rephrasePat (return . snd)
+  Pat (AliasDec, a) ->
+  Pat a
+removePatAliases = runIdentity . rephrasePat (pure . snd)
 
-addAliasesToPat ::
-  (ASTRep rep, CanBeAliased (Op rep), Typed dec) =>
-  PatT dec ->
-  Exp (Aliases rep) ->
-  PatT (VarAliases, dec)
-addAliasesToPat pat e =
-  Pat $ mkPatAliases pat e
-
+-- | Augment a body decoration with aliasing information provided by
+-- the statements and result of that body.
 mkAliasedBody ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   BodyDec rep ->
@@ -243,20 +248,20 @@ mkAliasedBody ::
   Result ->
   Body (Aliases rep)
 mkAliasedBody dec stms res =
-  Body (mkBodyAliases stms res, dec) stms res
+  Body (mkBodyAliasing stms res, dec) stms res
 
-mkPatAliases ::
+-- | Augment a pattern with aliasing information provided by the
+-- expression the pattern is bound to.
+mkAliasedPat ::
   (Aliased rep, Typed dec) =>
-  PatT dec ->
+  Pat dec ->
   Exp rep ->
-  [PatElemT (VarAliases, dec)]
-mkPatAliases pat e =
-  let als = expAliases e ++ repeat mempty
-   in -- In case the pattern has
-      -- more elements (this
-      -- implies a type error).
-      zipWith annotatePatElem (patElems pat) als
+  Pat (VarAliases, dec)
+mkAliasedPat pat e = Pat $ zipWith annotatePatElem (patElems pat) als
   where
+    -- Repeat mempty in case the pattern has more elements (this
+    -- implies a type error).
+    als = expAliases e ++ repeat mempty
     annotatePatElem bindee names =
       bindee `setPatElemDec` (AliasDec names', patElemDec bindee)
       where
@@ -266,12 +271,18 @@ mkPatAliases pat e =
             Mem _ -> names
             _ -> mempty
 
-mkBodyAliases ::
+-- | Given statements (with aliasing information) and a body result,
+-- produce aliasing information for the corresponding body as a whole.
+-- This is basically just looking up the aliasing of each element of
+-- the result, and removing the names that are no longer in scope.
+-- Note that this does *not* include aliases of results that are not
+-- bound in the statements!
+mkBodyAliasing ::
   Aliased rep =>
   Stms rep ->
   Result ->
   BodyAliasing
-mkBodyAliases stms res =
+mkBodyAliasing stms res =
   -- We need to remove the names that are bound in stms from the alias
   -- and consumption sets.  We do this by computing the transitive
   -- closure of the alias map (within stms), then removing anything
@@ -302,11 +313,19 @@ mkStmsAliases stms res = delve mempty $ stmsToList stms
       where
         look k = M.findWithDefault mempty k aliasmap
 
+-- | A tuple of a mapping from variable names to their aliases, and
+-- the names of consumed variables.
 type AliasesAndConsumed =
   ( M.Map VName Names,
     Names
   )
 
+-- | A helper function for computing the aliases of a sequence of
+-- statements.  You'd use this while recursing down the statements
+-- from first to last.  The 'AliasesAndConsumed' parameter is the
+-- current "state" of aliasing, and the function then returns a new
+-- state.  The main thing this function provides is proper handling of
+-- transitivity and "reverse" aliases.
 trackAliases ::
   Aliased rep =>
   AliasesAndConsumed ->
@@ -331,13 +350,13 @@ trackAliases (aliasmap, consumed) stm =
 
 mkAliasedLetStm ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
   Stm (Aliases rep)
 mkAliasedLetStm pat (StmAux cs attrs dec) e =
   Let
-    (addAliasesToPat pat e)
+    (mkAliasedPat pat e)
     (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
     e
 
@@ -347,13 +366,13 @@ instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
      in (AliasDec $ consumedInExp e, dec)
 
   mkExpPat ids e =
-    addAliasesToPat (mkExpPat ids $ removeExpAliases e) e
+    mkAliasedPat (mkExpPat ids $ removeExpAliases e) e
 
   mkLetNames names e = do
     env <- asksScope removeScopeAliases
     flip runReaderT env $ do
       Let pat dec _ <- mkLetNames names $ removeExpAliases e
-      return $ mkAliasedLetStm pat dec e
+      pure $ mkAliasedLetStm pat dec e
 
   mkBody stms res =
     let Body bodyrep _ _ = mkBody (fmap removeStmAliases stms) res

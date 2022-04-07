@@ -1,10 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | The futhark command line tool.
+-- | The @futhark@ command line program.
 module Main (main) where
 
 import Control.Exception
-import Control.Monad
 import Data.List (sortOn)
 import Data.Maybe
 import qualified Data.Text as T
@@ -19,6 +18,7 @@ import qualified Futhark.CLI.Dataset as Dataset
 import qualified Futhark.CLI.Defs as Defs
 import qualified Futhark.CLI.Dev as Dev
 import qualified Futhark.CLI.Doc as Doc
+import qualified Futhark.CLI.LSP as LSP
 import qualified Futhark.CLI.Literate as Literate
 import qualified Futhark.CLI.Misc as Misc
 import qualified Futhark.CLI.Multicore as Multicore
@@ -66,13 +66,16 @@ commands =
       ("dataget", (Misc.mainDataget, "Extract test data.")),
       ("doc", (Doc.main, "Generate documentation for Futhark code.")),
       ("pkg", (Pkg.main, "Manage local packages.")),
-      ("check", (Check.main, "Type check a program.")),
+      ("check", (Check.main, "Type-check a program.")),
+      ("check-syntax", (Misc.mainCheckSyntax, "Syntax-check a program.")),
       ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files.")),
       ("hash", (Misc.mainHash, "Print hash of program AST.")),
       ("autotune", (Autotune.main, "Autotune threshold parameters.")),
       ("defs", (Defs.main, "Show location and name of all definitions.")),
       ("query", (Query.main, "Query semantic information about program.")),
-      ("literate", (Literate.main, "Process a literate Futhark program."))
+      ("literate", (Literate.main, "Process a literate Futhark program.")),
+      ("lsp", (LSP.main, "Run LSP server.")),
+      ("thanks", (Misc.mainThanks, "Express gratitude."))
     ]
 
 msg :: String
@@ -115,17 +118,17 @@ reportingIOErrors =
     onError :: SomeException -> IO ()
     onError e
       | Just UserInterrupt <- asyncExceptionFromException e =
-        return () -- This corresponds to CTRL-C, which is not an error.
+          pure () -- This corresponds to CTRL-C, which is not an error.
       | otherwise = do
-        T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
-        T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
-        T.hPutStrLn stderr $ T.pack $ show e
-        exitWith $ ExitFailure 1
+          T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
+          T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
+          T.hPutStrLn stderr $ T.pack $ show e
+          exitWith $ ExitFailure 1
 
     onIOException :: IOException -> IO ()
     onIOException e
       | ioe_type e == ResourceVanished =
-        exitWith $ ExitFailure 1
+          exitWith $ ExitFailure 1
       | otherwise = throw e
 
 main :: IO ()

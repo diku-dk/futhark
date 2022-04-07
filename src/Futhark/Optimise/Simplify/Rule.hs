@@ -97,7 +97,7 @@ cannotSimplify = RuleM $ lift $ lift Nothing
 
 liftMaybe :: Maybe a -> RuleM rep a
 liftMaybe Nothing = cannotSimplify
-liftMaybe (Just x) = return x
+liftMaybe (Just x) = pure x
 
 -- | An efficient way of encoding whether a simplification rule should even be attempted.
 data Rule rep
@@ -110,7 +110,7 @@ type RuleGeneric rep a = a -> Stm rep -> Rule rep
 
 type RuleBasicOp rep a =
   ( a ->
-    Pat rep ->
+    Pat (LetDec rep) ->
     StmAux (ExpDec rep) ->
     BasicOp ->
     Rule rep
@@ -118,28 +118,28 @@ type RuleBasicOp rep a =
 
 type RuleIf rep a =
   a ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   ( SubExp,
-    BodyT rep,
-    BodyT rep,
+    Body rep,
+    Body rep,
     IfDec (BranchType rep)
   ) ->
   Rule rep
 
 type RuleDoLoop rep a =
   a ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   ( [(FParam rep, SubExp)],
     LoopForm rep,
-    BodyT rep
+    Body rep
   ) ->
   Rule rep
 
 type RuleOp rep a =
   a ->
-  Pat rep ->
+  Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Op rep ->
   Rule rep

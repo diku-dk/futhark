@@ -60,7 +60,7 @@ module Futhark.IR.Syntax.Core
     unitSlice,
     fixSlice,
     sliceSlice,
-    PatElemT (..),
+    PatElem (..),
 
     -- * Flat (LMAD) slices
     FlatSlice (..),
@@ -174,18 +174,18 @@ instance ArrayShape (ShapeBase ExtSize) where
     length ds1 == length ds2
       && evalState (and <$> zipWithM subDimOf ds1 ds2) M.empty
     where
-      subDimOf (Free se1) (Free se2) = return $ se1 == se2
-      subDimOf (Ext _) (Free _) = return False
-      subDimOf (Free _) (Ext _) = return True
+      subDimOf (Free se1) (Free se2) = pure $ se1 == se2
+      subDimOf (Ext _) (Free _) = pure False
+      subDimOf (Free _) (Ext _) = pure True
       subDimOf (Ext x) (Ext y) = do
         extmap <- get
         case M.lookup y extmap of
           Just ywas
-            | ywas == x -> return True
-            | otherwise -> return False
+            | ywas == x -> pure True
+            | otherwise -> pure False
           Nothing -> do
             put $ M.insert y x extmap
-            return True
+            pure True
 
 instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y
@@ -413,6 +413,7 @@ sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
       DimSlice (j + (s0 * i)) n (s0 * s1) : sliceSlice' js' is'
     sliceSlice' _ _ = []
 
+-- | A dimension in a 'FlatSlice'.
 data FlatDimIndex d
   = FlatDimIndex
       d
@@ -430,6 +431,10 @@ instance Functor FlatDimIndex where
 instance Foldable FlatDimIndex where
   foldMap = foldMapDefault
 
+-- | A flat slice is a way of viewing a one-dimensional array as a
+-- multi-dimensional array, using a more compressed mechanism than
+-- reshaping and using 'Slice'.  The initial @d@ is an offset, and the
+-- list then specifies the shape of the resulting array.
 data FlatSlice d = FlatSlice d [FlatDimIndex d]
   deriving (Eq, Ord, Show)
 
@@ -443,11 +448,13 @@ instance Functor FlatSlice where
 instance Foldable FlatSlice where
   foldMap = foldMapDefault
 
+-- | The dimensions (shape) of the view produced by a flat slice.
 flatSliceDims :: FlatSlice d -> [d]
 flatSliceDims (FlatSlice _ ds) = map dimSlice ds
   where
     dimSlice (FlatDimIndex n _) = n
 
+-- | The strides of each dimension produced by a flat slice.
 flatSliceStrides :: FlatSlice d -> [d]
 flatSliceStrides (FlatSlice _ ds) = map dimStride ds
   where
@@ -456,7 +463,7 @@ flatSliceStrides (FlatSlice _ ds) = map dimStride ds
 -- | An element of a pattern - consisting of a name and an addditional
 -- parametric decoration.  This decoration is what is expected to
 -- contain the type of the resulting variable.
-data PatElemT dec = PatElem
+data PatElem dec = PatElem
   { -- | The name being bound.
     patElemName :: VName,
     -- | Pat element decoration.
@@ -464,13 +471,13 @@ data PatElemT dec = PatElem
   }
   deriving (Ord, Show, Eq)
 
-instance Functor PatElemT where
+instance Functor PatElem where
   fmap = fmapDefault
 
-instance Foldable PatElemT where
+instance Foldable PatElem where
   foldMap = foldMapDefault
 
-instance Traversable PatElemT where
+instance Traversable PatElem where
   traverse f (PatElem name dec) =
     PatElem name <$> f dec
 

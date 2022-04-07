@@ -37,24 +37,24 @@ installInDir (BuildList bl) dir = do
         -- The archive may contain all kinds of other stuff that we don't want.
         | not (isInPkgDir from_dir $ Zip.eRelativePath entry)
             || hasTrailingPathSeparator (Zip.eRelativePath entry) =
-          return Nothing
+            pure Nothing
         | otherwise = do
-          -- Since we are writing to paths indicated in a zipfile we
-          -- downloaded from the wild Internet, we are going to be a
-          -- little bit paranoid.  Specifically, we want to avoid
-          -- writing outside of the 'lib/' directory.  We do this by
-          -- bailing out if the path contains any '..' components.  We
-          -- have to use System.FilePath.Posix, because the zip library
-          -- claims to encode filepaths with '/' directory seperators no
-          -- matter the host OS.
-          when (".." `elem` Posix.splitPath (Zip.eRelativePath entry)) $
-            fail $
-              "Zip archive for " <> pdir <> " contains suspicious path: "
-                <> Zip.eRelativePath entry
-          let f = pdir </> makeRelative from_dir (Zip.eRelativePath entry)
-          createDirectoryIfMissing True $ takeDirectory f
-          LBS.writeFile f $ Zip.fromEntry entry
-          return $ Just f
+            -- Since we are writing to paths indicated in a zipfile we
+            -- downloaded from the wild Internet, we are going to be a
+            -- little bit paranoid.  Specifically, we want to avoid
+            -- writing outside of the 'lib/' directory.  We do this by
+            -- bailing out if the path contains any '..' components.  We
+            -- have to use System.FilePath.Posix, because the zip library
+            -- claims to encode filepaths with '/' directory seperators no
+            -- matter the host OS.
+            when (".." `elem` Posix.splitPath (Zip.eRelativePath entry)) $
+              fail $
+                "Zip archive for " <> pdir <> " contains suspicious path: "
+                  <> Zip.eRelativePath entry
+            let f = pdir </> makeRelative from_dir (Zip.eRelativePath entry)
+            createDirectoryIfMissing True $ takeDirectory f
+            LBS.writeFile f $ Zip.fromEntry entry
+            pure $ Just f
 
       isInPkgDir from_dir f =
         Posix.splitPath from_dir `isPrefixOf` Posix.splitPath f
@@ -71,7 +71,7 @@ installInDir (BuildList bl) dir = do
             "futhark.pkg for " ++ T.unpack p ++ "-"
               ++ T.unpack (prettySemVer v)
               ++ " does not define a package path."
-    from_dir <- maybe noPkgDir (return . (pkgRevZipballDir info <>)) $ pkgDir m
+    from_dir <- maybe noPkgDir (pure . (pkgRevZipballDir info <>)) $ pkgDir m
 
     -- The directory in the local file system that will contain the
     -- package files.
@@ -152,7 +152,7 @@ installBuildList p bl = do
         -- package directory directly.
         createDirectoryIfMissing True $ takeDirectory $ libDir </> pfp
         renameDirectory (libOldDir </> pfp) (libDir </> pfp)
-    _ -> return ()
+    _ -> pure ()
 
   -- 6
   when libdir_exists $ liftIO $ removePathForcibly libOldDir
@@ -170,7 +170,7 @@ getPkgManifest = do
           <> " exists, but it is a directory!  What in Odin's beard..."
     _ -> liftIO $ do
       T.putStrLn $ T.pack futharkPkg <> " not found - pretending it's empty."
-      return $ newPkgManifest Nothing
+      pure $ newPkgManifest Nothing
 
 putPkgManifest :: PkgManifest -> PkgM ()
 putPkgManifest = liftIO . T.writeFile futharkPkg . prettyPkgManifest
@@ -240,7 +240,7 @@ doCheck = cmdMain "check" $ \args cfg ->
         liftIO $ T.putStr $ prettyBuildList bl
 
         case commented $ manifestPkgPath m of
-          Nothing -> return ()
+          Nothing -> pure ()
           Just p -> do
             let pdir = "lib" </> T.unpack p
 
@@ -307,15 +307,15 @@ doAdd = cmdMain "PKGPATH" $ \args cfg ->
       case prev_r of
         Just prev_r'
           | requiredPkgRev prev_r' == v ->
-            liftIO $ T.putStrLn $ "Package already at version " <> prettySemVer v <> "; nothing to do."
+              liftIO $ T.putStrLn $ "Package already at version " <> prettySemVer v <> "; nothing to do."
           | otherwise ->
-            liftIO $
-              T.putStrLn $
-                "Replaced " <> p <> " "
-                  <> prettySemVer (requiredPkgRev prev_r')
-                  <> " => "
-                  <> prettySemVer v
-                  <> "."
+              liftIO $
+                T.putStrLn $
+                  "Replaced " <> p <> " "
+                    <> prettySemVer (requiredPkgRev prev_r')
+                    <> " => "
+                    <> prettySemVer v
+                    <> "."
         Nothing ->
           liftIO $ T.putStrLn $ "Added new required package " <> p <> " " <> prettySemVer v <> "."
       putPkgManifest m'
@@ -391,7 +391,7 @@ doUpgrade = cmdMain "" $ \args cfg ->
               <> prettySemVer v
               <> "."
 
-      return
+      pure
         req
           { requiredPkgRev = v,
             requiredHash = Just h
@@ -443,7 +443,7 @@ main prog args = do
   case args of
     cmd : args'
       | Just (m, _) <- lookup cmd commands ->
-        m (unwords [prog, cmd]) args'
+          m (unwords [prog, cmd]) args'
     _ -> do
       let bad _ () = Just $ do
             let k = maxinum (map (length . fst) commands) + 3

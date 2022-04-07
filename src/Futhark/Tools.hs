@@ -33,10 +33,10 @@ redomapToMapAndReduce ::
     ExpDec rep ~ (),
     Op rep ~ SOAC rep
   ) =>
-  Pat rep ->
+  Pat (LetDec rep) ->
   ( SubExp,
     [Reduce rep],
-    LambdaT rep,
+    Lambda rep,
     [VName]
   ) ->
   m (Stm rep, Stm rep)
@@ -47,15 +47,15 @@ redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
   red_stm <-
     Let red_pat (defAux ()) . Op
       <$> (Screma w red_arrs <$> reduceSOAC reds)
-  return (map_stm, red_stm)
+  pure (map_stm, red_stm)
 
 splitScanOrRedomap ::
   (Typed dec, MonadFreshNames m) =>
-  [PatElemT dec] ->
+  [PatElem dec] ->
   SubExp ->
-  LambdaT rep ->
+  Lambda rep ->
   [[SubExp]] ->
-  m ([Ident], PatT dec, [VName])
+  m ([Ident], Pat dec, [VName])
 splitScanOrRedomap pes w map_lam nes = do
   let (acc_pes, arr_pes) =
         splitAt (length $ concat nes) pes
@@ -64,11 +64,11 @@ splitScanOrRedomap pes w map_lam nes = do
   map_accpat <- zipWithM accMapPatElem acc_pes acc_ts
   map_arrpat <- mapM arrMapPatElem arr_pes
   let map_pat = map_accpat ++ map_arrpat
-  return (map_pat, Pat acc_pes, map identName map_accpat)
+  pure (map_pat, Pat acc_pes, map identName map_accpat)
   where
     accMapPatElem pe acc_t =
       newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
-    arrMapPatElem = return . patElemIdent
+    arrMapPatElem = pure . patElemIdent
 
 -- | Turn a Screma into a Scanomap (possibly with mapout parts) and a
 -- Redomap.  This is used to handle Scremas that are so complicated
@@ -79,7 +79,7 @@ dissectScrema ::
     Op (Rep m) ~ SOAC (Rep m),
     Buildable (Rep m)
   ) =>
-  Pat (Rep m) ->
+  Pat (LetDec (Rep m)) ->
   SubExp ->
   ScremaForm (Rep m) ->
   [VName] ->
@@ -103,10 +103,10 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
 -- to the entire input.
 sequentialStreamWholeArray ::
   (MonadBuilder m, Buildable (Rep m)) =>
-  Pat (Rep m) ->
+  Pat (LetDec (Rep m)) ->
   SubExp ->
   [SubExp] ->
-  LambdaT (Rep m) ->
+  Lambda (Rep m) ->
   [VName] ->
   m ()
 sequentialStreamWholeArray pat w nes lam arrs = do
@@ -139,7 +139,7 @@ sequentialStreamWholeArray pat w nes lam arrs = do
     certifying cs $ case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->
-          letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
+            letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
       _ -> letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
 -- | Split the parameters of a stream reduction lambda into the chunk

@@ -207,15 +207,18 @@ readOpenCLScalar mem i t "device" _ = do
   GC.stm
     [C.cstm|if (ctx->failure_is_an_option &&
                      futhark_context_sync(ctx) != 0) { return 1; }|]
-  return [C.cexp|$id:val|]
+  pure [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space _ =
   error $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl, (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm
+    [C.cstm|ctx->error =
+     OPENCL_SUCCEED_NONFATAL(opencl_alloc(&ctx->opencl, ctx->log,
+                                          (size_t)$exp:size, $exp:tag, &$exp:mem));|]
 allocateOpenCLBuffer _ _ _ space =
-  error $ "Cannot allocate in '" ++ space ++ "' space."
+  error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
 deallocateOpenCLBuffer mem tag "device" =
@@ -287,10 +290,10 @@ staticOpenCLArray name "device" t vs = do
     ArrayValues vs' -> do
       let vs'' = [[C.cinit|$exp:v|] | v <- vs']
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
-      return $ length vs''
+      pure $ length vs''
     ArrayZeros n -> do
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
-      return n
+      pure n
   -- Fake a memory block.
   GC.contextField (C.toIdent name mempty) [C.cty|struct memblock_device|] Nothing
   -- During startup, copy the data to where we need it.
@@ -377,8 +380,8 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
 
     localBytes cur (SharedMemoryKArg num_bytes) = do
       num_bytes' <- GC.compileExp $ unCount num_bytes
-      return [C.cexp|$exp:cur + $exp:num_bytes'|]
-    localBytes cur _ = return cur
+      pure [C.cexp|$exp:cur + $exp:num_bytes'|]
+    localBytes cur _ = pure cur
 
 launchKernel ::
   C.ToExp a =>

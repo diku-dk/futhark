@@ -46,7 +46,7 @@ rephraseFunDef rephraser fundec = do
   body' <- rephraseBody rephraser $ funDefBody fundec
   params' <- mapM (rephraseParam $ rephraseFParamDec rephraser) $ funDefParams fundec
   rettype' <- mapM (rephraseRetType rephraser) $ funDefRetType fundec
-  return fundec {funDefBody = body', funDefParams = params', funDefRetType = rettype'}
+  pure fundec {funDefBody = body', funDefParams = params', funDefRetType = rettype'}
 
 -- | Rephrase an expression.
 rephraseExp :: Monad m => Rephraser m from to -> Exp from -> m (Exp to)
@@ -64,12 +64,12 @@ rephraseStm rephraser (Let pat (StmAux cs attrs dec) e) =
 rephrasePat ::
   Monad m =>
   (from -> m to) ->
-  PatT from ->
-  m (PatT to)
+  Pat from ->
+  m (Pat to)
 rephrasePat = traverse
 
 -- | Rephrase a pattern element.
-rephrasePatElem :: Monad m => (from -> m to) -> PatElemT from -> m (PatElemT to)
+rephrasePatElem :: Monad m => (from -> m to) -> PatElem from -> m (PatElem to)
 rephrasePatElem rephraser (PatElem ident from) =
   PatElem ident <$> rephraser from
 
@@ -91,7 +91,7 @@ rephraseLambda :: Monad m => Rephraser m from to -> Lambda from -> m (Lambda to)
 rephraseLambda rephraser lam = do
   body' <- rephraseBody rephraser $ lambdaBody lam
   params' <- mapM (rephraseParam $ rephraseLParamDec rephraser) $ lambdaParams lam
-  return lam {lambdaBody = body', lambdaParams = params'}
+  pure lam {lambdaBody = body', lambdaParams = params'}
 
 mapper :: Monad m => Rephraser m from to -> Mapper from to m
 mapper rephraser =

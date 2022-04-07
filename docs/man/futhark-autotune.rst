@@ -53,6 +53,11 @@ OPTIONS
   Print verbose information about what the tuner is doing.  Pass
   multiple times to increase the amount of information printed.
 
+--skip-compilation
+
+  Do not run the compiler, and instead assume that the program has
+  already been compiled.  Use with caution.
+
 --spec-file=FILE
 
   Ignore the test specification in the program file(s), and instead

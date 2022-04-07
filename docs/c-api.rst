@@ -13,9 +13,9 @@ then used to obtain a *context object*, which is then used to perform
 most other operations, such as calling Futhark functions.
 
 Most functions that can fail return an integer: 0 on success and a
-non-zero value on error.  Others return a ``NULL`` pointer.  Use
-:c:func:`futhark_context_get_error` to get a (possibly) more precise
-error message.
+non-zero value on error, as documented below.  Others return a
+``NULL`` pointer.  Use :c:func:`futhark_context_get_error` to get a
+(possibly) more precise error message.
 
 .. c:macro:: FUTHARK_BACKEND_foo
 
@@ -23,6 +23,29 @@ error message.
    generate the code; e.g. ``c``, ``opencl``, or ``cuda``.  This can
    be used for conditional compilation of code that only works with
    specific backends.
+
+Error codes
+-----------
+
+Most errors are result in a not otherwise specified nonzero return
+code, but a few classes of errors have distinct error codes.
+
+.. c:macro:: FUTHARK_SUCCESS
+
+   Defined as ``0``.  Returned in case of success.
+
+.. c:macro:: FUTHARK_PROGRAM_ERROR
+
+   Defined as ``2``.  Returned when the program fails due to
+   out-of-bounds, an invalid size coercion, invalid entry point
+   arguments, or similar misuse.
+
+.. c:macro:: FUTHARK_OUT_OF_MEMORY
+
+   Defined as ``3``.  Returned when the program fails to allocate
+   memory.  This is (somewhat) reliable only for GPU memory - due to
+   overcommit and other VM tricks, you should not expect running out
+   of main memory to be reported gracefully.
 
 Configuration
 -------------
@@ -93,6 +116,23 @@ configuration may *not* be used for multiple concurrent contexts.
 .. c:function:: const char* futhark_get_tuning_param_class(int i)
 
    Return the class of tuning parameter *i*, counting from zero.
+
+.. c:function:: void futhark_context_config_set_cache_file(struct futhark_context_config *cfg, const char *fname)
+
+   Ask the Futhark context to use a file with the designated file as a
+   cross-execution cache.  This can result in faster initialisation of
+   the program next time it is run.  For example, the GPU backends
+   will store JIT-compiled GPU code in this file.
+
+   The cache is managed entirely automatically, and if it is invalid
+   or stale, the program performs initialisation from scratch.  There
+   is no machine-readable way to get information about whether the
+   cache was hit succesfully, but you can enable logging to see what
+   hapens.
+
+   The lifespan of ``fname`` must exceed the lifespan of the
+   configuration object.  Pass ``NULL`` to disable caching (this is
+   the default).
 
 Context
 -------

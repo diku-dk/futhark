@@ -38,9 +38,9 @@ combineScans ops =
 canBeSinglePass :: [SegBinOp GPUMem] -> Maybe (SegBinOp GPUMem)
 canBeSinglePass ops
   | all ok ops =
-    Just $ combineScans ops
+      Just $ combineScans ops
   | otherwise =
-    Nothing
+      Nothing
   where
     ok op =
       segBinOpShape op == mempty
@@ -49,7 +49,7 @@ canBeSinglePass ops
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
 compileSegScan ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
   [SegBinOp GPUMem] ->
@@ -61,7 +61,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   case target of
     CUDA
       | Just scan' <- canBeSinglePass scans ->
-        SinglePass.compileSegScan pat lvl space scan' kbody
+          SinglePass.compileSegScan pat lvl space scan' kbody
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
   where
     n = product $ map toInt64Exp $ segSpaceDims space

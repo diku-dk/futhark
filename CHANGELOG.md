@@ -9,9 +9,103 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Sun Haoran has implemented unnamed typed holes, with syntax `???`.
+
+* Sun Haoran has implemented the beginnings of a language server:
+  `futhark lsp`.  A VSCode language extension is available on the
+  marketplace, but the language server should work with any editor.
+
+* Crucial new command: `futhark thanks`.
+
+* The GPU backends now support a caching mechanism for JIT-compiled
+  code, significantly improving startup times.  Use the
+  `futhark_context_config_set_cache_file()` in the C API, or the
+  `--cache-file` option on executables.  These also work for the
+  non-GPU backends, but currently have no effect.  (#1614)
+
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Incomplete simplification would cause some instances of nested
+  parallelism to require irregular allocations (#1610).
+
+* Missing alias checking for a simplification rule related to in-place
+  updates (#1615, #1628).
+
+* Incorrect code generation for certain copies of transposed arrays
+  (#1627).
+
+## [0.21.8]
+
+### Added
+
+* Slightly better parse errors (again).
+
+* `futhark literate` now supports a `file:` option in `:img` and
+  `:video` directives (#1491).
+
+### Fixed
+
+* Improved hoisting of size computations.  This could cause some
+  regular nested parallel programs to run into compiler limitations,
+  as if they were irregular.
+
+* Rare code generation bug for histograms (#1609).
+
+## [0.21.7]
+
+### Added
+
+* `futhark check-syntax`: check syntactic validity of a program
+  file, without type-checking.
+
+* Parsing multi-file programs is now parallelised, making it
+  *slightly* faster.
+
+* Reloading a large program in `futhark repl` is now faster, as long
+  as not too many of its files have been modified (#1597).
+
+### Fixed
+
+* Mistake in occurs check could cause infinite loop in type checker
+  for programs with type errors (#1599).
+
+## [0.21.6]
+
+### Added
+
+* `futhark bench` now explicitly notes when a tuning file is not
+  present.
+
+* `futhark bench`, `futhark test` and friends are now better at
+  handling fatally terminating programs (e.g. segmentation faults).
+
+* Generated C code is now a lot smaller for large programs, as error
+  recovery has been more centralised (#1584).
+
+### Fixed
+
+* Some bugs in checking for local memory capacity for particularly
+  exotic generated code.
+
+* Insufficient hoisting of allocation sizes led to problems with
+  memory expansion in rare cases (#1579).
+
+* Conversion of floating-point NaNs and infinities to integers now
+  well defined (produces zero) (#1586).
+
+* Better handling of OOM for certain short-lived CPU-side allocations (#1585).
+
+## [0.21.5]
+
+### Added
+
+* API functions now return more precise error codes in some cases.
+
+* Out-of-memory errors contain more information.
 
 ### Fixed
 
@@ -19,6 +113,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Removed unnecessary bounds checks in register tiling, giving about
   1.8x speedup on e.g. matrix multiplication on newer NVIDIA GPUs.
+
+* A parser bug erroneously demanded whitespace in some type
+  expressions (#1573).
+
+* Some memory was not being freed correctly when shutting down OpenCL
+  and CUDA contexts, which could lead to memory leaks in processes
+  that created and freed many contexts.
+
+* An incorrect copy-removal in some exotic cases (#1572).
+
+* 'restore'-functions might perform undefined pointer arithmetic when
+  passed garbage.
 
 ## [0.21.4]
 

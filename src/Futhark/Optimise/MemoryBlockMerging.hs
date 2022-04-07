@@ -50,7 +50,7 @@ getAllocsSegOp (SegHist _ _ _ _ body) =
 setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem
 setAllocsStm m stm@(Let (Pat [PatElem name _]) _ (Op (Alloc _ _)))
   | Just s <- M.lookup name m =
-    stm {stmExp = BasicOp $ SubExp s}
+      stm {stmExp = BasicOp $ SubExp s}
 setAllocsStm _ stm@(Let _ _ (Op (Alloc _ _))) = stm
 setAllocsStm m stm@(Let _ _ (Op (Inner (SegOp segop)))) =
   stm {stmExp = Op $ Inner $ SegOp $ setAllocsSegOp m segop}
@@ -94,12 +94,16 @@ maxSubExp = helper . S.toList
       z <- letSubExp "maxSubHelper" $ BasicOp $ BinOp (UMax Int64) s1 s2
       helper (z : sexps)
     helper [s] =
-      return s
+      pure s
     helper [] = error "impossible"
 
 isKernelInvariant :: Scope GPUMem -> (SubExp, space) -> Bool
 isKernelInvariant scope (Var vname, _) = vname `M.member` scope
 isKernelInvariant _ _ = True
+
+isScalarSpace :: (subExp, Space) -> Bool
+isScalarSpace (_, ScalarSpace _ _) = True
+isScalarSpace _ = False
 
 onKernelBodyStms ::
   MonadBuilder m =>
@@ -108,16 +112,16 @@ onKernelBodyStms ::
   m (SegOp lvl GPUMem)
 onKernelBodyStms (SegMap lvl space ts body) f = do
   stms <- f $ kernelBodyStms body
-  return $ SegMap lvl space ts $ body {kernelBodyStms = stms}
+  pure $ SegMap lvl space ts $ body {kernelBodyStms = stms}
 onKernelBodyStms (SegRed lvl space binops ts body) f = do
   stms <- f $ kernelBodyStms body
-  return $ SegRed lvl space binops ts $ body {kernelBodyStms = stms}
+  pure $ SegRed lvl space binops ts $ body {kernelBodyStms = stms}
 onKernelBodyStms (SegScan lvl space binops ts body) f = do
   stms <- f $ kernelBodyStms body
-  return $ SegScan lvl space binops ts $ body {kernelBodyStms = stms}
+  pure $ SegScan lvl space binops ts $ body {kernelBodyStms = stms}
 onKernelBodyStms (SegHist lvl space binops ts body) f = do
   stms <- f $ kernelBodyStms body
-  return $ SegHist lvl space binops ts $ body {kernelBodyStms = stms}
+  pure $ SegHist lvl space binops ts $ body {kernelBodyStms = stms}
 
 -- | This is the actual optimiser. Given an interference graph and a @SegOp@,
 -- replace allocations and references to memory blocks inside with a (hopefully)
@@ -130,7 +134,9 @@ optimiseKernel ::
 optimiseKernel graph segop0 = do
   segop <- onKernelBodyStms segop0 $ onKernels $ optimiseKernel graph
   scope_here <- askScope
-  let allocs = M.filter (isKernelInvariant scope_here) $ getAllocsSegOp segop
+  let allocs =
+        M.filter (\alloc -> isKernelInvariant scope_here alloc && not (isScalarSpace alloc)) $
+          getAllocsSegOp segop
       (colorspaces, coloring) =
         GreedyColoring.colorGraph
           (fmap snd allocs)
@@ -146,7 +152,7 @@ optimiseKernel graph segop0 = do
       & mapM (\(i, x) -> letSubExp "color" $ Op $ Alloc x $ colorspaces ! i)
       & collectStms
   let segop' = setAllocsSegOp (fmap (colors !!) coloring) segop
-  return $ case segop' of
+  pure $ case segop' of
     SegMap lvl sp tps body ->
       SegMap lvl sp tps $
         body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
@@ -170,11 +176,11 @@ onKernels f stms = inScopeOf stms $ mapM helper stms
   where
     helper stm@Let {stmExp = Op (Inner (SegOp segop))} = do
       exp' <- f segop
-      return $ stm {stmExp = Op $ Inner $ SegOp exp'}
+      pure $ stm {stmExp = Op $ Inner $ SegOp exp'}
     helper stm@Let {stmExp = If c then_body else_body dec} = do
       then_body_stms <- f `onKernels` bodyStms then_body
       else_body_stms <- f `onKernels` bodyStms else_body
-      return $
+      pure $
         stm
           { stmExp =
               If
@@ -185,13 +191,13 @@ onKernels f stms = inScopeOf stms $ mapM helper stms
           }
     helper stm@Let {stmExp = DoLoop merge form body} = do
       body_stms <- f `onKernels` bodyStms body
-      return $ stm {stmExp = DoLoop merge form (body {bodyStms = body_stms})}
-    helper stm = return stm
+      pure $ stm {stmExp = DoLoop merge form (body {bodyStms = body_stms})}
+    helper stm = pure stm
 
 -- | Perform the reuse-allocations optimization.
 optimise :: Pass GPUMem GPUMem
 optimise =
-  Pass "reuse allocations" "reuse allocations" $ \prog ->
+  Pass "memory block merging" "memory block merging allocations" $ \prog ->
     let graph = Interference.analyseProgGPU prog
      in Pass.intraproceduralTransformation (onStms graph) prog
   where

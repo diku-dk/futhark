@@ -30,6 +30,11 @@ futhark check [-w] PROGRAM
 Check whether a Futhark program type checks.  With ``-w``, no warnings
 are printed.
 
+futhark check-syntax PROGRAM
+----------------------------
+
+Check whether a Futhark program is syntactically correct.
+
 futhark datacmp FILE_A FILE_B
 -----------------------------
 
@@ -77,6 +82,11 @@ futhark query PROGRAM LINE COL
 
 Print information about the variable at the given position in the
 program.
+
+futhark thanks
+--------------
+
+Expresses gratitude.
 
 SEE ALSO
 ========

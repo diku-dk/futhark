@@ -109,7 +109,7 @@ runBenchmarks opts paths = do
       (sortBy (comparing fst) compiled_benchmarks)
   let results = concat $ catMaybes maybe_results
   case optJSON opts of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just file -> LBS.writeFile file $ encodeBenchResults results
   when (any isNothing maybe_results || anyFailed results) exitFailure
   where
@@ -131,8 +131,8 @@ data SkipReason = Skipped | FailedToCompile
 
 compileOptions :: BenchOptions -> IO CompileOptions
 compileOptions opts = do
-  futhark <- maybe getExecutablePath return $ optFuthark opts
-  return $
+  futhark <- maybe getExecutablePath pure $ optFuthark opts
+  pure $
     CompileOptions
       { compFuthark = futhark,
         compBackend = optBackend opts,
@@ -150,30 +150,30 @@ compileBenchmark opts (program, program_spec) = do
       | "nobench" `notElem` testTags spec,
         "disable" `notElem` testTags spec,
         any hasRuns cases ->
-        if optSkipCompilation opts
-          then do
-            exists <- doesFileExist $ binaryName program
-            if exists
-              then return $ Right (program, cases)
-              else do
-                putStrLn $ binaryName program ++ " does not exist, but --skip-compilation passed."
-                return $ Left FailedToCompile
-          else do
-            putStr $ "Compiling " ++ program ++ "...\n"
+          if optSkipCompilation opts
+            then do
+              exists <- doesFileExist $ binaryName program
+              if exists
+                then pure $ Right (program, cases)
+                else do
+                  putStrLn $ binaryName program ++ " does not exist, but --skip-compilation passed."
+                  pure $ Left FailedToCompile
+            else do
+              putStr $ "Compiling " ++ program ++ "...\n"
 
-            compile_opts <- compileOptions opts
+              compile_opts <- compileOptions opts
 
-            res <- prepareBenchmarkProgram (optConcurrency opts) compile_opts program cases
+              res <- prepareBenchmarkProgram (optConcurrency opts) compile_opts program cases
 
-            case res of
-              Left (err, errstr) -> do
-                putStrLn $ inRed err
-                maybe (return ()) SBS.putStrLn errstr
-                return $ Left FailedToCompile
-              Right () ->
-                return $ Right (program, cases)
+              case res of
+                Left (err, errstr) -> do
+                  putStrLn $ inRed err
+                  maybe (pure ()) SBS.putStrLn errstr
+                  pure $ Left FailedToCompile
+                Right () ->
+                  pure $ Right (program, cases)
     _ ->
-      return $ Left Skipped
+      pure $ Left Skipped
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
@@ -241,7 +241,7 @@ progressBar runs cur bound steps =
     cell i
       | i' * step_size <= cur = char 9
       | otherwise =
-        char (floor (((cur - (i' - 1) * step_size) * num_chars) / step_size))
+          char (floor (((cur - (i' - 1) * step_size) * num_chars) / step_size))
       where
         i' = fromIntegral i
 
@@ -293,9 +293,9 @@ mkProgressPrompt pad_to dataset_desc start_time
       putStr " " -- Just to move the cursor away from the progress bar.
       hFlush stdout
   | otherwise = do
-    putStr $ descString dataset_desc pad_to
-    hFlush stdout
-    return $ const $ return ()
+      putStr $ descString dataset_desc pad_to
+      hFlush stdout
+      pure $ const $ pure ()
 
 reportResult :: [RunResult] -> (Double, Double) -> IO ()
 reportResult results bootstrapCI = do
@@ -324,10 +324,10 @@ runBenchmarkCase ::
   TestRun ->
   IO (Maybe DataResult)
 runBenchmarkCase _ _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
-  return Nothing -- Not our concern, we are not a testing tool.
+  pure Nothing -- Not our concern, we are not a testing tool.
 runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
-    return Nothing
+      pure Nothing
 runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   start_time <- liftIO getCurrentTime
   prompt <- mkProgressPrompt pad_to dataset_desc start_time
@@ -350,13 +350,13 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   when fancyTerminal $ do
     clearLine
     putStr "\r"
+    putStr $ descString (atMostChars 40 dataset_desc) pad_to
 
   case res of
-    Left err -> do
-      when fancyTerminal $
-        liftIO $ putStrLn $ descString (atMostChars 40 dataset_desc) pad_to
-      liftIO $ putStrLn $ inRed $ T.unpack err
-      return $ Just $ DataResult dataset_desc $ Left err
+    Left err -> liftIO $ do
+      putStrLn ""
+      putStrLn $ inRed $ T.unpack err
+      pure $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
       when fancyTerminal $
         putStr $ descString (atMostChars 40 dataset_desc) pad_to
@@ -375,7 +375,7 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
         & Right
         & DataResult dataset_desc
         & Just
-        & return
+        & pure
 
 getMemoryUsage :: T.Text -> M.Map T.Text Int
 getMemoryUsage t =
@@ -466,7 +466,7 @@ commandLineOptions =
               case reads n of
                 [(n', "")]
                   | n' < max_timeout ->
-                    Right $ \config -> config {optTimeout = fromIntegral n'}
+                      Right $ \config -> config {optTimeout = fromIntegral n'}
                 _ ->
                   Left . optionsError $
                     "'" ++ n ++ "' is not an integer smaller than" ++ show max_timeout ++ "."
@@ -530,7 +530,7 @@ commandLineOptions =
               case reads n of
                 [(n', "")]
                   | n' > 0 ->
-                    Right $ \config -> config {optConcurrency = Just n'}
+                      Right $ \config -> config {optConcurrency = Just n'}
                 _ ->
                   Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
           )

@@ -2,7 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -99,6 +98,14 @@ genericOptions =
                 if (ret != NULL) {
                   futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                 }}|]
+      },
+    Option
+      { optionLongName = "cache-file",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "FILE",
+        optionDescription = "Store program cache here.",
+        optionAction =
+          [C.cstm|futhark_context_config_set_cache_file(cfg, optarg);|]
       }
   ]
 
@@ -110,7 +117,7 @@ typeBoilerplate (tname, TypeArray _ et rank ops) =
   let type_name = typeStructName tname
       aux_name = type_name ++ "_aux"
       info_name = T.unpack et ++ "_info"
-      shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank -1]]
+      shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       array_new_wrap = arrayNew ops <> "_wrap"
    in ( [C.cinit|&$id:type_name|],
         [C.cunit|

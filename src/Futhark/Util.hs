@@ -18,6 +18,7 @@ module Futhark.Util
     dropAt,
     takeLast,
     dropLast,
+    debug,
     mapEither,
     maybeNth,
     maybeHead,
@@ -27,6 +28,7 @@ module Futhark.Util
     hashText,
     unixEnvironment,
     isEnvVarAtLeast,
+    startupTime,
     fancyTerminal,
     runProgramWithExitCode,
     directoryContents,
@@ -46,6 +48,7 @@ module Futhark.Util
     toPOSIX,
     trim,
     pmapIO,
+    interactWithFileSafely,
     readFileSafely,
     convFloat,
     UserString,
@@ -61,6 +64,7 @@ import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash.MD5 as MD5
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
@@ -76,6 +80,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import qualified Data.Text.IO as T
+import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Numeric
 import qualified System.Directory.Tree as Dir
@@ -86,14 +91,15 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
+import System.Log.Logger (debugM)
 import System.Process.ByteString
 import Text.Read (readMaybe)
 
--- | Like 'nub', but without the quadratic runtime.
+-- | Like @nub@, but without the quadratic runtime.
 nubOrd :: Ord a => [a] -> [a]
 nubOrd = nubByOrd compare
 
--- | Like 'nubBy', but without the quadratic runtime.
+-- | Like @nubBy@, but without the quadratic runtime.
 nubByOrd :: (a -> a -> Ordering) -> [a] -> [a]
 nubByOrd cmp = map NE.head . NE.groupBy eq . sortBy cmp
   where
@@ -106,11 +112,11 @@ mapAccumLM ::
   acc ->
   [x] ->
   m (acc, [y])
-mapAccumLM _ acc [] = return (acc, [])
+mapAccumLM _ acc [] = pure (acc, [])
 mapAccumLM f acc (x : xs) = do
   (acc', x') <- f acc x
   (acc'', xs') <- mapAccumLM f acc' xs
-  return (acc'', x' : xs')
+  pure (acc'', x' : xs')
 
 -- | @chunk n a@ splits @a@ into @n@-size-chunks.  If the length of
 -- @a@ is not divisible by @n@, the last chunk will have fewer than
@@ -200,6 +206,13 @@ isEnvVarAtLeast s x =
     Just y -> y >= x
     _ -> False
 
+{-# NOINLINE startupTime #-}
+
+-- | The time at which the process started - or more accurately, the
+-- first time this binding was forced.
+startupTime :: UTCTime
+startupTime = unsafePerformIO getCurrentTime
+
 {-# NOINLINE fancyTerminal #-}
 
 -- | Are we running in a terminal capable of fancy commands and
@@ -208,7 +221,7 @@ fancyTerminal :: Bool
 fancyTerminal = unsafePerformIO $ do
   isTTY <- hIsTerminalDevice stdout
   isDumb <- (Just "dumb" ==) <$> lookupEnv "TERM"
-  return $ isTTY && not isDumb
+  pure $ isTTY && not isDumb
 
 -- | Like 'readProcessWithExitCode', but also wraps exceptions when
 -- the indicated binary cannot be launched, or some other exception is
@@ -220,7 +233,7 @@ runProgramWithExitCode ::
   IO (Either IOException (ExitCode, String, String))
 runProgramWithExitCode exe args inp =
   (Right . postprocess <$> readProcessWithExitCode exe args inp)
-    `catch` \e -> return (Left e)
+    `catch` \e -> pure (Left e)
   where
     decode = T.unpack . T.decodeUtf8With T.lenientDecode
     postprocess (code, out, err) =
@@ -229,10 +242,10 @@ runProgramWithExitCode exe args inp =
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]
 directoryContents dir = do
-  _ Dir.:/ tree <- Dir.readDirectoryWith return dir
+  _ Dir.:/ tree <- Dir.readDirectoryWith pure dir
   case Dir.failures tree of
     Dir.Failed _ err : _ -> throw err
-    _ -> return $ mapMaybe isFile $ Dir.flattenDir tree
+    _ -> pure $ mapMaybe isFile $ Dir.flattenDir tree
   where
     isFile (Dir.File _ path) = Just path
     isFile _ = Nothing
@@ -355,17 +368,23 @@ pmapIO concurrency f elems = do
         Left err -> throw (err :: SomeException)
         Right v -> pure v
 
+-- | Do some operation on a file, returning 'Nothing' if the file does
+-- not exist, and 'Left' if some other error occurs.
+interactWithFileSafely :: IO a -> IO (Maybe (Either String a))
+interactWithFileSafely m =
+  (Just . Right <$> m) `catch` couldNotRead
+  where
+    couldNotRead e
+      | isDoesNotExistError e =
+          pure Nothing
+      | otherwise =
+          pure $ Just $ Left $ show e
+
 -- | Read a file, returning 'Nothing' if the file does not exist, and
 -- 'Left' if some other error occurs.
 readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
 readFileSafely filepath =
-  (Just . Right <$> T.readFile filepath) `catch` couldNotRead
-  where
-    couldNotRead e
-      | isDoesNotExistError e =
-        return Nothing
-      | otherwise =
-        return $ Just $ Left $ show e
+  interactWithFileSafely $ T.readFile filepath
 
 -- | Convert between different floating-point types, preserving
 -- infinities and NaNs.
@@ -453,18 +472,26 @@ encodeAsUnicodeCharar c =
   where
     hex_str = showHex (ord c) "U"
 
+-- | Truncate to at most this many characters, making the last three
+-- characters "..." if truncation is necessary.
 atMostChars :: Int -> String -> String
 atMostChars n s
-  | length s > n = take (n -3) s ++ "..."
+  | length s > n = take (n - 3) s ++ "..."
   | otherwise = s
 
+-- | Invert a map, handling duplicate values (now keys) by
+-- constructing a set of corresponding values.
 invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
   M.toList m
     & fmap (swap . first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
 
+-- | Perform fixpoint iteration.
 fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
+
+debug :: MonadIO m => String -> m ()
+debug msg = liftIO $ debugM "futhark" msg

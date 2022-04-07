@@ -36,7 +36,7 @@ segMap1D desc lvl manifest f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBuilder $ do
     res <- f ltid
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms res
 
   let ret (SubExpRes cs se) = Returns manifest cs se
@@ -62,7 +62,7 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_yy, ltid_xx)
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
@@ -88,7 +88,7 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_z, ltid_y, ltid_x)
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
@@ -100,24 +100,36 @@ segScatter2D ::
   SubExp -> -- arr_size
   VName ->
   SegLevel -> -- lvl
+  [SubExp] -> -- dims of sequential loop on top
   (SubExp, SubExp) -> -- (dim_y, dim_x)
-  ((VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
-  Builder GPU [VName]
-segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
+  ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
+  Builder GPU VName
+segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
   ltid_x <- newVName "ltid_x"
   ltid_y <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
+
+  seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
+  let seq_space = zip seq_is seq_dims
+
+  let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_x, dim_x), (ltid_y, dim_y)]
+      lvl' =
+        SegThread
+          (segNumGroups lvl)
+          (segGroupSize lvl)
+          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
   ((t_v, res_v, res_i), stms) <- runBuilder $ do
-    (res_v, res_i) <- f (ltid_x, ltid_y)
+    (res_v, res_i) <-
+      localScope (scopeOfSegSpace segspace) $
+        f seq_is (ltid_x, ltid_y)
     t_v <- subExpType res_v
-    return (t_v, res_v, res_i)
+    pure (t_v, res_v, res_i)
 
   let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
-  letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
+  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl' segspace [t_v] body
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
@@ -143,9 +155,9 @@ isTileableRedomap stm
     not (null arrs),
     all primType $ lambdaReturnType map_lam,
     all (primType . paramType) $ lambdaParams map_lam =
-    Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
+      Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
   | otherwise =
-    Nothing
+      Nothing
 
 defVarianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 defVarianceInStm variance stm =
@@ -160,24 +172,24 @@ defVarianceInStm variance stm =
 varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 varianceInStm v0 stm@(Let _ _ (Op (OtherOp Screma {})))
   | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap stm =
-    let v = defVarianceInStm v0 stm
-        red_ps = lambdaParams red_lam
-        map_ps = lambdaParams map_lam
-        card_red = length red_nes
-        acc_lam_f = take (card_red `quot` 2) red_ps
-        arr_lam_f = drop (card_red `quot` 2) red_ps
-        stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
+      let v = defVarianceInStm v0 stm
+          red_ps = lambdaParams red_lam
+          map_ps = lambdaParams map_lam
+          card_red = length red_nes
+          acc_lam_f = take (card_red `quot` 2) red_ps
+          arr_lam_f = drop (card_red `quot` 2) red_ps
+          stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
 
-        f vacc (v_a, v_fm, v_fr_acc, v_fr_var) =
-          let vrc = oneName v_a <> M.findWithDefault mempty v_a vacc
-              vacc' = M.insert v_fm vrc vacc
-              vrc' = oneName v_fm <> vrc
-           in M.insert v_fr_acc (oneName v_fr_var <> vrc') $ M.insert v_fr_var vrc' vacc'
+          f vacc (v_a, v_fm, v_fr_acc, v_fr_var) =
+            let vrc = oneName v_a <> M.findWithDefault mempty v_a vacc
+                vacc' = M.insert v_fm vrc vacc
+                vrc' = oneName v_fm <> vrc
+             in M.insert v_fr_acc (oneName v_fr_var <> vrc') $ M.insert v_fr_var vrc' vacc'
 
-        v' =
-          foldl' f v $
-            zip4 arrs (map paramName map_ps) (map paramName acc_lam_f) (map paramName arr_lam_f)
-     in varianceInStms v' stm_lam
+          v' =
+            foldl' f v $
+              zip4 arrs (map paramName map_ps) (map paramName acc_lam_f) (map paramName arr_lam_f)
+       in varianceInStms v' stm_lam
 varianceInStm v0 stm = defVarianceInStm v0 stm
 
 varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable

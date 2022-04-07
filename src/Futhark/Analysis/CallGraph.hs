@@ -118,10 +118,10 @@ buildFGfun ftable fg fname =
 buildFGStms :: Stms SOACS -> FunCalls
 buildFGStms = mconcat . map buildFGstm . stmsToList
 
-buildFGBody :: Body -> FunCalls
+buildFGBody :: Body SOACS -> FunCalls
 buildFGBody = buildFGStms . bodyStms
 
-buildFGstm :: Stm -> FunCalls
+buildFGstm :: Stm SOACS -> FunCalls
 buildFGstm (Let (Pat (p : _)) aux (Apply fname _ _ _)) =
   FunCalls (M.singleton (patElemName p) (stmAuxAttrs aux, fname)) (S.singleton fname)
 buildFGstm (Let _ _ (Op op)) = execWriter $ mapSOACM folder op
@@ -130,7 +130,7 @@ buildFGstm (Let _ _ (Op op)) = execWriter $ mapSOACM folder op
       identitySOACMapper
         { mapOnSOACLambda = \lam -> do
             tell $ buildFGBody $ lambdaBody lam
-            return lam
+            pure lam
         }
 buildFGstm (Let _ _ e) = execWriter $ mapExpM folder e
   where
@@ -138,7 +138,7 @@ buildFGstm (Let _ _ e) = execWriter $ mapExpM folder e
       identityMapper
         { mapOnBody = \_ body -> do
             tell $ buildFGBody body
-            return body
+            pure body
         }
 
 -- | The set of all functions that are called noinline somewhere, or
@@ -148,31 +148,31 @@ findNoninlined prog =
   foldMap noinlineDef (progFuns prog)
     <> foldMap onStm (foldMap (bodyStms . funDefBody) (progFuns prog) <> progConsts prog)
   where
-    onStm :: Stm -> S.Set Name
+    onStm :: Stm SOACS -> S.Set Name
     onStm (Let _ aux (Apply fname _ _ _))
       | "noinline" `inAttrs` stmAuxAttrs aux =
-        S.singleton fname
+          S.singleton fname
     onStm (Let _ _ e) = execWriter $ mapExpM folder e
       where
         folder =
           identityMapper
             { mapOnBody = \_ body -> do
                 tell $ foldMap onStm $ bodyStms body
-                return body,
+                pure body,
               mapOnOp =
                 mapSOACM
                   identitySOACMapper
                     { mapOnSOACLambda = \lam -> do
                         tell $ foldMap onStm $ bodyStms $ lambdaBody lam
-                        return lam
+                        pure lam
                     }
             }
 
     noinlineDef fd
       | "noinline" `inAttrs` funDefAttrs fd =
-        S.singleton $ funDefName fd
+          S.singleton $ funDefName fd
       | otherwise =
-        mempty
+          mempty
 
 instance Pretty FunCalls where
   ppr = stack . map f . M.toList . fcMap

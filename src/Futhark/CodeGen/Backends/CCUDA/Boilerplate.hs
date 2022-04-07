@@ -1,5 +1,4 @@
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | Various boilerplate definitions for the CUDA backend.
 module Futhark.CodeGen.Backends.CCUDA.Boilerplate
@@ -109,10 +108,11 @@ generateConfigFuns sizes = do
                               typename int64_t tuning_params[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
+                              const char *cache_fname;
                             };|]
     )
 
-  let size_value_inits = zipWith sizeInit [0 .. M.size sizes -1] (M.elems sizes)
+  let size_value_inits = zipWith sizeInit [0 .. M.size sizes - 1] (M.elems sizes)
       sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
         where
           val = fromMaybe 0 $ sizeDefault size
@@ -129,6 +129,7 @@ generateConfigFuns sizes = do
                          cfg->num_nvrtc_opts = 0;
                          cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
+                         cfg->cache_fname = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
                                           tuning_param_names, tuning_param_vars,
@@ -289,7 +290,7 @@ generateConfigFuns sizes = do
                          return 1;
                        }|]
     )
-  return cfg
+  pure cfg
 
 generateContextFuns ::
   String ->
@@ -388,10 +389,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->total_runtime = 0;
                  $stms:init_fields
 
-                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
 
                  if (ctx->error != NULL) {
-                   return NULL;
+                   futhark_panic(1, "%s\n", ctx->error);
                  }
 
                  typename int32_t no_error = -1;
@@ -420,6 +421,8 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  $stms:free_fields
                                  free_constants(ctx);
+                                 cuMemFree(ctx->global_failure);
+                                 cuMemFree(ctx->global_failure_args);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
                                  ctx->cfg->in_use = 0;
@@ -458,7 +461,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
                      $stm:(failureSwitch failures)
 
-                     return 1;
+                     return FUTHARK_PROGRAM_ERROR;
                    }
                  }
                  CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.cu_ctx));

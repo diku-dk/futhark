@@ -150,7 +150,7 @@ wrapOption = fmap wrap
   where
     wrap f = do
       g <- f
-      return $ \cfg -> cfg {compilerConfig = g (compilerConfig cfg)}
+      pure $ \cfg -> cfg {compilerConfig = g (compilerConfig cfg)}
 
 incVerbosity :: Maybe FilePath -> CompilerConfig cfg -> CompilerConfig cfg
 incVerbosity file cfg =

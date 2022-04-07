@@ -66,7 +66,7 @@ import Futhark.Transform.Rename
 import Futhark.Util
 import Futhark.Util.Log
 
-type Target = (PatT Type, Result)
+type Target = (Pat Type, Result)
 
 -- | First pair element is the very innermost ("current") target.  In
 -- the list, the outermost target comes first.  Invariant: Every
@@ -120,7 +120,7 @@ targetsScope :: DistRep rep => Targets -> Scope rep
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting
-  { loopNestingPat :: PatT Type,
+  { loopNestingPat :: Pat Type,
     loopNestingAux :: StmAux (),
     loopNestingWidth :: SubExp,
     loopNestingParamsAndArrs :: [(Param Type, VName)]
@@ -214,7 +214,7 @@ pushInnerKernelNesting target newnest (nest, nests) =
       [] -> nest
       n : _ -> n
 
-fixNestingPatOrder :: LoopNesting -> Target -> PatT Type -> LoopNesting
+fixNestingPatOrder :: LoopNesting -> Target -> Pat Type -> LoopNesting
 fixNestingPatOrder nest (_, res) inner_pat =
   nest {loopNestingPat = basicPat pat'}
   where
@@ -267,7 +267,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
 
   addStms aux_stms
 
-  return $ Let pat aux $ Op $ segOp segop
+  pure $ Let pat aux $ Op $ segOp segop
   where
     first_nest = fst kernel_nest
     inputIsUsed input = kernelInputName input `nameIn` freeIn inner_body
@@ -287,7 +287,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, []) = do
         [ KernelInput pname ptype arr [Var i]
           | (Param _ pname ptype, arr) <- params_and_arrs
         ]
-  return ([(i, nesting_w)], inps)
+  pure ([(i, nesting_w)], inps)
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   i <- newVName "gtid"
   (ispace, inps) <- flatKernel (nest, nests)
@@ -297,14 +297,14 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
         snd <$> find ((== kernelInputArray inp) . paramName . fst) params_and_arrs
       fixupInput inp
         | Just arr <- isParam inp =
-          inp
-            { kernelInputArray = arr,
-              kernelInputIndices = Var i : kernelInputIndices inp
-            }
+            inp
+              { kernelInputArray = arr,
+                kernelInputIndices = Var i : kernelInputIndices inp
+              }
         | otherwise =
-          inp
+            inp
 
-  return ((i, nesting_w) : ispace, extra_inps i <> inps')
+  pure ((i, nesting_w) : ispace, extra_inps i <> inps')
   where
     extra_inps i =
       [ KernelInput pname ptype arr [Var i]
@@ -320,7 +320,7 @@ data DistributionBody = DistributionBody
     distributionExpandTarget :: Target -> Target
   }
 
-distributionInnerPat :: DistributionBody -> PatT Type
+distributionInnerPat :: DistributionBody -> Pat Type
 distributionInnerPat = fst . innerTarget . distributionTarget
 
 distributionBodyFromStms ::
@@ -373,7 +373,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
     distributeAtNesting ::
       Nesting ->
-      PatT Type ->
+      Pat Type ->
       (LoopNesting -> KernelNest, Names) ->
       M.Map VName Ident ->
       [Ident] ->
@@ -398,7 +398,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
         required_from_nest_idents <-
           forM (namesToList required_from_nest) $ \name -> do
             t <- lift $ lookupType name
-            return $ Ident name t
+            pure $ Ident name t
 
         (free_params, free_arrs, bind_in_target) <-
           fmap unzip3 $
@@ -408,13 +408,13 @@ createKernelNest (inner_nest, nests) distrib_body = do
                   Nothing -> do
                     arr <-
                       newIdent (baseString pname ++ "_r") $ arrayOfRow ptype w
-                    return
+                    pure
                       ( Param mempty pname ptype,
                         arr,
                         True
                       )
                   Just arr ->
-                    return
+                    pure
                       ( Param mempty pname ptype,
                         arr,
                         False
@@ -444,7 +444,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
               loopNestingParams nest''
           )
           $ fail "Would induce irregular array"
-        return
+        pure
           ( add_to_kernel nest'',
             free_in_kernel'',
             addTarget (free_arrs_pat, varsRes $ map paramName free_params_pat)
@@ -490,9 +490,9 @@ removeUnusedNestingParts used (MapNesting pat aux w params_and_arrs) =
 
 removeIdentityMappingGeneral ::
   Names ->
-  PatT Type ->
+  Pat Type ->
   Result ->
-  ( PatT Type,
+  ( Pat Type,
     Result,
     M.Map VName Ident,
     Target -> Target
@@ -520,9 +520,9 @@ removeIdentityMappingGeneral bound pat res =
 
 removeIdentityMappingFromNesting ::
   Names ->
-  PatT Type ->
+  Pat Type ->
   Result ->
-  ( PatT Type,
+  ( Pat Type,
     Result,
     M.Map VName Ident,
     Target -> Target
@@ -545,8 +545,8 @@ tryDistribute ::
   m (Maybe (Targets, Stms rep))
 tryDistribute _ _ targets stms
   | null stms =
-    -- No point in distributing an empty kernel.
-    return $ Just (targets, mempty)
+      -- No point in distributing an empty kernel.
+      pure $ Just (targets, mempty)
 tryDistribute mk_lvl nest targets stms =
   createKernelNest nest dist_body
     >>= \case
@@ -565,9 +565,9 @@ tryDistribute mk_lvl nest targets stms =
             ++ ppTargets targets
             ++ "\nand with new targets\n"
             ++ ppTargets targets'
-        return $ Just (targets', w_stms <> oneStm distributed')
+        pure $ Just (targets', w_stms <> oneStm distributed')
       Nothing ->
-        return Nothing
+        pure Nothing
   where
     (dist_body, inner_body_res) = distributionBodyFromStms targets stms
 

@@ -44,6 +44,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Data.Bitraversable
 import Data.Foldable (traverse_)
+import Data.List.NonEmpty (NonEmpty (..))
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Prop.Types (mapOnType)
 import Futhark.IR.Syntax
@@ -68,14 +69,14 @@ data Mapper frep trep m = Mapper
 identityMapper :: Monad m => Mapper rep rep m
 identityMapper =
   Mapper
-    { mapOnSubExp = return,
-      mapOnBody = const return,
-      mapOnVName = return,
-      mapOnRetType = return,
-      mapOnBranchType = return,
-      mapOnFParam = return,
-      mapOnLParam = return,
-      mapOnOp = return
+    { mapOnSubExp = pure,
+      mapOnBody = const pure,
+      mapOnVName = pure,
+      mapOnRetType = pure,
+      mapOnBranchType = pure,
+      mapOnFParam = pure,
+      mapOnLParam = pure,
+      mapOnOp = pure
     }
 
 -- | Map a monadic action across the immediate children of an
@@ -146,13 +147,11 @@ mapExpM tv (BasicOp (Rearrange perm e)) =
   BasicOp <$> (Rearrange perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Rotate es e)) =
   BasicOp <$> (Rotate <$> mapM (mapOnSubExp tv) es <*> mapOnVName tv e)
-mapExpM tv (BasicOp (Concat i x ys size)) =
-  BasicOp
-    <$> ( Concat i
-            <$> mapOnVName tv x
-            <*> mapM (mapOnVName tv) ys
-            <*> mapOnSubExp tv size
-        )
+mapExpM tv (BasicOp (Concat i (x :| ys) size)) = do
+  x' <- mapOnVName tv x
+  ys' <- mapM (mapOnVName tv) ys
+  size' <- mapOnSubExp tv size
+  pure $ BasicOp $ Concat i (x' :| ys') size'
 mapExpM tv (BasicOp (Copy e)) =
   BasicOp <$> (Copy <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Manifest perm e)) =
@@ -236,26 +235,26 @@ data Walker rep m = Walker
 identityWalker :: Monad m => Walker rep m
 identityWalker =
   Walker
-    { walkOnSubExp = const $ return (),
-      walkOnBody = const $ const $ return (),
-      walkOnVName = const $ return (),
-      walkOnRetType = const $ return (),
-      walkOnBranchType = const $ return (),
-      walkOnFParam = const $ return (),
-      walkOnLParam = const $ return (),
-      walkOnOp = const $ return ()
+    { walkOnSubExp = const $ pure (),
+      walkOnBody = const $ const $ pure (),
+      walkOnVName = const $ pure (),
+      walkOnRetType = const $ pure (),
+      walkOnBranchType = const $ pure (),
+      walkOnFParam = const $ pure (),
+      walkOnLParam = const $ pure (),
+      walkOnOp = const $ pure ()
     }
 
 walkOnShape :: Monad m => Walker rep m -> Shape -> m ()
 walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
 walkOnType :: Monad m => Walker rep m -> Type -> m ()
-walkOnType _ Prim {} = return ()
+walkOnType _ Prim {} = pure ()
 walkOnType tv (Acc acc ispace ts _) = do
   walkOnVName tv acc
   traverse_ (walkOnSubExp tv) ispace
   mapM_ (walkOnType tv) ts
-walkOnType _ Mem {} = return ()
+walkOnType _ Mem {} = pure ()
 walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
 walkOnLoopForm :: Monad m => Walker rep m -> LoopForm rep -> m ()
@@ -319,7 +318,7 @@ walkExpM tv (BasicOp (Rearrange _ e)) =
   walkOnVName tv e
 walkExpM tv (BasicOp (Rotate es e)) =
   mapM_ (walkOnSubExp tv) es >> walkOnVName tv e
-walkExpM tv (BasicOp (Concat _ x ys size)) =
+walkExpM tv (BasicOp (Concat _ (x :| ys) size)) =
   walkOnVName tv x >> mapM_ (walkOnVName tv) ys >> walkOnSubExp tv size
 walkExpM tv (BasicOp (Copy e)) =
   walkOnVName tv e
@@ -354,7 +353,7 @@ walkExpM tv (Op op) =
 -- given op for some representation.
 type OpStmsTraverser m op rep = (Scope rep -> Stms rep -> m (Stms rep)) -> op -> m op
 
--- | This representatin supports an 'OpStmsTraverser' for its 'Op'.
+-- | This representation supports an 'OpStmsTraverser' for its t'Op'.
 -- This is used for some simplification rules.
 class TraverseOpStms rep where
   -- | Transform every sub-'Stms' of this op.

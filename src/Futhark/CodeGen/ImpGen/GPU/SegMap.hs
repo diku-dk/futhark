@@ -17,7 +17,7 @@ import Prelude hiding (quot, rem)
 
 -- | Compile 'SegMap' instance code.
 compileSegMap ::
-  Pat GPUMem ->
+  Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
   KernelBody GPUMem ->
@@ -31,9 +31,8 @@ compileSegMap pat lvl space kbody = do
   emit $ Imp.DebugPrint "\n# SegMap" Nothing
   case lvl of
     SegThread {} -> do
-      let virt_num_groups =
-            sExt32 $ product dims' `divUp` unCount group_size'
-      sKernelThread "segmap" num_groups' group_size' (segFlat space) $
+      virt_num_groups <- dPrimVE "virt_num_groups" $ sExt32 $ product dims' `divUp` unCount group_size'
+      sKernelThread "segmap" (segFlat space) (defKernelAttrs num_groups' group_size') $
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
 
@@ -48,10 +47,11 @@ compileSegMap pat lvl space kbody = do
             compileStms mempty (kernelBodyStms kbody) $
               zipWithM_ (compileThreadResult space) (patElems pat) $
                 kernelBodyResult kbody
-    SegGroup {} ->
-      sKernelGroup "segmap_intragroup" num_groups' group_size' (segFlat space) $ do
-        let virt_num_groups = sExt32 $ product dims'
-        precomputeSegOpIDs (kernelBodyStms kbody) $
+    SegGroup {} -> do
+      pc <- precomputeConstants group_size' $ kernelBodyStms kbody
+      virt_num_groups <- dPrimVE "virt_num_groups" $ sExt32 $ product dims'
+      sKernelGroup "segmap_intragroup" (segFlat space) (defKernelAttrs num_groups' group_size') $ do
+        precomputedConstants pc $
           virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
             dIndexSpace (zip is dims') $ sExt64 group_id
 

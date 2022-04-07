@@ -2,7 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -138,6 +137,14 @@ genericOptions =
                 if (ret != NULL) {
                   futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                 }}|]
+      },
+    Option
+      { optionLongName = "cache-file",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "FILE",
+        optionDescription = "Store program cache here.",
+        optionAction =
+          [C.cstm|futhark_context_config_set_cache_file(cfg, optarg);|]
       }
   ]
   where
@@ -190,7 +197,7 @@ readInput manifest i tname =
           arr = "read_arr_" ++ show i
 
           ty = [C.cty|typename $id:t|]
-          dims_exps = [[C.cexp|$id:shape[$int:j]|] | j <- [0 .. rank -1]]
+          dims_exps = [[C.cexp|$id:shape[$int:j]|] | j <- [0 .. rank - 1]]
           t' = uncurry primAPIType $ scalarToPrim et
 
           new_array = arrayNew ops
@@ -263,7 +270,7 @@ printStm manifest tname e =
           values_array = arrayValues ops
           shape_array = arrayShape ops
           num_elems =
-            cproduct [[C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0 .. rank -1]]
+            cproduct [[C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0 .. rank - 1]]
           info = et <> "_info"
        in [C.cstm|{
                  $ty:et' *arr = calloc($exp:num_elems, $id:info.size);
