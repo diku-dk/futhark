@@ -1,3 +1,18 @@
+-- |
+-- This module implements an optimization that migrates host statements into
+-- GPUBody kernels to reduce the number of host-device synchronizations that
+-- occur when a scalar variable is written to or read from device memory.
+--
+-- Which statements that should be migrated are determined by a
+-- 'MigrationTable' produced by the "Futhark.Analysis.MigrationTable" module;
+-- with few exceptions this module merely performs the migration and rewriting
+-- dictated by that table.
+--
+-- The only exception at the time of writing is a unconditional transformation
+-- that turns @A[i] = x@ into @A[i:i+1] = gpu { x }@ for some scalar variable
+-- @x@. The rationale is that the code generator currently creates synchronous
+-- writes for 'Update' statements with scalar variables (but not constants).
+-- This transformation makes the 'Update' asyncrhonous.
 module Futhark.Pass.ReduceDeviceSyncs (reduceDeviceSyncs) where
 
 import Control.Monad
@@ -24,18 +39,10 @@ import Futhark.Transform.Substitute
 
 -- TODO: Run ormolu and hlint (all contributed files)
 
--- TODO: Write tests
+-- TODO: Write tests (especially for array expressions)
 
--- TODO: Add documentation (ReduceDeviceSyncs)
-
--- TODO: Expand GPUBody around parent if or loop statement.
-
--- TODO: Measure whether it is better to block delays through loops.
-
--- TODO: Investigate compiler limitation in migrated if.
---       It appears that statements that allocate memory cannot be migrated,
---       except ArrayLit of primitives.
-
+-- | An optimization pass that migrates host statements into GPUBody kernels
+-- to reduce the number of host-device synchronizations.
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
   Pass
@@ -51,215 +58,39 @@ reduceDeviceSyncs =
       putNameSource (stateNameSource st')
       pure prog'
 
-type ReduceM = StateT State (R.Reader MigrationTable)
+--------------------------------------------------------------------------------
+--                            AD HOC OPTIMIZATION                             --
+--------------------------------------------------------------------------------
 
-data State = State
-  { -- | A source to generate new 'VName's from.
-    stateNameSource :: VNameSource,
-    -- | A table of variables in the original program which have been migrated
-    -- to device. Each variable maps to a tuple that describes:
-    --   * 'baseName' of the original variable.
-    --   * Type of the original variable.
-    --   * Name of the single element array holding the migrated value.
-    --   * Whether the original variable still can be used on the host.
-    stateMigrated :: IM.IntMap (Name, Type, VName, Bool),
-    -- | Whether non-migration optimizations may introduce GPUBody kernels at
-    -- the current location.
-    stateGPUBodyOk :: Bool
-  }
-
-initialState :: VNameSource -> State
-initialState ns =
-  State
-    { stateNameSource = ns,
-      stateMigrated = mempty,
-      stateGPUBodyOk = True
-    }
-
--- | Retrieve a function of the current environment.
-asks :: (MigrationTable -> a) -> ReduceM a
-asks = lift . R.asks
-
--- | Fetch the value of the environment.
-ask :: ReduceM MigrationTable
-ask = lift R.ask
-
--- | Perform non-migration optimizations without introducing any GPUBody
--- kernels.
-noGPUBody :: ReduceM a -> ReduceM a
-noGPUBody m = do
-  prev <- gets stateGPUBodyOk
-  modify $ \st -> st {stateGPUBodyOk = False}
-  res <- m
-  modify $ \st -> st {stateGPUBodyOk = prev}
-  pure res
-
--- | Produce a fresh name, using the given name as a template.
-newName :: VName -> ReduceM VName
-newName n = do
-  st <- get
-  let ns = stateNameSource st
-  let (n', ns') = FN.newName ns n
-  put (st {stateNameSource = ns'})
-  pure n'
-
--- | Create a PatElem that binds the array of a migrated variable binding.
-arrayizePatElem :: PatElem Type -> ReduceM (PatElem Type)
-arrayizePatElem (PatElem n t) = do
-  let name = baseName n `withSuffix` "_dev"
-  dev <- newName (VName name 0)
-  let dev_t = t `arrayOfRow` intConst Int64 1
-  pure (PatElem dev dev_t)
-
-withSuffix :: Name -> String -> Name
-withSuffix name sfx = nameFromText $ T.append (nameToText name) (T.pack sfx)
-
--- | @(PatElem x t) `movedTo` arr@ registers that the value of @x@ has been
--- migrated to @arr[0]@, with @x@ being of type @t@.
-movedTo :: PatElem Type -> VName -> ReduceM ()
-movedTo = recordMigration False
-
--- | @(PatElem x t) `aliasedBy` arr@ registers that the value of @x@ also is
--- available on device as @arr[0]@, with @x@ being of type @t@.
-aliasedBy :: PatElem Type -> VName -> ReduceM ()
-aliasedBy = recordMigration True
-
--- | Records the migration of a variable and whether the original variable
--- still can be used on host.
-recordMigration :: Bool -> PatElem Type -> VName -> ReduceM ()
-recordMigration alias (PatElem x t) arr =
-  modify $ \st ->
-    let migrated = stateMigrated st
-        entry = (baseName x, t, arr, alias)
-        migrated' = IM.insert (baseTag x) entry migrated
-     in st {stateMigrated = migrated'}
-
--- | @pe `migratedTo` (dev, stms)@ registers that the variable @pe@ in the
--- original program has been migrated to @dev@ and rebinds the variable if
--- deemed necessary, adding an index statement to the given statements.
-migratedTo :: PatElem Type -> (VName, Stms GPU) -> ReduceM (Stms GPU)
-migratedTo pe (dev, stms) = do
-  used <- asks (usedOnHost $ patElemName pe)
-  if used
-    then pe `aliasedBy` dev >> pure (stms |> bind pe (eIndex dev))
-    else pe `movedTo` dev >> pure stms
-
--- | @useScalar stms n@ returns a variable that binds the result bound by @n@
--- in the original program. If the variable has been migrated to device and have
--- not been copied back to host a new variable binding will be added to the
--- provided statements and be returned.
-useScalar :: Stms GPU -> VName -> ReduceM (Stms GPU, VName)
-useScalar stms n = do
-  entry <- IM.lookup (baseTag n) <$> gets stateMigrated
-  case entry of
-    Nothing ->
-      pure (stms, n)
-    Just (_, _, _, True) ->
-      pure (stms, n)
-    Just (name, t, arr, _) ->
-      do
-        n' <- newName (VName name 0)
-        let stm = bind (PatElem n' t) (eIndex arr)
-        pure (stms |> stm, n')
-
--- | Create an expression that reads the first element of a 1-dimensional array.
-eIndex :: VName -> Exp GPU
-eIndex arr = BasicOp $ Index arr (Slice [DimFix $ intConst Int64 0])
-
--- | A shorthand for binding a single variable to an expression.
-bind :: PatElem Type -> Exp GPU -> Stm GPU
-bind pe = Let (Pat [pe]) (StmAux mempty mempty ())
-
--- | @storeScalar stms se t@ returns a variable that binds a single element
--- array that contains the value of @se@ in the original program. If @se@ is a
--- variable that has been migrated to device, its existing array alias will be
--- used. Otherwise a new variable binding will be added to the provided
--- statements and be returned. @t@ is the type of @se@.
-storeScalar :: Stms GPU -> SubExp -> Type -> ReduceM (Stms GPU, VName)
-storeScalar stms se t = do
-  entry <- case se of
-    Var n -> IM.lookup (baseTag n) <$> gets stateMigrated
-    _ -> pure Nothing
-  case entry of
-    Just (_, _, arr, _) -> pure (stms, arr)
-    Nothing -> do
-      -- How to most efficiently create an array containing the given value
-      -- depends on whether it is a variable or a constant. Creating a constant
-      -- array is a runtime copy of static memory, while creating an array that
-      -- contains a variable results in a synchronous write. The latter is thus
-      -- replaced with either a mergeable GPUBody kernel or a Replicate.
-      --
-      -- Whether it makes sense to hoist arrays out of bodies to enable CSE is
-      -- left to the simplifier to figure out. If a scalar is stored multiple
-      -- times within a body duplicates will be eliminated.
-      --
-      -- TODO: Enable the simplifier to hoist non-consumed, non-returned arrays
-      --       out of top-level function definitions. All constant arrays
-      --       produced here are in principle top-level hoistable.
-      gpubody_ok <- gets stateGPUBodyOk
-      case se of
-        Var n | gpubody_ok -> do
-          n' <- newName n
-          let stm = bind (PatElem n' t) (BasicOp $ SubExp se)
-
-          gpubody <- inGPUBody (pure stm)
-          let dev = patElemName $ head $ patElems (stmPat gpubody)
-
-          pure (stms |> gpubody, dev)
-        Var n -> do
-          pe <- arrayizePatElem (PatElem n t)
-          let shape = Shape [intConst Int64 1]
-          let stm = bind pe (BasicOp $ Replicate shape se)
-          pure (stms |> stm, patElemName pe)
-        _ -> do
-          let n = VName (nameFromString "const") 0
-          pe <- arrayizePatElem (PatElem n t)
-          let stm = bind pe (BasicOp $ ArrayLit [se] t)
-          pure (stms |> stm, patElemName pe)
-
--- | Map a variable name to itself or, if the variable no longer can be used on
--- host, the name of a single element array containing its value.
-resolveName :: VName -> ReduceM VName
-resolveName n = do
-  entry <- IM.lookup (baseTag n) <$> gets stateMigrated
-  case entry of
-    Nothing -> pure n
-    Just (_, _, _, True) -> pure n
-    Just (_, _, arr, _) -> pure arr
-
-resolveSubExp :: SubExp -> ReduceM SubExp
-resolveSubExp (Var n) = Var <$> resolveName n
-resolveSubExp cnst = pure cnst
-
-resolveSubExpRes :: SubExpRes -> ReduceM SubExpRes
-resolveSubExpRes (SubExpRes certs se) =
-  -- Certificates are always read back to host.
-  SubExpRes certs <$> resolveSubExp se
-
-resolveResult :: Result -> ReduceM Result
-resolveResult = mapM resolveSubExpRes
-
+-- | Optimize a whole program. The type signatures of top-level functions will
+-- remain unchanged.
 optimizeProgram :: Prog GPU -> ReduceM (Prog GPU)
 optimizeProgram (Prog consts funs) = do
   consts' <- optimizeStms consts
   funs' <- sequence $ parMap rpar optimizeFunDef funs
   pure (Prog consts' funs')
 
+-- | Optimize a function definition. Its type signature will remain unchanged.
 optimizeFunDef :: FunDef GPU -> ReduceM (FunDef GPU)
 optimizeFunDef fd = do
   let body = funDefBody fd
   stms' <- optimizeStms (bodyStms body)
   pure $ fd {funDefBody = body {bodyStms = stms'}}
 
+-- | Optimize a body. Scalar results may be replaced with single-element arrays.
 optimizeBody :: Body GPU -> ReduceM (Body GPU)
 optimizeBody (Body _ stms res) = do
   stms' <- optimizeStms stms
   res' <- resolveResult res
   pure (Body () stms' res')
 
+-- | Optimize a sequence of statements.
 optimizeStms :: Stms GPU -> ReduceM (Stms GPU)
 optimizeStms = foldM optimizeStm mempty
 
+-- | Optimize a single statement, rewriting it into one or more statements to
+-- be appended to the provided 'Stms'. Only variables with continued host usage
+-- will remain in scope if their statement is migrated.
 optimizeStm :: Stms GPU -> Stm GPU -> ReduceM (Stms GPU)
 optimizeStm out stm = do
   move <- asks (shouldMoveStm stm)
@@ -270,7 +101,7 @@ optimizeStm out stm = do
         | Just _ <- sliceIndices slice -> do
           -- It is faster to copy a scalar variable to device via a GPUBody and
           -- then asynchronously copy its contents to its destination, compared
-          -- to directly copy it from host to device via a blocking write.
+          -- to directly copying it from host to device via a blocking write.
           let t = Prim $ elemType $ patElemType $ head $ patElems (stmPat stm)
           (out', dev) <- storeScalar out (Var n) t
 
@@ -284,9 +115,17 @@ optimizeStm out stm = do
           pure (out' |> stm')
       BasicOp (Replicate (Shape dims) (Var v))
         | Pat [PatElem n arr_t] <- stmPat stm -> do
-          gpubody_ok <- gets stateGPUBodyOk
+          -- A Replicate can be rewritten to not require its replication value
+          -- to be available on host. If its value is migrated the Replicate
+          -- thus need to be transformed.
+          --
+          -- If the inner dimension of the replication array is one then the
+          -- rewrite can be performed more efficiently than the general case.
           v' <- resolveName v
           let v_kept_on_device = v /= v'
+
+          gpubody_ok <- gets stateGPUBodyOk
+
           case v_kept_on_device of
             False -> pure (out |> stm)
             True
@@ -369,26 +208,29 @@ optimizeStm out stm = do
           let e' = If cond tbranch' fbranch' (IfDec btypes' sort)
           let stm' = Let (Pat pes') (stmAux stm) e'
 
-          -- Read scalars that are used on host.
+          -- Read migrated scalars that are used on host.
           foldM addRead (out |> stm') (zip pes pes')
       DoLoop ps lf b -> do
+        -- Enable the migration of for-in loop variables.
         (params, lform, body) <- rewriteForIn (ps, lf, b)
 
         -- Update statement bound variables and parameters if their values
         -- have been migrated to device.
-        let lmerge (res, stms) (pe, param, MoveToDevice) = do
-              let (Param _ pn pt, pval) = param
+        let lmerge (res, stms) (pe, (Param _ pn pt, pval), MoveToDevice) = do
+              -- Rewrite the bound variable.
               pe' <- arrayizePatElem pe
 
               -- Move the initial value to device if not already there.
               (stms', arr) <- storeScalar stms pval (fromDecl pt)
 
+              -- Rewrite the parameter.
               pn' <- newName pn
               let pt' = toDecl (patElemType pe') Nonunique
               let pval' = Var arr
               let param' = (Param mempty pn' pt', pval')
 
-              PatElem pn (fromDecl pt) `movedTo` pn'
+              -- Record the migration.
+              Ident pn (fromDecl pt) `movedTo` pn'
 
               pure ((pe', param') : res, stms')
             lmerge _ (_, _, UsedOnHost) =
@@ -405,11 +247,12 @@ optimizeStm out stm = do
         (zipped', out') <- foldM lmerge ([], out) (zip3 pes params mss)
         let (pes', params') = unzip (reverse zipped')
 
+        -- Rewrite statement.
         body' <- optimizeBody body
         let e' = DoLoop params' lform body'
         let stm' = Let (Pat pes') (stmAux stm) e'
 
-        -- Read scalars that are used on host.
+        -- Read migrated scalars that are used on host.
         foldM addRead (out' |> stm') (zip pes pes')
       WithAcc inputs lmd -> do
         let getAcc (Acc a _ _ _) = a
@@ -433,6 +276,8 @@ optimizeStm out stm = do
                     let t' = patElemType pe'
                     pure (SubExpRes certs se', t', pe')
 
+        -- Rewrite non-accumulator results that have been migrated.
+        --
         -- Accumulator return values do not map to arrays one-to-one but
         -- one-to-many. They are not transformed however and can be mapped
         -- as a no-op.
@@ -446,12 +291,13 @@ optimizeStm out stm = do
         let rts' = rts0 ++ rts1'
         let pes' = pes0 ++ pes1'
 
+        -- Rewrite statement.
         let body' = Body () stms' res'
         let lmd' = lmd {lambdaBody = body', lambdaReturnType = rts'}
         let e' = WithAcc inputs' lmd'
         let stm' = Let (Pat pes') (stmAux stm) e'
 
-        -- Read scalars that are used on host.
+        -- Read migrated scalars that are used on host.
         foldM addRead (out |> stm') (zip pes pes')
       Op op -> do
         op' <- optimizeHostOp op
@@ -484,6 +330,7 @@ rewriteForIn (params, ForLoop i t n elems, body) = do
     index arr of_type =
       Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims of_type)
 
+-- | Optimize an accumulator input. The 'VName' is the accumulator token.
 optimizeWithAccInput :: VName -> WithAccInput GPU -> ReduceM (WithAccInput GPU)
 optimizeWithAccInput _ (shape, arrs, Nothing) = pure (shape, arrs, Nothing)
 optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
@@ -502,6 +349,8 @@ optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
       let op' = op {lambdaBody = body {bodyStms = stms'}}
       pure (shape, arrs, Just (op', nes))
 
+-- | Optimize a host operation. 'Index' statements are added to kernel code
+-- that depends on migrated scalars.
 optimizeHostOp :: HostOp GPU op -> ReduceM (HostOp GPU op)
 optimizeHostOp (SegOp (SegMap lvl space types kbody)) =
   SegOp . SegMap lvl space types <$> addReadsToKernelBody kbody
@@ -522,37 +371,212 @@ optimizeHostOp OtherOp {} =
 optimizeHostOp (GPUBody types body) =
   GPUBody types <$> addReadsToBody body
 
-addReadsToSegBinOp :: SegBinOp GPU -> ReduceM (SegBinOp GPU)
-addReadsToSegBinOp op = do
-  f' <- addReadsToLambda (segBinOpLambda op)
-  pure (op {segBinOpLambda = f'})
+--------------------------------------------------------------------------------
+--                               COMMON HELPERS                               --
+--------------------------------------------------------------------------------
 
-addReadsToHistOp :: HistOp GPU -> ReduceM (HistOp GPU)
-addReadsToHistOp op = do
-  f' <- addReadsToLambda (histOp op)
-  pure (op {histOp = f'})
+-- | Append the given string to a name.
+withSuffix :: Name -> String -> Name
+withSuffix name sfx = nameFromText $ T.append (nameToText name) (T.pack sfx)
 
-addReadsToLambda :: Lambda GPU -> ReduceM (Lambda GPU)
-addReadsToLambda f = do
-  body' <- addReadsToBody (lambdaBody f)
-  pure (f {lambdaBody = body'})
+--------------------------------------------------------------------------------
+--                             MIGRATION - TYPES                              --
+--------------------------------------------------------------------------------
 
-addReadsToBody :: Body GPU -> ReduceM (Body GPU)
-addReadsToBody body = do
-  (body', prologue) <- addReadsHelper body
-  pure body' {bodyStms = prologue >< bodyStms body'}
+-- | The monad used to perform migration-based synchronization reductions.
+type ReduceM = StateT State (R.Reader MigrationTable)
 
-addReadsToKernelBody :: KernelBody GPU -> ReduceM (KernelBody GPU)
-addReadsToKernelBody kbody = do
-  (kbody', prologue) <- addReadsHelper kbody
-  pure kbody' {kernelBodyStms = prologue >< kernelBodyStms kbody'}
+-- | The state used by a 'ReduceM' monad.
+data State = State
+  { -- | A source to generate new 'VName's from.
+    stateNameSource :: VNameSource,
+    -- | A table of variables in the original program which have been migrated
+    -- to device. Each variable maps to a tuple that describes:
+    --   * 'baseName' of the original variable.
+    --   * Type of the original variable.
+    --   * Name of the single element array holding the migrated value.
+    --   * Whether the original variable still can be used on the host.
+    stateMigrated :: IM.IntMap (Name, Type, VName, Bool),
+    -- | Whether non-migration optimizations may introduce GPUBody kernels at
+    -- the current location.
+    stateGPUBodyOk :: Bool
+  }
 
-addReadsHelper :: (FreeIn a, Substitute a) => a -> ReduceM (a, Stms GPU)
-addReadsHelper x = do
-  let from = namesToList (freeIn x)
-  (to, st) <- runStateT (mapM rename from) initialRState
-  let rename_map = M.fromList (zip from to)
-  pure (substituteNames rename_map x, rewritePrologue st)
+--------------------------------------------------------------------------------
+--                           MIGRATION - PRIMITIVES                           --
+--------------------------------------------------------------------------------
+
+-- | An initial state to use when running a 'ReduceM' monad.
+initialState :: VNameSource -> State
+initialState ns =
+  State
+    { stateNameSource = ns,
+      stateMigrated = mempty,
+      stateGPUBodyOk = True
+    }
+
+-- | Retrieve a function of the current environment.
+asks :: (MigrationTable -> a) -> ReduceM a
+asks = lift . R.asks
+
+-- | Fetch the value of the environment.
+ask :: ReduceM MigrationTable
+ask = lift R.ask
+
+-- | Perform non-migration optimizations without introducing any GPUBody
+-- kernels.
+noGPUBody :: ReduceM a -> ReduceM a
+noGPUBody m = do
+  prev <- gets stateGPUBodyOk
+  modify $ \st -> st {stateGPUBodyOk = False}
+  res <- m
+  modify $ \st -> st {stateGPUBodyOk = prev}
+  pure res
+
+-- | Produce a fresh name, using the given name as a template.
+newName :: VName -> ReduceM VName
+newName n = do
+  st <- get
+  let ns = stateNameSource st
+  let (n', ns') = FN.newName ns n
+  put (st {stateNameSource = ns'})
+  pure n'
+
+-- | Create a 'PatElem' that binds the array of a migrated variable binding.
+arrayizePatElem :: PatElem Type -> ReduceM (PatElem Type)
+arrayizePatElem (PatElem n t) = do
+  let name = baseName n `withSuffix` "_dev"
+  dev <- newName (VName name 0)
+  let dev_t = t `arrayOfRow` intConst Int64 1
+  pure (PatElem dev dev_t)
+
+-- | @x `movedTo` arr@ registers that the value of @x@ has been migrated to
+-- @arr[0]@.
+movedTo :: Ident -> VName -> ReduceM ()
+movedTo = recordMigration False
+
+-- | @x `aliasedBy` arr@ registers that the value of @x@ also is available on
+-- device as @arr[0]@.
+aliasedBy :: Ident -> VName -> ReduceM ()
+aliasedBy = recordMigration True
+
+-- | @recordMigration host x arr@ records the migration of variable @x@ to
+-- @arr[0]@. If @host@ then the original binding can still be used on host.
+recordMigration :: Bool -> Ident -> VName -> ReduceM ()
+recordMigration host (Ident x t) arr =
+  modify $ \st ->
+    let migrated = stateMigrated st
+        entry = (baseName x, t, arr, host)
+        migrated' = IM.insert (baseTag x) entry migrated
+     in st {stateMigrated = migrated'}
+
+-- | @pe `migratedTo` (dev, stms)@ registers that the variable @pe@ in the
+-- original program has been migrated to @dev@ and rebinds the variable if
+-- deemed necessary, adding an index statement to the given statements.
+migratedTo :: PatElem Type -> (VName, Stms GPU) -> ReduceM (Stms GPU)
+migratedTo pe (dev, stms) = do
+  used <- asks (usedOnHost $ patElemName pe)
+  if used
+    then patElemIdent pe `aliasedBy` dev >> pure (stms |> bind pe (eIndex dev))
+    else patElemIdent pe `movedTo` dev >> pure stms
+
+-- | @useScalar stms n@ returns a variable that binds the result bound by @n@
+-- in the original program. If the variable has been migrated to device and have
+-- not been copied back to host a new variable binding will be added to the
+-- provided statements and be returned.
+useScalar :: Stms GPU -> VName -> ReduceM (Stms GPU, VName)
+useScalar stms n = do
+  entry <- IM.lookup (baseTag n) <$> gets stateMigrated
+  case entry of
+    Nothing ->
+      pure (stms, n)
+    Just (_, _, _, True) ->
+      pure (stms, n)
+    Just (name, t, arr, _) ->
+      do
+        n' <- newName (VName name 0)
+        let stm = bind (PatElem n' t) (eIndex arr)
+        pure (stms |> stm, n')
+
+-- | Create an expression that reads the first element of a 1-dimensional array.
+eIndex :: VName -> Exp GPU
+eIndex arr = BasicOp $ Index arr (Slice [DimFix $ intConst Int64 0])
+
+-- | A shorthand for binding a single variable to an expression.
+bind :: PatElem Type -> Exp GPU -> Stm GPU
+bind pe = Let (Pat [pe]) (StmAux mempty mempty ())
+
+-- | @storeScalar stms se t@ returns a variable that binds a single element
+-- array that contains the value of @se@ in the original program. If @se@ is a
+-- variable that has been migrated to device, its existing array alias will be
+-- used. Otherwise a new variable binding will be added to the provided
+-- statements and be returned. @t@ is the type of @se@.
+storeScalar :: Stms GPU -> SubExp -> Type -> ReduceM (Stms GPU, VName)
+storeScalar stms se t = do
+  entry <- case se of
+    Var n -> IM.lookup (baseTag n) <$> gets stateMigrated
+    _ -> pure Nothing
+  case entry of
+    Just (_, _, arr, _) -> pure (stms, arr)
+    Nothing -> do
+      -- How to most efficiently create an array containing the given value
+      -- depends on whether it is a variable or a constant. Creating a constant
+      -- array is a runtime copy of static memory, while creating an array that
+      -- contains a variable results in a synchronous write. The latter is thus
+      -- replaced with either a mergeable GPUBody kernel or a Replicate.
+      --
+      -- Whether it makes sense to hoist arrays out of bodies to enable CSE is
+      -- left to the simplifier to figure out. Duplicates will be eliminated if
+      -- a scalar is stored multiple times within a body.
+      --
+      -- TODO: Enable the simplifier to hoist non-consumed, non-returned arrays
+      --       out of top-level function definitions. All constant arrays
+      --       produced here are in principle top-level hoistable.
+      gpubody_ok <- gets stateGPUBodyOk
+      case se of
+        Var n | gpubody_ok -> do
+          n' <- newName n
+          let stm = bind (PatElem n' t) (BasicOp $ SubExp se)
+
+          gpubody <- inGPUBody (pure stm)
+          let dev = patElemName $ head $ patElems (stmPat gpubody)
+
+          pure (stms |> gpubody, dev)
+        Var n -> do
+          pe <- arrayizePatElem (PatElem n t)
+          let shape = Shape [intConst Int64 1]
+          let stm = bind pe (BasicOp $ Replicate shape se)
+          pure (stms |> stm, patElemName pe)
+        _ -> do
+          let n = VName (nameFromString "const") 0
+          pe <- arrayizePatElem (PatElem n t)
+          let stm = bind pe (BasicOp $ ArrayLit [se] t)
+          pure (stms |> stm, patElemName pe)
+
+-- | Map a variable name to itself or, if the variable no longer can be used on
+-- host, the name of a single element array containing its value.
+resolveName :: VName -> ReduceM VName
+resolveName n = do
+  entry <- IM.lookup (baseTag n) <$> gets stateMigrated
+  case entry of
+    Nothing -> pure n
+    Just (_, _, _, True) -> pure n
+    Just (_, _, arr, _) -> pure arr
+
+-- | Like 'resolveName' but for a 'SubExp'. Constants are mapped to themselves.
+resolveSubExp :: SubExp -> ReduceM SubExp
+resolveSubExp (Var n) = Var <$> resolveName n
+resolveSubExp cnst = pure cnst
+
+-- | Like 'resolveSubExp' but for a 'SubExpRes'.
+resolveSubExpRes :: SubExpRes -> ReduceM SubExpRes
+resolveSubExpRes (SubExpRes certs se) =
+  -- Certificates are always read back to host.
+  SubExpRes certs <$> resolveSubExp se
+
+-- | Apply 'resolveSubExpRes' to a list of results.
+resolveResult :: Result -> ReduceM Result
+resolveResult = mapM resolveSubExpRes
 
 -- | Migrate a statement to device, ensuring all its bound variables used on
 -- host will remain available with the same names.
@@ -560,6 +584,7 @@ moveStm :: Stms GPU -> Stm GPU -> ReduceM (Stms GPU)
 moveStm out (Let pat aux (BasicOp (ArrayLit [se] t')))
   | Pat [PatElem n _] <- pat =
     do
+      -- Save an 'Index' by rewriting the 'ArrayLit' rather than migrating it.
       let n' = VName (baseName n `withSuffix` "_inner") 0
       let pat' = Pat [PatElem n' t']
       let e' = BasicOp (SubExp se)
@@ -583,14 +608,14 @@ moveStm out stm = do
             0 -> add $ SubExp (Var dev)
             -- Read all certificates for free.
             1 | t == Prim Unit -> add' (eIndex dev)
-            -- Record the device alias of each scalar variable.
-            -- Read scalars used on host.
+            -- Record the device alias of each scalar variable and read them
+            -- if used on host.
             1 -> pe `migratedTo` (dev, stms)
             -- Drop the added dimension of multidimensional arrays.
             _ -> add $ Index dev (fullSlice dev_t [DimFix $ intConst Int64 0])
 
--- | Create a GPUBody kernel that executes a single statement, returning its
--- result values wrapped in single element arrays.
+-- | Create a GPUBody kernel that executes a single statement and stores its
+-- results in single element arrays.
 inGPUBody :: RewriteM (Stm GPU) -> ReduceM (Stm GPU)
 inGPUBody m = do
   (stm, st) <- runStateT m initialRState
@@ -605,8 +630,14 @@ inGPUBody m = do
   let e = Op (GPUBody types body)
   pure (Let pat aux e)
 
+--------------------------------------------------------------------------------
+--                          KERNEL REWRITING - TYPES                          --
+--------------------------------------------------------------------------------
+
+-- The monad used to rewrite (migrated) kernel code.
 type RewriteM = StateT RState ReduceM
 
+-- | The state used by a 'RewriteM' monad.
 data RState = RState
   { -- | Maps variables in the original program to names to be used by rewrites.
     rewriteRenames :: IM.IntMap VName,
@@ -614,12 +645,56 @@ data RState = RState
     rewritePrologue :: Stms GPU
   }
 
+--------------------------------------------------------------------------------
+--                        KERNEL REWRITING - FUNCTIONS                        --
+--------------------------------------------------------------------------------
+
+-- | An initial state to use when running a 'RewriteM' monad.
 initialRState :: RState
 initialRState =
   RState
     { rewriteRenames = mempty,
       rewritePrologue = mempty
     }
+
+-- | Rewrite 'SegBinOp' dependencies to scalars that have been migrated.
+addReadsToSegBinOp :: SegBinOp GPU -> ReduceM (SegBinOp GPU)
+addReadsToSegBinOp op = do
+  f' <- addReadsToLambda (segBinOpLambda op)
+  pure (op {segBinOpLambda = f'})
+
+-- | Rewrite 'HistOp' dependencies to scalars that have been migrated.
+addReadsToHistOp :: HistOp GPU -> ReduceM (HistOp GPU)
+addReadsToHistOp op = do
+  f' <- addReadsToLambda (histOp op)
+  pure (op {histOp = f'})
+
+-- | Rewrite generic lambda dependencies to scalars that have been migrated.
+addReadsToLambda :: Lambda GPU -> ReduceM (Lambda GPU)
+addReadsToLambda f = do
+  body' <- addReadsToBody (lambdaBody f)
+  pure (f {lambdaBody = body'})
+
+-- | Rewrite generic body dependencies to scalars that have been migrated.
+addReadsToBody :: Body GPU -> ReduceM (Body GPU)
+addReadsToBody body = do
+  (body', prologue) <- addReadsHelper body
+  pure body' {bodyStms = prologue >< bodyStms body'}
+
+-- | Rewrite kernel body dependencies to scalars that have been migrated.
+addReadsToKernelBody :: KernelBody GPU -> ReduceM (KernelBody GPU)
+addReadsToKernelBody kbody = do
+  (kbody', prologue) <- addReadsHelper kbody
+  pure kbody' {kernelBodyStms = prologue >< kernelBodyStms kbody'}
+
+-- | Rewrite migrated scalar dependencies within anything. The returned
+-- statements must be added to the scope of the rewritten construct.
+addReadsHelper :: (FreeIn a, Substitute a) => a -> ReduceM (a, Stms GPU)
+addReadsHelper x = do
+  let from = namesToList (freeIn x)
+  (to, st) <- runStateT (mapM rename from) initialRState
+  let rename_map = M.fromList (zip from to)
+  pure (substituteNames rename_map x, rewritePrologue st)
 
 -- | Create a fresh name, registering which name it is a rewrite of.
 rewriteName :: VName -> RewriteM VName
@@ -628,12 +703,17 @@ rewriteName n = do
   modify $ \st -> st {rewriteRenames = IM.insert (baseTag n) n' (rewriteRenames st)}
   pure n'
 
+-- | Rewrite all bindings introduced by a body (to ensure they are unique) and
+-- fix any dependencies that are broken as a result of migration or rewriting.
 rewriteBody :: Body GPU -> RewriteM (Body GPU)
 rewriteBody (Body _ stms res) = do
   stms' <- rewriteStms stms
   res' <- renameResult res
   pure (Body () stms' res')
 
+-- | Rewrite all bindings introduced by a sequence of statements (to ensure they
+-- are unique) and fix any dependencies that are broken as a result of migration
+-- or rewriting.
 rewriteStms :: Stms GPU -> RewriteM (Stms GPU)
 rewriteStms = foldM rewriteTo mempty
   where
@@ -652,7 +732,11 @@ rewriteStms = foldM rewriteTo mempty
       | otherwise =
         out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ SubExp se)
 
--- | NOTE: GPUBody kernels must be rewritten through 'rewriteStms'.
+-- | Rewrite all bindings introduced by a single statement (to ensure they are
+-- unique) and fix any dependencies that are broken as a result of migration or
+-- rewriting.
+--
+-- NOTE: GPUBody kernels must be rewritten through 'rewriteStms'.
 rewriteStm :: Stm GPU -> RewriteM (Stm GPU)
 rewriteStm (Let pat aux e) = do
   e' <- rewriteExp e
@@ -660,20 +744,31 @@ rewriteStm (Let pat aux e) = do
   aux' <- rewriteStmAux aux
   pure (Let pat' aux' e')
 
+-- | Rewrite all bindings introduced by a pattern (to ensure they are unique)
+-- and fix any dependencies that are broken as a result of migration or
+-- rewriting.
 rewritePat :: Pat Type -> RewriteM (Pat Type)
 rewritePat pat = Pat <$> mapM rewritePatElem (patElems pat)
 
+-- | Rewrite the binding introduced by a single pattern element (to ensure it is
+-- unique) and fix any dependencies that are broken as a result of migration or
+-- rewriting.
 rewritePatElem :: PatElem Type -> RewriteM (PatElem Type)
 rewritePatElem (PatElem n t) = do
   n' <- rewriteName n
   t' <- renameType t
   pure (PatElem n' t')
 
+-- | Fix any 'StmAux' certificate references that are broken as a result of
+-- migration or rewriting.
 rewriteStmAux :: StmAux () -> RewriteM (StmAux ())
 rewriteStmAux (StmAux certs attrs _) = do
   certs' <- renameCerts certs
   pure (StmAux certs' attrs ())
 
+-- | Rewrite the bindings introduced by an expression (to ensure they are
+-- unique) and fix any dependencies that are broken as a result of migration or
+-- rewriting.
 rewriteExp :: Exp GPU -> RewriteM (Exp GPU)
 rewriteExp =
   mapExpM $
@@ -689,16 +784,19 @@ rewriteExp =
       }
   where
     -- This indicates that something fundamentally is wrong with the migration
-    -- table produced by the MigrationTable module.
+    -- table produced by the "Futhark.Analysis.MigrationTable" module.
     opError = compilerBugS "Cannot migrate a host-only operation to device."
 
+-- | Rewrite the binding introduced by a single parameter (to ensure it is
+-- unique) and fix any dependencies that are broken as a result of migration or
+-- rewriting.
 rewriteParam :: Param (TypeBase Shape u) -> RewriteM (Param (TypeBase Shape u))
 rewriteParam (Param attrs n t) = do
   n' <- rewriteName n
   t' <- renameType t
   pure (Param attrs n' t')
 
--- | Return the name to use for a rewrite dependency.
+-- | Return the name to use for a rewritten dependency.
 rename :: VName -> RewriteM VName
 rename n = do
   st <- get
@@ -717,26 +815,38 @@ rename n = do
             }
         pure n'
 
+-- | Update the variable names within a 'Result' to account for migration and
+-- rewriting.
 renameResult :: Result -> RewriteM Result
 renameResult = mapM renameSubExpRes
 
+-- | Update the variable names within a 'SubExpRes' to account for migration and
+-- rewriting.
 renameSubExpRes :: SubExpRes -> RewriteM SubExpRes
 renameSubExpRes (SubExpRes certs se) = do
   certs' <- renameCerts certs
   se' <- renameSubExp se
   pure (SubExpRes certs' se')
 
+-- | Update the variable names of certificates to account for migration and
+-- rewriting.
 renameCerts :: Certs -> RewriteM Certs
 renameCerts cs = Certs <$> mapM rename (unCerts cs)
 
+-- | Update any variable name within a 'SubExp' to account for migration and
+-- rewriting.
 renameSubExp :: SubExp -> RewriteM SubExp
 renameSubExp (Var n) = Var <$> rename n
 renameSubExp se = pure se
 
+-- | Update the variable names within a type to account for migration and
+-- rewriting.
 renameType :: TypeBase Shape u -> RewriteM (TypeBase Shape u)
 -- Note: mapOnType also maps the VName token of accumulators
 renameType = mapOnType renameSubExp
 
+-- | Update the variable names within an existential type to account for
+-- migration and rewriting.
 renameExtType :: TypeBase ExtShape u -> RewriteM (TypeBase ExtShape u)
 -- Note: mapOnExtType also maps the VName token of accumulators
 renameExtType = mapOnExtType renameSubExp

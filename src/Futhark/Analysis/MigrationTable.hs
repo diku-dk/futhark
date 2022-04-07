@@ -23,7 +23,7 @@
 --
 -- Blocking scalar writes are reduced by either turning such writes into
 -- asynchronous kernels, as is done with scalar array literals and accumulator
--- updates, or by transforming scalar writing into array copying.
+-- updates, or by transforming host-device writing into device-device copying.
 --
 -- For details on how the graph is constructed and how the vertex cut is found,
 -- see the master thesis "TODO" by Philip Børgesen (2022).
@@ -676,8 +676,8 @@ graphLoop (b : bs) params lform body = do
   -- Connect operands to sinks if they can reach a sink within the loop.
   -- Otherwise connect them to the loop bound variables that they can
   -- reach and exhaust their normal entry edges into the loop.
-  -- This means a read can be delayed through a loop body but not into it
-  -- if that would increase the number of reads done by the body.
+  -- This means a read can be delayed through a loop but not into it if
+  -- that would increase the number of reads done by any given iteration.
   let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
   foldM_ connectOperand rbc (IS.elems ops)
 
