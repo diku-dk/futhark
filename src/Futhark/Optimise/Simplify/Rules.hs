@@ -23,7 +23,7 @@ where
 import Control.Monad
 import Control.Monad.State
 import Data.Either
-import Data.List (find, insert, unzip4, zip4)
+import Data.List (insert, unzip4, zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
@@ -63,17 +63,24 @@ standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
 -- statement and it can be consumed.
 --
 -- This simplistic rule is only valid before we introduce memory.
-removeUnnecessaryCopy :: (BuilderOps rep, Aliased rep) => BottomUpRuleBasicOp rep
+removeUnnecessaryCopy :: BuilderOps rep => BottomUpRuleBasicOp rep
 removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
-    -- This next line is too conservative, but the problem is that 'v'
-    -- might not look like it has been consumed if it is consumed in
-    -- an outer scope.  This is because the simplifier applies
-    -- bottom-up rules in a kind of deepest-first order.
-    not (patElemName d `UT.isInResult` used) || (patElemName d `UT.isConsumed` used),
-    (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
+    -- This two first clauses below are too conservative, but the
+    -- problem is that 'v' might not look like it has been consumed if
+    -- it is consumed in an outer scope.  This is because the
+    -- simplifier applies bottom-up rules in a kind of deepest-first
+    -- order.
+    not (patElemName d `UT.isInResult` used)
+      || patElemName d `UT.isConsumed` used
+      -- Always OK to remove the copy if 'v' has no aliases and is never
+      -- used again.
+      || (v_is_fresh && v_not_used_again),
+    (v_not_used_again && consumable) || not (patElemName d `UT.isConsumed` used) =
       Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where
+    v_not_used_again = not (v `UT.used` used)
+    v_is_fresh = v `ST.lookupAliases` vtable == mempty
     -- We need to make sure we can even consume the original.  The big
     -- missing piece here is that we cannot do copy removal inside of
     -- 'map' and other SOACs, but that is handled by SOAC-specific rules.
@@ -84,9 +91,8 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
     consumableFParam =
       Just . maybe False (unique . declTypeOf) . ST.entryFParam
     consumableStm e = do
-      pat <- stmPat <$> ST.entryStm e
-      pe <- find ((== v) . patElemName) (patElems pat)
-      guard $ aliasesOf pe == mempty
+      void $ ST.entryStm e -- Must be a stm.
+      guard v_is_fresh
       pure True
 removeUnnecessaryCopy _ _ _ _ = Skip
 
