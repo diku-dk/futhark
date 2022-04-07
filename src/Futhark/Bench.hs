@@ -18,6 +18,9 @@ module Futhark.Bench
   )
 where
 
+-- added imports!
+-- for timing
+
 import Control.Applicative
 import Control.Monad.Except
 import qualified Data.Aeson as JSON
@@ -28,11 +31,17 @@ import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
+import Data.Time.Clock
+import qualified Data.Vector.Unboxed as U
 import Futhark.Server
 import Futhark.Test
+import Statistics.Autocorrelation
+import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
+import Statistics.Types
 import System.Exit
 import System.FilePath
 import System.Process.ByteString (readProcessWithExitCode)
+import System.Random.MWC (create)
 import System.Timeout (timeout)
 
 -- | The runtime of a single succesful run.
@@ -139,8 +148,81 @@ data RunOptions = RunOptions
     runVerbose :: Int,
     -- | Invoked for every runtime measured during the run.  Can be
     -- used to provide a progress bar.
-    runResultAction :: Maybe (Int -> IO ())
+    runResultAction :: Maybe ((Int, Maybe Double) -> IO ())
   }
+
+square :: Double -> Double
+square x =
+  x * x
+
+coefficientOfVar :: Sample -> (Double, Double)
+coefficientOfVar vec =
+  let mu = (U.foldl1 (+) vec) / (fromIntegral $ U.length vec) in
+  let std_err = sqrt $ (U.foldl1 (+) $ (U.map (square . (subtract mu)) vec)) / fromIntegral ((U.length vec) - 1)
+       in (std_err / mu, mu)
+
+-- Returns the next run count.
+nextRunCount :: Int -> Double -> Double -> Double -> Int -> Int
+nextRunCount runs rsd acor mu min_runs
+  | runs < min_runs = min_runs - runs    -- Minimum runs specified.
+  | acor > 0.95 && rsd > 0.0007 = div runs 5
+  | acor > 0.85 && rsd > 0.0012 = div runs 5
+  | acor > 0.75 && rsd > 0.0025 = div runs 5
+  | acor > 0.65 && rsd > 0.0055 = div runs 5
+  | rsd > 0.01 = div runs 5
+  | otherwise = 0
+  -- | mu * (fromIntegral runs) > 1.0e7 = 0 -- Time exceeds 10 seconds.
+
+-- Keep on running benchmark until a completion criteria is met.
+runLoop ::
+  ExceptT T.Text IO (RunResult, [T.Text]) ->
+  RunOptions ->
+  [(RunResult, [T.Text])] ->
+  ExceptT T.Text IO [(RunResult, [T.Text])]
+runLoop do_run opts r = do
+  let run_times = U.fromList $ map (fromIntegral . runMicroseconds . fst) r
+
+  g <- create
+  resampled <- liftIO $ resample g [Mean] 3500 run_times
+
+  let (rsd, mu) = coefficientOfVar $ resamples (snd $ head $ resampled)
+  let acor = case autocorrelation run_times of
+        (x, _, _) -> case x U.!? 1 of
+          Just y -> y
+          Nothing -> 1.0
+
+  let actions = do
+        x <- do_run
+        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) (((runMicroseconds . fst) x), Just rsd)
+        pure x
+
+  case nextRunCount (length r) rsd acor mu (runRuns opts) of
+    0 -> pure r
+    x -> do
+      r' <- replicateM x actions
+      runLoop do_run opts (r ++ r')
+
+-- Each benchmark is run for at least 0.5s wallclock time.
+runTimed ::
+  ExceptT T.Text IO (RunResult, [T.Text]) ->
+  RunOptions ->
+  NominalDiffTime ->
+  [(RunResult, [T.Text])] ->
+  ExceptT T.Text IO [(RunResult, [T.Text])]
+runTimed do_run opts elapsed r = do
+  let actions = do
+        x <- do_run
+        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) (((runMicroseconds . fst) x), Nothing)
+        pure x
+
+  before <- liftIO getCurrentTime
+  r' <- replicateM (1 + length r) actions
+  after <- liftIO getCurrentTime
+
+  let elapsed' = elapsed + (diffUTCTime after before)
+  case 0.5 < elapsed' of
+    False -> runTimed do_run opts elapsed' (r ++ r')
+    True -> pure (r ++ r')
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
@@ -156,8 +238,8 @@ benchmarkDataset ::
 benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
   output_types <- cmdEither $ cmdOutputs server entry
   input_types <- cmdEither $ cmdInputs server entry
-  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
-      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
+  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types - 1]]
+      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types - 1]]
 
   cmdMaybe . liftIO $ cmdClear server
 
@@ -171,17 +253,15 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,
           [(x, "")] <- reads $ T.unpack l' =
-          Just x
+            Just x
         | otherwise =
-          Nothing
+            Nothing
 
       doRun = do
         call_lines <- cmdEither (cmdCall server entry outs ins)
         when (any inputConsumed input_types) reloadInput
         case mapMaybe runtime call_lines of
-          [call_runtime] -> do
-            liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) call_runtime
-            return (RunResult call_runtime, call_lines)
+          [call_runtime] -> return (RunResult call_runtime, call_lines)
           [] -> throwError "Could not find runtime in output."
           ls -> throwError $ "Ambiguous runtimes: " <> T.pack (show ls)
 
@@ -189,8 +269,13 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
     -- First one uncounted warmup run.
     void $ cmdEither $ cmdCall server entry outs ins
     freeOuts
-    xs <- replicateM (runRuns opts -1) (doRun <* freeOuts)
+
+    ys <- runTimed (doRun <* freeOuts) opts (fromInteger 0) []
+
+    xs <- runLoop (doRun <* freeOuts) opts ys
+
     y <- doRun
+
     pure $ xs ++ [y]
 
   call_logs <- case maybe_call_logs of
