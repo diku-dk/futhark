@@ -214,7 +214,7 @@ diffBasicOp pat aux e m =
         v_adj_copy <-
           case t of
             Array {} -> letExp "update_val_adj_copy" $ BasicOp $ Copy v_adj
-            _ -> return v_adj
+            _ -> pure v_adj
         updateSubExpAdj v v_adj_copy
         zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v
         void $

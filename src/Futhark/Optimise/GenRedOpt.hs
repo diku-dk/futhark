@@ -50,12 +50,12 @@ optimiseStms :: Env -> Stms GPU -> GenRedM (Stms GPU)
 optimiseStms env stms =
   localScope (scopeOf stms) $ do
     (_, stms') <- foldM foldfun (env, mempty) $ stmsToList stms
-    return stms'
+    pure stms'
   where
     foldfun :: (Env, Stms GPU) -> Stm GPU -> GenRedM (Env, Stms GPU)
     foldfun (e, ss) s = do
       (e', s') <- optimiseStm e s
-      return (e', ss <> s')
+      pure (e', ss <> s')
 
 optimiseStm :: Env -> Stm GPU -> GenRedM (Env, Stms GPU)
 optimiseStm env stm@(Let _ _ (Op (SegOp (SegMap SegThread {} _ _ _)))) = do
@@ -64,11 +64,11 @@ optimiseStm env stm@(Let _ _ (Op (SegOp (SegMap SegThread {} _ _ _)))) = do
         case res_genred_opt of
           Just stms -> stms
           Nothing -> oneStm stm
-  return (env, stms')
+  pure (env, stms')
 optimiseStm env (Let pat aux e) = do
   env' <- changeEnv env (head $ patNames pat) e
   e' <- mapExpM (optimise env') e
-  return (env', oneStm $ Let pat aux e')
+  pure (env', oneStm $ Let pat aux e')
   where
     optimise env' = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody env'}
 
@@ -83,12 +83,12 @@ genRedOpts env ker = do
       helperGenRed res_sgrd
     _ -> helperGenRed res_tile
   where
-    helperGenRed Nothing = return Nothing
+    helperGenRed Nothing = pure Nothing
     helperGenRed (Just (stms_before, ker_snd)) = do
       mb_stms_after <- genRedOpts env ker_snd
       case mb_stms_after of
-        Just stms_after -> return $ Just $ stms_before <> stms_after
-        Nothing -> return $ Just $ stms_before <> oneStm ker_snd
+        Just stms_after -> pure $ Just $ stms_before <> stms_after
+        Nothing -> pure $ Just $ stms_before <> oneStm ker_snd
 
 se1 :: SubExp
 se1 = intConst Int64 1
@@ -177,7 +177,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       let ker2_body = old_kbody {kernelBodyStms = code1 <> code2}
       ker2_exp <- renameExp $ Op (SegOp (SegMap seg_thd seg_space kres_tps ker2_body))
       let ker2 = Let pat_ker aux ker2_exp
-      return $
+      pure $
         Just (code1_tr_host <> host_stms1 <> oneStm ker1, ker2)
   where
     isIndVarToParDim _ (Constant _) _ = False
@@ -218,8 +218,8 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     isDimIdxInvar2 variance gid (DimSlice d1 d2 d3) =
       all (isSeInvar2 variance gid) [d1, d2, d3]
     -- is an entire slice invariant to at least one gid of a parallel dimension
-    isSliceInvar2 variance slc gids =
-      any (\gid -> all (isDimIdxInvar2 variance gid) (unSlice slc)) gids
+    isSliceInvar2 variance slc =
+      any (\gid -> all (isDimIdxInvar2 variance gid) (unSlice slc))
     -- are all statements that touch memory invariant to at least one parallel dimension?
     isTileable :: VName -> [(VName, SubExp)] -> VarianceTable -> VName -> Stm GPU -> Bool
     isTileable seq_gid gid_dims variance acc_nm (Let (Pat [pel]) _ (BasicOp (Index _ slc)))
@@ -237,11 +237,11 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       let acc_deps = M.findWithDefault mempty pat_acc_nm variance
        in any (`nameIn` acc_deps) $ patNames pat
 genRed2Tile2d _ _ =
-  return Nothing
+  pure Nothing
 
 genRed2SegRed :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU, Stm GPU))
 genRed2SegRed _ _ =
-  return Nothing
+  pure Nothing
 
 transposeFVs ::
   Names ->
@@ -252,11 +252,11 @@ transposeFVs ::
 transposeFVs fvs variance gid stms = do
   (tab, stms') <- foldM foldfun (M.empty, mempty) $ stmsToList stms
   let stms_host = M.foldr (\(_, _, s) ss -> ss <> s) mempty tab
-  return (stms', stms_host)
+  pure (stms', stms_host)
   where
     foldfun (tab, all_stms) stm = do
       (tab', stm') <- transposeFV (tab, stm)
-      return (tab', all_stms <> oneStm stm')
+      pure (tab', all_stms <> oneStm stm')
     -- ToDo: currently handles only 2-dim arrays, please generalize
     transposeFV (tab, Let pat aux (BasicOp (Index arr slc)))
       | dims <- unSlice slc,
@@ -274,14 +274,14 @@ transposeFVs fvs variance gid stms = do
           let tab' = M.insert arr (perm, arr_tr, stms_tr) tab
               slc' = Slice $ map (dims !!) perm
               stm' = Let pat aux $ BasicOp $ Index arr_tr slc'
-          return (tab', stm')
+          pure (tab', stm')
       where
         isFixDim DimFix {} = True
         isFixDim _ = False
         depOnGid (DimFix (Var nm)) =
           gid == nm || nameIn gid (M.findWithDefault mempty nm variance)
         depOnGid _ = False
-    transposeFV r = return r
+    transposeFV r = pure r
 
 -- | Tries to identify the following pattern:
 --   code followed by some UpdateAcc-statement

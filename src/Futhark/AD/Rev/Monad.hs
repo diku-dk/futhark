@@ -257,8 +257,8 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
               Array {} -> do
                 v' <- letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
                 addSubstitution v' v
-                return [(v, v')]
-              _ -> return mempty
+                pure [(v, v')]
+              _ -> pure mempty
        in M.fromList . mconcat
             <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
 
