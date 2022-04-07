@@ -363,7 +363,7 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
 
       let vec_runtimes = U.fromList $ map (fromIntegral . runMicroseconds) runtimes
       g <- create
-      resampled <- liftIO $ resample g [Mean] 75000 vec_runtimes
+      resampled <- liftIO $ resample g [Mean] 70000 vec_runtimes
       let bootstrapCI = 
             ((estPoint boot) - (confIntLDX $ estError $ boot),
              (estPoint boot) + (confIntUDX $ estError $ boot))

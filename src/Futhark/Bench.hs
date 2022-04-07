@@ -155,23 +155,22 @@ square :: Double -> Double
 square x =
   x * x
 
-coefficientOfVar :: Sample -> (Double, Double)
-coefficientOfVar vec =
+relativeStdErr :: Sample -> Double
+relativeStdErr vec =
   let mu = (U.foldl1 (+) vec) / (fromIntegral $ U.length vec) in
-  let std_err = sqrt $ (U.foldl1 (+) $ (U.map (square . (subtract mu)) vec)) / fromIntegral ((U.length vec) - 1)
-       in (std_err / mu, mu)
+  let std_err = sqrt $ (U.foldl1 (+) $ (U.map (square . (subtract mu)) vec)) / fromIntegral ((U.length vec) - 1) in 
+      (std_err / mu)
 
 -- Returns the next run count.
-nextRunCount :: Int -> Double -> Double -> Double -> Int -> Int
-nextRunCount runs rsd acor mu min_runs
-  | runs < min_runs = min_runs - runs    -- Minimum runs specified.
-  | acor > 0.95 && rsd > 0.0007 = div runs 5
-  | acor > 0.85 && rsd > 0.0012 = div runs 5
-  | acor > 0.75 && rsd > 0.0025 = div runs 5
-  | acor > 0.65 && rsd > 0.0055 = div runs 5
-  | rsd > 0.01 = div runs 5
+nextRunCount :: Int -> Double -> Double -> Int -> Int
+nextRunCount runs rsd acor min_runs
+  | runs < min_runs = min_runs - runs   -- Minimum runs specified.
+  | acor > 0.92 && rsd > 0.008 = div runs 2
+  | acor > 0.75 && rsd > 0.015 = div runs 2
+  | acor > 0.65 && rsd > 0.025 = div runs 2
+  | acor > 0.45 && rsd > 0.050 = div runs 2
+  | rsd > 0.01 = div runs 2
   | otherwise = 0
-  -- | mu * (fromIntegral runs) > 1.0e7 = 0 -- Time exceeds 10 seconds.
 
 -- Keep on running benchmark until a completion criteria is met.
 runLoop ::
@@ -183,9 +182,9 @@ runLoop do_run opts r = do
   let run_times = U.fromList $ map (fromIntegral . runMicroseconds . fst) r
 
   g <- create
-  resampled <- liftIO $ resample g [Mean] 3500 run_times
+  resampled <- liftIO $ resample g [Mean] 2500 run_times
 
-  let (rsd, mu) = coefficientOfVar $ resamples (snd $ head $ resampled)
+  let rsd = relativeStdErr $ resamples (snd $ head $ resampled)
   let acor = case autocorrelation run_times of
         (x, _, _) -> case x U.!? 1 of
           Just y -> y
@@ -196,7 +195,7 @@ runLoop do_run opts r = do
         liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) (((runMicroseconds . fst) x), Just rsd)
         pure x
 
-  case nextRunCount (length r) rsd acor mu (runRuns opts) of
+  case nextRunCount (length r) rsd acor (runRuns opts) of
     0 -> pure r
     x -> do
       r' <- replicateM x actions
