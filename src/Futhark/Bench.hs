@@ -157,14 +157,14 @@ square x =
 
 relativeStdErr :: Sample -> Double
 relativeStdErr vec =
-  let mu = (U.foldl1 (+) vec) / (fromIntegral $ U.length vec) in
-  let std_err = sqrt $ (U.foldl1 (+) $ (U.map (square . (subtract mu)) vec)) / fromIntegral ((U.length vec) - 1) in 
-      (std_err / mu)
+  let mu = U.foldl1 (+) vec / fromIntegral (U.length vec)
+   in let std_err = sqrt $ U.foldl1 (+) (U.map (square . subtract mu) vec) / fromIntegral (U.length vec - 1)
+       in std_err / mu
 
 -- Returns the next run count.
 nextRunCount :: Int -> Double -> Double -> Int -> Int
 nextRunCount runs rsd acor min_runs
-  | runs < min_runs = min_runs - runs   -- Minimum runs specified.
+  | runs < min_runs = min_runs - runs -- Minimum runs specified.
   | acor > 0.92 && rsd > 0.008 = div runs 2
   | acor > 0.75 && rsd > 0.015 = div runs 2
   | acor > 0.65 && rsd > 0.025 = div runs 2
@@ -184,15 +184,13 @@ runLoop do_run opts r = do
   g <- create
   resampled <- liftIO $ resample g [Mean] 2500 run_times
 
-  let rsd = relativeStdErr $ resamples (snd $ head $ resampled)
+  let rsd = relativeStdErr $ resamples (snd $ head resampled)
   let acor = case autocorrelation run_times of
-        (x, _, _) -> case x U.!? 1 of
-          Just y -> y
-          Nothing -> 1.0
+        (x, _, _) -> fromMaybe 1 (x U.!? 1)
 
   let actions = do
         x <- do_run
-        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) (((runMicroseconds . fst) x), Just rsd)
+        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) ((runMicroseconds . fst) x, Just rsd)
         pure x
 
   case nextRunCount (length r) rsd acor (runRuns opts) of
@@ -211,17 +209,17 @@ runTimed ::
 runTimed do_run opts elapsed r = do
   let actions = do
         x <- do_run
-        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) (((runMicroseconds . fst) x), Nothing)
+        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) ((runMicroseconds . fst) x, Nothing)
         pure x
 
   before <- liftIO getCurrentTime
   r' <- replicateM (1 + length r) actions
   after <- liftIO getCurrentTime
 
-  let elapsed' = elapsed + (diffUTCTime after before)
-  case 0.5 < elapsed' of
-    False -> runTimed do_run opts elapsed' (r ++ r')
-    True -> pure (r ++ r')
+  let elapsed' = elapsed + diffUTCTime after before
+  if 0.5 < elapsed'
+    then pure (r ++ r')
+    else runTimed do_run opts elapsed' (r ++ r')
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
@@ -269,7 +267,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
     void $ cmdEither $ cmdCall server entry outs ins
     freeOuts
 
-    ys <- runTimed (doRun <* freeOuts) opts (fromInteger 0) []
+    ys <- runTimed (doRun <* freeOuts) opts 0 []
 
     xs <- runLoop (doRun <* freeOuts) opts ys
 

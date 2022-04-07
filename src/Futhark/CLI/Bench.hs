@@ -1,19 +1,10 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | @futhark bench@
 module Futhark.CLI.Bench (main) where
 
---added:
-import qualified Data.Vector.Unboxed as U
-import Data.Time.Clock
-import Statistics.Resampling (resample, Estimator(..))
-import Statistics.Resampling.Bootstrap (bootstrapBCA)
-import Statistics.Types
-import System.Random.MWC (create)
 import Control.Arrow (first)
-
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except hiding (throwError)
@@ -27,18 +18,24 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
 import qualified Data.Text as T
+import Data.Time.Clock
+import qualified Data.Vector.Unboxed as U
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal, maxinum, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
+import Statistics.Resampling (Estimator (..), resample)
+import Statistics.Resampling.Bootstrap (bootstrapBCA)
+import Statistics.Types
 import System.Console.ANSI (clearLine)
 import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
+import System.Random.MWC (create)
 import Text.Printf
 import Text.Regex.TDFA
 
@@ -258,40 +255,40 @@ interimResult us_sum i elapsed =
 mkProgressPrompt :: Int -> String -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
 mkProgressPrompt pad_to dataset_desc start_time
   | fancyTerminal = do
-    count <- newIORef (0, 0)
-    spin_count <- newIORef 0
-    let spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-    return $ \(us,rsd) -> do
-      putStr "\r" -- Go to start of line.
-      let p s =
-            putStr $
-              descString (atMostChars 40 dataset_desc) pad_to ++ s
+      count <- newIORef (0, 0)
+      spin_count <- newIORef 0
+      let spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+      pure $ \(us, rsd) -> do
+        putStr "\r" -- Go to start of line.
+        let p s =
+              putStr $
+                descString (atMostChars 40 dataset_desc) pad_to ++ s
 
-      (us_sum, i)  <- readIORef count
-      spin_idx <- readIORef spin_count
+        (us_sum, i) <- readIORef count
+        spin_idx <- readIORef spin_count
 
-      now <- liftIO getCurrentTime
-      let elapsed = realToFrac $ diffUTCTime now start_time
+        now <- liftIO getCurrentTime
+        let elapsed = realToFrac $ diffUTCTime now start_time
 
-      case us of
-        Nothing -> p $ replicate 13 ' ' ++ progressBar i elapsed 0.5 10
-        Just us' -> do 
+        case us of
+          Nothing -> p $ replicate 13 ' ' ++ progressBar i elapsed 0.5 10
+          Just us' -> do
             let us_sum' = us_sum + us'
                 i' = i + 1
             writeIORef count (us_sum', i')
             case rsd of
-              Nothing   -> p $ interimResult us_sum' i' elapsed
-              Just rsd' -> do 
+              Nothing -> p $ interimResult us_sum' i' elapsed
+              Just rsd' -> do
                 let spin_char = spin_load !! spin_idx
-                p $ (printf "%10.0fμs %c RSD of mean: %2.4f  %d" avg spin_char rsd' i')
+                p $ printf "%10.0fμs %c RSD of mean: %2.4f  %d" avg spin_char rsd' i'
                 let spin_count' = (spin_idx + 1) `mod` 10
                 writeIORef spin_count spin_count'
-                where 
+                where
                   avg :: Double
                   avg = fromIntegral us_sum / fromIntegral i
 
-      putStr " " -- Just to move the cursor away from the progress bar.
-      hFlush stdout
+        putStr " " -- Just to move the cursor away from the progress bar.
+        hFlush stdout
   | otherwise = do
       putStr $ descString dataset_desc pad_to
       hFlush stdout
@@ -299,20 +296,18 @@ mkProgressPrompt pad_to dataset_desc start_time
 
 reportResult :: [RunResult] -> (Double, Double) -> IO ()
 reportResult results bootstrapCI = do
-  let p = 
-        printf
+  let runtimes = map (fromIntegral . runMicroseconds) results
+      avg = sum runtimes / fromIntegral (length runtimes) :: Double
+  putStrLn $
+    uncurry
+      ( printf
           "%10.0fμs (95%%-CI: [%10.1f, %10.1f]; min: %3.0f%%; max: %+3.0f%%)"
           avg
-          (fst bootstrapCI)
-          (snd bootstrapCI)
-          ((minimum runtimes / avg - 1) * 100)
-          ((maxinum runtimes / avg - 1) * 100)
-        where
-          runtimes = map (fromIntegral . runMicroseconds) results
-          avg = sum runtimes / fromIntegral (length runtimes) :: Double
-          --rsd = stddevp runtimes / mean runtimes :: Double
-
-  putStrLn p
+      )
+      bootstrapCI
+      bootstrapCI
+      ((minimum runtimes / avg - 1) * 100)
+      ((maxinum runtimes / avg - 1) * 100)
 
 runBenchmarkCase ::
   Server ->
@@ -334,12 +329,12 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
 
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
-  prompt (Nothing , Nothing)
+  prompt (Nothing, Nothing)
 
   res <-
     benchmarkDataset
       server
-      (runOptions (prompt . (first Just)) opts)
+      (runOptions (prompt . first Just) opts)
       futhark
       program
       entry
@@ -364,9 +359,10 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
       let vec_runtimes = U.fromList $ map (fromIntegral . runMicroseconds) runtimes
       g <- create
       resampled <- liftIO $ resample g [Mean] 70000 vec_runtimes
-      let bootstrapCI = 
-            ((estPoint boot) - (confIntLDX $ estError $ boot),
-             (estPoint boot) + (confIntUDX $ estError $ boot))
+      let bootstrapCI =
+            ( estPoint boot - confIntLDX (estError boot),
+              estPoint boot + confIntUDX (estError boot)
+            )
             where
               boot = head $ bootstrapBCA cl95 vec_runtimes resampled
 
@@ -567,21 +563,21 @@ main = mainWithOptions initialBenchOptions commandLineOptions "options... progra
 --- https://hackage.haskell.org/package/hstats-0.3
 
 -- | Numerically stable mean
---mean :: Floating a => [a] -> a
---mean x = fst $ foldl' (\(!m, !n) x' -> (m + (x' - m) / (n + 1), n + 1)) (0, 0) x
+-- mean :: Floating a => [a] -> a
+-- mean x = fst $ foldl' (\(!m, !n) x' -> (m + (x' - m) / (n + 1), n + 1)) (0, 0) x
 
 ---- | Standard deviation of population
---stddevp :: (Floating a) => [a] -> a
---stddevp xs = sqrt $ pvar xs
+-- stddevp :: (Floating a) => [a] -> a
+-- stddevp xs = sqrt $ pvar xs
 
 ---- | Population variance
---pvar :: (Floating a) => [a] -> a
---pvar xs = centralMoment xs (2 :: Int)
+-- pvar :: (Floating a) => [a] -> a
+-- pvar xs = centralMoment xs (2 :: Int)
 
 ---- | Central moments
---centralMoment :: (Floating b, Integral t) => [b] -> t -> b
---centralMoment _ 1 = 0
---centralMoment xs r = sum (map (\x -> (x - m) ^ r) xs) / n
-  --where
-    --m = mean xs
-    --n = fromIntegral $ length xs
+-- centralMoment :: (Floating b, Integral t) => [b] -> t -> b
+-- centralMoment _ 1 = 0
+-- centralMoment xs r = sum (map (\x -> (x - m) ^ r) xs) / n
+-- where
+-- m = mean xs
+-- n = fromIntegral $ length xs
