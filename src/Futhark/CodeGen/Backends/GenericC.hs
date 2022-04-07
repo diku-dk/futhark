@@ -1757,6 +1757,7 @@ typedef unsigned int8 uint8_t;
 $errorsH
 
 #define INFINITY (floatbits((uniform int)0x7f800000))
+#define NAN (floatbits((uniform int)0x7fc00000))
 #define fabs(x) abs(x)
 #define FUTHARK_F64_ENABLED
 $cScalarDefs

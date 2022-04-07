@@ -3,6 +3,7 @@
 -- input { [1.0, 4.0] }
 -- output { [1f64, 6f64] }
 
+-- ==
 -- entry: gamma32
 -- input { [1f32, 4f32] }
 -- output { [1f32, 6f32] }
