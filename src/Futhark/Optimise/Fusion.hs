@@ -63,7 +63,21 @@ redInput :: [Reduce rep] -> Int
 redInput l = flip div 2 $ sum (map (length . lambdaParams . redLambda) l)
 
 
+doFuseScans :: FusionEnvM a -> FusionEnvM a
+doFuseScans m = do
+  fs <- gets fuseScans
+  modify (\s -> s {fuseScans = True})
+  r <- m
+  modify (\s -> s {fuseScans = fs})
+  return r
 
+dontFuseScans :: FusionEnvM a -> FusionEnvM a
+dontFuseScans m = do
+  fs <- gets fuseScans
+  modify (\s -> s {fuseScans = False})
+  r <- m
+  modify (\s -> s {fuseScans = fs})
+  return r
 
 
 
@@ -487,24 +501,26 @@ fuseStms edgs infusible s1 s2 =
           ( Futhark.Screma s_exp1 i1 sform1,
             Futhark.Screma s_exp2 i2 sform2)
               | Just _ <- isScanomapSOAC sform1,
-                L.null infusible, s_exp1 == s_exp2, any isScanRed edgs
+                s_exp1 == s_exp2, any isScanRed edgs
               -> do
-                mstream1 <- soacToStream soac1
-                mstream2 <- soacToStream soac2
-                case (mstream1, mstream2) of
-                  (Just (stream1, is_extra_1), Just (stream2, is_extra_2)) -> do
-                    is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
-                    is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                    fuseStms [] []
-                      (Let (basicPat is_extra_1' <> pats1) aux1 (Op stream1))
-                      (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
-                  _ -> return Nothing
+                doFusion <- gets fuseScans
+                if not doFusion then return Nothing else do
+                  mstream1 <- soacToStream soac1
+                  mstream2 <- soacToStream soac2
+                  case (mstream1, mstream2) of
+                    (Just (stream1, is_extra_1), Just (stream2, is_extra_2)) -> do
+                      is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
+                      is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+                      fuseStms edgs infusible
+                        (Let (basicPat is_extra_1' <> pats1) aux1 (Op stream1))
+                        (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
+                    _ -> return Nothing
           ( Futhark.Stream s_exp1 i1 sform1 nes1 lam1,
             Futhark.Stream s_exp2 i2 sform2 nes2 lam2)
             | getStreamOrder sform1 /= getStreamOrder sform2 ->
               let s1' = toSeqStream soac1 in
               let s2' = toSeqStream soac2 in
-              fuseStms [] infusible
+              fuseStms edgs infusible
                 (Let pats1 aux1 (Op s1'))
                 (Let pats2 aux2 (Op s2'))
           ( Futhark.Stream s_exp1 i1 sform1 nes1 lam1,
@@ -763,20 +779,26 @@ runInnerFusionOnContext :: DepContext -> FusionEnvM DepContext
 runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
   SNode (Let pats aux (If size_exp b1 b2 branchType )) _ ->
     do
-      b1_new <- doFusionInner b1 []
-      b2_new <- doFusionInner b2 []
+      b1_new <- doFuseScans $ doFusionInner b1 []
+      b2_new <- doFuseScans $ doFusionInner b2 []
       return (incomming, node, SNode (Let pats aux (If size_exp b1_new b2_new branchType)) mempty, outgoing)
   SNode (Let pats aux (DoLoop params form body)) _ ->
     do
+
       oldScope <- gets scope
       modify (\s -> s {scope = M.union (scopeOfFParams (map fst params)) oldScope})
-      b_new <- doFusionInner body (map (paramName . fst) params)
+      b_new <- doFuseScans $ doFusionInner body (map (paramName . fst) params)
       return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
   SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm [] [] lambda)))) _ ->
     do
-      newbody <- doFusionInner (lambdaBody lambda) []
+      newbody <- doFuseScans $ doFusionInner (lambdaBody lambda) []
       let newLam = lambda {lambdaBody = newbody}
       let nodeNew = SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm [] [] newLam)))) mempty
+      pure (incomming, node, nodeNew, outgoing)
+  SNode (Let pats aux (Op (Futhark.Stream sz is form nes lam))) _ -> do
+      newbody <- dontFuseScans $ doFusionInner (lambdaBody lam) []
+      let newLam = lam {lambdaBody = newbody}
+      let nodeNew = SNode(Let pats aux (Op (Futhark.Stream sz is form nes newLam)))mempty
       pure (incomming, node, nodeNew, outgoing)
   _ -> return c
   where

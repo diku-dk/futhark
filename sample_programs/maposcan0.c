@@ -4389,9 +4389,9 @@ int futhark_context_clear_caches(struct futhark_context *ctx)
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_4709,
-                             struct memblock *mem_out_p_4710,
-                             struct memblock arr_mem_4665,
+                             struct memblock *mem_out_p_4755,
+                             struct memblock *mem_out_p_4756,
+                             struct memblock arr_mem_4711,
                              int64_t dz2080U_4619);
 
 static int init_constants(struct futhark_context *ctx)
@@ -4484,111 +4484,104 @@ const int64_t *futhark_shape_f64_1d(struct futhark_context *ctx,
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             struct memblock *mem_out_p_4709,
-                             struct memblock *mem_out_p_4710,
-                             struct memblock arr_mem_4665, int64_t dz2080U_4619)
+                             struct memblock *mem_out_p_4755,
+                             struct memblock *mem_out_p_4756,
+                             struct memblock arr_mem_4711, int64_t dz2080U_4619)
 {
     (void) ctx;
     
     int err = 0;
-    size_t mem_4668_cached_sizze_4711 = 0;
-    unsigned char *mem_4668 = NULL;
-    size_t mem_4683_cached_sizze_4712 = 0;
-    unsigned char *mem_4683 = NULL;
-    struct memblock mem_4702;
+    size_t mem_4714_cached_sizze_4757 = 0;
+    unsigned char *mem_4714 = NULL;
+    size_t mem_4717_cached_sizze_4758 = 0;
+    unsigned char *mem_4717 = NULL;
+    struct memblock mem_4748;
     
-    mem_4702.references = NULL;
+    mem_4748.references = NULL;
     
-    struct memblock mem_4698;
+    struct memblock mem_4744;
     
-    mem_4698.references = NULL;
+    mem_4744.references = NULL;
     
-    struct memblock mem_out_4705;
+    struct memblock mem_out_4751;
     
-    mem_out_4705.references = NULL;
+    mem_out_4751.references = NULL;
     
-    struct memblock mem_out_4704;
+    struct memblock mem_out_4750;
     
-    mem_out_4704.references = NULL;
+    mem_out_4750.references = NULL;
     
-    int64_t binop_y_4666 = (int64_t) 8 * dz2080U_4619;
-    int64_t bytes_4667 = smax64((int64_t) 0, binop_y_4666);
+    int64_t binop_y_4712 = (int64_t) 8 * dz2080U_4619;
+    int64_t bytes_4713 = smax64((int64_t) 0, binop_y_4712);
     
-    if (mem_4668_cached_sizze_4711 < bytes_4667) {
-        err = lexical_realloc(&ctx->error, &mem_4668,
-                              &mem_4668_cached_sizze_4711, bytes_4667);
+    if (mem_4714_cached_sizze_4757 < bytes_4713) {
+        err = lexical_realloc(&ctx->error, &mem_4714,
+                              &mem_4714_cached_sizze_4757, bytes_4713);
+        if (err != FUTHARK_SUCCESS)
+            goto cleanup;
+    }
+    if (mem_4717_cached_sizze_4758 < bytes_4713) {
+        err = lexical_realloc(&ctx->error, &mem_4717,
+                              &mem_4717_cached_sizze_4758, bytes_4713);
         if (err != FUTHARK_SUCCESS)
             goto cleanup;
     }
     
-    double discard_4660;
-    double scanacc_4656 = 0.0;
+    double unused_4674;
+    double inpacc_4663 = 0.0;
     
-    for (int64_t i_4658 = 0; i_4658 < dz2080U_4619; i_4658++) {
-        double x_4651;
+    for (int64_t i_4692 = 0; i_4692 < dz2080U_4619; i_4692++) {
+        double x_4698;
         
-        x_4651 = ((double *) arr_mem_4665.mem)[i_4658];
+        x_4698 = ((double *) arr_mem_4711.mem)[i_4692];
         
-        double defunc_1_op_res_4650 = x_4651 + scanacc_4656;
+        double defunc_1_op_res_4707 = inpacc_4663 + x_4698;
+        double defunc_0_f_res_4708 = 2.0 * defunc_1_op_res_4707;
         
-        ((double *) mem_4668)[i_4658] = defunc_1_op_res_4650;
+        ((double *) mem_4714)[i_4692] = defunc_1_op_res_4707;
+        ((double *) mem_4717)[i_4692] = defunc_0_f_res_4708;
         
-        double scanacc_tmp_4706 = defunc_1_op_res_4650;
+        double inpacc_tmp_4752 = defunc_1_op_res_4707;
         
-        scanacc_4656 = scanacc_tmp_4706;
+        inpacc_4663 = inpacc_tmp_4752;
     }
-    discard_4660 = scanacc_4656;
-    if (mem_4683_cached_sizze_4712 < bytes_4667) {
-        err = lexical_realloc(&ctx->error, &mem_4683,
-                              &mem_4683_cached_sizze_4712, bytes_4667);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t i_4663 = 0; i_4663 < dz2080U_4619; i_4663++) {
-        double x_4653;
-        
-        x_4653 = ((double *) mem_4668)[i_4663];
-        
-        double defunc_0_f_res_4654 = 2.0 * x_4653;
-        
-        ((double *) mem_4683)[i_4663] = defunc_0_f_res_4654;
-    }
-    if (memblock_alloc(ctx, &mem_4698, bytes_4667, "mem_4698")) {
+    unused_4674 = inpacc_4663;
+    if (memblock_alloc(ctx, &mem_4744, bytes_4713, "mem_4744")) {
         err = 1;
         goto cleanup;
     }
     if (dz2080U_4619 * (int64_t) 8 > 0)
-        memmove(mem_4698.mem + (int64_t) 0, mem_4668 + (int64_t) 0,
+        memmove(mem_4744.mem + (int64_t) 0, mem_4714 + (int64_t) 0,
                 dz2080U_4619 * (int64_t) 8);
-    if (memblock_alloc(ctx, &mem_4702, bytes_4667, "mem_4702")) {
+    if (memblock_alloc(ctx, &mem_4748, bytes_4713, "mem_4748")) {
         err = 1;
         goto cleanup;
     }
     if (dz2080U_4619 * (int64_t) 8 > 0)
-        memmove(mem_4702.mem + (int64_t) 0, mem_4683 + (int64_t) 0,
+        memmove(mem_4748.mem + (int64_t) 0, mem_4717 + (int64_t) 0,
                 dz2080U_4619 * (int64_t) 8);
-    if (memblock_set(ctx, &mem_out_4704, &mem_4698, "mem_4698") != 0)
+    if (memblock_set(ctx, &mem_out_4750, &mem_4744, "mem_4744") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_4705, &mem_4702, "mem_4702") != 0)
+    if (memblock_set(ctx, &mem_out_4751, &mem_4748, "mem_4748") != 0)
         return 1;
-    (*mem_out_p_4709).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_4709, &mem_out_4704, "mem_out_4704") != 0)
+    (*mem_out_p_4755).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_4755, &mem_out_4750, "mem_out_4750") != 0)
         return 1;
-    (*mem_out_p_4710).references = NULL;
-    if (memblock_set(ctx, &*mem_out_p_4710, &mem_out_4705, "mem_out_4705") != 0)
+    (*mem_out_p_4756).references = NULL;
+    if (memblock_set(ctx, &*mem_out_p_4756, &mem_out_4751, "mem_out_4751") != 0)
         return 1;
     
   cleanup:
     {
-        free(mem_4668);
-        free(mem_4683);
-        if (memblock_unref(ctx, &mem_4702, "mem_4702") != 0)
+        free(mem_4714);
+        free(mem_4717);
+        if (memblock_unref(ctx, &mem_4748, "mem_4748") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_4698, "mem_4698") != 0)
+        if (memblock_unref(ctx, &mem_4744, "mem_4744") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_4705, "mem_out_4705") != 0)
+        if (memblock_unref(ctx, &mem_out_4751, "mem_out_4751") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_4704, "mem_out_4704") != 0)
+        if (memblock_unref(ctx, &mem_out_4750, "mem_out_4750") != 0)
             return 1;
     }
     return err;
@@ -4604,18 +4597,18 @@ int futhark_entry_main(struct futhark_context *ctx,
     
     lock_lock(&ctx->lock);
     
-    struct memblock mem_out_4705;
+    struct memblock mem_out_4751;
     
-    mem_out_4705.references = NULL;
+    mem_out_4751.references = NULL;
     
-    struct memblock mem_out_4704;
+    struct memblock mem_out_4750;
     
-    mem_out_4704.references = NULL;
+    mem_out_4750.references = NULL;
     
-    struct memblock arr_mem_4665;
+    struct memblock arr_mem_4711;
     
-    arr_mem_4665.references = NULL;
-    arr_mem_4665 = in0->mem;
+    arr_mem_4711.references = NULL;
+    arr_mem_4711 = in0->mem;
     dz2080U_4619 = in0->shape[0];
     if (!(dz2080U_4619 == in0->shape[0])) {
         ret = 1;
@@ -4624,18 +4617,18 @@ int futhark_entry_main(struct futhark_context *ctx,
                 msgprintf("Error: entry point arguments have invalid sizes.\n");
     }
     if (ret == 0) {
-        ret = futrts_entry_main(ctx, &mem_out_4704, &mem_out_4705, arr_mem_4665,
+        ret = futrts_entry_main(ctx, &mem_out_4750, &mem_out_4751, arr_mem_4711,
                                 dz2080U_4619);
         if (ret == 0) {
             assert((*out0 =
                     (struct futhark_f64_1d *) malloc(sizeof(struct futhark_f64_1d))) !=
                 NULL);
-            (*out0)->mem = mem_out_4704;
+            (*out0)->mem = mem_out_4750;
             (*out0)->shape[0] = dz2080U_4619;
             assert((*out1 =
                     (struct futhark_f64_1d *) malloc(sizeof(struct futhark_f64_1d))) !=
                 NULL);
-            (*out1)->mem = mem_out_4705;
+            (*out1)->mem = mem_out_4751;
             (*out1)->shape[0] = dz2080U_4619;
         }
     }

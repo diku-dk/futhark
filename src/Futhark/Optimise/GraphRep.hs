@@ -100,11 +100,15 @@ data FusionEnv = FusionEnv
     vNameSource :: VNameSource,
     scope :: Scope SOACS,
     --reachabilityG :: G.Gr () (),
-    producerMapping :: M.Map VName Node
+    producerMapping :: M.Map VName Node,
+    fuseScans :: Bool
   }
 
 freshFusionEnv :: Scope SOACS -> FusionEnv
-freshFusionEnv stms_scope = FusionEnv {vNameSource = blankNameSource, scope = stms_scope, producerMapping = M.empty}
+freshFusionEnv stms_scope = FusionEnv {vNameSource = blankNameSource,
+                                       scope = stms_scope,
+                                       producerMapping = M.empty,
+                                       fuseScans = True}
 
 newtype FusionEnvM a = FusionEnvM (State FusionEnv a)
   deriving
