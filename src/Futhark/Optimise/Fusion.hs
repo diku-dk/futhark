@@ -624,48 +624,81 @@ resFromLambda =  bodyResult . lambdaBody
 
 hFuseStms :: Stm SOACS -> Stm SOACS -> FusionEnvM (Maybe (Stm SOACS))
 hFuseStms s1 s2 = case (s1, s2) of
-  (Let pats1 _ (Op Futhark.Screma {}),
-   Let _     _ (Op Futhark.Screma {})) -> fuseStms [] (patNames pats1) s1 s2
-  (Let pats1 aux1 (Op (Futhark.Scatter s_exp1 i1 lam_1 outputs1)),
-   Let pats2 aux2 (Op (Futhark.Scatter s_exp2 i2 lam_2 outputs2)))
-   | s_exp1 == s_exp2 ->
-     pure $ Just $ Let pats aux (Op (Futhark.Scatter s_exp2 fused_inputs lam outputs))
-      where
-        pats = pats1 <> pats2
-        aux = aux1 <> aux2
-        outputs = outputs1 <> outputs2
-        --o1 = patNames pats1
+  (Let pats1 aux1 (Op soac1),
+   Let pats2 aux2 (Op soac2)) -> case (soac1, soac2) of
+      ( Futhark.Screma {},
+        Futhark.Screma {}) -> fuseStms [] (patNames pats1) s1 s2
+      ( Futhark.Scatter s_exp1 i1 lam_1 outputs1,
+        Futhark.Scatter s_exp2 i2 lam_2 outputs2)
+        | s_exp1 == s_exp2 ->
+          pure $ Just $ Let pats aux (Op (Futhark.Scatter s_exp2 fused_inputs lam outputs))
+            where
+              pats = pats1 <> pats2
+              aux = aux1 <> aux2
+              outputs = outputs1 <> outputs2
+              --o1 = patNames pats1
 
-        (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
-        (lam_1_output, lam_2_output) = mapT resFromLambda (lam_1, lam_2)
+              (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
+              (lam_1_output, lam_2_output) = mapT resFromLambda (lam_1, lam_2)
 
-        fused_inputs = fuseInputs2 [] i1 i2
-        fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
+              fused_inputs = fuseInputs2 [] i1 i2
+              fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
 
-        map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
-        map4 = makeMap fused_inputs fused_inputs_inner
-        map3 = fuseMaps map1 map4
+              map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
+              map4 = makeMap fused_inputs fused_inputs_inner
+              map3 = fuseMaps map1 map4
 
-        lam' = fuseLambda lam_1 lam_2
+              lam' = fuseLambda lam_1 lam_2
 
-        lparams = changeAll (i1 ++ i2)
-          (lambdaParams lam_1 ++ lambdaParams lam_2)
-          fused_inputs
+              lparams = changeAll (i1 ++ i2)
+                (lambdaParams lam_1 ++ lambdaParams lam_2)
+                fused_inputs
 
-        (types1, types2) = mapT lambdaReturnType (lam_1, lam_2)
-        (res1, res2) = mapT resFromLambda (lam_1, lam_2)
+              (types1, types2) = mapT lambdaReturnType (lam_1, lam_2)
+              (res1, res2) = mapT resFromLambda (lam_1, lam_2)
 
-        (ids1, vals1) = splitScatterResults outputs1 (zip3 types1 res1 lam_1_output)
-        (ids2, vals2) = splitScatterResults outputs2 (zip3 types2 res2 lam_2_output)
-        (types, res, _) = unzip3 $ ids1 ++ ids2 ++ vals1 ++ vals2
+              (ids1, vals1) = splitScatterResults outputs1 (zip3 types1 res1 lam_1_output)
+              (ids2, vals2) = splitScatterResults outputs2 (zip3 types2 res2 lam_2_output)
+              (types, res, _) = unzip3 $ ids1 ++ ids2 ++ vals1 ++ vals2
 
-        lam = substituteNames map3 $ lam' {
-          lambdaParams = lparams,
-          lambdaReturnType = types,
-          lambdaBody = (lambdaBody lam') {bodyResult = res}
-          }
-
+              lam = substituteNames map3 $ lam' {
+                lambdaParams = lparams,
+                lambdaReturnType = types,
+                lambdaBody = (lambdaBody lam') {bodyResult = res}
+                }
+      ( Futhark.Hist s_exp1 i1 ops_1 lam_1,
+        Futhark.Hist s_exp2 i2 ops_2 lam_2) -- pretty much copied too
+        | s_exp1 == s_exp2 -> do
+          let num_buckets_2 = length ops_2
+          let num_buckets_1 = length ops_1
+          let (body_2, body_1) = (lambdaBody lam_2, lambdaBody lam_1)
+          let body' =
+                Body
+                  { bodyDec = bodyDec body_1, -- body_p and body_c have the same decorations
+                    bodyStms = bodyStms body_2 <> bodyStms body_1,
+                    bodyResult =
+                      take num_buckets_1 (bodyResult body_1)
+                        ++ take num_buckets_2 (bodyResult body_2)
+                        ++ drop num_buckets_1 (bodyResult body_1)
+                        ++ drop num_buckets_2 (bodyResult body_2)
+                  }
+          let lam' = Lambda
+                  { lambdaParams = lambdaParams lam_1 ++ lambdaParams lam_2,
+                    lambdaBody = body',
+                    lambdaReturnType =
+                      replicate (num_buckets_1 + num_buckets_2) (Prim int64)
+                        ++ drop num_buckets_1 (lambdaReturnType lam_1)
+                        ++ drop num_buckets_2 (lambdaReturnType lam_2)
+                  }
+            -- success (outNames ker ++ returned_outvars) $
+          return $ Just $ Let (pats1 <> pats2) (aux1 <> aux2) (Op (Futhark.Hist s_exp1 (i1 <> i2) (ops_1 <> ops_2) lam'))
+      _ -> pure Nothing
   _ -> pure Nothing
+
+
+
+
+
 
 
 
@@ -855,20 +888,20 @@ makeCopiesOfConsAliased = mapAcross copyAlised
 -- need new Cons-edges + fake edges
 --
 
-testingTurnToStream :: DepGraphAug
-testingTurnToStream = mapAcross toStream
-  where
-    toStream :: DepContext -> FusionEnvM DepContext
-    toStream ctx@(incoming, n, nodeT, outputs) = case nodeT of
-      SNode (Let inputs sz (Op soac)) at -> do
-        res <- soacToStream soac
-        case res of
-          Nothing -> pure ctx
-          Just (stream, extra_inputs) -> do
-            new_extra_inputs <- mapM (newIdent "unused" . identType) extra_inputs
-            let nodeT2 = SNode (Let (basicPat new_extra_inputs <> inputs) sz (Op stream)) at
-            pure (incoming, n, nodeT2, outputs)
-      _ -> pure ctx
+-- testingTurnToStream :: DepGraphAug
+-- testingTurnToStream = mapAcross toStream
+--   where
+--     toStream :: DepContext -> FusionEnvM DepContext
+--     toStream ctx@(incoming, n, nodeT, outputs) = case nodeT of
+--       SNode (Let inputs sz (Op soac)) at -> do
+--         res <- soacToStream soac
+--         case res of
+--           Nothing -> pure ctx
+--           Just (stream, extra_inputs) -> do
+--             new_extra_inputs <- mapM (newIdent "unused" . identType) extra_inputs
+--             let nodeT2 = SNode (Let (basicPat new_extra_inputs <> inputs) sz (Op stream)) at
+--             pure (incoming, n, nodeT2, outputs)
+--       _ -> pure ctx
 
 
 -- this code is pretty much copied - no clue what streams are/do
