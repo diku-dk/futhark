@@ -1,5 +1,5 @@
 -- Test comparison of boolean values.
---
+
 -- ==
 -- entry: lt
 -- input { [false, false, true, true ] [false, true, false, true] }
