@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Sun Haoran has implemented unnamed typed holes, with syntax `???`.
+
+* Sun Haoran has implemented the beginnings of a language server:
+  `futhark lsp`.  A VSCode language extension is available on the
+  marketplace, but the language server should work with any editor.
+
+* Crucial new command: `futhark thanks`.
+
+* The GPU backends now support a caching mechanism for JIT-compiled
+  code, significantly improving startup times.  Use the
+  `futhark_context_config_set_cache_file()` in the C API, or the
+  `--cache-file` option on executables.  These also work for the
+  non-GPU backends, but currently have no effect.  (#1614)
+
 ### Removed
 
 ### Changed
@@ -20,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Missing alias checking for a simplification rule related to in-place
   updates (#1615).
+
+* Incorrect code generation for certain copies of transposed arrays
+  (#1627).
 
 ## [0.21.8]
 

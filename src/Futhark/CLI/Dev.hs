@@ -195,7 +195,7 @@ kernelsMemProg ::
   UntypedPassState ->
   FutharkM (Prog GPUMem.GPUMem)
 kernelsMemProg _ (GPUMem prog) =
-  return prog
+  pure prog
 kernelsMemProg name rep =
   externalErrorS $
     "Pass " ++ name
@@ -204,7 +204,7 @@ kernelsMemProg name rep =
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
-  return prog
+  pure prog
 soacsProg name rep =
   externalErrorS $
     "Pass " ++ name
@@ -213,7 +213,7 @@ soacsProg name rep =
 
 kernelsProg :: String -> UntypedPassState -> FutharkM (Prog GPU.GPU)
 kernelsProg _ (GPU prog) =
-  return prog
+  pure prog
 kernelsProg name rep =
   externalErrorS $
     "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
@@ -636,7 +636,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
           Left err -> do
             dumpError (futharkConfig config) err
             exitWith $ ExitFailure 2
-          Right () -> return ()
+          Right () -> pure ()
     compile _ _ =
       Nothing
     m file config = do

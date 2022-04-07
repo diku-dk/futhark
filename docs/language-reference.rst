@@ -225,7 +225,7 @@ declaration can only refer to names bound by preceding declarations.
       : | "open" `mod_exp`
       : | "import" `stringlit`
       : | "local" `dec`
-      : | "#[" attr "]" dec
+      : | "#[" `attr` "]" `dec`
 
 Any names defined by a declaration inside a module are by default
 visible to users of that module (see :ref:`module-system`).
@@ -435,7 +435,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` ")" ("." `fieldid`)*
        : | "(" `exp` ("," `exp`)* ")"
        : | "{" "}"
-       : | "{" field ("," `field`)* "}"
+       : | "{" `field` ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | `quals` "." "(" `exp` ")"
@@ -446,6 +446,7 @@ literals and variables, but also more complicated forms.
        : | "(" `qualbinop` `exp` ")"
        : | "(" ( "." `field` )+ ")"
        : | "(" "." "[" `index` ("," `index`)* "]" ")"
+       : | "???"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -462,7 +463,7 @@ literals and variables, but also more complicated forms.
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
-      : | "loop" `pat` [("=" `exp`)] `loopform` "do" `exp`
+      : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
@@ -474,7 +475,7 @@ literals and variables, but also more complicated forms.
    size : "[" `id` "]"
    pat:   `id`
       : | `pat_literal`
-      : |  "_"
+      : | "_"
       : | "(" ")"
       : | "(" `pat` ")"
       : | "(" `pat` ("," `pat`)+ ")"
@@ -609,6 +610,14 @@ Evaluates to an empty tuple.
 .........
 
 Evaluates to the result of ``e``.
+
+``???``
+.......
+
+A *typed hole*, usable as a placeholder expression.  The type checker
+will infer any necessary type for this expression.  This can sometimes
+result in an ambiguous type, which can be resolved using a type
+ascription.  Evaluating a typed hole results in a run-time error.
 
 ``(e1, e2, ..., eN)``
 .....................
@@ -1462,7 +1471,7 @@ Modules
 -------
 
 .. productionlist::
-   mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
+   mod_bind: "module" `id` `mod_param`* "=" [":" `mod_type_exp`] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
    mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
 
@@ -1582,7 +1591,7 @@ Module Type Expressions
        : | ("type" | "type^" | "type~") `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
-       : | "#[" attr "]" spec
+       : | "#[" `attr` "]" `spec`
 
 Module types classify modules, with the only (unimportant) difference
 in expressivity being that modules can contain module types, but

@@ -130,7 +130,7 @@ buildFGstm (Let _ _ (Op op)) = execWriter $ mapSOACM folder op
       identitySOACMapper
         { mapOnSOACLambda = \lam -> do
             tell $ buildFGBody $ lambdaBody lam
-            return lam
+            pure lam
         }
 buildFGstm (Let _ _ e) = execWriter $ mapExpM folder e
   where
@@ -138,7 +138,7 @@ buildFGstm (Let _ _ e) = execWriter $ mapExpM folder e
       identityMapper
         { mapOnBody = \_ body -> do
             tell $ buildFGBody body
-            return body
+            pure body
         }
 
 -- | The set of all functions that are called noinline somewhere, or
@@ -158,13 +158,13 @@ findNoninlined prog =
           identityMapper
             { mapOnBody = \_ body -> do
                 tell $ foldMap onStm $ bodyStms body
-                return body,
+                pure body,
               mapOnOp =
                 mapSOACM
                   identitySOACMapper
                     { mapOnSOACLambda = \lam -> do
                         tell $ foldMap onStm $ bodyStms $ lambdaBody lam
-                        return lam
+                        pure lam
                     }
             }
 

@@ -12,14 +12,16 @@ pkgs.stdenv.mkDerivation {
     pkgs.git
     pkgs.git-annex
     pkgs.ghc
+    pkgs.parallel
     pkgs.haskellPackages.weeder
+    pkgs.haskellPackages.apply-refact
     pkgs.hlint
     pkgs.pkgconfig
     pkgs.zlib
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
-    pkgs.haskell.packages.ghc921.ormolu_0_4_0_0
+    pkgs.haskell.packages.ghc922.ormolu_0_4_0_0
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl

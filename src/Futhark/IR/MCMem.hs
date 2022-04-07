@@ -38,7 +38,7 @@ instance RepTypes MCMem where
   type Op MCMem = MemOp (MCOp MCMem ())
 
 instance ASTRep MCMem where
-  expTypesFromPat = return . map snd . bodyReturnsFromPat
+  expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
 instance OpReturns (MCOp MCMem ()) where
   opReturns (ParOp _ op) = segOpReturns op
@@ -63,20 +63,20 @@ instance TC.Checkable MCMem where
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
-  primFParam name t = return $ Param mempty name (MemPrim t)
+  primFParam name t = pure $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem
 
 instance BuilderOps MCMem where
-  mkExpDecB _ _ = return ()
-  mkBodyB stms res = return $ Body () stms res
+  mkExpDecB _ _ = pure ()
+  mkBodyB stms res = pure $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
 instance BuilderOps (Engine.Wise MCMem) where
-  mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
-  mkBodyB stms res = return $ Engine.mkWiseBody () stms res
+  mkExpDecB pat e = pure $ Engine.mkWiseExpDec pat () e
+  mkBodyB stms res = pure $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
 
 instance TraverseOpStms (Engine.Wise MCMem) where
@@ -87,4 +87,4 @@ simplifyProg = simplifyProgGeneric simpleMCMem
 
 simpleMCMem :: Engine.SimpleOps MCMem
 simpleMCMem =
-  simpleGeneric (const mempty) $ simplifyMCOp $ const $ return ((), mempty)
+  simpleGeneric (const mempty) $ simplifyMCOp $ const $ pure ((), mempty)
