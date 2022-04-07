@@ -7,7 +7,6 @@ flags: {}
 extra-package-dbs: []
 
 nix:
-    enable: true
     packages: [zlib.dev, zlib.out, pkgconfig]
 
 # By default, stack doesn't compile multiple modules in parallel.
