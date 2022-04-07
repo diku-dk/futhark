@@ -497,7 +497,7 @@ fuseStms edgs infusible s1 s2 =
                     is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
                     fuseStms [] []
                       (Let (basicPat is_extra_1' <> pats1) aux1 (Op stream1))
-                      (Let pats2 aux2 (Op stream2))
+                      (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
                   _ -> return Nothing
           ( Futhark.Stream s_exp1 i1 sform1 nes1 lam1,
             Futhark.Stream s_exp2 i2 sform2 nes2 lam2)
@@ -525,14 +525,13 @@ fuseStms edgs infusible s1 s2 =
               -- let (lam2Rps, lam2ps) = splitAt (length nes2) $ tail $ lambdaParams lam2
               let lam1' = lam1 {lambdaParams = lam1ps, lambdaReturnType = lam1ts, lambdaBody = (lambdaBody lam1) {bodyResult = lam1rs}}
               let lam2' = lam2 {lambdaParams = lam2ps, lambdaReturnType = lam2ts, lambdaBody = (lambdaBody lam2) {bodyResult = lam2rs}}
-              let (lam, is_new) =  vFuseLambdas infusible lam1' i1 o1 lam2' i2 o2
+              let (lam, is_new) =  vFuseLambdas infusible lam1' i1 (drop (length nes1) o1) lam2' i2 (drop (length nes2) o2)
               let lam' = lam {lambdaParams = chunk1 : lam1Rps ++ lam2Rps ++ lambdaParams lam}
               let lam'' = lam'{lambdaBody = (lambdaBody lam') {bodyResult = lam1Rrs ++ lam2Rrs ++ bodyResult (lambdaBody lam')}}
               let lam''' = lam''{lambdaReturnType = lam1Rts <> lam2Rts <> lambdaReturnType lam''}
-              let pat1' = trace (ppr $ lambdaReturnType lam'') patIdents pats1
 
-              let toKeep = changeAll o1 (patIdents pats1) infusible
-              let pats = take (length nes1) (patIdents pats1) ++ take (length nes2) (patIdents pats2) ++ toKeep ++ drop (length nes2) (patIdents pats2)
+              let toKeep = filter (\x -> identName x `elem` infusible) (drop (length nes1) (patIdents pats1))
+              let pats = trace ("look: " ++ ppr pats2) $ take (length nes1) (patIdents pats1) ++ take (length nes2) (patIdents pats2) ++ toKeep ++ drop (length nes2) (patIdents pats2)
 
 
               -- let lam_new =  lam
@@ -1021,7 +1020,7 @@ soacToStream soac = do
             strmpar = chunk_param : inpacc_ids ++ strm_inpids
             strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
         lam0 <- renameLambda lamin
-        return $ Just ( Futhark.Stream w inNames (Parallel InOrder comm lam0) nes strmlam, map paramIdent inpacc_ids)
+        return $ Just ( Futhark.Stream w inNames (Parallel InOrder comm lam0) nes strmlam, [])
     _ -> pure Nothing
     where
       mkMapPlusAccLam ::
