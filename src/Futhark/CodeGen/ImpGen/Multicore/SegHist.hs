@@ -162,7 +162,7 @@ updateHisto op arrs bucket j uni_acc = do
         forM_ (zip uni_acc arrs) $ \(acc_u, arr) -> do
           copyDWIMFix (paramName acc_u) [] (Var arr) bucket
           --emit $ Imp.Op $ Imp.ExtractLane (paramName acc_u) (primExpFromSubExp Unit $ (Var $ paramName acc_u)) (untyped j)
-          
+
       op_body = compileBody' [] $ lambdaBody $ histOp op
       writeArray arr val = extractVectorLane j $ collect $ copyDWIMFix arr bucket val []
       do_hist = zipWithM_ writeArray arrs $ map resSubExp $ bodyResult $ lambdaBody $ histOp op
@@ -242,7 +242,6 @@ subHistogram pat space histops num_histos kbody = do
           forM_ (zip map_pes map_res) $ \(pe, res) ->
             copyDWIMFix (patElemName pe) (map Imp.le64 is) res []
 
- 
         forM_ (zip3 histops local_subhistograms (splitHistResults histops red_res)) $
           \( histop@(HistOp dest_shape _ _ _ shape lam),
              histop_subhistograms,
@@ -257,7 +256,6 @@ subHistogram pat space histops num_histos kbody = do
                   acc_params' = (lambdaParams . histOp) histop'
                   vs_params' = takeLast (length vs') $ lambdaParams $ histOp histop'
 
-                            
               generateUniformizeLoop $ \j ->
                 sComment "perform updates" $ do
                   --bucket'' <- mapM (\x -> extractVectorLane (primExpType . untyped) x) bucket'
@@ -271,6 +269,7 @@ subHistogram pat space histops num_histos kbody = do
                     sLoopNest shape $ \is' -> do
                       forM_ (zip vs_params' vs') $ \(p, res) ->
                         everythingVarying $
+                          -- comeback here. We need to fix that gtid is varying
                           extractVectorLane j $ collect $ copyDWIMFix (paramName p) [] res is'
                       updateHisto histop' histop_subhistograms (bucket'' ++ is') j acc_params'
 
