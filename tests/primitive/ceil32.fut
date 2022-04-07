@@ -1,15 +1,6 @@
 -- Rounding up floats to whole numbers.
 -- ==
--- input { 1.0000001192092896f32 } output { 2f32 }
--- input { -0.9999999403953552f32 } output { 0f32 }
--- input { -0f32 } output { -0f32 }
--- input { 0.49999999999999994f32 } output { 1f32 }
--- input { 0.5f32 } output { 1f32 }
--- input { 0.5000000000000001f32 } output { 1f32 }
--- input { 1.18e-38f32 } output { 1f32 }
--- input { -f32.inf } output { -f32.inf }
--- input { f32.inf } output { f32.inf }
--- input { f32.nan } output { f32.nan }
--- input { -0f32 } output { -0f32 }
-
-def main = f32.ceil
+-- input { [1.0000001192092896f32, -0.9999999403953552f32, -0f32, 0.49999999999999994f32, 0.5f32, 0.5000000000000001f32,
+--          1.18e-38f32, -f32.inf, f32.inf, f32.nan, -0f32] }
+-- output { [2f32, 0f32, -0f32, 1f32, 1f32, 1f32, 1f32, -f32.inf, f32.inf, f32.nan, -0f32] }
+def main = map f32.ceil
