@@ -18,7 +18,7 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
 import qualified Data.Text as T
-import Data.Time.Clock
+import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import qualified Data.Vector.Unboxed as U
 import Futhark.Bench
 import Futhark.Server
@@ -43,7 +43,8 @@ data BenchOptions = BenchOptions
   { optBackend :: String,
     optFuthark :: Maybe String,
     optRunner :: String,
-    optRuns :: Int,
+    optMinRuns :: Int,
+    optMinTime :: NominalDiffTime,
     optExtraOptions :: [String],
     optCompilerOptions :: [String],
     optJSON :: Maybe FilePath,
@@ -65,6 +66,7 @@ initialBenchOptions =
     Nothing
     ""
     10
+    0.5
     []
     []
     Nothing
@@ -96,7 +98,7 @@ runBenchmarks opts paths = do
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
-  putStrLn $ "Reporting mean runtime of at least " ++ show (optRuns opts) ++ " runs for each dataset."
+  putStrLn $ "Reporting mean runtime of at least " ++ show (optMinRuns opts) ++ " runs for each dataset."
   putStrLn "More runs automatically performed to ensure accurate measurement."
 
   futhark <- FutharkExe . compFuthark <$> compileOptions opts
@@ -219,7 +221,8 @@ runBenchmark opts futhark (program, cases) = do
 runOptions :: ((Int, Maybe Double) -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
   RunOptions
-    { runRuns = optRuns opts,
+    { runMinRuns = optMinRuns opts,
+      runMinTime = optMinTime opts,
       runTimeout = optTimeout opts,
       runVerbose = optVerbose opts,
       runResultAction = f
@@ -270,8 +273,8 @@ convergenceBar p spin_count us_sum i rsd' = do
     avg = fromIntegral us_sum / fromIntegral i
     spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-mkProgressPrompt :: Int -> Int -> String -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
-mkProgressPrompt min_runs pad_to dataset_desc start_time
+mkProgressPrompt :: BenchOptions -> Int -> String -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
+mkProgressPrompt opts pad_to dataset_desc start_time
   | fancyTerminal = do
       count <- newIORef (0, 0)
       spin_count <- newIORef 0
@@ -284,31 +287,28 @@ mkProgressPrompt min_runs pad_to dataset_desc start_time
         (us_sum, i) <- readIORef count
 
         now <- liftIO getCurrentTime
-        let minTime = 0.5
-            determineProgress i' =
-              let time_elapsed = realToFrac (diffUTCTime now start_time) / minTime
-                  runs_elapsed = fromIntegral i' / fromIntegral min_runs
+        let determineProgress i' =
+              let time_elapsed = toDouble (realToFrac (diffUTCTime now start_time) / optMinTime opts)
+                  runs_elapsed = fromIntegral i' / fromIntegral (optMinRuns opts)
                in -- The progress bar is the _shortest_ of the
                   -- time-based or runs-based estimate.  This is
                   -- intended to avoid a situation where the progress
                   -- bar is full but stuff is still happening.  On the
                   -- other hand, it means it can sometimes shrink.
-                  if time_elapsed < runs_elapsed
-                    then (time_elapsed, minTime)
-                    else (runs_elapsed, 1.0)
+                  min time_elapsed runs_elapsed
 
         case us of
           Nothing ->
-            let (elapsed, bound) = determineProgress i
-             in p $ replicate 13 ' ' <> progressBar elapsed bound progressBarSteps
+            let elapsed = determineProgress i
+             in p $ replicate 13 ' ' <> progressBar elapsed 1.0 progressBarSteps
           Just us' -> do
             let us_sum' = us_sum + us'
                 i' = i + 1
             writeIORef count (us_sum', i')
             case rsd of
               Nothing -> do
-                let (elapsed, bound) = determineProgress i'
-                p $ interimResult us_sum' i' elapsed bound
+                let elapsed = determineProgress i'
+                p $ interimResult us_sum' i' elapsed 1.0
               Just rsd' -> convergenceBar p spin_count us_sum i rsd'
         putStr " " -- Just to move the cursor away from the progress bar.
         hFlush stdout
@@ -316,6 +316,8 @@ mkProgressPrompt min_runs pad_to dataset_desc start_time
       putStr $ descString dataset_desc pad_to
       hFlush stdout
       pure $ const $ pure ()
+  where
+    toDouble = fromRational . toRational
 
 reportResult :: [RunResult] -> (Double, Double) -> IO ()
 reportResult results bootstrapCI = do
@@ -347,7 +349,7 @@ runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
       pure Nothing
 runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   start_time <- liftIO getCurrentTime
-  prompt <- mkProgressPrompt (optRuns opts) pad_to dataset_desc start_time
+  prompt <- mkProgressPrompt opts pad_to dataset_desc start_time
 
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
@@ -412,7 +414,7 @@ commandLineOptions =
                 [(n', "")] | n' > 0 ->
                   Right $ \config ->
                     config
-                      { optRuns = n'
+                      { optMinRuns = n'
                       }
                 _ ->
                   Left . optionsError $ "'" ++ n ++ "' is not a positive integer."

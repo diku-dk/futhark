@@ -141,7 +141,8 @@ decodeBenchResults = fmap unBenchResults . JSON.eitherDecode'
 
 -- | How to run a benchmark.
 data RunOptions = RunOptions
-  { runRuns :: Int,
+  { runMinRuns :: Int,
+    runMinTime :: NominalDiffTime,
     runTimeout :: Int,
     runVerbose :: Int,
     -- | Invoked for every runtime measured during the run.  Can be
@@ -187,15 +188,15 @@ runMinimum do_run opts runs_done elapsed r = do
 
   -- Figure out how much we have left to do.
   let todo
-        | runs_done < runRuns opts =
-            runRuns opts - runs_done
+        | runs_done < runMinRuns opts =
+            runMinRuns opts - runs_done
         | otherwise =
             -- Guesstimate how many runs we need to reach the minimum
             -- time.
             let time_per_run = elapsed / fromIntegral runs_done
-             in ceiling ((minimumTime - elapsed) / time_per_run)
+             in ceiling ((runMinTime opts - elapsed) / time_per_run)
 
-  -- Note that todo might be negative if minimumTime has been exceeded.
+  -- Note that todo might be negative if minimum time has been exceeded.
   if todo <= 0
     then pure r
     else do
@@ -204,8 +205,6 @@ runMinimum do_run opts runs_done elapsed r = do
       after <- liftIO getCurrentTime
       let elapsed' = elapsed + diffUTCTime after before
       runMinimum do_run opts (runs_done + todo) elapsed' (r <> r')
-  where
-    minimumTime = 0.5
 
 -- Do more runs until a convergence criterion is reached.
 runConvergence ::
