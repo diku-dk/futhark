@@ -202,27 +202,31 @@ runConvergence ::
   RunOptions ->
   [(RunResult, [T.Text])] ->
   BenchM [(RunResult, [T.Text])]
-runConvergence do_run opts r = do
-  let run_times = U.fromList $ map (fromIntegral . runMicroseconds . fst) r
+runConvergence do_run opts initial_r =
+  loop (resultRuntimes initial_r) initial_r
+  where
+    resultRuntimes =
+      U.fromList . map (fromIntegral . runMicroseconds . fst)
 
-  g <- create
-  resampled <- liftIO $ resample g [Mean] 2500 run_times
+    loop runtimes r = do
+      g <- create
+      resampled <- liftIO $ resample g [Mean] 2500 runtimes
 
-  let rsd = relativeStdErr $ resamples (snd $ head resampled)
-      acor =
-        let (x, _, _) = autocorrelation run_times
-         in fromMaybe 1 (x U.!? 1)
+      let rsd = relativeStdErr $ resamples (snd $ head resampled)
+          acor =
+            let (x, _, _) = autocorrelation runtimes
+             in fromMaybe 1 (x U.!? 1)
 
-  let actions = do
-        x <- do_run
-        liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
-        pure x
+      let actions = do
+            x <- do_run
+            liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
+            pure x
 
-  case nextRunCount (length r) rsd acor (runRuns opts) of
-    0 -> pure r
-    x -> do
-      r' <- replicateM x actions
-      runConvergence do_run opts (r ++ r')
+      case nextRunCount (length r) rsd acor (runRuns opts) of
+        0 -> pure r
+        x -> do
+          r' <- replicateM x actions
+          loop (runtimes <> resultRuntimes r') (r <> r')
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
