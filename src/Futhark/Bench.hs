@@ -18,9 +18,6 @@ module Futhark.Bench
   )
 where
 
--- added imports!
--- for timing
-
 import Control.Applicative
 import Control.Monad.Except
 import qualified Data.Aeson as JSON
@@ -28,6 +25,7 @@ import qualified Data.Aeson.Key as JSON
 import qualified Data.Aeson.KeyMap as JSON
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.DList as DL
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
@@ -162,9 +160,8 @@ relativeStdErr vec =
        in std_err / mu
 
 -- Returns the next run count.
-nextRunCount :: Int -> Double -> Double -> Int -> Int
-nextRunCount runs rsd acor min_runs
-  | runs < min_runs = min_runs - runs -- Minimum runs specified.
+nextRunCount :: Int -> Double -> Double -> Int
+nextRunCount runs rsd acor
   | acor > 0.95 && rsd > 0.0010 = div runs 2
   | acor > 0.75 && rsd > 0.0015 = div runs 2
   | acor > 0.65 && rsd > 0.0025 = div runs 2
@@ -178,32 +175,46 @@ type BenchM = ExceptT T.Text IO
 runMinimum ::
   BenchM (RunResult, [T.Text]) ->
   RunOptions ->
+  Int ->
   NominalDiffTime ->
-  [(RunResult, [T.Text])] ->
-  BenchM [(RunResult, [T.Text])]
-runMinimum do_run opts elapsed r = do
+  DL.DList (RunResult, [T.Text]) ->
+  BenchM (DL.DList (RunResult, [T.Text]))
+runMinimum do_run opts runs_done elapsed r = do
   let actions = do
         x <- do_run
         liftIO $ runResultAction opts (runMicroseconds (fst x), Nothing)
         pure x
 
-  before <- liftIO getCurrentTime
-  r' <- replicateM (1 + length r) actions
-  after <- liftIO getCurrentTime
+  -- Figure out how much we have left to do.
+  let todo
+        | runs_done < runRuns opts =
+            runRuns opts - runs_done
+        | otherwise =
+            -- Guesstimate how many runs we need to reach the minimum
+            -- time.
+            let time_per_run = elapsed / fromIntegral runs_done
+             in ceiling ((minimumTime - elapsed) / time_per_run)
 
-  let elapsed' = elapsed + diffUTCTime after before
-  if 0.5 < elapsed'
-    then pure (r ++ r')
-    else runMinimum do_run opts elapsed' (r ++ r')
+  -- Note that todo might be negative if minimumTime has been exceeded.
+  if todo <= 0
+    then pure r
+    else do
+      before <- liftIO getCurrentTime
+      r' <- DL.fromList <$> replicateM todo actions
+      after <- liftIO getCurrentTime
+      let elapsed' = elapsed + diffUTCTime after before
+      runMinimum do_run opts (runs_done + todo) elapsed' (r <> r')
+  where
+    minimumTime = 0.5
 
 -- Do more runs until a convergence criterion is reached.
 runConvergence ::
   BenchM (RunResult, [T.Text]) ->
   RunOptions ->
-  [(RunResult, [T.Text])] ->
-  BenchM [(RunResult, [T.Text])]
+  DL.DList (RunResult, [T.Text]) ->
+  BenchM (DL.DList (RunResult, [T.Text]))
 runConvergence do_run opts initial_r =
-  loop (resultRuntimes initial_r) initial_r
+  loop (resultRuntimes (DL.toList initial_r)) initial_r
   where
     resultRuntimes =
       U.fromList . map (fromIntegral . runMicroseconds . fst)
@@ -222,11 +233,11 @@ runConvergence do_run opts initial_r =
             liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
             pure x
 
-      case nextRunCount (length r) rsd acor (runRuns opts) of
+      case nextRunCount (length r) rsd acor of
         0 -> pure r
         x -> do
           r' <- replicateM x actions
-          loop (runtimes <> resultRuntimes r') (r <> r')
+          loop (runtimes <> resultRuntimes r') (r <> DL.fromList r')
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
@@ -273,13 +284,13 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
     -- First one uncounted warmup run.
     void $ cmdEither $ cmdCall server entry outs ins
 
-    ys <- runMinimum (freeOuts *> doRun) opts 0 []
+    ys <- runMinimum (freeOuts *> doRun) opts 0 0 mempty
 
     xs <- runConvergence (freeOuts *> doRun) opts ys
 
     vs <- readResults server outs <* freeOuts
 
-    pure (vs, xs)
+    pure (vs, DL.toList xs)
 
   (vs, call_logs) <- case maybe_call_logs of
     Nothing ->
