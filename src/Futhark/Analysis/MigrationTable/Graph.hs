@@ -69,7 +69,7 @@ module Futhark.Analysis.MigrationTable.Graph
 
     -- * Query
     member,
-    get,
+    lookup,
     isSinkConnected,
     canReachSink,
 
@@ -90,6 +90,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust)
 import Futhark.Error
 import Futhark.IR.GPU hiding (Result)
+import Prelude hiding (lookup)
 
 --------------------------------------------------------------------------------
 --                                   TYPES                                    --
@@ -268,14 +269,14 @@ member :: Id -> Graph m -> Bool
 member i (Graph m) = IM.member i m
 
 -- | Returns the vertex with the given id.
-get :: Id -> Graph m -> Maybe (Vertex m)
-get i (Graph m) = IM.lookup i m
+lookup :: Id -> Graph m -> Maybe (Vertex m)
+lookup i (Graph m) = IM.lookup i m
 
 -- | Returns whether a vertex with the given id exists in the
 -- graph and is connected directly to a sink.
 isSinkConnected :: Id -> Graph m -> Bool
 isSinkConnected i g =
-  maybe False ((ToSink ==) . vertexEdges) (get i g)
+  maybe False ((ToSink ==) . vertexEdges) (lookup i g)
 
 -- | @canReachSink g vs et i@ returns whether a sink can be reached via the
 -- vertex @v@ with id @i@ in @g@. @et@ identifies the type of edge that @v@ is
@@ -290,7 +291,7 @@ canReachSink ::
 canReachSink g vs et i
   | Just found <- M.lookup (et, i) (visited vs) =
     (found, vs)
-  | Just v <- get i g =
+  | Just v <- lookup i g =
     searchVertex v
   | otherwise =
     (False, vs) -- shouldn't happen
@@ -357,8 +358,7 @@ routeMany srcs graph =
 --------------------------------------------------------------------------------
 
 -- | @fold g f (a, vs) et i@ folds @f@ over the vertices in @g@ that can be
--- reached from the vertex with handle @i@, as when accessed via an edge of
--- type @et@.
+-- reached from the vertex with handle @i@ accessed via an edge of type @et@.
 -- Each vertex @v@ may be visited up to two times, once for each type of edge
 -- @e@ pointing to it, and each time @f a e v@ is evaluated to produce an
 -- updated @a@ value to be used in future @f@ evaluations or to be returned.
@@ -374,7 +374,7 @@ fold ::
   (a, Visited ())
 fold g f (res, vs) et i
   | M.notMember (et, i) (visited vs),
-    Just v <- get i g =
+    Just v <- lookup i g =
     let res' = f res et v
         vs' = Visited $ M.insert (et, i) () (visited vs)
         st = (res', vs')
@@ -414,7 +414,7 @@ reduce ::
 reduce g r vs et i
   | Just res <- M.lookup (et, i) (visited vs) =
     (res, vs)
-  | Just v <- get i g =
+  | Just v <- lookup i g =
     reduceVertex v
   | otherwise =
     (Produced mempty, vs) -- shouldn't happen
@@ -528,9 +528,9 @@ route' p d prev et i g
           -- edge to v_out and 'prev' is already in the 'Pending' map.
           -- It follows that no (new) cycle can start here.
           Reversed ->
-            let (res, g') = routeNormals (fromJust $ get i g) g p
+            let (res, g') = routeNormals (fromJust $ lookup i g) g p
              in (fst found_cycle <> res, g')
-  | Just v <- get i g =
+  | Just v <- lookup i g =
     routeVertex v
   | otherwise =
     backtrack

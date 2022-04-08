@@ -1,18 +1,17 @@
 -- |
 -- This module implements an optimization that migrates host statements into
--- GPUBody kernels to reduce the number of host-device synchronizations that
--- occur when a scalar variable is written to or read from device memory.
---
--- Which statements that should be migrated are determined by a
--- 'MigrationTable' produced by the "Futhark.Analysis.MigrationTable" module;
--- with few exceptions this module merely performs the migration and rewriting
--- dictated by that table.
+-- 'GPUBody' kernels to reduce the number of host-device synchronizations that
+-- occur when a scalar variable is written to or read from device memory. Which
+-- statements that should be migrated are determined by a 'MigrationTable'
+-- produced by the "Futhark.Analysis.MigrationTable" module; with few
+-- exceptions this module merely performs the migration and rewriting dictated
+-- by that table.
 --
 -- The only exception at the time of writing is a unconditional transformation
 -- that turns @A[i] = x@ into @A[i:i+1] = gpu { x }@ for some scalar variable
--- @x@. The rationale is that the code generator currently creates synchronous
--- writes for 'Update' statements with scalar variables (but not constants).
--- This transformation makes the 'Update' asyncrhonous.
+-- @x@. The rationale is that the code generator creates synchronous writes for
+-- 'Update' statements with scalar variables (but not constants).
+-- This transformation makes every 'Update' asynchronous.
 module Futhark.Pass.ReduceDeviceSyncs (reduceDeviceSyncs) where
 
 import Control.Monad
@@ -41,7 +40,7 @@ import Futhark.Transform.Substitute
 
 -- TODO: Write tests (especially for array expressions)
 
--- | An optimization pass that migrates host statements into GPUBody kernels
+-- | An optimization pass that migrates host statements into 'GPUBody' kernels
 -- to reduce the number of host-device synchronizations.
 reduceDeviceSyncs :: Pass GPU GPU
 reduceDeviceSyncs =
@@ -397,7 +396,7 @@ data State = State
     --   * Name of the single element array holding the migrated value.
     --   * Whether the original variable still can be used on the host.
     stateMigrated :: IM.IntMap (Name, Type, VName, Bool),
-    -- | Whether non-migration optimizations may introduce GPUBody kernels at
+    -- | Whether non-migration optimizations may introduce 'GPUBody' kernels at
     -- the current location.
     stateGPUBodyOk :: Bool
   }

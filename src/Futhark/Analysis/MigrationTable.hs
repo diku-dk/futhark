@@ -1,6 +1,6 @@
 -- |
 -- This module implements program analysis to determine which program statements
--- the "Futhark.Pass.ReduceDeviceSyncs" pass should move into GPUBody kernels
+-- the "Futhark.Pass.ReduceDeviceSyncs" pass should move into 'GPUBody' kernels
 -- to reduce blocking memory transfers between host and device. The results of
 -- the analysis is encoded into a 'MigrationTable' which can be queried.
 --
@@ -10,9 +10,9 @@
 -- from transitive usage that cannot or should not be migrated to device.
 --
 -- The variables of each partition are assigned a 'MigrationStatus' that states
--- whether computation of that variable should be moved to device or remain on
--- host. Due to how the graph is built and the vertex cut is found all
--- variables bound by a single statement will all belong to the same partition.
+-- whether the computation of those variables should be moved to device or
+-- remain on host. Due to how the graph is built and the vertex cut is found all
+-- variables bound by a single statement will belong to the same partition.
 --
 -- The vertex cut contains all variables that will reside in device memory but
 -- are required by host operations. These variables must be read from device
@@ -24,6 +24,8 @@
 -- Blocking scalar writes are reduced by either turning such writes into
 -- asynchronous kernels, as is done with scalar array literals and accumulator
 -- updates, or by transforming host-device writing into device-device copying.
+-- The latter transformation is recognized by this module but solely implemented
+-- by "Futhark.Pass.ReduceDeviceSyncs".
 --
 -- For details on how the graph is constructed and how the vertex cut is found,
 -- see the master thesis "TODO" by Philip Børgesen (2022).
@@ -31,15 +33,20 @@ module Futhark.Analysis.MigrationTable
   ( -- * Analysis
     analyseProg,
 
+    -- * Types
+    MigrationTable,
+    MigrationStatus (..),
+
     -- * Query
+    --
+    -- | These functions all assume that no parent statement should be migrated.
+    -- That is @shouldMoveStm stm mt@ should return @False@ for every statement
+    -- @stm@ with a body that a queried 'VName' or 'Stm' is nested within,
+    -- otherwise the query result may be invalid.
     shouldMoveStm,
     shouldMove,
     usedOnHost,
     statusOf,
-
-    -- * Types
-    MigrationTable,
-    MigrationStatus (..),
   )
 where
 
@@ -62,7 +69,7 @@ import Futhark.Analysis.MigrationTable.Graph hiding
     addEdges,
     connectToSink,
     fold,
-    get,
+    lookup,
     none,
   )
 import qualified Futhark.Analysis.MigrationTable.Graph as MG
@@ -775,7 +782,7 @@ graphLoop (b : bs) params lform body = do
       Grapher ReachableBindingsCache
     connectOperand cache op = do
       g <- getGraph
-      case MG.get op g of
+      case MG.lookup op g of
         Nothing -> pure cache
         Just v ->
           case vertexEdges v of
@@ -814,7 +821,7 @@ graphLoop (b : bs) params lform body = do
         findBindings _ (rb, nx, rbc) [] =
           (Produced rb, nx, rbc)
         findBindings g (rb, nx, rbc) (i : is)
-          | Just v <- MG.get i g,
+          | Just v <- MG.lookup i g,
             Just gid <- metaGraphId (vertexMeta v),
             gid == subgraphId -- only search the subgraph
             =
@@ -1083,7 +1090,7 @@ addEdges es is = do
 -- before its first use.
 requiredOnHost :: Id -> Grapher ()
 requiredOnHost i = do
-  mv <- MG.get i <$> getGraph
+  mv <- MG.lookup i <$> getGraph
   case mv of
     Nothing -> pure ()
     Just v -> do
@@ -1126,7 +1133,7 @@ routeSubgraph si = do
 -- is declared within the subgraph with id @si@.
 inSubGraph :: Id -> Graph -> Id -> Bool
 inSubGraph si g i
-  | Just v <- MG.get i g,
+  | Just v <- MG.lookup i g,
     Just mgi <- metaGraphId (vertexMeta v) =
     si == mgi
 inSubGraph _ _ _ = False

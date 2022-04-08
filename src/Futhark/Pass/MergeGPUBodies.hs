@@ -1,12 +1,12 @@
 -- |
--- This module implements an optimization pass that merges GPUBody kernels to
--- reduce the total number of kernel executions. This is useful because the
--- "Futhark.Pass.ReduceDeviceSyncs" pass creates a lot of GPUBody kernels that
--- only execute a single statement.
+-- This module implements an optimization pass that merges 'GPUBody' kernels to
+-- eliminate memory transactions and reduce the number of kernel launches.
+-- This is useful because the "Futhark.Pass.ReduceDeviceSyncs" pass introduces
+-- 'GPUBody' kernels that only execute single statements.
 --
--- To merge as many GPUBody kernels as possible, this pass reorders statements
--- with the goal of bringing as many GPUBody statements next to each other in a
--- sequence. Such sequence can then be merged into a single GPUBody kernel.
+-- To merge as many 'GPUBody' kernels as possible, this pass reorders statements
+-- with the goal of bringing as many 'GPUBody' statements next to each other in
+-- a sequence. Such sequence can then trivially be merged.
 module Futhark.Pass.MergeGPUBodies (mergeGPUBodies) where
 
 import Control.Monad
@@ -28,8 +28,8 @@ import Futhark.IR.GPU
 import Futhark.MonadFreshNames hiding (newName)
 import Futhark.Pass
 
--- | An optimization pass that reorders and merges GPUBody statements to reduce
--- the number of runtime kernel executions.
+-- | An optimization pass that reorders and merges 'GPUBody' statements to
+-- eliminate memory transactions and reduce the number of kernel launches.
 mergeGPUBodies :: Pass GPU GPU
 mergeGPUBodies =
   Pass
