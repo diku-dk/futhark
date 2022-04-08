@@ -148,7 +148,7 @@ data RunOptions = RunOptions
     runVerbose :: Int,
     -- | Invoked for every runtime measured during the run.  Can be
     -- used to provide a progress bar.
-    runResultAction :: Maybe ((Int, Maybe Double) -> IO ())
+    runResultAction :: (Int, Maybe Double) -> IO ()
   }
 
 square :: Double -> Double
@@ -172,12 +172,14 @@ nextRunCount runs rsd acor min_runs
   | rsd > 0.01 = div runs 2
   | otherwise = 0
 
+type BenchM = ExceptT T.Text IO
+
 -- Keep on running benchmark until a completion criteria is met.
 runLoop ::
-  ExceptT T.Text IO (RunResult, [T.Text]) ->
+  BenchM (RunResult, [T.Text]) ->
   RunOptions ->
   [(RunResult, [T.Text])] ->
-  ExceptT T.Text IO [(RunResult, [T.Text])]
+  BenchM [(RunResult, [T.Text])]
 runLoop do_run opts r = do
   let run_times = U.fromList $ map (fromIntegral . runMicroseconds . fst) r
 
@@ -185,12 +187,13 @@ runLoop do_run opts r = do
   resampled <- liftIO $ resample g [Mean] 2500 run_times
 
   let rsd = relativeStdErr $ resamples (snd $ head resampled)
-  let acor = case autocorrelation run_times of
-        (x, _, _) -> fromMaybe 1 (x U.!? 1)
+      acor =
+        let (x, _, _) = autocorrelation run_times
+         in fromMaybe 1 (x U.!? 1)
 
   let actions = do
         x <- do_run
-        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) ((runMicroseconds . fst) x, Just rsd)
+        liftIO $ runResultAction opts ((runMicroseconds . fst) x, Just rsd)
         pure x
 
   case nextRunCount (length r) rsd acor (runRuns opts) of
@@ -201,15 +204,15 @@ runLoop do_run opts r = do
 
 -- Each benchmark is run for at least 0.5s wallclock time.
 runTimed ::
-  ExceptT T.Text IO (RunResult, [T.Text]) ->
+  BenchM (RunResult, [T.Text]) ->
   RunOptions ->
   NominalDiffTime ->
   [(RunResult, [T.Text])] ->
-  ExceptT T.Text IO [(RunResult, [T.Text])]
+  BenchM [(RunResult, [T.Text])]
 runTimed do_run opts elapsed r = do
   let actions = do
         x <- do_run
-        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) ((runMicroseconds . fst) x, Nothing)
+        liftIO $ runResultAction opts ((runMicroseconds . fst) x, Nothing)
         pure x
 
   before <- liftIO getCurrentTime
