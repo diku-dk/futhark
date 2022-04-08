@@ -512,10 +512,11 @@ fuseStms edgs infusible s1 s2 =
                         (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
                     _ -> return Nothing
           ( Futhark.Screma s_exp1 i1 sform1,
-            _)--Futhark.Screma s_exp2 i2 sform2)
+            Futhark.Screma s_exp2 i2 sform2)
               |
-              --Just _ <- isScanomapSOAC sform2,
-               -- s_exp1 == s_exp2,
+                Just _ <- isScanomapSOAC sform1,
+                Just _ <- isScanomapSOAC sform2,
+                s_exp1 == s_exp2,
                 any isScanRed edgs
               -> do
                 doFusion <- gets fuseScans

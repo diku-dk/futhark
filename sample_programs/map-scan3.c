@@ -4359,7 +4359,7 @@ int futhark_context_clear_caches(struct futhark_context *ctx)
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             int32_t *out_prim_out_5222, int64_t n_4985,
+                             int32_t *out_prim_out_5166, int64_t n_4985,
                              int64_t m_4986);
 
 static int init_constants(struct futhark_context *ctx)
@@ -4379,17 +4379,17 @@ static int free_constants(struct futhark_context *ctx)
 }
 
 static int futrts_entry_main(struct futhark_context *ctx,
-                             int32_t *out_prim_out_5222, int64_t n_4985,
+                             int32_t *out_prim_out_5166, int64_t n_4985,
                              int64_t m_4986)
 {
     (void) ctx;
     
     int err = 0;
-    size_t mem_5187_cached_sizze_5223 = 0;
-    unsigned char *mem_5187 = NULL;
-    size_t mem_5197_cached_sizze_5224 = 0;
-    unsigned char *mem_5197 = NULL;
-    int32_t prim_out_5217;
+    size_t mem_5131_cached_sizze_5167 = 0;
+    unsigned char *mem_5131 = NULL;
+    size_t mem_5141_cached_sizze_5168 = 0;
+    unsigned char *mem_5141 = NULL;
+    int32_t prim_out_5161;
     bool bounds_invalid_upwards_5104 = slt64(n_4985, (int64_t) 0);
     bool valid_5105 = !bounds_invalid_upwards_5104;
     bool range_valid_c_5106;
@@ -4418,59 +4418,59 @@ static int futrts_entry_main(struct futhark_context *ctx,
         goto cleanup;
     }
     
-    int64_t binop_y_5185 = (int64_t) 4 * n_4985;
-    int64_t bytes_5186 = smax64((int64_t) 0, binop_y_5185);
+    int64_t binop_y_5129 = (int64_t) 4 * n_4985;
+    int64_t bytes_5130 = smax64((int64_t) 0, binop_y_5129);
     
-    if (mem_5187_cached_sizze_5223 < bytes_5186) {
-        err = lexical_realloc(&ctx->error, &mem_5187,
-                              &mem_5187_cached_sizze_5223, bytes_5186);
+    if (mem_5131_cached_sizze_5167 < bytes_5130) {
+        err = lexical_realloc(&ctx->error, &mem_5131,
+                              &mem_5131_cached_sizze_5167, bytes_5130);
         if (err != FUTHARK_SUCCESS)
             goto cleanup;
     }
     
-    int64_t binop_y_5195 = (int64_t) 4 * m_4986;
-    int64_t bytes_5196 = smax64((int64_t) 0, binop_y_5195);
+    int64_t binop_y_5139 = (int64_t) 4 * m_4986;
+    int64_t bytes_5140 = smax64((int64_t) 0, binop_y_5139);
     
-    if (mem_5197_cached_sizze_5224 < bytes_5196) {
-        err = lexical_realloc(&ctx->error, &mem_5197,
-                              &mem_5197_cached_sizze_5224, bytes_5196);
+    if (mem_5141_cached_sizze_5168 < bytes_5140) {
+        err = lexical_realloc(&ctx->error, &mem_5141,
+                              &mem_5141_cached_sizze_5168, bytes_5140);
         if (err != FUTHARK_SUCCESS)
             goto cleanup;
     }
-    for (int64_t i_5160 = 0; i_5160 < n_4985; i_5160++) {
-        int64_t defunc_0_f_res_5077 = (int64_t) 123 ^ i_5160;
+    for (int64_t i_5123 = 0; i_5123 < n_4985; i_5123++) {
+        int64_t defunc_0_f_res_5077 = (int64_t) 123 ^ i_5123;
+        int32_t discard_5118;
+        int32_t scanacc_5114 = 0;
         
-        for (int64_t i_5143 = 0; i_5143 < m_4986; i_5143++) {
-            int64_t defunc_0_f_res_5083 = mul64(defunc_0_f_res_5077, i_5143);
+        for (int64_t i_5116 = 0; i_5116 < m_4986; i_5116++) {
+            int64_t defunc_0_f_res_5083 = mul64(defunc_0_f_res_5077, i_5116);
             int32_t defunc_0_f_res_5086 = sext_i64_i32(defunc_0_f_res_5083);
+            int32_t defunc_1_op_res_5090 = add32(defunc_0_f_res_5086,
+                                                 scanacc_5114);
             
-            ((int32_t *) mem_5197)[i_5143] = defunc_0_f_res_5086;
+            ((int32_t *) mem_5141)[i_5116] = defunc_1_op_res_5090;
+            
+            int32_t scanacc_tmp_5163 = defunc_1_op_res_5090;
+            
+            scanacc_5114 = scanacc_tmp_5163;
         }
+        discard_5118 = scanacc_5114;
         
-        int32_t unused_5140;
         int32_t defunc_2_reduce_res_5092;
-        int32_t inpacc_5121;
-        int32_t inpacc_5132;
+        int32_t redout_5119 = 0;
         
-        inpacc_5121 = 0;
-        inpacc_5132 = 0;
-        for (int64_t i_5157 = 0; i_5157 < m_4986; i_5157++) {
-            int32_t x_5165;
+        for (int64_t i_5120 = 0; i_5120 < m_4986; i_5120++) {
+            int32_t x_5096;
             
-            x_5165 = ((int32_t *) mem_5197)[i_5157];
+            x_5096 = ((int32_t *) mem_5141)[i_5120];
             
-            int32_t defunc_1_op_res_5173 = add32(inpacc_5121, x_5165);
-            int32_t defunc_1_op_res_5136 = add32(inpacc_5132,
-                                                 defunc_1_op_res_5173);
-            int32_t inpacc_tmp_5220 = defunc_1_op_res_5173;
-            int32_t inpacc_tmp_5221 = defunc_1_op_res_5136;
+            int32_t defunc_1_op_res_5095 = add32(x_5096, redout_5119);
+            int32_t redout_tmp_5165 = defunc_1_op_res_5095;
             
-            inpacc_5121 = inpacc_tmp_5220;
-            inpacc_5132 = inpacc_tmp_5221;
+            redout_5119 = redout_tmp_5165;
         }
-        unused_5140 = inpacc_5121;
-        defunc_2_reduce_res_5092 = inpacc_5132;
-        ((int32_t *) mem_5187)[i_5160] = defunc_2_reduce_res_5092;
+        defunc_2_reduce_res_5092 = redout_5119;
+        ((int32_t *) mem_5131)[i_5123] = defunc_2_reduce_res_5092;
     }
     
     int64_t i_5097 = sub64(n_4985, (int64_t) 2);
@@ -4491,14 +4491,14 @@ static int futrts_entry_main(struct futhark_context *ctx,
     
     int32_t main_res_5102;
     
-    main_res_5102 = ((int32_t *) mem_5187)[i_5097];
-    prim_out_5217 = main_res_5102;
-    *out_prim_out_5222 = prim_out_5217;
+    main_res_5102 = ((int32_t *) mem_5131)[i_5097];
+    prim_out_5161 = main_res_5102;
+    *out_prim_out_5166 = prim_out_5161;
     
   cleanup:
     {
-        free(mem_5187);
-        free(mem_5197);
+        free(mem_5131);
+        free(mem_5141);
     }
     return err;
 }
@@ -4508,16 +4508,16 @@ int futhark_entry_main(struct futhark_context *ctx, int32_t *out0, const
 {
     int64_t n_4985;
     int64_t m_4986;
-    int32_t prim_out_5217;
+    int32_t prim_out_5161;
     int ret = 0;
     
     lock_lock(&ctx->lock);
     n_4985 = in0;
     m_4986 = in1;
     if (ret == 0) {
-        ret = futrts_entry_main(ctx, &prim_out_5217, n_4985, m_4986);
+        ret = futrts_entry_main(ctx, &prim_out_5161, n_4985, m_4986);
         if (ret == 0) {
-            *out0 = prim_out_5217;
+            *out0 = prim_out_5161;
         }
     }
     lock_unlock(&ctx->lock);
