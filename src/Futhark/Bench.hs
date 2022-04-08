@@ -215,7 +215,7 @@ runConvergence do_run opts r = do
 
   let actions = do
         x <- do_run
-        liftIO $ runResultAction opts ((runMicroseconds . fst) x, Just rsd)
+        liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
         pure x
 
   case nextRunCount (length r) rsd acor (runRuns opts) of
