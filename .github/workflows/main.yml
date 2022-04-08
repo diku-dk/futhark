@@ -55,6 +55,9 @@ jobs:
       run: |
         z3 --version
 
+    - name: Setup upterm session
+      uses: lhotari/action-upterm@v1
+
     - name: Build Futhark
       run: |
         cabal --version
