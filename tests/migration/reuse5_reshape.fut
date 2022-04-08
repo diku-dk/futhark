@@ -3,11 +3,12 @@
 -- returned.
 -- ==
 -- structure gpu {
---   /GPUBody/If/True/Reshape 1
+--   /If/True/GPUBody/If/True/Reshape 1
 -- }
 
-def main (A: *[5]i64) (x: i64) : [1]i64 =
-  if A[4] == 42
-     then let A' = [[1, x], [3, 4]] -- is optimized as a reshape of [1,x,3,4].
-           in #[unsafe] (opaque A')[0:1, 0] :> [1]i64
-     else A[0:1] :> [1]i64
+def main [n] (A: *[n]i64) : [1]i64 =
+  if n > 0
+     then if #[unsafe] A[0] == 42
+          then A :> [1]i64
+          else #[unsafe] A[0:1] :> [1]i64
+     else [42]
