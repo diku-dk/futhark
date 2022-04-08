@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.
@@ -52,7 +51,7 @@ operations =
   MC.operations
     { GC.opsCompiler = compileOp
     }
-    
+
 getName :: VName -> Name
 getName name = nameFromString $ pretty name
 
@@ -91,7 +90,7 @@ compileMemblockDeref = zipWith deref
     deref (v1, v2) (ty, MC.Prim) = [C.cdecl|$ty:ty $id:v1 = $id:(getName v2);|]
     deref (v1, v2) (_, MC.RawMem) = [C.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
     deref (v1, v2) (ty, MC.MemBlock) = [C.cdecl|uniform $ty:ty $id:v1 = *$id:(getName v2);|]
- 
+
 ispcDef :: MC.DefSpecifier
 ispcDef s f = do
   s' <- MC.multicoreName s
@@ -107,6 +106,93 @@ sharedDef s f = do
   GC.libDecl [C.cedecl|$esc:("#endif")|]
   GC.ispcDecl =<< f s'
   pure s'
+
+makeStringLiteral :: String -> GC.CompilerM Multicore () Name
+makeStringLiteral str = do
+  name <- MC.multicoreDef "strlit_shim" $ \s ->
+    pure [C.cedecl|char* $id:s() { return $string:str; }|]
+  void $ ispcDef "" $ const $
+    pure [C.cedecl|extern "C" unmasked uniform char* uniform $id:name();|]
+  pure name
+
+allocMemISPC :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> GC.CompilerM Multicore () ()
+allocMemISPC mem size space on_failure = GC.allocMem' mem size space on_failure stmt
+  where
+    stmt space' mem' size' mem_s' on_failure' = do
+      strlit <- makeStringLiteral mem_s'
+      pure
+        [C.cstm|if ($id:(GC.fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
+                  $id:strlit())) {
+                  $stm:on_failure'
+        }|]
+
+setMemISPC :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> GC.CompilerM Multicore () ()
+setMemISPC dest src space = GC.setMem' dest src space stmt
+  where
+    stmt space' dest' src' src_s' = do
+      strlit <- makeStringLiteral src_s'
+      pure
+        [C.cstm|if ($id:(GC.fatMemSet space')(ctx, &$exp:dest', &$exp:src',
+          $id:strlit()) != 0) {
+          err = 1;
+        }|]
+
+unRefMemISPC :: C.ToExp a => a -> Space -> GC.CompilerM Multicore () ()
+unRefMemISPC mem space = GC.unRefMem' mem space cstm
+  where
+    cstm s m m_s = do
+      strlit <- makeStringLiteral m_s
+      pure
+        [C.cstm|if ($id:(GC.fatMemUnRef s)(ctx, &$exp:m, $id:strlit()) != 0) {
+          err = 1;
+        }|]
+
+freeAllocatedMemISPC :: GC.CompilerM Multicore () [C.BlockItem]
+freeAllocatedMemISPC = GC.freeAllocatedMem' unRefMemISPC
+
+-- Handle printing an error message in ISPC
+errorInISPC :: ErrorMsg Exp -> String -> GC.CompilerM Multicore () ()
+errorInISPC msg stacktrace = do
+  -- Get format sting
+  (formatstr, formatargs) <- GC.errorMsgString msg
+  let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
+  -- Get args types and names for shim
+  let arg_types = errorMsgArgTypes msg
+  arg_names <- mapM (newVName . const "arg") arg_types
+  let params = zipWith (\ty name -> [C.cparam|$ty:(GC.primTypeToCType ty) $id:name|]) arg_types arg_names
+  let params_uni = zipWith (\ty name -> [C.cparam|uniform $ty:(GC.primTypeToCType ty) $id:name|]) arg_types arg_names
+  -- Make shim
+  let formatargs' = mapArgNames msg formatargs arg_names
+  shim <- MC.multicoreDef "assert_shim" $ \s -> do
+    pure
+      [C.cedecl|void $id:s(struct futhark_context* ctx, $params:params) {
+        ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
+      }|]
+  void $ ispcDef "" $ const $ pure
+    [C.cedecl|extern "C" unmasked void $id:shim(uniform struct futhark_context* uniform, $params:params_uni);|]
+  -- Call the shim
+  args <- getErrorValExps msg
+  uni <- newVName "uni"
+  let args' = map (\x -> [C.cexp|extract($exp:x, $id:uni)|]) args
+  GC.items
+    [C.citems|
+      foreach_active($id:uni) {
+        $id:shim(ctx, $args:args');
+        err = FUTHARK_PROGRAM_ERROR;
+      }|]
+  where
+    getErrorVal (ErrorString _) = Nothing
+    getErrorVal (ErrorVal _ v) = Just v
+
+    getErrorValExps (ErrorMsg m) = mapM GC.compileExp $ mapMaybe getErrorVal m
+
+    mapArgNames' (x:xs) (y:ys) (t:ts)
+      | isJust $ getErrorVal x = [C.cexp|$id:t|] : mapArgNames' xs ys ts
+      | otherwise = y : mapArgNames' xs ys (t:ts)
+    mapArgNames' _ ys [] = ys
+    mapArgNames' _ _ _ = []
+
+    mapArgNames (ErrorMsg parts) = mapArgNames' parts
 
 isConstExp :: PrimExp VName -> Bool
 isConstExp = isSimple . constFoldPrimExp
@@ -164,14 +250,14 @@ compileCodeISPC _ (Allocate name (Count (TPrimExp e)) space) = do
   cached <- GC.cacheMem name
   case cached of
     Just cur_size ->
-      GC.stm
+      GC.stm -- TODO(pema): Handle errors here
         [C.cstm|if ($exp:cur_size < $exp:size) {
-                 err = lexical_realloc_ispc(&$exp:name, &$exp:cur_size, $exp:size);
+                  lexical_realloc_ispc(&$exp:name, &$exp:cur_size, $exp:size);
                 }|]
     _ ->
-      GC.allocMemNoError name size space [C.cstm|{err = 1;}|]
+      allocMemISPC name size space [C.cstm|{err = 1;}|]
 compileCodeISPC _ (SetMem dest src space) =
-  GC.setMemNoError dest src space
+  setMemISPC dest src space
 compileCodeISPC vari code@(Write dest (Count idx) elemtype DefaultSpace vol elemexp)
   | isConstExp (untyped idx) = do
     dest' <- GC.rawMem dest
@@ -189,7 +275,7 @@ compileCodeISPC vari code@(Write dest (Count idx) elemtype DefaultSpace vol elem
   | otherwise = GC.compileCode code
 compileCodeISPC _ (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
-  unless cached $ GC.unRefMemNoError name space
+  unless cached $ unRefMemISPC name space
 compileCodeISPC vari (For i bound body) = do
   let i' = C.toIdent i
       t = GC.primTypeToCType $ primExpType bound
@@ -217,9 +303,12 @@ compileCodeISPC vari (If cond tbranch fbranch) = do
       [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
-compileCodeISPC _ (Assert e _ (_, _)) = do
+compileCodeISPC _ (Assert e msg (loc, locs)) = do
   e' <- GC.compileExp e
-  GC.stm [C.cstm|if (!$exp:e') { err = FUTHARK_PROGRAM_ERROR; }|]
+  err <- GC.collect $ errorInISPC msg stacktrace
+  GC.stm [C.cstm|if (!$exp:e') { $items:err }|]
+  where
+    stacktrace = prettyStacktrace 0 $ map locStr $ loc : locs
 compileCodeISPC _ code =
   GC.compileCode code
 
@@ -331,7 +420,7 @@ compileOp (ISPCKernel body free) = do
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
         mapM_ GC.item body'
-        free_mem <- GC.freeAllocatedMemNoError
+        free_mem <- freeAllocatedMemISPC
 
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]
