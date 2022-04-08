@@ -34,42 +34,6 @@ let
 
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
-          aeson =
-            haskellPackagesNew.aeson_2_0_3_0;
-
-          attoparsec =
-            haskellPackagesNew.attoparsec_0_14_4;
-
-          time-compat =
-            haskellPackagesNew.time-compat_1_9_6_1;
-
-          semialign =
-            haskellPackagesNew.semialign_1_2_0_1;
-
-          hashable =
-            haskellPackagesNew.hashable_1_4_0_2;
-
-          OneTuple =
-            haskellPackagesNew.OneTuple_0_3_1;
-
-          # Need to disable the test suite as otherwise we have a
-          # circular dependency with quickcheck-instances.
-          text-short =
-            pkgs.haskell.lib.dontCheck haskellPackagesNew.text-short_0_1_5;
-
-          quickcheck-instances =
-            haskellPackagesNew.quickcheck-instances_0_3_27;
-
-          hashable-time =
-            haskellPackagesNew.hashable-time_0_3;
-
-          lsp-types =
-            haskellPackagesNew.lsp-types_1_4_0_1;
-
-          # Test suite not compatible with aeson 2.0.3.
-          lsp =
-            pkgs.haskell.lib.dontCheck haskellPackagesNew.lsp_1_4_0_0;
-
           futhark-data =
             haskellPackagesNew.callPackage ./nix/futhark-data.nix { };
 

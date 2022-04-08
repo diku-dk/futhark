@@ -591,7 +591,7 @@ checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, 
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
       me <- liftTypeM askImportName
-      unless ("/prelude" `isPrefixOf` includeToFilePath me) $
+      unless (isBuiltin (includeToFilePath me)) $
         warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
       scope <- asks termScope
       pure (scope, v)

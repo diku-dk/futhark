@@ -23,7 +23,6 @@ import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor (first, second)
 import Data.Char (isAlpha, isAlphaNum)
 import Data.Either
-import Data.List (isPrefixOf)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Ord
@@ -742,7 +741,7 @@ checkOneDec (LocalDec d loc) = do
   pure (abstypes, env, LocalDec d' loc)
 checkOneDec (ImportDec name NoInfo loc) = do
   (name', env) <- lookupImport loc name
-  when ("/prelude" `isPrefixOf` name) $
+  when (isBuiltin name) $
     typeError loc mempty $ ppr name <+> "may not be explicitly imported."
   pure (mempty, env, ImportDec name (Info name') loc)
 checkOneDec (ValDec vb) = do

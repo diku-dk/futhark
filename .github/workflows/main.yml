@@ -123,7 +123,7 @@ jobs:
         name: futhark-nightly-macos-x86_64.tar.xz
         path: futhark-nightly-macos-x86_64.tar.xz
 
-  test-unit-and-style:
+  test-style:
     runs-on: ubuntu-20.04
 
     steps:
@@ -143,11 +143,6 @@ jobs:
 
     - name: Style check
       run: nix-shell --pure --run "tools/style-check.sh src unittests"
-
-    - name: Unit tests
-      run: |
-          nix-shell --pure --run "cabal update"
-          nix-shell --pure --run "cabal test"
 
   build-docs:
     runs-on: ubuntu-20.04

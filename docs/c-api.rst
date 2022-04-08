@@ -117,6 +117,23 @@ configuration may *not* be used for multiple concurrent contexts.
 
    Return the class of tuning parameter *i*, counting from zero.
 
+.. c:function:: void futhark_context_config_set_cache_file(struct futhark_context_config *cfg, const char *fname)
+
+   Ask the Futhark context to use a file with the designated file as a
+   cross-execution cache.  This can result in faster initialisation of
+   the program next time it is run.  For example, the GPU backends
+   will store JIT-compiled GPU code in this file.
+
+   The cache is managed entirely automatically, and if it is invalid
+   or stale, the program performs initialisation from scratch.  There
+   is no machine-readable way to get information about whether the
+   cache was hit succesfully, but you can enable logging to see what
+   hapens.
+
+   The lifespan of ``fname`` must exceed the lifespan of the
+   configuration object.  Pass ``NULL`` to disable caching (this is
+   the default).
+
 Context
 -------
 

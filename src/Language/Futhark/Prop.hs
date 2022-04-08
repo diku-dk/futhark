@@ -11,6 +11,7 @@ module Language.Futhark.Prop
   ( -- * Various
     Intrinsic (..),
     intrinsics,
+    isBuiltin,
     maxIntrinsicTag,
     namesToPrimTypes,
     qualName,
@@ -1257,6 +1258,9 @@ intrinsics =
       Prim $ Signed Int64
     tupInt64 x =
       tupleRecord $ replicate x $ Scalar $ Prim $ Signed Int64
+
+isBuiltin :: String -> Bool
+isBuiltin = ("/prelude/" `isPrefixOf`)
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.

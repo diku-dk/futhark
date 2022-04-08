@@ -33,7 +33,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State (execStateT, gets, modify)
 import Data.Bifunctor (first)
-import Data.List (intercalate, isPrefixOf, sort)
+import Data.List (intercalate, sort)
 import qualified Data.List.NonEmpty as NE
 import Data.Loc (Loc (..), locOf)
 import qualified Data.Map as M
@@ -47,6 +47,7 @@ import Futhark.Util.Pretty (Doc, align, line, ppr, text, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
+import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Semantic
 import qualified Language.Futhark.TypeChecker as E
 import Language.Futhark.Warnings
@@ -261,7 +262,7 @@ typeCheckProg orig_imports orig_src =
 
     f (imports, src) (LoadedFile path import_name prog mod_time) = do
       let prog'
-            | "/prelude" `isPrefixOf` includeToFilePath import_name = prog
+            | isBuiltin (includeToFilePath import_name) = prog
             | otherwise = prependRoots roots prog
       case E.checkProg (asImports imports) src import_name prog' of
         (prog_ws, Left (E.TypeError loc notes msg)) -> do
@@ -339,7 +340,7 @@ unchangedImports ::
   m ([LoadedFile CheckedFile], VNameSource)
 unchangedImports src [] = pure ([], src)
 unchangedImports src (f : fs)
-  | "/prelude" `isPrefixOf` includeToFilePath (lfImportName f) =
+  | isBuiltin (includeToFilePath (lfImportName f)) =
       first (f :) <$> unchangedImports src fs
   | otherwise = do
       changed <-

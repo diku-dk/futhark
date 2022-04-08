@@ -325,9 +325,11 @@ hasContiguousPerm (IxFun (lmad :| []) _ _) =
    in perm == sort perm
 hasContiguousPerm _ = False
 
--- | Shape of an index function.
+-- | The index space of the index function.  This is the same as the
+-- shape of arrays that the index function supports.
 shape :: (Eq num, IntegralExp num) => IxFun num -> Shape num
-shape (IxFun (lmad :| _) _ _) = lmadShape lmad
+shape (IxFun (lmad :| _) _ _) =
+  permuteFwd (lmadPermutation lmad) $ lmadShapeBase lmad
 
 -- | Shape of an LMAD.
 lmadShape :: (Eq num, IntegralExp num) => LMAD num -> Shape num

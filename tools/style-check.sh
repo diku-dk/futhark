@@ -2,6 +2,7 @@
 #
 # Run style-check-file.sh on every file in a directory tree.
 
+set -e
 set -o pipefail
 
 check="$(dirname $0)"/style-check-file.sh
