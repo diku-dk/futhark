@@ -51,6 +51,10 @@ jobs:
           dist-newstyle
         key: ${{ runner.os }}-cabal
 
+    - name: What is z3?
+      run: |
+        z3 --version
+
     - name: Build Futhark
       run: |
         cabal --version
