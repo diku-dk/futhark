@@ -39,8 +39,18 @@ jobs:
       run: |
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
-        sudo apt-get install ghc-9.0.1 libz3-4 libz3-dev z3
+        sudo apt-get install ghc-9.0.1
         echo "/opt/ghc/bin" >> $GITHUB_PATH
+
+    - name: Install z3
+      run: |
+        wget https://github.com/Z3Prover/z3/archive/refs/tags/z3-4.8.14.tar.gz
+        tar xf z3-4.8.14.tar.gz
+        cd z3-z3-4.8.14
+        python scripts/mk_make.py
+        cd build
+        make
+        sudo make install
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
