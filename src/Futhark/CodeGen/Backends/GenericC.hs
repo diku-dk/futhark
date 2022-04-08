@@ -1727,9 +1727,7 @@ commonLibFuns memreport = do
 
                  struct str_builder builder;
                  str_builder_init(&builder);
-                 if (ctx->detail_memory || ctx->profiling || ctx->logging) {
-                   $items:memreport
-                 }
+                 $items:memreport
                  if (ctx->profiling) {
                    $items:profilereport
                  }
