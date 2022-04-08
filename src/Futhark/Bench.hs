@@ -187,8 +187,9 @@ runLoop do_run opts r = do
   resampled <- liftIO $ resample g [Mean] 2500 run_times
 
   let rsd = relativeStdErr $ resamples (snd $ head resampled)
-  let acor = case autocorrelation run_times of
-        (x, _, _) -> fromMaybe 1 (x U.!? 1)
+      acor =
+        let (x, _, _) = autocorrelation run_times
+         in fromMaybe 1 (x U.!? 1)
 
   let actions = do
         x <- do_run
