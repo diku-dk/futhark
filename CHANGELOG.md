@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.21.8]
+
+### Added
+
+* Slightly better parse errors (again).
+
+* `futhark literate` now supports a `file:` option in `:img` and
+  `:video` directives (#1491).
+
+### Fixed
+
+* Improved hoisting of size computations.  This could cause some
+  regular nested parallel programs to run into compiler limitations,
+  as if they were irregular.
+
+* Rare code generation bug for histograms (#1609).
+
 ## [0.21.7]
 
 ### Added

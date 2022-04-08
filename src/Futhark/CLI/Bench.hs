@@ -100,7 +100,7 @@ runBenchmarks opts paths = do
       (sortBy (comparing fst) compiled_benchmarks)
   let results = concat $ catMaybes maybe_results
   case optJSON opts of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just file -> LBS.writeFile file $ encodeBenchResults results
   when (any isNothing maybe_results || anyFailed results) exitFailure
   where
@@ -122,8 +122,8 @@ data SkipReason = Skipped | FailedToCompile
 
 compileOptions :: BenchOptions -> IO CompileOptions
 compileOptions opts = do
-  futhark <- maybe getExecutablePath return $ optFuthark opts
-  return $
+  futhark <- maybe getExecutablePath pure $ optFuthark opts
+  pure $
     CompileOptions
       { compFuthark = futhark,
         compBackend = optBackend opts,
@@ -145,10 +145,10 @@ compileBenchmark opts (program, program_spec) = do
           then do
             exists <- doesFileExist $ binaryName program
             if exists
-              then return $ Right (program, cases)
+              then pure $ Right (program, cases)
               else do
                 putStrLn $ binaryName program ++ " does not exist, but --skip-compilation passed."
-                return $ Left FailedToCompile
+                pure $ Left FailedToCompile
           else do
             putStr $ "Compiling " ++ program ++ "...\n"
 
@@ -159,12 +159,12 @@ compileBenchmark opts (program, program_spec) = do
             case res of
               Left (err, errstr) -> do
                 putStrLn $ inRed err
-                maybe (return ()) SBS.putStrLn errstr
-                return $ Left FailedToCompile
+                maybe (pure ()) SBS.putStrLn errstr
+                pure $ Left FailedToCompile
               Right () ->
-                return $ Right (program, cases)
+                pure $ Right (program, cases)
     _ ->
-      return $ Left Skipped
+      pure $ Left Skipped
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
@@ -251,7 +251,7 @@ mkProgressPrompt :: Int -> Int -> String -> IO (Maybe Int -> IO ())
 mkProgressPrompt runs pad_to dataset_desc
   | fancyTerminal = do
     count <- newIORef (0, 0)
-    return $ \us -> do
+    pure $ \us -> do
       putStr "\r" -- Go to start of line.
       let p s =
             putStr $
@@ -269,7 +269,7 @@ mkProgressPrompt runs pad_to dataset_desc
   | otherwise = do
     putStr $ descString dataset_desc pad_to
     hFlush stdout
-    return $ const $ return ()
+    pure $ const $ pure ()
 
 reportResult :: [RunResult] -> IO ()
 reportResult = putStrLn . reportString
@@ -296,10 +296,10 @@ runBenchmarkCase ::
   TestRun ->
   IO (Maybe DataResult)
 runBenchmarkCase _ _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
-  return Nothing -- Not our concern, we are not a testing tool.
+  pure Nothing -- Not our concern, we are not a testing tool.
 runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
-    return Nothing
+    pure Nothing
 runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   prompt <- mkProgressPrompt (optRuns opts) pad_to dataset_desc
 
@@ -321,23 +321,20 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   when fancyTerminal $ do
     clearLine
     putStr "\r"
+    putStr $ descString (atMostChars 40 dataset_desc) pad_to
 
   case res of
-    Left err -> do
-      when fancyTerminal $
-        liftIO $ putStrLn $ descString (atMostChars 40 dataset_desc) pad_to
-      liftIO $ putStrLn $ inRed $ T.unpack err
-      return $ Just $ DataResult dataset_desc $ Left err
+    Left err -> liftIO $ do
+      putStrLn ""
+      putStrLn $ inRed $ T.unpack err
+      pure $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
-      when fancyTerminal $
-        putStr $ descString (atMostChars 40 dataset_desc) pad_to
-
       reportResult runtimes
       Result runtimes (getMemoryUsage errout) errout
         & Right
         & DataResult dataset_desc
         & Just
-        & return
+        & pure
 
 getMemoryUsage :: T.Text -> M.Map T.Text Int
 getMemoryUsage t =

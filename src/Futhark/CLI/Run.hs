@@ -47,8 +47,8 @@ interpret config fp = do
 
   inps <-
     case vr of
-      Left err -> do
-        hPutStrLn stderr $ "Error when reading input: " ++ show err
+      Left (SyntaxError loc err) -> do
+        hPutStrLn stderr $ "Input syntax error at " <> locStr loc <> ":\n" <> err
         exitFailure
       Right vs ->
         return vs
@@ -117,7 +117,7 @@ newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft show
       =<< liftIO
-        ( runExceptT (readProgram [] file)
+        ( runExceptT (readProgramFile [] file)
             `catch` \(err :: IOException) ->
               return (externalErrorS (show err))
         )

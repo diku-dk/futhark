@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:           futhark
-version:        0.21.7
+version:        0.21.8
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -289,6 +289,8 @@ library
       Language.Futhark.Interpreter
       Language.Futhark.Parser
       Language.Futhark.Parser.Monad
+      Language.Futhark.Parser.Lexer.Tokens
+      Language.Futhark.Parser.Lexer.Wrapper
       Language.Futhark.Prelude
       Language.Futhark.Pretty
       Language.Futhark.Prop
