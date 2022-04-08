@@ -184,7 +184,7 @@ runMinimum ::
 runMinimum do_run opts elapsed r = do
   let actions = do
         x <- do_run
-        liftIO $ runResultAction opts ((runMicroseconds . fst) x, Nothing)
+        liftIO $ runResultAction opts (runMicroseconds (fst x), Nothing)
         pure x
 
   before <- liftIO getCurrentTime
