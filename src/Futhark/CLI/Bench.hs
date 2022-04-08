@@ -352,9 +352,6 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
       putStrLn $ inRed $ T.unpack err
       pure $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
-      when fancyTerminal $
-        putStr $ descString (atMostChars 40 dataset_desc) pad_to
-
       let vec_runtimes = U.fromList $ map (fromIntegral . runMicroseconds) runtimes
       g <- create
       resampled <- liftIO $ resample g [Mean] 70000 vec_runtimes
