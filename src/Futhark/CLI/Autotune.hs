@@ -29,7 +29,7 @@ import Text.Regex.TDFA
 data AutotuneOptions = AutotuneOptions
   { optBackend :: String,
     optFuthark :: Maybe String,
-    optRuns :: Int,
+    optMinRuns :: Int,
     optTuning :: Maybe String,
     optExtraOptions :: [String],
     optVerbose :: Int,
@@ -56,7 +56,8 @@ compileOptions opts = do
 runOptions :: Int -> AutotuneOptions -> RunOptions
 runOptions timeout_s opts =
   RunOptions
-    { runRuns = optRuns opts,
+    { runMinRuns = optMinRuns opts,
+      runMinTime = 0.5,
       runTimeout = timeout_s,
       runVerbose = optVerbose opts,
       runResultAction = const $ pure ()
@@ -456,7 +457,7 @@ commandLineOptions =
                 [(n', "")] | n' >= 0 ->
                   Right $ \config ->
                     config
-                      { optRuns = n'
+                      { optMinRuns = n'
                       }
                 _ ->
                   Left $ error $ "'" ++ n ++ "' is not a non-negative integer."
