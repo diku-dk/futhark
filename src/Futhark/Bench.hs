@@ -165,10 +165,10 @@ relativeStdErr vec =
 nextRunCount :: Int -> Double -> Double -> Int -> Int
 nextRunCount runs rsd acor min_runs
   | runs < min_runs = min_runs - runs -- Minimum runs specified.
-  | acor > 0.92 && rsd > 0.008 = div runs 2
-  | acor > 0.75 && rsd > 0.015 = div runs 2
-  | acor > 0.65 && rsd > 0.025 = div runs 2
-  | acor > 0.45 && rsd > 0.050 = div runs 2
+  | acor > 0.95 && rsd > 0.0010 = div runs 2
+  | acor > 0.75 && rsd > 0.0015 = div runs 2
+  | acor > 0.65 && rsd > 0.0025 = div runs 2
+  | acor > 0.45 && rsd > 0.0050 = div runs 2
   | rsd > 0.01 = div runs 2
   | otherwise = 0
 
