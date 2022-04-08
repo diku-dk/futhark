@@ -182,9 +182,10 @@ generateDeviceFun fname device_func = do
         [ [C.cparam|__global int *global_failure|],
           [C.cparam|__global typename int64_t *global_failure_args|]
         ]
-      (func, cstate) =
+      ((a, b, _), cstate) =
         genGPUCode FunMode (functionBody device_func) failures $
           GC.compileFun mempty params (fname, device_func)
+      func = (a,b)
       kstate = GC.compUserState cstate
 
   modify $ \s ->

@@ -1646,7 +1646,7 @@ compileProg ::
   m CParts
 compileProg backend version ops extra header_extra spaces options prog = do
   src <- getNameSource
-  let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
+  let ((prototypes, definitions, ispcbindings, entry_point_decls, manifest), endstate) =
         runCompilerM ops src () compileProg'
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
@@ -1776,6 +1776,8 @@ struct memblock {
 };
 #endif
 
+$ispcbindings
+
 $ispc_decls
         |]
 
@@ -1799,8 +1801,8 @@ $ispc_decls
 
       ctx_ty <- contextType
 
-      (prototypes, functions) <-
-        unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
+      (prototypes, functions, ispcbindings) <-
+        unzip3 <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
       mapM_ (mapM_ earlyDecl) memstructs
       (entry_points, entry_points_manifest) <-
@@ -1815,6 +1817,7 @@ $ispc_decls
       return
         ( T.unlines $ map prettyText prototypes,
           T.unlines $ map (prettyText . funcToDef) functions,
+          T.unlines $ map prettyText ispcbindings,
           T.unlines $ map prettyText entry_points,
           Manifest.Manifest (M.fromList entry_points_manifest) types backend version
         )
@@ -2020,7 +2023,7 @@ cachingMemory lexical f = do
 
   local lexMem $ f (concatMap declCached cached') (map freeCached cached')
 
-compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
+compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func, C.Definition)
 compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)) = inNewFunction $ do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
@@ -2031,8 +2034,8 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     free_mem <- freeAllocatedMem
 
     return
-      ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
-        [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
+      ( [C.cedecl|int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
+        [C.cfun|int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
                $stms:ignores
                int err = 0;
                $items:decl_cached
@@ -2045,7 +2048,9 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
                $items:free_mem
                }
                return err;
-  }|]
+  }|],
+        [C.cedecl|extern "C" unmasked uniform int $id:(funName fname)(
+                  $params:(uniformParams extra), $params:(uniformParams outparams), $params:(uniformParams inparams));|]
       )
   where
     -- Ignore all the boilerplate parameters, just in case we don't
@@ -2067,6 +2072,16 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
       ty <- memToCType name space
       p_name <- newVName $ baseString name ++ "_p"
       return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
+
+    uniformParams = map uniformParam
+
+    uniformParam (C.Param ident (C.DeclSpec stor tq ts _) dec _) =
+      C.Param ident (C.DeclSpec stor (tq <> [C.ctyquals|uniform|]) ts noLoc) (uniformDecl dec) noLoc
+    uniformParam other = other
+
+    uniformDecl (C.Ptr tq dec _) =
+      C.Ptr (tq <> [C.ctyquals|uniform|]) (uniformDecl dec) noLoc
+    uniformDecl other = other
 
 derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =

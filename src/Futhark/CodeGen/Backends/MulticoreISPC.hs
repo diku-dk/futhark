@@ -29,7 +29,6 @@ import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType)
 import Data.Maybe
-import Data.Loc (noLoc)
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -96,7 +95,7 @@ ispcDef :: MC.DefSpecifier
 ispcDef s f = do
   s' <- MC.multicoreName s
   GC.ispcDecl =<< f s'
-  pure s'
+  return s'
 
 sharedDef :: MC.DefSpecifier
 sharedDef s f = do
@@ -106,17 +105,24 @@ sharedDef s f = do
   GC.libDecl =<< f s'
   GC.libDecl [C.cedecl|$esc:("#endif")|]
   GC.ispcDecl =<< f s'
-  pure s'
+  return s'
+
+makeStringLiteral :: String -> GC.CompilerM Multicore () Name
+makeStringLiteral str = do
+  name <- MC.multicoreDef "strlit_shim" $ \s ->
+    pure [C.cedecl|char* $id:s() { return $string:str; }|]
+  void $ ispcDef "" $ const $ 
+    pure [C.cedecl|extern "C" unmasked uniform char* uniform $id:name();|]
+  pure name
 
 isConstExp :: PrimExp VName -> Bool
 isConstExp = isSimple . constFoldPrimExp
   where isSimple (ValueExp _) = True
         isSimple _ = False
 
--- TODO(pema): Deduplicate some of the C code in the generic C generator
 -- Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
-compileCodeISPC :: Imp.Variability -> MCCode -> GC.CompilerM Multicore () ()
+compileCodeISPC :: Imp.Variability -> MCCode -> GC.CompilerM Multicore s ()
 compileCodeISPC vari (Comment s code) = do
   xs <- GC.collect $ compileCodeISPC vari code
   let comment = "// " ++ s
@@ -127,28 +133,6 @@ compileCodeISPC vari (Comment s code) = do
 compileCodeISPC vari (DeclareScalar name vol t) = do
   let ct = GC.primTypeToCType t
   GC.decl [C.cdecl|$tyquals:(GC.volQuals vol) $tyquals:(GC.variQuals vari) $ty:ct $id:name;|]
-compileCodeISPC _ (DeclareArray name DefaultSpace t vs) = do
-  name_realtype <- newVName $ baseString name ++ "_realtype"
-  let ct = GC.primTypeToCType t
-  case vs of
-    ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
-      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
-    ArrayZeros n ->
-      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
-  -- Fake a memory block.
-  GC.contextField
-    (C.toIdent name noLoc)
-    [C.cty|struct memblock|]
-    $ Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
-  -- Make an exported C shim to access it
-  shim <- MC.multicoreDef "get_static_array_shim" $ \f ->
-    pure [C.cedecl|struct memblock* $id:f(struct futhark_context* ctx) { return &ctx->$id:name; }|]
-  void $ ispcDef "" $ const $
-    pure [C.cedecl|extern "C" unmasked uniform struct memblock * uniform
-                   $id:shim(uniform struct futhark_context* uniform ctx);|]
-  -- Call it
-  GC.item [C.citem|uniform struct memblock $id:name = *$id:shim(ctx);|]
 compileCodeISPC vari (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name vol t : SetScalar dest e : code)
@@ -266,10 +250,10 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
             let lexical_nested = lexicalMemoryUsageMC $ Function Nothing [] params nested_code [] []
             fnpar_task <- MC.generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
             GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-            pure $ zip [fnpar_task] [True]
+            return $ zip [fnpar_task] [True]
         Nothing -> do
             GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-            pure mempty
+            return mempty
 
     GC.stm [C.cstm|return scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);|]
 
@@ -277,14 +261,14 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     mapM_ GC.profileReport $ MC.multiCoreReport $ (fpar_task, True) : fnpar_task
 
   schedn <- MC.multicoreDef "schedule_shim" $ \s ->
-    pure [C.cedecl|int $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) {
+    return [C.cedecl|int $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) {
         $items:toC
     }|]
 
-  void $ ispcDef "" $ const $ pure [C.cedecl|extern "C" unmasked uniform int $id:schedn 
-                                             (struct futhark_context uniform * uniform ctx, 
-                                             struct $id:fstruct uniform * uniform args, 
-                                             uniform int iterations);|]
+  void $ ispcDef "" $ \_ -> return [C.cedecl| extern "C" unmasked uniform int $id:schedn 
+                                                (struct futhark_context uniform * uniform ctx, 
+                                                struct $id:fstruct uniform * uniform args, 
+                                                uniform int iterations);|]
 
   aos_name <- newVName "aos"
   GC.stm [C.cstm|$escstm:("#if ISPC")|]
@@ -336,7 +320,7 @@ compileOp (ISPCKernel body free) = do
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]
 
-    pure
+    return
       [C.cedecl|
         export static uniform int $id:s(struct futhark_context uniform * uniform ctx,
                                  uniform typename int64_t start,
