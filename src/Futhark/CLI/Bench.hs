@@ -253,12 +253,23 @@ interimResult us_sum i elapsed =
     avg :: Double
     avg = fromIntegral us_sum / fromIntegral i
 
+convergenceBar :: (String -> IO ()) -> IORef Int -> Int -> Int -> Double -> IO ()
+convergenceBar p spin_count us_sum i rsd' = do
+  spin_idx <- readIORef spin_count
+  let spin_char = spin_load !! spin_idx
+  p $ printf "%10.0fμs %c (RSD of mean: %2.4f; %4d runs)" avg spin_char rsd' i
+  let spin_count' = (spin_idx + 1) `mod` 10
+  writeIORef spin_count spin_count'
+  where
+    avg :: Double
+    avg = fromIntegral us_sum / fromIntegral i
+    spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
 mkProgressPrompt :: Int -> String -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
 mkProgressPrompt pad_to dataset_desc start_time
   | fancyTerminal = do
       count <- newIORef (0, 0)
       spin_count <- newIORef 0
-      let spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
       pure $ \(us, rsd) -> do
         putStr "\r" -- Go to start of line.
         let p s =
@@ -266,7 +277,6 @@ mkProgressPrompt pad_to dataset_desc start_time
                 descString (atMostChars 40 dataset_desc) pad_to ++ s
 
         (us_sum, i) <- readIORef count
-        spin_idx <- readIORef spin_count
 
         now <- liftIO getCurrentTime
         let elapsed = realToFrac $ diffUTCTime now start_time
@@ -279,15 +289,7 @@ mkProgressPrompt pad_to dataset_desc start_time
             writeIORef count (us_sum', i')
             case rsd of
               Nothing -> p $ interimResult us_sum' i' elapsed
-              Just rsd' -> do
-                let spin_char = spin_load !! spin_idx
-                p $ printf "%10.0fμs %c RSD of mean: %2.4f  %d" avg spin_char rsd' i'
-                let spin_count' = (spin_idx + 1) `mod` 10
-                writeIORef spin_count spin_count'
-                where
-                  avg :: Double
-                  avg = fromIntegral us_sum / fromIntegral i
-
+              Just rsd' -> convergenceBar p spin_count us_sum i rsd'
         putStr " " -- Just to move the cursor away from the progress bar.
         hFlush stdout
   | otherwise = do
