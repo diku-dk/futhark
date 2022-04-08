@@ -172,12 +172,14 @@ nextRunCount runs rsd acor min_runs
   | rsd > 0.01 = div runs 2
   | otherwise = 0
 
+type BenchM = ExceptT T.Text IO
+
 -- Keep on running benchmark until a completion criteria is met.
 runLoop ::
-  ExceptT T.Text IO (RunResult, [T.Text]) ->
+  BenchM (RunResult, [T.Text]) ->
   RunOptions ->
   [(RunResult, [T.Text])] ->
-  ExceptT T.Text IO [(RunResult, [T.Text])]
+  BenchM [(RunResult, [T.Text])]
 runLoop do_run opts r = do
   let run_times = U.fromList $ map (fromIntegral . runMicroseconds . fst) r
 
@@ -201,11 +203,11 @@ runLoop do_run opts r = do
 
 -- Each benchmark is run for at least 0.5s wallclock time.
 runTimed ::
-  ExceptT T.Text IO (RunResult, [T.Text]) ->
+  BenchM (RunResult, [T.Text]) ->
   RunOptions ->
   NominalDiffTime ->
   [(RunResult, [T.Text])] ->
-  ExceptT T.Text IO [(RunResult, [T.Text])]
+  BenchM [(RunResult, [T.Text])]
 runTimed do_run opts elapsed r = do
   let actions = do
         x <- do_run
