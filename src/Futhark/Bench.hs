@@ -148,7 +148,7 @@ data RunOptions = RunOptions
     runVerbose :: Int,
     -- | Invoked for every runtime measured during the run.  Can be
     -- used to provide a progress bar.
-    runResultAction :: Maybe ((Int, Maybe Double) -> IO ())
+    runResultAction :: (Int, Maybe Double) -> IO ()
   }
 
 square :: Double -> Double
@@ -190,7 +190,7 @@ runLoop do_run opts r = do
 
   let actions = do
         x <- do_run
-        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) ((runMicroseconds . fst) x, Just rsd)
+        liftIO $ runResultAction opts ((runMicroseconds . fst) x, Just rsd)
         pure x
 
   case nextRunCount (length r) rsd acor (runRuns opts) of
@@ -209,7 +209,7 @@ runTimed ::
 runTimed do_run opts elapsed r = do
   let actions = do
         x <- do_run
-        liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) ((runMicroseconds . fst) x, Nothing)
+        liftIO $ runResultAction opts ((runMicroseconds . fst) x, Nothing)
         pure x
 
   before <- liftIO getCurrentTime

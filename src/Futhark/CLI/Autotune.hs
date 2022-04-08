@@ -59,7 +59,7 @@ runOptions timeout_s opts =
     { runRuns = optRuns opts,
       runTimeout = timeout_s,
       runVerbose = optVerbose opts,
-      runResultAction = Nothing
+      runResultAction = const $ pure ()
     }
 
 type Path = [(String, Int)]

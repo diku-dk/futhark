@@ -221,7 +221,7 @@ runOptions f opts =
     { runRuns = optRuns opts,
       runTimeout = optTimeout opts,
       runVerbose = optVerbose opts,
-      runResultAction = Just f
+      runResultAction = f
     }
 
 progressBar :: Int -> Double -> Double -> Int -> String
