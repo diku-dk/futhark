@@ -96,7 +96,8 @@ runBenchmarks opts paths = do
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
-  putStrLn $ "Reporting average runtime of " ++ show (optRuns opts) ++ " runs for each dataset."
+  putStrLn $ "Reporting mean runtime of at least " ++ show (optRuns opts) ++ " runs for each dataset."
+  putStrLn "More runs automatically performed to ensure accurate measurement."
 
   futhark <- FutharkExe . compFuthark <$> compileOptions opts
 
@@ -226,7 +227,7 @@ runOptions f opts =
 
 progressBar :: Int -> Double -> Double -> Int -> String
 progressBar runs cur bound steps =
-  "|" ++ map cell [1 .. steps] ++ "| " ++ show runs -- ++ "/" ++ show bound
+  "|" <> map cell [1 .. steps] <> "| " <> show runs <> " runs"
   where
     step_size :: Double
     step_size = bound / fromIntegral steps
