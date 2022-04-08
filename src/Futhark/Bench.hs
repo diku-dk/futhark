@@ -266,14 +266,14 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
           ls -> throwError $ "Ambiguous runtimes: " <> T.pack (show ls)
 
   maybe_call_logs <- liftIO . timeout (runTimeout opts * 1000000) . runExceptT $ do
-    -- First one uncounted warmup run, whose result we also use for
-    -- validation.
+    -- First one uncounted warmup run.
     void $ cmdEither $ cmdCall server entry outs ins
+
+    ys <- runMinimum (freeOuts *> doRun) opts 0 []
+
+    xs <- runConvergence (freeOuts *> doRun) opts ys
+
     vs <- readResults server outs <* freeOuts
-
-    ys <- runMinimum (doRun <* freeOuts) opts 0 []
-
-    xs <- runConvergence (doRun <* freeOuts) opts ys
 
     pure (vs, xs)
 
