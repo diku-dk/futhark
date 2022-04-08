@@ -174,13 +174,35 @@ nextRunCount runs rsd acor min_runs
 
 type BenchM = ExceptT T.Text IO
 
--- Keep on running benchmark until a completion criteria is met.
-runLoop ::
+-- Do the minimum number of runs.
+runMinimum ::
+  BenchM (RunResult, [T.Text]) ->
+  RunOptions ->
+  NominalDiffTime ->
+  [(RunResult, [T.Text])] ->
+  BenchM [(RunResult, [T.Text])]
+runMinimum do_run opts elapsed r = do
+  let actions = do
+        x <- do_run
+        liftIO $ runResultAction opts ((runMicroseconds . fst) x, Nothing)
+        pure x
+
+  before <- liftIO getCurrentTime
+  r' <- replicateM (1 + length r) actions
+  after <- liftIO getCurrentTime
+
+  let elapsed' = elapsed + diffUTCTime after before
+  if 0.5 < elapsed'
+    then pure (r ++ r')
+    else runMinimum do_run opts elapsed' (r ++ r')
+
+-- Do more runs until a convergence criterion is reached.
+runConvergence ::
   BenchM (RunResult, [T.Text]) ->
   RunOptions ->
   [(RunResult, [T.Text])] ->
   BenchM [(RunResult, [T.Text])]
-runLoop do_run opts r = do
+runConvergence do_run opts r = do
   let run_times = U.fromList $ map (fromIntegral . runMicroseconds . fst) r
 
   g <- create
@@ -200,29 +222,7 @@ runLoop do_run opts r = do
     0 -> pure r
     x -> do
       r' <- replicateM x actions
-      runLoop do_run opts (r ++ r')
-
--- Each benchmark is run for at least 0.5s wallclock time.
-runTimed ::
-  BenchM (RunResult, [T.Text]) ->
-  RunOptions ->
-  NominalDiffTime ->
-  [(RunResult, [T.Text])] ->
-  BenchM [(RunResult, [T.Text])]
-runTimed do_run opts elapsed r = do
-  let actions = do
-        x <- do_run
-        liftIO $ runResultAction opts ((runMicroseconds . fst) x, Nothing)
-        pure x
-
-  before <- liftIO getCurrentTime
-  r' <- replicateM (1 + length r) actions
-  after <- liftIO getCurrentTime
-
-  let elapsed' = elapsed + diffUTCTime after before
-  if 0.5 < elapsed'
-    then pure (r ++ r')
-    else runTimed do_run opts elapsed' (r ++ r')
+      runConvergence do_run opts (r ++ r')
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
@@ -270,9 +270,9 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
     void $ cmdEither $ cmdCall server entry outs ins
     freeOuts
 
-    ys <- runTimed (doRun <* freeOuts) opts 0 []
+    ys <- runMinimum (doRun <* freeOuts) opts 0 []
 
-    xs <- runLoop (doRun <* freeOuts) opts ys
+    xs <- runConvergence (doRun <* freeOuts) opts ys
 
     y <- doRun
 
