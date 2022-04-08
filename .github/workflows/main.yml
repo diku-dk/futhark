@@ -30,7 +30,7 @@ jobs:
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
   build-linux-cabal:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-21.10
 
     steps:
     - uses: actions/checkout@v2
@@ -51,13 +51,6 @@ jobs:
           dist-newstyle
         key: ${{ runner.os }}-cabal
 
-    - name: What is z3?
-      run: |
-        z3 --version
-
-    - name: Setup upterm session
-      uses: lhotari/action-upterm@v1
-
     - name: Build Futhark
       run: |
         cabal --version
@@ -66,7 +59,7 @@ jobs:
         cabal install -w ghc-9.0.1 --install-method=copy --overwrite-policy=always
 
   build-linux-stack:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-21.10
 
     steps:
     - uses: actions/checkout@v2
