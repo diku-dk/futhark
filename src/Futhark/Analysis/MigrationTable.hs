@@ -430,12 +430,25 @@ graphStm stm = do
       graphInefficientReturn [] e
       one bs `reuses` arr
     BasicOp (FlatIndex arr s) -> do
+      -- Migrating a FlatIndex leads to a memory allocation error.
+      --
+      -- TODO: Fix FlatIndex memory allocation error.
+      --
+      -- Can be replaced with 'graphHostOnly e' to disable migration.
+      -- A fix can be verified by enabling tests/migration/reuse2_flatindex.fut
       graphInefficientReturn (flatSliceDims s) e
       one bs `reuses` arr
     BasicOp (FlatUpdate arr _ _) -> do
       graphInefficientReturn [] e
       one bs `reuses` arr
-    BasicOp (Scratch _ s) -> graphInefficientReturn s e
+    BasicOp (Scratch _ s) ->
+      -- Migrating a Scratch leads to a memory allocation error.
+      --
+      -- TODO: Fix Scratch memory allocation error.
+      --
+      -- Can be replaced with 'graphHostOnly e' to disable migration.
+      -- A fix can be verified by enabling tests/migration/reuse4_scratch.fut
+      graphInefficientReturn s e
     BasicOp (Reshape s arr) -> do
       graphInefficientReturn (newDims s) e
       one bs `reuses` arr
