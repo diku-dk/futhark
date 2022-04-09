@@ -243,7 +243,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
               ++ ":\n"
               ++ gccerr
         Right (ExitSuccess, _, _) ->
-          return ()
+          pure ()
   where
     ispcbase = outpath <> ispcextension
 
@@ -386,7 +386,7 @@ compileMulticoreToISPCAction fcfg mode outpath =
           ispcextension = "_ispc"
           ispcheader = takeBaseName (outpath <> ispcextension) `addExtension` "h"
       (cprog, ispc) <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack $ "#include \"" <> ispcheader <> "\"") (T.pack versionString) prog
-      case mode of -- TODO(pema): Library mode
+      case mode of
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header

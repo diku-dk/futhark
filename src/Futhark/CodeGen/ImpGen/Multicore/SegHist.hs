@@ -46,7 +46,7 @@ renameHistop :: HistOp MCMem -> MulticoreGen (HistOp MCMem)
 renameHistop histop = do
   let op = histOp histop
   lambda' <- renameLambda op
-  return histop { histOp = lambda' }
+  pure histop { histOp = lambda' }
 
 nonsegmentedHist ::
   Pat LetDecMem ->

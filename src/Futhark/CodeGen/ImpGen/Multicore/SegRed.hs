@@ -78,7 +78,7 @@ renameSlug slug = do
   let lambda = segBinOpLambda op
   lambda' <- renameLambda lambda
   let op' = op { segBinOpLambda = lambda' }
-  return slug { slugOp = op' }
+  pure slug { slugOp = op' }
 
 nonsegmentedReduction ::
   Pat LetDecMem ->
@@ -322,7 +322,6 @@ reductionStage1Array space slugs kbody = do
     lparams <- collect $ genBinOpParams slugs
     (slug_local_accs, uniform_prebody) <- collect' $ genAccumulators slugs
     -- Put the accumulators outside of the kernel, so they are forced uniform
-    -- TODO(pema): This is a bit of a hack
     emit uniform_prebody
     inISPC $ do
       -- Put the lambda params inside the kernel so they are varying
