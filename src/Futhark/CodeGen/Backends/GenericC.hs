@@ -1999,17 +1999,18 @@ compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _)) = inNewFunct
     Nothing -> do
       inparams <- mapM compileInput inputs
       (outparams, _) <- unzip <$> mapM compileOutput outputs      
-      args <- mapM compileArguments (inputs <> outputs)
+      args <- mapM compileArguments (inputs <> outputs)      
       let builtin = [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams);|]
-      let fun = [C.cfun|static int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams) {               
-                return $id:fname($args:args);
+      let fun = [C.cfun|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams) {               
+                return $id:fname($args:extraToExp, $args:args);
       }|]
       return $ Just (builtin, fun)
     Just _ -> return  Nothing
-  where
+  where    
+    extraToExp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
     compileArguments (ScalarParam name _) = return [C.cexp|$id:name|]
-    compileArguments (MemParam name _) = return [C.cexp|$id:name|]
-    
+    compileArguments (MemParam name _) = return [C.cexp|*$id:name|]
+
     compileInput (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
       return [C.cparam|$ty:ctp $id:name|]
