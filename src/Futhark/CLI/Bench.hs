@@ -388,7 +388,11 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
               boot = head $ bootstrapBCA cl95 vec_runtimes resampled
 
       reportResult runtimes bootstrapCI
-      Result runtimes (getMemoryUsage errout) errout
+      -- We throw away the 'errout' because it is almost always
+      -- useless and adds too much to the .json file size.  This
+      -- behaviour could be moved into a command line option if we
+      -- wish.
+      Result runtimes (getMemoryUsage errout) mempty
         & Right
         & DataResult dataset_desc
         & Just
