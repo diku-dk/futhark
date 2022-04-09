@@ -51,7 +51,7 @@ newtype RunResult = RunResult {runMicroseconds :: Int}
 data Result = Result
   { runResults :: [RunResult],
     memoryMap :: M.Map T.Text Int,
-    stdErr :: T.Text
+    stdErr :: Maybe T.Text
   }
   deriving (Eq, Show)
 
@@ -100,13 +100,15 @@ instance JSON.FromJSON DataResults where
 dataResultJSON :: DataResult -> (JSON.Key, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
   (JSON.fromString desc, JSON.toJSON err)
-dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr))) =
+dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr_opt))) =
   ( JSON.fromString desc,
-    JSON.object
+    JSON.object $
       [ ("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
-        ("bytes", JSON.toJSON bytes),
-        ("stderr", JSON.toJSON progerr)
+        ("bytes", JSON.toJSON bytes)
       ]
+        ++ case progerr_opt of
+          Nothing -> []
+          Just progerr -> [("stderr", JSON.toJSON progerr)]
   )
 
 benchResultJSON :: BenchResult -> (JSON.Key, JSON.Value)

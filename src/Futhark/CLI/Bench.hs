@@ -392,7 +392,7 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
       -- useless and adds too much to the .json file size.  This
       -- behaviour could be moved into a command line option if we
       -- wish.
-      Result runtimes (getMemoryUsage errout) mempty
+      Result runtimes (getMemoryUsage errout) Nothing
         & Right
         & DataResult dataset_desc
         & Just
