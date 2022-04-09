@@ -32,7 +32,6 @@ dist-newstyle
 *.toc
 *.vrb
 *.nav
-*.nix
 
 # Ignore core dumps.
 core
