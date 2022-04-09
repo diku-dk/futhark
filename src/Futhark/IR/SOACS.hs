@@ -30,7 +30,7 @@ instance RepTypes SOACS where
   type Op SOACS = SOAC SOACS
 
 instance ASTRep SOACS where
-  expTypesFromPat = return . expExtTypesFromPat
+  expTypesFromPat = pure . expExtTypesFromPat
 
 instance TC.CheckableOp SOACS where
   checkOp = typeCheckSOAC

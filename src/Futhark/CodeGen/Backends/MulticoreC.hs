@@ -71,6 +71,7 @@ generateContext = do
                                int debugging;
                                int profiling;
                                int num_threads;
+                               const char *cache_fname;
                              };|]
     )
 
@@ -84,6 +85,7 @@ generateContext = do
                              cfg->in_use = 0;
                              cfg->debugging = 0;
                              cfg->profiling = 0;
+                             cfg->cache_fname = NULL;
                              cfg->num_threads = 0;
                              return cfg;
                            }|]
@@ -358,14 +360,14 @@ compileWriteBackResVals struct = zipWith field
 paramToCType :: Param -> GC.CompilerM op s (C.Type, ValueType)
 paramToCType (ScalarParam _ pt) = do
   let t = GC.primTypeToCType pt
-  return (t, Prim)
+  pure (t, Prim)
 paramToCType (MemParam name space') = mcMemToCType name space'
 
 mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
 mcMemToCType v space = do
   refcount <- GC.fatMemory space
   cached <- isJust <$> GC.cacheMem v
-  return
+  pure
     ( GC.fatMemType space,
       if refcount && not cached
         then MemBlock
@@ -455,7 +457,7 @@ addBenchmarkFields name Nothing = do
 benchmarkCode :: Name -> Maybe C.Id -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name tid code = do
   addBenchmarkFields name tid
-  return
+  pure
     [C.citems|
      typename uint64_t $id:start = 0;
      if (ctx->profiling && !ctx->profiling_paused) {
@@ -494,14 +496,14 @@ addTimingFields name = do
 multicoreName :: String -> GC.CompilerM op s Name
 multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
-  return $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
+  pure $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
 
 type DefSpecifier s = String -> (Name -> GC.CompilerM Multicore s C.Definition) -> GC.CompilerM Multicore s Name
 multicoreDef :: DefSpecifier s
 multicoreDef s f = do
   s' <- multicoreName s
   GC.libDecl =<< f s'
-  return s'
+  pure s'
 
 generateParLoopFn ::
   C.ToIdent a =>
@@ -526,7 +528,7 @@ generateParLoopFn lexical basename code fstruct free retval = do
         mapM_ GC.item code'
         free_mem <- GC.freeAllocatedMem
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
-    return
+    pure
       [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
                            int err = 0;
                            int subtask_id = tid;
@@ -548,7 +550,7 @@ prepareTaskStruct ::
   [(C.Type, ValueType)] ->
   GC.CompilerM Multicore s Name
 prepareTaskStruct def name free_args free_ctypes retval_args retval_ctypes = do
-  let makeStruct s = return
+  let makeStruct s = pure
         [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
@@ -560,7 +562,7 @@ prepareTaskStruct def name free_args free_ctypes retval_args retval_ctypes = do
   GC.stm [C.cstm|$id:fstruct'.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct' free_args free_ctypes)|]
   GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct' retval_args retval_ctypes)|]
-  return fstruct
+  pure fstruct
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore s
@@ -610,10 +612,10 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       let lexical_nested = lexicalMemoryUsageMC $ Function Nothing [] params nested_code [] []
       fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-      return $ zip [fnpar_task] [True]
+      pure $ zip [fnpar_task] [True]
     Nothing -> do
       GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-      return mempty
+      pure mempty
 
   free_all_mem <- GC.freeAllocatedMem
   let ftask_err = fpar_task <> "_err"
@@ -654,7 +656,7 @@ compileOp (ParLoop s' body free) = do
         free_mem <- GC.freeAllocatedMem
         mapM_ GC.item body'
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
-    return
+    pure
       [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int subtask_id, int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;

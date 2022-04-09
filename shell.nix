@@ -24,7 +24,10 @@ pkgs.stdenv.mkDerivation {
     unstable.haskell.compiler.ghc902
     unstable.haskell.packages.ghc902.haskell-language-server
     pkgs.stack
+    pkgs.ghc
+    pkgs.parallel
     pkgs.haskellPackages.weeder
+    pkgs.haskellPackages.apply-refact
     pkgs.hlint
     pkgs.pkgconfig
     pkgs.zlib

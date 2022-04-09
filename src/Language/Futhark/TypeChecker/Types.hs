@@ -233,7 +233,7 @@ evalTypeExp (TEDim dims t loc) = do
     dims' <- mapM (flip (checkName Term) loc) dims
     bindDims dims' $ do
       (t', svars, RetType t_dims st, l) <- evalTypeExp t
-      return
+      pure
         ( TEDim dims' t' loc,
           svars,
           RetType (dims' ++ t_dims) st,
@@ -257,7 +257,7 @@ evalTypeExp t@(TESum cs loc) = do
       cs_svars = (foldMap . foldMap) (\(_, y, _, _) -> y) checked
       ts_s = (fmap . fmap) (\(_, _, z, _) -> z) checked
       ls = (concatMap . fmap) (\(_, _, _, v) -> v) checked
-  return
+  pure
     ( TESum (M.toList cs') loc,
       cs_svars,
       RetType (foldMap (foldMap retDims) ts_s) $
@@ -276,7 +276,7 @@ evalTypeExp ote@TEApply {} = do
           <+> ppr (length targs) <> "."
     else do
       (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
-      return
+      pure
         ( foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
           [],
           RetType (t_dims ++ mconcat dims) $ applySubst (`M.lookup` mconcat substs) t,
@@ -296,27 +296,27 @@ evalTypeExp ote@TEApply {} = do
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
       v' <- checkNamedDim loc v
-      return
+      pure
         ( TypeArgExpDim (DimExpNamed v' dloc) loc,
           [],
           M.singleton pv $ SizeSubst $ NamedDim v'
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpConst x dloc) loc) =
-      return
+      pure
         ( TypeArgExpDim (DimExpConst x dloc) loc,
           [],
           M.singleton pv $ SizeSubst $ ConstDim x
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) = do
       d <- newTypeName "d"
-      return
+      pure
         ( TypeArgExpDim DimExpAny loc,
           [d],
           M.singleton pv $ SizeSubst $ NamedDim $ qualName d
         )
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
       (te', svars, RetType dims st, _) <- evalTypeExp te
-      return
+      pure
         ( TypeArgExpType te',
           svars ++ dims,
           M.singleton pv $ Subst [] $ RetType [] st
@@ -515,9 +515,9 @@ instance Substitutable Pat where
     where
       mapper =
         ASTMapper
-          { mapOnExp = return,
-            mapOnName = return,
-            mapOnQualName = return,
+          { mapOnExp = pure,
+            mapOnName = pure,
+            mapOnQualName = pure,
             mapOnStructType = pure . applySubst f,
             mapOnPatType = pure . applySubst f,
             mapOnStructRetType = pure . applySubst f,

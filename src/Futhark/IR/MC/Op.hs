@@ -146,10 +146,10 @@ typeCheckMCOp ::
   TC.TypeM rep ()
 typeCheckMCOp _ (ParOp (Just par_op) op) = do
   -- It is valid for the same array to be consumed in both par_op and op.
-  _ <- typeCheckSegOp return par_op `TC.alternative` typeCheckSegOp return op
-  return ()
+  _ <- typeCheckSegOp pure par_op `TC.alternative` typeCheckSegOp pure op
+  pure ()
 typeCheckMCOp _ (ParOp Nothing op) =
-  typeCheckSegOp return op
+  typeCheckSegOp pure op
 typeCheckMCOp f (OtherOp op) = f op
 
 simplifyMCOp ::
@@ -161,13 +161,13 @@ simplifyMCOp ::
   Engine.SimpleM rep (MCOp (Wise rep) op, Stms (Wise rep))
 simplifyMCOp f (OtherOp op) = do
   (op', stms) <- f op
-  return (OtherOp op', stms)
+  pure (OtherOp op', stms)
 simplifyMCOp _ (ParOp par_op op) = do
   (par_op', par_op_hoisted) <-
     case par_op of
-      Nothing -> return (Nothing, mempty)
+      Nothing -> pure (Nothing, mempty)
       Just x -> first Just <$> simplifySegOp x
 
   (op', op_hoisted) <- simplifySegOp op
 
-  return (ParOp par_op' op', par_op_hoisted <> op_hoisted)
+  pure (ParOp par_op' op', par_op_hoisted <> op_hoisted)

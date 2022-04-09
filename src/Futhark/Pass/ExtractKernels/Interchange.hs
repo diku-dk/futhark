@@ -91,9 +91,9 @@ interchangeLoop
 
       copyOrRemoveParam (param, arr)
         | not (paramName param `nameIn` free_in_body) =
-            return Nothing
+            pure Nothing
         | otherwise =
-            return $ Just (param, arr)
+            pure $ Just (param, arr)
 
       expandedInit _ (Var v)
         | Just arr <- isMapParameter v =
@@ -110,7 +110,7 @@ interchangeLoop
             -- It'd be better to fix this somewhere else...
             arrayOf (paramDeclType merge_param) (Shape [w]) Unique
         expanded_init <- expandedInit param_name merge_init
-        return (expanded_param, expanded_init)
+        pure (expanded_param, expanded_init)
         where
           param_name = baseString $ paramName merge_param
 
@@ -213,11 +213,11 @@ interchangeBranch1
           let lam = Lambda params branch lam_ret
               res = varsRes $ patNames branch_pat'
               map_stm = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
-          return $ mkBody (oneStm map_stm) res
+          pure $ mkBody (oneStm map_stm) res
 
     tbranch' <- mkBranch tbranch
     fbranch' <- mkBranch fbranch
-    return $
+    pure $
       Branch [0 .. patSize pat - 1] pat' cond tbranch' fbranch' $
         IfDec ret' if_sort
 
@@ -229,7 +229,7 @@ interchangeBranch ::
 interchangeBranch nest loop = do
   (loop', stms) <-
     runBuilder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
-  return $ stms <> oneStm (branchStm loop')
+  pure $ stms <> oneStm (branchStm loop')
 
 -- | An encoding of a WithAcc with alongside its result pattern.
 data WithAccStm
@@ -339,4 +339,4 @@ interchangeWithAcc ::
 interchangeWithAcc nest withacc = do
   (withacc', stms) <-
     runBuilder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
-  return $ stms <> oneStm (withAccStm withacc')
+  pure $ stms <> oneStm (withAccStm withacc')

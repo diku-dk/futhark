@@ -1,5 +1,5 @@
 -- Test ad-hoc properties and utility functions for f64.
---
+
 -- ==
 -- entry: testInf
 -- input { [1f64, -1f64, -1f64] [0f64, 0f64, 1f64] }
