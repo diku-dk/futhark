@@ -34,6 +34,7 @@ import qualified Data.Vector.Unboxed as U
 import Futhark.Server
 import Futhark.Test
 import Statistics.Autocorrelation (autocorrelation)
+import Statistics.Function (square)
 import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
 import Statistics.Types (Sample)
 import System.Exit
@@ -151,10 +152,6 @@ data RunOptions = RunOptions
     -- used to provide a progress bar.
     runResultAction :: (Int, Maybe Double) -> IO ()
   }
-
-square :: Double -> Double
-square x =
-  x * x
 
 relativeStdErr :: Sample -> Double
 relativeStdErr vec =
