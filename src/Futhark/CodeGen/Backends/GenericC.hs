@@ -654,9 +654,8 @@ freeRawMem mem space desc =
 defineMemorySpace :: Space -> CompilerM op s ([C.Definition], [C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
-  -- TODO(pema, K): This is hacky, we shouldn't touch generic-c
-  let structGuard =
-        "#ifndef __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
+  -- TODO(pema, K): This is hacky. Workaround for https://github.com/ispc/ispc/issues/2277
+  let structGuard = "#ifndef __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
   let structDefine = "#define __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
 
   let structdef =
