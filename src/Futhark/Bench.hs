@@ -234,7 +234,7 @@ runConvergence do_run opts initial_r =
             liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
             pure x
 
-      case nextRunCount (length r) rsd acor of
+      case nextRunCount (U.length runtimes) rsd acor of
         0 -> pure r
         x -> do
           r' <- replicateM x actions
