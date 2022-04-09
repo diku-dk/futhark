@@ -25,7 +25,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
-import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs)
+import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs, funName)
 import Data.Maybe
 import Data.Loc (noLoc)
 import qualified Data.DList as DL
@@ -35,21 +35,55 @@ import Futhark.Util.Pretty (prettyText)
 type ISPCState = (DL.DList C.Definition)
 type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a
 
--- | Compile the program to ImpCode with multicore operations.
+makeFunctionBinding :: (Name, Function Multicore) -> ISPCCompilerM ()
+makeFunctionBinding (fname, Function _ outputs inputs _ _ _) = do
+  outparams <- mapM compileOutput outputs
+  inparams <- mapM compileInput inputs
+  let def = [C.cedecl|extern "C" unmasked uniform int $id:(funName fname)(uniform struct futhark_context * uniform ctx,
+                      $params:outparams, $params:inparams);|]
+  --GC.modifyUserState (\s -> DL.singleton def <> s)
+  -- TODO(pema, K, obp): This is just a proof concept for how one could generate bindings from ImpCode functions.
+  -- You can comment out the line above this to see how it works. It's sort of copy pasta'd from compileFun.
+  -- For each function, we need to:
+  --   1. Generate a new C function which doesn't pass structs by value.
+  --   2. Generate a binding for that new C function in ISPC.
+  --   3. Make sure the names match.
+  pure ()
+  where
+    compileInput (ScalarParam name bt) = do
+      let ctp = GC.primTypeToCType bt
+      pure [C.cparam|$ty:ctp $id:name|]
+    compileInput (MemParam name space) = do
+      ty <- GC.memToCType name space
+      pure [C.cparam|$ty:ty $id:name|]
+
+    compileOutput (ScalarParam name bt) = do
+      let ctp = GC.primTypeToCType bt
+      p_name <- newVName $ "out_" ++ baseString name
+      pure [C.cparam|$ty:ctp *$id:p_name|]
+    compileOutput (MemParam name space) = do
+      ty <- GC.memToCType name space
+      p_name <- newVName $ baseString name ++ "_p"
+      pure [C.cparam|$ty:ty *$id:p_name|]
+
+-- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
   MonadFreshNames m => T.Text -> T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
 compileProg header version prog = do
+  (ws, defs) <- ImpGen.compileProg prog
+  let Functions funs = defFuns defs
+
   (ws', (cparts, endstate)) <-
-    (traverse
+    traverse
       (GC.compileProg'
         "ispc_multicore"
         version
         operations
-        MC.generateContext
+        (MC.generateContext >> mapM_ makeFunctionBinding funs)
         header
         [DefaultSpace]
         MC.cliOptions
-      ) <=< ImpGen.compileProg) prog
+      ) (ws, defs)
 
   let ispc_decls = T.unlines $ map prettyText $ DL.toList $ GC.compUserState endstate
   let ispcdefs =
