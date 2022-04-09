@@ -95,7 +95,7 @@ instance JSON.FromJSON DataResults where
         DataResult (JSON.toString k)
           <$> ((Right <$> success v) <|> (Left <$> JSON.parseJSON v))
       success = JSON.withObject "result" $ \o ->
-        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..: "stderr"
+        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..:? "stderr"
 
 dataResultJSON :: DataResult -> (JSON.Key, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
