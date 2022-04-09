@@ -1,10 +1,14 @@
 -- ==
--- input { 0u8 1u8 } output { 1u8 0u8 }
--- input { 1u8 1u8 } output { 1u8 1u8 }
--- input { 255u8 1u8 } output { 255u8 1u8 }
--- input { 1u8 255u8 } output { 255u8 1u8 }
+-- entry: testMax
+-- input { [0u8, 1u8, 255u8, 1u8]
+--         [1u8, 1u8, 1u8, 255u8]}
+-- output { [1u8, 1u8, 255u8, 255u8] }
 
+-- ==
+-- entry: testMin
+-- input { [0u8, 1u8, 255u8, 1u8]
+--         [1u8, 1u8, 1u8, 255u8]}
+-- output { [0u8, 1u8, 1u8, 1u8] }
 
-def main(x: u8) (y: u8): (u8,u8) =
-  (u8.max x y,
-   u8.min x y)
+entry testMax = map2 u8.max
+entry testMin = map2 u8.min

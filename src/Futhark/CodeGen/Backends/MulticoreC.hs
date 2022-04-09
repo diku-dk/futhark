@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.
@@ -59,6 +58,7 @@ generateContext = do
                                int debugging;
                                int profiling;
                                int num_threads;
+                               const char *cache_fname;
                              };|]
     )
 
@@ -72,6 +72,7 @@ generateContext = do
                              cfg->in_use = 0;
                              cfg->debugging = 0;
                              cfg->profiling = 0;
+                             cfg->cache_fname = NULL;
                              cfg->num_threads = 0;
                              return cfg;
                            }|]

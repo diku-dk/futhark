@@ -745,7 +745,12 @@ simplifyResult usages res = do
                 (`UT.usage` (u `UT.withoutU` UT.presentU))
                 (namesToList (ST.lookupAliases v vtable))
         UT.usage v u : als_usages
-  pure (res', UT.usages (freeIn res') <> more_usages)
+  pure
+    ( res',
+      UT.usages (freeIn res')
+        <> foldMap UT.inResultUsage (namesToList (freeIn res'))
+        <> more_usages
+    )
 
 isDoLoopResult :: Result -> UT.UsageTable
 isDoLoopResult = mconcat . map checkForVar
