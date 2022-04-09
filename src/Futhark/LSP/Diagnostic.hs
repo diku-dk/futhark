@@ -3,6 +3,8 @@
 module Futhark.LSP.Diagnostic
   ( publishWarningDiagnostics,
     publishErrorDiagnostics,
+    diagnosticSource,
+    maxDiagnostic,
   )
 where
 
@@ -30,14 +32,14 @@ import Language.LSP.Types
 import Language.LSP.Types.Lens (HasVersion (version))
 
 mkDiagnostic :: Range -> DiagnosticSeverity -> T.Text -> Diagnostic
-mkDiagnostic range severity msg = Diagnostic range (Just severity) Nothing (Just "futhark") msg Nothing Nothing
+mkDiagnostic range severity msg = Diagnostic range (Just severity) Nothing diagnosticSource msg Nothing Nothing
 
 -- | Publish diagnostics from a Uri to Diagnostics mapping.
 publish :: [(Uri, [Diagnostic])] -> LspT () IO ()
 publish uri_diags_map = for_ uri_diags_map $ \(uri, diags) -> do
   doc <- getVersionedTextDoc $ TextDocumentIdentifier uri
   debug $ "Publishing diagnostics for " ++ show uri ++ " Verion: " ++ show (doc ^. version)
-  publishDiagnostics 100 (toNormalizedUri uri) (doc ^. version) (partitionBySource diags)
+  publishDiagnostics maxDiagnostic (toNormalizedUri uri) (doc ^. version) (partitionBySource diags)
 
 publishWarningDiagnostics :: [(SrcLoc, Doc)] -> LspT () IO ()
 publishWarningDiagnostics warnings = do
@@ -81,3 +83,9 @@ getPosition :: Pos -> Position
 getPosition pos = do
   let Pos _ line col _ = pos
   Position (toEnum line - 1) (toEnum col - 1)
+
+maxDiagnostic :: Int
+maxDiagnostic = 100
+
+diagnosticSource :: Maybe T.Text
+diagnosticSource = Just "futhark"

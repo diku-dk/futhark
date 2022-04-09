@@ -3,11 +3,11 @@ module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
 import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
-import Futhark.LSP.Diagnostic (publishErrorDiagnostics, publishWarningDiagnostics)
+import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
 import Language.Futhark.Warnings (listWarnings)
-import Language.LSP.Server (LspT)
+import Language.LSP.Server (LspT, flushDiagnosticsBySource)
 
 -- | Try to take state from MVar, if it's empty, try to compile.
 tryTakeStateFromMVar :: MVar State -> Maybe FilePath -> LspT () IO State
@@ -43,6 +43,7 @@ tryCompile Nothing _ = pure emptyState
 tryCompile (Just path) state = do
   let old_loaded_prog = getLoadedProg state
   res <- liftIO $ reloadProg old_loaded_prog [path]
+  flushDiagnosticsBySource maxDiagnostic diagnosticSource
   case res of
     Right new_loaded_prog -> do
       publishWarningDiagnostics $ listWarnings $ lpWarnings new_loaded_prog
