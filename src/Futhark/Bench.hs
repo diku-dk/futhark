@@ -33,9 +33,9 @@ import Data.Time.Clock
 import qualified Data.Vector.Unboxed as U
 import Futhark.Server
 import Futhark.Test
-import Statistics.Autocorrelation
+import Statistics.Autocorrelation (autocorrelation)
 import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
-import Statistics.Types
+import Statistics.Types (Sample)
 import System.Exit
 import System.FilePath
 import System.Process.ByteString (readProcessWithExitCode)

@@ -28,7 +28,7 @@ import Futhark.Util.Console
 import Futhark.Util.Options
 import Statistics.Resampling (Estimator (..), resample)
 import Statistics.Resampling.Bootstrap (bootstrapBCA)
-import Statistics.Types
+import Statistics.Types (cl95, confIntLDX, confIntUDX, estError, estPoint)
 import System.Console.ANSI (clearLine)
 import System.Directory
 import System.Environment
