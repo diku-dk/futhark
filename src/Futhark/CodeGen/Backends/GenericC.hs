@@ -1772,6 +1772,9 @@ $ispc_decls
       (prototypes, functions) <-
         unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
+      extFunctions <- mapM (compileFunExt [[C.cparam|$ty:ctx_ty *ctx|]]) funs  
+      let (extPrototypes, extFuncs) = unzip $ catMaybes extFunctions
+
       mapM_ (mapM_ earlyDecl) memstructs
       (entry_points, entry_points_manifest) <-
         unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
@@ -1781,14 +1784,13 @@ $ispc_decls
       mapM_ earlyDecl $ concat memfuns
 
       types <- commonLibFuns memreport
-
       return
-        ( T.unlines $ map prettyText prototypes,
-          T.unlines $ map (prettyText . funcToDef) functions,
+        ( T.unlines $ map prettyText (prototypes <> extPrototypes),          
+          T.unlines $ map (prettyText . funcToDef) (functions <> extFuncs),
           T.unlines $ map prettyText entry_points,
           Manifest.Manifest (M.fromList entry_points_manifest) types backend version
         )
-
+    
     funcToDef func = C.FuncDef func loc
       where
         loc = case func of
@@ -1989,6 +1991,40 @@ cachingMemory lexical f = do
         [C.cstm|free($id:mem);|]
 
   local lexMem $ f (concatMap declCached cached') (map freeCached cached')
+-- | Compiles builtin to be linked with ISPC or some other kernel
+-- It declars the function without static qualifier and uses pointer to structs
+compileFunExt :: [C.Param] -> (Name, Function op) -> CompilerM op s (Maybe (C.Definition, C.Func))
+compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _)) = inNewFunction $ do
+  case functionEntry func of
+    Nothing -> do
+      inparams <- mapM compileInput inputs
+      (outparams, _) <- unzip <$> mapM compileOutput outputs      
+      args <- mapM compileArguments (inputs <> outputs)
+      let builtin = [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams);|]
+      let fun = [C.cfun|static int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams) {               
+                return $id:fname($args:args);
+      }|]
+      return $ Just (builtin, fun)
+    Just _ -> return  Nothing
+  where
+    compileArguments (ScalarParam name _) = return [C.cexp|$id:name|]
+    compileArguments (MemParam name _) = return [C.cexp|$id:name|]
+    
+    compileInput (ScalarParam name bt) = do
+      let ctp = primTypeToCType bt
+      return [C.cparam|$ty:ctp $id:name|]
+    compileInput (MemParam name space) = do
+      ty <- memToCType name space
+      return [C.cparam|$ty:ty *$id:name|]
+
+    compileOutput (ScalarParam name bt) = do
+      let ctp = primTypeToCType bt
+      p_name <- newVName $ "out_" ++ baseString name
+      return ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
+    compileOutput (MemParam name space) = do
+      ty <- memToCType name space
+      p_name <- newVName $ baseString name ++ "_p"
+      return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)) = inNewFunction $ do
@@ -1999,7 +2035,6 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     body' <- collect $ compileFunBody out_ptrs outputs body
     decl_mem <- declAllocatedMem
     free_mem <- freeAllocatedMem
-
     return
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
