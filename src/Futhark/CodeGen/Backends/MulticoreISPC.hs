@@ -111,8 +111,8 @@ makeStringLiteral :: String -> GC.CompilerM Multicore () Name
 makeStringLiteral str = do
   name <- MC.multicoreDef "strlit_shim" $ \s ->
     pure [C.cedecl|char* $id:s() { return $string:str; }|]
-  void $ ispcDef "" $ const $
-    pure [C.cedecl|extern "C" unmasked uniform char* uniform $id:name();|]
+  GC.ispcDecl
+    [C.cedecl|extern "C" unmasked uniform char* uniform $id:name();|]
   pure name
 
 allocMemISPC :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> GC.CompilerM Multicore () ()
@@ -168,7 +168,7 @@ errorInISPC msg stacktrace = do
       [C.cedecl|void $id:s(struct futhark_context* ctx, $params:params) {
         ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
       }|]
-  void $ ispcDef "" $ const $ pure
+  GC.ispcDecl
     [C.cedecl|extern "C" unmasked void $id:shim(uniform struct futhark_context* uniform, $params:params_uni);|]
   -- Call the shim
   args <- getErrorValExps msg
@@ -230,9 +230,8 @@ compileCodeISPC _ (DeclareArray name DefaultSpace t vs) = do
   -- Make an exported C shim to access it
   shim <- MC.multicoreDef "get_static_array_shim" $ \f ->
     pure [C.cedecl|struct memblock* $id:f(struct futhark_context* ctx) { return &ctx->$id:name; }|]
-  void $ ispcDef "" $ const $
-    pure [C.cedecl|extern "C" unmasked uniform struct memblock * uniform
-                   $id:shim(uniform struct futhark_context* uniform ctx);|]
+  GC.ispcDecl [C.cedecl|extern "C" unmasked uniform struct memblock * uniform
+                        $id:shim(uniform struct futhark_context* uniform ctx);|]
   -- Call it
   GC.item [C.citem|uniform struct memblock $id:name = *$id:shim(ctx);|]
 compileCodeISPC vari (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
@@ -370,10 +369,10 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
         $items:toC
     }|]
 
-  void $ ispcDef "" $ const $ pure [C.cedecl|extern "C" unmasked uniform int $id:schedn 
-                                             (struct futhark_context uniform * uniform ctx, 
-                                             struct $id:fstruct uniform * uniform args, 
-                                             uniform int iterations);|]
+  GC.ispcDecl [C.cedecl|extern "C" unmasked uniform int $id:schedn 
+                        (struct futhark_context uniform * uniform ctx, 
+                        struct $id:fstruct uniform * uniform args, 
+                        uniform int iterations);|]
 
   aos_name <- newVName "aos"
   GC.stm [C.cstm|$escstm:("#if ISPC")|]
