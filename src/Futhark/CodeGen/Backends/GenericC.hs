@@ -9,11 +9,10 @@
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
   ( compileProg,
+    compileProg',
     CParts (..),
     asLibrary,
     asExecutable,
-    asISPCExecutable,
-    asISPCServer,
     asServer,
 
     -- * Pluggable compiler
@@ -62,7 +61,6 @@ module Futhark.CodeGen.Backends.GenericC
     onClear,
     HeaderSection (..),
     libDecl,
-    ispcDecl,
     earlyDecl,
     publicName,
     contextType,
@@ -114,7 +112,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH, uniformH, ispcUtilH)
+import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
@@ -140,7 +138,6 @@ data CompilerState s = CompilerState
     compUserState :: s,
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
     compLibDecls :: DL.DList C.Definition,
-    compIspcDecls :: DL.DList C.Definition,
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe C.Stm),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
@@ -159,7 +156,6 @@ newCompilerState src s =
       compUserState = s,
       compHeaderDecls = mempty,
       compLibDecls = mempty,
-      compIspcDecls = mempty,
       compCtxFields = mempty,
       compProfileItems = mempty,
       compClearItems = mempty,
@@ -534,11 +530,6 @@ headerDecl sec def = modify $ \s ->
 libDecl :: C.Definition -> CompilerM op s ()
 libDecl def = modify $ \s ->
   s {compLibDecls = compLibDecls s <> DL.singleton def}
-
-ispcDecl :: C.Definition  -> CompilerM op s ()
-ispcDecl def = modify $ \s ->
-  s {compIspcDecls = compIspcDecls s <> DL.singleton def}
-
 
 earlyDecl :: C.Definition -> CompilerM op s ()
 earlyDecl def = modify $ \s ->
@@ -1532,9 +1523,7 @@ data CParts = CParts
     cServer :: T.Text,
     cLib :: T.Text,
     -- | The manifest, in JSON format.
-    cJsonManifest :: T.Text,
-    -- | ISPC header
-    cISPC :: T.Text
+    cJsonManifest :: T.Text
   }
 
 gnuSource :: T.Text
@@ -1579,18 +1568,6 @@ asLibrary parts =
     cJsonManifest parts
   )
 
-asISPCExecutable :: CParts -> (T.Text, T.Text)
-asISPCExecutable parts =
-  (c, ispc)
-  where c = asExecutable parts
-        ispc = cISPC parts
-
-asISPCServer :: CParts -> (T.Text, T.Text)
-asISPCServer parts =
-  (c, ispc)
-  where c = asServer parts
-        ispc = cISPC parts
-
 -- | As executable with command-line interface.
 asExecutable :: CParts -> T.Text
 asExecutable parts =
@@ -1601,23 +1578,22 @@ asServer :: CParts -> T.Text
 asServer parts =
   gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
--- | Compile imperative program to a C program.  Always uses the
--- function named "main" as entry point, so make sure it is defined.
-compileProg ::
+compileProg' ::
   MonadFreshNames m =>
+  Monoid s =>
   T.Text ->
   T.Text ->
-  Operations op () ->
-  CompilerM op () () ->
+  Operations op s ->
+  CompilerM op s () ->
   T.Text ->
   [Space] ->
   [Option] ->
   Definitions op ->
-  m CParts
-compileProg backend version ops extra header_extra spaces options prog = do
+  m (CParts, CompilerState s)
+compileProg' backend version ops extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
-        runCompilerM ops src () compileProg'
+        runCompilerM ops src mempty compileProgAction
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
       arraydecls = arrayDecls endstate
@@ -1679,8 +1655,6 @@ $timingH
 
   let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
       lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
-      ispc_decls = T.unlines $ map prettyText $ DL.toList $ compIspcDecls endstate
-      -- ispc_header =
       clidefs = cliDefs options manifest
       serverdefs = serverDefs options manifest
       libdefs =
@@ -1711,58 +1685,21 @@ $definitions
 
 $entry_point_decls
   |]
-      ispcdefs =
-        [untrimming|
-#define bool uint8 // This is a workaround around an ISPC bug, stdbool doesn't get included
-typedef int64 int64_t;
-typedef int32 int32_t;
-typedef int16 int16_t;
-typedef int8 int8_t;
-typedef int8 char;
-typedef unsigned int64 uint64_t;
-typedef unsigned int32 uint32_t;
-typedef unsigned int16 uint16_t;
-typedef unsigned int8 uint8_t;
-
-$errorsH
-
-#define INFINITY (floatbits((uniform int)0x7f800000))
-#define NAN (floatbits((uniform int)0x7fc00000))
-#define fabs(x) abs(x)
-#define FUTHARK_F64_ENABLED
-$cScalarDefs
-
-$uniformH
-
-$ispcUtilH
-
-#ifndef __ISPC_STRUCT_memblock__
-#define __ISPC_STRUCT_memblock__
-struct memblock {
-    int32_t * references;
-    uint8_t * mem;
-    int64_t size;
-    const int8_t * desc;
-};
-#endif
-
-$ispc_decls
-        |]
 
   return
-    CParts
+    (CParts
       { cHeader = headerdefs,
         cUtils = utildefs,
         cCLI = clidefs,
         cServer = serverdefs,
         cLib = libdefs,
-        cISPC = ispcdefs,
         cJsonManifest = Manifest.manifestToJSON manifest
-      }
+      },
+      endstate)
   where
     Definitions consts (Functions funs) = prog
 
-    compileProg' = do
+    compileProgAction = do
       (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
 
       get_consts <- compileConstants consts
@@ -1794,6 +1731,22 @@ $ispc_decls
         loc = case func of
           C.OldFunc _ _ _ _ _ _ l -> l
           C.Func _ _ _ _ _ l -> l
+
+-- | Compile imperative program to a C program.  Always uses the
+-- function named "main" as entry point, so make sure it is defined.
+compileProg ::
+  MonadFreshNames m =>
+  T.Text ->
+  T.Text ->
+  Operations op () ->
+  CompilerM op () () ->
+  T.Text ->
+  [Space] ->
+  [Option] ->
+  Definitions op ->
+  m CParts
+compileProg backend version ops extra header_extra spaces options prog =
+  fst <$> compileProg' backend version ops extra header_extra spaces options prog
 
 commonLibFuns :: [C.BlockItem] -> CompilerM op s (M.Map T.Text Manifest.Type)
 commonLibFuns memreport = do

@@ -10,8 +10,6 @@ module Futhark.CodeGen.Backends.MulticoreC
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
-    GC.asISPCExecutable,
-    GC.asISPCServer,
     GC.asServer,
     operations,
     cliOptions,
@@ -64,7 +62,7 @@ compileProg version =
 
 -- | Generate the multicore context definitions.  This is exported
 -- because the WASM backend needs it.
-generateContext :: GC.CompilerM op () ()
+generateContext :: GC.CompilerM op s ()
 generateContext = do
   mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack schedulerH)|]
 
@@ -252,7 +250,7 @@ cliOptions =
   ]
 
 -- | Operations for generating multicore code.
-operations :: GC.Operations Multicore ()
+operations :: GC.Operations Multicore s
 operations =
   GC.defaultOperations
     { GC.opsCompiler = compileOp,
@@ -499,8 +497,8 @@ multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
   return $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
 
-type DefSpecifier = String -> (Name -> GC.CompilerM Multicore () C.Definition) -> GC.CompilerM Multicore () Name
-multicoreDef :: DefSpecifier
+type DefSpecifier s = String -> (Name -> GC.CompilerM Multicore s C.Definition) -> GC.CompilerM Multicore s Name
+multicoreDef :: DefSpecifier s
 multicoreDef s f = do
   s' <- multicoreName s
   GC.libDecl =<< f s'
@@ -514,7 +512,7 @@ generateParLoopFn ::
   a ->
   [(VName, (C.Type, ValueType))] ->
   [(VName, (C.Type, ValueType))] ->
-  GC.CompilerM Multicore () Name
+  GC.CompilerM Multicore s Name
 generateParLoopFn lexical basename code fstruct free retval = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
@@ -543,13 +541,13 @@ generateParLoopFn lexical basename code fstruct free retval = do
                       }|]
 
 prepareTaskStruct ::
-  DefSpecifier ->
+  DefSpecifier s ->
   String ->
   [VName] ->
   [(C.Type, ValueType)] ->
   [VName] ->
   [(C.Type, ValueType)] ->
-  GC.CompilerM Multicore () Name
+  GC.CompilerM Multicore s Name
 prepareTaskStruct def name free_args free_ctypes retval_args retval_ctypes = do
   let makeStruct s = return
         [C.cedecl|struct $id:s {
@@ -566,7 +564,7 @@ prepareTaskStruct def name free_args free_ctypes retval_args retval_ctypes = do
   return fstruct
 
 -- Generate a segop function for top_level and potentially nested SegOp code
-compileOp :: GC.OpCompiler Multicore ()
+compileOp :: GC.OpCompiler Multicore s
 compileOp (GetLoopBounds start end) = do
   GC.stm [C.cstm|$id:start = start;|]
   GC.stm [C.cstm|$id:end = end;|]

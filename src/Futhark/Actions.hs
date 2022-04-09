@@ -385,21 +385,20 @@ compileMulticoreToISPCAction fcfg mode outpath =
           ispcpath = outpath `addExtension` "ispc"
           ispcextension = "_ispc"
           ispcheader = takeBaseName (outpath <> ispcextension) `addExtension` "h"
-      cprog <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack $ "#include \"" <> ispcheader <> "\"") (T.pack versionString) prog
+      (cprog, ispc) <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack $ "#include \"" <> ispcheader <> "\"") (T.pack versionString) prog
       case mode of -- TODO(pema): Library mode
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile ispcpath ispc
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
-          let (c, ispc) = MulticoreC.asISPCExecutable cprog
-          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
           liftIO $ T.writeFile ispcpath ispc
           runISPC ispcpath outpath cpath ispcextension ["-O3", "--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
-          let (c, ispc) = MulticoreC.asISPCServer cprog
-          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           liftIO $ T.writeFile ispcpath ispc
           runISPC ispcpath outpath cpath ispcextension ["-O3", "--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 

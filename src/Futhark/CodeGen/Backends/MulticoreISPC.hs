@@ -8,8 +8,6 @@ module Futhark.CodeGen.Backends.MulticoreISPC
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
-    GC.asISPCExecutable,
-    GC.asISPCServer,
     GC.asServer,
     operations,
   )
@@ -26,16 +24,24 @@ import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType)
+import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
+import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs)
 import Data.Maybe
 import Data.Loc (noLoc)
+import qualified Data.DList as DL
+import NeatInterpolation (untrimming)
+import Futhark.Util.Pretty (prettyText)
+
+type ISPCState = (DL.DList C.Definition)
+type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
-  MonadFreshNames m => T.Text -> T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
-compileProg header version =
-  traverse
-    ( GC.compileProg
+  MonadFreshNames m => T.Text -> T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
+compileProg header version prog = do
+  (ws', (cparts, endstate)) <-
+    (traverse
+      (GC.compileProg'
         "ispc_multicore"
         version
         operations
@@ -43,14 +49,57 @@ compileProg header version =
         header
         [DefaultSpace]
         MC.cliOptions
-    )
-    <=< ImpGen.compileProg
+      ) <=< ImpGen.compileProg) prog
 
-operations :: GC.Operations Multicore ()
+  let ispc_decls = T.unlines $ map prettyText $ DL.toList $ GC.compUserState endstate
+  let ispcdefs =
+        [untrimming|
+#define bool uint8 // This is a workaround around an ISPC bug, stdbool doesn't get included
+typedef int64 int64_t;
+typedef int32 int32_t;
+typedef int16 int16_t;
+typedef int8 int8_t;
+typedef int8 char;
+typedef unsigned int64 uint64_t;
+typedef unsigned int32 uint32_t;
+typedef unsigned int16 uint16_t;
+typedef unsigned int8 uint8_t;
+
+$errorsH
+
+#define INFINITY (floatbits((uniform int)0x7f800000))
+#define NAN (floatbits((uniform int)0x7fc00000))
+#define fabs(x) abs(x)
+#define FUTHARK_F64_ENABLED
+$cScalarDefs
+
+$uniformH
+
+$ispcUtilH
+
+#ifndef __ISPC_STRUCT_memblock__
+#define __ISPC_STRUCT_memblock__
+struct memblock {
+    int32_t * references;
+    uint8_t * mem;
+    int64_t size;
+    const int8_t * desc;
+};
+#endif
+
+$ispc_decls|]
+
+  pure (ws', (cparts, ispcdefs))
+
+operations :: GC.Operations Multicore ISPCState
 operations =
   MC.operations
     { GC.opsCompiler = compileOp
     }
+
+ispcDecl :: C.Definition  -> ISPCCompilerM ()
+ispcDecl def =
+  GC.modifyUserState (\s -> s <> DL.singleton def)
 
 getName :: VName -> Name
 getName name = nameFromString $ pretty name
@@ -91,31 +140,31 @@ compileMemblockDeref = zipWith deref
     deref (v1, v2) (_, MC.RawMem) = [C.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
     deref (v1, v2) (ty, MC.MemBlock) = [C.cdecl|uniform $ty:ty $id:v1 = *$id:(getName v2);|]
 
-ispcDef :: MC.DefSpecifier
+ispcDef :: MC.DefSpecifier ISPCState
 ispcDef s f = do
   s' <- MC.multicoreName s
-  GC.ispcDecl =<< f s'
+  ispcDecl =<< f s'
   pure s'
 
-sharedDef :: MC.DefSpecifier
+sharedDef :: MC.DefSpecifier ISPCState
 sharedDef s f = do
   s' <- MC.multicoreName s
   GC.libDecl [C.cedecl|$esc:("#ifndef __ISPC_STRUCT_" <> (nameToString s') <> "__")|]
   GC.libDecl [C.cedecl|$esc:("#define __ISPC_STRUCT_" <> (nameToString s') <> "__")|] -- TODO:(K) - refacor this shit
   GC.libDecl =<< f s'
   GC.libDecl [C.cedecl|$esc:("#endif")|]
-  GC.ispcDecl =<< f s'
+  ispcDecl =<< f s'
   pure s'
 
-makeStringLiteral :: String -> GC.CompilerM Multicore () Name
+makeStringLiteral :: String -> ISPCCompilerM Name
 makeStringLiteral str = do
   name <- MC.multicoreDef "strlit_shim" $ \s ->
     pure [C.cedecl|char* $id:s() { return $string:str; }|]
-  GC.ispcDecl
+  ispcDecl
     [C.cedecl|extern "C" unmasked uniform char* uniform $id:name();|]
   pure name
 
-allocMemISPC :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> GC.CompilerM Multicore () ()
+allocMemISPC :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> ISPCCompilerM ()
 allocMemISPC mem size space on_failure = GC.allocMem' mem size space on_failure stmt
   where
     stmt space' mem' size' mem_s' on_failure' = do
@@ -126,7 +175,7 @@ allocMemISPC mem size space on_failure = GC.allocMem' mem size space on_failure 
                   $stm:on_failure'
         }|]
 
-setMemISPC :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> GC.CompilerM Multicore () ()
+setMemISPC :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
 setMemISPC dest src space = GC.setMem' dest src space stmt
   where
     stmt space' dest' src' src_s' = do
@@ -137,7 +186,7 @@ setMemISPC dest src space = GC.setMem' dest src space stmt
           err = 1;
         }|]
 
-unRefMemISPC :: C.ToExp a => a -> Space -> GC.CompilerM Multicore () ()
+unRefMemISPC :: C.ToExp a => a -> Space -> ISPCCompilerM ()
 unRefMemISPC mem space = GC.unRefMem' mem space cstm
   where
     cstm s m m_s = do
@@ -147,11 +196,11 @@ unRefMemISPC mem space = GC.unRefMem' mem space cstm
           err = 1;
         }|]
 
-freeAllocatedMemISPC :: GC.CompilerM Multicore () [C.BlockItem]
+freeAllocatedMemISPC :: ISPCCompilerM [C.BlockItem]
 freeAllocatedMemISPC = GC.freeAllocatedMem' unRefMemISPC
 
 -- Handle printing an error message in ISPC
-errorInISPC :: ErrorMsg Exp -> String -> GC.CompilerM Multicore () ()
+errorInISPC :: ErrorMsg Exp -> String -> ISPCCompilerM ()
 errorInISPC msg stacktrace = do
   -- Get format sting
   (formatstr, formatargs) <- GC.errorMsgString msg
@@ -168,7 +217,7 @@ errorInISPC msg stacktrace = do
       [C.cedecl|void $id:s(struct futhark_context* ctx, $params:params) {
         ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
       }|]
-  GC.ispcDecl
+  ispcDecl
     [C.cedecl|extern "C" unmasked void $id:shim(uniform struct futhark_context* uniform, $params:params_uni);|]
   -- Call the shim
   args <- getErrorValExps msg
@@ -202,7 +251,7 @@ isConstExp = isSimple . constFoldPrimExp
 -- TODO(pema): Deduplicate some of the C code in the generic C generator
 -- Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
-compileCodeISPC :: Imp.Variability -> MCCode -> GC.CompilerM Multicore () ()
+compileCodeISPC :: Imp.Variability -> MCCode -> ISPCCompilerM ()
 compileCodeISPC vari (Comment s code) = do
   xs <- GC.collect $ compileCodeISPC vari code
   let comment = "// " ++ s
@@ -230,7 +279,7 @@ compileCodeISPC _ (DeclareArray name DefaultSpace t vs) = do
   -- Make an exported C shim to access it
   shim <- MC.multicoreDef "get_static_array_shim" $ \f ->
     pure [C.cedecl|struct memblock* $id:f(struct futhark_context* ctx) { return &ctx->$id:name; }|]
-  GC.ispcDecl [C.cedecl|extern "C" unmasked uniform struct memblock * uniform
+  ispcDecl [C.cedecl|extern "C" unmasked uniform struct memblock * uniform
                         $id:shim(uniform struct futhark_context* uniform ctx);|]
   -- Call it
   GC.item [C.citem|uniform struct memblock $id:name = *$id:shim(ctx);|]
@@ -312,7 +361,7 @@ compileCodeISPC _ code =
   GC.compileCode code
 
 -- Generate a segop function for top_level and potentially nested SegOp code
-compileOp :: GC.OpCompiler Multicore ()
+compileOp :: GC.OpCompiler Multicore ISPCState
 compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) = do
   let (ParallelTask seq_code) = seq_task
   free_ctypes <- mapM MC.paramToCType params
@@ -369,7 +418,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
         $items:toC
     }|]
 
-  GC.ispcDecl [C.cedecl|extern "C" unmasked uniform int $id:schedn 
+  ispcDecl [C.cedecl|extern "C" unmasked uniform int $id:schedn 
                         (struct futhark_context uniform * uniform ctx, 
                         struct $id:fstruct uniform * uniform args, 
                         uniform int iterations);|]
