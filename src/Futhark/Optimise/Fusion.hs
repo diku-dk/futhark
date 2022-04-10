@@ -14,7 +14,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 --import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
---import qualified Futhark.Analysis.HORep.SOAC as SOAC
+import qualified Futhark.Analysis.HORep.SOAC as H
 import Futhark.Construct
 --import qualified Futhark.IR.Aliases as Aliases
 import Futhark.IR.Prop.Aliases
@@ -289,11 +289,11 @@ tryFuseNodesInGraph node_1 node_2 g
       if b then do
         fres <- fuseContexts edgs infusable_nodes (context g node_1) (context g node_2)
         case fres of
-          Just newcxt@(inputs, _, SNode stm _, outputs) ->
+          Just newcxt@(inputs, _, nodeT, outputs) ->
             if null fused then contractEdge node_2 newcxt g
             else do
-              new_stm <- makeCopies stm
-              contractEdge node_2 (inputs, node_1, SNode new_stm mempty, outputs) g
+              new_stm <- makeCopies nodeT
+              contractEdge node_2 (inputs, node_1, nodeT, outputs) g
           Just _ -> error "fuseContexts did not return an SNode"
           Nothing -> pure g
       else pure g
@@ -326,22 +326,14 @@ tryFuseNodesInGraph node_1 node_2 g
 
 -- (tal, x) -> (tal, x)
 
-makeCopies :: Stm SOACS -> FusionEnvM (Stm SOACS)
-makeCopies s@(Let _ _ (Op (Futhark.Screma _ _  (ScremaForm _ _ lam)))) =
+makeCopies :: NodeT -> FusionEnvM NodeT
+makeCopies (SoacNode soac pats aux) =
   do
+    let lam = H.lambda soac
     let fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
-    makeCopiesInStm fused_inner s
-
-
-makeCopies stm = pure stm
-
-makeCopiesInStm :: [VName] -> Stm SOACS -> FusionEnvM (Stm SOACS)
-makeCopiesInStm toCopy (Let sz os (Op st@(Screma szi is (Futhark.ScremaForm scan red lam)))) =
-  do
-    newLam <- makeCopiesInLambda toCopy lam
-    pure $ Let sz os (Op (Screma szi is (Futhark.ScremaForm scan red newLam)))
-makeCopiesInStm _ s = pure s
-
+    lam' <- makeCopiesInLambda fused_inner lam
+    pure $ SoacNode (H.setLambda lam' soac) pats aux
+makeCopies nodeT = pure nodeT
 
 makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionEnvM (Lambda SOACS)
 makeCopiesInLambda toCopy lam =
@@ -382,12 +374,12 @@ tryFuseNodesInGraph2 node_1 node_2 g
 
 fuseContexts2 ::  DepContext -> DepContext -> FusionEnvM (Maybe DepContext)
 -- fuse the nodes / contexts
-fuseContexts2 c1@(_, _, SNode s1 _, _)
-              c2@(_, _, SNode s2 _, _)
+fuseContexts2 c1@(_, _, nodeT1, _)
+              c2@(_, _, nodeT2, _)
             = do
-              fres <- hFuseStms s1 s2
+              fres <- hFuseNodeT nodeT1 nodeT2
               case fres of
-               Just s3 -> pure $ Just (mergedContext (SNode s3 mempty) c1 c2)
+               Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
                Nothing -> pure Nothing
 fuseContexts2 _ _ = pure Nothing
 
@@ -395,34 +387,34 @@ fuseContexts2 _ _ = pure Nothing
 fuseContexts :: [EdgeT] -> [VName] -> DepContext -> DepContext -> FusionEnvM (Maybe DepContext)
 -- fuse the nodes / contexts
 fuseContexts edgs infusable
-            c1@(_, n1, SNode s1 _, _)
-            c2@(_, n2, SNode s2 _, _)
+            c1@(_, n1, nodeT1, _)
+            c2@(_, n2, nodeT2, _)
             = do
-              fres <- fuseStms edgs infusable s1 s2
+              fres <- fuseNodeT edgs infusable nodeT1 nodeT2
               case fres of
-               Just s3 -> pure $ Just (mergedContext (SNode s3 mempty) c1 c2)
+               Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
                Nothing -> pure Nothing
 fuseContexts _ _ _ _ = pure Nothing
 
 
-fuseStms :: [EdgeT] -> [VName] ->  Stm SOACS -> Stm SOACS -> FusionEnvM (Maybe (Stm SOACS))
-fuseStms edgs infusible s1 s2 =
+fuseNodeT :: [EdgeT] -> [VName] ->  NodeT -> NodeT -> FusionEnvM (Maybe NodeT)
+fuseNodeT edgs infusible s1 s2 =
   case (s1, s2) of
-    ( Let pats1 aux1 (Op soac1),
-      Let pats2 aux2 (Op soac2)) ->
-        let (o1, o2) = mapT (patNames . stmPat) (s1, s2) in
+    ( SoacNode soac1 pats1 aux1,
+      SoacNode soac2 pats2 aux2) ->
+        let (o1, o2) = mapT patNames (pats1, pats2) in
         let aux = (aux1 <> aux2) in
         case (soac1, soac2) of
-          ( Futhark.Screma  s_exp1 i1  (ScremaForm scans_1 red_1 lam_1),
-            Futhark.Screma  s_exp2 i2  (ScremaForm scans_2 red_2 lam_2))
+          ( H.Screma  s_exp1  (ScremaForm scans_1 red_1 lam_1) i1,
+            H.Screma  s_exp2  (ScremaForm scans_2 red_2 lam_2) i2)
             | s_exp1 == s_exp2 && not (any isScanRed edgs) ->
-              let op = Op $ Futhark.Screma s_exp2 fused_inputs (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam)
-              in pure $ Just $ Let (basicPat ids)  (aux1 <> aux2) op
+              let soac = H.Screma s_exp2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
+              in pure $ Just $ SoacNode soac (basicPat ids) (aux1 <> aux2)
                 where
             (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
             (lam_1_output, lam_2_output) = mapT (namesFromRes . resFromLambda) (lam_1, lam_2)
 
-            fused_inputs = fuseInputs2 o1 i1 i2
+            fused_inputs = fuseInputs o1 i1 i2
             lparams = changeAll (i1 ++ i2)
               (lambdaParams lam_1 ++ lambdaParams lam_2)
               fused_inputs
@@ -471,9 +463,9 @@ fuseStms edgs infusible s1 s2 =
             fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
 
 
-            map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
+            map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (map H.inputArray (i1 ++ i2))
             map2 = makeMap o1 lam_1_output
-            map4 = makeMap fused_inputs fused_inputs_inner
+            map4 = makeMap (map H.inputArray fused_inputs) fused_inputs_inner
             map3 = fuseMaps map1 (M.union map2 map4)
 
 
@@ -484,63 +476,67 @@ fuseStms edgs infusible s1 s2 =
               lambdaBody = (lambdaBody lam') {bodyResult = body_res}
               }
 -- vertical map-scatter fusion
-          ( Futhark.Screma  s_exp1 i1 (ScremaForm [] [] lam_1),
-            Futhark.Scatter s_exp2 i2 lam_2 other)
+          ( H.Screma  s_exp1 (ScremaForm [] [] lam_1) i1,
+            H.Scatter s_exp2 lam_2 i2 other)
             | L.null infusible -- only if map outputs are used exclusivly by the scatter
               && s_exp1 == s_exp2
-              -> pure $ Just $ Let pats2  (aux1 <> aux2) (Op (Futhark.Scatter s_exp2 fused_inputs lam other))
+              ->
+                let soac = H.Scatter s_exp2 lam fused_inputs other in
+                pure $ Just $ SoacNode soac pats2  (aux1 <> aux2)
             where
               (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
-          ( Futhark.Screma s_exp1 i1 (ScremaForm [] [] lam_1),
-            Futhark.Hist   s_exp2 i2 other lam_2)
+          ( H.Screma s_exp1  (ScremaForm [] [] lam_1) i1,
+            H.Hist   s_exp2  other lam_2 i2)
             | L.null infusible -- only if map outputs are used exclusivly by the hist
             && s_exp1 == s_exp2
-             -> pure $ Just $ Let pats2 (aux1 <> aux2) (Op (Futhark.Hist s_exp2 fused_inputs other lam))
+             ->
+               let soac = H.Hist s_exp2 other lam fused_inputs in
+               pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
             where
               (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
-          ( Futhark.Stream {},
-            Futhark.Screma s_exp2 i2 sform2)
-              |  Just _ <- isRedomapSOAC sform2 -> do
-                doFusion <- gets fuseScans
-                if not doFusion then return Nothing else do
-                  mstream2 <- soacToStream soac2
-                  case mstream2 of
-                    Just (stream2, is_extra_2) -> do
-                      is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                      fuseStms edgs infusible
-                        s1
-                        (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
-                    _ -> return Nothing
-          ( Futhark.Screma s_exp1 i1 sform1,
-            Futhark.Screma s_exp2 i2 sform2)
-              |
-                Just _ <- isScanomapSOAC sform1,
-                Just _ <- isScanomapSOAC sform2,
-                s_exp1 == s_exp2,
-                any isScanRed edgs
-              -> do
-                doFusion <- gets fuseScans
-                if not doFusion then return Nothing else do
-                  mstream1 <- soacToStream soac1
-                  mstream2 <- soacToStream soac2
-                  case (mstream1, mstream2) of
-                    (Just (stream1, is_extra_1), Just (stream2, is_extra_2)) -> do
-                      is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
-                      is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                      fuseStms edgs infusible
-                        (Let (basicPat is_extra_1' <> pats1) aux1 (Op stream1))
-                        (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
-                    _ -> return Nothing
-          ( Futhark.Stream s_exp1 i1 sform1 nes1 lam1,
-            Futhark.Stream s_exp2 i2 sform2 nes2 lam2)
+          -- ( H.Stream {},
+          --   H.Screma s_exp2 sform2 i2)
+          --     |  Just _ <- isRedomapSOAC sform2 -> do
+          --       doFusion <- gets fuseScans
+          --       if not doFusion then return Nothing else do
+          --         mstream2 <- soacToStream soac2
+          --         case mstream2 of
+          --           Just (stream2, is_extra_2) -> do
+          --             is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+          --             fuseStms edgs infusible
+          --               s1
+          --               (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
+          --           _ -> return Nothing
+          -- ( Futhark.Screma s_exp1 i1 sform1,
+          --   Futhark.Screma s_exp2 i2 sform2)
+          --     |
+          --       Just _ <- isScanomapSOAC sform1,
+          --       Just _ <- isScanomapSOAC sform2,
+          --       s_exp1 == s_exp2,
+          --       any isScanRed edgs
+          --     -> do
+          --       doFusion <- gets fuseScans
+          --       if not doFusion then return Nothing else do
+          --         mstream1 <- soacToStream soac1
+          --         mstream2 <- soacToStream soac2
+          --         case (mstream1, mstream2) of
+          --           (Just (stream1, is_extra_1), Just (stream2, is_extra_2)) -> do
+          --             is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
+          --             is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+          --             fuseStms edgs infusible
+          --               (Let (basicPat is_extra_1' <> pats1) aux1 (Op stream1))
+          --               (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
+          --           _ -> return Nothing
+          ( H.Stream s_exp1 sform1 nes1 lam1 i1,
+            H.Stream s_exp2 sform2 nes2 lam2 i2)
             | getStreamOrder sform1 /= getStreamOrder sform2 ->
               let s1' = toSeqStream soac1 in
               let s2' = toSeqStream soac2 in
-              fuseStms edgs infusible
-                (Let pats1 aux1 (Op s1'))
-                (Let pats2 aux2 (Op s2'))
-          ( Futhark.Stream s_exp1 i1 sform1 nes1 lam1,
-            Futhark.Stream s_exp2 i2 sform2 nes2 lam2) -> do
+              fuseNodeT edgs infusible
+                (SoacNode s1' pats1 aux1)
+                (SoacNode s2' pats2 aux2)
+          ( H.Stream s_exp1 sform1 lam1 nes1 i1,
+            H.Stream s_exp2 sform2 lam2 nes2 i2) -> do
               let chunk1 = head $ lambdaParams lam1
               let chunk2 = head $ lambdaParams lam2
               let mmap = makeMap [paramName chunk2] [paramName chunk1]
@@ -567,7 +563,8 @@ fuseStms edgs infusible s1 s2 =
 
 
               -- let lam_new =  lam
-              pure $ Just $ substituteNames mmap $ Let (basicPat pats) aux (Op $ Futhark.Stream s_exp1 is_new (mergeForms sform1 sform2) (nes1 <> nes2) lam''')
+              let soac = H.Stream s_exp1  (mergeForms sform1 sform2)  lam''' (nes1 <> nes2) is_new
+              pure $ Just $ substituteNames mmap $ SoacNode soac (basicPat pats) aux
 
           _ -> pure Nothing -- not fusable soac combos
     _ -> pure Nothing -- not op statements
@@ -577,26 +574,23 @@ fuseStms edgs infusible s1 s2 =
 
 
 
-    -- vertical map-histogram fusion
-
-
 
 
 vFuseLambdas :: [VName] ->
-                Lambda SOACS -> [VName] -> [VName] ->
-                Lambda SOACS -> [VName] -> [VName]
-                -> (Lambda SOACS, [VName])
+                Lambda SOACS -> [H.Input] -> [VName] ->
+                Lambda SOACS -> [H.Input] -> [VName]
+                -> (Lambda SOACS, [H.Input])
 vFuseLambdas infusible lam_1 i1 o1 lam_2 i2 o2 = (lam , fused_inputs)
   where
     (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
     (lam_1_output, _) = mapT (namesFromRes . resFromLambda) (lam_1, lam_2)
 
-    fused_inputs =  fuseInputs2 o1 i1 i2
+    fused_inputs =  fuseInputs o1 i1 i2
     fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
 
-    map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
+    map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (map H.inputArray (i1 ++ i2))
     map2 = makeMap (reverse o1) (reverse lam_1_output)
-    map4 = makeMap fused_inputs fused_inputs_inner
+    map4 = makeMap (map H.inputArray fused_inputs) fused_inputs_inner
     map3 = fuseMaps map1 (M.union map2 map4)
 
 
@@ -638,16 +632,17 @@ resFromLambda :: Lambda rep -> Result
 resFromLambda =  bodyResult . lambdaBody
 
 
-hFuseStms :: Stm SOACS -> Stm SOACS -> FusionEnvM (Maybe (Stm SOACS))
-hFuseStms s1 s2 = case (s1, s2) of
-  (Let pats1 aux1 (Op soac1),
-   Let pats2 aux2 (Op soac2)) -> case (soac1, soac2) of
-      ( Futhark.Screma {},
-        Futhark.Screma {}) -> fuseStms [] (patNames pats1) s1 s2
-      ( Futhark.Scatter s_exp1 i1 lam_1 outputs1,
-        Futhark.Scatter s_exp2 i2 lam_2 outputs2)
+hFuseNodeT :: NodeT-> NodeT-> FusionEnvM (Maybe NodeT)
+hFuseNodeT s1 s2 = case (s1, s2) of
+  (SoacNode soac1 pats1 aux1,
+   SoacNode soac2 pats2 aux2) -> case (soac1, soac2) of
+      ( H.Screma {},
+        H.Screma {}) -> fuseNodeT [] (patNames pats1) s1 s2
+      ( H.Scatter s_exp1 lam_1 i1 outputs1 ,
+        H.Scatter s_exp2 lam_2 i2 outputs2)
         | s_exp1 == s_exp2 ->
-          pure $ Just $ Let pats aux (Op (Futhark.Scatter s_exp2 fused_inputs lam outputs))
+          let soac = H.Scatter s_exp2 lam fused_inputs outputs  in
+          pure $ Just $ SoacNode soac pats aux
             where
               pats = pats1 <> pats2
               aux = aux1 <> aux2
@@ -657,7 +652,7 @@ hFuseStms s1 s2 = case (s1, s2) of
               (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
               (lam_1_output, lam_2_output) = mapT resFromLambda (lam_1, lam_2)
 
-              fused_inputs = fuseInputs2 [] i1 i2
+              fused_inputs = fuseInputs [] i1 i2
               fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
 
               map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
@@ -682,8 +677,8 @@ hFuseStms s1 s2 = case (s1, s2) of
                 lambdaReturnType = types,
                 lambdaBody = (lambdaBody lam') {bodyResult = res}
                 }
-      ( Futhark.Hist s_exp1 i1 ops_1 lam_1,
-        Futhark.Hist s_exp2 i2 ops_2 lam_2) -- pretty much copied too
+      ( H.Hist s_exp1 ops_1 lam_1 i1,
+        H.Hist s_exp2 ops_2 lam_2 i2) -- pretty much copied too
         | s_exp1 == s_exp2 -> do
           let num_buckets_2 = length ops_2
           let num_buckets_1 = length ops_1
@@ -707,7 +702,8 @@ hFuseStms s1 s2 = case (s1, s2) of
                         ++ drop num_buckets_2 (lambdaReturnType lam_2)
                   }
             -- success (outNames ker ++ returned_outvars) $
-          return $ Just $ Let (pats1 <> pats2) (aux1 <> aux2) (Op (Futhark.Hist s_exp1 (i1 <> i2) (ops_1 <> ops_2) lam'))
+          let soac = H.Hist s_exp1  (ops_1 <> ops_2) lam' (i1 <> i2)
+          return $ Just $ SoacNode soac (pats1 <> pats2) (aux1 <> aux2)
       _ -> pure Nothing
   _ -> pure Nothing
 
@@ -718,9 +714,9 @@ hFuseStms s1 s2 = case (s1, s2) of
 
 
 
-fuseInputs2 :: [VName] -> [VName] -> [VName] -> [VName]
-fuseInputs2 fusing inputs1 inputs2 =
-   L.nub $ inputs1 `L.union` filter (`notElem` fusing) inputs2
+fuseInputs :: [VName] -> [H.Input] -> [H.Input] -> [H.Input]
+fuseInputs fusing inputs1 inputs2 =
+   L.nub $ inputs1 `L.union` filter ((`notElem` fusing) . H.inputArray) inputs2
 
 -- fuseOutputs2 :: [VName] -> [VName] -> [VName] -> [VName]
 -- fuseOutputs2 infusible outputs1 outputs2 =
@@ -777,16 +773,18 @@ vNameFromAdj n1 (edge, n2) = depsFromEdge (n2,n1, edge)
 
 
 removeUnusedOutputsFromContext :: DepContext  -> FusionEnvM DepContext
-removeUnusedOutputsFromContext (incoming, n1, SNode s outputTs, outgoing) =
-  pure (incoming, n1, SNode new_stm outputTs, outgoing)
+removeUnusedOutputsFromContext (incoming, n1, nodeT, outgoing) =
+  pure (incoming, n1, nodeT', outgoing)
   where
-    new_stm = removeOutputsExcept (concatMap (vNameFromAdj n1) incoming) s
+    toKeep = concatMap (vNameFromAdj n1) incoming
+    -- new_stm = removeOutputsExcept (concatMap (vNameFromAdj n1) incoming) s
+    nodeT' = removeOutputsExcept toKeep nodeT
 removeUnusedOutputsFromContext c = pure c
 
-removeOutputsExcept :: [VName] -> Stm SOACS -> Stm SOACS
+removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
-  (Let pats1 aux1 (Op (Futhark.Screma size_exp i1  (ScremaForm scans_1 red_1 lam_1)))) ->
-     Let (basicPat (pats_unchanged ++ pats_new)) aux1 (Op (Futhark.Screma size_exp i1  (ScremaForm scans_1 red_1 lam_new)))
+  SoacNode soac@(H.Screma _ (ScremaForm scans_1 red_1 lam_1) _) pats1 aux1 ->
+      SoacNode (H.setLambda lam_new soac) (basicPat $ pats_unchanged ++ pats_new) aux1
         where
           scan_input_size = scanInput scans_1
           red_input_size = redInput red_1
@@ -801,23 +799,11 @@ removeOutputsExcept toKeep s = case s of
           lam_new = trace ("getshere: " ++ show toKeep) lam_1 {
             lambdaReturnType = types,
             lambdaBody = (lambdaBody lam_1) {bodyResult = results}
-            }
-  stm -> stm
+          }
+  node -> node
 
 
-mapAcross :: (DepContext -> FusionEnvM DepContext) -> DepGraphAug
-mapAcross f g =
-  do
-    let ns = nodes g
-    foldlM (flip helper) g ns
-    where
-      helper :: Node -> DepGraphAug
-      helper n gr = case match n gr of
-        (Just c, g') ->
-          do
-            c' <- f c
-            return $ c' & g'
-        (Nothing, g') -> pure g'
+
 
 
 -- do fusion on the inner nodes -
@@ -826,28 +812,25 @@ runInnerFusion = mapAcross runInnerFusionOnContext
 
 runInnerFusionOnContext :: DepContext -> FusionEnvM DepContext
 runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
-  SNode (Let pats aux (If size_exp b1 b2 branchType )) _ ->
-    do
-      b1_new <- doFuseScans $ doFusionInner b1 []
-      b2_new <- doFuseScans $ doFusionInner b2 []
-      return (incomming, node, SNode (Let pats aux (If size_exp b1_new b2_new branchType)) mempty, outgoing)
-  SNode (Let pats aux (DoLoop params form body)) _ ->
-    do
-      oldScope <- gets scope
-      modify (\s -> s {scope = M.union (scopeOfFParams (map fst params)) oldScope})
-      b_new <- doFuseScans $ doFusionInner body (map (paramName . fst) params)
-      return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
-  SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm scans reduces lambda)))) _ ->
-    do
-      newbody <- doFuseScans $ doFusionInner (lambdaBody lambda) []
-      let newLam = lambda {lambdaBody = newbody}
-      let nodeNew = SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm scans reduces newLam)))) mempty
-      pure (incomming, node, nodeNew, outgoing)
-  SNode (Let pats aux (Op (Futhark.Stream sz is form nes lam))) _ -> do
-      newbody <- dontFuseScans $ doFusionInner (lambdaBody lam) []
-      let newLam = lam {lambdaBody = newbody}
-      let nodeNew = SNode(Let pats aux (Op (Futhark.Stream sz is form nes newLam)))mempty
-      pure (incomming, node, nodeNew, outgoing)
+  -- SNode (Let pats aux (If size_exp b1 b2 branchType )) _ ->
+  --   do
+  --     b1_new <- doFuseScans $ doFusionInner b1 []
+  --     b2_new <- doFuseScans $ doFusionInner b2 []
+  --     return (incomming, node, SNode (Let pats aux (If size_exp b1_new b2_new branchType)) mempty, outgoing)
+  -- SNode (Let pats aux (DoLoop params form body)) _ ->
+  --   do
+  --     oldScope <- gets scope
+  --     modify (\s -> s {scope = M.union (scopeOfFParams (map fst params)) oldScope})
+  --     b_new <- doFuseScans $ doFusionInner body (map (paramName . fst) params)
+  --     return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
+  SoacNode soac pats aux -> do
+        let lam = H.lambda soac
+        newbody <- case soac of
+          H.Screma {} -> dontFuseScans $ doFusionInner (lambdaBody lam) []
+          _           -> doFuseScans   $ doFusionInner (lambdaBody lam) []
+        let newLam = lam {lambdaBody = newbody}
+        let newNode = SoacNode (H.setLambda newLam soac) pats aux
+        pure (incomming, node, newNode, outgoing)
   _ -> return c
   where
     doFusionInner :: Body SOACS -> [VName] -> FusionEnvM (Body SOACS)
@@ -873,35 +856,19 @@ isFake _ = False
 
 makeCopiesOfConsAliased :: DepGraphAug
 makeCopiesOfConsAliased = mapAcross copyAlised
-  where
+  where -- This funciton is rly important, but doesnt work
     copyAlised :: DepContext -> FusionEnvM DepContext
-    copyAlised c@(incoming, node, SNode s _, outgoing) = do
+    copyAlised c@(incoming, node, nodeT@(SoacNode soac pats aux), outgoing) = do
       let incoming' = concatMap depsFromEdgeT $ filter isFake (map fst incoming)
       let outgoing' = concatMap depsFromEdgeT $ filter isAlias (map fst outgoing)
       let toMakeCopies =  incoming' `L.intersect` outgoing'
       if not $ null toMakeCopies then do
         (new_stms, nameMapping) <- makeCopyStms toMakeCopies
-        return (incoming, node, FinalNode (new_stms ++ [substituteNames nameMapping s]), outgoing)
+        return (incoming, node, FinalNode new_stms (substituteNames nameMapping nodeT), outgoing)
       else pure c
     copyAlised c = pure c
 
--- make the context to context function and add that on top d
 
-
-
-
--- makeCopy :: MonadFreshNames m => DepGraph -> m DepGraph
--- makeCopy g =
---   return g
-
-
--- makeCopyContext :: MonadFreshNames m => DepContext -> m DepContext
--- makeCopyContext c = return c
-
-
--- Problems with copying fusion
--- need new Cons-edges + fake edges
---
 
 -- testingTurnToStream :: DepGraphAug
 -- testingTurnToStream = mapAcross toStream
@@ -919,214 +886,214 @@ makeCopiesOfConsAliased = mapAcross copyAlised
 --       _ -> pure ctx
 
 
--- this code is pretty much copied - no clue what streams are/do
-soacToStream :: SOAC SOACS -> FusionEnvM (Maybe (SOAC SOACS, [Ident]))
-soacToStream soac = do
-  chunk_param <- newParam "chunk" $ Prim int64
-  let chvar = Futhark.Var $ paramName chunk_param
-  let chvar = Futhark.Var $ paramName chunk_param
-  case soac of
-    Futhark.Screma sz inNames sform
-      | Just lam <- isMapSOAC sform -> do
-        -- lam' <- renameLambda lam
-        let empty_lam = Lambda [] (mkBody mempty []) []
+-- -- this code is pretty much copied - no clue what streams are/do
+-- soacToStream :: SOAC SOACS -> FusionEnvM (Maybe (SOAC SOACS, [Ident]))
+-- soacToStream soac = do
+--   chunk_param <- newParam "chunk" $ Prim int64
+--   let chvar = Futhark.Var $ paramName chunk_param
+--   let chvar = Futhark.Var $ paramName chunk_param
+--   case soac of
+--     Futhark.Screma sz inNames sform
+--       | Just lam <- isMapSOAC sform -> do
+--         -- lam' <- renameLambda lam
+--         let empty_lam = Lambda [] (mkBody mempty []) []
 
-        let new_out_types =  [arrayOfRow t chvar | t <- lambdaReturnType lam]
+--         let new_out_types =  [arrayOfRow t chvar | t <- lambdaReturnType lam]
 
-        let paramTypes = map paramType (lambdaParams lam)
-        let new_in_types =  [arrayOfRow t chvar | t <- paramTypes]
-        newParams <- mapM (newParam "inp") new_in_types
-        let new_lam_params = chunk_param : newParams
+--         let paramTypes = map paramType (lambdaParams lam)
+--         let new_in_types =  [arrayOfRow t chvar | t <- paramTypes]
+--         newParams <- mapM (newParam "inp") new_in_types
+--         let new_lam_params = chunk_param : newParams
 
-        strm_resids <- mapM (newIdent "res") new_out_types
-        -- strm_inpids <- mapM (newParam "inp" . paramName) (lambdaParams lam)
-        -- -- let strm_inpids' = [arrayOfRow t chvar | t <- strm_inpids]
-        -- -- (map paramName strm_inpids)
+--         strm_resids <- mapM (newIdent "res") new_out_types
+--         -- strm_inpids <- mapM (newParam "inp" . paramName) (lambdaParams lam)
+--         -- -- let strm_inpids' = [arrayOfRow t chvar | t <- strm_inpids]
+--         -- -- (map paramName strm_inpids)
 
-        let stm = mkLet strm_resids (Op (Futhark.Screma chvar (map paramName newParams) (mapSOAC lam))) :: Stm SOACS
-        let newBody = mkBody (oneStm stm) $ map (subExpRes . Futhark.Var . identName) strm_resids
+--         let stm = mkLet strm_resids (Op (Futhark.Screma chvar (map paramName newParams) (mapSOAC lam))) :: Stm SOACS
+--         let newBody = mkBody (oneStm stm) $ map (subExpRes . Futhark.Var . identName) strm_resids
 
-        let new_outer_lam = Lambda new_lam_params newBody new_out_types
+--         let new_outer_lam = Lambda new_lam_params newBody new_out_types
 
-        pure $ Just (Futhark.Stream sz inNames (Parallel Disorder Commutative empty_lam) [] new_outer_lam, [])
-    Futhark.Screma sz inNames sform
-      | Just (scans, _) <- Futhark.isScanomapSOAC sform,
-        Futhark.Scan scan_lam nes <- Futhark.singleScan scans -> do
-        let (Futhark.ScremaForm _ _ lam) = sform
-        let inps = inNames
-        let w = sz
-        lam' <- renameLambda lam
-        let arrrtps = mapType w lam
-        -- the chunked-outersize of the array result and input types
-        let loutps = [arrayOfRow t chvar | t <- map rowType arrrtps]
-        let lintps = [arrayOfRow t chvar | t <- map paramType (lambdaParams lam)]
+--         pure $ Just (Futhark.Stream sz inNames (Parallel Disorder Commutative empty_lam) [] new_outer_lam, [])
+--     Futhark.Screma sz inNames sform
+--       | Just (scans, _) <- Futhark.isScanomapSOAC sform,
+--         Futhark.Scan scan_lam nes <- Futhark.singleScan scans -> do
+--         let (Futhark.ScremaForm _ _ lam) = sform
+--         let inps = inNames
+--         let w = sz
+--         lam' <- renameLambda lam
+--         let arrrtps = mapType w lam
+--         -- the chunked-outersize of the array result and input types
+--         let loutps = [arrayOfRow t chvar | t <- map rowType arrrtps]
+--         let lintps = [arrayOfRow t chvar | t <- map paramType (lambdaParams lam)]
 
-        strm_inpids <- mapM (newParam "inp") lintps
-        -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
-        -- 1. let (scan0_ids,map_resids)   = scanomap(scan_lam, nes, map_lam, a_ch)
-        -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
-        -- 3. let outerszm1id = sizeof(0,strm_resids) - 1
-        -- 4. let lasteel_ids = if outerszm1id < 0
-        --                      then nes
-        --                      else strm_resids[outerszm1id]
-        -- 5. let acc'        = acc + lasteel_ids
-        --    {acc', strm_resids, map_resids}
-        -- the array and accumulator result types
-        let scan_arr_ts = map (`arrayOfRow` chvar) $ lambdaReturnType scan_lam
-            map_arr_ts = drop (length nes) loutps
-            accrtps = lambdaReturnType scan_lam
+--         strm_inpids <- mapM (newParam "inp") lintps
+--         -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
+--         -- 1. let (scan0_ids,map_resids)   = scanomap(scan_lam, nes, map_lam, a_ch)
+--         -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
+--         -- 3. let outerszm1id = sizeof(0,strm_resids) - 1
+--         -- 4. let lasteel_ids = if outerszm1id < 0
+--         --                      then nes
+--         --                      else strm_resids[outerszm1id]
+--         -- 5. let acc'        = acc + lasteel_ids
+--         --    {acc', strm_resids, map_resids}
+--         -- the array and accumulator result types
+--         let scan_arr_ts = map (`arrayOfRow` chvar) $ lambdaReturnType scan_lam
+--             map_arr_ts = drop (length nes) loutps
+--             accrtps = lambdaReturnType scan_lam
 
-        -- array result and input IDs of the stream's lambda
-        strm_resids <- mapM (newIdent "res") scan_arr_ts
-        scan0_ids <- mapM (newIdent "resarr0") scan_arr_ts
-        map_resids <- mapM (newIdent "map_res") map_arr_ts
+--         -- array result and input IDs of the stream's lambda
+--         strm_resids <- mapM (newIdent "res") scan_arr_ts
+--         scan0_ids <- mapM (newIdent "resarr0") scan_arr_ts
+--         map_resids <- mapM (newIdent "map_res") map_arr_ts
 
-        lastel_ids <- mapM (newIdent "lstel") accrtps
-        lastel_tmp_ids <- mapM (newIdent "lstel_tmp") accrtps
-        empty_arr <- newIdent "empty_arr" $ Prim Bool
-        inpacc_ids <- mapM (newParam "inpacc") accrtps
-        outszm1id <- newIdent "szm1" $ Prim int64
-        -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
-        let insstm =
-              mkLet (scan0_ids ++ map_resids) . Op $
-                Futhark.Screma chvar (map paramName strm_inpids) $
-                  Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
-            -- 2. let outerszm1id = chunksize - 1
-            outszm1stm =
-              mkLet [outszm1id] . BasicOp $
-                BinOp
-                  (Sub Int64 OverflowUndef)
-                  (Futhark.Var $ paramName chunk_param)
-                  (constant (1 :: Int64))
-            -- 3. let lasteel_ids = ...
-            empty_arr_stm =
-              mkLet [empty_arr] . BasicOp $
-                CmpOp
-                  (CmpSlt Int64)
-                  (Futhark.Var $ identName outszm1id)
-                  (constant (0 :: Int64))
-            leltmpstms =
-              zipWith
-                ( \lid arrid ->
-                    mkLet [lid] . BasicOp $
-                      Index (identName arrid) $
-                        fullSlice
-                          (identType arrid)
-                          [DimFix $ Futhark.Var $ identName outszm1id]
-                )
-                lastel_tmp_ids
-                scan0_ids
-            lelstm =
-              mkLet lastel_ids $
-                If
-                  (Futhark.Var $ identName empty_arr)
-                  (mkBody mempty $ subExpsRes nes)
-                  ( mkBody (stmsFromList leltmpstms) $
-                      varsRes $ map identName lastel_tmp_ids
-                  )
-                  $ ifCommon $ map identType lastel_tmp_ids
-        -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
-        maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) scan_lam
-        let mapstm =
-              mkLet strm_resids . Op $
-                Futhark.Screma chvar (map identName scan0_ids) (Futhark.mapSOAC maplam)
-        -- 5. let acc'        = acc + lasteel_ids
-        addlelbdy <-
-          mkPlusBnds scan_lam $
-            map Futhark.Var $
-              map paramName inpacc_ids ++ map identName lastel_ids
-        -- Finally, construct the stream
-        let (addlelstm, addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
-            strmbdy =
-              mkBody (stmsFromList [insstm, outszm1stm, empty_arr_stm, lelstm, mapstm] <> addlelstm) $
-                addlelres ++ map (subExpRes . Futhark.Var . identName) (strm_resids ++ map_resids)
-            strmpar = chunk_param : inpacc_ids ++ strm_inpids
-            strmlam = Lambda strmpar strmbdy (accrtps ++ loutps)
-        return $ Just ( Futhark.Stream w inNames Sequential nes strmlam, map paramIdent inpacc_ids)
+--         lastel_ids <- mapM (newIdent "lstel") accrtps
+--         lastel_tmp_ids <- mapM (newIdent "lstel_tmp") accrtps
+--         empty_arr <- newIdent "empty_arr" $ Prim Bool
+--         inpacc_ids <- mapM (newParam "inpacc") accrtps
+--         outszm1id <- newIdent "szm1" $ Prim int64
+--         -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
+--         let insstm =
+--               mkLet (scan0_ids ++ map_resids) . Op $
+--                 Futhark.Screma chvar (map paramName strm_inpids) $
+--                   Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
+--             -- 2. let outerszm1id = chunksize - 1
+--             outszm1stm =
+--               mkLet [outszm1id] . BasicOp $
+--                 BinOp
+--                   (Sub Int64 OverflowUndef)
+--                   (Futhark.Var $ paramName chunk_param)
+--                   (constant (1 :: Int64))
+--             -- 3. let lasteel_ids = ...
+--             empty_arr_stm =
+--               mkLet [empty_arr] . BasicOp $
+--                 CmpOp
+--                   (CmpSlt Int64)
+--                   (Futhark.Var $ identName outszm1id)
+--                   (constant (0 :: Int64))
+--             leltmpstms =
+--               zipWith
+--                 ( \lid arrid ->
+--                     mkLet [lid] . BasicOp $
+--                       Index (identName arrid) $
+--                         fullSlice
+--                           (identType arrid)
+--                           [DimFix $ Futhark.Var $ identName outszm1id]
+--                 )
+--                 lastel_tmp_ids
+--                 scan0_ids
+--             lelstm =
+--               mkLet lastel_ids $
+--                 If
+--                   (Futhark.Var $ identName empty_arr)
+--                   (mkBody mempty $ subExpsRes nes)
+--                   ( mkBody (stmsFromList leltmpstms) $
+--                       varsRes $ map identName lastel_tmp_ids
+--                   )
+--                   $ ifCommon $ map identType lastel_tmp_ids
+--         -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
+--         maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) scan_lam
+--         let mapstm =
+--               mkLet strm_resids . Op $
+--                 Futhark.Screma chvar (map identName scan0_ids) (Futhark.mapSOAC maplam)
+--         -- 5. let acc'        = acc + lasteel_ids
+--         addlelbdy <-
+--           mkPlusBnds scan_lam $
+--             map Futhark.Var $
+--               map paramName inpacc_ids ++ map identName lastel_ids
+--         -- Finally, construct the stream
+--         let (addlelstm, addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
+--             strmbdy =
+--               mkBody (stmsFromList [insstm, outszm1stm, empty_arr_stm, lelstm, mapstm] <> addlelstm) $
+--                 addlelres ++ map (subExpRes . Futhark.Var . identName) (strm_resids ++ map_resids)
+--             strmpar = chunk_param : inpacc_ids ++ strm_inpids
+--             strmlam = Lambda strmpar strmbdy (accrtps ++ loutps)
+--         return $ Just ( Futhark.Stream w inNames Sequential nes strmlam, map paramIdent inpacc_ids)
 
-    Futhark.Screma sz inNames sform
-      | Just (reds, _) <- Futhark.isRedomapSOAC sform,
-        Futhark.Reduce comm lamin nes <- Futhark.singleReduce reds -> do
-        let (Futhark.ScremaForm _ _ lam) = sform
-        let inps = inNames
-        let w = sz
-        lam' <- renameLambda lam
-        let arrrtps = mapType w lam
-        -- the chunked-outersize of the array result and input types
-        let loutps = [arrayOfRow t chvar | t <- map rowType arrrtps]
-        let lintps = [arrayOfRow t chvar | t <- map paramType (lambdaParams lam)]
-        strm_inpids <- mapM (newParam "inp") lintps
-        -- Redomap(+,lam,nes,a) => is translated in strem's body to:
-        -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-        -- 2. let acc'                   = acc + acc0_ids          in
-        --    {acc', strm_resids}
+--     Futhark.Screma sz inNames sform
+--       | Just (reds, _) <- Futhark.isRedomapSOAC sform,
+--         Futhark.Reduce comm lamin nes <- Futhark.singleReduce reds -> do
+--         let (Futhark.ScremaForm _ _ lam) = sform
+--         let inps = inNames
+--         let w = sz
+--         lam' <- renameLambda lam
+--         let arrrtps = mapType w lam
+--         -- the chunked-outersize of the array result and input types
+--         let loutps = [arrayOfRow t chvar | t <- map rowType arrrtps]
+--         let lintps = [arrayOfRow t chvar | t <- map paramType (lambdaParams lam)]
+--         strm_inpids <- mapM (newParam "inp") lintps
+--         -- Redomap(+,lam,nes,a) => is translated in strem's body to:
+--         -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
+--         -- 2. let acc'                   = acc + acc0_ids          in
+--         --    {acc', strm_resids}
 
-        let accrtps = take (length nes) $ lambdaReturnType lam
-            -- the chunked-outersize of the array result and input types
-            loutps' = drop (length nes) loutps
-            -- the lambda with proper index
-            foldlam = lam'
-        -- array result and input IDs of the stream's lambda
-        strm_resids <- mapM (newIdent "res") loutps'
-        inpacc_ids <- mapM (newParam "inpacc") accrtps
-        acc0_ids <- mapM (newIdent "acc0") accrtps
-        -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-        let insoac =
-              Futhark.Screma
-                chvar
-                (map paramName strm_inpids)
-                $ Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
-            insstm = mkLet (acc0_ids ++ strm_resids) $ Op insoac
-        -- 2. let acc'     = acc + acc0_ids    in
-        addaccbdy <-
-          mkPlusBnds lamin $
-            map Futhark.Var $
-              map paramName inpacc_ids ++ map identName acc0_ids
-        -- Construct the stream
-        let (addaccstm, addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
-            strmbdy =
-              mkBody (oneStm insstm <> addaccstm) $
-                addaccres ++ map (subExpRes . Futhark.Var . identName) strm_resids
-            strmpar = chunk_param : inpacc_ids ++ strm_inpids
-            strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
-        lam0 <- renameLambda lamin
-        return $ Just ( Futhark.Stream w inNames (Parallel InOrder comm lam0) nes strmlam, [])
-    _ -> pure Nothing
-    where
-      mkMapPlusAccLam ::
-        (MonadFreshNames m, Buildable rep) =>
-        [SubExp] ->
-        Lambda rep ->
-        m (Lambda rep)
-      mkMapPlusAccLam accs plus = do
-        let (accpars, rempars) = splitAt (length accs) $ lambdaParams plus
-            parstms =
-              zipWith
-                (\par se -> mkLet [paramIdent par] (BasicOp $ SubExp se))
-                accpars
-                accs
-            plus_bdy = lambdaBody plus
-            newlambdy =
-              Body
-                (bodyDec plus_bdy)
-                (stmsFromList parstms <> bodyStms plus_bdy)
-                (bodyResult plus_bdy)
-        renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
+--         let accrtps = take (length nes) $ lambdaReturnType lam
+--             -- the chunked-outersize of the array result and input types
+--             loutps' = drop (length nes) loutps
+--             -- the lambda with proper index
+--             foldlam = lam'
+--         -- array result and input IDs of the stream's lambda
+--         strm_resids <- mapM (newIdent "res") loutps'
+--         inpacc_ids <- mapM (newParam "inpacc") accrtps
+--         acc0_ids <- mapM (newIdent "acc0") accrtps
+--         -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
+--         let insoac =
+--               Futhark.Screma
+--                 chvar
+--                 (map paramName strm_inpids)
+--                 $ Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
+--             insstm = mkLet (acc0_ids ++ strm_resids) $ Op insoac
+--         -- 2. let acc'     = acc + acc0_ids    in
+--         addaccbdy <-
+--           mkPlusBnds lamin $
+--             map Futhark.Var $
+--               map paramName inpacc_ids ++ map identName acc0_ids
+--         -- Construct the stream
+--         let (addaccstm, addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
+--             strmbdy =
+--               mkBody (oneStm insstm <> addaccstm) $
+--                 addaccres ++ map (subExpRes . Futhark.Var . identName) strm_resids
+--             strmpar = chunk_param : inpacc_ids ++ strm_inpids
+--             strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
+--         lam0 <- renameLambda lamin
+--         return $ Just ( Futhark.Stream w inNames (Parallel InOrder comm lam0) nes strmlam, [])
+--     _ -> pure Nothing
+--     where
+--       mkMapPlusAccLam ::
+--         (MonadFreshNames m, Buildable rep) =>
+--         [SubExp] ->
+--         Lambda rep ->
+--         m (Lambda rep)
+--       mkMapPlusAccLam accs plus = do
+--         let (accpars, rempars) = splitAt (length accs) $ lambdaParams plus
+--             parstms =
+--               zipWith
+--                 (\par se -> mkLet [paramIdent par] (BasicOp $ SubExp se))
+--                 accpars
+--                 accs
+--             plus_bdy = lambdaBody plus
+--             newlambdy =
+--               Body
+--                 (bodyDec plus_bdy)
+--                 (stmsFromList parstms <> bodyStms plus_bdy)
+--                 (bodyResult plus_bdy)
+--         renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
 
-      mkPlusBnds ::
-        (MonadFreshNames m, Buildable rep) =>
-        Lambda rep ->
-        [SubExp] ->
-        m (Body rep)
-      mkPlusBnds plus accels = do
-        plus' <- renameLambda plus
-        let parstms =
-              zipWith
-                (\par se -> mkLet [paramIdent par] (BasicOp $ SubExp se))
-                (lambdaParams plus')
-                accels
-            body = lambdaBody plus'
-        return $ body {bodyStms = stmsFromList parstms <> bodyStms body}
+--       mkPlusBnds ::
+--         (MonadFreshNames m, Buildable rep) =>
+--         Lambda rep ->
+--         [SubExp] ->
+--         m (Body rep)
+--       mkPlusBnds plus accels = do
+--         plus' <- renameLambda plus
+--         let parstms =
+--               zipWith
+--                 (\par se -> mkLet [paramIdent par] (BasicOp $ SubExp se))
+--                 (lambdaParams plus')
+--                 accels
+--             body = lambdaBody plus'
+--         return $ body {bodyStms = stmsFromList parstms <> bodyStms body}
 
 
 
@@ -1136,10 +1103,10 @@ getStreamOrder (Parallel o _ _) = o
 getStreamOrder Sequential = InOrder
 
 -- also copied
-toSeqStream :: SOAC SOACS -> SOAC SOACS
-toSeqStream s@(Futhark.Stream _ _ Sequential _ _) = s
-toSeqStream (Futhark.Stream w is Parallel {} l acc) =
-  Futhark.Stream w is Sequential l acc
+toSeqStream :: H.SOAC SOACS -> H.SOAC SOACS
+toSeqStream s@(H.Stream _ Sequential _ _ _) = s
+toSeqStream (H.Stream w  Parallel {} l acc is) =
+  H.Stream w Sequential l acc is
 toSeqStream _ = error "toSeqStream expects a stream, but given a SOAC."
 
 
