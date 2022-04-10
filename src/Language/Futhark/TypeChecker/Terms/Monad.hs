@@ -591,7 +591,7 @@ checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, 
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
       me <- liftTypeM askImportName
-      unless ("/prelude" `isPrefixOf` includeToFilePath me) $
+      unless (isBuiltin (includeToFilePath me)) $
         warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
       scope <- asks termScope
       pure (scope, v)
@@ -626,7 +626,7 @@ instance MonadTypeChecker TermTypeM where
     case M.lookup name $ scopeTypeTable scope of
       Nothing -> unknownType loc qn
       Just (TypeAbbr l ps (RetType dims def)) ->
-        return
+        pure
           ( qn',
             ps,
             RetType dims $ qualifyTypeVars outer_env (map typeParamName ps) qs def,
@@ -707,12 +707,12 @@ extSize loc e = do
               RigidSlice d $ prettyOneLine $ DimSlice i j s
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
-      return
+      pure
         ( NamedDim $ qualName d,
           Just d
         )
     Just d ->
-      return
+      pure
         ( NamedDim $ qualName d,
           Just d
         )
@@ -739,7 +739,7 @@ newArrayType loc desc r = do
   constrain v $ NoConstraint Unlifted $ mkUsage' loc
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
   let rowt = TypeVar () Nonunique (typeName v) []
-  return
+  pure
     ( Array () Nonunique rowt (ShapeDecl $ map (NamedDim . qualName) dims),
       Scalar rowt
     )

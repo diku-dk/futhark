@@ -198,7 +198,7 @@ runCC cpath outpath cflags_def ldflags = do
           ++ ":\n"
           ++ gccerr
     Right (ExitSuccess, _, _) ->
-      return ()
+      pure ()
 
 runISPC :: String -> String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
 runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
@@ -243,7 +243,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
               ++ ":\n"
               ++ gccerr
         Right (ExitSuccess, _, _) ->
-          return ()
+          pure ()
   where
     ispcbase = outpath <> ispcextension
 
@@ -385,21 +385,20 @@ compileMulticoreToISPCAction fcfg mode outpath =
           ispcpath = outpath `addExtension` "ispc"
           ispcextension = "_ispc"
           ispcheader = takeBaseName (outpath <> ispcextension) `addExtension` "h"
-      cprog <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack $ "#include \"" <> ispcheader <> "\"") (T.pack versionString) prog
-      case mode of -- TODO(pema): Library mode
+      (cprog, ispc) <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack $ "#include \"" <> ispcheader <> "\"") (T.pack versionString) prog
+      case mode of
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile ispcpath ispc
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
-          let (c, ispc) = MulticoreC.asISPCExecutable cprog
-          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
           liftIO $ T.writeFile ispcpath ispc
           runISPC ispcpath outpath cpath ispcextension ["-O3", "--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
-          let (c, ispc) = MulticoreC.asISPCServer cprog
-          liftIO $ T.writeFile cpath $ cPrependHeader c
+          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           liftIO $ T.writeFile ispcpath ispc
           runISPC ispcpath outpath cpath ispcextension ["-O3", "--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
@@ -481,7 +480,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
           ++ ":\n"
           ++ emccerr
     Right (ExitSuccess, _, _) ->
-      return ()
+      pure ()
 
 -- | The @futhark wasm@ action.
 compileCtoWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem

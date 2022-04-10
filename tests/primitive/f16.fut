@@ -1,5 +1,5 @@
 -- Test ad-hoc properties and utility functions for f16.
---
+
 -- ==
 -- entry: testInf
 -- input { [1f16, -1f16, -1f16] [0f16, 0f16, 1f16] }

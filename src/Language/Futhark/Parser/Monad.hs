@@ -111,7 +111,6 @@ readLineFromMonad :: ReadLineMonad (Maybe T.Text)
 readLineFromMonad = GetLine Value
 
 instance Monad ReadLineMonad where
-  return = pure
   Value x >>= f = f x
   GetLine g >>= f = GetLine $ g >=> f
 
@@ -295,5 +294,4 @@ parseInMonad p file program =
     env = ParserState file program
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
-parse p file program =
-  either Left id $ getNoLines $ parseInMonad p file program
+parse p file program = join $ getNoLines $ parseInMonad p file program

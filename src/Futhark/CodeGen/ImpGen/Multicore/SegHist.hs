@@ -46,7 +46,7 @@ renameHistop :: HistOp MCMem -> MulticoreGen (HistOp MCMem)
 renameHistop histop = do
   let op = histOp histop
   lambda' <- renameLambda op
-  return histop { histOp = lambda' }
+  pure histop { histOp = lambda' }
 
 nonsegmentedHist ::
   Pat LetDecMem ->
@@ -89,8 +89,8 @@ onOpAtomic op = do
   let lambda = histOp op
       do_op = atomicUpdateLocking atomics lambda
   case do_op of
-    AtomicPrim f -> return f
-    AtomicCAS f -> return f
+    AtomicPrim f -> pure f
+    AtomicCAS f -> pure f
     AtomicLocking f -> do
       -- Allocate a static array of locks
       -- as in the GPU backend
@@ -100,7 +100,7 @@ onOpAtomic op = do
         sStaticArray "hist_locks" DefaultSpace int32 $
           Imp.ArrayZeros num_locks
       let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
-      return $ f l'
+      pure $ f l'
 
 atomicHistogram ::
   Pat LetDecMem ->

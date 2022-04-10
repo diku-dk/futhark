@@ -144,7 +144,7 @@ dummyDim pat = do
   dummy <- newVName "dummy"
   let ispace = [(dummy, intConst Int64 1)]
 
-  return
+  pure
     ( pat',
       ispace,
       forM_ (zip (patNames pat') (patNames pat)) $ \(from, to) -> do

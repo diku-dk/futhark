@@ -1,5 +1,4 @@
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 
 -- | This module defines a translation from imperative code with
@@ -58,7 +57,7 @@ translateGPU target prog =
             funs' <- forM funs $ \(fname, fun) ->
               (fname,) <$> traverse (onHostOp target) fun
 
-            return $
+            pure $
               ImpOpenCL.Definitions
                 (ImpOpenCL.Constants ps consts')
                 (ImpOpenCL.Functions funs')
@@ -97,13 +96,13 @@ cleanSizes m = M.map clean m
     clean s = s
 
 pointerQuals :: Monad m => String -> m [C.TypeQual]
-pointerQuals "global" = return [C.ctyquals|__global|]
-pointerQuals "local" = return [C.ctyquals|__local|]
-pointerQuals "private" = return [C.ctyquals|__private|]
-pointerQuals "constant" = return [C.ctyquals|__constant|]
-pointerQuals "write_only" = return [C.ctyquals|__write_only|]
-pointerQuals "read_only" = return [C.ctyquals|__read_only|]
-pointerQuals "kernel" = return [C.ctyquals|__kernel|]
+pointerQuals "global" = pure [C.ctyquals|__global|]
+pointerQuals "local" = pure [C.ctyquals|__local|]
+pointerQuals "private" = pure [C.ctyquals|__private|]
+pointerQuals "constant" = pure [C.ctyquals|__constant|]
+pointerQuals "write_only" = pure [C.ctyquals|__write_only|]
+pointerQuals "read_only" = pure [C.ctyquals|__read_only|]
+pointerQuals "kernel" = pure [C.ctyquals|__kernel|]
 pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
 -- In-kernel name and per-workgroup size in bytes.
@@ -151,12 +150,12 @@ onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
 onHostOp _ (ImpGPU.GetSize v key size_class) = do
   addSize key size_class
-  return $ ImpOpenCL.GetSize v key
+  pure $ ImpOpenCL.GetSize v key
 onHostOp _ (ImpGPU.CmpSizeLe v key size_class x) = do
   addSize key size_class
-  return $ ImpOpenCL.CmpSizeLe v key x
+  pure $ ImpOpenCL.CmpSizeLe v key x
 onHostOp _ (ImpGPU.GetSizeMax v size_class) =
-  return $ ImpOpenCL.GetSizeMax v size_class
+  pure $ ImpOpenCL.GetSizeMax v size_class
 
 genGPUCode ::
   OpsMode ->
@@ -224,8 +223,8 @@ ensureDeviceFuns code = do
           -- comes from.
           let device_func = fmap toDevice host_func
           ensureDeviceFun fname device_func
-          return $ Just fname
-        Nothing -> return Nothing
+          pure $ Just fname
+        Nothing -> pure Nothing
   where
     bad = compilerLimitationS "Cannot generate GPU functions that contain parallelism."
     toDevice :: HostOp -> KernelOp
@@ -356,7 +355,7 @@ onKernel target kernel = do
         catMaybes local_memory_args
           ++ kernelArgs kernel
 
-  return $ LaunchKernel safety name args num_groups group_size
+  pure $ LaunchKernel safety name args num_groups group_size
   where
     name = kernelName kernel
     num_groups = kernelNumGroups kernel
@@ -364,14 +363,14 @@ onKernel target kernel = do
 
     prepareLocalMemory TargetOpenCL (mem, size) = do
       mem_aligned <- newVName $ baseString mem ++ "_aligned"
-      return
+      pure
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
           [C.citem|__local volatile unsigned char* restrict $id:mem = (__local volatile unsigned char*) $id:mem_aligned;|]
         )
     prepareLocalMemory TargetCUDA (mem, size) = do
       param <- newVName $ baseString mem ++ "_offset"
-      return
+      pure
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|uint $id:param|],
           [C.citem|volatile $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
@@ -586,7 +585,7 @@ compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
   where
     compileKernelConst (SizeConst key) =
-      return [C.cexp|$id:(zEncodeString (pretty key))|]
+      pure [C.cexp|$id:(zEncodeString (pretty key))|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses
@@ -686,7 +685,7 @@ inKernelOperations mode body =
       quals <- case s of
         Space sid -> pointerQuals sid
         _ -> pointerQuals "global"
-      return [C.cty|$tyquals:(volatile++quals) $ty:t|]
+      pure [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
     atomicSpace (Space sid) = sid
     atomicSpace _ = "global"
@@ -779,7 +778,7 @@ inKernelOperations mode body =
 
     kernelMemoryType space = do
       quals <- pointerQuals space
-      return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
+      pure [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
     kernelWriteScalar =
       GC.writeScalarPointerWithQuals pointerQuals
@@ -790,7 +789,7 @@ inKernelOperations mode body =
     whatNext = do
       label <- nextErrorLabel
       pendingError True
-      return $
+      pure $
         if has_communication
           then [C.citems|local_failure = true; goto $id:label;|]
           else
@@ -816,13 +815,13 @@ inKernelOperations mode body =
       n <- length . kernelFailures <$> GC.getUserState
       GC.modifyUserState $ \s ->
         s {kernelFailures = kernelFailures s ++ [FailureMsg msg backtrace]}
-      let setArgs _ [] = return []
+      let setArgs _ [] = pure []
           setArgs i (ErrorString {} : parts') = setArgs i parts'
           -- FIXME: bogus for non-ints.
           setArgs i (ErrorVal _ x : parts') = do
             x' <- GC.compileExp x
             stms <- setArgs (i + 1) parts'
-            return $ [C.cstm|global_failure_args[$int:i] = (typename int64_t)$exp:x';|] : stms
+            pure $ [C.cstm|global_failure_args[$int:i] = (typename int64_t)$exp:x';|] : stms
       argstms <- setArgs (0 :: Int) parts
 
       what_next <- whatNext

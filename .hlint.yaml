@@ -4,3 +4,4 @@
 
 - error: {lhs: map subExpRes, rhs: subExpsRes}
 - error: {lhs: map varRes, rhs: varsRes}
+- error: {lhs: return, rhs: pure}

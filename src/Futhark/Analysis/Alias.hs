@@ -108,14 +108,14 @@ analyseExp aliases e = mapExp analyse e
   where
     analyse =
       Mapper
-        { mapOnSubExp = return,
-          mapOnVName = return,
-          mapOnBody = const $ return . analyseBody aliases,
-          mapOnRetType = return,
-          mapOnBranchType = return,
-          mapOnFParam = return,
-          mapOnLParam = return,
-          mapOnOp = return . addOpAliases aliases
+        { mapOnSubExp = pure,
+          mapOnVName = pure,
+          mapOnBody = const $ pure . analyseBody aliases,
+          mapOnRetType = pure,
+          mapOnBranchType = pure,
+          mapOnFParam = pure,
+          mapOnLParam = pure,
+          mapOnOp = pure . addOpAliases aliases
         }
 
 -- | Perform alias analysis on lambda.

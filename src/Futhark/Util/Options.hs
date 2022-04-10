@@ -42,7 +42,7 @@ mainWithOptions emptyConfig commandLineOptions usage f prog args =
   where
     applyOpts opts = do
       fs <- sequence opts
-      return $ foldl (.) id (reverse fs) emptyConfig
+      pure $ foldl (.) id (reverse fs) emptyConfig
 
     invalid nonopts unrecs errs = do
       help <- helpStr prog usage commandLineOptions'
@@ -54,7 +54,7 @@ mainWithOptions emptyConfig commandLineOptions usage f prog args =
 helpStr :: String -> String -> [OptDescr a] -> IO String
 helpStr prog usage opts = do
   let header = unlines ["Usage: " ++ prog ++ " " ++ usage, "Options:"]
-  return $ usageInfo header $ sortBy cmp opts
+  pure $ usageInfo header $ sortBy cmp opts
   where
     -- Sort first by long option, then by short name, then by description.  Hopefully
     -- everything has a long option.

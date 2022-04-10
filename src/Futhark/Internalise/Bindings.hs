@@ -98,7 +98,7 @@ processFlatPat x y = processFlatPat' [] x y
   where
     processFlatPat' pat [] _ = do
       let (vs, substs) = unzip pat
-      return (reverse vs, M.fromList substs)
+      pure (reverse vs, M.fromList substs)
     processFlatPat' pat ((p, attrs) : rest) ts = do
       attrs' <- internaliseAttrs attrs
       (ps, rest_ts) <- handleMapping attrs' ts <$> internaliseBindee p
@@ -117,7 +117,7 @@ processFlatPat x y = processFlatPat' [] x y
       let name = E.identName bindee
       n <- internalisedTypeSize $ E.unInfo $ E.identType bindee
       case n of
-        1 -> return [name]
+        1 -> pure [name]
         _ -> replicateM n $ newVName $ baseString name
 
 bindingFlatPat ::
@@ -143,7 +143,7 @@ flattenPat = flattenPat'
       name <- newVName "nameless"
       flattenPat' $ E.Id name t loc
     flattenPat' (E.Id v (Info t) loc) =
-      return [(E.Ident v (Info t) loc, mempty)]
+      pure [(E.Ident v (Info t) loc, mempty)]
     -- XXX: treat empty tuples and records as unit.
     flattenPat' (E.TuplePat [] loc) =
       flattenPat' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
