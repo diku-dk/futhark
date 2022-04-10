@@ -294,5 +294,4 @@ parseInMonad p file program =
     env = ParserState file program
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
-parse p file program =
-  either Left id $ getNoLines $ parseInMonad p file program
+parse p file program = join $ getNoLines $ parseInMonad p file program

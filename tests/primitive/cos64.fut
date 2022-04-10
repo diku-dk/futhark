@@ -1,9 +1,6 @@
 -- Does the cos64 function work?
 -- ==
--- input { 0.0 } output { 1.0 }
--- input { -1.0 } output { 0.5403023 }
--- input { 3.1415927 } output { -1.0 }
--- input { -3.1415927 } output { -1.0 }
+-- input { [0.0, -1.0, 3.1415927, -3.1415927] } 
+-- output { [1.0, 0.5403023, -1.0, -1.0] }
 
-
-def main(x: f64): f64 = f64.cos(x)
+def main = map f64.cos

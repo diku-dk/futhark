@@ -2,7 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -62,7 +61,6 @@ module Futhark.CodeGen.Backends.GenericC
     libDecl,
     earlyDecl,
     publicName,
-    contextType,
     contextField,
     contextFieldDyn,
     memToCType,
@@ -97,7 +95,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (errorsH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
@@ -543,10 +541,17 @@ decl x = item [C.citem|$decl:x;|]
 publicName :: String -> CompilerM op s String
 publicName s = pure $ "futhark_" ++ s
 
--- | The generated code must define a struct with this name.
+-- | The generated code must define a context struct with this name.
 contextType :: CompilerM op s C.Type
 contextType = do
   name <- publicName "context"
+  pure [C.cty|struct $id:name|]
+
+-- | The generated code must define a configuration struct with this
+-- name.
+configType :: CompilerM op s C.Type
+configType = do
+  name <- publicName "context_config"
   pure [C.cty|struct $id:name|]
 
 memToCType :: VName -> Space -> CompilerM op s C.Type
@@ -1592,6 +1597,7 @@ $errorsH
 #include <assert.h>
 #include <stdarg.h>
 $utilH
+$cacheH
 $halfH
 $timingH
 |]
@@ -1679,8 +1685,16 @@ commonLibFuns :: [C.BlockItem] -> CompilerM op s (M.Map T.Text Manifest.Type)
 commonLibFuns memreport = do
   types <- generateAPITypes
   ctx <- contextType
+  cfg <- configType
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
+
+  publicDef_ "context_config_set_cache_file" MiscDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:cfg* cfg, const char *f);|],
+      [C.cedecl|void $id:s($ty:cfg* cfg, const char *f) {
+                 cfg->cache_fname = f;
+               }|]
+    )
 
   publicDef_ "get_tuning_param_count" InitDecl $ \s ->
     ( [C.cedecl|int $id:s(void);|],
@@ -1713,9 +1727,7 @@ commonLibFuns memreport = do
 
                  struct str_builder builder;
                  str_builder_init(&builder);
-                 if (ctx->detail_memory || ctx->profiling || ctx->logging) {
-                   $items:memreport
-                 }
+                 $items:memreport
                  if (ctx->profiling) {
                    $items:profilereport
                  }
