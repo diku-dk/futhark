@@ -21,7 +21,13 @@ import Language.Futhark.Query
     atPos,
     boundLoc,
   )
-import Language.LSP.Types (Position (..), Range (..), Uri, filePathToUri)
+import Language.LSP.Types
+  ( Location (..),
+    Position (..),
+    Range (..),
+    Uri,
+    filePathToUri,
+  )
 
 getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> Maybe T.Text
 getHoverInfoFromState state (Just path) l c = do
@@ -36,7 +42,7 @@ getHoverInfoFromState state (Just path) l c = do
           Just $ T.pack $ "Definition: " ++ locStr (boundLoc bound)
 getHoverInfoFromState _ _ _ _ = Nothing
 
-findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Range
+findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Location
 findDefinitionRange state (Just path) l c = do
   -- some unnessecary operations inside `queryAtPos` for this function
   -- but shouldn't affect performance much since "Go to definition" is called less frequently
@@ -50,7 +56,7 @@ findDefinitionRange state (Just path) l c = do
               Loc (Pos file_path _ _ _) _ = loc
           if isBuiltin file_path
             then Nothing
-            else Just $ rangeFromLoc loc
+            else Just $ Location (filePathToUri file_path) (rangeFromLoc loc)
 findDefinitionRange _ _ _ _ = Nothing
 
 queryAtPos :: State -> Pos -> Maybe AtPos

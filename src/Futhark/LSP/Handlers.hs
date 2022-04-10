@@ -51,7 +51,9 @@ goToDefinitionHandler state_mvar = requestHandler STextDocumentDefinition $ \req
   state <- tryTakeStateFromMVar state_mvar file_path
   case findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1) of
     Nothing -> responder $ Right $ InR $ InL $ List []
-    Just range -> responder $ Right $ InL $ Location (doc ^. uri) range
+    Just loc -> do
+      debug $ show loc
+      responder $ Right $ InL loc
 
 onDocumentSaveHandler :: MVar State -> Handlers (LspM ())
 onDocumentSaveHandler state_mvar = notificationHandler STextDocumentDidSave $ \msg -> do
