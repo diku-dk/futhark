@@ -13,6 +13,7 @@ import qualified Data.Text as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.State (State (..))
 import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf, srclocOf)
+import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Core (locStr)
 import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Query
@@ -37,7 +38,7 @@ getHoverInfoFromState state (Just path) l c = do
       case def of
         Nothing -> Nothing
         Just (BoundTerm t defloc) -> do
-          Just $ T.pack $ show qn ++ " : " ++ show t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
+          Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
         Just bound ->
           Just $ T.pack $ "Definition: " ++ locStr (boundLoc bound)
 getHoverInfoFromState _ _ _ _ = Nothing
