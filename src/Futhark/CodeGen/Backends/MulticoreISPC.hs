@@ -183,11 +183,10 @@ ispcDef s f = do
 sharedDef :: MC.DefSpecifier ISPCState
 sharedDef s f = do
   s' <- MC.multicoreName s
-  GC.libDecl [C.cedecl|$esc:("#ifndef __ISPC_STRUCT_" <> (nameToString s') <> "__")|]
-  GC.libDecl [C.cedecl|$esc:("#define __ISPC_STRUCT_" <> (nameToString s') <> "__")|] -- TODO:(K) - refacor this shit
-  GC.libDecl =<< f s'
-  GC.libDecl [C.cedecl|$esc:("#endif")|]
   ispcDecl =<< f s'
+  -- Workaround for https://github.com/ispc/ispc/issues/2277
+  dummy <- newVName "dummy_struct_usage"
+  ispcDecl [C.cedecl|export void $id:dummy(uniform struct $id:s' * uniform a) { (void)a; }|]
   pure s'
 
 makeStringLiteral :: String -> ISPCCompilerM Name
