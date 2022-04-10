@@ -8,7 +8,7 @@ import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
 import Language.Futhark.Warnings (listWarnings)
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFiles)
-import Language.LSP.Types (TextDocumentVersion, filePathToUri, toNormalizedUri)
+import Language.LSP.VFS (VFS (vfsMap))
 
 -- | Try to take state from MVar, if it's empty, try to compile.
 tryTakeStateFromMVar :: MVar State -> Maybe FilePath -> LspT () IO State
@@ -44,7 +44,7 @@ tryCompile Nothing _ = pure emptyState
 tryCompile (Just path) state = do
   let old_loaded_prog = getLoadedProg state
   vfs <- getVirtualFiles
-  res <- liftIO $ reloadProg old_loaded_prog [path] (Just vfs)
+  res <- liftIO $ reloadProg old_loaded_prog [path] (vfsMap vfs)
   flushDiagnosticsBySource maxDiagnostic diagnosticSource
   case res of
     Right new_loaded_prog -> do
