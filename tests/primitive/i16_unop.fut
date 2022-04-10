@@ -1,26 +1,20 @@
 -- Test unary operators for i16.
---
+
 -- ==
--- input { 0  0i16 } output {  0i16 }
--- input { 0  1i16 } output { -1i16 }
--- input { 0 -1i16 } output {  1i16 }
--- input { 0  8i16 } output { -8i16 }
--- input { 0 -8i16 } output {  8i16 }
---
--- input { 1  0i16 } output { 0i16 }
--- input { 1  1i16 } output { 1i16 }
--- input { 1 -1i16 } output { 1i16 }
--- input { 1  8i16 } output { 8i16 }
--- input { 1 -8i16 } output { 8i16 }
---
--- input { 2  0i16 } output {  0i16 }
--- input { 2  1i16 } output {  1i16 }
--- input { 2 -1i16 } output { -1i16 }
--- input { 2  8i16 } output {  1i16 }
--- input { 2 -8i16 } output { -1i16 }
+-- entry: negatei16
+-- input { [0i16, 1i16, -1i16, 8i16, -8i16] }
+-- output { [0i16, -1i16, 1i16, -8i16, 8i16] }
 
+-- ==
+-- entry: absi16
+-- input { [0i16, 1i16, -1i16, 8i16, -8i16] }
+-- output { [0i16, 1i16, 1i16, 8i16, 8i16] }
 
-def main (f: i32) (x: i16): i16 =
-  if      f == 0 then -x
-  else if f == 1 then i16.abs(x)
-  else                i16.sgn(x)
+-- ==
+-- entry: sgni16
+-- input { [0i16, 1i16, -1i16, 8i16, -8i16] }
+-- output { [0i16, 1i16, -1i16, 1i16, -1i16] }
+
+entry negatei16 = map (\x : i16 -> -x)
+entry absi16 = map (i16.abs)
+entry sgni16 = map (i16.sgn)

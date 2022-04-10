@@ -5,6 +5,7 @@ module Futhark.LSP.Tool
     findDefinitionRange,
     rangeFromSrcLoc,
     rangeFromLoc,
+    locToUri,
   )
 where
 
@@ -21,7 +22,7 @@ import Language.Futhark.Query
     atPos,
     boundLoc,
   )
-import Language.LSP.Types (Position (..), Range (..))
+import Language.LSP.Types (Position (..), Range (..), Uri, filePathToUri)
 
 getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> Maybe T.Text
 getHoverInfoFromState state (Just path) l c = do
@@ -58,6 +59,11 @@ queryAtPos state pos =
   case stateProgram state of
     Nothing -> Nothing
     Just loaded_prog -> atPos (lpImports loaded_prog) pos
+
+locToUri :: Loc -> Uri
+locToUri loc = do
+  let (Loc (Pos file _ _ _) _) = loc
+  filePathToUri file
 
 -- the ending appears to be one col too short
 rangeFromSrcLoc :: SrcLoc -> Range

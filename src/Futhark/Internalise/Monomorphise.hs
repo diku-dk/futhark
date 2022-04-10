@@ -780,7 +780,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
   where
     shape_params = filter (not . isTypeParam) tparams
 
-    updateExpTypes substs e = astMap (mapper substs) e
+    updateExpTypes substs = astMap (mapper substs)
 
     mapper substs =
       ASTMapper
@@ -903,7 +903,7 @@ removeTypeVariables entry valbind = do
             mapOnPatRetType = pure . applySubst (`M.lookup` subs)
           }
 
-      onExp e = astMap mapper e
+      onExp = astMap mapper
 
   body' <- onExp body
 
