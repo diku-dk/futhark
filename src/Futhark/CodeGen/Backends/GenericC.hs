@@ -1966,7 +1966,7 @@ compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _)) = inNewFunct
       args <- mapM compileArguments (inputs <> outputs)      
       let builtin = [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams);|]
       let fun = [C.cfun|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams) {               
-                return $id:fname($args:extraToExp, $args:args);
+                return $id:(funName fname)($args:extraToExp, $args:args);
       }|]
       return $ Just (builtin, fun)
     Just _ -> return  Nothing
