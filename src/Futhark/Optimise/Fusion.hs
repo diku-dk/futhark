@@ -833,16 +833,15 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
       return (incomming, node, SNode (Let pats aux (If size_exp b1_new b2_new branchType)) mempty, outgoing)
   SNode (Let pats aux (DoLoop params form body)) _ ->
     do
-
       oldScope <- gets scope
       modify (\s -> s {scope = M.union (scopeOfFParams (map fst params)) oldScope})
       b_new <- doFuseScans $ doFusionInner body (map (paramName . fst) params)
       return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
-  SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm [] [] lambda)))) _ ->
+  SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm scans reduces lambda)))) _ ->
     do
       newbody <- doFuseScans $ doFusionInner (lambdaBody lambda) []
       let newLam = lambda {lambdaBody = newbody}
-      let nodeNew = SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm [] [] newLam)))) mempty
+      let nodeNew = SNode (Let pats aux (Op (Futhark.Screma is sz (ScremaForm scans reduces newLam)))) mempty
       pure (incomming, node, nodeNew, outgoing)
   SNode (Let pats aux (Op (Futhark.Stream sz is form nes lam))) _ -> do
       newbody <- dontFuseScans $ doFusionInner (lambdaBody lam) []
