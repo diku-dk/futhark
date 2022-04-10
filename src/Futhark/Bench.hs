@@ -159,15 +159,23 @@ relativeStdErr vec =
    in let std_err = sqrt $ U.foldl1 (+) (U.map (square . subtract mu) vec) / fromIntegral (U.length vec - 1)
        in std_err / mu
 
+-- | A list of @(autocorrelation,rsd)@ pairs.  When the
+-- autocorrelation is above the first element and the RSD is above the
+-- second element, we want more runs.
+convergenceCriteria :: [(Double, Double)]
+convergenceCriteria =
+  [ (0.95, 0.001),
+    (0.75, 0.0015),
+    (0.065, 0.0025),
+    (0.045, 0.0050),
+    (0, 0.01)
+  ]
+
 -- Returns the next run count.
 nextRunCount :: Int -> Double -> Double -> Int
-nextRunCount runs rsd acor
-  | acor > 0.95 && rsd > 0.0010 = div runs 2
-  | acor > 0.75 && rsd > 0.0015 = div runs 2
-  | acor > 0.65 && rsd > 0.0025 = div runs 2
-  | acor > 0.45 && rsd > 0.0050 = div runs 2
-  | rsd > 0.01 = div runs 2
-  | otherwise = 0
+nextRunCount runs rsd acor = if any check convergenceCriteria then div runs 2 else 0
+  where
+    check (acor_lb, rsd_lb) = acor > acor_lb && rsd > rsd_lb
 
 type BenchM = ExceptT T.Text IO
 
