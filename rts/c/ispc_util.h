@@ -24,46 +24,58 @@ static inline void free(void* uniform ptr) {
   }
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * uniform * uniform ptr,
+//TODO(Louis): get_error_ref expose på smartere måde
+extern "C" unmasked uniform int lexical_realloc_ns(uniform char * uniform * uniform error, 
+                                                  uniform unsigned char * uniform * uniform ptr, 
+                                                  uniform int64_t * uniform old_size, 
+                                                  uniform int64_t new_size);
+extern "C" unmasked uniform char * uniform * uniform futhark_get_error_ref(uniform struct futhark_context * uniform ctx);
+
+static inline uniform int lexical_realloc_ispc(uniform char * uniform * uniform error,
+                                        unsigned char uniform * uniform * uniform ptr,
                                         int64_t uniform * uniform old_size,
                                         uniform int64_t new_size) {
-  if (*ptr != NULL) free(*ptr);
-  unsigned char uniform * uniform alloc = uniform new uchar[new_size];
-  *ptr = alloc;
-  *old_size = new_size;
-  return FUTHARK_SUCCESS;
+  return lexical_realloc_ns(error, ptr, old_size, new_size);
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * uniform * uniform ptr,
+static inline uniform int lexical_realloc_ispc(uniform char * uniform * uniform error,
+                                        unsigned char uniform * uniform * uniform ptr,
                                         int64_t uniform * uniform old_size,
                                         varying int64_t new_size) {
-  return lexical_realloc_ispc(ptr, old_size, extract(new_size, 0));
+  uniform int err = 0;
+  foreach_active(i){
+    err |= lexical_realloc_ns(error, ptr, old_size, extract(new_size, i));
+  }
+  return err;
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying * uniform ptr,
+static inline uniform int lexical_realloc_ispc(uniform char * uniform * uniform error,
+                                        unsigned char uniform * varying * uniform ptr,
                                         int64_t uniform * varying old_size,
                                         varying int64_t new_size) {
-  if (*ptr != NULL) free(*ptr);
-  unsigned char* alloc = new uchar[new_size];
-  *ptr = alloc;
-  *old_size = new_size;
-  return FUTHARK_SUCCESS;
+  uniform int err = 0;
+  foreach_active(i){
+    uniform unsigned char * uniform * varying ptr1 = (uniform unsigned char * uniform * varying)ptr;
+    err |= lexical_realloc_ns(error, 
+                             (uniform unsigned char * uniform * uniform)extract((int64_t) ptr1, i), 
+                             (uniform int64_t * uniform)extract((int64_t)old_size, i), 
+                             extract(new_size, i));
+  }
+  return err;
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying * uniform ptr,
+static inline uniform int lexical_realloc_ispc(uniform char * uniform * uniform error,
+                                        unsigned char uniform * varying * uniform ptr,
                                         int64_t varying * uniform old_size,
                                         varying int64_t new_size) {
-  return lexical_realloc_ispc(ptr, (uniform int64_t * varying)old_size, new_size);
+  return lexical_realloc_ispc(error, ptr, (uniform int64_t * varying)old_size, new_size);
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying * uniform ptr,
+static inline uniform int lexical_realloc_ispc(uniform char * uniform * uniform error,
+                                        unsigned char uniform * varying * uniform ptr,
                                         size_t varying * uniform old_size,
                                         varying int64_t new_size) {
-  if (*ptr != NULL) free(*ptr);
-  unsigned char* alloc = new uchar[new_size];
-  *ptr = alloc;
-  *old_size = new_size;
-  return FUTHARK_SUCCESS;
+  return lexical_realloc_ispc(error, ptr, (uniform int64_t * varying)old_size, new_size);
 }
 
 extern "C" unmasked uniform int memblock_unref(uniform struct futhark_context * uniform ctx,

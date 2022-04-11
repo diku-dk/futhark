@@ -152,7 +152,6 @@ generateContext = do
                       typename int64_t tuning_iter;
                     };|]
     )
-
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
@@ -229,6 +228,13 @@ generateContext = do
                      (void)cfg; (void)param_name; (void)param_value;
                      return 1;
                    }|]
+    )
+  GC.publicDef_ "get_error_ref" GC.InitDecl $ \s ->
+    (
+      [C.cedecl|char ** $id:s(struct $id:ctx* ctx);|],
+      [C.cedecl|char ** $id:s(struct $id:ctx* ctx){
+                                return &(ctx->error);
+                             }|]
     )
 
 -- | Multicore-related command line options.
