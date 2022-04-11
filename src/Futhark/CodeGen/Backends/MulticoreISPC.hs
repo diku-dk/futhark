@@ -204,8 +204,8 @@ compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _))
 compileBuiltinFunc :: (Name, Function op) -> ISPCCompilerM ()
 compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _))
   | isNothing $ functionEntry func = do
-    let extra_ispc = [[C.cparam|uniform struct futhark_context * uniform ctx|]]
-        extraToExp_ispc = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra_ispc]
+    let extra = [[C.cparam|uniform struct futhark_context * uniform ctx|]]
+        extra_exp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
 
     inparams_extern <- mapM compileInputsExtern inputs
     outparams_extern <- mapM compileOutputsExtern outputs
@@ -219,26 +219,26 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _))
 
     let ispc_extern =
           [C.cedecl|extern "C" uniform int $id:((funName fname) ++ "_extern")
-                      ($params:extra_ispc, $params:outparams_extern, $params:inparams_extern);|]
+                      ($params:extra, $params:outparams_extern, $params:inparams_extern);|]
 
         ispc_uniform =
           [C.cedecl|uniform int $id:(funName fname)
-                    ($params:extra_ispc, $params:outparams_uni, $params:inparams_uni) { 
+                    ($params:extra, $params:outparams_uni, $params:inparams_uni) { 
                       return $id:(funName $ fname<>"_extern")(
-                        $args:extraToExp_ispc,
+                        $args:extra_exp,
                         $args:out_args_noderef,
                         $args:in_args_noderef);
                     }|]
 
         ispc_varying =
           [C.cedecl|uniform int $id:(funName fname)
-                    ($params:extra_ispc, $params:outparams_varying, $params:inparams_varying) { 
+                    ($params:extra, $params:outparams_varying, $params:inparams_varying) { 
                         uniform int err = 0;
                         $items:prebody_in
                         $items:prebody_out
-                        foreach_active(i){
+                        foreach_active(i) {
                           err |= $id:(funName $ fname<>"_extern")(
-                            $args:extraToExp_ispc,
+                            $args:extra_exp,
                             $args:out_args_vary,
                             $args:in_args_vary);
                         }
