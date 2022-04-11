@@ -155,11 +155,11 @@ data RunOptions = RunOptions
 -- second element, we want more runs.
 convergenceCriteria :: [(Double, Double)]
 convergenceCriteria =
-  [ (0.95, 0.001),
+  [ (0.95, 0.0010),
     (0.75, 0.0015),
     (0.65, 0.0025),
     (0.45, 0.0050),
-    (0, 0.01)
+    (0.00, 0.0100)
   ]
 
 -- Returns the next run count.
