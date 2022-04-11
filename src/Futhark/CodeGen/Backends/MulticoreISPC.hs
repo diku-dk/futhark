@@ -173,16 +173,15 @@ freeAllocatedMemISPC = GC.freeAllocatedMem' unRefMemISPC
 -- | Compiles builtin to be linked with ISPC or some other kernel
 -- It declars the function without static qualifier and uses pointer to structs
 compileFunExt :: [C.Param] -> (Name, Function op) -> ISPCCompilerM ()
-compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _)) = GC.inNewFunction $ do
-  case functionEntry func of
-    Nothing -> do
-      (inparams, args_in) <- unzip <$> mapM compileInput inputs
-      (outparams, args_out) <- unzip <$> mapM compileOutput outputs
-      GC.libDecl =<< pure
-        [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams) {               
-                return $id:(funName fname)($args:extraToExp, $args:(args_out <> args_in));
-        }|]
-    Just _ -> pure ()
+compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _))
+  | isNothing $ functionEntry func = do
+    (inparams, args_in) <- unzip <$> mapM compileInput inputs
+    (outparams, args_out) <- unzip <$> mapM compileOutput outputs
+    GC.libDecl =<< pure
+      [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams) {               
+                  return $id:(funName fname)($args:extraToExp, $args:(args_out <> args_in));
+                }|]
+  | otherwise = pure ()
   where
     extraToExp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
 
@@ -203,50 +202,52 @@ compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _)) = GC.inNewFu
       pure ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 compileBuiltinFunc :: (Name, Function op) -> ISPCCompilerM ()
-compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
-  case functionEntry func of
-    Nothing -> do
+compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _))
+  | isNothing $ functionEntry func = do
+    let extra_ispc = [[C.cparam|uniform struct futhark_context * uniform ctx|]]
+        extraToExp_ispc = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra_ispc]
 
-      let extra_ispc = [[C.cparam|uniform struct futhark_context * uniform ctx|]]
-          extraToExp_ispc = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra_ispc]
+    inparams_extern <- mapM compileInputsExtern inputs
+    outparams_extern <- mapM compileOutputsExtern outputs
 
-      inparams_extern <- mapM compileInputsExtern inputs
-      outparams_extern <- mapM compileOutputsExtern outputs
+    (inparams_uni, in_args_noderef) <- unzip <$> mapM compileInputsUniform inputs
+    (outparams_uni, out_args_noderef) <- unzip <$> mapM compileOutputsUniform outputs
 
-      (inparams_uni, in_args_noderef) <- unzip <$> mapM compileInputsUniform inputs
-      (outparams_uni, out_args_noderef) <- unzip <$> mapM compileOutputsUniform outputs
+    (inparams_varying, in_args_vary, prebody_in') <- unzip3 <$> mapM compileInputsVarying inputs
+    (outparams_varying, out_args_vary, prebody_out', postbody_out') <- unzip4 <$> mapM compileOutputsVarying outputs
+    let (prebody_in, prebody_out, postbody_out) = over each concat (prebody_in', prebody_out', postbody_out')
 
-      (inparams_varying, in_args_vary, prebody_in') <- unzip3 <$> mapM compileInputsVarying inputs
-      (outparams_varying, out_args_vary, prebody_out', postbody_out') <- unzip4 <$> mapM compileOutputsVarying outputs
-      let (prebody_in, prebody_out, postbody_out) = over each concat (prebody_in', prebody_out', postbody_out')
+    let ispc_extern =
+          [C.cedecl|extern "C" uniform int $id:((funName fname) ++ "_extern")
+                      ($params:extra_ispc, $params:outparams_extern, $params:inparams_extern);|]
 
-      let ispc_extern = [C.cedecl|extern "C" uniform int $id:((funName fname) ++ "_extern")
-                                  ($params:extra_ispc, $params:outparams_extern, $params:inparams_extern);|]
+        ispc_uniform =
+          [C.cedecl|uniform int $id:(funName fname)
+                    ($params:extra_ispc, $params:outparams_uni, $params:inparams_uni) { 
+                      return $id:(funName $ fname<>"_extern")(
+                        $args:extraToExp_ispc,
+                        $args:out_args_noderef,
+                        $args:in_args_noderef);
+                    }|]
 
-          ispc_uniform = [C.cfun|uniform int $id:(funName fname)
-                                 ($params:extra_ispc, $params:outparams_uni, $params:inparams_uni){ 
-                                      return $id:(funName $ fname<>"_extern")
-                                          ($args:extraToExp_ispc,
-                                           $args:out_args_noderef,
-                                           $args:in_args_noderef);}|]
+        ispc_varying =
+          [C.cedecl|uniform int $id:(funName fname)
+                    ($params:extra_ispc, $params:outparams_varying, $params:inparams_varying) { 
+                        uniform int err = 0;
+                        $items:prebody_in
+                        $items:prebody_out
+                        foreach_active(i){
+                          err |= $id:(funName $ fname<>"_extern")(
+                            $args:extraToExp_ispc,
+                            $args:out_args_vary,
+                            $args:in_args_vary);
+                        }
+                        $items:postbody_out
+                        return err;
+                    }|]
 
-          ispc_varying = [C.cfun|uniform int $id:(funName fname)
-                                 ($params:extra_ispc, $params:outparams_varying, $params:inparams_varying){ 
-                                     uniform int err = 0;
-                                     $items:prebody_in
-                                     $items:prebody_out
-                                     foreach_active(i){
-                                        err |= $id:(funName $ fname<>"_extern")(
-                                          $args:extraToExp_ispc,
-                                          $args:out_args_vary,
-                                          $args:in_args_vary);
-                                     }
-                                     $items:postbody_out
-                                 return err;}|]
-
-      mapM_ ispcEarlyDecl [funcToDef ispc_varying, funcToDef ispc_uniform, ispc_extern]
-
-    Just _ -> pure ()
+    mapM_ ispcEarlyDecl [ispc_varying, ispc_uniform, ispc_extern]
+  | otherwise = pure ()
   where
     compileInputsExtern (ScalarParam name bt) = do
       let ctp = GC.primTypeToCType bt
@@ -327,12 +328,6 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
           pre_body = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
                        $id:(newvn)[programIndex] = $id:name;|]
       pure (params,args,pre_body, [])
-
-    funcToDef f = C.FuncDef f loc
-      where
-        loc = case f of
-          C.OldFunc _ _ _ _ _ _ l -> l
-          C.Func _ _ _ _ _ l -> l
 
 -- Handle printing an error message in ISPC
 errorInISPC :: ErrorMsg Exp -> String -> ISPCCompilerM ()
