@@ -25,7 +25,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
-import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs, funName, defaultMemBlockType)
+import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs, funName)
 import Data.Maybe
 import Data.Loc (noLoc)
 import qualified Data.DList as DL
