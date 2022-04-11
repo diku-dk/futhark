@@ -98,7 +98,7 @@ fuseSOACs =
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
   do
-    new_stms <- runFusionEnvM (fuseGraphLZ stmList results []) $ freshFusionEnv $ scopeOf stms
+    new_stms <- runFusionEnvM (scopeOf stms) freshFusionEnv (fuseGraphLZ stmList results [])
     return $ stmsFromList new_stms
   where
     stmList = stmsToList stms
@@ -109,7 +109,7 @@ fuseConsts outputs stms =
 -- some sort of functional decorator pattern
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun _stmts fun = do
-  new_stms <- runFusionEnvM (fuseGraphLZ stms res (funDefParams  fun)) $ freshFusionEnv $ scopeOf fun
+  new_stms <- runFusionEnvM (scopeOf fun) freshFusionEnv (fuseGraphLZ stms res (funDefParams  fun))
   let body = (funDefBody fun) {bodyStms = stmsFromList new_stms}
   return fun {funDefBody = body}
     where
@@ -119,7 +119,7 @@ fuseFun _stmts fun = do
 
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
 fuseGraphLZ :: [Stm SOACS] -> Result -> [Param DeclType] -> FusionEnvM [Stm SOACS]
-fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
+fuseGraphLZ stms results inputs = localScope (scopeOf stms) $ fuseGraph stms resNames inputNames
   where
     resNames = namesFromRes results
     inputNames = map paramName $ filter isArray inputs
@@ -132,12 +132,12 @@ fuseGraph stms results inputs = do
     graph_not_fused <- mkDepGraph stms results (trace (show inputs) inputs)
  -- I have no idea why this is neccessary
 
-    oldScope <- gets scope
-    modify (\s -> s {scope = M.union (scopeOf stms) oldScope})
+    -- oldScope <- gets scope
+    -- modify (\s -> s {scope = M.union (scopeOf stms) oldScope})
     -- modify (\s -> s {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused})
     -- rg' <- gets reachabilityG
     let graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
-    graph_fused <-  doAllFusion graph_not_fused'
+    graph_fused <-  localScope (scopeOf stms) $ doAllFusion graph_not_fused'
     let graph_fused' = trace (pprg graph_fused) graph_fused
     -- rg <- gets reachabilityG
     let stms_new = linearizeGraph graph_fused'
@@ -157,6 +157,7 @@ reachable g source target = pure $ target `elem` Q.reachable source g
 
 linearizeGraph :: DepGraph -> [Stm SOACS]
 linearizeGraph g = concatMap stmFromNode $ reverse $ Q.topsort' g
+-- crazy bugged TODO URGENT
 
 doAllFusion :: DepGraphAug
 doAllFusion = applyAugs [keepTrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, makeCopiesOfConsAliased, runInnerFusion]
@@ -338,9 +339,7 @@ makeCopies nodeT = pure nodeT
 makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionEnvM (Lambda SOACS)
 makeCopiesInLambda toCopy lam =
   do
-    oldScope <- gets scope
-    modify (\s -> s {scope = M.union (scopeOf lam) oldScope})
-    (copies, nameMap) <- makeCopyStms toCopy
+    (copies, nameMap) <- localScope (scopeOf lam) $ makeCopyStms toCopy
     let l_body = lambdaBody lam
     let newBody = insertStms (stmsFromList copies) (substituteNames nameMap l_body)
     let newLambda = lam {lambdaBody = newBody}

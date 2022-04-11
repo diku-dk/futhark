@@ -33,11 +33,19 @@ import Data.Graph.Inductive.Dot
 import qualified Futhark.Util.Pretty as PP
 
 --import Debug.Trace
-import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSource, modifyNameSource, blankNameSource)
+--import Debug.Trace
+--import Debug.Trace
+--import Debug.Trace
+--import Debug.Trace
+--import Debug.Trace
+--import Debug.Trace
+--import Debug.Trace
+import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSource, modifyNameSource, blankNameSource, runBuilder, auxing, letBind)
 --import Futhark.Pass
 import Data.Foldable (foldlM)
 import Control.Monad.State
 import Futhark.Transform.Substitute (Substitute (substituteNames))
+import Control.Monad.Reader (ReaderT (runReaderT))
 -- import qualified Futhark.Analysis.HORep.MapNest as HM
 
 
@@ -119,25 +127,29 @@ data FusionEnv = FusionEnv
   {
     -- nodeMap :: M.Map VName [VName],
     vNameSource :: VNameSource,
-    scope :: Scope SOACS,
     --reachabilityG :: G.Gr () (),
     producerMapping :: M.Map VName Node,
     fuseScans :: Bool
   }
 
-freshFusionEnv :: Scope SOACS -> FusionEnv
-freshFusionEnv stms_scope = FusionEnv {vNameSource = blankNameSource,
-                                       scope = stms_scope,
+freshFusionEnv :: FusionEnv
+freshFusionEnv = FusionEnv {vNameSource = blankNameSource,
                                        producerMapping = M.empty,
                                        fuseScans = True}
 
-newtype FusionEnvM a = FusionEnvM (State FusionEnv a)
+newtype FusionEnvM a = FusionEnvM ( ReaderT
+          (Scope SOACS)
+          (State FusionEnv)
+          a
+    )
   deriving
     (
       Monad,
       Applicative,
       Functor,
-      MonadState FusionEnv
+      MonadState FusionEnv,
+      HasScope SOACS,
+      LocalScope SOACS
     )
 
 instance MonadFreshNames FusionEnvM where
@@ -145,17 +157,22 @@ instance MonadFreshNames FusionEnvM where
   putNameSource source =
     modify (\env -> env {vNameSource = source})
 
-instance HasScope SOACS FusionEnvM where
-  askScope = gets scope
+
+runFusionEnvM ::  MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionEnvM a -> m a
+runFusionEnvM scope fenv (FusionEnvM a) = do
+  let r = runReaderT a scope
+  return $ evalState r fenv
 
 
-runFusionEnvM ::
-  MonadFreshNames m =>
-  FusionEnvM a ->
-  FusionEnv ->
-  m a
-runFusionEnvM (FusionEnvM a) env =
-  modifyNameSource $ \src -> let (new_a, new_env) = runState a (env {vNameSource = src}) in (new_a, vNameSource new_env)
+
+
+-- runFusionEnvM ::
+--   MonadFreshNames m =>
+--   FusionEnvM a ->
+--   FusionEnv ->
+--   m a
+-- runFusionEnvM (FusionEnvM a) env =
+--   modifyNameSource $ \src -> let (new_a, new_env) = runState a (env {vNameSource = src}) in (new_a, vNameSource new_env)
 
 
 -- most everything is going to be a graph augmentation g -> M g.
@@ -556,7 +573,11 @@ mapT f (a,b) = (f a, f b)
 finalizeNode :: NodeT -> FusionEnvM [Stm SOACS]
 finalizeNode nt = case nt of
   StmNode stm -> pure [stm]
-  SoacNode so pat sa -> pure []
+  SoacNode soac pats aux -> do
+    (_, stms) <-  runBuilder $ do
+      new_soac <- H.toSOAC soac
+      auxing aux $ letBind pats $ Op new_soac
+    return $ stmsToList stms
   RNode vn -> pure []
   InNode vn -> pure []
   FinalNode stms nt' -> do
