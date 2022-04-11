@@ -16,6 +16,7 @@ module Futhark.CodeGen.Backends.MulticoreC
     ValueType (..),
     paramToCType,
     prepareTaskStruct,
+    closureFreeStructField,
     generateParLoopFn,
     addTimingFields,
     functionTiming,
