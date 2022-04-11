@@ -277,10 +277,13 @@ convergenceBar p spin_count us_sum i rsd' = do
     avg = fromIntegral us_sum / fromIntegral i
     spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
+data BenchPhase = Initial | Convergence
+
 mkProgressPrompt :: BenchOptions -> Int -> String -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
 mkProgressPrompt opts pad_to dataset_desc start_time
   | fancyTerminal = do
       count <- newIORef (0, 0)
+      phase_var <- newIORef Initial
       spin_count <- newIORef 0
       pure $ \(us, rsd) -> do
         putStr "\r" -- Go to start of line.
@@ -301,19 +304,31 @@ mkProgressPrompt opts pad_to dataset_desc start_time
                   -- other hand, it means it can sometimes shrink.
                   min time_elapsed runs_elapsed
 
-        case us of
-          Nothing ->
+        phase <- readIORef phase_var
+
+        case (us, phase, rsd) of
+          (Nothing, _, _) ->
             let elapsed = determineProgress i
              in p $ replicate 13 ' ' <> progressBar elapsed 1.0 progressBarSteps
-          Just us' -> do
+          (Just us', Initial, Nothing) -> do
             let us_sum' = us_sum + us'
                 i' = i + 1
             writeIORef count (us_sum', i')
-            case rsd of
-              Nothing -> do
-                let elapsed = determineProgress i'
-                p $ interimResult us_sum' i' elapsed 1.0
-              Just rsd' -> convergenceBar p spin_count us_sum i rsd'
+            let elapsed = determineProgress i'
+            p $ interimResult us_sum' i' elapsed 1.0
+          (Just us', Initial, Just rsd') -> do
+            -- Switched from phase 1 to convergence; discard all
+            -- prior results.
+            writeIORef count (us', 1)
+            writeIORef phase_var Convergence
+            convergenceBar p spin_count us' 1 rsd'
+          (Just us', Convergence, Just rsd') -> do
+            let us_sum' = us_sum + us'
+                i' = i + 1
+            writeIORef count (us_sum', i')
+            convergenceBar p spin_count us_sum' i' rsd'
+          (Just _, Convergence, Nothing) ->
+            pure () -- Probably should not happen.
         putStr " " -- Just to move the cursor away from the progress bar.
         hFlush stdout
   | otherwise = do
