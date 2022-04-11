@@ -221,9 +221,7 @@ runConvergence do_run opts initial_r =
     loop runtimes r = do
       g <- create
       resampled <-
-        liftIO $
-          fmap (resamples . snd . head) $
-            resample g [Mean] 2500 runtimes
+        liftIO $ resamples . snd . head <$> resample g [Mean] 2500 runtimes
 
       let rsd = fastStdDev resampled / mean resampled
           acor =
