@@ -54,6 +54,7 @@ data BenchOptions = BenchOptions
     optIgnoreFiles :: [Regex],
     optEntryPoint :: Maybe String,
     optTuning :: Maybe String,
+    optConvergencePhase :: Bool,
     optConcurrency :: Maybe Int,
     optVerbose :: Int,
     optTestSpec :: Maybe FilePath
@@ -76,6 +77,7 @@ initialBenchOptions =
     []
     Nothing
     (Just "tuning")
+    True
     Nothing
     0
     Nothing
@@ -229,6 +231,7 @@ runOptions f opts =
       runMinTime = optMinTime opts,
       runTimeout = optTimeout opts,
       runVerbose = optVerbose opts,
+      runConvergencePhase = optConvergencePhase opts,
       runResultAction = f
     }
 
@@ -562,6 +565,11 @@ commandLineOptions =
       ["no-tuning"]
       (NoArg $ Right $ \config -> config {optTuning = Nothing})
       "Do not load tuning files.",
+    Option
+      []
+      ["no-convergence-phase"]
+      (NoArg $ Right $ \config -> config {optConvergencePhase = False})
+      "Do not run convergence phase.",
     Option
       []
       ["concurrency"]

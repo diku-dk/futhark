@@ -26,12 +26,29 @@ immediately.  If execution of a test set fails, an error message will
 be printed and benchmarking will continue (and ``--json`` will write
 the file), but a non-zero exit code will be returned at the end.
 
-The number of runs is determined automatically: at least ``-r`` runs,
-or repeated runs for half a second, whichever is longer.  If the
-measurements from these runs exhibit enough uncertainty, the tool will
-enter a "convergence loop" where it first discards the initial
-measurements as potential outliers, and then performs more runs until
-a stable mean is reached.
+METHODOLOGY
+===========
+
+For each program and dataset, ``futhark bench`` first does a single
+"warmup" run that is discarded.  After that it uses a two-phase
+technique.
+
+1. The *initial phase* performs ten runs (change with ``-r``), or
+   perform runs for at least half a second, whichever takes longer.
+   If the resulting measurements are sufficiently statistically robust
+   (determined using standard deviation and autocorrelation metrics),
+   the results are produced and the second phase is not entered.
+   Otherwise, the results are discarded and the second phase entered.
+
+2. The *convergence phase* keeps performing runs until a measurement
+   of sufficient statistical quality is reached.
+
+The notion of "sufficient statistical quality" is based on heuristics.
+The intent is that ``futhark bench`` will in most cases do *the right
+thing* by default, both when benchmarking both long-running programs
+and short-running programs.  If you want complete control, disable the
+convergence phase with ``--no-convergence-phase`` and set the number
+of runs you want with ``-r``.
 
 OPTIONS
 =======
@@ -75,6 +92,10 @@ OPTIONS
 --no-tuning
 
   Do not look for tuning files.
+
+--no-convergence-phase
+
+  Do not run the convergence phase.
 
 --pass-option=opt
 

@@ -145,6 +145,8 @@ data RunOptions = RunOptions
     runMinTime :: NominalDiffTime,
     runTimeout :: Int,
     runVerbose :: Int,
+    -- | If true, run the convergence phase.
+    runConvergencePhase :: Bool,
     -- | Invoked for every runtime measured during the run.  Can be
     -- used to provide a progress bar.
     runResultAction :: (Int, Maybe Double) -> IO ()
@@ -221,8 +223,12 @@ runConvergence do_run opts initial_r =
       -- By throwing them away we converge much faster, and still get the
       -- right result.
       case nextRunCount n rsd acor of
-        0 -> pure initial_r
-        x -> moreRuns mempty mempty rsd x
+        x
+          | x > 0,
+            runConvergencePhase opts ->
+              moreRuns mempty mempty rsd x
+          | otherwise ->
+              pure initial_r
   where
     resultRuntimes =
       U.fromList . map (fromIntegral . runMicroseconds . fst)
