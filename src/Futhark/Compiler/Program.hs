@@ -70,6 +70,11 @@ data ProgError = ProgError Loc Doc
 
 type WithErrors = Either (NE.NonEmpty ProgError)
 
+-- | A mapping from absolute pathnames to text representing a virtual
+-- file system.  Before loading a file from the file system, this
+-- mapping is consulted.  If the desired pathname has an entry here,
+-- the corresponding text is used instead of loading the file from
+-- disk.
 type VFS = M.Map FilePath T.Text
 
 newtype UncheckedImport = UncheckedImport
