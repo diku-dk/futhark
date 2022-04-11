@@ -469,6 +469,7 @@ compileOp (ISPCKernel body free) = do
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
     mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
+        GC.decl [C.cdecl|uniform struct futhark_context * uniform ctx = $id:fstruct'->ctx;|] 
         GC.items =<< compileGetStructValsISPC fstruct free_args free_ctypes
         GC.decl [C.cdecl|uniform int err = 0;|]
         body' <- GC.collect $ compileCodeISPC Imp.Varying body
@@ -476,22 +477,19 @@ compileOp (ISPCKernel body free) = do
         mapM_ GC.item =<< GC.declAllocatedMem
         mapM_ GC.item body'
         free_mem <- freeAllocatedMemISPC
-
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]
-
     pure
       [C.cedecl|
-        export static uniform int $id:s(struct futhark_context uniform * uniform ctx,
-                                 uniform typename int64_t start,
-                                 uniform typename int64_t end,
-                                 struct $id:fstruct uniform * uniform $id:fstruct' ) {
+        export static uniform int $id:s(uniform typename int64_t start,
+                                        uniform typename int64_t end,
+                                        struct $id:fstruct uniform * uniform $id:fstruct' ) {
           $items:mainBody
         }|]
 
   -- Generate C code to call into ISPC kernel
   GC.items [C.citems|
-    err = $id:ispcShim(ctx, start, end, & $id:fstruct');
+    err = $id:ispcShim(start, end, & $id:fstruct');
     if (err != 0) {
       goto cleanup;
     }|]
