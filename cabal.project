@@ -1,4 +1,4 @@
-packages: futhark.cabal
+packages: language-c-quote/language-c-quote.cabal futhark.cabal
 index-state: 2022-02-03T19:05:34Z
 
 package futhark

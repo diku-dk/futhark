@@ -62,14 +62,16 @@ nonsegmentedHist pat space histops kbody num_histos = do
       hist_width = histSize $ head histops
       use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64
 
+  histops' <- renameHistOpLambda histops
+
   -- Only do something if there is actually input.
   collect $
     sUnless (product ns_64 .==. 0) $ do
       sIf
         use_subhistogram
         (subHistogram pat space histops num_histos kbody)
-        (subHistogram pat space histops num_histos kbody)
-        --(atomicHistogram pat space histops' kbody)
+        --(subHistogram pat space histops num_histos kbody)
+        (atomicHistogram pat space histops' kbody)
         -- TODO (obp): add atomic path back when finished debugging
 
 -- |
@@ -244,7 +246,7 @@ subHistogram pat space histops num_histos kbody = do
 
  
         forM_ (zip3 histops local_subhistograms (splitHistResults histops red_res)) $
-          \( histop@(HistOp dest_shape _ _ _ shape lam),
+          \( histop@(HistOp dest_shape _ _ _ shape _),
              histop_subhistograms,
              (bucket, vs')
              ) -> do
