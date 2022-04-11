@@ -109,7 +109,7 @@ fuseConsts outputs stms =
 -- some sort of functional decorator pattern
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun _stmts fun = do
-  new_stms <- runFusionEnvM (scopeOf fun) freshFusionEnv (fuseGraphLZ stms res (funDefParams  fun))
+  new_stms <- runFusionEnvM (scopeOf fun <> scopeOf _stmts) freshFusionEnv (fuseGraphLZ stms res (funDefParams  fun))
   let body = (funDefBody fun) {bodyStms = stmsFromList new_stms}
   return fun {funDefBody = body}
     where
@@ -119,28 +119,25 @@ fuseFun _stmts fun = do
 
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
 fuseGraphLZ :: [Stm SOACS] -> Result -> [Param DeclType] -> FusionEnvM [Stm SOACS]
-fuseGraphLZ stms results inputs = localScope (scopeOf stms) $ fuseGraph stms resNames inputNames
+fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
   where
     resNames = namesFromRes results
     inputNames = map paramName $ filter isArray inputs
 
 -- main fusion function.
 fuseGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM [Stm SOACS]
-fuseGraph stms results inputs = do
+fuseGraph stms results inputs = localScope (scopeOf stms) $ do
     -- old_reachabilityG <- trace (unlines (map ppr stms)) $ gets reachabilityG
     old_mappings <- gets producerMapping
     graph_not_fused <- mkDepGraph stms results (trace (show inputs) inputs)
- -- I have no idea why this is neccessary
 
-    -- oldScope <- gets scope
-    -- modify (\s -> s {scope = M.union (scopeOf stms) oldScope})
     -- modify (\s -> s {reachabilityG = TC.tc $ nmap (const ()) graph_not_fused})
     -- rg' <- gets reachabilityG
     let graph_not_fused' = trace (pprg graph_not_fused) graph_not_fused
-    graph_fused <-  localScope (scopeOf stms) $ doAllFusion graph_not_fused'
+    graph_fused <- doAllFusion graph_not_fused'
     let graph_fused' = trace (pprg graph_fused) graph_fused
     -- rg <- gets reachabilityG
-    let stms_new = linearizeGraph graph_fused'
+    stms_new <- linearizeGraph graph_fused'
     modify (\s -> s{producerMapping=old_mappings} )
     return $ trace (unlines (map ppr stms_new)) stms_new
 
@@ -155,8 +152,10 @@ reachable :: DepGraph -> Node -> Node -> FusionEnvM Bool
 reachable g source target = pure $ target `elem` Q.reachable source g
 
 
-linearizeGraph :: DepGraph -> [Stm SOACS]
-linearizeGraph g = concatMap stmFromNode $ reverse $ Q.topsort' g
+linearizeGraph :: DepGraph -> FusionEnvM [Stm SOACS]
+linearizeGraph g = do
+  stms <- mapM finalizeNode $ reverse $ Q.topsort' g
+  return $ concat stms
 -- crazy bugged TODO URGENT
 
 doAllFusion :: DepGraphAug
@@ -293,8 +292,8 @@ tryFuseNodesInGraph node_1 node_2 g
           Just newcxt@(inputs, _, nodeT, outputs) ->
             if null fused then contractEdge node_2 newcxt g
             else do
-              new_stm <- makeCopies nodeT
-              contractEdge node_2 (inputs, node_1, nodeT, outputs) g
+              new_node <- makeCopies nodeT
+              contractEdge node_2 (inputs, node_1, new_node, outputs) g
           Just _ -> error "fuseContexts did not return an SNode"
           Nothing -> pure g
       else pure g
@@ -824,7 +823,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
   --     return (incomming, node, SNode (Let pats aux (DoLoop params form b_new)) mempty, outgoing)
   SoacNode soac pats aux -> do
         let lam = H.lambda soac
-        newbody <- case soac of
+        newbody <- localScope (scopeOf lam) $ case soac of
           H.Screma {} -> dontFuseScans $ doFusionInner (lambdaBody lam) []
           _           -> doFuseScans   $ doFusionInner (lambdaBody lam) []
         let newLam = lam {lambdaBody = newbody}
@@ -857,10 +856,10 @@ makeCopiesOfConsAliased :: DepGraphAug
 makeCopiesOfConsAliased = mapAcross copyAlised
   where -- This funciton is rly important, but doesnt work
     copyAlised :: DepContext -> FusionEnvM DepContext
-    copyAlised c@(incoming, node, nodeT@(SoacNode soac pats aux), outgoing) = do
+    copyAlised c@(incoming, node, nodeT, outgoing) = do
       let incoming' = concatMap depsFromEdgeT $ filter isFake (map fst incoming)
       let outgoing' = concatMap depsFromEdgeT $ filter isAlias (map fst outgoing)
-      let toMakeCopies =  incoming' `L.intersect` outgoing'
+      let toMakeCopies = incoming' `L.intersect` outgoing'
       if not $ null toMakeCopies then do
         (new_stms, nameMapping) <- makeCopyStms toMakeCopies
         return (incoming, node, FinalNode new_stms (substituteNames nameMapping nodeT), outgoing)
