@@ -2,7 +2,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | C code generator.  This module can convert a correct ImpCode
--- program to an equivalent C program.
+-- program to an equivalent ISPC program.
 module Futhark.CodeGen.Backends.MulticoreISPC
   ( compileProg,
     GC.CParts (..),
@@ -25,7 +25,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
-import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs, funName)
+import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs, funName, defaultMemBlockType)
 import Data.Maybe
 import Data.Loc (noLoc)
 import qualified Data.DList as DL
@@ -134,45 +134,6 @@ operations =
 ispcDecl :: C.Definition  -> ISPCCompilerM ()
 ispcDecl def =
   GC.modifyUserState (\s -> s <> DL.singleton def)
-
-getName :: VName -> Name
-getName name = nameFromString $ pretty name
-
-isMemblock :: Param -> Bool
-isMemblock (MemParam _ _) = True
-isMemblock _  = False
-
--- Escaped memory name to immediately deref within function scope.
-freshMemName :: Param -> Param
-freshMemName (MemParam v s) = MemParam (VName (nameFromString ('_' : baseString v)) (baseTag v)) s
-freshMemName param = param
-
--- Compile parameter definitions to pass to ISPC kernel
-compileKernelParams :: [VName] -> [(C.Type, MC.ValueType)] -> [C.Param]
-compileKernelParams = zipWith field
-  where
-    field name (ty, MC.Prim) =
-      [C.cparam|uniform $ty:ty $id:(getName name)|]
-    field name (_, MC.RawMem) =
-      [C.cparam|unsigned char uniform * uniform $id:(getName name)|]
-    field name (_, _) =
-      [C.cparam|uniform typename memblock * uniform $id:(getName name)|]
-
--- Compile parameter values to ISPC kernel
-compileKernelInputs :: [VName] -> [(C.Type, MC.ValueType)] -> [C.Exp]
-compileKernelInputs = zipWith field
-  where
-    field name (_, MC.Prim) = [C.cexp|$id:(getName name)|]
-    field name (_, MC.RawMem) = [C.cexp|$id:(getName name)|]
-    field name (_, MC.MemBlock) = [C.cexp|&$id:(getName name)|]
-
--- Immediately dereference a memblock passed to the kernel, so we can use it normally
-compileMemblockDeref :: [(VName, VName)] -> [(C.Type, MC.ValueType)] -> [C.InitGroup]
-compileMemblockDeref = zipWith deref
-  where
-    deref (v1, v2) (ty, MC.Prim) = [C.cdecl|$ty:ty $id:v1 = $id:(getName v2);|]
-    deref (v1, v2) (_, MC.RawMem) = [C.cdecl|unsigned char uniform * uniform $id:v1 = $id:(getName v2);|]
-    deref (v1, v2) (ty, MC.MemBlock) = [C.cdecl|uniform $ty:ty $id:v1 = *$id:(getName v2);|]
 
 ispcDef :: MC.DefSpecifier ISPCState
 ispcDef s f = do
@@ -393,6 +354,71 @@ compileCodeISPC _ (Assert e msg (loc, locs)) = do
 compileCodeISPC _ code =
   GC.compileCode code
 
+compileGetStructVals ::
+  Name ->
+  [VName] ->
+  [(C.Type, MC.ValueType)] ->
+  [C.BlockItem]
+compileGetStructVals struct a b = concat $ zipWith field a b
+  where
+    struct' = struct <> "_"
+    field name (ty, MC.Prim) =
+      [C.citems|$ty:ty $id:name = $id:struct'->$id:(closureFreeStructField name);|]
+    field name (_, MC.MemBlock) =
+      [C.citems|uniform struct memblock* uniform $id:(pretty name <> "_") = $id:(struct')->$id:(closureFreeStructField name);
+                uniform struct memblock $id:name = *$id:(pretty name <> "_");|]
+    field name (_, MC.RawMem) =
+      [C.citems|uniform unsigned char * uniform $id:name = $id:struct'->$id:(closureFreeStructField name);|]
+
+
+closureFreeStructField :: VName -> Name
+closureFreeStructField v =
+  nameFromString "free_" <> nameFromString (pretty v)
+
+compileFreeStructFields :: [VName] -> [(C.Type, MC.ValueType)] -> [C.FieldGroup]
+compileFreeStructFields = zipWith field
+  where
+    field name (ty, MC.Prim) =
+      [C.csdecl|$ty:ty $id:(closureFreeStructField name);|]
+    field name (_, MC.MemBlock) =
+      [C.csdecl|struct memblock* $id:(closureFreeStructField name);|]
+    field name (_, MC.RawMem) =
+      [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
+
+compileSetStructValues ::
+  C.ToIdent a =>
+  a ->
+  [VName] ->
+  [(C.Type, MC.ValueType)] ->
+  [C.Stm]
+compileSetStructValues struct = zipWith field
+  where
+    field name (_, MC.Prim) =
+      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
+    field name (_, MC.MemBlock) =
+      [C.cstm|$id:struct.$id:(closureFreeStructField name)=& $id:name;|]
+    field name (_, MC.RawMem) =
+      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
+
+prepareTaskStruct ::
+  MC.DefSpecifier s ->
+  String ->
+  [VName] ->
+  [(C.Type, MC.ValueType)] ->
+  GC.CompilerM Multicore s Name
+prepareTaskStruct def name free_args free_ctypes = do
+  let makeStruct s = pure
+        [C.cedecl|struct $id:s {
+                       struct futhark_context *ctx;
+                       $sdecls:(compileFreeStructFields free_args free_ctypes)
+                     };|]
+  fstruct <- def name makeStruct
+  let fstruct' =  fstruct <> "_"
+  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct';|]
+  GC.stm [C.cstm|$id:fstruct'.ctx = ctx;|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct' free_args free_ctypes)|]
+  pure fstruct
+
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ISPCState
 compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) = do
@@ -480,22 +506,15 @@ compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
 
-  -- rename memblocks so we can pass them as pointers, compile the parameters
-  let free_names_esc = map freshMemName free
-  let free_args_esc = map paramName free_names_esc
-  let inputs_free = compileKernelParams free_args_esc free_ctypes
-
-  -- dereference memblock pointers into the unescaped names
-  let mem_args = map paramName $ filter isMemblock free
-  let mem_args_esc = map paramName $ filter isMemblock free_names_esc
-  mem_ctypes <- mapM MC.paramToCType (filter isMemblock free)
-  let memderef = compileMemblockDeref (zip mem_args mem_args_esc) mem_ctypes
-
   let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
   -- Generate ISPC kernel
+  fstruct <- prepareTaskStruct sharedDef "param_struct" free_args free_ctypes
+  let fstruct' = fstruct <> "_"
+
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
     mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
+        GC.items $ compileGetStructVals fstruct free_args free_ctypes
         GC.decl [C.cdecl|uniform int err = 0;|]
         body' <- GC.collect $ compileCodeISPC Imp.Varying body
         mapM_ GC.item decl_cached
@@ -511,15 +530,13 @@ compileOp (ISPCKernel body free) = do
         export static uniform int $id:s(struct futhark_context uniform * uniform ctx,
                                  uniform typename int64_t start,
                                  uniform typename int64_t end,
-                                 $params:inputs_free) {
-          $decls:memderef
+                                 struct $id:fstruct uniform * uniform $id:fstruct' ) {
           $items:mainBody
         }|]
 
   -- Generate C code to call into ISPC kernel
-  let ispc_inputs_free = compileKernelInputs free_args free_ctypes
   GC.items [C.citems|
-    err = $id:ispcShim(ctx, start, end, $args:ispc_inputs_free);
+    err = $id:ispcShim(ctx, start, end, & $id:fstruct');
     if (err != 0) {
       goto cleanup;
     }|]
