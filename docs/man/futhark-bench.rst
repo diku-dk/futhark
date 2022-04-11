@@ -16,10 +16,11 @@ DESCRIPTION
 
 This tool is the recommended way to benchmark Futhark programs.
 Programs are compiled using the specified backend (``c`` by default),
-then run a number of times for each test case, and the average runtime
-printed on standard output.  Refer to :ref:`futhark-test(1)` for
-information on how to format test data.  A program will be ignored if
-it contains no data sets - it will not even be compiled.
+then run a number of times for each test case, and the arithmetic mean
+runtime and 95% confidence interval printed on standard output.  Refer
+to :ref:`futhark-test(1)` for information on how to format test data.
+A program will be ignored if it contains no data sets - it will not
+even be compiled.
 
 If compilation of a program fails, then ``futhark bench`` will abort
 immediately.  If execution of a test set fails, an error message will
