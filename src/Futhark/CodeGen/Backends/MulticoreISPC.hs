@@ -66,7 +66,7 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
                                           ($args:extraToExp_ispc,
                                            $args:out_args_noderef,
                                            $args:in_args_noderef);}|]
- 
+
           ispc_varying = [C.cfun|uniform int $id:(funName fname)
                                  ($params:extra_ispc, $params:outparams_varying, $params:inparams_varying){ 
                                      uniform int err = 0;
@@ -83,9 +83,9 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
 
       --mapM_ GC.earlyDecl [funcToDef cfun]
       mapM_ ispcDeclPrepend [funcToDef ispc_varying, funcToDef ispc_uniform, ispc_extern]
-         
+
     Just _ -> pure ()
-  where    
+  where
     compileInputsExtern (ScalarParam name bt) = do
       let ctp = GC.primTypeToCType bt
           params = [C.cparam|uniform $ty:ctp $id:name|]
@@ -146,14 +146,14 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
       pure (params, args, pre_body)
 
     compileOutputsVarying (ScalarParam name bt) = do
-      p_name <- newVName $ "out_" ++ baseString name            
+      p_name <- newVName $ "out_" ++ baseString name
       deref_name <- newVName $ "aos_" ++ baseString name
       vari_p_name <- newVName $ "convert_" ++ baseString name
       let ctp      = GC.primTypeToCType bt
           pre_body = [C.citems|varying $ty:ctp $id:vari_p_name = *$id:p_name;|]
                        <>[C.citems|uniform $ty:ctp $id:deref_name[programCount];|]
                        <> [C.citems|$id:deref_name[programIndex] = $id:vari_p_name;|]
-          post_body = [C.citems|*$id:p_name =$id:(deref_name)[programIndex];|]          
+          post_body = [C.citems|*$id:p_name =$id:(deref_name)[programIndex];|]
           params   = [C.cparam|varying $ty:ctp * uniform $id:p_name|]
           args     = [C.cexp|&$id:(deref_name)[i]|]
       return (params, args, pre_body, post_body)
@@ -171,7 +171,7 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
       where
         loc = case f of
           C.OldFunc _ _ _ _ _ _ l -> l
-          C.Func _ _ _ _ _ l -> l 
+          C.Func _ _ _ _ _ l -> l
 
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
@@ -236,8 +236,7 @@ $ispc_decls|]
 operations :: GC.Operations Multicore ISPCState
 operations =
   MC.operations
-    { GC.opsCompiler = compileOp,
-      GC.opsCall = defCallIspc
+    { GC.opsCompiler = compileOp
     }
 
 ispcDecl :: C.Definition  -> ISPCCompilerM ()
@@ -399,6 +398,26 @@ isConstExp = isSimple . constFoldPrimExp
 -- Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
 compileCodeISPC :: Imp.Variability -> MCCode -> ISPCCompilerM ()
+compileCodeISPC _ (Call dests fname args) =
+  join $
+    defCallIspc 
+      <$> pure dests
+      <*> pure fname
+      <*> mapM compileArg args
+  where
+    compileArg (MemArg m) = pure [C.cexp|$exp:m|]
+    compileArg (ExpArg e) = GC.compileExp e
+    defCallIspc dests' fname' args' = do
+      let out_args = [[C.cexp|&$id:d|] | d <- dests']
+          args''
+            | isBuiltInFunction fname' = args'
+            | otherwise = [C.cexp|ctx|] : out_args ++ args'
+      case dests' of
+        [d]
+          | isBuiltInFunction fname' ->
+              GC.stm [C.cstm|$id:d = $id:(funName fname')($args:args'');|]
+        _ ->
+          GC.item [C.citem|if ($id:(funName fname')($args:args'') != 0) { err = 1; }|]
 compileCodeISPC vari (Comment s code) = do
   xs <- GC.collect $ compileCodeISPC vari code
   let comment = "// " ++ s
@@ -662,18 +681,3 @@ compileOp (VariabilityBlock vari code) = do
   compileCodeISPC vari code
 
 compileOp op = MC.compileOp op
-
-  
-defCallIspc :: GC.CallCompiler op s
-defCallIspc dests fname args = do
-  let out_args = [[C.cexp|&$id:d|] | d <- dests]
-      args'
-        | isBuiltInFunction fname = args
-        | otherwise = [C.cexp|ctx|] : out_args ++ args
-  case dests of
-    [dest]
-      | isBuiltInFunction fname ->
-          GC.stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
-    _ ->
-      GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; }|]
-

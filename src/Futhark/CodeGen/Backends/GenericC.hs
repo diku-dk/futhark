@@ -29,7 +29,7 @@ module Futhark.CodeGen.Backends.GenericC
     Allocate,
     Deallocate,
     Copy,
-    StaticArray,
+    StaticArray,    
 
     -- * Monadic compiler interface
     CompilerM,
