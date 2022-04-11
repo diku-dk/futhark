@@ -26,45 +26,151 @@ import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
 import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs, funName)
+import Futhark.IR.Prop (isBuiltInFunction)
 import Data.Maybe
 import Data.Loc (noLoc)
+import Data.List (unzip4)
 import qualified Data.DList as DL
 import NeatInterpolation (untrimming)
 import Futhark.Util.Pretty (prettyText)
+import Control.Lens (over, each)
 
 type ISPCState = (DL.DList C.Definition)
 type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a
 
-makeFunctionBinding :: (Name, Function Multicore) -> ISPCCompilerM ()
-makeFunctionBinding (fname, Function _ outputs inputs _ _ _) = do
-  outparams <- mapM compileOutput outputs
-  inparams <- mapM compileInput inputs
-  let def = [C.cedecl|extern "C" unmasked uniform int $id:(funName fname)(uniform struct futhark_context * uniform ctx,
-                      $params:outparams, $params:inparams);|]
-  --GC.modifyUserState (\s -> DL.singleton def <> s)
-  -- TODO(pema, K, obp): This is just a proof concept for how one could generate bindings from ImpCode functions.
-  -- You can comment out the line above this to see how it works. It's sort of copy pasta'd from compileFun.
-  -- For each function, we need to:
-  --   1. Generate a new C function which doesn't pass structs by value.
-  --   2. Generate a binding for that new C function in ISPC.
-  --   3. Make sure the names match.
-  pure ()
-  where
-    compileInput (ScalarParam name bt) = do
-      let ctp = GC.primTypeToCType bt
-      pure [C.cparam|$ty:ctp $id:name|]
-    compileInput (MemParam name space) = do
-      ty <- GC.memToCType name space
-      pure [C.cparam|$ty:ty $id:name|]
 
-    compileOutput (ScalarParam name bt) = do
+compileBuiltinFunc :: (Name, Function op) -> ISPCCompilerM ()
+compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
+  case functionEntry func of
+    Nothing -> do
+
+      let extra_ispc = [[C.cparam|uniform struct futhark_context * uniform ctx|]]
+          extraToExp_ispc = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra_ispc]
+
+      inparams_extern <- mapM compileInputsExtern inputs
+      outparams_extern <- mapM compileOutputsExtern outputs
+
+      (inparams_uni, in_args_noderef) <- unzip <$> mapM compileInputsUniform inputs
+      (outparams_uni, out_args_noderef) <- unzip <$> mapM compileOutputsUniform outputs
+
+      (inparams_varying, in_args_vary, prebody_in') <- unzip3 <$> mapM compileInputsVarying inputs
+      (outparams_varying, out_args_vary, prebody_out', postbody_out') <- unzip4 <$> mapM compileOutputsVarying outputs
+      let (prebody_in, prebody_out, postbody_out) = over each concat (prebody_in', prebody_out', postbody_out')
+
+      let ispc_extern = [C.cedecl|extern "C" uniform int $id:((funName fname) ++ "_extern")
+                                  ($params:extra_ispc, $params:outparams_extern, $params:inparams_extern);|]
+
+          ispc_uniform = [C.cfun|uniform int $id:(funName fname)
+                                 ($params:extra_ispc, $params:outparams_uni, $params:inparams_uni){ 
+                                      return $id:(funName $ fname<>"_extern")
+                                          ($args:extraToExp_ispc,
+                                           $args:out_args_noderef,
+                                           $args:in_args_noderef);}|]
+
+          ispc_varying = [C.cfun|uniform int $id:(funName fname)
+                                 ($params:extra_ispc, $params:outparams_varying, $params:inparams_varying){ 
+                                     uniform int err = 0;
+                                     $items:prebody_in
+                                     $items:prebody_out
+                                     foreach_active(i){
+                                        err |= $id:(funName $ fname<>"_extern")(
+                                          $args:extraToExp_ispc,
+                                          $args:out_args_vary,
+                                          $args:in_args_vary);
+                                     }
+                                     $items:postbody_out
+                                 return err;}|]
+
+      mapM_ ispcEarlyDecl [funcToDef ispc_varying, funcToDef ispc_uniform, ispc_extern]
+
+    Just _ -> pure ()
+  where
+    compileInputsExtern (ScalarParam name bt) = do
       let ctp = GC.primTypeToCType bt
+          params = [C.cparam|uniform $ty:ctp $id:name|]
+      pure params
+    compileInputsExtern (MemParam name space) = do
+      ty <- GC.memToCType name space
+      let params = [C.cparam|uniform $ty:ty * uniform $id:name|]
+      pure params
+
+    compileOutputsExtern (ScalarParam name bt) = do
       p_name <- newVName $ "out_" ++ baseString name
-      pure [C.cparam|$ty:ctp *$id:p_name|]
-    compileOutput (MemParam name space) = do
+      let ctp = GC.primTypeToCType bt
+          params = [C.cparam|uniform $ty:ctp * uniform $id:p_name|]
+      pure params
+    compileOutputsExtern (MemParam name space) = do
       ty <- GC.memToCType name space
       p_name <- newVName $ baseString name ++ "_p"
-      pure [C.cparam|$ty:ty *$id:p_name|]
+      let params = [C.cparam|uniform $ty:ty * uniform $id:p_name|]
+      pure params
+
+    compileInputsUniform (ScalarParam name bt) = do
+      let ctp    = GC.primTypeToCType bt
+          params = [C.cparam|uniform $ty:ctp $id:name|]
+          args   = [C.cexp|$id:name|]
+      pure (params, args)
+    compileInputsUniform (MemParam name space) = do
+      ty <- GC.memToCType name space
+      let params = [C.cparam|uniform $ty:ty $id:name|]
+          args   = [C.cexp|&$id:name|]
+      pure (params, args)
+
+    compileOutputsUniform (ScalarParam name bt) = do
+      p_name <- newVName $ "out_" ++ baseString name
+      let ctp    = GC.primTypeToCType bt
+          params = [C.cparam|uniform $ty:ctp *uniform $id:p_name|]
+          args   = [C.cexp|$id:p_name|]
+      pure (params, args)
+    compileOutputsUniform (MemParam name space) = do
+      ty <- GC.memToCType name space
+      p_name <- newVName $ baseString name ++ "_p"
+      let params = [C.cparam|uniform $ty:ty $id:p_name|]
+          args   = [C.cexp|&$id:p_name|]
+      pure (params, args)
+
+    compileInputsVarying (ScalarParam name bt) = do
+      let ctp      = GC.primTypeToCType bt
+          params   = [C.cparam|$ty:ctp $id:name|]
+          args     = [C.cexp|extract($id:name,i)|]
+          pre_body = []
+      pure (params, args, pre_body)
+    compileInputsVarying (MemParam name space) = do
+      typ <- GC.memToCType name space
+      newvn <- newVName $ "aos_" <> baseString name
+      let params   = [C.cparam|$ty:typ $id:name|]
+          args     = [C.cexp|&$id:(newvn)[i]|]
+          pre_body = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
+                       $id:(newvn)[programIndex] = $id:name;|]
+      pure (params, args, pre_body)
+
+    compileOutputsVarying (ScalarParam name bt) = do
+      p_name <- newVName $ "out_" ++ baseString name
+      deref_name <- newVName $ "aos_" ++ baseString name
+      vari_p_name <- newVName $ "convert_" ++ baseString name
+      let ctp      = GC.primTypeToCType bt
+          pre_body = [C.citems|varying $ty:ctp $id:vari_p_name = *$id:p_name;|]
+                       <>[C.citems|uniform $ty:ctp $id:deref_name[programCount];|]
+                       <> [C.citems|$id:deref_name[programIndex] = $id:vari_p_name;|]
+          post_body = [C.citems|*$id:p_name =$id:(deref_name)[programIndex];|]
+          params   = [C.cparam|varying $ty:ctp * uniform $id:p_name|]
+          args     = [C.cexp|&$id:(deref_name)[i]|]
+      pure (params, args, pre_body, post_body)
+    compileOutputsVarying (MemParam name space) = do
+      typ <- GC.memToCType name space
+      newvn <- newVName $ "aos_" <> baseString name
+      let params   = [C.cparam|$ty:typ $id:name|]
+          args     = [C.cexp|&$id:(newvn)[i]|]
+          pre_body = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
+                       $id:(newvn)[programIndex] = $id:name;|]
+      pure (params,args,pre_body, [])
+
+
+    funcToDef f = C.FuncDef f loc
+      where
+        loc = case f of
+          C.OldFunc _ _ _ _ _ _ l -> l
+          C.Func _ _ _ _ _ l -> l
 
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
@@ -79,13 +185,14 @@ compileProg header version prog = do
         "ispc_multicore"
         version
         operations
-        (MC.generateContext >> mapM_ makeFunctionBinding funs)
+        (MC.generateContext >> mapM_ compileBuiltinFunc funs)
         header
         [DefaultSpace]
         MC.cliOptions
       ) (ws, defs)
 
   let ispc_decls = T.unlines $ map prettyText $ DL.toList $ GC.compUserState endstate
+
   let ispcdefs =
         [untrimming|
 #define bool uint8 // This is a workaround around an ISPC bug, stdbool doesn't get included
@@ -134,6 +241,10 @@ operations =
 ispcDecl :: C.Definition  -> ISPCCompilerM ()
 ispcDecl def =
   GC.modifyUserState (\s -> s <> DL.singleton def)
+
+ispcEarlyDecl ::C.Definition  -> ISPCCompilerM ()
+ispcEarlyDecl def =
+  GC.modifyUserState (\s -> DL.singleton def <> s)
 
 ispcDef :: MC.DefSpecifier ISPCState
 ispcDef s f = do
@@ -246,6 +357,26 @@ isConstExp = isSimple . constFoldPrimExp
 -- Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
 compileCodeISPC :: Imp.Variability -> MCCode -> ISPCCompilerM ()
+compileCodeISPC _ (Call dests fname args) =
+  join $
+    defCallIspc 
+      <$> pure dests
+      <*> pure fname
+      <*> mapM compileArg args
+  where
+    compileArg (MemArg m) = pure [C.cexp|$exp:m|]
+    compileArg (ExpArg e) = GC.compileExp e
+    defCallIspc dests' fname' args' = do
+      let out_args = [[C.cexp|&$id:d|] | d <- dests']
+          args''
+            | isBuiltInFunction fname' = args'
+            | otherwise = [C.cexp|ctx|] : out_args ++ args'
+      case dests' of
+        [d]
+          | isBuiltInFunction fname' ->
+              GC.stm [C.cstm|$id:d = $id:(funName fname')($args:args'');|]
+        _ ->
+          GC.item [C.citem|if ($id:(funName fname')($args:args'') != 0) { err = 1; }|]
 compileCodeISPC vari (Comment s code) = do
   xs <- GC.collect $ compileCodeISPC vari code
   let comment = "// " ++ s
