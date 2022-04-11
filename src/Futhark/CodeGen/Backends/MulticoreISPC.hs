@@ -51,7 +51,7 @@ compileProg header version prog = do
         "ispc_multicore"
         version
         operations
-        (MC.generateContext >> mapM_ compileBuiltinFunc funs >> mapM_ (compileFunExt [[C.cparam|struct futhark_context *ctx|]]) funs)
+        (MC.generateContext >> mapM_ compileBuiltinFunc funs)
         header
         [DefaultSpace]
         MC.cliOptions
@@ -170,45 +170,18 @@ unRefMemISPC mem space = GC.unRefMem' mem space cstm
 freeAllocatedMemISPC :: ISPCCompilerM [C.BlockItem]
 freeAllocatedMemISPC = GC.freeAllocatedMem' unRefMemISPC
 
--- | Compiles builtin to be linked with ISPC or some other kernel
--- It declars the function without static qualifier and uses pointer to structs
-compileFunExt :: [C.Param] -> (Name, Function op) -> ISPCCompilerM ()
-compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _))
-  | isNothing $ functionEntry func = do
-    (inparams, args_in) <- unzip <$> mapM compileInput inputs
-    (outparams, args_out) <- unzip <$> mapM compileOutput outputs
-    GC.libDecl =<< pure
-      [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams) {               
-                  return $id:(funName fname)($args:extraToExp, $args:(args_out <> args_in));
-                }|]
-  | otherwise = pure ()
-  where
-    extraToExp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
-
-    compileInput (ScalarParam name bt) = do
-      let ctp = GC.primTypeToCType bt
-      pure  ([C.cparam|$ty:ctp $id:name|], [C.cexp|$id:name|])
-    compileInput (MemParam name space) = do
-      ty <- GC.memToCType name space
-      pure ([C.cparam|$ty:ty *$id:name|], [C.cexp|*$id:name|])
-
-    compileOutput (ScalarParam name bt) = do
-      let ctp = GC.primTypeToCType bt
-      p_name <- newVName $ "out_" ++ baseString name
-      pure ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
-    compileOutput (MemParam name space) = do
-      ty <- GC.memToCType name space
-      p_name <- newVName $ baseString name ++ "_p"
-      pure ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
-
 compileBuiltinFunc :: (Name, Function op) -> ISPCCompilerM ()
 compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _))
   | isNothing $ functionEntry func = do
     let extra = [[C.cparam|uniform struct futhark_context * uniform ctx|]]
+        extra_c = [[C.cparam|struct futhark_context * ctx|]]
         extra_exp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
 
-    inparams_extern <- mapM compileInputsExtern inputs
-    outparams_extern <- mapM compileOutputsExtern outputs
+    (inparams_c, in_args_c) <- unzip <$> mapM (compileInputsExtern []) inputs
+    (outparams_c, out_args_c) <- unzip <$> mapM (compileOutputsExtern []) outputs
+
+    (inparams_extern, _) <- unzip <$> mapM (compileInputsExtern [C.ctyquals|uniform|]) inputs
+    (outparams_extern, _) <- unzip <$> mapM (compileOutputsExtern [C.ctyquals|uniform|]) outputs
 
     (inparams_uni, in_args_noderef) <- unzip <$> mapM compileInputsUniform inputs
     (outparams_uni, out_args_noderef) <- unzip <$> mapM compileOutputsUniform outputs
@@ -216,6 +189,11 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _))
     (inparams_varying, in_args_vary, prebody_in') <- unzip3 <$> mapM compileInputsVarying inputs
     (outparams_varying, out_args_vary, prebody_out', postbody_out') <- unzip4 <$> mapM compileOutputsVarying outputs
     let (prebody_in, prebody_out, postbody_out) = over each concat (prebody_in', prebody_out', postbody_out')
+
+    GC.libDecl =<< pure
+      [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {               
+                  return $id:(funName fname)($args:extra_exp, $args:in_args_c, $args:out_args_c);
+                }|]
 
     let ispc_extern =
           [C.cedecl|extern "C" uniform int $id:((funName fname) ++ "_extern")
@@ -236,7 +214,7 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _))
                         uniform int err = 0;
                         $items:prebody_in
                         $items:prebody_out
-                        foreach_active(i) {
+                        foreach_active (i) {
                           err |= $id:(funName $ fname<>"_extern")(
                             $args:extra_exp,
                             $args:out_args_vary,
@@ -249,25 +227,21 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _))
     mapM_ ispcEarlyDecl [ispc_varying, ispc_uniform, ispc_extern]
   | otherwise = pure ()
   where
-    compileInputsExtern (ScalarParam name bt) = do
+    compileInputsExtern vari (ScalarParam name bt) = do
       let ctp = GC.primTypeToCType bt
-          params = [C.cparam|uniform $ty:ctp $id:name|]
-      pure params
-    compileInputsExtern (MemParam name space) = do
+      pure ([C.cparam|$tyquals:vari $ty:ctp $id:name|], [C.cexp|$id:name|])
+    compileInputsExtern vari (MemParam name space) = do
       ty <- GC.memToCType name space
-      let params = [C.cparam|uniform $ty:ty * uniform $id:name|]
-      pure params
+      pure ([C.cparam|$tyquals:vari $ty:ty * $tyquals:vari $id:name|], [C.cexp|*$id:name|])
 
-    compileOutputsExtern (ScalarParam name bt) = do
+    compileOutputsExtern vari (ScalarParam name bt) = do
       p_name <- newVName $ "out_" ++ baseString name
       let ctp = GC.primTypeToCType bt
-          params = [C.cparam|uniform $ty:ctp * uniform $id:p_name|]
-      pure params
-    compileOutputsExtern (MemParam name space) = do
+      pure ([C.cparam|$tyquals:vari $ty:ctp * $tyquals:vari $id:p_name|], [C.cexp|$id:p_name|])
+    compileOutputsExtern vari (MemParam name space) = do
       ty <- GC.memToCType name space
       p_name <- newVName $ baseString name ++ "_p"
-      let params = [C.cparam|uniform $ty:ty * uniform $id:p_name|]
-      pure params
+      pure ([C.cparam|$tyquals:vari $ty:ty * $tyquals:vari $id:p_name|], [C.cexp|$id:p_name|])
 
     compileInputsUniform (ScalarParam name bt) = do
       let ctp    = GC.primTypeToCType bt
@@ -305,7 +279,7 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _))
       let params   = [C.cparam|$ty:typ $id:name|]
           args     = [C.cexp|&$id:(newvn)[i]|]
           pre_body = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
-                       $id:(newvn)[programIndex] = $id:name;|]
+                               $id:(newvn)[programIndex] = $id:name;|]
       pure (params, args, pre_body)
 
     compileOutputsVarying (ScalarParam name bt) = do
