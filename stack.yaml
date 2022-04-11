@@ -15,7 +15,8 @@ ghc-options:
   $locals: -j -optP-Wno-nonportable-include-path
 
 extra-deps:
-- language-c-quote
+- github: pema99/language-c-quote
+  commit: 5668e74ef427f7c5ad6cd2fa66faba61f2a8a147
 - futhark-data-1.0.3.0
 - futhark-server-1.1.2.1
 - futhark-manifest-1.0.0.0
