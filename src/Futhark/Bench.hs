@@ -211,28 +211,42 @@ runConvergence ::
   DL.DList (RunResult, [T.Text]) ->
   BenchM (DL.DList (RunResult, [T.Text]))
 runConvergence do_run opts initial_r =
-  loop (resultRuntimes (DL.toList initial_r)) initial_r
+  let runtimes = resultRuntimes (DL.toList initial_r)
+      (n, rsd, acor) = runtimesMetrics runtimes
+   in -- If the runtimes collected during the runMinimum phase are
+      -- unstable enough that we need more in order to converge, we throw
+      -- away the runMinimum runtimes.  This is because they often exhibit
+      -- behaviour similar to a "warmup" period, and hence function as
+      -- outliers that poison the metrics we use to determine convergence.
+      -- By throwing them away we converge much faster, and still get the
+      -- right result.
+      case nextRunCount n rsd acor of
+        0 -> pure initial_r
+        x -> moreRuns mempty mempty rsd x
   where
     resultRuntimes =
       U.fromList . map (fromIntegral . runMicroseconds . fst)
 
-    loop runtimes r = do
+    runtimesMetrics runtimes =
       let n = U.length runtimes
           rsd = (fastStdDev runtimes / sqrt (fromIntegral n)) / mean runtimes
-          acor =
-            let (x, _, _) = autocorrelation runtimes
-             in fromMaybe 1 (x U.!? 1)
+          (x, _, _) = autocorrelation runtimes
+       in (n, rsd, fromMaybe 1 (x U.!? 1))
 
-      let actions = do
-            x <- do_run
-            liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
-            pure x
+    sample rsd = do
+      x <- do_run
+      liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
+      pure x
 
+    moreRuns runtimes r rsd x = do
+      r' <- replicateM x $ sample rsd
+      loop (runtimes <> resultRuntimes r') (r <> DL.fromList r')
+
+    loop runtimes r = do
+      let (n, rsd, acor) = runtimesMetrics runtimes
       case nextRunCount n rsd acor of
         0 -> pure r
-        x -> do
-          r' <- replicateM x actions
-          loop (runtimes <> resultRuntimes r') (r <> DL.fromList r')
+        x -> moreRuns runtimes r rsd x
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
