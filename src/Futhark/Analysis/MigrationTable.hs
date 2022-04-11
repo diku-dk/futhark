@@ -616,11 +616,25 @@ graphIf bs cond tbody fbody = do
   -- against the need to read the values bound by the if statement.
   --
   -- By connecting the branch condition to each variable bound by the statement
-  -- the condition will only stay on device if (1) the if statement is not
-  -- required on host and (2) no additional reads will be required to use the
-  -- if statement bound variables should the whole statement be migrated.
-  -- (If the condition is migrated to device and stays there, then the if
-  -- statement must necessarily execute on device.)
+  -- the condition will only stay on device if
+  --
+  --   (1) the if statement is not required on host, based on the statements
+  --       within its body.
+  --
+  --   (2) no additional reads will be required to use the if statement bound
+  --       variables should the whole statement be migrated.
+  --
+  -- If the condition is migrated to device and stays there, then the if
+  -- statement must necessarily execute on device.
+  --
+  -- While the graph model built by this module generally migrates no more
+  -- statements than necessary to obtain a minimum vertex cut, the branches
+  -- of if statements are subject to an inaccuracy. Specifically model is not
+  -- strong enough to capture their mutual exclusivity and thus encodes that
+  -- both branches are taken. While this does not affect the resulting number
+  -- of host-device reads it means that some reads may needlessly be delayed
+  -- out of branches. The overhead as measured on futhark-benchmarks appears
+  -- to be neglible though.
   ret <- zipWithM (comb cond_id) (bodyResult tbody) (bodyResult fbody)
   mapM_ (uncurry createNode) (zip bs ret)
   where
