@@ -15,17 +15,23 @@ DESCRIPTION
 ===========
 
 This tool is the recommended way to benchmark Futhark programs.
-Programs are compiled using the specified backend (``futhark c`` by
-default), then run a number of times for each test case, and the
-average runtime printed on standard output.  Refer to
-:ref:`futhark-test(1)` for information on how to format test data.  A
-program will be ignored if it contains no data sets - it will not even
-be compiled.
+Programs are compiled using the specified backend (``c`` by default),
+then run a number of times for each test case, and the average runtime
+printed on standard output.  Refer to :ref:`futhark-test(1)` for
+information on how to format test data.  A program will be ignored if
+it contains no data sets - it will not even be compiled.
 
 If compilation of a program fails, then ``futhark bench`` will abort
 immediately.  If execution of a test set fails, an error message will
 be printed and benchmarking will continue (and ``--json`` will write
 the file), but a non-zero exit code will be returned at the end.
+
+The number of runs is determined automatically: at least ``-r`` runs,
+or repeated runs for half a second, whichever is longer.  If the
+measurements from these runs exhibit enough uncertainty, the tool will
+enter a "convergence loop" where it first discards the initial
+measurements as potential outliers, and then performs more runs until
+a stable mean is reached.
 
 OPTIONS
 =======
