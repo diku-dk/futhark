@@ -1961,12 +1961,12 @@ compileFunExt :: [C.Param] -> (Name, Function op) -> CompilerM op s (Maybe (C.De
 compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _)) = inNewFunction $ do
   case functionEntry func of
     Nothing -> do
-      inparams <- mapM compileInput inputs
-      (outparams, _) <- unzip <$> mapM compileOutput outputs      
-      args <- mapM compileArguments (inputs <> outputs)      
+      (inparams, args_in) <- unzip <$> mapM compileInput inputs
+      (outparams, args_out) <- unzip <$> mapM compileOutput outputs      
+      -- args <- mapM compileArguments (inputs <> outputs)            
       let builtin = [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams);|]
       let fun = [C.cfun|int $id:((funName fname) ++ "_extern")($params:extra, $params:outparams, $params:inparams) {               
-                return $id:(funName fname)($args:extraToExp, $args:args);
+                return $id:(funName fname)($args:extraToExp, $args:(args_out <> args_in));
       }|]
       return $ Just (builtin, fun)
     Just _ -> return  Nothing
@@ -1977,10 +1977,10 @@ compileFunExt extra (fname, func@(Function _ outputs inputs _ _ _)) = inNewFunct
 
     compileInput (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
-      return [C.cparam|$ty:ctp $id:name|]
+      return ([C.cparam|$ty:ctp $id:name|], [C.cexp|$id:name|])
     compileInput (MemParam name space) = do
       ty <- memToCType name space
-      return [C.cparam|$ty:ty *$id:name|]
+      return ([C.cparam|$ty:ty *$id:name|], [C.cexp|*$id:name|])
 
     compileOutput (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
