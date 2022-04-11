@@ -35,7 +35,7 @@ import Futhark.Server
 import Futhark.Test
 import Statistics.Autocorrelation (autocorrelation)
 import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
-import Statistics.Sample (stdErrMean)
+import Statistics.Sample (fastStdDev, mean)
 import System.Exit
 import System.FilePath
 import System.Process.ByteString (readProcessWithExitCode)
@@ -220,9 +220,12 @@ runConvergence do_run opts initial_r =
 
     loop runtimes r = do
       g <- create
-      resampled <- liftIO $ resample g [Mean] 2500 runtimes
+      resampled <-
+        liftIO $
+          fmap (resamples . snd . head) $
+            resample g [Mean] 2500 runtimes
 
-      let rsd = stdErrMean $ resamples (snd $ head resampled)
+      let rsd = fastStdDev resampled / mean resampled
           acor =
             let (x, _, _) = autocorrelation runtimes
              in fromMaybe 1 (x U.!? 1)
