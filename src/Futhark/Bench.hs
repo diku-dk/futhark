@@ -33,9 +33,9 @@ import Data.Time.Clock
 import qualified Data.Vector.Unboxed as U
 import Futhark.Server
 import Futhark.Test
-import Statistics.Autocorrelation
+import Statistics.Autocorrelation (autocorrelation)
 import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
-import Statistics.Types
+import Statistics.Sample (fastStdDev, mean)
 import System.Exit
 import System.FilePath
 import System.Process.ByteString (readProcessWithExitCode)
@@ -51,7 +51,7 @@ newtype RunResult = RunResult {runMicroseconds :: Int}
 data Result = Result
   { runResults :: [RunResult],
     memoryMap :: M.Map T.Text Int,
-    stdErr :: T.Text
+    stdErr :: Maybe T.Text
   }
   deriving (Eq, Show)
 
@@ -95,18 +95,20 @@ instance JSON.FromJSON DataResults where
         DataResult (JSON.toString k)
           <$> ((Right <$> success v) <|> (Left <$> JSON.parseJSON v))
       success = JSON.withObject "result" $ \o ->
-        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..: "stderr"
+        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..:? "stderr"
 
 dataResultJSON :: DataResult -> (JSON.Key, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
   (JSON.fromString desc, JSON.toJSON err)
-dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr))) =
+dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr_opt))) =
   ( JSON.fromString desc,
-    JSON.object
+    JSON.object $
       [ ("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
-        ("bytes", JSON.toJSON bytes),
-        ("stderr", JSON.toJSON progerr)
+        ("bytes", JSON.toJSON bytes)
       ]
+        ++ case progerr_opt of
+          Nothing -> []
+          Just progerr -> [("stderr", JSON.toJSON progerr)]
   )
 
 benchResultJSON :: BenchResult -> (JSON.Key, JSON.Value)
@@ -150,25 +152,23 @@ data RunOptions = RunOptions
     runResultAction :: (Int, Maybe Double) -> IO ()
   }
 
-square :: Double -> Double
-square x =
-  x * x
-
-relativeStdErr :: Sample -> Double
-relativeStdErr vec =
-  let mu = U.foldl1 (+) vec / fromIntegral (U.length vec)
-   in let std_err = sqrt $ U.foldl1 (+) (U.map (square . subtract mu) vec) / fromIntegral (U.length vec - 1)
-       in std_err / mu
+-- | A list of @(autocorrelation,rsd)@ pairs.  When the
+-- autocorrelation is above the first element and the RSD is above the
+-- second element, we want more runs.
+convergenceCriteria :: [(Double, Double)]
+convergenceCriteria =
+  [ (0.95, 0.001),
+    (0.75, 0.0015),
+    (0.065, 0.0025),
+    (0.045, 0.0050),
+    (0, 0.01)
+  ]
 
 -- Returns the next run count.
 nextRunCount :: Int -> Double -> Double -> Int
-nextRunCount runs rsd acor
-  | acor > 0.95 && rsd > 0.0010 = div runs 2
-  | acor > 0.75 && rsd > 0.0015 = div runs 2
-  | acor > 0.65 && rsd > 0.0025 = div runs 2
-  | acor > 0.45 && rsd > 0.0050 = div runs 2
-  | rsd > 0.01 = div runs 2
-  | otherwise = 0
+nextRunCount runs rsd acor = if any check convergenceCriteria then div runs 2 else 0
+  where
+    check (acor_lb, rsd_lb) = acor > acor_lb && rsd > rsd_lb
 
 type BenchM = ExceptT T.Text IO
 
@@ -220,9 +220,12 @@ runConvergence do_run opts initial_r =
 
     loop runtimes r = do
       g <- create
-      resampled <- liftIO $ resample g [Mean] 2500 runtimes
+      resampled <-
+        liftIO $
+          fmap (resamples . snd . head) $
+            resample g [Mean] 2500 runtimes
 
-      let rsd = relativeStdErr $ resamples (snd $ head resampled)
+      let rsd = fastStdDev resampled / mean resampled
           acor =
             let (x, _, _) = autocorrelation runtimes
              in fromMaybe 1 (x U.!? 1)
@@ -232,7 +235,7 @@ runConvergence do_run opts initial_r =
             liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
             pure x
 
-      case nextRunCount (length r) rsd acor of
+      case nextRunCount (U.length runtimes) rsd acor of
         0 -> pure r
         x -> do
           r' <- replicateM x actions

@@ -28,7 +28,7 @@ import Futhark.Util.Console
 import Futhark.Util.Options
 import Statistics.Resampling (Estimator (..), resample)
 import Statistics.Resampling.Bootstrap (bootstrapBCA)
-import Statistics.Types
+import Statistics.Types (cl95, confIntLDX, confIntUDX, estError, estPoint)
 import System.Console.ANSI (clearLine)
 import System.Directory
 import System.Environment
@@ -197,10 +197,14 @@ withProgramServer program runner extra_options f = do
       putStrLn $ inRed $ show e
       pure Nothing
 
+-- Truncate dataset name display after this many characters.
+maxDatasetNameLength :: Int
+maxDatasetNameLength = 40
+
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
-  let runopts = "-L" : optExtraOptions opts ++ tuning_opts
+  let runopts = optExtraOptions opts ++ tuning_opts
   withProgramServer program (optRunner opts) runopts $ \server ->
     mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where
@@ -216,7 +220,7 @@ runBenchmark opts futhark (program, cases) = do
 
     relevant = maybe (const True) (==) (optEntryPoint opts) . T.unpack . iosEntryPoint
 
-    pad_to = foldl max 0 $ concatMap (map (length . atMostChars 19 . runDescription) . iosTestRuns) cases
+    pad_to = foldl max 0 $ concatMap (map (length . atMostChars maxDatasetNameLength . runDescription) . iosTestRuns) cases
 
 runOptions :: ((Int, Maybe Double) -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
@@ -282,7 +286,7 @@ mkProgressPrompt opts pad_to dataset_desc start_time
         putStr "\r" -- Go to start of line.
         let p s =
               putStr $
-                descString (atMostChars 40 dataset_desc) pad_to ++ s
+                descString (atMostChars maxDatasetNameLength dataset_desc) pad_to ++ s
 
         (us_sum, i) <- readIORef count
 
@@ -369,7 +373,7 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   when fancyTerminal $ do
     clearLine
     putStr "\r"
-    putStr $ descString (atMostChars 40 dataset_desc) pad_to
+    putStr $ descString (atMostChars maxDatasetNameLength dataset_desc) pad_to
 
   case res of
     Left err -> liftIO $ do
@@ -388,7 +392,11 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
               boot = head $ bootstrapBCA cl95 vec_runtimes resampled
 
       reportResult runtimes bootstrapCI
-      Result runtimes (getMemoryUsage errout) errout
+      -- We throw away the 'errout' because it is almost always
+      -- useless and adds too much to the .json file size.  This
+      -- behaviour could be moved into a command line option if we
+      -- wish.
+      Result runtimes (getMemoryUsage errout) Nothing
         & Right
         & DataResult dataset_desc
         & Just
