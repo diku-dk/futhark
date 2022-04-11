@@ -34,8 +34,8 @@ import qualified Data.Vector.Unboxed as U
 import Futhark.Server
 import Futhark.Test
 import Statistics.Autocorrelation (autocorrelation)
-import Statistics.Function (square)
 import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
+import Statistics.Sample (mean, stdErrMean)
 import Statistics.Types (Sample)
 import System.Exit
 import System.FilePath
@@ -154,10 +154,7 @@ data RunOptions = RunOptions
   }
 
 relativeStdErr :: Sample -> Double
-relativeStdErr vec =
-  let mu = U.foldl1 (+) vec / fromIntegral (U.length vec)
-   in let std_err = sqrt $ U.foldl1 (+) (U.map (square . subtract mu) vec) / fromIntegral (U.length vec - 1)
-       in std_err / mu
+relativeStdErr vec = stdErrMean vec / mean vec
 
 -- | A list of @(autocorrelation,rsd)@ pairs.  When the
 -- autocorrelation is above the first element and the RSD is above the
