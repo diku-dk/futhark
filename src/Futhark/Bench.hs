@@ -34,12 +34,10 @@ import qualified Data.Vector.Unboxed as U
 import Futhark.Server
 import Futhark.Test
 import Statistics.Autocorrelation (autocorrelation)
-import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
 import Statistics.Sample (fastStdDev, mean)
 import System.Exit
 import System.FilePath
 import System.Process.ByteString (readProcessWithExitCode)
-import System.Random.MWC (create)
 import System.Timeout (timeout)
 
 -- | The runtime of a single succesful run.
@@ -219,11 +217,8 @@ runConvergence do_run opts initial_r =
       U.fromList . map (fromIntegral . runMicroseconds . fst)
 
     loop runtimes r = do
-      g <- create
-      resampled <-
-        liftIO $ resamples . snd . head <$> resample g [Mean] 2500 runtimes
-
-      let rsd = fastStdDev resampled / mean resampled
+      let n = U.length runtimes
+          rsd = (fastStdDev runtimes / sqrt (fromIntegral n)) / mean runtimes
           acor =
             let (x, _, _) = autocorrelation runtimes
              in fromMaybe 1 (x U.!? 1)
@@ -233,7 +228,7 @@ runConvergence do_run opts initial_r =
             liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
             pure x
 
-      case nextRunCount (U.length runtimes) rsd acor of
+      case nextRunCount n rsd acor of
         0 -> pure r
         x -> do
           r' <- replicateM x actions
