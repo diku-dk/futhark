@@ -354,70 +354,25 @@ compileCodeISPC _ (Assert e msg (loc, locs)) = do
 compileCodeISPC _ code =
   GC.compileCode code
 
-compileGetStructVals ::
+compileGetStructValsISPC ::
   Name ->
   [VName] ->
   [(C.Type, MC.ValueType)] ->
-  [C.BlockItem]
-compileGetStructVals struct a b = concat $ zipWith field a b
+  ISPCCompilerM [C.BlockItem]
+compileGetStructValsISPC struct a b = concat <$> zipWithM field a b
   where
     struct' = struct <> "_"
     field name (ty, MC.Prim) =
-      [C.citems|$ty:ty $id:name = $id:struct'->$id:(closureFreeStructField name);|]
-    field name (_, MC.MemBlock) =
-      [C.citems|uniform struct memblock* uniform $id:(pretty name <> "_") = $id:(struct')->$id:(closureFreeStructField name);
-                uniform struct memblock $id:name = *$id:(pretty name <> "_");|]
+      pure [C.citems|uniform $ty:ty $id:name = $id:struct'->$id:(MC.closureFreeStructField name);|]
+    field name (_, MC.MemBlock) = do
+      strlit <- makeStringLiteral $ pretty name
+      pure [C.citems|uniform struct memblock $id:name;
+                $id:name.desc = $id:strlit();
+                $id:name.mem = $id:(struct')->$id:(MC.closureFreeStructField name);
+                $id:name.size = 0;
+                $id:name.references = NULL;|]
     field name (_, MC.RawMem) =
-      [C.citems|uniform unsigned char * uniform $id:name = $id:struct'->$id:(closureFreeStructField name);|]
-
-
-closureFreeStructField :: VName -> Name
-closureFreeStructField v =
-  nameFromString "free_" <> nameFromString (pretty v)
-
-compileFreeStructFields :: [VName] -> [(C.Type, MC.ValueType)] -> [C.FieldGroup]
-compileFreeStructFields = zipWith field
-  where
-    field name (ty, MC.Prim) =
-      [C.csdecl|$ty:ty $id:(closureFreeStructField name);|]
-    field name (_, MC.MemBlock) =
-      [C.csdecl|struct memblock* $id:(closureFreeStructField name);|]
-    field name (_, MC.RawMem) =
-      [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
-
-compileSetStructValues ::
-  C.ToIdent a =>
-  a ->
-  [VName] ->
-  [(C.Type, MC.ValueType)] ->
-  [C.Stm]
-compileSetStructValues struct = zipWith field
-  where
-    field name (_, MC.Prim) =
-      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
-    field name (_, MC.MemBlock) =
-      [C.cstm|$id:struct.$id:(closureFreeStructField name)=& $id:name;|]
-    field name (_, MC.RawMem) =
-      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
-
-prepareTaskStruct ::
-  MC.DefSpecifier s ->
-  String ->
-  [VName] ->
-  [(C.Type, MC.ValueType)] ->
-  GC.CompilerM Multicore s Name
-prepareTaskStruct def name free_args free_ctypes = do
-  let makeStruct s = pure
-        [C.cedecl|struct $id:s {
-                       struct futhark_context *ctx;
-                       $sdecls:(compileFreeStructFields free_args free_ctypes)
-                     };|]
-  fstruct <- def name makeStruct
-  let fstruct' =  fstruct <> "_"
-  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct';|]
-  GC.stm [C.cstm|$id:fstruct'.ctx = ctx;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct' free_args free_ctypes)|]
-  pure fstruct
+      pure [C.citems|uniform unsigned char * uniform $id:name = $id:struct'->$id:(MC.closureFreeStructField name);|]
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ISPCState
@@ -508,13 +463,13 @@ compileOp (ISPCKernel body free) = do
 
   let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
   -- Generate ISPC kernel
-  fstruct <- prepareTaskStruct sharedDef "param_struct" free_args free_ctypes
+  fstruct <- MC.prepareTaskStruct sharedDef "param_struct" free_args free_ctypes [] []
   let fstruct' = fstruct <> "_"
 
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
     mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
-        GC.items $ compileGetStructVals fstruct free_args free_ctypes
+        GC.items =<< compileGetStructValsISPC fstruct free_args free_ctypes
         GC.decl [C.cdecl|uniform int err = 0;|]
         body' <- GC.collect $ compileCodeISPC Imp.Varying body
         mapM_ GC.item decl_cached
