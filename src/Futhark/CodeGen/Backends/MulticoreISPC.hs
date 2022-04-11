@@ -83,56 +83,78 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
   where    
     compileInputsExtern (ScalarParam name bt) = do
       let ctp = GC.primTypeToCType bt
-      pure [C.cparam|uniform $ty:ctp $id:name|]
+          params = [C.cparam|uniform $ty:ctp $id:name|]
+      pure params
     compileInputsExtern (MemParam name space) = do
       ty <- GC.memToCType name space
-      pure [C.cparam|uniform $ty:ty * uniform $id:name|]
+      let params = [C.cparam|uniform $ty:ty * uniform $id:name|]
+      pure params
 
     compileOutputsExtern (ScalarParam name bt) = do
-      let ctp = GC.primTypeToCType bt
       p_name <- newVName $ "out_" ++ baseString name
-      return [C.cparam|uniform $ty:ctp * uniform $id:p_name|]
+      let ctp = GC.primTypeToCType bt
+          params = [C.cparam|uniform $ty:ctp * uniform $id:p_name|]
+      pure params
     compileOutputsExtern (MemParam name space) = do
       ty <- GC.memToCType name space
       p_name <- newVName $ baseString name ++ "_p"
-      return [C.cparam|uniform $ty:ty * uniform $id:p_name|]
+      let params = [C.cparam|uniform $ty:ty * uniform $id:p_name|]
+      pure params
 
     compileInputsUniform (ScalarParam name bt) = do
-      let ctp = GC.primTypeToCType bt
-      pure ([C.cparam|uniform $ty:ctp $id:name|], [C.cexp|$id:name|])
+      let ctp    = GC.primTypeToCType bt
+          params = [C.cparam|uniform $ty:ctp $id:name|]
+          args   = [C.cexp|$id:name|]
+      pure (params, args)
     compileInputsUniform (MemParam name space) = do
       ty <- GC.memToCType name space
-      pure ([C.cparam|uniform $ty:ty $id:name|], [C.cexp|&$id:name|])
+      let params = [C.cparam|uniform $ty:ty $id:name|]
+          args   = [C.cexp|&$id:name|]
+      pure (params, args)
 
     compileOutputsUniform (ScalarParam name bt) = do
-      let ctp = GC.primTypeToCType bt
       p_name <- newVName $ "out_" ++ baseString name
-      return ([C.cparam|uniform $ty:ctp $id:p_name|], [C.cexp|$id:p_name|])
+      let ctp    = GC.primTypeToCType bt
+          params = [C.cparam|uniform $ty:ctp $id:p_name|]
+          args   = [C.cexp|$id:p_name|]
+      pure (params, args)
     compileOutputsUniform (MemParam name space) = do
       ty <- GC.memToCType name space
       p_name <- newVName $ baseString name ++ "_p"
-      return ([C.cparam|uniform $ty:ty $id:p_name|], [C.cexp|&$id:p_name|])
+      let params = [C.cparam|uniform $ty:ty $id:p_name|]
+          args   = [C.cexp|&$id:p_name|]
+      pure (params, args)
 
     compileInputsVarying (ScalarParam name bt) = do
-      let ctp = GC.primTypeToCType bt
-      pure ([C.cparam|$ty:ctp $id:name|], [C.cexp|extract($id:name,i)|], [])
+      let ctp      = GC.primTypeToCType bt
+          params   = [C.cparam|$ty:ctp $id:name|]
+          args     = [C.cexp|extract($id:name,i)|]
+          pre_body = []
+      pure (params, args, pre_body)
     compileInputsVarying (MemParam name space) = do
       typ <- GC.memToCType name space
       newvn <- newVName $ "aos_" <> baseString name
-      let pb = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
+      let params   = [C.cparam|$ty:typ $id:name|]
+          args     = [C.cexp|&$id:(newvn)[i]|]
+          pre_body = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
                        $id:(newvn)[programIndex] = $id:name;|]
-      pure ([C.cparam|$ty:typ $id:name|], [C.cexp|&$id:(newvn)[i]|], pb)
+      pure (params, args, pre_body)
 
     compileOutputsVarying (ScalarParam name bt) = do
-      let ctp = GC.primTypeToCType bt
       p_name <- newVName $ "out_" ++ baseString name
-      return ([C.cparam|$ty:ctp $id:p_name|], [C.cexp|extract($id:p_name,i)|],[])
+      let ctp      = GC.primTypeToCType bt
+          params   = [C.cparam|$ty:ctp $id:p_name|]
+          args     = [C.cexp|extract($id:p_name,i)|]
+          pre_body = []
+      return (params, args, pre_body)
     compileOutputsVarying (MemParam name space) = do
       typ <- GC.memToCType name space
       newvn <- newVName $ "aos_" <> baseString name
-      let pb = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
+      let params   = [C.cparam|$ty:typ $id:name|]
+          args     = [C.cexp|&$id:(newvn)[i]|]
+          pre_body = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
                        $id:(newvn)[programIndex] = $id:name;|]
-      return ([C.cparam|$ty:typ $id:name|], [C.cexp|&$id:(newvn)[i]|], pb)
+      pure (params,args,pre_body)
 
 
     funcToDef f = C.FuncDef f loc
