@@ -74,18 +74,17 @@ compileBuiltinFunc (fname, func@(Function _ outputs inputs _ _ _)) =  do
                                       return $id:(funName $ fname<>"_extern")
                                           ($args:extraToExp_ispc, $args:args_uni_noderef);}|]
 
-          err = [C.citem|uniform int32_t err = 0;]
           ispc_varying = [C.cfun|uniform int $id:(funName fname)
                                  ($params:extra_ispc, $params:param_vari_out, $params:param_vari_in){ 
-                                     $item:err
+                                     uniform int err = 0;
                                      $items:pre_body_in
                                      $items:pre_body_out
                                      foreach_active(i){
-                                        $id:(funName $ fname<>"_extern")($args:extraToExp_ispc, $args:args_extract_out, $args:args_extract_in);
+                                        err |= $id:(funName $ fname<>"_extern")($args:extraToExp_ispc, $args:args_extract_out, $args:args_extract_in);
                                      }
                                      $items:post_body_in
                                      $items:post_body_out
-                                 return 0;}|]
+                                 return err;}|]
 
       --mapM_ GC.earlyDecl [funcToDef cfun]
       mapM_ ispcDeclPrepend [funcToDef ispc_varying, funcToDef ispc_uniform, ispc_extern]
