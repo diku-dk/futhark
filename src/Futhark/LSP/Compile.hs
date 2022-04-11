@@ -2,12 +2,16 @@ module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
 
 import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import qualified Data.Map as M
+import qualified Data.Text as T
 import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
 import Language.Futhark.Warnings (listWarnings)
-import Language.LSP.Server (LspT, flushDiagnosticsBySource)
+import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFiles)
+import Language.LSP.Types (fromNormalizedFilePath, uriToNormalizedFilePath)
+import Language.LSP.VFS (VFS (vfsMap), virtualFileText)
 
 -- | Try to take state from MVar, if it's empty, try to compile.
 tryTakeStateFromMVar :: MVar State -> Maybe FilePath -> LspT () IO State
@@ -42,7 +46,8 @@ tryCompile :: Maybe FilePath -> State -> LspT () IO State
 tryCompile Nothing _ = pure emptyState
 tryCompile (Just path) state = do
   let old_loaded_prog = getLoadedProg state
-  res <- liftIO $ reloadProg old_loaded_prog [path]
+  vfs <- getVirtualFiles
+  res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs)
   flushDiagnosticsBySource maxDiagnostic diagnosticSource
   case res of
     Right new_loaded_prog -> do
@@ -52,6 +57,20 @@ tryCompile (Just path) state = do
       debug "Compilation failed, publishing diagnostics"
       publishErrorDiagnostics prog_error
       pure emptyState
+
+-- | Transform VFS to a map of file paths to file contents.
+-- This is used to pass the file contents to the compiler.
+transformVFS :: VFS -> M.Map FilePath T.Text
+transformVFS vfs =
+  M.foldrWithKey
+    ( \uri virtual_file acc ->
+        case uriToNormalizedFilePath uri of
+          Nothing -> acc
+          Just file_path ->
+            M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
+    )
+    M.empty
+    (vfsMap vfs)
 
 getLoadedProg :: State -> LoadedProg
 getLoadedProg (State (Just loaded_prog)) = loaded_prog
