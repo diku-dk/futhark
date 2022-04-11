@@ -35,8 +35,7 @@ import Futhark.Server
 import Futhark.Test
 import Statistics.Autocorrelation (autocorrelation)
 import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
-import Statistics.Sample (mean, stdErrMean)
-import Statistics.Types (Sample)
+import Statistics.Sample (stdErrMean)
 import System.Exit
 import System.FilePath
 import System.Process.ByteString (readProcessWithExitCode)
@@ -153,9 +152,6 @@ data RunOptions = RunOptions
     runResultAction :: (Int, Maybe Double) -> IO ()
   }
 
-relativeStdErr :: Sample -> Double
-relativeStdErr vec = stdErrMean vec / mean vec
-
 -- | A list of @(autocorrelation,rsd)@ pairs.  When the
 -- autocorrelation is above the first element and the RSD is above the
 -- second element, we want more runs.
@@ -226,7 +222,7 @@ runConvergence do_run opts initial_r =
       g <- create
       resampled <- liftIO $ resample g [Mean] 2500 runtimes
 
-      let rsd = relativeStdErr $ resamples (snd $ head resampled)
+      let rsd = stdErrMean $ resamples (snd $ head resampled)
           acor =
             let (x, _, _) = autocorrelation runtimes
              in fromMaybe 1 (x U.!? 1)
