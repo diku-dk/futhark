@@ -64,25 +64,26 @@ data BenchOptions = BenchOptions
 initialBenchOptions :: BenchOptions
 initialBenchOptions =
   BenchOptions
-    "c"
-    Nothing
-    ""
-    10
-    0.5
-    []
-    []
-    Nothing
-    (-1)
-    False
-    ["nobench", "disable"]
-    []
-    Nothing
-    (Just "tuning")
-    Nothing
-    True
-    Nothing
-    0
-    Nothing
+    { optBackend = "c",
+      optFuthark = Nothing,
+      optRunner = "",
+      optMinRuns = 10,
+      optMinTime = 0.5,
+      optExtraOptions = [],
+      optCompilerOptions = [],
+      optJSON = Nothing,
+      optTimeout = -1,
+      optSkipCompilation = False,
+      optExcludeCase = ["nobench", "disable"],
+      optIgnoreFiles = [],
+      optEntryPoint = Nothing,
+      optTuning = Just "tuning",
+      optCacheExt = Nothing,
+      optConvergencePhase = True,
+      optConcurrency = Nothing,
+      optVerbose = 0,
+      optTestSpec = Nothing
+    }
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
