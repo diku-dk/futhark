@@ -277,6 +277,13 @@ standardOptions =
         optionArgument = RequiredArgument "open",
         optionAction = [Exp $ simpleCall "read_tuning_file" [Var "sizes", Var "optarg"]]
       },
+    -- Does not actually do anything for Python backends.
+    Option
+      { optionLongName = "cache-file",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "str",
+        optionAction = [Pass]
+      },
     Option
       { optionLongName = "log",
         optionShortName = Just 'L',
