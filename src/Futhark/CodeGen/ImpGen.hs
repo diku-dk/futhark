@@ -155,6 +155,7 @@ import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
 import Language.Futhark.Warnings
 import Prelude hiding (quot)
+import Debug.Trace (traceM)
 
 -- | How to compile an t'Op'.
 type OpCompiler rep r op = Pat (LetDec rep) -> Op rep -> ImpM rep r op ()
@@ -1814,6 +1815,7 @@ sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> I
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  traceM $ show mem
   let iota_ixfun = IxFun.iota $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
     IxFun.permute iota_ixfun $ rearrangeInverse perm
