@@ -43,7 +43,6 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
-import Debug.Trace (traceM)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =

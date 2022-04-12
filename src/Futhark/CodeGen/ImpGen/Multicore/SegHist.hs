@@ -219,10 +219,8 @@ subHistogram pat space histops num_histos kbody = do
     sOp $ Imp.GetTaskId (segFlat space)
 
     local_subhistograms <- forM (zip per_red_pes histops) $ \(pes', histop) -> do
-      op_local_subhistograms <- forM (histType histop) $ \t -> do
-        bla <- sAllocArray "subhistogram" (elemType t) (arrayShape t) DefaultSpace
-        traceM $ pretty bla        
-        pure bla
+      op_local_subhistograms <- forM (histType histop) $ \t ->
+        sAllocArray "subhistogram" (elemType t) (arrayShape t) DefaultSpace
       forM_ (zip3 pes' op_local_subhistograms (histNeutral histop)) $ \(pe, hist, ne) ->
         -- First thread initializes histogram with dest vals. Others
         -- initialize with neutral element
@@ -275,7 +273,14 @@ subHistogram pat space histops num_histos kbody = do
                     genHistOpParams histop' 
                     sLoopNest shape $ \is' -> do
                       forM_ (zip vs_params' vs') $ \(p, res) ->
-                        extractVectorLane j $ collect $ copyDWIMFix (paramName p) [] res is'
+                        case paramType p of 
+                          Prim pt ->
+                            everythingVarying $ do
+                              tmp <- dPrim "tmp" pt
+                              copyDWIMFix (tvVar tmp) [] res is'
+                              extractVectorLane j $ pure $
+                                Imp.SetScalar (paramName p) (Imp.LeafExp (tvVar tmp) pt)
+                          _ -> pure ()
                       updateHisto histop' histop_subhistograms (bucket'' ++ is') j acc_params'
 
     -- Copy the task-local subhistograms to the global subhistograms,
