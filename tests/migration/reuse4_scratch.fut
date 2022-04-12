@@ -2,9 +2,10 @@
 -- if none but single elements of the reused memory (updated or aliased) are
 -- returned.
 -- ==
+
 -- structure gpu {
---   /GPUBody/If/True/Scratch 0
---   /GPUBody/DoLoop/Scratch 0
+--   /GPUBody/If/True/Scratch 1
+--   /GPUBody/DoLoop/Scratch 1
 -- }
 
 -- This fails due to a memory allocation error.

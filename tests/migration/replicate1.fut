@@ -4,7 +4,7 @@
 -- dimension dropped, which is reintroduced by the GPUBody construct.
 -- ==
 -- structure gpu {
---   /GPUBody 1
+--   /GPUBody/Replicate 1
 --   /Replicate 0
 --   /Index 0
 -- }

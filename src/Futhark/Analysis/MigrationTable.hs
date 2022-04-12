@@ -38,7 +38,7 @@ module Futhark.Analysis.MigrationTable
     MigrationStatus (..),
 
     -- * Query
-    --
+
     -- | These functions all assume that no parent statement should be migrated.
     -- That is @shouldMoveStm stm mt@ should return @False@ for every statement
     -- @stm@ with a body that a queried 'VName' or 'Stm' is nested within,
@@ -467,7 +467,7 @@ graphStm stm = do
       -- An array literal purely of primitive constants can be hoisted out to be
       -- a top-level constant, unless it is to be returned or consumed.
       -- Otherwise its runtime implementation will copy a precomputed static
-      -- array and thus behave like a Copy.
+      -- array and thus behave like a 'Copy'.
       -- Whether the rows are primitive constants or arrays, without any scalar
       -- variable operands such ArrayLit cannot directly prevent a scalar read.
       graphHostOnly e
@@ -749,6 +749,23 @@ graphLoop (b : bs) params lform body = do
     graphTheLoop :: Grapher ()
     graphTheLoop = do
       mapM_ graphParam loopValues
+
+      -- For simplicity we do not currently track memory reuse through merge
+      -- parameters. A parameter does not simply reuse the memory of its
+      -- argument; it must also consider the iteration return value, which in
+      -- turn may depend on other merge parameters.
+      --
+      -- Situations that would benefit from this tracking is unlikely to occur
+      -- at the time of writing, and if it occurs current compiler limitations
+      -- will prevent successful compilation.
+      -- Specifically it requires the merge parameter argument to reuse memory
+      -- from an array literal, and both it and the loop must occur within an
+      -- if statement branch. Array literals are generally hoisted out of if
+      -- statements however, and when they are not, a memory allocation error
+      -- occurs.
+      --
+      -- TODO: Track memory reuse through merge parameters.
+
       case lform of
         ForLoop _ _ n elems -> do
           onlyGraphedScalarSubExp n >>= tellOperands

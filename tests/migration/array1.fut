@@ -1,4 +1,4 @@
--- Arrays are migrated if they contain free scalar variables.
+-- Array literals are migrated if they contain free scalar variables.
 -- ==
 -- structure gpu {
 --   GPUBody 0

@@ -21,12 +21,7 @@ def join 'a (x: a) (y: a) : a =
 def join3 'a (x: a) (y: a) (z: a) : a =
   x
 
-entry subExp (A: [2]i32) : i32 =
-  let (a, b) = (A[0], A[1])
-  let x = b
-  in if hostonly x
-     then join a b
-     else 0
+-- 'SubExp' cannot be tested due to elimination by the simplifier.
 
 entry opaque (A: [2]i32) : i32 =
   let (a, b) = (A[0], A[1])

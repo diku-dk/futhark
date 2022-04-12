@@ -2,8 +2,9 @@
 -- if none but single elements of the reused memory (updated or aliased) are
 -- returned.
 -- ==
+
 -- structure gpu {
---   /GPUBody/If/True/FlatIndex 0
+--   /GPUBody/If/True/FlatIndex 1
 -- }
 
 import "intrinsics"
