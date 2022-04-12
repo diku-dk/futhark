@@ -44,7 +44,7 @@ import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, getNameSou
 --import Futhark.Pass
 import Data.Foldable (foldlM)
 import Control.Monad.State
-import Futhark.Transform.Substitute (Substitute (substituteNames))
+import Futhark.Transform.Substitute (Substitute (substituteNames), Substitutable)
 import Control.Monad.Reader (ReaderT (runReaderT))
 -- import qualified Futhark.Analysis.HORep.MapNest as HM
 
@@ -70,7 +70,39 @@ data NodeT =
   | RNode VName
   | InNode VName
   | FinalNode [Stm SOACS] NodeT
+  | IfNode (Stm SOACS) [(NodeT, [EdgeT])]
+  | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
   deriving (Eq)
+
+
+getName :: EdgeT -> VName
+getName edgeT = case edgeT of
+  Alias vn -> vn
+  InfDep vn -> vn
+  Dep vn -> vn
+  Cons vn -> vn
+  Fake vn -> vn
+  Res vn -> vn
+  ScanRed vn -> vn
+
+
+setName :: VName -> EdgeT -> EdgeT
+setName vn edgeT = case edgeT of
+  Alias _ -> Alias vn
+  InfDep _ -> InfDep vn
+  Dep _ -> Dep vn
+  Cons _ -> Cons vn
+  Fake _ -> Fake vn
+  Res _ -> Res vn
+  ScanRed _ -> ScanRed vn
+
+
+
+instance Substitute EdgeT where
+  substituteNames m edgeT =
+    let newName = substituteNames m (getName edgeT)
+    in setName newName edgeT
+
 
 instance Substitute NodeT where
   substituteNames m nodeT = case nodeT of
@@ -80,6 +112,9 @@ instance Substitute NodeT where
     RNode vn -> RNode (f vn)
     InNode vn -> InNode (f vn)
     FinalNode stms nt -> FinalNode (map f stms) (f nt)
+    IfNode stm nodes -> IfNode (f stm) (map f nodes)
+    DoNode stm nodes -> DoNode (f stm) (map f nodes)
+
     where
       f :: Substitute a => a -> a
       f = substituteNames m
@@ -104,6 +139,17 @@ instance Show NodeT where
     show (FinalNode stms nt) = show nt
     show (RNode name)  = ppr $ "Res: "   ++ ppr name
     show (InNode name) = ppr $ "Input: " ++ ppr name
+    show (IfNode stm nodes) =  "If: " ++ L.intercalate ", " (map ppr $ getStmNames stm)
+    show (DoNode stm nodes) =  "Do: " ++ L.intercalate ", " (map ppr $ getStmNames stm)
+
+
+-- does the node acutally represent something in the program
+-- (non-real nodes are not delayed-fused into other nodes)
+isRealNode :: NodeT -> Bool
+isRealNode RNode {} = False
+isRealNode InNode {} = False
+isRealNode _ = True
+
 
 -- PrettyPrinter
 ppr :: PP.Pretty m => m -> String
@@ -134,8 +180,8 @@ data FusionEnv = FusionEnv
 
 freshFusionEnv :: FusionEnv
 freshFusionEnv = FusionEnv {vNameSource = blankNameSource,
-                                       producerMapping = M.empty,
-                                       fuseScans = True}
+                            producerMapping = M.empty,
+                            fuseScans = True}
 
 newtype FusionEnvM a = FusionEnvM ( ReaderT
           (Scope SOACS)
@@ -235,6 +281,12 @@ emptyG2 stms res inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
     rnodes = map RNode res
     inNodes= map InNode inputs
 
+initGraph :: DepGraphAug
+initGraph g = do
+  _ <- makeMapping g
+  addDepEdges g
+
+
 isArray :: FParam SOACS -> Bool
 isArray p = case paramDec p of
   Array {} -> True
@@ -310,14 +362,19 @@ mapAcrossNodeTs f = mapAcross f'
 
 
 nodeToSoacNode :: NodeT -> FusionEnvM NodeT
-nodeToSoacNode n@(StmNode (Let pats aux op@(Op _))) = do
-  maybeSoac <- H.fromExp op
-  case maybeSoac of
-    Right hsoac -> pure $ SoacNode hsoac pats aux
-    Left H.NotSOAC -> pure n
--- add if, loops, transformations
+nodeToSoacNode n@(StmNode s@(Let pats aux op)) = case op of
+  Op {} -> do
+    maybeSoac <- H.fromExp op
+    case maybeSoac of
+      Right hsoac -> pure $ SoacNode hsoac pats aux
+      Left H.NotSOAC -> pure n
+  -- add if, loops, (maybe transformations)
+  DoLoop {} -> -- loop-node
+    pure $ DoNode s []
+  If {} -> do
+    pure $ IfNode s []
+  _ -> pure n
 nodeToSoacNode n = pure n
-
 
 convertGraph :: DepGraphAug
 convertGraph = mapAcrossNodeTs nodeToSoacNode
@@ -367,18 +424,9 @@ lFromNode g n = label $ lNodeFromNode g n
 labFromEdge :: DepGraph -> DepEdge -> DepNode
 labFromEdge g (n1, _, _) = lNodeFromNode g n1
 
-depsFromEdgeT :: EdgeT -> [VName]
-depsFromEdgeT e = case e of
-  Dep name    -> [name]
-  InfDep name -> [name]
-  Res name    -> [name]
-  Cons name   -> [name]
-  Fake name   -> [name]
-  Alias name  -> [name]
-  ScanRed name-> [name]
 
-depsFromEdge ::  DepEdge -> [VName]
-depsFromEdge = depsFromEdgeT . edgeLabel
+depsFromEdge ::  DepEdge -> VName
+depsFromEdge = getName . edgeLabel
 
 
 input :: DepGraph -> DepNode -> [DepNode]
@@ -458,7 +506,7 @@ addExtraCons g = depGraphInsertEdges new_edges g
     make_edge :: DepEdge -> [DepEdge]
     make_edge (from, to, Cons cname) = [toLEdge (from, to2) (Fake cname) | (to2, _) <- filter (\(tonode,toedge)->
       tonode /= from
-      && cname `elem` depsFromEdgeT toedge
+      && cname == getName toedge
       ) $ lpre g to]
     make_edge _ = []
 
@@ -497,6 +545,11 @@ fusableInputs :: Stm SOACS -> [VName]
 fusableInputs (Let _ _ expr) = fusableInputsFromExp expr
 
 fusableInputsFromExp :: Exp SOACS -> [VName]
+fusableInputsFromExp (If _ b1 b2 _) =
+  concatMap fusableInputs (bodyStms b1) <>
+  concatMap fusableInputs (bodyStms b2)
+fusableInputsFromExp (DoLoop _ _ b1) =
+  concatMap fusableInputs (bodyStms b1)
 fusableInputsFromExp (Op soac) = case soac of
   Futhark.Screma  _ is _     -> is
   Futhark.Hist    _ is _ _   -> is
@@ -518,8 +571,12 @@ infusableInputsFromExp (Op soac) = case soac of
   Futhark.Stream  a1 _ a3 a4 lam     ->
     namesToList $ freeIn $ Futhark.Stream a1 [] a3 a4 lam
 -- infusableInputsFromExp op@(BasicOp x) = namesToList $ freeIn op
--- infusableInputsFromExp op@If {} = namesToList $ freeIn op
--- infusableInputsFromExp op@DoLoop {} = namesToList $ freeIn op
+infusableInputsFromExp (If exp _ _ cond) =
+  let emptyB = Body mempty mempty mempty :: Body SOACS in
+  namesToList $ freeIn (If exp emptyB emptyB cond)
+infusableInputsFromExp (DoLoop exp loopform _) =
+  let emptyB = Body mempty mempty mempty :: Body SOACS in
+  namesToList $ freeIn (DoLoop exp loopform emptyB)
 infusableInputsFromExp op = namesToList $ freeIn op
 
 aliasInputs :: Stm SOACS -> [VName]
@@ -559,8 +616,10 @@ getOutputs node = case node of
   (StmNode stm) -> getStmNames stm
   (RNode _)   -> []
   (InNode name) -> [name]
+  (IfNode stm nodes) -> getStmNames stm
+  (DoNode stm nodes) -> getStmNames stm
   (FinalNode stms _) -> error "Final nodes cannot generate edges" -- concatMap getStmNames stms
-  SoacNode {} -> error "soac nodes cannot generate edges"
+  (SoacNode _ pats _) -> patNames pats
 
 --- /Inspecting Stms ---
 
@@ -580,6 +639,12 @@ finalizeNode nt = case nt of
     return $ stmsToList stms
   RNode vn -> pure []
   InNode vn -> pure []
+  DoNode stm lst -> do
+    stmsNotFused <- mapM (finalizeNode . fst) lst
+    pure $ concat stmsNotFused ++ [stm]
+  IfNode stm lst -> do
+    stmsNotFused <- mapM (finalizeNode . fst) lst
+    pure $ concat stmsNotFused ++ [stm]
   FinalNode stms nt' -> do
     stms' <- finalizeNode nt'
     pure $ stms <> stms'
