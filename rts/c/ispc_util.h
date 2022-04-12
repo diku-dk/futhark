@@ -119,8 +119,6 @@ static inline uniform int lexical_realloc_ispc(uniform char * uniform * uniform 
   
   return err;
 }
-extern "C" unmasked uniform unsigned char * uniform realloc_ispc(uniform unsigned char * uniform ptr, uniform int64_t new_size);
-extern "C" unmasked uniform char * uniform msgprintf_ispc(uniform int64_t new_size);
 
 static inline uniform int lexical_realloc_ispc(uniform char * uniform * uniform error,
                                         unsigned char varying * uniform * uniform ptr,
