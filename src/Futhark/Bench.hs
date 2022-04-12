@@ -33,13 +33,11 @@ import Data.Time.Clock
 import qualified Data.Vector.Unboxed as U
 import Futhark.Server
 import Futhark.Test
-import Statistics.Autocorrelation
-import Statistics.Resampling (Bootstrap (..), Estimator (..), resample)
-import Statistics.Types
+import Statistics.Autocorrelation (autocorrelation)
+import Statistics.Sample (fastStdDev, mean)
 import System.Exit
 import System.FilePath
 import System.Process.ByteString (readProcessWithExitCode)
-import System.Random.MWC (create)
 import System.Timeout (timeout)
 
 -- | The runtime of a single succesful run.
@@ -51,7 +49,7 @@ newtype RunResult = RunResult {runMicroseconds :: Int}
 data Result = Result
   { runResults :: [RunResult],
     memoryMap :: M.Map T.Text Int,
-    stdErr :: T.Text
+    stdErr :: Maybe T.Text
   }
   deriving (Eq, Show)
 
@@ -95,18 +93,20 @@ instance JSON.FromJSON DataResults where
         DataResult (JSON.toString k)
           <$> ((Right <$> success v) <|> (Left <$> JSON.parseJSON v))
       success = JSON.withObject "result" $ \o ->
-        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..: "stderr"
+        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..:? "stderr"
 
 dataResultJSON :: DataResult -> (JSON.Key, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
   (JSON.fromString desc, JSON.toJSON err)
-dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr))) =
+dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr_opt))) =
   ( JSON.fromString desc,
-    JSON.object
+    JSON.object $
       [ ("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
-        ("bytes", JSON.toJSON bytes),
-        ("stderr", JSON.toJSON progerr)
+        ("bytes", JSON.toJSON bytes)
       ]
+        ++ case progerr_opt of
+          Nothing -> []
+          Just progerr -> [("stderr", JSON.toJSON progerr)]
   )
 
 benchResultJSON :: BenchResult -> (JSON.Key, JSON.Value)
@@ -145,30 +145,30 @@ data RunOptions = RunOptions
     runMinTime :: NominalDiffTime,
     runTimeout :: Int,
     runVerbose :: Int,
+    -- | If true, run the convergence phase.
+    runConvergencePhase :: Bool,
     -- | Invoked for every runtime measured during the run.  Can be
     -- used to provide a progress bar.
     runResultAction :: (Int, Maybe Double) -> IO ()
   }
 
-square :: Double -> Double
-square x =
-  x * x
-
-relativeStdErr :: Sample -> Double
-relativeStdErr vec =
-  let mu = U.foldl1 (+) vec / fromIntegral (U.length vec)
-   in let std_err = sqrt $ U.foldl1 (+) (U.map (square . subtract mu) vec) / fromIntegral (U.length vec - 1)
-       in std_err / mu
+-- | A list of @(autocorrelation,rsd)@ pairs.  When the
+-- autocorrelation is above the first element and the RSD is above the
+-- second element, we want more runs.
+convergenceCriteria :: [(Double, Double)]
+convergenceCriteria =
+  [ (0.95, 0.0010),
+    (0.75, 0.0015),
+    (0.65, 0.0025),
+    (0.45, 0.0050),
+    (0.00, 0.0100)
+  ]
 
 -- Returns the next run count.
 nextRunCount :: Int -> Double -> Double -> Int
-nextRunCount runs rsd acor
-  | acor > 0.95 && rsd > 0.0010 = div runs 2
-  | acor > 0.75 && rsd > 0.0015 = div runs 2
-  | acor > 0.65 && rsd > 0.0025 = div runs 2
-  | acor > 0.45 && rsd > 0.0050 = div runs 2
-  | rsd > 0.01 = div runs 2
-  | otherwise = 0
+nextRunCount runs rsd acor = if any check convergenceCriteria then div runs 2 else 0
+  where
+    check (acor_lb, rsd_lb) = acor > acor_lb && rsd > rsd_lb
 
 type BenchM = ExceptT T.Text IO
 
@@ -213,30 +213,46 @@ runConvergence ::
   DL.DList (RunResult, [T.Text]) ->
   BenchM (DL.DList (RunResult, [T.Text]))
 runConvergence do_run opts initial_r =
-  loop (resultRuntimes (DL.toList initial_r)) initial_r
+  let runtimes = resultRuntimes (DL.toList initial_r)
+      (n, rsd, acor) = runtimesMetrics runtimes
+   in -- If the runtimes collected during the runMinimum phase are
+      -- unstable enough that we need more in order to converge, we throw
+      -- away the runMinimum runtimes.  This is because they often exhibit
+      -- behaviour similar to a "warmup" period, and hence function as
+      -- outliers that poison the metrics we use to determine convergence.
+      -- By throwing them away we converge much faster, and still get the
+      -- right result.
+      case nextRunCount n rsd acor of
+        x
+          | x > 0,
+            runConvergencePhase opts ->
+              moreRuns mempty mempty rsd x
+          | otherwise ->
+              pure initial_r
   where
     resultRuntimes =
       U.fromList . map (fromIntegral . runMicroseconds . fst)
 
+    runtimesMetrics runtimes =
+      let n = U.length runtimes
+          rsd = (fastStdDev runtimes / sqrt (fromIntegral n)) / mean runtimes
+          (x, _, _) = autocorrelation runtimes
+       in (n, rsd, fromMaybe 1 (x U.!? 1))
+
+    sample rsd = do
+      x <- do_run
+      liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
+      pure x
+
+    moreRuns runtimes r rsd x = do
+      r' <- replicateM x $ sample rsd
+      loop (runtimes <> resultRuntimes r') (r <> DL.fromList r')
+
     loop runtimes r = do
-      g <- create
-      resampled <- liftIO $ resample g [Mean] 2500 runtimes
-
-      let rsd = relativeStdErr $ resamples (snd $ head resampled)
-          acor =
-            let (x, _, _) = autocorrelation runtimes
-             in fromMaybe 1 (x U.!? 1)
-
-      let actions = do
-            x <- do_run
-            liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
-            pure x
-
-      case nextRunCount (length r) rsd acor of
+      let (n, rsd, acor) = runtimesMetrics runtimes
+      case nextRunCount n rsd acor of
         0 -> pure r
-        x -> do
-          r' <- replicateM x actions
-          loop (runtimes <> resultRuntimes r') (r <> DL.fromList r')
+        x -> moreRuns runtimes r rsd x
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::

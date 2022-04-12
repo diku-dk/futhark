@@ -60,6 +60,7 @@ runOptions timeout_s opts =
       runMinTime = 0.5,
       runTimeout = timeout_s,
       runVerbose = optVerbose opts,
+      runConvergencePhase = True,
       runResultAction = const $ pure ()
     }
 

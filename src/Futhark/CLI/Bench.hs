@@ -28,7 +28,7 @@ import Futhark.Util.Console
 import Futhark.Util.Options
 import Statistics.Resampling (Estimator (..), resample)
 import Statistics.Resampling.Bootstrap (bootstrapBCA)
-import Statistics.Types
+import Statistics.Types (cl95, confIntLDX, confIntUDX, estError, estPoint)
 import System.Console.ANSI (clearLine)
 import System.Directory
 import System.Environment
@@ -55,6 +55,7 @@ data BenchOptions = BenchOptions
     optEntryPoint :: Maybe String,
     optTuning :: Maybe String,
     optCacheExt :: Maybe String,
+    optConvergencePhase :: Bool,
     optConcurrency :: Maybe Int,
     optVerbose :: Int,
     optTestSpec :: Maybe FilePath
@@ -78,6 +79,7 @@ initialBenchOptions =
     Nothing
     (Just "tuning")
     Nothing
+    True
     Nothing
     0
     Nothing
@@ -199,6 +201,10 @@ withProgramServer program runner extra_options f = do
       putStrLn $ inRed $ show e
       pure Nothing
 
+-- Truncate dataset name display after this many characters.
+maxDatasetNameLength :: Int
+maxDatasetNameLength = 40
+
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
@@ -218,7 +224,7 @@ runBenchmark opts futhark (program, cases) = do
 
     relevant = maybe (const True) (==) (optEntryPoint opts) . T.unpack . iosEntryPoint
 
-    pad_to = foldl max 0 $ concatMap (map (length . atMostChars 19 . runDescription) . iosTestRuns) cases
+    pad_to = foldl max 0 $ concatMap (map (length . atMostChars maxDatasetNameLength . runDescription) . iosTestRuns) cases
 
 runOptions :: ((Int, Maybe Double) -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
@@ -227,6 +233,7 @@ runOptions f opts =
       runMinTime = optMinTime opts,
       runTimeout = optTimeout opts,
       runVerbose = optVerbose opts,
+      runConvergencePhase = optConvergencePhase opts,
       runResultAction = f
     }
 
@@ -275,16 +282,19 @@ convergenceBar p spin_count us_sum i rsd' = do
     avg = fromIntegral us_sum / fromIntegral i
     spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
+data BenchPhase = Initial | Convergence
+
 mkProgressPrompt :: BenchOptions -> Int -> String -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
 mkProgressPrompt opts pad_to dataset_desc start_time
   | fancyTerminal = do
       count <- newIORef (0, 0)
+      phase_var <- newIORef Initial
       spin_count <- newIORef 0
       pure $ \(us, rsd) -> do
         putStr "\r" -- Go to start of line.
         let p s =
               putStr $
-                descString (atMostChars 40 dataset_desc) pad_to ++ s
+                descString (atMostChars maxDatasetNameLength dataset_desc) pad_to ++ s
 
         (us_sum, i) <- readIORef count
 
@@ -299,19 +309,31 @@ mkProgressPrompt opts pad_to dataset_desc start_time
                   -- other hand, it means it can sometimes shrink.
                   min time_elapsed runs_elapsed
 
-        case us of
-          Nothing ->
+        phase <- readIORef phase_var
+
+        case (us, phase, rsd) of
+          (Nothing, _, _) ->
             let elapsed = determineProgress i
              in p $ replicate 13 ' ' <> progressBar elapsed 1.0 progressBarSteps
-          Just us' -> do
+          (Just us', Initial, Nothing) -> do
             let us_sum' = us_sum + us'
                 i' = i + 1
             writeIORef count (us_sum', i')
-            case rsd of
-              Nothing -> do
-                let elapsed = determineProgress i'
-                p $ interimResult us_sum' i' elapsed 1.0
-              Just rsd' -> convergenceBar p spin_count us_sum i rsd'
+            let elapsed = determineProgress i'
+            p $ interimResult us_sum' i' elapsed 1.0
+          (Just us', Initial, Just rsd') -> do
+            -- Switched from phase 1 to convergence; discard all
+            -- prior results.
+            writeIORef count (us', 1)
+            writeIORef phase_var Convergence
+            convergenceBar p spin_count us' 1 rsd'
+          (Just us', Convergence, Just rsd') -> do
+            let us_sum' = us_sum + us'
+                i' = i + 1
+            writeIORef count (us_sum', i')
+            convergenceBar p spin_count us_sum' i' rsd'
+          (Just _, Convergence, Nothing) ->
+            pure () -- Probably should not happen.
         putStr " " -- Just to move the cursor away from the progress bar.
         hFlush stdout
   | otherwise = do
@@ -371,7 +393,7 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   when fancyTerminal $ do
     clearLine
     putStr "\r"
-    putStr $ descString (atMostChars 40 dataset_desc) pad_to
+    putStr $ descString (atMostChars maxDatasetNameLength dataset_desc) pad_to
 
   case res of
     Left err -> liftIO $ do
@@ -390,7 +412,11 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
               boot = head $ bootstrapBCA cl95 vec_runtimes resampled
 
       reportResult runtimes bootstrapCI
-      Result runtimes (getMemoryUsage errout) errout
+      -- We throw away the 'errout' because it is almost always
+      -- useless and adds too much to the .json file size.  This
+      -- behaviour could be moved into a command line option if we
+      -- wish.
+      Result runtimes (getMemoryUsage errout) Nothing
         & Right
         & DataResult dataset_desc
         & Just
@@ -549,6 +575,11 @@ commandLineOptions =
       ["no-tuning"]
       (NoArg $ Right $ \config -> config {optTuning = Nothing})
       "Do not load tuning files.",
+    Option
+      []
+      ["no-convergence-phase"]
+      (NoArg $ Right $ \config -> config {optConvergencePhase = False})
+      "Do not run convergence phase.",
     Option
       []
       ["concurrency"]
