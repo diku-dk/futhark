@@ -232,18 +232,6 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
 }
 
 // AOS <-> SOA methods
-
-static inline varying uint8 * uniform uniformize_ptr(varying uint8 * varying ptr) {
-    varying int64_t num = (varying int64_t)ptr;
-    //uniform size_t res;
-    //if (reduce_equal(num, &res)) {
-        return (varying uint8 * uniform)extract(num, 0);
-    //} else {
-    //    return (varying uint8 * uniform)res;
-    //}
-    // TODO(pema): Is this safe?
-}
-
 // -----------------------------------------------------------------------------
 static inline void memmove_1(varying uint8 * uniform dst, uniform uint8 * varying src, uniform int64_t n) {
     uniform uint8 * varying srcp = (uniform uint8 * varying) src;
@@ -270,19 +258,33 @@ static inline void memmove_1(varying uint8 * uniform dst, varying uint8 * unifor
 }
 
 static inline void memmove_1(varying uint8 * varying dst, uniform uint8 * varying src, uniform int64_t n) {
-    memmove_1(uniformize_ptr(dst), src, n);
+    foreach_unique (ptr in dst) {
+        memmove_1(ptr, src, n);
+    }
 }
 
 static inline void memmove_1(uniform uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) {
-    memmove_1(dst, uniformize_ptr(src), n);
+    foreach_unique (ptr in src) {
+        memmove_1(dst, ptr, n);
+    }
 }
 
 static inline void memmove_1(varying uint8 * varying dst, varying uint8 * uniform src, uniform int64_t n) {
-    memmove_1(uniformize_ptr(dst), src, n);
+    foreach_unique (ptr in dst) {
+        memmove_1(ptr, src, n);
+    }
 }
 
 static inline void memmove_1(varying uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) {
-    memmove_1(uniformize_ptr(dst), uniformize_ptr(src), n);
+    if (reduce_equal((varying int64_t)dst)) {
+        foreach_unique (ptr in src) {
+            memmove_1(dst, ptr, n);
+        }
+    } else {
+        foreach_unique (ptr in dst) {
+            memmove_1(ptr, src, n);
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -311,19 +313,33 @@ static inline void memmove_2(varying uint8 * uniform dst, varying uint8 * unifor
 }
 
 static inline void memmove_2(varying uint8 * varying dst, uniform uint8 * varying src, uniform int64_t n) {
-    memmove_2(uniformize_ptr(dst), src, n);
+    foreach_unique (ptr in dst) {
+        memmove_2(ptr, src, n);
+    }
 }
 
 static inline void memmove_2(uniform uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) {
-    memmove_2(dst, uniformize_ptr(src), n);
+    foreach_unique (ptr in src) {
+        memmove_2(dst, ptr, n);
+    }
 }
 
 static inline void memmove_2(varying uint8 * varying dst, varying uint8 * uniform src, uniform int64_t n) {
-    memmove_2(uniformize_ptr(dst), src, n);
+    foreach_unique (ptr in dst) {
+        memmove_2(ptr, src, n);
+    }
 }
 
 static inline void memmove_2(varying uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) {
-    memmove_2(uniformize_ptr(dst), uniformize_ptr(src), n);
+    if (reduce_equal((varying int64_t)dst)) {
+        foreach_unique (ptr in src) {
+            memmove_2(dst, ptr, n);
+        }
+    } else {
+        foreach_unique (ptr in dst) {
+            memmove_2(ptr, src, n);
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -352,19 +368,33 @@ static inline void memmove_4(varying uint8 * uniform dst, varying uint8 * unifor
 }
 
 static inline void memmove_4(varying uint8 * varying dst, uniform uint8 * varying src, uniform int64_t n) {
-    memmove_4(uniformize_ptr(dst), src, n);
+    foreach_unique (ptr in dst) {
+        memmove_4(ptr, src, n);
+    }
 }
 
 static inline void memmove_4(uniform uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) {
-    memmove_4(dst, uniformize_ptr(src), n);
+    foreach_unique (ptr in src) {
+        memmove_4(dst, ptr, n);
+    }
 }
 
 static inline void memmove_4(varying uint8 * varying dst, varying uint8 * uniform src, uniform int64_t n) {
-    memmove_4(uniformize_ptr(dst), src, n);
+    foreach_unique (ptr in dst) {
+        memmove_4(ptr, src, n);
+    }
 }
 
 static inline void memmove_4(varying uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) {
-    memmove_4(uniformize_ptr(dst), uniformize_ptr(src), n);
+    if (reduce_equal((varying int64_t)dst)) {
+        foreach_unique (ptr in src) {
+            memmove_4(dst, ptr, n);
+        }
+    } else {
+        foreach_unique (ptr in dst) {
+            memmove_4(ptr, src, n);
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -393,17 +423,31 @@ static inline void memmove_8(varying uint8 * uniform dst, varying uint8 * unifor
 }
 
 static inline void memmove_8(varying uint8 * varying dst, uniform uint8 * varying src, uniform int64_t n) {
-    memmove_8(uniformize_ptr(dst), src, n);
+    foreach_unique (ptr in dst) {
+        memmove_8(ptr, src, n);
+    }
 }
 
 static inline void memmove_8(uniform uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) {
-    memmove_8(dst, uniformize_ptr(src), n);
+    foreach_unique (ptr in src) {
+        memmove_8(dst, ptr, n);
+    }
 }
 
 static inline void memmove_8(varying uint8 * varying dst, varying uint8 * uniform src, uniform int64_t n) {
-    memmove_8(uniformize_ptr(dst), src, n);
+    foreach_unique (ptr in dst) {
+        memmove_8(ptr, src, n);
+    }
 }
 
 static inline void memmove_8(varying uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) {
-    memmove_8(uniformize_ptr(dst), uniformize_ptr(src), n);
+    if (reduce_equal((varying int64_t)dst)) {
+        foreach_unique (ptr in src) {
+            memmove_8(dst, ptr, n);
+        }
+    } else {
+        foreach_unique (ptr in dst) {
+            memmove_8(ptr, src, n);
+        }
+    }
 }
