@@ -201,7 +201,7 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
 
     GC.libDecl =<< pure
       [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {               
-                  return $id:(funName fname)($args:extra_exp, $args:in_args_c, $args:out_args_c);
+                  return $id:(funName fname)($args:extra_exp, $args:out_args_c, $args:in_args_c);
                 }|]
 
     let ispc_extern =
