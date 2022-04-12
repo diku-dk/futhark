@@ -63,7 +63,7 @@ createLocalArrays (Count groupSize) m types = do
       scanl (\off tySize -> alignTo off tySize + warpSize * tySize) warpSize $
         map primByteSize types
 
-  sComment "Allocate reused shared memeory" $ return ()
+  sComment "Allocate reused shared memeory" $ pure ()
 
   localMem <- sAlloc "local_mem" size (Space "local")
   transposeArrayLength <- dPrimV "trans_arr_len" workSize
@@ -99,7 +99,7 @@ createLocalArrays (Count groupSize) m types = do
         localMem
         $ IxFun.iotaOffset off' [warpSize]
 
-  return (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
+  pure (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 
 inBlockScanLookback ::
   KernelConstants ->

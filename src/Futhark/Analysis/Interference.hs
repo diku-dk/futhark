@@ -81,7 +81,7 @@ analyseStm lumap inuse0 stm =
         <&> namesFromList
         <&> namesIntersection inuse_outside
 
-    return
+    pure
       ( (inuse_outside `namesSubtract` last_use_mems `namesSubtract` lus)
           <> new_mems,
         (lus <> last_use_mems) `namesSubtract` new_mems,
@@ -120,13 +120,13 @@ analyseExp lumap inuse_outside expr =
     If _ then_body else_body _ -> do
       res1 <- analyseBody lumap inuse_outside then_body
       res2 <- analyseBody lumap inuse_outside else_body
-      return $ res1 <> res2
+      pure $ res1 <> res2
     DoLoop merge _ body ->
       analyseLoopParams merge <$> analyseBody lumap inuse_outside body
     Op (Inner (SegOp segop)) -> do
       analyseSegOp lumap inuse_outside segop
     _ ->
-      return mempty
+      pure mempty
 
 analyseKernelBody ::
   LocalScope GPUMem m =>
@@ -155,7 +155,7 @@ analyseStms lumap inuse0 stms = do
   where
     helper (inuse, lus, graph) stm = do
       (inuse', lus', graph') <- analyseStm lumap inuse stm
-      return (inuse', lus' <> lus, graph' <> graph)
+      pure (inuse', lus' <> lus, graph' <> graph)
 
 analyseSegOp ::
   LocalScope GPUMem m =>
@@ -172,7 +172,7 @@ analyseSegOp lumap inuse (SegScan _ _ binops _ body) = do
 analyseSegOp lumap inuse (SegHist _ _ histops _ body) = do
   (inuse', lus', graph) <- analyseKernelBody lumap inuse body
   (inuse'', lus'', graph') <- mconcat <$> mapM (analyseHistOp lumap inuse') histops
-  return (inuse'', lus' <> lus'', graph <> graph')
+  pure (inuse'', lus' <> lus'', graph <> graph')
 
 segWithBinOps ::
   LocalScope GPUMem m =>
@@ -188,7 +188,7 @@ segWithBinOps lumap inuse binops body = do
       <$> mapM
         (analyseSegBinOp lumap inuse')
         binops
-  return (inuse'', lus' <> lus'', graph <> graph')
+  pure (inuse'', lus' <> lus'', graph <> graph')
 
 analyseSegBinOp ::
   LocalScope GPUMem m =>
@@ -266,7 +266,7 @@ analyseGPU lumap stms = do
           (\x y -> if x /= y then cartesian makeEdge x y else mempty)
           inv_size_map
           inv_size_map
-  return $ graph <> new_edges
+  pure $ graph <> new_edges
 
 -- | Return a mapping from memory blocks to their element sizes in the given
 -- statements.
@@ -278,7 +278,7 @@ memSizes stms =
     memSizesStm (Let pat _ e) = do
       arraySizes <- fmap mconcat <$> mapM memElemSize $ patNames pat
       arraySizes' <- memSizesExp e
-      return $ arraySizes <> arraySizes'
+      pure $ arraySizes <> arraySizes'
     memSizesExp :: LocalScope GPUMem m => Exp GPUMem -> m (Map VName Int)
     memSizesExp (Op (Inner (SegOp segop))) =
       let body = segBody segop
@@ -289,15 +289,15 @@ memSizes stms =
     memSizesExp (If _ then_body else_body _) = do
       then_res <- memSizes $ bodyStms then_body
       else_res <- memSizes $ bodyStms else_body
-      return $ then_res <> else_res
+      pure $ then_res <> else_res
     memSizesExp (DoLoop _ _ body) =
       memSizes $ bodyStms body
-    memSizesExp _ = return mempty
+    memSizesExp _ = pure mempty
 
 -- | Return a mapping from memory blocks to the space they are allocated in.
 memSpaces :: LocalScope GPUMem m => Stms GPUMem -> m (Map VName Space)
 memSpaces stms =
-  return $ foldMap getSpacesStm stms
+  pure $ foldMap getSpacesStm stms
   where
     getSpacesStm :: Stm GPUMem -> Map VName Space
     getSpacesStm (Let (Pat [PatElem name _]) _ (Op (Alloc _ sp))) =
@@ -330,12 +330,12 @@ analyseGPU' lumap stms =
       inScopeOf stm $ do
         res1 <- analyseGPU' lumap (bodyStms then_body)
         res2 <- analyseGPU' lumap (bodyStms else_body)
-        return (res1 <> res2)
+        pure (res1 <> res2)
     helper stm@Let {stmExp = DoLoop merge _ body} =
       fmap (analyseLoopParams merge) . inScopeOf stm $
         analyseGPU' lumap $ bodyStms body
     helper stm =
-      inScopeOf stm $ return mempty
+      inScopeOf stm $ pure mempty
 
 nameInfoToMemInfo :: Mem rep inner => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
@@ -350,9 +350,9 @@ memInfo vname = do
   summary <- asksScope (fmap nameInfoToMemInfo . M.lookup vname)
   case summary of
     Just (MemArray _ _ _ (ArrayIn mem _)) ->
-      return $ Just mem
+      pure $ Just mem
     _ ->
-      return Nothing
+      pure Nothing
 
 -- | Returns a mapping from memory block to element size. The input is the
 -- `VName` of a variable (supposedly an array), and the result is a mapping from
@@ -362,6 +362,6 @@ memElemSize vname = do
   summary <- asksScope (fmap nameInfoToMemInfo . M.lookup vname)
   case summary of
     Just (MemArray pt _ _ (ArrayIn mem _)) ->
-      return $ M.singleton mem (primByteSize pt)
+      pure $ M.singleton mem (primByteSize pt)
     _ ->
-      return mempty
+      pure mempty

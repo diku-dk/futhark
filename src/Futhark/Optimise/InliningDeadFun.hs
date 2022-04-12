@@ -96,8 +96,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
                 | otherwise =
                     copyPropagateInFun simpleSOACS vtable' fd
 
-              onFun fd =
-                simplifyFun' <=< inlineInFunDef inlinemap $ fd
+              onFun = simplifyFun' <=< inlineInFunDef inlinemap
 
           to_inline_in' <- parMapM onFun to_inline_in
 
@@ -244,7 +243,7 @@ addLocations attrs caller_safety more_locs = fmap onStm
           runIdentity $
             mapSOACM
               identitySOACMapper
-                { mapOnSOACLambda = return . onLambda
+                { mapOnSOACLambda = pure . onLambda
                 }
               soac
       where
@@ -258,7 +257,7 @@ addLocations attrs caller_safety more_locs = fmap onStm
     onExp =
       mapExp
         identityMapper
-          { mapOnBody = const $ return . onBody attrs
+          { mapOnBody = const $ pure . onBody attrs
           }
 
     withAttrs attrs' aux = aux {stmAuxAttrs = attrs' <> stmAuxAttrs aux}

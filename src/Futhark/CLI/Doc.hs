@@ -34,7 +34,7 @@ main = mainWithOptions initialDocConfig commandLineOptions "options... -o outdir
           dumpError newFutharkConfig err
           exitWith $ ExitFailure 2
         Right () ->
-          return ()
+          pure ()
     f _ _ = Nothing
 
     m :: DocConfig -> FilePath -> FutharkM ()

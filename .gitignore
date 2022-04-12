@@ -17,6 +17,7 @@ dist-newstyle
 
 # Ignore IDE info
 .hie
+.vscode
 
 # Ignore side-effects of compilation.
 *.aux
@@ -31,7 +32,6 @@ dist-newstyle
 *.toc
 *.vrb
 *.nav
-*.nix
 
 # Ignore core dumps.
 core
