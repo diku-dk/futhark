@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Fusion would mistakenly try to treat some loops with irregular sizes
   (#1631).
 
+* Memory annotation bug for non-inlined functions (#1634).
+
 ## [0.21.8]
 
 ### Added
