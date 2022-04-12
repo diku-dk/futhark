@@ -297,10 +297,6 @@ extractVectorLane j code = do
           emit $ Imp.SetScalar (tvVar tv) e
           emit $ Imp.Op $ Imp.ExtractLane vname (untyped $ tvExp tv) ut_exp
         _ -> emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp
-    Imp.Read v1 v2 (Imp.Count iexp) pt space bla2 -> do
-      tv <- dPrim "tmp" (IntType Int64)     
-      emit $ Imp.Op $ Imp.ExtractLane (tvVar tv) (untyped iexp) ut_exp
-      emit $ Imp.Read v1 v2 (Imp.Count (tvExp tv)) pt space bla2 
     _ -> 
       emit code'
 
