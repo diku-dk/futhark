@@ -142,6 +142,10 @@ char * msgprintf_ispc(size_t new_size) {
   return msgprintf("Failed to allocate memory.\nAttempted allocation: %12lld bytes\n",
                        (long long) new_size);
 }
+char * msgprintf_ispc2(size_t new_size, size_t amount) {
+  return msgprintf("Failed to allocate memory.\nAttempted allocation: %12lld bytes times %i\n",
+                       (long long) new_size, amount);
+}
 
 static int lexical_realloc(char **error, unsigned char **ptr, size_t *old_size, size_t new_size) {
   unsigned char *new = realloc(*ptr, new_size);

@@ -100,12 +100,6 @@ static inline uniform int lexical_realloc_ispc(uniform char * uniform * uniform 
                                         unsigned char varying * uniform * uniform ptr,
                                         size_t varying * uniform old_size,
                                         uniform int64_t new_size) {
-  //TODO(LOUIS): FIX
-  //if (*ptr != NULL) free(*ptr);
-  //varying unsigned char* uniform alloc = uniform new varying uchar[new_size];
-  //*ptr = alloc;
-  //*old_size = new_size;
-  //return FUTHARK_SUCCESS;
   uniform int err = FUTHARK_SUCCESS;
   uniform unsigned char * uniform memptr = realloc_ispc((uniform unsigned char * uniform )*ptr, 
                                                         new_size*programCount);
