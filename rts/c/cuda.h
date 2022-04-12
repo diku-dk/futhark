@@ -556,12 +556,14 @@ static char* cuda_module_setup(struct cuda_context *ctx,
       if (cuModuleLoadData(&ctx->module, ptx) == CUDA_SUCCESS) {
         if (ctx->cfg.logging) {
           fprintf(stderr, "Success!\n");
-          loaded_ptx_from_cache = 1;
-        } else {
-          fprintf(stderr, "Failed!\n");
-          free(ptx);
-          ptx = NULL;
         }
+        loaded_ptx_from_cache = 1;
+      } else {
+        if (ctx->cfg.logging) {
+          fprintf(stderr, "Failed!\n");
+        }
+        free(ptx);
+        ptx = NULL;
       }
     }
   }

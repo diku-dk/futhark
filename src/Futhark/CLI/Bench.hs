@@ -54,6 +54,7 @@ data BenchOptions = BenchOptions
     optIgnoreFiles :: [Regex],
     optEntryPoint :: Maybe String,
     optTuning :: Maybe String,
+    optCacheExt :: Maybe String,
     optConcurrency :: Maybe Int,
     optVerbose :: Int,
     optTestSpec :: Maybe FilePath
@@ -76,6 +77,7 @@ initialBenchOptions =
     []
     Nothing
     (Just "tuning")
+    Nothing
     Nothing
     0
     Nothing
@@ -200,7 +202,7 @@ withProgramServer program runner extra_options f = do
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
-  let runopts = optExtraOptions opts ++ tuning_opts
+  let runopts = optExtraOptions opts ++ tuning_opts ++ determineCache (optCacheExt opts) program
   withProgramServer program (optRunner opts) runopts $ \server ->
     mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where
@@ -534,6 +536,14 @@ commandLineOptions =
           "EXTENSION"
       )
       "Look for tuning files with this extension (defaults to .tuning).",
+    Option
+      []
+      ["cache-extension"]
+      ( ReqArg
+          (\s -> Right $ \config -> config {optCacheExt = Just s})
+          "EXTENSION"
+      )
+      "Use cache files with this extension (none by default).",
     Option
       []
       ["no-tuning"]
