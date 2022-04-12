@@ -35,6 +35,11 @@ OPTIONS
   The backend used when compiling Futhark programs (without leading
   ``futhark``, e.g. just ``opencl``).
 
+--cache-extension=EXTENSION
+
+  For a program ``foo.fut``, pass ``--cache-file foo.fut.EXTENSION``.
+  By default, ``--cache-file`` is not passed.
+
 --concurrency=NUM
 
   The number of benchmark programs to prepare concurrently.  Defaults
