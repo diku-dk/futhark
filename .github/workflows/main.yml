@@ -290,7 +290,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests
+        futhark test -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --runner=tools/oclgrindrunner.sh tests
 
   test-pyopencl:
     runs-on: ubuntu-20.04
