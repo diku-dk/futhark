@@ -746,7 +746,7 @@ allocInExp (DoLoop merge form (Body () bodystms bodyres)) =
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   -- We assume that every array is going to be in its own memory.
-  pure $ Apply fname args' (mems ++ memoryInDeclExtType 0 rettype) loc
+  pure $ Apply fname args' (mems ++ memoryInDeclExtType num_arrays rettype) loc
   where
     mems = replicate num_arrays (MemMem DefaultSpace)
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf) rettype
