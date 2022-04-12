@@ -1,5 +1,7 @@
 // TODO(pema): Error handling
 
+#define __ATOMIC_RELAXED 0
+
 #ifndef __ISPC_STRUCT_memblock__
 #define __ISPC_STRUCT_memblock__
 struct memblock {
@@ -91,16 +93,16 @@ static uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
   uniform int err = 0;
 
   varying struct memblock _lhs = *lhs;
-  uniform struct memblock aos[programCount];
-  aos[programIndex] = _lhs;
+  uniform struct memblock aoss[programCount];
+  aoss[programIndex] = _lhs;
 
   foreach_active(i){
     err |= memblock_unref(ctx,
-		   &aos[i],
+		   &aoss[i],
 		   lhs_desc);
   }
 
-  *lhs = aos[programIndex];
+  *lhs = aoss[programIndex];
 
   return err;
 }
@@ -133,13 +135,13 @@ static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
   uniform int err = 0;
 
   varying struct memblock _block = *block;
-  uniform struct memblock aos[programCount];
-  aos[programIndex] = _block;
+  uniform struct memblock aoss[programCount];
+  aoss[programIndex] = _block;
 
   foreach_active(i){
-    err |= memblock_alloc(ctx, &aos[i], size, block_desc);
+    err |= memblock_alloc(ctx, &aoss[i], size, block_desc);
   }
-  *block = aos[programIndex];
+  *block = aoss[programIndex];
 
   return err;
 }
@@ -151,12 +153,12 @@ static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
   uniform int err = 0;
 
   varying struct memblock _block = *block;
-  uniform struct memblock aos[programCount];
-  aos[programIndex] = _block;
+  uniform struct memblock aoss[programCount];
+  aoss[programIndex] = _block;
   foreach_active(i){
-    err |= memblock_alloc(ctx, &aos[i], extract(size, i), block_desc);
+    err |= memblock_alloc(ctx, &aoss[i], extract(size, i), block_desc);
   }
-  *block = aos[programIndex];
+  *block = aoss[programIndex];
 
   return err;
 }
@@ -174,20 +176,20 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
 
   varying struct memblock _lhs = *lhs;
   varying struct memblock _rhs = *rhs;
-  uniform struct memblock aos1[programCount];
-  aos1[programIndex] = _lhs;
+  uniform struct memblock aoss1[programCount];
+  aoss1[programIndex] = _lhs;
 
-  uniform struct memblock aos2[programCount];
-  aos2[programIndex] = _rhs;
+  uniform struct memblock aoss2[programCount];
+  aoss2[programIndex] = _rhs;
 
   foreach_active(i) {
       err |= memblock_set(ctx,
-      &aos1[i],
-      &aos2[i],
+      &aoss1[i],
+      &aoss2[i],
       lhs_desc);
   }
-  *lhs = aos1[programIndex];
-  *rhs = aos2[programIndex];
+  *lhs = aoss1[programIndex];
+  *rhs = aoss2[programIndex];
 
   return err;
 }
@@ -199,16 +201,77 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
   uniform int err = 0;
 
   varying struct memblock _lhs = *lhs;
-  uniform struct memblock aos1[programCount];
-  aos1[programIndex] = _lhs;
+  uniform struct memblock aoss1[programCount];
+  aoss1[programIndex] = _lhs;
 
   foreach_active(i) {
       err |= memblock_set(ctx,
-      &aos1[i],
+      &aoss1[i],
       rhs,
       lhs_desc);
   }
-  *lhs = aos1[programIndex];
+  *lhs = aoss1[programIndex];
 
   return err;
 }
+
+
+extern "C" unmasked uniform int atomic_fetch_add_int32(uniform int *, uniform int arg, uniform int dummy);
+extern "C" unmasked uniform int atomic_fetch_sub_int32(uniform int *, uniform int arg, uniform int dummy);
+extern "C" unmasked uniform int atomic_fetch_and_int32(uniform int *, uniform int arg, uniform int dummy);
+extern "C" unmasked uniform int  atomic_fetch_or_int32(uniform int *, uniform int arg, uniform int dummy);
+extern "C" unmasked uniform int atomic_fetch_xor_int32(uniform int *, uniform int arg, uniform int dummy);
+
+uniform int __atomic_fetch_add(uniform int * uniform obj, uniform int arg, uniform int dummy){
+  return atomic_fetch_add_int32(obj,arg,dummy);
+}
+uniform int __atomic_fetch_sub(uniform int * uniform obj, uniform int arg, uniform int dummy){
+  return atomic_fetch_sub_int32(obj,arg,dummy);
+}
+uniform int __atomic_fetch_and(uniform int * uniform obj, uniform int arg, uniform int dummy){
+  return atomic_fetch_and_int32(obj,arg,dummy);
+}
+uniform int __atomic_fetch_or(uniform int  * uniform obj, uniform int arg, uniform int dummy){
+  return atomic_fetch_or_int32(obj,arg,dummy);
+}
+uniform int __atomic_fetch_xor(uniform int * uniform obj, uniform int arg, uniform int dummy){
+  return atomic_fetch_xor_int32(obj,arg,dummy);
+}
+
+varying int __atomic_fetch_add(uniform int * obj, int arg, uniform int dummy){
+  int temp = *obj;
+  foreach_active(i){
+    atomic_fetch_add_int32((int *)extract((int64)obj,i), extract(arg,i), dummy);
+  }
+  return temp;
+}
+varying int __atomic_fetch_sub(uniform int * obj, int arg, uniform int dummy){
+  int temp = *obj;
+  foreach_active(i){
+    atomic_fetch_sub_int32((int *)extract((int64)obj,i), extract(arg,i), dummy);
+  }
+  return temp;
+}
+varying int __atomic_fetch_and(uniform int * obj, int arg, uniform int dummy){
+  int temp = *obj;
+  foreach_active(i){
+    atomic_fetch_and_int32((int *)extract((int64)obj,i), extract(arg,i), dummy);
+  }
+  return temp;
+}
+varying int __atomic_fetch_or(uniform int  * obj, int arg, uniform int dummy){
+  int temp = *obj;
+  foreach_active(i){
+    atomic_fetch_or_int32((int *)extract((int64)obj,i), extract(arg,i), dummy);
+  }
+  return temp;
+}
+varying int __atomic_fetch_xor(uniform int * obj, int arg, uniform int dummy){
+  int temp = *obj;
+  foreach_active(i){
+    atomic_fetch_xor_int32((int *)extract((int64)obj,i), extract(arg,i), dummy);
+  }
+  return temp;
+}
+
+

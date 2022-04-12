@@ -148,4 +148,25 @@ static int lexical_realloc(char **error, unsigned char **ptr, size_t *old_size, 
   }
 }
 
+int atomic_fetch_add_int32(int *obj, int arg, int dummy){
+  return __atomic_fetch_add(obj, arg, __ATOMIC_RELAXED);
+}
+
+int atomic_fetch_sub_int32(int *obj, int arg, int dummy){
+  return __atomic_fetch_sub(obj, arg, __ATOMIC_RELAXED);
+}
+
+int atomic_fetch_and_int32(int *obj, int arg, int dummy){
+  return __atomic_fetch_and(obj, arg, __ATOMIC_RELAXED);
+}
+
+int atomic_fetch_or_int32(int *obj, int arg, int dummy){
+  return __atomic_fetch_or(obj, arg, __ATOMIC_RELAXED);
+}
+
+int atomic_fetch_xor_int32(int *obj, int arg, int dummy){
+  return __atomic_fetch_xor(obj, arg, __ATOMIC_RELAXED);
+}
+
+
 // End of util.h.
