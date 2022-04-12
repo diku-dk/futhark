@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   option on `futhark test` and `futhark bench`.  These also work for
   the non-GPU backends, but currently have no effect.  (#1614)
 
+* Aleksander Junge has improved `futhark bench` such that it
+  intelligently chooses how many runs to perform (#1335).
+
 ### Removed
 
 ### Changed
