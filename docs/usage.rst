@@ -87,6 +87,13 @@ All generated executables support the following options.
     used.  This option may also enable more conservative (and slower)
     execution, such as frequently synchronising to check for errors.
 
+  ``--cache-file=FILE``
+
+    Create (if necessary) and use data in the provided cache file to
+    speed up subsequent launches of the same program.  The cache file
+    is automatically updated by the running program as necessary.  It
+    is safe to delete at any time, and will be recreated as necessary.
+
 Non-Server Executable Options
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
