@@ -105,8 +105,15 @@ runBenchmarks opts paths = do
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
-  putStrLn $ "Reporting mean runtime of at least " ++ show (optMinRuns opts) ++ " runs for each dataset."
-  putStrLn "More runs automatically performed to ensure accurate measurement."
+  putStrLn $
+    "Reporting arithmetic mean runtime of at least "
+      <> show (optMinRuns opts)
+      <> " runs for each dataset (min "
+      <> show (optMinTime opts)
+      <> ")."
+  when (optConvergencePhase opts) . putStrLn $
+    "More runs automatically performed for up to " <> show (optConvergenceMaxTime opts)
+      <> " to ensure accurate measurement."
 
   futhark <- FutharkExe . compFuthark <$> compileOptions opts
 
