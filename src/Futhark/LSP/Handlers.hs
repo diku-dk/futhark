@@ -5,6 +5,8 @@ module Futhark.LSP.Handlers (handlers) where
 import Control.Concurrent.MVar (MVar)
 import Control.Lens ((^.))
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Data.Aeson.Types (Value (Array, String))
+import qualified Data.Vector as V
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromMVar)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (getHoverInfoFromState)
@@ -21,7 +23,8 @@ handlers state_mvar =
       onDocumentOpenHandler state_mvar,
       onDocumentCloseHandler,
       onDocumentSaveHandler state_mvar,
-      onDocumentChangeHandler state_mvar
+      onDocumentChangeHandler state_mvar,
+      onDocumentFocusHandler state_mvar
     ]
 
 onInitializeHandler :: Handlers (LspM ())
@@ -42,6 +45,14 @@ onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -
           rsp = Hover ms (Just range)
       responder (Right $ Just rsp)
     Nothing -> responder (Right Nothing)
+
+onDocumentFocusHandler :: MVar State -> Handlers (LspM ())
+onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/onFocusTextDocument") $ \msg -> do
+  debug "Got custom request: onFocusTextDocument"
+  let NotificationMessage _ _ (Array vector_param) = msg
+      String focused_uri = V.head vector_param -- only one parameter passed from the client
+  debug $ show focused_uri
+  tryReCompile state_mvar (uriToFilePath (Uri focused_uri))
 
 onDocumentSaveHandler :: MVar State -> Handlers (LspM ())
 onDocumentSaveHandler state_mvar = notificationHandler STextDocumentDidSave $ \msg -> do
