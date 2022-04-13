@@ -4,7 +4,13 @@ import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
+import Futhark.Compiler.Program
+  ( LoadedFile (lfPath),
+    LoadedProg (lpFiles),
+    lpWarnings,
+    noLoadedProg,
+    reloadProg,
+  )
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
@@ -22,9 +28,15 @@ tryTakeStateFromMVar state_mvar file_path = do
       new_state <- tryCompile file_path (State $ Just noLoadedProg)
       liftIO $ putMVar state_mvar new_state
       pure new_state
-    Just _ -> do
-      liftIO $ putMVar state_mvar old_state
-      pure old_state
+    Just loadedProg ->
+      if file_path `elem` map (Just . lfPath) (lpFiles loadedProg)
+        then do
+          liftIO $ putMVar state_mvar old_state
+          pure old_state
+        else do
+          new_state <- tryCompile file_path old_state
+          liftIO $ putMVar state_mvar new_state
+          pure new_state
 
 -- | Try to (re)-compile, replace old state if successful.
 tryReCompile :: MVar State -> Maybe FilePath -> LspT () IO ()
