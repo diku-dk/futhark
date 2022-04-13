@@ -230,7 +230,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-  ('index', 'Futhark.tex', 'Futhark Documentation',
+  ('index', 'Futhark.tex', 'Futhark User\'s Guide',
    'DIKU', 'manual'),
 ]
 
