@@ -17,6 +17,15 @@ This reference describes only the language itself.  Documentation for
 the built-in prelude is `available elsewhere
 <https://futhark-lang.org/docs/prelude>`_.
 
+Comments
+--------
+
+Line comments are indicated with ``--`` and continue until end of
+line.  A contiguous block of line comments beginning with ``-- |`` is
+a *documentation comment* and has special meaning to documentation
+tools.  Documentation comments are only allowed immediately before
+declarations.
+
 Identifiers and Keywords
 ------------------------
 
