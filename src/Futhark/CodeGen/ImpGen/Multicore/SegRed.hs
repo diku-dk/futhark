@@ -78,7 +78,7 @@ renameSlug slug = do
   let lambda = segBinOpLambda op
   lambda' <- renameLambda lambda
   let op' = op { segBinOpLambda = lambda' }
-  return slug { slugOp = op' }
+  pure slug { slugOp = op' }
 
 nonsegmentedReduction ::
   Pat LetDecMem ->
@@ -103,6 +103,9 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
 
   let path
        | comm && scalars = reductionStage1CommScalar
+       -- TODO(pema): This prevents us from using vectorizing the map part
+       -- Figure out if this is worth doing, or if we should just prefer the
+       -- reductionStage1NonCommScalar path?
        | arrays          = reductionStage1Array
        | scalars         = reductionStage1NonCommScalar
        | otherwise       = reductionStage1Fallback
@@ -319,7 +322,6 @@ reductionStage1Array space slugs kbody = do
     lparams <- collect $ genBinOpParams slugs
     (slug_local_accs, uniform_prebody) <- collect' $ genAccumulators slugs
     -- Put the accumulators outside of the kernel, so they are forced uniform
-    -- TODO(pema): This is a bit of a hack
     emit uniform_prebody
     inISPC $ do
       -- Put the lambda params inside the kernel so they are varying

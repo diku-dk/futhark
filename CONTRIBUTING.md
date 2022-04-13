@@ -1,7 +1,11 @@
 ## How to contribute to the Futhark compiler
 
-See also [Get Involved](https://futhark-lang.org/getinvolved.html) on
-the main website.
+* See [Get Involved](https://futhark-lang.org/getinvolved.html) on
+  the main website.
+
+* Read [HACKING.md](HACKING.md)
+
+* Read [STYLE.md](STYLE.md)
 
 #### **Did you find a bug?**
 

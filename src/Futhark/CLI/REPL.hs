@@ -153,8 +153,8 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
   (prog, tenv, ienv) <- case maybe_file of
     Nothing -> do
       -- Load the builtins through the type checker.
-      (_, prog) <-
-        badOnLeft prettyProgramErrors =<< liftIO (reloadProg prev_prog [])
+      prog <-
+        badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [])
       -- Then into the interpreter.
       ienv <-
         foldM
@@ -167,8 +167,8 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
 
       pure (prog, tenv, ienv')
     Just file -> do
-      (ws, prog) <- badOnLeft prettyProgramErrors =<< liftIO (reloadProg prev_prog [file])
-      liftIO $ putStrLn $ pretty ws
+      prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file])
+      liftIO $ putStrLn $ pretty $ lpWarnings prog
 
       ienv <-
         foldM
@@ -181,7 +181,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
 
       pure (prog, tenv, ienv')
 
-  return
+  pure
     FutharkiState
       { futharkiProg = prog,
         futharkiCount = count,
@@ -196,7 +196,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-    prettyProgramErrors = pretty . pprProgramErrors
+    prettyProgErrors = pretty . pprProgErrors
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -266,8 +266,8 @@ onDec d = do
   cur_prog <- gets futharkiProg
   imp_r <- liftIO $ extendProg cur_prog files
   case imp_r of
-    Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgramErrors e
-    Right (_ws, prog) -> do
+    Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgErrors e
+    Right prog -> do
       env <- gets futharkiEnv
       let (tenv, ienv) = extendEnvs prog env (map fst $ decImports d)
           imports = lpImports prog
@@ -321,7 +321,7 @@ breakForReason s top _ =
     && locOf top `notElem` futharkiSkipBreaks s
 
 runInterpreter :: F I.ExtOp a -> FutharkiM (Either I.InterpreterError a)
-runInterpreter m = runF m (return . Right) intOp
+runInterpreter m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) =
       pure $ Left err
@@ -374,7 +374,7 @@ runInterpreter m = runF m (return . Right) intOp
       c
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
-runInterpreter' m = runF m (return . Right) intOp
+runInterpreter' m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do

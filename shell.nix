@@ -1,9 +1,7 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-  unstable = import <nixos-unstable> {};
-
-ispc = pkgs.ispc.overrideAttrs (oldAttrs: rec {
+  ispc = pkgs.ispc.overrideAttrs (oldAttrs: rec {
     version = "1.17.0";
     src = builtins.fetchTarball {
       url = "https://github.com/ispc/ispc/archive/refs/tags/v${version}.tar.gz";
@@ -21,18 +19,17 @@ pkgs.stdenv.mkDerivation {
     pkgs.file
     pkgs.git
     pkgs.git-annex
-    #pkgs.ghc
-    unstable.haskell.compiler.ghc902
-    #pkgs.ispc
-    pkgs.stack
+    pkgs.ghc
+    pkgs.parallel
     pkgs.haskellPackages.weeder
+    pkgs.haskellPackages.apply-refact
     pkgs.hlint
     pkgs.pkgconfig
     pkgs.zlib
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
-    pkgs.haskell.packages.ghc921.ormolu_0_4_0_0
+    pkgs.haskell.packages.ghc922.ormolu_0_4_0_0
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
@@ -46,7 +43,4 @@ pkgs.stdenv.mkDerivation {
     [ pkgs.opencl-headers
       pkgs.ocl-icd ]
   ;
-  shellHooks=''
-    export PATH=$PATH:~/.local/bin
-  '';
 }

@@ -1,5 +1,10 @@
 packages: futhark.cabal
 index-state: 2022-02-03T19:05:34Z
 
+source-repository-package
+  type: git
+  location: https://github.com/pema99/language-c-quote.git
+  tag: f1cdbdca33a79d8e9301cad981fd35ef7129f2d6
+
 package futhark
   ghc-options: -Werror -j -fwrite-ide-info -hiedir=.hie
