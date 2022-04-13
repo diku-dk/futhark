@@ -6,23 +6,22 @@ Futhark Compared to Other Functional Languages
 This guide is intended for programmers who are familiar with other functional
 languages and want to start working with Futhark.
 
-Futhark is a simple language with a complex compiler.
-Functional programming is fundamentally well suited to
-data-parallelism, so Futhark's syntax and underlying concepts are taken directly
-from established functional languages; mostly from Haskell and the
-members of the ML family.  While Futhark does add a few small
-conveniences (built-in array types) and one complicated and unusual
-feature (in-place updates via uniqueness types, see
-:ref:`in-place-updates`), a programmer familiar with a common
-functional language should be able to understand the meaning of a
-Futhark program, and quickly begin writing their own programs.  To
-speed up this process, we describe here some of the various
-quirks and unexpected limitations imposed by Futhark. We also
-recommended reading some of the `example programs`_ along with this guide.
-The guide does *not* cover all Futhark features worth knowing, so do also
-skim :ref:`language-reference`.
+Futhark is a simple language with a complex compiler.  Functional
+programming is fundamentally well suited to data parallelism, so
+Futhark's syntax and underlying concepts are taken directly from
+established functional languages such as Haskell and the ML family.
+While Futhark does add a few small conveniences (built-in array types)
+and one complicated and unusual feature (in-place updates via
+uniqueness types, see :ref:`in-place-updates`), a programmer familiar
+with a common functional language should be able to understand the
+meaning of a Futhark program and quickly begin writing their own
+programs.  To speed up this process, we describe here some of the
+various quirks and unexpected limitations imposed by Futhark. We also
+recommended reading some of the `example programs`_ along with this
+guide.  The guide does *not* cover all Futhark features worth knowing,
+so do also skim :ref:`language-reference`.
 
-.. _`example programs`: https://github.com/diku-dk/futhark/tree/master/examples
+.. _`example programs`: https://futhark-lang.org/examples.html
 
 Basic Syntax
 ------------
@@ -36,7 +35,7 @@ Names are lexically divided into *identifiers* and *symbols*:
   numbers, underscores, and apostrophes.
 
 * *Symbols* contain the characters found in the default operators
-  (``+-*/%=!><|&^``)
+  (``+-*/%=!><|&^``).
 
 All function and variable names must be identifiers, and all infix
 operators are symbols.  An identifier can be used as an infix operator
@@ -53,8 +52,8 @@ the longest prefix of *op*.  For example, ``<<=`` would have the
 same fixity as ``<<``, and ``=<<`` the same as ``=``.  This rule is the
 same as the rule found in OCaml and F#.
 
-Top-level functions and values are defined with ``let``, as in OCaml
-and F#.
+Top-level functions and values are defined with ``def``.  Local
+variables are bound with ``let``.
 
 Evaluation
 ----------
@@ -81,7 +80,7 @@ library functions (in particular ``map``, ``reduce``, ``scan``, and
 Currying and partial application work as usual (although functions
 are not fully first class; see `Types`_).  Some Futhark language
 constructs look like functions, but are not.  This means they cannot
-be partially applied.  These include ``unsafe`` and ``assert``.
+be partially applied.  These ``assert``.
 
 Lambda terms are written as ``\x -> x + 2``, as in Haskell.
 
@@ -126,13 +125,13 @@ Sum types are defined as constructors separated by a vertical bar
 ``#blue``, where the latter has an ``i32`` as payload.  The terms
 ``#red`` and ``#blue 2`` produce values of this type.  Constructor
 applications must always be fully saturated.  Due to the structural
-typing, type annotations are usually necessary to resolve ambiguities.
-For example, the term ``#blue 2`` can produce a value of *any type*
-that has an appropriate constructor.
+type system, type annotations are sometimes necessary to resolve
+ambiguities.  For example, the term ``#blue 2`` can produce a value of
+*any type* that has an appropriate constructor.
 
-Function types are supported with the usual ``a -> b``, and functions can be
-passed as arguments to other functions.  However, there are some
-restrictions:
+Function types are written with the usual ``a -> b`` notation, and
+functions can be passed as arguments to other functions.  However,
+there are some restrictions:
 
 * A function cannot be put in an array (but a record or tuple is
   fine).
@@ -143,7 +142,7 @@ restrictions:
 
 Function types interact with type parameters in a subtle way::
 
-  let id 't (x: t) = x
+  def id 't (x: t) = x
 
 This declaration defines a function ``id`` that has a type parameter
 ``t``.  Here, ``t`` is an *unlifted* type parameter, which is
@@ -153,7 +152,7 @@ array.  However, it means that this identity function cannot be called
 on a functional value.  Instead, we probably want a *lifted* type
 parameter::
 
-  let id '^t (x: t) = x
+  def id '^t (x: t) = x
 
 Such *lifted* type parameters are not restricted from being
 instantiated with function types.  On the other hand, in the function
@@ -163,7 +162,7 @@ types.
 Futhark supports Hindley-Milner type inference (with some
 restrictions), so we could also just write it as::
 
-  let id x = x
+  def id x = x
 
 Type abbreviations are possible::
 

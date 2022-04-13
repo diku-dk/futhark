@@ -182,10 +182,10 @@ Context
 
 .. c:function:: char *futhark_context_get_error(struct futhark_context *ctx)
 
-   A human-readable string describing the last error, if any.  It is
-   the caller's responsibility to ``free()`` the returned string.  Any
-   subsequent call to the function returns ``NULL``, until a new error
-   occurs.
+   A human-readable string describing the last error.  Returns
+   ``NULL`` if no error has occurred.  It is the caller's
+   responsibility to ``free()`` the returned string.  Any subsequent
+   call to the function returns ``NULL``, until a new error occurs.
 
 .. c:function:: void futhark_context_set_logging_file(struct futhark_context *ctx, FILE* f)
 
@@ -249,14 +249,16 @@ will not result in a double free.
    call :c:func:`futhark_free_i32_1d`.  Multi-dimensional arrays are
    assumed to be in row-major form.  Returns ``NULL`` on failure.
 
-.. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int offset, int64_t dim0)
+.. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int64_t offset, int64_t dim0)
 
    Create an array based on *raw* data, as well as an offset into it.
    This differs little from :c:func:`futhark_i32_1d` when using the
    ``c`` backend, but when using e.g. the ``opencl`` backend, the
    ``data`` parameter will be a ``cl_mem``.  It is the caller's
    responsibility to eventually call :c:func:`futhark_free_i32_1d`.
-   Returns ``NULL`` on failure.
+   The ``data`` pointer must remain valid for the lifetime of the
+   array.  Unless you are very careful, this basically means for the
+   lifetime of the context.  Returns ``NULL`` on failure.
 
 .. c:function:: int futhark_free_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
