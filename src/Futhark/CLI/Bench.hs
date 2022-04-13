@@ -56,6 +56,7 @@ data BenchOptions = BenchOptions
     optTuning :: Maybe String,
     optCacheExt :: Maybe String,
     optConvergencePhase :: Bool,
+    optConvergenceMaxTime :: NominalDiffTime,
     optConcurrency :: Maybe Int,
     optVerbose :: Int,
     optTestSpec :: Maybe FilePath
@@ -80,6 +81,7 @@ initialBenchOptions =
       optTuning = Just "tuning",
       optCacheExt = Nothing,
       optConvergencePhase = True,
+      optConvergenceMaxTime = 5 * 60,
       optConcurrency = Nothing,
       optVerbose = 0,
       optTestSpec = Nothing
@@ -235,6 +237,7 @@ runOptions f opts =
       runTimeout = optTimeout opts,
       runVerbose = optVerbose opts,
       runConvergencePhase = optConvergencePhase opts,
+      runConvergenceMaxTime = optConvergenceMaxTime opts,
       runResultAction = f
     }
 
@@ -581,6 +584,21 @@ commandLineOptions =
       ["no-convergence-phase"]
       (NoArg $ Right $ \config -> config {optConvergencePhase = False})
       "Do not run convergence phase.",
+    Option
+      []
+      ["convergence-max-seconds"]
+      ( ReqArg
+          ( \n ->
+              case reads n of
+                [(n', "")]
+                  | n' > 0 ->
+                      Right $ \config -> config {optConvergenceMaxTime = fromInteger n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
+          )
+          "NUM"
+      )
+      "Limit convergence phase to this number of seconds.",
     Option
       []
       ["concurrency"]

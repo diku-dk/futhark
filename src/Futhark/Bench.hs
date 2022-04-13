@@ -147,6 +147,8 @@ data RunOptions = RunOptions
     runVerbose :: Int,
     -- | If true, run the convergence phase.
     runConvergencePhase :: Bool,
+    -- | Stop convergence once this much time has passed.
+    runConvergenceMaxTime :: NominalDiffTime,
     -- | Invoked for every runtime measured during the run.  Can be
     -- used to provide a progress bar.
     runResultAction :: (Int, Maybe Double) -> IO ()
@@ -214,7 +216,7 @@ runConvergence ::
   BenchM (DL.DList (RunResult, [T.Text]))
 runConvergence do_run opts initial_r =
   let runtimes = resultRuntimes (DL.toList initial_r)
-      (n, rsd, acor) = runtimesMetrics runtimes
+      (n, _, rsd, acor) = runtimesMetrics runtimes
    in -- If the runtimes collected during the runMinimum phase are
       -- unstable enough that we need more in order to converge, we throw
       -- away the runMinimum runtimes.  This is because they often exhibit
@@ -237,7 +239,11 @@ runConvergence do_run opts initial_r =
       let n = U.length runtimes
           rsd = (fastStdDev runtimes / sqrt (fromIntegral n)) / mean runtimes
           (x, _, _) = autocorrelation runtimes
-       in (n, rsd, fromMaybe 1 (x U.!? 1))
+       in ( n,
+            realToFrac (U.sum runtimes) :: NominalDiffTime,
+            rsd,
+            fromMaybe 1 (x U.!? 1)
+          )
 
     sample rsd = do
       x <- do_run
@@ -249,10 +255,14 @@ runConvergence do_run opts initial_r =
       loop (runtimes <> resultRuntimes r') (r <> DL.fromList r')
 
     loop runtimes r = do
-      let (n, rsd, acor) = runtimesMetrics runtimes
+      let (n, total, rsd, acor) = runtimesMetrics runtimes
       case nextRunCount n rsd acor of
-        0 -> pure r
-        x -> moreRuns runtimes r rsd x
+        x
+          | x > 0,
+            total < runConvergenceMaxTime opts ->
+              moreRuns runtimes r rsd x
+          | otherwise ->
+              pure r
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::

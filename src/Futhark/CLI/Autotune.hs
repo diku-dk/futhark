@@ -61,6 +61,7 @@ runOptions timeout_s opts =
       runTimeout = timeout_s,
       runVerbose = optVerbose opts,
       runConvergencePhase = True,
+      runConvergenceMaxTime = fromIntegral timeout_s,
       runResultAction = const $ pure ()
     }
 

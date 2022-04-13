@@ -72,6 +72,12 @@ OPTIONS
   this generation can take too much memory, in which case lowering
   ``--concurrency`` may help.
 
+--convergence-max-seconds=NUM
+
+  Don't run the convergence phase for longer than this.  This does not
+  mean that the measurements have converged.  Defaults to 300 seconds
+  (five minutes).
+
 --entry-point=name
 
   Only run entry points with this name.
