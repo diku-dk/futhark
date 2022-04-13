@@ -80,12 +80,19 @@ All generated executables support the following options.
 
     Print help text to standard output and exit.
 
-  ``-D``
+  ``-D/--debugging``
 
     Print debugging information on standard error.  Exactly what is
     printed, and how it looks, depends on which Futhark compiler is
     used.  This option may also enable more conservative (and slower)
     execution, such as frequently synchronising to check for errors.
+    This implies ``--log``.
+
+  ``-L/--log``
+
+    Print low-overhead logging information during initialisation and
+    during execution of entry points.  Enabling this option should not
+    affect program performance.
 
   ``--cache-file=FILE``
 
@@ -94,44 +101,15 @@ All generated executables support the following options.
     is automatically updated by the running program as necessary.  It
     is safe to delete at any time, and will be recreated as necessary.
 
-Non-Server Executable Options
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ``--print-params``
 
-The following options are only supported on non-server executables,
-because they make no sense in a server context.
+    Print a list of tuning parameters followed by their *parameter
+    class* in parentheses, which indicates what they are used for.
 
-  ``-t FILE``
+  ``--param=SIZE=VALUE``
 
-    Print the time taken to execute the program to the indicated file,
-    an integral number of microseconds.  The time taken to perform setup
-    or teardown, including reading the input or writing the result, is
-    not included in the measurement.  See the documentation for specific
-    compilers to see exactly what is measured.
-
-  ``-r RUNS``
-
-    Run the specified entry point the given number of times (plus a
-    warmup run).  The program result is only printed once, after the
-    last run.  If combined with ``-t``, one measurement is printed per
-    run.  This is a good way to perform benchmarking.
-
-  ``-b``
-
-    Print the result using the binary data format
-    (:ref:`binary-data-format`).  For large outputs, this is
-    significantly faster and takes up less space.
-
-GPU Options
-~~~~~~~~~~~
-
-The following options are supported by executables generated with the
-GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
-
-  ``-d DEVICE``
-
-    Pick the first device whose name contains the given string.  The
-    special string ``#k``, where ``k`` is an integer, can be used to
-    pick the *k*-th device, numbered from zero.
+    Set one of the tunable sizes to the given value.  Using the
+    ``--tuning`` option is more convenient.
 
   ``--tuning=FILE``
 
@@ -145,15 +123,55 @@ GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
     predecence.  This is equivalent to passing each size setting on
     the command like using the ``--size`` option, but more convenient.
 
-  ``--print-sizes``
+Non-Server Executable Options
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-    Print a list of tunable sizes followed by their *size class* in
-    parentheses, which indicates what they are used for.
+The following options are only supported on non-server executables,
+because they make no sense in a server context.
 
-  ``--size=SIZE=VALUE``
+  ``-t/--write-runtime-to FILE``
 
-    Set one of the tunable sizes to the given value.  Using the
-    ``--tuning`` option is more convenient.
+    Print the time taken to execute the program to the indicated file,
+    an integral number of microseconds.  The time taken to perform setup
+    or teardown, including reading the input or writing the result, is
+    not included in the measurement.  See the documentation for specific
+    compilers to see exactly what is measured.
+
+  ``-r/--runs RUNS``
+
+    Run the specified entry point the given number of times (plus a
+    warmup run).  The program result is only printed once, after the
+    last run.  If combined with ``-t``, one measurement is printed per
+    run.  This is a good way to perform benchmarking.
+
+  ``-b/--binary-output``
+
+    Print the result using the binary data format
+    (:ref:`binary-data-format`).  For large outputs, this is
+    significantly faster and takes up less space.
+
+  ``-n/--no-print-result``
+
+    Do not print the result of running the program.
+
+GPU Options
+~~~~~~~~~~~
+
+The following options are supported by executables generated with the
+GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
+
+  ``-d/--device DEVICE``
+
+    Pick the first device whose name contains the given string.  The
+    special string ``#k``, where ``k`` is an integer, can be used to
+    pick the *k*-th device, numbered from zero.
+
+  ``-P/--profile``
+
+    Measure the time taken by various GPU operations (such as kernels)
+    and print a summary at the end.  Unfortunately, it is currently
+    nontrivial (and manual) to relate these operations back to source
+    Futhark code.
 
 OpenCL-specific Options
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -161,28 +179,13 @@ OpenCL-specific Options
 The following options are supported by executables generated with the
 OpenCL backends (``opencl``, ``pyopencl``):
 
-  ``-P``
-
-    Measure the time taken by various OpenCL operations (such as
-    kernels) and print a summary at the end.  Unfortunately, it is
-    currently nontrivial (and manual) to relate these operations back
-    to source Futhark code.
-
-  ``-p PLATFORM``
+  ``-p/--platform PLATFORM``
 
     Pick the first OpenCL platform whose name contains the given
     string.  The special string ``#k``, where ``k`` is an integer, can
     be used to pick the *k*-th platform, numbered from zero.  If used
     in conjunction with ``-d``, only the devices from matching
     platforms are considered.
-
-  ``-d DEVICE``
-
-    Pick the first OpenCL device whose name contains the given string.
-    The special string ``#k``, where ``k`` is an integer, can be used
-    to pick the *k*-th device, numbered from zero.  If used in
-    conjunction with ``-p``, only the devices from matching platforms
-    are considered.
 
   ``--default-group-size INT``
 
@@ -288,6 +291,13 @@ The following options are supported by executables generated by the
     The number of threads used to run parallel operations.  If set to
     a value less than ``1``, then the runtime system will use one
     thread per detected core.
+
+  ``-P/--profile``
+
+    Measure the time taken by various parallel sections and print a
+    summary at the end.  Unfortunately, it is currently nontrivial
+    (and manual) to relate these operations back to source Futhark
+    code.
 
 Compiling to Library
 --------------------
