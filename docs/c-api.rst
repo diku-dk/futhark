@@ -182,10 +182,10 @@ Context
 
 .. c:function:: char *futhark_context_get_error(struct futhark_context *ctx)
 
-   A human-readable string describing the last error, if any.  It is
-   the caller's responsibility to ``free()`` the returned string.  Any
-   subsequent call to the function returns ``NULL``, until a new error
-   occurs.
+   A human-readable string describing the last error.  Returns
+   ``NULL`` if no error has occurred.  It is the caller's
+   responsibility to ``free()`` the returned string.  Any subsequent
+   call to the function returns ``NULL``, until a new error occurs.
 
 .. c:function:: void futhark_context_set_logging_file(struct futhark_context *ctx, FILE* f)
 
