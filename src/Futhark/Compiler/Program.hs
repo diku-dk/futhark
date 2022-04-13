@@ -40,7 +40,7 @@ import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Time.Clock (UTCTime)
+import Data.Time.Clock (UTCTime, getCurrentTime)
 import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
 import Futhark.Util.Pretty (Doc, align, line, ppr, text, (</>))
@@ -141,7 +141,9 @@ contentsAndModTime :: FilePath -> VFS -> IO (Maybe (Either String (T.Text, UTCTi
 contentsAndModTime filepath vfs = do
   case M.lookup filepath vfs of
     Nothing -> interactWithFileSafely $ (,) <$> T.readFile filepath <*> getModificationTime filepath
-    Just file_contents -> pure $ Just $ Right (file_contents, startupTime)
+    Just file_contents -> do
+      now <- getCurrentTime
+      pure $ Just $ Right (file_contents, now)
 
 readImportFile :: ImportName -> VFS -> IO (Either ProgError (LoadedFile T.Text))
 readImportFile include vfs = do
