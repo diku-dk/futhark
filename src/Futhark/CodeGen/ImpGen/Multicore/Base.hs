@@ -403,7 +403,7 @@ atomicUpdateLocking atomicBinOp lam
                 x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport old arr' bucket' bop = do
-      let atomic f = Imp.Atomic . f old arr' bucket'
+      let atomic f = Imp.Atomic [] . f old arr' bucket' -- TODO(k, obp): find free variables
       atomic <$> atomicBinOp bop
 
     primOrCas ops
@@ -429,7 +429,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   -- Critical section
   let try_acquire_lock = do
         old <-- (0 :: Imp.TExp Int32)
-        sOp . Imp.Atomic $
+        sOp . Imp.Atomic [] $ -- TODO(k, obp): find free variables
           Imp.AtomicCmpXchg
             int32
             (tvVar old)
@@ -442,7 +442,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
       -- simple write, for memory coherency reasons.
       release_lock = do
         old <-- lockingToLock locking
-        sOp . Imp.Atomic $
+        sOp . Imp.Atomic [] $ -- TODO(k, obp): find free variables
           Imp.AtomicCmpXchg
             int32
             (tvVar old)
@@ -525,8 +525,8 @@ atomicUpdateCAS t arr old bucket x do_op = do
   -- While-loop: Try to insert your value
   sWhile (tvExp run_loop .==. 0) $ do
     x <~~ Imp.var old t
-    do_op -- Writes result into x
-    sOp . Imp.Atomic $
+    do_op -- Writes result into x    
+    sOp . Imp.Atomic [] $ -- TODO(K, obp): find free variables
       Imp.AtomicCmpXchg
         bytes
         old_bits_v
