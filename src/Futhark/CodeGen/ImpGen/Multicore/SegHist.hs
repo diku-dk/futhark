@@ -60,7 +60,7 @@ nonsegmentedHist pat space histops kbody num_histos = do
       ns_64 = map toInt64Exp ns
       num_histos' = tvExp num_histos
       hist_width = histSize $ head histops
-      use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64
+      use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64 
 
   histops' <- renameHistOpLambda histops
 
@@ -88,7 +88,7 @@ onOpAtomic :: HistOp MCMem -> MulticoreGen ([VName] -> [Imp.TExp Int64] -> Multi
 onOpAtomic op = do
   atomics <- hostAtomics <$> askEnv
   let lambda = histOp op
-      do_op = atomicUpdateLocking [] atomics lambda
+      do_op = atomicUpdateLocking [] [] atomics lambda
   case do_op of
     AtomicPrim f -> pure f
     AtomicCAS f -> pure f

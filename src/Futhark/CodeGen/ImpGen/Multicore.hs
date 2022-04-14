@@ -21,11 +21,11 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (rem)
 import Prelude hiding (quot, rem)
-import Debug.Trace (traceM)
 import Futhark.CodeGen.ImpGen.Multicore.Base (freeParams)
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Language.LSP.Types.Lens (HasCode(code))
 import Futhark.IR (arraySize)
+import Debug.Trace
 
 -- GCC supported primitve atomic Operations
 -- TODO: Add support for 1, 2, and 16 bytes too
@@ -60,7 +60,7 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops
     opCompiler dest (Inner op) = compileMCOp dest op
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
-updateAcc acc is vs = sComment "UpdateAcc" $ do
+updateAcc acc is vs = sComment " KAN I IKKE HØRE MIG?" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map toInt64Exp is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
@@ -102,7 +102,7 @@ withAcc pat inputs lam = do
       defCompileExp pat $ WithAcc inputs lam
     locksForInputs atomics ((c, (_, _, op)) : inputs')
       | Just (op_lam, _) <- op,
-        AtomicLocking _ <- atomicUpdateLocking [] atomics op_lam = do
+        AtomicLocking _ <- atomicUpdateLocking [] [] atomics op_lam = do
           let num_locks = 100151
           locks_arr <-
             sStaticArray "withacc_locks" DefaultSpace int32 $
@@ -162,7 +162,7 @@ compileSegOp ::
   TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.MCCode
 compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
-  compileSegHist pat space histops kbody ntasks
+  traceShow "HERE" $ compileSegHist pat space histops kbody ntasks
 compileSegOp pat (SegScan _ space scans _ kbody) ntasks =
   compileSegScan pat space scans kbody ntasks
 compileSegOp pat (SegRed _ space reds _ kbody) ntasks =

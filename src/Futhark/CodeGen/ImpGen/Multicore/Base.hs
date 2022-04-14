@@ -380,11 +380,11 @@ data AtomicUpdate rep r
 
 atomicUpdateLocking ::
   [VName] ->
-  [TExp Int64] ->
+  [Imp.TExp Int64] ->
   AtomicBinOp ->
   Lambda MCMem ->
   AtomicUpdate MCMem ()
-atomicUpdateLocking arrs is atomicBinOp lam
+atomicUpdateLocking arrs' is atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
       primOrCas ops_and_ts $ \arrs bucket ->
@@ -413,12 +413,14 @@ atomicUpdateLocking arrs is atomicBinOp lam
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
     -- toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
-    getAtomicParams = do
-      typs <- mapM lookupType arrs
-      arrs_params <- concat <$> zipWithM toParam arrs typs
-      let typ_is = map (Prim . primExpType . untyped) is
-      is_params <- concat <$> zipWithM toParam (newVName "String") typ_is
-      pure ()
+    -- getAtomicParams = do
+    --   typs <- mapM lookupType arrs'
+    --   arrs_params <- concat <$> zipWithM toParam arrs' typs
+    --   let typ_is = map (Prim . primExpType . untyped) is
+    --   let name_is = map primExpName is
+    --   is_params <- concat <$> zipWithM toParam name_is typ_is
+    --   pure (arrs_params, is_params)
+    -- primExpName (Imp.TPrimExp vname) = vname
       
 
       
@@ -455,7 +457,7 @@ atomicUpdateLocking _ free _ op = AtomicLocking $ \locking arrs bucket -> do
       -- simple write, for memory coherency reasons.
       release_lock = do
         old <-- lockingToLock locking
-        sOp . Imp.Atomic free $ -- TODO(k, obp): find free variables
+        sOp . Imp.Atomic [] $ -- TODO(k, obp): find free variables
           Imp.AtomicCmpXchg
             int32
             (tvVar old)

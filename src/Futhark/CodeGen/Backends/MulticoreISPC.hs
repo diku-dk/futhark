@@ -590,42 +590,45 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       goto cleanup;
     }|]
   GC.stm [C.cstm|$escstm:("#endif")|]
-compileOp (ISPCKernel body free) = do
-  free_ctypes <- mapM MC.paramToCType free
-  let free_args = map paramName free
 
-  let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
-  -- Generate ISPC kernel
-  fstruct <- MC.prepareTaskStruct sharedDef "param_struct" free_args free_ctypes [] []
-  let fstruct' = fstruct <> "_"
+compileOp (ISPCKernel body free)
+  | hasAtomics body = MC.scopedBlock body
+  | otherwise = do
+    free_ctypes <- mapM MC.paramToCType free
+    let free_args = map paramName free
 
-  ispcShim <- ispcDef "loop_ispc" $ \s -> do
-    mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
-      GC.collect $ do
-        GC.decl [C.cdecl|uniform struct futhark_context * uniform ctx = $id:fstruct'->ctx;|]
-        GC.items =<< compileGetStructVals fstruct free_args free_ctypes
-        GC.decl [C.cdecl|uniform int err = 0;|]
-        body' <- GC.collect $ compileCode Imp.Varying body
-        mapM_ GC.item decl_cached
-        mapM_ GC.item =<< GC.declAllocatedMem
-        mapM_ GC.item body'
-        free_mem <- freeAllocatedMem
-        GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
-        GC.stm [C.cstm|return err;|]
-    pure
-      [C.cedecl|
-        export static uniform int $id:s(uniform typename int64_t start,
-                                        uniform typename int64_t end,
-                                        struct $id:fstruct uniform * uniform $id:fstruct' ) {
-          $items:mainBody
-        }|]
+    let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
+    -- Generate ISPC kernel
+    fstruct <- MC.prepareTaskStruct sharedDef "param_struct" free_args free_ctypes [] []
+    let fstruct' = fstruct <> "_"
 
-  -- Generate C code to call into ISPC kernel
-  GC.items [C.citems|
-    err = $id:ispcShim(start, end, & $id:fstruct');
-    if (err != 0) {
-      goto cleanup;
-    }|]
+    ispcShim <- ispcDef "loop_ispc" $ \s -> do
+      mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
+        GC.collect $ do
+          GC.decl [C.cdecl|uniform struct futhark_context * uniform ctx = $id:fstruct'->ctx;|]
+          GC.items =<< compileGetStructVals fstruct free_args free_ctypes
+          GC.decl [C.cdecl|uniform int err = 0;|]
+          body' <- GC.collect $ compileCode Imp.Varying body
+          mapM_ GC.item decl_cached
+          mapM_ GC.item =<< GC.declAllocatedMem
+          mapM_ GC.item body'
+          free_mem <- freeAllocatedMem
+          GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
+          GC.stm [C.cstm|return err;|]
+      pure
+        [C.cedecl|
+          export static uniform int $id:s(uniform typename int64_t start,
+                                          uniform typename int64_t end,
+                                          struct $id:fstruct uniform * uniform $id:fstruct' ) {
+            $items:mainBody
+          }|]
+
+    -- Generate C code to call into ISPC kernel
+    GC.items [C.citems|
+      err = $id:ispcShim(start, end, & $id:fstruct');
+      if (err != 0) {
+        goto cleanup;
+      }|]
 compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCode Imp.Varying body
@@ -646,3 +649,23 @@ compileOp (ExtractLane dest tar lane) = do
 compileOp (VariabilityBlock vari code) = do
   compileCode vari code
 compileOp op = MC.compileOp op
+
+hasAtomics :: MCCode -> Bool
+hasAtomics (x :>>: y) =
+  hasAtomics x || hasAtomics y
+hasAtomics (If _ x y) =
+  hasAtomics x || hasAtomics y
+hasAtomics (For _ _ x) =
+  hasAtomics x
+hasAtomics (While _ x) =
+  hasAtomics x
+hasAtomics (Comment _ x) =
+  hasAtomics x
+hasAtomics (Op (ForEach _ _ code)) =
+  hasAtomics code
+hasAtomics (Op (ForEachActive _ body)) =
+  hasAtomics body
+-- TODO: VariabilityBlock
+hasAtomics (Op (VariabilityBlock _ code)) = hasAtomics code
+hasAtomics (Op (Atomic _ _)) = True
+hasAtomics _ = False

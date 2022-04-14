@@ -45,6 +45,7 @@ data Multicore
   | -- | Retrieve the number of subtasks to execute.  Only valid
     -- immediately inside a 'SegOp' or 'ParLoop' construct!
     GetNumTasks VName
+    -- | Params for the array, Params to index the array, the atomic operation
   | Atomic [Param] AtomicOp
 
 -- | Multicore code.

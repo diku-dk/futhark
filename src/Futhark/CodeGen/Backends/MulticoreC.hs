@@ -24,7 +24,8 @@ module Futhark.CodeGen.Backends.MulticoreC
     multiCoreReport,
     multicoreDef,
     multicoreName,
-    DefSpecifier
+    DefSpecifier,
+    scopedBlock
   )
 where
 
