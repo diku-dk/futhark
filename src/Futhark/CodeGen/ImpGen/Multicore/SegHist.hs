@@ -70,7 +70,9 @@ nonsegmentedHist pat space histops kbody num_histos = do
       sIf
         use_subhistogram
         (subHistogram pat space histops num_histos kbody)
-        (atomicHistogram pat space histops' kbody)        
+        (subHistogram pat space histops num_histos kbody)
+
+        -- (atomicHistogram pat space histops' kbody)        
 -- |
 -- Atomic Histogram approach
 -- The implementation has three sub-strategies depending on the
@@ -86,7 +88,7 @@ onOpAtomic :: HistOp MCMem -> MulticoreGen ([VName] -> [Imp.TExp Int64] -> Multi
 onOpAtomic op = do
   atomics <- hostAtomics <$> askEnv
   let lambda = histOp op
-      do_op = atomicUpdateLocking atomics lambda
+      do_op = atomicUpdateLocking [] atomics lambda
   case do_op of
     AtomicPrim f -> pure f
     AtomicCAS f -> pure f

@@ -43,6 +43,7 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
+import Futhark.CodeGen.ImpCode (TExp)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -378,10 +379,12 @@ data AtomicUpdate rep r
     AtomicLocking (Locking -> DoAtomicUpdate rep r)
 
 atomicUpdateLocking ::
+  [VName] ->
+  [TExp Int64] ->
   AtomicBinOp ->
   Lambda MCMem ->
   AtomicUpdate MCMem ()
-atomicUpdateLocking atomicBinOp lam
+atomicUpdateLocking arrs is atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
       primOrCas ops_and_ts $ \arrs bucket ->
@@ -409,16 +412,24 @@ atomicUpdateLocking atomicBinOp lam
     primOrCas ops
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
+    -- toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
+    getAtomicParams = do
+      typs <- mapM lookupType arrs
+      arrs_params <- concat <$> zipWithM toParam arrs ts
+      is_params <- toParam is
+      
+
+      
 
     isPrim (op, _, _, _) = isJust $ atomicBinOp op
-atomicUpdateLocking _ op
+atomicUpdateLocking _ _ _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
       old <- dPrim "old" t
       atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
         compileBody' [xp] $ lambdaBody op
-atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
+atomicUpdateLocking _ free _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)
 
@@ -442,7 +453,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
       -- simple write, for memory coherency reasons.
       release_lock = do
         old <-- lockingToLock locking
-        sOp . Imp.Atomic [] $ -- TODO(k, obp): find free variables
+        sOp . Imp.Atomic free $ -- TODO(k, obp): find free variables
           Imp.AtomicCmpXchg
             int32
             (tvVar old)

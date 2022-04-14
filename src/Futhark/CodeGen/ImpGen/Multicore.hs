@@ -25,6 +25,7 @@ import Debug.Trace (traceM)
 import Futhark.CodeGen.ImpGen.Multicore.Base (freeParams)
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Language.LSP.Types.Lens (HasCode(code))
+import Futhark.IR (arraySize)
 
 -- GCC supported primitve atomic Operations
 -- TODO: Add support for 1, 2, and 16 bytes too
@@ -59,14 +60,7 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops
     opCompiler dest (Inner op) = compileMCOp dest op
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
-updateAcc acc is vs = do
-  code <- collect $ updateAcc acc is vs
-  free <- freeParams code
-  traceM $ show free
-  pure ()
-
-updateAcc' :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
-updateAcc' acc is vs = sComment "UpdateAcc" $ do
+updateAcc acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map toInt64Exp is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
@@ -79,8 +73,8 @@ updateAcc' acc is vs = sComment "UpdateAcc" $ do
         let (_x_params, y_params) =
               splitAt (length vs) $ map paramName $ lambdaParams lam
         forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
-        atomics <- hostAtomics <$> askEnv
-        case atomicUpdateLocking atomics lam of
+        atomics <- hostAtomics <$> askEnv        
+        case atomicUpdateLocking arrs is' atomics lam of
           AtomicPrim f -> f arrs is'
           AtomicCAS f -> f arrs is'
           AtomicLocking f -> do
@@ -108,7 +102,7 @@ withAcc pat inputs lam = do
       defCompileExp pat $ WithAcc inputs lam
     locksForInputs atomics ((c, (_, _, op)) : inputs')
       | Just (op_lam, _) <- op,
-        AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
+        AtomicLocking _ <- atomicUpdateLocking [] atomics op_lam = do
           let num_locks = 100151
           locks_arr <-
             sStaticArray "withacc_locks" DefaultSpace int32 $
