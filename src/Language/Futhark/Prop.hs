@@ -12,6 +12,7 @@ module Language.Futhark.Prop
     Intrinsic (..),
     intrinsics,
     isBuiltin,
+    isBuiltinLoc,
     maxIntrinsicTag,
     namesToPrimTypes,
     qualName,
@@ -113,6 +114,7 @@ import Data.Bitraversable (bitraverse)
 import Data.Char
 import Data.Foldable
 import Data.List (genericLength, isPrefixOf, sortOn)
+import Data.Loc (Loc (..), posFile)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Ord
@@ -1259,8 +1261,17 @@ intrinsics =
     tupInt64 x =
       tupleRecord $ replicate x $ Scalar $ Prim $ Signed Int64
 
-isBuiltin :: String -> Bool
+-- | Is this file part of the built-in prelude?
+isBuiltin :: FilePath -> Bool
 isBuiltin = ("/prelude/" `isPrefixOf`)
+
+-- | Is the position of this thing builtin as per 'isBuiltin'?  Things
+-- without location are considered not built-in.
+isBuiltinLoc :: Located a => a -> Bool
+isBuiltinLoc x =
+  case locOf x of
+    NoLoc -> False
+    Loc pos _ -> isBuiltin $ posFile pos
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
