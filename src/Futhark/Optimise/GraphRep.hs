@@ -206,8 +206,10 @@ instance MonadFreshNames FusionEnvM where
 
 runFusionEnvM ::  MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionEnvM a -> m a
 runFusionEnvM scope fenv (FusionEnvM a) = do
+  ns <- getNameSource
   let r = runReaderT a scope
-  return $ evalState r fenv
+  let fenv2 = fenv {vNameSource = ns}
+  return $ evalState r fenv2
 
 
 
@@ -637,7 +639,7 @@ finalizeNode nt = case nt of
       new_soac <- H.toSOAC soac
       auxing aux $ letBind pats $ Op new_soac
     return $ stmsToList stms
-  RNode vn -> pure []
+  RNode vn  -> pure []
   InNode vn -> pure []
   DoNode stm lst -> do
     stmsNotFused <- mapM (finalizeNode . fst) lst

@@ -23,7 +23,7 @@ import qualified Futhark.IR.SOACS as Futhark
 --import Futhark.IR.SOACS.Simplify
 -- import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Pass
---import Futhark.Transform.Rename
+import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (splitAt3, chunk)
 
@@ -158,7 +158,7 @@ linearizeGraph :: DepGraph -> FusionEnvM [Stm SOACS]
 linearizeGraph g = do
   stms <- mapM finalizeNode $ reverse $ Q.topsort' g
   return $ concat stms
--- crazy bugged TODO URGENT
+
 
 doAllFusion :: DepGraphAug
 doAllFusion = applyAugs [keepTrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, makeCopiesOfConsAliased, runInnerFusion]
@@ -823,7 +823,8 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
   IfNode (Let pat aux (If sz b1 b2 dec)) toFuse -> do
     b1' <- doFusionWithDelayed b1 [] toFuse
     b2' <- doFusionWithDelayed b2 [] toFuse
-    pure (incomming, node, IfNode (Let pat aux (If sz b1' b2' dec)) [], outgoing)
+    rb2' <- renameBody b2'
+    pure (incomming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
   SoacNode soac pats aux -> do
         let lam = H.lambda soac
         newbody <- localScope (scopeOf lam) $ case soac of
