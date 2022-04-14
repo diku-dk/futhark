@@ -745,34 +745,24 @@ depsFixedPoint deps =
           namesToList names
     deps' = M.map grow deps
 
--- Find the varying loop indices in a kernel
+-- Find roots of variance. These are memory blocks declared in
+-- the current scope as well as loop indices of foreach loops.
 findVarying :: MCCode -> [VName]
 findVarying (x :>>: y) = findVarying x ++ findVarying y
 findVarying (If _ x y) = findVarying x ++ findVarying y
 findVarying (For _ _ x) = findVarying x
 findVarying (While _ x) = findVarying x
 findVarying (Comment _ x) = findVarying x
-findVarying (Op (ForEach idx _ _)) = [idx]
 findVarying (Op (ForEachActive _ body)) = findVarying body
+findVarying (Op (ForEach idx _ body)) = [idx] ++ findVarying body
+findVarying (DeclareMem mem _) = [mem]
 findVarying _ = []
-
--- Find memory declared in this scope, both cached and fat.
-memInScope :: MCCode -> [VName]
-memInScope (x :>>: y) = memInScope x ++ memInScope y
-memInScope (If _ x y) = memInScope x ++ memInScope y
-memInScope (For _ _ x) = memInScope x
-memInScope (While _ x) = memInScope x
-memInScope (Comment _ x) = memInScope x
-memInScope (Op (ForEach _ _ body)) = memInScope body
-memInScope (Op (ForEachActive _ body)) = memInScope body
-memInScope (DeclareMem mem _) = [mem]
-memInScope _ = []
 
 -- Analyze variability in a body of code and run an action with
 -- info about that variability in the compiler state.
 analyzeVariability :: MCCode -> ISPCCompilerM a -> ISPCCompilerM a
 analyzeVariability code m = do
-  let roots = memInScope code ++ findVarying code
+  let roots = findVarying code
   let deps = M.toList $ depsFixedPoint $ execVariabilityM $ findDeps code
   let safelist = filter (\(_, b) -> not $ any (`nameIn` b) roots) deps
   let safe = namesFromList $ map fst safelist
