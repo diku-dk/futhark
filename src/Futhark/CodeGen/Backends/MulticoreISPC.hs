@@ -23,7 +23,6 @@ import qualified Language.C.Quote.ISPC as C
 import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
-import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
 import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs, funName)
 import Futhark.IR.Prop (isBuiltInFunction)
@@ -661,8 +660,11 @@ compileOp (ExtractLane dest tar lane) = do
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 compileOp op = MC.compileOp op
 
--- Dependency analysis
+-- Variability analysis
 type Dependencies = M.Map VName Names
+
+data Variability = Uniform | Varying
+  deriving (Eq, Ord, Show)
 
 -- Extend a set of dependencies with a new one
 extendDeps :: Dependencies -> VName -> Names -> Dependencies
@@ -764,11 +766,11 @@ getVariability :: VName -> ISPCCompilerM Variability
 getVariability name = do
   uniforms <- sUniform <$> GC.getUserState
   pure $ if nameIn name uniforms
-    then Imp.Uniform
-    else Imp.Varying
+    then Uniform
+    else Varying
 
 -- Get the variability qualifiers of a variable
 getVariabilityQuals :: VName -> ISPCCompilerM [C.TypeQual]
-getVariabilityQuals name = do
-  vari <- getVariability name
-  pure $ GC.variQuals vari
+getVariabilityQuals name = variQuals <$> getVariability name
+  where variQuals Uniform = [C.ctyquals|uniform|]
+        variQuals Varying = []

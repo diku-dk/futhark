@@ -80,7 +80,6 @@ module Futhark.CodeGen.Backends.GenericC
     intTypeToCType,
     copyMemoryDefaultSpace,
     volQuals,
-    variQuals,
     linearCode,
     derefPointer,
     allocMem,
@@ -2007,11 +2006,6 @@ derefPointer ptr i res_t =
 volQuals :: Volatility -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
-
-variQuals :: Variability  -> [C.TypeQual]
-variQuals Uniform = [C.ctyquals|uniform|]
-variQuals Unbound = []
-variQuals Varying = []
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
