@@ -38,10 +38,11 @@ getHoverInfoFromState state (Just path) l c = do
       Just $
         (prettyText qn <> " : " <> prettyText t)
           <> if isBuiltinLoc defloc
-            then mempty
+            then "\n\n" <> futharkDocUrl defloc
             else "\n\n**Definition: " <> T.pack (locStr (srclocOf defloc)) <> "**"
     bound
-      | isBuiltinLoc (boundLoc bound) -> Just "Builtin definition."
+      | isBuiltinLoc (boundLoc bound) ->
+          Just $ "Buildin definition: " <> futharkDocUrl (boundLoc bound)
       | otherwise -> Just $ "Definition: " <> T.pack (locStr (boundLoc bound))
 getHoverInfoFromState _ _ _ _ = Nothing
 
@@ -84,3 +85,11 @@ rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not f
 
 rangeFromSrcLoc :: SrcLoc -> Range
 rangeFromSrcLoc = rangeFromLoc . locOf
+
+-- | Generate link to futhark documentation site for prelude functions.
+futharkDocUrl :: Loc -> T.Text
+futharkDocUrl loc =
+  let (Loc (Pos file _ _ _) _) = loc
+   in "[Documentation](https://futhark-lang.org/docs/prelude/doc"
+        <> T.replace ".fut" ".html" (T.pack file)
+        <> ")"
