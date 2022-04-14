@@ -47,7 +47,6 @@ data Multicore
     -- immediately inside a 'SegOp' or 'ParLoop' construct!
     GetNumTasks VName
   | Atomic AtomicOp
-  deriving (Show)
 
 -- | Multicore code.
 type MCCode = Code Multicore
@@ -82,18 +81,15 @@ data SchedulerInfo = SchedulerInfo
     -- | The type scheduling for the task.
     scheduling :: Scheduling
   }
-  deriving (Show)
 
 -- | A task for a v'SegOp'.
 newtype ParallelTask = ParallelTask MCCode
-  deriving (Show)
 
 -- | Whether the Scheduler should schedule the tasks as Dynamic
 -- or it is restainted to Static
 data Scheduling
   = Dynamic
   | Static
-  deriving (Show)
 
 instance Pretty Scheduling where
   ppr Dynamic = "Dynamic"
@@ -222,6 +218,8 @@ lexicalMemoryUsageMC func =
     set (Op (ISPCKernel _ args)) = namesFromList $ map paramName args
     set x = go set x
 
+-- TODO(pema): Should this really be in here?
+-- Find memory declared in this scope, both cached and fat.
 memInScope :: MCCode -> [VName]
 memInScope = declared 
   where
