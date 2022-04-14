@@ -9,7 +9,7 @@ import Data.Aeson.Types (Value (Array, String))
 import qualified Data.Vector as V
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromMVar)
 import Futhark.LSP.State (State (..))
-import Futhark.LSP.Tool (getHoverInfoFromState)
+import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
 import Futhark.Util (debug)
 import Language.LSP.Server (Handlers, LspM, notificationHandler, requestHandler)
 import Language.LSP.Types
@@ -24,7 +24,9 @@ handlers state_mvar =
       onDocumentCloseHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
-      onDocumentFocusHandler state_mvar
+      onDocumentFocusHandler state_mvar,
+      goToDefinitionHandler state_mvar,
+      onDocumentChangeHandler state_mvar
     ]
 
 onInitializeHandler :: Handlers (LspM ())
@@ -38,8 +40,7 @@ onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -
       range = Range pos pos
       file_path = uriToFilePath $ doc ^. uri
   state <- tryTakeStateFromMVar state_mvar file_path
-  result <- liftIO $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
-  case result of
+  case getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1) of
     Just msg -> do
       let ms = HoverContents $ MarkupContent MkMarkdown msg
           rsp = Hover ms (Just range)
@@ -53,6 +54,19 @@ onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/o
       String focused_uri = V.head vector_param -- only one parameter passed from the client
   debug $ show focused_uri
   tryReCompile state_mvar (uriToFilePath (Uri focused_uri))
+  
+goToDefinitionHandler :: MVar State -> Handlers (LspM ())
+goToDefinitionHandler state_mvar = requestHandler STextDocumentDefinition $ \req responder -> do
+  debug "Got goto definition request"
+  let RequestMessage _ _ _ (DefinitionParams doc pos _workDone _partial) = req
+      Position l c = pos
+      file_path = uriToFilePath $ doc ^. uri
+  state <- tryTakeStateFromMVar state_mvar file_path
+  case findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1) of
+    Nothing -> responder $ Right $ InR $ InL $ List []
+    Just loc -> do
+      debug $ show loc
+      responder $ Right $ InL loc
 
 onDocumentSaveHandler :: MVar State -> Handlers (LspM ())
 onDocumentSaveHandler state_mvar = notificationHandler STextDocumentDidSave $ \msg -> do

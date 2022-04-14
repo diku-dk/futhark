@@ -14,19 +14,18 @@ import qualified Data.List.NonEmpty as NE
 import Data.Map (assocs, empty, insertWith)
 import qualified Data.Text as T
 import Futhark.Compiler.Program (ProgError (ProgError))
+import Futhark.LSP.Tool (locToUri, rangeFromLoc, rangeFromSrcLoc)
 import Futhark.Util (debug)
-import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf)
+import Futhark.Util.Loc (SrcLoc, locOf)
 import Futhark.Util.Pretty (Doc, pretty)
 import Language.LSP.Diagnostics (partitionBySource)
 import Language.LSP.Server (LspT, getVersionedTextDoc, publishDiagnostics)
 import Language.LSP.Types
   ( Diagnostic (Diagnostic),
     DiagnosticSeverity (DsError, DsWarning),
-    Position (Position),
-    Range (Range),
+    Range,
     TextDocumentIdentifier (TextDocumentIdentifier),
     Uri,
-    filePathToUri,
     toNormalizedUri,
   )
 import Language.LSP.Types.Lens (HasVersion (version))
@@ -46,10 +45,8 @@ publishWarningDiagnostics warnings = do
   let diags_map =
         foldr
           ( \(srcloc, msg) acc -> do
-              let (Loc (Pos file _ _ _) _) = locOf srcloc
-                  uri = filePathToUri file
-                  diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (T.pack $ pretty msg)
-              insertWith (++) uri [diag] acc
+              let diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (T.pack $ pretty msg)
+              insertWith (++) (locToUri $ locOf srcloc) [diag] acc
           )
           empty
           warnings
@@ -60,29 +57,12 @@ publishErrorDiagnostics errors = do
   let diags_map =
         foldr
           ( \(ProgError loc msg) acc -> do
-              let (Loc (Pos file _ _ _) _) = loc
-                  uri = filePathToUri file
-                  diag = mkDiagnostic (rangeFromLoc loc) DsError (T.pack $ pretty msg)
-              insertWith (++) uri [diag] acc
+              let diag = mkDiagnostic (rangeFromLoc loc) DsError (T.pack $ pretty msg)
+              insertWith (++) (locToUri loc) [diag] acc
           )
           empty
           errors
   publish $ assocs diags_map
-
--- the ending appears to be one col too short
-rangeFromSrcLoc :: SrcLoc -> Range
-rangeFromSrcLoc srcloc = do
-  let Loc start end = locOf srcloc
-  Range (getPosition start) (getPosition end)
-
-rangeFromLoc :: Loc -> Range
-rangeFromLoc (Loc start end) = Range (getPosition start) (getPosition end)
-rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
-
-getPosition :: Pos -> Position
-getPosition pos = do
-  let Pos _ line col _ = pos
-  Position (toEnum line - 1) (toEnum col - 1)
 
 maxDiagnostic :: Int
 maxDiagnostic = 100
