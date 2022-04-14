@@ -60,7 +60,7 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops
     opCompiler dest (Inner op) = compileMCOp dest op
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
-updateAcc acc is vs = sComment " KAN I IKKE HØRE MIG?" $ do
+updateAcc acc is vs = sComment "Update accs" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map toInt64Exp is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
@@ -162,7 +162,7 @@ compileSegOp ::
   TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.MCCode
 compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
-  traceShow "HERE" $ compileSegHist pat space histops kbody ntasks
+  compileSegHist pat space histops kbody ntasks
 compileSegOp pat (SegScan _ space scans _ kbody) ntasks =
   compileSegScan pat space scans kbody ntasks
 compileSegOp pat (SegRed _ space reds _ kbody) ntasks =

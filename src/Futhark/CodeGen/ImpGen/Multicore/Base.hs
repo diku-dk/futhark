@@ -44,6 +44,7 @@ import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
 import Futhark.CodeGen.ImpCode (TExp)
+import Data.Maybe (Maybe(Nothing))
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -378,6 +379,20 @@ data AtomicUpdate rep r
   | -- | Requires explicit locking.
     AtomicLocking (Locking -> DoAtomicUpdate rep r)
 
+-- getAtomicParams :: [VName] -> [TExp Int64] -> MulticoreGen ([Param], [Param])
+-- getAtomicParams arrs is = do
+--   typs <- mapM lookupType arrs
+--   arrs_params <- concat <$> zipWithM toParam arrs typs
+--   let typ_is = map (Prim . primExpType . untyped) is
+--   let name_is = namesToList $ freeIn is
+--   is_params <- concat <$> zipWithM toParam name_is typ_is
+--   pure (arrs_params, is_params)    
+
+makeAtomic :: Imp.AtomicOp -> MulticoreGen Imp.Multicore
+makeAtomic op = do
+  params <- freeParams op
+  pure $ Imp.Atomic params op
+
 atomicUpdateLocking ::
   [VName] ->
   [Imp.TExp Int64] ->
@@ -398,34 +413,26 @@ atomicUpdateLocking arrs' is atomicBinOp lam
           old <- dPrim "old" t
 
           (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
-
-          case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
+          hasAtomicSupport <- opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op
+          case hasAtomicSupport of
             Just f -> sOp $ f $ Imp.var y t
             Nothing ->
               atomicUpdateCAS t a (tvVar old) bucket x $
                 x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport old arr' bucket' bop = do
-      let atomic f = Imp.Atomic [] . f old arr' bucket' -- TODO(k, obp): find free variables
-      atomic <$> atomicBinOp bop
+      let atomic f = makeAtomic . f old arr' bucket' -- TODO(k, obp): find free variables
+      case atomicBinOp bop of
+        Just op -> do 
+          bla <- atomic op
+          pure $ Just bla
+        Nothing -> pure Nothing
 
     primOrCas ops
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
-    -- toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
-    -- getAtomicParams = do
-    --   typs <- mapM lookupType arrs'
-    --   arrs_params <- concat <$> zipWithM toParam arrs' typs
-    --   let typ_is = map (Prim . primExpType . untyped) is
-    --   let name_is = map primExpName is
-    --   is_params <- concat <$> zipWithM toParam name_is typ_is
-    --   pure (arrs_params, is_params)
-    -- primExpName (Imp.TPrimExp vname) = vname
-      
-
-      
-
     isPrim (op, _, _, _) = isJust $ atomicBinOp op
+
 atomicUpdateLocking _ _ _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
@@ -433,7 +440,7 @@ atomicUpdateLocking _ _ _ op
       old <- dPrim "old" t
       atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
         compileBody' [xp] $ lambdaBody op
-atomicUpdateLocking _ free _ op = AtomicLocking $ \locking arrs bucket -> do
+atomicUpdateLocking arrs' is _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)
 
@@ -444,7 +451,7 @@ atomicUpdateLocking _ free _ op = AtomicLocking $ \locking arrs bucket -> do
   -- Critical section
   let try_acquire_lock = do
         old <-- (0 :: Imp.TExp Int32)
-        sOp . Imp.Atomic [] $ -- TODO(k, obp): find free variables
+        atomic <- makeAtomic $ -- TODO(k, obp): find free variables
           Imp.AtomicCmpXchg
             int32
             (tvVar old)
@@ -452,6 +459,7 @@ atomicUpdateLocking _ free _ op = AtomicLocking $ \locking arrs bucket -> do
             (sExt32 <$> locks_offset)
             (tvVar continue)
             (untyped (lockingToLock locking))
+        sOp atomic
       lock_acquired = tvExp continue
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
@@ -541,7 +549,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
   sWhile (tvExp run_loop .==. 0) $ do
     x <~~ Imp.var old t
     do_op -- Writes result into x    
-    sOp . Imp.Atomic [] $ -- TODO(K, obp): find free variables
+    sOp . Imp.Atomic [] $ -- TODO(K, obp): find free variables      
       Imp.AtomicCmpXchg
         bytes
         old_bits_v
