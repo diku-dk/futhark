@@ -4,7 +4,6 @@ module Futhark.LSP.Handlers (handlers) where
 
 import Control.Concurrent.MVar (MVar)
 import Control.Lens ((^.))
-import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Aeson.Types (Value (Array, String))
 import qualified Data.Vector as V
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromMVar)
@@ -54,7 +53,7 @@ onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/o
       String focused_uri = V.head vector_param -- only one parameter passed from the client
   debug $ show focused_uri
   tryReCompile state_mvar (uriToFilePath (Uri focused_uri))
-  
+
 goToDefinitionHandler :: MVar State -> Handlers (LspM ())
 goToDefinitionHandler state_mvar = requestHandler STextDocumentDefinition $ \req responder -> do
   debug "Got goto definition request"
