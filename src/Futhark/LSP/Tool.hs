@@ -15,7 +15,7 @@ import Futhark.LSP.State (State (..))
 import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf, srclocOf)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locStr)
-import Language.Futhark.Prop (isBuiltin)
+import Language.Futhark.Prop (isBuiltinLoc)
 import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (BoundTerm),
@@ -36,10 +36,13 @@ getHoverInfoFromState state (Just path) l c = do
   case def of
     BoundTerm t defloc -> do
       Just $
-        (prettyText qn <> " : " <> prettyText t <> "\n\n")
-          <> ("**Definition: " <> T.pack (locStr (srclocOf defloc)) <> "**")
-    bound ->
-      Just $ "Definition: " <> T.pack (locStr (boundLoc bound))
+        (prettyText qn <> " : " <> prettyText t)
+          <> if isBuiltinLoc defloc
+            then mempty
+            else "\n\n**Definition: " <> T.pack (locStr (srclocOf defloc)) <> "**"
+    bound
+      | isBuiltinLoc (boundLoc bound) -> Just "Builtin definition."
+      | otherwise -> Just $ "Definition: " <> T.pack (locStr (boundLoc bound))
 getHoverInfoFromState _ _ _ _ = Nothing
 
 findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Location
@@ -49,7 +52,7 @@ findDefinitionRange state (Just path) l c = do
   AtName _qn (Just bound) _loc <- queryAtPos state $ Pos path l c 0
   let loc = boundLoc bound
       Loc (Pos file_path _ _ _) _ = loc
-  if isBuiltin file_path
+  if isBuiltinLoc loc
     then Nothing
     else Just $ Location (filePathToUri file_path) (rangeFromLoc loc)
 findDefinitionRange _ _ _ _ = Nothing
