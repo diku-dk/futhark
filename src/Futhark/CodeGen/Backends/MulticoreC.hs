@@ -698,8 +698,6 @@ compileOp (ForEach i bound body) =
 compileOp (ForEachActive i body) = do
   GC.decl [C.cdecl|typename int64_t $id:i = 0;|]
   scopedBlock body
-compileOp (VariabilityBlock _ code) =
-  GC.compileCode code
 compileOp (ExtractLane dest tar _) = do
   tar' <- GC.compileExp tar
   GC.stm [C.cstm|$id:dest = $exp:tar';|]

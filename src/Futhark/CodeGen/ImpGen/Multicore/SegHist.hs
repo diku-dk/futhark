@@ -273,13 +273,12 @@ subHistogram pat space histops num_histos kbody = do
                     sLoopNest shape $ \is' -> do
                       -- read values vs and perform lambda writing result back to is
                       forM_ (zip vs_params' vs') $ \(p, res) ->
-                        ifPrimType (paramType p) $ \pt ->
-                          everythingVarying $ do
-                            -- Hack to copy varying load into uniform result variable
-                            tmp <- dPrim "tmp" pt
-                            copyDWIMFix (tvVar tmp) [] res is'
-                            extractVectorLane j $ pure $
-                              Imp.SetScalar (paramName p) (Imp.LeafExp (tvVar tmp) pt)
+                        ifPrimType (paramType p) $ \pt -> do
+                          -- Hack to copy varying load into uniform result variable
+                          tmp <- dPrim "tmp" pt
+                          copyDWIMFix (tvVar tmp) [] res is'
+                          extractVectorLane j $ pure $
+                            Imp.SetScalar (paramName p) (Imp.LeafExp (tvVar tmp) pt)
                       updateHisto histop' histop_subhistograms (bucket'' ++ is') j acc_params'
 
     -- Copy the task-local subhistograms to the global subhistograms,

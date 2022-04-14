@@ -23,9 +23,6 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     generateChunkLoop,
     generateUniformizeLoop,
     extractVectorLane,
-    everythingUniform,
-    everythingDefault,
-    everythingVarying,
     inISPC,
     toParam,
     sLoopNestVectorized,
@@ -266,21 +263,6 @@ generateUniformizeLoop m = do
     addLoopVar i Int64
     m $ Imp.le64 i
   emit $ Imp.Op $ Imp.ForEachActive i body
-
-everythingWithVariability :: Imp.Variability -> ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
-everythingWithVariability vari m = do
-  (res, code) <- collect' m
-  emit $ Imp.Op $ Imp.VariabilityBlock vari code
-  pure res
-
-everythingUniform :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
-everythingUniform = everythingWithVariability Imp.Uniform 
-
-everythingVarying :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
-everythingVarying = everythingWithVariability Imp.Varying 
-
-everythingDefault :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
-everythingDefault = everythingWithVariability Imp.Unbound 
 
 extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.MCCode -> MulticoreGen ()
 extractVectorLane j code = do

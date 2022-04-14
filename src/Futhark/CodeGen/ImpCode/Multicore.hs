@@ -34,8 +34,6 @@ data Multicore
     ForEachActive VName MCCode
   | -- | Extract a lane to a uniform in ISPC
     ExtractLane VName Exp Exp
-  | -- | Specifies the variability of all declarations within this scope
-    VariabilityBlock Variability MCCode
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -141,8 +139,6 @@ instance Pretty Multicore where
   ppr (ForEachActive i body) =
     "foreach_active" <+> ppr i
       <+> nestedBlock "{" "}" (ppr body)
-  ppr (VariabilityBlock qual code) =
-    nestedBlock (show qual <> " {") "}" (ppr code)
   ppr (ExtractLane dest tar lane) =
     ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
 
@@ -171,8 +167,6 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body <> freeIn' bound)
   freeIn' (ForEachActive i body) =
     fvBind (oneName i) (freeIn' body)
-  freeIn' (VariabilityBlock _ code) =
-    freeIn' code
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
 
@@ -201,7 +195,6 @@ lexicalMemoryUsageMC func =
     -- go into new functions.
     goOp f (ForEach _ _ body) = go f body
     goOp f (ForEachActive _ body) = go f body
-    goOp f (VariabilityBlock _ code) = go f code
     goOp _ _ = mempty
 
     declared (DeclareMem mem spc) =
@@ -233,7 +226,6 @@ memInScope = declared
 
     goOp f (ForEach _ _ body) = go f body
     goOp f (ForEachActive _ body) = go f body
-    goOp f (VariabilityBlock _ code) = go f code
     goOp _ _ = mempty
 
     declared (DeclareMem mem _) = [mem]

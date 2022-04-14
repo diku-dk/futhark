@@ -656,8 +656,6 @@ compileOp (ExtractLane dest tar lane) = do
   tar' <- GC.compileExp tar
   lane' <- GC.compileExp lane
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
-compileOp (VariabilityBlock vari code) = do
-  compileCode vari code
 compileOp op = MC.compileOp op
 
 -- Dependency analysis
@@ -690,8 +688,6 @@ findVarying (Op (ForEach idx _ _)) =
   [idx]
 findVarying (Op (ForEachActive _ body)) =
   findVarying body
-findVarying (Op (VariabilityBlock _ body)) =
-  findVarying body
 findVarying _ = []
 
 -- Get the dependencies in a body of statements
@@ -718,8 +714,6 @@ stmtDeps n v (Op (SegOp _ free _ _ retvals _)) =
 stmtDeps n v (Op (ForEach _ _ body)) =
   stmtDeps n v body
 stmtDeps n v (Op (ForEachActive _ body)) =
-  stmtDeps n v body
-stmtDeps n v (Op (VariabilityBlock _ body)) =
   stmtDeps n v body
 stmtDeps n v (SetScalar name e) =
   extendDeps v name (freeIn e <> n)
