@@ -276,13 +276,13 @@ everythingWithVariability vari m = do
   pure res
 
 everythingUniform :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
-everythingUniform = everythingWithVariability Imp.Uniform 
+everythingUniform = everythingWithVariability Imp.Uniform
 
 everythingVarying :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
-everythingVarying = everythingWithVariability Imp.Varying 
+everythingVarying = everythingWithVariability Imp.Varying
 
 everythingDefault :: ImpM rep r Imp.Multicore a -> ImpM rep r Imp.Multicore a
-everythingDefault = everythingWithVariability Imp.Unbound 
+everythingDefault = everythingWithVariability Imp.Unbound
 
 extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.MCCode -> MulticoreGen ()
 extractVectorLane j code = do
@@ -295,11 +295,11 @@ extractVectorLane j code = do
         -- ISPC v1.17 does not support extract on f16 yet..
         -- Thus we do this stupid conversion to f32
         Prim (FloatType Float16) -> do
-          tv <- dPrim "hack_extract_f16" (FloatType Float32)     
+          tv <- dPrim "hack_extract_f16" (FloatType Float32)
           emit $ Imp.SetScalar (tvVar tv) e
           emit $ Imp.Op $ Imp.ExtractLane vname (untyped $ tvExp tv) ut_exp
         _ -> emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp
-    _ -> 
+    _ ->
       emit code'
 
 inISPC :: MulticoreGen () -> MulticoreGen ()
@@ -414,18 +414,16 @@ atomicUpdateLocking arrs' is atomicBinOp lam
 
           (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
           case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
-            Just f -> sOp $ f $ Imp.var y t
+            Just f -> do
+              sOp =<< f (Imp.var y t)
             Nothing ->
               atomicUpdateCAS t a (tvVar old) bucket x $
                 x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
-    opHasAtomicSupport :: VName -> VName -> (Imp.Count Imp.Elements (TExp Int32)) -> BinOp -> Maybe (Imp.Exp ->  MulticoreGen Imp.Multicore)
     opHasAtomicSupport old arr' bucket' bop = do
-      let atomic f = makeAtomic . f old arr' bucket' -- TODO(k, obp): find free variables
-      -- case atomicBinOp bop of
-        -- Just op -> Just <$> atomic op
-        -- Nothing -> pure Nothing
- 
+      let atomic f = makeAtomic . f old arr' bucket'
+      atomic <$> atomicBinOp bop
+
     primOrCas ops
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
