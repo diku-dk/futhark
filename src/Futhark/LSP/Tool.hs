@@ -13,7 +13,7 @@ import qualified Data.Text as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.State (State (..))
 import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf, srclocOf)
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (locStr)
 import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Query
@@ -35,9 +35,11 @@ getHoverInfoFromState state (Just path) l c = do
   AtName qn (Just def) _loc <- queryAtPos state $ Pos path l c 0
   case def of
     BoundTerm t defloc -> do
-      Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
+      Just $
+        (prettyText qn <> " : " <> prettyText t <> "\n\n")
+          <> ("**Definition: " <> T.pack (locStr (srclocOf defloc)) <> "**")
     bound ->
-      Just $ T.pack $ "Definition: " ++ locStr (boundLoc bound)
+      Just $ "Definition: " <> T.pack (locStr (boundLoc bound))
 getHoverInfoFromState _ _ _ _ = Nothing
 
 findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Location
