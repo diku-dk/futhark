@@ -723,7 +723,8 @@ doAtomic old arr ind val op ty = do
   val' <- GC.compileExp val
   arr' <- GC.rawMem arr
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
-
+  
+-- TODO(k, obp): find free variables
 atomicOps :: [Param] -> AtomicOp -> GC.CompilerM op s ()
 atomicOps _ (AtomicCmpXchg t old arr ind res val) = do
   ind' <- GC.compileExp $ untyped $ unCount ind
