@@ -370,19 +370,19 @@ handleError msg stacktrace = do
 -- TODO(pema): Deduplicate some of the C code in the generic C generator
 -- Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
-compileCode :: Imp.Variability -> MCCode -> ISPCCompilerM ()
-compileCode vari (Comment s code) = do
-  xs <- GC.collect $ compileCode vari code
+compileCode :: MCCode -> ISPCCompilerM ()
+compileCode (Comment s code) = do
+  xs <- GC.collect $ compileCode code
   let comment = "// " ++ s
   GC.stm
     [C.cstm|$comment:comment
               { $items:xs }
              |]
-compileCode _ (DeclareScalar name _ t) = do
+compileCode (DeclareScalar name _ t) = do
   let ct = GC.primTypeToCType t
   quals <- getVariabilityQuals name
   GC.decl [C.cdecl|$tyquals:quals $ty:ct $id:name;|]
-compileCode _ (DeclareArray name DefaultSpace t vs) = do
+compileCode (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = GC.primTypeToCType t
   case vs of
@@ -403,7 +403,7 @@ compileCode _ (DeclareArray name DefaultSpace t vs) = do
                         $id:shim(uniform struct futhark_context* uniform ctx);|]
   -- Call it
   GC.item [C.citem|uniform struct memblock $id:name = *$id:shim(ctx);|]
-compileCode vari (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
+compileCode (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name _ t : SetScalar dest e : code)
       | name == dest = do
@@ -412,9 +412,9 @@ compileCode vari (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
         quals <- getVariabilityQuals name
         GC.item [C.citem|$tyquals:quals $ty:ct $id:name = $exp:e';|]
         go code
-    go (x : xs) = compileCode vari x >> go xs
+    go (x : xs) = compileCode x >> go xs
     go [] = pure ()
-compileCode _ (Allocate name (Count (TPrimExp e)) space) = do
+compileCode (Allocate name (Count (TPrimExp e)) space) = do
   size <- GC.compileExp e
   cached <- GC.cacheMem name
   case cached of
@@ -425,20 +425,22 @@ compileCode _ (Allocate name (Count (TPrimExp e)) space) = do
                 }|]
     _ ->
       allocMem name size space [C.cstm|{err = 1;}|]
-compileCode _ (SetMem dest src space) =
+compileCode (SetMem dest src space) =
   setMem dest src space
-compileCode vari code@(Write dest (Count idx) elemtype DefaultSpace vol elemexp)
+compileCode code@(Write dest (Count idx) elemtype DefaultSpace _ elemexp)
   | isConstExp (untyped idx) = do
     dest' <- GC.rawMem dest
     idxexp <- GC.compileExp (untyped idx)
+    varis <- mapM getVariability (namesToList $ freeIn idx)
+    let quals = if all (==Uniform) varis then [C.ctyquals|uniform|] else []
     tmp <- newVName "tmp_idx"
     -- Disambiguate the variability of the constant index
-    GC.decl [C.cdecl|$tyquals:(GC.variQuals vari) typename int64_t $id:tmp = $exp:idxexp;|]
+    GC.decl [C.cdecl|$tyquals:quals typename int64_t $id:tmp = $exp:idxexp;|]
     let deref =
           GC.derefPointer
             dest'
             [C.cexp|$id:tmp|]
-            [C.cty|$tyquals:(GC.volQuals vol) $ty:(primStorageType elemtype)*|]
+            [C.cty|$ty:(primStorageType elemtype)*|]
     elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
     GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = GC.compileCode code
@@ -446,29 +448,30 @@ compileCode vari code@(Write dest (Count idx) elemtype DefaultSpace vol elemexp)
     isConstExp = isSimple . constFoldPrimExp
     isSimple (ValueExp _) = True
     isSimple _ = False
-compileCode _ (Free name space) = do
+compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ unRefMem name space
-compileCode vari (For i bound body) = do
+compileCode (For i bound body) = do
   let i' = C.toIdent i
       t = GC.primTypeToCType $ primExpType bound
   bound' <- GC.compileExp bound
-  body' <- GC.collect $ compileCode vari body
-  GC.stm -- TODO(pema): This is unsafe is the bound is varying
-    [C.cstm|for (uniform $ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+  body' <- GC.collect $ compileCode body
+  quals <- getVariabilityQuals i
+  GC.stm
+    [C.cstm|for ($tyquals:quals $ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
-compileCode vari (While cond body) = do
+compileCode (While cond body) = do
   cond' <- GC.compileExp $ untyped cond
-  body' <- GC.collect $ compileCode vari body
+  body' <- GC.collect $ compileCode body
   GC.stm
     [C.cstm|while ($exp:cond') {
             $items:body'
           }|]
-compileCode vari (If cond tbranch fbranch) = do
+compileCode (If cond tbranch fbranch) = do
   cond' <- GC.compileExp $ untyped cond
-  tbranch' <- GC.collect $ compileCode vari tbranch
-  fbranch' <- GC.collect $ compileCode vari fbranch
+  tbranch' <- GC.collect $ compileCode tbranch
+  fbranch' <- GC.collect $ compileCode fbranch
   GC.stm $ case (tbranch', fbranch') of
     (_, []) ->
       [C.cstm|if ($exp:cond') { $items:tbranch' }|]
@@ -476,7 +479,7 @@ compileCode vari (If cond tbranch fbranch) = do
       [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
-compileCode _ (Call dests fname args) =
+compileCode (Call dests fname args) =
   defCallIspc dests fname =<< mapM compileArg args
   where
     compileArg (MemArg m) = pure [C.cexp|$exp:m|]
@@ -492,13 +495,13 @@ compileCode _ (Call dests fname args) =
               GC.stm [C.cstm|$id:d = $id:(funName fname')($args:args'');|]
         _ ->
           GC.item [C.citem|if ($id:(funName fname')($args:args'') != 0) { err = 1; }|]
-compileCode _ (Assert e msg (loc, locs)) = do
+compileCode (Assert e msg (loc, locs)) = do
   e' <- GC.compileExp e
   err <- GC.collect $ handleError msg stacktrace
   GC.stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
     stacktrace = prettyStacktrace 0 $ map locStr $ loc : locs
-compileCode _ code =
+compileCode code =
   GC.compileCode code
 
 compileGetStructVals ::
@@ -618,7 +621,7 @@ compileOp (ISPCKernel body free) = do
         GC.decl [C.cdecl|uniform struct futhark_context * uniform ctx = $id:fstruct'->ctx;|]
         GC.items =<< compileGetStructVals fstruct free_args free_ctypes
         GC.decl [C.cdecl|uniform int err = 0;|]
-        body' <- GC.collect $ compileCode Imp.Varying body
+        body' <- GC.collect $ compileCode body
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
         mapM_ GC.item body'
@@ -641,13 +644,13 @@ compileOp (ISPCKernel body free) = do
     }|]
 compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
-  body' <- GC.collect $ compileCode Imp.Varying body
+  body' <- GC.collect $ compileCode body
   GC.stm [C.cstm|
     foreach ($id:i = 0 ... extract($exp:bound', 0)) {
       $items:body'
     }|]
 compileOp (ForEachActive name body) = do
-  body' <- GC.collect $ compileCode Imp.Uniform body
+  body' <- GC.collect $ compileCode body
   GC.stm [C.cstm|
     foreach_active ($id:name) {
       $items:body'
@@ -672,7 +675,7 @@ extendDeps deps v ns =
 thenDeps :: Dependencies -> (Dependencies -> Dependencies) -> Dependencies
 thenDeps deps f = M.unionWith (<>) deps $ f deps
 
--- Find the loop index in a kernel
+-- Find the varying loop indices in a kernel
 findVarying :: MCCode -> [VName]
 findVarying (x :>>: y) =
   findVarying x ++ findVarying y
