@@ -703,8 +703,6 @@ compileOp (VariabilityBlock _ code) =
 compileOp (ExtractLane dest tar _) = do
   tar' <- GC.compileExp tar
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
-compileOp (DeclareScalarVari a _ c) =
-  GC.compileCode (DeclareScalar a Nonvolatile c)
 
 scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
 scopedBlock code = do 

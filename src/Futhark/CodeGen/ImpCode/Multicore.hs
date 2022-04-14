@@ -10,7 +10,7 @@ module Futhark.CodeGen.ImpCode.Multicore
     AtomicOp (..),
     ParallelTask (..),
     lexicalMemoryUsageMC,
-    uniformize,
+    memInScope,
     module Futhark.CodeGen.ImpCode,
   )
 where
@@ -18,7 +18,6 @@ where
 import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty
 import qualified Data.Map as M
-import Debug.Trace (traceShow)
 
 -- | An imperative multicore program.
 type Program = Functions Multicore
@@ -48,8 +47,7 @@ data Multicore
     -- immediately inside a 'SegOp' or 'ParLoop' construct!
     GetNumTasks VName
   | Atomic AtomicOp
-
-  | DeclareScalarVari VName Variability PrimType
+  deriving (Show)
 
 -- | Multicore code.
 type MCCode = Code Multicore
@@ -84,15 +82,18 @@ data SchedulerInfo = SchedulerInfo
     -- | The type scheduling for the task.
     scheduling :: Scheduling
   }
+  deriving (Show)
 
 -- | A task for a v'SegOp'.
 newtype ParallelTask = ParallelTask MCCode
+  deriving (Show)
 
 -- | Whether the Scheduler should schedule the tasks as Dynamic
 -- or it is restainted to Static
 data Scheduling
   = Dynamic
   | Static
+  deriving (Show)
 
 instance Pretty Scheduling where
   ppr Dynamic = "Dynamic"
@@ -148,12 +149,6 @@ instance Pretty Multicore where
     nestedBlock (show qual <> " {") "}" (ppr code)
   ppr (ExtractLane dest tar lane) =
     ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
-  ppr (DeclareScalarVari name vari t) =
-    text "var" <+> ppr name <> text ":" <+> vari' <> ppr t
-    where
-      vari' = case vari of
-        Uniform -> text "uniform "
-        _ -> mempty
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -184,8 +179,6 @@ instance FreeIn Multicore where
     freeIn' code
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
-  freeIn' DeclareScalarVari {} =
-    mempty
 
 -- TODO(pema): This is a bit hacky
 -- Like @lexicalMemoryUsage@, but traverses inner multicore ops
@@ -229,59 +222,21 @@ lexicalMemoryUsageMC func =
     set (Op (ISPCKernel _ args)) = namesFromList $ map paramName args
     set x = go set x
 
--- can be written as a fold, probably
-inferVarying :: Names -> MCCode -> Names
-inferVarying v (x :>>: y) =
-  let left = inferVarying v x in
-  let right = inferVarying left y in
-  left <> right
-inferVarying v (If _ x y) =
-  let left = inferVarying v x in
-  let right = inferVarying left y in
-  left <> right
-inferVarying v (For _ _ x) =
-  inferVarying v x
-inferVarying v (While _ x) =
-  inferVarying v x
-inferVarying v (Comment _ x) =
-  inferVarying v x
-inferVarying v (Op (ForEach idx _ body)) =
-  oneName idx <> inferVarying (oneName idx <> v) body
-inferVarying v (Op (ForEachActive _ body)) =
-  inferVarying v body
-inferVarying v (Op (VariabilityBlock _ body)) =
-  inferVarying v body
-inferVarying v (SetScalar name e) =
-  if any (`nameIn` v) (namesToList $ freeIn e) 
-    then oneName name <> v
-    else v
-inferVarying v (Read x _ _ _ DefaultSpace _) =
-    oneName x <> v
-inferVarying v _ = v
+memInScope :: MCCode -> [VName]
+memInScope = declared 
+  where
+    go f (x :>>: y) = f x <> f y
+    go f (If _ x y) = f x <> f y
+    go f (For _ _ x) = f x
+    go f (While _ x) = f x
+    go f (Comment _ x) = f x
+    go f (Op op) = goOp f op
+    go _ _ = mempty
 
-uniformizeInferred :: Names -> MCCode -> MCCode
-uniformizeInferred v (x :>>: y) =
-  uniformizeInferred v x :>>: uniformizeInferred v y
-uniformizeInferred v (If e x y) =
-  If e (uniformizeInferred v x) (uniformizeInferred v y)
-uniformizeInferred v (For idx n x) =
-  For idx n (uniformizeInferred v x)
-uniformizeInferred v (While e x) =
-  While e (uniformizeInferred v x)
-uniformizeInferred v (Comment e x) =
-  Comment e (uniformizeInferred v x)
-uniformizeInferred v (Op (ForEach idx n body)) =
-  Op $ ForEach idx n (uniformizeInferred v body)
-uniformizeInferred v (Op (ForEachActive idx body)) =
-  Op $ ForEachActive idx (uniformizeInferred v body)
-uniformizeInferred v (Op (VariabilityBlock vari body)) =
-  Op $ VariabilityBlock vari (uniformizeInferred v body)
-uniformizeInferred v (DeclareScalar name vol bt) =
-  if nameIn name v
-    then DeclareScalar name vol bt
-    else Op $ DeclareScalarVari name Uniform bt
-uniformizeInferred _ code = code
+    goOp f (ForEach _ _ body) = go f body
+    goOp f (ForEachActive _ body) = go f body
+    goOp f (VariabilityBlock _ code) = go f code
+    goOp _ _ = mempty
 
-uniformize :: Names -> MCCode -> MCCode
-uniformize v c = uniformizeInferred inferred c
-  where inferred = inferVarying v c
+    declared (DeclareMem mem _) = [mem]
+    declared x = go declared x

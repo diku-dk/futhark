@@ -34,9 +34,20 @@ import qualified Data.DList as DL
 import NeatInterpolation (untrimming)
 import Futhark.Util.Pretty (prettyText)
 import Control.Lens (over, each)
+import qualified Data.Map as M
 
-type ISPCState = (DL.DList C.Definition)
 type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a
+data ISPCState = ISPCState
+  { sDefs :: DL.DList C.Definition
+  , sUniform :: Names
+  }
+
+instance Semigroup ISPCState where
+  ISPCState d1 u1 <> ISPCState d2 u2 = ISPCState (d1 <> d2) (u1 <> u2)
+
+instance Monoid ISPCState where
+  mempty = ISPCState mempty mempty
+  mappend = (<>)
 
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
@@ -57,7 +68,7 @@ compileProg header version prog = do
         MC.cliOptions
       ) (ws, defs)
 
-  let ispc_decls = T.unlines $ map prettyText $ DL.toList $ GC.compUserState endstate
+  let ispc_decls = T.unlines $ map prettyText $ DL.toList $ sDefs $ GC.compUserState endstate
 
   let ispcdefs =
         [untrimming|
@@ -106,11 +117,11 @@ operations =
 
 ispcDecl :: C.Definition -> ISPCCompilerM ()
 ispcDecl def =
-  GC.modifyUserState (\s -> s <> DL.singleton def)
+  GC.modifyUserState (\s -> s { sDefs = sDefs s <> DL.singleton def })
 
 ispcEarlyDecl :: C.Definition -> ISPCCompilerM ()
 ispcEarlyDecl def =
-  GC.modifyUserState (\s -> DL.singleton def <> s)
+  GC.modifyUserState (\s -> s { sDefs = DL.singleton def <> sDefs s })
 
 ispcDef :: MC.DefSpecifier ISPCState
 ispcDef s f = do
@@ -367,9 +378,10 @@ compileCode vari (Comment s code) = do
     [C.cstm|$comment:comment
               { $items:xs }
              |]
-compileCode vari (DeclareScalar name vol t) = do
+compileCode _ (DeclareScalar name _ t) = do
   let ct = GC.primTypeToCType t
-  GC.decl [C.cdecl|$tyquals:(GC.volQuals vol) $tyquals:(GC.variQuals vari) $ty:ct $id:name;|]
+  quals <- getVariabilityQuals name
+  GC.decl [C.cdecl|$tyquals:quals $ty:ct $id:name;|]
 compileCode _ (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = GC.primTypeToCType t
@@ -393,11 +405,12 @@ compileCode _ (DeclareArray name DefaultSpace t vs) = do
   GC.item [C.citem|uniform struct memblock $id:name = *$id:shim(ctx);|]
 compileCode vari (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
   where
-    go (DeclareScalar name vol t : SetScalar dest e : code)
+    go (DeclareScalar name _ t : SetScalar dest e : code)
       | name == dest = do
         let ct = GC.primTypeToCType t
         e' <- GC.compileExp e
-        GC.item [C.citem|$tyquals:(GC.volQuals vol) $tyquals:(GC.variQuals vari)  $ty:ct $id:name = $exp:e';|]
+        quals <- getVariabilityQuals name
+        GC.item [C.citem|$tyquals:quals $ty:ct $id:name = $exp:e';|]
         go code
     go (x : xs) = compileCode vari x >> go xs
     go [] = pure ()
@@ -600,7 +613,7 @@ compileOp (ISPCKernel body free) = do
   let fstruct' = fstruct <> "_"
 
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
-    mainBody <- GC.inNewFunction $ GC.cachingMemory lexical $ \decl_cached free_cached ->
+    mainBody <- GC.inNewFunction $ analyzeVariability body $ GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
         GC.decl [C.cdecl|uniform struct futhark_context * uniform ctx = $id:fstruct'->ctx;|]
         GC.items =<< compileGetStructVals fstruct free_args free_ctypes
@@ -627,12 +640,11 @@ compileOp (ISPCKernel body free) = do
       goto cleanup;
     }|]
 compileOp (ForEach i bound body) = do
-  let body' = uniformize (oneName i) body
   bound' <- GC.compileExp bound
-  body'' <- GC.collect $ compileCode Imp.Varying body'
+  body' <- GC.collect $ compileCode Imp.Varying body
   GC.stm [C.cstm|
     foreach ($id:i = 0 ... extract($exp:bound', 0)) {
-      $items:body''
+      $items:body'
     }|]
 compileOp (ForEachActive name body) = do
   body' <- GC.collect $ compileCode Imp.Uniform body
@@ -646,8 +658,120 @@ compileOp (ExtractLane dest tar lane) = do
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 compileOp (VariabilityBlock vari code) = do
   compileCode vari code
-compileOp (DeclareScalarVari name vari t) = do
-  let ct = GC.primTypeToCType t
-  GC.decl [C.cdecl|$tyquals:(GC.variQuals vari) $ty:ct $id:name;|]
 compileOp op = MC.compileOp op
 
+-- Dependency analysis
+type Dependencies = M.Map VName Names
+
+-- Extend a set of dependencies with a new one
+extendDeps :: Dependencies -> VName -> Names -> Dependencies
+extendDeps deps v ns =
+  case M.lookup v deps of
+    Nothing -> M.insert v ns deps
+    Just ns' -> M.insert v (ns <> ns') deps
+
+-- Combine 2 dependencies sets
+thenDeps :: Dependencies -> (Dependencies -> Dependencies) -> Dependencies
+thenDeps deps f = M.unionWith (<>) deps $ f deps
+
+-- Find the loop index in a kernel
+findVarying :: MCCode -> [VName]
+findVarying (x :>>: y) =
+  findVarying x ++ findVarying y
+findVarying (If _ x y) =
+  findVarying x ++ findVarying y
+findVarying (For _ _ x) =
+  findVarying x
+findVarying (While _ x) =
+  findVarying x
+findVarying (Comment _ x) =
+  findVarying x
+findVarying (Op (ForEach idx _ _)) =
+  [idx]
+findVarying (Op (ForEachActive _ body)) =
+  findVarying body
+findVarying (Op (VariabilityBlock _ body)) =
+  findVarying body
+findVarying _ = []
+
+-- Get the dependencies in a body of statements
+stmtDeps :: Names -> Dependencies -> MCCode -> Dependencies
+stmtDeps n v (x :>>: y) =
+  stmtDeps n v x `thenDeps` \v' -> stmtDeps n v' y
+stmtDeps n v (If cond x y) =
+  stmtDeps n' v x `thenDeps` \v' -> stmtDeps  n' v' y
+  where n' = n <> freeIn cond
+stmtDeps n v (For idx bound x) =
+  extendDeps v idx (free <> n)
+    `thenDeps` \v' -> stmtDeps n' v' x
+  where free = freeIn bound
+        n' = free <> n
+stmtDeps n v (While cond x) =
+  stmtDeps n' v x
+  where n' = n <> freeIn cond
+stmtDeps n v (Comment _ x) =
+  stmtDeps n v x
+stmtDeps n v (Op (SegOp _ free _ _ retvals _)) =
+  foldr (\x acc ->
+    extendDeps acc (paramName x) $ (<> n) $ namesFromList $ map paramName free)
+      v retvals
+stmtDeps n v (Op (ForEach _ _ body)) =
+  stmtDeps n v body
+stmtDeps n v (Op (ForEachActive _ body)) =
+  stmtDeps n v body
+stmtDeps n v (Op (VariabilityBlock _ body)) =
+  stmtDeps n v body
+stmtDeps n v (SetScalar name e) =
+  extendDeps v name (freeIn e <> n)
+stmtDeps n v (Call tars _ args) =
+  foldr (\x acc -> extendDeps acc x $ freeIn args <> n) v tars
+stmtDeps n v (Read x arr (Count iexp) _ DefaultSpace _) =
+  extendDeps v x (freeIn (untyped iexp) <> n)
+    `thenDeps` \v' -> extendDeps v' x (oneName arr <> n)
+stmtDeps n v (Op (GetLoopBounds x y)) =
+  extendDeps v x n
+    `thenDeps` \v' -> extendDeps v' y n
+stmtDeps n v (Op (ExtractLane x _ _)) = -- TODO(pema): Is this one right?
+  extendDeps v x n
+stmtDeps _ v _ = v
+
+-- Take a list of dependencies and iterate them to a fixed point.
+depsFixedPoint :: Dependencies -> Dependencies
+depsFixedPoint deps =
+  if deps == deps'
+    then deps
+    else depsFixedPoint deps'
+  where
+    grow names =
+      namesFromList $
+        concatMap (\n -> n : namesToList (M.findWithDefault mempty n deps)) $
+          namesToList names
+    deps' = M.map grow deps
+
+-- Analyze variability in a body of code and run an action with
+-- info about that variability in the compiler state.
+analyzeVariability :: MCCode -> ISPCCompilerM a -> ISPCCompilerM a
+analyzeVariability code m = do
+  let roots = memInScope code ++ findVarying code
+  let deps = M.toList $ depsFixedPoint $ stmtDeps mempty mempty code
+  let safelist = filter (\(_, b) -> not $ any (`nameIn` b) roots) deps
+  let safe = namesFromList $ map fst safelist
+  pre_state <- GC.getUserState
+  GC.modifyUserState (\s -> s { sUniform = safe })
+  a <- m
+  GC.modifyUserState (\s -> s { sUniform = sUniform pre_state })
+  pure a
+
+-- Get the variability of a variable
+getVariability :: VName -> ISPCCompilerM Variability
+getVariability name = do
+  uniforms <- sUniform <$> GC.getUserState
+  pure $ if nameIn name uniforms
+    then Imp.Uniform
+    else Imp.Varying
+
+-- Get the variability qualifiers of a variable
+getVariabilityQuals :: VName -> ISPCCompilerM [C.TypeQual]
+getVariabilityQuals name = do
+  vari <- getVariability name
+  pure $ GC.variQuals vari
