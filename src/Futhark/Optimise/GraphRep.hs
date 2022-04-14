@@ -205,12 +205,16 @@ instance MonadFreshNames FusionEnvM where
 
 
 runFusionEnvM ::  MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionEnvM a -> m a
-runFusionEnvM scope fenv (FusionEnvM a) = do
-  ns <- getNameSource
-  let r = runReaderT a scope
-  let fenv2 = fenv {vNameSource = ns}
-  return $ evalState r fenv2
-
+-- runFusionEnvM scope fenv (FusionEnvM a) = do
+--   ns <- getNameSource
+--   let r = runReaderT a scope
+--   let fenv2 = fenv {vNameSource = ns}
+--   return $ evalState r fenv2
+runFusionEnvM scope fenv (FusionEnvM a) = modifyNameSource $ \src ->
+    let x = runReaderT a scope in
+    let (y,z) = runState x (fenv {vNameSource = src}) in
+    (y, vNameSource z)
+  -- modifyNameSource $
 
 
 

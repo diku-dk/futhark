@@ -45,7 +45,7 @@ import Debug.Trace
 import Data.Foldable (foldlM)
 import Control.Monad.State
 import Futhark.IR.SOACS.SOAC (SOAC(Screma))
-import Futhark.Transform.Rename (renameLambda)
+-- import Futhark.Transform.Rename (renameLambda)
 import Futhark.Analysis.HORep.SOAC
 import Data.DList (apply)
 
@@ -839,10 +839,9 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     doFusionWithDelayed b extraInputs extraNodes = localScope (scopeOf stms) $
       do
         let g = emptyG2 stms results (inputs <> extraInputs)
-        g' <- applyAugs (map addNodeToGraph extraNodes
-                      <> map addEdgesToGraph extraNodes
-                      <> [initGraph, doAllFusion]) g
-        new_stms <- linearizeGraph g'
+        -- highly temporary and non-thought-out
+        g' <- applyAugs [makeMapping, handleNodes extraNodes,makeMapping, addDepEdges, doAllFusion] g
+        new_stms <- trace (pprg g') $ linearizeGraph g'
         return b {bodyStms = stmsFromList new_stms}
       where
         inputs = map (vNameFromAdj node) outgoing ++ extraInputs
@@ -859,18 +858,18 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
         results = namesFromRes (bodyResult b)
 
 
--- slightly wonkey, but probably correct
-addNodeToGraph :: (NodeT, [EdgeT]) -> DepGraphAug
-addNodeToGraph (nt, edgs) g = do
-  let n = head $ newNodes 1 g
-  let dnode = (n, nt)
-  return $ insNode dnode g
-  where
-    f e = (getName e, e)
-    edgs' = map f edgs
 
-addEdgesToGraph :: (NodeT, [EdgeT]) -> DepGraphAug
-addEdgesToGraph (n, edgs) = genEdges [(0,n)] (const edgs')
+handleNodes :: [(NodeT, [EdgeT])] -> DepGraphAug
+handleNodes ns g = do
+  let nodes = newNodes (length ns) g
+  let (nodeTs, edgs) = unzip ns
+  let depNodes = zip nodes nodeTs
+  let g' = insNodes depNodes g
+  applyAugs (zipWith (curry addEdgesToGraph) depNodes edgs) g'
+
+
+addEdgesToGraph :: (DepNode, [EdgeT]) -> DepGraphAug
+addEdgesToGraph (n, edgs) = genEdges [n] (const edgs')
   where
     f e = (getName e, e)
     edgs' = map f edgs
