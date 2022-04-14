@@ -415,8 +415,10 @@ atomicUpdateLocking arrs is atomicBinOp lam
     -- toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
     getAtomicParams = do
       typs <- mapM lookupType arrs
-      arrs_params <- concat <$> zipWithM toParam arrs ts
-      is_params <- toParam is
+      arrs_params <- concat <$> zipWithM toParam arrs typs
+      let typ_is = map (Prim . primExpType . untyped) is
+      is_params <- concat <$> zipWithM toParam (newVName "String") typ_is
+      pure ()
       
 
       
