@@ -1405,6 +1405,14 @@ static inline uniform double btof_bool_f64(uniform bool x) {
   return x ? 1.0 : 0.0;
 }
 
+static inline uniform bool ftob_f32_bool(uniform float x) {
+  return x != 0;
+}
+
+static inline uniform float btof_bool_f32(uniform bool x) {
+  return x ? 1 : 0;
+}
+
 static inline uniform int64_t futrts_to_bits64(uniform double x) {
   return futrts_ispc_to_bits64(x);
 }
