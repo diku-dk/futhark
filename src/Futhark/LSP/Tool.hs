@@ -32,32 +32,24 @@ import Language.LSP.Types
 
 getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> Maybe T.Text
 getHoverInfoFromState state (Just path) l c = do
-  case queryAtPos state $ Pos path l c 0 of
-    Nothing -> Nothing
-    Just (AtName qn def _loc) -> do
-      case def of
-        Nothing -> Nothing
-        Just (BoundTerm t defloc) -> do
-          Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
-        Just bound ->
-          Just $ T.pack $ "Definition: " ++ locStr (boundLoc bound)
+  AtName qn (Just def) _loc <- queryAtPos state $ Pos path l c 0
+  case def of
+    BoundTerm t defloc -> do
+      Just $ T.pack $ pretty qn ++ " : " ++ pretty t ++ "\n\n" ++ "**Definition: " ++ locStr (srclocOf defloc) ++ "**"
+    bound ->
+      Just $ T.pack $ "Definition: " ++ locStr (boundLoc bound)
 getHoverInfoFromState _ _ _ _ = Nothing
 
 findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Location
 findDefinitionRange state (Just path) l c = do
   -- some unnessecary operations inside `queryAtPos` for this function
   -- but shouldn't affect performance much since "Go to definition" is called less frequently
-  case queryAtPos state $ Pos path l c 0 of
-    Nothing -> Nothing
-    Just (AtName _qn def _loc) -> do
-      case def of
-        Nothing -> Nothing
-        Just bound -> do
-          let loc = boundLoc bound
-              Loc (Pos file_path _ _ _) _ = loc
-          if isBuiltin file_path
-            then Nothing
-            else Just $ Location (filePathToUri file_path) (rangeFromLoc loc)
+  AtName _qn (Just bound) _loc <- queryAtPos state $ Pos path l c 0
+  let loc = boundLoc bound
+      Loc (Pos file_path _ _ _) _ = loc
+  if isBuiltin file_path
+    then Nothing
+    else Just $ Location (filePathToUri file_path) (rangeFromLoc loc)
 findDefinitionRange _ _ _ _ = Nothing
 
 queryAtPos :: State -> Pos -> Maybe AtPos
