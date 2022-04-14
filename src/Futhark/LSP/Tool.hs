@@ -68,17 +68,19 @@ locToUri loc = do
   let (Loc (Pos file _ _ _) _) = loc
   filePathToUri file
 
--- the ending appears to be one col too short
-rangeFromSrcLoc :: SrcLoc -> Range
-rangeFromSrcLoc srcloc = do
-  let Loc start end = locOf srcloc
-  Range (getPosition start) (getPosition end)
+-- Futhark's parser has a slightly different notion of locations than
+-- LSP; so we tweak the positions here.
+getStartPos :: Pos -> Position
+getStartPos (Pos _ line col _) =
+  Position (toEnum line - 1) (toEnum col - 1)
+
+getEndPos :: Pos -> Position
+getEndPos (Pos _ line col _) =
+  Position (toEnum line - 1) (toEnum col)
 
 rangeFromLoc :: Loc -> Range
-rangeFromLoc (Loc start end) = Range (getPosition start) (getPosition end)
+rangeFromLoc (Loc start end) = Range (getStartPos start) (getEndPos end)
 rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
 
-getPosition :: Pos -> Position
-getPosition pos = do
-  let Pos _ line col _ = pos
-  Position (toEnum line - 1) (toEnum col - 1)
+rangeFromSrcLoc :: SrcLoc -> Range
+rangeFromSrcLoc = rangeFromLoc . locOf
