@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent ISPC program.
@@ -34,6 +35,8 @@ import NeatInterpolation (untrimming)
 import Futhark.Util.Pretty (prettyText)
 import Control.Lens (over, each)
 import qualified Data.Map as M
+import Control.Monad.Reader
+import Control.Monad.State
 
 type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a
 data ISPCState = ISPCState
@@ -666,16 +669,80 @@ type Dependencies = M.Map VName Names
 data Variability = Uniform | Varying
   deriving (Eq, Ord, Show)
 
--- Extend a set of dependencies with a new one
-extendDeps :: Dependencies -> VName -> Names -> Dependencies
-extendDeps deps v ns =
-  case M.lookup v deps of
-    Nothing -> M.insert v ns deps
-    Just ns' -> M.insert v (ns <> ns') deps
+newtype VariabilityM a
+  = VariabilityM (ReaderT Names (State Dependencies) a)
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadState Dependencies,
+      MonadReader Names
+    )
 
--- Combine 2 dependencies sets
-thenDeps :: Dependencies -> (Dependencies -> Dependencies) -> Dependencies
-thenDeps deps f = M.unionWith (<>) deps $ f deps
+execVariabilityM :: VariabilityM a -> Dependencies
+execVariabilityM (VariabilityM m) =
+  execState (runReaderT m mempty) mempty
+
+-- Extend the set of dependencies with a new one
+addDeps :: VName -> Names -> VariabilityM ()
+addDeps v ns = do
+  deps <- get
+  env <- ask
+  case M.lookup v deps of
+    Nothing -> put $ M.insert v (ns <> env) deps
+    Just ns' -> put $ M.insert v (ns <> ns') deps
+
+-- Find all the dependencies in a body of code
+findDeps :: MCCode -> VariabilityM ()
+findDeps (x :>>: y) = do
+  findDeps x
+  findDeps y
+findDeps (If cond x y) =
+  local (<> freeIn cond) $ do
+    findDeps x
+    findDeps y
+findDeps (For idx bound x) = do
+  addDeps idx free
+  local (<> free) $ findDeps x
+  where free = freeIn bound
+findDeps (While cond x) = do
+  local (<> freeIn cond) $ findDeps x
+findDeps (Comment _ x) =
+  findDeps x
+findDeps (Op (SegOp _ free _ _ retvals _)) =
+  mapM_ (\x ->
+    addDeps (paramName x) $
+      namesFromList $ map paramName free) retvals
+findDeps (Op (ForEach _ _ body)) =
+  findDeps body
+findDeps (Op (ForEachActive _ body)) =
+  findDeps body
+findDeps (SetScalar name e) =
+  addDeps name $ freeIn e
+findDeps (Call tars _ args) =
+  mapM_ (\x -> addDeps x $ freeIn args) tars
+findDeps (Read x arr (Count iexp) _ DefaultSpace _) = do
+  addDeps x $ freeIn (untyped iexp)
+  addDeps x $ oneName arr
+findDeps (Op (GetLoopBounds x y)) = do
+  addDeps x mempty
+  addDeps y mempty
+findDeps (Op (ExtractLane x _ _)) = do -- TODO(pema): Is this one right?
+  addDeps x mempty
+findDeps _ = pure ()
+
+-- Take a list of dependencies and iterate them to a fixed point.
+depsFixedPoint :: Dependencies -> Dependencies
+depsFixedPoint deps =
+  if deps == deps'
+    then deps
+    else depsFixedPoint deps'
+  where
+    grow names =
+      namesFromList $
+        concatMap (\n -> n : namesToList (M.findWithDefault mempty n deps)) $
+          namesToList names
+    deps' = M.map grow deps
 
 -- Find the varying loop indices in a kernel
 findVarying :: MCCode -> [VName]
@@ -695,64 +762,12 @@ findVarying (Op (ForEachActive _ body)) =
   findVarying body
 findVarying _ = []
 
--- Get the dependencies in a body of statements
-stmtDeps :: Names -> Dependencies -> MCCode -> Dependencies
-stmtDeps n v (x :>>: y) =
-  stmtDeps n v x `thenDeps` \v' -> stmtDeps n v' y
-stmtDeps n v (If cond x y) =
-  stmtDeps n' v x `thenDeps` \v' -> stmtDeps  n' v' y
-  where n' = n <> freeIn cond
-stmtDeps n v (For idx bound x) =
-  extendDeps v idx (free <> n)
-    `thenDeps` \v' -> stmtDeps n' v' x
-  where free = freeIn bound
-        n' = free <> n
-stmtDeps n v (While cond x) =
-  stmtDeps n' v x
-  where n' = n <> freeIn cond
-stmtDeps n v (Comment _ x) =
-  stmtDeps n v x
-stmtDeps n v (Op (SegOp _ free _ _ retvals _)) =
-  foldr (\x acc ->
-    extendDeps acc (paramName x) $ (<> n) $ namesFromList $ map paramName free)
-      v retvals
-stmtDeps n v (Op (ForEach _ _ body)) =
-  stmtDeps n v body
-stmtDeps n v (Op (ForEachActive _ body)) =
-  stmtDeps n v body
-stmtDeps n v (SetScalar name e) =
-  extendDeps v name (freeIn e <> n)
-stmtDeps n v (Call tars _ args) =
-  foldr (\x acc -> extendDeps acc x $ freeIn args <> n) v tars
-stmtDeps n v (Read x arr (Count iexp) _ DefaultSpace _) =
-  extendDeps v x (freeIn (untyped iexp) <> n)
-    `thenDeps` \v' -> extendDeps v' x (oneName arr <> n)
-stmtDeps n v (Op (GetLoopBounds x y)) =
-  extendDeps v x n
-    `thenDeps` \v' -> extendDeps v' y n
-stmtDeps n v (Op (ExtractLane x _ _)) = -- TODO(pema): Is this one right?
-  extendDeps v x n
-stmtDeps _ v _ = v
-
--- Take a list of dependencies and iterate them to a fixed point.
-depsFixedPoint :: Dependencies -> Dependencies
-depsFixedPoint deps =
-  if deps == deps'
-    then deps
-    else depsFixedPoint deps'
-  where
-    grow names =
-      namesFromList $
-        concatMap (\n -> n : namesToList (M.findWithDefault mempty n deps)) $
-          namesToList names
-    deps' = M.map grow deps
-
 -- Analyze variability in a body of code and run an action with
 -- info about that variability in the compiler state.
 analyzeVariability :: MCCode -> ISPCCompilerM a -> ISPCCompilerM a
 analyzeVariability code m = do
   let roots = memInScope code ++ findVarying code
-  let deps = M.toList $ depsFixedPoint $ stmtDeps mempty mempty code
+  let deps = M.toList $ depsFixedPoint $ execVariabilityM $ findDeps code
   let safelist = filter (\(_, b) -> not $ any (`nameIn` b) roots) deps
   let safe = namesFromList $ map fst safelist
   pre_state <- GC.getUserState
