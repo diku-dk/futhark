@@ -413,21 +413,19 @@ atomicUpdateLocking arrs' is atomicBinOp lam
           old <- dPrim "old" t
 
           (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
-          hasAtomicSupport <- opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op
-          case hasAtomicSupport of
+          case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
             Just f -> sOp $ f $ Imp.var y t
             Nothing ->
               atomicUpdateCAS t a (tvVar old) bucket x $
                 x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
+    opHasAtomicSupport :: VName -> VName -> (Imp.Count Imp.Elements (TExp Int32)) -> BinOp -> Maybe (Imp.Exp ->  MulticoreGen Imp.Multicore)
     opHasAtomicSupport old arr' bucket' bop = do
       let atomic f = makeAtomic . f old arr' bucket' -- TODO(k, obp): find free variables
-      case atomicBinOp bop of
-        Just op -> do 
-          bla <- atomic op
-          pure $ Just bla
-        Nothing -> pure Nothing
-
+      -- case atomicBinOp bop of
+        -- Just op -> Just <$> atomic op
+        -- Nothing -> pure Nothing
+ 
     primOrCas ops
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
