@@ -10,7 +10,6 @@ module Futhark.CodeGen.ImpCode.Multicore
     AtomicOp (..),
     ParallelTask (..),
     lexicalMemoryUsageMC,
-    memInScope,
     module Futhark.CodeGen.ImpCode,
   )
 where
@@ -210,23 +209,3 @@ lexicalMemoryUsageMC func =
     -- inside of a kernel!
     set (Op (ISPCKernel _ args)) = namesFromList $ map paramName args
     set x = go set x
-
--- TODO(pema): Should this really be in here?
--- Find memory declared in this scope, both cached and fat.
-memInScope :: MCCode -> [VName]
-memInScope = declared 
-  where
-    go f (x :>>: y) = f x <> f y
-    go f (If _ x y) = f x <> f y
-    go f (For _ _ x) = f x
-    go f (While _ x) = f x
-    go f (Comment _ x) = f x
-    go f (Op op) = goOp f op
-    go _ _ = mempty
-
-    goOp f (ForEach _ _ body) = go f body
-    goOp f (ForEachActive _ body) = go f body
-    goOp _ _ = mempty
-
-    declared (DeclareMem mem _) = [mem]
-    declared x = go declared x

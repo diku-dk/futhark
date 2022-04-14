@@ -663,6 +663,7 @@ compileOp (ExtractLane dest tar lane) = do
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 compileOp op = MC.compileOp op
 
+-- TODO(pema): Move this somewhere else
 -- Variability analysis
 type Dependencies = M.Map VName Names
 
@@ -727,7 +728,7 @@ findDeps (Read x arr (Count iexp) _ DefaultSpace _) = do
 findDeps (Op (GetLoopBounds x y)) = do
   addDeps x mempty
   addDeps y mempty
-findDeps (Op (ExtractLane x _ _)) = do -- TODO(pema): Is this one right?
+findDeps (Op (ExtractLane x _ _)) = do
   addDeps x mempty
 findDeps _ = pure ()
 
@@ -746,21 +747,26 @@ depsFixedPoint deps =
 
 -- Find the varying loop indices in a kernel
 findVarying :: MCCode -> [VName]
-findVarying (x :>>: y) =
-  findVarying x ++ findVarying y
-findVarying (If _ x y) =
-  findVarying x ++ findVarying y
-findVarying (For _ _ x) =
-  findVarying x
-findVarying (While _ x) =
-  findVarying x
-findVarying (Comment _ x) =
-  findVarying x
-findVarying (Op (ForEach idx _ _)) =
-  [idx]
-findVarying (Op (ForEachActive _ body)) =
-  findVarying body
+findVarying (x :>>: y) = findVarying x ++ findVarying y
+findVarying (If _ x y) = findVarying x ++ findVarying y
+findVarying (For _ _ x) = findVarying x
+findVarying (While _ x) = findVarying x
+findVarying (Comment _ x) = findVarying x
+findVarying (Op (ForEach idx _ _)) = [idx]
+findVarying (Op (ForEachActive _ body)) = findVarying body
 findVarying _ = []
+
+-- Find memory declared in this scope, both cached and fat.
+memInScope :: MCCode -> [VName]
+memInScope (x :>>: y) = memInScope x ++ memInScope y
+memInScope (If _ x y) = memInScope x ++ memInScope y
+memInScope (For _ _ x) = memInScope x
+memInScope (While _ x) = memInScope x
+memInScope (Comment _ x) = memInScope x
+memInScope (Op (ForEach _ _ body)) = memInScope body
+memInScope (Op (ForEachActive _ body)) = memInScope body
+memInScope (DeclareMem mem _) = [mem]
+memInScope _ = []
 
 -- Analyze variability in a body of code and run an action with
 -- info about that variability in the compiler state.
