@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Variables being indexes now have correct source spans in AST.
+
 ## [0.21.9]
 
 ### Added

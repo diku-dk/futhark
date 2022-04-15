@@ -492,10 +492,14 @@ TypeExpApply :: { UncheckedTypeExp }
                 { TEApply $1 $2 (srcspan $1 $>) }
               | 'id[' DimExp ']'
                 { let L loc (INDEXING v) = $1
-                  in TEApply (TEVar (qualName v) (srclocOf loc)) (TypeArgExpDim $2 (srclocOf loc)) (srcspan $1 $>) }
+                  in TEApply (TEVar (qualName v) (srclocOf (backOneCol loc)))
+                             (TypeArgExpDim $2 (srclocOf loc))
+                             (srcspan $1 $>) }
               | 'qid[' DimExp ']'
                 { let L loc (QUALINDEXING qs v) = $1
-                  in TEApply (TEVar (QualName qs v) (srclocOf loc)) (TypeArgExpDim $2 (srclocOf loc)) (srcspan $1 $>) }
+                  in TEApply (TEVar (QualName qs v) (srclocOf (backOneCol loc)))
+                             (TypeArgExpDim $2 (srclocOf loc))
+                             (srcspan $1 $>) }
               | TypeExpAtom
                 { $1 }
 
@@ -849,14 +853,14 @@ LoopForm : for VarId '<' Exp
 VarSlice :: { ((Name, Loc), UncheckedSlice, Loc) }
           : 'id[' DimIndices ']'
             { let L vloc (INDEXING v) = $1
-              in ((v, vloc), $2, locOf (srcspan $1 $>)) }
+              in ((v, backOneCol vloc), $2, locOf (srcspan $1 $>)) }
 
 QualVarSlice :: { ((QualName Name, Loc), UncheckedSlice, Loc) }
               : VarSlice
                 { let ((v, vloc), y, loc) = $1 in ((qualName v, vloc), y, loc) }
               | 'qid[' DimIndices ']'
                 { let L vloc (QUALINDEXING qs v) = $1
-                  in ((QualName qs v, vloc), $2, locOf (srcspan $1 $>)) }
+                  in ((QualName qs v, backOneCol vloc), $2, locOf (srcspan $1 $>)) }
 
 DimIndex :: { UncheckedDimIndex }
          : Exp2                   { DimFix $1 }
