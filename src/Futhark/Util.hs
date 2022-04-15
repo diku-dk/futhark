@@ -493,5 +493,6 @@ fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
 
+-- | Issue a debugging statement to the log.
 debug :: MonadIO m => String -> m ()
 debug msg = liftIO $ debugM "futhark" msg

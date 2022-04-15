@@ -1,3 +1,7 @@
+-- | Building blocks for "recompiling" (actually just type-checking)
+-- the Futhark program managed by the language server.  The challenge
+-- here is that if the program becomes type-invalid, we want to keep
+-- the old state around.
 module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
 
 import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
