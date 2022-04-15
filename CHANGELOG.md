@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark lsp`s hover information now contains proper range information.
 
+* `futhark query` and `futhark lsp` incorrectly thought size
+  parameters had type `i32`.
+
 ## [0.21.9]
 
 ### Added

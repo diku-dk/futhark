@@ -66,7 +66,7 @@ patternDefs (PatConstr _ _ pats _) =
 
 typeParamDefs :: TypeParamBase VName -> Defs
 typeParamDefs (TypeParamDim vn loc) =
-  M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int32) (locOf loc)
+  M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int64) (locOf loc)
 typeParamDefs (TypeParamType _ vn loc) =
   M.singleton vn $ DefBound $ BoundType $ locOf loc
 
