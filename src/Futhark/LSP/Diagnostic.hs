@@ -5,7 +5,6 @@
 module Futhark.LSP.Diagnostic
   ( publishWarningDiagnostics,
     publishErrorDiagnostics,
-    diagnosticSource,
     maxDiagnostic,
   )
 where
@@ -33,7 +32,7 @@ import Language.LSP.Types
 import Language.LSP.Types.Lens (HasVersion (version))
 
 mkDiagnostic :: Range -> DiagnosticSeverity -> T.Text -> Diagnostic
-mkDiagnostic range severity msg = Diagnostic range (Just severity) Nothing diagnosticSource msg Nothing Nothing
+mkDiagnostic range severity msg = Diagnostic range (Just severity) Nothing Nothing msg Nothing Nothing
 
 -- | Publish diagnostics from a Uri to Diagnostics mapping.
 publish :: [(Uri, [Diagnostic])] -> LspT () IO ()
@@ -75,8 +74,3 @@ publishErrorDiagnostics errors = do
 -- | The maximum number of diagnostics to report.
 maxDiagnostic :: Int
 maxDiagnostic = 100
-
--- | The source of the diagnostics.  (That is, the Futhark compiler,
--- but apparently the client must be told such things...)
-diagnosticSource :: Maybe T.Text
-diagnosticSource = Just "futhark"
