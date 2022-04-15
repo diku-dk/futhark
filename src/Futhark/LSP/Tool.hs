@@ -35,7 +35,7 @@ getHoverInfoFromState state (Just path) l c = do
           BoundModule {} -> "module"
           BoundModuleType {} -> "module type"
           BoundType {} -> "type"
-      ms = HoverContents $ MarkupContent MkMarkdown msg
+      ms = HoverContents $ MarkupContent MkPlainText msg
   Just $ Hover ms (Just (rangeFromLoc loc))
 getHoverInfoFromState _ _ _ _ = Nothing
 
