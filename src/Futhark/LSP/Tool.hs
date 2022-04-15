@@ -11,16 +11,14 @@ module Futhark.LSP.Tool
   )
 where
 
-import qualified Data.Text as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.State (State (..))
-import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf, srclocOf)
+import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf)
 import Futhark.Util.Pretty (prettyText)
-import Language.Futhark.Core (locStr)
 import Language.Futhark.Prop (isBuiltinLoc)
 import Language.Futhark.Query
   ( AtPos (AtName),
-    BoundTo (BoundTerm),
+    BoundTo (..),
     atPos,
     boundLoc,
   )
@@ -33,17 +31,12 @@ getHoverInfoFromState state (Just path) l c = do
   AtName _ (Just def) loc <- queryAtPos state $ Pos path l c 0
   let msg =
         case def of
-          BoundTerm t defloc ->
-            prettyText t
-              <> if isBuiltinLoc defloc
-                then mempty
-                else "\n\n**Definition: " <> T.pack (locStr (srclocOf defloc)) <> "**"
-          bound
-            | isBuiltinLoc (boundLoc bound) -> "Builtin definition."
-            | otherwise -> "Definition: " <> T.pack (locStr (boundLoc bound))
-      range = rangeFromLoc loc
+          BoundTerm t _ -> prettyText t
+          BoundModule {} -> "module"
+          BoundModuleType {} -> "module type"
+          BoundType {} -> "type"
       ms = HoverContents $ MarkupContent MkMarkdown msg
-  Just $ Hover ms (Just range)
+  Just $ Hover ms (Just (rangeFromLoc loc))
 getHoverInfoFromState _ _ _ _ = Nothing
 
 -- | Find the location of the definition referenced at the given file
