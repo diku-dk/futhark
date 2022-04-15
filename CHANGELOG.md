@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
-* Variables being indexes now have correct source spans in AST.
+* Variables being indexed now have correct source spans in AST.
 
 * `futhark lsp`s hover information now contains proper range information.
 
