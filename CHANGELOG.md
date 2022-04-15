@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.22.0]
+## [0.21.9]
 
 ### Added
 
@@ -26,10 +26,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Aleksander Junge has improved `futhark bench` such that it
   intelligently chooses how many runs to perform (#1335).
-
-### Removed
-
-### Changed
 
 ### Fixed
 
