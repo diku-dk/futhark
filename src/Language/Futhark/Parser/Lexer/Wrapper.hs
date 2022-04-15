@@ -16,7 +16,6 @@ module Language.Futhark.Parser.Lexer.Wrapper
     alexGetInput,
     alexGetByte,
     alexGetStartCode,
-    alexMove,
     alexError,
     alexGetPos,
   )
