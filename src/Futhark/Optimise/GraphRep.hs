@@ -46,6 +46,7 @@ import Data.Foldable (foldlM)
 import Control.Monad.State
 import Futhark.Transform.Substitute (Substitute (substituteNames), Substitutable)
 import Control.Monad.Reader (ReaderT (runReaderT))
+import Foreign (bitReverse32)
 -- import qualified Futhark.Analysis.HORep.MapNest as HM
 
 
@@ -577,12 +578,16 @@ infusableInputsFromExp (Op soac) = case soac of
   Futhark.Stream  a1 _ a3 a4 lam     ->
     namesToList $ freeIn $ Futhark.Stream a1 [] a3 a4 lam
 -- infusableInputsFromExp op@(BasicOp x) = namesToList $ freeIn op
-infusableInputsFromExp (If exp _ _ cond) =
+infusableInputsFromExp (If exp b1 b2 cond) =
   let emptyB = Body mempty mempty mempty :: Body SOACS in
-  namesToList $ freeIn (If exp emptyB emptyB cond)
-infusableInputsFromExp (DoLoop exp loopform _) =
+  namesToList (freeIn exp
+  <> freeIn cond)
+  <> concatMap infusableInputs (bodyStms b1)
+  <> concatMap infusableInputs (bodyStms b2)
+infusableInputsFromExp (DoLoop exp loopform b1) =
   let emptyB = Body mempty mempty mempty :: Body SOACS in
-  namesToList $ freeIn (DoLoop exp loopform emptyB)
+  concatMap infusableInputs (bodyStms b1)
+    <> namesToList (freeIn (DoLoop exp loopform emptyB))
 infusableInputsFromExp op = namesToList $ freeIn op
 
 aliasInputs :: Stm SOACS -> [VName]

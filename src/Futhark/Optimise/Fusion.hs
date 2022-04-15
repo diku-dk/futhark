@@ -507,8 +507,8 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                   if stream1 /= soac1 then do
                       is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
                       fuseNodeT edgs infusible
-                        (SoacNode stream1 (basicPat is_extra_1' <> pats1) aux1, [])
-                        (s2, [])
+                        (SoacNode stream1 (basicPat is_extra_1' <> pats1) aux1, e1s)
+                        (s2, e2s)
                   else pure Nothing
           -- ( Futhark.Screma s_exp1 i1 sform1,
           --   Futhark.Screma s_exp2 i2 sform2)
@@ -536,8 +536,8 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
               let s1' = toSeqStream soac1 in
               let s2' = toSeqStream soac2 in
               fuseNodeT edgs infusible
-                (SoacNode s1' pats1 aux1, [])
-                (SoacNode s2' pats2 aux2, [])
+                (SoacNode s1' pats1 aux1, e1s)
+                (SoacNode s2' pats2 aux2, e2s)
           ( H.Stream s_exp1 sform1 lam1 nes1 i1,
             H.Stream s_exp2 sform2 lam2 nes2 i2) -> do
               let chunk1 = head $ lambdaParams lam1
@@ -840,7 +840,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
       do
         let g = emptyG2 stms results (inputs <> extraInputs)
         -- highly temporary and non-thought-out
-        g' <- applyAugs [makeMapping, handleNodes extraNodes,makeMapping, addDepEdges, doAllFusion] g
+        g' <- applyAugs [handleNodes extraNodes,makeMapping, addDepEdges, doAllFusion] g
         new_stms <- trace (pprg g') $ linearizeGraph g'
         return b {bodyStms = stmsFromList new_stms}
       where
@@ -865,6 +865,7 @@ handleNodes ns g = do
   let (nodeTs, edgs) = unzip ns
   let depNodes = zip nodes nodeTs
   let g' = insNodes depNodes g
+  _ <- makeMapping g'
   applyAugs (zipWith (curry addEdgesToGraph) depNodes edgs) g'
 
 
