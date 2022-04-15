@@ -34,6 +34,7 @@ import qualified Data.DList as DL
 import NeatInterpolation (untrimming)
 import Futhark.Util.Pretty (prettyText)
 import Control.Lens (over, each)
+import Debug.Trace (traceM)
 
 type ISPCState = (DL.DList C.Definition)
 type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a
@@ -646,5 +647,36 @@ compileOp (ExtractLane dest tar lane) = do
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 compileOp (VariabilityBlock vari code) = do
   compileCode vari code
+
+compileOp (Atomic params op) = do  
+  tryDoIspcAtomic params op
+
 compileOp op = MC.compileOp op
 
+tryDoIspcAtomic :: [Param] -> AtomicOp -> ISPCCompilerM ()
+tryDoIspcAtomic _ (AtomicAdd ty old arr idx val) = 
+  doAtomic old arr idx val "atomic_add_global" [C.cty|$ty:(GC.intTypeToCType ty)|]
+tryDoIspcAtomic _ (AtomicSub t old arr ind val) =
+  doAtomic old arr ind val "atomic_subtract_global" [C.cty|$ty:(GC.intTypeToCType t)|]
+tryDoIspcAtomic _ (AtomicAnd t old arr ind val) =
+  doAtomic old arr ind val "atomic_and_global" [C.cty|$ty:(GC.intTypeToCType t)|]
+tryDoIspcAtomic _ (AtomicOr t old arr ind val) =
+  doAtomic old arr ind val "atomic_or_global" [C.cty|$ty:(GC.intTypeToCType t)|]
+tryDoIspcAtomic _ (AtomicXor t old arr ind val) =
+  doAtomic old arr ind val "atomic_xor_global" [C.cty|$ty:(GC.intTypeToCType t)|]  
+tryDoIspcAtomic params atomicOp = MC.compileOp (Atomic params atomicOp)
+
+doAtomic ::
+  (C.ToIdent a1) =>
+  a1 ->
+  VName ->
+  Count u (TExp Int32) ->
+  Exp ->
+  String ->
+  C.Type ->
+  ISPCCompilerM ()
+doAtomic old arr ind val op ty = do
+  ind' <- GC.compileExp $ untyped $ unCount ind
+  val' <- GC.compileExp val
+  arr' <- GC.rawMem arr
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val');|]

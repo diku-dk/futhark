@@ -394,12 +394,10 @@ makeAtomic op = do
   pure $ Imp.Atomic params op
 
 atomicUpdateLocking ::
-  [VName] ->
-  [Imp.TExp Int64] ->
   AtomicBinOp ->
   Lambda MCMem ->
   AtomicUpdate MCMem ()
-atomicUpdateLocking arrs' is atomicBinOp lam
+atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
       primOrCas ops_and_ts $ \arrs bucket ->
@@ -429,14 +427,14 @@ atomicUpdateLocking arrs' is atomicBinOp lam
       | otherwise = AtomicCAS
     isPrim (op, _, _, _) = isJust $ atomicBinOp op
 
-atomicUpdateLocking _ _ _ op
+atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
       old <- dPrim "old" t
       atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
         compileBody' [xp] $ lambdaBody op
-atomicUpdateLocking arrs' is _ op = AtomicLocking $ \locking arrs bucket -> do
+atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)
 
@@ -461,7 +459,7 @@ atomicUpdateLocking arrs' is _ op = AtomicLocking $ \locking arrs bucket -> do
       -- simple write, for memory coherency reasons.
       release_lock = do
         old <-- lockingToLock locking
-        sOp . Imp.Atomic [] $ -- TODO(k, obp): find free variables
+        atomic <- makeAtomic $ -- TODO(k, obp): find free variables
           Imp.AtomicCmpXchg
             int32
             (tvVar old)
@@ -469,7 +467,7 @@ atomicUpdateLocking arrs' is _ op = AtomicLocking $ \locking arrs bucket -> do
             (sExt32 <$> locks_offset)
             (tvVar continue)
             (untyped (lockingToUnlock locking))
-
+        sOp atomic
   -- Preparing parameters. It is assumed that the caller has already
   -- filled the arr_params. We copy the current value to the
   -- accumulator parameters.
@@ -545,7 +543,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
   sWhile (tvExp run_loop .==. 0) $ do
     x <~~ Imp.var old t
     do_op -- Writes result into x    
-    sOp . Imp.Atomic [] $ -- TODO(K, obp): find free variables      
+    atomic <- makeAtomic $ -- TODO(K, obp): find free variables      
       Imp.AtomicCmpXchg
         bytes
         old_bits_v
@@ -553,6 +551,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
         (sExt32 <$> bucket_offset)
         (tvVar run_loop)
         (toBits (Imp.var x t))
+    sOp atomic
     old <~~ fromBits old_bits
 
 supportedPrims :: Int -> Bool

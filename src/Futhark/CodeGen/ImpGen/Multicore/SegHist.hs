@@ -88,7 +88,7 @@ onOpAtomic :: HistOp MCMem -> MulticoreGen ([VName] -> [Imp.TExp Int64] -> Multi
 onOpAtomic op = do
   atomics <- hostAtomics <$> askEnv
   let lambda = histOp op
-      do_op = atomicUpdateLocking [] [] atomics lambda
+      do_op = atomicUpdateLocking atomics lambda
   case do_op of
     AtomicPrim f -> pure f
     AtomicCAS f -> pure f
