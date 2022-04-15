@@ -252,6 +252,10 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-jsonschema
+        sudo apt-get install -y wget
+        wget https://github.com/ispc/ispc/releases/download/v1.17.0/ispc-v1.17.0-linux.tar.gz
+        tar xvf ispc-v1.17.0-linux.tar.gz
+        mv ispc-v1.17.0-linux/bin/ispc $HOME/.local/bin/ispc
 
     - uses: actions/download-artifact@v2
       with:
