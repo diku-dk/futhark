@@ -75,12 +75,12 @@ data AlexState = AlexState
   }
 
 runAlex' :: Pos -> BS.ByteString -> Alex a -> Either LexerError a
-runAlex' start_pos input__ (Alex f) =
+runAlex' start_pos input (Alex f) =
   case f
     ( AlexState
         { alex_pos = start_pos,
           alex_bpos = 0,
-          alex_inp = input__,
+          alex_inp = input,
           alex_chr = '\n',
           alex_scd = 0
         }
