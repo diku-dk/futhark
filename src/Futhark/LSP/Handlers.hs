@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | The handlers exposed by the language server.
 module Futhark.LSP.Handlers (handlers) where
 
 import Control.Concurrent.MVar (MVar)
@@ -14,6 +15,9 @@ import Language.LSP.Server (Handlers, LspM, notificationHandler, requestHandler)
 import Language.LSP.Types
 import Language.LSP.Types.Lens (HasUri (uri))
 
+-- | Given an 'MVar' tracking the state, produce a set of handlers.
+-- When we want to add more features to the language server, this is
+-- the thing to change.
 handlers :: MVar State -> Handlers (LspM ())
 handlers state_mvar =
   mconcat

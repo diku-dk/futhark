@@ -1,11 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Generally useful definition used in various places in the
+-- language server implementation.
 module Futhark.LSP.Tool
   ( getHoverInfoFromState,
     findDefinitionRange,
     rangeFromSrcLoc,
     rangeFromLoc,
-    locToUri,
+    posToUri,
   )
 where
 
@@ -30,6 +32,8 @@ import Language.LSP.Types
     filePathToUri,
   )
 
+-- | Retrieve hover info for the definition referenced at the given
+-- file at the given line and column number (the two 'Int's).
 getHoverInfoFromState :: State -> Maybe FilePath -> Int -> Int -> Maybe T.Text
 getHoverInfoFromState state (Just path) l c = do
   AtName qn (Just def) _loc <- queryAtPos state $ Pos path l c 0
@@ -45,6 +49,8 @@ getHoverInfoFromState state (Just path) l c = do
       | otherwise -> Just $ "Definition: " <> T.pack (locStr (boundLoc bound))
 getHoverInfoFromState _ _ _ _ = Nothing
 
+-- | Find the location of the definition referenced at the given file
+-- at the given line and column number (the two 'Int's).
 findDefinitionRange :: State -> Maybe FilePath -> Int -> Int -> Maybe Location
 findDefinitionRange state (Just path) l c = do
   -- some unnessecary operations inside `queryAtPos` for this function
@@ -63,10 +69,9 @@ queryAtPos state pos =
     Nothing -> Nothing
     Just loaded_prog -> atPos (lpImports loaded_prog) pos
 
-locToUri :: Loc -> Uri
-locToUri loc = do
-  let (Loc (Pos file _ _ _) _) = loc
-  filePathToUri file
+-- | Convert a Futhark 'Pos' to an LSP 'Uri'.
+posToUri :: Pos -> Uri
+posToUri (Pos file _ _ _) = filePathToUri file
 
 -- Futhark's parser has a slightly different notion of locations than
 -- LSP; so we tweak the positions here.
@@ -78,9 +83,11 @@ getEndPos :: Pos -> Position
 getEndPos (Pos _ line col _) =
   Position (toEnum line - 1) (toEnum col)
 
+-- | Create an LSP 'Range' from a Futhark 'Loc'.
 rangeFromLoc :: Loc -> Range
 rangeFromLoc (Loc start end) = Range (getStartPos start) (getEndPos end)
 rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
 
+-- | Create an LSP 'Range' from a Futhark 'SrcLoc'.
 rangeFromSrcLoc :: SrcLoc -> Range
 rangeFromSrcLoc = rangeFromLoc . locOf

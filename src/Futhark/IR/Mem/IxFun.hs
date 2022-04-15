@@ -72,13 +72,18 @@ type Indices num = [num]
 
 type Permutation = [Int]
 
+-- | The physical element ordering alongside a dimension, i.e. the
+-- sign of the stride.
 data Monotonicity
-  = Inc
-  | Dec
-  | -- | monotonously increasing, decreasing or unknown
+  = -- | Increasing.
+    Inc
+  | -- | Decreasing.
+    Dec
+  | -- | Unknown.
     Unknown
   deriving (Show, Eq)
 
+-- | A single dimension in an 'LMAD'.
 data LMADDim num = LMADDim
   { ldStride :: num,
     ldRotate :: num,
@@ -1000,7 +1005,9 @@ existentializeExp e = do
   let t = primExpType $ untyped e
   pure $ TPrimExp $ LeafExp (Ext i) t
 
--- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
+-- | Try to turn all the leaves of the index function into 'Ext's.  We
+--  require that there's only one LMAD, that the index function is
+--  contiguous, and the base shape has only one dimension.
 existentialize ::
   (IntExp t, Eq v, Pretty v) =>
   IxFun (TPrimExp t v) ->

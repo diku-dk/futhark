@@ -2,6 +2,7 @@
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | @futhark lsp@
 module Futhark.CLI.LSP (main) where
 
 import Control.Concurrent.MVar (newMVar)
@@ -18,6 +19,7 @@ import Language.LSP.Types
   )
 import System.Log.Logger (Priority (DEBUG))
 
+-- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
 main _prog _args = do
   state_mvar <- newMVar emptyState
