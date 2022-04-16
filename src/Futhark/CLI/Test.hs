@@ -255,7 +255,10 @@ runTestCase (TestCase mode program testcase progs) = do
           unless (mode == Compile) $ do
             (tuning_opts, _) <-
               liftIO $ determineTuning (configTuning progs) program
-            let extra_options = tuning_opts ++ configExtraOptions progs
+            let extra_options =
+                  determineCache (configCacheExt progs) program
+                    ++ tuning_opts
+                    ++ configExtraOptions progs
                 runner = configRunner progs
             context "Running compiled program" $
               withProgramServer program runner extra_options $ \server -> do
@@ -613,7 +616,8 @@ defaultConfig =
             configRunner = "",
             configExtraOptions = [],
             configExtraCompilerOptions = [],
-            configTuning = Just "tuning"
+            configTuning = Just "tuning",
+            configCacheExt = Nothing
           },
       configLineOutput = False,
       configConcurrency = Nothing
@@ -625,6 +629,7 @@ data ProgConfig = ProgConfig
     configRunner :: FilePath,
     configExtraCompilerOptions :: [String],
     configTuning :: Maybe String,
+    configCacheExt :: Maybe String,
     -- | Extra options passed to the programs being run.
     configExtraOptions :: [String]
   }
@@ -729,6 +734,14 @@ commandLineOptions =
       ["no-tuning"]
       (NoArg $ Right $ changeProgConfig $ \config -> config {configTuning = Nothing})
       "Do not load tuning files.",
+    Option
+      []
+      ["cache-extension"]
+      ( ReqArg
+          (\s -> Right $ changeProgConfig $ \config -> config {configCacheExt = Just s})
+          "EXTENSION"
+      )
+      "Use cache files with this extension (none by default).",
     Option
       []
       ["concurrency"]

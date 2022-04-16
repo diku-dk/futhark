@@ -694,7 +694,10 @@ fusionGatherStms
   fres
   (Let (Pat pes) stmtp (DoLoop merge (ForLoop i it w loop_vars) body) : stms)
   res
-    | not $ null loop_vars = do
+    | not $ null loop_vars,
+      -- We cannot turn a loop into a stream if it has variant sizes
+      -- in its parameters.
+      not $ any ((`nameIn` freeIn merge) . paramName . fst) merge = do
         let (merge_params, merge_init) = unzip merge
             (loop_params, loop_arrs) = unzip loop_vars
         chunk_param <- newParam "chunk_size" $ Prim int64

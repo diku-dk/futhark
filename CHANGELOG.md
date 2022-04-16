@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+* Variables being indexed now have correct source spans in AST.
+
+* `futhark lsp`s hover information now contains proper range information.
+
+* `futhark query` and `futhark lsp` incorrectly thought size
+  parameters had type `i32`.
+
+## [0.21.9]
+
+### Added
+
 * Sun Haoran has implemented unnamed typed holes, with syntax `???`.
 
 * Sun Haoran has implemented the beginnings of a language server:
@@ -19,13 +36,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The GPU backends now support a caching mechanism for JIT-compiled
   code, significantly improving startup times.  Use the
-  `futhark_context_config_set_cache_file()` in the C API, or the
-  `--cache-file` option on executables.  These also work for the
-  non-GPU backends, but currently have no effect.  (#1614)
+  `futhark_context_config_set_cache_file()` in the C API, the
+  `--cache-file` option on executables, or the `--cache-extension`
+  option on `futhark test` and `futhark bench`.  These also work for
+  the non-GPU backends, but currently have no effect.  (#1614)
 
-### Removed
-
-### Changed
+* Aleksander Junge has improved `futhark bench` such that it
+  intelligently chooses how many runs to perform (#1335).
 
 ### Fixed
 
@@ -37,6 +54,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect code generation for certain copies of transposed arrays
   (#1627).
+
+* Fusion would mistakenly try to treat some loops with irregular sizes
+  (#1631).
+
+* Memory annotation bug for non-inlined functions (#1634).
 
 ## [0.21.8]
 
