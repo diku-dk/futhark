@@ -797,11 +797,11 @@ static uniform uint64_t futrts_mad_hi64(uniform uint64_t a, uniform uint64_t b, 
 }
 
 static uniform int32_t futrts_clzz8(uniform int8_t x) {
-  return x == 0 ? 8 : count_leading_zeros((uniform int32_t)x);
+  return count_leading_zeros((uniform int32_t)(uniform uint8_t)x)-24;
 }
 
 static uniform int32_t futrts_clzz16(uniform int16_t x) {
-  return x == 0 ? 16 : max(count_leading_zeros((uniform int32_t)x)-16,0);
+  return count_leading_zeros((uniform int32_t)(uniform uint16_t)x)-16;
 }
 
 static uniform int32_t futrts_clzz32(uniform int32_t x) {

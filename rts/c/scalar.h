@@ -1560,11 +1560,11 @@ static int32_t futrts_clzz64(int64_t x) {
 #elif ISPC
 
 static int32_t futrts_clzz8(int8_t x) {
-  return x == 0 ? 8 : count_leading_zeros((int32_t)x);
+  return count_leading_zeros((int32_t)(uint8_t)x)-24;
 }
 
 static int32_t futrts_clzz16(int16_t x) {
-  return x == 0 ? 16 : max(count_leading_zeros((int32_t)x)-16,0);
+  return count_leading_zeros((int32_t)(uint16_t)x)-16;
 }
 
 static int32_t futrts_clzz32(int32_t x) {
