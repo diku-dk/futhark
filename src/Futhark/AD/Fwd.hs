@@ -421,7 +421,9 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
                     case (tt, e_t) of
                       (IntType tt', IntType ft) -> ConvOpExp (SExt ft tt') e
                       (FloatType tt', FloatType ft) -> ConvOpExp (FPConv ft tt') e
-                      _ -> error $ "fwdStm.convertTo: " ++ pretty (tt, e_t)
+                      (Bool, FloatType ft) -> ConvOpExp (FToB ft) e
+                      (FloatType tt', Bool) -> ConvOpExp (BToF tt') e
+                      _ -> error $ "fwdStm.convertTo: " ++ pretty (f, tt, e_t)
                 where
                   e_t = primExpType e
           zipWithM_ (letBindNames . pure) (patNames pat_tan)

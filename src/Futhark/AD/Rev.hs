@@ -238,12 +238,11 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
           pat_adj' = primExpFromSubExp ret (Var pat_adj)
           convert ft tt
             | ft == tt = id
-          convert (IntType ft) (IntType tt) =
-            ConvOpExp (SExt ft tt)
-          convert (FloatType ft) (FloatType tt) =
-            ConvOpExp (FPConv ft tt)
-          convert ft tt =
-            error $ "diffStm.convert: " ++ pretty (ft, tt)
+          convert (IntType ft) (IntType tt) = ConvOpExp (SExt ft tt)
+          convert (FloatType ft) (FloatType tt) = ConvOpExp (FPConv ft tt)
+          convert Bool (FloatType tt) = ConvOpExp (BToF tt)
+          convert (FloatType ft) Bool = ConvOpExp (FToB ft)
+          convert ft tt = error $ "diffStm.convert: " ++ pretty (f, ft, tt)
 
       contribs <-
         case pdBuiltin f arg_pes of
