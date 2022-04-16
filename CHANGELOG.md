@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark query` and `futhark lsp` incorrectly thought size
   parameters had type `i32`.
 
+* `futhark doc` put documentation for prelude modules in the wrong
+  location (which also led to messed-up style sheets).
+
 ## [0.21.9]
 
 ### Added
