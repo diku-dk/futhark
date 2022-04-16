@@ -55,7 +55,11 @@ module Futhark.Analysis.PrimExp
     zExt32,
     zExt64,
     sExtAs,
+    fMin16,
+    fMin32,
     fMin64,
+    fMax16,
+    fMax32,
     fMax64,
 
     -- * Untyped construction
@@ -634,13 +638,29 @@ zExt32 = isInt32 . zExt Int32 . untyped
 zExt64 :: IntExp t => TPrimExp t v -> TPrimExp Int64 v
 zExt64 = isInt64 . zExt Int64 . untyped
 
+-- | 16-bit float minimum.
+fMin16 :: TPrimExp Half v -> TPrimExp Half v -> TPrimExp Half v
+fMin16 x y = isF16 $ BinOpExp (FMin Float16) (untyped x) (untyped y)
+
+-- | 32-bit float minimum.
+fMin32 :: TPrimExp Float v -> TPrimExp Float v -> TPrimExp Float v
+fMin32 x y = isF32 $ BinOpExp (FMin Float32) (untyped x) (untyped y)
+
 -- | 64-bit float minimum.
 fMin64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
-fMin64 x y = TPrimExp $ BinOpExp (FMin Float64) (untyped x) (untyped y)
+fMin64 x y = isF64 $ BinOpExp (FMin Float64) (untyped x) (untyped y)
+
+-- | 16-bit float maximum.
+fMax16 :: TPrimExp Half v -> TPrimExp Half v -> TPrimExp Half v
+fMax16 x y = isF16 $ BinOpExp (FMax Float16) (untyped x) (untyped y)
+
+-- | 32-bit float maximum.
+fMax32 :: TPrimExp Float v -> TPrimExp Float v -> TPrimExp Float v
+fMax32 x y = isF32 $ BinOpExp (FMax Float32) (untyped x) (untyped y)
 
 -- | 64-bit float maximum.
 fMax64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
-fMax64 x y = TPrimExp $ BinOpExp (FMax Float64) (untyped x) (untyped y)
+fMax64 x y = isF64 $ BinOpExp (FMax Float64) (untyped x) (untyped y)
 
 -- | Convert result of some integer expression to have the same type
 -- as another, using sign extension.

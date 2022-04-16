@@ -130,70 +130,107 @@ pdBinOp op _ _ = error $ "pdBinOp: missing case: " ++ pretty op
 -- applied to @args@ with respect to each of its arguments.  Returns
 -- 'Nothing' if no such derivative is known.
 pdBuiltin :: Name -> [PrimExp VName] -> Maybe [PrimExp VName]
+pdBuiltin "sqrt16" [x] =
+  Just [untyped $ 1 / (2 * sqrt (isF16 x))]
 pdBuiltin "sqrt32" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF32 x))]
 pdBuiltin "sqrt64" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF64 x))]
+pdBuiltin "log16" [x] =
+  Just [untyped $ 1 / isF16 x]
 pdBuiltin "log32" [x] =
   Just [untyped $ 1 / isF32 x]
 pdBuiltin "log64" [x] =
   Just [untyped $ 1 / isF64 x]
+pdBuiltin "log10_16" [x] =
+  Just [untyped $ 1 / (isF16 x * log 10)]
 pdBuiltin "log10_32" [x] =
   Just [untyped $ 1 / (isF32 x * log 10)]
 pdBuiltin "log10_64" [x] =
   Just [untyped $ 1 / (isF64 x * log 10)]
+pdBuiltin "log2_16" [x] =
+  Just [untyped $ 1 / (isF16 x * log 2)]
 pdBuiltin "log2_32" [x] =
   Just [untyped $ 1 / (isF32 x * log 2)]
 pdBuiltin "log2_64" [x] =
   Just [untyped $ 1 / (isF64 x * log 2)]
+pdBuiltin "exp16" [x] =
+  Just [untyped $ exp (isF16 x)]
 pdBuiltin "exp32" [x] =
   Just [untyped $ exp (isF32 x)]
 pdBuiltin "exp64" [x] =
   Just [untyped $ exp (isF64 x)]
+pdBuiltin "sin16" [x] =
+  Just [untyped $ cos (isF16 x)]
 pdBuiltin "sin32" [x] =
   Just [untyped $ cos (isF32 x)]
 pdBuiltin "sin64" [x] =
   Just [untyped $ cos (isF64 x)]
+pdBuiltin "sinh16" [x] =
+  Just [untyped $ cosh (isF16 x)]
 pdBuiltin "sinh32" [x] =
   Just [untyped $ cosh (isF32 x)]
 pdBuiltin "sinh64" [x] =
   Just [untyped $ cosh (isF64 x)]
+pdBuiltin "cos16" [x] =
+  Just [untyped $ -sin (isF16 x)]
 pdBuiltin "cos32" [x] =
   Just [untyped $ -sin (isF32 x)]
 pdBuiltin "cos64" [x] =
   Just [untyped $ -sin (isF64 x)]
+pdBuiltin "cosh16" [x] =
+  Just [untyped $ sinh (isF16 x)]
 pdBuiltin "cosh32" [x] =
   Just [untyped $ sinh (isF32 x)]
 pdBuiltin "cosh64" [x] =
   Just [untyped $ sinh (isF64 x)]
+pdBuiltin "tan16" [x] =
+  Just [untyped $ 1 / (cos (isF16 x) * cos (isF16 x))]
 pdBuiltin "tan32" [x] =
   Just [untyped $ 1 / (cos (isF32 x) * cos (isF32 x))]
 pdBuiltin "tan64" [x] =
   Just [untyped $ 1 / (cos (isF64 x) * cos (isF64 x))]
+pdBuiltin "asin16" [x] =
+  Just [untyped $ 1 / sqrt (1 - isF16 x * isF16 x)]
 pdBuiltin "asin32" [x] =
   Just [untyped $ 1 / sqrt (1 - isF32 x * isF32 x)]
 pdBuiltin "asin64" [x] =
   Just [untyped $ 1 / sqrt (1 - isF64 x * isF64 x)]
+pdBuiltin "asinh16" [x] =
+  Just [untyped $ 1 / sqrt (1 + isF16 x * isF16 x)]
 pdBuiltin "asinh32" [x] =
   Just [untyped $ 1 / sqrt (1 + isF32 x * isF32 x)]
 pdBuiltin "asinh64" [x] =
   Just [untyped $ 1 / sqrt (1 + isF64 x * isF64 x)]
+pdBuiltin "acos16" [x] =
+  Just [untyped $ -1 / sqrt (1 - isF16 x * isF16 x)]
 pdBuiltin "acos32" [x] =
   Just [untyped $ -1 / sqrt (1 - isF32 x * isF32 x)]
 pdBuiltin "acos64" [x] =
   Just [untyped $ -1 / sqrt (1 - isF64 x * isF64 x)]
+pdBuiltin "acosh16" [x] =
+  Just [untyped $ 1 / sqrt (isF16 x * isF16 x - 1)]
 pdBuiltin "acosh32" [x] =
   Just [untyped $ 1 / sqrt (isF32 x * isF32 x - 1)]
 pdBuiltin "acosh64" [x] =
   Just [untyped $ 1 / sqrt (isF64 x * isF64 x - 1)]
+pdBuiltin "atan16" [x] =
+  Just [untyped $ 1 / (1 + isF16 x * isF16 x)]
 pdBuiltin "atan32" [x] =
   Just [untyped $ 1 / (1 + isF32 x * isF32 x)]
 pdBuiltin "atan64" [x] =
   Just [untyped $ 1 / (1 + isF64 x * isF64 x)]
+pdBuiltin "atanh16" [x] =
+  Just [untyped $ cosh (isF16 x) * cosh (isF16 x)]
 pdBuiltin "atanh32" [x] =
   Just [untyped $ cosh (isF32 x) * cosh (isF32 x)]
 pdBuiltin "atanh64" [x] =
   Just [untyped $ cosh (isF64 x) * cosh (isF64 x)]
+pdBuiltin "atan2_16" [x, y] =
+  Just
+    [ untyped $ -isF16 y / (isF16 x * isF16 x + isF16 y * isF16 y),
+      untyped $ -isF16 x / (isF16 x * isF16 x + isF16 y * isF16 y)
+    ]
 pdBuiltin "atan2_32" [x, y] =
   Just
     [ untyped $ -isF32 y / (isF32 x * isF32 x + isF32 y * isF32 y),
@@ -204,11 +241,78 @@ pdBuiltin "atan2_64" [x, y] =
     [ untyped $ -isF64 y / (isF64 x * isF64 x + isF64 y * isF64 y),
       untyped $ -isF64 x / (isF64 x * isF64 x + isF64 y * isF64 y)
     ]
+pdBuiltin "tanh16" [x] =
+  Just [untyped $ 1 - tanh (isF16 x) * tanh (isF16 x)]
 pdBuiltin "tanh32" [x] =
   Just [untyped $ 1 - tanh (isF32 x) * tanh (isF32 x)]
 pdBuiltin "tanh64" [x] =
   Just [untyped $ 1 - tanh (isF64 x) * tanh (isF64 x)]
+pdBuiltin "fma16" [a, b, _c] =
+  Just [b, a, fConst Float16 1]
+pdBuiltin "fma32" [a, b, _c] =
+  Just [b, a, fConst Float32 1]
+pdBuiltin "fma64" [a, b, _c] =
+  Just [b, a, fConst Float64 1]
+pdBuiltin "mad16" [a, b, _c] =
+  Just [b, a, fConst Float16 1]
+pdBuiltin "mad32" [a, b, _c] =
+  Just [b, a, fConst Float32 1]
+pdBuiltin "mad64" [a, b, _c] =
+  Just [b, a, fConst Float64 1]
+pdBuiltin "from_bits16" [_] =
+  Just [fConst Float16 1]
+pdBuiltin "from_bits32" [_] =
+  Just [fConst Float32 1]
+pdBuiltin "from_bits64" [_] =
+  Just [fConst Float64 1]
+pdBuiltin "to_bits16" [_] =
+  Just [iConst Int16 1]
+pdBuiltin "to_bits32" [_] =
+  Just [iConst Int32 1]
+pdBuiltin "to_bits64" [_] =
+  Just [iConst Int64 1]
+pdBuiltin "hypot16" [x, y] =
+  Just
+    [ untyped $ isF16 x / isF16 (FunExp "hypot16" [x, y] $ FloatType Float16),
+      untyped $ isF16 y / isF16 (FunExp "hypot16" [x, y] $ FloatType Float16)
+    ]
+pdBuiltin "hypot32" [x, y] =
+  Just
+    [ untyped $ isF32 x / isF32 (FunExp "hypot32" [x, y] $ FloatType Float32),
+      untyped $ isF32 y / isF32 (FunExp "hypot32" [x, y] $ FloatType Float32)
+    ]
+pdBuiltin "hypot64" [x, y] =
+  Just
+    [ untyped $ isF64 x / isF64 (FunExp "hypot64" [x, y] $ FloatType Float64),
+      untyped $ isF64 y / isF64 (FunExp "hypot64" [x, y] $ FloatType Float64)
+    ]
+pdBuiltin "lerp16" [v0, v1, t] =
+  Just
+    [ untyped $ 1 - fMax16 0 (fMin16 1 (isF16 t)),
+      untyped $ fMax16 0 (fMin16 1 (isF16 t)),
+      untyped $ isF16 v1 - isF16 v0
+    ]
+pdBuiltin "lerp32" [v0, v1, t] =
+  Just
+    [ untyped $ 1 - fMax32 0 (fMin32 1 (isF32 t)),
+      untyped $ fMax32 0 (fMin32 1 (isF32 t)),
+      untyped $ isF32 v1 - isF32 v0
+    ]
+pdBuiltin "lerp64" [v0, v1, t] =
+  Just
+    [ untyped $ 1 - fMax64 0 (fMin64 1 (isF64 t)),
+      untyped $ fMax64 0 (fMin64 1 (isF64 t)),
+      untyped $ isF64 v1 - isF64 v0
+    ]
 -- More problematic derivatives follow below.
+pdBuiltin "mul_hi8" [x, y] = Just [y, x]
+pdBuiltin "mul_hi16" [x, y] = Just [y, x]
+pdBuiltin "mul_hi32" [x, y] = Just [y, x]
+pdBuiltin "mul_hi64" [x, y] = Just [y, x]
+pdBuiltin "mad_hi8" [a, b, _c] = Just [b, a, iConst Int8 1]
+pdBuiltin "mad_hi16" [a, b, _c] = Just [b, a, iConst Int16 1]
+pdBuiltin "mad_hi32" [a, b, _c] = Just [b, a, iConst Int32 1]
+pdBuiltin "mad_hi64" [a, b, _c] = Just [b, a, iConst Int64 1]
 pdBuiltin "isnan16" [_] = Just [untyped false]
 pdBuiltin "isnan32" [_] = Just [untyped false]
 pdBuiltin "isnan64" [_] = Just [untyped false]
@@ -228,4 +332,12 @@ pdBuiltin "clz8" [_] = Just [iConst Int32 0]
 pdBuiltin "clz16" [_] = Just [iConst Int32 0]
 pdBuiltin "clz32" [_] = Just [iConst Int32 0]
 pdBuiltin "clz64" [_] = Just [iConst Int32 0]
+pdBuiltin "ctz8" [_] = Just [iConst Int32 0]
+pdBuiltin "ctz16" [_] = Just [iConst Int32 0]
+pdBuiltin "ctz32" [_] = Just [iConst Int32 0]
+pdBuiltin "ctz64" [_] = Just [iConst Int32 0]
+pdBuiltin "popc8" [_] = Just [iConst Int32 0]
+pdBuiltin "popc16" [_] = Just [iConst Int32 0]
+pdBuiltin "popc32" [_] = Just [iConst Int32 0]
+pdBuiltin "popc64" [_] = Just [iConst Int32 0]
 pdBuiltin _ _ = Nothing

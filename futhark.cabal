@@ -405,6 +405,7 @@ test-suite unit
   type: exitcode-stdio-1.0
   main-is: futhark_tests.hs
   other-modules:
+      Futhark.AD.DerivativesTests
       Futhark.BenchTests
       Futhark.Pkg.SolveTests
       Futhark.IR.Prop.RearrangeTests
