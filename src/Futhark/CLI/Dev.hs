@@ -551,7 +551,7 @@ commandLineOptions =
     soacsPassOption inlineAggressively [],
     soacsPassOption inlineConservatively [],
     soacsPassOption removeDeadFunctions [],
-    soacsPassOption algebraicDifferentiation [],
+    soacsPassOption applyAD [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],

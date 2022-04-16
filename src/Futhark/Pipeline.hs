@@ -22,6 +22,7 @@ module Futhark.Pipeline
     module Futhark.Error,
     onePass,
     passes,
+    condPipeline,
     runPipeline,
   )
 where
@@ -153,6 +154,15 @@ onePass pass = Pipeline perform
           Left err -> validationError pass prog'' $ show err
           Right () -> pure ()
       pure prog'
+
+-- | Conditionally run pipeline if predicate is true.
+condPipeline ::
+  (Prog rep -> Bool) -> Pipeline rep rep -> Pipeline rep rep
+condPipeline cond (Pipeline f) =
+  Pipeline $ \cfg prog ->
+    if cond prog
+      then f cfg prog
+      else pure prog
 
 -- | Create a pipeline from a list of passes.
 passes ::

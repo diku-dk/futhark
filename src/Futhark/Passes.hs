@@ -17,7 +17,7 @@ import Futhark.IR.GPU (GPU)
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MC (MC)
 import Futhark.IR.MCMem (MCMem)
-import Futhark.IR.SOACS (SOACS)
+import Futhark.IR.SOACS (SOACS, usesAD)
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.CSE
@@ -63,10 +63,16 @@ standardPipeline =
       fuseSOACs,
       performCSE True,
       simplifySOACS,
-      removeDeadFunctions,
-      -- TODO: we sould skip the AD pass and its subsequent extra
-      -- optimisation passes if the program contains no AD constructs.
-      algebraicDifferentiation,
+      removeDeadFunctions
+    ]
+    >>> condPipeline usesAD adPipeline
+
+-- | This is the pipeline that applies the AD transformation and
+-- subsequent interesting optimisations.
+adPipeline :: Pipeline SOACS SOACS
+adPipeline =
+  passes
+    [ applyAD,
       simplifySOACS,
       performCSE True,
       fuseSOACs,

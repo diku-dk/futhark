@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Apply all AD operators in the program, leaving AD-free code.
-module Futhark.Pass.AD (algebraicDifferentiation) where
+module Futhark.Pass.AD (applyAD) where
 
 import Control.Monad
 import Futhark.AD.Fwd (fwdJVP)
@@ -63,8 +63,8 @@ onFun consts fd = do
   body <- onBody (scopeOf consts <> scopeOf fd) $ funDefBody fd
   pure $ fd {funDefBody = body}
 
-algebraicDifferentiation :: Pass SOACS SOACS
-algebraicDifferentiation =
+applyAD :: Pass SOACS SOACS
+applyAD =
   Pass
     { passName = "ad",
       passDescription = "Apply AD operators",
