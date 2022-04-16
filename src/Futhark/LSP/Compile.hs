@@ -9,7 +9,7 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
-import Futhark.LSP.Diagnostic (maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
+import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
 import Language.Futhark.Warnings (listWarnings)
@@ -52,7 +52,7 @@ tryCompile (Just path) state = do
   let old_loaded_prog = getLoadedProg state
   vfs <- getVirtualFiles
   res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs)
-  flushDiagnosticsBySource maxDiagnostic Nothing
+  flushDiagnosticsBySource maxDiagnostic diagnosticSource
   case res of
     Right new_loaded_prog -> do
       publishWarningDiagnostics $ listWarnings $ lpWarnings new_loaded_prog
