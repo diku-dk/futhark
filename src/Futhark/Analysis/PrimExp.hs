@@ -439,6 +439,15 @@ instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
         TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "divRoundingUp" (x, y)
 
+  TPrimExp x `pow` TPrimExp y
+    | Just z <-
+        msum
+          [ asIntOp Pow x y,
+            asFloatOp FPow x y
+          ] =
+        TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "pow" (x, y)
+
   sgn (TPrimExp (ValueExp (IntValue i))) = Just $ signum $ valueIntegral i
   sgn _ = Nothing
 

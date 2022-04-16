@@ -12,7 +12,6 @@ import Data.Bifunctor (bimap)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Syntax.Core
 import Futhark.Util.IntegralExp
-import Futhark.Util.Pretty (pretty)
 import Prelude hiding (quot)
 
 iConst :: IntType -> Integer -> PrimExp VName
@@ -65,6 +64,10 @@ pdBinOp :: BinOp -> PrimExp VName -> PrimExp VName -> (PrimExp VName, PrimExp VN
 pdBinOp (Add it _) _ _ = (iConst it 1, iConst it 1)
 pdBinOp (Sub it _) _ _ = (iConst it 1, iConst it (-1))
 pdBinOp (Mul _ _) x y = (y, x)
+pdBinOp (Pow it) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = ((x `pow` (y - 1)) * y, 0) -- FIXME (wrt y)
 pdBinOp (SDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
@@ -87,18 +90,31 @@ pdBinOp (UDivUp it _) a b =
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
 pdBinOp (UMod it _) _ _ = (iConst it 1, iConst it 0) -- FIXME
 pdBinOp (SMod it _) _ _ = (iConst it 1, iConst it 0) -- FIXME
+pdBinOp (SRem it _) _ _ = (iConst it 1, iConst it 0) -- FIXME
+pdBinOp (FMod ft) _ _ = (fConst ft 1, fConst ft 0) -- FIXME
+pdBinOp (UMax it) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = (fromBoolExp (x .>=. y), fromBoolExp (x .<. y))
 pdBinOp (SMax it) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (fromBoolExp (x .>=. y), fromBoolExp (x .<. y))
+pdBinOp (UMin it) a b =
+  intBinOp derivs derivs derivs derivs it a b
+  where
+    derivs x y = (fromBoolExp (x .<=. y), fromBoolExp (x .>. y))
 pdBinOp (SMin it) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (fromBoolExp (x .<=. y), fromBoolExp (x .>. y))
 --
+pdBinOp (Shl it) a b =
+  pdBinOp (Mul it OverflowWrap) a $ BinOpExp (Pow it) (iConst it 2) b
 pdBinOp (LShr it) a b =
-  pdBinOp (UDiv it Unsafe) a $
-    BinOpExp (Pow it) (ValueExp (IntValue (intValue it (2 :: Int)))) b
+  pdBinOp (UDiv it Unsafe) a $ BinOpExp (Pow it) (iConst it 2) b
+pdBinOp (AShr it) a b =
+  pdBinOp (SDiv it Unsafe) a $ BinOpExp (Pow it) (iConst it 2) b
 pdBinOp (And it) _a _b = (iConst it 0, iConst it 0) -- FIXME
 pdBinOp (Or it) _a _b = (iConst it 0, iConst it 0) -- FIXME
 pdBinOp (Xor it) _a _b = (iConst it 0, iConst it 0) -- FIXME
@@ -124,7 +140,6 @@ pdBinOp (FMin ft) a b =
     derivs x y = (fromBoolExp (x .<=. y), fromBoolExp (x .>. y))
 pdBinOp LogAnd a b = (b, a)
 pdBinOp LogOr _ _ = (ValueExp $ BoolValue True, ValueExp $ BoolValue False)
-pdBinOp op _ _ = error $ "pdBinOp: missing case: " ++ pretty op
 
 -- | @pdBuiltin f args i@ computes the partial derivative of @f@
 -- applied to @args@ with respect to each of its arguments.  Returns
