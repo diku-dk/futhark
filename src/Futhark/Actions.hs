@@ -208,7 +208,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
         "ispc"
         ( [ispcpath, "-o", ispcbase `addExtension` "o"] ++
           ["-h", ispcbase `addExtension` "h"] ++ 
-          cmdCFLAGS ispc_flags
+          ispc_flags
         )
         mempty
   ret <- -- TODO(kris): Clean this shit up
@@ -396,11 +396,11 @@ compileMulticoreToISPCAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
           liftIO $ T.writeFile ispcpath ispc
-          runISPC ispcpath outpath cpath ispcextension ["-O3", "--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcpath outpath cpath ispcextension ["-O3", "--addressing=64","--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           liftIO $ T.writeFile ispcpath ispc
-          runISPC ispcpath outpath cpath ispcextension ["-O3", "--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcpath outpath cpath ispcextension ["-O3", "--addressing=64","--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 pythonCommon ::
   (CompilerMode -> String -> prog -> FutharkM (Warnings, T.Text)) ->

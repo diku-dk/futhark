@@ -70,10 +70,7 @@ nonsegmentedHist pat space histops kbody num_histos = do
       sIf
         use_subhistogram
         (subHistogram pat space histops num_histos kbody)
-        --(subHistogram pat space histops num_histos kbody)
-        (atomicHistogram pat space histops' kbody)
-        -- TODO (obp): add atomic path back when finished debugging
-
+        (atomicHistogram pat space histops' kbody)        
 -- |
 -- Atomic Histogram approach
 -- The implementation has three sub-strategies depending on the
@@ -250,30 +247,38 @@ subHistogram pat space histops num_histos kbody = do
              histop_subhistograms,
              (bucket, vs')
              ) -> do
-
+              
+              -- TODO(k): I don't think these params ever used
               genHistOpParams histop
               histop' <- renameHistop histop
 
-              let bucket' = map toInt64Exp bucket
+              let bucket'     = map toInt64Exp bucket
                   dest_shape' = map toInt64Exp $ shapeDims dest_shape
                   acc_params' = (lambdaParams . histOp) histop'
-                  vs_params' = takeLast (length vs') $ lambdaParams $ histOp histop'
+                  vs_params'  = takeLast (length vs') $ lambdaParams $ histOp histop'
 
                             
               generateUniformizeLoop $ \j ->
                 sComment "perform updates" $ do
-                  --bucket'' <- mapM (\x -> extractVectorLane (primExpType . untyped) x) bucket'
-                  temps <- mapM (dPrim "bla" . (primExpType . untyped)) bucket'
-                  mapM_ (\(x,y) -> emit $ Imp.Op $ Imp.ExtractLane (tvVar x) (untyped y) (untyped j)) $ zip temps bucket'
-                  let bucket'' = map tvExp temps
+                  -- Create new set of uniform buckets
+                  -- That is extact each bucket from a SIMD vector lane
+                  extract_buckets <- mapM (dPrim "extract_bucket" . (primExpType . untyped)) bucket'
+                  mapM_ (\(x,y) -> emit $
+                    Imp.Op $ Imp.ExtractLane (tvVar x) (untyped y) (untyped j)) $ zip extract_buckets bucket'
+                  let bucket'' = map tvExp extract_buckets
                       bucket_in_bounds =
                         inBounds (Slice (map DimFix bucket'')) dest_shape'
                   sWhen bucket_in_bounds $ do
                     genHistOpParams histop' 
                     sLoopNest shape $ \is' -> do
+                      -- read values vs and perform lambda writing result back to is
                       forM_ (zip vs_params' vs') $ \(p, res) ->
-                        everythingVarying $
-                          extractVectorLane j $ collect $ copyDWIMFix (paramName p) [] res is'
+                        ifPrimType (paramType p) $ \pt -> do
+                          -- Hack to copy varying load into uniform result variable
+                          tmp <- dPrim "tmp" pt
+                          copyDWIMFix (tvVar tmp) [] res is'
+                          extractVectorLane j $ pure $
+                            Imp.SetScalar (paramName p) (Imp.LeafExp (tvVar tmp) pt)
                       updateHisto histop' histop_subhistograms (bucket'' ++ is') j acc_params'
 
     -- Copy the task-local subhistograms to the global subhistograms,
@@ -317,6 +322,8 @@ subHistogram pat space histops num_histos kbody = do
     emit $ Imp.Op $ Imp.SegOp "seghist_red" free_params_red red_task Nothing mempty scheduler_info
   where
     segment_dims = init $ unSegSpace space
+    ifPrimType (Prim pt) f = f pt
+    ifPrimType _ _ = pure ()
 
 -- This implementation for a Segmented Hist only
 -- parallelize over the segments,

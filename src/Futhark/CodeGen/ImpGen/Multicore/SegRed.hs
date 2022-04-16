@@ -271,7 +271,7 @@ reductionStage1NonCommScalar space slugs kbody = do
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
-    inISPC $ everythingUniform $ do
+    inISPC $ do
       -- Declare params
       genBinOpParams slugs
       slug_local_accs <- genAccumulators slugs
@@ -292,22 +292,21 @@ reductionStage1CommScalar space slugs kbody = do
     sOp $ Imp.GetTaskId (segFlat space)
     -- Rename lambda params in slugs to get a new set of them
     slugs' <- mapM renameSlug slugs
-    inISPC $ everythingUniform $ do
+    inISPC $ do
       -- Declare one set of params uniform
       genBinOpParams slugs'
       slug_local_accs_uni <- genAccumulators slugs'
-      everythingVarying $ do
-        -- Declare the other varying
-        genBinOpParams slugs
-        slug_local_accs <- genAccumulators slugs
-        -- Generate the main reduction loop over vectors
-        generateChunkLoop "SegRed" True $
-          genReductionLoop RedComm kbody slugs slug_local_accs space
-        -- Now reduce over those vector accumulators to get scalar results
-        generateUniformizeLoop $
-          genPostbodyReductionLoop slug_local_accs slugs' slug_local_accs_uni space
-        -- And write back the results
-        genWriteBack slugs slug_local_accs_uni space
+      -- Declare the other varying
+      genBinOpParams slugs
+      slug_local_accs <- genAccumulators slugs
+      -- Generate the main reduction loop over vectors
+      generateChunkLoop "SegRed" True $
+        genReductionLoop RedComm kbody slugs slug_local_accs space
+      -- Now reduce over those vector accumulators to get scalar results
+      generateUniformizeLoop $
+        genPostbodyReductionLoop slug_local_accs slugs' slug_local_accs_uni space
+      -- And write back the results
+      genWriteBack slugs slug_local_accs_uni space
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" fbody free_params
 
