@@ -135,7 +135,10 @@ module type real = {
   val to_i64: t -> i64
   val to_f64: t -> f64
 
+  -- | Square root.
   val sqrt: t -> t
+  -- | Cube root.
+  val cbrt: t -> t
   val exp: t -> t
 
   val sin: t -> t
@@ -915,6 +918,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   def abs (x: f64) = intrinsics.fabs64 x
 
   def sqrt (x: f64) = intrinsics.sqrt64 x
+  def cbrt (x: f64) = intrinsics.cbrt64 x
 
   def log (x: f64) = intrinsics.log64 x
   def log2 (x: f64) = intrinsics.log2_64 x
@@ -1026,6 +1030,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   def abs (x: f32) = intrinsics.fabs32 x
 
   def sqrt (x: f32) = intrinsics.sqrt32 x
+  def cbrt (x: f32) = intrinsics.cbrt32 x
 
   def log (x: f32) = intrinsics.log32 x
   def log2 (x: f32) = intrinsics.log2_32 x
@@ -1141,6 +1146,7 @@ module f16: (float with t = f16 with int_t = u16) = {
   def abs (x: f16) = intrinsics.fabs16 x
 
   def sqrt (x: f16) = intrinsics.sqrt16 x
+  def cbrt (x: f16) = intrinsics.cbrt16 x
 
   def log (x: f16) = intrinsics.log16 x
   def log2 (x: f16) = intrinsics.log2_16 x

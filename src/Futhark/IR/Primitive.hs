@@ -130,7 +130,9 @@ import qualified Data.Map as M
 import Data.Word
 import Foreign.C.Types (CUShort (..))
 import Futhark.Util
-  ( ceilDouble,
+  ( cbrt,
+    cbrtf,
+    ceilDouble,
     ceilFloat,
     convFloat,
     erf,
@@ -1185,6 +1187,10 @@ primFuns =
     [ f16 "sqrt16" sqrt,
       f32 "sqrt32" sqrt,
       f64 "sqrt64" sqrt,
+      --
+      f16 "cbrt16" $ convFloat . cbrtf . convFloat,
+      f32 "cbrt32" cbrtf,
+      f64 "cbrt64" cbrt,
       --
       f16 "log16" log,
       f32 "log32" log,

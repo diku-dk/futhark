@@ -1180,6 +1180,10 @@ static inline float futrts_sqrt32(float x) {
   return sqrt(x);
 }
 
+static inline float futrts_cbrt32(float x) {
+  return cbrt(x);
+}
+
 static inline float futrts_exp32(float x) {
   return exp(x);
 }
@@ -1300,6 +1304,10 @@ static inline float futrts_log10_32(float x) {
 
 static inline float futrts_sqrt32(float x) {
   return sqrtf(x);
+}
+
+static inline float futrts_cbrt32(float x) {
+  return cbrtf(x);
 }
 
 static inline float futrts_exp32(float x) {
@@ -1519,6 +1527,10 @@ static inline double futrts_log10_64(double x) {
 
 static inline double futrts_sqrt64(double x) {
   return sqrt(x);
+}
+
+static inline double futrts_cbrt64(double x) {
+  return cbrt(x);
 }
 
 static inline double futrts_exp64(double x) {
