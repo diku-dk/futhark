@@ -7,6 +7,7 @@ module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
 import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
@@ -23,7 +24,7 @@ tryTakeStateFromMVar state_mvar file_path = do
   old_state <- liftIO $ takeMVar state_mvar
   case stateProgram old_state of
     Nothing -> do
-      new_state <- tryCompile file_path (State $ Just noLoadedProg)
+      new_state <- tryCompile file_path noLoadedProg
       liftIO $ putMVar state_mvar new_state
       pure new_state
     Just _ -> do
@@ -35,7 +36,8 @@ tryReCompile :: MVar State -> Maybe FilePath -> LspT () IO ()
 tryReCompile state_mvar file_path = do
   debug "(Re)-compiling ..."
   old_state <- liftIO $ takeMVar state_mvar
-  new_state <- tryCompile file_path old_state
+  let loaded_prog = getLoadedProg old_state
+  new_state <- tryCompile file_path loaded_prog
   case stateProgram new_state of
     Nothing -> do
       debug "Failed to (re)-compile, using old state or Nothing"
@@ -46,10 +48,9 @@ tryReCompile state_mvar file_path = do
 
 -- | Try to compile, publish diagnostics on warnings and errors, return newly compiled state.
 --  Single point where the compilation is done, and shouldn't be exported.
-tryCompile :: Maybe FilePath -> State -> LspT () IO State
+tryCompile :: Maybe FilePath -> LoadedProg -> LspT () IO State
 tryCompile Nothing _ = pure emptyState
-tryCompile (Just path) state = do
-  let old_loaded_prog = getLoadedProg state
+tryCompile (Just path) old_loaded_prog = do
   vfs <- getVirtualFiles
   res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs)
   flushDiagnosticsBySource maxDiagnostic diagnosticSource
@@ -77,5 +78,4 @@ transformVFS vfs =
     (vfsMap vfs)
 
 getLoadedProg :: State -> LoadedProg
-getLoadedProg (State (Just loaded_prog)) = loaded_prog
-getLoadedProg (State Nothing) = noLoadedProg
+getLoadedProg state = fromMaybe noLoadedProg (stateProgram state)
