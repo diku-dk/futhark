@@ -2011,7 +2011,7 @@ volQuals Nonvolatile = []
 variQuals :: Variability  -> [C.TypeQual]
 variQuals Uniform = [C.ctyquals|uniform|]
 variQuals Unbound = []
-variQuals Varying = []
+variQuals Varying = [C.ctyquals|varying|] -- TODO(k): check if this is breaking
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
