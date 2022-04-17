@@ -54,10 +54,9 @@ findDefinitionRange state (Just path) l c = do
 findDefinitionRange _ _ _ _ = Nothing
 
 queryAtPos :: State -> Pos -> Maybe AtPos
-queryAtPos state pos =
-  case stateProgram state of
-    Nothing -> Nothing
-    Just loaded_prog -> atPos (lpImports loaded_prog) pos
+queryAtPos state pos = do
+  loaded_prog <- stateProgram state
+  atPos (lpImports loaded_prog) pos
 
 -- | Convert a Futhark 'Pos' to an LSP 'Uri'.
 posToUri :: Pos -> Uri
