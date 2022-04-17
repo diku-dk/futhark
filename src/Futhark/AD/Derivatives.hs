@@ -151,6 +151,18 @@ pdBuiltin "sqrt32" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF32 x))]
 pdBuiltin "sqrt64" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF64 x))]
+pdBuiltin "cbrt16" [x] =
+  Just [untyped $ 1 / (3 * cbrt16 (isF16 x) * cbrt16 (isF16 x))]
+  where
+    cbrt16 a = isF16 $ FunExp "cbrt16" [untyped a] $ FloatType Float16
+pdBuiltin "cbrt32" [x] =
+  Just [untyped $ 1 / (3 * cbrt32 (isF32 x) * cbrt32 (isF32 x))]
+  where
+    cbrt32 a = isF32 $ FunExp "cbrt32" [untyped a] $ FloatType Float32
+pdBuiltin "cbrt64" [x] =
+  Just [untyped $ 1 / (3 * cbrt64 (isF64 x) * cbrt64 (isF64 x))]
+  where
+    cbrt64 a = isF64 $ FunExp "cbrt64" [untyped a] $ FloatType Float32
 pdBuiltin "log16" [x] =
   Just [untyped $ 1 / isF16 x]
 pdBuiltin "log32" [x] =
@@ -319,6 +331,18 @@ pdBuiltin "lerp64" [v0, v1, t] =
       untyped $ fMax64 0 (fMin64 1 (isF64 t)),
       untyped $ isF64 v1 - isF64 v0
     ]
+pdBuiltin "erf16" [z] =
+  Just [untyped $ (2 / sqrt pi) * exp (negate (isF16 z * isF16 z))]
+pdBuiltin "erf32" [z] =
+  Just [untyped $ (2 / sqrt pi) * exp (negate (isF32 z * isF32 z))]
+pdBuiltin "erf64" [z] =
+  Just [untyped $ (2 / sqrt pi) * exp (negate (isF64 z * isF64 z))]
+pdBuiltin "erfc16" [z] =
+  Just [untyped $ negate $ (2 / sqrt pi) * exp (negate (isF16 z * isF16 z))]
+pdBuiltin "erfc32" [z] =
+  Just [untyped $ negate $ (2 / sqrt pi) * exp (negate (isF32 z * isF32 z))]
+pdBuiltin "erfc64" [z] =
+  Just [untyped $ negate $ (2 / sqrt pi) * exp (negate (isF64 z * isF64 z))]
 -- More problematic derivatives follow below.
 pdBuiltin "mul_hi8" [x, y] = Just [y, x]
 pdBuiltin "mul_hi16" [x, y] = Just [y, x]
