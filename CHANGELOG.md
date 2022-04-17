@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* New math functions: `f16.erf`, `f32.erf`, `f64.erf`.
+
+* New math functions: `f16.erfc`, `f32.erfc`, `f64.erfc`.
+
+* New math functions: `f16.cbrt`, `f32.cbrt`, `f64.cbrt`.
+
 ### Removed
 
 ### Changed
@@ -21,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark query` and `futhark lsp` incorrectly thought size
   parameters had type `i32`.
+
+* `futhark doc` put documentation for prelude modules in the wrong
+  location (which also led to messed-up style sheets).
 
 ## [0.21.9]
 
