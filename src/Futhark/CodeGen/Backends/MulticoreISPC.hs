@@ -72,6 +72,7 @@ typedef unsigned int64 uint64_t;
 typedef unsigned int32 uint32_t;
 typedef unsigned int16 uint16_t;
 typedef unsigned int8 uint8_t;
+#define volatile 
 
 $errorsH
 
@@ -647,24 +648,32 @@ compileOp (ExtractLane dest tar lane) = do
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 compileOp (VariabilityBlock vari code) = do
   compileCode vari code
-
-compileOp (Atomic params op) = do  
-  tryDoIspcAtomic params op
+--TODO(k): make wrapper for uniform and varying atomic operations  
+  
+compileOp (Atomic params op) = do
+  doIspcAtomic params op
 
 compileOp op = MC.compileOp op
-
-tryDoIspcAtomic :: [Param] -> AtomicOp -> ISPCCompilerM ()
-tryDoIspcAtomic _ (AtomicAdd ty old arr idx val) = 
-  doAtomic old arr idx val "atomic_add_global" [C.cty|$ty:(GC.intTypeToCType ty)|]
-tryDoIspcAtomic _ (AtomicSub t old arr ind val) =
-  doAtomic old arr ind val "atomic_subtract_global" [C.cty|$ty:(GC.intTypeToCType t)|]
-tryDoIspcAtomic _ (AtomicAnd t old arr ind val) =
-  doAtomic old arr ind val "atomic_and_global" [C.cty|$ty:(GC.intTypeToCType t)|]
-tryDoIspcAtomic _ (AtomicOr t old arr ind val) =
-  doAtomic old arr ind val "atomic_or_global" [C.cty|$ty:(GC.intTypeToCType t)|]
-tryDoIspcAtomic _ (AtomicXor t old arr ind val) =
-  doAtomic old arr ind val "atomic_xor_global" [C.cty|$ty:(GC.intTypeToCType t)|]  
-tryDoIspcAtomic params atomicOp = MC.compileOp (Atomic params atomicOp)
+compileAtomicWrapper :: VName -> AtomicOp -> ISPCCompilerM ()
+compileAtomicWrapper fname (AtomicCmpXchg ty _ _ _ _ val) = do  
+  let val_type  = GC.primTypeToCType . primExpType       
+      mem_type  = [C.cty|$ty:(GC.primTypeToCType ty)|]
+      val_param = [C.cparam|varying $ty:(val_type val) val|]      
+      old_param = [C.cparam|uniform $ty:(val_type val) * uniform old|] -- ispc claims this type, but it should be varying * uniform
+      res_param = [C.cparam|varying $ty:(val_type val) * uniform res|]
+      mem_param = [C.cparam|uniform $ty:mem_type * varying mem|]
+      fun = [C.cedecl|inline varying $ty:(val_type val) $id:fname($params:([mem_param, old_param, res_param, val_param])) {
+                      uniform $ty:(val_type val) olds[programCount];
+                      foreach_active(i) {
+                        uniform $ty:mem_type * uniform mem_uni = (uniform $ty:mem_type * uniform)extract((typename int64_t)mem, i);
+                        olds[i] = atomic_compare_exchange_global(mem_uni, *old, extract(val, i));
+                        memory_barrier(); 
+                      }
+                      *res = olds[programIndex];
+                      return *res;}|]                      
+  ispcEarlyDecl fun
+  
+compileAtomicWrapper _ _ = pure ()
 
 doAtomic ::
   (C.ToIdent a1) =>
@@ -680,3 +689,33 @@ doAtomic old arr ind val op ty = do
   val' <- GC.compileExp val
   arr' <- GC.rawMem arr
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val');|]
+
+doIspcAtomic :: [Param] -> AtomicOp -> ISPCCompilerM ()
+doIspcAtomic _ (AtomicAdd ty old arr idx val) = 
+  doAtomic old arr idx val "atomic_add_global" [C.cty|$ty:(GC.intTypeToCType ty)|]
+doIspcAtomic _ (AtomicSub t old arr ind val) =
+  doAtomic old arr ind val "atomic_subtract_global" [C.cty|$ty:(GC.intTypeToCType t)|]
+doIspcAtomic _ (AtomicAnd t old arr ind val) =
+  doAtomic old arr ind val "atomic_and_global" [C.cty|$ty:(GC.intTypeToCType t)|]
+doIspcAtomic _ (AtomicOr t old arr ind val) =
+  doAtomic old arr ind val "atomic_or_global" [C.cty|$ty:(GC.intTypeToCType t)|]
+doIspcAtomic _ (AtomicXor t old arr ind val) =
+  doAtomic old arr ind val "atomic_xor_global" [C.cty|$ty:(GC.intTypeToCType t)|]  
+doIspcAtomic _ atomic_op@(AtomicCmpXchg t old arr ind res val) = do  
+  -- Generate wrappers for atomic functions to handle variability
+  fname <- newNameFromString op
+  compileAtomicWrapper fname atomic_op 
+  ind' <- GC.compileExp $ untyped $ unCount ind
+  new_val' <- GC.compileExp val
+  let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  arr' <- GC.rawMem arr
+  GC.stms
+    [C.cstms|$id:res = $id:fname(&(($ty:cast)$exp:arr')[$exp:ind'],
+                ($ty:cast)&$id:old, 
+                 &$id:res,
+                 $exp:new_val');
+             memory_barrier();|]
+  where
+    op :: String
+    op = "atomic_compare_exchange_wrapper"
+doIspcAtomic params atomicOp = MC.compileOp (Atomic params atomicOp)
