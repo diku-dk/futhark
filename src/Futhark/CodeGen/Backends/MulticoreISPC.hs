@@ -730,6 +730,10 @@ doIspcAtomic _ atomic_op@(AtomicXchg ty old arr ind val) = do
   where
     op :: String
     op = "atomic_swap_global"
+-- Even though it is not documented on the ISPC user-guide, I have found these atomic overloads:
+-- atomic_compare_exchange(uniform type * uniform, varying type, varying type)
+-- atomic_compare_exchange(uniform type * uniform, uniform type, uniform type)
+-- atomic_compare_exchange(uniform type * varying, varying type, varying type)
 doIspcAtomic _ atomic_op@(AtomicCmpXchg t old arr ind res val) = do  
   --fname <- newNameFromString op
   --compileAtomicWrapper fname atomic_op 
@@ -738,10 +742,16 @@ doIspcAtomic _ atomic_op@(AtomicCmpXchg t old arr ind res val) = do
   let cast = [C.cty|$ty:(GC.primTypeToCType t)|]
   arr' <- GC.rawMem arr
   GC.stms
-    [C.cstms|$id:res = $id:fname(&(($ty:cast *)$exp:arr')[$exp:ind'],
-                ($tyquals:(GC.variQuals Varying) $ty:cast * $tyquals:(GC.variQuals Uniform))&$id:old,
-                 $exp:new_val');
+    [C.cstms|$id:res = $id:op(&(($ty:cast *)$exp:arr')[$exp:ind'],
+                              $id:old,
+                              $exp:new_val');
              memory_barrier();|]
+  
+  -- GC.stms
+  --   [C.cstms|$id:res = $id:op(&(($ty:cast *)$exp:arr')[$exp:ind'],
+  --               *(($tyquals:(GC.variQuals Varying) $ty:cast * $tyquals:(GC.variQuals Uniform))&$id:old),
+  --                $exp:new_val');
+  --            memory_barrier();|]
   where
     op :: String
     op = "atomic_compare_exchange_global"
