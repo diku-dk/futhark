@@ -133,6 +133,10 @@ import Futhark.Util
   ( ceilDouble,
     ceilFloat,
     convFloat,
+    erf,
+    erfc,
+    erfcf,
+    erff,
     floorDouble,
     floorFloat,
     hypot,
@@ -1265,6 +1269,15 @@ primFuns =
       f16 "lgamma16" $ convFloat . lgammaf . convFloat,
       f32 "lgamma32" lgammaf,
       f64 "lgamma64" lgamma,
+      --
+      --
+      f16 "erf16" $ convFloat . erff . convFloat,
+      f32 "erf32" erff,
+      f64 "erf64" erf,
+      --
+      f16 "erfc16" $ convFloat . erfcf . convFloat,
+      f32 "erfc32" erfcf,
+      f64 "erfc64" erfc,
       --
       i8 "clz8" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
       i16 "clz16" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,

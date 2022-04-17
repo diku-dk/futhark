@@ -490,6 +490,12 @@ def futhark_gamma64(x):
 def futhark_lgamma64(x):
   return np.float64(math.lgamma(x))
 
+def futhark_erf64(x):
+  return np.float64(math.erf(x))
+
+def futhark_erfc64(x):
+  return np.float64(math.erfc(x))
+
 def futhark_round64(x):
   return np.round(x)
 
@@ -576,6 +582,12 @@ def futhark_gamma32(x):
 def futhark_lgamma32(x):
   return np.float32(math.lgamma(x))
 
+def futhark_erf32(x):
+  return np.float32(math.erf(x))
+
+def futhark_erfc32(x):
+  return np.float32(math.erfc(x))
+
 def futhark_round32(x):
   return np.round(x)
 
@@ -661,6 +673,12 @@ def futhark_gamma16(x):
 
 def futhark_lgamma16(x):
   return np.float16(math.lgamma(x))
+
+def futhark_erf16(x):
+  return np.float16(math.erf(x))
+
+def futhark_erfc16(x):
+  return np.float16(math.erfc(x))
 
 def futhark_round16(x):
   return np.round(x)
