@@ -55,8 +55,15 @@ findDefinitionRange _ _ _ _ = Nothing
 
 queryAtPos :: State -> Pos -> Maybe AtPos
 queryAtPos state pos = do
+  -- TODO: maybe stale state
+  -- could add a check for this so that compute diff may not be needed
+  stale_pos <- useStale pos
+  -- pos from the current file content, convert to the stale pos for query
   loaded_prog <- stateProgram state
-  atPos (lpImports loaded_prog) pos
+  atPos (lpImports loaded_prog) stale_pos -- TODO: AtPos is stale, need to covert to correct position
+
+useStale :: Pos -> Maybe Pos
+useStale pos = Just pos
 
 -- | Convert a Futhark 'Pos' to an LSP 'Uri'.
 posToUri :: Pos -> Uri

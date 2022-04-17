@@ -14,8 +14,13 @@ import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiag
 import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
 import Language.Futhark.Warnings (listWarnings)
-import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFiles)
-import Language.LSP.Types (fromNormalizedFilePath, uriToNormalizedFilePath)
+import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
+import Language.LSP.Types
+  ( filePathToUri,
+    fromNormalizedFilePath,
+    toNormalizedUri,
+    uriToNormalizedFilePath,
+  )
 import Language.LSP.VFS (VFS (vfsMap), virtualFileText)
 
 -- | Try to take state from MVar, if it's empty, try to compile.
@@ -57,7 +62,14 @@ tryCompile (Just path) old_loaded_prog = do
   case res of
     Right new_loaded_prog -> do
       publishWarningDiagnostics $ listWarnings $ lpWarnings new_loaded_prog
-      pure $ State (Just new_loaded_prog)
+      maybe_virtual_file <- getVirtualFile $ toNormalizedUri $ filePathToUri path
+      case maybe_virtual_file of
+        Nothing -> pure $ State (Just new_loaded_prog) M.empty -- should never happen
+        Just virtual_file ->
+          pure $ State (Just new_loaded_prog) (M.singleton path (virtualFileText virtual_file))
+    -- TODO: only preserve the contents of the focused file for now, focus on useStale
+    -- should preserve all files that has been type-checked
+    -- maybe need an update on re-compile logic, don't discard all state afterwards
     Left prog_error -> do
       debug "Compilation failed, publishing diagnostics"
       publishErrorDiagnostics prog_error

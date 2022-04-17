@@ -5,14 +5,18 @@ module Futhark.LSP.State
   )
 where
 
+import qualified Data.Map as M
+import qualified Data.Text as T
 import Futhark.Compiler.Program (LoadedProg)
 
 -- | The state of the language server.
-newtype State = State
+data State = State
   { -- | The loaded program.
-    stateProgram :: Maybe LoadedProg
+    stateProgram :: Maybe LoadedProg,
+    -- | The last succussful type-checked file contents.
+    staleProgram :: M.Map FilePath T.Text
   }
 
 -- | Initial state.
 emptyState :: State
-emptyState = State Nothing
+emptyState = State Nothing M.empty
