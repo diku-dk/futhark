@@ -46,6 +46,8 @@ module Futhark.Util
     erff,
     erfc,
     erfcf,
+    cbrt,
+    cbrtf,
     hypot,
     hypotf,
     fromPOSIX,
@@ -349,6 +351,16 @@ erfc = c_erfc
 -- | The system-level @erfcf()@ function.
 erfcf :: Float -> Float
 erfcf = c_erfcf
+
+foreign import ccall "cbrt" c_cbrt :: Double -> Double
+
+foreign import ccall "cbrtf" c_cbrtf :: Float -> Float
+
+cbrt :: Double -> Double
+cbrt = c_cbrt
+
+cbrtf :: Float -> Float
+cbrtf = c_cbrtf
 
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
