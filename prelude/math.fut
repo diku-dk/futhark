@@ -185,7 +185,7 @@ module type real = {
   -- occur. Edge case behavior is per the IEEE 754-2008 standard.
   val fma : (a: t) -> (b: t) -> (c: t) -> t
 
-  -- | Round to the nearest integer, with alfway cases rounded to the
+  -- | Round to the nearest integer, with halfway cases rounded to the
   -- nearest even integer.  Note that this differs from `round()` in
   -- C, but matches more modern languages.
   val round : t -> t
