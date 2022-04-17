@@ -168,6 +168,12 @@ module type real = {
   val gamma: t -> t
   -- | The natural logarithm of the absolute value of `gamma`@term.
   val lgamma: t -> t
+
+  -- | The error function.
+  val erf : t -> t
+  -- | The complementary error function.
+  val erfc : t -> t
+
   -- | Linear interpolation.  The third argument must be in the range
   -- `[0,1]` or the results are unspecified.
   val lerp: t -> t -> t -> t
@@ -930,6 +936,8 @@ module f64: (float with t = f64 with int_t = u64) = {
   def hypot (x: f64) (y: f64) = intrinsics.hypot64 (x, y)
   def gamma = intrinsics.gamma64
   def lgamma = intrinsics.lgamma64
+  def erf = intrinsics.erf64
+  def erfc = intrinsics.erfc64
 
   def lerp v0 v1 t = intrinsics.lerp64 (v0,v1,t)
   def fma a b c = intrinsics.fma64 (a,b,c)
@@ -1039,6 +1047,8 @@ module f32: (float with t = f32 with int_t = u32) = {
   def hypot (x: f32) (y: f32) = intrinsics.hypot32 (x, y)
   def gamma = intrinsics.gamma32
   def lgamma = intrinsics.lgamma32
+  def erf = intrinsics.erf32
+  def erfc = intrinsics.erfc32
 
   def lerp v0 v1 t = intrinsics.lerp32 (v0,v1,t)
   def fma a b c = intrinsics.fma32 (a,b,c)
@@ -1152,6 +1162,8 @@ module f16: (float with t = f16 with int_t = u16) = {
   def hypot (x: f16) (y: f16) = intrinsics.hypot16 (x, y)
   def gamma = intrinsics.gamma16
   def lgamma = intrinsics.lgamma16
+  def erf = intrinsics.erf16
+  def erfc = intrinsics.erfc16
 
   def lerp v0 v1 t = intrinsics.lerp16 (v0,v1,t)
   def fma a b c = intrinsics.fma16 (a,b,c)

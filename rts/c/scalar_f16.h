@@ -259,6 +259,14 @@ static inline f16 futrts_lgamma16(f16 x) {
   return lgamma(x);
 }
 
+static inline f16 futrts_erf16(f16 x) {
+  return erf(x);
+}
+
+static inline f16 futrts_erfc16(f16 x) {
+  return erfc(x);
+}
+
 static inline f16 fmod16(f16 x, f16 y) {
   return fmod(x, y);
 }
@@ -371,6 +379,14 @@ static inline f16 futrts_gamma16(f16 x) {
 
 static inline f16 futrts_lgamma16(f16 x) {
   return lgammaf(x);
+}
+
+static inline f16 futrts_erf16(f16 x) {
+  return erff(x);
+}
+
+static inline f16 futrts_erfc16(f16 x) {
+  return erfcf(x);
 }
 
 static inline f16 fmod16(f16 x, f16 y) {
@@ -542,6 +558,14 @@ static inline f16 futrts_gamma16(f16 x) {
 
 static inline f16 futrts_lgamma16(f16 x) {
   return futrts_lgamma32(x);
+}
+
+static inline f16 futrts_erf16(f16 x) {
+  return futrts_erf32(x);
+}
+
+static inline f16 futrts_erfc16(f16 x) {
+  return futrts_erfc32(x);
 }
 
 static inline f16 fmod16(f16 x, f16 y) {
