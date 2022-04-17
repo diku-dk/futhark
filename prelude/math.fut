@@ -156,9 +156,17 @@ module type real = {
 
   val atan2: t -> t -> t
 
+  -- | Compute the length of the hypotenuse of a right-angled
+  -- triangle.  That is, `hypot x y` computes *√(x²+y²)*.  Put another
+  -- way, the distance of *(x,y)* from origin in an Euclidean space.
+  -- The calculation is performed without undue overflow or underflow
+  -- during intermediate steps (specific accuracy depends on the
+  -- backend).
   val hypot: t -> t -> t
 
+  -- | The true Gamma function.
   val gamma: t -> t
+  -- | The natural logarithm of the absolute value of `gamma`@term.
   val lgamma: t -> t
   -- | Linear interpolation.  The third argument must be in the range
   -- `[0,1]` or the results are unspecified.
@@ -171,9 +179,16 @@ module type real = {
   -- | Base-10 logarithm.
   val log10: t -> t
 
+  -- | Round towards infinity.
   val ceil : t -> t
+  -- | Round towards negative infinity.
   val floor : t -> t
+  -- | Round towards zero.
   val trunc : t -> t
+  -- | Round to the nearest integer, with halfway cases rounded to the
+  -- nearest even integer.  Note that this differs from `round()` in
+  -- C, but matches more modern languages.
+  val round : t -> t
 
   -- | Computes `a*b+c`.  Depending on the compiler backend, this may
   -- be fused into a single operation that is faster but less
@@ -184,11 +199,6 @@ module type real = {
   -- precision.  Rounding of intermediate products shall not
   -- occur. Edge case behavior is per the IEEE 754-2008 standard.
   val fma : (a: t) -> (b: t) -> (c: t) -> t
-
-  -- | Round to the nearest integer, with halfway cases rounded to the
-  -- nearest even integer.  Note that this differs from `round()` in
-  -- C, but matches more modern languages.
-  val round : t -> t
 
   val isinf: t -> bool
   val isnan: t -> bool
