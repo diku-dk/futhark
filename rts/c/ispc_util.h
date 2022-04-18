@@ -1,35 +1,35 @@
 // Generate missing overloads for extract on pointers
 #define make_extract(ty)                                                \
-static inline ty * uniform extract(ty * varying ptr, uniform int idx) { \
+static inline uniform ty * uniform extract(uniform ty * varying ptr, uniform int idx) { \
     int64 c = (int64)ptr;                                               \
     uniform int64 r = extract(c, idx);                                  \
-    return (ty * uniform)r;                                             \
+    return (uniform ty * uniform)r;                                             \
 }
 
-make_extract(uniform int8)
-make_extract(uniform int16)
-make_extract(uniform int32)
-make_extract(uniform int64)
-make_extract(uniform uint8)
-make_extract(uniform uint16)
-make_extract(uniform uint32)
-make_extract(uniform uint64)
-make_extract(uniform float16)
-make_extract(uniform float)
-make_extract(uniform double)
-make_extract(uniform int8* uniform)
+make_extract(int8)
+make_extract(int16)
+make_extract(int32)
+make_extract(int64)
+make_extract(uint8)
+make_extract(uint16)
+make_extract(uint32)
+make_extract(uint64)
+make_extract(float16)
+make_extract(float)
+make_extract(double)
+make_extract(int8* uniform)
 make_extract(int16* uniform)
-make_extract(uniform int32* uniform)
-make_extract(uniform int64* uniform)
-make_extract(uniform uint8* uniform)
-make_extract(uniform uint16* uniform)
-make_extract(uniform uint32* uniform)
-make_extract(uniform uint64* uniform)
-make_extract(uniform float16* uniform)
-make_extract(uniform float* uniform)
-make_extract(uniform double* uniform)
-make_extract(uniform struct futhark_context)
-make_extract(uniform struct memblock)
+make_extract(int32* uniform)
+make_extract(int64* uniform)
+make_extract(uint8* uniform)
+make_extract(uint16* uniform)
+make_extract(uint32* uniform)
+make_extract(uint64* uniform)
+make_extract(float16* uniform)
+make_extract(float* uniform)
+make_extract(double* uniform)
+make_extract(struct futhark_context)
+make_extract(struct memblock)
 
 // Memory allocation handling
 #ifndef __ISPC_STRUCT_memblock__
