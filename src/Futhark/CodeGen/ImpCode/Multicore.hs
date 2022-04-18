@@ -209,7 +209,4 @@ lexicalMemoryUsageMC func =
       where
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
-    -- Treat inputs to kernels as non lexical, so we don't mix up the types
-    -- inside of a kernel!
-    set (Op (ISPCKernel _ args)) = namesFromList $ map paramName args
     set x = go set x
