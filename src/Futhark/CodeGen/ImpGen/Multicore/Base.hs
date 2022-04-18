@@ -40,8 +40,6 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
-import Futhark.CodeGen.ImpCode (TExp)
-import Data.Maybe (Maybe(Nothing))
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -277,11 +275,11 @@ extractVectorLane j code = do
         -- ISPC v1.17 does not support extract on f16 yet..
         -- Thus we do this stupid conversion to f32
         Prim (FloatType Float16) -> do
-          tv <- dPrim "hack_extract_f16" (FloatType Float32)
+          tv <- dPrim "hack_extract_f16" (FloatType Float32)     
           emit $ Imp.SetScalar (tvVar tv) e
           emit $ Imp.Op $ Imp.ExtractLane vname (untyped $ tvExp tv) ut_exp
         _ -> emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp
-    _ ->
+    _ -> 
       emit code'
 
 inISPC :: MulticoreGen () -> MulticoreGen ()
@@ -361,20 +359,6 @@ data AtomicUpdate rep r
   | -- | Requires explicit locking.
     AtomicLocking (Locking -> DoAtomicUpdate rep r)
 
--- getAtomicParams :: [VName] -> [TExp Int64] -> MulticoreGen ([Param], [Param])
--- getAtomicParams arrs is = do
---   typs <- mapM lookupType arrs
---   arrs_params <- concat <$> zipWithM toParam arrs typs
---   let typ_is = map (Prim . primExpType . untyped) is
---   let name_is = namesToList $ freeIn is
---   is_params <- concat <$> zipWithM toParam name_is typ_is
---   pure (arrs_params, is_params)    
-
-makeAtomic :: Imp.AtomicOp -> MulticoreGen Imp.Multicore
-makeAtomic op = do
-  params <- freeParams op
-  pure $ Imp.Atomic params op
-
 atomicUpdateLocking ::
   AtomicBinOp ->
   Lambda MCMem ->
@@ -393,22 +377,22 @@ atomicUpdateLocking atomicBinOp lam
           old <- dPrim "old" t
 
           (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
+
           case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
-            Just f -> do
-              sOp =<< f (Imp.var y t)
+            Just f -> sOp $ f $ Imp.var y t
             Nothing ->
               atomicUpdateCAS t a (tvVar old) bucket x $
                 x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport old arr' bucket' bop = do
-      let atomic f = makeAtomic . f old arr' bucket'
+      let atomic f = Imp.Atomic . f old arr' bucket'
       atomic <$> atomicBinOp bop
 
     primOrCas ops
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
-    isPrim (op, _, _, _) = isJust $ atomicBinOp op
 
+    isPrim (op, _, _, _) = isJust $ atomicBinOp op
 atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
@@ -427,7 +411,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   -- Critical section
   let try_acquire_lock = do
         old <-- (0 :: Imp.TExp Int32)
-        atomic <- makeAtomic $ -- TODO(k, obp): find free variables
+        sOp . Imp.Atomic $
           Imp.AtomicCmpXchg
             int32
             (tvVar old)
@@ -435,13 +419,12 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
             (sExt32 <$> locks_offset)
             (tvVar continue)
             (untyped (lockingToLock locking))
-        sOp atomic
       lock_acquired = tvExp continue
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
       release_lock = do
         old <-- lockingToLock locking
-        atomic <- makeAtomic $ -- TODO(k, obp): find free variables
+        sOp . Imp.Atomic $
           Imp.AtomicCmpXchg
             int32
             (tvVar old)
@@ -449,7 +432,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
             (sExt32 <$> locks_offset)
             (tvVar continue)
             (untyped (lockingToUnlock locking))
-        sOp atomic
+
   -- Preparing parameters. It is assumed that the caller has already
   -- filled the arr_params. We copy the current value to the
   -- accumulator parameters.
@@ -524,8 +507,8 @@ atomicUpdateCAS t arr old bucket x do_op = do
   -- While-loop: Try to insert your value
   sWhile (tvExp run_loop .==. 0) $ do
     x <~~ Imp.var old t
-    do_op -- Writes result into x    
-    atomic <- makeAtomic $ -- TODO(K, obp): find free variables      
+    do_op -- Writes result into x
+    sOp . Imp.Atomic $
       Imp.AtomicCmpXchg
         bytes
         old_bits_v
@@ -533,7 +516,6 @@ atomicUpdateCAS t arr old bucket x do_op = do
         (sExt32 <$> bucket_offset)
         (tvVar run_loop)
         (toBits (Imp.var x t))
-    sOp atomic
     old <~~ fromBits old_bits
 
 supportedPrims :: Int -> Bool
