@@ -733,7 +733,7 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
   arr' <- GC.rawMem arr
   GC.stm
     [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
-                ($ty:cast)&$id:old,
+                 &$id:old,
                  $exp:new_val',
                  0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);|]
   where
