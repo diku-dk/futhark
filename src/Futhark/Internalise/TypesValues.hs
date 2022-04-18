@@ -110,7 +110,7 @@ newId :: InternaliseTypeM Int
 newId = do
   i <- gets typeCounter
   modify $ \s -> s {typeCounter = i + 1}
-  return i
+  pure i
 
 internaliseDim ::
   M.Map VName Int ->
@@ -119,16 +119,16 @@ internaliseDim ::
 internaliseDim exts d =
   case d of
     E.AnyDim _ -> Ext <$> newId
-    E.ConstDim n -> return $ Free $ intConst I.Int64 $ toInteger n
+    E.ConstDim n -> pure $ Free $ intConst I.Int64 $ toInteger n
     E.NamedDim name -> namedDim name
   where
     namedDim (E.QualName _ name)
       | Just x <- name `M.lookup` exts = pure $ I.Ext x
       | otherwise = do
-        subst <- liftInternaliseM $ lookupSubst name
-        case subst of
-          Just [v] -> pure $ I.Free v
-          _ -> pure $ I.Free $ I.Var name
+          subst <- liftInternaliseM $ lookupSubst name
+          case subst of
+            Just [v] -> pure $ I.Free v
+            _ -> pure $ I.Free $ I.Var name
 
 internaliseTypeM ::
   M.Map VName Int ->
@@ -139,22 +139,22 @@ internaliseTypeM exts orig_t =
     E.Array _ u et shape -> do
       dims <- internaliseShape shape
       ets <- internaliseTypeM exts $ E.Scalar et
-      return [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets]
+      pure [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets]
     E.Scalar (E.Prim bt) ->
-      return [I.Prim $ internalisePrimType bt]
+      pure [I.Prim $ internalisePrimType bt]
     E.Scalar (E.Record ets)
       -- XXX: we map empty records to units, because otherwise
       -- arrays of unit will lose their sizes.
-      | null ets -> return [I.Prim I.Unit]
+      | null ets -> pure [I.Prim I.Unit]
       | otherwise ->
-        concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
+          concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
       | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.typeLeaf tn) == "acc" -> do
-        ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
-        acc_param <- liftInternaliseM $ newVName "acc_cert"
-        let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
-        return [acc_t]
+          ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
+          acc_param <- liftInternaliseM $ newVName "acc_cert"
+          let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
+          pure [acc_t]
     E.Scalar E.TypeVar {} ->
       error "internaliseTypeM: cannot handle type variable."
     E.Scalar E.Arrow {} ->
@@ -163,7 +163,7 @@ internaliseTypeM exts orig_t =
       (ts, _) <-
         internaliseConstructors
           <$> traverse (fmap concat . mapM (internaliseTypeM exts)) cs
-      return $ I.Prim (I.IntType I.Int8) : ts
+      pure $ I.Prim (I.IntType I.Int8) : ts
   where
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
 
@@ -185,15 +185,15 @@ internaliseConstructors cs =
       where
         f (ts', js, new_ts) t
           | Just (_, j) <- find ((== fromDecl t) . fst) ts' =
-            ( delete (fromDecl t, j) ts',
-              js ++ [j],
-              new_ts
-            )
+              ( delete (fromDecl t, j) ts',
+                js ++ [j],
+                new_ts
+              )
           | otherwise =
-            ( ts',
-              js ++ [length ts + length new_ts],
-              new_ts ++ [t]
-            )
+              ( ts',
+                js ++ [length ts + length new_ts],
+                new_ts ++ [t]
+              )
 
 internaliseSumType ::
   M.Map Name [E.StructType] ->

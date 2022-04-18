@@ -166,11 +166,11 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
         [pe] <- patElems (stmPat stm),
         primType $ patElemType pe,
         maybe True (== 1) $ M.lookup (patElemName pe) multiplicities =
-        let (stms', sunk) =
-              optimiseStms' vtable' (M.insert (patElemName pe) stm sinking) stms
-         in if patElemName pe `nameIn` sunk
-              then (stms', sunk)
-              else (stm : stms', sunk)
+          let (stms', sunk) =
+                optimiseStms' vtable' (M.insert (patElemName pe) stm sinking) stms
+           in if patElemName pe `nameIn` sunk
+                then (stms', sunk)
+                else (stm : stms', sunk)
       | If cond tbranch fbranch ret <- stmExp stm =
         let (tbranch', tsunk) = optimiseBranch onOp vtable sinking tbranch
             (fbranch', fsunk) = optimiseBranch onOp vtable sinking fbranch
@@ -188,17 +188,17 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
               stms_sunk <> loop_sunk
             )
       | Op op <- stmExp stm =
-        let (op', op_sunk) = onOp vtable sinking op
-            (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-         in ( stm {stmExp = Op op'} : stms',
-              stms_sunk <> op_sunk
-            )
+          let (op', op_sunk) = onOp vtable sinking op
+              (stms', stms_sunk) = optimiseStms' vtable' sinking stms
+           in ( stm {stmExp = Op op'} : stms',
+                stms_sunk <> op_sunk
+              )
       | otherwise =
-        let (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-            (e', stm_sunk) = runState (mapExpM mapper (stmExp stm)) mempty
-         in ( stm {stmExp = e'} : stms',
-              stm_sunk <> stms_sunk
-            )
+          let (stms', stms_sunk) = optimiseStms' vtable' sinking stms
+              (e', stm_sunk) = runState (mapExpM mapper (stmExp stm)) mempty
+           in ( stm {stmExp = e'} : stms',
+                stm_sunk <> stms_sunk
+              )
       where
         vtable' = ST.insertStm stm vtable
         mapper =
@@ -211,7 +211,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
                         sinking
                         body
                 modify (<> sunk)
-                return body'
+                pure body'
             }
 
 optimiseBody ::
@@ -245,12 +245,12 @@ optimiseSegOp onOp vtable sinking op =
                   optimiseBody onOp op_vtable sinking $
                     lambdaBody lam
             modify (<> sunk)
-            return lam {lambdaBody = body},
+            pure lam {lambdaBody = body},
           mapOnSegOpBody = \body -> do
             let (body', sunk) =
                   optimiseKernelBody onOp op_vtable sinking body
             modify (<> sunk)
-            return body'
+            pure body'
         }
       where
         op_vtable = ST.fromScope scope <> vtable
@@ -273,7 +273,7 @@ sink onOp =
     onFun _ fd = do
       let vtable = ST.insertFParams (funDefParams fd) mempty
           (body, _) = optimiseBody onOp vtable mempty $ funDefBody fd
-      return fd {funDefBody = body}
+      pure fd {funDefBody = body}
 
     onConsts consts =
       pure $

@@ -78,11 +78,11 @@ complete xs
   | Just x <- maybeHead xs,
     Scalar (Sum all_cs) <- matchType x,
     Just xs_cs <- mapM isConstr xs =
-    all (`elem` xs_cs) (M.keys all_cs)
+      all (`elem` xs_cs) (M.keys all_cs)
   | otherwise =
-    (any (isBool True) xs && any (isBool False) xs)
-      || all isRecord xs
-      || all isTuple xs
+      (any (isBool True) xs && any (isBool False) xs)
+        || all isRecord xs
+        || all isTuple xs
   where
     isBool b1 (MatchConstr (ConstrLit (PatLitPrim (BoolValue b2))) _ _) = b1 == b2
     isBool _ _ = False
@@ -96,16 +96,16 @@ specialise ats c1 = go
   where
     go ((c2 : row) : ps)
       | Just args <- match c1 c2 =
-        (args ++ row) : go ps
+          (args ++ row) : go ps
       | otherwise =
-        go ps
+          go ps
     go _ = []
 
     match (MatchConstr c1' _ _) (MatchConstr c2' args _)
       | c1' == c2' =
-        Just args
+          Just args
       | otherwise =
-        Nothing
+          Nothing
     match _ MatchWild {} =
       Just $ map MatchWild ats
     match _ _ =
@@ -122,9 +122,9 @@ findUnmatched :: [[Match]] -> Int -> [[Match]]
 findUnmatched pmat n
   | ((p : _) : _) <- pmat,
     Just heads <- mapM maybeHead pmat =
-    if complete heads
-      then completeCase heads
-      else incompleteCase (matchType p) heads
+      if complete heads
+        then completeCase heads
+        else incompleteCase (matchType p) heads
   where
     completeCase cs = do
       c <- cs
@@ -144,7 +144,7 @@ findUnmatched pmat n
     incompleteCase pt cs = do
       u <- findUnmatched (defaultMat pmat) (n - 1)
       if null cs
-        then return $ MatchWild pt : u
+        then pure $ MatchWild pt : u
         else case pt of
           Scalar (Sum all_cs) -> do
             -- Figure out which constructors are missing.

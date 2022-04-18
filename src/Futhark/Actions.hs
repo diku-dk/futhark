@@ -197,7 +197,7 @@ runCC cpath outpath cflags_def ldflags = do
           ++ ":\n"
           ++ gccerr
     Right (ExitSuccess, _, _) ->
-      return ()
+      pure ()
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
@@ -243,11 +243,11 @@ compileOpenCLAction fcfg mode outpath =
           jsonpath = outpath `addExtension` "json"
           extra_options
             | System.Info.os == "darwin" =
-              ["-framework", "OpenCL"]
+                ["-framework", "OpenCL"]
             | System.Info.os == "mingw32" =
-              ["-lOpenCL64"]
+                ["-lOpenCL64"]
             | otherwise =
-              ["-lOpenCL"]
+                ["-lOpenCL"]
 
       case mode of
         ToLibrary -> do
@@ -400,7 +400,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
           ++ ":\n"
           ++ emccerr
     Right (ExitSuccess, _, _) ->
-      return ()
+      pure ()
 
 -- | The @futhark wasm@ action.
 compileCtoWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem

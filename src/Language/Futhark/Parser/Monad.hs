@@ -8,7 +8,7 @@
 -- standards.
 module Language.Futhark.Parser.Monad
   ( ParserMonad,
-    ParserEnv,
+    ParserState,
     ReadLineMonad (..),
     parseInMonad,
     parse,
@@ -95,13 +95,13 @@ mustBeEmpty _ (Array _ _ _ (ShapeDecl dims))
 mustBeEmpty loc t =
   parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
 
-data ParserEnv = ParserEnv
+data ParserState = ParserState
   { _parserFile :: FilePath,
     parserInput :: T.Text,
     parserLexical :: ([L Token], Pos)
   }
 
-type ParserMonad = ExceptT SyntaxError (StateT ParserEnv ReadLineMonad)
+type ParserMonad = ExceptT SyntaxError (StateT ParserState ReadLineMonad)
 
 data ReadLineMonad a
   = Value a
@@ -111,7 +111,6 @@ readLineFromMonad :: ReadLineMonad (Maybe T.Text)
 readLineFromMonad = GetLine Value
 
 instance Monad ReadLineMonad where
-  return = pure
   Value x >>= f = f x
   GetLine g >>= f = GetLine $ g >=> f
 
@@ -138,10 +137,10 @@ combArrayElements = foldM comb
     comb x y
       | valueType x == valueType y = Right x
       | otherwise =
-        Left . SyntaxError NoLoc $
-          "Elements " <> pretty x <> " and "
-            <> pretty y
-            <> " cannot exist in same array."
+          Left . SyntaxError NoLoc $
+            "Elements " <> pretty x <> " and "
+              <> pretty y
+              <> " cannot exist in same array."
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l
@@ -198,15 +197,15 @@ primTypeFromName loc s = maybe boom pure $ M.lookup s namesToPrimTypes
     boom = parseErrorAt loc $ Just $ "No type named " ++ nameToString s
 
 intNegate :: IntValue -> IntValue
-intNegate (Int8Value v) = Int8Value (- v)
-intNegate (Int16Value v) = Int16Value (- v)
-intNegate (Int32Value v) = Int32Value (- v)
-intNegate (Int64Value v) = Int64Value (- v)
+intNegate (Int8Value v) = Int8Value (-v)
+intNegate (Int16Value v) = Int16Value (-v)
+intNegate (Int32Value v) = Int32Value (-v)
+intNegate (Int64Value v) = Int64Value (-v)
 
 floatNegate :: FloatValue -> FloatValue
-floatNegate (Float16Value v) = Float16Value (- v)
-floatNegate (Float32Value v) = Float32Value (- v)
-floatNegate (Float64Value v) = Float64Value (- v)
+floatNegate (Float16Value v) = Float16Value (-v)
+floatNegate (Float32Value v) = Float32Value (-v)
+floatNegate (Float64Value v) = Float64Value (-v)
 
 primNegate :: PrimValue -> PrimValue
 primNegate (FloatValue v) = FloatValue $ floatNegate v
@@ -292,8 +291,7 @@ parseInMonad p file program =
     (evalStateT (runExceptT p) . env)
     (scanTokensText (Pos file 1 1 0) program)
   where
-    env = ParserEnv file program
+    env = ParserState file program
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
-parse p file program =
-  either Left id $ getNoLines $ parseInMonad p file program
+parse p file program = join $ getNoLines $ parseInMonad p file program

@@ -46,14 +46,14 @@ curl url = do
     liftIO $ readProcessWithExitCode "curl" ["-L", url] mempty
   case code of
     ExitFailure 127 ->
-      return $
+      pure $
         Left $
           "'" <> unwords ["curl", "-L", url] <> "' failed (program not found?)."
     ExitFailure _ -> do
       liftIO $ BS.hPutStr stderr err
-      return $ Left $ "'" <> unwords ["curl", "-L", url] <> "' failed."
+      pure $ Left $ "'" <> unwords ["curl", "-L", url] <> "' failed."
     ExitSuccess ->
-      return $ Right out
+      pure $ Right out
 
 -- | The manifest is stored as a monadic action, because we want to
 -- fetch them on-demand.  It would be a waste to fetch it information
@@ -95,15 +95,15 @@ data PkgRevInfo m = PkgRevInfo
 memoiseGetManifest :: MonadIO m => GetManifest m -> m (GetManifest m)
 memoiseGetManifest (GetManifest m) = do
   ref <- liftIO $ newIORef Nothing
-  return $
+  pure $
     GetManifest $ do
       v <- liftIO $ readIORef ref
       case v of
-        Just v' -> return v'
+        Just v' -> pure v'
         Nothing -> do
           v' <- m
           liftIO $ writeIORef ref $ Just v'
-          return v'
+          pure v'
 
 -- | Download the zip archive corresponding to a specific package
 -- version.
@@ -122,7 +122,7 @@ downloadZipball info = do
     Right r ->
       case Zip.toArchiveOrFail $ LBS.fromStrict r of
         Left e -> bad $ show e
-        Right a -> return a
+        Right a -> pure a
 
 -- | Information about a package.  The name of the package is stored
 -- separately.
@@ -154,25 +154,25 @@ pkgInfo ::
   m (Either T.Text (PkgInfo m))
 pkgInfo path
   | ["github.com", owner, repo] <- T.splitOn "/" path =
-    let (repo', vs) = majorRevOfPkg repo
-     in ghPkgInfo owner repo' vs
+      let (repo', vs) = majorRevOfPkg repo
+       in ghPkgInfo owner repo' vs
   | "github.com" : owner : repo : _ <- T.splitOn "/" path =
-    return $
-      Left $
-        T.intercalate
-          "\n"
-          [nope, "Do you perhaps mean 'github.com/" <> owner <> "/" <> repo <> "'?"]
+      pure $
+        Left $
+          T.intercalate
+            "\n"
+            [nope, "Do you perhaps mean 'github.com/" <> owner <> "/" <> repo <> "'?"]
   | ["gitlab.com", owner, repo] <- T.splitOn "/" path =
-    let (repo', vs) = majorRevOfPkg repo
-     in glPkgInfo owner repo' vs
+      let (repo', vs) = majorRevOfPkg repo
+       in glPkgInfo owner repo' vs
   | "gitlab.com" : owner : repo : _ <- T.splitOn "/" path =
-    return $
-      Left $
-        T.intercalate
-          "\n"
-          [nope, "Do you perhaps mean 'gitlab.com/" <> owner <> "/" <> repo <> "'?"]
+      pure $
+        Left $
+          T.intercalate
+            "\n"
+            [nope, "Do you perhaps mean 'gitlab.com/" <> owner <> "/" <> repo <> "'?"]
   | otherwise =
-    return $ Left nope
+      pure $ Left nope
   where
     nope = "Unable to handle package paths of the form '" <> path <> "'"
 
@@ -191,7 +191,7 @@ gitCmd opts = do
   case code of
     ExitFailure 127 -> fail $ "'" <> unwords ("git" : opts) <> "' failed (program not found?)."
     ExitFailure _ -> fail $ "'" <> unwords ("git" : opts) <> "' failed."
-    ExitSuccess -> return out
+    ExitSuccess -> pure out
 
 -- The GitLab and GitHub interactions are very similar, so we define a
 -- couple of generic functions that are used to implement support for
@@ -223,7 +223,7 @@ ghglRevGetManifest url owner repo tag = GetManifest $ do
         Right s ->
           case parsePkgManifest path s of
             Left e -> fail $ msg $ errorBundlePretty e
-            Right pm -> return pm
+            Right pm -> pure pm
 
 ghglLookupCommit ::
   (MonadIO m, MonadLogger m, MonadFail m) =>
@@ -240,7 +240,7 @@ ghglLookupCommit archive_url manifest_url mk_zip_dir owner repo d ref hash = do
   gd <- memoiseGetManifest $ ghglRevGetManifest manifest_url owner repo ref
   let dir = Posix.addTrailingPathSeparator $ T.unpack $ mk_zip_dir d
   time <- liftIO getCurrentTime -- FIXME
-  return $ PkgRevInfo archive_url dir hash gd time
+  pure $ PkgRevInfo archive_url dir hash gd time
 
 ghglPkgInfo ::
   (MonadIO m, MonadLogger m, MonadFail m) =>
@@ -257,13 +257,13 @@ ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir owner repo versio
   remote_lines <- T.lines . T.decodeUtf8 <$> gitCmd ["ls-remote", T.unpack repo_url]
 
   head_ref <-
-    maybe (fail $ "Cannot find HEAD ref for " <> T.unpack repo_url) return $
+    maybe (fail $ "Cannot find HEAD ref for " <> T.unpack repo_url) pure $
       maybeHead $ mapMaybe isHeadRef remote_lines
   let def = fromMaybe head_ref
 
   rev_info <- M.fromList . catMaybes <$> mapM revInfo remote_lines
 
-  return $
+  pure $
     Right $
       PkgInfo rev_info $ \r ->
         ghglLookupCommit
@@ -286,18 +286,18 @@ ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir owner repo versio
         "v" `T.isPrefixOf` t,
         Right v <- parseVersion $ T.drop 1 t,
         _svMajor v `elem` versions = do
-        pinfo <-
-          ghglLookupCommit
-            (mk_archive_url t)
-            (mk_manifest_url t)
-            mk_zip_dir
-            owner
-            repo
-            (prettySemVer v)
-            t
-            hash
-        return $ Just (v, pinfo)
-      | otherwise = return Nothing
+          pinfo <-
+            ghglLookupCommit
+              (mk_archive_url t)
+              (mk_manifest_url t)
+              mk_zip_dir
+              owner
+              repo
+              (prettySemVer v)
+              t
+              hash
+          pure $ Just (v, pinfo)
+      | otherwise = pure Nothing
 
 ghPkgInfo ::
   (MonadIO m, MonadLogger m, MonadFail m) =>
@@ -396,14 +396,14 @@ lookupPackage p = do
   r@(PkgRegistry m) <- getPkgRegistry
   case lookupKnownPackage p r of
     Just info ->
-      return info
+      pure info
     Nothing -> do
       e <- pkgInfo p
       case e of
         Left e' -> fail $ T.unpack e'
         Right pinfo -> do
           putPkgRegistry $ PkgRegistry $ M.insert p pinfo m
-          return pinfo
+          pure pinfo
 
 lookupPackageCommit ::
   MonadPkgRegistry m =>
@@ -421,7 +421,7 @@ lookupPackageCommit p ref = do
       pinfo' = pinfo {pkgVersions = M.insert v rev_info $ pkgVersions pinfo}
   modifyPkgRegistry $ \(PkgRegistry m) ->
     PkgRegistry $ M.insert p pinfo' m
-  return (v, rev_info)
+  pure (v, rev_info)
 
 -- | Look up information about a specific version of a package.
 lookupPackageRev ::
@@ -431,31 +431,31 @@ lookupPackageRev ::
   m (PkgRevInfo m)
 lookupPackageRev p v
   | Just commit <- isCommitVersion v =
-    snd <$> lookupPackageCommit p (Just commit)
+      snd <$> lookupPackageCommit p (Just commit)
   | otherwise = do
-    pinfo <- lookupPackage p
-    case lookupPkgRev v pinfo of
-      Nothing ->
-        let versions = case M.keys $ pkgVersions pinfo of
-              [] -> "Package " <> p <> " has no versions.  Invalid package path?"
-              ks ->
-                "Known versions: "
-                  <> T.concat (intersperse ", " $ map prettySemVer ks)
-            major
-              | (_, vs) <- majorRevOfPkg p,
-                _svMajor v `notElem` vs =
-                "\nFor major version " <> T.pack (show (_svMajor v))
-                  <> ", use package path "
-                  <> p
-                  <> "@"
-                  <> T.pack (show (_svMajor v))
-              | otherwise = mempty
-         in fail $
-              T.unpack $
-                "package " <> p <> " does not have a version " <> prettySemVer v <> ".\n"
-                  <> versions
-                  <> major
-      Just v' -> return v'
+      pinfo <- lookupPackage p
+      case lookupPkgRev v pinfo of
+        Nothing ->
+          let versions = case M.keys $ pkgVersions pinfo of
+                [] -> "Package " <> p <> " has no versions.  Invalid package path?"
+                ks ->
+                  "Known versions: "
+                    <> T.concat (intersperse ", " $ map prettySemVer ks)
+              major
+                | (_, vs) <- majorRevOfPkg p,
+                  _svMajor v `notElem` vs =
+                    "\nFor major version " <> T.pack (show (_svMajor v))
+                      <> ", use package path "
+                      <> p
+                      <> "@"
+                      <> T.pack (show (_svMajor v))
+                | otherwise = mempty
+           in fail $
+                T.unpack $
+                  "package " <> p <> " does not have a version " <> prettySemVer v <> ".\n"
+                    <> versions
+                    <> major
+        Just v' -> pure v'
 
 -- | Find the newest version of a package.
 lookupNewestRev ::
@@ -468,4 +468,4 @@ lookupNewestRev p = do
     [] -> do
       logMsg $ "Package " <> p <> " has no released versions.  Using HEAD."
       fst <$> lookupPackageCommit p Nothing
-    v : vs -> return $ foldl' max v vs
+    v : vs -> pure $ foldl' max v vs

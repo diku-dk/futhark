@@ -31,7 +31,7 @@ makeLocalArrays (Count group_size) num_threads scans = do
   let maxSize sizes = Imp.bytes $ foldl' sMax64 1 $ map Imp.unCount sizes
   forM_ mems_and_sizes $ \(sizes, mem) ->
     sAlloc_ mem (maxSize sizes) (Space "local")
-  return arrs
+  pure arrs
   where
     onScan (SegBinOp _ scan_op nes _) = do
       let (scan_x_params, _scan_y_params) =
@@ -44,15 +44,15 @@ makeLocalArrays (Count group_size) num_threads scans = do
               arr <-
                 lift . sArray "scan_arr" pt shape' mem $
                   IxFun.iota $ map pe64 $ shapeDims shape'
-              return (arr, [])
+              pure (arr, [])
             _ -> do
               let pt = elemType $ paramType p
                   shape = Shape [group_size]
               (sizes, mem') <- getMem pt shape
               arr <- lift $ sArrayInMem "scan_arr" pt shape mem'
-              return (arr, [(sizes, mem')])
+              pure (arr, [(sizes, mem')])
       modify (<> concat used_mems)
-      return arrs
+      pure arrs
 
     getMem pt shape = do
       let size = typeSize $ Array pt shape NoUniqueness
@@ -60,13 +60,13 @@ makeLocalArrays (Count group_size) num_threads scans = do
       case (find ((size `elem`) . fst) mems, mems) of
         (Just mem, _) -> do
           modify $ delete mem
-          return mem
+          pure mem
         (Nothing, (size', mem) : mems') -> do
           put mems'
-          return (size : size', mem)
+          pure (size : size', mem)
         (Nothing, []) -> do
           mem <- lift $ sDeclareMem "scan_arr_mem" $ Space "local"
-          return ([size], mem)
+          pure ([size], mem)
 
 type CrossesSegment = Maybe (Imp.TExp Int64 -> Imp.TExp Int64 -> Imp.TExp Bool)
 
@@ -96,15 +96,15 @@ writeToScanValues ::
   InKernelGen ()
 writeToScanValues gtids (pes, scan, scan_res)
   | shapeRank (segBinOpShape scan) > 0 =
-    forM_ (zip pes scan_res) $ \(pe, res) ->
-      copyDWIMFix
-        (patElemName pe)
-        (map Imp.le64 gtids)
-        (kernelResultSubExp res)
-        []
+      forM_ (zip pes scan_res) $ \(pe, res) ->
+        copyDWIMFix
+          (patElemName pe)
+          (map Imp.le64 gtids)
+          (kernelResultSubExp res)
+          []
   | otherwise =
-    forM_ (zip (yParams scan) scan_res) $ \(p, res) ->
-      copyDWIMFix (paramName p) [] (kernelResultSubExp res) []
+      forM_ (zip (yParams scan) scan_res) $ \(p, res) ->
+        copyDWIMFix (paramName p) [] (kernelResultSubExp res) []
 
 readToScanValues ::
   [Imp.TExp Int64] ->
@@ -113,10 +113,10 @@ readToScanValues ::
   InKernelGen ()
 readToScanValues is pes scan
   | shapeRank (segBinOpShape scan) > 0 =
-    forM_ (zip (yParams scan) pes) $ \(p, pe) ->
-      copyDWIMFix (paramName p) [] (Var (patElemName pe)) is
+      forM_ (zip (yParams scan) pes) $ \(p, pe) ->
+        copyDWIMFix (paramName p) [] (Var (patElemName pe)) is
   | otherwise =
-    return ()
+      pure ()
 
 readCarries ::
   Imp.TExp Int64 ->
@@ -128,21 +128,21 @@ readCarries ::
   InKernelGen ()
 readCarries chunk_id chunk_offset dims' vec_is pes scan
   | shapeRank (segBinOpShape scan) > 0 = do
-    ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-    -- We may have to reload the carries from the output of the
-    -- previous chunk.
-    sIf
-      (chunk_id .>. 0 .&&. ltid .==. 0)
-      ( do
-          let is = unflattenIndex dims' $ chunk_offset - 1
-          forM_ (zip (xParams scan) pes) $ \(p, pe) ->
-            copyDWIMFix (paramName p) [] (Var (patElemName pe)) (is ++ vec_is)
-      )
-      ( forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
-          copyDWIMFix (paramName p) [] ne []
-      )
+      ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+      -- We may have to reload the carries from the output of the
+      -- previous chunk.
+      sIf
+        (chunk_id .>. 0 .&&. ltid .==. 0)
+        ( do
+            let is = unflattenIndex dims' $ chunk_offset - 1
+            forM_ (zip (xParams scan) pes) $ \(p, pe) ->
+              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (is ++ vec_is)
+        )
+        ( forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
+            copyDWIMFix (paramName p) [] ne []
+        )
   | otherwise =
-    return ()
+      pure ()
 
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 ::
@@ -300,7 +300,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                     Just f ->
                       f
                         ( tvExp chunk_offset
-                            + sExt64 (kernelGroupSize constants) -1
+                            + sExt64 (kernelGroupSize constants) - 1
                         )
                         ( tvExp chunk_offset
                             + sExt64 (kernelGroupSize constants)
@@ -314,7 +314,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
 
               barrier
 
-  return (num_threads, elems_per_group, crossesSegment)
+  pure (num_threads, elems_per_group, crossesSegment)
 
 scanStage2 ::
   Pat LetDecMem ->

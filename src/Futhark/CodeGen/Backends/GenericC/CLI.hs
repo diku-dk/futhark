@@ -2,7 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -49,14 +48,20 @@ genericOptions =
         optionShortName = Just 'D',
         optionArgument = NoArgument,
         optionDescription = "Perform possibly expensive internal correctness checks and verbose logging.",
-        optionAction = [C.cstm|futhark_context_config_set_debugging(cfg, 1);|]
+        optionAction =
+          [C.cstm|{futhark_context_config_set_debugging(cfg, 1);
+                                print_report = 1;
+                               }|]
       },
     Option
       { optionLongName = "log",
         optionShortName = Just 'L',
         optionArgument = NoArgument,
         optionDescription = "Print various low-overhead logging information to stderr while running.",
-        optionAction = [C.cstm|futhark_context_config_set_logging(cfg, 1);|]
+        optionAction =
+          [C.cstm|{futhark_context_config_set_logging(cfg, 1);
+                   print_report = 1;
+                  }|]
       },
     Option
       { optionLongName = "entry-point",
@@ -138,6 +143,14 @@ genericOptions =
                 if (ret != NULL) {
                   futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                 }}|]
+      },
+    Option
+      { optionLongName = "cache-file",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "FILE",
+        optionDescription = "Store program cache here.",
+        optionAction =
+          [C.cstm|futhark_context_config_set_cache_file(cfg, optarg);|]
       }
   ]
   where
@@ -190,7 +203,7 @@ readInput manifest i tname =
           arr = "read_arr_" ++ show i
 
           ty = [C.cty|typename $id:t|]
-          dims_exps = [[C.cexp|$id:shape[$int:j]|] | j <- [0 .. rank -1]]
+          dims_exps = [[C.cexp|$id:shape[$int:j]|] | j <- [0 .. rank - 1]]
           t' = uncurry primAPIType $ scalarToPrim et
 
           new_array = arrayNew ops
@@ -263,7 +276,7 @@ printStm manifest tname e =
           values_array = arrayValues ops
           shape_array = arrayShape ops
           num_elems =
-            cproduct [[C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0 .. rank -1]]
+            cproduct [[C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0 .. rank - 1]]
           info = et <> "_info"
        in [C.cstm|{
                  $ty:et' *arr = calloc($exp:num_elems, $id:info.size);
@@ -408,6 +421,7 @@ $esc:(T.unpack valuesH)
 
 static int binary_output = 0;
 static int print_result = 1;
+static int print_report = 0;
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
 static int num_runs = 1;
@@ -483,9 +497,11 @@ int main(int argc, char** argv) {
       fclose(runtime_file);
     }
 
-    char *report = futhark_context_report(ctx);
-    fputs(report, stderr);
-    free(report);
+    if (print_report) {
+      char *report = futhark_context_report(ctx);
+      fputs(report, stderr);
+      free(report);
+    }
   }
 
   futhark_context_free(ctx);

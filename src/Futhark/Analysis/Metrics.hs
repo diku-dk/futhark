@@ -33,11 +33,11 @@ class OpMetrics op where
   opMetrics :: op -> MetricsM ()
 
 instance OpMetrics a => OpMetrics (Maybe a) where
-  opMetrics Nothing = return ()
+  opMetrics Nothing = pure ()
   opMetrics (Just x) = opMetrics x
 
 instance OpMetrics () where
-  opMetrics () = return ()
+  opMetrics () = pure ()
 
 newtype CountMetrics = CountMetrics [([Text], Text)]
 

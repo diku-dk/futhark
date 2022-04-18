@@ -154,14 +154,14 @@ instance (ASTRep rep, CanBeWise (Op rep)) => Aliased (Wise rep) where
 removeWisdom :: CanBeWise (Op rep) => Rephraser Identity (Wise rep) rep
 removeWisdom =
   Rephraser
-    { rephraseExpDec = return . snd,
-      rephraseLetBoundDec = return . snd,
-      rephraseBodyDec = return . snd,
-      rephraseFParamDec = return,
-      rephraseLParamDec = return,
-      rephraseRetType = return,
-      rephraseBranchType = return,
-      rephraseOp = return . removeOpWisdom
+    { rephraseExpDec = pure . snd,
+      rephraseLetBoundDec = pure . snd,
+      rephraseBodyDec = pure . snd,
+      rephraseFParamDec = pure,
+      rephraseLParamDec = pure,
+      rephraseRetType = pure,
+      rephraseBranchType = pure,
+      rephraseOp = pure . removeOpWisdom
     }
 
 removeScopeWisdom :: Scope (Wise rep) -> Scope rep
@@ -196,7 +196,7 @@ removeExpWisdom :: CanBeWise (Op rep) => Exp (Wise rep) -> Exp rep
 removeExpWisdom = runIdentity . rephraseExp removeWisdom
 
 removePatWisdom :: Pat (VarWisdom, a) -> Pat a
-removePatWisdom = runIdentity . rephrasePat (return . snd)
+removePatWisdom = runIdentity . rephrasePat (pure . snd)
 
 addWisdomToPat ::
   (ASTRep rep, CanBeWise (Op rep)) =>
@@ -258,7 +258,7 @@ instance (Buildable rep, CanBeWise (Op rep)) => Buildable (Wise rep) where
     env <- asksScope removeScopeWisdom
     flip runReaderT env $ do
       Let pat dec _ <- mkLetNames names $ removeExpWisdom e
-      return $ mkWiseLetStm pat dec e
+      pure $ mkWiseLetStm pat dec e
 
   mkBody stms res =
     let Body bodyrep _ _ = mkBody (fmap removeStmWisdom stms) res

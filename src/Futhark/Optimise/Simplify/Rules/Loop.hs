@@ -29,41 +29,41 @@ import Futhark.Transform.Rename
 removeRedundantMergeVariables :: BuilderOps rep => BottomUpRuleDoLoop rep
 removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
   | not $ all (usedAfterLoop . fst) merge =
-    let necessaryForReturned =
-          findNecessaryForReturned
-            usedAfterLoopOrInForm
-            (zip (map fst merge) (map resSubExp $ bodyResult body))
-            (dataDependencies body)
+      let necessaryForReturned =
+            findNecessaryForReturned
+              usedAfterLoopOrInForm
+              (zip (map fst merge) (map resSubExp $ bodyResult body))
+              (dataDependencies body)
 
-        resIsNecessary ((v, _), _) =
-          usedAfterLoop v
-            || paramName v `nameIn` necessaryForReturned
-            || referencedInPat v
-            || referencedInForm v
+          resIsNecessary ((v, _), _) =
+            usedAfterLoop v
+              || paramName v `nameIn` necessaryForReturned
+              || referencedInPat v
+              || referencedInForm v
 
-        (keep_valpart, discard_valpart) =
-          partition (resIsNecessary . snd) $
-            zip (patElems pat) $ zip merge $ bodyResult body
+          (keep_valpart, discard_valpart) =
+            partition (resIsNecessary . snd) $
+              zip (patElems pat) $ zip merge $ bodyResult body
 
-        (keep_valpatelems, keep_val) = unzip keep_valpart
-        (_discard_valpatelems, discard_val) = unzip discard_valpart
-        (merge', val_es') = unzip keep_val
+          (keep_valpatelems, keep_val) = unzip keep_valpart
+          (_discard_valpatelems, discard_val) = unzip discard_valpart
+          (merge', val_es') = unzip keep_val
 
-        body' = body {bodyResult = val_es'}
+          body' = body {bodyResult = val_es'}
 
-        pat' = Pat keep_valpatelems
-     in if merge' == merge
-          then Skip
-          else Simplify $ do
-            -- We can't just remove the bindings in 'discard', since the loop
-            -- body may still use their names in (now-dead) expressions.
-            -- Hence, we add them inside the loop, fully aware that dead-code
-            -- removal will eventually get rid of them.  Some care is
-            -- necessary to handle unique bindings.
-            body'' <- insertStmsM $ do
-              mapM_ (uncurry letBindNames) $ dummyStms discard_val
-              pure body'
-            auxing aux $ letBind pat' $ DoLoop merge' form body''
+          pat' = Pat keep_valpatelems
+       in if merge' == merge
+            then Skip
+            else Simplify $ do
+              -- We can't just remove the bindings in 'discard', since the loop
+              -- body may still use their names in (now-dead) expressions.
+              -- Hence, we add them inside the loop, fully aware that dead-code
+              -- removal will eventually get rid of them.  Some care is
+              -- necessary to handle unique bindings.
+              body'' <- insertStmsM $ do
+                mapM_ (uncurry letBindNames) $ dummyStms discard_val
+                pure body'
+              auxing aux $ letBind pat' $ DoLoop merge' form body''
   where
     pat_used = map (`UT.isUsedDirectly` used) $ patNames pat
     used_vals = map fst $ filter snd $ zip (map (paramName . fst) merge) pat_used
@@ -78,7 +78,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
     dummyStm ((p, e), _)
       | unique (paramDeclType p),
         Var v <- e =
-        ([paramName p], BasicOp $ Copy v)
+          ([paramName p], BasicOp $ Copy v)
       | otherwise = ([paramName p], BasicOp $ SubExp e)
 removeRedundantMergeVariables _ _ _ _ =
   Skip
@@ -120,26 +120,25 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
         | isInvariant,
           -- Also do not remove the condition in a while-loop.
           not $ paramName mergeParam `nameIn` freeIn form =
-          let (stm, explpat'') =
-                removeFromResult (mergeParam, mergeInit) explpat'
-           in ( maybe id (:) stm $ (paramIdent mergeParam, mergeInit) : invariant,
-                explpat'',
-                merge',
-                resExps
-              )
+            let (stm, explpat'') =
+                  removeFromResult (mergeParam, mergeInit) explpat'
+             in ( maybe id (:) stm $ (paramIdent mergeParam, mergeInit) : invariant,
+                  explpat'',
+                  merge',
+                  resExps
+                )
         where
           -- A non-unique merge variable is invariant if one of the
           -- following is true:
-          --
-          -- (0) The result is a variable of the same name as the
-          -- parameter, where all existential parameters are already
-          -- known to be invariant
           isInvariant
+            -- (0) The result is a variable of the same name as the
+            -- parameter, where all existential parameters are already
+            -- known to be invariant
             | Var v2 <- resSubExp resExp,
               paramName mergeParam == v2 =
-              allExistentialInvariant
-                (namesFromList $ map (identName . fst) invariant)
-                mergeParam
+                allExistentialInvariant
+                  (namesFromList $ map (identName . fst) invariant)
+                  mergeParam
             -- (1) The result is identical to the initial parameter value.
             | mergeInit == resSubExp resExp = True
             -- (2) The initial parameter value is equal to an outer
@@ -152,7 +151,7 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
               Just (p_init, p_res) <- ST.lookupLoopParam init_v vtable,
               p_init == resSubExp resExp,
               p_res == Var pat_name =
-              True
+                True
             | otherwise = False
     checkInvariance
       (_pat_name, (mergeParam, mergeInit), resExp)
@@ -176,19 +175,19 @@ simplifyLoopVariables :: (BuilderOps rep, Aliased rep) => TopDownRuleDoLoop rep
 simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_vars), body)
   | simplifiable <- map checkIfSimplifiable loop_vars,
     not $ all isNothing simplifiable = Simplify $ do
-    -- Check if the simplifications throw away more information than
-    -- we are comfortable with at this stage.
-    (maybe_loop_vars, body_prefix_stms) <-
-      localScope (scopeOf form) $
-        unzip <$> zipWithM onLoopVar loop_vars simplifiable
-    if maybe_loop_vars == map Just loop_vars
-      then cannotSimplify
-      else do
-        body' <- buildBody_ $ do
-          addStms $ mconcat body_prefix_stms
-          bodyBind body
-        let form' = ForLoop i it num_iters $ catMaybes maybe_loop_vars
-        auxing aux $ letBind pat $ DoLoop merge form' body'
+      -- Check if the simplifications throw away more information than
+      -- we are comfortable with at this stage.
+      (maybe_loop_vars, body_prefix_stms) <-
+        localScope (scopeOf form) $
+          unzip <$> zipWithM onLoopVar loop_vars simplifiable
+      if maybe_loop_vars == map Just loop_vars
+        then cannotSimplify
+        else do
+          body' <- buildBody_ $ do
+            addStms $ mconcat body_prefix_stms
+            bodyBind body
+          let form' = ForLoop i it num_iters $ catMaybes maybe_loop_vars
+          auxing aux $ letBind pat $ DoLoop merge form' body'
   where
     seType (Var v)
       | v == i = Just $ Prim $ IntType it
@@ -209,7 +208,7 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
     -- We only want this simplification if the result does not refer
     -- to 'i' at all, or does not contain accesses.
     onLoopVar (p, arr) Nothing =
-      return (Just (p, arr), mempty)
+      pure (Just (p, arr), mempty)
     onLoopVar (p, arr) (Just m) = do
       (x, x_stms) <- collectStms m
       case x of
@@ -218,21 +217,21 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
             DimFix (Var j) : slice' <- slice,
             j == i,
             not $ i `nameIn` freeIn slice -> do
-            addStms x_stms
-            w <- arraySize 0 <$> lookupType arr'
-            for_in_partial <-
-              certifying cs $
-                letExp "for_in_partial" . BasicOp . Index arr' . Slice $
-                  DimSlice (intConst Int64 0) w (intConst Int64 1) : slice'
-            return (Just (p, for_in_partial), mempty)
+              addStms x_stms
+              w <- arraySize 0 <$> lookupType arr'
+              for_in_partial <-
+                certifying cs $
+                  letExp "for_in_partial" . BasicOp . Index arr' . Slice $
+                    DimSlice (intConst Int64 0) w (intConst Int64 1) : slice'
+              pure (Just (p, for_in_partial), mempty)
         SubExpResult cs se
           | all (notIndex . stmExp) x_stms -> do
-            x_stms' <- collectStms_ $
-              certifying cs $ do
-                addStms x_stms
-                letBindNames [paramName p] $ BasicOp $ SubExp se
-            return (Nothing, x_stms')
-        _ -> return (Just (p, arr), mempty)
+              x_stms' <- collectStms_ $
+                certifying cs $ do
+                  addStms x_stms
+                  letBindNames [paramName p] $ BasicOp $ SubExp se
+              pure (Nothing, x_stms')
+        _ -> pure (Just (p, arr), mempty)
 
     notIndex (BasicOp Index {}) = False
     notIndex _ = True
@@ -247,23 +246,23 @@ simplifyLoopVariables _ _ _ _ = Skip
 narrowLoopType :: (BuilderOps rep) => TopDownRuleDoLoop rep
 narrowLoopType vtable pat aux (merge, ForLoop i Int64 n [], body)
   | Just (n', it', cs) <- smallerType =
-    Simplify $ do
-      i' <- newVName $ baseString i
-      let form' = ForLoop i' it' n' []
-      body' <- insertStmsM . inScopeOf form' $ do
-        letBindNames [i] $ BasicOp $ ConvOp (SExt it' Int64) (Var i')
-        pure body
-      auxing aux $ certifying cs $ letBind pat $ DoLoop merge form' body'
+      Simplify $ do
+        i' <- newVName $ baseString i
+        let form' = ForLoop i' it' n' []
+        body' <- insertStmsM . inScopeOf form' $ do
+          letBindNames [i] $ BasicOp $ ConvOp (SExt it' Int64) (Var i')
+          pure body
+        auxing aux $ certifying cs $ letBind pat $ DoLoop merge form' body'
   where
     smallerType
       | Var n' <- n,
         Just (ConvOp (SExt it' _) n'', cs) <- ST.lookupBasicOp n' vtable =
-        Just (n'', it', cs)
+          Just (n'', it', cs)
       | Constant (IntValue (Int64Value n')) <- n,
         toInteger n' <= toInteger (maxBound :: Int32) =
-        Just (intConst Int32 (toInteger n'), Int32, mempty)
+          Just (intConst Int32 (toInteger n'), Int32, mempty)
       | otherwise =
-        Nothing
+          Nothing
 narrowLoopType _ _ _ _ = Skip
 
 unroll ::
@@ -276,35 +275,35 @@ unroll ::
   RuleM rep [SubExpRes]
 unroll n merge (iv, it, i) loop_vars body
   | i >= n =
-    return $ map snd merge
+      pure $ map snd merge
   | otherwise = do
-    iter_body <- insertStmsM $ do
-      forM_ merge $ \(mergevar, SubExpRes cs mergeinit) ->
-        certifying cs $ letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
+      iter_body <- insertStmsM $ do
+        forM_ merge $ \(mergevar, SubExpRes cs mergeinit) ->
+          certifying cs $ letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
 
-      letBindNames [iv] $ BasicOp $ SubExp $ intConst it i
+        letBindNames [iv] $ BasicOp $ SubExp $ intConst it i
 
-      forM_ loop_vars $ \(p, arr) ->
-        letBindNames [paramName p] . BasicOp . Index arr . Slice $
-          DimFix (intConst Int64 i) : unSlice (fullSlice (paramType p) [])
+        forM_ loop_vars $ \(p, arr) ->
+          letBindNames [paramName p] . BasicOp . Index arr . Slice $
+            DimFix (intConst Int64 i) : unSlice (fullSlice (paramType p) [])
 
-      -- Some of the sizes in the types here might be temporarily wrong
-      -- until copy propagation fixes it up.
-      pure body
+        -- Some of the sizes in the types here might be temporarily wrong
+        -- until copy propagation fixes it up.
+        pure body
 
-    iter_body' <- renameBody iter_body
-    addStms $ bodyStms iter_body'
+      iter_body' <- renameBody iter_body
+      addStms $ bodyStms iter_body'
 
-    let merge' = zip (map fst merge) $ bodyResult iter_body'
-    unroll n merge' (iv, it, i + 1) loop_vars body
+      let merge' = zip (map fst merge) $ bodyResult iter_body'
+      unroll n merge' (iv, it, i + 1) loop_vars body
 
 simplifyKnownIterationLoop :: BuilderOps rep => TopDownRuleDoLoop rep
 simplifyKnownIterationLoop _ pat aux (merge, ForLoop i it (Constant iters) loop_vars, body)
   | IntValue n <- iters,
     zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
-    res <- unroll (valueIntegral n) (map (second subExpRes) merge) (i, it, 0) loop_vars body
-    forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
-      certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
+      res <- unroll (valueIntegral n) (map (second subExpRes) merge) (i, it, 0) loop_vars body
+      forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
+        certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 simplifyKnownIterationLoop _ _ _ _ =
   Skip
 

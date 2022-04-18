@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.21.9]
+
+### Added
+
+* Sun Haoran has implemented unnamed typed holes, with syntax `???`.
+
+* Sun Haoran has implemented the beginnings of a language server:
+  `futhark lsp`.  A VSCode language extension is available on the
+  marketplace, but the language server should work with any editor.
+
+* Crucial new command: `futhark thanks`.
+
+* The GPU backends now support a caching mechanism for JIT-compiled
+  code, significantly improving startup times.  Use the
+  `futhark_context_config_set_cache_file()` in the C API, the
+  `--cache-file` option on executables, or the `--cache-extension`
+  option on `futhark test` and `futhark bench`.  These also work for
+  the non-GPU backends, but currently have no effect.  (#1614)
+
+* Aleksander Junge has improved `futhark bench` such that it
+  intelligently chooses how many runs to perform (#1335).
+
+### Fixed
+
+* Incomplete simplification would cause some instances of nested
+  parallelism to require irregular allocations (#1610).
+
+* Missing alias checking for a simplification rule related to in-place
+  updates (#1615, #1628).
+
+* Incorrect code generation for certain copies of transposed arrays
+  (#1627).
+
+* Fusion would mistakenly try to treat some loops with irregular sizes
+  (#1631).
+
+* Memory annotation bug for non-inlined functions (#1634).
+
 ## [0.21.8]
 
 ### Added

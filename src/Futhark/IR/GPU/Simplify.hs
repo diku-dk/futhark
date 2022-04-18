@@ -50,10 +50,10 @@ simplifyKernelOp ::
   Engine.SimpleM rep (HostOp (Wise rep) op, Stms (Wise rep))
 simplifyKernelOp f (OtherOp op) = do
   (op', stms) <- f op
-  return (OtherOp op', stms)
+  pure (OtherOp op', stms)
 simplifyKernelOp _ (SegOp op) = do
   (op', hoisted) <- simplifySegOp op
-  return (SegOp op', hoisted)
+  pure (SegOp op', hoisted)
 simplifyKernelOp _ (SizeOp (SplitSpace o w i elems_per_thread)) =
   (,)
     <$> ( SizeOp
@@ -64,15 +64,15 @@ simplifyKernelOp _ (SizeOp (SplitSpace o w i elems_per_thread)) =
         )
     <*> pure mempty
 simplifyKernelOp _ (SizeOp (GetSize key size_class)) =
-  return (SizeOp $ GetSize key size_class, mempty)
+  pure (SizeOp $ GetSize key size_class, mempty)
 simplifyKernelOp _ (SizeOp (GetSizeMax size_class)) =
-  return (SizeOp $ GetSizeMax size_class, mempty)
+  pure (SizeOp $ GetSizeMax size_class, mempty)
 simplifyKernelOp _ (SizeOp (CmpSizeLe key size_class x)) = do
   x' <- Engine.simplify x
-  return (SizeOp $ CmpSizeLe key size_class x', mempty)
+  pure (SizeOp $ CmpSizeLe key size_class x', mempty)
 simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   w' <- Engine.simplify w
-  return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
+  pure (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
 simplifyKernelOp _ (GPUBody ts body) = do
   ts' <- Engine.simplify ts
   (hoisted, body') <-

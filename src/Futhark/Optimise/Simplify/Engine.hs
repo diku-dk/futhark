@@ -147,8 +147,8 @@ bindableSimpleOps ::
 bindableSimpleOps =
   SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
   where
-    mkExpDecS' _ pat e = return $ mkExpDec pat e
-    mkBodyS' _ stms res = return $ mkBody stms res
+    mkExpDecS' _ pat e = pure $ mkExpDec pat e
+    mkBodyS' _ stms res = pure $ mkBody stms res
     protectHoistedOpS' _ _ _ = Nothing
 
 newtype SimpleM rep a
@@ -175,7 +175,7 @@ instance SimplifiableRep rep => HasScope (Wise rep) (SimpleM rep) where
   lookupType name = do
     vtable <- askVtable
     case ST.lookupType name vtable of
-      Just t -> return t
+      Just t -> pure t
       Nothing ->
         error $
           "SimpleM.lookupType: cannot find variable "
@@ -218,7 +218,7 @@ collectCerts m = do
   x <- m
   (a, b, cs) <- get
   put (a, b, mempty)
-  return (x, cs)
+  pure (x, cs)
 
 -- | Mark that we have changed something and it would be a good idea
 -- to re-run the simplifier.
@@ -280,7 +280,7 @@ protectIfHoisted cond side m = do
       then do
         cond' <-
           if side
-            then return cond
+            then pure cond
             else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
         mapM_ (protectIf ops unsafeOrCostly cond') hoisted
       else addStms hoisted
@@ -313,8 +313,8 @@ protectLoopHoisted merge form m = do
         WhileLoop cond
           | Just (_, cond_init) <-
               find ((== cond) . paramName . fst) merge ->
-            return cond_init
-          | otherwise -> return $ constant True -- infinite loop
+              pure cond_init
+          | otherwise -> pure $ constant True -- infinite loop
         ForLoop _ it bound _ ->
           letSubExp "loop_nonempty" $
             BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
@@ -336,19 +336,19 @@ protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
-    auxing aux m
+      auxing aux m
 protectIf _ f taken (Let pat aux e)
   | f e =
-    case makeSafe e of
-      Just e' ->
-        auxing aux $ letBind pat e'
-      Nothing -> do
-        taken_body <- eBody [pure e]
-        untaken_body <-
-          eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
-        if_ts <- expTypesFromPat pat
-        auxing aux . letBind pat $
-          If taken taken_body untaken_body $ IfDec if_ts IfFallback
+      case makeSafe e of
+        Just e' ->
+          auxing aux $ letBind pat e'
+        Nothing -> do
+          taken_body <- eBody [pure e]
+          untaken_body <-
+            eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
+          if_ts <- expTypesFromPat pat
+          auxing aux . letBind pat $
+            If taken taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -378,10 +378,10 @@ emptyOfType _ Mem {} =
 emptyOfType _ Acc {} =
   error "emptyOfType: Cannot hoist accumulator."
 emptyOfType _ (Prim pt) =
-  return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
+  pure $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
 emptyOfType ctx_names (Array et shape _) = do
   let dims = map zeroIfContext $ shapeDims shape
-  return $ BasicOp $ Scratch et dims
+  pure $ BasicOp $ Scratch et dims
   where
     zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
     zeroIfContext se = se
@@ -457,20 +457,20 @@ hoistStms rules block orig_stms final = do
       case res of
         Nothing -- Nothing to optimise - see if hoistable.
           | block vtable usage stm ->
-            -- No, not hoistable.
-            pure
-              ( x,
-                expandUsage usageInStm vtable usage stm
-                  `UT.without` provides stm,
-                Left stm : stms
-              )
+              -- No, not hoistable.
+              pure
+                ( x,
+                  expandUsage usageInStm vtable usage stm
+                    `UT.without` provides stm,
+                  Left stm : stms
+                )
           | otherwise ->
-            -- Yes, hoistable.
-            pure
-              ( x,
-                expandUsage usageInStm vtable usage stm,
-                Right stm : stms
-              )
+              -- Yes, hoistable.
+              pure
+                ( x,
+                  expandUsage usageInStm vtable usage stm,
+                  Right stm : stms
+                )
         Just optimstms -> do
           changed
           descend usageInStm optimstms $ pure (x, usage, stms)
@@ -512,9 +512,9 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
       (blocked <> namesFromList (provides need), Left need)
     block blocked (Right need)
       | blocked `namesIntersect` freeIn need =
-        (blocked <> namesFromList (provides need), Left need)
+          (blocked <> namesFromList (provides need), Left need)
       | otherwise =
-        (blocked, Right need)
+          (blocked, Right need)
 
 provides :: Stm rep -> [VName]
 provides = patNames . stmPat
@@ -633,7 +633,7 @@ hoistCommon ::
   UT.UsageTable ->
   [UT.Usages] ->
   SubExp ->
-  IfSort ->
+  IfDec (BranchType rep) ->
   Body (Wise rep) ->
   Body (Wise rep) ->
   SimpleM
@@ -642,7 +642,7 @@ hoistCommon ::
       Body (Wise rep),
       Stms (Wise rep)
     )
-hoistCommon res_usage res_usages cond ifsort body1 body2 = do
+hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
   is_alloc_fun <- asksEngineEnv $ isAllocation . envHoistBlockers
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   vtable <- askVtable
@@ -663,6 +663,9 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
                  && cond_loop_invariant
                  && ifsort /= IfFallback
                  && loopInvariantStm vtable stm
+                 -- Avoid hoisting out something that might change the
+                 -- asymptotics of the program.
+                 && all primType (patTypes (stmPat stm))
              )
 
       -- No matter what, we always want to hoist constants as much as
@@ -678,7 +681,7 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
       --
       isNotHoistableBnd _ usage (Let pat _ _)
         | any (`UT.isSize` usage) $ patNames pat =
-          False
+            False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
@@ -698,7 +701,7 @@ hoistCommon res_usage res_usages cond ifsort body1 body2 = do
   (hoisted2, body2') <-
     protectIfHoisted cond False $
       simplifyBody block res_usage res_usages body2
-  return (body1', body2', hoisted1 <> hoisted2)
+  pure (body1', body2', hoisted1 <> hoisted2)
 
 -- | Simplify a single body.
 simplifyBody ::
@@ -743,7 +746,12 @@ simplifyResult usages res = do
                 (`UT.usage` (u `UT.withoutU` UT.presentU))
                 (namesToList (ST.lookupAliases v vtable))
         UT.usage v u : als_usages
-  return (res', UT.usages (freeIn res') <> more_usages)
+  pure
+    ( res',
+      UT.usages (freeIn res')
+        <> foldMap UT.inResultUsage (namesToList (freeIn res'))
+        <> more_usages
+    )
 
 isDoLoopResult :: Result -> UT.UsageTable
 isDoLoopResult = mconcat . map checkForVar
@@ -781,7 +789,7 @@ simplifyExp ::
   Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
-simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
+simplifyExp usage (Pat pes) (If cond tbranch fbranch ifdec@(IfDec ts ifsort)) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
   -- across branches.
@@ -789,8 +797,8 @@ simplifyExp usage (Pat pes) (If cond tbranch fbranch (IfDec ts ifsort)) = do
   cond' <- simplify cond
   ts' <- mapM simplify ts
   (tbranch', fbranch', hoisted) <-
-    hoistCommon usage pes_usages cond' ifsort tbranch fbranch
-  return (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted)
+    hoistCommon usage pes_usages cond' ifdec tbranch fbranch
+  pure (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted)
 simplifyExp _ _ (DoLoop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params
@@ -803,7 +811,7 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
       loop_params' <- mapM (traverse simplify) loop_params
       loop_arrs' <- mapM simplify loop_arrs
       let form' = ForLoop loopvar it boundexp' (zip loop_params' loop_arrs')
-      return
+      pure
         ( form',
           namesFromList (loopvar : map paramName loop_params') <> fparamnames,
           bindLoopVar loopvar it boundexp'
@@ -812,7 +820,7 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
         )
     WhileLoop cond -> do
       cond' <- simplify cond
-      return
+      pure
         ( WhileLoop cond',
           fparamnames,
           protectLoopHoisted merge' (WhileLoop cond')
@@ -835,7 +843,7 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
             (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
             pure (res, uses <> isDoLoopResult res)
   loopbody' <- constructBody loopstms loopres
-  return (DoLoop merge' form' loopbody', hoisted)
+  pure (DoLoop merge' form' loopbody', hoisted)
   where
     fparamnames =
       namesFromList (map (paramName . fst) merge)
@@ -846,7 +854,7 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
     withRes (p, x) y = (p, x, y)
 simplifyExp _ _ (Op op) = do
   (op', stms) <- simplifyOp op
-  return (Op op', stms)
+  pure (Op op', stms)
 simplifyExp usage _ (WithAcc inputs lam) = do
   (inputs', inputs_stms) <- fmap unzip . forM inputs $ \(shape, arrs, op) -> do
     (op', op_stms) <- case op of
@@ -855,7 +863,7 @@ simplifyExp usage _ (WithAcc inputs lam) = do
       Just (op_lam, nes) -> do
         (op_lam', op_lam_stms) <- simplifyLambda op_lam
         nes' <- simplify nes
-        return (Just (op_lam', nes'), op_lam_stms)
+        pure (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
   let noteAcc = ST.noteAccTokens (zip (map paramName (lambdaParams lam)) inputs')
   (lam', lam_stms) <- simplifyLambdaWith noteAcc (isFalse True) usage lam
@@ -872,9 +880,9 @@ simplifyExpBase :: SimplifiableRep rep => Exp (Wise rep) -> SimpleM rep (Exp (Wi
 -- more identical, which helps CSE.
 simplifyExpBase (BasicOp (BinOp op x y))
   | commutativeBinOp op = do
-    x' <- simplify x
-    y' <- simplify y
-    pure $ BasicOp $ BinOp op (min x' y') (max x' y')
+      x' <- simplify x
+      y' <- simplify y
+      pure $ BasicOp $ BinOp op (min x' y') (max x' y')
 simplifyExpBase e = mapExpM hoist e
   where
     hoist =
@@ -916,7 +924,7 @@ instance Simplifiable Int where
   simplify = pure
 
 instance Simplifiable a => Simplifiable (Maybe a) where
-  simplify Nothing = return Nothing
+  simplify Nothing = pure Nothing
   simplify (Just x) = Just <$> simplify x
 
 instance Simplifiable a => Simplifiable [a] where
@@ -929,14 +937,14 @@ instance Simplifiable SubExp where
       Just (Constant v, cs) -> do
         changed
         usedCerts cs
-        return $ Constant v
+        pure $ Constant v
       Just (Var id', cs) -> do
         changed
         usedCerts cs
-        return $ Var id'
-      _ -> return $ Var name
+        pure $ Var id'
+      _ -> pure $ Var name
   simplify (Constant v) =
-    return $ Constant v
+    pure $ Constant v
 
 instance Simplifiable SubExpRes where
   simplify (SubExpRes cs se) = do
@@ -963,15 +971,15 @@ instance Simplifiable VName where
       Just (Var v', cs) -> do
         changed
         usedCerts cs
-        return v'
-      _ -> return v
+        pure v'
+      _ -> pure v
 
 instance Simplifiable d => Simplifiable (ShapeBase d) where
   simplify = fmap Shape . simplify . shapeDims
 
 instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se
-  simplify (Ext x) = return $ Ext x
+  simplify (Ext x) = pure $ Ext x
 
 instance Simplifiable Space where
   simplify (ScalarSpace ds t) = ScalarSpace <$> simplify ds <*> pure t
@@ -988,7 +996,7 @@ instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =
-    return $ Prim bt
+    pure $ Prim bt
 
 instance Simplifiable d => Simplifiable (DimIndex d) where
   simplify (DimFix i) = DimFix <$> simplify i
@@ -1038,7 +1046,7 @@ simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
         (map (const mempty) rettype)
         body
   rettype' <- simplify rettype
-  return (Lambda params' body' rettype', hoisted)
+  pure (Lambda params' body' rettype', hoisted)
 
 instance Simplifiable Certs where
   simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
@@ -1046,9 +1054,9 @@ instance Simplifiable Certs where
       check idd = do
         vv <- ST.lookupSubExp idd <$> askVtable
         case vv of
-          Just (Constant _, Certs cs) -> return cs
-          Just (Var idd', _) -> return [idd']
-          _ -> return [idd]
+          Just (Constant _, Certs cs) -> pure cs
+          Just (Var idd', _) -> pure [idd']
+          _ -> pure [idd]
 
 simplifyFun ::
   SimplifiableRep rep =>

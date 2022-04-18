@@ -90,14 +90,13 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
 
           let simplifyFun' fd
                 | i `rem` simplify_rate == 0 =
-                  copyPropagateInFun simpleSOACS vtable'
-                    . performCSEOnFunDef True
-                    =<< simplifyFun vtable' fd
+                    copyPropagateInFun simpleSOACS vtable'
+                      . performCSEOnFunDef True
+                      =<< simplifyFun vtable' fd
                 | otherwise =
-                  copyPropagateInFun simpleSOACS vtable' fd
+                    copyPropagateInFun simpleSOACS vtable' fd
 
-              onFun fd =
-                simplifyFun' <=< inlineInFunDef inlinemap $ fd
+              onFun = simplifyFun' <=< inlineInFunDef inlinemap
 
           to_inline_in' <- parMapM onFun to_inline_in
 
@@ -115,7 +114,7 @@ inlineBecauseTiny = foldMap onFunDef . progFuns
     onFunDef fd
       | length (bodyStms (funDefBody fd)) < 2
           || "inline" `inAttrs` funDefAttrs fd =
-        S.singleton (funDefName fd)
+          S.singleton (funDefName fd)
       | otherwise = mempty
 
 -- Conservative inlining of functions that are called just once, or
@@ -197,7 +196,7 @@ inlineInBody fdmap = onBody
       | Just fd <- M.lookup fname fdmap,
         not $ "noinline" `inAttrs` funDefAttrs fd,
         not $ "noinline" `inAttrs` stmAuxAttrs aux =
-        (<>) <$> inlineFunction pat aux args what fd <*> inline rest
+          (<>) <$> inlineFunction pat aux args what fd <*> inline rest
     inline (stm@(Let _ _ BasicOp {}) : rest) =
       (oneStm stm <>) <$> inline rest
     inline (stm : rest) =
@@ -244,7 +243,7 @@ addLocations attrs caller_safety more_locs = fmap onStm
           runIdentity $
             mapSOACM
               identitySOACMapper
-                { mapOnSOACLambda = return . onLambda
+                { mapOnSOACLambda = pure . onLambda
                 }
               soac
       where
@@ -258,7 +257,7 @@ addLocations attrs caller_safety more_locs = fmap onStm
     onExp =
       mapExp
         identityMapper
-          { mapOnBody = const $ return . onBody attrs
+          { mapOnBody = const $ pure . onBody attrs
           }
 
     withAttrs attrs' aux = aux {stmAuxAttrs = attrs' <> stmAuxAttrs aux}

@@ -392,29 +392,29 @@ vecToBMP h w = BMP.renderBMP . BMP.packRGBA32ToBMP24 w h . SVec.vectorToByteStri
     frobVec vec = SVec.generate (h * w * 4) (pix vec)
     pix vec l =
       let (i, j) = (l `div` 4) `divMod` w
-          argb = vec SVec.! ((h -1 - i) * w + j)
+          argb = vec SVec.! ((h - 1 - i) * w + j)
           c = (argb `shiftR` (24 - ((l + 1) `mod` 4) * 8)) .&. 0xFF
        in fromIntegral c :: Word8
 
 valueToBMP :: Value -> Maybe LBS.ByteString
 valueToBMP v@(U32Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w bytes
+      Just $ vecToBMP h w bytes
 valueToBMP v@(I32Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ SVec.map fromIntegral bytes
+      Just $ vecToBMP h w $ SVec.map fromIntegral bytes
 valueToBMP v@(F32Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ greyFloatToImg bytes
+      Just $ vecToBMP h w $ greyFloatToImg bytes
 valueToBMP v@(U8Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ greyByteToImg bytes
+      Just $ vecToBMP h w $ greyByteToImg bytes
 valueToBMP v@(F64Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ greyFloatToImg bytes
+      Just $ vecToBMP h w $ greyFloatToImg bytes
 valueToBMP v@(BoolValue _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ greyByteToImg $ SVec.map ((*) 255 . fromEnum) bytes
+      Just $ vecToBMP h w $ greyByteToImg $ SVec.map ((*) 255 . fromEnum) bytes
 valueToBMP _ = Nothing
 
 valueToBMPs :: Value -> Maybe [LBS.ByteString]
@@ -455,14 +455,14 @@ videoBlock opts f = "\n\n![](" <> T.pack f <> ")" <> opts' <> "\n\n"
   where
     opts'
       | all T.null [loop, autoplay] =
-        mempty
+          mempty
       | otherwise =
-        "{" <> T.unwords [loop, autoplay] <> "}"
+          "{" <> T.unwords [loop, autoplay] <> "}"
     boolOpt s prop
       | Just b <- prop opts =
-        if b then s <> "=\"true\"" else s <> "=\"false\""
+          if b then s <> "=\"true\"" else s <> "=\"false\""
       | otherwise =
-        mempty
+          mempty
     loop = boolOpt "loop" videoLoop
     autoplay = boolOpt "autoplay" videoAutoplay
 
@@ -500,7 +500,7 @@ loadBMP bmpfile = do
           shape = SVec.fromList [fromIntegral h, fromIntegral w]
           pix l =
             let (i, j) = l `divMod` w
-                l' = (h -1 - i) * w + j
+                l' = (h - 1 - i) * w + j
                 r = fromIntegral $ bmp_bs `BS.index` (l' * 4)
                 g = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 1)
                 b = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 2)
@@ -532,8 +532,8 @@ literateBuiltin "loadimg" vs =
   case vs of
     [ValueAtom v]
       | Just path <- getValue v -> do
-        let path' = map (chr . fromIntegral) (path :: [Word8])
-        loadImage path'
+          let path' = map (chr . fromIntegral) (path :: [Word8])
+          loadImage path'
     _ ->
       throwError $
         "$loadimg does not accept arguments of types: "
@@ -542,8 +542,8 @@ literateBuiltin "loaddata" vs =
   case vs of
     [ValueAtom v]
       | Just path <- getValue v -> do
-        let path' = map (chr . fromIntegral) (path :: [Word8])
-        loadData path'
+          let path' = map (chr . fromIntegral) (path :: [Word8])
+          loadData path'
     _ ->
       throwError $
         "$loaddata does not accept arguments of types: "
@@ -635,10 +635,10 @@ processDirective env (DirectiveImg e params) = do
     case maybe_v of
       Right (ValueAtom v)
         | Just bmp <- valueToBMP v -> do
-          withTempDir $ \dir -> do
-            let bmpfile = dir </> "img.bmp"
-            liftIO $ LBS.writeFile bmpfile bmp
-            void $ system "convert" [bmpfile, pngfile] mempty
+            withTempDir $ \dir -> do
+              let bmpfile = dir </> "img.bmp"
+              liftIO $ LBS.writeFile bmpfile bmp
+              void $ system "convert" [bmpfile, pngfile] mempty
       Right v ->
         nope $ fmap valueType v
       Left t ->
@@ -654,10 +654,10 @@ processDirective env (DirectivePlot e size) = do
     case maybe_v of
       Right v
         | Just vs <- plottable2d v ->
-          plotWith [(Nothing, vs)] pngfile
+            plotWith [(Nothing, vs)] pngfile
       Right (ValueRecord m)
         | Just m' <- traverse plottable2d m -> do
-          plotWith (map (first Just) $ M.toList m') pngfile
+            plotWith (map (first Just) $ M.toList m') pngfile
       Right v ->
         throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
       Left t ->
@@ -698,7 +698,7 @@ processDirective env (DirectiveGnuplot e script) = do
     case maybe_v of
       Right (ValueRecord m)
         | Just m' <- traverse plottable m ->
-          plotWith (M.toList m') pngfile
+            plotWith (M.toList m') pngfile
       Right v ->
         throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
       Left t ->
@@ -737,12 +737,12 @@ processDirective env (DirectiveVideo e params) = do
         | ValueAtom (SFun stepfun' _ [_, _] closure) <- stepfun,
           ValueAtom (SValue _ _) <- initial,
           ValueAtom (SValue "i64" _) <- num_frames -> do
-          Just (ValueAtom num_frames') <-
-            mapM getValue <$> getExpValue (envServer env) num_frames
-          withTempDir $ \dir -> do
-            let num_frames_int = fromIntegral (num_frames' :: Int64)
-            renderFrames dir (stepfun', map ValueAtom closure) initial num_frames_int
-            onWebM videofile =<< bmpsToVideo dir
+            Just (ValueAtom num_frames') <-
+              mapM getValue <$> getExpValue (envServer env) num_frames
+            withTempDir $ \dir -> do
+              let num_frames_int = fromIntegral (num_frames' :: Int64)
+              renderFrames dir (stepfun', map ValueAtom closure) initial num_frames_int
+              onWebM videofile =<< bmpsToVideo dir
       _ ->
         nope
   where
@@ -751,7 +751,7 @@ processDirective env (DirectiveVideo e params) = do
     bmpfile dir j = dir </> printf "frame%010d.bmp" (j :: Int)
 
     renderFrames dir (stepfun, closure) initial num_frames =
-      foldM_ frame initial [0 .. num_frames -1]
+      foldM_ frame initial [0 .. num_frames - 1]
       where
         frame old_state j = do
           v <-
@@ -802,9 +802,9 @@ processDirective env (DirectiveVideo e params) = do
 
     onWebM videofile webmfile
       | format == "gif" =
-        void $ system "ffmpeg" ["-i", webmfile, videofile] mempty
+          void $ system "ffmpeg" ["-i", webmfile, videofile] mempty
       | otherwise =
-        liftIO $ copyFile webmfile videofile
+          liftIO $ copyFile webmfile videofile
 
 -- Did this script block succeed or fail?
 data Failure = Failure | Success
@@ -931,7 +931,7 @@ main :: String -> [String] -> IO ()
 main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts ->
   case args of
     [prog] -> Just $ do
-      futhark <- maybe getExecutablePath return $ scriptFuthark opts
+      futhark <- maybe getExecutablePath pure $ scriptFuthark opts
 
       script <- parseProgFile prog
 

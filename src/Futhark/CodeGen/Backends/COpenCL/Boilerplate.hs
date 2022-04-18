@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( generateBoilerplate,
@@ -48,7 +47,7 @@ failureSwitch failures =
       onPart ErrorVal {} = "%lld"
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
         let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
-            msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg -1]]
+            msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg - 1]]
          in [C.cstm|case $int:i: {ctx->error = msgprintf($string:msg, $args:msgargs); break;}|]
       failure_cases =
         zipWith onFailure [(0 :: Int) ..] failures
@@ -105,10 +104,11 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                                typename int64_t tuning_params[$int:num_sizes];
                                int num_build_opts;
                                const char **build_opts;
+                               const char *cache_fname;
                             };|]
     )
 
-  let size_value_inits = zipWith sizeInit [0 .. M.size sizes -1] (M.elems sizes)
+  let size_value_inits = zipWith sizeInit [0 .. M.size sizes - 1] (M.elems sizes)
       sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
         where
           val = fromMaybe 0 $ sizeDefault size
@@ -124,6 +124,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          cfg->num_build_opts = 0;
                          cfg->build_opts = (const char**) malloc(sizeof(const char*));
                          cfg->build_opts[0] = NULL;
+                         cfg->cache_fname = NULL;
                          $stms:size_value_inits
                          opencl_config_init(&cfg->opencl, $int:num_sizes,
                                             tuning_param_names, tuning_param_vars,
@@ -416,7 +417,9 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                           $stms:set_required_types
 
                           init_context_early(cfg, ctx);
-                          typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types, cfg->build_opts);
+                          typename cl_program prog =
+                            setup_opencl(&ctx->opencl, opencl_program, required_types, cfg->build_opts,
+                                         cfg->cache_fname);
                           init_context_late(cfg, ctx, prog);
                           return ctx;
                        }|]
@@ -437,7 +440,9 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                           $stms:set_required_types
 
                           init_context_early(cfg, ctx);
-                          typename cl_program prog = setup_opencl_with_command_queue(&ctx->opencl, queue, opencl_program, required_types, cfg->build_opts);
+                          typename cl_program prog =
+                            setup_opencl_with_command_queue(&ctx->opencl, queue, opencl_program, required_types, cfg->build_opts,
+                                                            cfg->cache_fname);
                           init_context_late(cfg, ctx, prog);
                           return ctx;
                        }|]
@@ -678,9 +683,9 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
                         clGetDeviceInfo(ctx->device, $id:s',
                                         sizeof($id:v), &$id:v,
                                         NULL);|]
-        Just _ -> return ()
+        Just _ -> pure ()
 
-      return [C.cexp|$id:v|]
+      pure [C.cexp|$id:v|]
 
 -- Output size information if logging is enabled.
 --

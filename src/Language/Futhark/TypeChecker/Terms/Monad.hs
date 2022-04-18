@@ -510,13 +510,13 @@ instance MonadUnify TermTypeM where
     case checking of
       Just checking'
         | hasNoBreadCrumbs bcs ->
-          throwError $
-            TypeError (locOf loc) notes $
-              ppr checking'
+            throwError $
+              TypeError (locOf loc) notes $
+                ppr checking'
         | otherwise ->
-          throwError $
-            TypeError (locOf loc) notes $
-              ppr checking' <> line </> doc <> ppr bcs
+            throwError $
+              TypeError (locOf loc) notes $
+                ppr checking' <> line </> doc <> ppr bcs
       Nothing ->
         throwError $ TypeError (locOf loc) notes $ doc <> ppr bcs
     where
@@ -568,35 +568,35 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
   where
     descend scope []
       | Just name' <- M.lookup (space, name) $ scopeNameMap scope =
-        pure (scope, name')
+          pure (scope, name')
       | otherwise =
-        unknownVariable space qn loc
+          unknownVariable space qn loc
     descend scope (q : qs)
       | Just (QualName _ q') <- M.lookup (Term, q) $ scopeNameMap scope,
         Just res <- M.lookup q' $ scopeModTable scope =
-        case res of
-          -- Check if we are referring to the magical intrinsics
-          -- module.
-          _
-            | baseTag q' <= maxIntrinsicTag ->
-              checkIntrinsic space qn loc
-          ModEnv q_scope -> do
-            (scope', QualName qs' name') <- descend (envToTermScope q_scope) qs
-            pure (scope', QualName (q' : qs') name')
-          ModFun {} -> unappliedFunctor loc
+          case res of
+            -- Check if we are referring to the magical intrinsics
+            -- module.
+            _
+              | baseTag q' <= maxIntrinsicTag ->
+                  checkIntrinsic space qn loc
+            ModEnv q_scope -> do
+              (scope', QualName qs' name') <- descend (envToTermScope q_scope) qs
+              pure (scope', QualName (q' : qs') name')
+            ModFun {} -> unappliedFunctor loc
       | otherwise =
-        unknownVariable space qn loc
+          unknownVariable space qn loc
 
 checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
-    me <- liftTypeM askImportName
-    unless ("/prelude" `isPrefixOf` includeToFilePath me) $
-      warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
-    scope <- asks termScope
-    pure (scope, v)
+      me <- liftTypeM askImportName
+      unless (isBuiltin (includeToFilePath me)) $
+        warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
+      scope <- asks termScope
+      pure (scope, v)
   | otherwise =
-    unknownVariable space qn loc
+      unknownVariable space qn loc
 
 localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -626,7 +626,7 @@ instance MonadTypeChecker TermTypeM where
     case M.lookup name $ scopeTypeTable scope of
       Nothing -> unknownType loc qn
       Just (TypeAbbr l ps (RetType dims def)) ->
-        return
+        pure
           ( qn',
             ps,
             RetType dims $ qualifyTypeVars outer_env (map typeParamName ps) qs def,
@@ -652,8 +652,8 @@ instance MonadTypeChecker TermTypeM where
       Just (BoundV _ tparams t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
-          (tnames, t') <- instantiateTypeScheme loc tparams t
-          pure $ qualifyTypeVars outer_env tnames qs t'
+            (tnames, t') <- instantiateTypeScheme loc tparams t
+            pure $ qualifyTypeVars outer_env tnames qs t'
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
         equalityType usage argtype
@@ -707,12 +707,12 @@ extSize loc e = do
               RigidSlice d $ prettyOneLine $ DimSlice i j s
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
-      return
+      pure
         ( NamedDim $ qualName d,
           Just d
         )
     Just d ->
-      return
+      pure
         ( NamedDim $ qualName d,
           Just d
         )
@@ -739,7 +739,7 @@ newArrayType loc desc r = do
   constrain v $ NoConstraint Unlifted $ mkUsage' loc
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
   let rowt = TypeVar () Nonunique (typeName v) []
-  return
+  pure
     ( Array () Nonunique rowt (ShapeDecl $ map (NamedDim . qualName) dims),
       Scalar rowt
     )
@@ -843,9 +843,9 @@ dimFromExp rf (Parens e _) = dimFromExp rf e
 dimFromExp rf (QualParens _ e _) = dimFromExp rf e
 dimFromExp rf e
   | Just d <- maybeDimFromExp e =
-    pure (d, Nothing)
+      pure (d, Nothing)
   | otherwise =
-    extSize (srclocOf e) $ rf e
+      extSize (srclocOf e) $ rf e
 
 dimFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
 dimFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp

@@ -64,9 +64,9 @@ unifyScalarTypes _ (Prim t1) (Prim t2)
   | otherwise = Nothing
 unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
   | tv1 == tv2 = do
-    u3 <- uf u1 u2
-    targs3 <- zipWithM unifyTypeArgs targs1 targs2
-    Just $ TypeVar (als1 <> als2) u3 tv1 targs3
+      u3 <- uf u1 u2
+      targs3 <- zipWithM unifyTypeArgs targs1 targs2
+      Just $ TypeVar (als1 <> als2) u3 tv1 targs3
   | otherwise = Nothing
   where
     unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim _d2 _) =
@@ -78,10 +78,10 @@ unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
 unifyScalarTypes uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
-    Record
-      <$> traverse
-        (uncurry (unifyTypesU uf))
-        (M.intersectionWith (,) ts1 ts2)
+      Record
+        <$> traverse
+          (uncurry (unifyTypesU uf))
+          (M.intersectionWith (,) ts1 ts2)
 unifyScalarTypes
   uf
   (Arrow as1 mn1 t1 (RetType dims1 t1'))
@@ -91,10 +91,10 @@ unifyScalarTypes
 unifyScalarTypes uf (Sum cs1) (Sum cs2)
   | length cs1 == length cs2,
     sort (M.keys cs1) == sort (M.keys cs2) =
-    Sum
-      <$> traverse
-        (uncurry (zipWithM (unifyTypesU uf)))
-        (M.intersectionWith (,) cs1 cs2)
+      Sum
+        <$> traverse
+          (uncurry (zipWithM (unifyTypesU uf)))
+          (M.intersectionWith (,) cs1 cs2)
 unifyScalarTypes _ _ _ = Nothing
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal
@@ -115,12 +115,12 @@ subuniqueOf _ _ = True
 renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
-    dims' <- mapM newName dims
-    let m = M.fromList $ zip dims $ map (SizeSubst . NamedDim . qualName) dims'
-        st' = applySubst (`M.lookup` m) st
-    pure $ RetType dims' st'
+      dims' <- mapM newName dims
+      let m = M.fromList $ zip dims $ map (SizeSubst . NamedDim . qualName) dims'
+          st' = applySubst (`M.lookup` m) st
+      pure $ RetType dims' st'
   | otherwise =
-    pure $ RetType dims st
+      pure $ RetType dims st
 
 evalTypeExp ::
   MonadTypeChecker m =>
@@ -233,7 +233,7 @@ evalTypeExp (TEDim dims t loc) = do
     dims' <- mapM (flip (checkName Term) loc) dims
     bindDims dims' $ do
       (t', svars, RetType t_dims st, l) <- evalTypeExp t
-      return
+      pure
         ( TEDim dims' t' loc,
           svars,
           RetType (dims' ++ t_dims) st,
@@ -257,7 +257,7 @@ evalTypeExp t@(TESum cs loc) = do
       cs_svars = (foldMap . foldMap) (\(_, y, _, _) -> y) checked
       ts_s = (fmap . fmap) (\(_, _, z, _) -> z) checked
       ls = (concatMap . fmap) (\(_, _, _, v) -> v) checked
-  return
+  pure
     ( TESum (M.toList cs') loc,
       cs_svars,
       RetType (foldMap (foldMap retDims) ts_s) $
@@ -276,7 +276,7 @@ evalTypeExp ote@TEApply {} = do
           <+> ppr (length targs) <> "."
     else do
       (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
-      return
+      pure
         ( foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
           [],
           RetType (t_dims ++ mconcat dims) $ applySubst (`M.lookup` mconcat substs) t,
@@ -296,27 +296,27 @@ evalTypeExp ote@TEApply {} = do
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
       v' <- checkNamedDim loc v
-      return
+      pure
         ( TypeArgExpDim (DimExpNamed v' dloc) loc,
           [],
           M.singleton pv $ SizeSubst $ NamedDim v'
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpConst x dloc) loc) =
-      return
+      pure
         ( TypeArgExpDim (DimExpConst x dloc) loc,
           [],
           M.singleton pv $ SizeSubst $ ConstDim x
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) = do
       d <- newTypeName "d"
-      return
+      pure
         ( TypeArgExpDim DimExpAny loc,
           [d],
           M.singleton pv $ SizeSubst $ NamedDim $ qualName d
         )
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
       (te', svars, RetType dims st, _) <- evalTypeExp te
-      return
+      pure
         ( TypeArgExpType te',
           svars ++ dims,
           M.singleton pv $ Subst [] $ RetType [] st
@@ -389,9 +389,9 @@ checkForDuplicateNamesInType = check mempty
 
     check seen (TEArrow (Just v) t1 t2 loc)
       | Just prev_loc <- M.lookup v seen =
-        bad v loc prev_loc
+          bad v loc prev_loc
       | otherwise =
-        check seen' t1 >> check seen' t2
+          check seen' t1 >> check seen' t2
       where
         seen' = M.insert v loc seen
     check seen (TEArrow Nothing t1 t2 _) =
@@ -406,9 +406,9 @@ checkForDuplicateNamesInType = check mempty
       check seen t1
     check seen (TEDim (v : vs) t loc)
       | Just prev_loc <- M.lookup v seen =
-        bad v loc prev_loc
+          bad v loc prev_loc
       | otherwise =
-        check (M.insert v loc seen) (TEDim vs t loc)
+          check (M.insert v loc seen) (TEDim vs t loc)
     check seen (TEDim [] t _) =
       check seen t
     check _ TEArray {} = pure ()
@@ -515,9 +515,9 @@ instance Substitutable Pat where
     where
       mapper =
         ASTMapper
-          { mapOnExp = return,
-            mapOnName = return,
-            mapOnQualName = return,
+          { mapOnExp = pure,
+            mapOnName = pure,
+            mapOnQualName = pure,
             mapOnStructType = pure . applySubst f,
             mapOnPatType = pure . applySubst f,
             mapOnStructRetType = pure . applySubst f,

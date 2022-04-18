@@ -98,15 +98,15 @@ withAcc pat inputs lam = do
     locksForInputs atomics ((c, (_, _, op)) : inputs')
       | Just (op_lam, _) <- op,
         AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
-        let num_locks = 100151
-        locks_arr <-
-          sStaticArray "withacc_locks" DefaultSpace int32 $
-            Imp.ArrayZeros num_locks
-        let locks = Locks locks_arr num_locks
-            extend env = env {hostLocks = M.insert c locks $ hostLocks env}
-        localEnv extend $ locksForInputs atomics inputs'
+          let num_locks = 100151
+          locks_arr <-
+            sStaticArray "withacc_locks" DefaultSpace int32 $
+              Imp.ArrayZeros num_locks
+          let locks = Locks locks_arr num_locks
+              extend env = env {hostLocks = M.insert c locks $ hostLocks env}
+          localEnv extend $ locksForInputs atomics inputs'
       | otherwise =
-        locksForInputs atomics inputs'
+          locksForInputs atomics inputs'
 
 compileMCExp :: ExpCompiler MCMem HostEnv Imp.Multicore
 compileMCExp _ (BasicOp (UpdateAcc acc is vs)) =

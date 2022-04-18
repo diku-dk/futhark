@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -195,25 +194,25 @@ instance C.ToExp IntValue where
 instance C.ToExp FloatValue where
   toExp (Float16Value x) _
     | isInfinite x =
-      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+        if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
     | isNaN x =
-      [C.cexp|NAN|]
+        [C.cexp|NAN|]
     | otherwise =
-      [C.cexp|$float:(fromRational (toRational x))|]
+        [C.cexp|$float:(fromRational (toRational x))|]
   toExp (Float32Value x) _
     | isInfinite x =
-      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+        if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
     | isNaN x =
-      [C.cexp|NAN|]
+        [C.cexp|NAN|]
     | otherwise =
-      [C.cexp|$float:x|]
+        [C.cexp|$float:x|]
   toExp (Float64Value x) _
     | isInfinite x =
-      if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+        if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
     | isNaN x =
-      [C.cexp|NAN|]
+        [C.cexp|NAN|]
     | otherwise =
-      [C.cexp|$double:x|]
+        [C.cexp|$double:x|]
 
 instance C.ToExp PrimValue where
   toExp (IntValue v) = C.toExp v
@@ -242,7 +241,7 @@ storageSize pt rank shape =
     header_size, pt_size :: Int
     header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
     pt_size = primByteSize pt
-    dims = [[C.cexp|$exp:shape[$int:i]|] | i <- [0 .. rank -1]]
+    dims = [[C.cexp|$exp:shape[$int:i]|] | i <- [0 .. rank - 1]]
 
 typeStr :: Signedness -> PrimType -> String
 typeStr sign pt =
@@ -277,7 +276,7 @@ storeValueHeader sign pt rank shape dest =
     copy_shape
       | rank == 0 = []
       | otherwise =
-        [C.cstms|
+          [C.cstms|
                 memcpy($exp:dest, $exp:shape, $int:rank*sizeof(typename int64_t));
                 $exp:dest += $int:rank*sizeof(typename int64_t);|]
 

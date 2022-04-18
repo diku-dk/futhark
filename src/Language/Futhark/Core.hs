@@ -119,9 +119,9 @@ locStr a =
     Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)
       -- Do not show line2 if it is identical to line1.
       | line1 == line2 ->
-        first_part ++ "-" ++ show col2
+          first_part ++ "-" ++ show col2
       | otherwise ->
-        first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+          first_part ++ "-" ++ show line2 ++ ":" ++ show col2
       where
         first_part = file ++ ":" ++ show line1 ++ ":" ++ show col1
 
@@ -136,9 +136,9 @@ locStrRel a b =
     (Loc (Pos a_file _ _ _) _, Loc (Pos b_file line1 col1 _) (Pos _ line2 col2 _))
       | a_file == b_file,
         line1 == line2 ->
-        first_part ++ "-" ++ show col2
+          first_part ++ "-" ++ show col2
       | a_file == b_file ->
-        first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+          first_part ++ "-" ++ show line2 ++ ":" ++ show col2
       where
         first_part = show line1 ++ ":" ++ show col1
     _ -> locStr b

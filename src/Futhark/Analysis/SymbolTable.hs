@@ -30,6 +30,7 @@ module Futhark.Analysis.SymbolTable
     lookupAliases,
     lookupLoopVar,
     lookupLoopParam,
+    aliases,
     available,
     consume,
     index,
@@ -262,12 +263,21 @@ lookupAliases name vtable =
 lookupLoopVar :: VName -> SymbolTable rep -> Maybe SubExp
 lookupLoopVar name vtable = do
   LoopVar e <- entryType <$> M.lookup name (bindings vtable)
-  return $ loopVarBound e
+  pure $ loopVarBound e
 
+-- | Look up the initial value and eventual result of a loop
+-- parameter.  Note that the result almost certainly refers to
+-- something that is not part of the symbol table.
 lookupLoopParam :: VName -> SymbolTable rep -> Maybe (SubExp, SubExp)
 lookupLoopParam name vtable = do
   FParam e <- entryType <$> M.lookup name (bindings vtable)
   fparamMerge e
+
+-- | Do these two names alias each other?  This is expected to be a
+-- commutative relationship, so the order of arguments does not
+-- matter.
+aliases :: VName -> VName -> SymbolTable rep -> Bool
+aliases x y vtable = x == y || (x `nameIn` lookupAliases y vtable)
 
 -- | In symbol table and not consumed.
 available :: VName -> SymbolTable rep -> Bool
@@ -285,7 +295,7 @@ index name is table = do
   where
     asPrimExp i = do
       Prim t <- lookupSubExpType i table
-      return $ TPrimExp $ primExpFromSubExp t i
+      pure $ TPrimExp $ primExpFromSubExp t i
 
 index' ::
   VName ->
@@ -299,7 +309,7 @@ index' name is vtable = do
       | Just k <-
           elemIndex name . patNames . stmPat $
             letBoundStm entry' ->
-        letBoundIndex entry' k is
+          letBoundIndex entry' k is
     FreeVar entry' ->
       freeVarIndex entry' name is
     LParam entry' -> lparamIndex entry' is
@@ -338,18 +348,18 @@ indexExp _ (BasicOp (Iota _ x s to_it)) _ [i] =
 indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
     Just (Prim t) <- lookupSubExpType v table =
-    Just $ Indexed mempty $ primExpFromSubExp t v
+      Just $ Indexed mempty $ primExpFromSubExp t v
 indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_ : is) = do
   guard $ v `available` table
   index' v is table
 indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
-    let is' =
-          reshapeIndex
-            (map pe64 oldshape)
-            (map pe64 $ newDims newshape)
-            is
-     in index' v is' table
+      let is' =
+            reshapeIndex
+              (map pe64 oldshape)
+              (map pe64 $ newDims newshape)
+              is
+       in index' v is' table
 indexExp table (BasicOp (Index v slice)) _ is = do
   guard $ v `available` table
   index' v (adjust (unSlice slice) is) table
@@ -387,7 +397,7 @@ bindingEntries ::
   [LetBoundEntry rep]
 bindingEntries stm@(Let pat _ _) vtable = do
   pat_elem <- patElems pat
-  return $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) stm
+  pure $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) stm
 
 adjustSeveral :: Ord k => (v -> v) -> [k] -> M.Map k v -> M.Map k v
 adjustSeveral f = flip $ foldl' $ flip $ M.adjust f
@@ -572,15 +582,15 @@ hideIf hide vtable = vtable {bindings = M.map maybeHide $ bindings vtable}
   where
     maybeHide entry
       | hide entry =
-        entry
-          { entryType =
-              FreeVar
-                FreeVarEntry
-                  { freeVarDec = entryInfo entry,
-                    freeVarIndex = \_ _ -> Nothing,
-                    freeVarAliases = entryAliases $ entryType entry
-                  }
-          }
+          entry
+            { entryType =
+                FreeVar
+                  FreeVarEntry
+                    { freeVarDec = entryInfo entry,
+                      freeVarIndex = \_ _ -> Nothing,
+                      freeVarAliases = entryAliases $ entryType entry
+                    }
+            }
       | otherwise = entry
 
 -- | Hide these definitions, if they are protected by certificates in

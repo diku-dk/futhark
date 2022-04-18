@@ -47,7 +47,7 @@ redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
   red_stm <-
     Let red_pat (defAux ()) . Op
       <$> (Screma w red_arrs <$> reduceSOAC reds)
-  return (map_stm, red_stm)
+  pure (map_stm, red_stm)
 
 splitScanOrRedomap ::
   (Typed dec, MonadFreshNames m) =>
@@ -64,11 +64,11 @@ splitScanOrRedomap pes w map_lam nes = do
   map_accpat <- zipWithM accMapPatElem acc_pes acc_ts
   map_arrpat <- mapM arrMapPatElem arr_pes
   let map_pat = map_accpat ++ map_arrpat
-  return (map_pat, Pat acc_pes, map identName map_accpat)
+  pure (map_pat, Pat acc_pes, map identName map_accpat)
   where
     accMapPatElem pe acc_t =
       newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
-    arrMapPatElem = return . patElemIdent
+    arrMapPatElem = pure . patElemIdent
 
 -- | Turn a Screma into a Scanomap (possibly with mapout parts) and a
 -- Redomap.  This is used to handle Scremas that are so complicated
@@ -139,7 +139,7 @@ sequentialStreamWholeArray pat w nes lam arrs = do
     certifying cs $ case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->
-          letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
+            letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
       _ -> letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
 -- | Split the parameters of a stream reduction lambda into the chunk
