@@ -80,7 +80,6 @@ module Futhark.CodeGen.Backends.GenericC
     intTypeToCType,
     copyMemoryDefaultSpace,
     volQuals,
-    variQuals,
     linearCode,
     derefPointer,
     allocMem,

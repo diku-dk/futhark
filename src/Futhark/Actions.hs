@@ -208,7 +208,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
         "ispc"
         ( [ispcpath, "-o", ispcbase `addExtension` "o"] ++
           ["-h", ispcbase `addExtension` "h"] ++ 
-          cmdCFLAGS ispc_flags
+          ispc_flags
         )
         mempty
   ret <- -- TODO(kris): Clean this shit up
