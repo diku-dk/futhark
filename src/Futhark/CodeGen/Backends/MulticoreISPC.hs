@@ -754,7 +754,7 @@ findVarying (For _ _ x) = findVarying x
 findVarying (While _ x) = findVarying x
 findVarying (Comment _ x) = findVarying x
 findVarying (Op (ForEachActive _ body)) = findVarying body
-findVarying (Op (ForEach idx _ body)) = [idx] ++ findVarying body
+findVarying (Op (ForEach idx _ body)) = idx : findVarying body
 findVarying (DeclareMem mem _) = [mem]
 findVarying _ = []
 
