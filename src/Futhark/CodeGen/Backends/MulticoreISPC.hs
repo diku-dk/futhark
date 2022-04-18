@@ -517,15 +517,13 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
     field name (ty, MC.Prim pt) = do
       let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
       pure [C.citems|uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
-    field name (_, MC.MemBlock) = do
+    field name (_, _) = do
       strlit <- makeStringLiteral $ pretty name
       pure [C.citems|uniform struct memblock $id:name;
                      $id:name.desc = $id:strlit();
                      $id:name.mem = $id:struct'->$id:(MC.closureFreeStructField name);
                      $id:name.size = 0;
                      $id:name.references = NULL;|]
-    field name (_, MC.RawMem) =
-      pure [C.citems|uniform unsigned char * uniform $id:name = $id:struct'->$id:(MC.closureFreeStructField name);|]
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ISPCState
