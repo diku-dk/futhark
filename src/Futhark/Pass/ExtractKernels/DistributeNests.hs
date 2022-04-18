@@ -430,7 +430,7 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
                 let branch = Branch perm pat cond tbranch fbranch ret
                 stms <-
                   (`runReaderT` types) $
-                    simplifyStms =<< interchangeBranch nest' branch
+                    simplifyStms . oneStm =<< interchangeBranch nest' branch
                 onTopLevelStms stms
                 pure acc'
         _ ->
@@ -452,7 +452,7 @@ maybeDistributeStm stm@(Let pat _ (WithAcc inputs lam)) acc
                 let withacc = WithAccStm perm pat inputs lam
                 stms <-
                   (`runReaderT` types) $
-                    simplifyStms =<< interchangeWithAcc nest' withacc
+                    simplifyStms . oneStm =<< interchangeWithAcc nest' withacc
                 onTopLevelStms stms
                 pure acc'
         _ ->
