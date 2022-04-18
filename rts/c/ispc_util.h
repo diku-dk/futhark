@@ -1,5 +1,37 @@
-// TODO(pema): Error handling
+// Generate missing overloads for extract on pointers
+#define make_extract(ty)                                                \
+static inline ty * uniform extract(ty * varying ptr, uniform int idx) { \
+    int64 c = (int64)ptr;                                               \
+    uniform int64 r = extract(c, idx);                                  \
+    return (ty * uniform)r;                                             \
+}
 
+make_extract(uniform int8)
+make_extract(uniform int16)
+make_extract(uniform int32)
+make_extract(uniform int64)
+make_extract(uniform uint8)
+make_extract(uniform uint16)
+make_extract(uniform uint32)
+make_extract(uniform uint64)
+make_extract(uniform float16)
+make_extract(uniform float)
+make_extract(uniform double)
+make_extract(uniform int8* uniform)
+make_extract(int16* uniform)
+make_extract(uniform int32* uniform)
+make_extract(uniform int64* uniform)
+make_extract(uniform uint8* uniform)
+make_extract(uniform uint16* uniform)
+make_extract(uniform uint32* uniform)
+make_extract(uniform uint64* uniform)
+make_extract(uniform float16* uniform)
+make_extract(uniform float* uniform)
+make_extract(uniform double* uniform)
+make_extract(uniform struct futhark_context)
+make_extract(uniform struct memblock)
+
+// Memory allocation handling
 #ifndef __ISPC_STRUCT_memblock__
 #define __ISPC_STRUCT_memblock__
 struct memblock {
@@ -9,8 +41,6 @@ struct memblock {
     const int8_t * desc;
 };
 #endif
-
-
 
 typedef unsigned char uchar;
 
@@ -76,10 +106,8 @@ static uniform int memblock_unref(uniform struct futhark_context * varying ctx,
 {
   uniform int err = 0;
 
-  foreach_active(i){
-    err |= memblock_unref((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
-		   (uniform struct memblock * uniform)(extract((varying int64_t)lhs,i)),
-		   lhs_desc);
+  foreach_active(i) {
+    err |= memblock_unref(extract(ctx,i), extract(lhs,i), lhs_desc);
   }
 
   return err;
@@ -117,10 +145,7 @@ static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
   uniform int err = 0;
 
   foreach_active(i){
-    err |= memblock_alloc((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
-		   (uniform struct memblock * uniform)(extract((varying int64_t)block,i)),
-		   extract(size, i),
-		   block_desc);
+    err |= memblock_alloc(extract(ctx,i), extract(block,i), extract(size, i), block_desc);
   }
 
   return err;
