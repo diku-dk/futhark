@@ -356,9 +356,11 @@ foreign import ccall "cbrt" c_cbrt :: Double -> Double
 
 foreign import ccall "cbrtf" c_cbrtf :: Float -> Float
 
+-- | The system-level @cbrt@ function.
 cbrt :: Double -> Double
 cbrt = c_cbrt
 
+-- | The system-level @cbrtf@ function.
 cbrtf :: Float -> Float
 cbrtf = c_cbrtf
 
