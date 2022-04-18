@@ -25,7 +25,7 @@ import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
-import Futhark.CodeGen.Backends.SimpleRep (toStorage, primStorageType, cScalarDefs, funName)
+import Futhark.CodeGen.Backends.SimpleRep (fromStorage, toStorage, primStorageType, cScalarDefs, funName)
 import Futhark.IR.Prop (isBuiltInFunction)
 import Data.Maybe
 import Data.Loc (noLoc)
@@ -514,8 +514,9 @@ compileGetStructVals ::
 compileGetStructVals struct a b = concat <$> zipWithM field a b
   where
     struct' = struct <> "_"
-    field name (ty, MC.Prim) =
-      pure [C.citems|uniform $ty:ty $id:name = $id:struct'->$id:(MC.closureFreeStructField name);|]
+    field name (ty, MC.Prim pt) = do
+      let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
+      pure [C.citems|uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (_, MC.MemBlock) = do
       strlit <- makeStringLiteral $ pretty name
       pure [C.citems|uniform struct memblock $id:name;
