@@ -1,8 +1,5 @@
 -- Size variables must be made available on host before use and thus block the
 -- migration of any parent statements.
---
--- This test program is extremely contrived and obviously wrong.
--- It is undetermined whether the case can occur in natural programs.
 -- ==
 -- structure gpu {
 --   /If 1
@@ -17,7 +14,7 @@ def main (A: [5]i64) : [1]i64 =
                then let n = A[2]                  -- required on host.
                      in if A[3] == 0              -- not blocked.
                         then let B = A :> [n]i64  -- n used as a size variable.
-                              in opaque B :> [1]i64
+                              in (opaque B)[0:1]
                         else let i = n%5
                               in A[i:i+1] :> [1]i64
                else A[0:1] :> [1]i64

@@ -3,12 +3,11 @@
 -- returned or if the memory source is migrated into the same kernel.
 -- ==
 -- structure gpu {
---   /If/True/GPUBody/If/True/Reshape 1
+--   /GPUBody/If/True/Rearrange 1
 -- }
 
-def main [n] (A: *[n]i64) : [1]i64 =
-  if n > 0
-     then if #[unsafe] A[0] == 42
-          then (opaque A) :> [1]i64
-          else #[unsafe] A[0:1] :> [1]i64
-     else [42]
+def main (A: [3][2]i64) (x: i64) : [1]i64 =
+  if A[0,0] == 42
+     then let A' = transpose (opaque A)
+           in #[unsafe] (opaque A')[0, 0:1] :> [1]i64
+     else A[0, 0:1] :> [1]i64
