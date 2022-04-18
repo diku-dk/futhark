@@ -31,6 +31,47 @@ make_extract(uniform double* uniform)
 make_extract(uniform struct futhark_context)
 make_extract(uniform struct memblock)
 
+
+#define make_atomic_compare_exchange_wrapper(ty)				     \
+static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
+							   uniform ty * uniform old, \
+                                                           const uniform ty val){    \
+  uniform ty actual = atomic_compare_exchange_global(mem, *old, val);                \
+  if (actual == *old){                                                               \
+    return 1;                                                                        \
+  }                                                                                  \
+  *old = val;                                                                        \
+  return 0;                                                                          \
+}                                                                                    \
+static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying mem, \
+							  varying ty * uniform old,  \
+							  const varying ty val){     \
+  varying ty actual = atomic_compare_exchange_global(mem, *old, val);                \
+  if(actual == *old){                                                                \
+    return 1;                                                                        \
+  }                                                                                  \
+  *old = val;                                                                        \
+  return 0;                                                                          \
+}                                                                                    
+
+
+make_atomic_compare_exchange_wrapper(int32)
+make_atomic_compare_exchange_wrapper(int64)
+make_atomic_compare_exchange_wrapper(uint32)
+make_atomic_compare_exchange_wrapper(uint64)
+make_atomic_compare_exchange_wrapper(float)
+make_atomic_compare_exchange_wrapper(double)
+
+
+#define __atomic_fetch_add(x,y,z) atomic_add_global(x,y)
+#define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,y)
+#define __atomic_fetch_and(x,y,z) atomic_and_global(x,y)
+#define __atomic_fetch_or(x,y,z)  atomic_or_global(x,y)
+#define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,y)
+#define __atomic_exchange_n(x,y,z)  atomic_swap_global(x,y)
+#define __atomic_compare_exchange_n(x,y,z,h,j,k)  atomic_compare_exchange_wrapper(x,y,z)
+
+
 // Memory allocation handling
 #ifndef __ISPC_STRUCT_memblock__
 #define __ISPC_STRUCT_memblock__
