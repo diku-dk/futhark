@@ -68,7 +68,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
         let (_x_params, y_params) =
               splitAt (length vs) $ map paramName $ lambdaParams lam
         forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
-        atomics <- hostAtomics <$> askEnv
+        atomics <- hostAtomics <$> askEnv        
         case atomicUpdateLocking atomics lam of
           AtomicPrim f -> f arrs is'
           AtomicCAS f -> f arrs is'

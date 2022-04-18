@@ -43,7 +43,8 @@ data Multicore
   | -- | Retrieve the number of subtasks to execute.  Only valid
     -- immediately inside a 'SegOp' or 'ParLoop' construct!
     GetNumTasks VName
-  | Atomic AtomicOp
+    -- | Params for the array, Params to index the array, the atomic operation
+  | Atomic [Param] AtomicOp
 
 -- | Multicore code.
 type MCCode = Code Multicore
@@ -128,7 +129,7 @@ instance Pretty Multicore where
           [ nestedBlock "params {" "}" (ppr params),
             nestedBlock "body {" "}" (ppr body)
           ]
-  ppr (Atomic _) =
+  ppr (Atomic _ _) =
     "AtomicOp"
   ppr (ISPCKernel body _) =
     "ispc" <+> nestedBlock "{" "}" (ppr body)
@@ -158,7 +159,7 @@ instance FreeIn Multicore where
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
   freeIn' (ParLoop _ body _) =
     freeIn' body
-  freeIn' (Atomic aop) =
+  freeIn' (Atomic _ aop) =
     freeIn' aop
   freeIn' (ISPCKernel body _) =
     freeIn' body

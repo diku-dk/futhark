@@ -60,7 +60,7 @@ nonsegmentedHist pat space histops kbody num_histos = do
       ns_64 = map toInt64Exp ns
       num_histos' = tvExp num_histos
       hist_width = histSize $ head histops
-      use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64
+      use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64 
 
   histops' <- renameHistOpLambda histops
 
@@ -70,7 +70,9 @@ nonsegmentedHist pat space histops kbody num_histos = do
       sIf
         use_subhistogram
         (subHistogram pat space histops num_histos kbody)
-        (atomicHistogram pat space histops' kbody)        
+        (subHistogram pat space histops num_histos kbody)
+
+        -- (atomicHistogram pat space histops' kbody)        
 -- |
 -- Atomic Histogram approach
 -- The implementation has three sub-strategies depending on the

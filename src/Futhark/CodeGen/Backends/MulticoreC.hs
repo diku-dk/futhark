@@ -24,7 +24,8 @@ module Futhark.CodeGen.Backends.MulticoreC
     multiCoreReport,
     multicoreDef,
     multicoreName,
-    DefSpecifier
+    DefSpecifier,
+    scopedBlock
   )
 where
 
@@ -692,8 +693,8 @@ compileOp (ParLoop s' body free) = do
 
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
-compileOp (Atomic aop) =
-  atomicOps aop
+compileOp (Atomic free aop) =
+  atomicOps free aop
 compileOp (ISPCKernel body _) =
   scopedBlock body
 compileOp (ForEach i bound body) =
@@ -724,9 +725,10 @@ doAtomic old arr ind val op ty = do
   val' <- GC.compileExp val
   arr' <- GC.rawMem arr
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
-
-atomicOps :: AtomicOp -> GC.CompilerM op s ()
-atomicOps (AtomicCmpXchg t old arr ind res val) = do
+  
+-- TODO(k, obp): find free variables
+atomicOps :: [Param] -> AtomicOp -> GC.CompilerM op s ()
+atomicOps _ (AtomicCmpXchg t old arr ind res val) = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
@@ -739,7 +741,7 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
   where
     op :: String
     op = "__atomic_compare_exchange_n"
-atomicOps (AtomicXchg t old arr ind val) = do
+atomicOps _ (AtomicXchg t old arr ind val) = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
@@ -747,13 +749,13 @@ atomicOps (AtomicXchg t old arr ind val) = do
   where
     op :: String
     op = "__atomic_exchange_n"
-atomicOps (AtomicAdd t old arr ind val) =
+atomicOps _ (AtomicAdd t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicSub t old arr ind val) =
+atomicOps _ (AtomicSub t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicAnd t old arr ind val) =
+atomicOps _ (AtomicAnd t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicOr t old arr ind val) =
+atomicOps _ (AtomicOr t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicXor t old arr ind val) =
+atomicOps _ (AtomicXor t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|]
