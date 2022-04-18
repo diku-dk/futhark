@@ -2007,11 +2007,6 @@ volQuals :: Volatility -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
 
-variQuals :: Variability  -> [C.TypeQual]
-variQuals Uniform = [C.ctyquals|uniform|]
-variQuals Unbound = []
-variQuals Varying = [C.ctyquals|varying|] -- TODO(k): check if this is breaking
-
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
   quals <- quals_f space

@@ -34,8 +34,6 @@ import qualified Data.DList as DL
 import NeatInterpolation (untrimming)
 import Futhark.Util.Pretty (prettyText)
 import Control.Lens (over, each)
-import Debug.Trace (traceM) -- remove
-import Futhark.CodeGen.Backends.GenericC (variQuals) -- remove
 import qualified Data.Map as M
 import Control.Monad.Reader
 import Control.Monad.State
@@ -666,10 +664,6 @@ compileOp (ExtractLane dest tar lane) = do
   lane' <- GC.compileExp lane
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
   
-compileOp (VariabilityBlock vari code) = do
-  compileCode vari code
---TODO(k): make wrapper for uniform and varying atomic operations  
-  
 compileOp (Atomic params op) = do
   doIspcAtomic params op
 
@@ -680,35 +674,53 @@ compileOp op = MC.compileOp op
 -- I have found that thre exists an overload for atomic_compare_exchange(uniform type * varying, varing type * uniform, varying type)
 compileAtomicWrapper :: VName -> AtomicOp -> ISPCCompilerM ()
 compileAtomicWrapper fname (AtomicCmpXchg ty _ _ _ _ val) = do  
-  let val_type  = GC.primTypeToCType . primExpType val      
+  let val_type  = (GC.primTypeToCType . primExpType) val      
       mem_type  = [C.cty|$ty:(GC.primTypeToCType ty)|]
       val_param = [C.cparam|varying $ty:val_type val|]      
-      old_param = [C.cparam|uniform $ty:val_type * varying old|] 
+      old_param = [C.cparam|varying $ty:val_type * uniform old|] 
       mem_param = [C.cparam|varying $ty:mem_type * uniform mem|]
       fun_vari  = [C.cedecl|inline varying bool $id:fname($params:([mem_param, old_param, val_param])) {
                       varying $ty:mem_type mem_vari = *mem;
+                      varying $ty:val_type old_vari = *old;
                       uniform $ty:mem_type mem_uni[programCount];
+                      uniform $ty:val_type old_uni[programCount];                      
                       mem_uni[programIndex] = mem_vari;
-                      uniform $ty:val_type olds[programCount];
-                      varying $ty:val_type res;
+                      old_uni[programIndex] = old_vari;
+                      uniform bool mask[programCount];
                       foreach_active(i) {
-                        olds[i] = atomic_compare_exchange_global(&mem_uni[i], extract(old, i), extract(val, i));
-                        memory_barrier(); 
+                        uniform $ty:val_type actual = atomic_compare_exchange_global(&mem_uni[i], old_uni[i], extract(val, i));
+                        if (actual == *old) {
+                          mask[i] = true;
+                        }
+                        else {
+                          *old = val;
+                          mask[i] = false;
+                        }
                       }
-                      res = olds[programIndex];
+                      *mem = mem_uni[programIndex];
+                      *old = old_uni[programIndex];
+                      varying bool res = mask[programIndex];
                       return res;}|]          
       fun_uni  = [C.cedecl|inline uniform bool $id:fname(uniform $ty:mem_type * uniform mem,
                                                                        uniform $ty:val_type * uniform old,
-                                                                       uniform $ty:val_type val) {
-                             uniform  $ty:val_type * uniform old_uni = extract()                                            
-                             uniform $ty:val_type actual = atomic_compare_exchange_global(mem, old, val);
-                             if (actual == *old)
+                                                                       uniform $ty:val_type val) {                                                                
+                             uniform $ty:val_type actual = atomic_compare_exchange_global(mem, *old, val);
+                             if (actual == *old) {
+                               return 1;
+                             }
+                             *old = val;
+                             return 1;
                           }|]                  
       fun_extra = [C.cedecl|inline varying bool $id:fname(uniform $ty:mem_type * varying mem,
-                                                                       varying $ty:val_type old,
-                                                                       varying $ty:val_type val) {
+                                                          varying $ty:val_type * uniform old,
+                                                          varying $ty:val_type val) {
                              
-                             return atomic_compare_exchange_global(mem, old, val);
+                             varying $ty:val_type actual = atomic_compare_exchange_global(mem, *old, val);
+                             if (actual == *old) {
+                               return 1;
+                             } 
+                             *old = val;
+                             return 0;
                           }|] 
   ispcEarlyDecl fun_vari
   ispcEarlyDecl fun_uni
@@ -746,9 +758,7 @@ doIspcAtomic _ (AtomicOr t old arr ind val) =
   doAtomic old arr ind val "atomic_or_global" [C.cty|$ty:(GC.intTypeToCType t)|]
 doIspcAtomic _ (AtomicXor t old arr ind val) =
   doAtomic old arr ind val "atomic_xor_global" [C.cty|$ty:(GC.intTypeToCType t)|]  
-doIspcAtomic _ atomic_op@(AtomicXchg ty old arr ind val) = do
-  --fname <- newNameFromString op  
-  --compileAtomicWrapper fname atomic_op 
+doIspcAtomic _ (AtomicXchg ty old arr ind val) = do 
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType ty)* |]
@@ -766,25 +776,16 @@ doIspcAtomic _ atomic_op@(AtomicCmpXchg t old arr ind res val) = do
   compileAtomicWrapper fname atomic_op 
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
-  let cast = [C.cty|$ty:(GC.primTypeToCType t)|]
+  let cast = [C.cty|$ty:(GC.primTypeToCType t) * |]
   arr' <- GC.rawMem arr
-  GC.stms
-    [C.cstms|memory_barrier();
-             $id:res = $id:fname(&(($ty:cast *)$exp:arr')[$exp:ind'],
-                              $id:old,
-                              $exp:new_val');
-             memory_barrier();|]
-  
-  -- GC.stms
-  --   [C.cstms|$id:res = $id:op(&(($ty:cast *)$exp:arr')[$exp:ind'],
-  --               *(($tyquals:(GC.variQuals Varying) $ty:cast * $tyquals:(GC.variQuals Uniform))&$id:old),
-  --                $exp:new_val');
-  --            memory_barrier();|]
-  where
-    op :: String
+  -- LLVM already uses __ATOMIC_SEQ_CST for atomic.
+  -- We avoid to cast old, since otherwise ISPC makes implicit variability cast
+  GC.stm
+    [C.cstm|$id:res = $id:fname(&(($ty:cast)$exp:arr')[$exp:ind'],
+                              &$id:old,
+                              $exp:new_val');|]
+  where    
     op = "atomic_compare_exchange_global"
-
-compileOp op = MC.compileOp op
 
 -- TODO(pema): Move this somewhere else
 -- Variability analysis
