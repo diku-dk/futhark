@@ -659,35 +659,43 @@ compileOp op = MC.compileOp op
 -- Note to self: the fast way of doing atomics is with uniform * uniform ptr, varying old, varying val
 -- Another note: this is not needed. The ispc documentation does not state which atomic_compare_exchange overloads exists
 -- I have found that thre exists an overload for atomic_compare_exchange(uniform type * varying, varing type * uniform, varying type)
--- compileAtomicWrapper :: VName -> AtomicOp -> ISPCCompilerM ()
--- compileAtomicWrapper fname (AtomicCmpXchg ty _ _ _ _ val) = do  
---   let val_type  = GC.primTypeToCType . primExpType       
---       mem_type  = [C.cty|$ty:(GC.primTypeToCType ty)|]
---       val_param = [C.cparam|varying $ty:(val_type val) val|]      
---       old_param = [C.cparam|varying $ty:(val_type val) * uniform old|] 
---       mem_param = [C.cparam|uniform $ty:mem_type * varying mem|]
---       -- I do not think the types for the params in general should be this way.
---       -- In tests/accs/hist*.fut the ispc compiler claims these are the types.
---       fun_vari  = [C.cedecl|inline varying $ty:(val_type val) $id:fname($params:([mem_param, old_param, val_param])) {
---                       varying $ty:(val_type val) old_vec = *old;
---                       uniform $ty:(val_type val) olds[programCount];
---                       varying $ty:(val_type val) res;
---                       foreach_active(i) {
---                         uniform $ty:mem_type * uniform mem_uni = (uniform $ty:mem_type * uniform)extract((typename int64_t)mem, i);
---                         olds[i] = atomic_compare_exchange_global(mem_uni, extract(old_vec, i), extract(val, i));
---                         memory_barrier(); 
---                       }
---                       res = olds[programIndex];
---                       return 1;}|] --TODO(k): fix this return 1. When res is returned hist1.fut never terminates.          
---       fun_uni  = [C.cedecl|inline uniform $ty:(val_type val) $id:fname(uniform $ty:mem_type * uniform mem,
---                                                                        uniform $ty:(val_type val) * uniform old,
---                                                                        uniform $ty:(val_type val) val) {
---                              return atomic_compare_exchange_global(mem, *old, val);
---                           }|]                  
---   ispcEarlyDecl fun_vari
---   ispcEarlyDecl fun_uni
+compileAtomicWrapper :: VName -> AtomicOp -> ISPCCompilerM ()
+compileAtomicWrapper fname (AtomicCmpXchg ty _ _ _ _ val) = do  
+  let val_type  = GC.primTypeToCType . primExpType val      
+      mem_type  = [C.cty|$ty:(GC.primTypeToCType ty)|]
+      val_param = [C.cparam|varying $ty:val_type val|]      
+      old_param = [C.cparam|uniform $ty:val_type * varying old|] 
+      mem_param = [C.cparam|varying $ty:mem_type * uniform mem|]
+      fun_vari  = [C.cedecl|inline varying bool $id:fname($params:([mem_param, old_param, val_param])) {
+                      varying $ty:mem_type mem_vari = *mem;
+                      uniform $ty:mem_type mem_uni[programCount];
+                      mem_uni[programIndex] = mem_vari;
+                      uniform $ty:val_type olds[programCount];
+                      varying $ty:val_type res;
+                      foreach_active(i) {
+                        olds[i] = atomic_compare_exchange_global(&mem_uni[i], extract(old, i), extract(val, i));
+                        memory_barrier(); 
+                      }
+                      res = olds[programIndex];
+                      return res;}|]          
+      fun_uni  = [C.cedecl|inline uniform bool $id:fname(uniform $ty:mem_type * uniform mem,
+                                                                       uniform $ty:val_type * uniform old,
+                                                                       uniform $ty:val_type val) {
+                             uniform  $ty:val_type * uniform old_uni = extract()                                            
+                             uniform $ty:val_type actual = atomic_compare_exchange_global(mem, old, val);
+                             if (actual == *old)
+                          }|]                  
+      fun_extra = [C.cedecl|inline varying bool $id:fname(uniform $ty:mem_type * varying mem,
+                                                                       varying $ty:val_type old,
+                                                                       varying $ty:val_type val) {
+                             
+                             return atomic_compare_exchange_global(mem, old, val);
+                          }|] 
+  ispcEarlyDecl fun_vari
+  ispcEarlyDecl fun_uni
+  ispcEarlyDecl fun_extra
 
--- compileAtomicWrapper _ _ = pure ()
+compileAtomicWrapper _ _ = pure ()
 
 doAtomic ::
   (C.ToIdent a1) =>
@@ -735,14 +743,15 @@ doIspcAtomic _ atomic_op@(AtomicXchg ty old arr ind val) = do
 -- atomic_compare_exchange(uniform type * uniform, uniform type, uniform type)
 -- atomic_compare_exchange(uniform type * varying, varying type, varying type)
 doIspcAtomic _ atomic_op@(AtomicCmpXchg t old arr ind res val) = do  
-  --fname <- newNameFromString op
-  --compileAtomicWrapper fname atomic_op 
+  fname <- newNameFromString op
+  compileAtomicWrapper fname atomic_op 
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType t)|]
   arr' <- GC.rawMem arr
   GC.stms
-    [C.cstms|$id:res = $id:op(&(($ty:cast *)$exp:arr')[$exp:ind'],
+    [C.cstms|memory_barrier();
+             $id:res = $id:fname(&(($ty:cast *)$exp:arr')[$exp:ind'],
                               $id:old,
                               $exp:new_val');
              memory_barrier();|]
