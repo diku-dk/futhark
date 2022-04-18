@@ -512,7 +512,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        cd futhark-benchmarks && pwd && sh get-data.sh external-data.txt
+        cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
 
     - run: |
         futhark test -C --no-terminal --backend=opencl  --pass-compiler-option=--Werror futhark-benchmarks
