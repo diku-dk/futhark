@@ -32,6 +32,7 @@ make_extract(struct futhark_context)
 make_extract(struct memblock)
 
 
+// Handling of atomics
 #define make_atomic_compare_exchange_wrapper(ty)				     \
 static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
 							   uniform ty * uniform old, \
@@ -54,14 +55,12 @@ static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying 
   return 0;                                                                          \
 }                                                                                    
 
-
 make_atomic_compare_exchange_wrapper(int32)
 make_atomic_compare_exchange_wrapper(int64)
 make_atomic_compare_exchange_wrapper(uint32)
 make_atomic_compare_exchange_wrapper(uint64)
 make_atomic_compare_exchange_wrapper(float)
 make_atomic_compare_exchange_wrapper(double)
-
 
 #define __atomic_fetch_add(x,y,z) atomic_add_global(x,y)
 #define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,y)
