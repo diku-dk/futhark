@@ -41,7 +41,18 @@ data AutotuneOptions = AutotuneOptions
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 False thresholdMax Nothing
+  AutotuneOptions
+    { optBackend = "opencl",
+      optFuthark = Nothing,
+      optMinRuns = 10,
+      optTuning = Just "tuning",
+      optExtraOptions = [],
+      optVerbose = 0,
+      optTimeout = 600,
+      optSkipCompilation = False,
+      optDefaultThreshold = thresholdMax,
+      optTestSpec = Nothing
+    }
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
