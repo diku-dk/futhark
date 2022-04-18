@@ -341,7 +341,8 @@ handleError msg stacktrace = do
   shim <- MC.multicoreDef "assert_shim" $ \s -> do
     pure
       [C.cedecl|void $id:s(struct futhark_context* ctx, $params:params) {
-        ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
+        if (ctx->error == NULL)
+          ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
       }|]
   ispcDecl
     [C.cedecl|extern "C" unmasked void $id:shim(uniform struct futhark_context* uniform, $params:params_uni);|]
