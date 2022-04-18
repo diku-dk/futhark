@@ -23,7 +23,7 @@ import qualified Data.Vector.Unboxed as U
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (atMostChars, fancyTerminal, maxinum, maybeNth, pmapIO)
+import Futhark.Util (atMostChars, fancyTerminal, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 import Statistics.Resampling (Estimator (..), resample)
@@ -355,18 +355,10 @@ mkProgressPrompt opts pad_to dataset_desc start_time
     toDouble = fromRational . toRational
 
 reportResult :: [RunResult] -> (Double, Double) -> IO ()
-reportResult results bootstrapCI = do
+reportResult results (ci_lower, ci_upper) = do
   let runtimes = map (fromIntegral . runMicroseconds) results
       avg = sum runtimes / fromIntegral (length runtimes) :: Double
-  putStrLn $
-    uncurry
-      ( printf
-          "%10.0fμs (95%%-CI: [%10.1f, %10.1f]; min: %3.0f%%; max: %+3.0f%%)"
-          avg
-      )
-      bootstrapCI
-      ((minimum runtimes / avg - 1) * 100)
-      ((maxinum runtimes / avg - 1) * 100)
+  putStrLn $ printf "%10.0fμs (95%% CI: [%10.1f, %10.1f])" avg ci_lower ci_upper
 
 runBenchmarkCase ::
   Server ->
