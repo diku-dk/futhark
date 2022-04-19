@@ -9,7 +9,7 @@ import Data.Aeson.Types (Value (Array, String))
 import qualified Data.Vector as V
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromMVar)
 import Futhark.LSP.State (State (..))
-import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
+import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState, getMapping)
 import Futhark.Util (debug)
 import Language.LSP.Server (Handlers, LspM, notificationHandler, requestHandler)
 import Language.LSP.Types
@@ -37,12 +37,14 @@ onInitializeHandler = notificationHandler SInitialized $ \_msg -> debug "Initial
 
 onHoverHandler :: MVar State -> Handlers (LspM ())
 onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -> do
-  debug "Got hover request"
   let RequestMessage _ _ _ (HoverParams doc pos _workDone) = req
       Position l c = pos
-      file_path = uriToFilePath $ doc ^. uri
+      file_uri = doc ^. uri
+      file_path = uriToFilePath file_uri
+  debug $ "Hover request at: " ++ show pos
   state <- tryTakeStateFromMVar state_mvar file_path
-  responder $ Right $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
+  mapping <- getMapping state file_uri
+  responder $ Right $ getHoverInfoFromState state file_path mapping (fromEnum l + 1) (fromEnum c + 1)
 
 onDocumentFocusHandler :: MVar State -> Handlers (LspM ())
 onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/onFocusTextDocument") $ \msg -> do
@@ -57,9 +59,11 @@ goToDefinitionHandler state_mvar = requestHandler STextDocumentDefinition $ \req
   debug "Got goto definition request"
   let RequestMessage _ _ _ (DefinitionParams doc pos _workDone _partial) = req
       Position l c = pos
-      file_path = uriToFilePath $ doc ^. uri
+      file_uri = doc ^. uri
+      file_path = uriToFilePath file_uri
   state <- tryTakeStateFromMVar state_mvar file_path
-  case findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1) of
+  mapping <- getMapping state file_uri
+  case findDefinitionRange state file_path mapping (fromEnum l + 1) (fromEnum c + 1) of
     Nothing -> responder $ Right $ InR $ InL $ List []
     Just loc -> do
       debug $ show loc

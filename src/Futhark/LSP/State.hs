@@ -2,6 +2,7 @@
 module Futhark.LSP.State
   ( State (..),
     emptyState,
+    getStaleContent,
   )
 where
 
@@ -20,3 +21,8 @@ data State = State
 -- | Initial state.
 emptyState :: State
 emptyState = State Nothing M.empty
+
+-- | Get the contents of a stale (last succuessfully complied) file's contents.
+getStaleContent :: State -> Maybe FilePath -> Maybe T.Text
+getStaleContent state (Just file_path) = M.lookup file_path (staleProgram state)
+getStaleContent _ _ = Nothing
