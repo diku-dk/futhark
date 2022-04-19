@@ -30,7 +30,7 @@ main _prog _args = do
       ServerDefinition
         { onConfigurationChange = const $ const $ Right (),
           defaultConfig = (),
-          doInitialize = \env _req -> do pure $ Right env,
+          doInitialize = \env _req -> pure $ Right env,
           staticHandlers = handlers state_mvar,
           interpretHandler = \env -> Iso (runLspT env) liftIO,
           options =
