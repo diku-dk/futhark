@@ -14,7 +14,7 @@ where
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Data.Either
-import Data.List (intersect)
+import Data.List (intersect, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Ord
@@ -378,6 +378,52 @@ ppTypeAbbr _ name (l, ps, t) =
     <+> equals
     <+/> nest 2 (align (ppr t))
 
+matchScalarTypes :: ScalarTypeBase (DimDecl VName) () -> ScalarTypeBase (DimDecl VName) () -> Bool
+matchScalarTypes (Prim x) (Prim y) = x == y
+matchScalarTypes (TypeVar () x_u x_tn x_targs) (TypeVar () y_u y_tn y_targs) =
+  x_u == y_u && x_tn == y_tn && length x_targs == length y_targs
+    && and (zipWith matchTypeArg x_targs y_targs)
+  where
+    matchTypeArg (TypeArgDim x_d _) (TypeArgDim y_d _) = x_d == y_d
+    matchTypeArg (TypeArgType x_t _) (TypeArgType y_t _) = matchTypes x_t y_t
+    matchTypeArg _ _ = False
+matchScalarTypes (Record x_ts) (Record y_ts) =
+  length x_ts == length y_ts
+    && sort (M.keys x_ts) == sort (M.keys y_ts)
+    && all (uncurry matchTypes) (M.intersectionWith (,) x_ts y_ts)
+matchScalarTypes (Sum x_cs) (Sum y_xs) =
+  length x_cs == length y_xs
+    && sort (M.keys x_cs) == sort (M.keys y_xs)
+    && all (and . uncurry (zipWith matchTypes)) (M.intersectionWith (,) x_cs y_xs)
+matchScalarTypes (Arrow () x_p x_t x_rt) (Arrow () y_p y_t y_rt) =
+  matchTypes x_t y_t && matchRetTypes x_rt (applySubst subst y_rt)
+  where
+    subst = case (x_p, y_p) of
+      (Named x_p', Named y_p') -> \v ->
+        if v == y_p'
+          then Just $ SizeSubst $ NamedDim $ qualName x_p'
+          else Nothing
+      _ -> const Nothing
+matchScalarTypes _ _ = False
+
+matchTypes :: StructType -> StructType -> Bool
+matchTypes (Scalar x_t) (Scalar y_t) =
+  matchScalarTypes x_t y_t
+matchTypes (Array () x_u x_st x_shape) (Array () y_u y_st y_shape) =
+  x_u == y_u && matchScalarTypes x_st y_st && x_shape == y_shape
+matchTypes _ _ = False
+
+-- | The Eq instance does not handle alpha equivalent of RetType binders.
+matchRetTypes :: StructRetType -> StructRetType -> Bool
+matchRetTypes (RetType x_dims x_t) (RetType y_dims y_t)
+  | length x_dims == length y_dims =
+      matchTypes x_t (applySubst (`M.lookup` substs) y_t)
+  | otherwise =
+      False
+  where
+    substs =
+      M.fromList $ zip y_dims $ map (SizeSubst . NamedDim . qualName) x_dims
+
 -- | Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for
 -- functor application.  The first env is the module env, and the
@@ -532,7 +578,7 @@ matchMTys orig_mty orig_mty_sig =
                 <+/> textwrap "is not used as an array size in the definition."
 
       let spec_t' = applySubst (`M.lookup` (param_substs <> abs_subst_to_type)) spec_t
-      if spec_t' == t
+      if matchRetTypes spec_t' t
         then pure (spec_name, name)
         else nomatch spec_t'
       where
