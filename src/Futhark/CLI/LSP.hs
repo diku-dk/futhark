@@ -5,8 +5,8 @@
 -- | @futhark lsp@
 module Futhark.CLI.LSP (main) where
 
-import Control.Concurrent.MVar (newMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Data.IORef (newIORef)
 import Futhark.LSP.Handlers (handlers)
 import Futhark.LSP.State (emptyState)
 import Futhark.Util (debug)
@@ -22,7 +22,7 @@ import System.Log.Logger (Priority (DEBUG))
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
 main _prog _args = do
-  state_mvar <- newMVar emptyState
+  state_mvar <- newIORef emptyState
   debug "Init with emptyState"
   setupLogger Nothing ["futhark"] DEBUG
   _ <-
