@@ -37,10 +37,10 @@ onInitializeHandler = notificationHandler SInitialized $ \_msg -> debug "Initial
 
 onHoverHandler :: MVar State -> Handlers (LspM ())
 onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -> do
-  debug "Got hover request"
   let RequestMessage _ _ _ (HoverParams doc pos _workDone) = req
       Position l c = pos
       file_path = uriToFilePath $ doc ^. uri
+  debug $ "Got hover request: " <> show (file_path, pos)
   state <- tryTakeStateFromMVar state_mvar file_path
   responder $ Right $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
 
@@ -54,10 +54,10 @@ onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/o
 
 goToDefinitionHandler :: MVar State -> Handlers (LspM ())
 goToDefinitionHandler state_mvar = requestHandler STextDocumentDefinition $ \req responder -> do
-  debug "Got goto definition request"
   let RequestMessage _ _ _ (DefinitionParams doc pos _workDone _partial) = req
       Position l c = pos
       file_path = uriToFilePath $ doc ^. uri
+  debug $ "Got goto definition: " <> show (file_path, pos)
   state <- tryTakeStateFromMVar state_mvar file_path
   case findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1) of
     Nothing -> responder $ Right $ InR $ InL $ List []
