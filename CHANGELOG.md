@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark lsp` is now better at handling multiple files (#1647).
+
 ## [0.21.10]
 
 ### Added
