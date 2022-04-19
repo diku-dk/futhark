@@ -191,7 +191,7 @@ withProgramServer program runner extra_options f = do
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
-  let runopts = "-L" : optExtraOptions opts ++ tuning_opts
+  let runopts = optExtraOptions opts ++ tuning_opts
   withProgramServer program (optRunner opts) runopts $ \server ->
     mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where

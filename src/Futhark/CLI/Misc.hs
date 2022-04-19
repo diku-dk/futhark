@@ -13,21 +13,19 @@ where
 import Control.Monad.State
 import qualified Data.ByteString.Lazy as BS
 import Data.Function (on)
-import Data.List (isInfixOf, isPrefixOf, nubBy)
+import Data.List (isInfixOf, nubBy)
 import qualified Data.Text.IO as T
 import Futhark.Compiler
 import Futhark.Test
 import Futhark.Util (hashText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyTextOneLine)
+import Language.Futhark.Prop (isBuiltin)
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
 import System.Random
-
-isBuiltin :: String -> Bool
-isBuiltin = ("/prelude/" `isPrefixOf`)
 
 -- | @futhark imports@
 mainImports :: String -> [String] -> IO ()

@@ -65,7 +65,7 @@ tryFusion (TryFusion m) types = modifyNameSource $ \src ->
 
 liftMaybe :: Maybe a -> TryFusion a
 liftMaybe Nothing = fail "Nothing"
-liftMaybe (Just x) = return x
+liftMaybe (Just x) = pure x
 
 type SOAC = SOAC.SOAC SOACS
 
@@ -313,7 +313,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
         -- Avoid name duplication, because the producer lambda is not
         -- removed from the program until much later.
         uniq_lam <- renameLambda $ SOAC.lambda res_soac
-        return $
+        pure $
           ker
             { fsoac = uniq_lam `SOAC.setLambda` res_soac,
               fusedVars = fusedVars_new,
@@ -324,7 +324,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
 
   outPairs <- forM (zip outVars $ map rowType $ SOAC.typeOf soac_p) $ \(outVar, t) -> do
     outVar' <- newVName $ baseString outVar ++ "_elem"
-    return (outVar, Ident outVar' t)
+    pure (outVar, Ident outVar' t)
 
   let mapLikeFusionCheck =
         let (res_lam, new_inp) = fuseMaps unfus_set lam_p inp_p_arr outPairs lam_c inp_c_arr
@@ -515,7 +515,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
       soac_p'' <- case form2 of
         Sequential {} -> toSeqStream soac_p'
-        _ -> return soac_p'
+        _ -> pure soac_p'
       if soac_p' == soac_p
         then fail "SOAC could not be turned into stream."
         else fuseSOACwithKer unfus_set (map identName newacc_ids ++ outVars) soac_p'' soac_p_consumed ker
@@ -537,7 +537,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       when (soac_c' == soac_c) $ fail "SOAC could not be turned into stream."
       soac_c'' <- case form_p of
         Sequential -> toSeqStream soac_c'
-        _ -> return soac_c'
+        _ -> pure soac_c'
 
       fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed $
         ker {fsoac = soac_c'', outNames = map identName newacc_ids ++ outNames ker}
@@ -595,23 +595,23 @@ fuseStreamHelper
             unfus_accs = take (length nes1) outVars
             unfus_arrs = filter (`notElem` unfus_accs) $ filter (`nameIn` unfus_set) outVars
         res_form <- mergeForms form2 form1
-        return
+        pure
           ( unfus_accs ++ out_kernms ++ unfus_arrs,
             SOAC.Stream w2 res_form res_lam'' (nes1 ++ nes2) new_inp
           )
     where
-      mergeForms Sequential Sequential = return Sequential
+      mergeForms Sequential Sequential = pure Sequential
       mergeForms (Parallel _ comm2 lam2r) (Parallel o1 comm1 lam1r) =
-        return $ Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
+        pure $ Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
       mergeForms _ _ = fail "Fusing sequential to parallel stream disallowed!"
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 
 -- | If a Stream is passed as argument then it converts it to a
 --   Sequential Stream; Otherwise it FAILS!
 toSeqStream :: SOAC -> TryFusion SOAC
-toSeqStream s@(SOAC.Stream _ Sequential _ _ _) = return s
+toSeqStream s@(SOAC.Stream _ Sequential _ _ _) = pure s
 toSeqStream (SOAC.Stream w Parallel {} l acc inps) =
-  return $ SOAC.Stream w Sequential l acc inps
+  pure $ SOAC.Stream w Sequential l acc inps
 toSeqStream _ = fail "toSeqStream expects a stream, but given a SOAC."
 
 -- Here follows optimizations and transforms to expose fusability.
@@ -619,7 +619,7 @@ toSeqStream _ = fail "toSeqStream expects a stream, but given a SOAC."
 optimizeKernel :: Maybe [VName] -> FusedKer -> TryFusion FusedKer
 optimizeKernel inp ker = do
   (soac, resTrans) <- optimizeSOAC inp (fsoac ker) startTrans
-  return $
+  pure $
     ker
       { fsoac = soac,
         outputTransform = resTrans
@@ -636,13 +636,13 @@ optimizeSOAC inp soac os = do
   res <- foldM comb (False, soac, os) optimizations
   case res of
     (False, _, _) -> fail "No optimisation applied"
-    (True, soac', os') -> return (soac', os')
+    (True, soac', os') -> pure (soac', os')
   where
     comb (changed, soac', os') f =
       do
         (soac'', os'') <- f inp soac' os
-        return (True, soac'', os'')
-        <|> return (changed, soac', os')
+        pure (True, soac'', os'')
+        <|> pure (changed, soac', os')
 
 type Optimization =
   Maybe [VName] ->
@@ -693,7 +693,7 @@ iswim _ (SOAC.Screma w form arrs) ots
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
-      return
+      pure
         ( SOAC.Screma map_w (ScremaForm [] [] map_fun') map_arrs',
           ots SOAC.|> SOAC.Rearrange map_cs perm
         )
@@ -756,7 +756,7 @@ pullRearrange ::
   TryFusion (SOAC, SOAC.ArrayTransforms)
 pullRearrange soac ots = do
   nest <- liftMaybe =<< MapNest.fromSOAC soac
-  SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
+  SOAC.Rearrange cs perm SOAC.:< ots' <- pure $ SOAC.viewf ots
   if rearrangeReach perm <= mapDepth nest
     then do
       let -- Expand perm to cover the full extent of the input dimensionality
@@ -768,7 +768,7 @@ pullRearrange soac ots = do
       soac' <-
         MapNest.toSOAC $
           inputs' `MapNest.setInputs` rearrangeReturnTypes nest perm
-      return (soac', ots')
+      pure (soac', ots')
     else fail "Cannot pull transpose"
 
 pushRearrange ::
@@ -786,7 +786,7 @@ pushRearrange inpIds soac ots = do
         MapNest.toSOAC $
           inputs'
             `MapNest.setInputs` rearrangeReturnTypes nest perm
-      return (soac', invertRearrange SOAC.<| ots)
+      pure (soac', invertRearrange SOAC.<| ots)
     else fail "Cannot push transpose"
 
 -- | Actually also rearranges indices.
@@ -818,7 +818,7 @@ fixupInputs inpIds inps =
   case mapMaybe inputRearrange $ filter exposable inps of
     perm : _ -> do
       inps' <- mapM (fixupInput (rearrangeReach perm) perm) inps
-      return (perm, inps')
+      pure (perm, inps')
     _ -> Nothing
   where
     exposable = (`elem` inpIds) . SOAC.inputArray
@@ -865,13 +865,13 @@ pullReshape (SOAC.Screma _ form inps) ots
                       lambdaReturnType = retTypes,
                       lambdaBody = inner_body
                     }
-            return $ SOAC.Screma w $ Futhark.mapSOAC inner_fun
+            pure $ SOAC.Screma w $ Futhark.mapSOAC inner_fun
 
       op' <-
         foldM outersoac (SOAC.Screma mapw' $ Futhark.mapSOAC maplam) $
           zip (drop 1 $ reverse $ newDims shape) $
             drop 1 $ reverse $ drop 1 $ tails $ newDims shape
-      return (op' inputs', ots')
+      pure (op' inputs', ots')
 pullReshape _ _ = fail "Cannot pull reshape"
 
 -- Tie it all together in exposeInputs (for making inputs to a
@@ -891,7 +891,7 @@ exposeInputs inpIds ker =
 
     pushRearrange' = do
       (soac', ot') <- pushRearrange inpIds (fsoac ker) ot
-      return
+      pure
         ker
           { fsoac = soac',
             outputTransform = ot'
@@ -901,7 +901,7 @@ exposeInputs inpIds ker =
       (soac', ot') <- pullRearrange (fsoac ker) ot
       unless (SOAC.nullTransforms ot') $
         fail "pullRearrange was not enough"
-      return
+      pure
         ker
           { fsoac = soac',
             outputTransform = SOAC.noTransforms
@@ -911,7 +911,7 @@ exposeInputs inpIds ker =
       case commonTransforms inpIds $ inputs ker' of
         (ot', inps')
           | all exposed inps' ->
-              return (ker' {fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
+              pure (ker' {fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
         _ -> fail "Cannot expose"
 
     exposed (SOAC.Input ts _ _)
@@ -932,6 +932,6 @@ pullOutputTransforms = attempt outputTransformPullers
       do
         (soac', ots') <- p soac ots
         if SOAC.nullTransforms ots'
-          then return (soac', SOAC.noTransforms)
-          else pullOutputTransforms soac' ots' <|> return (soac', ots')
+          then pure (soac', SOAC.noTransforms)
+          else pullOutputTransforms soac' ots' <|> pure (soac', ots')
         <|> attempt ps soac ots

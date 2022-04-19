@@ -13,7 +13,9 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Util (chunks, splitFromEnd, takeLast)
 import Futhark.Util.IntegralExp (rem)
+import Futhark.Transform.Rename (renameLambda)
 import Prelude hiding (quot, rem)
+
 
 compileSegHist ::
   Pat LetDecMem ->
@@ -35,6 +37,16 @@ segHistOpChunks = chunks . map (length . histNeutral)
 
 histSize :: HistOp MCMem -> Imp.TExp Int64
 histSize = product . map toInt64Exp . shapeDims . histShape
+
+genHistOpParams :: HistOp MCMem -> MulticoreGen ()
+genHistOpParams histops =
+  dScope Nothing $ scopeOfLParams $ lambdaParams $ histOp histops
+
+renameHistop :: HistOp MCMem -> MulticoreGen (HistOp MCMem)
+renameHistop histop = do
+  let op = histOp histop
+  lambda' <- renameLambda op
+  pure histop { histOp = lambda' }
 
 nonsegmentedHist ::
   Pat LetDecMem ->
@@ -58,8 +70,7 @@ nonsegmentedHist pat space histops kbody num_histos = do
       sIf
         use_subhistogram
         (subHistogram pat space histops num_histos kbody)
-        (atomicHistogram pat space histops' kbody)
-
+        (atomicHistogram pat space histops' kbody)        
 -- |
 -- Atomic Histogram approach
 -- The implementation has three sub-strategies depending on the
@@ -77,8 +88,8 @@ onOpAtomic op = do
   let lambda = histOp op
       do_op = atomicUpdateLocking atomics lambda
   case do_op of
-    AtomicPrim f -> return f
-    AtomicCAS f -> return f
+    AtomicPrim f -> pure f
+    AtomicCAS f -> pure f
     AtomicLocking f -> do
       -- Allocate a static array of locks
       -- as in the GPU backend
@@ -88,7 +99,7 @@ onOpAtomic op = do
         sStaticArray "hist_locks" DefaultSpace int32 $
           Imp.ArrayZeros num_locks
       let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
-      return $ f l'
+      pure $ f l'
 
 atomicHistogram ::
   Pat LetDecMem ->
@@ -138,18 +149,26 @@ atomicHistogram pat space histops kbody = do
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "atomic_seg_hist" body free_params
 
-updateHisto :: HistOp MCMem -> [VName] -> [Imp.TExp Int64] -> MulticoreGen ()
-updateHisto op arrs bucket = do
-  let acc_params = take (length arrs) $ lambdaParams $ histOp op
-      bind_acc_params =
-        forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
-          copyDWIMFix (paramName acc_p) [] (Var arr) bucket
+updateHisto
+  :: HistOp MCMem
+  -> [VName]
+  -> [Imp.TExp Int64]
+  -> Imp.TExp Int64
+  -> [Param LParamMem]
+  -> MulticoreGen ()
+updateHisto op arrs bucket j uni_acc = do
+  let bind_acc_params =
+        forM_ (zip uni_acc arrs) $ \(acc_u, arr) -> do
+          copyDWIMFix (paramName acc_u) [] (Var arr) bucket
+          --emit $ Imp.Op $ Imp.ExtractLane (paramName acc_u) (primExpFromSubExp Unit $ (Var $ paramName acc_u)) (untyped j)
+          
       op_body = compileBody' [] $ lambdaBody $ histOp op
-      writeArray arr val = copyDWIMFix arr bucket val []
+      writeArray arr val = extractVectorLane j $ collect $ copyDWIMFix arr bucket val []
       do_hist = zipWithM_ writeArray arrs $ map resSubExp $ bodyResult $ lambdaBody $ histOp op
 
   sComment "Start of body" $ do
-    dLParams acc_params
+    -- sComment "dlParams" $ -- TODO (obp): This should be redundant declare.
+    --   dLParams acc_params                skkrt
     bind_acc_params
     op_body
     do_hist
@@ -211,7 +230,7 @@ subHistogram pat space histops num_histos kbody = do
 
       pure op_local_subhistograms
 
-    generateChunkLoop "SegRed" False $ \i -> do
+    inISPC $ generateChunkLoop "SegRed" True $ \i -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns_64 i
       compileStms mempty (kernelBodyStms kbody) $ do
         let (red_res, map_res) =
@@ -222,24 +241,45 @@ subHistogram pat space histops num_histos kbody = do
           forM_ (zip map_pes map_res) $ \(pe, res) ->
             copyDWIMFix (patElemName pe) (map Imp.le64 is) res []
 
+ 
         forM_ (zip3 histops local_subhistograms (splitHistResults histops red_res)) $
-          \( histop@(HistOp dest_shape _ _ _ shape lam),
+          \( histop@(HistOp dest_shape _ _ _ shape _),
              histop_subhistograms,
              (bucket, vs')
              ) -> do
-              let bucket' = map toInt64Exp bucket
-                  dest_shape' = map toInt64Exp $ shapeDims dest_shape
-                  bucket_in_bounds =
-                    inBounds (Slice (map DimFix bucket')) dest_shape'
-                  vs_params = takeLast (length vs') $ lambdaParams lam
+              
+              -- TODO(k): I don't think these params ever used
+              genHistOpParams histop
+              histop' <- renameHistop histop
 
-              sComment "perform updates" $
-                sWhen bucket_in_bounds $ do
-                  dLParams $ lambdaParams lam
-                  sLoopNest shape $ \is' -> do
-                    forM_ (zip vs_params vs') $ \(p, res) ->
-                      copyDWIMFix (paramName p) [] res is'
-                    updateHisto histop histop_subhistograms (bucket' ++ is')
+              let bucket'     = map toInt64Exp bucket
+                  dest_shape' = map toInt64Exp $ shapeDims dest_shape
+                  acc_params' = (lambdaParams . histOp) histop'
+                  vs_params'  = takeLast (length vs') $ lambdaParams $ histOp histop'
+
+                            
+              generateUniformizeLoop $ \j ->
+                sComment "perform updates" $ do
+                  -- Create new set of uniform buckets
+                  -- That is extact each bucket from a SIMD vector lane
+                  extract_buckets <- mapM (dPrim "extract_bucket" . (primExpType . untyped)) bucket'
+                  mapM_ (\(x,y) -> emit $
+                    Imp.Op $ Imp.ExtractLane (tvVar x) (untyped y) (untyped j)) $ zip extract_buckets bucket'
+                  let bucket'' = map tvExp extract_buckets
+                      bucket_in_bounds =
+                        inBounds (Slice (map DimFix bucket'')) dest_shape'
+                  sWhen bucket_in_bounds $ do
+                    genHistOpParams histop' 
+                    sLoopNest shape $ \is' -> do
+                      -- read values vs and perform lambda writing result back to is
+                      forM_ (zip vs_params' vs') $ \(p, res) ->
+                        ifPrimType (paramType p) $ \pt -> do
+                          -- Hack to copy varying load into uniform result variable
+                          tmp <- dPrim "tmp" pt
+                          copyDWIMFix (tvVar tmp) [] res is'
+                          extractVectorLane j $ pure $
+                            Imp.SetScalar (paramName p) (Imp.LeafExp (tvVar tmp) pt)
+                      updateHisto histop' histop_subhistograms (bucket'' ++ is') j acc_params'
 
     -- Copy the task-local subhistograms to the global subhistograms,
     -- where they will be combined.
@@ -282,6 +322,8 @@ subHistogram pat space histops num_histos kbody = do
     emit $ Imp.Op $ Imp.SegOp "seghist_red" free_params_red red_task Nothing mempty scheduler_info
   where
     segment_dims = init $ unSegSpace space
+    ifPrimType (Prim pt) f = f pt
+    ifPrimType _ _ = pure ()
 
 -- This implementation for a Segmented Hist only
 -- parallelize over the segments,

@@ -69,14 +69,14 @@ data Mapper frep trep m = Mapper
 identityMapper :: Monad m => Mapper rep rep m
 identityMapper =
   Mapper
-    { mapOnSubExp = return,
-      mapOnBody = const return,
-      mapOnVName = return,
-      mapOnRetType = return,
-      mapOnBranchType = return,
-      mapOnFParam = return,
-      mapOnLParam = return,
-      mapOnOp = return
+    { mapOnSubExp = pure,
+      mapOnBody = const pure,
+      mapOnVName = pure,
+      mapOnRetType = pure,
+      mapOnBranchType = pure,
+      mapOnFParam = pure,
+      mapOnLParam = pure,
+      mapOnOp = pure
     }
 
 -- | Map a monadic action across the immediate children of an
@@ -151,7 +151,7 @@ mapExpM tv (BasicOp (Concat i (x :| ys) size)) = do
   x' <- mapOnVName tv x
   ys' <- mapM (mapOnVName tv) ys
   size' <- mapOnSubExp tv size
-  return $ BasicOp $ Concat i (x' :| ys') size'
+  pure $ BasicOp $ Concat i (x' :| ys') size'
 mapExpM tv (BasicOp (Copy e)) =
   BasicOp <$> (Copy <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Manifest perm e)) =
@@ -235,26 +235,26 @@ data Walker rep m = Walker
 identityWalker :: Monad m => Walker rep m
 identityWalker =
   Walker
-    { walkOnSubExp = const $ return (),
-      walkOnBody = const $ const $ return (),
-      walkOnVName = const $ return (),
-      walkOnRetType = const $ return (),
-      walkOnBranchType = const $ return (),
-      walkOnFParam = const $ return (),
-      walkOnLParam = const $ return (),
-      walkOnOp = const $ return ()
+    { walkOnSubExp = const $ pure (),
+      walkOnBody = const $ const $ pure (),
+      walkOnVName = const $ pure (),
+      walkOnRetType = const $ pure (),
+      walkOnBranchType = const $ pure (),
+      walkOnFParam = const $ pure (),
+      walkOnLParam = const $ pure (),
+      walkOnOp = const $ pure ()
     }
 
 walkOnShape :: Monad m => Walker rep m -> Shape -> m ()
 walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
 walkOnType :: Monad m => Walker rep m -> Type -> m ()
-walkOnType _ Prim {} = return ()
+walkOnType _ Prim {} = pure ()
 walkOnType tv (Acc acc ispace ts _) = do
   walkOnVName tv acc
   traverse_ (walkOnSubExp tv) ispace
   mapM_ (walkOnType tv) ts
-walkOnType _ Mem {} = return ()
+walkOnType _ Mem {} = pure ()
 walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
 walkOnLoopForm :: Monad m => Walker rep m -> LoopForm rep -> m ()

@@ -2,10 +2,13 @@
 --
 -- Easy to get wrong if you forget that MD5 is little-endian.
 --
+-- Ignored on ISPC backend since the ISPC compiler miscompiles the program
+-- when using 64-bit addressing mode. Memory reads from valid addresses
+-- cause a segfault if there are inactive lanes with invalid addresses.
 -- ==
--- input { empty([0]u8) }
+-- no_ispc-multicore input { empty([0]u8) }
 -- output { [0xd4u8,0x1du8,0x8cu8,0xd9u8,0x8fu8,0x00u8,0xb2u8,0x04u8,0xe9u8,0x80u8,0x09u8,0x98u8,0xecu8,0xf8u8,0x42u8,0x7eu8] }
--- input { [0u8] }
+-- no_ispc-multicore input { [0u8] }
 -- output { [0x93u8, 0xb8u8, 0x85u8, 0xadu8, 0xfeu8, 0x0du8, 0xa0u8, 0x89u8, 0xcdu8, 0xf6u8, 0x34u8, 0x90u8, 0x4fu8, 0xd5u8, 0x9fu8, 0x71u8] }
 
 type md5 = (u32, u32, u32, u32)

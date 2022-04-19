@@ -175,10 +175,10 @@ tryMakeGenerator ::
   Either String (RandomConfiguration -> OutputFormat -> Word64 -> IO ())
 tryMakeGenerator t
   | Just vs <- readValues $ BS.pack t =
-      return $ \_ fmt _ -> mapM_ (outValue fmt) vs
+      pure $ \_ fmt _ -> mapM_ (outValue fmt) vs
   | otherwise = do
       t' <- toValueType =<< either (Left . syntaxErrorMsg) Right (parseType name (T.pack t))
-      return $ \conf fmt seed -> do
+      pure $ \conf fmt seed -> do
         let v = randomValue conf t' seed
         outValue fmt v
   where
@@ -198,7 +198,7 @@ toValueType (TEUnique t _) = toValueType t
 toValueType (TEArray t d _) = do
   d' <- constantDim d
   V.ValueType ds t' <- toValueType t
-  return $ V.ValueType (d' : ds) t'
+  pure $ V.ValueType (d' : ds) t'
   where
     constantDim (DimExpConst k _) = Right k
     constantDim _ = Left "Array has non-constant dimension declaration."

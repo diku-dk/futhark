@@ -98,7 +98,7 @@ optimiseLambda ::
   UnstreamM rep (Lambda rep)
 optimiseLambda onOp lam = localScope (scopeOfLParams $ lambdaParams lam) $ do
   body <- optimiseBody onOp $ lambdaBody lam
-  return lam {lambdaBody = body}
+  pure lam {lambdaBody = body}
 
 optimiseStm ::
   ASTRep rep =>
@@ -172,4 +172,4 @@ onHostOp stage pat aux (GPU.OtherOp soac)
         }
 onHostOp stage pat aux (SegOp op) =
   pure <$> (Let pat aux . Op . SegOp <$> optimiseSegOp (onHostOp stage) op)
-onHostOp _ pat aux op = return [Let pat aux $ Op op]
+onHostOp _ pat aux op = pure [Let pat aux $ Op op]

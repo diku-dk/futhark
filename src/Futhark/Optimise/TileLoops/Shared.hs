@@ -36,7 +36,7 @@ segMap1D desc lvl manifest f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBuilder $ do
     res <- f ltid
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms res
 
   let ret (SubExpRes cs se) = Returns manifest cs se
@@ -62,7 +62,7 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_yy, ltid_xx)
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
@@ -88,7 +88,7 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_z, ltid_y, ltid_x)
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
@@ -124,7 +124,7 @@ segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
       localScope (scopeOfSegSpace segspace) $
         f seq_is (ltid_x, ltid_y)
     t_v <- subExpType res_v
-    return (t_v, res_v, res_i)
+    pure (t_v, res_v, res_i)
 
   let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]

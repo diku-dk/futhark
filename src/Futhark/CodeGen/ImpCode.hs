@@ -73,7 +73,6 @@ module Futhark.CodeGen.ImpCode
     Exp,
     TExp,
     Volatility (..),
-    Variability (..),
     Arg (..),
     var,
     ErrorMsg (..),
@@ -326,9 +325,6 @@ data Code a
 -- ignore this for backends where it makes no sense (anything but C
 -- and similar low-level things)
 data Volatility = Volatile | Nonvolatile
-  deriving (Eq, Ord, Show)
-
-data Variability = Uniform | Varying | Unbound
   deriving (Eq, Ord, Show)
 
 instance Semigroup (Code a) where

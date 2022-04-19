@@ -663,19 +663,19 @@ static inline uniform uint64_t pow64(uniform uint64_t x, uniform uint64_t y) {
 }
 
 static inline uniform bool itob_i8_bool(uniform int8_t x) {
-  return x;
+  return x != 0;
 }
 
 static inline uniform bool itob_i16_bool(uniform int16_t x) {
-  return x;
+  return x != 0;
 }
 
 static inline uniform bool itob_i32_bool(uniform int32_t x) {
-  return x;
+  return x != 0;
 }
 
 static inline uniform bool itob_i64_bool(uniform int64_t x) {
-  return x;
+  return x != 0;
 }
 
 static inline uniform int8_t btoi_bool_i8(uniform bool x) {
@@ -797,11 +797,11 @@ static uniform uint64_t futrts_mad_hi64(uniform uint64_t a, uniform uint64_t b, 
 }
 
 static uniform int32_t futrts_clzz8(uniform int8_t x) {
-  return count_leading_zeros((uniform int32_t)x)-24;
+  return count_leading_zeros((uniform int32_t)(uniform uint8_t)x)-24;
 }
 
 static uniform int32_t futrts_clzz16(uniform int16_t x) {
-  return count_leading_zeros((uniform int32_t)x)-16;
+  return count_leading_zeros((uniform int32_t)(uniform uint16_t)x)-16;
 }
 
 static uniform int32_t futrts_clzz32(uniform int32_t x) {
@@ -892,11 +892,11 @@ static inline uniform float fabs32(uniform float x) {
 }
 
 static inline uniform float fmax32(uniform float x, uniform float y) {
-  return max(x, y);
+  return isnan(x) ? y : isnan(y) ? x : max(x, y);
 }
 
 static inline uniform float fmin32(uniform float x, uniform float y) {
-  return min(x, y);
+  return isnan(x) ? y : isnan(y) ? x : min(x, y);
 }
 
 static inline uniform float fpow32(uniform float x, uniform float y) {
@@ -1057,7 +1057,7 @@ static inline uniform float futrts_atanh32(uniform float x) {
 }
 
 static inline uniform float futrts_atan2_32(uniform float x, uniform float y) {
-  return atan2(x, y);
+  return (x == 0.0f && y == 0.0f) ? 0.0f : atan2(x, y);
 }
 
 static inline uniform float futrts_hypot32(uniform float x, uniform float y) {
@@ -1211,11 +1211,11 @@ static inline uniform double fabs64(uniform double x) {
 }
 
 static inline uniform double fmax64(uniform double x, uniform double y) {
-  return max(x, y);
+  return isnan(x) ? y : isnan(y) ? x : max(x, y);
 }
 
 static inline uniform double fmin64(uniform double x, uniform double y) {
-  return min(x, y);
+  return isnan(x) ? y : isnan(y) ? x : min(x, y);
 }
 
 static inline uniform double fpow64(uniform double x, uniform double y) {
@@ -1397,6 +1397,22 @@ static inline uniform uint64_t fptoui_f64_i64(uniform double x) {
   }
 }
 
+static inline uniform bool ftob_f64_bool(uniform double x) {
+  return x != 0.0;
+}
+
+static inline uniform double btof_bool_f64(uniform bool x) {
+  return x ? 1.0 : 0.0;
+}
+
+static inline uniform bool ftob_f32_bool(uniform float x) {
+  return x != 0;
+}
+
+static inline uniform float btof_bool_f32(uniform bool x) {
+  return x ? 1 : 0;
+}
+
 static inline uniform int64_t futrts_to_bits64(uniform double x) {
   return futrts_ispc_to_bits64(x);
 }
@@ -1543,8 +1559,12 @@ static inline uniform f16 fabs16(uniform f16 x) {
   return abs(x);
 }
 
+static inline uniform bool futrts_isnan16(uniform f16 x) {
+  return isnan((uniform float)x);
+}
+
 static inline uniform f16 fmax16(uniform f16 x, uniform f16 y) {
-  return max(x, y);
+  return futrts_isnan16(x) ? y : futrts_isnan16(y) ? x : max(x, y);
 }
 
 static inline uniform f16 fmin16(uniform f16 x, uniform f16 y) {
@@ -1553,10 +1573,6 @@ static inline uniform f16 fmin16(uniform f16 x, uniform f16 y) {
 
 static inline uniform f16 fpow16(uniform f16 x, uniform f16 y) {
   return pow(x, y);
-}
-
-static inline uniform bool futrts_isnan16(uniform f16 x) {
-  return isnan((uniform float)x);
 }
 
 static inline uniform bool futrts_isinf16(uniform float x) {
@@ -1686,7 +1702,7 @@ static inline uniform f16 futrts_fma16(uniform f16 a, uniform f16 b, uniform f16
 }
 
 static inline uniform int16_t futrts_to_bits16(uniform f16 x) {
-  return *((uniform int16_t *)&x); //TODO: Now that linker bug is fixed, try to simplify
+  return *((uniform int16_t *)&x); //TODO: Varying didn't work with this, check if this is fine at some point
 }
 
 static inline uniform f16 futrts_from_bits16(uniform int16_t x) {

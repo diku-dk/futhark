@@ -139,6 +139,9 @@ static inline f16 btof_bool_f16(bool x) {
 }
 
 #ifndef EMULATE_F16
+static inline bool futrts_isnan16(f16 x) {
+  return isnan((float)x);
+}
 
 #ifdef __OPENCL_VERSION__
 
@@ -164,11 +167,11 @@ static inline f16 fabs16(f16 x) {
 }
 
 static inline f16 fmax16(f16 x, f16 y) {
-  return max(x, y);
+  return futrts_isnan16(x) ? y : futrts_isnan16(y) ? x : max(x, y);
 }
 
 static inline f16 fmin16(f16 x, f16 y) {
-  return min(x, y);
+  return futrts_isnan16(x) ? y : futrts_isnan16(y) ? x : min(x, y);
 }
 
 static inline f16 fpow16(f16 x, f16 y) {
@@ -192,10 +195,6 @@ static inline f16 fpow16(f16 x, f16 y) {
   return powf(x, y);
 }
 #endif
-
-static inline bool futrts_isnan16(f16 x) {
-  return isnan((float)x);
-}
 
 #if ISPC
 static inline bool futrts_isinf16(float x) {
@@ -581,11 +580,13 @@ static inline f16 futrts_from_bits16(int16_t x) {
 #elif ISPC
 
 static inline int16_t futrts_to_bits16(f16 x) {
-  return *((int16_t *)&x); //TODO: Now that linker bug is fixed, try to simplify
+  varying int16_t y = *((varying int16_t * uniform)&x);
+  return y;
 }
 
 static inline f16 futrts_from_bits16(int16_t x) {
-  return *((float16 *)&x);
+  varying f16 y = *((varying f16 * uniform)&x);
+  return y;
 }
 #else
 static inline int16_t futrts_to_bits16(f16 x) {

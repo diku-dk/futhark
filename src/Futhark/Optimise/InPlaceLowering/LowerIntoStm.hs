@@ -55,7 +55,7 @@ lowerUpdate scope (Let pat aux (DoLoop merge form body)) updates = do
   canDo <- lowerUpdateIntoLoop scope updates pat merge form body
   Just $ do
     (prestms, poststms, pat', merge', body') <- canDo
-    return $
+    pure $
       prestms
         ++ [ certify (stmAuxCerts aux) $
                mkLet pat' $ DoLoop merge' form body'
@@ -86,7 +86,7 @@ lowerUpdateGPU
         Just $ do
           (pat', kbody', poststms) <- mk
           let cs = stmAuxCerts aux <> foldMap updateCerts updates
-          return $
+          pure $
             certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
             stmsToList poststms
     where
@@ -118,9 +118,9 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
   -- The updates are all-or-nothing.  Being more liberal would require
   -- changes to the in-place-lowering pass itself.
   mk <- zipWithM onRet (patElems pat) (kernelBodyResult kbody)
-  return $ do
+  pure $ do
     (pes, bodystms, krets, poststms) <- unzip4 <$> sequence mk
-    return
+    pure
       ( Pat pes,
         kbody
           { kernelBodyStms = kernelBodyStms kbody <> mconcat bodystms,
@@ -155,7 +155,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
 
             v_aliased <- newName v
 
-            return
+            pure
               ( PatElem bindee_nm bindee_dec,
                 bodystms,
                 ret',
@@ -165,7 +165,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
                   ]
               )
     onRet pe ret =
-      Just $ return (pe, mempty, ret, mempty)
+      Just $ pure (pe, mempty, ret, mempty)
 
 lowerUpdateIntoLoop ::
   ( Buildable rep,
@@ -230,7 +230,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
     (idxsubsts', newstms) <- substituteIndices idxsubsts $ bodyStms body
     (body_res, res_stms) <- manipulateResult in_place_map idxsubsts'
     let body' = mkBody (newstms <> res_stms) body_res
-    return (prestms, poststms, valpat, val', body')
+    pure (prestms, poststms, valpat, val', body')
   where
     usedInBody =
       mconcat $ map (`lookupAliases` scope) $ namesToList $ freeIn body <> freeIn form
@@ -243,7 +243,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
     mkMerges summaries = do
       ((origmerge, extramerge), (prestms, poststms)) <-
         runWriterT $ partitionEithers <$> mapM mkMerge summaries
-      return (origmerge ++ extramerge, prestms, poststms)
+      pure (origmerge ++ extramerge, prestms, poststms)
 
     mkMerge summary
       | Just (update, mergename, mergedec) <- relatedUpdate summary = do
@@ -266,12 +266,12 @@ lowerUpdateIntoLoop scope updates pat val form body = do
                 mkLet [Ident (updateValue update) elm_t] $ BasicOp $ Copy precopy
               ]
             )
-          return $
+          pure $
             Right
               ( Param mempty mergename (toDecl (typeOf mergedec) Unique),
                 Var source
               )
-      | otherwise = return $ Left $ mergeParam summary
+      | otherwise = pure $ Left $ mergeParam summary
 
     mkResAndPat summaries =
       let (origpat, extrapat) = partitionEithers $ map mkResAndPat' summaries
@@ -305,7 +305,7 @@ summariseLoop scope updates usedInBody resmap merge =
               if hasLoopInvariantShape fparam
                 then Just $ do
                   lowered_array <- newVName "lowered_array"
-                  return
+                  pure
                     LoopResultSummary
                       { resultSubExp = se,
                         inPatAs = v,
@@ -341,7 +341,7 @@ indexSubstitutions = mapMaybe getSubstitution
     getSubstitution res = do
       (DesiredUpdate _ _ cs _ is _, nm, dec) <- relatedUpdate res
       let name = paramName $ fst $ mergeParam res
-      return (name, (cs, nm, typeOf dec, is))
+      pure (name, (cs, nm, typeOf dec, is))
 
 manipulateResult ::
   (Buildable rep, MonadFreshNames m) =>
