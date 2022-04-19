@@ -32,7 +32,7 @@ mappingFromDiff stale current = PositionMapping $ rawMapping (getDiff stale curr
 -- | Transform current Pos to the stale pos for query
 -- Note: line and col in Pos is larger by one
 toStalePos :: Maybe PositionMapping -> Pos -> Maybe Pos
-toStalePos (Just (PositionMapping (_, new2old))) pos = do
+toStalePos (Just (PositionMapping (_, new2old))) pos =
   if l > Prelude.length new2old
     then Nothing
     else Just $ Pos file ((new2old !! (l - 1)) + 1) c o
@@ -40,15 +40,17 @@ toStalePos (Just (PositionMapping (_, new2old))) pos = do
     Pos file l c o = pos
 toStalePos Nothing pos = Just pos
 
-toCurrentPos :: PositionMapping -> Pos -> Maybe Pos
-toCurrentPos (PositionMapping (old2new, _)) pos = do
+-- some refactoring might be needed, same logic as toStalePos
+toCurrentPos :: Maybe PositionMapping -> Pos -> Maybe Pos
+toCurrentPos (Just (PositionMapping (old2new, _))) pos =
   if l > Prelude.length old2new
     then Nothing
     else Just $ Pos file ((old2new !! (l - 1)) + 1) c o
   where
     Pos file l c o = pos
+toCurrentPos Nothing pos = Just pos
 
-toCurrentLoc :: PositionMapping -> Loc -> Maybe Loc
+toCurrentLoc :: Maybe PositionMapping -> Loc -> Maybe Loc
 toCurrentLoc mapping loc = do
   let Loc start end = loc
   current_start <- toCurrentPos mapping start

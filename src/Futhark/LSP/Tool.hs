@@ -67,7 +67,16 @@ queryAtPos :: State -> Maybe PositionMapping -> Pos -> Maybe AtPos
 queryAtPos state mapping pos = do
   loaded_prog <- stateProgram state
   stale_pos <- toStalePos mapping pos
-  atPos (lpImports loaded_prog) stale_pos -- TODO: AtPos is stale, need to covert to correct position
+  query_result <- atPos (lpImports loaded_prog) stale_pos
+  updateAtPos query_result
+  where
+    updateAtPos :: AtPos -> Maybe AtPos
+    updateAtPos (AtName qn (Just def) loc) = do
+      current_loc <- toCurrentLoc mapping loc
+      -- TODO: update boundloc to current_loc
+      -- note, boundloc could be in another file, don't change in that case
+      Just $ AtName qn (Just def) current_loc
+    updateAtPos _ = Nothing
 
 -- | Entry point for create PositionMapping.
 -- Nothing if diff is not needed.
