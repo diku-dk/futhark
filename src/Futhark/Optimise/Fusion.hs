@@ -111,6 +111,9 @@ fuseConsts outputs stms =
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun _stmts fun = do
   new_stms <- runFusionEnvM (scopeOf fun <> scopeOf _stmts) freshFusionEnv (fuseGraphLZ stms res (funDefParams  fun))
+    -- new_stms <- runFusionEnvM (scopeOf fun <> scopeOf _stmts) freshFusionEnv $ do
+    -- stms_new <- fuseGraphLZ stms res (funDefParams  fun)
+    -- simplifyStms $ stmsFromList stms_new
   let body = (funDefBody fun) {bodyStms = stmsFromList new_stms}
   return fun {funDefBody = body}
     where
@@ -163,7 +166,7 @@ linearizeGraph g = do
 doAllFusion :: DepGraphAug
 doAllFusion = applyAugs [keepTrying doMapFusion, doHorizontalFusion, removeUnusedOutputs, makeCopiesOfConsAliased, runInnerFusion]
 --testingTurnToStream--
-
+--
 
 
 -- map-fusion part
