@@ -533,14 +533,14 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
           --               (Let (basicPat is_extra_1' <> pats1) aux1 (Op stream1))
           --               (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
           --           _ -> return Nothing
-          ( H.Stream s_exp1 sform1 nes1 lam1 i1,
-            H.Stream s_exp2 sform2 nes2 lam2 i2)
-            | getStreamOrder sform1 /= getStreamOrder sform2 ->
-              let s1' = toSeqStream soac1 in
-              let s2' = toSeqStream soac2 in
-              fuseNodeT edgs infusible
-                (SoacNode s1' pats1 aux1, e1s)
-                (SoacNode s2' pats2 aux2, e2s)
+          -- ( H.Stream s_exp1 sform1 nes1 lam1 i1,
+          --   H.Stream s_exp2 sform2 nes2 lam2 i2)
+          --   | getStreamOrder sform1 /= getStreamOrder sform2 ->
+          --     let s1' = toSeqStream soac1 in
+          --     let s2' = toSeqStream soac2 in
+          --     fuseNodeT edgs infusible
+          --       (SoacNode s1' pats1 aux1, e1s)
+          --       (SoacNode s2' pats2 aux2, e2s)
           ( H.Stream s_exp1 sform1 lam1 nes1 i1,
             H.Stream s_exp2 sform2 lam2 nes2 i2) -> do
               let chunk1 = head $ lambdaParams lam1
