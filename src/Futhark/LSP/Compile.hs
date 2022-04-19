@@ -8,7 +8,7 @@ import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
+import Futhark.Compiler.Program (LoadedProg, lpFilePaths, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
@@ -26,9 +26,19 @@ tryTakeStateFromMVar state_mvar file_path = do
       new_state <- tryCompile file_path (State $ Just noLoadedProg)
       liftIO $ putMVar state_mvar new_state
       pure new_state
-    Just _ -> do
-      liftIO $ putMVar state_mvar old_state
-      pure old_state
+    Just prog -> do
+      -- If this is in the context of some file that is not part of
+      -- the program, try to reload the program from that file.
+      let files = lpFilePaths prog
+      state <- case file_path of
+        Just file_path'
+          | file_path' `notElem` files -> do
+              debug $ "File not part of program: " <> show file_path'
+              debug $ "Program contains: " <> show files
+              tryCompile file_path (State $ Just noLoadedProg)
+        _ -> pure old_state
+      liftIO $ putMVar state_mvar state
+      pure state
 
 -- | Try to (re)-compile, replace old state if successful.
 tryReCompile :: MVar State -> Maybe FilePath -> LspT () IO ()
@@ -49,6 +59,7 @@ tryReCompile state_mvar file_path = do
 tryCompile :: Maybe FilePath -> State -> LspT () IO State
 tryCompile Nothing _ = pure emptyState
 tryCompile (Just path) state = do
+  debug $ "Reloading program from " <> show path
   let old_loaded_prog = getLoadedProg state
   vfs <- getVirtualFiles
   res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs)
