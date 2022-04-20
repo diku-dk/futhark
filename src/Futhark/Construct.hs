@@ -495,7 +495,8 @@ binLambda bop arg_t ret_t = do
         lambdaBody = body
       }
 
--- | Easily construct a t'Lambda' within a 'MonadBuilder'.
+-- | Easily construct a t'Lambda' within a 'MonadBuilder'.  See also
+-- 'runLambdaBuilder'.
 mkLambda ::
   MonadBuilder m =>
   [LParam (Rep m)] ->

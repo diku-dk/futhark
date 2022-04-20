@@ -493,13 +493,13 @@ jobs:
     steps:
     - uses: actions/checkout@v2
       with:
-        submodules: recursive # for git-annex to work.
-        fetch-depth: 0        #
+        submodules: recursive
+        fetch-depth: 0
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev git-annex
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
 
     - uses: actions/download-artifact@v2
       with:
@@ -512,7 +512,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        cd futhark-benchmarks && pwd && git-annex get
+        cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
 
     - run: |
         futhark test -C --no-terminal --backend=opencl  --pass-compiler-option=--Werror futhark-benchmarks

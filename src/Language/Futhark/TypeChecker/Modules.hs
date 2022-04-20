@@ -532,9 +532,10 @@ matchMTys orig_mty orig_mty_sig =
                 <+/> textwrap "is not used as an array size in the definition."
 
       let spec_t' = applySubst (`M.lookup` (param_substs <> abs_subst_to_type)) spec_t
-      if spec_t' == t
-        then pure (spec_name, name)
-        else nomatch spec_t'
+      case doUnification loc (map (`TypeParamDim` mempty) (retDims t)) (retType spec_t') (retType t) of
+        Right t'
+          | noSizes t' `subtypeOf` noSizes (retType spec_t') -> pure (spec_name, name)
+        _ -> nomatch spec_t'
       where
         nomatch spec_t' =
           mismatchedType
@@ -580,9 +581,7 @@ matchMTys orig_mty orig_mty_sig =
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
         Right t
-          | noSizes t
-              `subtypeOf` noSizes orig_spec_t ->
-              Nothing
+          | noSizes t `subtypeOf` noSizes orig_spec_t -> Nothing
           | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =
