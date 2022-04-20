@@ -22,7 +22,7 @@ module Futhark.Optimise.Simplify.Rep
     addScopeWisdom,
     addWisdomToPat,
     mkWiseBody,
-    mkWiseLetStm,
+    mkWiseStm,
     mkWiseExpDec,
     CanBeWise (..),
 
@@ -240,13 +240,13 @@ mkWiseBody dec stms res =
     (aliases, consumed) = Aliases.mkBodyAliasing stms res
 
 -- | Produce a statement with simplifier information.
-mkWiseLetStm ::
+mkWiseStm ::
   (ASTRep rep, CanBeWise (Op rep)) =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Wise rep) ->
   Stm (Wise rep)
-mkWiseLetStm pat (StmAux cs attrs dec) e =
+mkWiseStm pat (StmAux cs attrs dec) e =
   let pat' = addWisdomToPat pat e
    in Let pat' (StmAux cs attrs $ mkWiseExpDec pat' dec e) e
 
@@ -275,7 +275,7 @@ instance (Buildable rep, CanBeWise (Op rep)) => Buildable (Wise rep) where
     env <- asksScope removeScopeWisdom
     flip runReaderT env $ do
       Let pat dec _ <- mkLetNames names $ removeExpWisdom e
-      pure $ mkWiseLetStm pat dec e
+      pure $ mkWiseStm pat dec e
 
   mkBody stms res =
     let Body bodyrep _ _ = mkBody (fmap removeStmWisdom stms) res
@@ -298,7 +298,7 @@ instance CanBeWise () where
 
 -- | Construct a 'Wise' statement.
 informStm :: Informing rep => Stm rep -> Stm (Wise rep)
-informStm (Let pat aux e) = mkWiseLetStm pat aux $ informExp e
+informStm (Let pat aux e) = mkWiseStm pat aux $ informExp e
 
 -- | Construct 'Wise' statements.
 informStms :: Informing rep => Stms rep -> Stms (Wise rep)
