@@ -1164,25 +1164,34 @@ instance MonadUnify UnifyM where
           </> indent 2 (ppr t2)
           </> "do not match."
 
-runUnifyM :: [TypeParam] -> UnifyM a -> Either TypeError a
-runUnifyM tparams (UnifyM m) = runExcept $ evalStateT m (constraints, 0)
+runUnifyM :: [TypeParam] -> [TypeParam] -> UnifyM a -> Either TypeError a
+runUnifyM rigid_tparams nonrigid_tparams (UnifyM m) =
+  runExcept $ evalStateT m (constraints, 0)
   where
-    constraints = M.fromList $ map f tparams
-    f (TypeParamDim p loc) = (p, (0, Size Nothing $ Usage Nothing loc))
-    f (TypeParamType l p loc) = (p, (0, NoConstraint l $ Usage Nothing loc))
+    constraints =
+      M.fromList $
+        map nonrigid nonrigid_tparams <> map rigid rigid_tparams
+    nonrigid (TypeParamDim p loc) = (p, (0, Size Nothing $ Usage Nothing loc))
+    nonrigid (TypeParamType l p loc) = (p, (0, NoConstraint l $ Usage Nothing loc))
+    rigid (TypeParamDim p loc) = (p, (0, ParamSize loc))
+    rigid (TypeParamType l p loc) = (p, (0, ParamType l loc))
 
 -- | Perform a unification of two types outside a monadic context.
--- The type parameters are allowed to be instantiated; all other types
--- are considered rigid.
+-- The first list of type parameters are rigid but may have liftedness
+-- constraints; the second list of type parameters are allowed to be
+-- instantiated. All other types are considered rigid with no
+-- constraints.
 doUnification ::
   Loc ->
+  [TypeParam] ->
   [TypeParam] ->
   StructType ->
   StructType ->
   Either TypeError StructType
-doUnification loc tparams t1 t2 = runUnifyM tparams $ do
-  expect (Usage Nothing (srclocOf loc)) t1 t2
-  normTypeFully t2
+doUnification loc rigid_tparams nonrigid_tparams t1 t2 =
+  runUnifyM rigid_tparams nonrigid_tparams $ do
+    expect (Usage Nothing (srclocOf loc)) t1 t2
+    normTypeFully t2
 
 -- Note [Linking variables to sum types]
 --

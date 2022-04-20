@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect handling of local quantification when determining type
   equivalence in during module type ascription (#1648).
 
+* Incorrect checking of liftedness when instantiating polymorphic
+  functions during module type ascription.
+
 ## [0.21.10]
 
 ### Added

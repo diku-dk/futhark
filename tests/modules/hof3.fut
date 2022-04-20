@@ -1,6 +1,8 @@
 -- Not OK, because the module type specifies a more liberal type than
 -- defined by the module.
 -- ==
--- error: module type
+-- error: Module type
 
-module m = { type t 'a = a } : { type t '^a }
+module m = { def f 'a (x: a) = ([x])[0] } : { val f '^a : a -> a }
+
+let main = m.f id 0i32
