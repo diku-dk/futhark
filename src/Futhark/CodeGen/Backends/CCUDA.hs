@@ -134,6 +134,13 @@ cliOptions =
              optionArgument = NoArgument,
              optionDescription = "Gather profiling data while executing and print out a summary at the end.",
              optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+           },
+         Option
+           { optionLongName = "use-single-device",
+             optionShortName = Nothing,
+             optionArgument = NoArgument,
+             optionDescription = "Forces futhark only to run using a single GPU device",
+             optionAction = [C.cstm|futhark_context_config_set_multi_device(cfg, false);|]
            }
        ]
 
@@ -162,6 +169,13 @@ readCUDAScalar mem idx t "device" _ = do
     [C.citems|
        $ty:t $id:val;
        {
+       if(ctx->use_multi_device){
+         for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
+           CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
+           CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+           CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));  
+         }
+       }
        $items:bef
        CUDA_SUCCEED_OR_RETURN(
           cuMemcpyDtoH(&$id:val,
@@ -196,6 +210,16 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
       (bef, aft) = profilingEnclosure prof
   GC.item
     [C.citem|{
+                if(ctx->use_multi_device){
+                  for(int device_id = 0; device_id < ctx->cuda.device_count; 
+                    device_id++){
+                    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(
+                      ctx->cuda.contexts[device_id]));
+                    CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+                    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(
+                      &ctx->cuda.contexts[device_id]));  
+                  }
+                }
                 $items:bef
                 CUDA_SUCCEED_OR_RETURN(
                   $id:fn($exp:dstmem + $exp:dstidx,
@@ -284,6 +308,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
 
   (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
   (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
+  (grid_x_MD, grid_y_MD, grid_z_MD) <- mkDimsMD <$> mapM GC.compileExp num_blocks
   let perm_args
         | length num_blocks == 3 = [[C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|]]
         | otherwise = []
@@ -326,7 +351,8 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       grid[perm[1]] = $exp:grid_y;
       grid[perm[2]] = $exp:grid_z;
 
-      void *$id:args_arr[] = { $inits:args'' };
+      int device_id = 0; 
+      void *$id:args_arr[] = { $inits:args'' , &device_id };
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
         fprintf(ctx->log, "Launching %s with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
@@ -337,12 +363,36 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
         $id:time_start = get_wall_time();
       }
       $items:bef
-      CUDA_SUCCEED_OR_RETURN(
-        cuLaunchKernel(ctx->$id:kernel_name,
-                       grid[0], grid[1], grid[2],
-                       $exp:block_x, $exp:block_y, $exp:block_z,
-                       $exp:shared_tot, NULL,
-                       $id:args_arr, NULL));
+      if(ctx->use_multi_device){
+        for(int devID = 0; devID < ctx->cuda.device_count; devID++){
+            int localIdx = devID;
+            void *$id:args_arr[] = { $inits:args'' , &localIdx};
+            size_t grid_MD[3];
+            grid_MD[perm[0]] = $exp:grid_x_MD;
+            grid_MD[perm[1]] = $exp:grid_y_MD;
+            grid_MD[perm[2]] = $exp:grid_z_MD;
+            CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
+            CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:(kernelMultiDevice kernel_name)[devID],
+                                                  grid_MD[0], grid_MD[1], grid_MD[2],
+                                                  $exp:block_x, $exp:block_y, $exp:block_z,
+                                                  $exp:shared_tot, NULL,
+                                                  $id:args_arr, NULL));
+            CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.finished[devID], NULL));
+            for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){
+              if(other_dev == devID) continue;
+              CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.finished[devID],0));
+            }                                                  
+            CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
+        }
+
+      } else {
+        CUDA_SUCCEED_OR_RETURN(
+          cuLaunchKernel(ctx->$id:kernel_name,
+                         grid[0], grid[1], grid[2],
+                         $exp:block_x, $exp:block_y, $exp:block_z,
+                         $exp:shared_tot, NULL,
+                         $id:args_arr, NULL));
+      }
       $items:aft
       if (ctx->debugging) {
         CUDA_SUCCEED_FATAL(cuCtxSynchronize());
@@ -383,3 +433,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       pure (offset, Just (size, offset))
+    mkDimsMD [] = ([C.cexp|0|], [C.cexp|0|], [C.cexp|0|])
+    mkDimsMD [x] = ([C.cexp| $exp:x / ctx->cuda.device_count + 1|], [C.cexp|1|], [C.cexp|1|])
+    mkDimsMD [x, y] = ([C.cexp| $exp:x / ctx->cuda.device_count + 1|], y, [C.cexp|1|])
+    mkDimsMD (x : y : z : _) = ([C.cexp| $exp:x / ctx->cuda.device_count + 1|], y, z)

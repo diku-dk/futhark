@@ -286,25 +286,25 @@ onKernel target kernel = do
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
         | not $ null called =
-            (SafetyFull, [])
+          (SafetyFull, [])
         | length (kernelFailures kstate) == length failures =
-            if kernelFailureTolerant kernel
-              then (SafetyNone, [])
-              else -- No possible failures in this kernel, so if we make
-              -- it past an initial check, then we are good to go.
+          if kernelFailureTolerant kernel
+            then (SafetyNone, [])
+            else -- No possible failures in this kernel, so if we make
+            -- it past an initial check, then we are good to go.
 
-                ( SafetyCheap,
-                  [C.citems|if (*global_failure >= 0) { return; }|]
-                )
+              ( SafetyCheap,
+                [C.citems|if (*global_failure >= 0) { return; }|]
+              )
         | otherwise =
-            if not (kernelHasBarriers kstate)
-              then
-                ( SafetyFull,
-                  [C.citems|if (*global_failure >= 0) { return; }|]
-                )
-              else
-                ( SafetyFull,
-                  [C.citems|
+          if not (kernelHasBarriers kstate)
+            then
+              ( SafetyFull,
+                [C.citems|if (*global_failure >= 0) { return; }|]
+              )
+            else
+              ( SafetyFull,
+                [C.citems|
                      volatile __local bool local_failure;
                      if (failure_is_an_option) {
                        int failed = *global_failure >= 0;
@@ -316,7 +316,7 @@ onKernel target kernel = do
                      local_failure = false;
                      barrier(CLK_LOCAL_MEM_FENCE);
                   |]
-                )
+              )
 
       failure_params =
         [ [C.cparam|__global int *global_failure|],
@@ -329,6 +329,7 @@ onKernel target kernel = do
           ++ take (numFailureParams safety) failure_params
           ++ catMaybes local_memory_params
           ++ use_params
+          ++ [[C.cparam|const int device_id|]]
 
       kernel_fun =
         [C.cfun|__kernel void $id:name ($params:params) {
@@ -473,7 +474,7 @@ static inline void mem_fence_local() {
   where
     enable_f64
       | FloatType Float64 `S.member` ts =
-          [untrimming|
+        [untrimming|
          #pragma OPENCL EXTENSION cl_khr_fp64 : enable
          #define FUTHARK_F64_ENABLED
          |]
@@ -553,14 +554,19 @@ static inline int get_local_size(int d) {
   }
 }
 
-static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_group_id(d) * get_local_size(d) + get_local_id(d);
-}
-#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)
 
 static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d) {
   return get_num_groups(d) * get_local_size(d);
 }
+
+static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int device_id, int d) {
+  switch (d) {
+    case 0: return get_global_size(block_dim0, block_dim1, block_dim2, d) * device_id + 
+      get_group_id(d) * get_local_size(d) + get_local_id(d); 
+    default: return get_group_id(d) * get_local_size(d) + get_local_id(d);
+  }
+}
+#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, device_id, d)
 
 #define CLK_LOCAL_MEM_FENCE 1
 #define CLK_GLOBAL_MEM_FENCE 2
@@ -657,6 +663,8 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
     kernelOps (GetLockstepWidth v) =
       GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
+    kernelOps (GetDeviceId v) =
+      GC.stm [C.cstm|$id:v = device_id;|]
     kernelOps (Barrier f) = do
       GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
@@ -800,17 +808,17 @@ inKernelOperations mode body =
 
     callInKernel dests fname args
       | isBuiltInFunction fname =
-          GC.opsCall GC.defaultOperations dests fname args
+        GC.opsCall GC.defaultOperations dests fname args
       | otherwise = do
-          let out_args = [[C.cexp|&$id:d|] | d <- dests]
-              args' =
-                [C.cexp|global_failure|] :
-                [C.cexp|global_failure_args|] :
-                out_args ++ args
+        let out_args = [[C.cexp|&$id:d|] | d <- dests]
+            args' =
+              [C.cexp|global_failure|] :
+              [C.cexp|global_failure_args|] :
+              out_args ++ args
 
-          what_next <- whatNext
+        what_next <- whatNext
 
-          GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
+        GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
 
     errorInKernel msg@(ErrorMsg parts) backtrace = do
       n <- length . kernelFailures <$> GC.getUserState

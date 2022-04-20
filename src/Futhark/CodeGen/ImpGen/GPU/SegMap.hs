@@ -27,6 +27,7 @@ compileSegMap pat lvl space kbody = do
       dims' = map toInt64Exp dims
       num_groups' = toInt64Exp <$> segNumGroups lvl
       group_size' = toInt64Exp <$> segGroupSize lvl
+      
 
   emit $ Imp.DebugPrint "\n# SegMap" Nothing
   case lvl of
@@ -35,11 +36,18 @@ compileSegMap pat lvl space kbody = do
       sKernelThread "segmap" (segFlat space) (defKernelAttrs num_groups' group_size') $
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
+          device_id <- kernelDeviceId . kernelConstants <$> askEnv
 
           global_tid <-
-            dPrimVE "global_tid" $
-              sExt64 group_id * sExt64 (unCount group_size')
-                + sExt64 local_tid
+            dPrimVE "global_tid" $ 
+              sExt64 (unCount group_size') * sExt64 (unCount num_groups') * sExt64 device_id +
+                sExt64 group_id * sExt64 (unCount group_size')
+                  + sExt64 local_tid
+          
+          
+          --global_tid_32 <- kernelGlobalThreadId . kernelConstants <$> askEnv
+          --global_tid <- dPrimVE "global_tid" $ sExt64 global_tid_32
+
 
           dIndexSpace (zip is dims') global_tid
 

@@ -157,6 +157,12 @@ struct cuda_context {
   struct profiling_record *profiling_records;
   int profiling_records_capacity;
   int profiling_records_used;
+
+  int device_count;
+  CUdevice* devices;
+  CUcontext* contexts;
+  CUmodule* modules;
+  CUevent* finished;
 };
 
 #define CU_DEV_ATTR(x) (CU_DEVICE_ATTRIBUTE_##x)
@@ -249,6 +255,39 @@ static int cuda_device_setup(struct cuda_context *ctx) {
     fprintf(stderr, "Using device #%d\n", chosen);
   }
 
+  int used_devices = 0;
+  int* devices = (int*)malloc(sizeof(int)*count);
+  for(int devID = 0; devID < count; devID++){
+    CUDA_SUCCEED_FATAL(cuDeviceGet(&dev, devID)); 
+
+    int cc_major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
+    int cc_minor = device_query(dev, COMPUTE_CAPABILITY_MINOR);
+    // Here it's a design chocie that all device should be of the same CC
+    if (cc_major == cc_major_best && cc_minor == cc_minor_best){
+      devices[used_devices] = devID;
+      used_devices++;
+    }
+  }
+  if(ctx->cfg.debugging){
+    fprintf(stderr, "Using %d devices\n", used_devices);
+  }
+  ctx->device_count = used_devices;
+  ctx->devices = (CUdevice*)malloc(sizeof(CUdevice)*used_devices);
+  ctx->contexts = (CUcontext*)malloc(sizeof(CUcontext)*used_devices);
+  ctx->modules = (CUmodule*)malloc(sizeof(CUmodule)*used_devices);
+  ctx->finished = (CUevent*)malloc(sizeof(CUevent)*used_devices);
+
+  for(int devIdx = 0; devIdx < used_devices; devIdx++){
+    CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->devices[devIdx], devices[devIdx]));
+    CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->contexts[devIdx], 
+                                   CU_CTX_SCHED_AUTO, 
+                                   ctx->devices[devIdx]));
+    CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->finished[devIdx], 
+                                     CU_EVENT_DISABLE_TIMING));                                   
+  }
+
+  free(devices); 
+
   CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->dev, chosen));
   return 0;
 }
@@ -290,7 +329,9 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
     { 7, 0, "compute_70" },
     { 7, 2, "compute_72" },
     { 7, 5, "compute_75" },
-    { 8, 0, "compute_80" }
+    // NVRTC doesn't support compiling to 8.0, See nvrtc.h
+    { 8, 0, "compute_75" },
+    { 8, 6, "compute_75" }
   };
 
   int major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
@@ -534,6 +575,12 @@ static char* cuda_module_setup(struct cuda_context *ctx,
 
   CUDA_SUCCEED_FATAL(cuModuleLoadData(&ctx->module, ptx));
 
+  for(int devID = 0; devID < ctx->device_count; devID++){
+    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[devID]));
+    CUDA_SUCCEED_FATAL(cuModuleLoadData(&ctx->modules[devID], ptx));
+    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devID]));
+  }
+
   free(ptx);
   if (src != NULL) {
     free(src);
@@ -620,6 +667,16 @@ static void cuda_cleanup(struct cuda_context *ctx) {
   CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
   (void)cuda_tally_profiling_records(ctx);
   free(ctx->profiling_records);
+  for(int devIdx = 0; devIdx < ctx->device_count; devIdx++){
+    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[devIdx]));
+    CUDA_SUCCEED_FATAL(cuEventDestroy(ctx->finished[devIdx]));
+    CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->modules[devIdx]));
+    CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->contexts[devIdx]));  
+  }
+  free(ctx->finished);
+  free(ctx->modules);
+  free(ctx->contexts);
+  free(ctx->devices);
   CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
   CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
 }
@@ -653,7 +710,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
     fprintf(log, "Actually allocating the desired block.\n");
   }
 
-  CUresult res = cuMemAlloc(mem_out, min_size);
+  CUresult res = cuMemAllocManaged(mem_out, min_size, CU_MEM_ATTACH_GLOBAL);
   while (res == CUDA_ERROR_OUT_OF_MEMORY) {
     CUdeviceptr mem;
     if (free_list_first(&ctx->free_list, &mem) == 0) {
@@ -664,7 +721,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
     } else {
       break;
     }
-    res = cuMemAlloc(mem_out, min_size);
+    res = cuMemAllocManaged(mem_out, min_size, CU_MEM_ATTACH_GLOBAL);
   }
 
   return res;
