@@ -66,7 +66,7 @@ tryCompile (Just path) old_loaded_prog = do
       case maybe_virtual_file of
         Nothing -> pure $ State (Just new_loaded_prog) M.empty -- should never happen
         Just virtual_file ->
-          pure $ State (Just new_loaded_prog) (M.singleton path (virtualFileText virtual_file))
+          pure $ State (Just new_loaded_prog) (M.singleton path virtual_file)
     -- TODO: only preserve the contents of the focused file for now, focus on useStale
     -- should preserve all files that has been type-checked
     -- maybe need an update on re-compile logic, don't discard all state afterwards

@@ -32,7 +32,7 @@ import Language.Futhark.Query
   )
 import Language.LSP.Server (LspM, getVirtualFile)
 import Language.LSP.Types
-import Language.LSP.VFS (VirtualFile, virtualFileText)
+import Language.LSP.VFS (VirtualFile, virtualFileText, virtualFileVersion)
 
 -- | Retrieve hover info for the definition referenced at the given
 -- file at the given line and column number (the two 'Int's).
@@ -91,15 +91,17 @@ queryAtPos state mapping pos = do
     updateBoundLoc (BoundType _loc) current_loc = BoundType current_loc
 
 -- | Entry point for create PositionMapping.
--- Nothing if diff is not needed.
+-- Nothing if mapping is not needed.
 getMapping :: State -> Uri -> LspM () (Maybe PositionMapping)
 getMapping state uri = do
   virtual_file <- getVirtualFile $ toNormalizedUri uri
   pure $ computeMapping (getStaleContent state $ uriToFilePath uri) virtual_file
   where
-    computeMapping :: Maybe T.Text -> Maybe VirtualFile -> Maybe PositionMapping
-    computeMapping (Just stale_content) (Just virtual_file) =
-      Just $ mappingFromDiff (T.lines stale_content) (T.lines $ virtualFileText virtual_file)
+    computeMapping :: Maybe VirtualFile -> Maybe VirtualFile -> Maybe PositionMapping
+    computeMapping (Just stale_file) (Just current_file) =
+      if virtualFileVersion stale_file == virtualFileVersion current_file
+        then Nothing -- "stale_file" is not stale afterall, no mapping needed
+        else Just $ mappingFromDiff (T.lines $ virtualFileText stale_file) (T.lines $ virtualFileText current_file)
     computeMapping _ _ = Nothing
 
 -- | Convert a Futhark 'Pos' to an LSP 'Uri'.
