@@ -1,4 +1,5 @@
 -- Do not migrate the application of functions that work with arrays.
+-- These are subject to compiler limitations.
 -- ==
 -- structure gpu {
 --   GPUBody 0

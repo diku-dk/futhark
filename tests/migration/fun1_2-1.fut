@@ -1,4 +1,4 @@
--- Functions that do not work with arrays can be migrated.
+-- Function calls that do not work with arrays can be migrated.
 -- ==
 -- structure gpu {
 --   /GPUBody 1
