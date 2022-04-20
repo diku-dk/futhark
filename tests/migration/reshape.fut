@@ -1,5 +1,8 @@
--- Reshapes cannot be migrated to prevent dimension size variables from being
--- read.
+-- Reshapes may not be migrated on their own as results from GPUBody constructs
+-- are copied, which would change the asymptotic cost of the operation.
+--
+-- In general any scalar used within a type must be made available on host
+-- before use.
 -- ==
 -- structure gpu {
 --   GPUBody 0

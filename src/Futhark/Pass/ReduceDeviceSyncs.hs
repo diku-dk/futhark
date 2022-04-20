@@ -39,8 +39,6 @@ import Futhark.Transform.Substitute
 -- TODO: Run ormolu and hlint (all contributed files)
 
 -- TODO: Write tests
---       - Array expressions.
---       - Single element arrays.
 
 -- | An optimization pass that migrates host statements into 'GPUBody' kernels
 -- to reduce the number of host-device synchronizations.

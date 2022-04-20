@@ -1,5 +1,8 @@
--- In general replicates are not migrated. They can however be rewritten to
--- allow the computation of their replicated value to be migrated.
+-- In general replicates are not migrated in order not to turn a parallel
+-- operation into a sequential one (GPUBody kernels are single-threaded).
+--
+-- They can however be rewritten to allow the computation of their replicated
+-- value to be migrated.
 -- ==
 -- structure gpu {
 --   /GPUBody 1
