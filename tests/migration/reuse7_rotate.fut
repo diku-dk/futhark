@@ -8,15 +8,15 @@
 --   /GPUBody/DoLoop/Rotate 1
 -- }
 
--- This fails due to a memory allocation error.
+-- These fail due to memory allocation errors.
 
--- entry case1 (A: [5]i64) : [1]i64 =
+-- entry case_if (A: [5]i64) : [1]i64 =
 --   if A[0] == 42
---      then let A' = rotate 1 (opaque A)
---            in #[unsafe] (opaque A')[0:1] :> [1]i64
+--      then let B = rotate 1 (opaque A)
+--            in #[unsafe] (opaque B)[0:1] :> [1]i64
 --      else A[0:1] :> [1]i64
 
--- entry case2 (A: [5]i64) : [1]i64 =
+-- entry case_for (A: [5]i64) : [1]i64 =
 --   loop _ = A[0:1] for i < A[1] do
 --     let B = rotate i (opaque A)
 --      in B[0:1]

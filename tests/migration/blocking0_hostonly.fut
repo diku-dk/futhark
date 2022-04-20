@@ -6,12 +6,19 @@
 
 #[noinline]
 def hostonly 'a (x: a) : a =
-  -- This function can only be run on host and thus requires
-  -- its argument to be made available there.
+  -- This function can only be run on host.
   let arr = opaque [x]
   in arr[0]
 
-def main (A: [5]i64) : i64 =
-  let x = if A[0] == 0 then A[1] else hostonly A[2]
-   in loop y = x while y < 1000 do
-        hostonly (y * A[y%5])
+entry case_if (A: [5]i64) : i64 =
+  if A[0] == 0
+     then hostonly 42
+     else A[1]
+
+entry case_while (A: [5]i64) : i64 =
+  loop x = A[0] while x < 1000 do
+    x * (A[hostonly x % 5] + 1)
+
+entry case_for (A: [5]i64) : i64 =
+  loop x = 0 for i < A[0] do
+    x * (A[hostonly x % 5] + 1)

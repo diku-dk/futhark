@@ -8,15 +8,15 @@
 --   /GPUBody/DoLoop/Scratch 1
 -- }
 
--- This fails due to a memory allocation error.
+-- These fail due to memory allocation errors.
 
--- entry case1 (A: *[5]i64) : [1]i64 =
---   if A[4] == 42
---      then let A' = #[sequential] map (+1) A
---            in #[unsafe] (opaque A')[0:1] :> [1]i64
+-- entry case_if (A: *[5]i64) : [1]i64 =
+--   if A[0] == 42
+--      then let B = #[sequential] map (+1) A
+--            in #[unsafe] (opaque B)[0:1] :> [1]i64
 --      else A[0:1] :> [1]i64
 
--- entry case2 (A: *[5]i64) : [1]i64 =
+-- entry case_for (A: *[5]i64) : [1]i64 =
 --   loop A' = A[0:1] for i < A[1] do
 --     let B = [0, 1, 2, 3, A'[0]]
 --     let C = #[sequential] map (+i) B

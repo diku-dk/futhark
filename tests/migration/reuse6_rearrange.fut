@@ -6,8 +6,8 @@
 --   /GPUBody/If/True/Rearrange 1
 -- }
 
-def main (A: [3][2]i64) (x: i64) : [1]i64 =
+entry case_if (A: [3][2]i64) (x: i64) : [1]i64 =
   if A[0,0] == 42
-     then let A' = transpose (opaque A)
-           in #[unsafe] (opaque A')[0, 0:1] :> [1]i64
+     then let B = transpose (opaque A)
+           in #[unsafe] (opaque B)[0, 0:1] :> [1]i64
      else A[0, 0:1] :> [1]i64

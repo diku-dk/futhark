@@ -2,12 +2,22 @@
 -- This is to avoid turning a parallel device copy into a sequential operation.
 -- ==
 -- structure gpu {
---   GPUBody 0
 --   /If/True/ArrayLit 1
+--   /DoLoop/ArrayLit 2
 -- }
 
-def main (A: [5]i64) : [1]i64 =
-  if A[4] == 42
+entry case_if (A: [5]i64) (x: i64) : i64 =
+  if A[0] == 0
      then let B = [A, opaque A]
-           in #[unsafe] (opaque B)[0, 0:1] :> [1]i64
-     else A[0:1] :> [1]i64
+           in #[unsafe] (opaque B)[x%2, 2]
+     else A[1]
+
+entry case_while (A: [5]i64) : i64 =
+  loop x = A[0] while x < 1000 do
+    let B = [A, opaque A]
+     in #[unsafe] (opaque B)[x%2, 2]
+
+entry case_for (A: [5]i64) : i64 =
+  loop x = 0 for i < A[0] do
+    let B = [A, opaque A]
+     in #[unsafe] (opaque B)[x%2, 2]
