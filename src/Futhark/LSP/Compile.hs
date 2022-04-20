@@ -11,7 +11,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
-import Futhark.LSP.State (State (..), emptyState)
+import Futhark.LSP.State (State (..), emptyState, updateStaleContent)
 import Futhark.Util (debug)
 import Language.Futhark.Warnings (listWarnings)
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
@@ -29,7 +29,7 @@ tryTakeStateFromMVar state_mvar file_path = do
   old_state <- liftIO $ takeMVar state_mvar
   case stateProgram old_state of
     Nothing -> do
-      new_state <- tryCompile file_path noLoadedProg
+      new_state <- tryCompile old_state file_path noLoadedProg
       liftIO $ putMVar state_mvar new_state
       pure new_state
     Just _ -> do
@@ -42,7 +42,7 @@ tryReCompile state_mvar file_path = do
   debug "(Re)-compiling ..."
   old_state <- liftIO $ takeMVar state_mvar
   let loaded_prog = getLoadedProg old_state
-  new_state <- tryCompile file_path loaded_prog
+  new_state <- tryCompile old_state file_path loaded_prog
   case stateProgram new_state of
     Nothing -> do
       debug "Failed to (re)-compile, using old state or Nothing"
@@ -53,11 +53,11 @@ tryReCompile state_mvar file_path = do
 
 -- | Try to compile, publish diagnostics on warnings and errors, return newly compiled state.
 --  Single point where the compilation is done, and shouldn't be exported.
-tryCompile :: Maybe FilePath -> LoadedProg -> LspT () IO State
-tryCompile Nothing _ = pure emptyState
-tryCompile (Just path) old_loaded_prog = do
+tryCompile :: State -> Maybe FilePath -> LoadedProg -> LspT () IO State
+tryCompile _ Nothing _ = pure emptyState
+tryCompile state (Just path) old_loaded_prog = do
   vfs <- getVirtualFiles
-  res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs)
+  res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs) -- NOTE: vfs only keeps track of current opened files
   flushDiagnosticsBySource maxDiagnostic diagnosticSource
   case res of
     Right new_loaded_prog -> do
@@ -65,11 +65,10 @@ tryCompile (Just path) old_loaded_prog = do
       maybe_virtual_file <- getVirtualFile $ toNormalizedUri $ filePathToUri path
       case maybe_virtual_file of
         Nothing -> pure $ State (Just new_loaded_prog) M.empty -- should never happen
-        Just virtual_file ->
-          pure $ State (Just new_loaded_prog) (M.singleton path virtual_file)
-    -- TODO: only preserve the contents of the focused file for now, focus on useStale
-    -- should preserve all files that has been type-checked
-    -- maybe need an update on re-compile logic, don't discard all state afterwards
+        Just virtual_file -> pure $ updateStaleContent path virtual_file state
+    -- Preserve files that have been opened should be enoguth.
+    -- But still might need an update on re-compile logic, don't discard all state afterwards,
+    -- try to compile from root file, if there is a depencency relatetion, improve performance and provide more dignostic.
     Left prog_error -> do
       debug "Compilation failed, publishing diagnostics"
       publishErrorDiagnostics prog_error

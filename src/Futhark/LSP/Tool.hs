@@ -73,15 +73,19 @@ queryAtPos state mapping pos = do
     updateAtPos :: AtPos -> Maybe AtPos
     updateAtPos (AtName qn (Just def) loc) = do
       let def_loc = boundLoc def
-          Loc (Pos file_path _ _ _) _ = def_loc
+          Loc (Pos def_file _ _ _) _ = def_loc
           Pos current_file _ _ _ = pos
       current_loc <- toCurrentLoc mapping loc
-      current_def_loc <- toCurrentLoc mapping def_loc
-      -- TODO: getting even trickier then expected
-      -- what if the definition is in a different **stale** file?
-      if file_path == current_file
-        then Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
-        else Just $ AtName qn (Just def) current_loc
+      if def_file == current_file
+        then do
+          current_def_loc <- toCurrentLoc mapping def_loc
+          Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
+        else do
+          -- TODO: getting even trickier then expected
+          -- what if the definition is in a different **stale** file?
+          -- how to compute a mapping for def_file?
+          -- we don't have the file contents if the file is not open, it doesn't exits in VFS
+          Just $ AtName qn (Just def) current_loc
     updateAtPos _ = Nothing
 
     updateBoundLoc :: BoundTo -> Loc -> BoundTo
