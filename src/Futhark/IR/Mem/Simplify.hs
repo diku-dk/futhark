@@ -143,7 +143,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
                 v_copy <- newVName $ baseString v <> "_nonext_copy"
                 let v_pat =
                       Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]
-                addStm $ mkWiseLetStm v_pat (defAux ()) $ BasicOp (Copy v)
+                addStm $ mkWiseStm v_pat (defAux ()) $ BasicOp (Copy v)
                 pure $ SubExpRes cs $ Var v_copy
             | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
                 pure $ SubExpRes cs $ Var mem
