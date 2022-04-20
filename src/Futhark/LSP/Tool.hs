@@ -72,11 +72,23 @@ queryAtPos state mapping pos = do
   where
     updateAtPos :: AtPos -> Maybe AtPos
     updateAtPos (AtName qn (Just def) loc) = do
+      let def_loc = boundLoc def
+          Loc (Pos file_path _ _ _) _ = def_loc
+          Pos current_file _ _ _ = pos
       current_loc <- toCurrentLoc mapping loc
-      -- TODO: update boundloc to current_loc
-      -- note, boundloc could be in another file, don't change in that case
-      Just $ AtName qn (Just def) current_loc
+      current_def_loc <- toCurrentLoc mapping def_loc
+      -- TODO: getting even trickier then expected
+      -- what if the definition is in a different **stale** file?
+      if file_path == current_file
+        then Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
+        else Just $ AtName qn (Just def) current_loc
     updateAtPos _ = Nothing
+
+    updateBoundLoc :: BoundTo -> Loc -> BoundTo
+    updateBoundLoc (BoundTerm t _loc) current_loc = BoundTerm t current_loc
+    updateBoundLoc (BoundModule _loc) current_loc = BoundModule current_loc
+    updateBoundLoc (BoundModuleType _loc) current_loc = BoundModuleType current_loc
+    updateBoundLoc (BoundType _loc) current_loc = BoundType current_loc
 
 -- | Entry point for create PositionMapping.
 -- Nothing if diff is not needed.

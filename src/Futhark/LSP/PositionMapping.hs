@@ -50,6 +50,7 @@ toCurrentPos (Just (PositionMapping (old2new, _))) pos =
     Pos file l c o = pos
 toCurrentPos Nothing pos = Just pos
 
+-- | Transform stale Loc gotten from stale AST to current Loc.
 toCurrentLoc :: Maybe PositionMapping -> Loc -> Maybe Loc
 toCurrentLoc mapping loc = do
   let Loc start end = loc
