@@ -900,7 +900,7 @@ static inline uniform float fmin32(uniform float x, uniform float y) {
 }
 
 static inline uniform float fpow32(uniform float x, uniform float y) {
-  return pow(x, y);
+  return __stdlib_powf(x, y);
 }
 
 static inline uniform bool futrts_isnan32(uniform float x) {
@@ -1219,7 +1219,7 @@ static inline uniform double fmin64(uniform double x, uniform double y) {
 }
 
 static inline uniform double fpow64(uniform double x, uniform double y) {
-  return pow(x, y);
+  return __stdlib_powf(x, y);
 }
 
 static inline uniform double futrts_log64(uniform double x) {
