@@ -43,6 +43,7 @@ module Futhark.Optimise.Simplify.Engine
     isFalse,
     isOp,
     isNotSafe,
+    isDeviceMigrated,
     asksEngineEnv,
     askVtable,
     localVtable,
@@ -60,6 +61,7 @@ module Futhark.Optimise.Simplify.Engine
     ST.SymbolTable,
     hoistStms,
     blockIf,
+    blockMigrated,
     enterLoop,
     constructBody,
     module Futhark.Optimise.Simplify.Rep,
@@ -313,7 +315,7 @@ protectLoopHoisted merge form m = do
         WhileLoop cond
           | Just (_, cond_init) <-
               find ((== cond) . paramName . fst) merge ->
-              pure cond_init
+            pure cond_init
           | otherwise -> pure $ constant True -- infinite loop
         ForLoop _ it bound _ ->
           letSubExp "loop_nonempty" $
@@ -336,19 +338,19 @@ protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
-      auxing aux m
+    auxing aux m
 protectIf _ f taken (Let pat aux e)
   | f e =
-      case makeSafe e of
-        Just e' ->
-          auxing aux $ letBind pat e'
-        Nothing -> do
-          taken_body <- eBody [pure e]
-          untaken_body <-
-            eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
-          if_ts <- expTypesFromPat pat
-          auxing aux . letBind pat $
-            If taken taken_body untaken_body $ IfDec if_ts IfFallback
+    case makeSafe e of
+      Just e' ->
+        auxing aux $ letBind pat e'
+      Nothing -> do
+        taken_body <- eBody [pure e]
+        untaken_body <-
+          eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
+        if_ts <- expTypesFromPat pat
+        auxing aux . letBind pat $
+          If taken taken_body untaken_body $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -457,20 +459,20 @@ hoistStms rules block orig_stms final = do
       case res of
         Nothing -- Nothing to optimise - see if hoistable.
           | block vtable usage stm ->
-              -- No, not hoistable.
-              pure
-                ( x,
-                  expandUsage usageInStm vtable usage stm
-                    `UT.without` provides stm,
-                  Left stm : stms
-                )
+            -- No, not hoistable.
+            pure
+              ( x,
+                expandUsage usageInStm vtable usage stm
+                  `UT.without` provides stm,
+                Left stm : stms
+              )
           | otherwise ->
-              -- Yes, hoistable.
-              pure
-                ( x,
-                  expandUsage usageInStm vtable usage stm,
-                  Right stm : stms
-                )
+            -- Yes, hoistable.
+            pure
+              ( x,
+                expandUsage usageInStm vtable usage stm,
+                Right stm : stms
+              )
         Just optimstms -> do
           changed
           descend usageInStm optimstms $ pure (x, usage, stms)
@@ -512,9 +514,9 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
       (blocked <> namesFromList (provides need), Left need)
     block blocked (Right need)
       | blocked `namesIntersect` freeIn need =
-          (blocked <> namesFromList (provides need), Left need)
+        (blocked <> namesFromList (provides need), Left need)
       | otherwise =
-          (blocked, Right need)
+        (blocked, Right need)
 
 provides :: Stm rep -> [VName]
 provides = patNames . stmPat
@@ -681,7 +683,7 @@ hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
       --
       isNotHoistableBnd _ usage (Let pat _ _)
         | any (`UT.isSize` usage) $ patNames pat =
-            False
+          False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
@@ -861,7 +863,7 @@ simplifyExp usage _ (WithAcc inputs lam) = do
       Nothing ->
         pure (Nothing, mempty)
       Just (op_lam, nes) -> do
-        (op_lam', op_lam_stms) <- simplifyLambda op_lam
+        (op_lam', op_lam_stms) <- blockMigrated (simplifyLambda op_lam)
         nes' <- simplify nes
         pure (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
@@ -872,6 +874,36 @@ simplifyExp _ _ e = do
   e' <- simplifyExpBase e
   pure (e', mempty)
 
+-- | Block hoisting of 'Index' statements introduced by migration.
+blockMigrated ::
+  SimplifiableRep rep =>
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep)) ->
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+blockMigrated = local withMigrationBlocker
+  where
+    withMigrationBlocker (ops, env) =
+      let blockers = envHoistBlockers env
+          par_blocker = blockHoistPar blockers
+
+          blocker = par_blocker `orIf` isDeviceMigrated
+
+          blockers' = blockers {blockHoistPar = blocker}
+          env' = env {envHoistBlockers = blockers'}
+       in (ops, env')
+
+-- | Statement is a scalar read from a single element array of rank one.
+isDeviceMigrated :: SimplifiableRep rep => BlockPred (Wise rep)
+isDeviceMigrated vtable _ stm
+  | BasicOp (Index arr slice) <- stmExp stm,
+    [DimFix idx] <- unSlice slice,
+    idx == intConst Int64 0,
+    Just arr_t <- ST.lookupType arr vtable,
+    [size] <- arrayDims arr_t,
+    size == intConst Int64 1 =
+    True
+  | otherwise =
+    False
+
 -- The simple nonrecursive case that we can perform without bottom-up
 -- information.
 simplifyExpBase :: SimplifiableRep rep => Exp (Wise rep) -> SimpleM rep (Exp (Wise rep))
@@ -880,9 +912,9 @@ simplifyExpBase :: SimplifiableRep rep => Exp (Wise rep) -> SimpleM rep (Exp (Wi
 -- more identical, which helps CSE.
 simplifyExpBase (BasicOp (BinOp op x y))
   | commutativeBinOp op = do
-      x' <- simplify x
-      y' <- simplify y
-      pure $ BasicOp $ BinOp op (min x' y') (max x' y')
+    x' <- simplify x
+    y' <- simplify y
+    pure $ BasicOp $ BinOp op (min x' y') (max x' y')
 simplifyExpBase e = mapExpM hoist e
   where
     hoist =
