@@ -29,6 +29,27 @@ jobs:
         name: futhark-nightly-linux-x86_64.tar.xz
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
+  build-linux-guix:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Guix cache
+      uses: actions/cache@v2
+      with:
+        path: ~/.cache/guix
+        # use a key that (almost) never matches
+        key: guix-cache-${{ github.sha }}
+        restore-keys: |
+          guix-cache-
+
+    - name: Install Guix
+      uses: PromyLOPh/guix-install-action@v1
+
+    - name: Build Futhark
+      run: guix time-machine --channels=channels.scm -- build -f futhark.scm
+
   build-linux-cabal:
     runs-on: ubuntu-20.04
 
