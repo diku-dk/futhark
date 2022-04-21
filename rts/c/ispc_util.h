@@ -89,9 +89,7 @@ static inline void free(void* ptr) {
 }
 
 static inline void free(void* uniform ptr) {
-  if (programIndex == 0) {
-    delete ptr;
-  }
+  delete ptr;
 }
 
 // TODO(pema): Rename
