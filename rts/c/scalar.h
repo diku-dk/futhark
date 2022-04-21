@@ -1560,11 +1560,11 @@ static int32_t futrts_clzz64(int64_t x) {
 #elif ISPC
 
 static int32_t futrts_clzz8(int8_t x) {
-  return x == 0 ? 8 : count_leading_zeros((int32_t)x);
+  return count_leading_zeros((int32_t)(uint8_t)x)-24;
 }
 
 static int32_t futrts_clzz16(int16_t x) {
-  return x == 0 ? 16 : max(count_leading_zeros((int32_t)x)-16,0);
+  return count_leading_zeros((int32_t)(uint16_t)x)-16;
 }
 
 static int32_t futrts_clzz32(int32_t x) {
@@ -1770,8 +1770,13 @@ static inline float fmin32(float x, float y) {
   return isnan(x) ? y : isnan(y) ? x : min(x, y);
 }
 
-static inline float fpow32(float x, float y) {
-  return pow(x, y);
+static inline float fpow32(float a, float b) {
+  float ret;
+  foreach_active (i) {
+      uniform float r = __stdlib_powf(extract(a, i), extract(b, i));
+      ret = insert(ret, i, r);
+  }
+  return ret;
 }
 
 #else // Not OpenCL, but CUDA or plain C.
@@ -2393,8 +2398,13 @@ static inline double fmin64(double x, double y) {
   return isnan(x) ? y : isnan(y) ? x : min(x, y);
 }
 
-static inline double fpow64(double x, double y) {
-  return pow(x, y);
+static inline double fpow64(double a, double b) {
+  float ret;
+  foreach_active (i) {
+      uniform float r = __stdlib_powf(extract(a, i), extract(b, i));
+      ret = insert(ret, i, r);
+  }
+  return ret;
 }
 
 static inline double futrts_log64(double x) {

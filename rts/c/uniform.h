@@ -797,11 +797,11 @@ static uniform uint64_t futrts_mad_hi64(uniform uint64_t a, uniform uint64_t b, 
 }
 
 static uniform int32_t futrts_clzz8(uniform int8_t x) {
-  return x == 0 ? 8 : count_leading_zeros((uniform int32_t)x);
+  return count_leading_zeros((uniform int32_t)(uniform uint8_t)x)-24;
 }
 
 static uniform int32_t futrts_clzz16(uniform int16_t x) {
-  return x == 0 ? 16 : max(count_leading_zeros((uniform int32_t)x)-16,0);
+  return count_leading_zeros((uniform int32_t)(uniform uint16_t)x)-16;
 }
 
 static uniform int32_t futrts_clzz32(uniform int32_t x) {
@@ -900,7 +900,7 @@ static inline uniform float fmin32(uniform float x, uniform float y) {
 }
 
 static inline uniform float fpow32(uniform float x, uniform float y) {
-  return pow(x, y);
+  return __stdlib_powf(x, y);
 }
 
 static inline uniform bool futrts_isnan32(uniform float x) {
@@ -1219,7 +1219,7 @@ static inline uniform double fmin64(uniform double x, uniform double y) {
 }
 
 static inline uniform double fpow64(uniform double x, uniform double y) {
-  return pow(x, y);
+  return __stdlib_powf(x, y);
 }
 
 static inline uniform double futrts_log64(uniform double x) {

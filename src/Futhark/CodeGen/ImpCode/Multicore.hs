@@ -169,8 +169,12 @@ instance FreeIn Multicore where
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
 
--- TODO(pema): This is a bit hacky
--- Like @lexicalMemoryUsage@, but traverses inner multicore ops
+-- TODO(pema): We should probably make something like this but
+-- for the (non-ispc) multicore backend, which _does_ look into
+-- kernels (since they will be lexical). As it is currently, we
+-- treat many memory blocks which _could_ be lexical in the normal
+-- multicore backend as non-lexical. Also, the issue with safety tests.
+-- | Like @lexicalMemoryUsage@, but traverses inner multicore ops
 lexicalMemoryUsageMC :: Function Multicore -> M.Map VName Space
 lexicalMemoryUsageMC func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
@@ -205,9 +209,6 @@ lexicalMemoryUsageMC func =
       where
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
-    -- Treat inputs to kernels as non lexical, so we don't mix up the types
-    -- inside of a kernel!
-    set (Op (ISPCKernel _ args)) = namesFromList $ map paramName args
     -- Critically, don't treat inputs to nested segops as lexical, since we
     -- want to use AoS memory for lexical blocks, which is incompatible with
     -- pointer assignmentes visible in C.

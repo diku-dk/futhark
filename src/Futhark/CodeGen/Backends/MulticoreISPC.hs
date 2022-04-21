@@ -85,6 +85,7 @@ typedef unsigned int64 uint64_t;
 typedef unsigned int32 uint32_t;
 typedef unsigned int16 uint16_t;
 typedef unsigned int8 uint8_t;
+#define volatile
 
 $errorsH
 
@@ -362,7 +363,8 @@ handleError msg stacktrace = do
   shim <- MC.multicoreDef "assert_shim" $ \s -> do
     pure
       [C.cedecl|void $id:s(struct futhark_context* ctx, $params:params) {
-        ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
+        if (ctx->error == NULL)
+          ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
       }|]
   ispcDecl
     [C.cedecl|extern "C" unmasked void $id:shim(uniform struct futhark_context* uniform, $params:params_uni);|]
@@ -579,17 +581,16 @@ compileGetStructVals ::
 compileGetStructVals struct a b = concat <$> zipWithM field a b
   where
     struct' = struct <> "_"
-    field name (ty, MC.Prim) =
-      pure [C.citems|uniform $ty:ty $id:name = $id:struct'->$id:(MC.closureFreeStructField name);|]
-    field name (_, MC.MemBlock) = do
+    field name (ty, MC.Prim pt) = do
+      let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
+      pure [C.citems|uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
+    field name (_, _) = do
       strlit <- makeStringLiteral $ pretty name
       pure [C.citems|uniform struct memblock $id:name;
                      $id:name.desc = $id:strlit();
                      $id:name.mem = $id:struct'->$id:(MC.closureFreeStructField name);
                      $id:name.size = 0;
                      $id:name.references = NULL;|]
-    field name (_, MC.RawMem) =
-      pure [C.citems|uniform unsigned char * uniform $id:name = $id:struct'->$id:(MC.closureFreeStructField name);|]
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ISPCState
