@@ -20,11 +20,11 @@ The Linux binaries we distribute are statically linked and should not
 require any special libraries installed system-wide.
 
 When building from source on Linux and macOS, you will need to have
-the ``gmp`` and ``tinfo`` libraries installed.  These are pretty
-common, so you may already have them.  On Debian-like systems
+the ``gmp``, ``tinfo``, and ``zlib`` libraries installed.  These are
+pretty common, so you may already have them.  On Debian-like systems
 (e.g. Ubuntu), use::
 
-  sudo apt install libtinfo-dev libgmp-dev
+  sudo apt install libtinfo-dev libgmp-dev zlib1g-dev
 
 If you install Futhark via a package manager (e.g. Homebrew, Nix, or
 AUR), you shouldn't need to worry about any of this.

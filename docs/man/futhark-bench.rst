@@ -15,17 +15,41 @@ DESCRIPTION
 ===========
 
 This tool is the recommended way to benchmark Futhark programs.
-Programs are compiled using the specified backend (``futhark c`` by
-default), then run a number of times for each test case, and the
-average runtime printed on standard output.  Refer to
-:ref:`futhark-test(1)` for information on how to format test data.  A
-program will be ignored if it contains no data sets - it will not even
-be compiled.
+Programs are compiled using the specified backend (``c`` by default),
+then run a number of times for each test case, and the arithmetic mean
+runtime and 95% confidence interval printed on standard output.  Refer
+to :ref:`futhark-test(1)` for information on how to format test data.
+A program will be ignored if it contains no data sets - it will not
+even be compiled.
 
 If compilation of a program fails, then ``futhark bench`` will abort
 immediately.  If execution of a test set fails, an error message will
 be printed and benchmarking will continue (and ``--json`` will write
 the file), but a non-zero exit code will be returned at the end.
+
+METHODOLOGY
+===========
+
+For each program and dataset, ``futhark bench`` first does a single
+"warmup" run that is discarded.  After that it uses a two-phase
+technique.
+
+1. The *initial phase* performs ten runs (change with ``-r``), or
+   perform runs for at least half a second, whichever takes longer.
+   If the resulting measurements are sufficiently statistically robust
+   (determined using standard deviation and autocorrelation metrics),
+   the results are produced and the second phase is not entered.
+   Otherwise, the results are discarded and the second phase entered.
+
+2. The *convergence phase* keeps performing runs until a measurement
+   of sufficient statistical quality is reached.
+
+The notion of "sufficient statistical quality" is based on heuristics.
+The intent is that ``futhark bench`` will in most cases do *the right
+thing* by default, both when benchmarking both long-running programs
+and short-running programs.  If you want complete control, disable the
+convergence phase with ``--no-convergence-phase`` and set the number
+of runs you want with ``-r``.
 
 OPTIONS
 =======
@@ -35,6 +59,11 @@ OPTIONS
   The backend used when compiling Futhark programs (without leading
   ``futhark``, e.g. just ``opencl``).
 
+--cache-extension=EXTENSION
+
+  For a program ``foo.fut``, pass ``--cache-file foo.fut.EXTENSION``.
+  By default, ``--cache-file`` is not passed.
+
 --concurrency=NUM
 
   The number of benchmark programs to prepare concurrently.  Defaults
@@ -42,6 +71,12 @@ OPTIONS
   benchmark, as well as generate any needed datasets.  In some cases,
   this generation can take too much memory, in which case lowering
   ``--concurrency`` may help.
+
+--convergence-max-seconds=NUM
+
+  Don't run the convergence phase for longer than this.  This does not
+  mean that the measurements have converged.  Defaults to 300 seconds
+  (five minutes).
 
 --entry-point=name
 
@@ -69,6 +104,10 @@ OPTIONS
 --no-tuning
 
   Do not look for tuning files.
+
+--no-convergence-phase
+
+  Do not run the convergence phase.
 
 --pass-option=opt
 
@@ -128,13 +167,6 @@ OPTIONS
   example, given ``--tuning=tuning`` (the default), the program
   ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
   exists.
-
-WHAT FUTHARK BENCH MEASURES
-===========================
-
-``futhark bench`` measures the time it takes to run the given Futhark
-program by passing the ``-t FILE`` option to the generated program. See
-the man page for the specific compiler to see exactly what is measured.
 
 EXAMPLES
 ========
