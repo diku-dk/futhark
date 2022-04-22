@@ -1,5 +1,4 @@
--- Reads can be delayed out of loops and participate in further reductions,
--- even if they are introduced by a for-in loop.
+-- Reads introduced by a for-in loop can be delayed.
 -- ==
 -- structure gpu {
 --   /DoLoop/Index 0
