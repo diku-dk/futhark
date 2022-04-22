@@ -2,13 +2,13 @@
 -- the Futhark program managed by the language server.  The challenge
 -- here is that if the program becomes type-invalid, we want to keep
 -- the old state around.
-module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
+module Futhark.LSP.Compile (tryTakeStateFromIORef, tryReCompile) where
 
-import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Data.IORef (IORef, readIORef, writeIORef)
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
+import Futhark.Compiler.Program (LoadedProg, lpFilePaths, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState)
 import Futhark.Util (debug)
@@ -17,38 +17,49 @@ import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFiles)
 import Language.LSP.Types (fromNormalizedFilePath, uriToNormalizedFilePath)
 import Language.LSP.VFS (VFS (vfsMap), virtualFileText)
 
--- | Try to take state from MVar, if it's empty, try to compile.
-tryTakeStateFromMVar :: MVar State -> Maybe FilePath -> LspT () IO State
-tryTakeStateFromMVar state_mvar file_path = do
-  old_state <- liftIO $ takeMVar state_mvar
+-- | Try to take state from IORef, if it's empty, try to compile.
+tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State
+tryTakeStateFromIORef state_mvar file_path = do
+  old_state <- liftIO $ readIORef state_mvar
   case stateProgram old_state of
     Nothing -> do
       new_state <- tryCompile file_path (State $ Just noLoadedProg)
-      liftIO $ putMVar state_mvar new_state
+      liftIO $ writeIORef state_mvar new_state
       pure new_state
-    Just _ -> do
-      liftIO $ putMVar state_mvar old_state
-      pure old_state
+    Just prog -> do
+      -- If this is in the context of some file that is not part of
+      -- the program, try to reload the program from that file.
+      let files = lpFilePaths prog
+      state <- case file_path of
+        Just file_path'
+          | file_path' `notElem` files -> do
+              debug $ "File not part of program: " <> show file_path'
+              debug $ "Program contains: " <> show files
+              tryCompile file_path (State $ Just noLoadedProg)
+        _ -> pure old_state
+      liftIO $ writeIORef state_mvar state
+      pure state
 
 -- | Try to (re)-compile, replace old state if successful.
-tryReCompile :: MVar State -> Maybe FilePath -> LspT () IO ()
+tryReCompile :: IORef State -> Maybe FilePath -> LspT () IO ()
 tryReCompile state_mvar file_path = do
   debug "(Re)-compiling ..."
-  old_state <- liftIO $ takeMVar state_mvar
+  old_state <- liftIO $ readIORef state_mvar
   new_state <- tryCompile file_path old_state
   case stateProgram new_state of
     Nothing -> do
       debug "Failed to (re)-compile, using old state or Nothing"
-      liftIO $ putMVar state_mvar old_state
+      liftIO $ writeIORef state_mvar old_state
     Just _ -> do
       debug "(Re)-compile successful"
-      liftIO $ putMVar state_mvar new_state
+      liftIO $ writeIORef state_mvar new_state
 
 -- | Try to compile, publish diagnostics on warnings and errors, return newly compiled state.
 --  Single point where the compilation is done, and shouldn't be exported.
 tryCompile :: Maybe FilePath -> State -> LspT () IO State
 tryCompile Nothing _ = pure emptyState
 tryCompile (Just path) state = do
+  debug $ "Reloading program from " <> show path
   let old_loaded_prog = getLoadedProg state
   vfs <- getVirtualFiles
   res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs)

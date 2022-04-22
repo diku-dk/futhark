@@ -356,13 +356,13 @@ trackAliases (aliasmap, consumed) stm =
     aliasesOfAliases = mconcat . map look . namesToList
     look k = M.findWithDefault mempty k aliasmap
 
-mkAliasedLetStm ::
+mkAliasedStm ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
   Stm (Aliases rep)
-mkAliasedLetStm pat (StmAux cs attrs dec) e =
+mkAliasedStm pat (StmAux cs attrs dec) e =
   Let
     (mkAliasedPat pat e)
     (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
@@ -380,7 +380,7 @@ instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
     env <- asksScope removeScopeAliases
     flip runReaderT env $ do
       Let pat dec _ <- mkLetNames names $ removeExpAliases e
-      pure $ mkAliasedLetStm pat dec e
+      pure $ mkAliasedStm pat dec e
 
   mkBody stms res =
     let Body bodyrep _ _ = mkBody (fmap removeStmAliases stms) res

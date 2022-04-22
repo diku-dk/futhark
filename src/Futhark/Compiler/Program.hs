@@ -15,6 +15,7 @@ module Futhark.Compiler.Program
     noLoadedProg,
     lpImports,
     lpWarnings,
+    lpFilePaths,
     reloadProg,
     extendProg,
   )
@@ -344,6 +345,10 @@ lpImports = map f . lpFiles
 -- | All warnings of a 'LoadedProg'.
 lpWarnings :: LoadedProg -> Warnings
 lpWarnings = foldMap (cfWarnings . lfMod) . lpFiles
+
+-- | The absolute paths of the files that are part of this program.
+lpFilePaths :: LoadedProg -> [FilePath]
+lpFilePaths = map lfPath . lpFiles
 
 unchangedImports ::
   MonadIO m =>

@@ -405,7 +405,7 @@ nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
   cs' <- simplify cs
   (pat', pat_cs) <- collectCerts $ simplifyPat $ removePatWisdom pat
   let aux' = StmAux (cs' <> pat_cs) attrs dec
-  mkWiseLetStm pat' aux' <$> simplifyExpBase e
+  mkWiseStm pat' aux' <$> simplifyExpBase e
 
 -- Bottom-up simplify a statement.  Recurses into sub-Bodies and Ops.
 -- Does not copy-propagate into the pattern and similar, as it is
@@ -419,7 +419,7 @@ recSimplifyStm ::
 recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
   ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp usage pat e
   let aux' = StmAux (cs <> e_cs) attrs dec
-  pure (e_hoisted, mkWiseLetStm (removePatWisdom pat) aux' e')
+  pure (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
 
 hoistStms ::
   SimplifiableRep rep =>

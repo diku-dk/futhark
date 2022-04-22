@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.22.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `futhark lsp` is now better at handling multiple files (#1647).
+
+* Incorrect handling of local quantification when determining type
+  equivalence in during module type ascription (#1648).
+
+* Incorrect checking of liftedness when instantiating polymorphic
+  functions during module type ascription.
+
+## [0.21.10]
+
+### Added
+
+* New math functions: `f16.erf`, `f32.erf`, `f64.erf`.
+
+* New math functions: `f16.erfc`, `f32.erfc`, `f64.erfc`.
+
+* New math functions: `f16.cbrt`, `f32.cbrt`, `f64.cbrt`.
+
+### Fixed
+
+* Variables being indexed now have correct source spans in AST.
+
+* `futhark lsp`s hover information now contains proper range information.
+
+* `futhark query` and `futhark lsp` incorrectly thought size
+  parameters had type `i32`.
+
+* `futhark doc` put documentation for prelude modules in the wrong
+  location (which also led to messed-up style sheets).
+
 ## [0.21.9]
 
 ### Added

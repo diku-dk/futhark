@@ -512,10 +512,8 @@ matchMTys orig_mty orig_mty_sig =
       StructRetType ->
       Either TypeError (VName, VName)
     matchTypeAbbr loc abs_subst_to_type spec_name spec_l spec_ps spec_t name l ps t = do
-      -- We have to create substitutions for the type parameters, too.
+      -- Number of type parameters must match.
       unless (length spec_ps == length ps) $ nomatch spec_t
-      param_substs <-
-        mconcat <$> zipWithM (matchTypeParam (nomatch spec_t)) spec_ps ps
 
       -- Abstract types have a particular restriction to ensure that
       -- if we have a value of an abstract type 't [n]', then there is
@@ -531,10 +529,12 @@ matchMTys orig_mty orig_mty_sig =
                 <+/> pquote (pprName d)
                 <+/> textwrap "is not used as an array size in the definition."
 
-      let spec_t' = applySubst (`M.lookup` (param_substs <> abs_subst_to_type)) spec_t
-      if spec_t' == t
-        then pure (spec_name, name)
-        else nomatch spec_t'
+      let spec_t' = applySubst (`M.lookup` abs_subst_to_type) spec_t
+          nonrigid = ps <> map (`TypeParamDim` mempty) (retDims t)
+      case doUnification loc spec_ps nonrigid (retType spec_t') (retType t) of
+        Right t'
+          | noSizes t' `subtypeOf` noSizes (retType spec_t') -> pure (spec_name, name)
+        _ -> nomatch spec_t'
       where
         nomatch spec_t' =
           mismatchedType
@@ -543,15 +543,6 @@ matchMTys orig_mty orig_mty_sig =
             spec_name
             (spec_l, spec_ps, spec_t')
             (l, ps, t)
-
-    matchTypeParam _ (TypeParamDim x _) (TypeParamDim y _) =
-      pure $ M.singleton x $ SizeSubst $ NamedDim $ qualName y
-    matchTypeParam _ (TypeParamType spec_l x _) (TypeParamType l y _)
-      | spec_l <= l =
-          pure . M.singleton x . Subst [] . RetType [] $
-            Scalar $ TypeVar () Nonunique (typeName y) []
-    matchTypeParam nomatch _ _ =
-      nomatch
 
     matchVal ::
       Loc ->
@@ -573,16 +564,14 @@ matchMTys orig_mty orig_mty_sig =
                 </> fromMaybe mempty problem
 
     matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Maybe Doc)
-    matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
-      case doUnification loc tps (toStruct orig_spec_t) (toStruct orig_t) of
+    matchValBinding loc (BoundV spec_tps orig_spec_t) (BoundV tps orig_t) = do
+      case doUnification loc spec_tps tps (toStruct orig_spec_t) (toStruct orig_t) of
         Left (TypeError _ notes msg) ->
           Just $ Just $ msg <> ppr notes
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
         Right t
-          | noSizes t
-              `subtypeOf` noSizes orig_spec_t ->
-              Nothing
+          | noSizes t `subtypeOf` noSizes orig_spec_t -> Nothing
           | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =
