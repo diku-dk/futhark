@@ -171,33 +171,6 @@ genScanLoop typ pat space kbody scan_ops local_accs mapout kernel i = do
                   copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
 
-scanStage1' ::
-  SegSpace
-  -> [SegBinOp MCMem]
-  -> ([[VName]] -> [[VName]] -> MulticoreGen ())
-   -> MulticoreGen ()
-scanStage1' space scan_ops f_loop =  do
-  -- Stage 1 : each thread partially scans a chunk of the input
-  -- Writes directly to the resulting array
-  fbody <- collect $ do
-    dPrim_ (segFlat space) int64
-    sOp $ Imp.GetTaskId (segFlat space)
-
-    -- Make one set of uniform params
-    genBinOpParams scan_ops
-    local_accs_uni <- genLocalAccsStage1 scan_ops
-
-    scan_ops_vari <- renameSegBinOp scan_ops
-    -- Make one set of potentially varying params
-    genBinOpParams scan_ops_vari
-    local_accs_vari <- genLocalAccsStage1 scan_ops_vari
-    traceM $ "stage1 vari1 " ++ pretty local_accs_vari
-    traceM $ "stage1 uni1 " ++ pretty local_accs_uni
-
-    f_loop local_accs_uni local_accs_vari
-  free_params <- freeParams fbody
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
-
 scalar ::
   Pat LetDecMem
   -> SegSpace
@@ -228,11 +201,19 @@ vectorized pat space kbody scan_ops = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
     
+    sComment "stage1" (pure ())
+    genBinOpParams scan_ops
+    local_accs <- genLocalAccsStage1 scan_ops
     -- Make one set of uniform params        
     inISPC $ generateChunkLoop "SegScan" False $ \i -> do
-      genBinOpParams scan_ops
-      local_accs <- genLocalAccsStage1 scan_ops
-      genScanLoop Vectorized pat space kbody scan_ops local_accs True True i
+      -- Generate set of varying parameters in ISPC-programs
+      scan_ops' <- renameSegBinOp scan_ops
+      genBinOpParams scan_ops'
+      forM_ (zip scan_ops' scan_ops) $ \(scan_op', scan_op) -> do
+        forM_ (zip (xParams scan_op') (xParams scan_op)) $ \(xParam', xParam) -> do
+          copyDWIMFix (paramName xParam') [] (Var $ paramName xParam) []
+
+      genScanLoop Vectorized pat space kbody scan_ops' local_accs True True i
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params  
@@ -363,27 +344,6 @@ scanStage3' pat space scan_ops f = do
   free_params' <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
 
-scalarStage3 ::
-  Pat LetDecMem
-  -> SegSpace
-  -> KernelBody MCMem
-  -> [SegBinOp MCMem]
-  -> MulticoreGen ()
-scalarStage3 pat space kbody scan_ops = do
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  --traceM $ pretty per_scan_pes
-  body <- collect $ do
-    dPrim_ (segFlat space) int64
-    sOp $ Imp.GetTaskId (segFlat space)
-
-    genBinOpParams scan_ops
-    local_accs <- genLocalAccsStage3 scan_ops per_scan_pes 
-
-    inISPC $ generateChunkLoop "SegScan" True $
-      genScanLoop Scalar pat space kbody scan_ops local_accs True True
-  free_params <- freeParams body
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params  
-
 vectorizedStage3 ::
   Pat LetDecMem
   -> SegSpace
@@ -396,11 +356,17 @@ vectorizedStage3 pat space kbody scan_ops = do
   body <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
+    
+    genBinOpParams scan_ops
+    local_accs <- genLocalAccsStage3 scan_ops per_scan_pes
 
     inISPC $ generateChunkLoop "SegScan" False $ \i -> do
-      genBinOpParams scan_ops
-      local_accs <- genLocalAccsStage3 scan_ops per_scan_pes 
-      genScanLoop Vectorized pat space kbody scan_ops local_accs True True i
+      scan_ops' <- renameSegBinOp scan_ops
+      genBinOpParams scan_ops'
+      forM_ (zip scan_ops' scan_ops) $ \(scan_op', scan_op) -> do
+        forM_ (zip (xParams scan_op') (xParams scan_op)) $ \(xParam', xParam) -> do
+          copyDWIMFix (paramName xParam') [] (Var $ paramName xParam) []
+      genScanLoop Vectorized pat space kbody scan_ops' local_accs True True i
 
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params  
