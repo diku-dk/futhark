@@ -517,12 +517,16 @@ coercions to give ``g`` an acceptable type:
 
 Another workaround, which is often the right one in cases not as
 contrived as above, is to modify ``f`` itself to produce a *witness*
-of the constraint, in the form of an array of shape ``[n][m]``::
+of the constraint, in the form of an array of shape ``[n][m]``:
+
+.. code-block:: futhark
 
   def f (n: i64) (m: i64) : ([n][m](), [n][m]bool -> bool) =
     (replicate n (replicate m ()), \b -> b[0,0])
 
-Then ``uncurry f`` works just fine and has the following type::
+Then ``uncurry f`` works just fine and has the following type:
+
+.. code-block:: futhark
 
   (i64, i64) -> ?[n][m].([n][m](), [n][m]bool -> bool)
 
@@ -592,13 +596,17 @@ Other errors
 
 This occurs for overloaded constants such as ``1234`` that are
 inferred by context to have a type that is too narrow for their value.
-Example::
+Example:
+
+.. code-block::
 
   257 : u8
 
 It is not an error to have a *non-overloaded* numeric constant whose
 value is too large for its type.  The following is perfectly
-cromulent::
+cromulent:
+
+.. code-block::
 
   257u8
 
