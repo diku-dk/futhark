@@ -475,7 +475,7 @@ point, we must define a wrapper function::
 .. _module-is-parametric:
 
 "Module *x* is a parametric module
-----------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A parametric module is a module-level function::
 
