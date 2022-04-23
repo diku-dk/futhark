@@ -669,8 +669,7 @@ define your own short-circuiting operators.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Futhark requires ``match`` expressions to be *exhaustive* - that is,
-cover all possible forms of the value being pattern-matches.
-Example:
+cover all possible forms of the value being matched.  Example:
 
 .. code-block:: futhark
 
