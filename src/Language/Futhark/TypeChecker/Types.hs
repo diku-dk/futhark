@@ -26,9 +26,10 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List (foldl', sort, unzip4, (\\))
+import Data.List (find, foldl', sort, unzip4, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Set as S
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding ((<|>))
 import Language.Futhark
@@ -233,12 +234,19 @@ evalTypeExp (TEDim dims t loc) = do
     dims' <- mapM (flip (checkName Term) loc) dims
     bindDims dims' $ do
       (t', svars, RetType t_dims st, l) <- evalTypeExp t
-      pure
-        ( TEDim dims' t' loc,
-          svars,
-          RetType (dims' ++ t_dims) st,
-          max l SizeLifted
-        )
+      let (witnessed, _) = determineSizeWitnesses st
+      case find (`S.notMember` witnessed) dims' of
+        Just d ->
+          typeError loc mempty . withIndexLink "unused-existential" $
+            "Existential size " <> pquote (pprName d)
+              <> " not used as array size."
+        Nothing ->
+          pure
+            ( TEDim dims' t' loc,
+              svars,
+              RetType (dims' ++ t_dims) st,
+              max l SizeLifted
+            )
   where
     bindDims [] m = m
     bindDims (d : ds) m =

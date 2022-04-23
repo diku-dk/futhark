@@ -362,6 +362,91 @@ filter (>0)`` part will be fully evaluated to a concrete array before
 We can of course also write it as ``length (filter (>0) xs)``, with no
 use of either pipelining or composition.
 
+.. _unused-existential:
+
+"Existential size *n* not used as array size"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error occurs for type expressions that use explicit existential
+quantification in an incorrect way, such as the following examples::
+
+  ?[n].bool
+
+  ?[n].bool -> [n]bool
+
+When we use existential quantification, we are required to use the
+size within its scope, *and* it must not exclusively be used to the
+right of function arrow.
+
+To understand the motivation behind this rule, consider that when we
+use an existential quantifier we are saying that there is *some size*,
+it just cannot be known statically, but must be read from some value
+(i.e. array) at runtime.  In the first example above, the existential
+size ``n`` is not used at all, so the actual value cannot be
+determined at runtime.  In the second example, while an array
+``[n]bool`` does exist, it is part of a function type, and at runtime
+functions are black boxes and don't "carry" the size of their
+parameter or result types.
+
+The workaround is to actually use the existential size.  This can be
+as simple as adding a *witness array* of type ``[n]()``::
+
+  ?[n].([n](),bool)
+
+  ?[n].([n](), bool -> [n]bool)
+
+Such an array will take up no space at runtime.
+
+.. _unify-param-existential:
+
+"Parameter *x* used as size would go out of scope."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error tends to happen because higher-order functions are used in
+a way that causes a size requirement to become impossible to
+constrait.  Real programs that run into this issue are quite complex,
+but to illustrate the problem, consider the following contrived
+function::
+
+  def f (n: i64) (m: i64) (b: [n][m]bool) = b[0,0]
+
+We have the following type::
+
+  val f : (n: i64) -> (m: i64) -> (b: [n][m]bool) -> bool
+
+Now suppose we say::
+
+  def g = uncurry f
+
+What should be the type of ``g``?  Intuitively, something like this::
+
+  val g : (n: i64, m: i64) -> (b: [n][m]bool) -> bool
+
+But this is *not* expressible in the Futhark type system - and even if
+it were, it would not be easy to infer this in general, as it depends
+on exactly what ``uncurry`` does, which the type checker does not
+know.
+
+As a workaround, we can use explicit type annotation and size
+coercions to give ``g`` an acceptable type::
+
+  def g [a][b] (n,m) (b: [a][b]bool) = f n m (b :> [n][m]bool)
+
+Another workaround, which is often the right one in cases not as
+contrived as above, is to modify ``f`` itself to produce a *witness*
+of the constraint, in the form of an array of shape ``[n][m]``::
+
+  def f (n: i64) (m: i64) : ([n][m](), [n][m]bool -> bool) =
+    (replicate n (replicate m ()), \b -> b[0,0])
+
+Then ``uncurry f`` works just fine and has the following type::
+
+  (i64, i64) -> ?[n][m].([n][m](), [n][m]bool -> bool)
+
+Programming with such *explicit size witnesses* is a fairly advanced
+technique, but often necessary when writing advanced size-dependent
+code.
+
 Module errors
 -------------
 

@@ -73,6 +73,7 @@ module Language.Futhark.Prop
     DimPos (..),
     mustBeExplicit,
     mustBeExplicitInType,
+    determineSizeWitnesses,
     tupleRecord,
     isTupleRecord,
     areTupleFields,
@@ -234,13 +235,22 @@ mustBeExplicitAux t =
     onDim _ _ _ =
       pure ()
 
+-- | Determine which of the sizes in a type are used as sizes outside
+-- of functions in the type, and which are not.  The former are said
+-- to be "witnessed" by this type, while the latter are not.  In
+-- practice, the latter means that the actual sizes must come from
+-- somewhere else.
+determineSizeWitnesses :: StructType -> (S.Set VName, S.Set VName)
+determineSizeWitnesses t =
+  bimap (S.fromList . M.keys) (S.fromList . M.keys) $
+    M.partition not $ mustBeExplicitAux t
+
 -- | Figure out which of the sizes in a parameter type must be passed
 -- explicitly, because their first use is as something else than just
 -- an array dimension.  'mustBeExplicit' is like this function, but
 -- first decomposes into parameter types.
 mustBeExplicitInType :: StructType -> S.Set VName
-mustBeExplicitInType t =
-  S.fromList $ M.keys $ M.filter id $ mustBeExplicitAux t
+mustBeExplicitInType = snd . determineSizeWitnesses
 
 -- | Figure out which of the sizes in a binding type must be passed
 -- explicitly, because their first use is as something else than just
