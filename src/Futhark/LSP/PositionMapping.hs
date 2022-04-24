@@ -4,6 +4,7 @@ module Futhark.LSP.PositionMapping
     PositionMapping,
     toStalePos,
     toCurrentLoc,
+    StaleFile (..),
   )
 where
 
@@ -11,13 +12,25 @@ import Data.Algorithm.Diff (Diff, PolyDiff (Both, First, Second), getDiff)
 import Data.Bifunctor (Bifunctor (bimap, first, second))
 import qualified Data.Text as T
 import Futhark.Util.Loc (Loc (Loc), Pos (Pos))
+import Language.LSP.VFS (VirtualFile)
 
 -- | A mapping between current file content and the stale (last successful compiled) file content
 -- currently, only supports entire line mapping
 -- more detailed mapping might be achieved via referring to haskell-language-server@efb4b94
--- also might be a good idea to separate the related logic into a separate module
 newtype PositionMapping = PositionMapping ([Int], [Int])
   deriving (Show)
+
+-- | Stale text document stored in state.
+data StaleFile = StaleFile
+  { -- | The last successful compiled file content.
+    staleContent :: VirtualFile,
+    -- | PositionMapping between current and stale file content.
+    -- Nothing if last type-check is successful.
+    staleMapping :: Maybe PositionMapping
+  }
+
+instance Show StaleFile where
+  show (StaleFile _ mapping) = show mapping
 
 -- | Compute PositionMapping using the diff between two texts.
 mappingFromDiff :: [T.Text] -> [T.Text] -> PositionMapping

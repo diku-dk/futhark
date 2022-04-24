@@ -6,12 +6,14 @@ module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
 
 import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Data.Map (assocs)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
-import Futhark.LSP.State (State (..), emptyState, updateStaleContent)
+import Futhark.LSP.State (State (..), emptyState, updateStaleContent, updateStaleMapping)
+import Futhark.LSP.Tool (computeMapping)
 import Futhark.Util (debug)
 import Language.Futhark.Warnings (listWarnings)
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
@@ -46,7 +48,10 @@ tryReCompile state_mvar file_path = do
   case stateProgram new_state of
     Nothing -> do
       debug "Failed to (re)-compile, using old state or Nothing"
-      liftIO $ putMVar state_mvar old_state
+      debug $ "Computing PositionMapping for: " <> show file_path
+      mapping <- computeMapping old_state file_path
+      -- TODO: still compute even if no error in current file, use virtual file afterall?
+      liftIO $ putMVar state_mvar $ updateStaleMapping file_path mapping old_state
     Just _ -> do
       debug "(Re)-compile successful"
       liftIO $ putMVar state_mvar new_state
@@ -64,8 +69,9 @@ tryCompile state (Just path) old_loaded_prog = do
       publishWarningDiagnostics $ listWarnings $ lpWarnings new_loaded_prog
       maybe_virtual_file <- getVirtualFile $ toNormalizedUri $ filePathToUri path
       case maybe_virtual_file of
-        Nothing -> pure $ State (Just new_loaded_prog) M.empty -- should never happen
-        Just virtual_file -> pure $ updateStaleContent path virtual_file state
+        Nothing -> pure $ State (Just new_loaded_prog) (staleData state) -- should never happen
+        Just virtual_file ->
+          pure $ updateStaleContent path virtual_file new_loaded_prog state
     -- Preserve files that have been opened should be enoguth.
     -- But still might need an update on re-compile logic, don't discard all state afterwards,
     -- try to compile from root file, if there is a depencency relatetion, improve performance and provide more dignostic.

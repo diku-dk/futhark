@@ -9,7 +9,7 @@ import Data.Aeson.Types (Value (Array, String))
 import qualified Data.Vector as V
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromMVar)
 import Futhark.LSP.State (State (..))
-import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState, getMapping)
+import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)
 import Futhark.Util (debug)
 import Language.LSP.Server (Handlers, LspM, notificationHandler, requestHandler)
 import Language.LSP.Types
@@ -22,14 +22,10 @@ handlers :: MVar State -> Handlers (LspM ())
 handlers state_mvar =
   mconcat
     [ onInitializeHandler,
-      onHoverHandler state_mvar,
       onDocumentOpenHandler state_mvar,
       onDocumentCloseHandler,
       onDocumentSaveHandler state_mvar,
-      onDocumentChangeHandler state_mvar,
-      onDocumentFocusHandler state_mvar,
-      goToDefinitionHandler state_mvar,
-      onDocumentChangeHandler state_mvar
+      goToDefinitionHandler state_mvar
     ]
 
 onInitializeHandler :: Handlers (LspM ())
@@ -43,8 +39,7 @@ onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -
       file_path = uriToFilePath file_uri
   debug $ "Hover request at: " ++ show pos
   state <- tryTakeStateFromMVar state_mvar file_path
-  mapping <- getMapping state file_uri
-  responder $ Right $ getHoverInfoFromState state file_path mapping (fromEnum l + 1) (fromEnum c + 1)
+  responder $ Right $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
 
 onDocumentFocusHandler :: MVar State -> Handlers (LspM ())
 onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/onFocusTextDocument") $ \msg -> do
@@ -56,14 +51,14 @@ onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/o
 
 goToDefinitionHandler :: MVar State -> Handlers (LspM ())
 goToDefinitionHandler state_mvar = requestHandler STextDocumentDefinition $ \req responder -> do
-  debug "Got goto definition request"
   let RequestMessage _ _ _ (DefinitionParams doc pos _workDone _partial) = req
       Position l c = pos
       file_uri = doc ^. uri
       file_path = uriToFilePath file_uri
+  debug $ "Go to definition request for: " <> show file_path
   state <- tryTakeStateFromMVar state_mvar file_path
-  mapping <- getMapping state file_uri
-  case findDefinitionRange state file_path mapping (fromEnum l + 1) (fromEnum c + 1) of
+  debug $ show $ staleData state
+  case findDefinitionRange state file_path (fromEnum l + 1) (fromEnum c + 1) of
     Nothing -> responder $ Right $ InR $ InL $ List []
     Just loc -> do
       debug $ show loc
