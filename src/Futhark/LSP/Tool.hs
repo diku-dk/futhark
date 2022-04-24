@@ -84,9 +84,8 @@ queryAtPos state pos = do
           Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
         else do
           let def_mapping = getStaleMapping state def_file
-          -- current_def_loc <- toCurrentLoc def_mapping def_loc
-          -- Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
-          Just $ AtName qn (Just def) current_loc
+          current_def_loc <- toCurrentLoc def_mapping def_loc
+          Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
     updateAtPos _ _ = Nothing
 
     updateBoundLoc :: BoundTo -> Loc -> BoundTo

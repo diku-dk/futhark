@@ -2,15 +2,14 @@
 -- the Futhark program managed by the language server.  The challenge
 -- here is that if the program becomes type-invalid, we want to keep
 -- the old state around.
-module Futhark.LSP.Compile (tryTakeStateFromMVar, tryReCompile) where
+module Futhark.LSP.Compile (tryTakeStateFromIORef, tryReCompile) where
 
-import Control.Concurrent.MVar (MVar, putMVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Data.Map (assocs)
+import Data.IORef (IORef, readIORef, writeIORef)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
-import Futhark.Compiler.Program (LoadedProg, lpWarnings, noLoadedProg, reloadProg)
+import Futhark.Compiler.Program (LoadedProg, lpFilePaths, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState, updateStaleContent, updateStaleMapping)
 import Futhark.LSP.Tool (computeMapping)
@@ -25,42 +24,53 @@ import Language.LSP.Types
   )
 import Language.LSP.VFS (VFS (vfsMap), virtualFileText)
 
--- | Try to take state from MVar, if it's empty, try to compile.
-tryTakeStateFromMVar :: MVar State -> Maybe FilePath -> LspT () IO State
-tryTakeStateFromMVar state_mvar file_path = do
-  old_state <- liftIO $ takeMVar state_mvar
+-- | Try to take state from IORef, if it's empty, try to compile.
+tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State
+tryTakeStateFromIORef state_mvar file_path = do
+  old_state <- liftIO $ readIORef state_mvar
   case stateProgram old_state of
     Nothing -> do
       new_state <- tryCompile old_state file_path noLoadedProg
-      liftIO $ putMVar state_mvar new_state
+      liftIO $ writeIORef state_mvar new_state
       pure new_state
-    Just _ -> do
-      liftIO $ putMVar state_mvar old_state
-      pure old_state
+    Just prog -> do
+      -- If this is in the context of some file that is not part of
+      -- the program, try to reload the program from that file.
+      let files = lpFilePaths prog
+      state <- case file_path of
+        Just file_path'
+          | file_path' `notElem` files -> do
+              debug $ "File not part of program: " <> show file_path'
+              debug $ "Program contains: " <> show files
+              tryCompile old_state file_path noLoadedProg
+        _ -> pure old_state
+      liftIO $ writeIORef state_mvar state
+      pure state
 
 -- | Try to (re)-compile, replace old state if successful.
-tryReCompile :: MVar State -> Maybe FilePath -> LspT () IO ()
+tryReCompile :: IORef State -> Maybe FilePath -> LspT () IO ()
 tryReCompile state_mvar file_path = do
   debug "(Re)-compiling ..."
-  old_state <- liftIO $ takeMVar state_mvar
+  old_state <- liftIO $ readIORef state_mvar
   let loaded_prog = getLoadedProg old_state
   new_state <- tryCompile old_state file_path loaded_prog
+  debug $ show $ staleData old_state
   case stateProgram new_state of
     Nothing -> do
       debug "Failed to (re)-compile, using old state or Nothing"
       debug $ "Computing PositionMapping for: " <> show file_path
       mapping <- computeMapping old_state file_path
-      -- TODO: still compute even if no error in current file, use virtual file afterall?
-      liftIO $ putMVar state_mvar $ updateStaleMapping file_path mapping old_state
+      liftIO $ writeIORef state_mvar $ updateStaleMapping file_path mapping old_state
     Just _ -> do
       debug "(Re)-compile successful"
-      liftIO $ putMVar state_mvar new_state
+      liftIO $ writeIORef state_mvar new_state
 
 -- | Try to compile, publish diagnostics on warnings and errors, return newly compiled state.
 --  Single point where the compilation is done, and shouldn't be exported.
 tryCompile :: State -> Maybe FilePath -> LoadedProg -> LspT () IO State
 tryCompile _ Nothing _ = pure emptyState
 tryCompile state (Just path) old_loaded_prog = do
+  debug $ "Reloading program from " <> show path
   vfs <- getVirtualFiles
   res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs) -- NOTE: vfs only keeps track of current opened files
   flushDiagnosticsBySource maxDiagnostic diagnosticSource

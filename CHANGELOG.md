@@ -15,6 +15,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark lsp` is now better at handling multiple files (#1647).
+
+* Incorrect handling of local quantification when determining type
+  equivalence in during module type ascription (#1648).
+
+* Incorrect checking of liftedness when instantiating polymorphic
+  functions during module type ascription.
+
+* Tightened some restrictions on the use of existential sizes that
+  could otherwise lead to compiler crashes (#1650).  This restriction
+  is perhaps a bit *too* might and it may be possible to loosen it in
+  the future.
+
+## [0.21.10]
+
+### Added
+
+* New math functions: `f16.erf`, `f32.erf`, `f64.erf`.
+
+* New math functions: `f16.erfc`, `f32.erfc`, `f64.erfc`.
+
+* New math functions: `f16.cbrt`, `f32.cbrt`, `f64.cbrt`.
+
+### Fixed
+
 * Variables being indexed now have correct source spans in AST.
 
 * `futhark lsp`s hover information now contains proper range information.

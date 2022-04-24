@@ -135,7 +135,10 @@ module type real = {
   val to_i64: t -> i64
   val to_f64: t -> f64
 
+  -- | Square root.
   val sqrt: t -> t
+  -- | Cube root.
+  val cbrt: t -> t
   val exp: t -> t
 
   val sin: t -> t
@@ -168,6 +171,12 @@ module type real = {
   val gamma: t -> t
   -- | The natural logarithm of the absolute value of `gamma`@term.
   val lgamma: t -> t
+
+  -- | The error function.
+  val erf : t -> t
+  -- | The complementary error function.
+  val erfc : t -> t
+
   -- | Linear interpolation.  The third argument must be in the range
   -- `[0,1]` or the results are unspecified.
   val lerp: t -> t -> t -> t
@@ -909,6 +918,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   def abs (x: f64) = intrinsics.fabs64 x
 
   def sqrt (x: f64) = intrinsics.sqrt64 x
+  def cbrt (x: f64) = intrinsics.cbrt64 x
 
   def log (x: f64) = intrinsics.log64 x
   def log2 (x: f64) = intrinsics.log2_64 x
@@ -930,6 +940,8 @@ module f64: (float with t = f64 with int_t = u64) = {
   def hypot (x: f64) (y: f64) = intrinsics.hypot64 (x, y)
   def gamma = intrinsics.gamma64
   def lgamma = intrinsics.lgamma64
+  def erf = intrinsics.erf64
+  def erfc = intrinsics.erfc64
 
   def lerp v0 v1 t = intrinsics.lerp64 (v0,v1,t)
   def fma a b c = intrinsics.fma64 (a,b,c)
@@ -1018,6 +1030,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   def abs (x: f32) = intrinsics.fabs32 x
 
   def sqrt (x: f32) = intrinsics.sqrt32 x
+  def cbrt (x: f32) = intrinsics.cbrt32 x
 
   def log (x: f32) = intrinsics.log32 x
   def log2 (x: f32) = intrinsics.log2_32 x
@@ -1039,6 +1052,8 @@ module f32: (float with t = f32 with int_t = u32) = {
   def hypot (x: f32) (y: f32) = intrinsics.hypot32 (x, y)
   def gamma = intrinsics.gamma32
   def lgamma = intrinsics.lgamma32
+  def erf = intrinsics.erf32
+  def erfc = intrinsics.erfc32
 
   def lerp v0 v1 t = intrinsics.lerp32 (v0,v1,t)
   def fma a b c = intrinsics.fma32 (a,b,c)
@@ -1131,6 +1146,7 @@ module f16: (float with t = f16 with int_t = u16) = {
   def abs (x: f16) = intrinsics.fabs16 x
 
   def sqrt (x: f16) = intrinsics.sqrt16 x
+  def cbrt (x: f16) = intrinsics.cbrt16 x
 
   def log (x: f16) = intrinsics.log16 x
   def log2 (x: f16) = intrinsics.log2_16 x
@@ -1152,6 +1168,8 @@ module f16: (float with t = f16 with int_t = u16) = {
   def hypot (x: f16) (y: f16) = intrinsics.hypot16 (x, y)
   def gamma = intrinsics.gamma16
   def lgamma = intrinsics.lgamma16
+  def erf = intrinsics.erf16
+  def erfc = intrinsics.erfc16
 
   def lerp v0 v1 t = intrinsics.lerp16 (v0,v1,t)
   def fma a b c = intrinsics.fma16 (a,b,c)
