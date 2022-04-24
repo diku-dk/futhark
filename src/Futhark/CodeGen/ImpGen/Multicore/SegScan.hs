@@ -116,6 +116,14 @@ genLocalAccsStage1 scan_ops = do
 
         pure acc
 
+-- Generate code to write back results from the accumulators
+-- genWriteBack :: [SegBinOp MCMem] -> [[VName]] -> SegSpace -> MulticoreGen ()
+-- genWriteBack scan_ops local_accs space =
+--   forM_ (zip scan_ops local_accs) $ \(scan_op, local_accs') ->
+--     forM (zip (seg) local_accs') $ \(acc, local_acc) ->
+--       copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
+
+
 getNestLoop ::
   ScanType
   -> Shape
@@ -200,20 +208,14 @@ vectorized pat space kbody scan_ops = do
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
-    
-    sComment "stage1" (pure ())
-    genBinOpParams scan_ops
-    local_accs <- genLocalAccsStage1 scan_ops
-    -- Make one set of uniform params        
-    inISPC $ generateChunkLoop "SegScan" False $ \i -> do
-      -- Generate set of varying parameters in ISPC-programs
-      scan_ops' <- renameSegBinOp scan_ops
-      genBinOpParams scan_ops'
-      forM_ (zip scan_ops' scan_ops) $ \(scan_op', scan_op) -> do
-        forM_ (zip (xParams scan_op') (xParams scan_op)) $ \(xParam', xParam) -> do
-          copyDWIMFix (paramName xParam') [] (Var $ paramName xParam) []
 
-      genScanLoop Vectorized pat space kbody scan_ops' local_accs True True i
+    lparams <- collect $ genBinOpParams scan_ops
+    local_accs <- genLocalAccsStage1 scan_ops    
+
+    inISPC $ do
+      emit lparams
+      generateChunkLoop "SegScan" False $ \i -> do
+        genScanLoop Vectorized pat space kbody scan_ops local_accs True True i
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params  
@@ -320,13 +322,13 @@ genLocalAccsStage3 scan_ops per_scan_pes =
           sIf (start .==. 0) read_neutral read_carry_in
         pure acc
 
-scanStage3' ::
+scalarStage3 ::
   Pat LetDecMem
   -> SegSpace
-  ->[ SegBinOp MCMem]
-  -> ([[VName]] -> [[VName]] -> MulticoreGen ())
+  -> KernelBody MCMem
+  -> [SegBinOp MCMem]
   -> MulticoreGen ()
-scanStage3' pat space scan_ops f = do
+scalarStage3 pat space kbody scan_ops = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
   --traceM $ pretty per_scan_pes
   body <- collect $ do
@@ -334,16 +336,13 @@ scanStage3' pat space scan_ops f = do
     sOp $ Imp.GetTaskId (segFlat space)
 
     genBinOpParams scan_ops
-    local_accs_uni <- genLocalAccsStage3 scan_ops per_scan_pes    
-    
-    scan_ops_vari <- renameSegBinOp scan_ops
-    genBinOpParams scan_ops_vari  
-    local_accs_vari <- genLocalAccsStage3 scan_ops_vari per_scan_pes
+    local_accs <- genLocalAccsStage3 scan_ops per_scan_pes 
 
-    f local_accs_uni local_accs_vari
-  free_params' <- freeParams body
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
-
+    inISPC $ generateChunkLoop "SegScan" True $
+      genScanLoop Scalar pat space kbody scan_ops local_accs True True
+  free_params <- freeParams body
+  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params 
+  
 vectorizedStage3 ::
   Pat LetDecMem
   -> SegSpace
@@ -357,16 +356,13 @@ vectorizedStage3 pat space kbody scan_ops = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
     
-    genBinOpParams scan_ops
+    lparams <- collect $ genBinOpParams scan_ops
     local_accs <- genLocalAccsStage3 scan_ops per_scan_pes
 
-    inISPC $ generateChunkLoop "SegScan" False $ \i -> do
-      scan_ops' <- renameSegBinOp scan_ops
-      genBinOpParams scan_ops'
-      forM_ (zip scan_ops' scan_ops) $ \(scan_op', scan_op) -> do
-        forM_ (zip (xParams scan_op') (xParams scan_op)) $ \(xParam', xParam) -> do
-          copyDWIMFix (paramName xParam') [] (Var $ paramName xParam) []
-      genScanLoop Vectorized pat space kbody scan_ops' local_accs True True i
+    inISPC $ do
+      emit lparams
+      generateChunkLoop "SegScan" False $ \i -> do
+        genScanLoop Vectorized pat space kbody scan_ops local_accs True True i
 
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params  
