@@ -175,6 +175,9 @@ cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
 cmdCFLAGS :: [String] -> [String]
 cmdCFLAGS def = maybe def words $ lookup "CFLAGS" unixEnvironment
 
+cmdISPCFLAGS :: [String] -> [String]
+cmdISPCFLAGS def = maybe def words $ lookup "ISPCFLAGS" unixEnvironment
+
 runCC :: String -> String -> [String] -> [String] -> FutharkM ()
 runCC cpath outpath cflags_def ldflags = do
   ret <-
@@ -207,8 +210,9 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
       runProgramWithExitCode
         "ispc"
         ( [ispcpath, "-o", ispcbase `addExtension` "o"] ++
-          ["-h", ispcbase `addExtension` "h"] ++ 
-          ispc_flags
+          ["-h", ispcbase `addExtension` "h"] ++
+          ["--addressing=64", "--pic"] ++ -- These flags are always needed
+          cmdISPCFLAGS ispc_flags
         )
         mempty
   ret <- -- TODO(kris): Clean this shit up
@@ -396,11 +400,11 @@ compileMulticoreToISPCAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
           liftIO $ T.writeFile ispcpath ispc
-          runISPC ispcpath outpath cpath ispcextension ["-O3", "--addressing=64","--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcpath outpath cpath ispcextension ["-O3", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           liftIO $ T.writeFile ispcpath ispc
-          runISPC ispcpath outpath cpath ispcextension ["-O3", "--addressing=64","--pic", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcpath outpath cpath ispcextension ["-O3", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 pythonCommon ::
   (CompilerMode -> String -> prog -> FutharkM (Warnings, T.Text)) ->
