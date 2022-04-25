@@ -258,7 +258,7 @@ static int cuda_device_setup(struct cuda_context *ctx) {
   }
 
   int used_devices = 0;
-  int* devices = (int*)malloc(sizeof(int)*count);
+  int* devices = (int*)calloc(count, sizeof(int));
   for(int devID = 0; devID < count; devID++){
     CUDA_SUCCEED_FATAL(cuDeviceGet(&dev, devID)); 
 
@@ -275,23 +275,24 @@ static int cuda_device_setup(struct cuda_context *ctx) {
   }
   ctx->kernel_iterator = 0;
   ctx->device_count = used_devices;
-  ctx->devices = (CUdevice*)malloc(sizeof(CUdevice)*used_devices);
-  ctx->contexts = (CUcontext*)malloc(sizeof(CUcontext)*used_devices);
-  ctx->modules = (CUmodule*)malloc(sizeof(CUmodule)*used_devices);
-  ctx->kernel_done = (CUevent*)malloc(sizeof(CUevent)*used_devices*2);
-  ctx->finished = (CUevent*)malloc(sizeof(CUevent)*used_devices);
+  ctx->devices = (CUdevice*)calloc(used_devices, sizeof(CUdevice));
+  ctx->contexts = (CUcontext*)calloc(used_devices, sizeof(CUcontext));
+  ctx->modules = (CUmodule*)calloc(used_devices, sizeof(CUmodule));
+  ctx->kernel_done = (CUevent*)calloc(used_devices*2, sizeof(CUevent));
+  ctx->finished = (CUevent*)calloc(used_devices, sizeof(CUevent));
 
   for(int devIdx = 0; devIdx < used_devices; devIdx++){
     CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->devices[devIdx], devices[devIdx]));
-    CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->contexts[devIdx], 
-                                   CU_CTX_SCHED_AUTO, 
-                                   ctx->devices[devIdx]));
+    CUDA_SUCCEED_FATAL(cuDevicePrimaryCtxRetain(&ctx->contexts[devIdx], 
+                                   ctx->devices[devIdx])); 
+    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->devices[devIdx]));                                   
     CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->kernel_done[devIdx * 2],
                                      CU_EVENT_DISABLE_TIMING));
     CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->kernel_done[devIdx * 2 + 1],
                                      CU_EVENT_DISABLE_TIMING));
     CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->finished[devIdx], 
                                      CU_EVENT_DISABLE_TIMING));
+    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->devices[devIdx]));
   }
 
   free(devices); 

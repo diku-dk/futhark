@@ -338,7 +338,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
       forKernelMD name =
         ( [C.csdecl| typename CUfunction* $id:(kernelMultiDevice name);|],
-          [C.cstms| ctx->$id:(kernelMultiDevice name) = malloc(sizeof(CUfunction)*ctx->cuda.device_count);                                           
+          [C.cstms| ctx->$id:(kernelMultiDevice name) = calloc(ctx->cuda.device_count,sizeof(CUfunction));                                           
               for(int devID = 0; devID < ctx->cuda.device_count; devID++){
                 CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
                 CUDA_SUCCEED_FATAL(cuModuleGetFunction(&ctx->$id:(kernelMultiDevice name)[devID],

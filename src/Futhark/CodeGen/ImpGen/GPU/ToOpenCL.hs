@@ -325,11 +325,11 @@ onKernel target kernel = do
         ]
 
       params =
-        perm_params
+        [[C.cparam|const int device_id|]]
+          ++ perm_params
           ++ take (numFailureParams safety) failure_params
           ++ catMaybes local_memory_params
           ++ use_params
-          ++ [[C.cparam|const int device_id|]]
 
       kernel_fun =
         [C.cfun|__kernel void $id:name ($params:params) {

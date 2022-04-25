@@ -382,12 +382,11 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){
               if(other_dev == devID) continue;
               CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[devID * 2
-                                                   + cuda.kernel_iterator],0));
+                                                   + ctx->cuda.kernel_iterator],0));
             }
             CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
         }
         ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
-
       } else {
         CUDA_SUCCEED_OR_RETURN(
           cuLaunchKernel(ctx->$id:kernel_name,
