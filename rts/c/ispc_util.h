@@ -89,9 +89,7 @@ static inline void free(void* ptr) {
 }
 
 static inline void free(void* uniform ptr) {
-  if (programIndex == 0) {
-    delete ptr;
-  }
+  delete ptr;
 }
 
 static inline uniform int lexical_realloc_ispc(unsigned char uniform * uniform * uniform ptr,
