@@ -12,6 +12,7 @@ module Language.Futhark.Prop
     Intrinsic (..),
     intrinsics,
     isBuiltin,
+    isBuiltinLoc,
     maxIntrinsicTag,
     namesToPrimTypes,
     qualName,
@@ -72,6 +73,7 @@ module Language.Futhark.Prop
     DimPos (..),
     mustBeExplicit,
     mustBeExplicitInType,
+    determineSizeWitnesses,
     tupleRecord,
     isTupleRecord,
     areTupleFields,
@@ -113,6 +115,7 @@ import Data.Bitraversable (bitraverse)
 import Data.Char
 import Data.Foldable
 import Data.List (genericLength, isPrefixOf, sortOn)
+import Data.Loc (Loc (..), posFile)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Ord
@@ -232,13 +235,22 @@ mustBeExplicitAux t =
     onDim _ _ _ =
       pure ()
 
+-- | Determine which of the sizes in a type are used as sizes outside
+-- of functions in the type, and which are not.  The former are said
+-- to be "witnessed" by this type, while the latter are not.  In
+-- practice, the latter means that the actual sizes must come from
+-- somewhere else.
+determineSizeWitnesses :: StructType -> (S.Set VName, S.Set VName)
+determineSizeWitnesses t =
+  bimap (S.fromList . M.keys) (S.fromList . M.keys) $
+    M.partition not $ mustBeExplicitAux t
+
 -- | Figure out which of the sizes in a parameter type must be passed
 -- explicitly, because their first use is as something else than just
 -- an array dimension.  'mustBeExplicit' is like this function, but
 -- first decomposes into parameter types.
 mustBeExplicitInType :: StructType -> S.Set VName
-mustBeExplicitInType t =
-  S.fromList $ M.keys $ M.filter id $ mustBeExplicitAux t
+mustBeExplicitInType = snd . determineSizeWitnesses
 
 -- | Figure out which of the sizes in a binding type must be passed
 -- explicitly, because their first use is as something else than just
@@ -1259,8 +1271,17 @@ intrinsics =
     tupInt64 x =
       tupleRecord $ replicate x $ Scalar $ Prim $ Signed Int64
 
-isBuiltin :: String -> Bool
+-- | Is this file part of the built-in prelude?
+isBuiltin :: FilePath -> Bool
 isBuiltin = ("/prelude/" `isPrefixOf`)
+
+-- | Is the position of this thing builtin as per 'isBuiltin'?  Things
+-- without location are considered not built-in.
+isBuiltinLoc :: Located a => a -> Bool
+isBuiltinLoc x =
+  case locOf x of
+    NoLoc -> False
+    Loc pos _ -> isBuiltin $ posFile pos
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.

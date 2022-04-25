@@ -9,13 +9,71 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Sun Haoran has implemented unnamed typed holes, with syntax `???`.
-
-* Crucial new command: `futhark thanks`.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* `futhark lsp` is now better at handling multiple files (#1647).
+
+* Incorrect handling of local quantification when determining type
+  equivalence in during module type ascription (#1648).
+
+* Incorrect checking of liftedness when instantiating polymorphic
+  functions during module type ascription.
+
+* Tightened some restrictions on the use of existential sizes that
+  could otherwise lead to compiler crashes (#1650).  This restriction
+  is perhaps a bit *too* might and it may be possible to loosen it in
+  the future.
+
+* Another defunctorisation bug (#1653).  Somehow we find these every
+  time Martin Elsman writes a nontrivial Futhark program.
+
+## [0.21.10]
+
+### Added
+
+* New math functions: `f16.erf`, `f32.erf`, `f64.erf`.
+
+* New math functions: `f16.erfc`, `f32.erfc`, `f64.erfc`.
+
+* New math functions: `f16.cbrt`, `f32.cbrt`, `f64.cbrt`.
+
+### Fixed
+
+* Variables being indexed now have correct source spans in AST.
+
+* `futhark lsp`s hover information now contains proper range information.
+
+* `futhark query` and `futhark lsp` incorrectly thought size
+  parameters had type `i32`.
+
+* `futhark doc` put documentation for prelude modules in the wrong
+  location (which also led to messed-up style sheets).
+
+## [0.21.9]
+
+### Added
+
+* Sun Haoran has implemented unnamed typed holes, with syntax `???`.
+
+* Sun Haoran has implemented the beginnings of a language server:
+  `futhark lsp`.  A VSCode language extension is available on the
+  marketplace, but the language server should work with any editor.
+
+* Crucial new command: `futhark thanks`.
+
+* The GPU backends now support a caching mechanism for JIT-compiled
+  code, significantly improving startup times.  Use the
+  `futhark_context_config_set_cache_file()` in the C API, the
+  `--cache-file` option on executables, or the `--cache-extension`
+  option on `futhark test` and `futhark bench`.  These also work for
+  the non-GPU backends, but currently have no effect.  (#1614)
+
+* Aleksander Junge has improved `futhark bench` such that it
+  intelligently chooses how many runs to perform (#1335).
 
 ### Fixed
 
@@ -23,7 +81,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   parallelism to require irregular allocations (#1610).
 
 * Missing alias checking for a simplification rule related to in-place
-  updates (#1615).
+  updates (#1615, #1628).
+
+* Incorrect code generation for certain copies of transposed arrays
+  (#1627).
+
+* Fusion would mistakenly try to treat some loops with irregular sizes
+  (#1631).
+
+* Memory annotation bug for non-inlined functions (#1634).
 
 ## [0.21.8]
 

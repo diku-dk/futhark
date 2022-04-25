@@ -1,10 +1,10 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | @futhark bench@
 module Futhark.CLI.Bench (main) where
 
+import Control.Arrow (first)
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except hiding (throwError)
@@ -13,23 +13,29 @@ import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
 import Data.Function ((&))
 import Data.IORef
-import Data.List (foldl', sortBy)
+import Data.List (sortBy)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
 import qualified Data.Text as T
+import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
+import qualified Data.Vector.Unboxed as U
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (atMostChars, fancyTerminal, maxinum, maybeNth, pmapIO)
+import Futhark.Util (atMostChars, fancyTerminal, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
+import Statistics.Resampling (Estimator (..), resample)
+import Statistics.Resampling.Bootstrap (bootstrapBCA)
+import Statistics.Types (cl95, confIntLDX, confIntUDX, estError, estPoint)
 import System.Console.ANSI (clearLine)
 import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
+import System.Random.MWC (create)
 import Text.Printf
 import Text.Regex.TDFA
 
@@ -37,7 +43,8 @@ data BenchOptions = BenchOptions
   { optBackend :: String,
     optFuthark :: Maybe String,
     optRunner :: String,
-    optRuns :: Int,
+    optMinRuns :: Int,
+    optMinTime :: NominalDiffTime,
     optExtraOptions :: [String],
     optCompilerOptions :: [String],
     optJSON :: Maybe FilePath,
@@ -47,6 +54,9 @@ data BenchOptions = BenchOptions
     optIgnoreFiles :: [Regex],
     optEntryPoint :: Maybe String,
     optTuning :: Maybe String,
+    optCacheExt :: Maybe String,
+    optConvergencePhase :: Bool,
+    optConvergenceMaxTime :: NominalDiffTime,
     optConcurrency :: Maybe Int,
     optVerbose :: Int,
     optTestSpec :: Maybe FilePath
@@ -55,22 +65,27 @@ data BenchOptions = BenchOptions
 initialBenchOptions :: BenchOptions
 initialBenchOptions =
   BenchOptions
-    "c"
-    Nothing
-    ""
-    10
-    []
-    []
-    Nothing
-    (-1)
-    False
-    ["nobench", "disable"]
-    []
-    Nothing
-    (Just "tuning")
-    Nothing
-    0
-    Nothing
+    { optBackend = "c",
+      optFuthark = Nothing,
+      optRunner = "",
+      optMinRuns = 10,
+      optMinTime = 0.5,
+      optExtraOptions = [],
+      optCompilerOptions = [],
+      optJSON = Nothing,
+      optTimeout = -1,
+      optSkipCompilation = False,
+      optExcludeCase = ["nobench", "disable"],
+      optIgnoreFiles = [],
+      optEntryPoint = Nothing,
+      optTuning = Just "tuning",
+      optCacheExt = Nothing,
+      optConvergencePhase = True,
+      optConvergenceMaxTime = 5 * 60,
+      optConcurrency = Nothing,
+      optVerbose = 0,
+      optTestSpec = Nothing
+    }
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -90,7 +105,15 @@ runBenchmarks opts paths = do
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
-  putStrLn $ "Reporting average runtime of " ++ show (optRuns opts) ++ " runs for each dataset."
+  putStrLn $
+    "Reporting arithmetic mean runtime of at least "
+      <> show (optMinRuns opts)
+      <> " runs for each dataset (min "
+      <> show (optMinTime opts)
+      <> ")."
+  when (optConvergencePhase opts) . putStrLn $
+    "More runs automatically performed for up to " <> show (optConvergenceMaxTime opts)
+      <> " to ensure accurate measurement."
 
   futhark <- FutharkExe . compFuthark <$> compileOptions opts
 
@@ -188,10 +211,14 @@ withProgramServer program runner extra_options f = do
       putStrLn $ inRed $ show e
       pure Nothing
 
+-- Truncate dataset name display after this many characters.
+maxDatasetNameLength :: Int
+maxDatasetNameLength = 40
+
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
-  let runopts = "-L" : optExtraOptions opts ++ tuning_opts
+  let runopts = optExtraOptions opts ++ tuning_opts ++ determineCache (optCacheExt opts) program
   withProgramServer program (optRunner opts) runopts $ \server ->
     mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where
@@ -207,84 +234,131 @@ runBenchmark opts futhark (program, cases) = do
 
     relevant = maybe (const True) (==) (optEntryPoint opts) . T.unpack . iosEntryPoint
 
-    pad_to = foldl max 0 $ concatMap (map (length . atMostChars 40 . runDescription) . iosTestRuns) cases
+    pad_to = foldl max 0 $ concatMap (map (length . atMostChars maxDatasetNameLength . runDescription) . iosTestRuns) cases
 
-runOptions :: (Int -> IO ()) -> BenchOptions -> RunOptions
+runOptions :: ((Int, Maybe Double) -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
   RunOptions
-    { runRuns = optRuns opts,
+    { runMinRuns = optMinRuns opts,
+      runMinTime = optMinTime opts,
       runTimeout = optTimeout opts,
       runVerbose = optVerbose opts,
-      runResultAction = Just f
+      runConvergencePhase = optConvergencePhase opts,
+      runConvergenceMaxTime = optConvergenceMaxTime opts,
+      runResultAction = f
     }
 
-progressBar :: Int -> Int -> Int -> String
+progressBar :: Double -> Double -> Int -> String
 progressBar cur bound steps =
-  "|" ++ map cell [1 .. steps] ++ "| " ++ show cur ++ "/" ++ show bound
+  "|" <> map cell [1 .. steps] <> "| "
   where
     step_size :: Double
-    step_size = fromIntegral bound / fromIntegral steps
-    cur' = fromIntegral cur
+    step_size = bound / fromIntegral steps
     chars = " ▏▎▍▍▌▋▊▉█"
     char i = fromMaybe ' ' $ maybeNth (i :: Int) chars
     num_chars = fromIntegral $ length chars
 
     cell :: Int -> Char
     cell i
-      | i' * step_size <= cur' = char 9
+      | i' * step_size <= cur = char 9
       | otherwise =
-          char (floor (((cur' - (i' - 1) * step_size) * num_chars) / step_size))
+          char (floor (((cur - (i' - 1) * step_size) * num_chars) / step_size))
       where
         i' = fromIntegral i
 
 descString :: String -> Int -> String
 descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
 
-interimResult :: Int -> Int -> Int -> String
-interimResult us_sum i runs =
-  printf "%10.0fμs " avg ++ progressBar i runs 10
+progressBarSteps :: Int
+progressBarSteps = 10
+
+interimResult :: Int -> Int -> Double -> Double -> String
+interimResult us_sum runs elapsed bound =
+  printf "%10.0fμs " avg
+    <> progressBar elapsed bound progressBarSteps
+    <> (" " <> show runs <> " runs")
+  where
+    avg :: Double
+    avg = fromIntegral us_sum / fromIntegral runs
+
+convergenceBar :: (String -> IO ()) -> IORef Int -> Int -> Int -> Double -> IO ()
+convergenceBar p spin_count us_sum i rsd' = do
+  spin_idx <- readIORef spin_count
+  let spin_char = spin_load !! spin_idx
+  p $ printf "%10.0fμs %c (RSD of mean: %2.4f; %4d runs)" avg spin_char rsd' i
+  let spin_count' = (spin_idx + 1) `mod` 10
+  writeIORef spin_count spin_count'
   where
     avg :: Double
     avg = fromIntegral us_sum / fromIntegral i
+    spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-mkProgressPrompt :: Int -> Int -> String -> IO (Maybe Int -> IO ())
-mkProgressPrompt runs pad_to dataset_desc
+data BenchPhase = Initial | Convergence
+
+mkProgressPrompt :: BenchOptions -> Int -> String -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
+mkProgressPrompt opts pad_to dataset_desc start_time
   | fancyTerminal = do
       count <- newIORef (0, 0)
-      pure $ \us -> do
+      phase_var <- newIORef Initial
+      spin_count <- newIORef 0
+      pure $ \(us, rsd) -> do
         putStr "\r" -- Go to start of line.
         let p s =
               putStr $
-                descString (atMostChars 40 dataset_desc) pad_to ++ s
+                descString (atMostChars maxDatasetNameLength dataset_desc) pad_to ++ s
+
         (us_sum, i) <- readIORef count
-        case us of
-          Nothing -> p $ replicate 13 ' ' ++ progressBar i runs 10
-          Just us' -> do
+
+        now <- liftIO getCurrentTime
+        let determineProgress i' =
+              let time_elapsed = toDouble (realToFrac (diffUTCTime now start_time) / optMinTime opts)
+                  runs_elapsed = fromIntegral i' / fromIntegral (optMinRuns opts)
+               in -- The progress bar is the _shortest_ of the
+                  -- time-based or runs-based estimate.  This is
+                  -- intended to avoid a situation where the progress
+                  -- bar is full but stuff is still happening.  On the
+                  -- other hand, it means it can sometimes shrink.
+                  min time_elapsed runs_elapsed
+
+        phase <- readIORef phase_var
+
+        case (us, phase, rsd) of
+          (Nothing, _, _) ->
+            let elapsed = determineProgress i
+             in p $ replicate 13 ' ' <> progressBar elapsed 1.0 progressBarSteps
+          (Just us', Initial, Nothing) -> do
             let us_sum' = us_sum + us'
                 i' = i + 1
             writeIORef count (us_sum', i')
-            p $ interimResult us_sum' i' runs
+            let elapsed = determineProgress i'
+            p $ interimResult us_sum' i' elapsed 1.0
+          (Just us', Initial, Just rsd') -> do
+            -- Switched from phase 1 to convergence; discard all
+            -- prior results.
+            writeIORef count (us', 1)
+            writeIORef phase_var Convergence
+            convergenceBar p spin_count us' 1 rsd'
+          (Just us', Convergence, Just rsd') -> do
+            let us_sum' = us_sum + us'
+                i' = i + 1
+            writeIORef count (us_sum', i')
+            convergenceBar p spin_count us_sum' i' rsd'
+          (Just _, Convergence, Nothing) ->
+            pure () -- Probably should not happen.
         putStr " " -- Just to move the cursor away from the progress bar.
         hFlush stdout
   | otherwise = do
       putStr $ descString dataset_desc pad_to
       hFlush stdout
       pure $ const $ pure ()
-
-reportResult :: [RunResult] -> IO ()
-reportResult = putStrLn . reportString
   where
-    reportString results =
-      printf
-        "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
-        avg
-        rsd
-        ((minimum runtimes / avg - 1) * 100)
-        ((maxinum runtimes / avg - 1) * 100)
-      where
-        runtimes = map (fromIntegral . runMicroseconds) results
-        avg = sum runtimes / fromIntegral (length runtimes)
-        rsd = stddevp runtimes / mean runtimes :: Double
+    toDouble = fromRational . toRational
+
+reportResult :: [RunResult] -> (Double, Double) -> IO ()
+reportResult results (ci_lower, ci_upper) = do
+  let runtimes = map (fromIntegral . runMicroseconds) results
+      avg = sum runtimes / fromIntegral (length runtimes) :: Double
+  putStrLn $ printf "%10.0fμs (95%% CI: [%10.1f, %10.1f])" avg ci_lower ci_upper
 
 runBenchmarkCase ::
   Server ->
@@ -301,16 +375,17 @@ runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
       pure Nothing
 runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
-  prompt <- mkProgressPrompt (optRuns opts) pad_to dataset_desc
+  start_time <- liftIO getCurrentTime
+  prompt <- mkProgressPrompt opts pad_to dataset_desc start_time
 
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
-  prompt Nothing
+  prompt (Nothing, Nothing)
 
   res <-
     benchmarkDataset
       server
-      (runOptions (prompt . Just) opts)
+      (runOptions (prompt . first Just) opts)
       futhark
       program
       entry
@@ -321,7 +396,7 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   when fancyTerminal $ do
     clearLine
     putStr "\r"
-    putStr $ descString (atMostChars 40 dataset_desc) pad_to
+    putStr $ descString (atMostChars maxDatasetNameLength dataset_desc) pad_to
 
   case res of
     Left err -> liftIO $ do
@@ -329,8 +404,22 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
       putStrLn $ inRed $ T.unpack err
       pure $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
-      reportResult runtimes
-      Result runtimes (getMemoryUsage errout) errout
+      let vec_runtimes = U.fromList $ map (fromIntegral . runMicroseconds) runtimes
+      g <- create
+      resampled <- liftIO $ resample g [Mean] 70000 vec_runtimes
+      let bootstrapCI =
+            ( estPoint boot - confIntLDX (estError boot),
+              estPoint boot + confIntUDX (estError boot)
+            )
+            where
+              boot = head $ bootstrapBCA cl95 vec_runtimes resampled
+
+      reportResult runtimes bootstrapCI
+      -- We throw away the 'errout' because it is almost always
+      -- useless and adds too much to the .json file size.  This
+      -- behaviour could be moved into a command line option if we
+      -- wish.
+      Result runtimes (getMemoryUsage errout) Nothing
         & Right
         & DataResult dataset_desc
         & Just
@@ -356,7 +445,7 @@ commandLineOptions =
                 [(n', "")] | n' > 0 ->
                   Right $ \config ->
                     config
-                      { optRuns = n'
+                      { optMinRuns = n'
                       }
                 _ ->
                   Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
@@ -478,9 +567,37 @@ commandLineOptions =
       "Look for tuning files with this extension (defaults to .tuning).",
     Option
       []
+      ["cache-extension"]
+      ( ReqArg
+          (\s -> Right $ \config -> config {optCacheExt = Just s})
+          "EXTENSION"
+      )
+      "Use cache files with this extension (none by default).",
+    Option
+      []
       ["no-tuning"]
       (NoArg $ Right $ \config -> config {optTuning = Nothing})
       "Do not load tuning files.",
+    Option
+      []
+      ["no-convergence-phase"]
+      (NoArg $ Right $ \config -> config {optConvergencePhase = False})
+      "Do not run convergence phase.",
+    Option
+      []
+      ["convergence-max-seconds"]
+      ( ReqArg
+          ( \n ->
+              case reads n of
+                [(n', "")]
+                  | n' > 0 ->
+                      Right $ \config -> config {optConvergenceMaxTime = fromInteger n'}
+                _ ->
+                  Left . optionsError $ "'" ++ n ++ "' is not a positive integer."
+          )
+          "NUM"
+      )
+      "Limit convergence phase to this number of seconds.",
     Option
       []
       ["concurrency"]
@@ -521,26 +638,3 @@ main = mainWithOptions initialBenchOptions commandLineOptions "options... progra
   case progs of
     [] -> Nothing
     _ -> Just $ runBenchmarks (excludeBackend config) progs
-
---- The following extracted from hstats package by Marshall Beddoe:
---- https://hackage.haskell.org/package/hstats-0.3
-
--- | Numerically stable mean
-mean :: Floating a => [a] -> a
-mean x = fst $ foldl' (\(!m, !n) x' -> (m + (x' - m) / (n + 1), n + 1)) (0, 0) x
-
--- | Standard deviation of population
-stddevp :: (Floating a) => [a] -> a
-stddevp xs = sqrt $ pvar xs
-
--- | Population variance
-pvar :: (Floating a) => [a] -> a
-pvar xs = centralMoment xs (2 :: Int)
-
--- | Central moments
-centralMoment :: (Floating b, Integral t) => [b] -> t -> b
-centralMoment _ 1 = 0
-centralMoment xs r = sum (map (\x -> (x - m) ^ r) xs) / n
-  where
-    m = mean xs
-    n = fromIntegral $ length xs

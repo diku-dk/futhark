@@ -1,5 +1,4 @@
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | Various boilerplate definitions for the CUDA backend.
 module Futhark.CodeGen.Backends.CCUDA.Boilerplate
@@ -112,6 +111,7 @@ generateConfigFuns sizes = do
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
                               bool use_multi_device;
+                              const char *cache_fname;
                             };|]
     )
 
@@ -132,6 +132,7 @@ generateConfigFuns sizes = do
                          cfg->num_nvrtc_opts = 0;
                          cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
+                         cfg->cache_fname = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
                                           tuning_param_names, tuning_param_vars,
@@ -422,7 +423,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->total_runtime = 0;
                  $stms:init_fields
 
-                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
 
                  ctx->use_multi_device = cfg->use_multi_device && (ctx->cuda.device_count >= 1);
                  if (ctx->error != NULL) {
