@@ -16,12 +16,15 @@ import Futhark.Util.Loc (Loc (Loc), Pos (Pos))
 import Language.LSP.VFS (VirtualFile)
 
 -- | A mapping between current file content and the stale (last successful compiled) file content.
--- The first component of the pair provides the mapping from stale position to current,
--- e.g. old2new[2] = 4 means "line 2" in the stale file corresponds to "line 4" in the current file.
--- The second component vice versa.
 -- Currently, only supports entire line mapping,
 -- more detailed mapping might be achieved via referring to haskell-language-server@efb4b94
-newtype PositionMapping = PositionMapping (V.Vector Int, V.Vector Int)
+data PositionMapping = PositionMapping
+  { -- | The mapping from stale position to current.
+    -- e.g. staleToCurrent[2] = 4 means "line 2" in the stale file, corresponds to "line 4" in the current file.
+    staleToCurrent :: V.Vector Int,
+    -- | The mapping from current position to stale.
+    currentToStale :: V.Vector Int
+  }
   deriving (Show)
 
 -- | Stale text document stored in state.
@@ -33,14 +36,13 @@ data StaleFile = StaleFile
     -- Nothing if last type-check is successful.
     staleMapping :: Maybe PositionMapping
   }
-
-instance Show StaleFile where
-  show (StaleFile _ mapping) = show mapping
+  deriving (Show)
 
 -- | Compute PositionMapping using the diff between two texts.
 mappingFromDiff :: [T.Text] -> [T.Text] -> PositionMapping
-mappingFromDiff stale current =
-  PositionMapping $ bimap V.fromList V.fromList $ rawMapping (getDiff stale current) 0 0
+mappingFromDiff stale current = do
+  let (stale_to_current, current_to_stale) = rawMapping (getDiff stale current) 0 0
+  PositionMapping (V.fromList stale_to_current) (V.fromList current_to_stale)
   where
     rawMapping :: [Diff T.Text] -> Int -> Int -> ([Int], [Int])
     rawMapping [] _ _ = ([], [])
@@ -51,20 +53,20 @@ mappingFromDiff stale current =
 -- | Transform current Pos to the stale pos for query
 -- Note: line and col in Pos is larger by one
 toStalePos :: Maybe PositionMapping -> Pos -> Maybe Pos
-toStalePos (Just (PositionMapping (_, new2old))) pos =
-  if l > Prelude.length new2old
+toStalePos (Just (PositionMapping _ current_to_stale)) pos =
+  if l > Prelude.length current_to_stale
     then Nothing
-    else Just $ Pos file (V.unsafeIndex new2old (l - 1) + 1) c o
+    else Just $ Pos file (V.unsafeIndex current_to_stale (l - 1) + 1) c o
   where
     Pos file l c o = pos
 toStalePos Nothing pos = Just pos
 
 -- some refactoring might be needed, same logic as toStalePos
 toCurrentPos :: Maybe PositionMapping -> Pos -> Maybe Pos
-toCurrentPos (Just (PositionMapping (old2new, _))) pos =
-  if l > Prelude.length old2new
+toCurrentPos (Just (PositionMapping stale_to_current _)) pos =
+  if l > Prelude.length stale_to_current
     then Nothing
-    else Just $ Pos file (V.unsafeIndex old2new (l - 1) + 1) c o
+    else Just $ Pos file (V.unsafeIndex stale_to_current (l - 1) + 1) c o
   where
     Pos file l c o = pos
 toCurrentPos Nothing pos = Just pos
