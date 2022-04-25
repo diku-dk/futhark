@@ -53,6 +53,7 @@ profilingEnclosure name =
       |]
   )
 
+
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateBoilerplate ::
@@ -429,10 +430,16 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  }
 
                  typename int32_t no_error = -1;
-                 CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
+                 CUDA_SUCCEED_FATAL(cuMemAllocManaged(
+                                      &ctx->global_failure, 
+                                      sizeof(no_error), 
+                                      CU_MEM_ATTACH_GLOBAL));
                  CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
                  // The +1 is to avoid zero-byte allocations.
-                 CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*($int:max_failure_args+1)));
+                 CUDA_SUCCEED_FATAL(cuMemAllocManaged(
+                                      &ctx->global_failure_args, 
+                                      sizeof(int64_t)*($int:max_failure_args+1),
+                                      CU_MEM_ATTACH_GLOBAL));
 
                  $stms:init_kernel_fields
                  $stms:(concat init_kernel_md_fields)
