@@ -63,6 +63,7 @@ findDefinitionRange state (Just path) l c = do
     else Just $ Location (filePathToUri file_path) (rangeFromLoc loc)
 findDefinitionRange _ _ _ _ = Nothing
 
+-- | Query the AST for information at certain Pos.
 queryAtPos :: State -> Pos -> Maybe AtPos
 queryAtPos state pos = do
   let Pos path _ _ _ = pos
@@ -72,6 +73,7 @@ queryAtPos state pos = do
   query_result <- atPos (lpImports loaded_prog) stale_pos
   updateAtPos mapping query_result
   where
+    -- Update the 'AtPos' with the current mapping.
     updateAtPos :: Maybe PositionMapping -> AtPos -> Maybe AtPos
     updateAtPos mapping (AtName qn (Just def) loc) = do
       let def_loc = boundLoc def
@@ -83,6 +85,7 @@ queryAtPos state pos = do
           current_def_loc <- toCurrentLoc mapping def_loc
           Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
         else do
+          -- Defined in another file, get the corresponding PositionMapping.
           let def_mapping = getStaleMapping state def_file
           current_def_loc <- toCurrentLoc def_mapping def_loc
           Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
@@ -103,7 +106,7 @@ computeMapping state (Just file_path) = do
     getMapping :: Maybe VirtualFile -> Maybe VirtualFile -> Maybe PositionMapping
     getMapping (Just stale_file) (Just current_file) =
       if virtualFileVersion stale_file == virtualFileVersion current_file
-        then Nothing
+        then Nothing -- Happens when other files (e.g. dependencies) fail to type-check.
         else Just $ mappingFromDiff (T.lines $ virtualFileText stale_file) (T.lines $ virtualFileText current_file)
     getMapping _ _ = Nothing
 computeMapping _ _ = pure Nothing

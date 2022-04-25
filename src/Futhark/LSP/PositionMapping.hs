@@ -11,18 +11,23 @@ where
 import Data.Algorithm.Diff (Diff, PolyDiff (Both, First, Second), getDiff)
 import Data.Bifunctor (Bifunctor (bimap, first, second))
 import qualified Data.Text as T
+import qualified Data.Vector as V
 import Futhark.Util.Loc (Loc (Loc), Pos (Pos))
 import Language.LSP.VFS (VirtualFile)
 
--- | A mapping between current file content and the stale (last successful compiled) file content
--- currently, only supports entire line mapping
+-- | A mapping between current file content and the stale (last successful compiled) file content.
+-- The first component of the pair provides the mapping from stale position to current,
+-- e.g. old2new[2] = 4 means "line 2" in the stale file corresponds to "line 4" in the current file.
+-- The second component vice versa.
+-- Currently, only supports entire line mapping,
 -- more detailed mapping might be achieved via referring to haskell-language-server@efb4b94
-newtype PositionMapping = PositionMapping ([Int], [Int])
+newtype PositionMapping = PositionMapping (V.Vector Int, V.Vector Int)
   deriving (Show)
 
 -- | Stale text document stored in state.
 data StaleFile = StaleFile
-  { -- | The last successful compiled file content.
+  { -- | The last successfully compiled file content.
+    -- Using VirtualFile for convenience, we can use anything with {version, content}
     staleContent :: VirtualFile,
     -- | PositionMapping between current and stale file content.
     -- Nothing if last type-check is successful.
@@ -34,7 +39,8 @@ instance Show StaleFile where
 
 -- | Compute PositionMapping using the diff between two texts.
 mappingFromDiff :: [T.Text] -> [T.Text] -> PositionMapping
-mappingFromDiff stale current = PositionMapping $ rawMapping (getDiff stale current) 0 0
+mappingFromDiff stale current =
+  PositionMapping $ bimap V.fromList V.fromList $ rawMapping (getDiff stale current) 0 0
   where
     rawMapping :: [Diff T.Text] -> Int -> Int -> ([Int], [Int])
     rawMapping [] _ _ = ([], [])
@@ -48,7 +54,7 @@ toStalePos :: Maybe PositionMapping -> Pos -> Maybe Pos
 toStalePos (Just (PositionMapping (_, new2old))) pos =
   if l > Prelude.length new2old
     then Nothing
-    else Just $ Pos file ((new2old !! (l - 1)) + 1) c o
+    else Just $ Pos file (V.unsafeIndex new2old (l - 1) + 1) c o
   where
     Pos file l c o = pos
 toStalePos Nothing pos = Just pos
@@ -58,7 +64,7 @@ toCurrentPos :: Maybe PositionMapping -> Pos -> Maybe Pos
 toCurrentPos (Just (PositionMapping (old2new, _))) pos =
   if l > Prelude.length old2new
     then Nothing
-    else Just $ Pos file ((old2new !! (l - 1)) + 1) c o
+    else Just $ Pos file (V.unsafeIndex old2new (l - 1) + 1) c o
   where
     Pos file l c o = pos
 toCurrentPos Nothing pos = Just pos

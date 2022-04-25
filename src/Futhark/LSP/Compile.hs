@@ -54,7 +54,6 @@ tryReCompile state_mvar file_path = do
   old_state <- liftIO $ readIORef state_mvar
   let loaded_prog = getLoadedProg old_state
   new_state <- tryCompile old_state file_path loaded_prog
-  debug $ show $ staleData old_state
   case stateProgram new_state of
     Nothing -> do
       debug "Failed to (re)-compile, using old state or Nothing"
