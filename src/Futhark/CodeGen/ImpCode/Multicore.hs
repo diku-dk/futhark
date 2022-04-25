@@ -33,8 +33,6 @@ data Multicore
     ForEachActive VName MCCode
   | -- | Extract a lane to a uniform in ISPC
     ExtractLane VName Exp Exp
-  | -- | Specifies the variability of all declarations within this scope
-    VariabilityBlock Variability MCCode
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -140,8 +138,6 @@ instance Pretty Multicore where
   ppr (ForEachActive i body) =
     "foreach_active" <+> ppr i
       <+> nestedBlock "{" "}" (ppr body)
-  ppr (VariabilityBlock qual code) =
-    nestedBlock (show qual <> " {") "}" (ppr code)
   ppr (ExtractLane dest tar lane) =
     ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
 
@@ -170,13 +166,15 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body <> freeIn' bound)
   freeIn' (ForEachActive i body) =
     fvBind (oneName i) (freeIn' body)
-  freeIn' (VariabilityBlock _ code) =
-    freeIn' code
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
 
--- TODO(pema): This is a bit hacky
--- Like @lexicalMemoryUsage@, but traverses inner multicore ops
+-- TODO(pema): We should probably make something like this but
+-- for the (non-ispc) multicore backend, which _does_ look into
+-- kernels (since they will be lexical). As it is currently, we
+-- treat many memory blocks which _could_ be lexical in the normal
+-- multicore backend as non-lexical. Also, the issue with safety tests.
+-- | Like @lexicalMemoryUsage@, but traverses inner multicore ops
 lexicalMemoryUsageMC :: Function Multicore -> M.Map VName Space
 lexicalMemoryUsageMC func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
@@ -200,7 +198,6 @@ lexicalMemoryUsageMC func =
     -- go into new functions.
     goOp f (ForEach _ _ body) = go f body
     goOp f (ForEachActive _ body) = go f body
-    goOp f (VariabilityBlock _ code) = go f code
     goOp _ _ = mempty
 
     declared (DeclareMem mem spc) =
@@ -212,7 +209,4 @@ lexicalMemoryUsageMC func =
       where
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
-    -- Treat inputs to kernels as non lexical, so we don't mix up the types
-    -- inside of a kernel!
-    set (Op (ISPCKernel _ args)) = namesFromList $ map paramName args
     set x = go set x

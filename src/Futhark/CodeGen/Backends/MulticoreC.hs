@@ -32,9 +32,10 @@ import Control.Monad
 
 import qualified Data.Map as M
 import Data.Maybe
+import Data.Loc
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.CodeGen.Backends.SimpleRep ( defaultMemBlockType )
+import Futhark.CodeGen.Backends.SimpleRep ( defaultMemBlockType, primStorageType, toStorage, fromStorage )
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
@@ -224,8 +225,8 @@ generateContext = do
   GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[0];|]
 
   GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, typename size_t param_value);|],
-      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, typename size_t param_value) {
+    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
+      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value) {
                      (void)cfg; (void)param_name; (void)param_value;
                      return 1;
                    }|]
@@ -281,12 +282,12 @@ closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
   nameFromString "retval_" <> nameFromString (pretty v)
 
-data ValueType = Prim | MemBlock | RawMem
+data ValueType = Prim PrimType | MemBlock | RawMem
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
   where
-    field name (ty, Prim) =
+    field name (ty, Prim _) =
       [C.csdecl|$ty:ty $id:(closureFreeStructField name);|]
     field name (_, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
@@ -294,7 +295,7 @@ compileFreeStructFields = zipWith field
 compileRetvalStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileRetvalStructFields = zipWith field
   where
-    field name (ty, Prim) =
+    field name (ty, Prim _) =
       [C.csdecl|$ty:ty *$id:(closureRetvalStructField name);|]
     field name (_, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
@@ -307,8 +308,8 @@ compileSetStructValues ::
   [C.Stm]
 compileSetStructValues struct = zipWith field
   where
-    field name (_, Prim) =
-      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
+    field name (_, Prim pt) =
+      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$exp:(toStorage pt (C.toExp name noLoc));|]
     field name (_, MemBlock) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name.mem;|]
     field name (_, RawMem) =
@@ -320,20 +321,24 @@ compileSetRetvalStructValues ::
   [VName] ->
   [(C.Type, ValueType)] ->
   [C.Stm]
-compileSetRetvalStructValues struct = zipWith field
+compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
   where
-    field name (ct, Prim) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=($ty:ct*)&$id:name;|]
+    field name (ct, Prim _) =
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=(($ty:ct*)&$id:name);
+               $escstm:("#if ISPC")
+               $id:struct.$id:(closureRetvalStructField name)+= programIndex;
+               $escstm:("#endif")|]
     field name (_, MemBlock) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
     field name (_, RawMem) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
 compileGetRetvalStructVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field
   where
-    field name (ty, Prim) =
-      [C.cdecl|$ty:ty $id:name = *$id:struct->$id:(closureRetvalStructField name);|]
+    field name (ty, Prim pt) =
+      let inner = [C.cexp|*$id:struct->$id:(closureRetvalStructField name)|]
+      in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(pretty name),
@@ -348,8 +353,9 @@ compileGetStructVals ::
   [C.InitGroup]
 compileGetStructVals struct = zipWith field
   where
-    field name (ty, Prim) =
-      [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureFreeStructField name);|]
+    field name (ty, Prim pt) =
+      let inner = [C.cexp|$id:struct->$id:(closureFreeStructField name)|]
+      in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(pretty name),
@@ -359,15 +365,15 @@ compileGetStructVals struct = zipWith field
 compileWriteBackResVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
 compileWriteBackResVals struct = zipWith field
   where
-    field name (_, Prim) =
-      [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $id:name;|]
+    field name (_, Prim pt) =
+      [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $exp:(toStorage pt (C.toExp name noLoc));|]
     field name (_, _) =
       [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
 
 paramToCType :: Param -> GC.CompilerM op s (C.Type, ValueType)
 paramToCType (ScalarParam _ pt) = do
-  let t = GC.primTypeToCType pt
-  pure (t, Prim)
+  let t = primStorageType pt
+  pure (t, Prim pt)
 paramToCType (MemParam name space') = mcMemToCType name space'
 
 mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
@@ -704,8 +710,6 @@ compileOp (ForEach i bound body) =
 compileOp (ForEachActive i body) = do
   GC.decl [C.cdecl|typename int64_t $id:i = 0;|]
   scopedBlock body
-compileOp (VariabilityBlock _ code) =
-  GC.compileCode code
 compileOp (ExtractLane dest tar _) = do
   tar' <- GC.compileExp tar
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
@@ -738,7 +742,7 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
   arr' <- GC.rawMem arr
   GC.stm
     [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
-                ($ty:cast)&$id:old,
+                 &$id:old,
                  $exp:new_val',
                  0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);|]
   where

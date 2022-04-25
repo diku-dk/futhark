@@ -241,6 +241,37 @@ jobs:
         futhark test -c --backend=multicore tests --no-tuning
         make -C tests_lib/c FUTHARK_BACKEND=multicore
 
+  test-ispc-multicore:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-jsonschema
+        wget https://github.com/ispc/ispc/releases/download/v1.17.0/ispc-v1.17.0-linux.tar.gz
+        tar xvf ispc-v1.17.0-linux.tar.gz
+        mkdir -p $HOME/.local/bin/
+        mv ispc-v1.17.0-linux/bin/ispc $HOME/.local/bin/ispc
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - run: |
+        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
+        futhark test -c --backend=ispc-multicore tests --no-tuning
+        make -C tests_lib/c FUTHARK_BACKEND=ispc-multicore
+
   test-python:
     runs-on: ubuntu-20.04
     needs: [build-linux-nix]

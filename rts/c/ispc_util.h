@@ -1,5 +1,77 @@
-// TODO(pema): Error handling
+// Generate missing overloads for extract on pointers
+#define make_extract(ty)                                                \
+static inline uniform ty * uniform extract(uniform ty * varying ptr, uniform int idx) { \
+    int64 c = (int64)ptr;                                               \
+    uniform int64 r = extract(c, idx);                                  \
+    return (uniform ty * uniform)r;                                             \
+}
 
+make_extract(int8)
+make_extract(int16)
+make_extract(int32)
+make_extract(int64)
+make_extract(uint8)
+make_extract(uint16)
+make_extract(uint32)
+make_extract(uint64)
+make_extract(float16)
+make_extract(float)
+make_extract(double)
+make_extract(int8* uniform)
+make_extract(int16* uniform)
+make_extract(int32* uniform)
+make_extract(int64* uniform)
+make_extract(uint8* uniform)
+make_extract(uint16* uniform)
+make_extract(uint32* uniform)
+make_extract(uint64* uniform)
+make_extract(float16* uniform)
+make_extract(float* uniform)
+make_extract(double* uniform)
+make_extract(struct futhark_context)
+make_extract(struct memblock)
+
+
+// Handling of atomics
+#define make_atomic_compare_exchange_wrapper(ty)				     \
+static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
+							   uniform ty * uniform old, \
+                                                           const uniform ty val){    \
+  uniform ty actual = atomic_compare_exchange_global(mem, *old, val);                \
+  if (actual == *old){                                                               \
+    return 1;                                                                        \
+  }                                                                                  \
+  *old = val;                                                                        \
+  return 0;                                                                          \
+}                                                                                    \
+static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying mem, \
+							  varying ty * uniform old,  \
+							  const varying ty val){     \
+  varying ty actual = atomic_compare_exchange_global(mem, *old, val);                \
+  if(actual == *old){                                                                \
+    return 1;                                                                        \
+  }                                                                                  \
+  *old = val;                                                                        \
+  return 0;                                                                          \
+}                                                                                    
+
+make_atomic_compare_exchange_wrapper(int32)
+make_atomic_compare_exchange_wrapper(int64)
+make_atomic_compare_exchange_wrapper(uint32)
+make_atomic_compare_exchange_wrapper(uint64)
+make_atomic_compare_exchange_wrapper(float)
+make_atomic_compare_exchange_wrapper(double)
+
+#define __atomic_fetch_add(x,y,z) atomic_add_global(x,y)
+#define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,y)
+#define __atomic_fetch_and(x,y,z) atomic_and_global(x,y)
+#define __atomic_fetch_or(x,y,z)  atomic_or_global(x,y)
+#define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,y)
+#define __atomic_exchange_n(x,y,z)  atomic_swap_global(x,y)
+#define __atomic_compare_exchange_n(x,y,z,h,j,k)  atomic_compare_exchange_wrapper(x,y,z)
+
+
+// Memory allocation handling
 #ifndef __ISPC_STRUCT_memblock__
 #define __ISPC_STRUCT_memblock__
 struct memblock {
@@ -10,8 +82,6 @@ struct memblock {
 };
 #endif
 
-
-
 typedef unsigned char uchar;
 
 static inline void free(void* ptr) {
@@ -19,9 +89,7 @@ static inline void free(void* ptr) {
 }
 
 static inline void free(void* uniform ptr) {
-  if (programIndex == 0) {
-    delete ptr;
-  }
+  delete ptr;
 }
 
 extern "C" unmasked uniform unsigned char * uniform realloc_ispc(uniform unsigned char * uniform ptr, uniform int64_t new_size);
@@ -130,10 +198,8 @@ static uniform int memblock_unref(uniform struct futhark_context * varying ctx,
 {
   uniform int err = 0;
 
-  foreach_active(i){
-    err |= memblock_unref((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
-		   (uniform struct memblock * uniform)(extract((varying int64_t)lhs,i)),
-		   lhs_desc);
+  foreach_active(i) {
+    err |= memblock_unref(extract(ctx,i), extract(lhs,i), lhs_desc);
   }
 
   return err;
@@ -171,10 +237,7 @@ static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
   uniform int err = 0;
 
   foreach_active(i){
-    err |= memblock_alloc((uniform struct futhark_context * uniform)(extract((varying int64_t)ctx,i)),
-		   (uniform struct memblock * uniform)(extract((varying int64_t)block,i)),
-		   extract(size, i),
-		   block_desc);
+    err |= memblock_alloc(extract(ctx,i), extract(block,i), extract(size, i), block_desc);
   }
 
   return err;

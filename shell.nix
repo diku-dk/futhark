@@ -1,9 +1,7 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-  unstable = import <nix-unstable> {};
-
-ispc = pkgs.ispc.overrideAttrs (oldAttrs: rec {
+  ispc = pkgs.ispc.overrideAttrs (oldAttrs: rec {
     version = "1.17.0";
     src = builtins.fetchTarball {
       url = "https://github.com/ispc/ispc/archive/refs/tags/v${version}.tar.gz";
@@ -21,9 +19,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.file
     pkgs.git
     pkgs.git-annex
-    unstable.haskell.compiler.ghc902
-    unstable.haskell.packages.ghc902.haskell-language-server
-    pkgs.stack
     pkgs.ghc
     pkgs.parallel
     pkgs.haskellPackages.weeder
@@ -34,6 +29,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
+    pkgs.haskell.packages.ghc922.ormolu_0_4_0_0
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
@@ -47,8 +43,4 @@ pkgs.stdenv.mkDerivation {
     [ pkgs.opencl-headers
       pkgs.ocl-icd ]
   ;
-  shellHooks=''
-    export PATH=$PATH:~/.local/bin
-    alias skkrt='stack build --fast && stack install'
-  '';
 }

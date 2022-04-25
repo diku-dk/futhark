@@ -29,7 +29,7 @@ module Futhark.CodeGen.Backends.GenericC
     Allocate,
     Deallocate,
     Copy,
-    StaticArray,
+    StaticArray,    
 
     -- * Monadic compiler interface
     CompilerM,
@@ -80,7 +80,6 @@ module Futhark.CodeGen.Backends.GenericC
     intTypeToCType,
     copyMemoryDefaultSpace,
     volQuals,
-    variQuals,
     linearCode,
     derefPointer,
     allocMem,
@@ -282,7 +281,8 @@ defError msg stacktrace = do
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
-    [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
+    [C.citems|if (ctx->error == NULL) 
+                ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
@@ -636,7 +636,7 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm [C.cstm|$exp:dest = (unsigned char*) malloc((typename size_t)$exp:size);|]
+    stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
 
 freeRawMem ::
   (C.ToExp a, C.ToExp b) =>
@@ -975,7 +975,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       [C.cexp|data|]
       [C.cexp|0|]
       DefaultSpace
-      [C.cexp|((typename size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   new_raw_body <- collect $ do
     prepare_new
@@ -986,7 +986,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       [C.cexp|data|]
       [C.cexp|offset|]
       space
-      [C.cexp|((typename size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
@@ -999,7 +999,7 @@ arrayLibraryFunctions pub space pt signed rank = do
         [C.cexp|arr->mem.mem|]
         [C.cexp|0|]
         space
-        [C.cexp|((typename size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
+        [C.cexp|((size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
 
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -1178,7 +1178,7 @@ opaqueLibraryFunctions desc vds = do
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
   headerDecl
     (OpaqueDecl desc)
-    [C.cedecl|int $id:store_opaque($ty:ctx_ty *ctx, const $ty:opaque_type *obj, void **p, typename size_t *n);|]
+    [C.cedecl|int $id:store_opaque($ty:ctx_ty *ctx, const $ty:opaque_type *obj, void **p, size_t *n);|]
   headerDecl
     (OpaqueDecl desc)
     [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
@@ -1197,7 +1197,7 @@ opaqueLibraryFunctions desc vds = do
           }
 
           int $id:store_opaque($ty:ctx_ty *ctx,
-                               const $ty:opaque_type *obj, void **p, typename size_t *n) {
+                               const $ty:opaque_type *obj, void **p, size_t *n) {
             int ret = 0;
             $items:store_body
             return ret;
@@ -1724,12 +1724,12 @@ $entry_point_decls
       types <- commonLibFuns memreport
 
       pure
-        ( T.unlines $ map prettyText prototypes,
+        ( T.unlines $ map prettyText prototypes,          
           T.unlines $ map (prettyText . funcToDef) functions,
           T.unlines $ map prettyText entry_points,
           Manifest.Manifest (M.fromList entry_points_manifest) types backend version
         )
-
+    
     funcToDef func = C.FuncDef func loc
       where
         loc = case func of
@@ -1944,7 +1944,7 @@ cachingMemory lexical f = do
           }
 
       declCached (mem, size) =
-        [ [C.citem|typename size_t $id:size = 0;|],
+        [ [C.citem|size_t $id:size = 0;|],
           [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]
         ]
 
@@ -1962,7 +1962,6 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     body' <- collect $ compileFunBody out_ptrs outputs body
     decl_mem <- declAllocatedMem
     free_mem <- freeAllocatedMem
-
     pure
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
@@ -2008,11 +2007,6 @@ derefPointer ptr i res_t =
 volQuals :: Volatility -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
-
-variQuals :: Variability  -> [C.TypeQual]
-variQuals Uniform = [C.ctyquals|uniform|]
-variQuals Unbound = []
-variQuals Varying = []
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
