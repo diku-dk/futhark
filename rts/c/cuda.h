@@ -260,7 +260,7 @@ static int cuda_device_setup(struct cuda_context *ctx) {
   int used_devices = 0;
   int* devices = (int*)calloc(count, sizeof(int));
   for(int devID = 0; devID < count; devID++){
-    CUDA_SUCCEED_FATAL(cuDeviceGet(&dev, devID)); 
+    CUDA_SUCCEED_FATAL(cuDeviceGet(&dev, devID));
 
     int cc_major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
     int cc_minor = device_query(dev, COMPUTE_CAPABILITY_MINOR);
@@ -283,19 +283,19 @@ static int cuda_device_setup(struct cuda_context *ctx) {
 
   for(int devIdx = 0; devIdx < used_devices; devIdx++){
     CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->devices[devIdx], devices[devIdx]));
-    CUDA_SUCCEED_FATAL(cuDevicePrimaryCtxRetain(&ctx->contexts[devIdx], 
-                                   ctx->devices[devIdx])); 
-    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->devices[devIdx]));                                   
+    CUDA_SUCCEED_FATAL(cuDevicePrimaryCtxRetain(&ctx->contexts[devIdx],
+                                   ctx->devices[devIdx]));
+    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[devIdx]));
     CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->kernel_done[devIdx * 2],
                                      CU_EVENT_DISABLE_TIMING));
     CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->kernel_done[devIdx * 2 + 1],
                                      CU_EVENT_DISABLE_TIMING));
-    CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->finished[devIdx], 
+    CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->finished[devIdx],
                                      CU_EVENT_DISABLE_TIMING));
-    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->devices[devIdx]));
+    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devIdx]));
   }
 
-  free(devices); 
+  free(devices);
 
   CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->dev, chosen));
   return 0;
@@ -748,7 +748,8 @@ static void cuda_cleanup(struct cuda_context *ctx) {
     CUDA_SUCCEED_FATAL(cuEventDestroy(ctx->kernel_done[devIdx * 2 + 1]));
     CUDA_SUCCEED_FATAL(cuEventDestroy(ctx->finished[devIdx]));
     CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->modules[devIdx]));
-    CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->contexts[devIdx]));  
+    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devIdx]));
+    CUDA_SUCCEED_FATAL(cuDevicePrimaryCtxRelease(ctx->devices[devIdx]));
   }
   free(ctx->kernel_done);
   free(ctx->finished);

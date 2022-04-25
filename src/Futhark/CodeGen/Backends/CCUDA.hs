@@ -319,7 +319,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             [C.cinit|&ctx->failure_is_an_option|],
             [C.cinit|&ctx->global_failure_args|]
           ]
-      args'' = perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
+      args'' = [[C.cinit|&device_id|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
       sizes_nonzero =
         expsNotZero
           [ grid_x,
@@ -352,7 +352,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       grid[perm[2]] = $exp:grid_z;
 
       int device_id = 0;
-      void *$id:args_arr[] = { $inits:args'' , &device_id };
+      void *$id:args_arr[] = { $inits:args''};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
         fprintf(ctx->log, "Launching %s with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
@@ -364,13 +364,13 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       }
       $items:bef
       if(ctx->use_multi_device){
+        size_t grid_MD[3];
+        grid_MD[perm[0]] = $exp:grid_x_MD;
+        grid_MD[perm[1]] = $exp:grid_y_MD;
+        grid_MD[perm[2]] = $exp:grid_z_MD;
         for(int devID = 0; devID < ctx->cuda.device_count; devID++){
-            int localIdx = devID;
-            void *$id:args_arr[] = { $inits:args'' , &localIdx};
-            size_t grid_MD[3];
-            grid_MD[perm[0]] = $exp:grid_x_MD;
-            grid_MD[perm[1]] = $exp:grid_y_MD;
-            grid_MD[perm[2]] = $exp:grid_z_MD;
+            int device_id = devID;
+            void *$id:args_arr[] = { $inits:args'' };
             CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
             CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:(kernelMultiDevice kernel_name)[devID],
                                                   grid_MD[0], grid_MD[1], grid_MD[2],
