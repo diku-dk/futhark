@@ -277,3 +277,6 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
 
   return err;
 }
+
+#define memmove memmove64
+#define memcpy memcpy64
