@@ -269,7 +269,7 @@ jobs:
 
     - run: |
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-        futhark test -c --backend=ispc-multicore tests --no-tuning
+        futhark test -c --backend=ispc-multicore tests/big1.fut --no-tuning
         make -C tests_lib/c FUTHARK_BACKEND=ispc-multicore
 
   test-python:

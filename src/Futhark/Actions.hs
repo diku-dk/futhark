@@ -400,11 +400,11 @@ compileMulticoreToISPCAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
           liftIO $ T.writeFile ispcpath ispc
-          runISPC ispcpath outpath cpath ispcextension ["-O3", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcpath outpath cpath ispcextension ["-O3", "--target=avx2-i32x8", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           liftIO $ T.writeFile ispcpath ispc
-          runISPC ispcpath outpath cpath ispcextension ["-O3", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+          runISPC ispcpath outpath cpath ispcextension ["-O3", "--target=avx2-i32x8", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 pythonCommon ::
   (CompilerMode -> String -> prog -> FutharkM (Warnings, T.Text)) ->
