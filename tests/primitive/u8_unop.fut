@@ -1,25 +1,20 @@
 -- Test unary operators for u8.
---
--- ==
--- input { 0  0u8 } output {  0u8 }
--- input { 0  1u8 } output { 255u8 }
--- input { 0 255u8 } output {  1u8 }
--- input { 0  8u8 } output { 248u8 }
--- input { 0 248u8 } output {  8u8 }
---
--- input { 1  0u8 } output { 0u8 }
--- input { 1  1u8 } output { 1u8 }
--- input { 1 255u8 } output { 255u8 }
--- input { 1  8u8 } output { 8u8 }
--- input { 1 248u8 } output { 248u8 }
---
--- input { 2  0u8 } output { 0u8 }
--- input { 2  1u8 } output { 1u8 }
--- input { 2 255u8 } output { 1u8 }
--- input { 2  8u8 } output { 1u8 }
--- input { 2 248u8 } output { 1u8 }
 
-def main (f: i32) (x: u8): u8 =
-  if      f == 0 then -x
-  else if f == 1 then u8.abs(x)
-  else                u8.sgn(x)
+-- ==
+-- entry: negateu8
+-- input { [0u8, 1u8, 255u8, 8u8, 248u8] }
+-- output { [0u8, 255u8, 1u8, 248u8, 8u8] }
+
+-- ==
+-- entry: absu8
+-- input { [0u8, 1u8, 255u8, 8u8, 248u8] }
+-- output { [0u8, 1u8, 255u8, 8u8, 248u8] }
+
+-- ==
+-- entry: sgnu8
+-- input { [0u8, 1u8, 255u8, 8u8, 248u8] }
+-- output { [0u8, 1u8, 1u8, 1u8, 1u8] }
+
+entry negateu8 = map (\x : u8 -> -x)
+entry absu8 = map (u8.abs)
+entry sgnu8 = map (u8.sgn)

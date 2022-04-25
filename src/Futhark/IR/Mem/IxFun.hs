@@ -72,13 +72,18 @@ type Indices num = [num]
 
 type Permutation = [Int]
 
+-- | The physical element ordering alongside a dimension, i.e. the
+-- sign of the stride.
 data Monotonicity
-  = Inc
-  | Dec
-  | -- | monotonously increasing, decreasing or unknown
+  = -- | Increasing.
+    Inc
+  | -- | Decreasing.
+    Dec
+  | -- | Unknown.
     Unknown
   deriving (Show, Eq)
 
+-- | A single dimension in an 'LMAD'.
 data LMADDim num = LMADDim
   { ldStride :: num,
     ldRotate :: num,
@@ -282,9 +287,11 @@ hasContiguousPerm (IxFun (lmad :| []) _ _) =
    in perm == sort perm
 hasContiguousPerm _ = False
 
--- | Shape of an index function.
+-- | The index space of the index function.  This is the same as the
+-- shape of arrays that the index function supports.
 shape :: (Eq num, IntegralExp num) => IxFun num -> Shape num
-shape (IxFun (lmad :| _) _ _) = lmadShape lmad
+shape (IxFun (lmad :| _) _ _) =
+  permuteFwd (lmadPermutation lmad) $ lmadShapeBase lmad
 
 -- | Shape of an LMAD.
 lmadShape :: (Eq num, IntegralExp num) => LMAD num -> Shape num
@@ -998,7 +1005,9 @@ existentializeExp e = do
   let t = primExpType $ untyped e
   pure $ TPrimExp $ LeafExp (Ext i) t
 
--- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
+-- | Try to turn all the leaves of the index function into 'Ext's.  We
+--  require that there's only one LMAD, that the index function is
+--  contiguous, and the base shape has only one dimension.
 existentialize ::
   (IntExp t, Eq v, Pretty v) =>
   IxFun (TPrimExp t v) ->

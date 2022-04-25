@@ -1,5 +1,4 @@
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | Various boilerplate definitions for the CUDA backend.
 module Futhark.CodeGen.Backends.CCUDA.Boilerplate
@@ -52,7 +51,6 @@ profilingEnclosure name =
       }
       |]
   )
-
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
@@ -112,6 +110,7 @@ generateConfigFuns sizes = do
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
                               bool use_multi_device;
+                              const char *cache_fname;
                             };|]
     )
 
@@ -132,6 +131,7 @@ generateConfigFuns sizes = do
                          cfg->num_nvrtc_opts = 0;
                          cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
+                         cfg->cache_fname = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
                                           tuning_param_names, tuning_param_vars,
@@ -326,7 +326,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
           [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
                                      &ctx->$id:name,
                                      ctx->cuda.module,
-                                     $string:(pretty (C.toIdent name mempty))));                                     
+                                     $string:(pretty (C.toIdent name mempty))));
                                      |]
         ) :
         forCostCentre name
@@ -338,7 +338,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
       forKernelMD name =
         ( [C.csdecl| typename CUfunction* $id:(kernelMultiDevice name);|],
-          [C.cstms| ctx->$id:(kernelMultiDevice name) = calloc(ctx->cuda.device_count,sizeof(CUfunction));                                           
+          [C.cstms| ctx->$id:(kernelMultiDevice name) = calloc(ctx->cuda.device_count,sizeof(CUfunction));
               for(int devID = 0; devID < ctx->cuda.device_count; devID++){
                 CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
                 CUDA_SUCCEED_FATAL(cuModuleGetFunction(&ctx->$id:(kernelMultiDevice name)[devID],
@@ -422,7 +422,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->total_runtime = 0;
                  $stms:init_fields
 
-                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
 
                  ctx->use_multi_device = cfg->use_multi_device && (ctx->cuda.device_count >= 1);
                  if (ctx->error != NULL) {
@@ -431,13 +431,13 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
                  typename int32_t no_error = -1;
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
-                                      &ctx->global_failure, 
-                                      sizeof(no_error), 
+                                      &ctx->global_failure,
+                                      sizeof(no_error),
                                       CU_MEM_ATTACH_GLOBAL));
                  CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
                  // The +1 is to avoid zero-byte allocations.
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
-                                      &ctx->global_failure_args, 
+                                      &ctx->global_failure_args,
                                       sizeof(int64_t)*($int:max_failure_args+1),
                                       CU_MEM_ATTACH_GLOBAL));
 

@@ -173,7 +173,7 @@ readCUDAScalar mem idx t "device" _ = do
          for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
            CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
            CUDA_SUCCEED_FATAL(cuCtxSynchronize());
-           CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));  
+           CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
          }
        }
        $items:bef
@@ -211,13 +211,13 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   GC.item
     [C.citem|{
                 if(ctx->use_multi_device){
-                  for(int device_id = 0; device_id < ctx->cuda.device_count; 
+                  for(int device_id = 0; device_id < ctx->cuda.device_count;
                     device_id++){
                     CUDA_SUCCEED_FATAL(cuCtxPushCurrent(
                       ctx->cuda.contexts[device_id]));
                     CUDA_SUCCEED_FATAL(cuCtxSynchronize());
                     CUDA_SUCCEED_FATAL(cuCtxPopCurrent(
-                      &ctx->cuda.contexts[device_id]));  
+                      &ctx->cuda.contexts[device_id]));
                   }
                 }
                 $items:bef
@@ -351,7 +351,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       grid[perm[1]] = $exp:grid_y;
       grid[perm[2]] = $exp:grid_z;
 
-      int device_id = 0; 
+      int device_id = 0;
       void *$id:args_arr[] = { $inits:args'' , &device_id };
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {

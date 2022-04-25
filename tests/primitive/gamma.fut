@@ -1,6 +1,12 @@
 -- ==
--- input { 1.0 } output { 1f32 1f64 }
--- input { 4.0 } output { 6f32 6f64 }
+-- entry: gamma64
+-- input { [1.0, 4.0] }
+-- output { [1f64, 6f64] }
 
-def main (x: f64) = (f32.gamma (f32.f64 x),
-                     f64.gamma x)
+-- ==
+-- entry: gamma32
+-- input { [1f32, 4f32] }
+-- output { [1f32, 6f32] }
+
+entry gamma64 = map f64.gamma
+entry gamma32 = map f32.gamma

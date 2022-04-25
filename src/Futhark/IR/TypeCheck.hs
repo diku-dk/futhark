@@ -533,11 +533,11 @@ requireI ts ident = require ts $ Var ident
 checkArrIdent ::
   Checkable rep =>
   VName ->
-  TypeM rep Type
+  TypeM rep (Shape, PrimType)
 checkArrIdent v = do
   t <- lookupType v
   case t of
-    Array {} -> pure t
+    Array pt shape _ -> pure (shape, pt)
     _ -> bad $ NotAnArray v t
 
 checkAccIdent ::
@@ -836,16 +836,16 @@ checkBasicOp (Index ident (Slice idxes)) = do
     bad $ SlicingError (arrayRank vt) (length idxes)
   mapM_ checkDimIndex idxes
 checkBasicOp (Update _ src (Slice idxes) se) = do
-  src_t <- checkArrIdent src
-  when (arrayRank src_t /= length idxes) $
-    bad $ SlicingError (arrayRank src_t) (length idxes)
+  (src_shape, src_pt) <- checkArrIdent src
+  when (shapeRank src_shape /= length idxes) $
+    bad $ SlicingError (shapeRank src_shape) (length idxes)
 
   se_aliases <- subExpAliasesM se
   when (src `nameIn` se_aliases) $
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
-  require [arrayOf (Prim (elemType src_t)) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
+  require [arrayOf (Prim src_pt) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
   consume =<< lookupAliases src
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
@@ -854,16 +854,16 @@ checkBasicOp (FlatIndex ident slice) = do
     bad $ SlicingError (arrayRank vt) 1
   checkFlatSlice slice
 checkBasicOp (FlatUpdate src slice v) = do
-  src_t <- checkArrIdent src
-  when (arrayRank src_t /= 1) $
-    bad $ SlicingError (arrayRank src_t) 1
+  (src_shape, src_pt) <- checkArrIdent src
+  when (shapeRank src_shape /= 1) $
+    bad $ SlicingError (shapeRank src_shape) 1
 
   v_aliases <- lookupAliases v
   when (src `nameIn` v_aliases) $
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   checkFlatSlice slice
-  requireI [arrayOf (Prim (elemType src_t)) (Shape (flatSliceDims slice)) NoUniqueness] v
+  requireI [arrayOf (Prim src_pt) (Shape (flatSliceDims slice)) NoUniqueness] v
   consume =<< lookupAliases src
 checkBasicOp (Iota e x s et) = do
   require [Prim int64] e
@@ -875,7 +875,7 @@ checkBasicOp (Replicate (Shape dims) valexp) = do
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 checkBasicOp (Reshape newshape arrexp) = do
-  rank <- arrayRank <$> checkArrIdent arrexp
+  rank <- shapeRank . fst <$> checkArrIdent arrexp
   mapM_ (require [Prim int64] . newDim) newshape
   zipWithM_ (checkDimChange rank) newshape [0 ..]
   where
@@ -910,22 +910,10 @@ checkBasicOp (Rotate rots arr) = do
           ++ show rank
           ++ "-dimensional array."
 checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
-  arr1t <- checkArrIdent arr1exp
-  arr2ts <- mapM checkArrIdent arr2exps
-  let success =
-        all
-          ( (== dropAt i 1 (arrayDims arr1t))
-              . dropAt i 1
-              . arrayDims
-          )
-          arr2ts
-  unless success $
-    bad $
-      TypeError $
-        "Types of arguments to concat do not match.  Got "
-          ++ pretty arr1t
-          ++ " and "
-          ++ intercalate ", " (map pretty arr2ts)
+  arr1_dims <- shapeDims . fst <$> checkArrIdent arr1exp
+  arr2s_dims <- map (shapeDims . fst) <$> mapM checkArrIdent arr2exps
+  unless (all ((== dropAt i 1 arr1_dims) . dropAt i 1) arr2s_dims) $
+    bad $ TypeError "Types of arguments to concat do not match."
   require [Prim int64] ressize
 checkBasicOp (Copy e) =
   void $ checkArrIdent e
