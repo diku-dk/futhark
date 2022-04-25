@@ -52,7 +52,6 @@ profilingEnclosure name =
       |]
   )
 
-
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateBoilerplate ::
@@ -327,7 +326,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
           [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
                                      &ctx->$id:name,
                                      ctx->cuda.module,
-                                     $string:(pretty (C.toIdent name mempty))));                                     
+                                     $string:(pretty (C.toIdent name mempty))));
                                      |]
         ) :
         forCostCentre name
@@ -339,7 +338,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
       forKernelMD name =
         ( [C.csdecl| typename CUfunction* $id:(kernelMultiDevice name);|],
-          [C.cstms| ctx->$id:(kernelMultiDevice name) = malloc(sizeof(CUfunction)*ctx->cuda.device_count);                                           
+          [C.cstms| ctx->$id:(kernelMultiDevice name) = malloc(sizeof(CUfunction)*ctx->cuda.device_count);
               for(int devID = 0; devID < ctx->cuda.device_count; devID++){
                 CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
                 CUDA_SUCCEED_FATAL(cuModuleGetFunction(&ctx->$id:(kernelMultiDevice name)[devID],
@@ -432,13 +431,13 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
                  typename int32_t no_error = -1;
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
-                                      &ctx->global_failure, 
-                                      sizeof(no_error), 
+                                      &ctx->global_failure,
+                                      sizeof(no_error),
                                       CU_MEM_ATTACH_GLOBAL));
                  CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
                  // The +1 is to avoid zero-byte allocations.
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
-                                      &ctx->global_failure_args, 
+                                      &ctx->global_failure_args,
                                       sizeof(int64_t)*($int:max_failure_args+1),
                                       CU_MEM_ATTACH_GLOBAL));
 
