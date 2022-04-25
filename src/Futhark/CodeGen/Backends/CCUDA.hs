@@ -377,13 +377,16 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
                                                   $exp:block_x, $exp:block_y, $exp:block_z,
                                                   $exp:shared_tot, NULL,
                                                   $id:args_arr, NULL));
-            CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.finished[devID], NULL));
+            CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[devID * 2
+                                             + ctx->cuda.kernel_iterator], NULL));
             for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){
               if(other_dev == devID) continue;
-              CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.finished[devID],0));
-            }                                                  
+              CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[devID * 2
+                                                   + cuda.kernel_iterator],0));
+            }
             CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
         }
+        ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
 
       } else {
         CUDA_SUCCEED_OR_RETURN(
