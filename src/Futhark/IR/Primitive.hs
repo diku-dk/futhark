@@ -1670,7 +1670,7 @@ negativeIshInt (Int16Value k) = k < 0
 negativeIshInt (Int32Value k) = k < 0
 negativeIshInt (Int64Value k) = k < 0
 
--- | The size of a value of a given primitive type in bites.
+-- | The size of a value of a given primitive type in bits.
 primBitSize :: PrimType -> Int
 primBitSize = (* 8) . primByteSize
 
