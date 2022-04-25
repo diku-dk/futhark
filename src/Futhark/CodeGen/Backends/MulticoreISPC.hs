@@ -508,6 +508,59 @@ compileCode (Assert e msg (loc, locs)) = do
 compileCode code =
   GC.compileCode code
 
+-- Prepare a struct with memory allocted in the scope and populate
+-- its fields with values
+prepareMemStruct :: [(VName, VName)] -> [VName] -> ISPCCompilerM Name
+prepareMemStruct lexmems fatmems = do
+  let lex_defs = concatMap lexMemDef lexmems
+  let fat_defs = map fatMemDef fatmems
+  name <- ispcDef "mem_struct" $ \s -> do
+    pure
+      [C.cedecl|struct $id:s {
+        $sdecls:lex_defs
+        $sdecls:fat_defs
+      };|]
+  let name' = name <> "_"
+  GC.decl [C.cdecl|uniform struct $id:name $id:name';|]
+  forM_ (concatMap (\(a, b) -> [a, b]) lexmems) $ \m ->
+    GC.stm [C.cstm|$id:name'.$id:m = $id:m;|]
+  forM_ fatmems $ \m ->
+    GC.stm [C.cstm|$id:name'.$id:m = &$id:m;|]
+  pure name
+  where
+    lexMemDef (name, size) =
+      [[C.csdecl|uniform unsigned char * varying $id:name;|]
+      ,[C.csdecl|varying size_t $id:size;|]]
+    fatMemDef name =
+      [C.csdecl|varying struct memblock * uniform $id:name;|]
+
+-- Get memory from the memory struct into local variables
+compileGetMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
+compileGetMemStructVals struct lexmems fatmems = do
+  forM_ fatmems $ \m ->
+    GC.decl [C.cdecl|struct memblock $id:m = *$id:struct->$id:m;|]
+  forM_ lexmems $ \(m, s) -> do
+    GC.decl [C.cdecl|unsigned char * $id:m = $id:struct->$id:m;|]
+    GC.decl [C.cdecl|size_t $id:s = $id:struct->$id:s;|]
+
+-- Write back potentially changed memory addresses and sizes to the memory struct
+compileWritebackMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
+compileWritebackMemStructVals struct lexmems fatmems = do
+  forM_ fatmems $ \m ->
+    GC.stm [C.cstm|*$id:struct->$id:m = $id:m;|]
+  forM_ lexmems $ \(m, s) -> do
+    GC.stm [C.cstm|$id:struct->$id:m = $id:m;|]
+    GC.stm [C.cstm|$id:struct->$id:s = $id:s;|]
+
+-- Read back potentially changed memory addresses and sizes to the memory struct into local variables
+compileReadbackMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
+compileReadbackMemStructVals struct lexmems fatmems = do
+  forM_ fatmems $ \m ->
+    GC.stm [C.cstm|$id:m = *$id:struct.$id:m;|]
+  forM_ lexmems $ \(m, s) -> do
+    GC.stm [C.cstm|$id:m = $id:struct.$id:m;|]
+    GC.stm [C.cstm|$id:s = $id:struct.$id:s;|]
+
 compileGetStructVals ::
   Name ->
   [VName] ->
@@ -619,7 +672,7 @@ compileOp (ISPCKernel body free) = do
   let fstruct' = fstruct <> "_"
 
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
-    mainBody <- GC.inNewFunction $ analyzeVariability body $ GC.cachingMemory lexical $ \decl_cached free_cached ->
+    mainBody <- GC.inNewFunction $ analyzeVariability body $ GC.cachingMemory lexical $ \decl_cached free_cached lexmems ->
       GC.collect $ do
         GC.decl [C.cdecl|uniform struct futhark_context * uniform ctx = $id:fstruct'->ctx;|]
         GC.items =<< compileGetStructVals fstruct free_args free_ctypes
@@ -627,7 +680,31 @@ compileOp (ISPCKernel body free) = do
         body' <- GC.collect $ compileCode body
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
-        mapM_ GC.item body'
+
+        -- Make inner kernel for error handling
+        fatmems <- gets (map fst . GC.compDeclaredMem)
+        mstruct <- prepareMemStruct lexmems fatmems
+        let mstruct' = mstruct <> "_"
+        innerShim <- ispcDef "inner_ispc" $ \t -> do
+          innerBody <- GC.collect $ do
+            GC.decl [C.cdecl|uniform struct futhark_context * uniform ctx = $id:fstruct'->ctx;|]
+            GC.items =<< compileGetStructVals fstruct free_args free_ctypes
+            compileGetMemStructVals mstruct' lexmems fatmems
+            GC.decl [C.cdecl|uniform int err = 0;|]
+            mapM_ GC.item body'
+            compileWritebackMemStructVals mstruct' lexmems fatmems
+            GC.stm [C.cstm|return err;|]
+          pure [C.cedecl|
+            static unmasked inline uniform int $id:t(uniform typename int64_t start,
+                                        uniform typename int64_t end,
+                                        struct $id:fstruct uniform * uniform $id:fstruct',
+                                        struct $id:mstruct uniform * uniform $id:mstruct') {
+              $items:innerBody
+            }|]
+        -- Call the kernel and read back potentially changed memory
+        GC.stm [C.cstm|err = $id:innerShim(start, end, $id:fstruct', &$id:mstruct');|]
+        compileReadbackMemStructVals mstruct' lexmems fatmems
+
         free_mem <- freeAllocatedMem
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]

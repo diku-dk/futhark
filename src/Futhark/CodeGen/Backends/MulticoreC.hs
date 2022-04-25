@@ -526,7 +526,7 @@ generateParLoopFn lexical basename code fstruct free retval = do
   let (retval_args, retval_ctypes) = unzip retval
   multicoreDef basename $ \s -> do
     fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
-      GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
+      GC.cachingMemory lexical $ \decl_cached free_cached _ -> GC.collect $ do
         mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
         mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
         code' <- GC.collect $ GC.compileCode code
@@ -649,7 +649,7 @@ compileOp (ParLoop s' body free) = do
 
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
-      GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
+      GC.cachingMemory lexical $ \decl_cached free_cached _ -> GC.collect $ do
         mapM_
           GC.item
           [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
