@@ -353,19 +353,24 @@ lpFilePaths = map lfPath . lpFiles
 unchangedImports ::
   MonadIO m =>
   VNameSource ->
+  VFS ->
   [LoadedFile CheckedFile] ->
   m ([LoadedFile CheckedFile], VNameSource)
-unchangedImports src [] = pure ([], src)
-unchangedImports src (f : fs)
+unchangedImports src _ [] = pure ([], src)
+unchangedImports src vfs (f : fs)
   | isBuiltin (includeToFilePath (lfImportName f)) =
-      first (f :) <$> unchangedImports src fs
+      first (f :) <$> unchangedImports src vfs fs
   | otherwise = do
-      changed <-
-        maybe True (either (const True) (> lfModTime f))
-          <$> liftIO (interactWithFileSafely (getModificationTime $ lfPath f))
-      if changed
+      let file_path = lfPath f
+      if M.member file_path vfs
         then pure ([], cfNameSource $ lfMod f)
-        else first (f :) <$> unchangedImports src fs
+        else do
+          changed <-
+            maybe True (either (const True) (> lfModTime f))
+              <$> liftIO (interactWithFileSafely (getModificationTime file_path))
+          if changed
+            then pure ([], cfNameSource $ lfMod f)
+            else first (f :) <$> unchangedImports src vfs fs
 
 -- | A "loaded program" containing no actual files.  Use this as a
 -- starting point for 'reloadProg'
@@ -380,10 +385,10 @@ noLoadedProg =
 -- | Find out how many of the old imports can be used.  Here we are
 -- forced to be overly conservative, because our type checker
 -- enforces a linear ordering.
-usableLoadedProg :: MonadIO m => LoadedProg -> [FilePath] -> m LoadedProg
-usableLoadedProg (LoadedProg roots imports src) new_roots
+usableLoadedProg :: MonadIO m => LoadedProg -> VFS -> [FilePath] -> m LoadedProg
+usableLoadedProg (LoadedProg roots imports src) vfs new_roots
   | sort roots == sort new_roots = do
-      (imports', src') <- unchangedImports src imports
+      (imports', src') <- unchangedImports src vfs imports
       pure $ LoadedProg [] imports' src'
   | otherwise =
       pure noLoadedProg
@@ -412,7 +417,7 @@ reloadProg ::
   VFS ->
   IO (Either (NE.NonEmpty ProgError) LoadedProg)
 reloadProg lp new_roots vfs = do
-  lp' <- usableLoadedProg lp new_roots
+  lp' <- usableLoadedProg lp vfs new_roots
   extendProg lp' new_roots vfs
 
 -- | Read and type-check some Futhark files.
