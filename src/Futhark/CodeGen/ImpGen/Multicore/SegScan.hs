@@ -67,10 +67,9 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
     let noArrayParam = null [x | x@(Array {})<- paramTypes]
 
     let (scanStage1, scanStage3)
-         | scalars = trace "scalar" (scalar, scalarStage3)
-         | vectorize && noArrayParam = trace "vec" (vectorized, vectorizedStage3)
-         | vectorize = trace "scalar" (scalar, scalarStage3)
-         | otherwise = trace "other" (fallback, fallbackStage3)
+         | scalars = (scalarStage1, scalarStage3)
+         | vectorize && noArrayParam = (vectorizedStage1, vectorizedStage3)
+         | otherwise = (fallbackStage1, fallbackStage3)
     scanStage1 pat space kbody scan_ops
 
     let nsubtasks' = tvExp nsubtasks
@@ -119,13 +118,6 @@ genLocalAccsStage1 scan_ops = do
           copyDWIMFix acc vec_is ne []
 
         pure acc
-
--- Generate code to write back results from the accumulators
--- genWriteBack :: [SegBinOp MCMem] -> [[VName]] -> SegSpace -> MulticoreGen ()
--- genWriteBack scan_ops local_accs space =
---   forM_ (zip scan_ops local_accs) $ \(scan_op, local_accs') ->
---     forM (zip (seg) local_accs') $ \(acc, local_acc) ->
---       copyDWIMFix acc [Imp.le64 $ segFlat space] (Var local_acc) []
 
 
 getNestLoop ::
@@ -183,18 +175,17 @@ genScanLoop typ pat space kbody scan_ops local_accs mapout kernel i = do
                   copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
                   copyDWIMFix acc' vec_is se []
 
-scalar ::
+scalarStage1 ::
   Pat LetDecMem
   -> SegSpace
   -> KernelBody MCMem
   -> [SegBinOp MCMem]
   -> MulticoreGen ()
-scalar pat space kbody scan_ops = do
+scalarStage1 pat space kbody scan_ops = do
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    -- Make one set of uniform params
     genBinOpParams scan_ops
     local_accs <- genLocalAccsStage1 scan_ops
     inISPC $ generateChunkLoop "SegScan" True $
@@ -202,13 +193,13 @@ scalar pat space kbody scan_ops = do
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
-vectorized ::
+vectorizedStage1 ::
   Pat LetDecMem
   -> SegSpace
   -> KernelBody MCMem
   -> [SegBinOp MCMem]
   ->  MulticoreGen ()
-vectorized pat space kbody scan_ops = do
+vectorizedStage1 pat space kbody scan_ops = do
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -224,20 +215,19 @@ vectorized pat space kbody scan_ops = do
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
-fallback ::
+fallbackStage1 ::
   Pat LetDecMem
   -> SegSpace
   -> KernelBody MCMem
   -> [SegBinOp MCMem]
   ->  MulticoreGen ()
-fallback pat space kbody scan_ops  = do
+fallbackStage1 pat space kbody scan_ops  = do
     -- Stage 1 : each thread partially scans a chunk of the input
   -- Writes directly to the resulting array
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    -- Make one set of uniform params
     genBinOpParams scan_ops
     local_accs <- genLocalAccsStage1 scan_ops
 
@@ -391,7 +381,6 @@ fallbackStage3 pat space kbody scan_ops  = do
       genScanLoop Fallback pat space kbody scan_ops local_accs True False
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
-
 
 -- This implementation for a Segmented scan only
 -- parallelize over the segments and each segment is
