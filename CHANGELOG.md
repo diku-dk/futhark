@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The CUDA backend now supports compute capability 8.6 and 8.7.
+
 ### Removed
 
 ### Changed
