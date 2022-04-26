@@ -659,10 +659,18 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
   scopeCheck usage bcs vn lvl tp
 
   constraints <- getConstraints
-  let link =
-        let ext = filter (`S.member` typeDimNames tp) bound
-         in modifyConstraints $
+  let link = do
+        let (witnessed, not_witnessed) = determineSizeWitnesses tp
+            used v = v `S.member` witnessed || v `S.member` not_witnessed
+            ext = filter used bound
+        case filter (`notElem` witnessed) ext of
+          [] ->
+            modifyConstraints $
               M.insert vn (lvl, Constraint (RetType ext tp) usage)
+          problems ->
+            unifyError usage mempty bcs . withIndexLink "unify-param-existential" $
+              "Parameter(s) " <> commasep (map (pquote . pprName) problems)
+                <> " used as size(s) would go out of scope."
 
   case snd <$> M.lookup vn constraints of
     Just (NoConstraint Unlifted unlift_usage) -> do
