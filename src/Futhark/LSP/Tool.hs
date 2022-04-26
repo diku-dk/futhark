@@ -8,11 +8,19 @@ module Futhark.LSP.Tool
     rangeFromSrcLoc,
     rangeFromLoc,
     posToUri,
+    computeMapping,
   )
 where
 
+import qualified Data.Text as T
 import Futhark.Compiler.Program (lpImports)
-import Futhark.LSP.State (State (..))
+import Futhark.LSP.PositionMapping
+  ( PositionMapping,
+    mappingFromDiff,
+    toCurrentLoc,
+    toStalePos,
+  )
+import Futhark.LSP.State (State (..), getStaleContent, getStaleMapping)
 import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Prop (isBuiltinLoc)
@@ -22,7 +30,9 @@ import Language.Futhark.Query
     atPos,
     boundLoc,
   )
+import Language.LSP.Server (LspM, getVirtualFile)
 import Language.LSP.Types
+import Language.LSP.VFS (VirtualFile, virtualFileText, virtualFileVersion)
 
 -- | Retrieve hover info for the definition referenced at the given
 -- file at the given line and column number (the two 'Int's).
@@ -53,11 +63,53 @@ findDefinitionRange state (Just path) l c = do
     else Just $ Location (filePathToUri file_path) (rangeFromLoc loc)
 findDefinitionRange _ _ _ _ = Nothing
 
+-- | Query the AST for information at certain Pos.
 queryAtPos :: State -> Pos -> Maybe AtPos
-queryAtPos state pos =
-  case stateProgram state of
-    Nothing -> Nothing
-    Just loaded_prog -> atPos (lpImports loaded_prog) pos
+queryAtPos state pos = do
+  let Pos path _ _ _ = pos
+      mapping = getStaleMapping state path
+  loaded_prog <- stateProgram state
+  stale_pos <- toStalePos mapping pos
+  query_result <- atPos (lpImports loaded_prog) stale_pos
+  updateAtPos mapping query_result
+  where
+    -- Update the 'AtPos' with the current mapping.
+    updateAtPos :: Maybe PositionMapping -> AtPos -> Maybe AtPos
+    updateAtPos mapping (AtName qn (Just def) loc) = do
+      let def_loc = boundLoc def
+          Loc (Pos def_file _ _ _) _ = def_loc
+          Pos current_file _ _ _ = pos
+      current_loc <- toCurrentLoc mapping loc
+      if def_file == current_file
+        then do
+          current_def_loc <- toCurrentLoc mapping def_loc
+          Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
+        else do
+          -- Defined in another file, get the corresponding PositionMapping.
+          let def_mapping = getStaleMapping state def_file
+          current_def_loc <- toCurrentLoc def_mapping def_loc
+          Just $ AtName qn (Just (updateBoundLoc def current_def_loc)) current_loc
+    updateAtPos _ _ = Nothing
+
+    updateBoundLoc :: BoundTo -> Loc -> BoundTo
+    updateBoundLoc (BoundTerm t _loc) current_loc = BoundTerm t current_loc
+    updateBoundLoc (BoundModule _loc) current_loc = BoundModule current_loc
+    updateBoundLoc (BoundModuleType _loc) current_loc = BoundModuleType current_loc
+    updateBoundLoc (BoundType _loc) current_loc = BoundType current_loc
+
+-- | Entry point for computing PositionMapping.
+computeMapping :: State -> Maybe FilePath -> LspM () (Maybe PositionMapping)
+computeMapping state (Just file_path) = do
+  virtual_file <- getVirtualFile $ toNormalizedUri $ filePathToUri file_path
+  pure $ getMapping (getStaleContent state file_path) virtual_file
+  where
+    getMapping :: Maybe VirtualFile -> Maybe VirtualFile -> Maybe PositionMapping
+    getMapping (Just stale_file) (Just current_file) =
+      if virtualFileVersion stale_file == virtualFileVersion current_file
+        then Nothing -- Happens when other files (e.g. dependencies) fail to type-check.
+        else Just $ mappingFromDiff (T.lines $ virtualFileText stale_file) (T.lines $ virtualFileText current_file)
+    getMapping _ _ = Nothing
+computeMapping _ _ = pure Nothing
 
 -- | Convert a Futhark 'Pos' to an LSP 'Uri'.
 posToUri :: Pos -> Uri

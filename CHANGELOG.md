@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect handling of local quantification when determining type
   equivalence in during module type ascription (#1648).
 
+* Incorrect checking of liftedness when instantiating polymorphic
+  functions during module type ascription.
+
+* Tightened some restrictions on the use of existential sizes that
+  could otherwise lead to compiler crashes (#1650).  This restriction
+  is perhaps a bit *too* might and it may be possible to loosen it in
+  the future.
+
+* Another defunctorisation bug (#1653).  Somehow we find these every
+  time Martin Elsman writes a nontrivial Futhark program.
+
 ## [0.21.10]
 
 ### Added
