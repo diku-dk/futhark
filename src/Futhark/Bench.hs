@@ -141,7 +141,8 @@ decodeBenchResults = fmap unBenchResults . JSON.eitherDecode'
 
 -- | How to run a benchmark.
 data RunOptions = RunOptions
-  { runMinRuns :: Int,
+  { -- | Applies both to initial and convergence phase.
+    runMinRuns :: Int,
     runMinTime :: NominalDiffTime,
     runTimeout :: Int,
     runVerbose :: Int,
@@ -228,7 +229,7 @@ runConvergence do_run opts initial_r =
         x
           | x > 0,
             runConvergencePhase opts ->
-              moreRuns mempty mempty rsd x
+              moreRuns mempty mempty rsd (x `max` runMinRuns opts)
           | otherwise ->
               pure initial_r
   where
