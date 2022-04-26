@@ -67,13 +67,15 @@ import Data.Set (Set, (\\))
 import qualified Data.Set as S
 import Futhark.Error
 import Futhark.IR.GPU
-import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph hiding
-  ( Graph,
-    addEdges,
-    connectToSink,
-    fold,
-    lookup,
-    none,
+import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
+  ( EdgeType (..),
+    Edges (..),
+    Id,
+    IdSet,
+    Result (..),
+    Routing (..),
+    Vertex (..),
+    nameToId,
   )
 import qualified Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph as MG
 
@@ -331,7 +333,7 @@ buildGraph hof usage stms =
 -- | Graph a body.
 graphBody :: Body GPU -> Grapher ()
 graphBody body = do
-  let res_ops = IS.fromList $ namesToIds $ freeIn (bodyResult body)
+  let res_ops = IS.fromList $ MG.namesToIds $ freeIn (bodyResult body)
   body_stats <-
     captureBodyStats $
       incBodyDepthFor (graphStms (bodyStms body) >> tellOperands res_ops)
@@ -681,7 +683,7 @@ graphIf bs cond tbody fbody = do
 -----------------------------------------------------
 type ReachableBindings = IdSet
 
-type ReachableBindingsCache = Visited (MG.Result ReachableBindings)
+type ReachableBindingsCache = MG.Visited (MG.Result ReachableBindings)
 
 type NonExhausted = [Id]
 
@@ -822,7 +824,7 @@ graphLoop (b : bs) params lform body = do
       | Var n <- res,
         ret <- nameToId n,
         ret /= p =
-          if isSinkConnected p g
+          if MG.isSinkConnected p g
             then connectToSink ret
             else addEdges (MG.oneEdge p) (IS.singleton ret)
       | otherwise =
@@ -1133,7 +1135,7 @@ graphedScalarOperands e =
 -- is not empty.
 createNode :: Binding -> Operands -> Grapher ()
 createNode b ops =
-  unless (IS.null ops) (addVertex b >> addEdges (oneEdge $ fst b) ops)
+  unless (IS.null ops) (addVertex b >> addEdges (MG.oneEdge $ fst b) ops)
 
 -- | Adds a vertex to the graph for the given binding.
 addVertex :: Binding -> Grapher ()
