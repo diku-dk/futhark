@@ -78,7 +78,6 @@ import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
     Result (..),
     Routing (..),
     Vertex (..),
-    nameToId,
   )
 import qualified Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph as MG
 
@@ -233,6 +232,9 @@ checkFunDef fun = do
 -- | HostUsage identifies scalar variables that are used on host.
 type HostUsage = [Id]
 
+nameToId :: VName -> Id
+nameToId = baseTag
+
 -- | Analyses a program to return a migration table that covers all its
 -- statements and variables.
 analyseProg :: Prog GPU -> MigrationTable
@@ -333,7 +335,7 @@ buildGraph hof usage stms =
 -- | Graph a body.
 graphBody :: Body GPU -> Grapher ()
 graphBody body = do
-  let res_ops = IS.fromList $ MG.namesToIds $ freeIn (bodyResult body)
+  let res_ops = namesIntSet $ freeIn (bodyResult body)
   body_stats <-
     captureBodyStats $
       incBodyDepthFor (graphStms (bodyStms body) >> tellOperands res_ops)

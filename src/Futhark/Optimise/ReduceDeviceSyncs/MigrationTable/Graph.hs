@@ -1,7 +1,8 @@
 -- | This module contains the type definitions and basic operations
 -- for the graph that
 -- "Futhark.Optimise.ReduceDeviceSyncs.MigrationTable" internally uses
--- to construct a migration table.
+-- to construct a migration table.  It is however completely
+-- Futhark-agnostic and implements a generic graph abstraction.
 --
 -- = Overview
 --
@@ -52,8 +53,6 @@ module Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
 
     -- * Construction
     empty,
-    nameToId,
-    namesToIds,
     vertex,
     declareEdges,
     oneEdge,
@@ -88,8 +87,6 @@ import qualified Data.IntSet as IS
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust)
-import Futhark.Error
-import Futhark.IR.GPU hiding (Result)
 import Prelude hiding (lookup)
 
 --------------------------------------------------------------------------------
@@ -201,14 +198,6 @@ instance Semigroup a => Semigroup (Result a) where
 -- | The empty graph.
 empty :: Graph m
 empty = Graph IM.empty
-
--- | Maps a name to its corresponding vertex handle.
-nameToId :: VName -> Id
-nameToId = baseTag
-
--- | Maps a set of names to a list of corresponding vertex handles.
-namesToIds :: Names -> [Id]
-namesToIds = IM.keys . namesIntMap
 
 -- | Constructs a 'Vertex' without any edges.
 vertex :: Id -> m -> Vertex m
@@ -339,7 +328,7 @@ route src g =
     (DeadEnd, g') -> (Nothing, g')
     (SinkFound snk, g') -> (Just snk, g')
     (CycleDetected {}, _) ->
-      compilerBugS
+      error
         "Routing did not escape cycle in Futhark.Analysis.MigrationTable.Graph."
 
 -- | @routeMany srcs g@ attempts to create a 'route' in @g@ from every vertex
