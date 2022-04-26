@@ -78,13 +78,13 @@ kernelsPipeline =
         unstreamGPU,
         performCSE True,
         simplifyGPU,
-        sinkGPU,           -- Sink reads before migrating them.
+        sinkGPU, -- Sink reads before migrating them.
         reduceDeviceSyncs,
-        simplifyGPU,       -- Simplify and hoist storages.
-        performCSE True,   -- Eliminate duplicate storages.
+        simplifyGPU, -- Simplify and hoist storages.
+        performCSE True, -- Eliminate duplicate storages.
         mergeGPUBodies,
-        simplifyGPU,       -- Cleanup merged GPUBody kernels.
-        sinkGPU,           -- Sink reads within GPUBody kernels.
+        simplifyGPU, -- Cleanup merged GPUBody kernels.
+        sinkGPU, -- Sink reads within GPUBody kernels.
         inPlaceLoweringGPU
       ]
 

@@ -175,7 +175,7 @@ hostOnlyFunDefs funs =
     -- A function that calls a host-only function is itself host-only.
     checkCalls hostOnlyFuns (Just calls)
       | hostOnlyFuns `S.disjoint` calls =
-        Just calls
+          Just calls
     checkCalls _ _ =
       Nothing
 
@@ -192,13 +192,13 @@ checkFunDef fun = do
     ok = Just ()
     check isArr as = if any isArr as then hostOnly else ok
 
-    checkFParams ps = check isArray ps
+    checkFParams = check isArray
 
-    checkLParams ps = check (isArray . fst) ps
+    checkLParams = check (isArray . fst)
 
-    checkRetTypes rs = check isArrayType rs
+    checkRetTypes = check isArrayType
 
-    checkPats pats = check isArray pats
+    checkPats = check isArray
 
     checkLoopForm (ForLoop _ _ _ (_ : _)) = hostOnly
     checkLoopForm _ = ok
@@ -249,9 +249,9 @@ analyseConsts hof funs consts =
     f free usage n t
       | isScalar t,
         n `nameIn` free =
-        nameToId n : usage
+          nameToId n : usage
       | otherwise =
-        usage
+          usage
 
 -- | Analyses a top-level function definition.
 analyseFunDef :: HostOnlyFuns -> FunDef GPU -> MigrationTable
@@ -369,13 +369,13 @@ graphStm stm = do
     BasicOp (ArrayLit arr t)
       | isScalar t,
         any (isJust . subExpVar) arr ->
-        -- Migrating an array literal with free variables saves a write for
-        -- every scalar it contains. Under CUDA each scalar is written using
-        -- a synchronous write. Under OpenCL scalar constants will be written
-        -- asynchronously but free variables are still transferred using
-        -- blocking writes. If all scalars are constants then the compiler
-        -- generates more efficient code that copies static device memory.
-        graphAutoMove (one bs)
+          -- Migrating an array literal with free variables saves a write for
+          -- every scalar it contains. Under CUDA each scalar is written using
+          -- a synchronous write. Under OpenCL scalar constants will be written
+          -- asynchronously but free variables are still transferred using
+          -- blocking writes. If all scalars are constants then the compiler
+          -- generates more efficient code that copies static device memory.
+          graphAutoMove (one bs)
     BasicOp UnOp {} -> graphSimple bs e
     BasicOp BinOp {} -> graphSimple bs e
     BasicOp CmpOp {} -> graphSimple bs e
@@ -412,7 +412,7 @@ graphStm stm = do
       -- the total number of reads can hence either decrease, remain the same,
       -- or even increase, subject to the ordering of reads and kernels that
       -- perform assertions.
-      -- 
+      --
       -- Since it is possible to implement the same failure checking scheme as
       -- OpenCL using asynchronous reads (and doing so would be a good idea!)
       -- we consider this to be acceptable.
@@ -422,18 +422,18 @@ graphStm stm = do
       graphSimple bs e
     BasicOp (Index _ slice)
       | isFixed slice ->
-        graphRead (one bs)
+          graphRead (one bs)
     BasicOp {}
       | [(_, t)] <- bs,
         dims <- arrayDims t,
         dims /= [], -- i.e. produces an array
         all (== intConst Int64 1) dims ->
-        -- An expression that produces an array that only contains a single
-        -- primitive value is as efficient to compute and copy as a scalar,
-        -- and introduces no size variables.
-        --
-        -- This is an exception to the inefficiency rules that comes next.
-        graphSimple bs e
+          -- An expression that produces an array that only contains a single
+          -- primitive value is as efficient to compute and copy as a scalar,
+          -- and introduces no size variables.
+          --
+          -- This is an exception to the inefficiency rules that comes next.
+          graphSimple bs e
     -- Expressions with a cost sublinear to the size of their result arrays are
     -- risky to migrate as we cannot guarantee that their results are not
     -- returned from a GPUBody, which always copies its return values. Since
@@ -756,7 +756,7 @@ graphLoop (b : bs) params lform body = do
       onlyGraphedScalarSubExp n >>= addEdges (ToNodes bindings Nothing)
     WhileLoop n
       | (_, _, arg, _) <- loopValueFor n ->
-        onlyGraphedScalarSubExp arg >>= addEdges (ToNodes bindings Nothing)
+          onlyGraphedScalarSubExp arg >>= addEdges (ToNodes bindings Nothing)
   where
     subgraphId :: Id
     subgraphId = fst b
@@ -822,11 +822,11 @@ graphLoop (b : bs) params lform body = do
       | Var n <- res,
         ret <- nameToId n,
         ret /= p =
-        if isSinkConnected p g
-          then connectToSink ret
-          else addEdges (MG.oneEdge p) (IS.singleton ret)
+          if isSinkConnected p g
+            then connectToSink ret
+            else addEdges (MG.oneEdge p) (IS.singleton ret)
       | otherwise =
-        pure ()
+          pure ()
     deviceBindings ::
       Graph ->
       (ReachableBindings, ReachableBindingsCache) ->
@@ -848,9 +848,9 @@ graphLoop (b : bs) params lform body = do
     bindingReach rb _ v
       | i <- vertexId v,
         IS.member i bindings =
-        IS.insert i rb
+          IS.insert i rb
       | otherwise =
-        rb
+          rb
     connectOperand ::
       ReachableBindingsCache ->
       Id ->
@@ -884,9 +884,9 @@ graphLoop (b : bs) params lform body = do
           Vertex Meta
         updateEdges nx rb v
           | ToNodes es _ <- vertexEdges v =
-            let nx' = IS.fromList nx
-                es' = ToNodes (rb <> es) $ Just (rb <> nx')
-             in v {vertexEdges = es'}
+              let nx' = IS.fromList nx
+                  es' = ToNodes (rb <> es) $ Just (rb <> nx')
+               in v {vertexEdges = es'}
           | otherwise = v
         findBindings ::
           Graph ->
@@ -900,13 +900,13 @@ graphLoop (b : bs) params lform body = do
             Just gid <- metaGraphId (vertexMeta v),
             gid == subgraphId -- only search the subgraph
             =
-            let (res, rbc') = MG.reduce g bindingReach rbc Normal i
-             in case res of
-                  FoundSink -> (FoundSink, [], rbc')
-                  Produced rb' -> findBindings g (rb <> rb', nx, rbc') is
+              let (res, rbc') = MG.reduce g bindingReach rbc Normal i
+               in case res of
+                    FoundSink -> (FoundSink, [], rbc')
+                    Produced rb' -> findBindings g (rb <> rb', nx, rbc') is
           | otherwise =
-            -- don't exhaust
-            findBindings g (rb, i : nx, rbc) is
+              -- don't exhaust
+              findBindings g (rb, i : nx, rbc) is
 
 -- | Graph a 'WithAcc' statement.
 graphWithAcc ::
@@ -1060,8 +1060,8 @@ graphedScalarOperands e =
       | BasicOp UpdateAcc {} <- ua,
         Pat [pe] <- pat,
         Acc a _ _ _ <- typeOf pe =
-        -- Capture the tokens of accumulators used on host.
-        captureAcc a >> collectBasic ua
+          -- Capture the tokens of accumulators used on host.
+          captureAcc a >> collectBasic ua
     collectStm stm = collect (stmExp stm)
 
     collectLForm (ForLoop _ _ b _) = collectSubExp b
@@ -1210,7 +1210,7 @@ inSubGraph :: Id -> Graph -> Id -> Bool
 inSubGraph si g i
   | Just v <- MG.lookup i g,
     Just mgi <- metaGraphId (vertexMeta v) =
-    si == mgi
+      si == mgi
 inSubGraph _ _ _ = False
 
 -- | @b `reuses` n@ records that @b@ binds an array backed by the same memory
@@ -1219,13 +1219,13 @@ inSubGraph _ _ _ = False
 reuses :: Binding -> VName -> Grapher ()
 reuses (i, t) n
   | isArray t =
-    do
-      body_depth <- outermostCopyableArray n
-      case body_depth of
-        Just bd -> recordCopyableMemory i bd
-        Nothing -> pure ()
+      do
+        body_depth <- outermostCopyableArray n
+        case body_depth of
+          Just bd -> recordCopyableMemory i bd
+          Nothing -> pure ()
   | otherwise =
-    pure ()
+      pure ()
 
 reusesSubExp :: Binding -> SubExp -> Grapher ()
 reusesSubExp b (Var n) = b `reuses` n
@@ -1245,24 +1245,24 @@ reusesReturn bs res = do
     reuse :: Int -> Bool -> (Binding, SubExp) -> Grapher Bool
     reuse body_depth onlyCopyable (b, se)
       | all (== intConst Int64 1) (arrayDims $ snd b) =
-        -- Single element arrays are immediately recognizable as copyable so
-        -- don't bother recording those. Note that this case also matches
-        -- primitive return values.
-        pure onlyCopyable
+          -- Single element arrays are immediately recognizable as copyable so
+          -- don't bother recording those. Note that this case also matches
+          -- primitive return values.
+          pure onlyCopyable
       | (i, t) <- b,
         isArray t,
         Var n <- se =
-        do
-          res_body_depth <- outermostCopyableArray n
-          case res_body_depth of
-            Just inner -> do
-              recordCopyableMemory i (min body_depth inner)
-              let returns_free_var = inner <= body_depth
-              pure (onlyCopyable && not returns_free_var)
-            _ ->
-              pure False
+          do
+            res_body_depth <- outermostCopyableArray n
+            case res_body_depth of
+              Just inner -> do
+                recordCopyableMemory i (min body_depth inner)
+                let returns_free_var = inner <= body_depth
+                pure (onlyCopyable && not returns_free_var)
+              _ ->
+                pure False
       | otherwise =
-        pure onlyCopyable
+          pure onlyCopyable
 
 -- @reusesBranches bs b1 b2@ records each array binding in @bs@ as reusing
 -- copyable memory if each corresponding return value in the lists @b1@ and @b2@
@@ -1278,27 +1278,27 @@ reusesBranches bs b1 b2 = do
     reuse :: Int -> Bool -> (Binding, SubExp, SubExp) -> Grapher Bool
     reuse body_depth onlyCopyable (b, se1, se2)
       | all (== intConst Int64 1) (arrayDims $ snd b) =
-        -- Single element arrays are immediately recognizable as copyable so
-        -- don't bother recording those. Note that this case also matches
-        -- primitive return values.
-        pure onlyCopyable
+          -- Single element arrays are immediately recognizable as copyable so
+          -- don't bother recording those. Note that this case also matches
+          -- primitive return values.
+          pure onlyCopyable
       | (i, t) <- b,
         isArray t,
         Var n1 <- se1,
         Var n2 <- se2 =
-        do
-          body_depth_1 <- outermostCopyableArray n1
-          body_depth_2 <- outermostCopyableArray n2
-          case (body_depth_1, body_depth_2) of
-            (Just bd1, Just bd2) -> do
-              let inner = min bd1 bd2
-              recordCopyableMemory i (min body_depth inner)
-              let returns_free_var = inner <= body_depth
-              pure (onlyCopyable && not returns_free_var)
-            _ ->
-              pure False
+          do
+            body_depth_1 <- outermostCopyableArray n1
+            body_depth_2 <- outermostCopyableArray n2
+            case (body_depth_1, body_depth_2) of
+              (Just bd1, Just bd2) -> do
+                let inner = min bd1 bd2
+                recordCopyableMemory i (min body_depth inner)
+                let returns_free_var = inner <= body_depth
+                pure (onlyCopyable && not returns_free_var)
+              _ ->
+                pure False
       | otherwise =
-        pure onlyCopyable
+          pure onlyCopyable
 
 --------------------------------------------------------------------------------
 --                           GRAPH BUILDING - TYPES                           --

@@ -93,69 +93,69 @@ optimizeStm out stm = do
     else case stmExp stm of
       BasicOp (Update safety arr slice (Var n))
         | Just _ <- sliceIndices slice -> do
-          -- It is faster to copy a scalar variable to device via a GPUBody and
-          -- then asynchronously copy its contents to its destination, compared
-          -- to directly copying it from host to device via a blocking write.
-          let t = Prim $ elemType $ patElemType $ head $ patElems (stmPat stm)
-          (out', dev) <- storeScalar out (Var n) t
+            -- It is faster to copy a scalar variable to device via a GPUBody and
+            -- then asynchronously copy its contents to its destination, compared
+            -- to directly copying it from host to device via a blocking write.
+            let t = Prim $ elemType $ patElemType $ head $ patElems (stmPat stm)
+            (out', dev) <- storeScalar out (Var n) t
 
-          -- Transform the single element Update into a slice Update.
-          let dims = unSlice slice
-          let (outer, [DimFix i]) = splitAt (length dims - 1) dims
-          let one = intConst Int64 1
-          let slice' = Slice $ outer ++ [DimSlice i one one]
-          let stm' = stm {stmExp = BasicOp (Update safety arr slice' (Var dev))}
+            -- Transform the single element Update into a slice Update.
+            let dims = unSlice slice
+            let (outer, [DimFix i]) = splitAt (length dims - 1) dims
+            let one = intConst Int64 1
+            let slice' = Slice $ outer ++ [DimSlice i one one]
+            let stm' = stm {stmExp = BasicOp (Update safety arr slice' (Var dev))}
 
-          pure (out' |> stm')
+            pure (out' |> stm')
       BasicOp (Replicate (Shape dims) (Var v))
         | Pat [PatElem n arr_t] <- stmPat stm -> do
-          -- A Replicate can be rewritten to not require its replication value
-          -- to be available on host. If its value is migrated the Replicate
-          -- thus need to be transformed.
-          --
-          -- If the inner dimension of the replication array is one then the
-          -- rewrite can be performed more efficiently than the general case.
-          v' <- resolveName v
-          let v_kept_on_device = v /= v'
+            -- A Replicate can be rewritten to not require its replication value
+            -- to be available on host. If its value is migrated the Replicate
+            -- thus need to be transformed.
+            --
+            -- If the inner dimension of the replication array is one then the
+            -- rewrite can be performed more efficiently than the general case.
+            v' <- resolveName v
+            let v_kept_on_device = v /= v'
 
-          gpubody_ok <- gets stateGPUBodyOk
+            gpubody_ok <- gets stateGPUBodyOk
 
-          case v_kept_on_device of
-            False -> pure (out |> stm)
-            True
-              | all (== intConst Int64 1) dims,
-                Just t' <- peelArray 1 arr_t,
-                gpubody_ok -> do
-                let n' = VName (baseName n `withSuffix` "_inner") 0
-                let pat' = Pat [PatElem n' t']
-                let e' = BasicOp $ Replicate (Shape $ tail dims) (Var v)
-                let stm' = Let pat' (stmAux stm) e'
+            case v_kept_on_device of
+              False -> pure (out |> stm)
+              True
+                | all (== intConst Int64 1) dims,
+                  Just t' <- peelArray 1 arr_t,
+                  gpubody_ok -> do
+                    let n' = VName (baseName n `withSuffix` "_inner") 0
+                    let pat' = Pat [PatElem n' t']
+                    let e' = BasicOp $ Replicate (Shape $ tail dims) (Var v)
+                    let stm' = Let pat' (stmAux stm) e'
 
-                -- `gpu { v }` is slightly faster than `replicate 1 v` and
-                -- can merge with the GPUBody that v was computed by.
-                gpubody <- inGPUBody (rewriteStm stm')
-                pure (out |> gpubody {stmPat = stmPat stm})
-            True
-              | last dims == intConst Int64 1 ->
-                let e' = BasicOp $ Replicate (Shape $ init dims) (Var v')
-                    stm' = stm {stmExp = e'}
-                 in pure (out |> stm')
-            True -> do
-              n' <- newName n
-              -- v_kept_on_device implies that v is a scalar.
-              let dims' = dims ++ [intConst Int64 1]
-              let arr_t' = Array (elemType arr_t) (Shape dims') NoUniqueness
-              let pat' = Pat [PatElem n' arr_t']
-              let e' = BasicOp $ Replicate (Shape dims) (Var v')
-              let repl = Let pat' (stmAux stm) e'
+                    -- `gpu { v }` is slightly faster than `replicate 1 v` and
+                    -- can merge with the GPUBody that v was computed by.
+                    gpubody <- inGPUBody (rewriteStm stm')
+                    pure (out |> gpubody {stmPat = stmPat stm})
+              True
+                | last dims == intConst Int64 1 ->
+                    let e' = BasicOp $ Replicate (Shape $ init dims) (Var v')
+                        stm' = stm {stmExp = e'}
+                     in pure (out |> stm')
+              True -> do
+                n' <- newName n
+                -- v_kept_on_device implies that v is a scalar.
+                let dims' = dims ++ [intConst Int64 1]
+                let arr_t' = Array (elemType arr_t) (Shape dims') NoUniqueness
+                let pat' = Pat [PatElem n' arr_t']
+                let e' = BasicOp $ Replicate (Shape dims) (Var v')
+                let repl = Let pat' (stmAux stm) e'
 
-              let aux = StmAux mempty mempty ()
-              let slice = map sliceDim (arrayDims arr_t)
-              let slice' = slice ++ [DimFix $ intConst Int64 0]
-              let idx = BasicOp $ Index n' (Slice slice')
-              let index = Let (stmPat stm) aux idx
+                let aux = StmAux mempty mempty ()
+                let slice = map sliceDim (arrayDims arr_t)
+                let slice' = slice ++ [DimFix $ intConst Int64 0]
+                let idx = BasicOp $ Index n' (Slice slice')
+                let index = Let (stmPat stm) aux idx
 
-              pure (out |> repl |> index)
+                pure (out |> repl |> index)
       BasicOp {} ->
         pure (out |> stm)
       Apply {} ->
@@ -315,11 +315,11 @@ rewriteForIn (params, ForLoop i t n elems, body) = do
     inline mt (x, arr) (arrs, stms)
       | pn <- paramName x,
         not (usedOnHost pn mt) =
-        let pt = typeOf x
-            stm = bind (PatElem pn pt) (BasicOp $ index arr pt)
-         in (arrs, stm <| stms)
+          let pt = typeOf x
+              stm = bind (PatElem pn pt) (BasicOp $ index arr pt)
+           in (arrs, stm <| stms)
       | otherwise =
-        ((x, arr) : arrs, stms)
+          ((x, arr) : arrs, stms)
 
     index arr of_type =
       Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims of_type)
@@ -577,15 +577,15 @@ resolveResult = mapM resolveSubExpRes
 moveStm :: Stms GPU -> Stm GPU -> ReduceM (Stms GPU)
 moveStm out (Let pat aux (BasicOp (ArrayLit [se] t')))
   | Pat [PatElem n _] <- pat =
-    do
-      -- Save an 'Index' by rewriting the 'ArrayLit' rather than migrating it.
-      let n' = VName (baseName n `withSuffix` "_inner") 0
-      let pat' = Pat [PatElem n' t']
-      let e' = BasicOp (SubExp se)
-      let stm' = Let pat' aux e'
+      do
+        -- Save an 'Index' by rewriting the 'ArrayLit' rather than migrating it.
+        let n' = VName (baseName n `withSuffix` "_inner") 0
+        let pat' = Pat [PatElem n' t']
+        let e' = BasicOp (SubExp se)
+        let stm' = Let pat' aux e'
 
-      gpubody <- inGPUBody (rewriteStm stm')
-      pure (out |> gpubody {stmPat = pat})
+        gpubody <- inGPUBody (rewriteStm stm')
+        pure (out |> gpubody {stmPat = pat})
 moveStm out stm = do
   -- Move the statement to device.
   gpubody <- inGPUBody (rewriteStm stm)
@@ -722,9 +722,9 @@ rewriteStms = foldM rewriteTo mempty
     bnd :: Stms GPU -> (PatElem Type, SubExpRes) -> Stms GPU
     bnd out (pe, SubExpRes cs se)
       | Just t' <- peelArray 1 (typeOf pe) =
-        out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ ArrayLit [se] t')
+          out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ ArrayLit [se] t')
       | otherwise =
-        out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ SubExp se)
+          out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ SubExp se)
 
 -- | Rewrite all bindings introduced by a single statement (to ensure they are
 -- unique) and fix any dependencies that are broken as a result of migration or

@@ -121,14 +121,14 @@ removeDeadGPUBodyResult (_, used) pat aux (GPUBody types body)
     pat_used <- map (`UT.isUsedDirectly` used) $ patNames pat,
     -- If they are not all used, then this rule applies.
     not (and pat_used) =
-    -- Remove the parts of the GPUBody results that correspond to dead
-    -- return value bindings.  Note that this leaves dead code in the
-    -- kernel, but that will be removed later.
-    let pick :: [a] -> [a]
-        pick = map snd . filter fst . zip pat_used
-        pat' = pick (patElems pat)
-        types' = pick types
-        body' = body {bodyResult = pick (bodyResult body)}
-     in Simplify $ auxing aux $ letBind (Pat pat') $ Op $ GPUBody types' body'
+      -- Remove the parts of the GPUBody results that correspond to dead
+      -- return value bindings.  Note that this leaves dead code in the
+      -- kernel, but that will be removed later.
+      let pick :: [a] -> [a]
+          pick = map snd . filter fst . zip pat_used
+          pat' = pick (patElems pat)
+          types' = pick types
+          body' = body {bodyResult = pick (bodyResult body)}
+       in Simplify $ auxing aux $ letBind (Pat pat') $ Op $ GPUBody types' body'
   | otherwise = Skip
 removeDeadGPUBodyResult _ _ _ _ = Skip

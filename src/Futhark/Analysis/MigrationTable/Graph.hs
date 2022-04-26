@@ -290,11 +290,11 @@ canReachSink ::
   (Bool, Visited Bool)
 canReachSink g vs et i
   | Just found <- M.lookup (et, i) (visited vs) =
-    (found, vs)
+      (found, vs)
   | Just v <- lookup i g =
-    searchVertex v
+      searchVertex v
   | otherwise =
-    (False, vs) -- shouldn't happen
+      (False, vs) -- shouldn't happen
   where
     searchVertex v = cached (searchEdges v)
 
@@ -375,18 +375,18 @@ fold ::
 fold g f (res, vs) et i
   | M.notMember (et, i) (visited vs),
     Just v <- lookup i g =
-    let res' = f res et v
-        vs' = Visited $ M.insert (et, i) () (visited vs)
-        st = (res', vs')
-     in case (et, vertexRouting v) of
-          (Normal, FromSource) -> st
-          (Normal, FromNode rev _) -> foldReversed st rev
-          (Reversed, FromNode rev _) -> foldAll st rev (vertexEdges v)
-          _ -> foldNormals st (vertexEdges v)
+      let res' = f res et v
+          vs' = Visited $ M.insert (et, i) () (visited vs)
+          st = (res', vs')
+       in case (et, vertexRouting v) of
+            (Normal, FromSource) -> st
+            (Normal, FromNode rev _) -> foldReversed st rev
+            (Reversed, FromNode rev _) -> foldAll st rev (vertexEdges v)
+            _ -> foldNormals st (vertexEdges v)
   | otherwise =
-    (res, vs)
+      (res, vs)
   where
-    foldReversed st rev = fold g f st Reversed rev
+    foldReversed st = fold g f st Reversed
 
     foldAll st rev es = foldReversed (foldNormals st es) rev
 
@@ -413,11 +413,11 @@ reduce ::
   (Result a, Visited (Result a))
 reduce g r vs et i
   | Just res <- M.lookup (et, i) (visited vs) =
-    (res, vs)
+      (res, vs)
   | Just v <- lookup i g =
-    reduceVertex v
+      reduceVertex v
   | otherwise =
-    (Produced mempty, vs) -- shouldn't happen
+      (Produced mempty, vs) -- shouldn't happen
   where
     reduceVertex v =
       let (res, vs') = reduceEdges v
@@ -505,35 +505,35 @@ route' ::
   (RoutingResult m, Graph m)
 route' p d prev et i g
   | Just d' <- IM.lookup i p =
-    let found_cycle = (CycleDetected d' [] p, g)
-     in case et of
-          -- Accessing some vertex v via a normal edge corresponds to accessing
-          -- v_in via a normal edge. If v_in has a reversed edge then that is
-          -- the only outgoing edge that is available.
-          -- All outgoing edges available via this ingoing edge were already
-          -- available via the edge that first reached the vertex.
-          Normal -> found_cycle
-          -- Accessing some vertex v via a reversed edge corresponds to
-          -- accessing v_out via a reversed edge. All other edges of v_out are
-          -- available, and the edge from v_in to v_out has been reversed,
-          -- implying that v_in has a single reversed edge that also is
-          -- available.
-          -- There exists at most one reversed edge to each vertex. Since this
-          -- vertex was reached via one, and the vertex already have been
-          -- reached, then the first reach must have been via a normal edge
-          -- that only could traverse a reversed edge. The reversed edge from
-          -- v_out to v_in thus completes a cycle, but a sink might be
-          -- reachable via any of the other edges from v_out.
-          -- The depth for the vertex need not be updated as this is the only
-          -- edge to v_out and 'prev' is already in the 'Pending' map.
-          -- It follows that no (new) cycle can start here.
-          Reversed ->
-            let (res, g') = routeNormals (fromJust $ lookup i g) g p
-             in (fst found_cycle <> res, g')
+      let found_cycle = (CycleDetected d' [] p, g)
+       in case et of
+            -- Accessing some vertex v via a normal edge corresponds to accessing
+            -- v_in via a normal edge. If v_in has a reversed edge then that is
+            -- the only outgoing edge that is available.
+            -- All outgoing edges available via this ingoing edge were already
+            -- available via the edge that first reached the vertex.
+            Normal -> found_cycle
+            -- Accessing some vertex v via a reversed edge corresponds to
+            -- accessing v_out via a reversed edge. All other edges of v_out are
+            -- available, and the edge from v_in to v_out has been reversed,
+            -- implying that v_in has a single reversed edge that also is
+            -- available.
+            -- There exists at most one reversed edge to each vertex. Since this
+            -- vertex was reached via one, and the vertex already have been
+            -- reached, then the first reach must have been via a normal edge
+            -- that only could traverse a reversed edge. The reversed edge from
+            -- v_out to v_in thus completes a cycle, but a sink might be
+            -- reachable via any of the other edges from v_out.
+            -- The depth for the vertex need not be updated as this is the only
+            -- edge to v_out and 'prev' is already in the 'Pending' map.
+            -- It follows that no (new) cycle can start here.
+            Reversed ->
+              let (res, g') = routeNormals (fromJust $ lookup i g) g p
+               in (fst found_cycle <> res, g')
   | Just v <- lookup i g =
-    routeVertex v
+      routeVertex v
   | otherwise =
-    backtrack
+      backtrack
   where
     backtrack = (DeadEnd, g)
 
@@ -580,7 +580,7 @@ route' p d prev et i g
                       }
                in (res, adjust f i g')
 
-    setRoute g' = adjust (\v -> v {vertexRouting = routing}) i g'
+    setRoute = adjust (\v -> v {vertexRouting = routing}) i
 
     routing =
       case prev of
@@ -590,33 +590,33 @@ route' p d prev et i g
     withPrev edges
       | Just i' <- prev,
         ToNodes es (Just es') <- edges =
-        ToNodes es (Just $ IS.insert i' es')
+          ToNodes es (Just $ IS.insert i' es')
       | otherwise =
-        edges -- shouldn't happen
+          edges -- shouldn't happen
     routeNormals v g0 p0
       | ToSink <- vertexEdges v =
-        -- There cannot be a reversed edge to a vertex with an edge to a sink.
-        (SinkFound i, setRoute g0)
+          -- There cannot be a reversed edge to a vertex with an edge to a sink.
+          (SinkFound i, setRoute g0)
       | ToNodes es nx <- vertexEdges v =
-        let (res, g', nx') =
-              case nx of
-                Just es' -> routeNorms (IS.toAscList es') g0 p0
-                Nothing -> routeNorms (IS.toAscList es) g0 p0
-            edges = ToNodes es (Just $ IS.fromDistinctAscList nx')
-            exhaust = flip adjust i $ \v' ->
-              v' {vertexEdges = ToNodes es (Just IS.empty)}
-         in case (res, et) of
-              (DeadEnd, _) -> (res, exhaust g')
-              (CycleDetected d' as p', _) ->
-                let res' = CycleDetected d' (exhaust : as) p'
-                    v' = v {vertexEdges = edges}
-                 in (res', insert v' g')
-              (SinkFound _, Normal) ->
-                let v' = v {vertexEdges = edges, vertexRouting = routing}
-                 in (res, insert v' g')
-              (SinkFound _, Reversed) ->
-                let v' = v {vertexEdges = withPrev edges}
-                 in (res, insert v' g')
+          let (res, g', nx') =
+                case nx of
+                  Just es' -> routeNorms (IS.toAscList es') g0 p0
+                  Nothing -> routeNorms (IS.toAscList es) g0 p0
+              edges = ToNodes es (Just $ IS.fromDistinctAscList nx')
+              exhaust = flip adjust i $ \v' ->
+                v' {vertexEdges = ToNodes es (Just IS.empty)}
+           in case (res, et) of
+                (DeadEnd, _) -> (res, exhaust g')
+                (CycleDetected d' as p', _) ->
+                  let res' = CycleDetected d' (exhaust : as) p'
+                      v' = v {vertexEdges = edges}
+                   in (res', insert v' g')
+                (SinkFound _, Normal) ->
+                  let v' = v {vertexEdges = edges, vertexRouting = routing}
+                   in (res, insert v' g')
+                (SinkFound _, Reversed) ->
+                  let v' = v {vertexEdges = withPrev edges}
+                   in (res, insert v' g')
 
     routeNorms [] g0 _ = (DeadEnd, g0, [])
     routeNorms (e : es) g0 p0 =

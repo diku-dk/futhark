@@ -159,10 +159,10 @@ reorderStm aliases (Let pat (StmAux cs attrs _) e) = do
 
     recordAliases atable pe
       | aliasesOf pe == mempty =
-        atable
+          atable
       | otherwise =
-        let root_aliases = rootAliasesOf (aliasesOf pe) atable
-         in M.insert (patElemName pe) root_aliases atable
+          let root_aliases = rootAliasesOf (aliasesOf pe) atable
+           in M.insert (patElemName pe) root_aliases atable
 
 -- | Optimize a single expression and determine its dependencies.
 transformExp ::
@@ -361,15 +361,15 @@ moveGPUBody stm usage consumed = do
   where
     consumes idx grps
       | Just grp <- SQ.lookup idx grps =
-        not $ IS.disjoint (groupBindings grp) consumed
+          not $ IS.disjoint (groupBindings grp) consumed
       | otherwise =
-        False
+          False
 
     stores idx (PatElem n t, se)
       | Just row_t <- peelArray 1 t =
-        recordEquivalent n $ Entry se row_t n idx True
+          recordEquivalent n $ Entry se row_t n idx True
       | otherwise =
-        recordEquivalent n $ Entry se t n idx False
+          recordEquivalent n $ Entry se t n idx False
 
 -- | Moves a non-GPUBody statement to the furthest possible groups of the
 -- statement sequence, possibly a new group at the end of sequence.
@@ -399,15 +399,15 @@ recordEquivalentsOf stm idx = do
   case stm of
     Let (Pat [PatElem x _]) _ (BasicOp (SubExp (Var n)))
       | Just entry <- IM.lookup (baseTag n) eqs,
-        entryGroupIdx entry == idx -1 ->
-        recordEquivalent x entry
+        entryGroupIdx entry == idx - 1 ->
+          recordEquivalent x entry
     Let (Pat [PatElem x _]) _ (BasicOp (Index arr slice))
       | Just entry <- IM.lookup (baseTag arr) eqs,
-        entryGroupIdx entry == idx -1,
+        entryGroupIdx entry == idx - 1,
         Slice (DimFix i : dims) <- slice,
         i == intConst Int64 0,
         dims == map sliceDim (arrayDims $ entryType entry) ->
-        recordEquivalent x (entry {entryStored = False})
+          recordEquivalent x (entry {entryStored = False})
     _ -> pure ()
 
 -- | Does this group block a statement with this usage/consumption statistics
@@ -425,9 +425,9 @@ groupBlocks usage consumed grp =
 moveToGrp :: (Stm GPU, Usage) -> Int -> Groups -> Groups
 moveToGrp stm idx grps
   | idx >= SQ.length grps =
-    moveToGrp stm idx (grps |> mempty)
+      moveToGrp stm idx (grps |> mempty)
   | otherwise =
-    SQ.adjust' (stm `moveTo`) idx grps
+      SQ.adjust' (stm `moveTo`) idx grps
 
 -- | Adds the statement and its usage statistics to the group.
 moveTo :: (Stm GPU, Usage) -> Group -> Group
@@ -478,9 +478,9 @@ collapse = do
 mergeKernels :: Stms GPU -> ReorderM (Stms GPU)
 mergeKernels stms
   | SQ.length stms < 2 =
-    pure stms
+      pure stms
   | otherwise =
-    SQ.singleton <$> foldrM merge empty stms
+      SQ.singleton <$> foldrM merge empty stms
   where
     empty = Let mempty (StmAux mempty mempty ()) noop
     noop = Op (GPUBody [] (Body () SQ.empty []))
@@ -489,15 +489,15 @@ mergeKernels stms
     merge stm0 stm1
       | Let pat0 (StmAux cs0 attrs0 _) (Op (GPUBody types0 body)) <- stm0,
         Let pat1 (StmAux cs1 attrs1 _) (Op (GPUBody types1 body1)) <- stm1 =
-        do
-          Body _ stms0 res0 <- execRewrite (rewriteBody body)
-          let Body _ stms1 res1 = body1
+          do
+            Body _ stms0 res0 <- execRewrite (rewriteBody body)
+            let Body _ stms1 res1 = body1
 
-              pat' = pat0 <> pat1
-              aux' = StmAux (cs0 <> cs1) (attrs0 <> attrs1) ()
-              types' = types0 ++ types1
-              body' = Body () (stms0 <> stms1) (res0 <> res1)
-           in pure (Let pat' aux' (Op (GPUBody types' body')))
+                pat' = pat0 <> pat1
+                aux' = StmAux (cs0 <> cs1) (attrs0 <> attrs1) ()
+                types' = types0 ++ types1
+                body' = Body () (stms0 <> stms1) (res0 <> res1)
+             in pure (Let pat' aux' (Op (GPUBody types' body')))
     merge _ _ =
       compilerBugS "mergeGPUBodies: cannot merge non-GPUBody statements"
 
@@ -541,11 +541,11 @@ rewriteExp e = do
       | Just entry <- IM.lookup (baseTag arr) eqs,
         DimFix idx : dims <- unSlice slice,
         idx == intConst Int64 0 ->
-        let se = entryValue entry
-         in pure . BasicOp $ case (dims, se) of
-              ([], _) -> SubExp se
-              (_, Var src) -> Index src (Slice dims)
-              _ -> compilerBugS "rewriteExp: bad equivalence entry"
+          let se = entryValue entry
+           in pure . BasicOp $ case (dims, se) of
+                ([], _) -> SubExp se
+                (_, Var src) -> Index src (Slice dims)
+                _ -> compilerBugS "rewriteExp: bad equivalence entry"
     _ -> mapExpM rewriter e
   where
     rewriter =

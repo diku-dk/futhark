@@ -48,9 +48,9 @@ module Futhark.Optimise.Sink (sinkGPU, sinkMC) where
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl')
+import qualified Data.Map as M
 import Data.Sequence ((<|))
 import qualified Data.Sequence as SQ
-import qualified Data.Map as M
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Builder.Class
@@ -114,17 +114,17 @@ optimiseLoop ::
   Sinker rep ([(FParam rep, SubExp)], LoopForm rep, Body rep)
 optimiseLoop onOp vtable sinking (merge, form, body0)
   | WhileLoop {} <- form =
-    let (body1, sunk) = optimiseBody onOp vtable' sinking body0
-     in ((merge, form, body1), sunk)
+      let (body1, sunk) = optimiseBody onOp vtable' sinking body0
+       in ((merge, form, body1), sunk)
   | ForLoop i it bound loop_vars <- form =
-    let stms' = foldr (inline i) (bodyStms body0) loop_vars
-        body1 = body0 {bodyStms = stms'}
-        (body2, sunk) = optimiseBody onOp vtable' sinking body1
-        notSunk (x,_) = not $ paramName x `nameIn` sunk
-        loop_vars' = filter notSunk loop_vars
-        form' = ForLoop i it bound loop_vars'
-        body3 = body2 {bodyStms = SQ.drop (length loop_vars') (bodyStms body2)}
-     in ((merge, form', body3), sunk)
+      let stms' = foldr (inline i) (bodyStms body0) loop_vars
+          body1 = body0 {bodyStms = stms'}
+          (body2, sunk) = optimiseBody onOp vtable' sinking body1
+          notSunk (x, _) = not $ paramName x `nameIn` sunk
+          loop_vars' = filter notSunk loop_vars
+          form' = ForLoop i it bound loop_vars'
+          body3 = body2 {bodyStms = SQ.drop (length loop_vars') (bodyStms body2)}
+       in ((merge, form', body3), sunk)
   where
     (params, _) = unzip merge
     scope = case form of
@@ -172,21 +172,21 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
                 then (stms', sunk)
                 else (stm : stms', sunk)
       | If cond tbranch fbranch ret <- stmExp stm =
-        let (tbranch', tsunk) = optimiseBranch onOp vtable sinking tbranch
-            (fbranch', fsunk) = optimiseBranch onOp vtable sinking fbranch
-            (stms', sunk) = optimiseStms' vtable' sinking stms
-         in ( stm {stmExp = If cond tbranch' fbranch' ret} : stms',
-              tsunk <> fsunk <> sunk
-            )
+          let (tbranch', tsunk) = optimiseBranch onOp vtable sinking tbranch
+              (fbranch', fsunk) = optimiseBranch onOp vtable sinking fbranch
+              (stms', sunk) = optimiseStms' vtable' sinking stms
+           in ( stm {stmExp = If cond tbranch' fbranch' ret} : stms',
+                tsunk <> fsunk <> sunk
+              )
       | DoLoop merge lform body <- stmExp stm =
-        let comps = (merge, lform, body)
-            (comps', loop_sunk) = optimiseLoop onOp vtable sinking comps
-            (merge', lform', body') = comps'
+          let comps = (merge, lform, body)
+              (comps', loop_sunk) = optimiseLoop onOp vtable sinking comps
+              (merge', lform', body') = comps'
 
-            (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-         in ( stm {stmExp = DoLoop merge' lform' body'} : stms',
-              stms_sunk <> loop_sunk
-            )
+              (stms', stms_sunk) = optimiseStms' vtable' sinking stms
+           in ( stm {stmExp = DoLoop merge' lform' body'} : stms',
+                stms_sunk <> loop_sunk
+              )
       | Op op <- stmExp stm =
           let (op', op_sunk) = onOp vtable sinking op
               (stms', stms_sunk) = optimiseStms' vtable' sinking stms
