@@ -218,7 +218,12 @@ def initialise_opencl_object(self,
 
         build_options += ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
 
-        build_options += ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi').replace('#', 'zh'),v) for (s,v) in self.sizes.items()]
+        build_options += ["-D{}={}".format(s.
+                                           replace('z', 'zz').
+                                           replace('.', 'zi').
+                                           replace('#', 'zh').
+                                           replace('\'', 'zq'),
+                                           v) for (s,v) in self.sizes.items()]
 
         if (self.platform.name == 'Oclgrind'):
             build_options += ['-DEMULATE_F16']
