@@ -57,6 +57,7 @@ import qualified Control.Monad.Trans.Reader as R
 import Control.Monad.Trans.State.Strict ()
 import Control.Monad.Trans.State.Strict hiding (State)
 import Control.Parallel.Strategies (parMap, rpar)
+import Data.Bifunctor (first, second)
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
@@ -78,9 +79,6 @@ import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
     nameToId,
   )
 import qualified Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph as MG
-
-{- HLINT ignore "Use first" -}
-{- HLINT ignore "Use second" -}
 
 --------------------------------------------------------------------------------
 --                              MIGRATION TABLES                              --
@@ -738,7 +736,7 @@ graphLoop (b : bs) params lform body = do
   -- sources.
   g2 <- getGraph
   let (dbs, rbc) = foldl' (deviceBindings g2) (IS.empty, MG.none) srcs
-  modifySources $ \(r, u) -> (r, IS.toList dbs ++ u)
+  modifySources $ second (IS.toList dbs <>)
 
   -- Connect operands to sinks if they can reach a sink within the loop.
   -- Otherwise connect them to the loop bound variables that they can
@@ -1018,8 +1016,8 @@ graphedScalarOperands e =
    in IS.intersection is <$> getGraphedScalars
   where
     initial = (IS.empty, S.empty) -- scalar operands, accumulator tokens
-    captureName n = modify $ \(is, accs) -> (IS.insert (nameToId n) is, accs)
-    captureAcc a = modify $ \(is, accs) -> (is, S.insert a accs)
+    captureName n = modify $ first $ IS.insert (nameToId n)
+    captureAcc a = modify $ second $ S.insert a
     collectFree x = mapM_ captureName (namesToList $ freeIn x)
 
     collect b@BasicOp {} =
@@ -1150,7 +1148,7 @@ addVertex (i, t) = do
 addSource :: Binding -> Grapher ()
 addSource b = do
   addVertex b
-  modifySources $ \(routed, unrouted) -> (routed, fst b : unrouted)
+  modifySources $ second (fst b :)
 
 -- | Adds the given edges to each vertex identified by the 'IdSet'. It is
 -- assumed that all vertices reside within the body that currently is being
