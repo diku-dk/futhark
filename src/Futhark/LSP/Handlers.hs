@@ -40,15 +40,9 @@ onHoverHandler state_mvar = requestHandler STextDocumentHover $ \req responder -
   debug "Got hover request"
   let RequestMessage _ _ _ (HoverParams doc pos _workDone) = req
       Position l c = pos
-      range = Range pos pos
       file_path = uriToFilePath $ doc ^. uri
   state <- tryTakeStateFromMVar state_mvar file_path
-  case getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1) of
-    Just msg -> do
-      let ms = HoverContents $ MarkupContent MkMarkdown msg
-          rsp = Hover ms (Just range)
-      responder (Right $ Just rsp)
-    Nothing -> responder (Right Nothing)
+  responder $ Right $ getHoverInfoFromState state file_path (fromEnum l + 1) (fromEnum c + 1)
 
 onDocumentFocusHandler :: MVar State -> Handlers (LspM ())
 onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/onFocusTextDocument") $ \msg -> do

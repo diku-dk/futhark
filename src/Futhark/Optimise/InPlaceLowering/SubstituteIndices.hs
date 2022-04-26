@@ -19,8 +19,11 @@ import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Substitute
 
+-- | Essentially the components of an 'Index' expression.
 type IndexSubstitution = (Certs, VName, Type, Slice SubExp)
 
+-- | A mapping from variable names to the indexing operation they
+-- should be replaced with.
 type IndexSubstitutions = [(VName, IndexSubstitution)]
 
 typeEnvFromSubstitutions :: LParamInfo rep ~ Type => IndexSubstitutions -> Scope rep

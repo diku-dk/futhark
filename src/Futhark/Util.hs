@@ -42,6 +42,12 @@ module Futhark.Util
     lgammaf,
     tgamma,
     tgammaf,
+    erf,
+    erff,
+    erfc,
+    erfcf,
+    cbrt,
+    cbrtf,
     hypot,
     hypotf,
     fromPOSIX,
@@ -321,6 +327,42 @@ hypot = c_hypot
 -- | The system-level @hypotf@ function.
 hypotf :: Float -> Float -> Float
 hypotf = c_hypotf
+
+foreign import ccall "erf" c_erf :: Double -> Double
+
+foreign import ccall "erff" c_erff :: Float -> Float
+
+foreign import ccall "erfc" c_erfc :: Double -> Double
+
+foreign import ccall "erfcf" c_erfcf :: Float -> Float
+
+-- | The system-level @erf()@ function.
+erf :: Double -> Double
+erf = c_erf
+
+-- | The system-level @erff()@ function.
+erff :: Float -> Float
+erff = c_erff
+
+-- | The system-level @erfc()@ function.
+erfc :: Double -> Double
+erfc = c_erfc
+
+-- | The system-level @erfcf()@ function.
+erfcf :: Float -> Float
+erfcf = c_erfcf
+
+foreign import ccall "cbrt" c_cbrt :: Double -> Double
+
+foreign import ccall "cbrtf" c_cbrtf :: Float -> Float
+
+-- | The system-level @cbrt@ function.
+cbrt :: Double -> Double
+cbrt = c_cbrt
+
+-- | The system-level @cbrtf@ function.
+cbrtf :: Float -> Float
+cbrtf = c_cbrtf
 
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
