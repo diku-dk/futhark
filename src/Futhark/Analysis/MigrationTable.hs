@@ -28,8 +28,8 @@
 -- by "Futhark.Pass.ReduceDeviceSyncs".
 --
 -- For details on how the graph is constructed and how the vertex cut is found,
--- see the master thesis "Eliminating Synchronous GPU Memory Transfers" by
--- Philip Børgesen (2022).
+-- see the master thesis "Reducing Synchronous GPU Memory Transfers" by Philip
+-- Børgesen (2022).
 module Futhark.Analysis.MigrationTable
   ( -- * Analysis
     analyseProg,
