@@ -10,8 +10,9 @@
 -- The only exception at the time of writing is a unconditional transformation
 -- that turns @A[i] = x@ into @A[i:i+1] = gpu { x }@ for some scalar variable
 -- @x@. The rationale is that the code generator creates synchronous writes for
--- 'Update' statements with scalar variables (but not constants).
--- This transformation makes every 'Update' asynchronous.
+-- 'Update' statements with scalar variables. Under some backends 'Update' will
+-- be performed asynchronously when applied to a constant value; those 'Update's
+-- are therefore not transformed.
 module Futhark.Pass.ReduceDeviceSyncs (reduceDeviceSyncs) where
 
 import Control.Monad

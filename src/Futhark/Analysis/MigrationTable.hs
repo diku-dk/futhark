@@ -28,7 +28,7 @@
 -- by "Futhark.Pass.ReduceDeviceSyncs".
 --
 -- For details on how the graph is constructed and how the vertex cut is found,
--- see the master thesis "Eliminating Synchronous GPU Memory Transactions" by
+-- see the master thesis "Eliminating Synchronous GPU Memory Transfers" by
 -- Philip Børgesen (2022).
 module Futhark.Analysis.MigrationTable
   ( -- * Analysis
@@ -369,8 +369,11 @@ graphStm stm = do
     BasicOp (ArrayLit arr t)
       | isScalar t,
         any (isJust . subExpVar) arr ->
-        -- Migrating an array literal saves a synchronous write for every scalar
-        -- variable it contains. If all scalars are constants then the compiler
+        -- Migrating an array literal with free variables saves a write for
+        -- every scalar it contains. Under CUDA each scalar is written using
+        -- a synchronous write. Under OpenCL scalar constants will be written
+        -- asynchronously but free variables are still transferred using
+        -- blocking writes. If all scalars are constants then the compiler
         -- generates more efficient code that copies static device memory.
         graphAutoMove (one bs)
     BasicOp UnOp {} -> graphSimple bs e
@@ -378,10 +381,12 @@ graphStm stm = do
     BasicOp CmpOp {} -> graphSimple bs e
     BasicOp ConvOp {} -> graphSimple bs e
     BasicOp Assert {} ->
+      -- == OpenCL =============================================================
+      --
       -- The next read after the execution of a kernel containing an assertion
       -- will be made asynchronous, followed by an asynchronous read to check
       -- if any assertion failed. The runtime will then block for all enqueued
-      -- commands to finish.
+      -- operations to finish.
       --
       -- Since an assertion only binds a certificate of unit type, an assertion
       -- cannot increase the number of (read) synchronizations that occur. In
@@ -395,6 +400,25 @@ graphStm stm = do
       -- multiple threads or processes schedules GPU work, as system-wide
       -- throughput only will decrease if the GPU utilization decreases as a
       -- result.
+      --
+      -- == CUDA ===============================================================
+      --
+      -- Under the CUDA backend every read is synchronous and is followed by
+      -- a full synchronization that blocks for all enqueued operations to
+      -- finish. If any enqueued kernel contained an assertion, another
+      -- synchronous read is then made to check if an assertion failed.
+      --
+      -- Migrating an assertion to save a read may thus introduce new reads, and
+      -- the total number of reads can hence either decrease, remain the same,
+      -- or even increase, subject to the ordering of reads and kernels that
+      -- perform assertions.
+      -- 
+      -- Since it is possible to implement the same failure checking scheme as
+      -- OpenCL using asynchronous reads (and doing so would be a good idea!)
+      -- we consider this to be acceptable.
+      --
+      -- TODO: Implement the OpenCL failure checking scheme under CUDA. This
+      --       should reduce the number of synchronizations per read to one.
       graphSimple bs e
     BasicOp (Index _ slice)
       | isFixed slice ->
