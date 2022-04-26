@@ -1,7 +1,7 @@
--- |
--- This module contains the type definitions and basic operations for the graph
--- that "Futhark.Analysis.MigrationTable" internally uses to construct a
--- migration table.
+-- | This module contains the type definitions and basic operations
+-- for the graph that
+-- "Futhark.Optimise.ReduceDeviceSyncs.MigrationTable" internally uses
+-- to construct a migration table.
 --
 -- = Overview
 --
@@ -397,7 +397,7 @@ fold g f (res, vs) et i
 -- | @reduce g r vs et i@ returns 'FoundSink' if a sink can be reached via the
 -- vertex @v@ with id @i@ in @g@. Otherwise it returns 'Produced' @(r x et v)@
 -- where @x@ is the '<>' aggregate of all values produced by reducing the
--- vertices that are available via @v@'s' edges.
+-- vertices that are available via the edges of @v@.
 -- @et@ identifies the type of edge that @v@ is accessed by and thereby which
 -- edges of @v@ that are available. @vs@ caches reductions of vertices that
 -- previously have been visited in the graph.

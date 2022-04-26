@@ -1,13 +1,15 @@
 -- |
 -- This module implements program analysis to determine which program statements
--- the "Futhark.Pass.ReduceDeviceSyncs" pass should move into 'GPUBody' kernels
+-- the "Futhark.Optimise.ReduceDeviceSyncs" pass should move into 'GPUBody' kernels
 -- to reduce blocking memory transfers between host and device. The results of
 -- the analysis is encoded into a 'MigrationTable' which can be queried.
 --
--- To reduce blocking scalar reads the module constructs a data flow dependency
--- graph of program variables (see "Futhark.Analysis.MigrationTable.Graph") in
--- which it finds a minimum vertex cut that separates array reads of scalars
--- from transitive usage that cannot or should not be migrated to device.
+-- To reduce blocking scalar reads the module constructs a data flow
+-- dependency graph of program variables (see
+-- "Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph") in which
+-- it finds a minimum vertex cut that separates array reads of scalars
+-- from transitive usage that cannot or should not be migrated to
+-- device.
 --
 -- The variables of each partition are assigned a 'MigrationStatus' that states
 -- whether the computation of those variables should be moved to device or
@@ -1178,8 +1180,8 @@ connectToSink i = do
   modifyGraph (MG.connectToSink i)
   modifyGraphedScalars (IS.delete i)
 
--- | Like 'connectToSink' but vertex is given by a 'SubExp'. This is a no-op if
--- the 'SubExp' is a constant.
+-- | Like 'connectToSink' but vertex is given by a t'SubExp'. This is a no-op if
+-- the t'SubExp' is a constant.
 connectSubExpToSink :: SubExp -> Grapher ()
 connectSubExpToSink (Var n) = connectToSink (nameToId n)
 connectSubExpToSink _ = pure ()
@@ -1538,7 +1540,7 @@ onlyGraphedScalar n = do
     then pure (IS.singleton i)
     else pure IS.empty
 
--- | Like 'onlyGraphedScalars' but for a single 'SubExp'.
+-- | Like 'onlyGraphedScalars' but for a single t'SubExp'.
 onlyGraphedScalarSubExp :: SubExp -> Grapher IdSet
 onlyGraphedScalarSubExp (Constant _) = pure IS.empty
 onlyGraphedScalarSubExp (Var n) = onlyGraphedScalar n

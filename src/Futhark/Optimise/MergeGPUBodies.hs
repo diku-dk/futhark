@@ -1,7 +1,7 @@
 -- |
 -- This module implements an optimization pass that merges 'GPUBody' kernels to
 -- eliminate memory transactions and reduce the number of kernel launches.
--- This is useful because the "Futhark.Pass.ReduceDeviceSyncs" pass introduces
+-- This is useful because the "Futhark.Optimise.ReduceDeviceSyncs" pass introduces
 -- 'GPUBody' kernels that only execute single statements.
 --
 -- To merge as many 'GPUBody' kernels as possible, this pass reorders statements
@@ -236,7 +236,7 @@ data State = State
     stateEquivalents :: EquivalenceTable
   }
 
--- | A map from variable tags to 'SubExp's returned from within GPUBodies.
+-- | A map from variable tags to t'SubExp's returned from within GPUBodies.
 type EquivalenceTable = IM.IntMap Entry
 
 -- | An entry in an 'EquivalenceTable'.
@@ -441,7 +441,7 @@ moveTo (stm, usage) grp =
 --                         MERGING GPU BODIES - TYPES                         --
 --------------------------------------------------------------------------------
 
--- | The monad used for rewriting a GPUBody to use the 'SubExp's that are
+-- | The monad used for rewriting a GPUBody to use the t'SubExp's that are
 -- returned from kernels it is merged with rather than the results that they
 -- bind.
 --

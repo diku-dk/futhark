@@ -1,17 +1,18 @@
--- |
--- This module implements an optimization that migrates host statements into
--- 'GPUBody' kernels to reduce the number of host-device synchronizations that
--- occur when a scalar variable is written to or read from device memory. Which
--- statements that should be migrated are determined by a 'MigrationTable'
--- produced by the "Futhark.Analysis.MigrationTable" module; with few
--- exceptions this module merely performs the migration and rewriting dictated
--- by that table.
+-- | This module implements an optimization that migrates host
+-- statements into 'GPUBody' kernels to reduce the number of
+-- host-device synchronizations that occur when a scalar variable is
+-- written to or read from device memory. Which statements that should
+-- be migrated are determined by a 'MigrationTable' produced by the
+-- "Futhark.Optimise.ReduceDeviceSyncs.MigrationTable" module; with
+-- few exceptions this module merely performs the migration and
+-- rewriting dictated by that table.
 --
--- The only exception at the time of writing is a unconditional transformation
--- that turns @A[i] = x@ into @A[i:i+1] = gpu { x }@ for some scalar variable
--- @x@. The rationale is that the code generator creates synchronous writes for
--- 'Update' statements with scalar variables. Under some backends 'Update' will
--- be performed asynchronously when applied to a constant value; those 'Update's
+-- The only exception at the time of writing is a unconditional
+-- transformation that turns @A[i] = x@ into @A[i:i+1] = gpu { x }@
+-- for some scalar variable @x@. The rationale is that the code
+-- generator creates synchronous writes for 'Update' statements with
+-- scalar variables. Under some backends 'Update' will be performed
+-- asynchronously when applied to a constant value; those 'Update's
 -- are therefore not transformed.
 module Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs) where
 
@@ -557,7 +558,7 @@ resolveName n = do
     Just (_, _, _, True) -> pure n
     Just (_, _, arr, _) -> pure arr
 
--- | Like 'resolveName' but for a 'SubExp'. Constants are mapped to themselves.
+-- | Like 'resolveName' but for a t'SubExp'. Constants are mapped to themselves.
 resolveSubExp :: SubExp -> ReduceM SubExp
 resolveSubExp (Var n) = Var <$> resolveName n
 resolveSubExp cnst = pure cnst
@@ -827,7 +828,7 @@ renameSubExpRes (SubExpRes certs se) = do
 renameCerts :: Certs -> RewriteM Certs
 renameCerts cs = Certs <$> mapM rename (unCerts cs)
 
--- | Update any variable name within a 'SubExp' to account for migration and
+-- | Update any variable name within a t'SubExp' to account for migration and
 -- rewriting.
 renameSubExp :: SubExp -> RewriteM SubExp
 renameSubExp (Var n) = Var <$> rename n
