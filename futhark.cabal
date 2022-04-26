@@ -65,8 +65,6 @@ library
       Futhark.Analysis.MemAlias
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
-      Futhark.Analysis.MigrationTable
-      Futhark.Analysis.MigrationTable.Graph
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Generalize
@@ -232,6 +230,10 @@ library
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
+      Futhark.Optimise.MergeGPUBodies
+      Futhark.Optimise.ReduceDeviceSyncs
+      Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
+      Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Rep
@@ -265,8 +267,6 @@ library
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
-      Futhark.Pass.MergeGPUBodies
-      Futhark.Pass.ReduceDeviceSyncs
       Futhark.Pass.Simplify
       Futhark.Passes
       Futhark.Pipeline

@@ -37,7 +37,7 @@
 -- When routing fails to find a sink in some subgraph reached via an edge then
 -- that edge is marked exhausted. No sink can be reached via an exhausted edge,
 -- and any subsequent routing attempt will skip pathfinding along such edge.
-module Futhark.Analysis.MigrationTable.Graph
+module Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
   ( -- * Types
     Graph,
     Id,

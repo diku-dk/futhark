@@ -13,7 +13,7 @@
 -- 'Update' statements with scalar variables. Under some backends 'Update' will
 -- be performed asynchronously when applied to a constant value; those 'Update's
 -- are therefore not transformed.
-module Futhark.Pass.ReduceDeviceSyncs (reduceDeviceSyncs) where
+module Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs) where
 
 import Control.Monad
 import Control.Monad.Trans.Class
@@ -26,12 +26,12 @@ import Data.List (unzip4, zip4)
 import qualified Data.Map.Strict as M
 import Data.Sequence ((<|), (><), (|>))
 import qualified Data.Text as T
-import Futhark.Analysis.MigrationTable
 import Futhark.Construct (fullSlice, sliceDim)
 import Futhark.Error
 import qualified Futhark.FreshNames as FN
 import Futhark.IR.GPU
 import Futhark.MonadFreshNames (VNameSource, getNameSource, putNameSource)
+import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
 import Futhark.Pass
 import Futhark.Transform.Substitute
 

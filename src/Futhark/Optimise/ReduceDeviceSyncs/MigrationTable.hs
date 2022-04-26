@@ -30,7 +30,7 @@
 -- For details on how the graph is constructed and how the vertex cut is found,
 -- see the master thesis "Reducing Synchronous GPU Memory Transfers" by Philip
 -- Børgesen (2022).
-module Futhark.Analysis.MigrationTable
+module Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
   ( -- * Analysis
     analyseProg,
 
@@ -65,7 +65,9 @@ import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
 import qualified Data.Sequence as SQ
 import Data.Set (Set, (\\))
 import qualified Data.Set as S
-import Futhark.Analysis.MigrationTable.Graph hiding
+import Futhark.Error
+import Futhark.IR.GPU
+import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph hiding
   ( Graph,
     addEdges,
     connectToSink,
@@ -73,9 +75,7 @@ import Futhark.Analysis.MigrationTable.Graph hiding
     lookup,
     none,
   )
-import qualified Futhark.Analysis.MigrationTable.Graph as MG
-import Futhark.Error
-import Futhark.IR.GPU
+import qualified Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph as MG
 
 {- HLINT ignore "Use first" -}
 {- HLINT ignore "Use second" -}

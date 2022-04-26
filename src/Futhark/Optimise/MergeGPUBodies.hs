@@ -7,7 +7,7 @@
 -- To merge as many 'GPUBody' kernels as possible, this pass reorders statements
 -- with the goal of bringing as many 'GPUBody' statements next to each other in
 -- a sequence. Such sequence can then trivially be merged.
-module Futhark.Pass.MergeGPUBodies (mergeGPUBodies) where
+module Futhark.Optimise.MergeGPUBodies (mergeGPUBodies) where
 
 import Control.Monad
 import Control.Monad.Trans.Class

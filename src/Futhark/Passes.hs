@@ -26,6 +26,8 @@ import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.MergeGPUBodies
+import Futhark.Optimise.ReduceDeviceSyncs
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -37,8 +39,6 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
-import Futhark.Pass.MergeGPUBodies
-import Futhark.Pass.ReduceDeviceSyncs
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 
