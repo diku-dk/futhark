@@ -11,7 +11,6 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Util.IntegralExp (quot, rem)
 import Prelude hiding (quot, rem)
-import Debug.Trace (traceM, trace, traceShowId)
 
 -- Compile a SegScan construct
 compileSegScan ::
