@@ -448,7 +448,7 @@ graphStm stm = do
     -- whole given that each of its returned arrays either
     --   1) is backed by memory used by a migratable statement within its body.
     --   2) contains just a single element.
-    -- An array matching either criterium is denoted "copyable memory" because
+    -- An array matching either criterion is denoted "copyable memory" because
     -- the asymptotic cost of copying it is less than or equal to the statement
     -- that produced it. This makes the parent of statements with sublinear cost
     -- safe to migrate.
