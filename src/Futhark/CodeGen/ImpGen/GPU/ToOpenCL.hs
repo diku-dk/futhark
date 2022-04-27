@@ -324,7 +324,7 @@ onKernel target kernel = do
         ]
 
       params =
-        [[C.cparam|const int device_id|]]
+        [[C.cparam|const int device_id|],[C.cparam|const int device_count|]]
           ++ perm_params
           ++ take (numFailureParams safety) failure_params
           ++ catMaybes local_memory_params
@@ -664,6 +664,8 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
     kernelOps (GetDeviceId v) =
       GC.stm [C.cstm|$id:v = device_id;|]
+    kernelOps (GetDeviceCount v) =
+      GC.stm [C.cstm|$id:v = device_count;|]
     kernelOps (Barrier f) = do
       GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}

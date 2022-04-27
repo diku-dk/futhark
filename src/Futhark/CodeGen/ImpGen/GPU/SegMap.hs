@@ -36,10 +36,13 @@ compileSegMap pat lvl space kbody = do
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
           device_id <- kernelDeviceId . kernelConstants <$> askEnv
+          device_count <- kernelDeviceCount . kernelConstants <$> askEnv
+          device_blocks <- dPrimVE "device_blocks" $ sExt64
+            (unCount num_groups') `divUp` sExt64 device_count + 1
 
           global_tid <-
             dPrimVE "global_tid" $
-              sExt64 (unCount group_size') * sExt64 (unCount num_groups') * sExt64 device_id
+              sExt64 (unCount group_size') * device_blocks * sExt64 device_id
                 + sExt64 group_id * sExt64 (unCount group_size')
                 + sExt64 local_tid
 

@@ -102,7 +102,8 @@ data KernelConstants = KernelConstants
     -- | Mapping from dimensions of nested SegOps to how many
     -- iterations the virtualisation loop needs.
     kernelChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32),
-    kernelDeviceId :: Imp.TExp Int32
+    kernelDeviceId :: Imp.TExp Int32,
+    kernelDeviceCount :: Imp.TExp Int32
   }
 
 -- | The sizes of nested iteration spaces in the kernel.
@@ -1135,6 +1136,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
   wave_size <- newVName "wave_size"
   inner_group_size <- newVName "group_size"
   device_id <- newVName "device_id"
+  device_count <- newVName "device_count"
   let constants =
         KernelConstants
           (Imp.le32 global_tid)
@@ -1151,6 +1153,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
           mempty
           mempty
           (Imp.le32 device_id)
+          (Imp.le32 device_count)
 
   let set_constants = do
         dPrim_ global_tid int32
@@ -1159,6 +1162,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
         dPrim_ wave_size int32
         dPrim_ group_id int32
         dPrim_ device_id int32
+        dPrim_ device_count int32
 
         sOp (Imp.GetGlobalId global_tid 0)
         sOp (Imp.GetLocalId local_tid 0)
@@ -1166,6 +1170,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
         sOp (Imp.GetLockstepWidth wave_size)
         sOp (Imp.GetGroupId group_id 0)
         sOp (Imp.GetDeviceId device_id)
+        sOp (Imp.GetDeviceCount device_count)
 
   pure (constants, set_constants)
 
@@ -1556,17 +1561,20 @@ simpleKernelConstants kernel_size desc = do
   thread_gtid <- newVName $ desc ++ "_gtid"
   thread_ltid <- newVName $ desc ++ "_ltid"
   group_id <- newVName $ desc ++ "_gid"
-  device_id <- newVName $ desc ++ "_devID"
+  device_id <- newVName $ desc ++ "_devive_id"
+  device_count <- newVName $ desc ++ "_device_count"
   (num_groups, group_size) <- computeMapKernelGroups kernel_size
   let set_constants = do
         dPrim_ thread_gtid int32
         dPrim_ thread_ltid int32
         dPrim_ group_id int32
         dPrim_ device_id int32
+        dPrim_ device_count int32
         sOp (Imp.GetGlobalId thread_gtid 0)
         sOp (Imp.GetLocalId thread_ltid 0)
         sOp (Imp.GetGroupId group_id 0)
         sOp (Imp.GetDeviceId device_id)
+        sOp (Imp.GetDeviceCount device_count)
 
   pure
     ( KernelConstants
@@ -1583,7 +1591,8 @@ simpleKernelConstants kernel_size desc = do
         (Imp.le64 thread_gtid .<. kernel_size)
         mempty
         mempty
-        (Imp.le32 device_id),
+        (Imp.le32 device_id)
+        (Imp.le32 device_count),
       set_constants
     )
 

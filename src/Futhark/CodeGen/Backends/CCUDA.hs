@@ -319,7 +319,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             [C.cinit|&ctx->failure_is_an_option|],
             [C.cinit|&ctx->global_failure_args|]
           ]
-      args'' = [[C.cinit|&device_id|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
+      args'' = [[C.cinit|&device_id|], [C.cinit|&device_count|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
       sizes_nonzero =
         expsNotZero
           [ grid_x,
@@ -352,6 +352,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       grid[perm[2]] = $exp:grid_z;
 
       int device_id = 0;
+      int device_count = ctx->cuda.device_count;
       void *$id:args_arr[] = { $inits:args''};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
@@ -377,6 +378,8 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
                                                   $exp:block_x, $exp:block_y, $exp:block_z,
                                                   $exp:shared_tot, NULL,
                                                   $id:args_arr, NULL));
+            // This synchronisation is placed here to ensure that the same level
+            // of synchronisation is provided as single streams
             CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[devID * 2
                                              + ctx->cuda.kernel_iterator], NULL));
             for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){

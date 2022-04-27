@@ -148,6 +148,7 @@ data KernelOp
   | GetGlobalId VName Int
   | GetLockstepWidth VName
   | GetDeviceId VName
+  | GetDeviceCount VName
   | Atomic Space AtomicOp
   | Barrier Fence
   | MemFence Fence
@@ -210,6 +211,9 @@ instance Pretty KernelOp where
   ppr (GetDeviceId dest) =
     ppr dest <+> "<-"
       <+> "device_id"
+  ppr (GetDeviceCount dest) =
+    ppr dest <+> "<-"
+      <+> "device_count"
   ppr (GetLockstepWidth dest) =
     ppr dest <+> "<-"
       <+> "get_lockstep_width()"
