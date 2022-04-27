@@ -26,8 +26,6 @@
 -- Blocking scalar writes are reduced by either turning such writes into
 -- asynchronous kernels, as is done with scalar array literals and accumulator
 -- updates, or by transforming host-device writing into device-device copying.
--- The latter transformation is recognized by this module but solely implemented
--- by "Futhark.Pass.ReduceDeviceSyncs".
 --
 -- For details on how the graph is constructed and how the vertex cut is found,
 -- see the master thesis "Reducing Synchronous GPU Memory Transfers" by Philip
