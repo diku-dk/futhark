@@ -374,11 +374,11 @@ graphStm stm = do
       | isScalar t,
         any (isJust . subExpVar) arr ->
           -- Migrating an array literal with free variables saves a write for
-          -- every scalar it contains. Under CUDA each scalar is written using
-          -- a synchronous write. Under OpenCL scalar constants will be written
-          -- asynchronously but free variables are still transferred using
-          -- blocking writes. If all scalars are constants then the compiler
-          -- generates more efficient code that copies static device memory.
+          -- every scalar it contains. Under some backends the compiler
+          -- generates asynchronous writes for scalar constants but otherwise
+          -- each write will be synchronous. If all scalars are constants then
+          -- the compiler generates more efficient code that copies static
+          -- device memory.
           graphAutoMove (one bs)
     BasicOp UnOp {} -> graphSimple bs e
     BasicOp BinOp {} -> graphSimple bs e
