@@ -24,8 +24,6 @@
 -- Blocking scalar writes are reduced by either turning such writes into
 -- asynchronous kernels, as is done with scalar array literals and accumulator
 -- updates, or by transforming host-device writing into device-device copying.
--- The latter transformation is recognized by this module but solely implemented
--- by "Futhark.Pass.ReduceDeviceSyncs".
 --
 -- For details on how the graph is constructed and how the vertex cut is found,
 -- see the master thesis "Reducing Synchronous GPU Memory Transfers" by Philip
@@ -412,7 +410,7 @@ graphStm stm = do
       -- the total number of reads can hence either decrease, remain the same,
       -- or even increase, subject to the ordering of reads and kernels that
       -- perform assertions.
-      -- 
+      --
       -- Since it is possible to implement the same failure checking scheme as
       -- OpenCL using asynchronous reads (and doing so would be a good idea!)
       -- we consider this to be acceptable.

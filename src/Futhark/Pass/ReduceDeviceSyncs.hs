@@ -85,27 +85,22 @@ optimizeStm out stm = do
     else case stmExp stm of
       BasicOp (Update safety arr slice (Var v))
         | Just _ <- sliceIndices slice -> do
-          -- An Update can be rewritten to not require its value to be
-          -- available on host. If its value is migrated the Update thus needs
-          -- to be rewritten.
-          v' <- resolveName v
-          let v_kept_on_device = v /= v'
-
-          case v_kept_on_device of
-            False -> pure (out |> stm)
-            True -> do
-              let t = elemType $ patElemType $ head $ patElems (stmPat stm)
-              (out', dev) <- storeScalar out (Var v) (Prim t)
-
+          -- Rewrite the Update if its write value has been migrated. Copying
+          -- is faster than doing a synchronous write, so we use the device
+          -- array even if the value has been made available to the host.
+          dev <- storedScalar (Var v)
+          case dev of
+            Nothing -> pure (out |> stm)
+            Just dst -> do
               -- Transform the single element Update into a slice Update.
               let dims = unSlice slice
               let (outer, [DimFix i]) = splitAt (length dims - 1) dims
               let one = intConst Int64 1
               let slice' = Slice $ outer ++ [DimSlice i one one]
-              let e = BasicOp (Update safety arr slice' (Var dev))
+              let e = BasicOp (Update safety arr slice' (Var dst))
               let stm' = stm {stmExp = e}
 
-              pure (out' |> stm')
+              pure (out |> stm')
       BasicOp (Replicate (Shape dims) (Var v))
         | Pat [PatElem n arr_t] <- stmPat stm -> do
           -- A Replicate can be rewritten to not require its replication value
@@ -498,6 +493,14 @@ eIndex arr = BasicOp $ Index arr (Slice [DimFix $ intConst Int64 0])
 -- | A shorthand for binding a single variable to an expression.
 bind :: PatElem Type -> Exp GPU -> Stm GPU
 bind pe = Let (Pat [pe]) (StmAux mempty mempty ())
+
+-- | Returns the array alias of @se@ if it is a variable that has been migrated
+-- to device. Otherwise returns @Nothing@.
+storedScalar :: SubExp -> ReduceM (Maybe VName)
+storedScalar (Constant _) = pure Nothing
+storedScalar (Var n) = do
+  entry <- IM.lookup (baseTag n) <$> gets stateMigrated
+  pure $ fmap (\(_, _, arr, _) -> arr) entry
 
 -- | @storeScalar stms se t@ returns a variable that binds a single element
 -- array that contains the value of @se@ in the original program. If @se@ is a
