@@ -29,6 +29,7 @@ import Futhark.IR.GPUMem hiding
   )
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
+import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to CUDA.
@@ -137,7 +138,26 @@ cliOptions =
            }
        ]
 
+-- We detect the special case of writing a constant and turn it into a
+-- non-blocking write.  This may be slightly faster, as it prevents
+-- unnecessary synchronisation of the context, and writing a constant
+-- is fairly common.  This is only possible because we can give the
+-- constant infinite lifetime (with 'static'), which is not the case
+-- for ordinary variables.
 writeCUDAScalar :: GC.WriteScalar OpenCL ()
+writeCUDAScalar mem idx t "device" _ val@C.Const {} = do
+  val' <- newVName "write_static"
+  let (bef, aft) = profilingEnclosure copyScalarToDev
+  GC.item
+    [C.citem|{static $ty:t $id:val' = $exp:val;
+              $items:bef
+              CUDA_SUCCEED_OR_RETURN(
+                cuMemcpyHtoDAsync($exp:mem + $exp:idx * sizeof($ty:t),
+                                  &$id:val',
+                                  sizeof($ty:t),
+                                  0));
+              $items:aft
+             }|]
 writeCUDAScalar mem idx t "device" _ val = do
   val' <- newVName "write_tmp"
   let (bef, aft) = profilingEnclosure copyScalarToDev
@@ -167,10 +187,12 @@ readCUDAScalar mem idx t "device" _ = do
           cuMemcpyDtoH(&$id:val,
                        $exp:mem + $exp:idx * sizeof($ty:t),
                        sizeof($ty:t)));
-        $items:aft
+       $items:aft
        }
        |]
-  GC.stm [C.cstm|if (futhark_context_sync(ctx) != 0) { return 1; }|]
+  GC.stm
+    [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
+            { return 1; }|]
   pure [C.cexp|$id:val|]
 readCUDAScalar _ _ _ space _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
