@@ -135,16 +135,9 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
   b->used += needed;
 }
 
-unsigned char * realloc_ispc(unsigned char *ptr, size_t new_size) {
-  return realloc(ptr, new_size);
-}
-char * msgprintf_ispc(size_t new_size) {
+char * lexical_realloc_error(size_t new_size) {
   return msgprintf("Failed to allocate memory.\nAttempted allocation: %12lld bytes\n",
                        (long long) new_size);
-}
-char * msgprintf_ispc2(size_t new_size, size_t amount) {
-  return msgprintf("Failed to allocate memory.\nAttempted allocation: %12lld bytes times %i\n",
-                       (long long) new_size, amount);
 }
 
 static int lexical_realloc(char **error, unsigned char **ptr, size_t *old_size, size_t new_size) {

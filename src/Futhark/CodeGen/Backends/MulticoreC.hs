@@ -231,7 +231,7 @@ generateContext = do
                      return 1;
                    }|]
     )
-  GC.publicDef_ "get_error_ref" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_get_error_ref" GC.InitDecl $ \s ->
     (
       [C.cedecl|char ** $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|char ** $id:s(struct $id:ctx* ctx){
