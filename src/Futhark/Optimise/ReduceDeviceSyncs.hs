@@ -6,13 +6,6 @@
 -- "Futhark.Optimise.ReduceDeviceSyncs.MigrationTable" module; this module
 -- merely performs the migration and rewriting dictated by that table.
 module Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs) where
--- |
--- This module implements an optimization that migrates host statements into
--- 'GPUBody' kernels to reduce the number of host-device synchronizations that
--- occur when a scalar variable is written to or read from device memory. Which
--- statements that should be migrated are determined by a 'MigrationTable'
--- produced by the "Futhark.Analysis.MigrationTable" module; this module merely
--- performs the migration and rewriting dictated by that table.
 
 import Control.Monad
 import Control.Monad.Trans.Class
