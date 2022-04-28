@@ -19,8 +19,6 @@ let
     packageOverrides = pkgs: rec {
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
-          language-c-quote =
-            haskellPackagesNew.callPackage ./nix/language-c-quote.nix { };
           futhark-data =
             haskellPackagesNew.callPackage ./nix/futhark-data.nix { };
 
