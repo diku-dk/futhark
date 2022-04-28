@@ -436,6 +436,21 @@ static inline f16 futrts_lgamma16(f16 x) {
   return *((varying f16 * uniform)&y);
 }
 
+static inline f16 futrts_cbrt16(f16 x) {
+  f16 res = (f16)futrts_cbrt32((float)x);
+  return res;
+}
+
+static inline f16 futrts_erf16(f16 x) {
+  f16 res = (f16)futrts_erf32((float)x);
+  return res;
+}
+
+static inline f16 futrts_erfc16(f16 x) {
+  f16 res = (f16)futrts_erfc32((float)x);
+  return res;
+}
+
 static inline f16 fmod16(f16 x, f16 y) {
   return x - y * (float16)trunc((float) (x/y)); //TODO: Check if correct behavior, else use round()
 }
