@@ -43,6 +43,7 @@ module Futhark.Optimise.Simplify.Engine
     isFalse,
     isOp,
     isNotSafe,
+    isDeviceMigrated,
     asksEngineEnv,
     askVtable,
     localVtable,
@@ -60,7 +61,9 @@ module Futhark.Optimise.Simplify.Engine
     ST.SymbolTable,
     hoistStms,
     blockIf,
+    blockMigrated,
     enterLoop,
+    constructBody,
     module Futhark.Optimise.Simplify.Rep,
   )
 where
@@ -387,7 +390,7 @@ emptyOfType ctx_names (Array et shape _) = do
 
 -- | Statements that are not worth hoisting out of loops, because they
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
--- further optimisation..
+-- further optimisation.
 notWorthHoisting :: ASTRep rep => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
   not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
@@ -860,7 +863,7 @@ simplifyExp usage _ (WithAcc inputs lam) = do
       Nothing ->
         pure (Nothing, mempty)
       Just (op_lam, nes) -> do
-        (op_lam', op_lam_stms) <- simplifyLambda op_lam
+        (op_lam', op_lam_stms) <- blockMigrated (simplifyLambda op_lam)
         nes' <- simplify nes
         pure (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
@@ -870,6 +873,36 @@ simplifyExp usage _ (WithAcc inputs lam) = do
 simplifyExp _ _ e = do
   e' <- simplifyExpBase e
   pure (e', mempty)
+
+-- | Block hoisting of 'Index' statements introduced by migration.
+blockMigrated ::
+  SimplifiableRep rep =>
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep)) ->
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+blockMigrated = local withMigrationBlocker
+  where
+    withMigrationBlocker (ops, env) =
+      let blockers = envHoistBlockers env
+          par_blocker = blockHoistPar blockers
+
+          blocker = par_blocker `orIf` isDeviceMigrated
+
+          blockers' = blockers {blockHoistPar = blocker}
+          env' = env {envHoistBlockers = blockers'}
+       in (ops, env')
+
+-- | Statement is a scalar read from a single element array of rank one.
+isDeviceMigrated :: SimplifiableRep rep => BlockPred (Wise rep)
+isDeviceMigrated vtable _ stm
+  | BasicOp (Index arr slice) <- stmExp stm,
+    [DimFix idx] <- unSlice slice,
+    idx == intConst Int64 0,
+    Just arr_t <- ST.lookupType arr vtable,
+    [size] <- arrayDims arr_t,
+    size == intConst Int64 1 =
+      True
+  | otherwise =
+      False
 
 -- The simple nonrecursive case that we can perform without bottom-up
 -- information.
