@@ -725,10 +725,20 @@ compileOp (ISPCKernel body free) = do
 compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCode body
-  GC.stm [C.cstm|
-    foreach ($id:i = 0 ... extract($exp:bound', 0)) {
+  GC.stms [C.cstms|
+    for (uniform int64 i = 0; i < ($exp:bound' / programCount); i++)
+    {
+      int64 $id:i = programIndex + i * programCount;
+      {
+        $items:body'
+      }
+    }
+    for (int64 $id:i = programIndex+(($exp:bound' / programCount) * programCount); $id:i < ($exp:bound'); $id:i += programCount)
+    {
       $items:body'
-    }|]
+    }
+    |]
+  --GC.stm [C.cstm|foreach ($id:i = 0 ... $exp:bound') { $items:body' }|]
 compileOp (ForEachActive name body) = do
   body' <- GC.collect $ compileCode body
   GC.stm [C.cstm|
