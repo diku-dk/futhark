@@ -735,6 +735,7 @@ unAllocGPUStms = unAllocStms False
 
     unAllocOp Alloc {} = Left "unAllocOp: unhandled Alloc"
     unAllocOp (Inner OtherOp {}) = Left "unAllocOp: unhandled OtherOp"
+    unAllocOp (Inner GPUBody {}) = Left "unAllocOp: unhandled GPUBody"
     unAllocOp (Inner (SizeOp op)) = pure $ SizeOp op
     unAllocOp (Inner (SegOp op)) = SegOp <$> mapSegOpM mapper op
       where

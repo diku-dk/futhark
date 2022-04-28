@@ -67,6 +67,10 @@ analyseGPUOp pat_name (lumap, used) (Inner (SegOp (SegHist lvl _ binops tps body
   (lumap'', used'') <- analyseKernelBody (lumap', used') body
   let nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
   pure (insertNames pat_name nms lumap'', used'' <> nms)
+analyseGPUOp pat_name (lumap, used) (Inner (GPUBody ts body)) = do
+  (lumap', used') <- analyseBody lumap used body
+  let nms = freeIn ts
+  pure (insertNames pat_name nms lumap', used' <> nms)
 
 segOpHelper ::
   (FreeIn (OpWithAliases (Op rep)), ASTRep rep) =>

@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The CUDA backend now supports compute capability 8.6 and 8.7.
 
+* Philip Børgesen has implemented a new optimisation for GPU backends
+  that migrates scalar work to the GPU, in order to reduce
+  synchronisation.  This results in major speedup for some programs.
+
 ### Removed
 
 ### Changed

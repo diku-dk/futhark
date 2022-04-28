@@ -1,6 +1,9 @@
 -- Careful; this one cannot be sunk.
 -- ==
--- structure gpu { /Index 5 }
+-- structure gpu {
+--   /Index 1
+--   /GPUBody/Index 4
+-- }
 
 def main (arr: *[](i32, i32, i32, i32, i32)) =
   let (a,b,c,d,e) = arr[0]

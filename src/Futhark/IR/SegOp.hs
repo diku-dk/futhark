@@ -56,6 +56,7 @@ where
 
 import Control.Category
 import Control.Monad.Identity hiding (mapM_)
+import Control.Monad.Reader hiding (mapM_)
 import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Data.Bifunctor (first)
@@ -1178,6 +1179,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
           `Engine.orIf` Engine.isOp
           `Engine.orIf` par_blocker
           `Engine.orIf` Engine.isConsumed
+          `Engine.orIf` Engine.isDeviceMigrated
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
@@ -1201,6 +1203,12 @@ simplifyKernelBody space (KernelBody _ stms res) = do
     consumedInResult _ =
       []
 
+simplifyLambda ::
+  Engine.SimplifiableRep rep =>
+  Lambda (Wise rep) ->
+  Engine.SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+simplifyLambda = Engine.blockMigrated . Engine.simplifyLambda
+
 segSpaceSymbolTable :: ASTRep rep => SegSpace -> ST.SymbolTable rep
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
   foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
@@ -1214,7 +1222,7 @@ simplifySegBinOp ::
 simplifySegBinOp (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      Engine.simplifyLambda lam
+      simplifyLambda lam
   shape' <- Engine.simplify shape
   nes' <- mapM Engine.simplify nes
   pure (SegBinOp comm lam' nes' shape', hoisted)
@@ -1276,7 +1284,7 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
         (lam', op_hoisted) <-
           Engine.localVtable (<> scope_vtable) $
             Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-              Engine.simplifyLambda lam
+              simplifyLambda lam
         pure
           ( HistOp w' rf' arrs' nes' dims' lam',
             op_hoisted

@@ -38,6 +38,7 @@ module Futhark.IR.Aliases
     removeFunDefAliases,
     removeExpAliases,
     removeStmAliases,
+    removeBodyAliases,
     removeLambdaAliases,
     removePatAliases,
     removeScopeAliases,
@@ -225,6 +226,13 @@ removeStmAliases ::
   Stm (Aliases rep) ->
   Stm rep
 removeStmAliases = runIdentity . rephraseStm removeAliases
+
+-- | Remove alias information from body.
+removeBodyAliases ::
+  CanBeAliased (Op rep) =>
+  Body (Aliases rep) ->
+  Body rep
+removeBodyAliases = runIdentity . rephraseBody removeAliases
 
 -- | Remove alias information from lambda.
 removeLambdaAliases ::
