@@ -76,7 +76,7 @@ data Context = Context
     ctxVisibleMTys :: S.Set VName
   }
 
-type FileMap = M.Map VName (String, Namespace)
+type FileMap = M.Map VName (FilePath, Namespace)
 
 type DocM = ReaderT Context (WriterT Documented (Writer Warnings))
 
@@ -119,7 +119,8 @@ vnameToFileMap = mconcat . map forFile
       mconcat (map (vname Type) (M.keys abs))
         <> forEnv file_env
       where
-        vname ns v = M.singleton (qualLeaf v) (file, ns)
+        file' = makeRelative "/" file
+        vname ns v = M.singleton (qualLeaf v) (file', ns)
         vname' ((ns, _), v) = vname ns v
 
         forEnv env =
@@ -175,7 +176,7 @@ renderFiles important_imports imports = runWriter $ do
       ++ map (importHtml *** fst) import_pages
   where
     file_map = vnameToFileMap imports
-    importHtml import_name = "doc" </> import_name <.> "html"
+    importHtml import_name = "doc" </> makeRelative "/" import_name <.> "html"
 
 -- | The header documentation (which need not be present) can contain
 -- an abstract and further sections.
@@ -228,7 +229,7 @@ contentsPage important_imports pages =
 
 importLink :: FilePath -> String -> Html
 importLink current name =
-  let file = relativise (makeRelative "/" $ "doc" </> name -<.> "html") current
+  let file = relativise ("doc" </> makeRelative "/" name -<.> "html") current
    in (H.a ! A.href (fromString file) $ fromString name)
 
 indexPage :: [FilePath] -> Imports -> Documented -> FileMap -> Html
@@ -288,8 +289,9 @@ indexPage important_imports imports documented fm =
       H.li $ H.a ! A.href (fromString $ '#' : initial) $ fromString initial
 
     linkTo (name, (file, what)) =
-      let link =
-            (H.a ! A.href (fromString (makeRelative "/" $ "doc" </> vnameLink' name "" file))) $
+      let file' = makeRelative "/" file
+          link =
+            (H.a ! A.href (fromString (makeRelative "/" $ "doc" </> vnameLink' name "" file'))) $
               fromString $ baseString name
           what' = case what of
             IndexValue -> "value"
@@ -297,7 +299,7 @@ indexPage important_imports imports documented fm =
             IndexType -> "type"
             IndexModuleType -> "module type"
             IndexModule -> "module"
-          html_file = makeRelative "/" $ "doc" </> file -<.> "html"
+          html_file = "doc" </> file' -<.> "html"
        in H.tr $
             (H.td ! A.class_ "doc_index_name" $ link)
               <> (H.td ! A.class_ "doc_index_namespace" $ what')
@@ -661,12 +663,13 @@ qualNameHtml (QualName names vname@(VName name tag)) =
         then pure Nothing
         else Just <$> vnameLink vname
 
-vnameLink' :: VName -> String -> String -> String
 vnameLink :: VName -> DocM String
 vnameLink vname = do
   current <- asks ctxCurrent
   file <- asks $ maybe current fst . M.lookup vname . ctxFileMap
   pure $ vnameLink' vname current file
+
+vnameLink' :: VName -> String -> String -> String
 vnameLink' (VName _ tag) current file =
   if file == current
     then "#" ++ show tag

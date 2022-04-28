@@ -198,7 +198,7 @@ static inline f16 fpow16(f16 x, f16 y) {
 
 #if ISPC
 static inline bool futrts_isinf16(float x) {
-  return !futrts_isnan16(x) && futrts_isnan16(x - x); //TODO: Find cleaner solution
+  return !futrts_isnan16(x) && futrts_isnan16(x - x);
 }
 static inline bool futrts_isfinite16(float x) {
   return !futrts_isnan16(x) && !futrts_isinf16(x);
@@ -226,6 +226,10 @@ static inline f16 futrts_log10_16(f16 x) {
 
 static inline f16 futrts_sqrt16(f16 x) {
   return sqrt(x);
+}
+
+static inline f16 futrts_cbrt16(f16 x) {
+  return cbrt(x);
 }
 
 static inline f16 futrts_exp16(f16 x) {
@@ -294,6 +298,14 @@ static inline f16 futrts_gamma16(f16 x) {
 
 static inline f16 futrts_lgamma16(f16 x) {
   return lgamma(x);
+}
+
+static inline f16 futrts_erf16(f16 x) {
+  return erf(x);
+}
+
+static inline f16 futrts_erfc16(f16 x) {
+  return erfc(x);
 }
 
 static inline f16 fmod16(f16 x, f16 y) {
@@ -424,8 +436,23 @@ static inline f16 futrts_lgamma16(f16 x) {
   return *((varying f16 * uniform)&y);
 }
 
+static inline f16 futrts_cbrt16(f16 x) {
+  f16 res = (f16)futrts_cbrt32((float)x);
+  return res;
+}
+
+static inline f16 futrts_erf16(f16 x) {
+  f16 res = (f16)futrts_erf32((float)x);
+  return res;
+}
+
+static inline f16 futrts_erfc16(f16 x) {
+  f16 res = (f16)futrts_erfc32((float)x);
+  return res;
+}
+
 static inline f16 fmod16(f16 x, f16 y) {
-  return x - y * (float16)trunc((float) (x/y)); //TODO: Check if correct behavior, else use round()
+  return x - y * (float16)trunc((float) (x/y));
 }
 
 static inline f16 futrts_round16(f16 x) {
@@ -468,6 +495,10 @@ static inline f16 futrts_log10_16(f16 x) {
 
 static inline f16 futrts_sqrt16(f16 x) {
   return hsqrt(x);
+}
+
+static inline f16 futrts_cbrt16(f16 x) {
+  return cbrtf(x);
 }
 
 static inline f16 futrts_exp16(f16 x) {
@@ -536,6 +567,14 @@ static inline f16 futrts_gamma16(f16 x) {
 
 static inline f16 futrts_lgamma16(f16 x) {
   return lgammaf(x);
+}
+
+static inline f16 futrts_erf16(f16 x) {
+  return erff(x);
+}
+
+static inline f16 futrts_erfc16(f16 x) {
+  return erfcf(x);
 }
 
 static inline f16 fmod16(f16 x, f16 y) {
@@ -652,6 +691,10 @@ static inline f16 futrts_sqrt16(f16 x) {
   return futrts_sqrt32(x);
 }
 
+static inline f16 futrts_cbrt16(f16 x) {
+  return futrts_cbrt32(x);
+}
+
 static inline f16 futrts_exp16(f16 x) {
   return futrts_exp32(x);
 }
@@ -718,6 +761,14 @@ static inline f16 futrts_gamma16(f16 x) {
 
 static inline f16 futrts_lgamma16(f16 x) {
   return futrts_lgamma32(x);
+}
+
+static inline f16 futrts_erf16(f16 x) {
+  return futrts_erf32(x);
+}
+
+static inline f16 futrts_erfc16(f16 x) {
+  return futrts_erfc32(x);
 }
 
 static inline f16 fmod16(f16 x, f16 y) {

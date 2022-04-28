@@ -64,6 +64,7 @@ compileProg header version prog = do
         "ispc_multicore"
         version
         operations
+        mempty
         (MC.generateContext >> mapM_ compileBuiltinFun funs)
         header
         [DefaultSpace]

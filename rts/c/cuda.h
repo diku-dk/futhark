@@ -290,7 +290,9 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
     { 7, 0, "compute_70" },
     { 7, 2, "compute_72" },
     { 7, 5, "compute_75" },
-    { 8, 0, "compute_80" }
+    { 8, 0, "compute_80" },
+    { 8, 6, "compute_80" },
+    { 8, 7, "compute_80" }
   };
 
   int major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
@@ -556,12 +558,14 @@ static char* cuda_module_setup(struct cuda_context *ctx,
       if (cuModuleLoadData(&ctx->module, ptx) == CUDA_SUCCESS) {
         if (ctx->cfg.logging) {
           fprintf(stderr, "Success!\n");
-          loaded_ptx_from_cache = 1;
-        } else {
-          fprintf(stderr, "Failed!\n");
-          free(ptx);
-          ptx = NULL;
         }
+        loaded_ptx_from_cache = 1;
+      } else {
+        if (ctx->cfg.logging) {
+          fprintf(stderr, "Failed!\n");
+        }
+        free(ptx);
+        ptx = NULL;
       }
     }
   }

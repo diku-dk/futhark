@@ -29,7 +29,7 @@ module Futhark.CodeGen.Backends.GenericC
     Allocate,
     Deallocate,
     Copy,
-    StaticArray,    
+    StaticArray,
 
     -- * Monadic compiler interface
     CompilerM,
@@ -1583,20 +1583,20 @@ asServer parts =
 
 compileProg' ::
   MonadFreshNames m =>
-  Monoid s =>
   T.Text ->
   T.Text ->
   Operations op s ->
+  s ->
   CompilerM op s () ->
   T.Text ->
   [Space] ->
   [Option] ->
   Definitions op ->
   m (CParts, CompilerState s)
-compileProg' backend version ops extra header_extra spaces options prog = do
+compileProg' backend version ops def extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
-        runCompilerM ops src mempty compileProgAction
+        runCompilerM ops src def compileProgAction
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
       arraydecls = arrayDecls endstate
@@ -1750,7 +1750,7 @@ compileProg ::
   Definitions op ->
   m CParts
 compileProg backend version ops extra header_extra spaces options prog =
-  fst <$> compileProg' backend version ops extra header_extra spaces options prog
+  fst <$> compileProg' backend version ops () extra header_extra spaces options prog
 
 commonLibFuns :: [C.BlockItem] -> CompilerM op s (M.Map T.Text Manifest.Type)
 commonLibFuns memreport = do

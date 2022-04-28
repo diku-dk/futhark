@@ -15,6 +15,7 @@ module Futhark.Compiler.Program
     noLoadedProg,
     lpImports,
     lpWarnings,
+    lpFilePaths,
     reloadProg,
     extendProg,
   )
@@ -40,7 +41,7 @@ import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Time.Clock (UTCTime)
+import Data.Time.Clock (UTCTime, getCurrentTime)
 import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
 import Futhark.Util.Pretty (Doc, align, line, ppr, text, (</>))
@@ -69,6 +70,13 @@ data LoadedFile fm = LoadedFile
 data ProgError = ProgError Loc Doc
 
 type WithErrors = Either (NE.NonEmpty ProgError)
+
+-- | A mapping from absolute pathnames to text representing a virtual
+-- file system.  Before loading a file from the file system, this
+-- mapping is consulted.  If the desired pathname has an entry here,
+-- the corresponding text is used instead of loading the file from
+-- disk.
+type VFS = M.Map FilePath T.Text
 
 newtype UncheckedImport = UncheckedImport
   { unChecked ::
@@ -128,18 +136,23 @@ newImportMVar m = do
   void $ forkIO $ putMVar mvar =<< m
   pure $ Just mvar
 
-contentsAndModTime :: FilePath -> IO (Maybe (Either String (T.Text, UTCTime)))
-contentsAndModTime filepath =
-  interactWithFileSafely $
-    (,) <$> T.readFile filepath <*> getModificationTime filepath
+-- | Read the content and modification time of a file.
+-- Check if the file exits in VFS before interact with file system directly.
+contentsAndModTime :: FilePath -> VFS -> IO (Maybe (Either String (T.Text, UTCTime)))
+contentsAndModTime filepath vfs = do
+  case M.lookup filepath vfs of
+    Nothing -> interactWithFileSafely $ (,) <$> T.readFile filepath <*> getModificationTime filepath
+    Just file_contents -> do
+      now <- getCurrentTime
+      pure $ Just $ Right (file_contents, now)
 
-readImportFile :: ImportName -> IO (Either ProgError (LoadedFile T.Text))
-readImportFile include = do
+readImportFile :: ImportName -> VFS -> IO (Either ProgError (LoadedFile T.Text))
+readImportFile include vfs = do
   -- First we try to find a file of the given name in the search path,
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
   let filepath = includeToFilePath include
-  r <- contentsAndModTime filepath
+  r <- contentsAndModTime filepath vfs
   case (r, lookup prelude_str prelude) of
     (Just (Right (s, mod_time)), _) ->
       pure $ Right $ loaded filepath s mod_time
@@ -163,9 +176,8 @@ readImportFile include = do
     not_found =
       "Could not find import " <> E.quote (includeToString include) <> "."
 
-handleFile ::
-  ReaderState -> LoadedFile T.Text -> IO UncheckedImport
-handleFile state_mvar (LoadedFile file_name import_name file_contents mod_time) = do
+handleFile :: ReaderState -> VFS -> LoadedFile T.Text -> IO UncheckedImport
+handleFile state_mvar vfs (LoadedFile file_name import_name file_contents mod_time) = do
   case parseFuthark file_name file_contents of
     Left (SyntaxError loc err) ->
       pure . UncheckedImport . Left . singleError $ ProgError loc $ text err
@@ -173,7 +185,7 @@ handleFile state_mvar (LoadedFile file_name import_name file_contents mod_time) 
       let imports = map (uncurry (mkImportFrom import_name)) $ E.progImports prog
       mvars <-
         mapMaybe sequenceA . zip imports
-          <$> mapM (readImport state_mvar) imports
+          <$> mapM (readImport state_mvar vfs) imports
       let file =
             LoadedFile
               { lfPath = file_name,
@@ -183,26 +195,27 @@ handleFile state_mvar (LoadedFile file_name import_name file_contents mod_time) 
               }
       pure $ UncheckedImport $ Right (file, mvars)
 
-readImport :: ReaderState -> ImportName -> IO (Maybe (MVar UncheckedImport))
-readImport state_mvar include =
+readImport :: ReaderState -> VFS -> ImportName -> IO (Maybe (MVar UncheckedImport))
+readImport state_mvar vfs include =
   modifyMVar state_mvar $ \state ->
     case M.lookup include state of
       Just x -> pure (state, x)
       Nothing -> do
         prog_mvar <- newImportMVar $ do
-          readImportFile include >>= \case
+          readImportFile include vfs >>= \case
             Left e -> pure $ UncheckedImport $ Left $ singleError e
-            Right file -> handleFile state_mvar file
+            Right file -> handleFile state_mvar vfs file
         pure (M.insert include prog_mvar state, prog_mvar)
 
 readUntypedLibraryExceptKnown ::
   [ImportName] ->
+  VFS ->
   [FilePath] ->
   IO (Either (NE.NonEmpty ProgError) [LoadedFile E.UncheckedProg])
-readUntypedLibraryExceptKnown known fps = do
+readUntypedLibraryExceptKnown known vfs fps = do
   state_mvar <- liftIO $ newState known
   let prelude_import = mkInitialImport "/prelude/prelude"
-  prelude_mvar <- liftIO $ readImport state_mvar prelude_import
+  prelude_mvar <- liftIO $ readImport state_mvar vfs prelude_import
   fps_mvars <- liftIO (mapM (onFile state_mvar) fps)
   let unknown_mvars = onlyUnknown ((prelude_import, prelude_mvar) : fps_mvars)
   fmap (map snd) . errorsToTop <$> orderedImports unknown_mvars
@@ -214,10 +227,10 @@ readUntypedLibraryExceptKnown known fps = do
           Just prog_mvar -> pure (state, (include, prog_mvar))
           Nothing -> do
             prog_mvar <- newImportMVar $ do
-              r <- contentsAndModTime fp
+              r <- contentsAndModTime fp vfs
               case r of
                 Just (Right (fs, mod_time)) -> do
-                  handleFile state_mvar $
+                  handleFile state_mvar vfs $
                     LoadedFile
                       { lfImportName = include,
                         lfMod = fs,
@@ -333,22 +346,31 @@ lpImports = map f . lpFiles
 lpWarnings :: LoadedProg -> Warnings
 lpWarnings = foldMap (cfWarnings . lfMod) . lpFiles
 
+-- | The absolute paths of the files that are part of this program.
+lpFilePaths :: LoadedProg -> [FilePath]
+lpFilePaths = map lfPath . lpFiles
+
 unchangedImports ::
   MonadIO m =>
   VNameSource ->
+  VFS ->
   [LoadedFile CheckedFile] ->
   m ([LoadedFile CheckedFile], VNameSource)
-unchangedImports src [] = pure ([], src)
-unchangedImports src (f : fs)
+unchangedImports src _ [] = pure ([], src)
+unchangedImports src vfs (f : fs)
   | isBuiltin (includeToFilePath (lfImportName f)) =
-      first (f :) <$> unchangedImports src fs
+      first (f :) <$> unchangedImports src vfs fs
   | otherwise = do
-      changed <-
-        maybe True (either (const True) (> lfModTime f))
-          <$> liftIO (interactWithFileSafely (getModificationTime $ lfPath f))
-      if changed
+      let file_path = lfPath f
+      if M.member file_path vfs
         then pure ([], cfNameSource $ lfMod f)
-        else first (f :) <$> unchangedImports src fs
+        else do
+          changed <-
+            maybe True (either (const True) (> lfModTime f))
+              <$> liftIO (interactWithFileSafely (getModificationTime file_path))
+          if changed
+            then pure ([], cfNameSource $ lfMod f)
+            else first (f :) <$> unchangedImports src vfs fs
 
 -- | A "loaded program" containing no actual files.  Use this as a
 -- starting point for 'reloadProg'
@@ -363,10 +385,10 @@ noLoadedProg =
 -- | Find out how many of the old imports can be used.  Here we are
 -- forced to be overly conservative, because our type checker
 -- enforces a linear ordering.
-usableLoadedProg :: MonadIO m => LoadedProg -> [FilePath] -> m LoadedProg
-usableLoadedProg (LoadedProg roots imports src) new_roots
+usableLoadedProg :: MonadIO m => LoadedProg -> VFS -> [FilePath] -> m LoadedProg
+usableLoadedProg (LoadedProg roots imports src) vfs new_roots
   | sort roots == sort new_roots = do
-      (imports', src') <- unchangedImports src imports
+      (imports', src') <- unchangedImports src vfs imports
       pure $ LoadedProg [] imports' src'
   | otherwise =
       pure noLoadedProg
@@ -375,10 +397,11 @@ usableLoadedProg (LoadedProg roots imports src) new_roots
 extendProg ::
   LoadedProg ->
   [FilePath] ->
+  VFS ->
   IO (Either (NE.NonEmpty ProgError) LoadedProg)
-extendProg lp new_roots = do
+extendProg lp new_roots vfs = do
   new_imports_untyped <-
-    readUntypedLibraryExceptKnown (map lfImportName $ lpFiles lp) new_roots
+    readUntypedLibraryExceptKnown (map lfImportName $ lpFiles lp) vfs new_roots
   pure $ do
     (imports, src') <-
       typeCheckProg (lpFiles lp) (lpNameSource lp) =<< new_imports_untyped
@@ -391,10 +414,11 @@ extendProg lp new_roots = do
 reloadProg ::
   LoadedProg ->
   [FilePath] ->
+  VFS ->
   IO (Either (NE.NonEmpty ProgError) LoadedProg)
-reloadProg lp new_roots = do
-  lp' <- usableLoadedProg lp new_roots
-  extendProg lp' new_roots
+reloadProg lp new_roots vfs = do
+  lp' <- usableLoadedProg lp vfs new_roots
+  extendProg lp' new_roots vfs
 
 -- | Read and type-check some Futhark files.
 readLibrary ::
@@ -409,7 +433,7 @@ readLibrary extra_eps fps =
       . typeCheckProg mempty (lpNameSource noLoadedProg)
       <=< fmap (setEntryPoints (E.defaultEntryPoint : extra_eps) fps)
   )
-    <$> readUntypedLibraryExceptKnown [] fps
+    <$> readUntypedLibraryExceptKnown [] M.empty fps
   where
     frob (y, z) = (foldMap (cfWarnings . lfMod) y, asImports y, z)
 
@@ -418,6 +442,6 @@ readLibrary extra_eps fps =
 readUntypedLibrary ::
   [FilePath] ->
   IO (Either (NE.NonEmpty ProgError) [(ImportName, E.UncheckedProg)])
-readUntypedLibrary = fmap (fmap (map f)) . readUntypedLibraryExceptKnown []
+readUntypedLibrary = fmap (fmap (map f)) . readUntypedLibraryExceptKnown [] M.empty
   where
     f lf = (lfImportName lf, lfMod lf)
