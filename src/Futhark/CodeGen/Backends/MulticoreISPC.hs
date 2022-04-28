@@ -665,7 +665,7 @@ compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCode body
   GC.stms [C.cstms|
-    $escstm:("foreach(" <> pretty i <> "=0 ... extract(" <> pretty bound <> ",0))")
+    $escstm:("foreach(" <> pretty i <> "=0 ... extract(" <> pretty bound' <> ",0))")
     {
       $items:body'
     }|]
