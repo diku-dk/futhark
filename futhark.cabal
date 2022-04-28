@@ -350,7 +350,7 @@ library
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
-    , language-c-quote
+    , language-c-quote >= 0.12
     , hslogger
     , lens
     , lsp >= 1.4

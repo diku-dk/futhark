@@ -114,7 +114,7 @@ import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
-import qualified Language.C.Quote.ISPC as C
+import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
