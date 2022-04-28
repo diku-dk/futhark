@@ -426,7 +426,7 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
     Just cur_size ->
       GC.stm -- TODO(pema): Handle errors here
         [C.cstm|if ($exp:cur_size < $exp:size) {
-                  lexical_realloc_ispc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
+                  lexical_realloc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
                 }|]
     _ ->
       allocMem name size space [C.cstm|{err = 1;}|]
