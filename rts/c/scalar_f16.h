@@ -198,7 +198,7 @@ static inline f16 fpow16(f16 x, f16 y) {
 
 #if ISPC
 static inline bool futrts_isinf16(float x) {
-  return !futrts_isnan16(x) && futrts_isnan16(x - x); //TODO: Find cleaner solution
+  return !futrts_isnan16(x) && futrts_isnan16(x - x);
 }
 static inline bool futrts_isfinite16(float x) {
   return !futrts_isnan16(x) && !futrts_isinf16(x);
@@ -452,7 +452,7 @@ static inline f16 futrts_erfc16(f16 x) {
 }
 
 static inline f16 fmod16(f16 x, f16 y) {
-  return x - y * (float16)trunc((float) (x/y)); //TODO: Check if correct behavior, else use round()
+  return x - y * (float16)trunc((float) (x/y));
 }
 
 static inline f16 futrts_round16(f16 x) {
