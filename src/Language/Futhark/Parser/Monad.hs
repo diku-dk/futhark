@@ -35,6 +35,7 @@ module Language.Futhark.Parser.Monad
     emptyArrayError,
     parseError,
     parseErrorAt,
+    backOneCol,
 
     -- * Reexports
     L,
@@ -275,6 +276,11 @@ emptyArrayError loc =
 
 twoDotsRange :: Loc -> ParserMonad a
 twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
+
+-- | Move the end position back one column.
+backOneCol :: Loc -> Loc
+backOneCol (Loc start (Pos f l c o)) = Loc start $ Pos f l (c - 1) (o - 1)
+backOneCol NoLoc = NoLoc
 
 --- Now for the parser interface.
 

@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Handling of diagnostics in the language server - things like
+-- warnings and errors.
 module Futhark.LSP.Diagnostic
   ( publishWarningDiagnostics,
     publishErrorDiagnostics,
@@ -14,19 +16,18 @@ import qualified Data.List.NonEmpty as NE
 import Data.Map (assocs, empty, insertWith)
 import qualified Data.Text as T
 import Futhark.Compiler.Program (ProgError (ProgError))
+import Futhark.LSP.Tool (posToUri, rangeFromLoc, rangeFromSrcLoc)
 import Futhark.Util (debug)
-import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf)
-import Futhark.Util.Pretty (Doc, pretty)
+import Futhark.Util.Loc (Loc (..), SrcLoc, locOf)
+import Futhark.Util.Pretty (Doc, prettyText)
 import Language.LSP.Diagnostics (partitionBySource)
 import Language.LSP.Server (LspT, getVersionedTextDoc, publishDiagnostics)
 import Language.LSP.Types
   ( Diagnostic (Diagnostic),
     DiagnosticSeverity (DsError, DsWarning),
-    Position (Position),
-    Range (Range),
+    Range,
     TextDocumentIdentifier (TextDocumentIdentifier),
     Uri,
-    filePathToUri,
     toNormalizedUri,
   )
 import Language.LSP.Types.Lens (HasVersion (version))
@@ -41,51 +42,41 @@ publish uri_diags_map = for_ uri_diags_map $ \(uri, diags) -> do
   debug $ "Publishing diagnostics for " ++ show uri ++ " Verion: " ++ show (doc ^. version)
   publishDiagnostics maxDiagnostic (toNormalizedUri uri) (doc ^. version) (partitionBySource diags)
 
+-- | Send warning diagnostics to the client.
 publishWarningDiagnostics :: [(SrcLoc, Doc)] -> LspT () IO ()
 publishWarningDiagnostics warnings = do
   let diags_map =
         foldr
-          ( \(srcloc, msg) acc -> do
-              let (Loc (Pos file _ _ _) _) = locOf srcloc
-                  uri = filePathToUri file
-                  diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (T.pack $ pretty msg)
-              insertWith (++) uri [diag] acc
+          ( \(srcloc, msg) acc ->
+              let diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (prettyText msg)
+               in case locOf srcloc of
+                    NoLoc -> acc
+                    Loc pos _ -> insertWith (++) (posToUri pos) [diag] acc
           )
           empty
           warnings
   publish $ assocs diags_map
 
+-- | Send error diagnostics to the client.
 publishErrorDiagnostics :: NE.NonEmpty ProgError -> LspT () IO ()
 publishErrorDiagnostics errors = do
   let diags_map =
         foldr
-          ( \(ProgError loc msg) acc -> do
-              let (Loc (Pos file _ _ _) _) = loc
-                  uri = filePathToUri file
-                  diag = mkDiagnostic (rangeFromLoc loc) DsError (T.pack $ pretty msg)
-              insertWith (++) uri [diag] acc
+          ( \(ProgError loc msg) acc ->
+              let diag = mkDiagnostic (rangeFromLoc loc) DsError (prettyText msg)
+               in case loc of
+                    NoLoc -> acc
+                    Loc pos _ -> insertWith (++) (posToUri pos) [diag] acc
           )
           empty
           errors
   publish $ assocs diags_map
 
--- the ending appears to be one col too short
-rangeFromSrcLoc :: SrcLoc -> Range
-rangeFromSrcLoc srcloc = do
-  let Loc start end = locOf srcloc
-  Range (getPosition start) (getPosition end)
-
-rangeFromLoc :: Loc -> Range
-rangeFromLoc (Loc start end) = Range (getPosition start) (getPosition end)
-rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
-
-getPosition :: Pos -> Position
-getPosition pos = do
-  let Pos _ line col _ = pos
-  Position (toEnum line - 1) (toEnum col - 1)
-
+-- | The maximum number of diagnostics to report.
 maxDiagnostic :: Int
 maxDiagnostic = 100
 
+-- | The source of the diagnostics.  (That is, the Futhark compiler,
+-- but apparently the client must be told such things...)
 diagnosticSource :: Maybe T.Text
 diagnosticSource = Just "futhark"

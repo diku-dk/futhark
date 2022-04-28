@@ -129,9 +129,17 @@ lookupImport name = maybe bad pure =<< asks (M.lookup name . envImports)
 lookupMod' :: QualName VName -> Scope -> Either String Mod
 lookupMod' mname scope =
   let (mname', scope') = lookupSubstInScope mname scope
-   in maybe (Left $ bad mname') Right $ M.lookup (qualLeaf mname') $ scopeMods scope'
+   in maybe (Left $ bad mname') (Right . extend) $ M.lookup (qualLeaf mname') $ scopeMods scope'
   where
     bad mname' = "Unknown module: " ++ pretty mname ++ " (" ++ pretty mname' ++ ")"
+    extend (ModMod (Scope inner_scope inner_mods)) =
+      -- XXX: perhaps hacky fix for #1653.  We need to impose the
+      -- substitutions of abstract types from outside, because the
+      -- inner module may have some incorrect substitutions in some
+      -- cases.  Our treatment of abstract types is completely whack
+      -- and should be fixed.
+      ModMod $ Scope (scopeSubsts scope <> inner_scope) inner_mods
+    extend m = m
 
 lookupMod :: QualName VName -> TransformM Mod
 lookupMod mname = either error pure . lookupMod' mname =<< askScope

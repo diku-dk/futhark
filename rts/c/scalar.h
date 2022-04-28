@@ -1908,6 +1908,10 @@ static inline float futrts_sqrt32(float x) {
   return sqrt(x);
 }
 
+static inline float futrts_cbrt32(float x) {
+  return cbrt(x);
+}
+
 static inline float futrts_exp32(float x) {
   return exp(x);
 }
@@ -1974,6 +1978,14 @@ static inline float futrts_gamma32(float x) {
 
 static inline float futrts_lgamma32(float x) {
   return lgamma(x);
+}
+
+static inline float futrts_erf32(float x) {
+  return erf(x);
+}
+
+static inline float futrts_erfc32(float x) {
+  return erfc(x);
 }
 
 static inline float fmod32(float x, float y) {
@@ -2183,6 +2195,10 @@ static inline float futrts_sqrt32(float x) {
   return sqrtf(x);
 }
 
+static inline float futrts_cbrt32(float x) {
+  return cbrtf(x);
+}
+
 static inline float futrts_exp32(float x) {
   return expf(x);
 }
@@ -2255,6 +2271,14 @@ float futrts_ispc_lgamma32(float x) {
 }
 static inline float futrts_lgamma32(float x) {
   return lgammaf(x);
+}
+
+static inline float futrts_erf32(float x) {
+  return erff(x);
+}
+
+static inline float futrts_erfc32(float x) {
+  return erfcf(x);
 }
 
 static inline float fmod32(float x, float y) {
@@ -2746,6 +2770,10 @@ static inline double futrts_sqrt64(double x) {
   return sqrt(x);
 }
 
+static inline double futrts_cbrt64(double x) {
+  return cbrt(x);
+}
+
 static inline double futrts_exp64(double x) {
   return exp(x);
 }
@@ -2821,6 +2849,14 @@ double futrts_ispc_lgamma64(double x) {
 }
 static inline double futrts_lgamma64(double x) {
   return lgamma(x);
+}
+
+static inline double futrts_erf64(double x) {
+  return erf(x);
+}
+
+static inline double futrts_erfc64(double x) {
+  return erfc(x);
 }
 
 static inline double futrts_fma64(double a, double b, double c) {

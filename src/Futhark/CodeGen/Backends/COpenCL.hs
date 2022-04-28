@@ -205,8 +205,8 @@ readOpenCLScalar mem i t "device" _ = do
                                        0, NULL, $exp:(profilingEvent copyScalarFromDev)));
               |]
   GC.stm
-    [C.cstm|if (ctx->failure_is_an_option &&
-                     futhark_context_sync(ctx) != 0) { return 1; }|]
+    [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
+            { return 1; }|]
   pure [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space _ =
   error $ "Cannot read from '" ++ space ++ "' memory space."
