@@ -150,7 +150,7 @@ getToken = do
 
 scanTokens :: Pos -> BS.ByteString -> Either LexerError ([L Token], Pos)
 scanTokens pos str =
-  runAlex' pos str $ do
+  runAlex pos str $ do
   fix $ \loop -> do
     tok <- getToken
     case tok of

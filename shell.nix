@@ -41,6 +41,8 @@ pkgs.stdenv.mkDerivation {
   ]
   ++ pkgs.lib.optionals (pkgs.stdenv.isLinux)
     [ pkgs.opencl-headers
-      pkgs.ocl-icd ]
+      pkgs.ocl-icd
+      pkgs.oclgrind
+    ]
   ;
 }

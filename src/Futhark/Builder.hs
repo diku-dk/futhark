@@ -25,6 +25,7 @@ module Futhark.Builder
     runBuilder,
     runBuilder_,
     runBodyBuilder,
+    runLambdaBuilder,
 
     -- * The 'MonadBuilder' typeclass
     module Futhark.Builder.Class,
@@ -204,6 +205,24 @@ runBodyBuilder ::
   Builder rep (Body rep) ->
   m (Body rep)
 runBodyBuilder = fmap (uncurry $ flip insertStms) . runBuilder
+
+-- | Given lambda parameters, Run a builder action that produces the
+-- statements and returns the 'Result' of the lambda body.
+runLambdaBuilder ::
+  ( Buildable rep,
+    MonadFreshNames m,
+    HasScope somerep m,
+    SameScope somerep rep
+  ) =>
+  [LParam rep] ->
+  Builder rep Result ->
+  m (Lambda rep)
+runLambdaBuilder params m = do
+  ((res, ret), stms) <- runBuilder . localScope (scopeOfLParams params) $ do
+    res <- m
+    ret <- mapM subExpResType res
+    pure (res, ret)
+  pure $ Lambda params (mkBody stms res) ret
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.

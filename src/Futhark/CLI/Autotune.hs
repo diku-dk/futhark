@@ -29,7 +29,7 @@ import Text.Regex.TDFA
 data AutotuneOptions = AutotuneOptions
   { optBackend :: String,
     optFuthark :: Maybe String,
-    optRuns :: Int,
+    optMinRuns :: Int,
     optTuning :: Maybe String,
     optExtraOptions :: [String],
     optVerbose :: Int,
@@ -41,7 +41,18 @@ data AutotuneOptions = AutotuneOptions
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 False thresholdMax Nothing
+  AutotuneOptions
+    { optBackend = "opencl",
+      optFuthark = Nothing,
+      optMinRuns = 10,
+      optTuning = Just "tuning",
+      optExtraOptions = [],
+      optVerbose = 0,
+      optTimeout = 600,
+      optSkipCompilation = False,
+      optDefaultThreshold = thresholdMax,
+      optTestSpec = Nothing
+    }
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -56,10 +67,13 @@ compileOptions opts = do
 runOptions :: Int -> AutotuneOptions -> RunOptions
 runOptions timeout_s opts =
   RunOptions
-    { runRuns = optRuns opts,
+    { runMinRuns = optMinRuns opts,
+      runMinTime = 0.5,
       runTimeout = timeout_s,
       runVerbose = optVerbose opts,
-      runResultAction = Nothing
+      runConvergencePhase = True,
+      runConvergenceMaxTime = fromIntegral timeout_s,
+      runResultAction = const $ pure ()
     }
 
 type Path = [(String, Int)]
@@ -456,7 +470,7 @@ commandLineOptions =
                 [(n', "")] | n' >= 0 ->
                   Right $ \config ->
                     config
-                      { optRuns = n'
+                      { optMinRuns = n'
                       }
                 _ ->
                   Left $ error $ "'" ++ n ++ "' is not a non-negative integer."

@@ -315,14 +315,17 @@ compileSetRetvalStructValues ::
   [VName] ->
   [(C.Type, ValueType)] ->
   [C.Stm]
-compileSetRetvalStructValues struct = zipWith field
+compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
   where
     field name (ct, Prim _) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=($ty:ct*)&$id:name;|]
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=(($ty:ct*)&$id:name);
+               $escstm:("#if ISPC")
+               $id:struct.$id:(closureRetvalStructField name)+= programIndex;
+               $escstm:("#endif")|]
     field name (_, MemBlock) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
     field name (_, RawMem) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
 compileGetRetvalStructVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field

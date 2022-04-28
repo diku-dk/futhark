@@ -908,7 +908,7 @@ static inline uniform bool futrts_isnan32(uniform float x) {
 }
 
 static inline uniform bool futrts_isinf32(uniform float x) {
-  return !isnan(x) && isnan(x - x); //TODO: Find cleaner solution
+  return !isnan(x) && isnan(x - x);
 }
 static inline uniform bool futrts_isfinite32(uniform float x) {
   return !isnan(x) && !futrts_isinf32(x);
@@ -994,6 +994,11 @@ static inline uniform float futrts_log10_32(uniform float x) {
 
 static inline uniform float futrts_sqrt32(uniform float x) {
   return sqrt(x);
+}
+
+extern "C" unmasked uniform float cbrtf(uniform float);
+static inline uniform float futrts_cbrt32(uniform float x) {
+  return cbrtf(x);
 }
 
 static inline uniform float futrts_exp32(uniform float x) {
@@ -1101,8 +1106,18 @@ static inline uniform float futrts_lgamma32(uniform float x) {
   return futrts_ispc_lgamma32(x);
 }
 
+extern "C" unmasked uniform float erff(uniform float);
+static inline uniform float futrts_erf32(uniform float x) {
+  return erff(x);
+}
+
+extern "C" unmasked uniform float erfcf(uniform float);
+static inline uniform float futrts_erfc32(uniform float x) {
+  return erfcf(x);
+}
+
 static inline uniform float fmod32(uniform float x, uniform float y) {
-  return x - y * trunc(x/y); //TODO: Check if correct behavior, else use round()
+  return x - y * trunc(x/y);
 }
 
 static inline uniform float futrts_round32(uniform float x) {
@@ -1144,7 +1159,7 @@ static inline uniform float fsignum32(uniform float x) {
 #ifdef FUTHARK_F64_ENABLED
 
 static inline uniform bool futrts_isinf64(uniform float x) {
-  return !isnan(x) && isnan(x - x); //TODO: Find cleaner solution
+  return !isnan(x) && isnan(x - x);
 }
 static inline uniform bool futrts_isfinite64(uniform float x) {
   return !isnan(x) && !futrts_isinf64(x);
@@ -1238,6 +1253,11 @@ static inline uniform double futrts_sqrt64(uniform double x) {
   return sqrt(x);
 }
 
+extern "C" unmasked uniform double cbrt(uniform double);
+static inline uniform double futrts_cbrt64(uniform double x) {
+  return cbrt(x);
+}
+
 static inline uniform double futrts_exp64(uniform double x) {
   return exp(x);
 }
@@ -1311,6 +1331,16 @@ static inline uniform double futrts_gamma64(uniform double x) {
 
 static inline uniform double futrts_lgamma64(uniform double x) {
   return futrts_ispc_lgamma64(x);
+}
+
+extern "C" unmasked uniform double erf(uniform double);
+static inline uniform double futrts_erf64(uniform double x) {
+  return erf(x);
+}
+
+extern "C" unmasked uniform double erfc(uniform double);
+static inline uniform double futrts_erfc64(uniform double x) {
+  return erfc(x);
 }
 
 static inline uniform double futrts_fma64(uniform double a, uniform double b, uniform double c) {
@@ -1422,7 +1452,7 @@ static inline uniform double futrts_from_bits64(uniform int64_t x) {
 }
 
 static inline uniform double fmod64(uniform double x, uniform double y) {
-  return x - y * trunc(x/y); //TODO: Check if correct behavior, else use round()
+  return x - y * trunc(x/y);
 }
 
 static inline uniform double fsignum64(uniform double x) {
@@ -1576,7 +1606,7 @@ static inline uniform f16 fpow16(uniform f16 x, uniform f16 y) {
 }
 
 static inline uniform bool futrts_isinf16(uniform float x) {
-  return !futrts_isnan16(x) && futrts_isnan16(x - x); //TODO: Find cleaner solution
+  return !futrts_isnan16(x) && futrts_isnan16(x - x);
 }
 static inline uniform bool futrts_isfinite16(uniform float x) {
   return !futrts_isnan16(x) && !futrts_isinf16(x);
@@ -1597,6 +1627,11 @@ static inline uniform f16 futrts_log10_16(uniform f16 x) {
 
 static inline uniform f16 futrts_sqrt16(uniform f16 x) {
   return (uniform f16)sqrt((uniform float)x);
+}
+
+extern "C" unmasked uniform float cbrtf(uniform float);
+static inline uniform f16 futrts_cbrt16(uniform f16 x) {
+  return (uniform f16)cbrtf((uniform float)x);
 }
 
 static inline uniform f16 futrts_exp16(uniform f16 x) {
@@ -1673,8 +1708,18 @@ static inline uniform f16 futrts_lgamma16(uniform f16 x) {
   return (uniform f16)futrts_ispc_lgamma32((uniform float)x);
 }
 
+extern "C" unmasked uniform float erff(uniform float);
+static inline uniform f16 futrts_erf32(uniform f16 x) {
+  return (uniform f16)erff((uniform float)x);
+}
+
+extern "C" unmasked uniform float erfcf(uniform float);
+static inline uniform f16 futrts_erfc32(uniform f16 x) {
+  return (uniform f16)erfcf((uniform float)x);
+}
+
 static inline uniform f16 fmod16(uniform f16 x, uniform f16 y) {
-  return x - y * (uniform f16)trunc((uniform float) (x/y)); //TODO: Check if correct behavior, else use round()
+  return x - y * (uniform f16)trunc((uniform float) (x/y));
 }
 
 static inline uniform f16 futrts_round16(uniform f16 x) {
@@ -1702,7 +1747,7 @@ static inline uniform f16 futrts_fma16(uniform f16 a, uniform f16 b, uniform f16
 }
 
 static inline uniform int16_t futrts_to_bits16(uniform f16 x) {
-  return *((uniform int16_t *)&x); //TODO: Varying didn't work with this, check if this is fine at some point
+  return *((uniform int16_t *)&x);
 }
 
 static inline uniform f16 futrts_from_bits16(uniform int16_t x) {
