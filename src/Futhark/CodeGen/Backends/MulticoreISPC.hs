@@ -180,7 +180,7 @@ setMem dest src space = GC.setMem' dest src space stmt
       pure
         [C.cstm|if ($id:(GC.fatMemSet space')(ctx, &$exp:dest', &$exp:src',
           $id:strlit()) != 0) {
-          err = 1;
+          return 1;
         }|]
 
 -- | Unref memory in ISPC
@@ -191,7 +191,7 @@ unRefMem mem space = GC.unRefMem' mem space cstm
       strlit <- makeStringLiteral m_s
       pure
         [C.cstm|if ($id:(GC.fatMemUnRef s)(ctx, &$exp:m, $id:strlit()) != 0) {
-          err = 1;
+          return 1;
         }|]
 
 -- | Free memory in ISPC
@@ -362,11 +362,12 @@ handleError msg stacktrace = do
   let args' = map (\x -> [C.cexp|extract($exp:x, $id:uni)|]) args
   GC.items
     [C.citems|
-      $escstm:("foreach_active("<> pretty uni <> ")")
+      $escstm:("foreach_active(" <> pretty uni <> ")")
       {
         $id:shim(ctx, $args:args');
         err = FUTHARK_PROGRAM_ERROR;
-      }|]
+      }
+      return err;|]
   where
     getErrorVal (ErrorString _) = Nothing
     getErrorVal (ErrorVal _ v) = Just v
@@ -439,7 +440,7 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
                   lexical_realloc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
                 }|]
     _ ->
-      allocMem name size space [C.cstm|{err = 1;}|]
+      allocMem name size space [C.cstm|{return 1;}|]
 compileCode (SetMem dest src space) =
   setMem dest src space
 compileCode code@(Write dest (Count idx) elemtype DefaultSpace _ elemexp)
@@ -509,7 +510,7 @@ compileCode (Call dests fname args) =
           | isBuiltInFunction fname' ->
               GC.stm [C.cstm|$id:d = $id:(funName fname')($args:args'');|]
         _ ->
-          GC.item [C.citem|if ($id:(funName fname')($args:args'') != 0) { err = 1; }|]
+          GC.item [C.citem|if ($id:(funName fname')($args:args'') != 0) { return 1; }|]
 compileCode (Assert e msg (loc, locs)) = do
   e' <- GC.compileExp e
   err <- GC.collect $ handleError msg stacktrace
@@ -665,6 +666,9 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
         err = $id:schedn(ctx, &$id:aos_name[i], extract($exp:e', i));
       }
     }
+    if (err != 0) {
+      return err;
+    }
     $escstm:("#else")
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
     if (err != 0) {
@@ -685,7 +689,6 @@ compileOp (ISPCKernel body free) = do
       GC.collect $ do
         GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
         GC.items =<< compileGetStructVals fstruct free_args free_ctypes
-        GC.decl [C.cdecl|$tyqual:uniform int err = 0;|]
         body' <- GC.collect $ compileCode body
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
@@ -712,7 +715,7 @@ compileOp (ISPCKernel body free) = do
               $items:innerBody
             }|]
         -- Call the kernel and read back potentially changed memory
-        GC.stm [C.cstm|err = $id:innerShim(start, end, $id:fstruct', &$id:mstruct');|]
+        GC.decl [C.cdecl|$tyqual:uniform int err = $id:innerShim(start, end, $id:fstruct', &$id:mstruct');|]
         compileReadbackMemStructVals mstruct' lexmems fatmems
 
         free_mem <- freeAllocatedMem
@@ -736,28 +739,21 @@ compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCode body
   GC.stms [C.cstms|
-    for ($tyqual:uniform typename int64_t i = 0; i < ($exp:bound' / programCount); i++)
-    {
+    for ($tyqual:uniform typename int64_t i = 0; i < ($exp:bound' / programCount); i++) {
       typename int64_t $id:i = programIndex + i * programCount;
       $items:body'
     }
-    if (programIndex < ($exp:bound' % programCount))
-    {
+    if (programIndex < ($exp:bound' % programCount)) {
       typename int64_t $id:i = programIndex + (($exp:bound' / programCount) * programCount);
       $items:body'
     }|]
-  {-
-    $escstm:("foreach(" <> pretty i <> "=0 ... extract(" <> pretty bound' <> ",0))")
-    {
-      $items:body'
-    }
-  -}
 compileOp (ForEachActive name body) = do
   body' <- GC.collect $ compileCode body
   GC.stms [C.cstms|
-    $escstm:("foreach_active(" <> pretty name <> ")")
-    {
-      $items:body'
+    for ($tyqual:uniform unsigned int $id:name = 0; $id:name < programCount; $id:name++) {
+      if (programIndex == $id:name) {
+        $items:body'
+      }
     }|]
 compileOp (ExtractLane dest tar lane) = do
   tar' <- GC.compileExp tar
