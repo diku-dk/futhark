@@ -610,6 +610,7 @@ mayProduceError (Allocate _ _ _) = True
 mayProduceError (Assert _ _ _) = True
 mayProduceError (SetMem _ _ _) = True
 mayProduceError (Free _ _) = True
+mayProduceError (Call _ _ _) = True
 mayProduceError _ = False
 
 -- Generate a segop function for top_level and potentially nested SegOp code
