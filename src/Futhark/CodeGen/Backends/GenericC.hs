@@ -79,14 +79,10 @@ module Futhark.CodeGen.Backends.GenericC
     primTypeToCType,
     intTypeToCType,
     copyMemoryDefaultSpace,
-    volQuals,
     linearCode,
     derefPointer,
-    allocMem,
     allocMem',
-    setMem,
     setMem',
-    unRefMem,
     unRefMem',
     fatMemAlloc,
     fatMemSet,
@@ -114,7 +110,7 @@ import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
-import qualified Language.C.Quote.ISPC as C
+import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
@@ -1724,12 +1720,12 @@ $entry_point_decls
       types <- commonLibFuns memreport
 
       pure
-        ( T.unlines $ map prettyText prototypes,          
+        ( T.unlines $ map prettyText prototypes,
           T.unlines $ map (prettyText . funcToDef) functions,
           T.unlines $ map prettyText entry_points,
           Manifest.Manifest (M.fromList entry_points_manifest) types backend version
         )
-    
+
     funcToDef func = C.FuncDef func loc
       where
         loc = case func of

@@ -1,4 +1,3 @@
-
 // Start of scalar.h.
 
 // Implementation of the primitive scalar operations.  Very

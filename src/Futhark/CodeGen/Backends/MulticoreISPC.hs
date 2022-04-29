@@ -20,12 +20,12 @@ import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.ISPC as C
+import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
-import Futhark.CodeGen.Backends.SimpleRep (fromStorage, toStorage, primStorageType, cScalarDefs, funName)
+import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.IR.Prop (isBuiltInFunction)
 import Data.Maybe
 import Data.Loc (noLoc)
@@ -44,13 +44,18 @@ data ISPCState = ISPCState
   , sUniform :: Names
   }
 
-instance Semigroup ISPCState where
-  ISPCState d1 u1 <> ISPCState d2 u2 = ISPCState (d1 <> d2) (u1 <> u2)
+uniform :: C.TypeQual
+uniform = C.EscTypeQual "uniform" noLoc
 
-instance Monoid ISPCState where
-  mempty = ISPCState mempty mempty
-  mappend = (<>)
+unmasked :: C.TypeQual
+unmasked = C.EscTypeQual "unmasked" noLoc
 
+export :: C.TypeQual
+export = C.EscTypeQual "export" noLoc
+
+varying :: C.TypeQual
+varying = C.EscTypeQual "varying" noLoc
+  
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
   MonadFreshNames m => T.Text -> T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
@@ -64,7 +69,7 @@ compileProg header version prog = do
         "ispc_multicore"
         version
         operations
-        mempty
+        (ISPCState mempty mempty)
         (MC.generateContext >> mapM_ compileBuiltinFun funs)
         header
         [DefaultSpace]
@@ -113,6 +118,7 @@ $ispc_decls|]
 
   pure (ws', (cparts, ispcdefs))
 
+-- | Compiler operations specific to the ISPC multicore backend.
 operations :: GC.Operations Multicore ISPCState
 operations =
   MC.operations
@@ -133,26 +139,27 @@ ispcDef s f = do
   ispcDecl =<< f s'
   pure s'
 
--- Expose struct to both ISPC and C
+-- | Expose a struct to both ISPC and C.
 sharedDef :: MC.DefSpecifier ISPCState
 sharedDef s f = do
   s' <- MC.multicoreName s
   ispcDecl =<< f s'
   -- Workaround for https://github.com/ispc/ispc/issues/2277
   dummy <- newVName "dummy_struct_usage"
-  ispcDecl [C.cedecl|export void $id:dummy(uniform struct $id:s' * uniform a) { (void)a; }|]
+  ispcDecl [C.cedecl|$tyqual:export void $id:dummy($tyqual:uniform struct $id:s' * $tyqual:uniform a) { (void)a; }|]
   pure s'
 
--- ISPC has no string literals, so this makes one in C and exposes it via an external function
+-- | ISPC has no string literals, so this makes one in C and exposes it via an
+-- external function, returning the name.
 makeStringLiteral :: String -> ISPCCompilerM Name
 makeStringLiteral str = do
   name <- MC.multicoreDef "strlit_shim" $ \s ->
     pure [C.cedecl|char* $id:s() { return $string:str; }|]
   ispcDecl
-    [C.cedecl|extern "C" unmasked uniform char* uniform $id:name();|]
+    [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform char* $tyqual:uniform $id:name();|]
   pure name
 
--- Allocate memory in ISPC
+-- | Allocate memory in ISPC
 allocMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> ISPCCompilerM ()
 allocMem mem size space on_failure = GC.allocMem' mem size space on_failure stmt
   where
@@ -164,7 +171,7 @@ allocMem mem size space on_failure = GC.allocMem' mem size space on_failure stmt
                   $stm:on_failure'
         }|]
 
--- Set memory in ISPC
+-- | Set memory in ISPC
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
 setMem dest src space = GC.setMem' dest src space stmt
   where
@@ -176,7 +183,7 @@ setMem dest src space = GC.setMem' dest src space stmt
           err = 1;
         }|]
 
--- Unref memory in ISPC
+-- | Unref memory in ISPC
 unRefMem :: C.ToExp a => a -> Space -> ISPCCompilerM ()
 unRefMem mem space = GC.unRefMem' mem space cstm
   where
@@ -187,25 +194,25 @@ unRefMem mem space = GC.unRefMem' mem space cstm
           err = 1;
         }|]
 
--- Free memory in ISPC
+-- | Free memory in ISPC
 freeAllocatedMem :: ISPCCompilerM [C.BlockItem]
 freeAllocatedMem = GC.freeAllocatedMem' unRefMem
 
--- Given a ImpCode function, generate all the required machinery for calling
+-- | Given a ImpCode function, generate all the required machinery for calling
 -- it in ISPC, both in a varying or uniform context. This involves handling
 -- for the fact that ISPC cannot pass structs by value to external functions.
 compileBuiltinFun :: (Name, Function op) -> ISPCCompilerM ()
 compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
   | isNothing $ functionEntry func = do
-    let extra = [[C.cparam|uniform struct futhark_context * uniform ctx|]]
+    let extra = [[C.cparam|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx|]]
         extra_c = [[C.cparam|struct futhark_context * ctx|]]
         extra_exp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
 
     (inparams_c, in_args_c) <- unzip <$> mapM (compileInputsExtern []) inputs
     (outparams_c, out_args_c) <- unzip <$> mapM (compileOutputsExtern []) outputs
 
-    (inparams_extern, _) <- unzip <$> mapM (compileInputsExtern [C.ctyquals|uniform|]) inputs
-    (outparams_extern, _) <- unzip <$> mapM (compileOutputsExtern [C.ctyquals|uniform|]) outputs
+    (inparams_extern, _) <- unzip <$> mapM (compileInputsExtern [C.ctyquals|$tyqual:uniform|]) inputs
+    (outparams_extern, _) <- unzip <$> mapM (compileOutputsExtern [C.ctyquals|$tyqual:uniform|]) outputs
 
     (inparams_uni, in_args_noderef) <- unzip <$> mapM compileInputsUniform inputs
     (outparams_uni, out_args_noderef) <- unzip <$> mapM compileOutputsUniform outputs
@@ -220,11 +227,11 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
                 }|]
 
     let ispc_extern =
-          [C.cedecl|extern "C" uniform int $id:((funName fname) ++ "_extern")
+          [C.cedecl|extern "C" $tyqual:uniform int $id:((funName fname) ++ "_extern")
                       ($params:extra, $params:outparams_extern, $params:inparams_extern);|]
 
         ispc_uniform =
-          [C.cedecl|uniform int $id:(funName fname)
+          [C.cedecl|$tyqual:uniform int $id:(funName fname)
                     ($params:extra, $params:outparams_uni, $params:inparams_uni) { 
                       return $id:(funName $ fname<>"_extern")(
                         $args:extra_exp,
@@ -233,12 +240,13 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
                     }|]
 
         ispc_varying =
-          [C.cedecl|uniform int $id:(funName fname)
+          [C.cedecl|$tyqual:uniform int $id:(funName fname)
                     ($params:extra, $params:outparams_varying, $params:inparams_varying) { 
-                        uniform int err = 0;
+                        $tyqual:uniform int err = 0;
                         $items:prebody_in
                         $items:prebody_out
-                        foreach_active (i) {
+                        $escstm:("foreach_active (i)")
+                        {
                           err |= $id:(funName $ fname<>"_extern")(
                             $args:extra_exp,
                             $args:out_args_vary,
@@ -269,25 +277,25 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
 
     compileInputsUniform (ScalarParam name bt) = do
       let ctp    = GC.primTypeToCType bt
-          params = [C.cparam|uniform $ty:ctp $id:name|]
+          params = [C.cparam|$tyqual:uniform $ty:ctp $id:name|]
           args   = [C.cexp|$id:name|]
       pure (params, args)
     compileInputsUniform (MemParam name space) = do
       ty <- GC.memToCType name space
-      let params = [C.cparam|uniform $ty:ty $id:name|]
+      let params = [C.cparam|$tyqual:uniform $ty:ty $id:name|]
           args   = [C.cexp|&$id:name|]
       pure (params, args)
 
     compileOutputsUniform (ScalarParam name bt) = do
       p_name <- newVName $ "out_" ++ baseString name
       let ctp    = GC.primTypeToCType bt
-          params = [C.cparam|uniform $ty:ctp *uniform $id:p_name|]
+          params = [C.cparam|$tyqual:uniform $ty:ctp *$tyqual:uniform $id:p_name|]
           args   = [C.cexp|$id:p_name|]
       pure (params, args)
     compileOutputsUniform (MemParam name space) = do
       ty <- GC.memToCType name space
       p_name <- newVName $ baseString name ++ "_p"
-      let params = [C.cparam|uniform $ty:ty $id:p_name|]
+      let params = [C.cparam|$tyqual:uniform $ty:ty $id:p_name|]
           args   = [C.cexp|&$id:p_name|]
       pure (params, args)
 
@@ -302,7 +310,7 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
       newvn <- newVName $ "aos_" <> baseString name
       let params   = [C.cparam|$ty:typ $id:name|]
           args     = [C.cexp|&$id:(newvn)[i]|]
-          pre_body = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
+          pre_body = [C.citems|$tyqual:uniform $ty:typ $id:(newvn)[programCount];
                                $id:(newvn)[programIndex] = $id:name;|]
       pure (params, args, pre_body)
 
@@ -311,11 +319,11 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
       deref_name <- newVName $ "aos_" ++ baseString name
       vari_p_name <- newVName $ "convert_" ++ baseString name
       let ctp       = GC.primTypeToCType bt
-          pre_body  = [C.citems|varying $ty:ctp $id:vari_p_name = *$id:p_name;
-                                uniform $ty:ctp $id:deref_name[programCount];
+          pre_body  = [C.citems|$tyqual:varying $ty:ctp $id:vari_p_name = *$id:p_name;
+                                $tyqual:uniform $ty:ctp $id:deref_name[programCount];
                                 $id:deref_name[programIndex] = $id:vari_p_name;|]
           post_body = [C.citems|*$id:p_name = $id:(deref_name)[programIndex];|]
-          params    = [C.cparam|varying $ty:ctp * uniform $id:p_name|]
+          params    = [C.cparam|$tyqual:varying $ty:ctp * $tyqual:uniform $id:p_name|]
           args      = [C.cexp|&$id:(deref_name)[i]|]
       pure (params, args, pre_body, post_body)
     compileOutputsVarying (MemParam name space) = do
@@ -323,11 +331,11 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
       newvn <- newVName $ "aos_" <> baseString name
       let params   = [C.cparam|$ty:typ $id:name|]
           args     = [C.cexp|&$id:(newvn)[i]|]
-          pre_body = [C.citems|uniform $ty:typ $id:(newvn)[programCount];
+          pre_body = [C.citems|$tyqual:uniform $ty:typ $id:(newvn)[programCount];
                        $id:(newvn)[programIndex] = $id:name;|]
       pure (params,args,pre_body, [])
 
--- Handle logging an error message in ISPC
+-- | Handle logging an error message in ISPC.
 handleError :: ErrorMsg Exp -> String -> ISPCCompilerM ()
 handleError msg stacktrace = do
   -- Get format sting
@@ -337,7 +345,7 @@ handleError msg stacktrace = do
   let arg_types = errorMsgArgTypes msg
   arg_names <- mapM (newVName . const "arg") arg_types
   let params = zipWith (\ty name -> [C.cparam|$ty:(GC.primTypeToCType ty) $id:name|]) arg_types arg_names
-  let params_uni = zipWith (\ty name -> [C.cparam|uniform $ty:(GC.primTypeToCType ty) $id:name|]) arg_types arg_names
+  let params_uni = zipWith (\ty name -> [C.cparam|$tyqual:uniform $ty:(GC.primTypeToCType ty) $id:name|]) arg_types arg_names
   -- Make shim
   let formatargs' = mapArgNames msg formatargs arg_names
   shim <- MC.multicoreDef "assert_shim" $ \s -> do
@@ -347,14 +355,15 @@ handleError msg stacktrace = do
           ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
       }|]
   ispcDecl
-    [C.cedecl|extern "C" unmasked void $id:shim(uniform struct futhark_context* uniform, $params:params_uni);|]
+    [C.cedecl|extern "C" $tyqual:unmasked void $id:shim($tyqual:uniform struct futhark_context* $tyqual:uniform, $params:params_uni);|]
   -- Call the shim
   args <- getErrorValExps msg
   uni <- newVName "uni"
   let args' = map (\x -> [C.cexp|extract($exp:x, $id:uni)|]) args
   GC.items
     [C.citems|
-      foreach_active($id:uni) {
+      $escstm:("foreach_active("<> pretty uni <> ")")
+      {
         $id:shim(ctx, $args:args');
         err = FUTHARK_PROGRAM_ERROR;
       }|]
@@ -372,9 +381,10 @@ handleError msg stacktrace = do
 
     mapArgNames (ErrorMsg parts) = mapArgNames' parts
 
--- TODO(pema): Deduplicate some of the C code in the generic C generator
--- Compile a block of code with ISPC specific semantics, falling back
+-- | Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
+-- All recursive constructors are duplicated here, since not doing so
+-- would cause use to enter regular generic C codegen with no escape.
 compileCode :: MCCode -> ISPCCompilerM ()
 compileCode (Comment s code) = do
   xs <- GC.collect $ compileCode code
@@ -404,10 +414,10 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
   -- Make an exported C shim to access it
   shim <- MC.multicoreDef "get_static_array_shim" $ \f ->
     pure [C.cedecl|struct memblock* $id:f(struct futhark_context* ctx) { return &ctx->$id:name; }|]
-  ispcDecl [C.cedecl|extern "C" unmasked uniform struct memblock * uniform
-                        $id:shim(uniform struct futhark_context* uniform ctx);|]
+  ispcDecl [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform struct memblock * $tyqual:uniform
+                        $id:shim($tyqual:uniform struct futhark_context* $tyqual:uniform ctx);|]
   -- Call it
-  GC.item [C.citem|uniform struct memblock $id:name = *$id:shim(ctx);|]
+  GC.item [C.citem|$tyqual:uniform struct memblock $id:name = *$id:shim(ctx);|]
 compileCode (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name _ t : SetScalar dest e : code)
@@ -437,7 +447,7 @@ compileCode code@(Write dest (Count idx) elemtype DefaultSpace _ elemexp)
     dest' <- GC.rawMem dest
     idxexp <- GC.compileExp (untyped idx)
     varis <- mapM getVariability (namesToList $ freeIn idx)
-    let quals = if all (==Uniform) varis then [C.ctyquals|uniform|] else []
+    let quals = if all (==Uniform) varis then [C.ctyquals|$tyqual:uniform|] else []
     tmp <- newVName "tmp_idx"
     -- Disambiguate the variability of the constant index
     GC.decl [C.cdecl|$tyquals:quals typename int64_t $id:tmp = $exp:idxexp;|]
@@ -519,10 +529,10 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
     struct' = struct <> "_"
     field name (ty, MC.Prim pt) = do
       let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
-      pure [C.citems|uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
+      pure [C.citems|$tyqual:uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (_, _) = do
       strlit <- makeStringLiteral $ pretty name
-      pure [C.citems|uniform struct memblock $id:name;
+      pure [C.citems|$tyqual:uniform struct memblock $id:name;
                      $id:name.desc = $id:strlit();
                      $id:name.mem = $id:struct'->$id:(MC.closureFreeStructField name);
                      $id:name.size = 0;
@@ -541,7 +551,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   e' <- GC.compileExp e
 
-  let lexical = lexicalMemoryUsageMC $ Function Nothing [] params seq_code [] []
+  let lexical = lexicalMemoryUsageMC False $ Function Nothing [] params seq_code [] []
 
   fstruct <-
     MC.prepareTaskStruct sharedDef "task" free_args free_ctypes retval_args retval_ctypes
@@ -551,7 +561,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   let ftask_name = fstruct <> "_task"
 
-  toC <- GC.collect $ do
+  to_c <- GC.collect $ do
     GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
     GC.stm [C.cstm|$id:ftask_name.args = args;|]
     GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
@@ -568,7 +578,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     -- Generate the nested segop function if available
     fnpar_task <- case par_task of
         Just (ParallelTask nested_code) -> do
-            let lexical_nested = lexicalMemoryUsageMC $ Function Nothing [] params nested_code [] []
+            let lexical_nested = lexicalMemoryUsageMC False $ Function Nothing [] params nested_code [] []
             fnpar_task <- MC.generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
             GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
             pure $ zip [fnpar_task] [True]
@@ -583,38 +593,36 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   schedn <- MC.multicoreDef "schedule_shim" $ \s ->
     pure [C.cedecl|int $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) {
-        $items:toC
+        $items:to_c
     }|]
 
-  ispcDecl [C.cedecl|extern "C" unmasked uniform int $id:schedn 
-                        (struct futhark_context uniform * uniform ctx, 
-                        struct $id:fstruct uniform * uniform args, 
-                        uniform int iterations);|]
+  ispcDecl [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:schedn 
+                        (struct futhark_context $tyqual:uniform * $tyqual:uniform ctx, 
+                        struct $id:fstruct $tyqual:uniform * $tyqual:uniform args, 
+                        $tyqual:uniform int iterations);|]
 
   aos_name <- newVName "aos"
-  GC.stm [C.cstm|$escstm:("#if ISPC")|]
   GC.items [C.citems|
-    #if ISPC
-    uniform struct $id:fstruct $id:aos_name[programCount];
+    $escstm:("#if ISPC")
+    $tyqual:uniform struct $id:fstruct $id:aos_name[programCount];
     $id:aos_name[programIndex] = $id:(fstruct <> "_");
-    foreach_active (i) {
+    $escstm:("foreach_active (i)")
+    {
       if (err == 0) {
         err = $id:schedn(ctx, &$id:aos_name[i], extract($exp:e', i));
       }
-    }|]
-  -- TODO(pema): We can't do much else here^^ than set the error code and hope for the best
-  GC.stm [C.cstm|$escstm:("#else")|]
-  GC.items [C.citems|
+    }
+    $escstm:("#else")
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
     if (err != 0) {
       goto cleanup;
-    }|]
-  GC.stm [C.cstm|$escstm:("#endif")|]
+    }
+    $escstm:("#endif")|]
 compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
 
-  let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
+  let lexical = lexicalMemoryUsageMC False $ Function Nothing [] free body [] []
   -- Generate ISPC kernel
   fstruct <- MC.prepareTaskStruct sharedDef "param_struct" free_args free_ctypes [] []
   let fstruct' = fstruct <> "_"
@@ -622,9 +630,9 @@ compileOp (ISPCKernel body free) = do
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
     mainBody <- GC.inNewFunction $ analyzeVariability body $ GC.cachingMemory lexical $ \decl_cached free_cached ->
       GC.collect $ do
-        GC.decl [C.cdecl|uniform struct futhark_context * uniform ctx = $id:fstruct'->ctx;|]
+        GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
         GC.items =<< compileGetStructVals fstruct free_args free_ctypes
-        GC.decl [C.cdecl|uniform int err = 0;|]
+        GC.decl [C.cdecl|$tyqual:uniform int err = 0;|]
         body' <- GC.collect $ compileCode body
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
@@ -634,9 +642,9 @@ compileOp (ISPCKernel body free) = do
         GC.stm [C.cstm|return err;|]
     pure
       [C.cedecl|
-        export static uniform int $id:s(uniform typename int64_t start,
-                                        uniform typename int64_t end,
-                                        struct $id:fstruct uniform * uniform $id:fstruct' ) {
+        $tyqual:export static $tyqual:uniform int $id:s($tyqual:uniform typename int64_t start,
+                                        $tyqual:uniform typename int64_t end,
+                                        struct $id:fstruct $tyqual:uniform * $tyqual:uniform $id:fstruct' ) {
           $items:mainBody
         }|]
 
@@ -649,14 +657,16 @@ compileOp (ISPCKernel body free) = do
 compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCode body
-  GC.stm [C.cstm|
-    foreach ($id:i = 0 ... extract($exp:bound', 0)) {
+  GC.stms [C.cstms|
+    $escstm:("foreach(" <> pretty i <> "=0 ... extract(" <> pretty bound' <> ",0))")
+    {
       $items:body'
     }|]
 compileOp (ForEachActive name body) = do
   body' <- GC.collect $ compileCode body
-  GC.stm [C.cstm|
-    foreach_active ($id:name) {
+  GC.stms [C.cstms|
+    $escstm:("foreach_active(" <> pretty name <> ")")
+    {
       $items:body'
     }|]
 compileOp (ExtractLane dest tar lane) = do
@@ -665,7 +675,6 @@ compileOp (ExtractLane dest tar lane) = do
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 compileOp op = MC.compileOp op
 
--- TODO(pema): Move this somewhere else
 -- Variability analysis
 type Dependencies = M.Map VName Names
 
@@ -785,5 +794,5 @@ getVariability name = do
 -- Get the variability qualifiers of a variable
 getVariabilityQuals :: VName -> ISPCCompilerM [C.TypeQual]
 getVariabilityQuals name = variQuals <$> getVariability name
-  where variQuals Uniform = [C.ctyquals|uniform|]
+  where variQuals Uniform = [C.ctyquals|$tyqual:uniform|]
         variQuals Varying = []
