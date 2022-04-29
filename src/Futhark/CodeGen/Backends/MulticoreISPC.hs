@@ -713,30 +713,35 @@ compileOp (ISPCKernel body free) = do
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
 
-        -- Make inner kernel for error handling
-        fatmems <- gets (map fst . GC.compDeclaredMem)
-        mstruct <- prepareMemStruct lexmems fatmems
-        let mstruct' = mstruct <> "_"
-        innerShim <- ispcDef "inner_ispc" $ \t -> do
-          innerBody <- GC.collect $ do
-            GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
-            GC.items =<< compileGetStructVals fstruct free_args free_ctypes
-            compileGetMemStructVals mstruct' lexmems fatmems
+        -- Make inner kernel for error handling, if needed
+        if mayProduceError body
+          then do
+            fatmems <- gets (map fst . GC.compDeclaredMem)
+            mstruct <- prepareMemStruct lexmems fatmems
+            let mstruct' = mstruct <> "_"
+            innerShim <- ispcDef "inner_ispc" $ \t -> do
+              innerBody <- GC.collect $ do
+                GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
+                GC.items =<< compileGetStructVals fstruct free_args free_ctypes
+                compileGetMemStructVals mstruct' lexmems fatmems
+                GC.decl [C.cdecl|$tyqual:uniform int err = 0;|]
+                mapM_ GC.item body'
+                compileWritebackMemStructVals mstruct' lexmems fatmems
+                GC.stm [C.cstm|return err;|]
+              pure [C.cedecl|
+                static $tyqual:unmasked inline $tyqual:uniform int $id:t(
+                  $tyqual:uniform typename int64_t start,
+                  $tyqual:uniform typename int64_t end,
+                  struct $id:fstruct $tyqual:uniform * $tyqual:uniform $id:fstruct',
+                  struct $id:mstruct $tyqual:uniform * $tyqual:uniform $id:mstruct') {
+                  $items:innerBody
+                }|]
+            -- Call the kernel and read back potentially changed memory
+            GC.decl [C.cdecl|$tyqual:uniform int err = $id:innerShim(start, end, $id:fstruct', &$id:mstruct');|]
+            compileReadbackMemStructVals mstruct' lexmems fatmems
+          else do
             GC.decl [C.cdecl|$tyqual:uniform int err = 0;|]
             mapM_ GC.item body'
-            compileWritebackMemStructVals mstruct' lexmems fatmems
-            GC.stm [C.cstm|return err;|]
-          pure [C.cedecl|
-            static $tyqual:unmasked inline $tyqual:uniform int $id:t(
-              $tyqual:uniform typename int64_t start,
-              $tyqual:uniform typename int64_t end,
-              struct $id:fstruct $tyqual:uniform * $tyqual:uniform $id:fstruct',
-              struct $id:mstruct $tyqual:uniform * $tyqual:uniform $id:mstruct') {
-              $items:innerBody
-            }|]
-        -- Call the kernel and read back potentially changed memory
-        GC.decl [C.cdecl|$tyqual:uniform int err = $id:innerShim(start, end, $id:fstruct', &$id:mstruct');|]
-        compileReadbackMemStructVals mstruct' lexmems fatmems
 
         free_mem <- freeAllocatedMem
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
