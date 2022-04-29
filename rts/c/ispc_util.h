@@ -92,7 +92,6 @@ static inline void free(void* uniform ptr) {
   delete ptr;
 }
 
-// TODO(pema): Rename
 static inline uniform int lexical_realloc_ispc(unsigned char uniform * uniform * uniform ptr,
                                         int64_t uniform * uniform old_size,
                                         uniform int64_t new_size) {
@@ -125,7 +124,6 @@ static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying *
   return lexical_realloc_ispc(ptr, (uniform int64_t * varying)old_size, new_size);
 }
 
-// TODO(pema): Don't use size_t, it is evil!!!!
 static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying * uniform ptr,
                                         size_t varying * uniform old_size,
                                         varying int64_t new_size) {

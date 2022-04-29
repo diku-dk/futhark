@@ -468,7 +468,7 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
     cached <- isJust <$> GC.cacheMem dest
     let typ =
           if cached
-            then [C.cty|varying $ty:(primStorageType elemtype)* uniform|]
+            then [C.cty|$tyqual:varying $ty:(primStorageType elemtype)* $tyqual:uniform|]
             else [C.cty|$ty:(primStorageType elemtype)*|]
     dest' <- GC.rawMem dest
     idxexp <- GC.compileExp (untyped idx)
@@ -488,7 +488,7 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
     cached <- isJust <$> GC.cacheMem dest
     let typ =
           if cached
-            then [C.cty|varying $ty:(primStorageType elemtype)* uniform|]
+            then [C.cty|$tyqual:varying $ty:(primStorageType elemtype)* uniform|]
             else [C.cty|$ty:(primStorageType elemtype)*|]
     dest' <- GC.rawMem dest
     deref <-
@@ -501,18 +501,18 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
     isConstExp = isSimple . constFoldPrimExp
     isSimple (ValueExp _) = True
     isSimple _ = False
-compileCode (Read x src (Count iexp) restype DefaultSpace vol) = do
+compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
   src' <- GC.rawMem src
   cached <- isJust <$> GC.cacheMem src
   let typ =
         if cached
-          then [C.cty|varying $ty:(primStorageType restype)* uniform|]
+          then [C.cty|$tyqual:varying $ty:(primStorageType restype)* uniform|]
           else [C.cty|$ty:(primStorageType restype)*|]
   e <-
     fmap (fromStorage restype) $
       GC.derefPointer src'
         <$> GC.compileExp (untyped iexp)
-        <*> pure [C.cty|$tyquals:(GC.volQuals vol) $ty:typ|]
+        <*> pure [C.cty|$ty:typ|]
   GC.stm [C.cstm|$id:x = $exp:e;|]
 compileCode code@(Copy dest pt (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
   dm <- isJust <$> GC.cacheMem dest
@@ -765,7 +765,7 @@ cachingMemoryISPC lexical f = do
 
       declCached (mem, size) =
         [ [C.citem|size_t $id:size = 0;|],
-          [C.citem|varying unsigned char * uniform $id:mem = NULL;|]
+          [C.citem|$tyqual:varying unsigned char * $tyqual:uniform $id:mem = NULL;|]
         ]
 
       freeCached (mem, _) =
