@@ -82,8 +82,6 @@ struct memblock {
 };
 #endif
 
-typedef unsigned char uchar;
-
 static inline void free(void* ptr) {
   delete ptr;
 }
@@ -92,62 +90,99 @@ static inline void free(void* uniform ptr) {
   delete ptr;
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * uniform * uniform ptr,
-                                        int64_t uniform * uniform old_size,
-                                        uniform int64_t new_size) {
-  if (*ptr != NULL) free(*ptr);
-  unsigned char uniform * uniform alloc = uniform new uchar[new_size];
-  *ptr = alloc;
-  *old_size = new_size;
-  return FUTHARK_SUCCESS;
+extern "C" unmasked uniform unsigned char * uniform realloc(uniform unsigned char * uniform ptr, uniform int64_t new_size);
+extern "C" unmasked uniform char * uniform lexical_realloc_error(uniform int64_t new_size);
+extern "C" unmasked uniform char * uniform * uniform futhark_context_get_error_ref(uniform struct futhark_context * uniform ctx);
+
+static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+                                               unsigned char uniform * uniform * uniform ptr,
+                                               int64_t uniform * uniform old_size,
+                                               uniform int64_t new_size) {
+  uniform unsigned char * uniform memptr = realloc(*ptr, new_size);
+  if (memptr == NULL) {
+    *error = lexical_realloc_error(new_size);
+    return FUTHARK_OUT_OF_MEMORY;
+  } else {
+    *ptr = memptr;
+    *old_size = new_size;
+    return FUTHARK_SUCCESS;
+  }
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * uniform * uniform ptr,
-                                        int64_t uniform * uniform old_size,
-                                        varying int64_t new_size) {
-  return lexical_realloc_ispc(ptr, old_size, reduce_max(new_size));
+
+static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+                                               unsigned char uniform * uniform * uniform ptr,
+                                               int64_t uniform * uniform old_size,
+                                               varying int64_t new_size) {
+  return lexical_realloc(error, ptr, old_size, reduce_max(new_size));
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying * uniform ptr,
-                                        int64_t uniform * varying old_size,
-                                        varying int64_t new_size) {
-  if (*ptr != NULL) free(*ptr);
-  unsigned char* alloc = new uchar[new_size];
-  *ptr = alloc;
-  *old_size = new_size;
-  return FUTHARK_SUCCESS;
+static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+                                               unsigned char uniform * varying * uniform ptr,
+                                               int64_t uniform * varying old_size,
+                                               varying int64_t new_size) {
+  uniform int err = FUTHARK_SUCCESS;
+  foreach_active(i){
+    uniform unsigned char * uniform memptr = realloc(extract(*ptr,i), extract(new_size,i));
+    if (memptr == NULL) {
+      *error = lexical_realloc_error(extract(new_size,i));
+      err = FUTHARK_OUT_OF_MEMORY;
+    } else {
+      *ptr = (uniform unsigned char * varying)insert((int64_t)*ptr, i, (uniform int64_t) memptr);
+      *old_size = new_size;
+    }
+  }
+  return err;
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying * uniform ptr,
+static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+                                        unsigned char uniform * varying * uniform ptr,
                                         int64_t varying * uniform old_size,
                                         varying int64_t new_size) {
-  return lexical_realloc_ispc(ptr, (uniform int64_t * varying)old_size, new_size);
+  uniform int err = FUTHARK_SUCCESS;
+  foreach_active(i){
+    uniform unsigned char * uniform memptr = realloc(extract(*ptr,i), extract(new_size,i));
+    if (memptr == NULL) {
+      *error = lexical_realloc_error(extract(new_size,i));
+      err = FUTHARK_OUT_OF_MEMORY;
+    } else {
+      *ptr = (uniform unsigned char * varying)insert((int64_t)*ptr, i, (uniform int64_t) memptr);
+      *old_size = new_size;
+    }
+  }
+  return err;
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char uniform * varying * uniform ptr,
-                                        size_t varying * uniform old_size,
-                                        varying int64_t new_size) {
-  if (*ptr != NULL) free(*ptr);
-  unsigned char* alloc = new uchar[new_size];
-  *ptr = alloc;
-  *old_size = new_size;
-  return FUTHARK_SUCCESS;
+static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+                                               unsigned char uniform * varying * uniform ptr,
+                                               size_t varying * uniform old_size,
+                                               varying int64_t new_size) {
+  return lexical_realloc(error, ptr, (varying int64_t * uniform)old_size, new_size);
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char varying * uniform * uniform ptr,
-                                        size_t varying * uniform old_size,
-                                        uniform int64_t new_size) {
-  if (*ptr != NULL) free(*ptr);
-  varying unsigned char* uniform alloc = uniform new varying uchar[new_size];
-  *ptr = alloc;
-  *old_size = new_size;
-  return FUTHARK_SUCCESS;
+static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+                                               unsigned char varying * uniform * uniform ptr,
+                                               size_t varying * uniform old_size,
+                                               uniform int64_t new_size) {
+  uniform int err = FUTHARK_SUCCESS;
+  uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr, 
+                                                        new_size*programCount);
+  if (memptr == NULL) {
+    *error = lexical_realloc_error(new_size);
+    err = FUTHARK_OUT_OF_MEMORY;
+  } else {
+    *ptr = (varying unsigned char * uniform)memptr;
+    *old_size = new_size;
+  }
+  
+  return err;
 }
 
-static inline uniform int lexical_realloc_ispc(unsigned char varying * uniform * uniform ptr,
-                                        size_t varying * uniform old_size,
-                                        varying int64_t new_size) {
-  return lexical_realloc_ispc(ptr, old_size, reduce_max(new_size));
+static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+                                               unsigned char varying * uniform * uniform ptr,
+                                               size_t varying * uniform old_size,
+                                               varying int64_t new_size) {
+  return lexical_realloc(error, ptr, old_size, reduce_max(new_size));
 }
 
 extern "C" unmasked uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
