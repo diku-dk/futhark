@@ -379,6 +379,7 @@ segmentedReduction pat space reds kbody =
     free_params <- freeParams body
     emit $ Imp.Op $ Imp.ParLoop "segmented_segred" body free_params
 
+-- Currently, this is only used as part of SegHist calculations, never alone.
 compileSegRedBody ::
   Pat LetDecMem ->
   SegSpace ->
@@ -394,7 +395,7 @@ compileSegRedBody pat space reds kbody = do
 
   let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension
-  collect . generateChunkLoop "SegRed" False $ \n_segments -> do
+  collect . inISPC $ generateChunkLoop "SegRed" True $ \n_segments -> do
     flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
     zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
     sComment "neutral-initialise the accumulators" $
