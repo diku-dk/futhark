@@ -167,7 +167,7 @@ copyMemoryAOS pt destmem destidx srcmem srcidx nbytes =
                       extract($exp:nbytes, 0));
             }|]
   where 
-    size = show (primByteSize pt :: Integer)
+    size = show (8 * primByteSize pt :: Integer)
     overload = "memmove_" <> size
 
 -- | ISPC has no string literals, so this makes one in C and exposes it via an
