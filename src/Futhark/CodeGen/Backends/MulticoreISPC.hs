@@ -180,7 +180,7 @@ setMem dest src space = GC.setMem' dest src space stmt
       pure
         [C.cstm|if ($id:(GC.fatMemSet space')(ctx, &$exp:dest', &$exp:src',
           $id:strlit()) != 0) {
-          return 1;
+          $escstm:("unmasked { return 1; }")
         }|]
 
 -- | Unref memory in ISPC
@@ -191,7 +191,7 @@ unRefMem mem space = GC.unRefMem' mem space cstm
       strlit <- makeStringLiteral m_s
       pure
         [C.cstm|if ($id:(GC.fatMemUnRef s)(ctx, &$exp:m, $id:strlit()) != 0) {
-          return 1;
+          $escstm:("unmasked { return 1; }")
         }|]
 
 -- | Free memory in ISPC
@@ -367,7 +367,7 @@ handleError msg stacktrace = do
         $id:shim(ctx, $args:args');
         err = FUTHARK_PROGRAM_ERROR;
       }
-      return err;|]
+      $escstm:("unmasked { return err; }")|]
   where
     getErrorVal (ErrorString _) = Nothing
     getErrorVal (ErrorVal _ v) = Just v
@@ -439,11 +439,11 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
         [C.cstm|if ($exp:cur_size < $exp:size) {
                   err = lexical_realloc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
                   if (err != FUTHARK_SUCCESS) {
-                    return err;
+                    $escstm:("unmasked { return err; }")
                   }
                 }|]
     _ ->
-      allocMem name size space [C.cstm|{return 1;}|]
+      allocMem name size space [C.cstm|$escstm:("unmasked { return 1; }")|]
 compileCode (SetMem dest src space) =
   setMem dest src space
 compileCode code@(Write dest (Count idx) elemtype DefaultSpace _ elemexp)
@@ -513,7 +513,10 @@ compileCode (Call dests fname args) =
           | isBuiltInFunction fname' ->
               GC.stm [C.cstm|$id:d = $id:(funName fname')($args:args'');|]
         _ ->
-          GC.item [C.citem|if ($id:(funName fname')($args:args'') != 0) { return 1; }|]
+          GC.item [C.citem|
+            if ($id:(funName fname')($args:args'') != 0) {
+              $escstm:("unmasked { return 1; }")
+            }|]
 compileCode (Assert e msg (loc, locs)) = do
   e' <- GC.compileExp e
   err <- GC.collect $ handleError msg stacktrace
@@ -688,7 +691,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       }
     }
     if (err != 0) {
-      return err;
+      $escstm:("unmasked { return err; }")
     }
     $escstm:("#else")
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
