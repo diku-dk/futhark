@@ -1,4 +1,3 @@
-
 // Start of scalar.h.
 
 // Implementation of the primitive scalar operations.  Very
@@ -1908,6 +1907,10 @@ static inline float futrts_sqrt32(float x) {
   return sqrt(x);
 }
 
+static inline float futrts_cbrt32(float x) {
+  return cbrt(x);
+}
+
 static inline float futrts_exp32(float x) {
   return exp(x);
 }
@@ -1976,6 +1979,14 @@ static inline float futrts_lgamma32(float x) {
   return lgamma(x);
 }
 
+static inline float futrts_erf32(float x) {
+  return erf(x);
+}
+
+static inline float futrts_erfc32(float x) {
+  return erfc(x);
+}
+
 static inline float fmod32(float x, float y) {
   return fmod(x, y);
 }
@@ -2020,6 +2031,16 @@ static inline float futrts_log10_32(float x) {
 
 static inline float futrts_sqrt32(float x) {
   return sqrt(x);
+}
+
+extern "C" unmasked uniform float cbrtf(uniform float);
+static inline float futrts_cbrt32(float x) {
+  float res;
+  foreach_active (i) {
+    uniform float r = cbrtf(extract(x, i));
+    res = insert(res, i, r);
+  }
+  return res;
 }
 
 static inline float futrts_exp32(float x) {
@@ -2137,6 +2158,26 @@ static inline float futrts_lgamma32(float x) {
   return *((varying float * uniform)&y);
 }
 
+extern "C" unmasked uniform float erff(uniform float x);
+static inline float futrts_erf32(float x) {
+  float res;
+  foreach_active (i) {
+    uniform float r = erff(extract(x, i));
+    res = insert(res, i, r);
+  }
+  return res;
+}
+
+extern "C" unmasked uniform float erfcf(uniform float x);
+static inline float futrts_erfc32(float x) {
+  float res;
+  foreach_active (i) {
+    uniform float r = erfcf(extract(x, i));
+    res = insert(res, i, r);
+  }
+  return res;
+}
+
 static inline float fmod32(float x, float y) {
   return x - y * trunc(x/y); //TODO: Check if correct behavior, else use round()
 }
@@ -2181,6 +2222,10 @@ static inline float futrts_log10_32(float x) {
 
 static inline float futrts_sqrt32(float x) {
   return sqrtf(x);
+}
+
+static inline float futrts_cbrt32(float x) {
+  return cbrtf(x);
 }
 
 static inline float futrts_exp32(float x) {
@@ -2255,6 +2300,14 @@ float futrts_ispc_lgamma32(float x) {
 }
 static inline float futrts_lgamma32(float x) {
   return lgammaf(x);
+}
+
+static inline float futrts_erf32(float x) {
+  return erff(x);
+}
+
+static inline float futrts_erfc32(float x) {
+  return erfcf(x);
 }
 
 static inline float fmod32(float x, float y) {
@@ -2423,6 +2476,16 @@ static inline double futrts_sqrt64(double x) {
   return sqrt(x);
 }
 
+extern "C" unmasked uniform double cbrt(uniform double);
+static inline double futrts_cbrt64(double x) {
+  double res;
+  foreach_active (i) {
+    uniform double r = cbrtf(extract(x, i));
+    res = insert(res, i, r);
+  }
+  return res;
+}
+
 static inline double futrts_exp64(double x) {
   return exp(x);
 }
@@ -2511,6 +2574,26 @@ static inline double futrts_lgamma64(double x) {
     y[i] = futrts_ispc_lgamma64(extract(x,i));
   }
   return *((varying double * uniform)&y);
+}
+
+extern "C" unmasked uniform double erf(uniform double x);
+static inline double futrts_erf64(double x) {
+  double res;
+  foreach_active (i) {
+    uniform double r = erf(extract(x, i));
+    res = insert(res, i, r);
+  }
+  return res;
+}
+
+extern "C" unmasked uniform double erfc(uniform double x);
+static inline double futrts_erfc64(double x) {
+  float res;
+  foreach_active (i) {
+    uniform double r = erfc(extract(x, i));
+    res = insert(res, i, r);
+  }
+  return res;
 }
 
 static inline double futrts_fma64(double a, double b, double c) {
@@ -2746,6 +2829,10 @@ static inline double futrts_sqrt64(double x) {
   return sqrt(x);
 }
 
+static inline double futrts_cbrt64(double x) {
+  return cbrt(x);
+}
+
 static inline double futrts_exp64(double x) {
   return exp(x);
 }
@@ -2821,6 +2908,14 @@ double futrts_ispc_lgamma64(double x) {
 }
 static inline double futrts_lgamma64(double x) {
   return lgamma(x);
+}
+
+static inline double futrts_erf64(double x) {
+  return erf(x);
+}
+
+static inline double futrts_erfc64(double x) {
+  return erfc(x);
 }
 
 static inline double futrts_fma64(double a, double b, double c) {

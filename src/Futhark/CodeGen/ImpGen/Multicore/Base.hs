@@ -232,7 +232,8 @@ extractAllocations segop_code = f segop_code
       (mempty, code)
 
 -- | Emit code for the chunk loop, given an action that generates code
--- for a single iteration.
+-- for a single iteration. The boolean indicates whether to generate
+-- a (possibly) vectorized loop, or a fully sequential one.
 --
 -- The action is called with the (symbolic) index of the current
 -- iteration.
@@ -253,9 +254,12 @@ generateChunkLoop desc vec m = do
   -- Emit either foreach or normal for loop
   let bound = untyped n
   if vec
-  then emit $ Imp.Op $ Imp.ForEach i bound body
-  else emit $ Imp.For i bound body
+    then emit $ Imp.Op $ Imp.ForEach i bound body
+    else emit $ Imp.For i bound body
 
+-- | Emit code for a sequential loop over each vector lane, given
+-- and action that generates code for a single iteration. The action
+-- is called with the symbolic index of the current iteration.
 generateUniformizeLoop :: (Imp.TExp Int64 -> MulticoreGen ()) -> MulticoreGen ()
 generateUniformizeLoop m = do
   i <- newVName "uni_i"
@@ -264,6 +268,10 @@ generateUniformizeLoop m = do
     m $ Imp.le64 i
   emit $ Imp.Op $ Imp.ForEachActive i body
 
+-- | Given a piece of code, if that code performs an assignment, turn
+-- that assignment into an extraction of element from a vector on the
+-- right hand side, using a passed index for the extraction. Other code
+-- is left as is.
 extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.MCCode -> MulticoreGen ()
 extractVectorLane j code = do
   let ut_exp = untyped j
@@ -282,6 +290,8 @@ extractVectorLane j code = do
     _ -> 
       emit code'
 
+-- | Given an action that may generate some code, put that code
+-- into an ISPC kernel.
 inISPC :: MulticoreGen () -> MulticoreGen ()
 inISPC code = do
   code' <- collect code
@@ -306,7 +316,7 @@ sForVectorized i bound body = do
   sForVectorized' i' (untyped bound) $
     body $ TPrimExp $ Imp.var i' $ primExpType $ untyped bound
 
--- Like sLoopNest, but puts a foreach at the innermost layer
+-- | Like sLoopNest, but puts a vectorized loop at the innermost layer.
 sLoopNestVectorized ::
   Shape ->
   ([Imp.TExp Int64] -> MulticoreGen ()) ->

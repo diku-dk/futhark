@@ -59,8 +59,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
     let isScalar x = case x of MemPrim _ -> True; _ -> False
     -- Are we only working on scalars
     let scalars = all (all (isScalar . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (==[]) dims
-    -- Do we have nested vector operations
-    --let vectorized = all (/=[]) dims
+    
     scanStage1 scalars pat space scan_ops kbody
     let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do

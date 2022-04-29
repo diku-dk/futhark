@@ -7,7 +7,7 @@
 -- Futhark-agnostic, and perhaps it can even serve as inspiration for
 -- other Alex lexer wrappers.
 module Language.Futhark.Parser.Lexer.Wrapper
-  ( runAlex',
+  ( runAlex,
     Alex,
     AlexInput,
     Byte,
@@ -16,7 +16,6 @@ module Language.Futhark.Parser.Lexer.Wrapper
     alexGetInput,
     alexGetByte,
     alexGetStartCode,
-    alexMove,
     alexError,
     alexGetPos,
   )
@@ -75,13 +74,13 @@ data AlexState = AlexState
     alex_scd :: !Int -- the current startcode
   }
 
-runAlex' :: Pos -> BS.ByteString -> Alex a -> Either LexerError a
-runAlex' start_pos input__ (Alex f) =
+runAlex :: Pos -> BS.ByteString -> Alex a -> Either LexerError a
+runAlex start_pos input (Alex f) =
   case f
     ( AlexState
         { alex_pos = start_pos,
           alex_bpos = 0,
-          alex_inp = input__,
+          alex_inp = input,
           alex_chr = '\n',
           alex_scd = 0
         }

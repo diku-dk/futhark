@@ -29,7 +29,7 @@ module Futhark.CodeGen.Backends.GenericC
     Allocate,
     Deallocate,
     Copy,
-    StaticArray,    
+    StaticArray,
 
     -- * Monadic compiler interface
     CompilerM,
@@ -79,14 +79,10 @@ module Futhark.CodeGen.Backends.GenericC
     primTypeToCType,
     intTypeToCType,
     copyMemoryDefaultSpace,
-    volQuals,
     linearCode,
     derefPointer,
-    allocMem,
     allocMem',
-    setMem,
     setMem',
-    unRefMem,
     unRefMem',
     fatMemAlloc,
     fatMemSet,
@@ -114,7 +110,7 @@ import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
-import qualified Language.C.Quote.ISPC as C
+import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
@@ -1583,20 +1579,20 @@ asServer parts =
 
 compileProg' ::
   MonadFreshNames m =>
-  Monoid s =>
   T.Text ->
   T.Text ->
   Operations op s ->
+  s ->
   CompilerM op s () ->
   T.Text ->
   [Space] ->
   [Option] ->
   Definitions op ->
   m (CParts, CompilerState s)
-compileProg' backend version ops extra header_extra spaces options prog = do
+compileProg' backend version ops def extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
-        runCompilerM ops src mempty compileProgAction
+        runCompilerM ops src def compileProgAction
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
       arraydecls = arrayDecls endstate
@@ -1724,12 +1720,12 @@ $entry_point_decls
       types <- commonLibFuns memreport
 
       pure
-        ( T.unlines $ map prettyText prototypes,          
+        ( T.unlines $ map prettyText prototypes,
           T.unlines $ map (prettyText . funcToDef) functions,
           T.unlines $ map prettyText entry_points,
           Manifest.Manifest (M.fromList entry_points_manifest) types backend version
         )
-    
+
     funcToDef func = C.FuncDef func loc
       where
         loc = case func of
@@ -1750,7 +1746,7 @@ compileProg ::
   Definitions op ->
   m CParts
 compileProg backend version ops extra header_extra spaces options prog =
-  fst <$> compileProg' backend version ops extra header_extra spaces options prog
+  fst <$> compileProg' backend version ops () extra header_extra spaces options prog
 
 commonLibFuns :: [C.BlockItem] -> CompilerM op s (M.Map T.Text Manifest.Type)
 commonLibFuns memreport = do
