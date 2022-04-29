@@ -242,6 +242,10 @@ library
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
+      Futhark.Optimise.MergeGPUBodies
+      Futhark.Optimise.ReduceDeviceSyncs
+      Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
+      Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Rep

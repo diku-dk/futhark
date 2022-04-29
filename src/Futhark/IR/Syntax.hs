@@ -376,18 +376,14 @@ data BasicOp
     Update Safety VName (Slice SubExp) SubExp
   | FlatIndex VName (FlatSlice SubExp)
   | FlatUpdate VName (FlatSlice SubExp) VName
-  | -- | @
-    -- concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@.
-    -- @
+  | -- | @concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@
     --
     -- Concatenates the non-empty list of 'VName' resulting in an
     -- array of length t'SubExp'. The 'Int' argument is used to
     -- specify the dimension along which the arrays are
     -- concatenated. For instance:
     --
-    -- @
-    -- concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]
-    -- @
+    -- @concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]@
     Concat Int (NonEmpty VName) SubExp
   | -- | Copy the given array.  The result will not alias anything.
     Copy VName

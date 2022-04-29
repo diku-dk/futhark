@@ -28,6 +28,8 @@ import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.MergeGPUBodies
+import Futhark.Optimise.ReduceDeviceSyncs
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -100,7 +102,13 @@ kernelsPipeline =
         unstreamGPU,
         performCSE True,
         simplifyGPU,
-        sinkGPU,
+        sinkGPU, -- Sink reads before migrating them.
+        reduceDeviceSyncs,
+        simplifyGPU, -- Simplify and hoist storages.
+        performCSE True, -- Eliminate duplicate storages.
+        mergeGPUBodies,
+        simplifyGPU, -- Cleanup merged GPUBody kernels.
+        sinkGPU, -- Sink reads within GPUBody kernels.
         inPlaceLoweringGPU
       ]
 

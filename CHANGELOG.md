@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The CUDA backend now supports compute capability 8.6 and 8.7.
+
+* Philip Børgesen has implemented a new optimisation for GPU backends
+  that migrates scalar work to the GPU, in order to reduce
+  synchronisation.  This results in major speedup for some programs.
+
 ### Removed
 
 ### Changed
@@ -30,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Another defunctorisation bug (#1653).  Somehow we find these every
   time Martin Elsman writes a nontrivial Futhark program.
+
+* `futhark bench`: convergence phase now does at least `--runs` runs.
 
 ## [0.21.10]
 

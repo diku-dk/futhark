@@ -282,10 +282,10 @@ interimResult us_sum runs elapsed bound =
     avg = fromIntegral us_sum / fromIntegral runs
 
 convergenceBar :: (String -> IO ()) -> IORef Int -> Int -> Int -> Double -> IO ()
-convergenceBar p spin_count us_sum i rsd' = do
+convergenceBar p spin_count us_sum i rse' = do
   spin_idx <- readIORef spin_count
   let spin_char = spin_load !! spin_idx
-  p $ printf "%10.0fμs %c (RSD of mean: %2.4f; %4d runs)" avg spin_char rsd' i
+  p $ printf "%10.0fμs %c (RSE of mean: %2.4f; %4d runs)" avg spin_char rse' i
   let spin_count' = (spin_idx + 1) `mod` 10
   writeIORef spin_count spin_count'
   where
@@ -301,7 +301,7 @@ mkProgressPrompt opts pad_to dataset_desc start_time
       count <- newIORef (0, 0)
       phase_var <- newIORef Initial
       spin_count <- newIORef 0
-      pure $ \(us, rsd) -> do
+      pure $ \(us, rse) -> do
         putStr "\r" -- Go to start of line.
         let p s =
               putStr $
@@ -322,7 +322,7 @@ mkProgressPrompt opts pad_to dataset_desc start_time
 
         phase <- readIORef phase_var
 
-        case (us, phase, rsd) of
+        case (us, phase, rse) of
           (Nothing, _, _) ->
             let elapsed = determineProgress i
              in p $ replicate 13 ' ' <> progressBar elapsed 1.0 progressBarSteps
@@ -332,17 +332,17 @@ mkProgressPrompt opts pad_to dataset_desc start_time
             writeIORef count (us_sum', i')
             let elapsed = determineProgress i'
             p $ interimResult us_sum' i' elapsed 1.0
-          (Just us', Initial, Just rsd') -> do
+          (Just us', Initial, Just rse') -> do
             -- Switched from phase 1 to convergence; discard all
             -- prior results.
             writeIORef count (us', 1)
             writeIORef phase_var Convergence
-            convergenceBar p spin_count us' 1 rsd'
-          (Just us', Convergence, Just rsd') -> do
+            convergenceBar p spin_count us' 1 rse'
+          (Just us', Convergence, Just rse') -> do
             let us_sum' = us_sum + us'
                 i' = i + 1
             writeIORef count (us_sum', i')
-            convergenceBar p spin_count us_sum' i' rsd'
+            convergenceBar p spin_count us_sum' i' rse'
           (Just _, Convergence, Nothing) ->
             pure () -- Probably should not happen.
         putStr " " -- Just to move the cursor away from the progress bar.
