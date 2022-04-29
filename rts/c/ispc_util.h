@@ -33,7 +33,7 @@ make_extract(struct memblock)
 
 
 // Handling of atomics
-#define make_atomic_compare_exchange_wrapper(ty)				                     \
+#define make_atomic_compare_exchange_wrapper(ty)                                     \
 static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
                                uniform ty * uniform old,                             \
                                                            const uniform ty val){    \
