@@ -118,6 +118,7 @@ $ispc_decls|]
 
   pure (ws', (cparts, ispcdefs))
 
+-- | Compiler operations specific to the ISPC multicore backend.
 operations :: GC.Operations Multicore ISPCState
 operations =
   MC.operations
@@ -138,7 +139,7 @@ ispcDef s f = do
   ispcDecl =<< f s'
   pure s'
 
--- Expose struct to both ISPC and C
+-- | Expose a struct to both ISPC and C.
 sharedDef :: MC.DefSpecifier ISPCState
 sharedDef s f = do
   s' <- MC.multicoreName s
@@ -148,7 +149,8 @@ sharedDef s f = do
   ispcDecl [C.cedecl|$tyqual:export void $id:dummy($tyqual:uniform struct $id:s' * $tyqual:uniform a) { (void)a; }|]
   pure s'
 
--- ISPC has no string literals, so this makes one in C and exposes it via an external function
+-- | ISPC has no string literals, so this makes one in C and exposes it via an
+-- external function, returning the name.
 makeStringLiteral :: String -> ISPCCompilerM Name
 makeStringLiteral str = do
   name <- MC.multicoreDef "strlit_shim" $ \s ->
@@ -157,7 +159,7 @@ makeStringLiteral str = do
     [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform char* $tyqual:uniform $id:name();|]
   pure name
 
--- Allocate memory in ISPC
+-- | Allocate memory in ISPC
 allocMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> ISPCCompilerM ()
 allocMem mem size space on_failure = GC.allocMem' mem size space on_failure stmt
   where
@@ -169,7 +171,7 @@ allocMem mem size space on_failure = GC.allocMem' mem size space on_failure stmt
                   $stm:on_failure'
         }|]
 
--- Set memory in ISPC
+-- | Set memory in ISPC
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
 setMem dest src space = GC.setMem' dest src space stmt
   where
@@ -181,7 +183,7 @@ setMem dest src space = GC.setMem' dest src space stmt
           err = 1;
         }|]
 
--- Unref memory in ISPC
+-- | Unref memory in ISPC
 unRefMem :: C.ToExp a => a -> Space -> ISPCCompilerM ()
 unRefMem mem space = GC.unRefMem' mem space cstm
   where
@@ -192,11 +194,11 @@ unRefMem mem space = GC.unRefMem' mem space cstm
           err = 1;
         }|]
 
--- Free memory in ISPC
+-- | Free memory in ISPC
 freeAllocatedMem :: ISPCCompilerM [C.BlockItem]
 freeAllocatedMem = GC.freeAllocatedMem' unRefMem
 
--- Given a ImpCode function, generate all the required machinery for calling
+-- | Given a ImpCode function, generate all the required machinery for calling
 -- it in ISPC, both in a varying or uniform context. This involves handling
 -- for the fact that ISPC cannot pass structs by value to external functions.
 compileBuiltinFun :: (Name, Function op) -> ISPCCompilerM ()
@@ -333,7 +335,7 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
                        $id:(newvn)[programIndex] = $id:name;|]
       pure (params,args,pre_body, [])
 
--- Handle logging an error message in ISPC
+-- | Handle logging an error message in ISPC.
 handleError :: ErrorMsg Exp -> String -> ISPCCompilerM ()
 handleError msg stacktrace = do
   -- Get format sting
@@ -379,7 +381,7 @@ handleError msg stacktrace = do
 
     mapArgNames (ErrorMsg parts) = mapArgNames' parts
 
--- Compile a block of code with ISPC specific semantics, falling back
+-- | Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
 -- All recursive constructors are duplicated here, since not doing so
 -- would cause use to enter regular generic C codegen with no escape.

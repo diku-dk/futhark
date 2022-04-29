@@ -256,7 +256,7 @@ subHistogram pat space histops num_histos kbody = do
               generateUniformizeLoop $ \j ->
                 sComment "perform updates" $ do
                   -- Create new set of uniform buckets
-                  -- That is extact each bucket from a SIMD vector lane
+                  -- That is extract each bucket from a SIMD vector lane
                   extract_buckets <- mapM (dPrim "extract_bucket" . (primExpType . untyped)) bucket'
                   mapM_ (\(x,y) -> emit $
                     Imp.Op $ Imp.ExtractLane (tvVar x) (untyped y) (untyped j)) $ zip extract_buckets bucket'
