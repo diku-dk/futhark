@@ -1,6 +1,3 @@
 [submodule "futhark-benchmarks"]
 	path = futhark-benchmarks
 	url = https://github.com/diku-dk/futhark-benchmarks.git
-[submodule "language-c-quote"]
-	path = language-c-quote
-	url = https://github.com/pema99/language-c-quote

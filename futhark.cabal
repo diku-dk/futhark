@@ -352,8 +352,8 @@ library
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
-    , language-c-quote
     , hslogger
+    , language-c-quote >= 0.12
     , lens
     , lsp >= 1.4
     , mainland-pretty >=0.7.1

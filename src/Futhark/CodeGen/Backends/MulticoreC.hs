@@ -29,21 +29,20 @@ module Futhark.CodeGen.Backends.MulticoreC
 where
 
 import Control.Monad
-
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Loc
 import qualified Data.Text as T
+import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.CodeGen.Backends.SimpleRep ( defaultMemBlockType, primStorageType, toStorage, fromStorage )
+import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.ISPC as C
+import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
-import qualified Futhark.CodeGen.Backends.GenericC as GC
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -506,6 +505,7 @@ multicoreName s = do
   pure $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
 
 type DefSpecifier s = String -> (Name -> GC.CompilerM Multicore s C.Definition) -> GC.CompilerM Multicore s Name
+
 multicoreDef :: DefSpecifier s
 multicoreDef s f = do
   s' <- multicoreName s
@@ -591,7 +591,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   e' <- GC.compileExp e
 
-  let lexical = lexicalMemoryUsageMC $ Function Nothing [] params seq_code [] []
+  let lexical = lexicalMemoryUsageMC True $ Function Nothing [] params seq_code [] []
 
   fstruct <-
     prepareTaskStruct multicoreDef "task" free_args free_ctypes retval_args retval_ctypes
@@ -616,7 +616,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   -- Generate the nested segop function if available
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code) -> do
-      let lexical_nested = lexicalMemoryUsageMC $ Function Nothing [] params nested_code [] []
+      let lexical_nested = lexicalMemoryUsageMC True $ Function Nothing [] params nested_code [] []
       fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
       pure $ zip [fnpar_task] [True]
@@ -642,7 +642,7 @@ compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
-  let lexical = lexicalMemoryUsageMC $ Function Nothing [] free body [] []
+  let lexical = lexicalMemoryUsageMC True $ Function Nothing [] free body [] []
 
   fstruct <-
     prepareTaskStruct multicoreDef (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty

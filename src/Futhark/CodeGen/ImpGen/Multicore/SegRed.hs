@@ -99,14 +99,11 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
    -- Are we only working on scalar arrays?
   let scalars = all (all (isScalar . paramDec) . slugParams) slugs1 && all (==[]) dims
    -- Are we working with vectorized inner maps?
-  let arrays = [] `notElem` dims
+  let inner_map = [] `notElem` dims
 
   let path
        | comm && scalars = reductionStage1CommScalar
-       -- TODO(pema): This prevents us from using vectorizing the map part
-       -- Figure out if this is worth doing, or if we should just prefer the
-       -- reductionStage1NonCommScalar path?
-       | arrays          = reductionStage1Array
+       | inner_map       = reductionStage1Array
        | scalars         = reductionStage1NonCommScalar
        | otherwise       = reductionStage1Fallback
   path space slugs1 kbody
