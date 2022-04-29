@@ -435,9 +435,12 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
   cached <- GC.cacheMem name
   case cached of
     Just cur_size ->
-      GC.stm -- TODO(pema): Handle errors here
+      GC.stm
         [C.cstm|if ($exp:cur_size < $exp:size) {
-                  lexical_realloc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
+                  err = lexical_realloc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
+                  if (err != FUTHARK_SUCCESS) {
+                    return err;
+                  }
                 }|]
     _ ->
       allocMem name size space [C.cstm|{return 1;}|]
@@ -592,6 +595,23 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
                      $id:name.size = 0;
                      $id:name.references = NULL;|]
 
+-- | Can the given code produce an error? If so, we can't use foreach
+-- loops, since they don't allow for early-outs in error handling.
+mayProduceError :: MCCode -> Bool
+mayProduceError (x :>>: y) = mayProduceError x || mayProduceError y
+mayProduceError (If _ x y) = mayProduceError x || mayProduceError y
+mayProduceError (For _ _ x) = mayProduceError x
+mayProduceError (While _ x) = mayProduceError x
+mayProduceError (Comment _ x) = mayProduceError x
+mayProduceError (Op (ForEachActive _ body)) = mayProduceError body
+mayProduceError (Op (ForEach _ _ body)) = mayProduceError body
+mayProduceError (Op (SegOp _ _ _ _ _ _)) = True
+mayProduceError (Allocate _ _ _) = True
+mayProduceError (Assert _ _ _) = True
+mayProduceError (SetMem _ _ _) = True
+mayProduceError (Free _ _) = True
+mayProduceError _ = False
+
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ISPCState
 compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) = do
@@ -738,15 +758,21 @@ compileOp (ISPCKernel body free) = do
 compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCode body
-  GC.stms [C.cstms|
-    for ($tyqual:uniform typename int64_t i = 0; i < ($exp:bound' / programCount); i++) {
-      typename int64_t $id:i = programIndex + i * programCount;
-      $items:body'
-    }
-    if (programIndex < ($exp:bound' % programCount)) {
-      typename int64_t $id:i = programIndex + (($exp:bound' / programCount) * programCount);
-      $items:body'
-    }|]
+  if mayProduceError body
+    then GC.stms [C.cstms|
+      for ($tyqual:uniform typename int64_t i = 0; i < ($exp:bound' / programCount); i++) {
+        typename int64_t $id:i = programIndex + i * programCount;
+        $items:body'
+      }
+      if (programIndex < ($exp:bound' % programCount)) {
+        typename int64_t $id:i = programIndex + (($exp:bound' / programCount) * programCount);
+        $items:body'
+      }|]
+    else GC.stms [C.cstms|
+      $escstm:("foreach (" <> pretty i <> " = 0 ... " <> pretty bound' <> ")")
+      {
+        $items:body'
+      }|]
 compileOp (ForEachActive name body) = do
   body' <- GC.collect $ compileCode body
   GC.stms [C.cstms|
