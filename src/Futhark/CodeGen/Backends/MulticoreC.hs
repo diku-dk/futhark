@@ -153,6 +153,7 @@ generateContext = do
                       typename int64_t tuning_iter;
                     };|]
     )
+
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
