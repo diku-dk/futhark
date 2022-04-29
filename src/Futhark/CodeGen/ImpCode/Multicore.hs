@@ -170,14 +170,10 @@ instance FreeIn Multicore where
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
 
--- TODO(pema): We should probably make something like this but
--- for the (non-ispc) multicore backend, which _does_ look into
--- kernels (since they will be lexical). As it is currently, we
--- treat many memory blocks which _could_ be lexical in the normal
--- multicore backend as non-lexical. Also, the issue with safety tests.
--- | Like @lexicalMemoryUsage@, but traverses inner multicore ops
-lexicalMemoryUsageMC :: Function Multicore -> M.Map VName Space
-lexicalMemoryUsageMC func =
+-- | Like @lexicalMemoryUsage@, but traverses some inner multicore ops.
+-- The boolean indicates whether to enter kernels.
+lexicalMemoryUsageMC :: Bool -> Function Multicore -> M.Map VName Space
+lexicalMemoryUsageMC gokernel func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
     declared $ functionBody func
   where
@@ -195,10 +191,13 @@ lexicalMemoryUsageMC func =
 
     -- We want SetMems and declarations to be visible through custom control flow
     -- so we don't erroneously treat a memblock that could be lexical as needing
-    -- refcounting. Importantly, we do not look into kernels, though, since they
-    -- go into new functions.
+    -- refcounting. Importantly, for ISPC, we do not look into kernels, since they
+    -- go into new functions. For the Multicore backend, we can do it, though.
     goOp f (ForEach _ _ body) = go f body
     goOp f (ForEachActive _ body) = go f body
+    goOp f (ISPCKernel body _)
+      | gokernel = go f body
+      | otherwise = mempty
     goOp _ _ = mempty
 
     declared (DeclareMem mem spc) =
