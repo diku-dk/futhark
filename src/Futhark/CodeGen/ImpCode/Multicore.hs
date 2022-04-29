@@ -25,13 +25,14 @@ type Program = Functions Multicore
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String MCCode [Param]
-  | -- | Emit code in ISPC
+  | -- | A kernel of ISPC code, or a scoped block in regular C.
     ISPCKernel MCCode [Param]
-  | -- | ForEach, only valid in ISPC
+  | -- | A foreach loop in ISPC, or a regular for loop in C.
     ForEach VName Exp MCCode
-  | -- | ForEach_Active, only valid in ISPC
+  | -- | A foreach_active loop in ISPC, or a single execution in C.
     ForEachActive VName MCCode
-  | -- | Extract a lane to a uniform in ISPC
+  | -- | Extract a value from a given lane and assign it to a variable.
+    -- This is just a regular assignment in C.
     ExtractLane VName Exp Exp
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately

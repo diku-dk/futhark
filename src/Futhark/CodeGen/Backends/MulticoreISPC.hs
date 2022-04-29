@@ -25,7 +25,7 @@ import qualified Language.C.Syntax as C
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
-import Futhark.CodeGen.Backends.SimpleRep (fromStorage, toStorage, primStorageType, cScalarDefs, funName)
+import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.IR.Prop (isBuiltInFunction)
 import Data.Maybe
 import Data.Loc (noLoc)
@@ -43,14 +43,6 @@ data ISPCState = ISPCState
   { sDefs :: DL.DList C.Definition
   , sUniform :: Names
   }
-
-instance Semigroup ISPCState where
-  ISPCState d1 u1 <> ISPCState d2 u2 = ISPCState (d1 <> d2) (u1 <> u2)
-
-instance Monoid ISPCState where
-  mempty = ISPCState mempty mempty
-  mappend = (<>)
-
 
 uniform :: C.TypeQual
 uniform = C.EscTypeQual "uniform" noLoc
@@ -77,7 +69,7 @@ compileProg header version prog = do
         "ispc_multicore"
         version
         operations
-        mempty
+        (ISPCState mempty mempty)
         (MC.generateContext >> mapM_ compileBuiltinFun funs)
         header
         [DefaultSpace]
@@ -387,9 +379,10 @@ handleError msg stacktrace = do
 
     mapArgNames (ErrorMsg parts) = mapArgNames' parts
 
--- TODO(pema): Deduplicate some of the C code in the generic C generator
 -- Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
+-- All recursive constructors are duplicated here, since not doing so
+-- would cause use to enter regular generic C codegen with no escape.
 compileCode :: MCCode -> ISPCCompilerM ()
 compileCode (Comment s code) = do
   xs <- GC.collect $ compileCode code
@@ -566,7 +559,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   let ftask_name = fstruct <> "_task"
 
-  toC <- GC.collect $ do
+  to_c <- GC.collect $ do
     GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
     GC.stm [C.cstm|$id:ftask_name.args = args;|]
     GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
@@ -598,7 +591,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   schedn <- MC.multicoreDef "schedule_shim" $ \s ->
     pure [C.cedecl|int $id:s(struct futhark_context* ctx, void* args, typename int64_t iterations) {
-        $items:toC
+        $items:to_c
     }|]
 
   ispcDecl [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:schedn 
@@ -607,9 +600,8 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                         $tyqual:uniform int iterations);|]
 
   aos_name <- newVName "aos"
-  GC.stm [C.cstm|$escstm:("#if ISPC")|]
   GC.items [C.citems|
-    #if ISPC
+    $escstm:("#if ISPC")
     $tyqual:uniform struct $id:fstruct $id:aos_name[programCount];
     $id:aos_name[programIndex] = $id:(fstruct <> "_");
     $escstm:("foreach_active (i)")
@@ -617,15 +609,13 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       if (err == 0) {
         err = $id:schedn(ctx, &$id:aos_name[i], extract($exp:e', i));
       }
-    }|]
-  -- TODO(pema): We can't do much else here^^ than set the error code and hope for the best
-  GC.stm [C.cstm|$escstm:("#else")|]
-  GC.items [C.citems|
+    }
+    $escstm:("#else")
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
     if (err != 0) {
       goto cleanup;
-    }|]
-  GC.stm [C.cstm|$escstm:("#endif")|]
+    }
+    $escstm:("#endif")|]
 compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
@@ -683,7 +673,6 @@ compileOp (ExtractLane dest tar lane) = do
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 compileOp op = MC.compileOp op
 
--- TODO(pema): Move this somewhere else
 -- Variability analysis
 type Dependencies = M.Map VName Names
 

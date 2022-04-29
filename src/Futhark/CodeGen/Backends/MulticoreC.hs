@@ -29,13 +29,13 @@ module Futhark.CodeGen.Backends.MulticoreC
 where
 
 import Control.Monad
-
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Loc
 import qualified Data.Text as T
+import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.CodeGen.Backends.SimpleRep ( defaultMemBlockType, primStorageType, toStorage, fromStorage )
+import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
@@ -43,7 +43,6 @@ import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
-import qualified Futhark.CodeGen.Backends.GenericC as GC
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -506,6 +505,7 @@ multicoreName s = do
   pure $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
 
 type DefSpecifier s = String -> (Name -> GC.CompilerM Multicore s C.Definition) -> GC.CompilerM Multicore s Name
+
 multicoreDef :: DefSpecifier s
 multicoreDef s f = do
   s' <- multicoreName s

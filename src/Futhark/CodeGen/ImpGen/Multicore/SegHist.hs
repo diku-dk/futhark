@@ -70,7 +70,8 @@ nonsegmentedHist pat space histops kbody num_histos = do
       sIf
         use_subhistogram
         (subHistogram pat space histops num_histos kbody)
-        (atomicHistogram pat space histops' kbody)        
+        (atomicHistogram pat space histops' kbody)
+
 -- |
 -- Atomic Histogram approach
 -- The implementation has three sub-strategies depending on the
@@ -160,15 +161,12 @@ updateHisto op arrs bucket j uni_acc = do
   let bind_acc_params =
         forM_ (zip uni_acc arrs) $ \(acc_u, arr) -> do
           copyDWIMFix (paramName acc_u) [] (Var arr) bucket
-          --emit $ Imp.Op $ Imp.ExtractLane (paramName acc_u) (primExpFromSubExp Unit $ (Var $ paramName acc_u)) (untyped j)
           
       op_body = compileBody' [] $ lambdaBody $ histOp op
       writeArray arr val = extractVectorLane j $ collect $ copyDWIMFix arr bucket val []
       do_hist = zipWithM_ writeArray arrs $ map resSubExp $ bodyResult $ lambdaBody $ histOp op
 
   sComment "Start of body" $ do
-    -- sComment "dlParams" $ -- TODO (obp): This should be redundant declare.
-    --   dLParams acc_params                skkrt
     bind_acc_params
     op_body
     do_hist
@@ -248,8 +246,6 @@ subHistogram pat space histops num_histos kbody = do
              (bucket, vs')
              ) -> do
               
-              -- TODO(k): I don't think these params ever used
-              genHistOpParams histop
               histop' <- renameHistop histop
 
               let bucket'     = map toInt64Exp bucket
@@ -257,7 +253,6 @@ subHistogram pat space histops num_histos kbody = do
                   acc_params' = (lambdaParams . histOp) histop'
                   vs_params'  = takeLast (length vs') $ lambdaParams $ histOp histop'
 
-                            
               generateUniformizeLoop $ \j ->
                 sComment "perform updates" $ do
                   -- Create new set of uniform buckets

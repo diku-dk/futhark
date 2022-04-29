@@ -232,7 +232,8 @@ extractAllocations segop_code = f segop_code
       (mempty, code)
 
 -- | Emit code for the chunk loop, given an action that generates code
--- for a single iteration.
+-- for a single iteration. The boolean indicates whether to generate
+-- a (possibly) vectorized loop, or a fully sequential one.
 --
 -- The action is called with the (symbolic) index of the current
 -- iteration.
@@ -253,8 +254,8 @@ generateChunkLoop desc vec m = do
   -- Emit either foreach or normal for loop
   let bound = untyped n
   if vec
-  then emit $ Imp.Op $ Imp.ForEach i bound body
-  else emit $ Imp.For i bound body
+    then emit $ Imp.Op $ Imp.ForEach i bound body
+    else emit $ Imp.For i bound body
 
 generateUniformizeLoop :: (Imp.TExp Int64 -> MulticoreGen ()) -> MulticoreGen ()
 generateUniformizeLoop m = do
