@@ -1773,3 +1773,5 @@ static inline uniform f16 fpconv_f32_f16(uniform float x) {
   return (uniform f16) x;
 }
 #endif
+
+// End of uniform.h.
