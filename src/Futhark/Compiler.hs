@@ -37,7 +37,7 @@ import Futhark.MonadFreshNames
 import Futhark.Pipeline
 import Futhark.Util.Console (inRed, inYellow)
 import Futhark.Util.Log
-import Futhark.Util.Pretty (Doc, ppr, prettyText, stack, text, (</>))
+import Futhark.Util.Pretty (Doc, line, ppr, prettyText, punctuate, stack, text, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings
@@ -136,7 +136,7 @@ typeCheckInternalProgram prog =
 
 -- | Prettyprint program errors as suitable for showing on a text console.
 pprProgErrors :: NE.NonEmpty ProgError -> Doc
-pprProgErrors = stack . map onError . sortOn (rep . locOf) . NE.toList
+pprProgErrors = stack . punctuate line . map onError . sortOn (rep . locOf) . NE.toList
   where
     rep NoLoc = ("", 0)
     rep (Loc p _) = (posFile p, posCoff p)
