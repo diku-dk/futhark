@@ -201,7 +201,7 @@ extractAllocations segop_code = f segop_code
       (Imp.DeclareMem name space, mempty)
     f (Imp.Allocate name size space)
       | not $ freeIn size `namesIntersect` declared =
-          (Imp.Allocate name size space, mempty)
+        (Imp.Allocate name size space, mempty)
     f (x Imp.:>>: y) = f x <> f y
     f (Imp.While cond body) =
       (mempty, Imp.While cond body)
@@ -272,7 +272,7 @@ generateUniformizeLoop m = do
 -- that assignment into an extraction of element from a vector on the
 -- right hand side, using a passed index for the extraction. Other code
 -- is left as is.
-extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.MCCode -> MulticoreGen ()
+extractVectorLane :: Imp.TExp Int64 -> MulticoreGen Imp.MCCode -> MulticoreGen ()
 extractVectorLane j code = do
   let ut_exp = untyped j
   code' <- code
@@ -283,11 +283,11 @@ extractVectorLane j code = do
         -- ISPC v1.17 does not support extract on f16 yet..
         -- Thus we do this stupid conversion to f32
         Prim (FloatType Float16) -> do
-          tv <- dPrim "hack_extract_f16" (FloatType Float32)     
+          tv <- dPrim "hack_extract_f16" (FloatType Float32)
           emit $ Imp.SetScalar (tvVar tv) e
           emit $ Imp.Op $ Imp.ExtractLane vname (untyped $ tvExp tv) ut_exp
         _ -> emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp
-    _ -> 
+    _ ->
       emit code'
 
 -- | Given an action that may generate some code, put that code
@@ -376,23 +376,23 @@ atomicUpdateLocking ::
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
-      primOrCas ops_and_ts $ \arrs bucket ->
-        -- If the operator is a vectorised binary operator on 32-bit values,
-        -- we can use a particularly efficient implementation. If the
-        -- operator has an atomic implementation we use that, otherwise it
-        -- is still a binary operator which can be implemented by atomic
-        -- compare-and-swap if 32 bits.
-        forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
-          -- Common variables.
-          old <- dPrim "old" t
+    primOrCas ops_and_ts $ \arrs bucket ->
+      -- If the operator is a vectorised binary operator on 32-bit values,
+      -- we can use a particularly efficient implementation. If the
+      -- operator has an atomic implementation we use that, otherwise it
+      -- is still a binary operator which can be implemented by atomic
+      -- compare-and-swap if 32 bits.
+      forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
+        -- Common variables.
+        old <- dPrim "old" t
 
-          (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
+        (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
 
-          case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
-            Just f -> sOp $ f $ Imp.var y t
-            Nothing ->
-              atomicUpdateCAS t a (tvVar old) bucket x $
-                x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
+        case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
+          Just f -> sOp $ f $ Imp.var y t
+          Nothing ->
+            atomicUpdateCAS t a (tvVar old) bucket x $
+              x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport old arr' bucket' bop = do
       let atomic f = Imp.Atomic . f old arr' bucket'
@@ -407,9 +407,9 @@ atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
-      old <- dPrim "old" t
-      atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
-        compileBody' [xp] $ lambdaBody op
+    old <- dPrim "old" t
+    atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
+      compileBody' [xp] $ lambdaBody op
 atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)

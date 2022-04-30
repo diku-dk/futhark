@@ -14,9 +14,9 @@ module Futhark.CodeGen.ImpCode.Multicore
   )
 where
 
+import qualified Data.Map as M
 import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty
-import qualified Data.Map as M
 
 -- | An imperative multicore program.
 type Program = Functions Multicore

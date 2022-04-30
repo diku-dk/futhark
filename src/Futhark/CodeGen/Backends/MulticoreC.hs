@@ -24,14 +24,14 @@ module Futhark.CodeGen.Backends.MulticoreC
     multiCoreReport,
     multicoreDef,
     multicoreName,
-    DefSpecifier
+    DefSpecifier,
   )
 where
 
 import Control.Monad
+import Data.Loc
 import qualified Data.Map as M
 import Data.Maybe
-import Data.Loc
 import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -232,8 +232,7 @@ generateContext = do
                    }|]
     )
   GC.publicDef_ "context_get_error_ref" GC.InitDecl $ \s ->
-    (
-      [C.cedecl|char ** $id:s(struct $id:ctx* ctx);|],
+    ( [C.cedecl|char ** $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|char ** $id:s(struct $id:ctx* ctx){
                                 return &(ctx->error);
                              }|]
@@ -338,7 +337,7 @@ compileGetRetvalStructVals struct = zipWith field
   where
     field name (ty, Prim pt) =
       let inner = [C.cexp|*$id:struct->$id:(closureRetvalStructField name)|]
-      in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
+       in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(pretty name),
@@ -355,7 +354,7 @@ compileGetStructVals struct = zipWith field
   where
     field name (ty, Prim pt) =
       let inner = [C.cexp|$id:struct->$id:(closureFreeStructField name)|]
-      in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
+       in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(pretty name),
@@ -564,14 +563,15 @@ prepareTaskStruct ::
   [(C.Type, ValueType)] ->
   GC.CompilerM Multicore s Name
 prepareTaskStruct def name free_args free_ctypes retval_args retval_ctypes = do
-  let makeStruct s = pure
-        [C.cedecl|struct $id:s {
+  let makeStruct s =
+        pure
+          [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
   fstruct <- def name makeStruct
-  let fstruct' =  fstruct <> "_"
+  let fstruct' = fstruct <> "_"
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct';|]
   GC.stm [C.cstm|$id:fstruct'.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct' free_args free_ctypes)|]
@@ -716,7 +716,7 @@ compileOp (ExtractLane dest tar _) = do
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
 
 scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
-scopedBlock code = do 
+scopedBlock code = do
   inner <- GC.collect $ GC.compileCode code
   GC.stm [C.cstm|{$items:inner}|]
 

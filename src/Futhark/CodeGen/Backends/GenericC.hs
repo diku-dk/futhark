@@ -87,9 +87,10 @@ module Futhark.CodeGen.Backends.GenericC
     fatMemAlloc,
     fatMemSet,
     fatMemUnRef,
-    errorMsgString
+    errorMsgString,
   )
 where
+
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -109,7 +110,7 @@ import Futhark.CodeGen.RTS.C (cacheH, errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (prettyText, ppr, prettyCompact)
+import Futhark.Util.Pretty (ppr, prettyCompact, prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
@@ -256,9 +257,9 @@ errorMsgString (ErrorMsg parts) = do
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   pure (mconcat formatstrs, formatargs)
 
-freeAllocatedMem'
-  :: (VName -> Space -> CompilerM op s ())
-  -> CompilerM op s [C.BlockItem]
+freeAllocatedMem' ::
+  (VName -> Space -> CompilerM op s ()) ->
+  CompilerM op s [C.BlockItem]
 freeAllocatedMem' f = collect $ mapM_ (uncurry f) =<< gets compDeclaredMem
 
 freeAllocatedMem :: CompilerM op s [C.BlockItem]
@@ -291,7 +292,7 @@ defCall dests fname args = do
   case dests of
     [dest]
       | isBuiltInFunction fname ->
-          stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
+        stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
     _ ->
       item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; goto cleanup; }|]
 
@@ -813,18 +814,18 @@ resetMem mem space = do
       when refcount $
         stm [C.cstm|$exp:mem.references = NULL;|]
 
-setMem'
-  :: (C.ToExp a, C.ToExp b) => a
-  -> b
-  -> Space
-  -> (Space -> a -> b -> String -> CompilerM op s C.Stm)
-  -> CompilerM op s ()
+setMem' ::
+  (C.ToExp a, C.ToExp b) =>
+  a ->
+  b ->
+  Space ->
+  (Space -> a -> b -> String -> CompilerM op s C.Stm) ->
+  CompilerM op s ()
 setMem' dest src space stmt = do
   refcount <- fatMemory space
   let src_s = pretty $ C.toExp src noLoc
   if refcount
-    then
-      stm =<< stmt space dest src src_s
+    then stm =<< stmt space dest src src_s
     else case space of
       ScalarSpace ds _ -> do
         i' <- newVName "i"
@@ -838,12 +839,12 @@ setMem' dest src space stmt = do
                   }|]
       _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
-
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = setMem' dest src space stmt
   where
-    stmt space' dest' src' src_s' = pure
-      [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src',
+    stmt space' dest' src' src_s' =
+      pure
+        [C.cstm|if ($id:(fatMemSet space')(ctx, &$exp:dest', &$exp:src',
                 $string:src_s') != 0) {
                 return 1;
               }|]
@@ -859,8 +860,9 @@ unRefMem' mem space cstm = do
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = unRefMem' mem space cstm
   where
-    cstm s m m_s = pure
-      [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, $string:m_s) != 0) {
+    cstm s m m_s =
+      pure
+        [C.cstm|if ($id:(fatMemUnRef s)(ctx, &$exp:m, $string:m_s) != 0) {
         return 1;
       }|]
 
@@ -876,8 +878,7 @@ allocMem' mem size space on_failure stmt = do
   refcount <- fatMemory space
   let mem_s = pretty $ C.toExp mem noLoc
   if refcount
-    then
-      stm =<< stmt space mem size mem_s on_failure
+    then stm =<< stmt space mem size mem_s on_failure
     else do
       freeRawMem mem space mem_s
       allocRawMem mem size space [C.cexp|desc|]
@@ -891,8 +892,9 @@ allocMem ::
   CompilerM op s ()
 allocMem mem size space on_failure = allocMem' mem size space on_failure stmt
   where
-    stmt space' mem' size' mem_s' on_failure' = pure
-      [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
+    stmt space' mem' size' mem_s' on_failure' =
+      pure
+        [C.cstm|if ($id:(fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
                 $string:mem_s')) {
                 $stm:on_failure'
               }|]
@@ -1329,9 +1331,9 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       let rank = length shape
           maybeCopyDim (Var d) i
             | not $ d `nameIn` arg_names =
-                ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
-                  [C.cexp|$id:d == $exp:src->shape[$int:i]|]
-                )
+              ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
+                [C.cexp|$id:d == $exp:src->shape[$int:i]|]
+              )
           maybeCopyDim x i =
             ( Nothing,
               [C.cexp|$exp:x == $exp:src->shape[$int:i]|]
@@ -1687,15 +1689,16 @@ $entry_point_decls
   |]
 
   pure
-    (CParts
-      { cHeader = headerdefs,
-        cUtils = utildefs,
-        cCLI = clidefs,
-        cServer = serverdefs,
-        cLib = libdefs,
-        cJsonManifest = Manifest.manifestToJSON manifest
-      },
-      endstate)
+    ( CParts
+        { cHeader = headerdefs,
+          cUtils = utildefs,
+          cCLI = clidefs,
+          cServer = serverdefs,
+          cLib = libdefs,
+          cJsonManifest = Manifest.manifestToJSON manifest
+        },
+      endstate
+    )
   where
     Definitions consts (Functions funs) = prog
 
@@ -2143,10 +2146,10 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name vol t : SetScalar dest e : code)
       | name == dest = do
-          let ct = primTypeToCType t
-          e' <- compileExp e
-          item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-          go code
+        let ct = primTypeToCType t
+        e' <- compileExp e
+        item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
+        go code
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
 compileCode (Assert e msg (loc, locs)) = do
@@ -2304,8 +2307,8 @@ compileCode (DeclareArray name (Space space) t vs) =
 compileCode (SetScalar dest (BinOpExp op (LeafExp x _) y))
   | dest == x,
     Just f <- assignmentOperator op = do
-      y' <- compileExp y
-      stm [C.cstm|$exp:(f dest y');|]
+    y' <- compileExp y
+    stm [C.cstm|$exp:(f dest y');|]
 compileCode (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]

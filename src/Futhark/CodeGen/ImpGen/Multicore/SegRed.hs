@@ -10,8 +10,8 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
-import Prelude hiding (quot, rem)
 import Futhark.Transform.Rename (renameLambda)
+import Prelude hiding (quot, rem)
 
 type DoSegBody = (([[(SubExp, [Imp.TExp Int64])]] -> MulticoreGen ()) -> MulticoreGen ())
 
@@ -44,9 +44,9 @@ compileSegRed' ::
   MulticoreGen Imp.MCCode
 compileSegRed' pat space reds nsubtasks kbody
   | [_] <- unSegSpace space =
-      nonsegmentedReduction pat space reds nsubtasks kbody
+    nonsegmentedReduction pat space reds nsubtasks kbody
   | otherwise =
-      segmentedReduction pat space reds kbody
+    segmentedReduction pat space reds kbody
 
 -- | A SegBinOp with auxiliary information.
 data SegBinOpSlug = SegBinOpSlug
@@ -77,8 +77,8 @@ renameSlug slug = do
   let op = slugOp slug
   let lambda = segBinOpLambda op
   lambda' <- renameLambda lambda
-  let op' = op { segBinOpLambda = lambda' }
-  pure slug { slugOp = op' }
+  let op' = op {segBinOpLambda = lambda'}
+  pure slug {slugOp = op'}
 
 nonsegmentedReduction ::
   Pat LetDecMem ->
@@ -93,19 +93,19 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
       nsubtasks' = tvExp nsubtasks
 
   -- Are all the operators commutative?
-  let comm = all ((==Commutative) . segBinOpComm) reds
+  let comm = all ((== Commutative) . segBinOpComm) reds
   let dims = map (shapeDims . slugShape) slugs1
   let isScalar x = case x of MemPrim _ -> True; _ -> False
-   -- Are we only working on scalar arrays?
-  let scalars = all (all (isScalar . paramDec) . slugParams) slugs1 && all (==[]) dims
-   -- Are we working with vectorized inner maps?
+  -- Are we only working on scalar arrays?
+  let scalars = all (all (isScalar . paramDec) . slugParams) slugs1 && all (== []) dims
+  -- Are we working with vectorized inner maps?
   let inner_map = [] `notElem` dims
 
   let path
-       | comm && scalars = reductionStage1CommScalar
-       | inner_map       = reductionStage1Array
-       | scalars         = reductionStage1NonCommScalar
-       | otherwise       = reductionStage1Fallback
+        | comm && scalars = reductionStage1CommScalar
+        | inner_map = reductionStage1Array
+        | scalars = reductionStage1NonCommScalar
+        | otherwise = reductionStage1Fallback
   path space slugs1 kbody
 
   reds2 <- renameSegBinOp reds
@@ -142,20 +142,20 @@ genAccumulators slugs =
 
 -- Datatype to represent all the different ways we can generate
 -- code for a reduction.
-data RedLoopType =
-    RedSeq        -- Fully sequential
-  | RedComm       -- Commutative scalar
-  | RedNonComm    -- Noncommutative scalar
-  | RedNested     -- Nested vectorized operator
+data RedLoopType
+  = RedSeq -- Fully sequential
+  | RedComm -- Commutative scalar
+  | RedNonComm -- Noncommutative scalar
+  | RedNested -- Nested vectorized operator
   | RedUniformize -- Uniformize over scalar acc
 
 -- Given a type of reduction and the loop index, should we wrap
 -- the loop body in some extra code?
 getRedLoop ::
-  RedLoopType
-  -> Imp.TExp Int64
-  -> (Imp.TExp Int64 -> MulticoreGen ())
-  -> MulticoreGen ()
+  RedLoopType ->
+  Imp.TExp Int64 ->
+  (Imp.TExp Int64 -> MulticoreGen ()) ->
+  MulticoreGen ()
 getRedLoop RedNonComm _ = generateUniformizeLoop
 getRedLoop RedUniformize uni = \body -> body uni
 getRedLoop _ _ = \body -> body 0
@@ -163,10 +163,10 @@ getRedLoop _ _ = \body -> body 0
 -- Given a type of reduction, should we perform extracts on
 -- the accumulator?
 getExtract ::
-  RedLoopType
-  -> Imp.TExp Int64
-  -> MulticoreGen Imp.MCCode
-  -> MulticoreGen ()
+  RedLoopType ->
+  Imp.TExp Int64 ->
+  MulticoreGen Imp.MCCode ->
+  MulticoreGen ()
 getExtract RedNonComm = extractVectorLane
 getExtract RedUniformize = extractVectorLane
 getExtract _ = \_ body -> body >>= emit
@@ -174,10 +174,10 @@ getExtract _ = \_ body -> body >>= emit
 -- Given a type of reduction, should we vectorize the inner
 -- map, if it exists?
 getNestLoop ::
-  RedLoopType
-  -> Shape
-  -> ([Imp.TExp Int64] -> MulticoreGen ())
-  -> MulticoreGen ()
+  RedLoopType ->
+  Shape ->
+  ([Imp.TExp Int64] -> MulticoreGen ()) ->
+  MulticoreGen ()
 getNestLoop RedNested = sLoopNestVectorized
 getNestLoop _ = sLoopNest
 
@@ -189,25 +189,25 @@ redSourceAccs slug_local_accs m =
 
 -- Generate a reduction loop for uniformizing vectors
 genPostbodyReductionLoop ::
-  [[VName]]
-  -> [SegBinOpSlug]
-  -> [[VName]]
-  -> SegSpace
-  -> Imp.TExp Int64
-  -> MulticoreGen ()
+  [[VName]] ->
+  [SegBinOpSlug] ->
+  [[VName]] ->
+  SegSpace ->
+  Imp.TExp Int64 ->
+  MulticoreGen ()
 genPostbodyReductionLoop accs =
   genReductionLoop RedUniformize (redSourceAccs accs)
 
 -- Generate a potentially vectorized body of code that performs reduction
 -- when put inside a chunked loop.
 genReductionLoop ::
-  RedLoopType
-  -> DoSegBody
-  -> [SegBinOpSlug]
-  -> [[VName]]
-  -> SegSpace
-  -> Imp.TExp Int64
-  -> MulticoreGen ()
+  RedLoopType ->
+  DoSegBody ->
+  [SegBinOpSlug] ->
+  [[VName]] ->
+  SegSpace ->
+  Imp.TExp Int64 ->
+  MulticoreGen ()
 genReductionLoop typ kbodymap slugs slug_local_accs space i = do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
@@ -226,8 +226,9 @@ genReductionLoop typ kbodymap slugs slug_local_accs space i = do
 
           sComment "Load next params" $
             forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) -> do
-              getExtract typ uni $ collect $
-                copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+              getExtract typ uni $
+                collect $
+                  copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
 
           sComment "SegRed body" $
             compileStms mempty (bodyStms $ slugBody slug) $
@@ -395,39 +396,40 @@ compileSegRedBody pat space reds kbody = do
 
   let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension
-  collect . inISPC $ generateChunkLoop "SegRed" True $ \n_segments -> do
-    flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
-    zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
-    sComment "neutral-initialise the accumulators" $
-      forM_ (zip per_red_pes reds) $ \(pes, red) ->
-        forM_ (zip pes (segBinOpNeutral red)) $ \(pe, ne) ->
-          sLoopNest (segBinOpShape red) $ \vec_is ->
-            copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) ne []
+  collect . inISPC $
+    generateChunkLoop "SegRed" True $ \n_segments -> do
+      flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
+      zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
+      sComment "neutral-initialise the accumulators" $
+        forM_ (zip per_red_pes reds) $ \(pes, red) ->
+          forM_ (zip pes (segBinOpNeutral red)) $ \(pe, ne) ->
+            sLoopNest (segBinOpShape red) $ \vec_is ->
+              copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) ne []
 
-    sComment "main body" $ do
-      dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
-      sFor "i" inner_bound $ \i -> do
-        zipWithM_
-          (<--)
-          (map (`mkTV` int64) $ init is)
-          (unflattenIndex (init ns_64) (sExt64 n_segments))
-        dPrimV_ (last is) i
-        kbody $ \red_res' -> do
-          forM_ (zip3 per_red_pes reds red_res') $ \(pes, red, res') ->
-            sLoopNest (segBinOpShape red) $ \vec_is -> do
-              sComment "load accum" $ do
-                let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
-                forM_ (zip acc_params pes) $ \(p, pe) ->
-                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.le64 (init is) ++ vec_is)
+      sComment "main body" $ do
+        dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
+        sFor "i" inner_bound $ \i -> do
+          zipWithM_
+            (<--)
+            (map (`mkTV` int64) $ init is)
+            (unflattenIndex (init ns_64) (sExt64 n_segments))
+          dPrimV_ (last is) i
+          kbody $ \red_res' -> do
+            forM_ (zip3 per_red_pes reds red_res') $ \(pes, red, res') ->
+              sLoopNest (segBinOpShape red) $ \vec_is -> do
+                sComment "load accum" $ do
+                  let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
+                  forM_ (zip acc_params pes) $ \(p, pe) ->
+                    copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.le64 (init is) ++ vec_is)
 
-              sComment "load new val" $ do
-                let next_params = drop (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
-                forM_ (zip next_params res') $ \(p, (res, res_is)) ->
-                  copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+                sComment "load new val" $ do
+                  let next_params = drop (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
+                  forM_ (zip next_params res') $ \(p, (res, res_is)) ->
+                    copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
 
-              sComment "apply reduction" $ do
-                let lbody = (lambdaBody . segBinOpLambda) red
-                compileStms mempty (bodyStms lbody) $
-                  sComment "write back to res" $
-                    forM_ (zip pes $ map resSubExp $ bodyResult lbody) $
-                      \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) se' []
+                sComment "apply reduction" $ do
+                  let lbody = (lambdaBody . segBinOpLambda) red
+                  compileStms mempty (bodyStms lbody) $
+                    sComment "write back to res" $
+                      forM_ (zip pes $ map resSubExp $ bodyResult lbody) $
+                        \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.le64 (init is) ++ vec_is) se' []

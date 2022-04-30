@@ -25,6 +25,7 @@ module Futhark.Actions
     compilePyOpenCLAction,
   )
 where
+
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (intercalate)
@@ -209,22 +210,23 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
     liftIO $
       runProgramWithExitCode
         "ispc"
-        ( [ispcpath, "-o", ispcbase `addExtension` "o"] ++
-          ["-h", ispcbase `addExtension` "h"] ++
-          ["--addressing=64", "--pic"] ++ -- These flags are always needed
-          cmdISPCFLAGS ispc_flags
+        ( [ispcpath, "-o", ispcbase `addExtension` "o"]
+            ++ ["-h", ispcbase `addExtension` "h"]
+            ++ ["--addressing=64", "--pic"]
+            ++ cmdISPCFLAGS ispc_flags -- These flags are always needed
         )
         mempty
   ret <- -- TODO(kris): Clean this shit up
     liftIO $
       runProgramWithExitCode
         cmdCC
-        ( [ispcbase `addExtension` "h"] ++
-          [ispcbase `addExtension` "o"] ++
-          [cpath, "-o", outpath] ++
-          cmdCFLAGS cflags_def ++
+        ( [ispcbase `addExtension` "h"]
+            ++ [ispcbase `addExtension` "o"]
+            ++ [cpath, "-o", outpath]
+            ++ cmdCFLAGS cflags_def
+            ++
             -- The default LDFLAGS are always added.
-          ldflags
+            ldflags
         )
         mempty
   case ret_ispc of
@@ -295,11 +297,11 @@ compileOpenCLAction fcfg mode outpath =
           jsonpath = outpath `addExtension` "json"
           extra_options
             | System.Info.os == "darwin" =
-                ["-framework", "OpenCL"]
+              ["-framework", "OpenCL"]
             | System.Info.os == "mingw32" =
-                ["-lOpenCL64"]
+              ["-lOpenCL64"]
             | otherwise =
-                ["-lOpenCL"]
+              ["-lOpenCL"]
 
       case mode of
         ToLibrary -> do
