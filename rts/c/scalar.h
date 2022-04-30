@@ -2160,7 +2160,7 @@ static inline float futrts_erfc32(float x) {
 }
 
 static inline float fmod32(float x, float y) {
-  return x - y * trunc(x/y); //TODO: Check if correct behavior, else use round()
+  return x - y * trunc(x/y);
 }
 
 static inline float futrts_round32(float x) {
@@ -2688,7 +2688,7 @@ static inline double futrts_from_bits64(int64_t x) {
 }
 
 static inline double fmod64(double x, double y) {
-  return x - y * trunc(x/y); //TODO: Check if correct behavior, else use round()
+  return x - y * trunc(x/y);
 }
 
 static inline double fsignum64(double x) {
