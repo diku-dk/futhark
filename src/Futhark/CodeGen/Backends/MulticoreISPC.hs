@@ -526,7 +526,7 @@ compileCode (Assert e msg (loc, locs)) = do
 compileCode code =
   GC.compileCode code
 
--- Prepare a struct with memory allocted in the scope and populate
+-- | Prepare a struct with memory allocted in the scope and populate
 -- its fields with values
 prepareMemStruct :: [(VName, VName)] -> [VName] -> ISPCCompilerM Name
 prepareMemStruct lexmems fatmems = do
@@ -552,7 +552,7 @@ prepareMemStruct lexmems fatmems = do
     fatMemDef name =
       [C.csdecl|$tyqual:varying struct memblock * $tyqual:uniform $id:name;|]
 
--- Get memory from the memory struct into local variables
+-- | Get memory from the memory struct into local variables
 compileGetMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
 compileGetMemStructVals struct lexmems fatmems = do
   forM_ fatmems $ \m ->
@@ -561,7 +561,7 @@ compileGetMemStructVals struct lexmems fatmems = do
     GC.decl [C.cdecl|unsigned char * $id:m = $id:struct->$id:m;|]
     GC.decl [C.cdecl|size_t $id:s = $id:struct->$id:s;|]
 
--- Write back potentially changed memory addresses and sizes to the memory struct
+-- | Write back potentially changed memory addresses and sizes to the memory struct
 compileWritebackMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
 compileWritebackMemStructVals struct lexmems fatmems = do
   forM_ fatmems $ \m ->
@@ -570,7 +570,7 @@ compileWritebackMemStructVals struct lexmems fatmems = do
     GC.stm [C.cstm|$id:struct->$id:m = $id:m;|]
     GC.stm [C.cstm|$id:struct->$id:s = $id:s;|]
 
--- Read back potentially changed memory addresses and sizes to the memory struct into local variables
+-- | Read back potentially changed memory addresses and sizes to the memory struct into local variables
 compileReadbackMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
 compileReadbackMemStructVals struct lexmems fatmems = do
   forM_ fatmems $ \m ->
