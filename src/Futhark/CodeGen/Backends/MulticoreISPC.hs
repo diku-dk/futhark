@@ -180,7 +180,7 @@ setMem dest src space = GC.setMem' dest src space stmt
       pure
         [C.cstm|if ($id:(GC.fatMemSet space')(ctx, &$exp:dest', &$exp:src',
           $id:strlit()) != 0) {
-          err = 1;
+          $escstm:("unmasked { return 1; }")
         }|]
 
 -- | Unref memory in ISPC
@@ -191,7 +191,7 @@ unRefMem mem space = GC.unRefMem' mem space cstm
       strlit <- makeStringLiteral m_s
       pure
         [C.cstm|if ($id:(GC.fatMemUnRef s)(ctx, &$exp:m, $id:strlit()) != 0) {
-          err = 1;
+          $escstm:("unmasked { return 1; }")
         }|]
 
 -- | Free memory in ISPC
@@ -362,11 +362,12 @@ handleError msg stacktrace = do
   let args' = map (\x -> [C.cexp|extract($exp:x, $id:uni)|]) args
   GC.items
     [C.citems|
-      $escstm:("foreach_active("<> pretty uni <> ")")
+      $escstm:("foreach_active(" <> pretty uni <> ")")
       {
         $id:shim(ctx, $args:args');
         err = FUTHARK_PROGRAM_ERROR;
-      }|]
+      }
+      $escstm:("unmasked { return err; }")|]
   where
     getErrorVal (ErrorString _) = Nothing
     getErrorVal (ErrorVal _ v) = Just v
@@ -434,12 +435,15 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
   cached <- GC.cacheMem name
   case cached of
     Just cur_size ->
-      GC.stm -- TODO(pema): Handle errors here
+      GC.stm
         [C.cstm|if ($exp:cur_size < $exp:size) {
-                  lexical_realloc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
+                  err = lexical_realloc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
+                  if (err != FUTHARK_SUCCESS) {
+                    $escstm:("unmasked { return err; }")
+                  }
                 }|]
     _ ->
-      allocMem name size space [C.cstm|{err = 1;}|]
+      allocMem name size space [C.cstm|$escstm:("unmasked { return 1; }")|]
 compileCode (SetMem dest src space) =
   setMem dest src space
 compileCode code@(Write dest (Count idx) elemtype DefaultSpace _ elemexp)
@@ -509,7 +513,10 @@ compileCode (Call dests fname args) =
           | isBuiltInFunction fname' ->
               GC.stm [C.cstm|$id:d = $id:(funName fname')($args:args'');|]
         _ ->
-          GC.item [C.citem|if ($id:(funName fname')($args:args'') != 0) { err = 1; }|]
+          GC.item [C.citem|
+            if ($id:(funName fname')($args:args'') != 0) {
+              $escstm:("unmasked { return 1; }")
+            }|]
 compileCode (Assert e msg (loc, locs)) = do
   e' <- GC.compileExp e
   err <- GC.collect $ handleError msg stacktrace
@@ -518,6 +525,59 @@ compileCode (Assert e msg (loc, locs)) = do
     stacktrace = prettyStacktrace 0 $ map locStr $ loc : locs
 compileCode code =
   GC.compileCode code
+
+-- | Prepare a struct with memory allocted in the scope and populate
+-- its fields with values
+prepareMemStruct :: [(VName, VName)] -> [VName] -> ISPCCompilerM Name
+prepareMemStruct lexmems fatmems = do
+  let lex_defs = concatMap lexMemDef lexmems
+  let fat_defs = map fatMemDef fatmems
+  name <- ispcDef "mem_struct" $ \s -> do
+    pure
+      [C.cedecl|struct $id:s {
+        $sdecls:lex_defs
+        $sdecls:fat_defs
+      };|]
+  let name' = name <> "_"
+  GC.decl [C.cdecl|$tyqual:uniform struct $id:name $id:name';|]
+  forM_ (concatMap (\(a, b) -> [a, b]) lexmems) $ \m ->
+    GC.stm [C.cstm|$id:name'.$id:m = $id:m;|]
+  forM_ fatmems $ \m ->
+    GC.stm [C.cstm|$id:name'.$id:m = &$id:m;|]
+  pure name
+  where
+    lexMemDef (name, size) =
+      [[C.csdecl|$tyqual:uniform unsigned char * $tyqual:varying $id:name;|]
+      ,[C.csdecl|$tyqual:varying size_t $id:size;|]]
+    fatMemDef name =
+      [C.csdecl|$tyqual:varying struct memblock * $tyqual:uniform $id:name;|]
+
+-- | Get memory from the memory struct into local variables
+compileGetMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
+compileGetMemStructVals struct lexmems fatmems = do
+  forM_ fatmems $ \m ->
+    GC.decl [C.cdecl|struct memblock $id:m = *$id:struct->$id:m;|]
+  forM_ lexmems $ \(m, s) -> do
+    GC.decl [C.cdecl|unsigned char * $id:m = $id:struct->$id:m;|]
+    GC.decl [C.cdecl|size_t $id:s = $id:struct->$id:s;|]
+
+-- | Write back potentially changed memory addresses and sizes to the memory struct
+compileWritebackMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
+compileWritebackMemStructVals struct lexmems fatmems = do
+  forM_ fatmems $ \m ->
+    GC.stm [C.cstm|*$id:struct->$id:m = $id:m;|]
+  forM_ lexmems $ \(m, s) -> do
+    GC.stm [C.cstm|$id:struct->$id:m = $id:m;|]
+    GC.stm [C.cstm|$id:struct->$id:s = $id:s;|]
+
+-- | Read back potentially changed memory addresses and sizes to the memory struct into local variables
+compileReadbackMemStructVals :: Name -> [(VName, VName)] -> [VName] -> ISPCCompilerM ()
+compileReadbackMemStructVals struct lexmems fatmems = do
+  forM_ fatmems $ \m ->
+    GC.stm [C.cstm|$id:m = *$id:struct.$id:m;|]
+  forM_ lexmems $ \(m, s) -> do
+    GC.stm [C.cstm|$id:m = $id:struct.$id:m;|]
+    GC.stm [C.cstm|$id:s = $id:struct.$id:s;|]
 
 compileGetStructVals ::
   Name ->
@@ -537,6 +597,24 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
                      $id:name.mem = $id:struct'->$id:(MC.closureFreeStructField name);
                      $id:name.size = 0;
                      $id:name.references = NULL;|]
+
+-- | Can the given code produce an error? If so, we can't use foreach
+-- loops, since they don't allow for early-outs in error handling.
+mayProduceError :: MCCode -> Bool
+mayProduceError (x :>>: y) = mayProduceError x || mayProduceError y
+mayProduceError (If _ x y) = mayProduceError x || mayProduceError y
+mayProduceError (For _ _ x) = mayProduceError x
+mayProduceError (While _ x) = mayProduceError x
+mayProduceError (Comment _ x) = mayProduceError x
+mayProduceError (Op (ForEachActive _ body)) = mayProduceError body
+mayProduceError (Op (ForEach _ _ body)) = mayProduceError body
+mayProduceError (Op (SegOp _ _ _ _ _ _)) = True
+mayProduceError (Allocate _ _ _) = True
+mayProduceError (Assert _ _ _) = True
+mayProduceError (SetMem _ _ _) = True
+mayProduceError (Free _ _) = True
+mayProduceError (Call _ _ _) = True
+mayProduceError _ = False
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ISPCState
@@ -612,6 +690,9 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
         err = $id:schedn(ctx, &$id:aos_name[i], extract($exp:e', i));
       }
     }
+    if (err != 0) {
+      $escstm:("unmasked { return err; }")
+    }
     $escstm:("#else")
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
     if (err != 0) {
@@ -628,15 +709,44 @@ compileOp (ISPCKernel body free) = do
   let fstruct' = fstruct <> "_"
 
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
-    mainBody <- GC.inNewFunction $ analyzeVariability body $ GC.cachingMemory lexical $ \decl_cached free_cached ->
+    mainBody <- GC.inNewFunction $ analyzeVariability body $ GC.cachingMemory lexical $ \decl_cached free_cached lexmems ->
       GC.collect $ do
         GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
         GC.items =<< compileGetStructVals fstruct free_args free_ctypes
-        GC.decl [C.cdecl|$tyqual:uniform int err = 0;|]
         body' <- GC.collect $ compileCode body
         mapM_ GC.item decl_cached
         mapM_ GC.item =<< GC.declAllocatedMem
-        mapM_ GC.item body'
+
+        -- Make inner kernel for error handling, if needed
+        if mayProduceError body
+          then do
+            fatmems <- gets (map fst . GC.compDeclaredMem)
+            mstruct <- prepareMemStruct lexmems fatmems
+            let mstruct' = mstruct <> "_"
+            innerShim <- ispcDef "inner_ispc" $ \t -> do
+              innerBody <- GC.collect $ do
+                GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
+                GC.items =<< compileGetStructVals fstruct free_args free_ctypes
+                compileGetMemStructVals mstruct' lexmems fatmems
+                GC.decl [C.cdecl|$tyqual:uniform int err = 0;|]
+                mapM_ GC.item body'
+                compileWritebackMemStructVals mstruct' lexmems fatmems
+                GC.stm [C.cstm|return err;|]
+              pure [C.cedecl|
+                static $tyqual:unmasked inline $tyqual:uniform int $id:t(
+                  $tyqual:uniform typename int64_t start,
+                  $tyqual:uniform typename int64_t end,
+                  struct $id:fstruct $tyqual:uniform * $tyqual:uniform $id:fstruct',
+                  struct $id:mstruct $tyqual:uniform * $tyqual:uniform $id:mstruct') {
+                  $items:innerBody
+                }|]
+            -- Call the kernel and read back potentially changed memory
+            GC.decl [C.cdecl|$tyqual:uniform int err = $id:innerShim(start, end, $id:fstruct', &$id:mstruct');|]
+            compileReadbackMemStructVals mstruct' lexmems fatmems
+          else do
+            GC.decl [C.cdecl|$tyqual:uniform int err = 0;|]
+            mapM_ GC.item body'
+
         free_mem <- freeAllocatedMem
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
         GC.stm [C.cstm|return err;|]
@@ -657,17 +767,27 @@ compileOp (ISPCKernel body free) = do
 compileOp (ForEach i bound body) = do
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCode body
-  GC.stms [C.cstms|
-    $escstm:("foreach(" <> pretty i <> "=0 ... extract(" <> pretty bound' <> ",0))")
-    {
-      $items:body'
-    }|]
+  if mayProduceError body
+    then GC.stms [C.cstms|
+      for ($tyqual:uniform typename int64_t i = 0; i < ($exp:bound' / programCount); i++) {
+        typename int64_t $id:i = programIndex + i * programCount;
+        $items:body'
+      }
+      if (programIndex < ($exp:bound' % programCount)) {
+        typename int64_t $id:i = programIndex + (($exp:bound' / programCount) * programCount);
+        $items:body'
+      }|]
+    else GC.stms [C.cstms|
+      $escstm:("foreach (" <> pretty i <> " = 0 ... " <> pretty bound' <> ")") {
+        $items:body'
+      }|]
 compileOp (ForEachActive name body) = do
   body' <- GC.collect $ compileCode body
   GC.stms [C.cstms|
-    $escstm:("foreach_active(" <> pretty name <> ")")
-    {
-      $items:body'
+    for ($tyqual:uniform unsigned int $id:name = 0; $id:name < programCount; $id:name++) {
+      if (programIndex == $id:name) {
+        $items:body'
+      }
     }|]
 compileOp (ExtractLane dest tar lane) = do
   tar' <- GC.compileExp tar
