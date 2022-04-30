@@ -282,7 +282,7 @@ typeCheckProg orig_imports orig_src =
           let err' = msg <> ppr notes
           Left . singleError . ProgError (locOf loc) $
             if anyWarnings prog_ws
-              then ppr prog_ws </> line <> ppr err'
+              then ppr err' </> ppr prog_ws
               else ppr err'
         (prog_ws, Right (m, src')) ->
           let warnHole (loc, t) =
