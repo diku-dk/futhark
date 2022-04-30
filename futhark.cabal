@@ -88,6 +88,7 @@ library
       Futhark.CLI.Doc
       Futhark.CLI.Literate
       Futhark.CLI.LSP
+      Futhark.CLI.Main
       Futhark.CLI.Misc
       Futhark.CLI.Multicore
       Futhark.CLI.MulticoreWASM
@@ -385,13 +386,10 @@ library
 
 executable futhark
   main-is: src/main.hs
-  other-modules:
-      Paths_futhark
   ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
   build-depends:
       base
     , futhark
-    , text
   default-language: Haskell2010
 
 test-suite unit
