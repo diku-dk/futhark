@@ -36,7 +36,7 @@ import Control.Monad.State (execStateT, gets, modify)
 import Data.Bifunctor (first)
 import Data.List (intercalate, sort)
 import qualified Data.List.NonEmpty as NE
-import Data.Loc (Loc (..), locOf)
+import Data.Loc (Loc (..), Located, locOf)
 import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
@@ -44,7 +44,7 @@ import qualified Data.Text.IO as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
-import Futhark.Util.Pretty (Doc, align, ppr, text, (</>))
+import Futhark.Util.Pretty (Doc, align, ppr, text)
 import qualified Language.Futhark as E
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
@@ -67,9 +67,17 @@ data LoadedFile fm = LoadedFile
 
 -- | Note that the location may be 'NoLoc'.  This essentially only
 -- happens when the problem is that a root file cannot be found.
-data ProgError = ProgError Loc Doc
+data ProgError
+  = ProgError Loc Doc
+  | -- | Not actually an error, but we want them reported
+    -- with errors.
+    ProgWarning Loc Doc
 
 type WithErrors = Either (NE.NonEmpty ProgError)
+
+instance Located ProgError where
+  locOf (ProgError l _) = l
+  locOf (ProgWarning l _) = l
 
 -- | A mapping from absolute pathnames to text representing a virtual
 -- file system.  Before loading a file from the file system, this
@@ -280,10 +288,10 @@ typeCheckProg orig_imports orig_src =
       case E.checkProg (asImports imports) src import_name prog' of
         (prog_ws, Left (E.TypeError loc notes msg)) -> do
           let err' = msg <> ppr notes
-          Left . singleError . ProgError (locOf loc) $
-            if anyWarnings prog_ws
-              then ppr err' </> ppr prog_ws
-              else ppr err'
+              warningToError (wloc, wmsg) = ProgWarning (locOf wloc) wmsg
+          Left $
+            ProgError (locOf loc) err'
+              NE.:| map warningToError (listWarnings prog_ws)
         (prog_ws, Right (m, src')) ->
           let warnHole (loc, t) =
                 singleWarning (E.srclocOf loc) $ "Hole of type: " <> align (ppr t)
