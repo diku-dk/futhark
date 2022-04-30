@@ -11,15 +11,15 @@
 -- depended upon by soacs.fut.  So we just define a quick-and-dirty
 -- internal one here that uses the intrinsic version.
 local def internal_map 'a [n] 'x (f: a -> x) (as: [n]a): [n]x =
-  intrinsics.map (f, as) :> [n]x
+  intrinsics.map (f, as)
 
 -- | Construct an array of pairs from two arrays.
 def zip [n] 'a 'b (as: [n]a) (bs: [n]b): *[n](a,b) =
-  intrinsics.zip (as, bs) :> *[n](a,b)
+  intrinsics.zip (as, bs)
 
 -- | Construct an array of pairs from two arrays.
 def zip2 [n] 'a 'b (as: [n]a) (bs: [n]b): *[n](a,b) =
-  zip as bs :> *[n](a,b)
+  zip as bs
 
 -- | As `zip2`@term, but with one more array.
 def zip3 [n] 'a 'b 'c (as: [n]a) (bs: [n]b) (cs: [n]c): *[n](a,b,c) =
@@ -35,7 +35,7 @@ def zip5 [n] 'a 'b 'c 'd 'e (as: [n]a) (bs: [n]b) (cs: [n]c) (ds: [n]d) (es: [n]
 
 -- | Turn an array of pairs into two arrays.
 def unzip [n] 'a 'b (xs: [n](a,b)): ([n]a, [n]b) =
-  intrinsics.unzip xs :> ([n]a, [n]b)
+  intrinsics.unzip xs
 
 -- | Turn an array of pairs into two arrays.
 def unzip2 [n] 'a 'b (xs: [n](a,b)): ([n]a, [n]b) =
