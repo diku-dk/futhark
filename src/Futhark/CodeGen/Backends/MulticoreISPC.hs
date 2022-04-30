@@ -778,8 +778,7 @@ compileOp (ForEach i bound body) = do
         $items:body'
       }|]
     else GC.stms [C.cstms|
-      $escstm:("foreach (" <> pretty i <> " = 0 ... " <> pretty bound' <> ")")
-      {
+      $escstm:("foreach (" <> pretty i <> " = 0 ... " <> pretty bound' <> ")") {
         $items:body'
       }|]
 compileOp (ForEachActive name body) = do
