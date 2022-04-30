@@ -80,9 +80,10 @@ compileProg header version prog = do
 
   let ispc_decls = T.unlines $ map prettyText $ DL.toList $ sDefs $ GC.compUserState endstate
 
+  -- The bool #define is a workaround around an ISPC bug, stdbool doesn't get included.
   let ispcdefs =
         [untrimming|
-#define bool uint8 // This is a workaround around an ISPC bug, stdbool doesn't get included
+#define bool uint8
 typedef int64 int64_t;
 typedef int32 int32_t;
 typedef int16 int16_t;
@@ -105,16 +106,6 @@ $cScalarDefs
 $uniformH
 
 $ispcUtilH
-
-#ifndef __ISPC_STRUCT_memblock__
-#define __ISPC_STRUCT_memblock__
-struct memblock {
-    int32_t * references;
-    uint8_t * mem;
-    int64_t size;
-    const int8_t * desc;
-};
-#endif
 
 $ispc_decls|]
 
@@ -837,7 +828,7 @@ execVariabilityM :: VariabilityM a -> Dependencies
 execVariabilityM (VariabilityM m) =
   execState (runReaderT m mempty) mempty
 
--- Extend the set of dependencies with a new one
+-- | Extend the set of dependencies with a new one
 addDeps :: VName -> Names -> VariabilityM ()
 addDeps v ns = do
   deps <- get
@@ -846,7 +837,7 @@ addDeps v ns = do
     Nothing -> put $ M.insert v (ns <> env) deps
     Just ns' -> put $ M.insert v (ns <> ns') deps
 
--- Find all the dependencies in a body of code
+-- | Find all the dependencies in a body of code
 findDeps :: MCCode -> VariabilityM ()
 findDeps (x :>>: y) = do
   findDeps x
@@ -889,7 +880,7 @@ findDeps (Op (ExtractLane x _ _)) = do
   addDeps x mempty
 findDeps _ = pure ()
 
--- Take a list of dependencies and iterate them to a fixed point.
+-- | Take a list of dependencies and iterate them to a fixed point.
 depsFixedPoint :: Dependencies -> Dependencies
 depsFixedPoint deps =
   if deps == deps'
@@ -902,7 +893,7 @@ depsFixedPoint deps =
           namesToList names
     deps' = M.map grow deps
 
--- Find roots of variance. These are memory blocks declared in
+-- | Find roots of variance. These are memory blocks declared in
 -- the current scope as well as loop indices of foreach loops.
 findVarying :: MCCode -> [VName]
 findVarying (x :>>: y) = findVarying x ++ findVarying y
@@ -915,7 +906,7 @@ findVarying (Op (ForEach idx _ body)) = idx : findVarying body
 findVarying (DeclareMem mem _) = [mem]
 findVarying _ = []
 
--- Analyze variability in a body of code and run an action with
+-- | Analyze variability in a body of code and run an action with
 -- info about that variability in the compiler state.
 analyzeVariability :: MCCode -> ISPCCompilerM a -> ISPCCompilerM a
 analyzeVariability code m = do
@@ -929,7 +920,7 @@ analyzeVariability code m = do
   GC.modifyUserState (\s -> s {sUniform = sUniform pre_state})
   pure a
 
--- Get the variability of a variable
+-- | Get the variability of a variable
 getVariability :: VName -> ISPCCompilerM Variability
 getVariability name = do
   uniforms <- sUniform <$> GC.getUserState
@@ -938,7 +929,7 @@ getVariability name = do
       then Uniform
       else Varying
 
--- Get the variability qualifiers of a variable
+-- | Get the variability qualifiers of a variable
 getVariabilityQuals :: VName -> ISPCCompilerM [C.TypeQual]
 getVariabilityQuals name = variQuals <$> getVariability name
   where
