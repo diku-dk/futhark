@@ -1332,7 +1332,7 @@ fixOverloadedTypes tyvars_at_toplevel =
           <+> ppr (Sum cs) <> ")."
           </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, Size Nothing usage) =
-      typeError usage mempty $ "Size" <+> pquote (pprName v) <+> "is ambiguous.\n"
+      typeError usage mempty $ "Size" <+> pquote (pprName v) <+> "is ambiguous."
     fixOverloaded _ = pure ()
 
 hiddenParamNames :: [Pat] -> Names
