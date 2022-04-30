@@ -651,7 +651,7 @@ freeRawMem mem space desc =
 defineMemorySpace :: Space -> CompilerM op s ([C.Definition], [C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
-  -- TODO(pema, K): This is hacky. Workaround for https://github.com/ispc/ispc/issues/2277
+  -- This is a hack to work around https://github.com/ispc/ispc/issues/2277 for the ISPC backend
   let structGuard = "#ifndef __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
   let structDefine = "#define __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
 
