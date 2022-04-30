@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Errors and warnings no longer awkwardly mixed together in console output.
 
+* Slightly better type errors for ambiguous sizes (#1661).
+
 ## [0.21.10]
 
 ### Added
