@@ -37,7 +37,7 @@ import Language.Futhark.TypeChecker.Terms.DoLoop
 import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Terms.Pat
 import Language.Futhark.TypeChecker.Types
-import Language.Futhark.TypeChecker.Unify hiding (Usage)
+import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
 overloadedTypeVars :: Constraints -> Names
@@ -1331,8 +1331,12 @@ fixOverloadedTypes tyvars_at_toplevel =
         "Type is ambiguous (must be a sum type with constructors:"
           <+> ppr (Sum cs) <> ")."
           </> "Add a type annotation to disambiguate the type."
-    fixOverloaded (v, Size Nothing usage) =
-      typeError usage mempty $ "Size" <+> pquote (pprName v) <+> "is ambiguous."
+    fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
+      typeError loc mempty . withIndexLink "ambiguous-size" $
+        "Ambiguous size" <+> pquote (pprName v) <> "."
+    fixOverloaded (v, Size Nothing (Usage (Just u) loc)) =
+      typeError loc mempty . withIndexLink "ambiguous-size" $
+        "Ambiguous size" <+> pquote (pprName v) <+> "arising from" <+> text u <> "."
     fixOverloaded _ = pure ()
 
 hiddenParamNames :: [Pat] -> Names
