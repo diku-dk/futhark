@@ -225,7 +225,7 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
 
       GC.libDecl
         =<< pure
-          [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {               
+          [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {
                   return $id:(funName fname)($args:extra_exp, $args:out_args_c, $args:in_args_c);
                 }|]
 
@@ -235,7 +235,7 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
 
           ispc_uniform =
             [C.cedecl|$tyqual:uniform int $id:(funName fname)
-                    ($params:extra, $params:outparams_uni, $params:inparams_uni) { 
+                    ($params:extra, $params:outparams_uni, $params:inparams_uni) {
                       return $id:(funName $ fname<>"_extern")(
                         $args:extra_exp,
                         $args:out_args_noderef,
@@ -244,7 +244,7 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
 
           ispc_varying =
             [C.cedecl|$tyqual:uniform int $id:(funName fname)
-                    ($params:extra, $params:outparams_varying, $params:inparams_varying) { 
+                    ($params:extra, $params:outparams_varying, $params:inparams_varying) {
                         $tyqual:uniform int err = 0;
                         $items:prebody_in
                         $items:prebody_out
@@ -686,9 +686,9 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     }|]
 
   ispcDecl
-    [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:schedn 
-                        (struct futhark_context $tyqual:uniform * $tyqual:uniform ctx, 
-                        struct $id:fstruct $tyqual:uniform * $tyqual:uniform args, 
+    [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:schedn
+                        (struct futhark_context $tyqual:uniform * $tyqual:uniform ctx,
+                        struct $id:fstruct $tyqual:uniform * $tyqual:uniform args,
                         $tyqual:uniform int iterations);|]
 
   aos_name <- newVName "aos"

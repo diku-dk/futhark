@@ -278,7 +278,7 @@ defError msg stacktrace = do
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
-    [C.citems|if (ctx->error == NULL) 
+    [C.citems|if (ctx->error == NULL)
                 ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
