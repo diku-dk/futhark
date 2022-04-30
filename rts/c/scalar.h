@@ -2140,22 +2140,24 @@ static inline float futrts_hypot32(float x, float y) {
 
 }
 
-extern "C" unmasked uniform float futrts_ispc_gamma32(uniform float x);
+extern "C" unmasked uniform float tgammaf(uniform float x);
 static inline float futrts_gamma32(float x) {
-  uniform float y[programCount];
-  foreach_active(i){
-    y[i] = futrts_ispc_gamma32(extract(x,i));
+  float res;
+  foreach_active (i) {
+    uniform float r = tgammaf(extract(x, i));
+    res = insert(res, i, r);
   }
-  return *((varying float * uniform)&y);
+  return res;
 }
 
-extern "C" unmasked uniform float futrts_ispc_lgamma32(uniform float x);
+extern "C" unmasked uniform float lgammaf(uniform float x);
 static inline float futrts_lgamma32(float x) {
-  uniform float y[programCount];
-  foreach_active(i){
-    y[i] = futrts_ispc_lgamma32(extract(x,i));
+  float res;
+  foreach_active (i) {
+    uniform float r = lgammaf(extract(x, i));
+    res = insert(res, i, r);
   }
-  return *((varying float * uniform)&y);
+  return res;
 }
 
 extern "C" unmasked uniform float erff(uniform float x);
@@ -2288,16 +2290,10 @@ static inline float futrts_hypot32(float x, float y) {
   return hypotf(x, y);
 }
 
-float futrts_ispc_gamma32(float x) {
-  return tgammaf(x);
-}
 static inline float futrts_gamma32(float x) {
   return tgammaf(x);
 }
 
-float futrts_ispc_lgamma32(float x) {
-  return lgammaf(x);
-}
 static inline float futrts_lgamma32(float x) {
   return lgammaf(x);
 }
@@ -2549,31 +2545,34 @@ static inline double futrts_atan2_64(double x, double y) {
   return atan2(x, y);
 }
 
-extern "C" unmasked uniform double futrts_ispc_hypot64(uniform double x, uniform double y);
+extern "C" unmasked uniform double hypot(uniform double x, uniform double y);
 static inline double futrts_hypot64(double x, double y) {
-  uniform double z[programCount];
-  foreach_active(i){
-    z[i] = futrts_ispc_hypot64(extract(x,i),extract(y,i));
+  double res;
+  foreach_active (i) {
+    uniform double r = hypot(extract(x, i), extract(y, i));
+    res = insert(res, i, r);
   }
-  return *((varying double * uniform)&z);
+  return res;
 }
 
-extern "C" unmasked uniform double futrts_ispc_gamma64(uniform double x);
+extern "C" unmasked uniform double tgamma(uniform double x);
 static inline double futrts_gamma64(double x) {
-  uniform double y[programCount];
-  foreach_active(i){
-    y[i] = futrts_ispc_gamma64(extract(x,i));
+  double res;
+  foreach_active (i) {
+    uniform double r = tgamma(extract(x, i));
+    res = insert(res, i, r);
   }
-  return *((varying double * uniform)&y);
+  return res;
 }
 
-extern "C" unmasked uniform double futrts_ispc_lgamma64(uniform double x);
+extern "C" unmasked uniform double lgamma(uniform double x);
 static inline double futrts_lgamma64(double x) {
-  uniform double y[programCount];
-  foreach_active(i){
-    y[i] = futrts_ispc_lgamma64(extract(x,i));
+  double res;
+  foreach_active (i) {
+    uniform double r = lgamma(extract(x, i));
+    res = insert(res, i, r);
   }
-  return *((varying double * uniform)&y);
+  return res;
 }
 
 extern "C" unmasked uniform double erf(uniform double x);
@@ -2688,23 +2687,24 @@ static inline double btof_bool_f64(bool x) {
   return x ? 1.0 : 0.0;
 }
 
-extern "C" unmasked uniform int64_t futrts_ispc_to_bits64(uniform double x);
 static inline int64_t futrts_to_bits64(double x) {
-  uniform int64_t y[programCount];
-  foreach_active(i){
-    y[i] = futrts_ispc_to_bits64(extract(x,i));
+  int64_t res;
+  foreach_active (i) {
+    uniform double tmp = extract(x, i);
+    uniform int64_t r = *((uniform int64_t* uniform)&tmp);
+    res = insert(res, i, r);
   }
-  return *((varying int64_t * uniform)&y);
+  return res;
 }
 
-
-extern "C" unmasked uniform double futrts_ispc_from_bits64(uniform int64_t x);
 static inline double futrts_from_bits64(int64_t x) {
-  uniform double y[programCount];
-  foreach_active(i){
-    y[i] = futrts_ispc_from_bits64(extract(x,i));
+  double res;
+  foreach_active (i) {
+    uniform int64_t tmp = extract(x, i);
+    uniform double r = *((uniform double* uniform)&tmp);
+    res = insert(res, i, r);
   }
-  return *((varying double * uniform)&y);
+  return res;
 }
 
 static inline double fmod64(double x, double y) {
@@ -2889,23 +2889,14 @@ static inline double futrts_atan2_64(double x, double y) {
   return atan2(x, y);
 }
 
-double futrts_ispc_hypot64(double x, double y) {
-  return hypot(x,y);
-}
 static inline double futrts_hypot64(double x, double y) {
   return hypot(x, y);
 }
 
-double futrts_ispc_gamma64(double x) {
-  return tgamma(x);
-}
 static inline double futrts_gamma64(double x) {
   return tgamma(x);
 }
 
-double futrts_ispc_lgamma64(double x) {
-  return lgamma(x);
-}
 static inline double futrts_lgamma64(double x) {
   return lgamma(x);
 }
@@ -3024,26 +3015,7 @@ static inline int64_t futrts_to_bits64(double x) {
   return p.t;
 }
 
-int64_t futrts_ispc_to_bits64(double x) {
-  union {
-    double f;
-    int64_t t;
-  } p;
-
-  p.f = x;
-  return p.t;
-}
-
 static inline double futrts_from_bits64(int64_t x) {
-  union {
-    int64_t f;
-    double t;
-  } p;
-
-  p.f = x;
-  return p.t;
-}
-double futrts_ispc_from_bits64(int64_t x) {
   union {
     int64_t f;
     double t;
