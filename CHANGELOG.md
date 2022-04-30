@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Slightly better type errors for ambiguous sizes (#1661).
 
+* Better type errors for module ascription involving nested modules
+  (#1660).
+
 ## [0.21.10]
 
 ### Added
