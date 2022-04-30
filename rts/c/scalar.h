@@ -1198,8 +1198,6 @@ static inline uint64_t pow64(uint64_t x, uint64_t y) {
   return res;
 }
 
-#if ISPC
-
 static inline bool itob_i8_bool(int8_t x) {
   return x != 0;
 }
@@ -1215,26 +1213,6 @@ static inline bool itob_i32_bool(int32_t x) {
 static inline bool itob_i64_bool(int64_t x) {
   return x != 0;
 }
-
-#else
-
-static inline bool itob_i8_bool(int8_t x) {
-  return x;
-}
-
-static inline bool itob_i16_bool(int16_t x) {
-  return x;
-}
-
-static inline bool itob_i32_bool(int32_t x) {
-  return x;
-}
-
-static inline bool itob_i64_bool(int64_t x) {
-  return x;
-}
-
-#endif
 
 static inline int8_t btoi_bool_i8(bool x) {
   return x;
@@ -1801,11 +1779,12 @@ static inline bool futrts_isnan32(float x) {
   return isnan(x);
 }
 
-#if ISPC // Changed
+#if ISPC
 
 static inline bool futrts_isinf32(float x) {
-  return !isnan(x) && isnan(x - x); //TODO: Find cleaner solution
+  return !isnan(x) && isnan(x - x);
 }
+
 static inline bool futrts_isfinite32(float x) {
   return !isnan(x) && !futrts_isinf32(x);
 }
@@ -2373,8 +2352,9 @@ static inline float fsignum32(float x) {
 
 #if ISPC
 static inline bool futrts_isinf64(float x) {
-  return !isnan(x) && isnan(x - x); //TODO: Find cleaner solution
+  return !isnan(x) && isnan(x - x);
 }
+
 static inline bool futrts_isfinite64(float x) {
   return !isnan(x) && !futrts_isinf64(x);
 }
