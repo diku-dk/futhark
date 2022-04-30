@@ -206,35 +206,35 @@ freeAllocatedMem = GC.freeAllocatedMem' unRefMem
 compileBuiltinFun :: (Name, Function op) -> ISPCCompilerM ()
 compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
   | isNothing $ functionEntry func = do
-    let extra = [[C.cparam|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx|]]
-        extra_c = [[C.cparam|struct futhark_context * ctx|]]
-        extra_exp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
+      let extra = [[C.cparam|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx|]]
+          extra_c = [[C.cparam|struct futhark_context * ctx|]]
+          extra_exp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
 
-    (inparams_c, in_args_c) <- unzip <$> mapM (compileInputsExtern []) inputs
-    (outparams_c, out_args_c) <- unzip <$> mapM (compileOutputsExtern []) outputs
+      (inparams_c, in_args_c) <- unzip <$> mapM (compileInputsExtern []) inputs
+      (outparams_c, out_args_c) <- unzip <$> mapM (compileOutputsExtern []) outputs
 
-    (inparams_extern, _) <- unzip <$> mapM (compileInputsExtern [C.ctyquals|$tyqual:uniform|]) inputs
-    (outparams_extern, _) <- unzip <$> mapM (compileOutputsExtern [C.ctyquals|$tyqual:uniform|]) outputs
+      (inparams_extern, _) <- unzip <$> mapM (compileInputsExtern [C.ctyquals|$tyqual:uniform|]) inputs
+      (outparams_extern, _) <- unzip <$> mapM (compileOutputsExtern [C.ctyquals|$tyqual:uniform|]) outputs
 
-    (inparams_uni, in_args_noderef) <- unzip <$> mapM compileInputsUniform inputs
-    (outparams_uni, out_args_noderef) <- unzip <$> mapM compileOutputsUniform outputs
+      (inparams_uni, in_args_noderef) <- unzip <$> mapM compileInputsUniform inputs
+      (outparams_uni, out_args_noderef) <- unzip <$> mapM compileOutputsUniform outputs
 
-    (inparams_varying, in_args_vary, prebody_in') <- unzip3 <$> mapM compileInputsVarying inputs
-    (outparams_varying, out_args_vary, prebody_out', postbody_out') <- unzip4 <$> mapM compileOutputsVarying outputs
-    let (prebody_in, prebody_out, postbody_out) = over each concat (prebody_in', prebody_out', postbody_out')
+      (inparams_varying, in_args_vary, prebody_in') <- unzip3 <$> mapM compileInputsVarying inputs
+      (outparams_varying, out_args_vary, prebody_out', postbody_out') <- unzip4 <$> mapM compileOutputsVarying outputs
+      let (prebody_in, prebody_out, postbody_out) = over each concat (prebody_in', prebody_out', postbody_out')
 
-    GC.libDecl
-      =<< pure
-        [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {               
+      GC.libDecl
+        =<< pure
+          [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {               
                   return $id:(funName fname)($args:extra_exp, $args:out_args_c, $args:in_args_c);
                 }|]
 
-    let ispc_extern =
-          [C.cedecl|extern "C" $tyqual:uniform int $id:((funName fname) ++ "_extern")
+      let ispc_extern =
+            [C.cedecl|extern "C" $tyqual:uniform int $id:((funName fname) ++ "_extern")
                       ($params:extra, $params:outparams_extern, $params:inparams_extern);|]
 
-        ispc_uniform =
-          [C.cedecl|$tyqual:uniform int $id:(funName fname)
+          ispc_uniform =
+            [C.cedecl|$tyqual:uniform int $id:(funName fname)
                     ($params:extra, $params:outparams_uni, $params:inparams_uni) { 
                       return $id:(funName $ fname<>"_extern")(
                         $args:extra_exp,
@@ -242,8 +242,8 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
                         $args:in_args_noderef);
                     }|]
 
-        ispc_varying =
-          [C.cedecl|$tyqual:uniform int $id:(funName fname)
+          ispc_varying =
+            [C.cedecl|$tyqual:uniform int $id:(funName fname)
                     ($params:extra, $params:outparams_varying, $params:inparams_varying) { 
                         $tyqual:uniform int err = 0;
                         $items:prebody_in
@@ -259,7 +259,7 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
                         return err;
                     }|]
 
-    mapM_ ispcEarlyDecl [ispc_varying, ispc_uniform, ispc_extern]
+      mapM_ ispcEarlyDecl [ispc_varying, ispc_uniform, ispc_extern]
   | otherwise = pure ()
   where
     compileInputsExtern vari (ScalarParam name bt) = do
@@ -430,11 +430,11 @@ compileCode (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name _ t : SetScalar dest e : code)
       | name == dest = do
-        let ct = GC.primTypeToCType t
-        e' <- GC.compileExp e
-        quals <- getVariabilityQuals name
-        GC.item [C.citem|$tyquals:quals $ty:ct $id:name = $exp:e';|]
-        go code
+          let ct = GC.primTypeToCType t
+          e' <- GC.compileExp e
+          quals <- getVariabilityQuals name
+          GC.item [C.citem|$tyquals:quals $ty:ct $id:name = $exp:e';|]
+          go code
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
 compileCode (Allocate name (Count (TPrimExp e)) space) = do
@@ -455,20 +455,20 @@ compileCode (SetMem dest src space) =
   setMem dest src space
 compileCode code@(Write dest (Count idx) elemtype DefaultSpace _ elemexp)
   | isConstExp (untyped idx) = do
-    dest' <- GC.rawMem dest
-    idxexp <- GC.compileExp (untyped idx)
-    varis <- mapM getVariability (namesToList $ freeIn idx)
-    let quals = if all (== Uniform) varis then [C.ctyquals|$tyqual:uniform|] else []
-    tmp <- newVName "tmp_idx"
-    -- Disambiguate the variability of the constant index
-    GC.decl [C.cdecl|$tyquals:quals typename int64_t $id:tmp = $exp:idxexp;|]
-    let deref =
-          GC.derefPointer
-            dest'
-            [C.cexp|$id:tmp|]
-            [C.cty|$ty:(primStorageType elemtype)*|]
-    elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
-    GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
+      dest' <- GC.rawMem dest
+      idxexp <- GC.compileExp (untyped idx)
+      varis <- mapM getVariability (namesToList $ freeIn idx)
+      let quals = if all (== Uniform) varis then [C.ctyquals|$tyqual:uniform|] else []
+      tmp <- newVName "tmp_idx"
+      -- Disambiguate the variability of the constant index
+      GC.decl [C.cdecl|$tyquals:quals typename int64_t $id:tmp = $exp:idxexp;|]
+      let deref =
+            GC.derefPointer
+              dest'
+              [C.cexp|$id:tmp|]
+              [C.cty|$ty:(primStorageType elemtype)*|]
+      elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
+      GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = GC.compileCode code
   where
     isConstExp = isSimple . constFoldPrimExp
@@ -518,7 +518,7 @@ compileCode (Call dests fname args) =
       case dests' of
         [d]
           | isBuiltInFunction fname' ->
-            GC.stm [C.cstm|$id:d = $id:(funName fname')($args:args'');|]
+              GC.stm [C.cstm|$id:d = $id:(funName fname')($args:args'');|]
         _ ->
           GC.item
             [C.citem|
