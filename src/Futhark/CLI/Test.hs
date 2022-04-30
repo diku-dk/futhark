@@ -323,8 +323,8 @@ checkError (ThisError regex_s regex) err
   | not (match regex $ T.unpack err) =
       E.throwError $
         "Expected error:\n  " <> regex_s
-          <> "\nGot error:\n  "
-          <> err
+          <> "\nGot error:\n"
+          <> T.unlines (map ("  " <>) (T.lines err))
 checkError _ _ =
   pure ()
 
