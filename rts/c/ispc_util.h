@@ -1,3 +1,8 @@
+// Start of ispc_util.h.
+
+// This header file implements various operations that are useful only when
+// generating ISPC code. This includes wrappers for parts of Futhark's C runtime.
+
 // Generate missing overloads for extract on pointers
 #define make_extract(ty)                                                                \
 static inline uniform ty * uniform extract(uniform ty * varying ptr, uniform int idx) { \
@@ -65,10 +70,10 @@ make_atomic_compare_exchange_wrapper(double)
 #define __atomic_fetch_add(x,y,z) atomic_add_global(x,y)
 #define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,y)
 #define __atomic_fetch_and(x,y,z) atomic_and_global(x,y)
-#define __atomic_fetch_or(x,y,z)  atomic_or_global(x,y)
+#define __atomic_fetch_or(x,y,z) atomic_or_global(x,y)
 #define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,y)
-#define __atomic_exchange_n(x,y,z)  atomic_swap_global(x,y)
-#define __atomic_compare_exchange_n(x,y,z,h,j,k)  atomic_compare_exchange_wrapper(x,y,z)
+#define __atomic_exchange_n(x,y,z) atomic_swap_global(x,y)
+#define __atomic_compare_exchange_n(x,y,z,h,j,k) atomic_compare_exchange_wrapper(x,y,z)
 
 
 // Memory allocation handling
@@ -81,8 +86,6 @@ struct memblock {
     const int8_t * desc;
 };
 #endif
-
-typedef unsigned char uchar;
 
 static inline void free(void* ptr) {
   delete ptr;
@@ -326,3 +329,5 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
 
   return err;
 }
+
+// End of ispc_util.h.
