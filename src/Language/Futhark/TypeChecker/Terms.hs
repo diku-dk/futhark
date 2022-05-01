@@ -147,7 +147,7 @@ checkAscript ::
   SrcLoc ->
   UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeExp VName, Exp)
+  TermTypeM (TypeExp Info VName, Exp)
 checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
   e' <- checkExp e
@@ -162,7 +162,7 @@ checkCoerce ::
   SrcLoc ->
   UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeExp VName, StructType, Exp, [VName])
+  TermTypeM (TypeExp Info VName, StructType, Exp, [VName])
 checkCoerce loc te e = do
   (te', te_t, ext) <- checkTypeExpRigid te RigidCoerce
   e' <- checkExp e
@@ -1242,7 +1242,7 @@ checkFunDef ::
     ( VName,
       [TypeParam],
       [Pat],
-      Maybe (TypeExp VName),
+      Maybe (TypeExp Info VName),
       StructRetType,
       Exp
     )
@@ -1402,7 +1402,7 @@ checkBinding ::
   TermTypeM
     ( [TypeParam],
       [Pat],
-      Maybe (TypeExp VName),
+      Maybe (TypeExp Info VName),
       StructRetType,
       Exp
     )

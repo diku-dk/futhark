@@ -234,14 +234,17 @@ instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (ForIn pat e) = ForIn <$> astMap tv pat <*> mapOnExp tv e
   astMap tv (While e) = While <$> mapOnExp tv e
 
-instance ASTMappable (TypeExp VName) where
-  astMap tv (TEVar qn loc) = TEVar <$> astMap tv qn <*> pure loc
-  astMap tv (TETuple ts loc) = TETuple <$> traverse (astMap tv) ts <*> pure loc
+instance ASTMappable (TypeExp Info VName) where
+  astMap tv (TEVar qn loc) =
+    TEVar <$> astMap tv qn <*> pure loc
+  astMap tv (TETuple ts loc) =
+    TETuple <$> traverse (astMap tv) ts <*> pure loc
   astMap tv (TERecord ts loc) =
     TERecord <$> traverse (traverse $ astMap tv) ts <*> pure loc
   astMap tv (TEArray te dim loc) =
     TEArray <$> astMap tv te <*> astMap tv dim <*> pure loc
-  astMap tv (TEUnique t loc) = TEUnique <$> astMap tv t <*> pure loc
+  astMap tv (TEUnique t loc) =
+    TEUnique <$> astMap tv t <*> pure loc
   astMap tv (TEApply t1 t2 loc) =
     TEApply <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
   astMap tv (TEArrow v t1 t2 loc) =
@@ -251,17 +254,13 @@ instance ASTMappable (TypeExp VName) where
   astMap tv (TEDim dims t loc) =
     TEDim dims <$> astMap tv t <*> pure loc
 
-instance ASTMappable (TypeArgExp VName) where
-  astMap tv (TypeArgExpDim dim loc) =
-    TypeArgExpDim <$> astMap tv dim <*> pure loc
-  astMap tv (TypeArgExpType te) =
-    TypeArgExpType <$> astMap tv te
+instance ASTMappable (TypeArgExp Info VName) where
+  astMap tv (TypeArgExpSize dim) = TypeArgExpSize <$> astMap tv dim
+  astMap tv (TypeArgExpType te) = TypeArgExpType <$> astMap tv te
 
-instance ASTMappable (SizeExp VName) where
-  astMap tv (SizeExpNamed vn loc) =
-    SizeExpNamed <$> astMap tv vn <*> pure loc
-  astMap _ (SizeExpConst k loc) = pure $ SizeExpConst k loc
-  astMap _ SizeExpAny = pure SizeExpAny
+instance ASTMappable (SizeExp Info VName) where
+  astMap tv (SizeExp e loc) = SizeExp <$> mapOnExp tv e <*> pure loc
+  astMap _ (SizeExpAny loc) = pure $ SizeExpAny loc
 
 instance ASTMappable Size where
   astMap tv (NamedSize vn) = NamedSize <$> astMap tv vn
@@ -417,7 +416,7 @@ barePat (RecordPat fs loc) = RecordPat (map (fmap barePat) fs) loc
 barePat (PatParens p loc) = PatParens (barePat p) loc
 barePat (Id v _ loc) = Id v NoInfo loc
 barePat (Wildcard _ loc) = Wildcard NoInfo loc
-barePat (PatAscription pat t loc) = PatAscription (barePat pat) t loc
+barePat (PatAscription pat t loc) = PatAscription (barePat pat) (bareTypeExp t) loc
 barePat (PatLit v _ loc) = PatLit v NoInfo loc
 barePat (PatConstr c _ ps loc) = PatConstr c NoInfo (map barePat ps) loc
 barePat (PatAttr attr p loc) = PatAttr attr (barePat p) loc
@@ -436,6 +435,9 @@ bareLoopForm (While e) = While (bareExp e)
 bareCase :: CaseBase Info VName -> CaseBase NoInfo VName
 bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
 
+bareTypeExp :: TypeExp Info VName -> TypeExp NoInfo VName
+bareTypeExp = undefined
+
 -- | Remove all annotations from an expression, but retain the
 -- name/scope information.
 bareExp :: ExpBase Info VName -> ExpBase NoInfo VName
@@ -450,7 +452,7 @@ bareExp (TupLit els loc) = TupLit (map bareExp els) loc
 bareExp (StringLit vs loc) = StringLit vs loc
 bareExp (RecordLit fields loc) = RecordLit (map bareField fields) loc
 bareExp (ArrayLit els _ loc) = ArrayLit (map bareExp els) NoInfo loc
-bareExp (Ascript e te loc) = Ascript (bareExp e) te loc
+bareExp (Ascript e te loc) = Ascript (bareExp e) (bareTypeExp te) loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
 bareExp (Not x loc) = Not (bareExp x) loc
 bareExp (Update src slice v loc) =
@@ -461,7 +463,7 @@ bareExp (Project field e _ loc) =
   Project field (bareExp e) NoInfo loc
 bareExp (Assert e1 e2 _ loc) = Assert (bareExp e1) (bareExp e2) NoInfo loc
 bareExp (Lambda params body ret _ loc) =
-  Lambda (map barePat params) (bareExp body) ret NoInfo loc
+  Lambda (map barePat params) (bareExp body) (fmap bareTypeExp ret) NoInfo loc
 bareExp (OpSection name _ loc) = OpSection name NoInfo loc
 bareExp (OpSectionLeft name _ arg _ _ loc) =
   OpSectionLeft name NoInfo (bareExp arg) (NoInfo, NoInfo) (NoInfo, NoInfo) loc
@@ -504,11 +506,15 @@ bareExp (AppExp appexp _) =
         LetPat sizes pat e body loc ->
           LetPat sizes (barePat pat) (bareExp e) (bareExp body) loc
         LetFun name (fparams, params, ret, _, e) body loc ->
-          LetFun name (fparams, map barePat params, ret, NoInfo, bareExp e) (bareExp body) loc
+          LetFun
+            name
+            (fparams, map barePat params, fmap bareTypeExp ret, NoInfo, bareExp e)
+            (bareExp body)
+            loc
         Range start next end loc ->
           Range (bareExp start) (fmap bareExp next) (fmap bareExp end) loc
         Coerce e te loc ->
-          Coerce (bareExp e) te loc
+          Coerce (bareExp e) (bareTypeExp te) loc
         Index arr slice loc ->
           Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =

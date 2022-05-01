@@ -100,10 +100,9 @@ instance Pretty Size where
   ppr (NamedSize v) = ppr v
   ppr (ConstSize n) = ppr n
 
-instance IsName vn => Pretty (SizeExp vn) where
-  ppr SizeExpAny = mempty
-  ppr (SizeExpNamed v _) = ppr v
-  ppr (SizeExpConst n _) = ppr n
+instance (Eq vn, IsName vn, Annot f) => Pretty (SizeExp f vn) where
+  ppr SizeExpAny {} = brackets mempty
+  ppr (SizeExp e _) = brackets $ ppr e
 
 instance Pretty (Shape Size) where
   ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
@@ -162,7 +161,7 @@ instance Pretty (Shape dim) => Pretty (TypeArg dim) where
   pprPrec _ (TypeArgDim d _) = ppr $ Shape [d]
   pprPrec p (TypeArgType t _) = pprPrec p t
 
-instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
+instance (Eq vn, IsName vn, Annot f) => Pretty (TypeExp f vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
   ppr (TEArray d at _) = brackets (ppr d) <> ppr at
   ppr (TETuple ts _) = parens $ commasep $ map ppr ts
@@ -182,8 +181,8 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
   ppr (TEDim dims te _) =
     text "?" <> mconcat (map (brackets . pprName) dims) <> text "." <> ppr te
 
-instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
-  ppr (TypeArgExpDim d _) = brackets $ ppr d
+instance (Eq vn, IsName vn, Annot f) => Pretty (TypeArgExp f vn) where
+  ppr (TypeArgExpSize d) = ppr d
   ppr (TypeArgExpType t) = ppr t
 
 instance IsName vn => Pretty (QualName vn) where

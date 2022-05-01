@@ -144,18 +144,10 @@ replaceStaticValSizes globals orig_substs sv =
         te' = onTypeExp substs te
     onExp substs e = onAST substs e
 
-    onTypeExpDim substs d@(SizeExpNamed v loc) =
-      case M.lookup (qualLeaf v) substs of
-        Just (SubstNamed v') ->
-          SizeExpNamed v' loc
-        Just (SubstConst x) ->
-          SizeExpConst x loc
-        Nothing ->
-          d
     onTypeExpDim _ d = d
 
-    onTypeArgExp substs (TypeArgExpDim d loc) =
-      TypeArgExpDim (onTypeExpDim substs d) loc
+    onTypeArgExp substs (TypeArgExpSize d) =
+      TypeArgExpSize (onTypeExpDim substs d)
     onTypeArgExp substs (TypeArgExpType te) =
       TypeArgExpType (onTypeExp substs te)
 

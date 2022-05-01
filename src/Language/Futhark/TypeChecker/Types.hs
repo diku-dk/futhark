@@ -204,8 +204,8 @@ renameRetType (RetType dims st)
 
 evalTypeExp ::
   MonadTypeChecker m =>
-  TypeExp Name ->
-  m (TypeExp VName, [VName], StructRetType, Liftedness)
+  TypeExp NoInfo Name ->
+  m (TypeExp Info VName, [VName], StructRetType, Liftedness)
 evalTypeExp (TEVar name loc) = do
   (name', ps, t, l) <- lookupType loc name
   t' <- renameRetType t
@@ -267,14 +267,15 @@ evalTypeExp (TEArray d t loc) = do
           <+> pquote (ppr t)
           <+/> "(might contain function)."
   where
-    checkSizeExp SizeExpAny = do
+    checkSizeExp (SizeExpAny dloc) = do
       dv <- newTypeName "d"
-      pure ([dv], SizeExpAny, NamedSize $ qualName dv)
-    checkSizeExp (SizeExpConst k dloc) =
-      pure ([], SizeExpConst k dloc, ConstSize k)
-    checkSizeExp (SizeExpNamed v dloc) = do
+      pure ([dv], SizeExpAny dloc, NamedSize $ qualName dv)
+    checkSizeExp (SizeExp (IntLit k NoInfo kloc) dloc) =
+      pure ([], SizeExp (IntLit k int64_info kloc) dloc, ConstSize $ fromInteger k)
+    checkSizeExp (SizeExp (Var v NoInfo vloc) dloc) = do
       v' <- checkNamedSize loc v
-      pure ([], SizeExpNamed v' dloc, NamedSize v')
+      pure ([], SizeExp (Var v' int64_info vloc) dloc, NamedSize v')
+    int64_info = Info (Scalar (Prim (Signed Int64)))
 --
 evalTypeExp (TEUnique t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp t
@@ -384,7 +385,10 @@ evalTypeExp ote@TEApply {} = do
   where
     tloc = srclocOf ote
 
-    rootAndArgs :: MonadTypeChecker m => TypeExp Name -> m (QualName Name, SrcLoc, [TypeArgExp Name])
+    rootAndArgs ::
+      MonadTypeChecker m =>
+      TypeExp NoInfo Name ->
+      m (QualName Name, SrcLoc, [TypeArgExp NoInfo Name])
     rootAndArgs (TEVar qn loc) = pure (qn, loc, [])
     rootAndArgs (TEApply op arg _) = do
       (op', loc, args) <- rootAndArgs op
@@ -393,26 +397,30 @@ evalTypeExp ote@TEApply {} = do
       typeError (srclocOf te') mempty $
         "Type" <+> pquote (ppr te') <+> "is not a type constructor."
 
-    checkArgApply (TypeParamDim pv _) (TypeArgExpDim (SizeExpNamed v dloc) loc) = do
-      v' <- checkNamedSize loc v
+    checkSizeExp (SizeExp (Var v NoInfo vloc) dloc) = do
+      v' <- checkNamedSize vloc v
       pure
-        ( TypeArgExpDim (SizeExpNamed v' dloc) loc,
+        ( TypeArgExpSize (SizeExp (Var v' (Info (Scalar (Prim (Signed Int64)))) vloc) dloc),
           [],
-          M.singleton pv $ SizeSubst $ NamedSize v'
+          SizeSubst $ NamedSize v'
         )
-    checkArgApply (TypeParamDim pv _) (TypeArgExpDim (SizeExpConst x dloc) loc) =
+    checkSizeExp (SizeExp (IntLit x NoInfo xloc) dloc) =
       pure
-        ( TypeArgExpDim (SizeExpConst x dloc) loc,
+        ( TypeArgExpSize (SizeExp (IntLit x (Info (Scalar (Prim (Signed Int64)))) xloc) dloc),
           [],
-          M.singleton pv $ SizeSubst $ ConstSize x
+          SizeSubst $ ConstSize $ fromInteger x
         )
-    checkArgApply (TypeParamDim pv _) (TypeArgExpDim SizeExpAny loc) = do
+    checkSizeExp (SizeExpAny loc) = do
       d <- newTypeName "d"
       pure
-        ( TypeArgExpDim SizeExpAny loc,
+        ( TypeArgExpSize (SizeExpAny loc),
           [d],
-          M.singleton pv $ SizeSubst $ NamedSize $ qualName d
+          SizeSubst $ NamedSize $ qualName d
         )
+
+    checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
+      (d', svars, subst) <- checkSizeExp d
+      pure (d', svars, M.singleton pv subst)
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
       (te', svars, RetType dims st, _) <- evalTypeExp te
       pure
@@ -435,8 +443,8 @@ evalTypeExp ote@TEApply {} = do
 -- * The liftedness of the type.
 checkTypeExp ::
   MonadTypeChecker m =>
-  TypeExp Name ->
-  m (TypeExp VName, [VName], StructRetType, Liftedness)
+  TypeExp NoInfo Name ->
+  m (TypeExp Info VName, [VName], StructRetType, Liftedness)
 checkTypeExp te = do
   checkForDuplicateNamesInType te
   evalTypeExp te
@@ -481,7 +489,7 @@ checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
 -- it (normal name shadowing).
 checkForDuplicateNamesInType ::
   MonadTypeChecker m =>
-  TypeExp Name ->
+  TypeExp NoInfo Name ->
   m ()
 checkForDuplicateNamesInType = check mempty
   where
@@ -507,7 +515,7 @@ checkForDuplicateNamesInType = check mempty
     check seen (TESum cs _) = mapM_ (mapM (check seen) . snd) cs
     check seen (TEApply t1 (TypeArgExpType t2) _) =
       check seen t1 >> check seen t2
-    check seen (TEApply t1 TypeArgExpDim {} _) =
+    check seen (TEApply t1 TypeArgExpSize {} _) =
       check seen t1
     check seen (TEDim (v : vs) t loc)
       | Just prev_loc <- M.lookup v seen =

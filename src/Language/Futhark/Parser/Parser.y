@@ -246,7 +246,7 @@ SigExp :: { UncheckedSigExp }
                                 in SigArrow (Just name) $4 $7 (srcspan $1 $>) }
         | SigExp '->' SigExp  { SigArrow Nothing $1 $3 (srcspan $1 $>) }
 
-TypeRef :: { TypeRefBase Name }
+TypeRef :: { TypeRefBase NoInfo Name }
          : QualName TypeParams '=' TypeExpTerm
            { TypeRef (fst $1) $2 $4 (srcspan (snd $1) $>) }
 
@@ -457,15 +457,15 @@ TypeExpDims :: { [Name] }
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
            { TEUnique $2 (srcspan $1 $>) }
-         | '[' SizeExp ']' TypeExpTerm %prec indexprec
-           { TEArray $2 $4 (srcspan $1 $>) }
+         | SizeExp TypeExpTerm %prec indexprec
+           { TEArray $1 $2 (srcspan $1 $>) }
          | TypeExpApply %prec sumprec { $1 }
 
          -- Errors
-         | '[' SizeExp ']' %prec bottom
+         |  SizeExp %prec bottom
            {% parseErrorAt (srcspan $1 $>) $ Just $
                 unlines ["missing array row type.",
-                         "Did you mean []"  ++ pretty $2 ++ "?"]
+                         "Did you mean []"  ++ pretty $1 ++ "?"]
            }
 
 SumType :: { UncheckedTypeExp }
@@ -487,18 +487,29 @@ SumClause :: { (Name, [UncheckedTypeExp], Loc) }
 TypeExpApply :: { UncheckedTypeExp }
               : TypeExpApply TypeArg
                 { TEApply $1 $2 (srcspan $1 $>) }
-              | 'id[' SizeExp ']'
-                { let L loc (INDEXING v) = $1
-                  in TEApply (TEVar (qualName v) (srclocOf (backOneCol loc)))
-                             (TypeArgExpDim $2 (srclocOf loc))
-                             (srcspan $1 $>) }
-              | 'qid[' SizeExp ']'
-                { let L loc (QUALINDEXING qs v) = $1
-                  in TEApply (TEVar (QualName qs v) (srclocOf (backOneCol loc)))
-                             (TypeArgExpDim $2 (srclocOf loc))
-                             (srcspan $1 $>) }
               | TypeExpAtom
                 { $1 }
+              -- The following productions work around lack of whitespace-sensitivity in the lexer.
+              | 'id[' Exp ']'
+                { let L loc (INDEXING v) = $1
+                  in TEApply (TEVar (qualName v) (srclocOf (backOneCol loc)))
+                             (TypeArgExpSize (SizeExp $2 (srcspan (locEnd (locOf $1)) $3)))
+                             (srcspan $1 $>) }
+              | 'qid[' Exp ']'
+                { let L loc (QUALINDEXING qs v) = $1
+                  in TEApply (TEVar (QualName qs v) (srclocOf (backOneCol loc)))
+                             (TypeArgExpSize (SizeExp $2 (srcspan (locEnd (locOf $1)) $3)))
+                             (srcspan $1 $>) }
+              | 'id[' ']'
+                { let L loc (INDEXING v) = $1
+                  in TEApply (TEVar (qualName v) (srclocOf (backOneCol loc)))
+                             (TypeArgExpSize (SizeExpAny (srcspan (locEnd (locOf $1)) $2)))
+                             (srcspan $1 $>) }
+              | 'qid[' ']'
+                { let L loc (QUALINDEXING qs v) = $1
+                  in TEApply (TEVar (QualName qs v) (srclocOf (backOneCol loc)))
+                             (TypeArgExpSize (SizeExpAny (srcspan (locEnd (locOf $1)) $2)))
+                             (srcspan $1 $>) }
 
 TypeExpAtom :: { UncheckedTypeExp }
              : '(' TypeExp ')'                { $2 }
@@ -512,9 +523,9 @@ TypeExpAtom :: { UncheckedTypeExp }
 Constr :: { (Name, Loc) }
         : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, locOf $1) }
 
-TypeArg :: { TypeArgExp Name }
-         : '[' SizeExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
-         | TypeExpAtom     { TypeArgExpType $1 }
+TypeArg :: { TypeArgExp NoInfo Name }
+         : SizeExp      { TypeArgExpSize $1 }
+         | TypeExpAtom  { TypeArgExpType $1 }
 
 FieldType :: { (Name, UncheckedTypeExp) }
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
@@ -527,14 +538,9 @@ TupleTypes :: { [UncheckedTypeExp] }
             : TypeExp                { [$1] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
-SizeExp :: { SizeExp Name }
-        : QualName
-          { SizeExpNamed (fst $1) (srclocOf (snd $1)) }
-        | intlit
-          { let L loc (INTLIT n) = $1
-            in SizeExpConst (fromIntegral n) (srclocOf loc) }
-        |
-          { SizeExpAny }
+SizeExp :: { SizeExp NoInfo Name }
+         : '[' Exp ']' { SizeExp $2 (srcspan $1 $>) }
+         | '['     ']' { SizeExpAny (srcspan $1 $>) }
 
 FunParam :: { PatBase NoInfo Name }
 FunParam : InnerPat { $1 }

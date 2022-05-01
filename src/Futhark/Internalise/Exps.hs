@@ -172,7 +172,7 @@ entryPoint name params (eret, crets) =
         u = foldl max Nonunique $ map I.uniqueness ts
         desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
         t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
-    typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
+    typeExpOpaqueName (TEApply te TypeArgExpSize {} _) =
       typeExpOpaqueName te
     typeExpOpaqueName (TEArray _ te _) =
       let (d, te') = withoutDims te
@@ -2281,7 +2281,7 @@ partitionWithSOACS k lam arrs = do
           (resultBody [next_one])
         $ ifCommon [I.Prim int64]
 
-typeExpForError :: E.TypeExp VName -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError :: E.TypeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =
   pure [ErrorString $ pretty qn]
 typeExpForError (E.TEUnique te _) =
@@ -2291,10 +2291,8 @@ typeExpForError (E.TEDim dims te _) =
   where
     dims' = mconcat (map onDim dims)
     onDim d = "[" <> pretty d <> "]"
-typeExpForError (E.TEArray d te _) = do
-  d' <- dimExpForError d
-  te' <- typeExpForError te
-  pure $ ["[", d', "]"] ++ te'
+typeExpForError (E.TEArray d te _) =
+  (<>) <$> sizeExpForError d <*> typeExpForError te
 typeExpForError (E.TETuple tes _) = do
   tes' <- mapM typeExpForError tes
   pure $ ["("] ++ intercalate [", "] tes' ++ [")"]
@@ -2312,7 +2310,7 @@ typeExpForError (E.TEApply t arg _) = do
   t' <- typeExpForError t
   arg' <- case arg of
     TypeArgExpType argt -> typeExpForError argt
-    TypeArgExpDim d _ -> pure <$> dimExpForError d
+    TypeArgExpSize d -> sizeExpForError d
   pure $ t' ++ [" "] ++ arg'
 typeExpForError (E.TESum cs _) = do
   cs' <- mapM (onClause . snd) cs
@@ -2322,16 +2320,16 @@ typeExpForError (E.TESum cs _) = do
       c' <- mapM typeExpForError c
       pure $ intercalate [" "] c'
 
-dimExpForError :: E.SizeExp VName -> InternaliseM (ErrorMsgPart SubExp)
-dimExpForError (SizeExpNamed d _) = do
+sizeExpForError :: E.SizeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
+sizeExpForError (SizeExp (E.Var d _ _) _) = do
   substs <- lookupSubst $ E.qualLeaf d
   d' <- case substs of
     Just [v] -> pure v
     _ -> pure $ I.Var $ E.qualLeaf d
-  pure $ ErrorVal int64 d'
-dimExpForError (SizeExpConst d _) =
-  pure $ ErrorString $ pretty d
-dimExpForError SizeExpAny = pure ""
+  pure ["[", ErrorVal int64 d', "]"]
+sizeExpForError (SizeExp (E.IntLit d _ _) _) =
+  pure ["[", ErrorString (pretty d), "]"]
+sizeExpForError SizeExpAny {} = pure ["[]"]
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.
