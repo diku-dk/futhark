@@ -92,7 +92,6 @@ module Language.Futhark.Syntax
     DecBase (..),
 
     -- * Miscellaneous
-    Showable,
     NoInfo (..),
     Info (..),
     Alias (..),
@@ -125,37 +124,10 @@ import Futhark.Util.Pretty
 import Language.Futhark.Core
 import Prelude
 
--- | Convenience class for deriving 'Show' instances for the AST.
-class
-  ( Show vn,
-    Show (f VName),
-    Show (f (Diet, Maybe VName)),
-    Show (f String),
-    Show (f [VName]),
-    Show (f ([VName], [VName])),
-    Show (f PatType),
-    Show (f (PatType, [VName])),
-    Show (f (StructType, [VName])),
-    Show (f (StructRetType, [VName])),
-    Show (f EntryPoint),
-    Show (f StructType),
-    Show (f StructRetType),
-    Show (f PatRetType),
-    Show (f (StructType, Maybe VName)),
-    Show (f (PName, StructType)),
-    Show (f (PName, StructType, Maybe VName)),
-    Show (f (Aliasing, StructRetType)),
-    Show (f (M.Map VName VName)),
-    Show (f AppRes)
-  ) =>
-  Showable f vn
-
 -- | No information functor.  Usually used for placeholder type- or
 -- aliasing information.
 data NoInfo a = NoInfo
   deriving (Eq, Ord, Show)
-
-instance Show vn => Showable NoInfo vn
 
 instance Functor NoInfo where
   fmap _ NoInfo = NoInfo
@@ -169,8 +141,6 @@ instance Traversable NoInfo where
 -- | Some information.  The dual to 'NoInfo'
 newtype Info a = Info {unInfo :: a}
   deriving (Eq, Ord, Show)
-
-instance Show vn => Showable Info vn
 
 instance Functor Info where
   fmap f (Info x) = Info $ f x
@@ -553,7 +523,9 @@ data TypeDeclBase f vn = TypeDecl
     expandedType :: f StructType
   }
 
-deriving instance Showable f vn => Show (TypeDeclBase f vn)
+deriving instance Show (TypeDeclBase Info VName)
+
+deriving instance Show vn => Show (TypeDeclBase NoInfo vn)
 
 deriving instance Eq (TypeDeclBase NoInfo VName)
 
@@ -596,7 +568,9 @@ data IdentBase f vn = Ident
     identSrcLoc :: SrcLoc
   }
 
-deriving instance Showable f vn => Show (IdentBase f vn)
+deriving instance Show (IdentBase Info VName)
+
+deriving instance Show vn => Show (IdentBase NoInfo vn)
 
 instance Eq vn => Eq (IdentBase ty vn) where
   x == y = identName x == identName y
@@ -678,7 +652,9 @@ data DimIndexBase f vn
       (Maybe (ExpBase f vn))
       (Maybe (ExpBase f vn))
 
-deriving instance Showable f vn => Show (DimIndexBase f vn)
+deriving instance Show (DimIndexBase Info VName)
+
+deriving instance Show vn => Show (DimIndexBase NoInfo vn)
 
 deriving instance Eq (DimIndexBase NoInfo VName)
 
@@ -789,7 +765,9 @@ data AppExpBase f vn
   | -- | A match expression.
     Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc
 
-deriving instance Showable f vn => Show (AppExpBase f vn)
+deriving instance Show (AppExpBase Info VName)
+
+deriving instance Show vn => Show (AppExpBase NoInfo vn)
 
 deriving instance Eq (AppExpBase NoInfo VName)
 
@@ -893,7 +871,9 @@ data ExpBase f vn
     Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
   | AppExp (AppExpBase f vn) (f AppRes)
 
-deriving instance Showable f vn => Show (ExpBase f vn)
+deriving instance Show (ExpBase Info VName)
+
+deriving instance Show vn => Show (ExpBase NoInfo vn)
 
 deriving instance Eq (ExpBase NoInfo VName)
 
@@ -933,7 +913,9 @@ data FieldBase f vn
   = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
   | RecordFieldImplicit vn (f PatType) SrcLoc
 
-deriving instance Showable f vn => Show (FieldBase f vn)
+deriving instance Show (FieldBase Info VName)
+
+deriving instance Show vn => Show (FieldBase NoInfo vn)
 
 deriving instance Eq (FieldBase NoInfo VName)
 
@@ -946,7 +928,9 @@ instance Located (FieldBase f vn) where
 -- | A case in a match expression.
 data CaseBase f vn = CasePat (PatBase f vn) (ExpBase f vn) SrcLoc
 
-deriving instance Showable f vn => Show (CaseBase f vn)
+deriving instance Show (CaseBase Info VName)
+
+deriving instance Show vn => Show (CaseBase NoInfo vn)
 
 deriving instance Eq (CaseBase NoInfo VName)
 
@@ -961,7 +945,9 @@ data LoopFormBase f vn
   | ForIn (PatBase f vn) (ExpBase f vn)
   | While (ExpBase f vn)
 
-deriving instance Showable f vn => Show (LoopFormBase f vn)
+deriving instance Show (LoopFormBase Info VName)
+
+deriving instance Show vn => Show (LoopFormBase NoInfo vn)
 
 deriving instance Eq (LoopFormBase NoInfo VName)
 
@@ -987,7 +973,9 @@ data PatBase f vn
   | PatConstr Name (f PatType) [PatBase f vn] SrcLoc
   | PatAttr (AttrInfo vn) (PatBase f vn) SrcLoc
 
-deriving instance Showable f vn => Show (PatBase f vn)
+deriving instance Show (PatBase Info VName)
+
+deriving instance Show vn => Show (PatBase NoInfo vn)
 
 deriving instance Eq (PatBase NoInfo VName)
 
@@ -1057,7 +1045,9 @@ data ValBindBase f vn = ValBind
     valBindLocation :: SrcLoc
   }
 
-deriving instance Showable f vn => Show (ValBindBase f vn)
+deriving instance Show (ValBindBase Info VName)
+
+deriving instance Show (ValBindBase NoInfo Name)
 
 instance Located (ValBindBase f vn) where
   locOf = locOf . valBindLocation
@@ -1073,7 +1063,9 @@ data TypeBindBase f vn = TypeBind
     typeBindLocation :: SrcLoc
   }
 
-deriving instance Showable f vn => Show (TypeBindBase f vn)
+deriving instance Show (TypeBindBase Info VName)
+
+deriving instance Show (TypeBindBase NoInfo Name)
 
 instance Located (TypeBindBase f vn) where
   locOf = locOf . typeBindLocation
@@ -1133,7 +1125,9 @@ data SpecBase f vn
   | ModSpec vn (SigExpBase f vn) (Maybe DocComment) SrcLoc
   | IncludeSpec (SigExpBase f vn) SrcLoc
 
-deriving instance Showable f vn => Show (SpecBase f vn)
+deriving instance Show (SpecBase Info VName)
+
+deriving instance Show (SpecBase NoInfo Name)
 
 instance Located (SpecBase f vn) where
   locOf (ValSpec _ _ _ _ loc) = locOf loc
@@ -1150,12 +1144,16 @@ data SigExpBase f vn
   | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
   | SigArrow (Maybe vn) (SigExpBase f vn) (SigExpBase f vn) SrcLoc
 
-deriving instance Showable f vn => Show (SigExpBase f vn)
+deriving instance Show (SigExpBase Info VName)
+
+deriving instance Show (SigExpBase NoInfo Name)
 
 -- | A type refinement.
 data TypeRefBase f vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeDeclBase f vn) SrcLoc
 
-deriving instance Showable f vn => Show (TypeRefBase f vn)
+deriving instance Show (TypeRefBase Info VName)
+
+deriving instance Show (TypeRefBase NoInfo Name)
 
 instance Located (TypeRefBase f vn) where
   locOf (TypeRef _ _ _ loc) = locOf loc
@@ -1175,7 +1173,9 @@ data SigBindBase f vn = SigBind
     sigLoc :: SrcLoc
   }
 
-deriving instance Showable f vn => Show (SigBindBase f vn)
+deriving instance Show (SigBindBase Info VName)
+
+deriving instance Show (SigBindBase NoInfo Name)
 
 instance Located (SigBindBase f vn) where
   locOf = locOf . sigLoc
@@ -1203,7 +1203,9 @@ data ModExpBase f vn
       (ModExpBase f vn)
       SrcLoc
 
-deriving instance Showable f vn => Show (ModExpBase f vn)
+deriving instance Show (ModExpBase Info VName)
+
+deriving instance Show (ModExpBase NoInfo Name)
 
 instance Located (ModExpBase f vn) where
   locOf (ModVar _ loc) = locOf loc
@@ -1224,7 +1226,9 @@ data ModBindBase f vn = ModBind
     modLocation :: SrcLoc
   }
 
-deriving instance Showable f vn => Show (ModBindBase f vn)
+deriving instance Show (ModBindBase Info VName)
+
+deriving instance Show (ModBindBase NoInfo Name)
 
 instance Located (ModBindBase f vn) where
   locOf = locOf . modLocation
@@ -1237,7 +1241,9 @@ data ModParamBase f vn = ModParam
     modParamLocation :: SrcLoc
   }
 
-deriving instance Showable f vn => Show (ModParamBase f vn)
+deriving instance Show (ModParamBase Info VName)
+
+deriving instance Show (ModParamBase NoInfo Name)
 
 instance Located (ModParamBase f vn) where
   locOf = locOf . modParamLocation
@@ -1252,7 +1258,9 @@ data DecBase f vn
   | LocalDec (DecBase f vn) SrcLoc
   | ImportDec FilePath (f FilePath) SrcLoc
 
-deriving instance Showable f vn => Show (DecBase f vn)
+deriving instance Show (DecBase Info VName)
+
+deriving instance Show (DecBase NoInfo Name)
 
 instance Located (DecBase f vn) where
   locOf (ValDec d) = locOf d
@@ -1270,7 +1278,9 @@ data ProgBase f vn = Prog
     progDecs :: [DecBase f vn]
   }
 
-deriving instance Showable f vn => Show (ProgBase f vn)
+deriving instance Show (ProgBase Info VName)
+
+deriving instance Show (ProgBase NoInfo Name)
 
 --- Some prettyprinting definitions are here because we need them in
 --- the Attributes module.
