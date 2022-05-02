@@ -287,7 +287,8 @@ class Monad m => MonadTypeChecker m where
       Scalar (Prim (Signed Int64)) -> pure v'
       _ ->
         typeError loc mempty $
-          "Dimension declaration" <+> ppr v <+> "should be of type i64."
+          "Sizes must have type i64, but" <+> pquote (ppr v) <+> "has type:"
+            </> ppr t
 
   typeError :: Located loc => loc -> Notes -> Doc -> m a
 
