@@ -1,7 +1,7 @@
 -- This one screwed up multi-versioning at one point.  The problem was
 -- that loop interchange produced identity maps.
 
-def main [n][m] (xss: *[n][m]i32) (n: i32) =
+def main [n][m] (xss: *[n][m]i32) =
   map (\(xs: []i32) ->
          let ys = copy xs
          let (xs, _) =
