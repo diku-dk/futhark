@@ -646,10 +646,11 @@ compileOp (ISPCKernel body free) = do
       goto cleanup;
     }|]
 compileOp (ForEach i bound body) = do
-  bound' <- GC.compileExp bound
+  bound' <- mapM GC.compileExp bound    
   body' <- GC.collect $ compileCode body
+  let bounds = concatMap (\(i', b) -> [C.ispcforeachiters|$id:i' = 0 ... extract($exp:b, 0)|]) $ zip i bound'
   GC.stm [C.cstm|
-    foreach ($id:i = 0 ... extract($exp:bound', 0)) {
+    foreach ($foreachiters:bounds) {
       $items:body'
     }|]
 compileOp (ForEachActive name body) = do
@@ -755,7 +756,7 @@ findVarying (For _ _ x) = findVarying x
 findVarying (While _ x) = findVarying x
 findVarying (Comment _ x) = findVarying x
 findVarying (Op (ForEachActive _ body)) = findVarying body
-findVarying (Op (ForEach idx _ body)) = idx : findVarying body
+findVarying (Op (ForEach idx _ body)) = idx ++ findVarying body
 findVarying (DeclareMem mem _) = [mem]
 findVarying _ = []
 

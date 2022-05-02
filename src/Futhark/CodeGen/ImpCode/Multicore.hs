@@ -28,7 +28,7 @@ data Multicore
   | -- | Emit code in ISPC
     ISPCKernel MCCode [Param]
   | -- | ForEach, only valid in ISPC
-    ForEach VName Exp MCCode
+    ForEach [VName] [Exp] MCCode
   | -- | ForEach_Active, only valid in ISPC
     ForEachActive VName MCCode
   | -- | Extract a lane to a uniform in ISPC
@@ -163,7 +163,7 @@ instance FreeIn Multicore where
   freeIn' (ISPCKernel body _) =
     freeIn' body
   freeIn' (ForEach i bound body) =
-    fvBind (oneName i) (freeIn' body <> freeIn' bound)
+    fvBind (namesFromList i) (freeIn' body <> freeIn' bound)
   freeIn' (ForEachActive i body) =
     fvBind (oneName i) (freeIn' body)
   freeIn' (ExtractLane dest tar lane) =
