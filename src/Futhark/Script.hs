@@ -378,7 +378,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->
-            pure $ V.ValueAtom $ SValue (V.valueTypeText (V.valueType s')) $ VVal s'
+            pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType s')) $ VVal s'
           Nothing -> error $ "Unable to write value " ++ pretty s
       evalExp' _ (Const val) =
         pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType val)) $ VVal val
