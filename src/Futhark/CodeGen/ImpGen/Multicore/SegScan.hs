@@ -58,15 +58,22 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
     let dims = map (shapeDims . segBinOpShape) scan_ops
     let isScalar x = case x of MemPrim _ -> True; _ -> False
     -- Are we only working on scalars
-    let scalars = all (all (isScalar . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (== []) dims
+    let scalars = all (all (isScalar . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (==[]) dims
 
-    scanStage1 scalars pat space scan_ops kbody
+    -- Checks if this SegOp is innermost (does not contain a nested segOp)
+    let f = stmsToList . bodyStms . lambdaBody . segBinOpLambda
+        innermost = null [x | x@(Op (Inner (ParOp _ _))) <-
+                             [e | (Let _ _ e) <- concatMap f scan_ops]]
+
+    -- Do we have nested vector operations
+    --let vectorized = all (/=[]) dims
+    scanStage1 (scalars && innermost) pat space scan_ops kbody
     let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do
       scan_ops2 <- renameSegBinOp scan_ops
       scanStage2 pat nsubtasks space scan_ops2 kbody
       scan_ops3 <- renameSegBinOp scan_ops
-      scanStage3 scalars pat space scan_ops3 kbody
+      scanStage3 (scalars && innermost) pat space scan_ops3 kbody
 
 -- Given a boolean indicating if we are generating a kernel, give a function
 -- to inject into the loop the body
