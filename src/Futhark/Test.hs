@@ -163,11 +163,15 @@ scriptValueAsVars server names_and_types val = do
     note (_, t)
       | "(" `T.isPrefixOf` t =
           Just $
-            "\nNote: expected type " <> prettyText t <> " is an opaque tuple that cannot be constructed\n"
+            "\nNote: expected type "
+              <> prettyText t
+              <> " is an opaque tuple that cannot be constructed\n"
               <> "in FutharkScript.  Consider using type annotations to give it a proper name."
       | "{" `T.isPrefixOf` t =
           Just $
-            "\nNote: expected type " <> prettyText t <> " is an opaque record that cannot be constructed\n"
+            "\nNote: expected type "
+              <> prettyText t
+              <> " is an opaque record that cannot be constructed\n"
               <> "in FutharkScript.  Consider using type annotations to give it a proper name."
       | otherwise =
           Nothing
