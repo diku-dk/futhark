@@ -714,6 +714,9 @@ compileOp (ForEachActive i body) = do
 compileOp (ExtractLane dest tar _) = do
   tar' <- GC.compileExp tar
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
+compileOp (ScanOp _ dest tar) = do
+  tar' <- GC.compileExp tar
+  GC.stm [C.cstm|$id:dest = $exp:tar';|]
 
 scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
 scopedBlock code = do

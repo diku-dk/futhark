@@ -11,6 +11,7 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Util.IntegralExp (quot, rem)
 import Prelude hiding (quot, rem)
+import Data.Maybe
 
 -- Compile a SegScan construct
 compileSegScan ::
@@ -100,11 +101,14 @@ genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
       per_scan_pes = segBinOpChunks scan_ops $ patElems pat
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
+  let intrinsic = map (intrinsicScanLambda . segBinOpLambda) scan_ops
+  let all_intrinisc = all isJust intrinsic
+  let scan_loop = getScanLoop (kernel && not all_intrinisc)
 
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
   compileStms mempty (kernelBodyStms kbody) $ do
     -- Potential vector load and then do sequential scan
-    getScanLoop kernel $ \j -> do
+    scan_loop $ \j -> do
       when mapout $
         sComment "write mapped values results to memory" $ do
           let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat

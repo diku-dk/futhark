@@ -26,6 +26,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     inISPC,
     toParam,
     sLoopNestVectorized,
+    intrinsicScanLambda,
   )
 where
 
@@ -40,6 +41,7 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
+import Data.Foldable (find)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -297,6 +299,48 @@ inISPC code = do
   code' <- collect code
   free <- freeParams code'
   emit $ Imp.Op $ Imp.ISPCKernel code' free
+
+-------------------------------
+------- SegScan helpers -------
+-------------------------------
+intrinsicScanOp :: BinOp -> Maybe String
+intrinsicScanOp Add {} = Just "scan_add"
+intrinsicScanOp FAdd {} = Just "scan_add"
+intrinsicScanOp Mul {} = Just "scan_mul"
+intrinsicScanOp FMul {} = Just "scan_mul"
+intrinsicScanOp And {} = Just "scan_and"
+intrinsicScanOp Or {} = Just "scan_or"
+intrinsicScanOp Xor {} = Just "scan_xor"
+intrinsicScanOp LogOr {} = Just "scan_and"
+intrinsicScanOp LogAnd {} = Just "scan_or"
+intrinsicScanOp SMax {} = Just "scan_max"
+intrinsicScanOp SMin {} = Just "scan_min"
+intrinsicScanOp UMax {} = Just "scan_max"
+intrinsicScanOp UMin {} = Just "scan_min"
+intrinsicScanOp FMax {} = Just "scan_max"
+intrinsicScanOp FMin {} = Just "scan_min"
+intrinsicScanOp _ = Nothing
+
+intrinsicScanLambda :: Lambda rep -> Maybe String
+intrinsicScanLambda lam =
+  let body = lambdaBody lam
+      n2 = length (lambdaParams lam) `div` 2
+      (xps, yps) = splitAt n2 (lambdaParams lam)
+
+      okComponent c = msum $ okBinOp c <$> bodyStms body
+      okBinOp
+        (xp, yp, SubExpRes _ (Var r))
+        (Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y))))
+          | patElemName pe == r,
+            ((x == paramName xp && y == paramName yp) ||
+             (y == paramName xp && x == paramName yp)) =
+              intrinsicScanOp op
+          | otherwise = Nothing
+      okBinOp _ _ = Nothing
+   in guard (length (bodyResult body) == 1)
+      >> guard (n2 * 2 == length (lambdaParams lam))
+      >> guard (n2 == length (bodyResult body))
+      >> msum (map okComponent (zip3 xps yps $ bodyResult body))
 
 -------------------------------
 ------- SegRed helpers  -------

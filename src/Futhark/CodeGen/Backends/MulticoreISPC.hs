@@ -878,6 +878,8 @@ findDeps (Op (GetLoopBounds x y)) = do
   addDeps y mempty
 findDeps (Op (ExtractLane x _ _)) = do
   addDeps x mempty
+findDeps (Op (ScanOp _ x tar)) = do
+  addDeps x $ freeIn tar
 findDeps _ = pure ()
 
 -- | Take a list of dependencies and iterate them to a fixed point.
