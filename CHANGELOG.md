@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   that migrates scalar work to the GPU, in order to reduce
   synchronisation.  This results in major speedup for some programs.
 
+* String literals are now allowed in `input` blocks.
+
 ### Removed
 
 ### Changed
