@@ -4,7 +4,7 @@ module Futhark.CodeGen.ImpGen.Multicore.SegScan
 where
 
 import Control.Monad
-import Data.List (zip4)
+import Data.List (zip4, zip5)
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -102,8 +102,8 @@ genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
   let intrinsic = map (intrinsicScanLambda . segBinOpLambda) scan_ops
-  let all_intrinisc = all isJust intrinsic
-  let scan_loop = getScanLoop (kernel && not all_intrinisc)
+  let all_intrinsic = all isJust intrinsic
+  let scan_loop = getScanLoop (kernel && not all_intrinsic)
 
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
   compileStms mempty (kernelBodyStms kbody) $ do
@@ -116,21 +116,40 @@ genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
       forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           -- Read accum value
-          forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
-            copyDWIMFix (paramName p) [] (Var acc') vec_is
-          -- Read next value
-          sComment "Read next values" $
-            forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-              getExtract kernel j $
-                collect $
-                  copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
-          -- Scan body
-          sComment "Scan body" $
-            compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-                \(acc', pe, se) -> do
-                  copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
-                  copyDWIMFix acc' vec_is se []
+          if all_intrinsic
+            then
+              forM_ (zip5 pes (catMaybes intrinsic) scan_res (xParams scan_op) (yParams scan_op)) $
+                \(pe, iname, se, xp, yp) ->
+                  case paramType xp of
+                    Prim pt -> do
+                      res <- tvVar <$> dPrim "res" pt
+                      emit $ Imp.Op $ Imp.ScanOp iname res (kernelResultSubExp se)
+                      copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) (Var res) []
+                      lane <- tvVar <$> dPrim "lane" (IntType Int32)
+                      --emit $ Imp.SetScalar last 
+
+                      extractVectorLane (TPrimExp $ Imp.LeafExp lane (IntType Int32)) $
+                        pure $ Imp.SetScalar (paramName xp) (Imp.LeafExp res pt)
+                      pure ()
+                    _ -> undefined
+            else do
+              forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
+                copyDWIMFix (paramName p) [] (Var acc') vec_is
+              -- Read next value
+              sComment "Read next values" $
+                forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
+                  getExtract kernel j $
+                    collect $
+                      copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+              -- Scan body
+              sComment "Scan body" $
+                compileStms mempty (bodyStms $ lamBody scan_op) $
+                  forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
+                    \(acc', pe, se) -> do
+                      copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+                      copyDWIMFix acc' vec_is se []
+              
+
 
 scanStage1 ::
   Bool ->

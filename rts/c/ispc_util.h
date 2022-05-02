@@ -330,4 +330,25 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
   return err;
 }
 
+// Scan helpers
+#define scan_helper(name, ty, op)                     \
+static inline ty scan_##name(ty a) {                  \
+  #pragma unroll                                      \
+  for (uniform int i = 1; i < programCount; i *= 2) { \
+    a = op(a, shift(a, -i));                          \
+  }                                                   \
+  return a;                                           \
+}
+
+#define infix_scan_helper(name, ty, op)               \
+static inline ty scan_##name(ty a) {                  \
+  #pragma unroll                                      \
+  for (uniform int i = 1; i < programCount; i *= 2) { \
+    a = a op shift(a, -i);                            \
+  }                                                   \
+  return a;                                           \
+}
+
+infix_scan_helper(add, int32_t, +)
+
 // End of ispc_util.h.

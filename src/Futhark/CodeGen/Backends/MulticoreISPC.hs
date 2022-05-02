@@ -806,6 +806,8 @@ compileOp (ExtractLane dest tar lane) = do
   tar' <- GC.compileExp tar
   lane' <- GC.compileExp lane
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
+compileOp (ScanOp name dest tar) = do
+  GC.stm [C.cstm|$id:dest = $id:name($exp:tar);|]
 compileOp op = MC.compileOp op
 
 -- Variability analysis

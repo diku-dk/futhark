@@ -36,7 +36,7 @@ data Multicore
     ExtractLane VName Exp Exp
   | -- | Special cases of Scan, where we can efficiently scan over
     -- values in a single vector register.
-    ScanOp String VName Exp
+    ScanOp String VName SubExp
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
