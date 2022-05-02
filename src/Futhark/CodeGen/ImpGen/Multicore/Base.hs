@@ -26,6 +26,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     inISPC,
     toParam,
     sLoopNestVectorized,
+    getChunkLoopNestVectorized,
   )
 where
 
@@ -40,6 +41,7 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
+import Futhark.CodeGen.ImpCode.Multicore (TExp)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
@@ -287,6 +289,10 @@ inISPC code = do
   code' <- collect code
   free <- freeParams code'
   emit $ Imp.Op $ Imp.ISPCKernel code' free
+
+getChunkLoopNestVectorized :: String -> Bool -> (TExp Int64 -> MulticoreGen ()) -> MulticoreGen ()
+getChunkLoopNestVectorized segOpName True m = inISPC $ generateChunkLoop segOpName True m
+getChunkLoopNestVectorized segOpName False m = generateChunkLoop segOpName False m
 
 -------------------------------
 ------- SegRed helpers  -------
