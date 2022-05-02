@@ -237,12 +237,10 @@ data DimDecl vn
     NamedDim (QualName vn)
   | -- | The size is a constant.
     ConstDim Int
-  | -- | No known size - but still possibly given a unique name, so we
-    -- can recognise e.g. @type square [n] = [n][n]i32@ and make
-    -- @square []@ do the right thing.  If @Nothing@, then this is a
-    -- name distinct from any other.  The type checker should _never_
-    -- produce these - they are a (hopefully temporary) thing
-    -- introduced by defunctorisation and monomorphisation.
+  | -- | No known size.  If @Nothing@, then this is a name distinct
+    -- from any other.  The type checker should _never_ produce these
+    -- - they are a (hopefully temporary) thing introduced by
+    -- defunctorisation and monomorphisation.
     AnyDim (Maybe vn)
   deriving (Show)
 
