@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark doc`: some formatting bugs.
 
+* `futhark doc` didn't notice all `local` module types (#1666).
+
 ## [0.21.10]
 
 ### Added
