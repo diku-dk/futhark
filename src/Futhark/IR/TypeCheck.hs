@@ -555,6 +555,21 @@ checkAccIdent v = do
           ++ " should be an accumulator but is of type "
           ++ pretty t
 
+checkArrOrAccIdent ::
+  Checkable rep =>
+  VName ->
+  TypeM rep Type
+checkArrOrAccIdent v = do
+  t <- lookupType v
+  case t of
+    Array {} -> return t
+    Acc {} -> return t
+    _ ->
+      bad . TypeError $
+        pretty v
+          ++ " should be an accumulator or array but is of type "
+          ++ pretty t
+
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
 -- information.
@@ -916,7 +931,7 @@ checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
     bad $ TypeError "Types of arguments to concat do not match."
   require [Prim int64] ressize
 checkBasicOp (Copy e) =
-  void $ checkArrIdent e
+  void $ checkArrOrAccIdent e
 checkBasicOp (Manifest perm arr) =
   checkBasicOp $ Rearrange perm arr -- Basically same thing!
 checkBasicOp (Assert e (ErrorMsg parts) _) = do

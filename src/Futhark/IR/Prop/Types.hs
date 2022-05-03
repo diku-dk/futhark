@@ -292,7 +292,8 @@ primType _ = False
 elemType :: TypeBase shape u -> PrimType
 elemType (Array t _ _) = t
 elemType (Prim t) = t
-elemType Acc {} = error "Acc"
+elemType (Acc _ _ [t] _) = elemType t
+elemType Acc {} = error "" -- TODO: Fix
 elemType Mem {} = error "elemType Mem"
 
 -- | Swap the two outer dimensions of the type.

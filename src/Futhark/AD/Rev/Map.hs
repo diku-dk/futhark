@@ -14,6 +14,7 @@ import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
 import Futhark.Util (splitAt3)
 
 -- | A classification of a free variable based on its adjoint.  The
@@ -75,7 +76,9 @@ withAcc inputs m = do
       pure (cert_param, acc_param)
   acc_lam <-
     subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params
-  letTupExp "withacc_res" $ WithAcc inputs acc_lam
+  (subst, copy_stms) <- subSubsts $ copyConsumedArrsInStm $ Let mempty (StmAux mempty mempty mempty) (WithAcc inputs acc_lam)
+  addStms copy_stms
+  letTupExp "withhacc_res" $ substituteNames subst $ WithAcc inputs acc_lam
 
 vjpMap :: VjpOps -> [Adj] -> StmAux () -> SubExp -> Lambda SOACS -> [VName] -> ADM ()
 vjpMap ops res_adjs _ w map_lam as
@@ -149,8 +152,8 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
   pat_adj_vals <- mapM adjVal pat_adj
   pat_adj_params <-
     mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj_vals
-  map_lam' <- renameLambda map_lam
 
+  map_lam' <- renameLambda map_lam
   free <- filterM isActive $ namesToList $ freeIn map_lam'
 
   accAdjoints free $ \free_with_adjs free_without_adjs -> do
