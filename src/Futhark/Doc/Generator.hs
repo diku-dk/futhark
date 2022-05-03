@@ -141,12 +141,13 @@ renderFiles important_imports imports = runWriter $ do
     forM imports $ \(current, fm) ->
       let ctx =
             Context
-              current
-              fm
-              imports
-              mempty
-              file_map
-              (progModuleTypes $ fileProg fm)
+              { ctxCurrent = current,
+                ctxFileMod = fm,
+                ctxImports = imports,
+                ctxNoLink = mempty,
+                ctxFileMap = file_map,
+                ctxVisibleMTys = progModuleTypes $ fileProg fm
+              }
        in flip runReaderT ctx $ do
             (first_paragraph, maybe_abstract, maybe_sections) <- headerDoc $ fileProg fm
 
