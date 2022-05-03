@@ -134,11 +134,11 @@ instance Substitute Adj where
 zeroArray :: MonadBuilder m => Shape -> Type -> m VName
 zeroArray shape t
   | shapeRank shape == 0 =
-    letExp "zero" $ zeroExp t
+      letExp "zero" $ zeroExp t
   | otherwise = do
-    zero <- letSubExp "zero" $ zeroExp t
-    attributing (oneAttr "sequential") $
-      letExp "zeroes_" $ BasicOp $ Replicate shape zero
+      zero <- letSubExp "zero" $ zeroExp t
+      attributing (oneAttr "sequential") $
+        letExp "zeroes_" $ BasicOp $ Replicate shape zero
 
 sparseArray :: (MonadBuilder m, Rep m ~ SOACS) => Sparse -> m VName
 sparseArray (Sparse shape t ivs) = do
@@ -259,7 +259,7 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
               Acc {} -> do
                 v' <- letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
                 addSubstitution v' v
-                return [(v, v')]
+                pure [(v, v')]
               Array {} -> do
                 v' <- letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
                 addSubstitution v' v

@@ -223,7 +223,7 @@ diffBasicOp pat aux e m =
             =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj slice zeroes)
     UpdateAcc _ _ vs -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ mapM_ (flip updateSubExpAdj pat_adj) vs
+      returnSweepCode $ mapM_ (`updateSubExpAdj` pat_adj) vs
 
 vjpOps :: VjpOps
 vjpOps = VjpOps diffLambda diffStm
@@ -233,29 +233,29 @@ diffStm (Let pat aux (BasicOp e)) m =
   diffBasicOp pat aux e m
 diffStm stm@(Let pat _ (Apply f args _ _)) m
   | Just (ret, argts) <- M.lookup f builtInFunctions = do
-    addStm stm
-    m
+      addStm stm
+      m
 
-    pat_adj <- lookupAdjVal =<< patName pat
-    let arg_pes = zipWith primExpFromSubExp argts (map fst args)
-        pat_adj' = primExpFromSubExp ret (Var pat_adj)
-        convert ft tt
-          | ft == tt = id
-        convert (IntType ft) (IntType tt) = ConvOpExp (SExt ft tt)
-        convert (FloatType ft) (FloatType tt) = ConvOpExp (FPConv ft tt)
-        convert Bool (FloatType tt) = ConvOpExp (BToF tt)
-        convert (FloatType ft) Bool = ConvOpExp (FToB ft)
-        convert ft tt = error $ "diffStm.convert: " ++ pretty (f, ft, tt)
+      pat_adj <- lookupAdjVal =<< patName pat
+      let arg_pes = zipWith primExpFromSubExp argts (map fst args)
+          pat_adj' = primExpFromSubExp ret (Var pat_adj)
+          convert ft tt
+            | ft == tt = id
+          convert (IntType ft) (IntType tt) = ConvOpExp (SExt ft tt)
+          convert (FloatType ft) (FloatType tt) = ConvOpExp (FPConv ft tt)
+          convert Bool (FloatType tt) = ConvOpExp (BToF tt)
+          convert (FloatType ft) Bool = ConvOpExp (FToB ft)
+          convert ft tt = error $ "diffStm.convert: " ++ pretty (f, ft, tt)
 
-    contribs <-
-      case pdBuiltin f arg_pes of
-        Nothing ->
-          error $ "No partial derivative defined for builtin function: " ++ pretty f
-        Just derivs ->
-          forM (zip derivs argts) $ \(deriv, argt) ->
-            letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
+      contribs <-
+        case pdBuiltin f arg_pes of
+          Nothing ->
+            error $ "No partial derivative defined for builtin function: " ++ pretty f
+          Just derivs ->
+            forM (zip derivs argts) $ \(deriv, argt) ->
+              letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
 
-    zipWithM_ updateSubExpAdj (map fst args) contribs
+      zipWithM_ updateSubExpAdj (map fst args) contribs
 diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
   addStm stm
   m
@@ -280,7 +280,7 @@ diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
 diffStm (Let pat aux loop@DoLoop {}) m =
   diffLoop diffStms pat aux loop m
-diffStm stm@(Let pat aux (WithAcc inputs lam)) m = do
+diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
   addStm stm
   m
   returnSweepCode $ do
@@ -291,7 +291,7 @@ diffStm stm@(Let pat aux (WithAcc inputs lam)) m = do
       filterM
         ( \v -> do
             v_t <- lookupType v
-            return $ isAcc v_t
+            pure $ isAcc v_t
         )
         free_vars
     free_certs <- mapM ((accCert <$>) . lookupType) free_accs
@@ -308,7 +308,7 @@ diffStm stm@(Let pat aux (WithAcc inputs lam)) m = do
     accCert _ = error ""
     renameInputLambda (shape, as, Just (f, nes)) = do
       f' <- renameLambda f
-      return $ (shape, as, Just (f', nes))
+      pure (shape, as, Just (f', nes))
     renameInputLambda input = pure input
     diffLambda' res_adjs get_adjs_for (Lambda params body ts) =
       localScope (scopeOfLParams params) $ do
@@ -321,13 +321,13 @@ diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
 diffStms :: Stms SOACS -> ADM ()
 diffStms all_stms
   | Just (stm, stms) <- stmsHead all_stms = do
-    (subst, copy_stms) <- copyConsumedArrsInStm stm
-    let (stm', stms') = substituteNames subst (stm, stms)
-    diffStms copy_stms >> diffStm stm' (diffStms stms')
-    forM_ (M.toList subst) $ \(from, to) ->
-      setAdj from =<< lookupAdj to
+      (subst, copy_stms) <- copyConsumedArrsInStm stm
+      let (stm', stms') = substituteNames subst (stm, stms)
+      diffStms copy_stms >> diffStm stm' (diffStms stms')
+      forM_ (M.toList subst) $ \(from, to) ->
+        setAdj from =<< lookupAdj to
   | otherwise =
-    pure ()
+      pure ()
 
 -- | Preprocess statements before differentiating.
 -- For now, it's just stripmining.
