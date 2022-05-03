@@ -152,8 +152,8 @@ parseExp sep =
         [ try $ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
           inParens sep $ parseExp sep,
           inBraces sep (Record <$> (pField `sepBy` pComma)),
-          Const <$> V.parseValue sep,
           StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\""),
+          Const <$> V.parseValue sep,
           Call <$> parseFunc <*> pure []
         ]
 
