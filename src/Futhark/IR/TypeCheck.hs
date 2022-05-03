@@ -562,8 +562,8 @@ checkArrOrAccIdent ::
 checkArrOrAccIdent v = do
   t <- lookupType v
   case t of
-    Array {} -> return t
-    Acc {} -> return t
+    Array {} -> pure t
+    Acc {} -> pure t
     _ ->
       bad . TypeError $
         pretty v
