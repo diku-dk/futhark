@@ -1,7 +1,7 @@
 -- ==
 -- entry: f_vjp
 -- compiled input { [[1,2,3],[1,2,3],[1,2,3]] [1,2,3]}
--- output { [[6,12,18],[6,12,18],[6,12,18]] [1,2,3] }
+-- output { [[1,1,1],[1,1,1],[1,1,1]] [3,3,3] }
 def f [n] (xssys : ([n][n]i32, [n]i32)) =
   let (xss,ys) = xssys
   in i32.sum (map (\xs -> i32.sum (map2 (*) xs ys)) xss)
