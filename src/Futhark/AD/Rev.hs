@@ -296,9 +296,9 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
     free_vars <- filterM isActive $ namesToList $ freeIn lam'
     free_accs <- filterM (fmap isAcc . lookupType) free_vars
     let free_vars' = free_vars \\ free_accs
-    diffLam <- diffLambda' adjs free_vars' lam'
+    lam'' <- diffLambda' adjs free_vars' lam'
     inputs' <- mapM renameInputLambda inputs
-    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' diffLam
+    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' lam''
     zipWithM_ insAdj (arrs <> free_vars') free_adjs
   where
     arrs = concatMap (\(_, as, _) -> as) inputs
