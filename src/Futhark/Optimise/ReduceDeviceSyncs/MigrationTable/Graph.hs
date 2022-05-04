@@ -70,7 +70,6 @@ module Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
     member,
     lookup,
     isSinkConnected,
-    canReachSink,
 
     -- * Routing
     route,
@@ -267,54 +266,6 @@ isSinkConnected :: Id -> Graph m -> Bool
 isSinkConnected i g =
   maybe False ((ToSink ==) . vertexEdges) (lookup i g)
 
--- | @canReachSink g vs et i@ returns whether a sink can be reached via the
--- vertex @v@ with id @i@ in @g@. @et@ identifies the type of edge that @v@ is
--- accessed by and thereby which edges of @v@ that are available. @vs@ caches
--- whether a sink can be reached from vertices that are visited.
-canReachSink ::
-  Graph m ->
-  Visited Bool ->
-  EdgeType ->
-  Id ->
-  (Bool, Visited Bool)
-canReachSink g vs et i
-  | Just found <- M.lookup (et, i) (visited vs) =
-      (found, vs)
-  | Just v <- lookup i g =
-      searchVertex v
-  | otherwise =
-      (False, vs) -- shouldn't happen
-  where
-    searchVertex v = cached (searchEdges v)
-
-    cached (found, vs') =
-      (found, Visited $ M.insert (et, i) found (visited vs'))
-
-    searchEdges v =
-      case (et, vertexRouting v) of
-        (Normal, FromSource) -> (False, vs)
-        (Normal, FromNode rev _) -> entry (searchReversed rev)
-        (Reversed, FromNode rev _) -> entry (searchAll rev $ vertexEdges v)
-        _ -> entry (searchNormals $ vertexEdges v)
-
-    -- Handle cycles
-    entry f = f $ Visited $ M.insert (et, i) False (visited vs)
-
-    searchReversed rev vs' = canReachSink g vs' Reversed rev
-
-    searchAll rev es vs0 =
-      let (found, vs1) = searchNormals es vs0
-       in if found then (True, vs1) else searchReversed rev vs1
-
-    searchNormals ToSink vs' = (True, vs')
-    searchNormals (ToNodes es _) vs' = searchNorms (IS.elems es) vs'
-
-    searchNorms [] vs0 = (False, vs0)
-    searchNorms (e : es) vs0 =
-      let (found, vs1) = canReachSink g vs0 Normal e
-       in if found then (True, vs1) else searchNorms es vs1
-
---------------------------------------------------------------------------------
 --                                  ROUTING                                   --
 --------------------------------------------------------------------------------
 
