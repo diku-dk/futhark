@@ -10,6 +10,10 @@ module Futhark.Optimise.Fusion.LoopKernel
     arrInputs,
     transformOutput,
     attemptFusion,
+    tryFusion,
+    pullRearrange,
+    pushRearrange,
+    iswim,
     SOAC,
     MapNest,
   )
