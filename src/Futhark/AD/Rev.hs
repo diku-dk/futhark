@@ -302,8 +302,6 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
     zipWithM_ insAdj (arrs <> free_vars') free_adjs
   where
     arrs = concatMap (\(_, as, _) -> as) inputs
-    isAcc Acc {} = True
-    isAcc _ = False
     renameInputLambda (shape, as, Just (f, nes)) = do
       f' <- renameLambda f
       pure (shape, as, Just (f', nes))

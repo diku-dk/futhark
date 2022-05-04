@@ -33,10 +33,6 @@ zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ show t
 
-isAcc :: TypeBase s u -> Bool
-isAcc Acc {} = True
-isAcc _ = False
-
 tanType :: TypeBase s u -> ADM (TypeBase s u)
 tanType (Acc acc ispace ts u) = do
   ts_tan <- mapM tanType ts
