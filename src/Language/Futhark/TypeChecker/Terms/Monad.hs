@@ -843,6 +843,8 @@ maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
 maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
+dimFromExp rf (Attr _ e _) = dimFromExp rf e
+dimFromExp rf (Assert _ e _ _) = dimFromExp rf e
 dimFromExp rf (Parens e _) = dimFromExp rf e
 dimFromExp rf (QualParens _ e _) = dimFromExp rf e
 dimFromExp rf e
