@@ -284,6 +284,10 @@ transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
   pure (red_stms, op)
 
 transformSOAC :: Pat Type -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
+transformSOAC _ _ JVP {} =
+  error "transformSOAC: unhandled JVP"
+transformSOAC _ _ VJP {} =
+  error "transformSOAC: unhandled VJP"
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
       seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs

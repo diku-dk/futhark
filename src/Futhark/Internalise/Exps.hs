@@ -1578,6 +1578,7 @@ isOverloadedFunction qname args loc = do
           handleOps,
           handleSOACs,
           handleAccs,
+          handleAD,
           handleRest
         ]
   msum [h args $ baseString $ qualLeaf qname | h <- handlers]
@@ -1745,6 +1746,19 @@ isOverloadedFunction qname args loc = do
       vs <- internaliseExp "acc_v" v
       fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
     handleAccs _ _ = Nothing
+
+    handleAD [TupLit [f, x, v] _] fname
+      | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
+          x' <- internaliseExp "ad_x" x
+          v' <- internaliseExp "ad_v" v
+          xts <- mapM subExpType x'
+          (ps, body, ret) <- internaliseLambda f xts
+          let lam = I.Lambda ps body ret
+          fmap (map I.Var) . letTupExp desc . Op $
+            case fname of
+              "jvp2" -> JVP lam x' v'
+              _ -> VJP lam x' v'
+    handleAD _ _ = Nothing
 
     handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v

@@ -5,6 +5,7 @@ open import "soacs"
 open import "array"
 open import "math"
 open import "functional"
+open import "ad"
 
 -- | Create single-precision float from integer.
 def r32 (x: i32): f32 = f32.i32 x

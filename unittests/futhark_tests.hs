@@ -1,5 +1,6 @@
 module Main (main) where
 
+import qualified Futhark.AD.DerivativesTests
 import qualified Futhark.BenchTests
 import qualified Futhark.IR.Mem.IxFunTests
 import qualified Futhark.IR.PrimitiveTests
@@ -16,6 +17,7 @@ allTests =
   testGroup
     ""
     [ Language.Futhark.SyntaxTests.tests,
+      Futhark.AD.DerivativesTests.tests,
       Futhark.BenchTests.tests,
       Futhark.IR.PropTests.tests,
       Futhark.IR.Syntax.CoreTests.tests,

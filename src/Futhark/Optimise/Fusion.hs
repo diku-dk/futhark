@@ -844,10 +844,11 @@ fusionGatherExp fres (WithAcc inps lam) = do
 
 fusionGatherExp _ (Op Futhark.Screma {}) = errorIllegal "screma"
 fusionGatherExp _ (Op Futhark.Scatter {}) = errorIllegal "write"
------------------------------------
----- Generic Traversal         ----
------------------------------------
-
+fusionGatherExp fres (Op (Futhark.VJP lam _ _)) =
+  snd <$> fusionGatherLam (mempty, fres) lam
+fusionGatherExp fres (Op (Futhark.JVP lam _ _)) =
+  snd <$> fusionGatherLam (mempty, fres) lam
+--
 fusionGatherExp fres e = addNamesToInfusible fres $ freeIn e
 
 fusionGatherSubExp :: FusedRes -> SubExp -> FusionGM FusedRes

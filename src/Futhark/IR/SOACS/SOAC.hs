@@ -122,6 +122,10 @@ data SOAC rep
     --
     -- The final lambda produces indexes and values for the 'HistOp's.
     Hist SubExp [VName] [HistOp rep] (Lambda rep)
+  | -- FIXME: this should not be here
+    JVP (Lambda rep) [SubExp] [SubExp]
+  | -- FIXME: this should not be here
+    VJP (Lambda rep) [SubExp] [SubExp]
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
@@ -400,6 +404,14 @@ mapSOACM ::
   SOACMapper frep trep m ->
   SOAC frep ->
   m (SOAC trep)
+mapSOACM tv (JVP lam args vec) =
+  JVP <$> mapOnSOACLambda tv lam
+    <*> mapM (mapOnSOACSubExp tv) args
+    <*> mapM (mapOnSOACSubExp tv) vec
+mapSOACM tv (VJP lam args vec) =
+  VJP <$> mapOnSOACLambda tv lam
+    <*> mapM (mapOnSOACSubExp tv) args
+    <*> mapM (mapOnSOACSubExp tv) vec
 mapSOACM tv (Stream size arrs form accs lam) =
   Stream <$> mapOnSOACSubExp tv size
     <*> mapM (mapOnSOACVName tv) arrs
@@ -490,7 +502,13 @@ instance ASTRep rep => Rename (SOAC rep) where
       renamer = SOACMapper rename rename rename
 
 -- | The type of a SOAC.
-soacType :: SOAC rep -> [Type]
+soacType :: Typed (LParamInfo rep) => SOAC rep -> [Type]
+soacType (JVP lam _ _) =
+  lambdaReturnType lam
+    ++ lambdaReturnType lam
+soacType (VJP lam _ _) =
+  lambdaReturnType lam
+    ++ map paramType (lambdaParams lam)
 soacType (Stream outersize _ _ accs lam) =
   map (substNamesInType substs) rtp
   where
@@ -509,12 +527,14 @@ soacType (Hist _ _ ops _bucket_fun) = do
 soacType (Screma w _arrs form) =
   scremaType w form
 
-instance TypedOp (SOAC rep) where
+instance ASTRep rep => TypedOp (SOAC rep) where
   opType = pure . staticShapes . soacType
 
 instance (ASTRep rep, Aliased rep) => AliasedOp (SOAC rep) where
   opAliases = map (const mempty) . soacType
 
+  consumedInOp JVP {} = mempty
+  consumedInOp VJP {} = mempty
   -- Only map functions can consume anything.  The operands to scan
   -- and reduce functions are always considered "fresh".
   consumedInOp (Screma _ arrs (ScremaForm _ _ map_lam)) =
@@ -556,6 +576,10 @@ instance
   where
   type OpWithAliases (SOAC rep) = SOAC (Aliases rep)
 
+  addOpAliases aliases (JVP lam args vec) =
+    JVP (Alias.analyseLambda aliases lam) args vec
+  addOpAliases aliases (VJP lam args vec) =
+    VJP (Alias.analyseLambda aliases lam) args vec
   addOpAliases aliases (Stream size arr form accs lam) =
     Stream size arr (analyseStreamForm form) accs $
       Alias.analyseLambda aliases lam
@@ -648,6 +672,8 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: TC.Checkable rep => SOAC (Aliases rep) -> TC.TypeM rep ()
+typeCheckSOAC JVP {} = pure ()
+typeCheckSOAC VJP {} = pure ()
 typeCheckSOAC (Stream size arrexps form accexps lam) = do
   TC.require [Prim int64] size
   accargs <- mapM TC.checkArg accexps
@@ -820,6 +846,10 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
           ++ " wrong for given scan and reduction functions."
 
 instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
+  opMetrics (VJP lam _ _) =
+    inside "VJP" $ lambdaMetrics lam
+  opMetrics (JVP lam _ _) =
+    inside "JVP" $ lambdaMetrics lam
   opMetrics (Stream _ _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Scatter _len _ lam _) =
@@ -833,6 +863,22 @@ instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
       lambdaMetrics map_lam
 
 instance PrettyRep rep => PP.Pretty (SOAC rep) where
+  ppr (VJP lam args vec) =
+    text "vjp"
+      <> parens
+        ( PP.align $
+            ppr lam <> comma
+              </> PP.braces (commasep $ map ppr args) <> comma
+              </> PP.braces (commasep $ map ppr vec)
+        )
+  ppr (JVP lam args vec) =
+    text "jvp"
+      <> parens
+        ( PP.align $
+            ppr lam <> comma
+              </> PP.braces (commasep $ map ppr args) <> comma
+              </> PP.braces (commasep $ map ppr vec)
+        )
   ppr (Stream size arrs form acc lam) =
     case form of
       Parallel o comm lam0 ->

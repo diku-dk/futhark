@@ -42,6 +42,7 @@ import Futhark.Analysis.Alias
 import Futhark.IR
 import Futhark.IR.Aliases
   ( Aliases,
+    consumedInStms,
     mkStmsAliases,
     removeFunDefAliases,
     removeProgAliases,
@@ -54,9 +55,6 @@ import Futhark.IR.Prop.Aliases
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import Futhark.Pass
 import Futhark.Transform.Substitute
-
-consumedInStms :: Aliased rep => Stms rep -> Names
-consumedInStms = snd . flip mkStmsAliases []
 
 -- | Perform CSE on every function in a program.
 --
@@ -213,6 +211,13 @@ cseInStms consumed (stm : stms) m =
       | patElemName pe `nameIn` consumed = Consume
       | otherwise = Observe
 
+-- A small amount of normalisation of expressions that otherwise would
+-- be different for pointless reasons.
+normExp :: Exp lore -> Exp lore
+normExp (Apply fname args ret (safety, _, _)) =
+  Apply fname args ret (safety, mempty, mempty)
+normExp e = e
+
 cseInStm ::
   ASTRep rep =>
   Names ->
@@ -221,7 +226,7 @@ cseInStm ::
   CSEM rep a
 cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
-  let e' = substituteNames nsubsts e
+  let e' = normExp $ substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
   if any (bad cse_arrays) $ patElems pat
     then m [Let pat' (StmAux cs attrs edec) e']

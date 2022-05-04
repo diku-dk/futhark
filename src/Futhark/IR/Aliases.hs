@@ -47,6 +47,7 @@ module Futhark.IR.Aliases
     AliasesAndConsumed,
     trackAliases,
     mkStmsAliases,
+    consumedInStms,
   )
 where
 
@@ -327,6 +328,10 @@ type AliasesAndConsumed =
   ( M.Map VName Names,
     Names
   )
+
+-- | The variables consumed in these statements.
+consumedInStms :: Aliased rep => Stms rep -> Names
+consumedInStms = snd . flip mkStmsAliases []
 
 -- | A helper function for computing the aliases of a sequence of
 -- statements.  You'd use this while recursing down the statements

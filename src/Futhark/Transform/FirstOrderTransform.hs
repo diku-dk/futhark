@@ -123,6 +123,10 @@ transformSOAC ::
   Pat (LetDec (Rep m)) ->
   SOAC (Rep m) ->
   m ()
+transformSOAC _ JVP {} =
+  error "transformSOAC: unhandled JVP"
+transformSOAC _ VJP {} =
+  error "transformSOAC: unhandled VJP"
 transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   -- See Note [Translation of Screma].
   --
