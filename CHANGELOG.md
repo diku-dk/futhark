@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * String literals are now allowed in `input` blocks.
 
+* Experimental and undocumented support for automatic differentiation,
+  available on the secret menu.
+
 ### Removed
 
 ### Changed

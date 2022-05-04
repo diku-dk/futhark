@@ -15,6 +15,8 @@ module Futhark.Util
     maxinum,
     chunk,
     chunks,
+    pairs,
+    unpairs,
     dropAt,
     takeLast,
     dropLast,
@@ -62,6 +64,7 @@ module Futhark.Util
     zEncodeString,
     atMostChars,
     invertMap,
+    traverseFold,
     fixPoint,
   )
 where
@@ -76,6 +79,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import Data.Char
 import Data.Either
+import Data.Foldable (fold)
 import Data.Function ((&))
 import Data.List (foldl', genericDrop, genericSplitAt, sortBy)
 import qualified Data.List.NonEmpty as NE
@@ -141,6 +145,18 @@ chunks [] _ = []
 chunks (n : ns) xs =
   let (bef, aft) = splitAt n xs
    in bef : chunks ns aft
+
+-- | @pairs l@ chunks the list into pairs of consecutive elements,
+-- ignoring any excess element.  Example: @pairs [a,b,c,d] ==
+-- [(a,b),(c,d)]@.
+pairs :: [a] -> [(a, a)]
+pairs (a : b : l) = (a, b) : pairs l
+pairs _ = []
+
+-- | The opposite of 'pairs': @unpairs [(a,b),(c,d)] = [a,b,c,d]@.
+unpairs :: [(a, a)] -> [a]
+unpairs [] = []
+unpairs ((a, b) : l) = a : b : unpairs l
 
 -- | Like 'maximum', but returns zero for an empty list.
 maxinum :: (Num a, Ord a, Foldable f) => f a -> a
@@ -528,6 +544,10 @@ invertMap m =
   M.toList m
     & fmap (swap . first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
+
+-- | Applicatively fold a traversable.
+traverseFold :: (Monoid m, Traversable t, Applicative f) => (a -> f m) -> t a -> f m
+traverseFold f = fmap fold . traverse f
 
 -- | Perform fixpoint iteration.
 fixPoint :: Eq a => (a -> a) -> a -> a

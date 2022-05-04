@@ -108,7 +108,8 @@ kernelRules =
       [ RuleOp SOAC.simplifyKnownIterationSOAC,
         RuleOp SOAC.removeReplicateMapping,
         RuleOp SOAC.liftIdentityMapping,
-        RuleOp SOAC.simplifyMapIota
+        RuleOp SOAC.simplifyMapIota,
+        RuleOp SOAC.removeUnusedSOACInput
       ]
       [ RuleBasicOp removeUnnecessaryCopy,
         RuleOp removeDeadGPUBodyResult

@@ -157,10 +157,12 @@ module Futhark.IR.Syntax
     stmsFromList,
     stmsToList,
     stmsHead,
+    stmsLast,
     subExpRes,
     subExpsRes,
     varRes,
     varsRes,
+    subExpResVName,
   )
 where
 
@@ -245,6 +247,12 @@ stmsHead stms = case Seq.viewl stms of
   stm Seq.:< stms' -> Just (stm, stms')
   Seq.EmptyL -> Nothing
 
+-- | The last statement in the sequence, if any.
+stmsLast :: Stms lore -> Maybe (Stms lore, Stm lore)
+stmsLast stms = case Seq.viewr stms of
+  stms' Seq.:> stm -> Just (stms', stm)
+  Seq.EmptyR -> Nothing
+
 -- | A pairing of a subexpression and some certificates.
 data SubExpRes = SubExpRes
   { resCerts :: Certs,
@@ -267,6 +275,11 @@ subExpsRes = map subExpRes
 -- | Construct a 'Result' from variable names.
 varsRes :: [VName] -> Result
 varsRes = map varRes
+
+-- | The 'VName' of a 'SubExpRes', if it exists.
+subExpResVName :: SubExpRes -> Maybe VName
+subExpResVName (SubExpRes _ (Var v)) = Just v
+subExpResVName _ = Nothing
 
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
