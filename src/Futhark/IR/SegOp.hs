@@ -1179,6 +1179,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
           `Engine.orIf` Engine.isOp
           `Engine.orIf` par_blocker
           `Engine.orIf` Engine.isConsumed
+          `Engine.orIf` Engine.isConsuming
           `Engine.orIf` Engine.isDeviceMigrated
 
   -- Ensure we do not try to use anything that is consumed in the result.
