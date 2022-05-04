@@ -57,7 +57,6 @@ module Futhark.Util
     trim,
     pmapIO,
     interactWithFileSafely,
-    readFileSafely,
     convFloat,
     UserString,
     EncodedString,
@@ -89,7 +88,6 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
-import qualified Data.Text.IO as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Numeric
@@ -437,12 +435,6 @@ interactWithFileSafely m =
           pure Nothing
       | otherwise =
           pure $ Just $ Left $ show e
-
--- | Read a file, returning 'Nothing' if the file does not exist, and
--- 'Left' if some other error occurs.
-readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
-readFileSafely filepath =
-  interactWithFileSafely $ T.readFile filepath
 
 -- | Convert between different floating-point types, preserving
 -- infinities and NaNs.

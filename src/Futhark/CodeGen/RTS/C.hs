@@ -3,7 +3,6 @@
 -- | Code snippets used by the C backends.
 module Futhark.CodeGen.RTS.C
   ( atomicsH,
-    chaselevH,
     cudaH,
     freeListH,
     halfH,
@@ -32,11 +31,6 @@ import qualified Data.Text as T
 atomicsH :: T.Text
 atomicsH = $(embedStringFile "rts/c/atomics.h")
 {-# NOINLINE atomicsH #-}
-
--- | @rts/c/chaselev.h@
-chaselevH :: T.Text
-chaselevH = $(embedStringFile "rts/c/chaselev.h")
-{-# NOINLINE chaselevH #-}
 
 -- | @rts/c/cuda.h@
 cudaH :: T.Text
