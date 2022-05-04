@@ -406,7 +406,37 @@ revVJP scope (Lambda params body ts) =
 --
 -- # Adjoint of Map
 --
+-- Suppose we have primal code
 --
+--   let acc' =
+--     map (...) acc
+--
+-- where "acc : acc(c, [n], {f64})" and the width of the Map is "w".
+-- Our normal transformation for Map input arrays is to similarly map
+-- their adjoint, but clearly this doesn't work here because the
+-- semantics of mapping an adjoint is an "implicit replicate".  So
+-- when generating the return sweep we actually perform that
+-- replication:
+--
+--   map (...) (replicate w acc_adj)
+--
+-- But what about the contributions to "acc'"?  Those we also have to
+-- take special care of.  The result of the map itself is actually a
+-- multidimensional array:
+--
+--   let acc_contribs =
+--     map (...) (replicate w acc'_adj)
+--
+-- which we must then sum to add to the contribution.
+--
+--   acc_adj += sum(acc_contribs)
+--
+-- I'm slightly worried about the asymptotics of this, since my
+-- intuition of this is that the contributions might be rather sparse.
+-- (Maybe completely zero?  If so it will be simplified away
+-- entirely.)  Perhaps a better solution is to treat
+-- accumulator-inputs in the primal code as we do free variables, and
+-- create accumulators for them in the return sweep.
 --
 -- # Consumption
 --
