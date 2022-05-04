@@ -22,7 +22,7 @@ if [ "$TESTPARSER_WORKER" ]; then
         out=$dir/${f}_${suffix}
         mkdir -p $(dirname $out)
         if ! ( futhark dev -w "$@" $f > $out && futhark dev $out >/dev/null); then
-            echo "^- $f"
+            echo "^- $f $@"
             exit 1
         fi
     }
