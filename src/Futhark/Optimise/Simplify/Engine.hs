@@ -40,6 +40,7 @@ module Futhark.Optimise.Simplify.Engine
     orIf,
     hasFree,
     isConsumed,
+    isConsuming,
     isFalse,
     isOp,
     isNotSafe,
