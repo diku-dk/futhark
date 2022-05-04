@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   that migrates scalar work to the GPU, in order to reduce
   synchronisation.  This results in major speedup for some programs.
 
+* String literals are now allowed in `input` blocks.
+
 ### Removed
 
 ### Changed
@@ -38,6 +40,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   time Martin Elsman writes a nontrivial Futhark program.
 
 * `futhark bench`: convergence phase now does at least `--runs` runs.
+
+* Errors and warnings no longer awkwardly mixed together in console output.
+
+* Slightly better type errors for ambiguous sizes (#1661).
+
+* Better type errors for module ascription involving nested modules
+  (#1660).
+
+* `futhark doc`: some formatting bugs.
+
+* `futhark doc` didn't notice all `local` module types (#1666).
 
 ## [0.21.10]
 

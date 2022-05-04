@@ -22,8 +22,9 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Data.Bifunctor (first)
+import Data.List (sortOn)
 import qualified Data.List.NonEmpty as NE
-import Data.Loc (Loc (NoLoc))
+import Data.Loc (Loc (..), posCoff, posFile)
 import qualified Data.Text.IO as T
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Compiler.Config
@@ -34,7 +35,7 @@ import qualified Futhark.IR.TypeCheck as I
 import Futhark.Internalise
 import Futhark.MonadFreshNames
 import Futhark.Pipeline
-import Futhark.Util.Console (inRed)
+import Futhark.Util.Console (inRed, inYellow)
 import Futhark.Util.Log
 import Futhark.Util.Pretty (Doc, line, ppr, prettyText, punctuate, stack, text, (</>))
 import qualified Language.Futhark as E
@@ -135,12 +136,18 @@ typeCheckInternalProgram prog =
 
 -- | Prettyprint program errors as suitable for showing on a text console.
 pprProgErrors :: NE.NonEmpty ProgError -> Doc
-pprProgErrors = stack . punctuate line . map onError . NE.toList
+pprProgErrors = stack . punctuate line . map onError . sortOn (rep . locOf) . NE.toList
   where
+    rep NoLoc = ("", 0)
+    rep (Loc p _) = (posFile p, posCoff p)
     onError (ProgError NoLoc msg) =
       msg
     onError (ProgError loc msg) =
       text (inRed $ "Error at " <> locStr (srclocOf loc) <> ":") </> msg
+    onError (ProgWarning NoLoc msg) =
+      msg
+    onError (ProgWarning loc msg) =
+      text (inYellow $ "Warning at " <> locStr (srclocOf loc) <> ":") </> msg
 
 -- | Throw an exception formatted with 'pprProgErrors' if there's
 -- an error.
