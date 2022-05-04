@@ -292,7 +292,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
     cs == mempty,
     -- check kernel has one result of primitive type
     [res_tp] <- ts,
-    isAccType res_tp,
+    isAcc res_tp,
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
     (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims_rev <-
@@ -411,8 +411,6 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
       pure $ Just (host_stms, new_kernel)
   where
-    isAccType Acc {} = True
-    isAccType _ = False
     sameAccType acc_sglton (Acc sglton _ _ _) =
       acc_sglton == sglton
     sameAccType _ _ = False

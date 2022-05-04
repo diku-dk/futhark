@@ -13,6 +13,7 @@ module Futhark.IR.Prop.Types
     staticShapes,
     staticShapes1,
     primType,
+    isAcc,
     arrayOf,
     arrayOfRow,
     arrayOfShape,
@@ -286,6 +287,11 @@ rowType = stripArray 1
 primType :: TypeBase shape u -> Bool
 primType Prim {} = True
 primType _ = False
+
+-- | Is this an accumulator?
+isAcc :: TypeBase shape u -> Bool
+isAcc Acc {} = True
+isAcc _ = False
 
 -- | Returns the bottommost type of an array.  For @[][]i32@, this
 -- would be @i32@.  If the given type is not an array, it is returned.

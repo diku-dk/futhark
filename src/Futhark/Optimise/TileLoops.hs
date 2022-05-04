@@ -628,9 +628,6 @@ protectOutOfBounds desc in_bounds ts m = do
       <$> (zip <$> mapM lookupType m_body_free <*> pure m_body_free)
   let blank t = maybe (eBlank t) (pure . BasicOp . SubExp . Var) $ lookup t t_to_v
   letTupExp desc =<< eIf (toExp in_bounds) (pure m_body) (eBody $ map blank ts)
-  where
-    isAcc Acc {} = True
-    isAcc _ = False
 
 postludeGeneric ::
   Tiling ->
