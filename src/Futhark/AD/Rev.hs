@@ -221,9 +221,15 @@ diffBasicOp pat aux e m =
         void $
           updateAdj arr
             =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj slice zeroes)
-    UpdateAcc _ _ vs -> do
-      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ mapM_ (`updateSubExpAdj` pat_adj) vs
+    -- See Note [Adjoints of accumulators]
+    UpdateAcc _ is vs -> do
+      addStm $ Let pat aux $ BasicOp e
+      m
+      pat_adjs <- mapM lookupAdjVal (patNames pat)
+      returnSweepCode $ do
+        forM_ (zip pat_adjs vs) $ \(adj, v) -> do
+          adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ Slice $ map DimFix is
+          updateSubExpAdj v adj_i
 
 vjpOps :: VjpOps
 vjpOps = VjpOps diffLambda diffStm
@@ -280,6 +286,7 @@ diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
 diffStm (Let pat aux loop@DoLoop {}) m =
   diffLoop diffStms pat aux loop m
+-- See Note [Adjoints of accumulators]
 diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
   addStm stm
   m
@@ -359,12 +366,60 @@ revVJP scope (Lambda params body ts) =
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->
       Param mempty <$> maybe (newVName "const_adj") adjVName (subExpVar se) <*> pure t
 
-    Body () stms res <-
+    body' <-
       localScope (scopeOfLParams params_adj) $
         diffBody
           (map adjFromParam params_adj)
           (map paramName params)
           body
-    let body' = Body () stms res
 
     pure $ Lambda (params ++ params_adj) body' (ts <> map paramType params)
+
+-- Note [Adjoints of accumulators]
+--
+-- The general case of taking adjoints of WithAcc is tricky.  We make
+-- some assumptions and lay down a basic design.
+--
+-- First, we assume that any WithAccs that occur in the program are
+-- the result of previous invocations of VJP.  This means we can rely
+-- on the operator having a constant adjoint (it's some kind of
+-- addition).
+--
+-- Second, the adjoint of an accumulator is an array of the same type
+-- as the underlying array.  For example, the adjoint type of the
+-- primal type 'acc(c, [n], {f64})' is '[n]f64'.  In principle the
+-- adjoint of 'acc(c, [n], {f64,f32})' should be two arrays of type
+-- '[]f64', '[]f32'.  Our current design assumes that adjoints are
+-- single variables.  This is fixable.
+--
+-- # Adjoint of UpdateAcc
+--
+--   Consider primal code
+--
+--     update_acc(acc, i, v)
+--
+--   Interpreted as an imperative statement, this means
+--
+--     acc[i] ⊕= v
+--
+--   for some '⊕'.  Normally all the compiler knows of '⊕' is that it
+--   is associative and commutative, but because we assume that all
+--   accumulators are the result of previous AD transformations, we
+--   can assume that '⊕' actually behaves like addition - that is, has
+--   unit partial derivatives.  So the return sweep is
+--
+--     v += acc_adj[i]
+--
+-- # Adjoint of Map
+--
+--
+--
+-- # Consumption
+--
+-- A minor problem is that our usual way of handling consumption (Note
+-- [Consumption]) is not viable, because accumulators are not
+-- copyable.  Fortunately, while the accumulators that are consumed in
+-- the forward sweep will also be present in the return sweep given
+-- our current translation rules, they will be dead code.  As long as
+-- we are careful to run dead code elimination after revVJP, we should
+-- be good.

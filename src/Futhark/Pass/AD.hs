@@ -4,10 +4,12 @@
 module Futhark.Pass.AD (applyAD, applyADInnermost) where
 
 import Control.Monad
+import Control.Monad.Reader
 import Futhark.AD.Fwd (fwdJVP)
 import Futhark.AD.Rev (revVJP)
 import Futhark.Builder
 import Futhark.IR.SOACS
+import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Pass
 
 -- | Whether we apply only the innermost AD operators, or all of them.
@@ -38,7 +40,7 @@ onStm mode scope (Let pat aux (Op (VJP lam args vec))) = do
   lam' <- onLambda mode scope lam
   if mode == All || lam == lam'
     then do
-      lam'' <- revVJP scope lam'
+      lam'' <- (`runReaderT` scope) . simplifyLambda =<< revVJP scope lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
     else pure $ oneStm $ Let pat aux $ Op $ VJP lam' args vec
 onStm mode scope (Let pat aux (Op (JVP lam args vec))) = do
