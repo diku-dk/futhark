@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Experimental and undocumented support for automatic differentiation,
   available on the secret menu.
 
+* Assertions and attributes are now ignored when used as size
+  expressions.  E.g. `iota (assert p n) 0` now has size `n`.
+
 ### Removed
 
 ### Changed
