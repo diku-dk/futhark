@@ -295,8 +295,7 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
     lam' <- renameLambda lam
     free_vars <- filterM isActive $ namesToList $ freeIn lam'
     free_accs <- filterM (fmap isAcc . lookupType) free_vars
-    free_certs <- mapM ((accCert <$>) . lookupType) free_accs
-    let free_vars' = (free_vars \\ free_certs) \\ free_accs
+    let free_vars' = free_vars \\ free_accs
     diffLam <- diffLambda' adjs free_vars' lam'
     inputs' <- mapM renameInputLambda inputs
     free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' diffLam
@@ -305,8 +304,6 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
     arrs = concatMap (\(_, as, _) -> as) inputs
     isAcc Acc {} = True
     isAcc _ = False
-    accCert (Acc cert _ _ _) = cert
-    accCert _ = error ""
     renameInputLambda (shape, as, Just (f, nes)) = do
       f' <- renameLambda f
       pure (shape, as, Just (f', nes))
