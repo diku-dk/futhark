@@ -75,7 +75,7 @@ withAcc inputs m = do
       pure (cert_param, acc_param)
   acc_lam <-
     subAD $ mkLambda (cert_params ++ acc_params) $ m $ map paramName acc_params
-  letTupExp "withacc_res" $ WithAcc inputs acc_lam
+  letTupExp "withhacc_res" $ WithAcc inputs acc_lam
 
 vjpMap :: VjpOps -> [Adj] -> StmAux () -> SubExp -> Lambda SOACS -> [VName] -> ADM ()
 vjpMap ops res_adjs _ w map_lam as
@@ -145,12 +145,17 @@ vjpMap ops res_adjs _ w map_lam as
       Just ivs
     isSparse _ =
       Nothing
+-- See Note [Adjoints of accumulators] for how we deal with
+-- accumulators - it's a bit tricky here.
 vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
-  pat_adj_vals <- mapM adjVal pat_adj
+  pat_adj_vals <- forM (zip pat_adj (lambdaReturnType map_lam)) $ \(adj, t) ->
+    case t of
+      Acc {} -> letExp "acc_adj_rep" . BasicOp . Replicate (Shape [w]) . Var =<< adjVal adj
+      _ -> adjVal adj
   pat_adj_params <-
     mapM (newParam "map_adj_p" . rowType <=< lookupType) pat_adj_vals
-  map_lam' <- renameLambda map_lam
 
+  map_lam' <- renameLambda map_lam
   free <- filterM isActive $ namesToList $ freeIn map_lam'
 
   accAdjoints free $ \free_with_adjs free_without_adjs -> do
@@ -161,12 +166,10 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
           lambdaParams map_lam' ++ pat_adj_params ++ free_adjs_params
         adjs_for = map paramName (lambdaParams map_lam') ++ free
     lam_rev <-
-      mkLambda lam_rev_params $
-        subAD $
-          noAdjsFor free_without_adjs $ do
-            zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
-            bodyBind . lambdaBody
-              =<< vjpLambda ops (map adjFromParam pat_adj_params) adjs_for map_lam'
+      mkLambda lam_rev_params . subAD . noAdjsFor free_without_adjs $ do
+        zipWithM_ insAdj free_with_adjs $ map paramName free_adjs_params
+        bodyBind . lambdaBody
+          =<< vjpLambda ops (map adjFromParam pat_adj_params) adjs_for map_lam'
 
     (param_contribs, free_contribs) <-
       fmap (splitAt (length (lambdaParams map_lam'))) $
@@ -176,7 +179,11 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
     -- Crucial that we handle the free contribs first in case 'free'
     -- and 'as' intersect.
     zipWithM_ freeContrib free free_contribs
-    zipWithM_ updateAdj as param_contribs
+    let param_ts = map paramType (lambdaParams map_lam')
+    forM_ (zip3 param_ts as param_contribs) $ \(param_t, a, param_contrib) ->
+      case param_t of
+        Acc {} -> freeContrib a param_contrib
+        _ -> updateAdj a param_contrib
   where
     addIdxParams n lam = do
       idxs <- replicateM n $ newParam "idx" $ Prim int64

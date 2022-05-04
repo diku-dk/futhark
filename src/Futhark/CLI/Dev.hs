@@ -552,6 +552,7 @@ commandLineOptions =
     soacsPassOption inlineConservatively [],
     soacsPassOption removeDeadFunctions [],
     soacsPassOption applyAD [],
+    soacsPassOption applyADInnermost [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
