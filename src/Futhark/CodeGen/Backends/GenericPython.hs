@@ -56,10 +56,10 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.RTS.Python
-import Futhark.Compiler.CLI (CompilerMode (..))
+import Futhark.Compiler.Config (CompilerMode (..))
 import Futhark.IR.Primitive hiding (Bool)
 import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
-import Futhark.IR.Syntax (Space (..))
+import Futhark.IR.Syntax.Core (Space (..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty, prettyText)

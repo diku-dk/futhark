@@ -37,6 +37,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Time.Clock
 import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Compiler.Config (Verbosity (..))
 import Futhark.Error
 import Futhark.IR (PrettyRep, Prog)
 import Futhark.IR.TypeCheck
@@ -47,16 +48,6 @@ import Futhark.Util.Pretty (prettyText)
 import System.IO
 import Text.Printf
 import Prelude hiding (id, (.))
-
--- | How much information to print to stderr while the compiler is running.
-data Verbosity
-  = -- | Silence is golden.
-    NotVerbose
-  | -- | Print messages about which pass is running.
-    Verbose
-  | -- | Also print logs from individual passes.
-    VeryVerbose
-  deriving (Eq, Ord)
 
 newtype FutharkEnv = FutharkEnv {futharkVerbose :: Verbosity}
 
