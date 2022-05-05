@@ -221,7 +221,7 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
                 }|]
 
       let ispc_extern =
-            [C.cedecl|extern "C" $tyqual:uniform int $id:((funName fname) ++ "_extern")
+            [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:((funName fname) ++ "_extern")
                       ($params:extra, $params:outparams_extern, $params:inparams_extern);|]
 
           ispc_uniform =
