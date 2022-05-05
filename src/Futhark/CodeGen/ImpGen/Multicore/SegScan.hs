@@ -65,19 +65,25 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
     let paramTypes = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
     let noArrayParam = null [x | x@(Array {})<- paramTypes]
 
+    -- Checks if this SegOp is innermost (does not contain a nested segOp)
+    let f = stmsToList . bodyStms . lambdaBody . segBinOpLambda
+        innermost = null [x | x@(Op (Inner (ParOp _ _))) <-
+                             [e | (Let _ _ e) <- concatMap f scan_ops]]
+
+
     let (scanStage1, scanStage3)
          | scalars = (scalarStage1, scalarStage3)
          | vectorize && noArrayParam = (vectorizedStage1, vectorizedStage3)
          | otherwise = (fallbackStage1, fallbackStage3)
-    scanStage1 pat space kbody scan_ops
+
+    scanStage1 pat space kbody scan_ops 
 
     let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do
       scan_ops2 <- renameSegBinOp scan_ops
       scanStage2 pat nsubtasks space scan_ops2 kbody
       scan_ops3 <- renameSegBinOp scan_ops
-      --scanStage3 False scalars pat space scan_ops3 kbody
-      scanStage3 pat space kbody scan_ops3
+      scanStage3 pat space kbody scan_ops3 
 
 
 data ScanType = Fallback | Vectorized | Scalar

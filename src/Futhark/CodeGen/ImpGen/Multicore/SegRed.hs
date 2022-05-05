@@ -34,6 +34,7 @@ compileSegRed pat space reds kbody nsubtasks =
 
       red_cont $ segBinOpChunks reds $ zip (map kernelResultSubExp red_res) $ repeat []
 
+
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
   Pat LetDecMem ->
@@ -100,6 +101,11 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
   let scalars = all (all (isScalar . paramDec) . slugParams) slugs1 && all (== []) dims
   -- Are we working with vectorized inner maps?
   let inner_map = [] `notElem` dims
+
+  -- Checks if this SegOp is innermost (does not contain a nested segOp)
+  let f = stmsToList . bodyStms . lambdaBody . segBinOpLambda
+      innermost = null [x | x@(Op (Inner (ParOp _ _))) <-
+                           [e | (Let _ _ e) <- concatMap f reds]]
 
   let path
         | comm && scalars = reductionStage1CommScalar
