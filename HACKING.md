@@ -2,57 +2,43 @@
 
 The Futhark compiler is a significant body of code with a not entirely
 straightforward design. The main source of documentation is the
-Haddock comments in the source code itself. You can generate
-hyperlinked reference documentation by running `cabal haddock` (see
-below).
+Haddock comments in the source code itself.  You can generate
+hyperlinked reference documentation by running `make docs` (see
+below).  To build the compiler, you need a recent version of
+[GHC](http://ghc.haskell.org/) If you [install
+Nix](https://nixos.org/download.html#download-nix) then you can run
+`nix-shell` to get a shell environment in which all necessary tools
+are installed.
 
-If you [install Nix](https://nixos.org/download.html#download-nix)
-then you can run `nix-shell` to get a shell environment in which all
-necessary tooling is installed.
-
-* [Reference documentation for the latest
-  release](http://hackage.haskell.org/package/futhark)
-
-* [Haskell style guide](STYLE.md)
+Make sure to see the [Haskell style guide](STYLE.md).
 
 If you feel that the documentation is incomplete, or something lacks
 an explanation, then feel free to [report it as an
 issue](https://github.com/diku-dk/futhark/issues). Documentation bugs
 are bugs too.
 
-## Compiling with Cabal
+## Building
 
-The Futhark compiler is often build using Cabal, the Haskell build
-tool.  You need to install an appropriate version of GHC yourself,
-e.g. with [ghcup](https://www.haskell.org/ghcup/) or by using
-`nix-shell`.  The following commands are then interesting:
+We include a `Makefile` with the following targets.
 
-* `cabal build`: build the Futhark compiler.
+* `make build` (or just `make`) builds the compiler.
 
-* `cabal run futhark -- args...`: run the Futhark compiler with the
-  provided options, first (re)compiling it if necessary.
+* `make install` builds the compiler and copies the resulting binaries
+  to `$HOME/.local/bin`, or `$PREFIX/bin` if the `PREFIX` environment
+  variable is set.
 
-* `cabal haddock --enable-documentation`: generate hyperlinked documentation.
+* `make docs` builds internal compiler documentation.  For the user
+  documentation, see the `docs/` subdirectory.
 
-## Compiling with Stack
+* `make check` style-checks all code.  Requires [GNU
+  Parallel](https://www.gnu.org/software/parallel/).
 
-The Futhark compiler is somtimes built using
-[Stack](https://docs.haskellstack.org/en/stable/README/). It's a good
-idea to familiarise yourself with how it works. As a starting point,
-here are a few hints:
+* `make check-commit` style-checks all code staged for a commit.
+  Requires [GNU Parallel](https://www.gnu.org/software/parallel/).
 
--   When testing, pass `--fast` to `stack` to disable the GHC
-    optimiser. This speeds up builds considerably (although it still
-    takes a while). The resulting Futhark compiler will run slower,
-    but it is not something you will notice for small test programs.
--   When debugging, pass `--profile` to `stack`. This will build the
-    Futhark compiler with debugging information (not just profiling).
-    In particular, hard crashes will print a stack trace. You can also
-    get actual profiling information by passing `+RTS -pprof-all -RTS`
-    to the Futhark compiler. This asks the Haskell runtime to print
-    profiling information to a file. For more information, see the
-    [Profiling](https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/profiling.html)
-    chapter in the GHC User Guide.
+You can also use `cabal` directly if you are familiar with it.  In
+particular, `cabal run futhark -- args...` is useful for running the
+Futhark compiler with the provided args.
 
 ## Debugging Internal Type Errors
 
@@ -100,11 +86,12 @@ specific passes.
 
 You may wish to set the environment variable
 `FUTHARK_COMPILER_DEBUGGING=1`. This has the following effects:
--   The frontend prints internal names. (This may affect code
-    generation in some cases, so turn it off when actually
-    generating code.)
--   Tools that talk to server-mode executables will print the messages
-    sent back and worth on the standard error stream.
+
+- The frontend prints internal names. (This may affect code
+  generation in some cases, so turn it off when actually
+  generating code.)
+- Tools that talk to server-mode executables will print the messages
+  sent back and worth on the standard error stream.
 
 ## Running compiler pipelines
 

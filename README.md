@@ -33,10 +33,8 @@ For more information, see:
 Hacking
 =======
 
-We welcome all contributions!
-
 Issues tagged with [good first
 issue](https://github.com/diku-dk/futhark/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 do not require deep knowledge of the code base.
 
-For contributing code, see also [the style guide](STYLE.md).
+For contributing code, see [the hacking instructions](HACKING.md).

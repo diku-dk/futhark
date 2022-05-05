@@ -6,6 +6,8 @@ set -e
 set -o pipefail
 
 check="$(dirname $0)"/style-check-file.sh
-# Running a style checker will not contribute to a scientific
-# publication.
-find "$@" -type f | parallel --will-cite "$check"
+if [ "$@" ]; then
+    # Running a style checker will not contribute to a scientific
+    # publication.
+    find "$@" -type f | parallel --will-cite "$check"
+fi
