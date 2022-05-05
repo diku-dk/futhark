@@ -17,7 +17,7 @@ build:
 	cabal build
 
 install: build
-	install -D $$(cabal -v0 list-bin futhark:futhark) $(PREFIX)/bin
+	install -D $$(cabal -v0 list-bin exe:futhark) $(PREFIX)/bin
 
 docs:
 	cabal haddock --enable-documentation
