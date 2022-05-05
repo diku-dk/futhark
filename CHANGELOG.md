@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark test` only runs the interpreter if passed `-i`.
 
+* `futhark literate` now shows progress bars when run with `-v`.
+
 ### Removed
 
 ### Changed
