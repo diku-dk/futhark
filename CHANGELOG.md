@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Assertions and attributes are now ignored when used as size
   expressions.  E.g. `iota (assert p n) 0` now has size `n`.
 
+* `futhark test` only runs the interpreter if passed `-i`.
+
 ### Removed
 
 ### Changed
