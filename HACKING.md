@@ -32,7 +32,7 @@ e.g. with [ghcup](https://www.haskell.org/ghcup/) or by using
 * `cabal run futhark -- args...`: run the Futhark compiler with the
   provided options, first (re)compiling it if necessary.
 
-* `cabal haddock`: generate hyperlinked documentation.
+* `cabal haddock --enable-documentation`: generate hyperlinked documentation.
 
 ## Compiling with Stack
 
