@@ -522,7 +522,7 @@ groupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint g
   elements_per_thread <-
     dPrimVE "elements_per_thread" $
       segment_size `divUp` (unCount group_size * groups_per_segment)
-  return (groups_per_segment, Imp.elements elements_per_thread)
+  pure (groups_per_segment, Imp.elements elements_per_thread)
 
 -- | A SegBinOp with auxiliary information.
 data SegBinOpSlug = SegBinOpSlug
@@ -562,9 +562,9 @@ segBinOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
       | Prim t <- paramType p,
         shapeRank (segBinOpShape op) == 0 = do
           acc <- dPrim (baseString (paramName p) <> "_acc") t
-          return (tvVar acc, [])
+          pure (tvVar acc, [])
       | otherwise =
-          return (param_arr, [sExt64 local_tid, sExt64 group_id])
+          pure (param_arr, [sExt64 local_tid, sExt64 group_id])
 
 reductionStageZero ::
   KernelConstants ->
@@ -676,9 +676,9 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
                     sLoopNest (slugShape slug) $ \vec_is ->
                       copyDWIMFix acc (acc_is ++ vec_is) ne []
           sUnless (local_tid .==. 0) reset_to_neutral
-      _ -> return ()
+      _ -> pure ()
 
-  return (slugs_op_renamed, doTheReduction)
+  pure (slugs_op_renamed, doTheReduction)
 
 reductionStageOne ::
   KernelConstants ->
@@ -698,7 +698,7 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
     Noncommutative -> pure ()
     Commutative -> doTheReduction
 
-  return slugs_op_renamed
+  pure slugs_op_renamed
 
 reductionStageTwo ::
   KernelConstants ->

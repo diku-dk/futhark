@@ -50,13 +50,13 @@ data ASTMapper m = ASTMapper
 identityMapper :: Monad m => ASTMapper m
 identityMapper =
   ASTMapper
-    { mapOnExp = return,
-      mapOnName = return,
-      mapOnQualName = return,
-      mapOnStructType = return,
-      mapOnPatType = return,
-      mapOnStructRetType = return,
-      mapOnPatRetType = return
+    { mapOnExp = pure,
+      mapOnName = pure,
+      mapOnQualName = pure,
+      mapOnStructType = pure,
+      mapOnPatType = pure,
+      mapOnStructRetType = pure,
+      mapOnPatRetType = pure
     }
 
 -- | The class of things that we can map an 'ASTMapper' across.
@@ -122,6 +122,8 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Var name t loc) =
     Var <$> mapOnQualName tv name <*> traverse (mapOnPatType tv) t
       <*> pure loc
+  astMap tv (Hole t loc) =
+    Hole <$> traverse (mapOnPatType tv) t <*> pure loc
   astMap _ (Literal val loc) =
     pure $ Literal val loc
   astMap _ (StringLit vs loc) =
@@ -250,9 +252,9 @@ instance ASTMappable (DimIndexBase Info VName) where
   astMap tv (DimFix j) = DimFix <$> mapOnExp tv j
   astMap tv (DimSlice i j stride) =
     DimSlice
-      <$> maybe (return Nothing) (fmap Just . mapOnExp tv) i
-      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) j
-      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) stride
+      <$> maybe (pure Nothing) (fmap Just . mapOnExp tv) i
+      <*> maybe (pure Nothing) (fmap Just . mapOnExp tv) j
+      <*> maybe (pure Nothing) (fmap Just . mapOnExp tv) stride
 
 instance ASTMappable Alias where
   astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v
@@ -427,6 +429,7 @@ bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
 -- name/scope information.
 bareExp :: ExpBase Info VName -> ExpBase NoInfo VName
 bareExp (Var name _ loc) = Var name NoInfo loc
+bareExp (Hole _ loc) = Hole NoInfo loc
 bareExp (Literal v loc) = Literal v loc
 bareExp (IntLit val _ loc) = IntLit val NoInfo loc
 bareExp (FloatLit val _ loc) = FloatLit val NoInfo loc

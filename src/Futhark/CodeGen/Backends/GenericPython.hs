@@ -56,10 +56,10 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.RTS.Python
-import Futhark.Compiler.CLI (CompilerMode (..))
+import Futhark.Compiler.Config (CompilerMode (..))
 import Futhark.IR.Primitive hiding (Bool)
 import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
-import Futhark.IR.Syntax (Space (..))
+import Futhark.IR.Syntax.Core (Space (..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty, prettyText)
@@ -240,12 +240,12 @@ instance MonadFreshNames (CompilerM op s) where
 collect :: CompilerM op s () -> CompilerM op s [PyStmt]
 collect m = pass $ do
   ((), w) <- listen m
-  return (w, const mempty)
+  pure (w, const mempty)
 
 collect' :: CompilerM op s a -> CompilerM op s (a, [PyStmt])
 collect' m = pass $ do
   (x, w) <- listen m
-  return ((x, w), const mempty)
+  pure ((x, w), const mempty)
 
 atInit :: PyStmt -> CompilerM op s ()
 atInit x = modify $ \s ->
@@ -276,6 +276,13 @@ standardOptions =
         optionShortName = Nothing,
         optionArgument = RequiredArgument "open",
         optionAction = [Exp $ simpleCall "read_tuning_file" [Var "sizes", Var "optarg"]]
+      },
+    -- Does not actually do anything for Python backends.
+    Option
+      { optionLongName = "cache-file",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "str",
+        optionAction = [Pass]
       },
     Option
       { optionLongName = "log",
@@ -397,7 +404,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
         ToLibrary -> do
           (entry_points, entry_point_types) <-
             unzip . catMaybes <$> mapM (compileEntryFun sync DoNotReturnTiming) funs
-          return
+          pure
             [ ClassDef $
                 Class class_name $
                   Assign (Var "entry_points") (Dict entry_point_types) :
@@ -409,7 +416,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
         ToServer -> do
           (entry_points, entry_point_types) <-
             unzip . catMaybes <$> mapM (compileEntryFun sync ReturnTiming) funs
-          return $
+          pure $
             parse_options_server
               ++ [ ClassDef
                      ( Class class_name $
@@ -428,7 +435,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
           let classinst = Assign (Var "self") $ simpleCall class_name []
           (entry_point_defs, entry_point_names, entry_points) <-
             unzip3 . catMaybes <$> mapM (callEntryFun sync) funs
-          return $
+          pure $
             parse_options_executable
               ++ ClassDef
                 ( Class class_name $
@@ -498,7 +505,7 @@ compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
   body' <- collect $ compileCode body
   let inputs' = map (compileName . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
-  return $
+  pure $
     Def (futharkFun . nameToString $ fname) ("self" : inputs') $
       body' ++ [ret]
 
@@ -544,7 +551,7 @@ entryPointOutput (Imp.OpaqueValue u desc vs) =
     <$> mapM (entryPointOutput . Imp.TransparentValue u) vs
 entryPointOutput (Imp.TransparentValue _ (Imp.ScalarValue bt ept name)) = do
   name' <- compileVar name
-  return $ simpleCall tf [name']
+  pure $ simpleCall tf [name']
   where
     tf = compilePrimToExtNp bt ept
 entryPointOutput (Imp.TransparentValue _ (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
@@ -553,7 +560,7 @@ entryPointOutput (Imp.TransparentValue _ (Imp.ArrayValue mem (Imp.Space sid) bt 
 entryPointOutput (Imp.TransparentValue _ (Imp.ArrayValue mem _ bt ept dims)) = do
   mem' <- Cast <$> compileVar mem <*> pure (compilePrimTypeExt bt ept)
   dims' <- mapM compileDim dims
-  return $ simpleCall "createArray" [mem', Tuple dims', Var $ compilePrimToExtNp bt ept]
+  pure $ simpleCall "createArray" [mem', Tuple dims', Var $ compilePrimToExtNp bt ept]
 
 badInput :: Int -> PyExp -> String -> PyStmt
 badInput i e t =
@@ -761,7 +768,7 @@ printValue = fmap concat . mapM (uncurry printValue')
     -- but we will probably need yet another plugin mechanism here in
     -- the future.
     printValue' (Imp.OpaqueValue _ desc _) _ =
-      return
+      pure
         [ Exp $
             simpleCall
               "sys.stdout.write"
@@ -771,7 +778,7 @@ printValue = fmap concat . mapM (uncurry printValue')
       printValue' (Imp.TransparentValue u (Imp.ArrayValue mem DefaultSpace bt ept shape)) $
         simpleCall (pretty e ++ ".get") []
     printValue' (Imp.TransparentValue _ _) e =
-      return
+      pure
         [ Exp $
             Call
               (Var "write_value")
@@ -822,8 +829,8 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
         dest' <- compileVar dest
         src' <- compileVar src
         copy dest' offset space src' offset space size (IntType Int32) -- FIXME
-        return $ Just $ compileName name'
-      _ -> return Nothing
+        pure $ Just $ compileName name'
+      _ -> pure Nothing
 
   prepareIn <- collect $ do
     declEntryPointInputSizes $ map snd args
@@ -846,7 +853,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
             [Assign funTuple $ simpleCall fname' (fmap Var argexps)]
         ]
 
-  return
+  pure
     ( map (extValueDescName . snd) args,
       prepareIn,
       call argexps_lib,
@@ -1019,8 +1026,8 @@ compileBinOpLike ::
 compileBinOpLike f x y = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
-  let simple s = return $ BinOp s x' y'
-  return (x', y', simple)
+  let simple s = pure $ BinOp s x' y'
+  pure (x', y', simple)
 
 -- | The ctypes type corresponding to a 'PrimType'.
 compilePrimType :: PrimType -> String
@@ -1134,7 +1141,7 @@ compileVar v =
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m PyExp) -> Imp.PrimExp v -> m PyExp
-compilePrimExp _ (Imp.ValueExp v) = return $ compilePrimValue v
+compilePrimExp _ (Imp.ValueExp v) = pure $ compilePrimValue v
 compilePrimExp f (Imp.LeafExp v _) = f v
 compilePrimExp f (Imp.BinOpExp op x y) = do
   (x', y', simple) <- compileBinOpLike f x y
@@ -1153,10 +1160,10 @@ compilePrimExp f (Imp.BinOpExp op x y) = do
     Shl {} -> simple "<<"
     LogAnd {} -> simple "and"
     LogOr {} -> simple "or"
-    _ -> return $ simpleCall (pretty op) [x', y']
+    _ -> pure $ simpleCall (pretty op) [x', y']
 compilePrimExp f (Imp.ConvOpExp conv x) = do
   x' <- compilePrimExp f x
-  return $ simpleCall (pretty conv) [x']
+  pure $ simpleCall (pretty conv) [x']
 compilePrimExp f (Imp.CmpOpExp cmp x y) = do
   (x', y', simple) <- compileBinOpLike f x y
   case cmp of
@@ -1165,7 +1172,7 @@ compilePrimExp f (Imp.CmpOpExp cmp x y) = do
     FCmpLe {} -> simple "<="
     CmpLlt -> simple "<"
     CmpLle -> simple "<="
-    _ -> return $ simpleCall (pretty cmp) [x', y']
+    _ -> pure $ simpleCall (pretty cmp) [x', y']
 compilePrimExp f (Imp.UnOpExp op exp1) =
   UnOp (compileUnOp op) <$> compilePrimExp f exp1
 compilePrimExp f (Imp.FunExp h args _) =
@@ -1176,7 +1183,7 @@ compileExp = compilePrimExp compileVar
 
 errorMsgString :: Imp.ErrorMsg Imp.Exp -> CompilerM op s (String, [PyExp])
 errorMsgString (Imp.ErrorMsg parts) = do
-  let onPart (Imp.ErrorString s) = return ("%s", String s)
+  let onPart (Imp.ErrorString s) = pure ("%s", String s)
       onPart (Imp.ErrorVal IntType {} x) = ("%d",) <$> compileExp x
       onPart (Imp.ErrorVal FloatType {} x) = ("%f",) <$> compileExp x
       onPart (Imp.ErrorVal Imp.Bool x) = ("%r",) <$> compileExp x
@@ -1186,9 +1193,9 @@ errorMsgString (Imp.ErrorMsg parts) = do
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 compileCode Imp.DebugPrint {} =
-  return ()
+  pure ()
 compileCode Imp.TracePrint {} =
-  return ()
+  pure ()
 compileCode (Imp.Op op) =
   join $ asks envOpCompiler <*> pure op
 compileCode (Imp.If cond tb fb) = do
@@ -1216,11 +1223,11 @@ compileCode (Imp.For i bound body) = do
       body' ++ [AssignOp "+" (Var i') (Var one)]
 compileCode (Imp.SetScalar name exp1) =
   stm =<< Assign <$> compileVar name <*> compileExp exp1
-compileCode Imp.DeclareMem {} = return ()
+compileCode Imp.DeclareMem {} = pure ()
 compileCode (Imp.DeclareScalar v _ Unit) = do
   v' <- compileVar v
   stm $ Assign v' $ Var "True"
-compileCode Imp.DeclareScalar {} = return ()
+compileCode Imp.DeclareScalar {} = pure ()
 compileCode (Imp.DeclareArray name (Space space) t vs) =
   join $
     asks envStaticArray
@@ -1352,4 +1359,4 @@ compileCode (Imp.Read x src (Imp.Count iexp) bt _ _) = do
   let bt' = compilePrimType bt
   src' <- compileVar src
   stm $ Assign x' $ fromStorage bt $ simpleCall "indexArray" [src', iexp', Var bt']
-compileCode Imp.Skip = return ()
+compileCode Imp.Skip = pure ()

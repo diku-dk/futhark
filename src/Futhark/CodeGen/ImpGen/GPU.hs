@@ -143,6 +143,12 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group
   mkTV (patElemName pe) int32 <-- sExt32 num_groups
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
+opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
+  tid <- newVName "tid"
+  sKernelThread "gpuseq" tid (defKernelAttrs 1 1) $
+    compileStms (freeIn res) stms $
+      forM_ (zip pes res) $ \(pe, SubExpRes _ se) ->
+        copyDWIM (patElemName pe) [DimFix 0] se []
 opCompiler pat e =
   compilerBugS $
     "opCompiler: Invalid pattern\n  "
@@ -186,7 +192,7 @@ checkLocalMemoryReqs code = do
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
   if any (`M.notMember` scope) (namesToList $ freeIn alloc_sizes)
-    then return Nothing
+    then pure Nothing
     else do
       local_memory_capacity :: TV Int32 <- dPrim "local_memory_capacity" int32
       sOp $ Imp.GetSizeMax (tvVar local_memory_capacity) SizeLocalMemory
@@ -195,7 +201,7 @@ checkLocalMemoryReqs code = do
             sExt64 $ tvExp local_memory_capacity
           fits size =
             unCount size .<=. local_memory_capacity_64
-      return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
+      pure $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
   where
     getGPU = foldMap getKernel
     getKernel (Imp.CallKernel k) | Imp.kernelCheckLocalMemory k = [k]
@@ -248,7 +254,7 @@ expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
       sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
-  return ()
+  pure ()
 expCompiler pat (WithAcc inputs lam) =
   withAcc pat inputs lam
 -- This is a multi-versioning If created by incremental flattening.
@@ -308,7 +314,7 @@ mapTransposeForType bt = do
   exists <- hasFunction fname
   unless exists $ emitFunction fname $ mapTransposeFunction bt
 
-  return fname
+  pure fname
 
 mapTransposeName :: PrimType -> String
 mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt

@@ -40,9 +40,11 @@ module Futhark.Optimise.Simplify.Engine
     orIf,
     hasFree,
     isConsumed,
+    isConsuming,
     isFalse,
     isOp,
     isNotSafe,
+    isDeviceMigrated,
     asksEngineEnv,
     askVtable,
     localVtable,
@@ -60,7 +62,9 @@ module Futhark.Optimise.Simplify.Engine
     ST.SymbolTable,
     hoistStms,
     blockIf,
+    blockMigrated,
     enterLoop,
+    constructBody,
     module Futhark.Optimise.Simplify.Rep,
   )
 where
@@ -146,8 +150,8 @@ bindableSimpleOps ::
 bindableSimpleOps =
   SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
   where
-    mkExpDecS' _ pat e = return $ mkExpDec pat e
-    mkBodyS' _ stms res = return $ mkBody stms res
+    mkExpDecS' _ pat e = pure $ mkExpDec pat e
+    mkBodyS' _ stms res = pure $ mkBody stms res
     protectHoistedOpS' _ _ _ = Nothing
 
 newtype SimpleM rep a
@@ -174,7 +178,7 @@ instance SimplifiableRep rep => HasScope (Wise rep) (SimpleM rep) where
   lookupType name = do
     vtable <- askVtable
     case ST.lookupType name vtable of
-      Just t -> return t
+      Just t -> pure t
       Nothing ->
         error $
           "SimpleM.lookupType: cannot find variable "
@@ -217,7 +221,7 @@ collectCerts m = do
   x <- m
   (a, b, cs) <- get
   put (a, b, mempty)
-  return (x, cs)
+  pure (x, cs)
 
 -- | Mark that we have changed something and it would be a good idea
 -- to re-run the simplifier.
@@ -279,7 +283,7 @@ protectIfHoisted cond side m = do
       then do
         cond' <-
           if side
-            then return cond
+            then pure cond
             else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
         mapM_ (protectIf ops unsafeOrCostly cond') hoisted
       else addStms hoisted
@@ -312,8 +316,8 @@ protectLoopHoisted merge form m = do
         WhileLoop cond
           | Just (_, cond_init) <-
               find ((== cond) . paramName . fst) merge ->
-              return cond_init
-          | otherwise -> return $ constant True -- infinite loop
+              pure cond_init
+          | otherwise -> pure $ constant True -- infinite loop
         ForLoop _ it bound _ ->
           letSubExp "loop_nonempty" $
             BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
@@ -377,17 +381,17 @@ emptyOfType _ Mem {} =
 emptyOfType _ Acc {} =
   error "emptyOfType: Cannot hoist accumulator."
 emptyOfType _ (Prim pt) =
-  return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
+  pure $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
 emptyOfType ctx_names (Array et shape _) = do
   let dims = map zeroIfContext $ shapeDims shape
-  return $ BasicOp $ Scratch et dims
+  pure $ BasicOp $ Scratch et dims
   where
     zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
     zeroIfContext se = se
 
 -- | Statements that are not worth hoisting out of loops, because they
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
--- further optimisation..
+-- further optimisation.
 notWorthHoisting :: ASTRep rep => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
   not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
@@ -402,7 +406,7 @@ nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
   cs' <- simplify cs
   (pat', pat_cs) <- collectCerts $ simplifyPat $ removePatWisdom pat
   let aux' = StmAux (cs' <> pat_cs) attrs dec
-  mkWiseLetStm pat' aux' <$> simplifyExpBase e
+  mkWiseStm pat' aux' <$> simplifyExpBase e
 
 -- Bottom-up simplify a statement.  Recurses into sub-Bodies and Ops.
 -- Does not copy-propagate into the pattern and similar, as it is
@@ -416,7 +420,7 @@ recSimplifyStm ::
 recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
   ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp usage pat e
   let aux' = StmAux (cs <> e_cs) attrs dec
-  pure (e_hoisted, mkWiseLetStm (removePatWisdom pat) aux' e')
+  pure (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
 
 hoistStms ::
   SimplifiableRep rep =>
@@ -700,7 +704,7 @@ hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
   (hoisted2, body2') <-
     protectIfHoisted cond False $
       simplifyBody block res_usage res_usages body2
-  return (body1', body2', hoisted1 <> hoisted2)
+  pure (body1', body2', hoisted1 <> hoisted2)
 
 -- | Simplify a single body.
 simplifyBody ::
@@ -745,7 +749,12 @@ simplifyResult usages res = do
                 (`UT.usage` (u `UT.withoutU` UT.presentU))
                 (namesToList (ST.lookupAliases v vtable))
         UT.usage v u : als_usages
-  return (res', UT.usages (freeIn res') <> more_usages)
+  pure
+    ( res',
+      UT.usages (freeIn res')
+        <> foldMap UT.inResultUsage (namesToList (freeIn res'))
+        <> more_usages
+    )
 
 isDoLoopResult :: Result -> UT.UsageTable
 isDoLoopResult = mconcat . map checkForVar
@@ -792,7 +801,7 @@ simplifyExp usage (Pat pes) (If cond tbranch fbranch ifdec@(IfDec ts ifsort)) = 
   ts' <- mapM simplify ts
   (tbranch', fbranch', hoisted) <-
     hoistCommon usage pes_usages cond' ifdec tbranch fbranch
-  return (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted)
+  pure (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted)
 simplifyExp _ _ (DoLoop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params
@@ -805,7 +814,7 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
       loop_params' <- mapM (traverse simplify) loop_params
       loop_arrs' <- mapM simplify loop_arrs
       let form' = ForLoop loopvar it boundexp' (zip loop_params' loop_arrs')
-      return
+      pure
         ( form',
           namesFromList (loopvar : map paramName loop_params') <> fparamnames,
           bindLoopVar loopvar it boundexp'
@@ -814,7 +823,7 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
         )
     WhileLoop cond -> do
       cond' <- simplify cond
-      return
+      pure
         ( WhileLoop cond',
           fparamnames,
           protectLoopHoisted merge' (WhileLoop cond')
@@ -837,7 +846,7 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
             (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
             pure (res, uses <> isDoLoopResult res)
   loopbody' <- constructBody loopstms loopres
-  return (DoLoop merge' form' loopbody', hoisted)
+  pure (DoLoop merge' form' loopbody', hoisted)
   where
     fparamnames =
       namesFromList (map (paramName . fst) merge)
@@ -848,16 +857,16 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
     withRes (p, x) y = (p, x, y)
 simplifyExp _ _ (Op op) = do
   (op', stms) <- simplifyOp op
-  return (Op op', stms)
+  pure (Op op', stms)
 simplifyExp usage _ (WithAcc inputs lam) = do
   (inputs', inputs_stms) <- fmap unzip . forM inputs $ \(shape, arrs, op) -> do
     (op', op_stms) <- case op of
       Nothing ->
         pure (Nothing, mempty)
       Just (op_lam, nes) -> do
-        (op_lam', op_lam_stms) <- simplifyLambda op_lam
+        (op_lam', op_lam_stms) <- blockMigrated (simplifyLambda op_lam)
         nes' <- simplify nes
-        return (Just (op_lam', nes'), op_lam_stms)
+        pure (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
   let noteAcc = ST.noteAccTokens (zip (map paramName (lambdaParams lam)) inputs')
   (lam', lam_stms) <- simplifyLambdaWith noteAcc (isFalse True) usage lam
@@ -865,6 +874,36 @@ simplifyExp usage _ (WithAcc inputs lam) = do
 simplifyExp _ _ e = do
   e' <- simplifyExpBase e
   pure (e', mempty)
+
+-- | Block hoisting of 'Index' statements introduced by migration.
+blockMigrated ::
+  SimplifiableRep rep =>
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep)) ->
+  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+blockMigrated = local withMigrationBlocker
+  where
+    withMigrationBlocker (ops, env) =
+      let blockers = envHoistBlockers env
+          par_blocker = blockHoistPar blockers
+
+          blocker = par_blocker `orIf` isDeviceMigrated
+
+          blockers' = blockers {blockHoistPar = blocker}
+          env' = env {envHoistBlockers = blockers'}
+       in (ops, env')
+
+-- | Statement is a scalar read from a single element array of rank one.
+isDeviceMigrated :: SimplifiableRep rep => BlockPred (Wise rep)
+isDeviceMigrated vtable _ stm
+  | BasicOp (Index arr slice) <- stmExp stm,
+    [DimFix idx] <- unSlice slice,
+    idx == intConst Int64 0,
+    Just arr_t <- ST.lookupType arr vtable,
+    [size] <- arrayDims arr_t,
+    size == intConst Int64 1 =
+      True
+  | otherwise =
+      False
 
 -- The simple nonrecursive case that we can perform without bottom-up
 -- information.
@@ -918,7 +957,7 @@ instance Simplifiable Int where
   simplify = pure
 
 instance Simplifiable a => Simplifiable (Maybe a) where
-  simplify Nothing = return Nothing
+  simplify Nothing = pure Nothing
   simplify (Just x) = Just <$> simplify x
 
 instance Simplifiable a => Simplifiable [a] where
@@ -931,14 +970,14 @@ instance Simplifiable SubExp where
       Just (Constant v, cs) -> do
         changed
         usedCerts cs
-        return $ Constant v
+        pure $ Constant v
       Just (Var id', cs) -> do
         changed
         usedCerts cs
-        return $ Var id'
-      _ -> return $ Var name
+        pure $ Var id'
+      _ -> pure $ Var name
   simplify (Constant v) =
-    return $ Constant v
+    pure $ Constant v
 
 instance Simplifiable SubExpRes where
   simplify (SubExpRes cs se) = do
@@ -965,15 +1004,15 @@ instance Simplifiable VName where
       Just (Var v', cs) -> do
         changed
         usedCerts cs
-        return v'
-      _ -> return v
+        pure v'
+      _ -> pure v
 
 instance Simplifiable d => Simplifiable (ShapeBase d) where
   simplify = fmap Shape . simplify . shapeDims
 
 instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se
-  simplify (Ext x) = return $ Ext x
+  simplify (Ext x) = pure $ Ext x
 
 instance Simplifiable Space where
   simplify (ScalarSpace ds t) = ScalarSpace <$> simplify ds <*> pure t
@@ -990,7 +1029,7 @@ instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =
-    return $ Prim bt
+    pure $ Prim bt
 
 instance Simplifiable d => Simplifiable (DimIndex d) where
   simplify (DimFix i) = DimFix <$> simplify i
@@ -1040,7 +1079,7 @@ simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
         (map (const mempty) rettype)
         body
   rettype' <- simplify rettype
-  return (Lambda params' body' rettype', hoisted)
+  pure (Lambda params' body' rettype', hoisted)
 
 instance Simplifiable Certs where
   simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
@@ -1048,9 +1087,9 @@ instance Simplifiable Certs where
       check idd = do
         vv <- ST.lookupSubExp idd <$> askVtable
         case vv of
-          Just (Constant _, Certs cs) -> return cs
-          Just (Var idd', _) -> return [idd']
-          _ -> return [idd]
+          Just (Constant _, Certs cs) -> pure cs
+          Just (Var idd', _) -> pure [idd']
+          _ -> pure [idd]
 
 simplifyFun ::
   SimplifiableRep rep =>

@@ -22,6 +22,7 @@ module Futhark.Pipeline
     module Futhark.Error,
     onePass,
     passes,
+    condPipeline,
     runPipeline,
   )
 where
@@ -36,6 +37,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Time.Clock
 import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Compiler.Config (Verbosity (..))
 import Futhark.Error
 import Futhark.IR (PrettyRep, Prog)
 import Futhark.IR.TypeCheck
@@ -46,16 +48,6 @@ import Futhark.Util.Pretty (prettyText)
 import System.IO
 import Text.Printf
 import Prelude hiding (id, (.))
-
--- | How much information to print to stderr while the compiler is running.
-data Verbosity
-  = -- | Silence is golden.
-    NotVerbose
-  | -- | Print messages about which pass is running.
-    Verbose
-  | -- | Also print logs from individual passes.
-    VeryVerbose
-  deriving (Eq, Ord)
 
 newtype FutharkEnv = FutharkEnv {futharkVerbose :: Verbosity}
 
@@ -121,7 +113,7 @@ data PipelineConfig = PipelineConfig
 newtype Pipeline fromrep torep = Pipeline {unPipeline :: PipelineConfig -> Prog fromrep -> FutharkM (Prog torep)}
 
 instance Category Pipeline where
-  id = Pipeline $ const return
+  id = Pipeline $ const pure
   p2 . p1 = Pipeline perform
     where
       perform cfg prog =
@@ -151,8 +143,17 @@ onePass pass = Pipeline perform
       when (pipelineValidate cfg) $
         case checkProg prog'' of
           Left err -> validationError pass prog'' $ show err
-          Right () -> return ()
-      return prog'
+          Right () -> pure ()
+      pure prog'
+
+-- | Conditionally run pipeline if predicate is true.
+condPipeline ::
+  (Prog rep -> Bool) -> Pipeline rep rep -> Pipeline rep rep
+condPipeline cond (Pipeline f) =
+  Pipeline $ \cfg prog ->
+    if cond prog
+      then f cfg prog
+      else pure prog
 
 -- | Create a pipeline from a list of passes.
 passes ::
@@ -180,4 +181,4 @@ runPass pass prog = do
   (prog', logged) <- runPassM (passFunction pass prog)
   verb <- asks $ (>= VeryVerbose) . futharkVerbose
   when verb $ addLog logged
-  return prog'
+  pure prog'

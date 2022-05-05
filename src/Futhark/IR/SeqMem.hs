@@ -35,7 +35,7 @@ instance RepTypes SeqMem where
   type Op SeqMem = MemOp ()
 
 instance ASTRep SeqMem where
-  expTypesFromPat = return . map snd . bodyReturnsFromPat
+  expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
 instance PrettyRep SeqMem
 
@@ -50,23 +50,23 @@ instance TC.Checkable SeqMem where
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
-  primFParam name t = return $ Param mempty name (MemPrim t)
+  primFParam name t = pure $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
   matchLoopResult = matchLoopResultMem
 
 instance BuilderOps SeqMem where
-  mkExpDecB _ _ = return ()
-  mkBodyB stms res = return $ Body () stms res
+  mkExpDecB _ _ = pure ()
+  mkBodyB stms res = pure $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
 instance TraverseOpStms SeqMem where
   traverseOpStms _ = pure
 
 instance BuilderOps (Engine.Wise SeqMem) where
-  mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
-  mkBodyB stms res = return $ Engine.mkWiseBody () stms res
+  mkExpDecB pat e = pure $ Engine.mkWiseExpDec pat () e
+  mkBodyB stms res = pure $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
 
 instance TraverseOpStms (Engine.Wise SeqMem) where
@@ -77,4 +77,4 @@ simplifyProg = simplifyProgGeneric simpleSeqMem
 
 simpleSeqMem :: Engine.SimpleOps SeqMem
 simpleSeqMem =
-  simpleGeneric (const mempty) $ const $ return ((), mempty)
+  simpleGeneric (const mempty) $ const $ pure ((), mempty)

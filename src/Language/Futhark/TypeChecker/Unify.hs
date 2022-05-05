@@ -8,7 +8,7 @@
 -- blocks.
 module Language.Futhark.TypeChecker.Unify
   ( Constraint (..),
-    Usage,
+    Usage (..),
     mkUsage,
     mkUsage',
     Level,
@@ -253,12 +253,12 @@ dimNotes ctx (NamedDim d) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
-      return $
+      pure $
         aNote $
           pretty $
             pquote (ppr d) <+> prettySource (srclocOf ctx) loc rsrc
-    _ -> return mempty
-dimNotes _ _ = return mempty
+    _ -> pure mempty
+dimNotes _ _ = pure mempty
 
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
@@ -319,7 +319,7 @@ class Monad m => MonadUnify m where
 normTypeFully :: (Substitutable a, MonadUnify m) => a -> m a
 normTypeFully t = do
   constraints <- getConstraints
-  return $ applySubst (`lookupSubst` constraints) t
+  pure $ applySubst (`lookupSubst` constraints) t
 
 -- | Replace any top-level type variable with its substitution.
 normType :: MonadUnify m => StructType -> m StructType
@@ -327,8 +327,8 @@ normType t@(Scalar (TypeVar _ _ (TypeName [] v) [])) = do
   constraints <- getConstraints
   case snd <$> M.lookup v constraints of
     Just (Constraint (RetType [] t') _) -> normType t'
-    _ -> return t
-normType t = return t
+    _ -> pure t
+normType t = pure t
 
 -- | Replace any top-level type variable with its substitution.
 normPatType :: MonadUnify m => PatType -> m PatType
@@ -337,8 +337,8 @@ normPatType t@(Scalar (TypeVar als u (TypeName [] v) [])) = do
   case snd <$> M.lookup v constraints of
     Just (Constraint (RetType [] t') _) ->
       normPatType $ t' `setUniqueness` u `setAliases` als
-    _ -> return t
-normPatType t = return t
+    _ -> pure t
+normPatType t = pure t
 
 rigidConstraint :: Constraint -> Bool
 rigidConstraint ParamType {} = True
@@ -373,7 +373,7 @@ isNonRigid :: VName -> Constraints -> Maybe Level
 isNonRigid v constraints = do
   (lvl, c) <- M.lookup v constraints
   guard $ not $ rigidConstraint c
-  return lvl
+  pure lvl
 
 type UnifyDims m =
   BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> DimDecl VName -> DimDecl VName -> m ()
@@ -539,12 +539,12 @@ unifyWith onDims usage = subunify False
                 unifyError usage mempty bcs $
                   "Unshared constructors:" <+> commasep (map (("#" <>) . ppr) missing) <> "."
         _
-          | t1' == t2' -> return ()
+          | t1' == t2' -> pure ()
           | otherwise -> failure
 
 unifyDims :: MonadUnify m => Usage -> UnifyDims m
 unifyDims _ _ _ _ d1 d2
-  | d1 == d2 = return ()
+  | d1 == d2 = pure ()
 unifyDims usage bcs _ nonrigid (NamedDim (QualName _ d1)) d2
   | Just lvl1 <- nonrigid d1 =
       linkVarToDim usage bcs d1 lvl1 d2
@@ -568,7 +568,7 @@ expect :: MonadUnify m => Usage -> StructType -> StructType -> m ()
 expect usage = unifyWith onDims usage mempty noBreadCrumbs
   where
     onDims _ _ _ d1 d2
-      | d1 == d2 = return ()
+      | d1 == d2 = pure ()
     -- We identify existentially bound names by them being nonrigid
     -- and yet bound.  It's OK to unify with those.
     onDims bcs bound nonrigid (NamedDim (QualName _ d1)) d2
@@ -627,7 +627,7 @@ scopeCheck usage bcs vn max_lvl tp = do
             then scopeViolation v
             else modifyConstraints $ M.insert v (max_lvl, c)
       | otherwise =
-          return ()
+          pure ()
 
     scopeViolation v = do
       notes <- typeNotes usage tp
@@ -659,10 +659,18 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
   scopeCheck usage bcs vn lvl tp
 
   constraints <- getConstraints
-  let link =
-        let ext = filter (`S.member` typeDimNames tp) bound
-         in modifyConstraints $
+  let link = do
+        let (witnessed, not_witnessed) = determineSizeWitnesses tp
+            used v = v `S.member` witnessed || v `S.member` not_witnessed
+            ext = filter used bound
+        case filter (`notElem` witnessed) ext of
+          [] ->
+            modifyConstraints $
               M.insert vn (lvl, Constraint (RetType ext tp) usage)
+          problems ->
+            unifyError usage mempty bcs . withIndexLink "unify-param-existential" $
+              "Parameter(s) " <> commasep (map (pquote . pprName) problems)
+                <> " used as size(s) would go out of scope."
 
   case snd <$> M.lookup vn constraints of
     Just (NoConstraint Unlifted unlift_usage) -> do
@@ -801,7 +809,7 @@ linkVarToDim usage bcs vn lvl dim = do
                   <+> pquote (ppr dim')
                   <+> "is rigidly bound in a deeper scope."
             _ -> modifyConstraints $ M.insert (qualLeaf dim') (lvl, c)
-    _ -> return ()
+    _ -> pure ()
 
   modifyConstraints $ M.insert vn (lvl, Size (Just dim) usage)
 
@@ -816,7 +824,7 @@ mustBeOneOf ts usage t = do
   case t' of
     Scalar (TypeVar _ _ (TypeName [] v) [])
       | not $ isRigid' v -> linkVarToTypes usage v ts
-    Scalar (Prim pt) | pt `elem` ts -> return ()
+    Scalar (Prim pt) | pt `elem` ts -> pure ()
     _ -> failure
   where
     failure =
@@ -876,13 +884,13 @@ equalityType usage t = do
               unifyError usage mempty noBreadCrumbs $
                 "Type" <+> pquote (ppr t) <+> "does not support equality."
                   </> "Constrained to be higher-order due to" <+> ppr cusage <+> "."
-          | otherwise -> return ()
+          | otherwise -> pure ()
         Just (lvl, NoConstraint _ _) ->
           modifyConstraints $ M.insert vn (lvl, Equality usage)
         Just (_, Overloaded _ _) ->
-          return () -- All primtypes support equality.
+          pure () -- All primtypes support equality.
         Just (_, Equality {}) ->
-          return ()
+          pure ()
         Just (_, HasConstrs cs _) ->
           mapM_ (equalityType usage) $ concat $ M.elems cs
         _ ->
@@ -913,7 +921,7 @@ zeroOrderTypeWith usage bcs t = do
               <+> "at"
               <+> text (locStr ploc)
               <+> "may be a function."
-        _ -> return ()
+        _ -> pure ()
 
 -- | Assert that this type must be zero-order.
 zeroOrderType ::
@@ -952,7 +960,7 @@ arrayElemTypeWith usage bcs t = do
                   <+> "bound at"
                   <+> text (locStr ploc)
                   <+> "is lifted and cannot be an array element."
-        _ -> return ()
+        _ -> pure ()
 
 -- | Assert that this type must be valid as an array element.
 arrayElemType ::
@@ -1042,7 +1050,7 @@ mustHaveFieldWith onDims usage bound bcs l t = do
       | Just (lvl, NoConstraint {}) <- M.lookup tn constraints -> do
           scopeCheck usage bcs tn lvl l_type'
           modifyConstraints $ M.insert tn (lvl, HasFields (M.singleton l l_type') usage)
-          return l_type
+          pure l_type
       | Just (lvl, HasFields fields _) <- M.lookup tn constraints -> do
           case M.lookup l fields of
             Just t' -> unifyWith onDims usage bound bcs l_type' t'
@@ -1051,18 +1059,18 @@ mustHaveFieldWith onDims usage bound bcs l t = do
                 M.insert
                   tn
                   (lvl, HasFields (M.insert l l_type' fields) usage)
-          return l_type
+          pure l_type
     Scalar (Record fields)
       | Just t' <- M.lookup l fields -> do
           unify usage l_type' $ toStruct t'
-          return t'
+          pure t'
       | otherwise ->
           unifyError usage mempty bcs $
             "Attempt to access field" <+> pquote (ppr l) <+> " of value of type"
               <+> ppr (toStructural t) <> "."
     _ -> do
       unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type'
-      return l_type
+      pure l_type
 
 -- | Assert that some type must have a field with this name and type.
 mustHaveField ::
@@ -1081,21 +1089,21 @@ newDimOnMismatch ::
   m (TypeBase (DimDecl VName) as, [VName])
 newDimOnMismatch loc t1 t2 = do
   (t, seen) <- runStateT (matchDims onDims t1 t2) mempty
-  return (t, M.elems seen)
+  pure (t, M.elems seen)
   where
     r = Rigid $ RigidCond (toStruct t1) (toStruct t2)
     onDims _ d1 d2
-      | d1 == d2 = return d1
+      | d1 == d2 = pure d1
       | otherwise = do
           -- Remember mismatches we have seen before and reuse the
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> return $ NamedDim $ qualName d
+            Just d -> pure $ NamedDim $ qualName d
             Nothing -> do
               d <- lift $ newDimVar loc r "differ"
               modify $ M.insert (d1, d2) d
-              return $ NamedDim $ qualName d
+              pure $ NamedDim $ qualName d
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.
@@ -1108,7 +1116,7 @@ unifyMostCommon ::
 unifyMostCommon usage t1 t2 = do
   -- We are ignoring the dimensions here, because any mismatches
   -- should be turned into fresh size variables.
-  let allOK _ _ _ _ _ = return ()
+  let allOK _ _ _ _ _ = pure ()
   unifyWith allOK usage mempty noBreadCrumbs (toStruct t1) (toStruct t2)
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
@@ -1131,7 +1139,7 @@ newVar :: Name -> UnifyM VName
 newVar name = do
   (x, i) <- get
   put (x, i + 1)
-  return $ VName (mkTypeVarName name i) i
+  pure $ VName (mkTypeVarName name i) i
 
 instance MonadUnify UnifyM where
   getConstraints = gets fst
@@ -1140,14 +1148,14 @@ instance MonadUnify UnifyM where
   newTypeVar loc name = do
     v <- newVar name
     modifyConstraints $ M.insert v (0, NoConstraint Lifted $ Usage Nothing loc)
-    return $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+    pure $ Scalar $ TypeVar mempty Nonunique (typeName v) []
 
   newDimVar loc rigidity name = do
     dim <- newVar name
     case rigidity of
       Rigid src -> modifyConstraints $ M.insert dim (0, UnknowableSize loc src)
       Nonrigid -> modifyConstraints $ M.insert dim (0, Size Nothing $ Usage Nothing loc)
-    return dim
+    pure dim
 
   curLevel = pure 0
 
@@ -1164,25 +1172,34 @@ instance MonadUnify UnifyM where
           </> indent 2 (ppr t2)
           </> "do not match."
 
-runUnifyM :: [TypeParam] -> UnifyM a -> Either TypeError a
-runUnifyM tparams (UnifyM m) = runExcept $ evalStateT m (constraints, 0)
+runUnifyM :: [TypeParam] -> [TypeParam] -> UnifyM a -> Either TypeError a
+runUnifyM rigid_tparams nonrigid_tparams (UnifyM m) =
+  runExcept $ evalStateT m (constraints, 0)
   where
-    constraints = M.fromList $ map f tparams
-    f (TypeParamDim p loc) = (p, (0, Size Nothing $ Usage Nothing loc))
-    f (TypeParamType l p loc) = (p, (0, NoConstraint l $ Usage Nothing loc))
+    constraints =
+      M.fromList $
+        map nonrigid nonrigid_tparams <> map rigid rigid_tparams
+    nonrigid (TypeParamDim p loc) = (p, (0, Size Nothing $ Usage Nothing loc))
+    nonrigid (TypeParamType l p loc) = (p, (0, NoConstraint l $ Usage Nothing loc))
+    rigid (TypeParamDim p loc) = (p, (0, ParamSize loc))
+    rigid (TypeParamType l p loc) = (p, (0, ParamType l loc))
 
 -- | Perform a unification of two types outside a monadic context.
--- The type parameters are allowed to be instantiated; all other types
--- are considered rigid.
+-- The first list of type parameters are rigid but may have liftedness
+-- constraints; the second list of type parameters are allowed to be
+-- instantiated. All other types are considered rigid with no
+-- constraints.
 doUnification ::
   Loc ->
+  [TypeParam] ->
   [TypeParam] ->
   StructType ->
   StructType ->
   Either TypeError StructType
-doUnification loc tparams t1 t2 = runUnifyM tparams $ do
-  expect (Usage Nothing (srclocOf loc)) t1 t2
-  normTypeFully t2
+doUnification loc rigid_tparams nonrigid_tparams t1 t2 =
+  runUnifyM rigid_tparams nonrigid_tparams $ do
+    expect (Usage Nothing (srclocOf loc)) t1 t2
+    normTypeFully t2
 
 -- Note [Linking variables to sum types]
 --

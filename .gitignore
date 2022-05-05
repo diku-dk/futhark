@@ -8,6 +8,9 @@
 .#*
 *~
 
+# Ignore IntelliJ configuration files
+.idea/
+
 # Ignore cabal build directory.
 dist
 dist-newstyle
@@ -46,3 +49,6 @@ core.*
 data/
 lib/
 testparser/
+
+# Ignore macOS system files.
+.DS_Store

@@ -66,7 +66,7 @@ patternDefs (PatConstr _ _ pats _) =
 
 typeParamDefs :: TypeParamBase VName -> Defs
 typeParamDefs (TypeParamDim vn loc) =
-  M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int32) (locOf loc)
+  M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int64) (locOf loc)
 typeParamDefs (TypeParamType _ vn loc) =
   M.singleton vn $ DefBound $ BoundType $ locOf loc
 
@@ -78,7 +78,7 @@ expDefs e =
       identityMapper {mapOnExp = onExp}
     onExp e' = do
       modify (<> expDefs e')
-      return e'
+      pure e'
 
     identDefs (Ident v (Info vt) vloc) =
       M.singleton v $ DefBound $ BoundTerm (toStruct vt) $ locOf vloc
@@ -371,10 +371,7 @@ containingModule :: Imports -> Pos -> Maybe FileModule
 containingModule imports (Pos file _ _ _) =
   snd <$> find ((== file') . fst) imports
   where
-    file' =
-      includeToString $
-        mkInitialImport $
-          fst $ Posix.splitExtension file
+    file' = includeToString $ mkInitialImport $ fst $ Posix.splitExtension file
 
 -- | Information about what is at the given source location.
 data AtPos = AtName (QualName VName) (Maybe BoundTo) Loc

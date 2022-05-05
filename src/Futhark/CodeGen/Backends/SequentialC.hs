@@ -31,5 +31,5 @@ compileProg version =
     operations :: GC.Operations Imp.Sequential ()
     operations =
       GC.defaultOperations
-        { GC.opsCompiler = const $ return ()
+        { GC.opsCompiler = const $ pure ()
         }

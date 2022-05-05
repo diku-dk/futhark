@@ -64,7 +64,7 @@ checkIfUsed occs v
     not $ "_" `isPrefixOf` prettyName (identName v) =
       warn (srclocOf v) $ "Unused variable" <+> pquote (pprName $ identName v) <+> "."
   | otherwise =
-      return ()
+      pure ()
 
 -- | Bind these identifiers locally while running the provided action.
 -- Checks that the identifiers are used properly within the scope
@@ -116,7 +116,7 @@ binding stms = check . handleVars
 
       mapM_ (checkIfUsed usages) stms
 
-      return a
+      pure a
 
     -- Collect and remove all occurences in @stms@.  This relies
     -- on the fact that no variables shadow any other.
@@ -223,6 +223,9 @@ patternDims (PatAscription p (TypeDecl _ (Info t)) _) =
     dimIdent _ NamedDim {} = Nothing
 patternDims _ = []
 
+sizeBinderToParam :: SizeBinder VName -> UncheckedTypeParam
+sizeBinderToParam (SizeBinder v loc) = TypeParamDim (baseName v) loc
+
 -- | Check and bind a @let@-pattern.
 bindingPat ::
   [SizeBinder VName] ->
@@ -231,7 +234,7 @@ bindingPat ::
   (Pat -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkForDuplicateNames [p]
+  checkForDuplicateNames (map sizeBinderToParam sizes) [p]
   checkPat sizes p t $ \p' -> binding (S.toList $ patIdents p') $ do
     -- Perform an observation of every declared dimension.  This
     -- prevents unused-name warnings for otherwise unused dimensions.
@@ -248,11 +251,11 @@ patLitMkType :: PatLit -> SrcLoc -> TermTypeM StructType
 patLitMkType (PatLitInt _) loc = do
   t <- newTypeVar loc "t"
   mustBeOneOf anyNumberType (mkUsage loc "integer literal") t
-  return t
+  pure t
 patLitMkType (PatLitFloat _) loc = do
   t <- newTypeVar loc "t"
   mustBeOneOf anyFloatType (mkUsage loc "float literal") t
-  return t
+  pure t
 patLitMkType (PatLitPrim v) _ =
   pure $ Scalar $ Prim $ primValueType v
 
@@ -272,16 +275,16 @@ checkPat' _ (Id name _ loc) _
     name' = nameToString name
 checkPat' _ (Id name NoInfo loc) (Ascribed t) = do
   name' <- newID name
-  return $ Id name' (Info t) loc
+  pure $ Id name' (Info t) loc
 checkPat' _ (Id name NoInfo loc) NoneInferred = do
   name' <- newID name
   t <- newTypeVar loc "t"
-  return $ Id name' (Info t) loc
+  pure $ Id name' (Info t) loc
 checkPat' _ (Wildcard _ loc) (Ascribed t) =
-  return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
+  pure $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
 checkPat' _ (Wildcard NoInfo loc) NoneInferred = do
   t <- newTypeVar loc "t"
-  return $ Wildcard (Info t) loc
+  pure $ Wildcard (Info t) loc
 checkPat' sizes (TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,
     length ts == length ps =
@@ -351,28 +354,28 @@ checkPat' sizes (PatAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
 checkPat' _ (PatLit l NoInfo loc) (Ascribed t) = do
   t' <- patLitMkType l loc
   unify (mkUsage loc "matching against literal") t' (toStruct t)
-  return $ PatLit l (Info (fromStruct t')) loc
+  pure $ PatLit l (Info (fromStruct t')) loc
 checkPat' _ (PatLit l NoInfo loc) NoneInferred = do
   t' <- patLitMkType l loc
-  return $ PatLit l (Info (fromStruct t')) loc
+  pure $ PatLit l (Info (fromStruct t')) loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
   | Just ts <- M.lookup n cs = do
       ps' <- zipWithM (checkPat' sizes) ps $ map Ascribed ts
-      return $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
+      pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed t) = do
   t' <- newTypeVar loc "t"
   ps' <- mapM (\p -> checkPat' sizes p NoneInferred) ps
   mustHaveConstr usage n t' (patternStructType <$> ps')
   unify usage t' (toStruct t)
   t'' <- normTypeFully t
-  return $ PatConstr n (Info t'') ps' loc
+  pure $ PatConstr n (Info t'') ps' loc
   where
     usage = mkUsage loc "matching against constructor"
 checkPat' sizes (PatConstr n NoInfo ps loc) NoneInferred = do
   ps' <- mapM (\p -> checkPat' sizes p NoneInferred) ps
   t <- newTypeVar loc "t"
   mustHaveConstr usage n t (patternStructType <$> ps')
-  return $ PatConstr n (Info $ fromStruct t) ps' loc
+  pure $ PatConstr n (Info $ fromStruct t) ps' loc
   where
     usage = mkUsage loc "matching against constructor"
 
@@ -388,7 +391,7 @@ checkPat ::
   (Pat -> TermTypeM a) ->
   TermTypeM a
 checkPat sizes p t m = do
-  checkForDuplicateNames [p]
+  checkForDuplicateNames (map sizeBinderToParam sizes) [p]
   p' <- onFailure (CheckingPat p t) $ checkPat' sizes p t
 
   let explicit = mustBeExplicitInType $ patternStructType p'
@@ -408,7 +411,7 @@ bindingParams ::
   ([TypeParam] -> [Pat] -> TermTypeM a) ->
   TermTypeM a
 bindingParams tps orig_ps m = do
-  checkForDuplicateNames orig_ps
+  checkForDuplicateNames tps orig_ps
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
     let descend ps' (p : ps) =
           checkPat [] p NoneInferred $ \p' ->

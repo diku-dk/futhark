@@ -531,13 +531,14 @@ instance MonadUnify TermTypeM where
 -- parameters. Returns the names of the fresh type variables, the
 -- instance list, and the instantiated type.
 instantiateTypeScheme ::
+  QualName VName ->
   SrcLoc ->
   [TypeParam] ->
   PatType ->
   TermTypeM ([VName], PatType)
-instantiateTypeScheme loc tparams t = do
+instantiateTypeScheme qn loc tparams t = do
   let tnames = map typeParamName tparams
-  (tparam_names, tparam_substs) <- unzip <$> mapM (instantiateTypeParam loc) tparams
+  (tparam_names, tparam_substs) <- unzip <$> mapM (instantiateTypeParam qn loc) tparams
   let substs = M.fromList $ zip tnames tparam_substs
       t' = applySubst (`M.lookup` substs) t
   pure (tparam_names, t')
@@ -546,19 +547,22 @@ instantiateTypeScheme loc tparams t = do
 -- substitution map.
 instantiateTypeParam ::
   Monoid as =>
+  QualName VName ->
   SrcLoc ->
   TypeParam ->
   TermTypeM (VName, Subst (RetTypeBase dim as))
-instantiateTypeParam loc tparam = do
+instantiateTypeParam qn loc tparam = do
   i <- incCounter
   let name = nameFromString (takeWhile isAscii (baseString (typeParamName tparam)))
   v <- newID $ mkTypeVarName name i
   case tparam of
     TypeParamType x _ _ -> do
-      constrain v $ NoConstraint x $ mkUsage' loc
+      constrain v . NoConstraint x . mkUsage loc $
+        "instantiated type parameter of " <> quote (pretty qn) <> "."
       pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
     TypeParamDim {} -> do
-      constrain v $ Size Nothing $ mkUsage' loc
+      constrain v . Size Nothing . mkUsage loc $
+        "instantiated size parameter of " <> quote (pretty qn) <> "."
       pure (v, SizeSubst $ NamedDim $ qualName v)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
@@ -591,7 +595,7 @@ checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, 
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
       me <- liftTypeM askImportName
-      unless ("/prelude" `isPrefixOf` includeToFilePath me) $
+      unless (isBuiltin (includeToFilePath me)) $
         warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
       scope <- asks termScope
       pure (scope, v)
@@ -626,7 +630,7 @@ instance MonadTypeChecker TermTypeM where
     case M.lookup name $ scopeTypeTable scope of
       Nothing -> unknownType loc qn
       Just (TypeAbbr l ps (RetType dims def)) ->
-        return
+        pure
           ( qn',
             ps,
             RetType dims $ qualifyTypeVars outer_env (map typeParamName ps) qs def,
@@ -652,7 +656,7 @@ instance MonadTypeChecker TermTypeM where
       Just (BoundV _ tparams t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
-            (tnames, t') <- instantiateTypeScheme loc tparams t
+            (tnames, t') <- instantiateTypeScheme qn' loc tparams t
             pure $ qualifyTypeVars outer_env tnames qs t'
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
@@ -707,12 +711,12 @@ extSize loc e = do
               RigidSlice d $ prettyOneLine $ DimSlice i j s
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
-      return
+      pure
         ( NamedDim $ qualName d,
           Just d
         )
     Just d ->
-      return
+      pure
         ( NamedDim $ qualName d,
           Just d
         )
@@ -739,7 +743,7 @@ newArrayType loc desc r = do
   constrain v $ NoConstraint Unlifted $ mkUsage' loc
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
   let rowt = TypeVar () Nonunique (typeName v) []
-  return
+  pure
     ( Array () Nonunique rowt (ShapeDecl $ map (NamedDim . qualName) dims),
       Scalar rowt
     )
@@ -811,7 +815,7 @@ checkTypeExpNonrigid :: TypeExp Name -> TermTypeM (TypeExp VName, StructType, [V
 checkTypeExpNonrigid te = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
-    constrain v $ Size Nothing $ mkUsage' $ srclocOf te
+    constrain v $ Size Nothing $ mkUsage (srclocOf te) "anonymous size in type expression"
   pure (te', st, svars ++ dims)
 
 checkTypeExpRigid ::
@@ -839,6 +843,8 @@ maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
 maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
+dimFromExp rf (Attr _ e _) = dimFromExp rf e
+dimFromExp rf (Assert _ e _ _) = dimFromExp rf e
 dimFromExp rf (Parens e _) = dimFromExp rf e
 dimFromExp rf (QualParens _ e _) = dimFromExp rf e
 dimFromExp rf e

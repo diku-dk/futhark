@@ -60,7 +60,7 @@ isPermutationOf l1 l2 =
       | Just y == x = Just (Nothing : xs, i)
       | otherwise = do
           (xs', v) <- pick (i + 1) xs y
-          return (x : xs', v)
+          pure (x : xs', v)
 
 -- | If @l@ is an index into the array @a@, then @transposeIndex k n
 -- l@ is an index to the same element in the array @transposeArray k n

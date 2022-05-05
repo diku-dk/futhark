@@ -72,13 +72,18 @@ type Indices num = [num]
 
 type Permutation = [Int]
 
+-- | The physical element ordering alongside a dimension, i.e. the
+-- sign of the stride.
 data Monotonicity
-  = Inc
-  | Dec
-  | -- | monotonously increasing, decreasing or unknown
+  = -- | Increasing.
+    Inc
+  | -- | Decreasing.
+    Dec
+  | -- | Unknown.
     Unknown
   deriving (Show, Eq)
 
+-- | A single dimension in an 'LMAD'.
 data LMADDim num = LMADDim
   { ldStride :: num,
     ldRotate :: num,
@@ -181,10 +186,10 @@ instance FreeIn num => FreeIn (IxFun num) where
   freeIn' = foldMap freeIn'
 
 instance Functor LMAD where
-  fmap f = runIdentity . traverse (return . f)
+  fmap f = runIdentity . traverse (pure . f)
 
 instance Functor IxFun where
-  fmap f = runIdentity . traverse (return . f)
+  fmap f = runIdentity . traverse (pure . f)
 
 instance Foldable LMAD where
   foldMap f = execWriter . traverse (tell . f)
@@ -282,9 +287,11 @@ hasContiguousPerm (IxFun (lmad :| []) _ _) =
    in perm == sort perm
 hasContiguousPerm _ = False
 
--- | Shape of an index function.
+-- | The index space of the index function.  This is the same as the
+-- shape of arrays that the index function supports.
 shape :: (Eq num, IntegralExp num) => IxFun num -> Shape num
-shape (IxFun (lmad :| _) _ _) = lmadShape lmad
+shape (IxFun (lmad :| _) _ _) =
+  permuteFwd (lmadPermutation lmad) $ lmadShapeBase lmad
 
 -- | Shape of an LMAD.
 lmadShape :: (Eq num, IntegralExp num) => LMAD num -> Shape num
@@ -385,7 +392,7 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) (Slice is) = do
             filter (isJust . dimFix . snd) $
               zip [0 .. length is' - 1] is'
 
-  return $ IxFun (setLMADPermutation perm' lmad' :| lmads) oshp cg'
+  pure $ IxFun (setLMADPermutation perm' lmad' :| lmads) oshp cg'
   where
     updatePerm ps inds = concatMap decrease ps
       where
@@ -564,7 +571,7 @@ reshapeCoercion (IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape = do
             dims'
             (newDims newshape)
       lmad' = LMAD off dims''
-  return $ IxFun (lmad' :| lmads) oldbase cg
+  pure $ IxFun (lmad' :| lmads) oldbase cg
 
 -- | Handle the case where a reshape operation can stay inside a single LMAD.
 --
@@ -662,7 +669,7 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape
           sortBy (compare `on` fst) $
             zip sup_inds dims_sup ++ zip rpt_inds repeats'
       lmad' = LMAD off' dims'
-  return $ IxFun (setLMADPermutation perm' lmad' :| lmads) oldbase cg
+  pure $ IxFun (setLMADPermutation perm' lmad' :| lmads) oldbase cg
   where
     consecutive _ [] = True
     consecutive i [p] = i == p
@@ -676,7 +683,7 @@ splitCoercions newshape' = do
   let (head_coercions, newshape'') = span isCoercion newshape'
       (reshapes, tail_coercions) = break isCoercion newshape''
   guard (all isCoercion tail_coercions)
-  return (head_coercions, reshapes, tail_coercions)
+  pure (head_coercions, reshapes, tail_coercions)
   where
     isCoercion DimCoercion {} = True
     isCoercion _ = False
@@ -809,7 +816,7 @@ rebaseNice
         new_base' = IxFun (lmad_base'' :| lmads_base) shp cg_base
         IxFun lmads_base' _ _ = new_base'
         lmads'' = lmads' ++@ lmads_base'
-    return $ IxFun lmads'' shp (cg && cg_base)
+    pure $ IxFun lmads'' shp (cg && cg_base)
 
 -- | Rebase an index function on top of a new base.
 rebase ::
@@ -864,7 +871,7 @@ rearrangeWithOffset (IxFun (lmad :| []) oshp cg) elem_size = do
     linearWithOffset
       (IxFun (setLMADPermutation perm_contig lmad :| []) oshp cg)
       elem_size
-  return (offset, zip perm (permuteFwd perm (lmadShapeBase lmad)))
+  pure (offset, zip perm (permuteFwd perm (lmadShapeBase lmad)))
 rearrangeWithOffset _ _ = Nothing
 
 -- | Is this a row-major array starting at offset zero?
@@ -971,7 +978,7 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
         map (\(a, b, c, d, e) -> LMADDim a b c d e) $
           zip5 dstd drot dshp dperm dmon
       lmad = LMAD offt lmad_dims
-  return (IxFun (lmad :| []) oshp ctg, m5)
+  pure (IxFun (lmad :| []) oshp ctg, m5)
   where
     lmadDMon = map ldMon . lmadDims
     lmadDSrd = map ldStride . lmadDims
@@ -981,7 +988,7 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
       foldM
         ( \(l_acc, m') (pe1, pe2) -> do
             let (e, m'') = PEG.leastGeneralGeneralization m' pe1 pe2
-            return (l_acc ++ [e], m'')
+            pure (l_acc ++ [e], m'')
         )
         ([], m)
         (zip l1 l2)
@@ -996,9 +1003,11 @@ existentializeExp e = do
   i <- gets length
   modify (++ [e])
   let t = primExpType $ untyped e
-  return $ TPrimExp $ LeafExp (Ext i) t
+  pure $ TPrimExp $ LeafExp (Ext i) t
 
--- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
+-- | Try to turn all the leaves of the index function into 'Ext's.  We
+--  require that there's only one LMAD, that the index function is
+--  contiguous, and the base shape has only one dimension.
 existentialize ::
   (IntExp t, Eq v, Pretty v) =>
   IxFun (TPrimExp t v) ->
@@ -1011,7 +1020,7 @@ existentialize (IxFun (lmad :| []) oshp True)
       lmadOffset' <- existentializeExp $ lmadOffset lmad
       lmadDims' <- mapM existentializeLMADDim $ lmadDims lmad
       let lmad' = LMAD lmadOffset' lmadDims'
-      return $ Just $ IxFun (lmad' :| []) oshp' True
+      pure $ Just $ IxFun (lmad' :| []) oshp' True
   where
     existentializeLMADDim ::
       LMADDim (TPrimExp t v) ->
@@ -1019,8 +1028,8 @@ existentialize (IxFun (lmad :| []) oshp True)
     existentializeLMADDim (LMADDim str rot shp perm mon) = do
       stride' <- existentializeExp str
       shape' <- existentializeExp shp
-      return $ LMADDim stride' (fmap Free rot) shape' perm mon
-existentialize _ = return Nothing
+      pure $ LMADDim stride' (fmap Free rot) shape' perm mon
+existentialize _ = pure Nothing
 
 -- | When comparing index functions as part of the type check in KernelsMem,
 -- we may run into problems caused by the simplifier. As index functions can be

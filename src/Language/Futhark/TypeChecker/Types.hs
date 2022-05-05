@@ -26,9 +26,10 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List (foldl', sort, unzip4, (\\))
+import Data.List (find, foldl', sort, unzip4, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Set as S
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding ((<|>))
 import Language.Futhark
@@ -233,12 +234,19 @@ evalTypeExp (TEDim dims t loc) = do
     dims' <- mapM (flip (checkName Term) loc) dims
     bindDims dims' $ do
       (t', svars, RetType t_dims st, l) <- evalTypeExp t
-      return
-        ( TEDim dims' t' loc,
-          svars,
-          RetType (dims' ++ t_dims) st,
-          max l SizeLifted
-        )
+      let (witnessed, _) = determineSizeWitnesses st
+      case find (`S.notMember` witnessed) dims' of
+        Just d ->
+          typeError loc mempty . withIndexLink "unused-existential" $
+            "Existential size " <> pquote (pprName d)
+              <> " not used as array size."
+        Nothing ->
+          pure
+            ( TEDim dims' t' loc,
+              svars,
+              RetType (dims' ++ t_dims) st,
+              max l SizeLifted
+            )
   where
     bindDims [] m = m
     bindDims (d : ds) m =
@@ -257,7 +265,7 @@ evalTypeExp t@(TESum cs loc) = do
       cs_svars = (foldMap . foldMap) (\(_, y, _, _) -> y) checked
       ts_s = (fmap . fmap) (\(_, _, z, _) -> z) checked
       ls = (concatMap . fmap) (\(_, _, _, v) -> v) checked
-  return
+  pure
     ( TESum (M.toList cs') loc,
       cs_svars,
       RetType (foldMap (foldMap retDims) ts_s) $
@@ -276,7 +284,7 @@ evalTypeExp ote@TEApply {} = do
           <+> ppr (length targs) <> "."
     else do
       (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
-      return
+      pure
         ( foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
           [],
           RetType (t_dims ++ mconcat dims) $ applySubst (`M.lookup` mconcat substs) t,
@@ -296,27 +304,27 @@ evalTypeExp ote@TEApply {} = do
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
       v' <- checkNamedDim loc v
-      return
+      pure
         ( TypeArgExpDim (DimExpNamed v' dloc) loc,
           [],
           M.singleton pv $ SizeSubst $ NamedDim v'
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpConst x dloc) loc) =
-      return
+      pure
         ( TypeArgExpDim (DimExpConst x dloc) loc,
           [],
           M.singleton pv $ SizeSubst $ ConstDim x
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) = do
       d <- newTypeName "d"
-      return
+      pure
         ( TypeArgExpDim DimExpAny loc,
           [d],
           M.singleton pv $ SizeSubst $ NamedDim $ qualName d
         )
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
       (te', svars, RetType dims st, _) <- evalTypeExp te
-      return
+      pure
         ( TypeArgExpType te',
           svars ++ dims,
           M.singleton pv $ Subst [] $ RetType [] st
@@ -341,26 +349,28 @@ checkTypeExp te = do
   checkForDuplicateNamesInType te
   evalTypeExp te
 
--- | Check for duplication of names inside a pattern group.  Produces
--- a description of all names used in the pattern group.
+-- | Check for duplication of names inside a binding group.
 checkForDuplicateNames ::
-  MonadTypeChecker m =>
-  [UncheckedPat] ->
-  m ()
-checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
+  MonadTypeChecker m => [UncheckedTypeParam] -> [UncheckedPat] -> m ()
+checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
+  mapM_ checkTypeParam tps
+  mapM_ checkPat pats
   where
-    check (Id v _ loc) = seen v loc
-    check (PatParens p _) = check p
-    check (PatAttr _ p _) = check p
-    check Wildcard {} = pure ()
-    check (TuplePat ps _) = mapM_ check ps
-    check (RecordPat fs _) = mapM_ (check . snd) fs
-    check (PatAscription p _ _) = check p
-    check PatLit {} = pure ()
-    check (PatConstr _ _ ps _) = mapM_ check ps
+    checkTypeParam (TypeParamType _ v loc) = seen Type v loc
+    checkTypeParam (TypeParamDim v loc) = seen Term v loc
 
-    seen v loc = do
-      already <- gets $ M.lookup v
+    checkPat (Id v _ loc) = seen Term v loc
+    checkPat (PatParens p _) = checkPat p
+    checkPat (PatAttr _ p _) = checkPat p
+    checkPat Wildcard {} = pure ()
+    checkPat (TuplePat ps _) = mapM_ checkPat ps
+    checkPat (RecordPat fs _) = mapM_ (checkPat . snd) fs
+    checkPat (PatAscription p _ _) = checkPat p
+    checkPat PatLit {} = pure ()
+    checkPat (PatConstr _ _ ps _) = mapM_ checkPat ps
+
+    seen ns v loc = do
+      already <- gets $ M.lookup (ns, v)
       case already of
         Just prev_loc ->
           lift $
@@ -368,7 +378,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
               "Name" <+> pquote (ppr v) <+> "also bound at"
                 <+> text (locStr prev_loc) <> "."
         Nothing ->
-          modify $ M.insert v loc
+          modify $ M.insert (ns, v) loc
 
 -- | Check whether the type contains arrow types that define the same
 -- parameter.  These might also exist further down, but that's not
@@ -515,9 +525,9 @@ instance Substitutable Pat where
     where
       mapper =
         ASTMapper
-          { mapOnExp = return,
-            mapOnName = return,
-            mapOnQualName = return,
+          { mapOnExp = pure,
+            mapOnName = pure,
+            mapOnQualName = pure,
             mapOnStructType = pure . applySubst f,
             mapOnPatType = pure . applySubst f,
             mapOnStructRetType = pure . applySubst f,

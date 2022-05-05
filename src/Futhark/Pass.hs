@@ -51,7 +51,7 @@ runPassM (PassM m) = modifyNameSource $ runState (runWriterT m)
 -- 'Left', the result is a 'CompilerBug'.
 liftEither :: Show err => Either err a -> PassM a
 liftEither (Left e) = compilerBugS $ show e
-liftEither (Right v) = return v
+liftEither (Right v) = pure v
 
 -- | Turn an 'Either' monadic computation into a 'PassM'.  If the 'Either' is
 -- 'Left', the result is an exception.
@@ -89,15 +89,15 @@ parPass f as = do
      in ((bs, mconcat logs), mconcat srcs)
 
   addLog log
-  return x
+  pure x
   where
     f' src a =
       let ((x', log), src') = runState (runPassM (f a)) src
        in (x', log, src')
 
--- | Apply some operation to the top-level constants.  Then applies an
--- operation to all the function function definitions, which are also
--- given the transformed constants so they can be brought into scope.
+-- | Apply some operation to the top-level constants. Then applies an
+-- operation to all the function definitions, which are also given the
+-- transformed constants so they can be brought into scope.
 -- The function definition transformations are run in parallel (with
 -- 'parPass'), since they cannot affect each other.
 intraproceduralTransformationWithConsts ::
@@ -108,7 +108,7 @@ intraproceduralTransformationWithConsts ::
 intraproceduralTransformationWithConsts ct ft (Prog consts funs) = do
   consts' <- ct consts
   funs' <- parPass (ft consts') funs
-  return $ Prog consts' funs'
+  pure $ Prog consts' funs'
 
 -- | Like 'intraproceduralTransformationWithConsts', but do not change
 -- the top-level constants, and simply pass along their 'Scope'.
@@ -124,4 +124,4 @@ intraproceduralTransformation f =
         f
           (scopeOf consts <> scopeOfFParams (funDefParams fd))
           (bodyStms $ funDefBody fd)
-      return fd {funDefBody = (funDefBody fd) {bodyStms = stms}}
+      pure fd {funDefBody = (funDefBody fd) {bodyStms = stms}}

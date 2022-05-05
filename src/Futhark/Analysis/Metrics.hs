@@ -16,6 +16,7 @@ module Futhark.Analysis.Metrics
     MetricsM,
     stmMetrics,
     lambdaMetrics,
+    bodyMetrics,
   )
 where
 
@@ -32,11 +33,11 @@ class OpMetrics op where
   opMetrics :: op -> MetricsM ()
 
 instance OpMetrics a => OpMetrics (Maybe a) where
-  opMetrics Nothing = return ()
+  opMetrics Nothing = pure ()
   opMetrics (Just x) = opMetrics x
 
 instance OpMetrics () where
-  opMetrics () = return ()
+  opMetrics () = pure ()
 
 newtype CountMetrics = CountMetrics [([Text], Text)]
 
@@ -91,6 +92,7 @@ progMetrics prog =
 funDefMetrics :: OpMetrics (Op rep) => FunDef rep -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
+-- | Compute metrics for this body.
 bodyMetrics :: OpMetrics (Op rep) => Body rep -> MetricsM ()
 bodyMetrics = mapM_ stmMetrics . bodyStms
 

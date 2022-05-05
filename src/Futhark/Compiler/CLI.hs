@@ -150,7 +150,7 @@ wrapOption = fmap wrap
   where
     wrap f = do
       g <- f
-      return $ \cfg -> cfg {compilerConfig = g (compilerConfig cfg)}
+      pure $ \cfg -> cfg {compilerConfig = g (compilerConfig cfg)}
 
 incVerbosity :: Maybe FilePath -> CompilerConfig cfg -> CompilerConfig cfg
 incVerbosity file cfg =
@@ -171,13 +171,6 @@ data CompilerConfig cfg = CompilerConfig
     compilerConfig :: cfg,
     compilerEntryPoints :: [Name]
   }
-
--- | Are we compiling a library or an executable?
-data CompilerMode
-  = ToLibrary
-  | ToExecutable
-  | ToServer
-  deriving (Eq, Ord, Show)
 
 -- | The configuration of the compiler.
 newCompilerConfig :: cfg -> CompilerConfig cfg

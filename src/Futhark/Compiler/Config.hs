@@ -3,11 +3,28 @@ module Futhark.Compiler.Config
   ( FutharkConfig (..),
     newFutharkConfig,
     Verbosity (..),
+    CompilerMode (..),
   )
 where
 
-import Futhark.IR
-import Futhark.Pipeline
+import Futhark.IR.Syntax.Core (Name)
+
+-- | Are we compiling a library or an executable?
+data CompilerMode
+  = ToLibrary
+  | ToExecutable
+  | ToServer
+  deriving (Eq, Ord, Show)
+
+-- | How much information to print to stderr while the compiler is running.
+data Verbosity
+  = -- | Silence is golden.
+    NotVerbose
+  | -- | Print messages about which pass is running.
+    Verbose
+  | -- | Also print logs from individual passes.
+    VeryVerbose
+  deriving (Eq, Ord)
 
 -- | The compiler configuration.  This only contains options related
 -- to core compiler functionality, such as reading the initial program

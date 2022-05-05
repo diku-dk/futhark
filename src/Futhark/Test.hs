@@ -21,6 +21,7 @@ module Futhark.Test
     readResults,
     ensureReferenceOutput,
     determineTuning,
+    determineCache,
     binaryName,
     futharkServerCfg,
     V.Mismatch,
@@ -162,11 +163,15 @@ scriptValueAsVars server names_and_types val = do
     note (_, t)
       | "(" `T.isPrefixOf` t =
           Just $
-            "\nNote: expected type " <> prettyText t <> " is an opaque tuple that cannot be constructed\n"
+            "\nNote: expected type "
+              <> prettyText t
+              <> " is an opaque tuple that cannot be constructed\n"
               <> "in FutharkScript.  Consider using type annotations to give it a proper name."
       | "{" `T.isPrefixOf` t =
           Just $
-            "\nNote: expected type " <> prettyText t <> " is an opaque record that cannot be constructed\n"
+            "\nNote: expected type "
+              <> prettyText t
+              <> " is an opaque record that cannot be constructed\n"
               <> "in FutharkScript.  Consider using type annotations to give it a proper name."
       | otherwise =
           Nothing
@@ -449,7 +454,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
       | otherwise =
           pure False
 
--- | Determine the --tuning options to pass to the program.  The first
+-- | Determine the @--tuning@ options to pass to the program.  The first
 -- argument is the extension of the tuning file, or 'Nothing' if none
 -- should be used.
 determineTuning :: MonadIO m => Maybe FilePath -> FilePath -> m ([String], String)
@@ -463,6 +468,13 @@ determineTuning (Just ext) program = do
           " (using " <> takeFileName (program <.> ext) <> ")"
         )
     else pure ([], " (no tuning file)")
+
+-- | Determine the @--cache-file@ options to pass to the program.  The
+-- first argument is the extension of the cache file, or 'Nothing' if
+-- none should be used.
+determineCache :: Maybe FilePath -> FilePath -> [String]
+determineCache Nothing _ = []
+determineCache (Just ext) program = ["--cache-file", program <.> ext]
 
 -- | Check that the result is as expected, and write files and throw
 -- an error if not.

@@ -19,8 +19,11 @@ import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Substitute
 
+-- | Essentially the components of an 'Index' expression.
 type IndexSubstitution = (Certs, VName, Type, Slice SubExp)
 
+-- | A mapping from variable names to the indexing operation they
+-- should be replaced with.
 type IndexSubstitutions = [(VName, IndexSubstitution)]
 
 typeEnvFromSubstitutions :: LParamInfo rep ~ Type => IndexSubstitutions -> Scope rep
@@ -119,7 +122,7 @@ substituteIndicesInExp substs e = do
                       BasicOp $ Index src2 $ fullSlice (typeOf src2dec) (unSlice is2)
                 row_copy <-
                   letExp (baseString v ++ "_row_copy") $ BasicOp $ Copy row
-                return $
+                pure $
                   update
                     v
                     v
@@ -133,7 +136,7 @@ substituteIndicesInExp substs e = do
                     )
                     substs'
           consumingSubst substs' _ =
-            return substs'
+            pure substs'
        in foldM consumingSubst substs . namesToList . consumedInExp
 
 substituteIndicesInSubExp ::
@@ -144,7 +147,7 @@ substituteIndicesInSubExp ::
 substituteIndicesInSubExp substs (Var v) =
   Var <$> substituteIndicesInVar substs v
 substituteIndicesInSubExp _ se =
-  return se
+  pure se
 
 substituteIndicesInVar ::
   MonadBuilder m =>
@@ -160,7 +163,7 @@ substituteIndicesInVar substs v
         letExp (baseString src2 <> "_v_idx") $
           BasicOp $ Index src2 $ fullSlice (typeOf src2_dec) is2
   | otherwise =
-      return v
+      pure v
 
 substituteIndicesInBody ::
   (MonadBuilder m, Buildable (Rep m), Aliased (Rep m)) =>

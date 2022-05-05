@@ -45,7 +45,7 @@ simplifyProg simpl rules blockers (Prog consts funs) = do
 
   -- We deepen the vtable so it will look like the constants are in an
   -- "outer loop"; this communicates useful information to some
-  -- simplification rules (e.g. seee issue #1302).
+  -- simplification rules (e.g. see issue #1302).
   funs' <- parPass (simplifyFun' (ST.deepen consts_vtable) . informFunDef) funs
   let funs_uses = UT.usages $ foldMap freeIn funs'
 
@@ -149,11 +149,10 @@ simplifyStms ::
   m (Stms rep)
 simplifyStms simpl rules blockers scope =
   fmap (fmap removeStmWisdom)
-    . simplifySomething f id simpl rules blockers vtable
+    . simplifySomething Engine.simplifyStms id simpl rules blockers vtable
     . informStms
   where
     vtable = ST.fromScope $ addScopeWisdom scope
-    f stms = Engine.simplifyStms stms
 
 loopUntilConvergence ::
   (MonadFreshNames m, Engine.SimplifiableRep rep) =>

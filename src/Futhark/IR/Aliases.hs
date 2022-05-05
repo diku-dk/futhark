@@ -38,6 +38,7 @@ module Futhark.IR.Aliases
     removeFunDefAliases,
     removeExpAliases,
     removeStmAliases,
+    removeBodyAliases,
     removeLambdaAliases,
     removePatAliases,
     removeScopeAliases,
@@ -46,6 +47,7 @@ module Futhark.IR.Aliases
     AliasesAndConsumed,
     trackAliases,
     mkStmsAliases,
+    consumedInStms,
   )
 where
 
@@ -179,14 +181,14 @@ resultAliasComment name als =
 removeAliases :: CanBeAliased (Op rep) => Rephraser Identity (Aliases rep) rep
 removeAliases =
   Rephraser
-    { rephraseExpDec = return . snd,
-      rephraseLetBoundDec = return . snd,
-      rephraseBodyDec = return . snd,
-      rephraseFParamDec = return,
-      rephraseLParamDec = return,
-      rephraseRetType = return,
-      rephraseBranchType = return,
-      rephraseOp = return . removeOpAliases
+    { rephraseExpDec = pure . snd,
+      rephraseLetBoundDec = pure . snd,
+      rephraseBodyDec = pure . snd,
+      rephraseFParamDec = pure,
+      rephraseLParamDec = pure,
+      rephraseRetType = pure,
+      rephraseBranchType = pure,
+      rephraseOp = pure . removeOpAliases
     }
 
 -- | Remove alias information from an aliased scope.
@@ -226,6 +228,13 @@ removeStmAliases ::
   Stm rep
 removeStmAliases = runIdentity . rephraseStm removeAliases
 
+-- | Remove alias information from body.
+removeBodyAliases ::
+  CanBeAliased (Op rep) =>
+  Body (Aliases rep) ->
+  Body rep
+removeBodyAliases = runIdentity . rephraseBody removeAliases
+
 -- | Remove alias information from lambda.
 removeLambdaAliases ::
   CanBeAliased (Op rep) =>
@@ -237,7 +246,7 @@ removeLambdaAliases = runIdentity . rephraseLambda removeAliases
 removePatAliases ::
   Pat (AliasDec, a) ->
   Pat a
-removePatAliases = runIdentity . rephrasePat (return . snd)
+removePatAliases = runIdentity . rephrasePat (pure . snd)
 
 -- | Augment a body decoration with aliasing information provided by
 -- the statements and result of that body.
@@ -320,6 +329,10 @@ type AliasesAndConsumed =
     Names
   )
 
+-- | The variables consumed in these statements.
+consumedInStms :: Aliased rep => Stms rep -> Names
+consumedInStms = snd . flip mkStmsAliases []
+
 -- | A helper function for computing the aliases of a sequence of
 -- statements.  You'd use this while recursing down the statements
 -- from first to last.  The 'AliasesAndConsumed' parameter is the
@@ -348,13 +361,13 @@ trackAliases (aliasmap, consumed) stm =
     aliasesOfAliases = mconcat . map look . namesToList
     look k = M.findWithDefault mempty k aliasmap
 
-mkAliasedLetStm ::
+mkAliasedStm ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
   Stm (Aliases rep)
-mkAliasedLetStm pat (StmAux cs attrs dec) e =
+mkAliasedStm pat (StmAux cs attrs dec) e =
   Let
     (mkAliasedPat pat e)
     (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
@@ -372,7 +385,7 @@ instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
     env <- asksScope removeScopeAliases
     flip runReaderT env $ do
       Let pat dec _ <- mkLetNames names $ removeExpAliases e
-      return $ mkAliasedLetStm pat dec e
+      pure $ mkAliasedStm pat dec e
 
   mkBody stms res =
     let Body bodyrep _ _ = mkBody (fmap removeStmAliases stms) res

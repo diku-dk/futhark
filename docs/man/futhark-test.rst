@@ -14,9 +14,10 @@ futhark test [options...] infiles...
 DESCRIPTION
 ===========
 
-This tool is used to test Futhark programs based on input/output
-datasets.  If a directory is given, all contained files with a
-``.fut`` extension are considered.
+Test Futhark programs based on input/output datasets.  All contained
+``.fut`` files within a given directory are considered.  By default,
+tests are carried out with compiled code.  This can be changed with
+the ``-i`` option.
 
 A Futhark test program is an ordinary Futhark program, with at least
 one test block describing input/output test cases and possibly other
@@ -89,10 +90,6 @@ simply be a description of an expected compile time type error::
 
 This is used to test the type checker.
 
-By default, both the interpreter and compiler is run on all test cases
-(except those that have specified ``compiled``), although this can be
-changed with command-line options to ``futhark test``.
-
 Tuple syntax is not supported when specifying input and output values.
 Instead, you can write an N-tuple as its constituent N values.  Beware
 of syntax errors in the values - the errors reported by
@@ -129,12 +126,17 @@ OPTIONS
   The backend used when compiling Futhark programs (without leading
   ``futhark``, e.g. just ``opencl``).
 
+--cache-extension=EXTENSION
+
+  For a program ``foo.fut``, pass ``--cache-file foo.fut.EXTENSION``.
+  By default, ``--cache-file`` is not passed.
+
 -c
-  Only run compiled code - do not run any interpreters.
+  Only run compiled code - do not run the interpreter.  This is the
+  default.
 
 -C
   Compile the programs, but do not run them.
-
 
 --concurrency=NUM
 
@@ -148,7 +150,7 @@ OPTIONS
   where *foo* is the backend used.
 
 -i
-  Only interpret - do not run any compilers.
+  Test with the interpreter.
 
 -t
   Type-check the programs, but do not run them.

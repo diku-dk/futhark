@@ -91,9 +91,9 @@ interchangeLoop
 
       copyOrRemoveParam (param, arr)
         | not (paramName param `nameIn` free_in_body) =
-            return Nothing
+            pure Nothing
         | otherwise =
-            return $ Just (param, arr)
+            pure $ Just (param, arr)
 
       expandedInit _ (Var v)
         | Just arr <- isMapParameter v =
@@ -110,7 +110,7 @@ interchangeLoop
             -- It'd be better to fix this somewhere else...
             arrayOf (paramDeclType merge_param) (Shape [w]) Unique
         expanded_init <- expandedInit param_name merge_init
-        return (expanded_param, expanded_init)
+        pure (expanded_param, expanded_init)
         where
           param_name = baseString $ paramName merge_param
 
@@ -129,7 +129,8 @@ maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
   SeqLoop perm loop_pat <$> mapM f merge <*> pure form <*> pure body
   where
     f (p, Var arg)
-      | isMapInput arg =
+      | isMapInput arg,
+        Array {} <- paramType p =
           (p,) <$> letSubExp (baseString (paramName p) <> "_inter_copy") (BasicOp $ Copy arg)
     f (p, arg) =
       pure (p, arg)
@@ -192,7 +193,7 @@ branchStm (Branch _ pat cond tbranch fbranch ret) =
   Let pat (defAux ()) $ If cond tbranch fbranch ret
 
 interchangeBranch1 ::
-  (MonadBuilder m) =>
+  (MonadFreshNames m, HasScope SOACS m) =>
   Branch ->
   LoopNesting ->
   m Branch
@@ -212,23 +213,24 @@ interchangeBranch1
           let lam = Lambda params branch lam_ret
               res = varsRes $ patNames branch_pat'
               map_stm = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
-          return $ mkBody (oneStm map_stm) res
+          pure $ mkBody (oneStm map_stm) res
 
-    tbranch' <- mkBranch tbranch
-    fbranch' <- mkBranch fbranch
-    return $
+    tbranch' <- runBodyBuilder $ mkBranch tbranch
+    fbranch' <- runBodyBuilder $ mkBranch fbranch
+    pure $
       Branch [0 .. patSize pat - 1] pat' cond tbranch' fbranch' $
         IfDec ret' if_sort
 
+-- | Given a (parallel) map nesting and an inner branch, move the maps
+-- inside the branch.  The result is the resulting branch expression,
+-- which will then contain statements with @map@ expressions.
 interchangeBranch ::
   (MonadFreshNames m, HasScope SOACS m) =>
   KernelNest ->
   Branch ->
-  m (Stms SOACS)
-interchangeBranch nest loop = do
-  (loop', stms) <-
-    runBuilder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
-  return $ stms <> oneStm (branchStm loop')
+  m (Stm SOACS)
+interchangeBranch nest loop =
+  branchStm <$> foldM interchangeBranch1 loop (reverse $ kernelNestLoops nest)
 
 -- | An encoding of a WithAcc with alongside its result pattern.
 data WithAccStm
@@ -239,7 +241,7 @@ withAccStm (WithAccStm _ pat inputs lam) =
   Let pat (defAux ()) $ WithAcc inputs lam
 
 interchangeWithAcc1 ::
-  (MonadBuilder m, Rep m ~ SOACS) =>
+  (MonadFreshNames m, LocalScope SOACS m) =>
   WithAccStm ->
   LoopNesting ->
   m WithAccStm
@@ -249,7 +251,7 @@ interchangeWithAcc1
     inputs' <- mapM onInput inputs
     lam_params' <- newAccLamParams $ lambdaParams acc_lam
     iota_p <- newParam "iota_p" $ Prim int64
-    acc_lam' <- trLam (Var (paramName iota_p)) <=< mkLambda lam_params' $ do
+    acc_lam' <- trLam (Var (paramName iota_p)) <=< runLambdaBuilder lam_params' $ do
       let acc_params = drop (length inputs) lam_params'
           orig_acc_params = drop (length inputs) $ lambdaParams acc_lam
       iota_w <-
@@ -330,12 +332,14 @@ interchangeWithAcc1
                 mapOnOp = trSOAC i
               }
 
+-- | Given a (parallel) map nesting and an inner withacc, move the
+-- maps inside the branch.  The result is the resulting withacc
+-- expression, which will then contain statements with @map@
+-- expressions.
 interchangeWithAcc ::
-  (MonadFreshNames m, HasScope SOACS m) =>
+  (MonadFreshNames m, LocalScope SOACS m) =>
   KernelNest ->
   WithAccStm ->
-  m (Stms SOACS)
-interchangeWithAcc nest withacc = do
-  (withacc', stms) <-
-    runBuilder $ foldM interchangeWithAcc1 withacc $ reverse $ kernelNestLoops nest
-  return $ stms <> oneStm (withAccStm withacc')
+  m (Stm SOACS)
+interchangeWithAcc nest withacc =
+  withAccStm <$> foldM interchangeWithAcc1 withacc (reverse $ kernelNestLoops nest)

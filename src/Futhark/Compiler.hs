@@ -8,7 +8,7 @@ module Futhark.Compiler
     runCompilerOnProgram,
     dumpError,
     handleWarnings,
-    pprProgramErrors,
+    pprProgErrors,
     module Futhark.Compiler.Program,
     module Futhark.Compiler.Config,
     readProgramFile,
@@ -22,8 +22,9 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Data.Bifunctor (first)
+import Data.List (sortOn)
 import qualified Data.List.NonEmpty as NE
-import Data.Loc (Loc (NoLoc))
+import Data.Loc (Loc (..), posCoff, posFile)
 import qualified Data.Text.IO as T
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Compiler.Config
@@ -34,7 +35,7 @@ import qualified Futhark.IR.TypeCheck as I
 import Futhark.Internalise
 import Futhark.MonadFreshNames
 import Futhark.Pipeline
-import Futhark.Util.Console (inRed)
+import Futhark.Util.Console (inRed, inYellow)
 import Futhark.Util.Log
 import Futhark.Util.Pretty (Doc, line, ppr, prettyText, punctuate, stack, text, (</>))
 import qualified Language.Futhark as E
@@ -87,7 +88,7 @@ runCompilerOnProgram config pipeline action file = do
       dumpError config err
       exitWith $ ExitFailure 2
     Right () ->
-      return ()
+      pure ()
   where
     compile = do
       prog <- runPipelineOnProgram config pipeline file
@@ -129,27 +130,33 @@ typeCheckInternalProgram :: I.Prog I.SOACS -> FutharkM ()
 typeCheckInternalProgram prog =
   case I.checkProg prog' of
     Left err -> internalErrorS ("After internalisation:\n" ++ show err) (ppr prog')
-    Right () -> return ()
+    Right () -> pure ()
   where
     prog' = Alias.aliasAnalysis prog
 
 -- | Prettyprint program errors as suitable for showing on a text console.
-pprProgramErrors :: NE.NonEmpty ProgramError -> Doc
-pprProgramErrors = stack . punctuate line . map onError . NE.toList
+pprProgErrors :: NE.NonEmpty ProgError -> Doc
+pprProgErrors = stack . punctuate line . map onError . sortOn (rep . locOf) . NE.toList
   where
-    onError (ProgramError NoLoc msg) =
+    rep NoLoc = ("", 0)
+    rep (Loc p _) = (posFile p, posCoff p)
+    onError (ProgError NoLoc msg) =
       msg
-    onError (ProgramError loc msg) =
+    onError (ProgError loc msg) =
       text (inRed $ "Error at " <> locStr (srclocOf loc) <> ":") </> msg
+    onError (ProgWarning NoLoc msg) =
+      msg
+    onError (ProgWarning loc msg) =
+      text (inYellow $ "Warning at " <> locStr (srclocOf loc) <> ":") </> msg
 
--- | Throw an exception formatted with 'pprProgramErrors' if there's
+-- | Throw an exception formatted with 'pprProgErrors' if there's
 -- an error.
-throwOnProgramError ::
+throwOnProgError ::
   MonadError CompilerError m =>
-  Either (NE.NonEmpty ProgramError) a ->
+  Either (NE.NonEmpty ProgError) a ->
   m a
-throwOnProgramError =
-  either (externalError . pprProgramErrors) pure
+throwOnProgError =
+  either (externalError . pprProgErrors) pure
 
 -- | Read and type-check a Futhark program, comprising a single file,
 -- including all imports.
@@ -169,7 +176,7 @@ readProgramFiles ::
   [FilePath] ->
   m (Warnings, Imports, VNameSource)
 readProgramFiles extra_eps =
-  throwOnProgramError <=< liftIO . readLibrary extra_eps
+  throwOnProgError <=< liftIO . readLibrary extra_eps
 
 -- | Read and parse (but do not type-check) a Futhark program,
 -- including all imports.
@@ -178,7 +185,7 @@ readUntypedProgram ::
   FilePath ->
   m [(String, E.UncheckedProg)]
 readUntypedProgram =
-  fmap (map (first includeToString)) . throwOnProgramError
+  fmap (map (first includeToString)) . throwOnProgError
     <=< liftIO . readUntypedLibrary . pure
 
 orDie :: MonadIO m => FutharkM a -> m a
@@ -188,7 +195,7 @@ orDie m = liftIO $ do
     Left err -> do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
-    Right res' -> return res'
+    Right res' -> pure res'
 
 -- | Not verbose, and terminates process on error.
 readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
@@ -211,4 +218,4 @@ handleWarnings config m = do
     when (futharkWerror config) $
       externalErrorS "Treating above warnings as errors due to --Werror."
 
-  return a
+  pure a

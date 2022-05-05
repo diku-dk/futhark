@@ -33,6 +33,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
+import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
@@ -40,6 +41,7 @@ import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
+import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.GPU as GPU
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
@@ -193,7 +195,7 @@ kernelsMemProg ::
   UntypedPassState ->
   FutharkM (Prog GPUMem.GPUMem)
 kernelsMemProg _ (GPUMem prog) =
-  return prog
+  pure prog
 kernelsMemProg name rep =
   externalErrorS $
     "Pass " ++ name
@@ -202,7 +204,7 @@ kernelsMemProg name rep =
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
-  return prog
+  pure prog
 soacsProg name rep =
   externalErrorS $
     "Pass " ++ name
@@ -211,7 +213,7 @@ soacsProg name rep =
 
 kernelsProg :: String -> UntypedPassState -> FutharkM (Prog GPU.GPU)
 kernelsProg _ (GPU prog) =
-  return prog
+  pure prog
 kernelsProg name rep =
   externalErrorS $
     "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
@@ -549,8 +551,11 @@ commandLineOptions =
     soacsPassOption inlineAggressively [],
     soacsPassOption inlineConservatively [],
     soacsPassOption removeDeadFunctions [],
+    soacsPassOption applyAD [],
+    soacsPassOption applyADInnermost [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
+    kernelsPassOption histAccsGPU [],
     kernelsPassOption unstreamGPU [],
     kernelsPassOption sinkGPU [],
     typedPassOption soacsProg GPU extractKernels [],
@@ -632,7 +637,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
           Left err -> do
             dumpError (futharkConfig config) err
             exitWith $ ExitFailure 2
-          Right () -> return ()
+          Right () -> pure ()
     compile _ _ =
       Nothing
     m file config = do

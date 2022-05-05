@@ -35,6 +35,7 @@ module Language.Futhark.Parser.Monad
     emptyArrayError,
     parseError,
     parseErrorAt,
+    backOneCol,
 
     -- * Reexports
     L,
@@ -111,7 +112,6 @@ readLineFromMonad :: ReadLineMonad (Maybe T.Text)
 readLineFromMonad = GetLine Value
 
 instance Monad ReadLineMonad where
-  return = pure
   Value x >>= f = f x
   GetLine g >>= f = GetLine $ g >=> f
 
@@ -277,6 +277,11 @@ emptyArrayError loc =
 twoDotsRange :: Loc -> ParserMonad a
 twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
 
+-- | Move the end position back one column.
+backOneCol :: Loc -> Loc
+backOneCol (Loc start (Pos f l c o)) = Loc start $ Pos f l (c - 1) (o - 1)
+backOneCol NoLoc = NoLoc
+
 --- Now for the parser interface.
 
 -- | A syntax error.
@@ -295,5 +300,4 @@ parseInMonad p file program =
     env = ParserState file program
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
-parse p file program =
-  either Left id $ getNoLines $ parseInMonad p file program
+parse p file program = join $ getNoLines $ parseInMonad p file program

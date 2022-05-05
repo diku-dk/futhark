@@ -130,7 +130,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
           forM fixable $ \(arr_pe, mem_size, oldmem, space) -> do
             size <- toSubExp "size" mem_size
             mem <- letExp "mem" $ Op $ Alloc size space
-            return ((patElemName arr_pe, mem), (oldmem, mem))
+            pure ((patElemName arr_pe, mem), (oldmem, mem))
 
       -- Update the branches to contain Copy expressions putting the
       -- arrays where they are expected.
@@ -143,12 +143,12 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
                 v_copy <- newVName $ baseString v <> "_nonext_copy"
                 let v_pat =
                       Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]
-                addStm $ mkWiseLetStm v_pat (defAux ()) $ BasicOp (Copy v)
-                return $ SubExpRes cs $ Var v_copy
+                addStm $ mkWiseStm v_pat (defAux ()) $ BasicOp (Copy v)
+                pure $ SubExpRes cs $ Var v_copy
             | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
-                return $ SubExpRes cs $ Var mem
+                pure $ SubExpRes cs $ Var mem
           updateResult _ se =
-            return se
+            pure se
       tbranch' <- updateBody tbranch
       fbranch' <- updateBody fbranch
       letBind pat $ If cond tbranch' fbranch' ifdec

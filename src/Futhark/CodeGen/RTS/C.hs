@@ -3,7 +3,6 @@
 -- | Code snippets used by the C backends.
 module Futhark.CodeGen.RTS.C
   ( atomicsH,
-    chaselevH,
     cudaH,
     freeListH,
     halfH,
@@ -18,6 +17,7 @@ module Futhark.CodeGen.RTS.C
     utilH,
     valuesH,
     errorsH,
+    cacheH,
   )
 where
 
@@ -31,11 +31,6 @@ import qualified Data.Text as T
 atomicsH :: T.Text
 atomicsH = $(embedStringFile "rts/c/atomics.h")
 {-# NOINLINE atomicsH #-}
-
--- | @rts/c/chaselev.h@
-chaselevH :: T.Text
-chaselevH = $(embedStringFile "rts/c/chaselev.h")
-{-# NOINLINE chaselevH #-}
 
 -- | @rts/c/cuda.h@
 cudaH :: T.Text
@@ -106,3 +101,8 @@ valuesH = $(embedStringFile "rts/c/values.h")
 errorsH :: T.Text
 errorsH = $(embedStringFile "rts/c/errors.h")
 {-# NOINLINE errorsH #-}
+
+-- | @rts/c/cache.h@
+cacheH :: T.Text
+cacheH = $(embedStringFile "rts/c/cache.h")
+{-# NOINLINE cacheH #-}

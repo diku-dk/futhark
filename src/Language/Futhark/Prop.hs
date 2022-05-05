@@ -11,6 +11,8 @@ module Language.Futhark.Prop
   ( -- * Various
     Intrinsic (..),
     intrinsics,
+    isBuiltin,
+    isBuiltinLoc,
     maxIntrinsicTag,
     namesToPrimTypes,
     qualName,
@@ -24,6 +26,7 @@ module Language.Futhark.Prop
     progModuleTypes,
     identifierReference,
     prettyStacktrace,
+    progHoles,
 
     -- * Queries on expressions
     typeOf,
@@ -70,6 +73,7 @@ module Language.Futhark.Prop
     DimPos (..),
     mustBeExplicit,
     mustBeExplicitInType,
+    determineSizeWitnesses,
     tupleRecord,
     isTupleRecord,
     areTupleFields,
@@ -111,6 +115,7 @@ import Data.Bitraversable (bitraverse)
 import Data.Char
 import Data.Foldable
 import Data.List (genericLength, isPrefixOf, sortOn)
+import Data.Loc (Loc (..), posFile)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Ord
@@ -120,6 +125,7 @@ import qualified Futhark.IR.Primitive as Primitive
 import Futhark.Util (maxinum, nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark.Syntax
+import Language.Futhark.Traversals
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -227,15 +233,24 @@ mustBeExplicitAux t =
     onDim _ _ (NamedDim d) =
       modify $ M.insertWith (&&) (qualLeaf d) True
     onDim _ _ _ =
-      return ()
+      pure ()
+
+-- | Determine which of the sizes in a type are used as sizes outside
+-- of functions in the type, and which are not.  The former are said
+-- to be "witnessed" by this type, while the latter are not.  In
+-- practice, the latter means that the actual sizes must come from
+-- somewhere else.
+determineSizeWitnesses :: StructType -> (S.Set VName, S.Set VName)
+determineSizeWitnesses t =
+  bimap (S.fromList . M.keys) (S.fromList . M.keys) $
+    M.partition not $ mustBeExplicitAux t
 
 -- | Figure out which of the sizes in a parameter type must be passed
 -- explicitly, because their first use is as something else than just
 -- an array dimension.  'mustBeExplicit' is like this function, but
 -- first decomposes into parameter types.
 mustBeExplicitInType :: StructType -> S.Set VName
-mustBeExplicitInType t =
-  S.fromList $ M.keys $ M.filter id $ mustBeExplicitAux t
+mustBeExplicitInType = snd . determineSizeWitnesses
 
 -- | Figure out which of the sizes in a binding type must be passed
 -- explicitly, because their first use is as something else than just
@@ -484,7 +499,7 @@ matchDims onDims = matchDims' mempty
           Scalar (TypeVar als2 _ _ targs2)
           ) ->
             Scalar . TypeVar (als1 <> als2) u v <$> zipWithM matchTypeArg targs1 targs2
-        _ -> return t1
+        _ -> pure t1
 
     matchTypeArg ta@TypeArgType {} _ = pure ta
     matchTypeArg a _ = pure a
@@ -571,6 +586,7 @@ typeOf (StringLit vs _) =
     (ShapeDecl [ConstDim $ genericLength vs])
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
+typeOf (Hole (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Negate e _) = typeOf e
 typeOf (Not e _) = typeOf e
@@ -1062,6 +1078,24 @@ intrinsics =
                      arr_b $ shape [n]
                    ]
                    $ RetType [] $ uarr_a $ shape [k]
+               ),
+               ( "jvp2",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b]
+                   [ Scalar t_a `arr` Scalar t_b,
+                     Scalar t_a,
+                     Scalar t_a
+                   ]
+                   $ RetType [] $ Scalar $ tupleRecord [Scalar t_b, Scalar t_b]
+               ),
+               ( "vjp2",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b]
+                   [ Scalar t_a `arr` Scalar t_b,
+                     Scalar t_a,
+                     Scalar t_b
+                   ]
+                   $ RetType [] $ Scalar $ tupleRecord [Scalar t_b, Scalar t_a]
                )
              ]
           ++
@@ -1222,7 +1256,7 @@ intrinsics =
     mkIntrinsicBinOp :: BinOp -> Maybe (String, Intrinsic)
     mkIntrinsicBinOp op = do
       op' <- intrinsicBinOp op
-      return (pretty op, op')
+      pure (pretty op, op')
 
     binOp ts = Just $ IntrinsicOverloadedFun ts [Nothing, Nothing] Nothing
     ordering = Just $ IntrinsicOverloadedFun anyPrimType [Nothing, Nothing] (Just Bool)
@@ -1254,6 +1288,18 @@ intrinsics =
       Prim $ Signed Int64
     tupInt64 x =
       tupleRecord $ replicate x $ Scalar $ Prim $ Signed Int64
+
+-- | Is this file part of the built-in prelude?
+isBuiltin :: FilePath -> Bool
+isBuiltin = ("/prelude/" `isPrefixOf`)
+
+-- | Is the position of this thing builtin as per 'isBuiltin'?  Things
+-- without location are considered not built-in.
+isBuiltinLoc :: Located a => a -> Bool
+isBuiltinLoc x =
+  case locOf x of
+    NoLoc -> False
+    Loc pos _ -> isBuiltin $ posFile pos
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
@@ -1297,34 +1343,62 @@ modExpImports ModLambda {} = []
 
 -- | The set of module types used in any exported (non-local)
 -- declaration.
-progModuleTypes :: Ord vn => ProgBase f vn -> S.Set vn
-progModuleTypes = mconcat . map onDec . progDecs
+progModuleTypes :: ProgBase Info VName -> S.Set VName
+progModuleTypes prog = foldMap reach mtypes_used
   where
-    onDec (OpenDec x _) = onModExp x
-    onDec (ModDec md) =
-      maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
-    onDec SigDec {} = mempty
-    onDec TypeDec {} = mempty
-    onDec ValDec {} = mempty
-    onDec LocalDec {} = mempty
-    onDec ImportDec {} = mempty
+    -- Fixed point iteration.
+    reach v = S.singleton v <> maybe mempty (foldMap reach) (M.lookup v reachable_from_mtype)
 
-    onModExp ModVar {} = mempty
-    onModExp (ModParens p _) = onModExp p
-    onModExp ModImport {} = mempty
-    onModExp (ModDecs ds _) = mconcat $ map onDec ds
-    onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
-    onModExp (ModAscript me se _ _) = onModExp me <> onSigExp se
-    onModExp (ModLambda p r me _) =
-      onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
+    reachable_from_mtype = foldMap onDec $ progDecs prog
+      where
+        onDec OpenDec {} = mempty
+        onDec ModDec {} = mempty
+        onDec (SigDec sb) =
+          M.singleton (sigName sb) (onSigExp (sigExp sb))
+        onDec TypeDec {} = mempty
+        onDec ValDec {} = mempty
+        onDec (LocalDec d _) = onDec d
+        onDec ImportDec {} = mempty
 
-    onModParam = onSigExp . modParamType
+        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
+        onSigExp (SigParens e _) = onSigExp e
+        onSigExp (SigSpecs ss _) = foldMap onSpec ss
+        onSigExp (SigWith e _ _) = onSigExp e
+        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
 
-    onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
-    onSigExp (SigParens e _) = onSigExp e
-    onSigExp SigSpecs {} = mempty
-    onSigExp (SigWith e _ _) = onSigExp e
-    onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
+        onSpec ValSpec {} = mempty
+        onSpec TypeSpec {} = mempty
+        onSpec TypeAbbrSpec {} = mempty
+        onSpec (ModSpec vn e _ _) = S.singleton vn <> onSigExp e
+        onSpec (IncludeSpec e _) = onSigExp e
+
+    mtypes_used = foldMap onDec $ progDecs prog
+      where
+        onDec (OpenDec x _) = onModExp x
+        onDec (ModDec md) =
+          maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
+        onDec SigDec {} = mempty
+        onDec TypeDec {} = mempty
+        onDec ValDec {} = mempty
+        onDec LocalDec {} = mempty
+        onDec ImportDec {} = mempty
+
+        onModExp ModVar {} = mempty
+        onModExp (ModParens p _) = onModExp p
+        onModExp ModImport {} = mempty
+        onModExp (ModDecs ds _) = mconcat $ map onDec ds
+        onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
+        onModExp (ModAscript me se _ _) = onModExp me <> onSigExp se
+        onModExp (ModLambda p r me _) =
+          onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
+
+        onModParam = onSigExp . modParamType
+
+        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
+        onSigExp (SigParens e _) = onSigExp e
+        onSigExp SigSpecs {} = mempty
+        onSigExp (SigWith e _ _) = onSigExp e
+        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
 
 -- | Extract a leading @((name, namespace, file), remainder)@ from a
 -- documentation comment string.  These are formatted as
@@ -1354,6 +1428,33 @@ leadingOperator s =
     s' = nameToString s
     operators :: [BinOp]
     operators = [minBound .. maxBound :: BinOp]
+
+-- | Find instances of typed holes in the program.
+progHoles :: ProgBase Info VName -> [(Loc, StructType)]
+progHoles = foldMap holesInDec . progDecs
+  where
+    holesInDec (ValDec vb) = holesInExp $ valBindBody vb
+    holesInDec (ModDec me) = holesInModExp $ modExp me
+    holesInDec (OpenDec me _) = holesInModExp me
+    holesInDec (LocalDec d _) = holesInDec d
+    holesInDec TypeDec {} = mempty
+    holesInDec SigDec {} = mempty
+    holesInDec ImportDec {} = mempty
+
+    holesInModExp (ModDecs ds _) = foldMap holesInDec ds
+    holesInModExp (ModParens me _) = holesInModExp me
+    holesInModExp (ModApply x y _ _ _) = holesInModExp x <> holesInModExp y
+    holesInModExp (ModAscript me _ _ _) = holesInModExp me
+    holesInModExp (ModLambda _ _ me _) = holesInModExp me
+    holesInModExp ModVar {} = mempty
+    holesInModExp ModImport {} = mempty
+
+    holesInExp = flip execState mempty . onExp
+
+    onExp e@(Hole (Info t) loc) = do
+      modify ((locOf loc, toStruct t) :)
+      pure e
+    onExp e = astMap (identityMapper {mapOnExp = onExp}) e
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()
