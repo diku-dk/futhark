@@ -58,7 +58,7 @@ static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying 
   }                                                                                  \
   *old = val;                                                                        \
   return 0;                                                                          \
-}                                                                                    
+}
 
 make_atomic_compare_exchange_wrapper(int32)
 make_atomic_compare_exchange_wrapper(int64)
@@ -169,7 +169,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
                                           size_t varying * uniform old_size,
                                           uniform int64_t new_size) {
   uniform int err = FUTHARK_SUCCESS;
-  uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr, 
+  uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr,
                                                         new_size*programCount);
   if (memptr == NULL) {
     *error = lexical_realloc_error(new_size);
@@ -178,7 +178,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
     *ptr = (varying unsigned char * uniform)memptr;
     *old_size = new_size;
   }
-  
+
   return err;
 }
 
