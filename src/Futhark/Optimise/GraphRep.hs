@@ -3,9 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
-{-# HLINT ignore "Use tuple-section" #-}
 module Futhark.Optimise.GraphRep (module Futhark.Optimise.GraphRep) where
 
 import Control.Monad.Reader (ReaderT (runReaderT))
