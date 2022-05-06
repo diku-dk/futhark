@@ -73,7 +73,7 @@ fuseConsts outputs stms =
     new_stms <- runFusionEnvM (scopeOf stms) freshFusionEnv (fuseGraphLZ stmList results [])
     return $ stmsFromList new_stms
   where
-    stmList = trace (ppr stms) $ stmsToList stms
+    stmList = trace (pretty stms) $ stmsToList stms
     results = varsRes outputs
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
@@ -86,7 +86,7 @@ fuseFun _stmts fun = do
   return fun {funDefBody = body}
   where
     b = funDefBody fun
-    stms = trace (ppr (bodyStms b)) $ stmsToList $ bodyStms b
+    stms = trace (pretty (bodyStms b)) $ stmsToList $ bodyStms b
     res = bodyResult b
 
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
@@ -108,7 +108,7 @@ fuseGraph stms results inputs = localScope (scopeOf stms) $ do
 
   stms_new <- linearizeGraph graph_fused'
   modify (\s -> s {producerMapping = old_mappings})
-  return $ trace (unlines (map ppr stms_new)) stms_new
+  return $ trace (unlines (map pretty stms_new)) stms_new
 
 unreachableEitherDir :: DepGraph -> Node -> Node -> FusionEnvM Bool
 unreachableEitherDir g a b = do
@@ -484,7 +484,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                       let lam''' = lam'' {lambdaReturnType = lam1Rts <> lam2Rts <> lambdaReturnType lam''}
 
                       let toKeep = filter (\x -> H.inputArray x `elem` infusible) (drop (length nes1) pats1)
-                      let pats = trace ("look: " ++ ppr pats2) $ take (length nes1) pats1 ++ take (length nes2) pats2 ++ toKeep ++ drop (length nes2) pats2
+                      let pats = trace ("look: " ++ pretty pats2) $ take (length nes1) pats1 ++ take (length nes2) pats2 ++ toKeep ++ drop (length nes2) pats2
 
                       let soac = H.Stream s_exp1 (mergeForms sform1 sform2) lam''' (nes1 <> nes2) is_new
                       pure $ Just $ substituteNames mmap $ SoacNode soac pats aux

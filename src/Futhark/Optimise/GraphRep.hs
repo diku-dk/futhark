@@ -26,7 +26,6 @@ import qualified Futhark.IR.SOACS as Futhark
 import Futhark.MonadFreshNames (newName)
 import qualified Futhark.Optimise.Fusion.LoopKernel as LK
 import Futhark.Transform.Substitute
-import qualified Futhark.Util.Pretty as PP
 
 data EdgeT
   = Alias VName
@@ -50,23 +49,23 @@ data NodeT
   deriving (Eq)
 
 instance Show EdgeT where
-  show (Dep vName) = "Dep " <> ppr vName
-  show (InfDep vName) = "iDep " <> ppr vName
+  show (Dep vName) = "Dep " <> pretty vName
+  show (InfDep vName) = "iDep " <> pretty vName
   show (Cons _) = "Cons"
   show (Fake _) = "Fake"
   show (Res _) = "Res"
   show (Alias _) = "Alias"
-  show (ScanRed vName) = "SR " <> ppr vName
-  show (TrDep vName) = "Tr " <> ppr vName
+  show (ScanRed vName) = "SR " <> pretty vName
+  show (TrDep vName) = "Tr " <> pretty vName
 
 instance Show NodeT where
-  show (StmNode (Let pat _ _)) = L.intercalate ", " $ map ppr $ patNames pat
-  show (SoacNode _ pat _) = L.intercalate ", " $ map (ppr . H.inputArray) pat
+  show (StmNode (Let pat _ _)) = L.intercalate ", " $ map pretty $ patNames pat
+  show (SoacNode _ pat _) = L.intercalate ", " $ map (pretty . H.inputArray) pat
   show (FinalNode _ nt) = show nt
-  show (RNode name) = ppr $ "Res: " ++ ppr name
-  show (InNode name) = ppr $ "Input: " ++ ppr name
-  show (IfNode stm _) = "If: " ++ L.intercalate ", " (map ppr $ getStmNames stm)
-  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map ppr $ getStmNames stm)
+  show (RNode name) = pretty $ "Res: " ++ pretty name
+  show (InNode name) = pretty $ "Input: " ++ pretty name
+  show (IfNode stm _) = "If: " ++ L.intercalate ", " (map pretty $ getStmNames stm)
+  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map pretty $ getStmNames stm)
 
 instance Substitute EdgeT where
   substituteNames m edgeT =
@@ -143,9 +142,6 @@ isRealNode :: NodeT -> Bool
 isRealNode RNode {} = False
 isRealNode InNode {} = False
 isRealNode _ = True
-
-ppr :: PP.Pretty m => m -> String
-ppr k = PP.prettyDoc 80 (PP.ppr k)
 
 pprg :: DepGraph -> String
 pprg = G.showDot . G.fglToDotString . G.nemap show show
