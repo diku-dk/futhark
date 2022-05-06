@@ -272,7 +272,7 @@ generateUniformizeLoop m = do
 -- that assignment into an extraction of element from a vector on the
 -- right hand side, using a passed index for the extraction. Other code
 -- is left as is.
-extractVectorLane :: Imp.TExp Int64 ->  MulticoreGen Imp.MCCode -> MulticoreGen ()
+extractVectorLane :: Imp.TExp Int64 -> MulticoreGen Imp.MCCode -> MulticoreGen ()
 extractVectorLane j code = do
   let ut_exp = untyped j
   code' <- code
@@ -283,11 +283,11 @@ extractVectorLane j code = do
         -- ISPC v1.17 does not support extract on f16 yet..
         -- Thus we do this stupid conversion to f32
         Prim (FloatType Float16) -> do
-          tv <- dPrim "hack_extract_f16" (FloatType Float32)     
+          tv <- dPrim "hack_extract_f16" (FloatType Float32)
           emit $ Imp.SetScalar (tvVar tv) e
           emit $ Imp.Op $ Imp.ExtractLane vname (untyped $ tvExp tv) ut_exp
         _ -> emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp
-    _ -> 
+    _ ->
       emit code'
 
 -- | Given an action that may generate some code, put that code

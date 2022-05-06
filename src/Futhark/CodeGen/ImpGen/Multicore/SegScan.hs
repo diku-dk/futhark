@@ -58,8 +58,8 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
     let dims = map (shapeDims . segBinOpShape) scan_ops
     let isScalar x = case x of MemPrim _ -> True; _ -> False
     -- Are we only working on scalars
-    let scalars = all (all (isScalar . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (==[]) dims
-    
+    let scalars = all (all (isScalar . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (== []) dims
+
     scanStage1 scalars pat space scan_ops kbody
     let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do
@@ -85,15 +85,15 @@ getExtract False = \_ body -> body >>= emit
 -- for an external kernel, and @mapout@ indicates whether this loop
 -- is fused with a map.
 genScanLoop ::
-  Pat LetDecMem
-  -> SegSpace
-  -> KernelBody MCMem
-  -> [SegBinOp MCMem]
-  -> [[VName]]
-  -> Bool
-  -> Bool
-  -> Imp.TExp Int64
-  -> ImpM MCMem HostEnv Imp.Multicore ()
+  Pat LetDecMem ->
+  SegSpace ->
+  KernelBody MCMem ->
+  [SegBinOp MCMem] ->
+  [[VName]] ->
+  Bool ->
+  Bool ->
+  Imp.TExp Int64 ->
+  ImpM MCMem HostEnv Imp.Multicore ()
 genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
   let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res = segBinOpChunks scan_ops all_scan_res
@@ -117,8 +117,9 @@ genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
           -- Read next value
           sComment "Read next values" $
             forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
-              getExtract kernel j $ collect $
-                copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+              getExtract kernel j $
+                collect $
+                  copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
           -- Scan body
           sComment "Scan body" $
             compileStms mempty (bodyStms $ lamBody scan_op) $
