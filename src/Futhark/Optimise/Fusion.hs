@@ -177,7 +177,7 @@ vTryFuseNodesInGraph node_1 node_2 g
           then do
             fres <- vFuseContexts edgs infusable_nodes (context g node_1) (context g node_2)
             case fres of
-              Just newcxt@(inputs, _, nodeT, outputs) -> do
+              Just (inputs, _, nodeT, outputs) -> do
                 nodeT' <-
                   if null fusedC
                     then pure nodeT
@@ -224,8 +224,8 @@ vFuseContexts :: [EdgeT] -> [VName] -> DepContext -> DepContext -> FusionEnvM (M
 vFuseContexts
   edgs
   infusable
-  c1@(i1, n1, nodeT1, o1)
-  c2@(i2, n2, nodeT2, o2) =
+  c1@(_i1, _n1, nodeT1, o1)
+  c2@(_i2, _n2, nodeT2, o2) =
     do
       fres <- fuseNodeT edgs infusable (nodeT1, map fst o1) (nodeT2, map fst o2)
       case fres of
@@ -240,7 +240,7 @@ pullRearrangeNodeT ts nodeT = case nodeT of
     maybeSoac <- tryFusion (pullRearrange soac ts) scope
     case maybeSoac of
       -- plausible source of bugs
-      Just (s2, ts) -> pure $ Just $ SoacNode s2 (map (H.addInitialTransforms ts) outputs) aux
+      Just (s2, _ts) -> pure $ Just $ SoacNode s2 (map (H.addInitialTransforms ts) outputs) aux
       _ -> pure Nothing
   _ -> pure Nothing
 
@@ -406,7 +406,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                            in pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
                       where
                         (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
-                  ( H.Screma s_exp1 sform1 i1,
+                  ( H.Screma _s_e1 sform1 _i1,
                     H.Stream {}
                     )
                       | Just _ <- isMapSOAC sform1 -> do
@@ -452,13 +452,13 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                   --     fuseNodeT edgs infusible
                   --       (SoacNode s1' pats1 aux1, e1s)
                   --       (SoacNode s2' pats2 aux2, e2s)
-                  ( H.Stream s_exp1 sform1 lam1 nes1 i1,
-                    H.Stream s_exp2 sform2 lam2 nes2 i2
+                  ( H.Stream _w1 sform1 lam1 nes1 i1,
+                    H.Stream _w2 sform2 lam2 nes2 i2
                     )
                       | (sform1 == Sequential) /= (sform2 == Sequential) ->
                           pure Nothing
-                  ( H.Stream s_exp1 sform1 lam1 nes1 i1,
-                    H.Stream s_exp2 sform2 lam2 nes2 i2
+                  ( H.Stream w1 sform1 lam1 nes1 i1,
+                    H.Stream _w2 sform2 lam2 nes2 i2
                     ) -> do
                       let chunk1 = head $ lambdaParams lam1
                       let chunk2 = head $ lambdaParams lam2
@@ -482,7 +482,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                       let toKeep = filter (\x -> H.inputArray x `elem` infusible) (drop (length nes1) pats1)
                       let pats = trace ("look: " ++ pretty pats2) $ take (length nes1) pats1 ++ take (length nes2) pats2 ++ toKeep ++ drop (length nes2) pats2
 
-                      let soac = H.Stream s_exp1 (mergeForms sform1 sform2) lam''' (nes1 <> nes2) is_new
+                      let soac = H.Stream w1 (mergeForms sform1 sform2) lam''' (nes1 <> nes2) is_new
                       pure $ Just $ substituteNames mmap $ SoacNode soac pats aux
                   _ -> pure Nothing -- not fusable soac combos
     _ -> pure Nothing -- not op statements
@@ -797,7 +797,7 @@ mergeForms :: StreamForm SOACS -> StreamForm SOACS -> StreamForm SOACS
 mergeForms Sequential Sequential = Sequential
 mergeForms (Parallel _ comm2 lam2r) (Parallel o1 comm1 lam1r) =
   Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
-mergeForms s _ = error "fusing sequential"
+mergeForms _ _ = error "fusing sequential"
 
 -- also copied, todo: use as import if possible
 mergeReduceOps :: Lambda rep -> Lambda rep -> Lambda rep
