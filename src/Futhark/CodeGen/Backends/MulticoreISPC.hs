@@ -806,8 +806,8 @@ compileOp (ExtractLane dest tar lane) = do
   tar' <- GC.compileExp tar
   lane' <- GC.compileExp lane
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
-compileOp (ScanOp name dest tar) = do
-  GC.stm [C.cstm|$id:dest = $id:name($exp:tar);|]
+compileOp (ScanOp name dest tar next) = do
+  GC.stm [C.cstm|$id:dest = $id:name($exp:tar, &$exp:next);|]
 compileOp op = MC.compileOp op
 
 -- Variability analysis
@@ -880,8 +880,9 @@ findDeps (Op (GetLoopBounds x y)) = do
   addDeps y mempty
 findDeps (Op (ExtractLane x _ _)) = do
   addDeps x mempty
-findDeps (Op (ScanOp _ x tar)) = do
-  addDeps x $ freeIn tar
+findDeps (Op (ScanOp _ dest tar next)) = do
+  addDeps dest $ freeIn tar
+  addDeps next mempty
 findDeps _ = pure ()
 
 -- | Take a list of dependencies and iterate them to a fixed point.

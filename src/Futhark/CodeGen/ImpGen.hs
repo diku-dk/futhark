@@ -62,6 +62,7 @@ module Futhark.CodeGen.ImpGen
     tvSize,
     tvExp,
     tvVar,
+    tvType,
     ToExp (..),
     compileAlloc,
     everythingVolatile,
@@ -1180,6 +1181,9 @@ tvExp (TV v t) = Imp.TPrimExp $ Imp.var v t
 -- | Extract the underlying variable name from a typed variable.
 tvVar :: TV t -> VName
 tvVar (TV v _) = v
+
+tvType :: TV t -> PrimType
+tvType (TV _ t) = t
 
 -- | Compile things to 'Imp.Exp'.
 class ToExp a where

@@ -331,22 +331,24 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
 }
 
 // Scan helpers
-#define scan_helper(name, ty, op)                     \
-static inline ty scan_##name(ty a) {                  \
-  #pragma unroll                                      \
-  for (uniform int i = 1; i < programCount; i *= 2) { \
-    a = op(a, shift(a, -i));                          \
-  }                                                   \
-  return a;                                           \
+#define scan_helper(name, ty, op)                           \
+static inline ty scan_##name(ty a, uniform ty* uniform b) { \
+  a = op(a, *b);                                            \
+  for (uniform int i = 1; i < programCount; i *= 2) {       \
+    a = op(a, shift(a, -i));                                \
+  }                                                         \
+  *b = extract(a, popcnt(lanemask())-1);                    \
+  return a;                                                 \
 }
 
-#define infix_scan_helper(name, ty, op)               \
-static inline ty scan_##name(ty a) {                  \
-  #pragma unroll                                      \
-  for (uniform int i = 1; i < programCount; i *= 2) { \
-    a = a op shift(a, -i);                            \
-  }                                                   \
-  return a;                                           \
+#define infix_scan_helper(name, ty, op)                     \
+static inline ty scan_##name(ty a, uniform ty* uniform b) { \
+  a = a op (*b);                                            \
+  for (uniform int i = 1; i < programCount; i *= 2) {       \
+    a = a op shift(a, -i);                                  \
+  }                                                         \
+  *b = extract(a, popcnt(lanemask())-1);                    \
+  return a;                                                 \
 }
 
 infix_scan_helper(add, int32_t, +)

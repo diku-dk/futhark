@@ -41,7 +41,6 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Prelude hiding (quot, rem)
-import Data.Foldable (find)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =

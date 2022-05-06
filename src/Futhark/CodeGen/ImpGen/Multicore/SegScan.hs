@@ -118,20 +118,10 @@ genScanLoop pat space kbody scan_ops local_accs mapout kernel i = do
           -- Read accum value
           if all_intrinsic
             then
-              forM_ (zip5 pes (catMaybes intrinsic) scan_res (xParams scan_op) (yParams scan_op)) $
-                \(pe, iname, se, xp, yp) ->
-                  case paramType xp of
-                    Prim pt -> do
-                      res <- tvVar <$> dPrim "res" pt
-                      emit $ Imp.Op $ Imp.ScanOp iname res (kernelResultSubExp se)
-                      copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) (Var res) []
-                      lane <- tvVar <$> dPrim "lane" (IntType Int32)
-                      --emit $ Imp.SetScalar last 
-
-                      extractVectorLane (TPrimExp $ Imp.LeafExp lane (IntType Int32)) $
-                        pure $ Imp.SetScalar (paramName xp) (Imp.LeafExp res pt)
-                      pure ()
-                    _ -> undefined
+              forM_ (zip5 pes (catMaybes intrinsic) scan_res (yParams scan_op) acc) $
+                \(pe, iname, se, yp, acc') -> do
+                  emit $ Imp.Op $ Imp.ScanOp iname (paramName yp) (kernelResultSubExp se) acc'
+                  copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) (Var $ paramName yp) []
             else do
               forM_ (zip (xParams scan_op) acc) $ \(p, acc') ->
                 copyDWIMFix (paramName p) [] (Var acc') vec_is
@@ -166,25 +156,25 @@ scanStage1 kernel pat space scan_ops kbody = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
-    local_accs <- forM scan_ops $ \scan_op -> do
-      let shape = segBinOpShape scan_op
-          ts = lambdaReturnType $ segBinOpLambda scan_op
-      forM (zip3 (xParams scan_op) (segBinOpNeutral scan_op) ts) $ \(p, ne, t) -> do
-        acc <- -- update accumulator to have type decoration
-          case shapeDims shape of
-            [] -> pure $ paramName p
-            _ -> do
-              let pt = elemType t
-              sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-
-        -- Now neutral-initialise the accumulator.
-        sLoopNest (segBinOpShape scan_op) $ \vec_is ->
-          copyDWIMFix acc vec_is ne []
-
-        pure acc
-
     (if kernel then inISPC else id) $ do
+      dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
+      local_accs <- forM scan_ops $ \scan_op -> do
+        let shape = segBinOpShape scan_op
+            ts = lambdaReturnType $ segBinOpLambda scan_op
+        forM (zip3 (xParams scan_op) (segBinOpNeutral scan_op) ts) $ \(p, ne, t) -> do
+          acc <- -- update accumulator to have type decoration
+            case shapeDims shape of
+              [] -> pure $ paramName p
+              _ -> do
+                let pt = elemType t
+                sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
+
+          -- Now neutral-initialise the accumulator.
+          sLoopNest (segBinOpShape scan_op) $ \vec_is ->
+            copyDWIMFix acc vec_is ne []
+
+          pure acc
+
       generateChunkLoop "SegScan" kernel $
         genScanLoop pat space kbody scan_ops local_accs True kernel
 
@@ -262,30 +252,30 @@ scanStage3 kernel pat space scan_ops kbody = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
-    dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
-    local_accs <- forM (zip scan_ops per_scan_pes) $ \(scan_op, pes) -> do
-      let shape = segBinOpShape scan_op
-          ts = lambdaReturnType $ segBinOpLambda scan_op
-      forM (zip4 (xParams scan_op) pes ts $ segBinOpNeutral scan_op) $ \(p, pe, t, ne) -> do
-        acc <-
-          case shapeDims shape of
-            [] -> pure $ paramName p
-            _ -> do
-              let pt = elemType t
-              sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
-
-        -- Initialise the accumulator with neutral from previous chunk.
-        -- or read neutral if first ``iter``
-        (start, _end) <- getLoopBounds
-        sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
-          let read_carry_in =
-                copyDWIMFix acc vec_is (Var $ patElemName pe) (start - 1 : vec_is)
-              read_neutral =
-                copyDWIMFix acc vec_is ne []
-          sIf (start .==. 0) read_neutral read_carry_in
-        pure acc
-
     (if kernel then inISPC else id) $ do
+      dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
+      local_accs <- forM (zip scan_ops per_scan_pes) $ \(scan_op, pes) -> do
+        let shape = segBinOpShape scan_op
+            ts = lambdaReturnType $ segBinOpLambda scan_op
+        forM (zip4 (xParams scan_op) pes ts $ segBinOpNeutral scan_op) $ \(p, pe, t, ne) -> do
+          acc <-
+            case shapeDims shape of
+              [] -> pure $ paramName p
+              _ -> do
+                let pt = elemType t
+                sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
+
+          -- Initialise the accumulator with neutral from previous chunk.
+          -- or read neutral if first ``iter``
+          (start, _end) <- getLoopBounds
+          sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+            let read_carry_in =
+                  copyDWIMFix acc vec_is (Var $ patElemName pe) (start - 1 : vec_is)
+                read_neutral =
+                  copyDWIMFix acc vec_is ne []
+            sIf (start .==. 0) read_neutral read_carry_in
+          pure acc
+
       generateChunkLoop "SegScan" kernel $
         genScanLoop pat space kbody scan_ops local_accs False kernel
 

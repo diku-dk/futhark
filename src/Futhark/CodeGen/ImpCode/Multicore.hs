@@ -36,7 +36,7 @@ data Multicore
     ExtractLane VName Exp Exp
   | -- | Special cases of Scan, where we can efficiently scan over
     -- values in a single vector register.
-    ScanOp String VName SubExp
+    ScanOp String VName SubExp VName
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -144,8 +144,8 @@ instance Pretty Multicore where
       <+> nestedBlock "{" "}" (ppr body)
   ppr (ExtractLane dest tar lane) =
     ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
-  ppr (ScanOp name dest tar) =
-    ppr dest <+> "<-" <+> ppr name <+> parens (ppr tar)
+  ppr (ScanOp name dest tar next) =
+    ppr dest <> text "," <+> ppr next <+> "<-" <+> text name <+> parens (ppr tar)
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -174,8 +174,8 @@ instance FreeIn Multicore where
     fvBind (oneName i) (freeIn' body)
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
-  freeIn' (ScanOp _ dest tar) =
-    freeIn' dest <> freeIn' tar
+  freeIn' (ScanOp _ dest tar next) =
+    freeIn' dest <> freeIn' tar <> freeIn' next
 
 -- | Like @lexicalMemoryUsage@, but traverses some inner multicore ops.
 -- The boolean indicates whether to enter kernels.
