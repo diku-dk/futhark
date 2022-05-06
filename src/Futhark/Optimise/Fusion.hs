@@ -175,13 +175,18 @@ vTryFuseNodesInGraph node_1 node_2 g
         b <- vFusionFeasability g node_1 node_2
         if b
           then do
-            fres <- vFuseContexts edgs infusable_nodes (G.context g node_1) (G.context g node_2)
+            let (ctx1, ctx2) = mapT (G.context g) (node_1, node_2)
+            fres <- vFuseContexts edgs infusable_nodes ctx1 ctx2
             case fres of
               Just (inputs, _, nodeT, outputs) -> do
                 nodeT' <-
                   if null fusedC
                     then pure nodeT
-                    else makeCopies nodeT
+                    else do
+                      let (_,_,_,deps_1) = ctx1
+                      -- make copies of everything that was not previously consumed
+                      let old_cons = map (getName . fst) $ filter (isCons . fst) deps_1
+                      makeCopiesOfFusedExcept old_cons nodeT
                 g' <- contractEdge node_2 (inputs, node_1, nodeT', outputs) g
                 if null trEdgs
                   then pure g'
@@ -257,14 +262,14 @@ pushRearrangeNodeT trs nodeT = case nodeT of
       _ -> pure Nothing
   _ -> pure Nothing
 
-makeCopies :: NodeT -> FusionEnvM NodeT
-makeCopies (SoacNode soac pats aux) =
+makeCopiesOfFusedExcept :: [VName] -> NodeT -> FusionEnvM NodeT
+makeCopiesOfFusedExcept noCopy (SoacNode soac pats aux) =
   do
     let lam = H.lambda soac
     let fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
-    lam' <- makeCopiesInLambda fused_inner lam
+    lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
     pure $ SoacNode (H.setLambda lam' soac) pats aux
-makeCopies nodeT = pure nodeT
+makeCopiesOfFusedExcept _ nodeT = pure nodeT
 
 makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionEnvM (Lambda SOACS)
 makeCopiesInLambda toCopy lam =

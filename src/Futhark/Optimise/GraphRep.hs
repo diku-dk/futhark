@@ -442,7 +442,7 @@ iswim = mapAcrossWithSE f
       case maybeISWIM of
         Just (newSOAC, newts) ->
           trace (show $ H.width newSOAC) $
-            updateNode n (const (Just $ SoacNode newSOAC (map (internalizeOutput . H.addTransforms newts) ots) aux)) g
+            updateNode n (const (Just $ SoacNode newSOAC (map (internalizeAndAdd newts) ots) aux)) g
               >>= updateTrEdges n
               >>= updateContext n
         Nothing -> pure g
