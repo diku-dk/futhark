@@ -305,10 +305,10 @@ matchCodeAccumCode kstms =
           (stmsToList kstms)
    in (stmsFromList code1, screma, stmsFromList code2)
 
--- | Checks that there exist a parallel dimension (among `kids`),
---     to which all the indices (`acc_inds`) are invariant to.
+-- | Checks that there exist a parallel dimension (among @kids@),
+--     to which all the indices (@acc_inds@) are invariant to.
 --   It returns the innermost such parallel dimension, as a tuple
---     of the pardim gid (`VName`) and its index (`Int`) in the
+--     of the pardim gid ('VName') and its index ('Int') in the
 --     parallel space.
 isInvarToParDim ::
   Names ->
