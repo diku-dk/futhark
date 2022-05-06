@@ -11,7 +11,7 @@ module Futhark.Optimise.Fusion.LoopKernel
     transformOutput,
     attemptFusion,
     tryFusion,
-    pullRearrange,
+    pullOutputTransforms,
     pushRearrange,
     iswim,
     mergeForms,
@@ -695,7 +695,7 @@ iswim _ (SOAC.Screma w form arrs) ots
               )
               $ varsRes $ patNames map_pat
           map_fun' = Lambda map_params map_body map_rettype
-          perm = case lambdaReturnType map_fun of
+          perm = case lambdaReturnType scan_fun of -- instead of map_fun
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 

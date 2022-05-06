@@ -47,6 +47,8 @@ module Futhark.Optimise.GraphRep
     makeMap,
     fuseMaps,
     hasNoDifferingInputs,
+    printgraph,
+    internalizeAndAdd
   )
 where
 
@@ -189,6 +191,9 @@ isRealNode _ = True
 
 pprg :: DepGraph -> String
 pprg = G.showDot . G.fglToDotString . G.nemap show show
+
+printgraph :: DepGraphAug
+printgraph g = trace (pprg g) $ pure g
 
 type DepNode = G.LNode NodeT
 
@@ -414,6 +419,14 @@ nodeOutputTransforms vname nodeT = case nodeT of
 internalizeOutput :: H.Input -> H.Input
 internalizeOutput i@(H.Input ts name _) = H.Input ts name (H.inputType i)
 
+internalizeAndAdd :: H.ArrayTransforms -> H.Input -> H.Input
+internalizeAndAdd ts i = H.setInputTransforms newTs $  internalizeOutput temporaryI
+  where
+    oldTs = H.inputTransforms i
+    temporaryI = H.setInputTransforms ts i
+    newTs = ts <> oldTs
+
+
 findTransformsBetween :: VName -> NodeT -> NodeT -> H.ArrayTransforms
 findTransformsBetween vname n1 n2 =
   let outs = nodeOutputTransforms vname n1
@@ -616,7 +629,7 @@ makeScanInfusible g = pure $ G.emap change_node_to_idep g
 -- find dependencies - either fusable or infusable. edges are generated based on these
 
 fusableInputs :: Stm SOACS -> [VName]
-fusableInputs (Let _ _ expr) = fusableInputsFromExp expr
+fusableInputs (Let _ _ expr) = L.nub $ fusableInputsFromExp expr
 
 fusableInputsFromExp :: Exp SOACS -> [VName]
 fusableInputsFromExp (If _ b1 b2 _) =
@@ -635,7 +648,7 @@ fusableInputsFromExp (Op soac) = case soac of
 fusableInputsFromExp _ = []
 
 infusableInputs :: Stm SOACS -> [VName]
-infusableInputs (Let _ aux e) = infusableInputsFromExp e ++ namesToList (freeIn aux)
+infusableInputs (Let _ aux e) = L.nub $ infusableInputsFromExp e ++ namesToList (freeIn aux)
 
 infusableInputsFromExp :: Exp SOACS -> [VName]
 infusableInputsFromExp (Op soac) = case soac of
@@ -753,6 +766,7 @@ finalizeNode nt = case nt of
 isDep :: EdgeT -> Bool -- Is there a possibility of fusion?
 isDep (Dep _) = True
 isDep (ScanRed _) = True
+isDep (Res _) = True
 isDep _ = False
 
 isInf :: (G.Node, G.Node, EdgeT) -> Bool -- No possibility of fusion
