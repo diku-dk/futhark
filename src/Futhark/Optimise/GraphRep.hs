@@ -9,17 +9,15 @@ module Futhark.Optimise.GraphRep (module Futhark.Optimise.GraphRep) where
 import Control.Monad.Reader (ReaderT (runReaderT))
 import Control.Monad.State
 import Data.Foldable (foldlM)
-import Data.Graph.Inductive.Dot
-import Data.Graph.Inductive.Graph
+import qualified Data.Graph.Inductive.Dot as G
+import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Tree as G
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
-import Data.Maybe (isJust, isNothing, mapMaybe)
+import Data.Maybe (isNothing, mapMaybe)
 import qualified Data.Set as S
 import Debug.Trace (trace)
-import Foreign (bitReverse32)
 import qualified Futhark.Analysis.Alias as Alias
-import Futhark.Analysis.HORep.SOAC (lambda)
 import qualified Futhark.Analysis.HORep.SOAC as H
 import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, auxing, blankNameSource, getNameSource, letBind, modifyNameSource, runBuilder)
 import Futhark.IR.Prop.Aliases
@@ -27,9 +25,8 @@ import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import Futhark.MonadFreshNames (newName)
 import qualified Futhark.Optimise.Fusion.LoopKernel as LK
-import Futhark.Transform.Substitute (Substitutable, Substitute (substituteNames))
+import Futhark.Transform.Substitute
 import qualified Futhark.Util.Pretty as PP
-import System.Posix.Internals (puts)
 
 data EdgeT
   = Alias VName
@@ -65,16 +62,15 @@ instance Show EdgeT where
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map ppr $ patNames pat
   show (SoacNode _ pat _) = L.intercalate ", " $ map (ppr . H.inputArray) pat
-  show (FinalNode stms nt) = show nt
+  show (FinalNode _ nt) = show nt
   show (RNode name) = ppr $ "Res: " ++ ppr name
   show (InNode name) = ppr $ "Input: " ++ ppr name
-  show (IfNode stm nodes) = "If: " ++ L.intercalate ", " (map ppr $ getStmNames stm)
-  show (DoNode stm nodes) = "Do: " ++ L.intercalate ", " (map ppr $ getStmNames stm)
+  show (IfNode stm _) = "If: " ++ L.intercalate ", " (map ppr $ getStmNames stm)
+  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map ppr $ getStmNames stm)
 
 instance Substitute EdgeT where
   substituteNames m edgeT =
-    let newName = substituteNames m (getName edgeT)
-     in setName newName edgeT
+    setName (substituteNames m (getName edgeT)) edgeT
 
 instance Substitute NodeT where
   substituteNames m nodeT = case nodeT of
@@ -152,13 +148,13 @@ ppr :: PP.Pretty m => m -> String
 ppr k = PP.prettyDoc 80 (PP.ppr k)
 
 pprg :: DepGraph -> String
-pprg = showDot . fglToDotString . nemap show show
+pprg = G.showDot . G.fglToDotString . G.nemap show show
 
-type DepNode = LNode NodeT
+type DepNode = G.LNode NodeT
 
-type DepEdge = LEdge EdgeT
+type DepEdge = G.LEdge EdgeT
 
-type DepContext = Context NodeT EdgeT
+type DepContext = G.Context NodeT EdgeT
 
 type DepGraph = G.Gr NodeT EdgeT
 
@@ -170,7 +166,7 @@ type EdgeGenerator = NodeT -> [(VName, EdgeT)] -- for each node, what producer s
 
 data FusionEnv = FusionEnv -- monadic state environment for fusion.
   { vNameSource :: VNameSource,
-    producerMapping :: M.Map VName Node,
+    producerMapping :: M.Map VName G.Node,
     fuseScans :: Bool
   }
 
@@ -215,7 +211,7 @@ keepTrying f g =
   do
     r <- f g
     r2 <- f r
-    if equal r r2
+    if G.equal r r2
       then pure r
       else keepTrying f r2
 
@@ -234,7 +230,7 @@ isArray p = case paramDec p of
 --   g <- mkDepGraph stms resNames inputNames
 --   let str = pprg g
 --   strs <-  mapM displayGraphFromNode (nodes' g)
---   return $ str ++ concat strs
+--   pure $ str ++ concat strs
 --   where
 --     stms = (stmsToList . bodyStms . funDefBody) fun
 --     resNames = namesFromRes ((bodyResult . funDefBody) fun)
@@ -245,11 +241,11 @@ isArray p = case paramDec p of
 -- displayGraphFromNode n = case n of
 --   SoacNode soac _ _ -> do
 --     g <- mkDepGraph ((stmsToList . bodyStms . lambdaBody . lambda)soac) [] []
---     return $ pprg g
---   _ -> return ""
+--     pure $ pprg g
+--   _ -> pure ""
 
 emptyGraph :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
-emptyGraph stms res inputs = mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
+emptyGraph stms res inputs = G.mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
   where
     label_nodes = zip [0 ..]
     snodes = map StmNode stms
@@ -282,14 +278,14 @@ initialGraphConstruction =
 
 makeMapping :: DepGraphAug
 makeMapping g = do
-  let mapping = M.fromList $ concatMap gen_dep_list (labNodes g)
+  let mapping = M.fromList $ concatMap gen_dep_list (G.labNodes g)
   modify (\s -> s {producerMapping = mapping})
   pure g
   where
-    gen_dep_list :: DepNode -> [(VName, Node)]
+    gen_dep_list :: DepNode -> [(VName, G.Node)]
     gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
 
-makeEdges :: [EdgeT] -> FusionEnvM [(Node, EdgeT)]
+makeEdges :: [EdgeT] -> FusionEnvM [(G.Node, EdgeT)]
 makeEdges edgs = do
   mapping <- gets producerMapping
   pure $ map (makeEdge mapping) edgs
@@ -304,20 +300,20 @@ genEdges l_stms edge_fun g = do
   depGraphInsertEdges (concatMap (gen_edge name_map) l_stms) g
   where
     -- statements -> mapping from declared array names to soac index
-    gen_edge :: M.Map VName Node -> DepNode -> [LEdge EdgeT]
+    gen_edge :: M.Map VName G.Node -> DepNode -> [G.LEdge EdgeT]
     gen_edge name_map (from, node) =
-      [ toLEdge (from, to) edgeT | (dep, edgeT) <- edge_fun node, Just to <- [M.lookup dep name_map]
+      [ G.toLEdge (from, to) edgeT | (dep, edgeT) <- edge_fun node, Just to <- [M.lookup dep name_map]
       ]
 
 delLEdges :: [DepEdge] -> DepGraphAug
-delLEdges edgs g = pure $ foldl (flip ($)) g (map delLEdge edgs)
+delLEdges edgs g = pure $ foldl (flip ($)) g (map G.delLEdge edgs)
 
 depGraphInsertEdges :: [DepEdge] -> DepGraphAug
-depGraphInsertEdges edgs g = pure $ insEdges edgs g
+depGraphInsertEdges edgs g = pure $ G.insEdges edgs g
 
-updateTrEdges :: Node -> DepGraphAug
+updateTrEdges :: G.Node -> DepGraphAug
 updateTrEdges n1 g = do
-  let (inc, _, nt, otg) = context g n1
+  let (inc, _, _nt, otg) = G.context g n1
   let relevantInc = relNodes inc
   let relevantOtg = relNodes otg
   let augs =
@@ -325,16 +321,16 @@ updateTrEdges n1 g = do
           <> map (`updateTrEdgesBetween` n1) relevantOtg
   applyAugs augs g
   where
-    relNodes :: Adj EdgeT -> [Node]
+    relNodes :: G.Adj EdgeT -> [G.Node]
     relNodes adjs = map snd $ filter (isDep . fst) adjs
 
-updateTrEdgesBetween :: Node -> Node -> DepGraphAug
+updateTrEdgesBetween :: G.Node -> G.Node -> DepGraphAug
 updateTrEdgesBetween n1 n2 g = do
-  let ns = map (getName . edgeLabel) $ filter (isDep . edgeLabel) $ edgesBetween g n1 n2
+  let ns = map (getName . G.edgeLabel) $ filter (isDep . G.edgeLabel) $ edgesBetween g n1 n2
   let edgs = mapMaybe insEdge ns
   depGraphInsertEdges edgs =<< delLEdges edgs g
   where
-    (nt1, nt2) = mapT (lab' . context g) (n1, n2)
+    (nt1, nt2) = mapT (G.lab' . G.context g) (n1, n2)
     insEdge :: VName -> Maybe DepEdge
     insEdge name =
       if H.nullTransforms $ findTransformsBetween name nt1 nt2
@@ -342,17 +338,14 @@ updateTrEdgesBetween n1 n2 g = do
         else Just (n2, n1, TrDep name)
 
 mapAcross :: (DepContext -> FusionEnvM DepContext) -> DepGraphAug
-mapAcross f g =
-  do
-    let ns = nodes g
-    foldlM (flip helper) g ns
+mapAcross f g = foldlM (flip helper) g (G.nodes g)
   where
-    helper :: Node -> DepGraphAug
-    helper n g' = case match n g' of
+    helper :: G.Node -> DepGraphAug
+    helper n g' = case G.match n g' of
       (Just c, g_new) ->
         do
           c' <- f c
-          pure $ c' & g_new
+          pure $ c' G.& g_new
       (Nothing, _) -> pure g'
 
 mapAcrossNodeTs :: (NodeT -> FusionEnvM NodeT) -> DepGraphAug
@@ -361,11 +354,11 @@ mapAcrossNodeTs f = mapAcross f'
     f' (ins, n, nodeT, outs) =
       do
         nodeT' <- f nodeT
-        return (ins, n, nodeT', outs)
+        pure (ins, n, nodeT', outs)
 
 mapAcrossWithSE :: (DepNode -> DepGraphAug) -> DepGraphAug
 mapAcrossWithSE f g =
-  applyAugs (map f (labNodes g)) g
+  applyAugs (map f (G.labNodes g)) g
 
 transformsFromInputs :: VName -> [H.Input] -> H.ArrayTransforms
 transformsFromInputs name1 is = case L.filter filterFun is of
@@ -387,7 +380,7 @@ nodeOutputTransforms vname nodeT = case nodeT of
   _ -> H.noTransforms
 
 internalizeOutput :: H.Input -> H.Input
-internalizeOutput i@(H.Input ts name tp) = H.Input ts name (H.inputType i)
+internalizeOutput i@(H.Input ts name _) = H.Input ts name (H.inputType i)
 
 findTransformsBetween :: VName -> NodeT -> NodeT -> H.ArrayTransforms
 findTransformsBetween vname n1 n2 =
@@ -398,44 +391,44 @@ findTransformsBetween vname n1 n2 =
 iswim :: DepGraphAug
 iswim = mapAcrossWithSE f
   where
-    f (n, lab) g =
-      case lab of
-        SoacNode soac ots aux -> do
-          scope <- askScope
-          maybeISWIM <- LK.tryFusion (LK.iswim Nothing soac H.noTransforms) scope
-          case maybeISWIM of
-            Just (newSOAC, newts) ->
-              trace (show $ H.width newSOAC) $
-                updateNode n (const (Just $ SoacNode newSOAC (map (internalizeOutput . H.addTransforms newts) ots) aux)) g
-                  >>= updateTrEdges n
-                  >>= updateContext n
-            Nothing -> pure g
-        _ -> pure g
+    f (n, SoacNode soac ots aux) g = do
+      scope <- askScope
+      maybeISWIM <- LK.tryFusion (LK.iswim Nothing soac H.noTransforms) scope
+      case maybeISWIM of
+        Just (newSOAC, newts) ->
+          trace (show $ H.width newSOAC) $
+            updateNode n (const (Just $ SoacNode newSOAC (map (internalizeOutput . H.addTransforms newts) ots) aux)) g
+              >>= updateTrEdges n
+              >>= updateContext n
+        Nothing -> pure g
+    f _ g = pure g
 
-    updateContext :: Node -> DepGraphAug
+    updateContext :: G.Node -> DepGraphAug
     updateContext n g =
-      case match n g of
-        (Just (ins, _, lab, outs), g') -> do
+      case G.match n g of
+        (Just (ins, _, l, outs), g') -> do
           let newins = map (\(e, n2) -> if isScanRed e then (Dep (getName e), n2) else (e, n2)) ins
-          pure $ (&) (newins, n, lab, outs) g'
+          pure $ (newins, n, l, outs) G.& g'
         _ -> pure g
 
 addTransforms :: DepGraphAug
 addTransforms orig_g =
   applyAugs (map helper ns) orig_g
   where
-    ns = nodes orig_g
-    helper :: Node -> DepGraphAug
-    helper n g = case lab g n of
-      Just (StmNode (Let pat aux exp))
-        | Just (vn, transform) <- H.transformFromExp (stmAuxCerts aux) exp,
-          [n'] <- L.nub $ suc g n,
-          vn `notElem` map (getName . edgeLabel) (filter (\(a, _, _) -> a /= n) (inn g n')),
-          Just (SoacNode soac outps aux2) <- lab g n',
+    ns = G.nodes orig_g
+    helper :: G.Node -> DepGraphAug
+    helper n g = case G.lab g n of
+      Just (StmNode (Let pat aux e))
+        | Just (vn, transform) <- H.transformFromExp (stmAuxCerts aux) e,
+          [n'] <- L.nub $ G.suc g n,
+          vn
+            `notElem` map
+              (getName . G.edgeLabel)
+              (filter (\(a, _, _) -> a /= n) (G.inn g n')),
+          Just (SoacNode soac outps aux2) <- G.lab g n',
           [trName] <- patNames pat ->
             do
-              let sucNodes = pre g n
-              let edgs = inn g n
+              let sucNodes = G.pre g n
               g' <- depGraphInsertEdges (map (\nd -> (nd, n', TrDep trName)) sucNodes) g
               let outps' =
                     map
@@ -447,7 +440,7 @@ addTransforms orig_g =
                       outps
               let mapping = makeMap [vn] [trName]
               let newNode = substituteNames mapping (SoacNode soac outps' (aux <> aux2))
-              let ctx = mergedContext newNode (context g' n') (context g' n)
+              let ctx = mergedContext newNode (G.context g' n') (G.context g' n)
               contractEdge n ctx g'
       _ -> pure g
 
@@ -467,13 +460,13 @@ addTransforms orig_g =
 mapEdgeT :: (EdgeT -> EdgeT) -> DepEdge -> DepEdge
 mapEdgeT f (n1, n2, e) = (n1, n2, f e)
 
-updateNode :: Node -> (NodeT -> Maybe NodeT) -> DepGraphAug
+updateNode :: G.Node -> (NodeT -> Maybe NodeT) -> DepGraphAug
 updateNode n f g =
-  case context g n of
+  case G.context g n of
     (ins, _, l, outs) ->
       case f l of
         Just newLab ->
-          pure $ (&) (ins, n, newLab, outs) (delNode n g)
+          pure $ (ins, n, newLab, outs) G.& G.delNode n g
         Nothing -> pure g
 
 nodeToSoacNode :: NodeT -> FusionEnvM NodeT
@@ -500,33 +493,33 @@ stmFromNode :: NodeT -> [Stm SOACS] -- do not use outside of edge generation
 stmFromNode (StmNode x) = [x]
 stmFromNode _ = []
 
-nodeFromLNode :: DepNode -> Node
+nodeFromLNode :: DepNode -> G.Node
 nodeFromLNode = fst
 
-lNodeFromNode :: DepGraph -> Node -> DepNode
-lNodeFromNode g n = labNode' (context g n)
+lNodeFromNode :: DepGraph -> G.Node -> DepNode
+lNodeFromNode g n = G.labNode' (G.context g n)
 
-lFromNode :: DepGraph -> Node -> NodeT
+lFromNode :: DepGraph -> G.Node -> NodeT
 lFromNode g n = label $ lNodeFromNode g n
 
 labFromEdge :: DepGraph -> DepEdge -> DepNode
 labFromEdge g (n1, _, _) = lNodeFromNode g n1
 
 depsFromEdge :: DepEdge -> VName
-depsFromEdge = getName . edgeLabel
+depsFromEdge = getName . G.edgeLabel
 
 input :: DepGraph -> DepNode -> [DepNode]
-input g node = map (labNode' . context g) $ suc g $ nodeFromLNode node
+input g node = map (G.labNode' . G.context g) $ G.suc g $ nodeFromLNode node
 
 output :: DepGraph -> DepNode -> [DepNode]
-output g node = map (labNode' . context g) $ pre g $ nodeFromLNode node
+output g node = map (G.labNode' . G.context g) $ G.pre g $ nodeFromLNode node
 
-edgesBetween :: DepGraph -> Node -> Node -> [DepEdge]
-edgesBetween g n1 n2 = labEdges $ subgraph [n1, n2] g
+edgesBetween :: DepGraph -> G.Node -> G.Node -> [DepEdge]
+edgesBetween g n1 n2 = G.labEdges $ G.subgraph [n1, n2] g
 
 -- Utility func for augs
 augWithFun :: EdgeGenerator -> DepGraphAug
-augWithFun f g = genEdges (labNodes g) f g
+augWithFun f g = genEdges (G.labNodes g) f g
 
 toAlias :: DepGenerator -> EdgeGenerator
 toAlias f stmt = map (\vname -> (vname, Alias vname)) (concatMap f (stmFromNode stmt))
@@ -550,34 +543,33 @@ addCons :: DepGraphAug
 addCons = augWithFun getStmCons
 
 -- Merges two contexts
-mergedContext :: (Eq b) => a -> Context a b -> Context a b -> Context a b
+mergedContext :: (Eq b) => a -> G.Context a b -> G.Context a b -> G.Context a b
 mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
   let new_inp = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (inp1 `L.union` inp2)
    in let new_out = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (out1 `L.union` out2)
        in (new_inp, n1, mergedlabel, new_out)
 
-contractEdge :: Node -> DepContext -> DepGraphAug
-contractEdge n2 cxt g = do
-  let n1 = node' cxt -- n1 remains
-  mapping <- gets producerMapping
-  pure $ (&) cxt $ delNodes [n1, n2] g
+contractEdge :: G.Node -> DepContext -> DepGraphAug
+contractEdge n2 ctx g = do
+  let n1 = G.node' ctx -- n1 remains
+  pure $ ctx G.& G.delNodes [n1, n2] g
 
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it
 addExtraCons :: DepGraphAug
 addExtraCons g = depGraphInsertEdges new_edges g
   where
-    new_edges = concatMap make_edge (labEdges g)
+    new_edges = concatMap make_edge (G.labEdges g)
     make_edge :: DepEdge -> [DepEdge]
     make_edge (from, to, Cons cname) =
-      [ toLEdge (from, to2) (Fake cname)
+      [ G.toLEdge (from, to2) (Fake cname)
         | (to2, _) <-
             filter
               ( \(tonode, toedge) ->
                   tonode /= from
                     && cname == getName toedge
               )
-              $ lpre g to
+              $ G.lpre g to
       ]
     make_edge _ = []
 
@@ -585,7 +577,7 @@ addResEdges :: DepGraphAug
 addResEdges = augWithFun getStmRes
 
 makeScanInfusible :: DepGraphAug
-makeScanInfusible g = return $ emap change_node_to_idep g
+makeScanInfusible g = pure $ G.emap change_node_to_idep g
   where
     find_scan_results :: Stm SOACS -> [VName]
     find_scan_results (Let pat _ (Op (Futhark.Screma _ _ (ScremaForm scns rdcs _)))) =
@@ -594,7 +586,7 @@ makeScanInfusible g = return $ emap change_node_to_idep g
     find_scan_results _ = []
 
     scan_res_set :: S.Set VName
-    scan_res_set = S.fromList (concatMap find_scan_results (concatMap (stmFromNode . label) (labNodes g)))
+    scan_res_set = S.fromList (concatMap find_scan_results (concatMap (stmFromNode . label) (G.labNodes g)))
 
     is_scan_res :: VName -> Bool
     is_scan_res name = S.member name scan_res_set
@@ -629,7 +621,7 @@ fusableInputsFromExp (Op soac) = case soac of
 fusableInputsFromExp _ = []
 
 infusableInputs :: Stm SOACS -> [VName]
-infusableInputs (Let _ aux expr) = infusableInputsFromExp expr ++ namesToList (freeIn aux)
+infusableInputs (Let _ aux e) = infusableInputsFromExp e ++ namesToList (freeIn aux)
 
 infusableInputsFromExp :: Exp SOACS -> [VName]
 infusableInputsFromExp (Op soac) = case soac of
@@ -730,7 +722,7 @@ finalizeNode nt = case nt of
     (_, stms) <- runBuilder $ do
       new_soac <- H.toSOAC soac
       auxing aux $ letBind (basicPat (map inputToIdent outputs')) $ Op new_soac
-    return $ stmsToList (substituteNames mapping stms <> outputTrs)
+    pure $ stmsToList (substituteNames mapping stms <> outputTrs)
   RNode _ -> pure []
   InNode _ -> pure []
   DoNode stm lst -> do
@@ -752,7 +744,7 @@ isDep (Dep _) = True
 isDep (ScanRed _) = True
 isDep _ = False
 
-isInf :: (Node, Node, EdgeT) -> Bool -- No possibility of fusion
+isInf :: (G.Node, G.Node, EdgeT) -> Bool -- No possibility of fusion
 isInf (_, _, e) = case e of
   InfDep _ -> True
   Cons _ -> False
