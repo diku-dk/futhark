@@ -108,14 +108,14 @@ instance (Monoid (Bundled a), TanBuilder a) => TanBuilder [a] where
 instance TanBuilder (PatElem (TypeBase s u)) where
   newTan (PatElem p t)
     | isAcc t = do
-        insertTan p p
-        t' <- tanType t
-        pure $ PatElem p t'
+      insertTan p p
+      t' <- tanType t
+      pure $ PatElem p t'
     | otherwise = do
-        p' <- tanVName p
-        insertTan p p'
-        t' <- tanType t
-        pure $ PatElem p' t'
+      p' <- tanVName p
+      insertTan p p'
+      t' <- tanType t
+      pure $ PatElem p' t'
   bundleNew pe@(PatElem _ t) = do
     pe' <- newTan pe
     if isAcc t
@@ -156,11 +156,11 @@ instance Tangent (TypeBase s u) where
   tangent = tanType
   bundleTan t
     | isAcc t = do
-        t' <- tangent t
-        pure [t']
+      t' <- tangent t
+      pure [t']
     | otherwise = do
-        t' <- tangent t
-        pure [t, t']
+      t' <- tangent t
+      pure [t, t']
 
 instance (Monoid (BundledTan a), Tangent a) => Tangent [a] where
   type BundledTan [a] = BundledTan a
@@ -400,28 +400,28 @@ fwdStm stm@(Let pat aux (BasicOp e)) = do
   basicFwd pat aux e
 fwdStm stm@(Let pat _ (Apply f args _ _))
   | Just (ret, argts) <- M.lookup f builtInFunctions = do
-      addStm stm
-      arg_tans <-
-        zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
-      pat_tan <- newTan pat
-      let arg_pes = zipWith primExpFromSubExp argts (map fst args)
-      case pdBuiltin f arg_pes of
-        Nothing ->
-          error $ "No partial derivative defined for builtin function: " ++ pretty f
-        Just derivs -> do
-          let convertTo tt e
-                | e_t == tt = e
-                | otherwise =
-                    case (tt, e_t) of
-                      (IntType tt', IntType ft) -> ConvOpExp (SExt ft tt') e
-                      (FloatType tt', FloatType ft) -> ConvOpExp (FPConv ft tt') e
-                      (Bool, FloatType ft) -> ConvOpExp (FToB ft) e
-                      (FloatType tt', Bool) -> ConvOpExp (BToF tt') e
-                      _ -> error $ "fwdStm.convertTo: " ++ pretty (f, tt, e_t)
-                where
-                  e_t = primExpType e
-          zipWithM_ (letBindNames . pure) (patNames pat_tan)
-            =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
+    addStm stm
+    arg_tans <-
+      zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
+    pat_tan <- newTan pat
+    let arg_pes = zipWith primExpFromSubExp argts (map fst args)
+    case pdBuiltin f arg_pes of
+      Nothing ->
+        error $ "No partial derivative defined for builtin function: " ++ pretty f
+      Just derivs -> do
+        let convertTo tt e
+              | e_t == tt = e
+              | otherwise =
+                case (tt, e_t) of
+                  (IntType tt', IntType ft) -> ConvOpExp (SExt ft tt') e
+                  (FloatType tt', FloatType ft) -> ConvOpExp (FPConv ft tt') e
+                  (Bool, FloatType ft) -> ConvOpExp (FToB ft) e
+                  (FloatType tt', Bool) -> ConvOpExp (BToF tt') e
+                  _ -> error $ "fwdStm.convertTo: " ++ pretty (f, tt, e_t)
+              where
+                e_t = primExpType e
+        zipWithM_ (letBindNames . pure) (patNames pat_tan)
+          =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
 fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
   t' <- slocal' $ fwdBody t
   f' <- slocal' $ fwdBody f
