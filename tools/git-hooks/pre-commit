@@ -27,5 +27,5 @@ if git diff-index --cached --check HEAD | egrep -v '^[+-]'; then
     fail
 fi
 
-make check-commit
-make build
+make check-commit || fail
+make build || fail
