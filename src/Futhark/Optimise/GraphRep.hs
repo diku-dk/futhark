@@ -421,10 +421,10 @@ iswim = mapAcrossWithSE f
         _ -> pure g
 
 addTransforms :: DepGraphAug
-addTransforms g =
-  applyAugs (map helper ns) g
+addTransforms orig_g =
+  applyAugs (map helper ns) orig_g
   where
-    ns = nodes g
+    ns = nodes orig_g
     helper :: Node -> DepGraphAug
     helper n g = case lab g n of
       Just (StmNode (Let pat aux exp))
@@ -470,8 +470,8 @@ mapEdgeT f (n1, n2, e) = (n1, n2, f e)
 updateNode :: Node -> (NodeT -> Maybe NodeT) -> DepGraphAug
 updateNode n f g =
   case context g n of
-    (ins, _, lab, outs) ->
-      case f lab of
+    (ins, _, l, outs) ->
+      case f l of
         Just newLab ->
           pure $ (&) (ins, n, newLab, outs) (delNode n g)
         Nothing -> pure g
@@ -560,7 +560,6 @@ contractEdge :: Node -> DepContext -> DepGraphAug
 contractEdge n2 cxt g = do
   let n1 = node' cxt -- n1 remains
   mapping <- gets producerMapping
-  let newMapping = fuseMaps mapping (makeMap [n2] [n1])
   pure $ (&) cxt $ delNodes [n1, n2] g
 
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
@@ -625,6 +624,8 @@ fusableInputsFromExp (Op soac) = case soac of
   Futhark.Hist _ is _ _ -> is
   Futhark.Scatter _ is _ _ -> is
   Futhark.Stream _ is _ _ _ -> is
+  Futhark.JVP {} -> []
+  Futhark.VJP {} -> []
 fusableInputsFromExp _ = []
 
 infusableInputs :: Stm SOACS -> [VName]
@@ -640,18 +641,16 @@ infusableInputsFromExp (Op soac) = case soac of
     namesToList $ freeIn $ Futhark.Scatter e [] lam other
   Futhark.Stream a1 _ a3 a4 lam ->
     namesToList $ freeIn $ Futhark.Stream a1 [] a3 a4 lam
-infusableInputsFromExp (If exp b1 b2 cond) =
-  let emptyB = Body mempty mempty mempty :: Body SOACS
-   in namesToList
-        ( freeIn exp
-            <> freeIn cond
-        )
-        <> concatMap infusableInputs (bodyStms b1)
-        <> concatMap infusableInputs (bodyStms b2)
-infusableInputsFromExp (DoLoop exp loopform b1) =
+  Futhark.JVP {} -> []
+  Futhark.VJP {} -> []
+infusableInputsFromExp (If e b1 b2 cond) =
+  namesToList (freeIn e <> freeIn cond)
+    <> concatMap infusableInputs (bodyStms b1)
+    <> concatMap infusableInputs (bodyStms b2)
+infusableInputsFromExp (DoLoop e loopform b1) =
   let emptyB = Body mempty mempty mempty :: Body SOACS
    in concatMap infusableInputs (bodyStms b1)
-        <> namesToList (freeIn (DoLoop exp loopform emptyB))
+        <> namesToList (freeIn (DoLoop e loopform emptyB))
 infusableInputsFromExp op = namesToList $ freeIn op
 
 aliasInputs :: Stm SOACS -> [VName]
@@ -687,9 +686,9 @@ getOutputs node = case node of
   (StmNode stm) -> getStmNames stm
   (RNode _) -> []
   (InNode name) -> [name]
-  (IfNode stm nodes) -> getStmNames stm
-  (DoNode stm nodes) -> getStmNames stm
-  (FinalNode stms _) -> error "Final nodes cannot generate edges"
+  (IfNode stm _) -> getStmNames stm
+  (DoNode stm _) -> getStmNames stm
+  FinalNode {} -> error "Final nodes cannot generate edges"
   (SoacNode _ outputs _) -> map H.inputArray outputs
 
 mapT :: (a -> b) -> (a, a) -> (b, b) -- tuple map
@@ -717,10 +716,10 @@ genOutTransformStms inps = do
   pure (makeMap names newNames, substituteNames (makeMap namesToRep names) stms)
 
 inputToIdent :: H.Input -> Ident
-inputToIdent i@(H.Input _ vn tp) = Ident vn tp
+inputToIdent (H.Input _ vn tp) = Ident vn tp
 
 inputToIdent2 :: H.Input -> Ident
-inputToIdent2 i@(H.Input _ vn tp) = Ident vn (H.inputType i)
+inputToIdent2 i@(H.Input _ vn _) = Ident vn (H.inputType i)
 
 finalizeNode :: NodeT -> FusionEnvM [Stm SOACS]
 finalizeNode nt = case nt of
@@ -732,8 +731,8 @@ finalizeNode nt = case nt of
       new_soac <- H.toSOAC soac
       auxing aux $ letBind (basicPat (map inputToIdent outputs')) $ Op new_soac
     return $ stmsToList (substituteNames mapping stms <> outputTrs)
-  RNode vn -> pure []
-  InNode vn -> pure []
+  RNode _ -> pure []
+  InNode _ -> pure []
   DoNode stm lst -> do
     stmsNotFused <- mapM (finalizeNode . fst) lst
     pure $ concat stmsNotFused ++ [stm]
