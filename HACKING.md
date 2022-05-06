@@ -5,10 +5,12 @@ straightforward design. The main source of documentation is the
 Haddock comments in the source code itself.  You can generate
 hyperlinked reference documentation by running `make docs` (see
 below).  To build the compiler, you need a recent version of
-[GHC](http://ghc.haskell.org/) If you [install
-Nix](https://nixos.org/download.html#download-nix) then you can run
-`nix-shell` to get a shell environment in which all necessary tools
-are installed.
+[GHC](http://ghc.haskell.org/), which can be installed via
+[ghcup](https://www.haskell.org/ghcup/).
+
+If you [install Nix](https://nixos.org/download.html#download-nix)
+then you can run `nix-shell` to get a shell environment in which all
+necessary tools are installed.
 
 Make sure to see the [Haskell style guide](STYLE.md).
 
