@@ -229,10 +229,10 @@ vFuseContexts :: [EdgeT] -> [VName] -> DepContext -> DepContext -> FusionEnvM (M
 vFuseContexts
   edgs
   infusable
-  c1@(_i1, _n1, nodeT1, o1)
+  c1@(_i1, n1, nodeT1, o1)
   c2@(_i2, _n2, nodeT2, o2) =
     do
-      fres <- fuseNodeT edgs infusable (nodeT1, map fst o1) (nodeT2, map fst o2)
+      fres <- fuseNodeT edgs infusable (nodeT1, map fst o1) (nodeT2, map fst $ filter ((/=) n1 . snd) o2)
       case fres of
         Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
         Nothing -> pure Nothing
