@@ -708,7 +708,7 @@ leafExpTypes (CmpOpExp _ e1 e2) =
 leafExpTypes (FunExp _ pes _) =
   S.unions $ map leafExpTypes pes
 
--- | Multiplication of untyped 'PrimExps', which must have the same
+-- | Multiplication of untyped 'PrimExp's, which must have the same
 -- type.
 (~*~) :: PrimExp v -> PrimExp v -> PrimExp v
 x ~*~ y = BinOpExp op x y
@@ -720,7 +720,7 @@ x ~*~ y = BinOpExp op x y
       Bool -> LogAnd
       Unit -> LogAnd
 
--- | Division of untyped 'PrimExps', which must have the same
+-- | Division of untyped 'PrimExp's, which must have the same
 -- type.  For integers, this is unsafe signed division.
 (~/~) :: PrimExp v -> PrimExp v -> PrimExp v
 x ~/~ y = BinOpExp op x y
@@ -732,7 +732,7 @@ x ~/~ y = BinOpExp op x y
       Bool -> LogAnd
       Unit -> LogAnd
 
--- | Addition of untyped 'PrimExps', which must have the same type.
+-- | Addition of untyped 'PrimExp's, which must have the same type.
 (~+~) :: PrimExp v -> PrimExp v -> PrimExp v
 x ~+~ y = BinOpExp op x y
   where
@@ -743,7 +743,7 @@ x ~+~ y = BinOpExp op x y
       Bool -> LogOr
       Unit -> LogOr
 
--- | Subtraction of untyped 'PrimExps', which must have the same type.
+-- | Subtraction of untyped 'PrimExp's, which must have the same type.
 (~-~) :: PrimExp v -> PrimExp v -> PrimExp v
 x ~-~ y = BinOpExp op x y
   where

@@ -23,6 +23,8 @@ fConst ft x = ValueExp $ FloatValue $ floatValue ft x
 untyped2 :: (TPrimExp t v, TPrimExp t v) -> (PrimExp v, PrimExp v)
 untyped2 = bimap untyped untyped
 
+-- | @pdUnOp op x@ computes the partial derivatives of @op@
+-- with respect to @x@.
 pdUnOp :: UnOp -> PrimExp VName -> PrimExp VName
 pdUnOp (Abs it) a = UnOpExp (SSignum it) a
 pdUnOp (FAbs ft) a = UnOpExp (FSignum ft) a
@@ -60,6 +62,8 @@ floatBinOp f _ _ Float16 a b = untyped2 $ f (isF16 a) (isF16 b)
 floatBinOp _ f _ Float32 a b = untyped2 $ f (isF32 a) (isF32 b)
 floatBinOp _ _ f Float64 a b = untyped2 $ f (isF64 a) (isF64 b)
 
+-- | @pdBinOp op x y@ computes the partial derivatives of @op@ with
+-- respect to @x@ and @y@.
 pdBinOp :: BinOp -> PrimExp VName -> PrimExp VName -> (PrimExp VName, PrimExp VName)
 pdBinOp (Add it _) _ _ = (iConst it 1, iConst it 1)
 pdBinOp (Sub it _) _ _ = (iConst it 1, iConst it (-1))
