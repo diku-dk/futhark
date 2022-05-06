@@ -7,7 +7,7 @@
 module Futhark.Optimise.Fusion (fuseSOACs) where
 
 import Control.Monad.State
-import Data.Graph.Inductive.Graph
+import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Query.DFS as Q
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
@@ -106,13 +106,13 @@ fuseGraph stms results inputs = localScope (scopeOf stms) $ do
   modify (\s -> s {producerMapping = old_mappings})
   pure $ trace (unlines (map pretty stms_new)) stms_new
 
-unreachableEitherDir :: DepGraph -> Node -> Node -> FusionEnvM Bool
+unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 unreachableEitherDir g a b = do
   b1 <- reachable g a b
   b2 <- reachable g b a
   pure $ not (b1 || b2)
 
-reachable :: DepGraph -> Node -> Node -> FusionEnvM Bool
+reachable :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 reachable g source target = pure $ target `elem` Q.reachable source g
 
 linearizeGraph :: DepGraph -> FusionEnvM [Stm SOACS]
@@ -131,51 +131,51 @@ doAllFusion =
     ]
 
 doVerticalFusion :: DepGraphAug
-doVerticalFusion g = applyAugs (map tryFuseNodeInGraph $ labNodes g) g
+doVerticalFusion g = applyAugs (map tryFuseNodeInGraph $ G.labNodes g) g
 
 doHorizontalFusion :: DepGraphAug
-doHorizontalFusion g = applyAugs (map horizontalFusionOnNode (nodes g)) g
+doHorizontalFusion g = applyAugs (map horizontalFusionOnNode (G.nodes g)) g
 
 -- for each node, find what came before, attempt to fuse
-horizontalFusionOnNode :: Node -> DepGraphAug
+horizontalFusionOnNode :: G.Node -> DepGraphAug
 horizontalFusionOnNode node g = tryFuseAll incoming_nodes g
   where
-    (incoming_nodes, _) = unzip $ lpre g node
+    (incoming_nodes, _) = unzip $ G.lpre g node
 
-tryFuseAll :: [Node] -> DepGraphAug
+tryFuseAll :: [G.Node] -> DepGraphAug
 tryFuseAll nodes_list = applyAugs (map (uncurry hTryFuseNodesInGraph) pairs)
   where
     pairs = [(x, y) | x <- nodes_list, y <- nodes_list, x < y]
 
-vFusionFeasability :: DepGraph -> Node -> Node -> FusionEnvM Bool
+vFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 vFusionFeasability g n1 n2 =
   do
     let b2 = not (any isInf (edgesBetween g n1 n2))
-    reach <- mapM (reachable g n2) (filter (/= n2) (pre g n1))
+    reach <- mapM (reachable g n2) (filter (/= n2) (G.pre g n1))
     pure $ b2 && all not reach
 
-hFusionFeasability :: DepGraph -> Node -> Node -> FusionEnvM Bool
+hFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 hFusionFeasability = unreachableEitherDir
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug
 tryFuseNodeInGraph node_to_fuse g =
-  if gelem node_to_fuse_id g
+  if G.gelem node_to_fuse_id g
     then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) g
     else pure g
   where
-    fuses_with = map fst $ filter (isDep . snd) $ lpre g (nodeFromLNode node_to_fuse)
+    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
     node_to_fuse_id = nodeFromLNode node_to_fuse
 
-vTryFuseNodesInGraph :: Node -> Node -> DepGraphAug
+vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
 vTryFuseNodesInGraph node_1 node_2 g
-  | not (gelem node_1 g && gelem node_2 g) = pure g
+  | not (G.gelem node_1 g && G.gelem node_2 g) = pure g
   | otherwise =
       do
         b <- vFusionFeasability g node_1 node_2
         if b
           then do
-            fres <- vFuseContexts edgs infusable_nodes (context g node_1) (context g node_2)
+            fres <- vFuseContexts edgs infusable_nodes (G.context g node_1) (G.context g node_2)
             case fres of
               Just (inputs, _, nodeT, outputs) -> do
                 nodeT' <-
@@ -189,20 +189,20 @@ vTryFuseNodesInGraph node_1 node_2 g
               Nothing -> pure g
           else pure g
   where
-    edgs = map edgeLabel $ edgesBetween g node_1 node_2
+    edgs = map G.edgeLabel $ edgesBetween g node_1 node_2
     fusedC = map getName $ filter isCons edgs
     trEdgs = map getName $ filter isTrDep edgs
     infusable_nodes =
       map
         depsFromEdge
-        (concatMap (edgesBetween g node_1) (filter (/= node_2) $ pre g node_1))
+        (concatMap (edgesBetween g node_1) (filter (/= node_2) $ G.pre g node_1))
 
-hTryFuseNodesInGraph :: Node -> Node -> DepGraphAug
+hTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug
 hTryFuseNodesInGraph node_1 node_2 g
-  | not (gelem node_1 g && gelem node_2 g) = pure g
+  | not (G.gelem node_1 g && G.gelem node_2 g) = pure g
   | otherwise = do
       b <- hFusionFeasability g node_1 node_2
-      fres <- hFuseContexts (context g node_1) (context g node_2)
+      fres <- hFuseContexts (G.context g node_1) (G.context g node_2)
       if b
         then case fres of
           Just new_Context -> contractEdge node_2 new_Context g
@@ -642,7 +642,7 @@ fuseLambda lam_1 lam_2 =
 removeUnusedOutputs :: DepGraphAug
 removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 
-vNameFromAdj :: Node -> (EdgeT, Node) -> VName
+vNameFromAdj :: G.Node -> (EdgeT, G.Node) -> VName
 vNameFromAdj n1 (edge, n2) = depsFromEdge (n2, n1, edge)
 
 removeUnusedOutputsFromContext :: DepContext -> FusionEnvM DepContext
@@ -688,7 +688,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
         let extra_is = map (paramName . fst) (filter (isArray . fst) params)
         b <- doFusionWithDelayed body extra_is toFuse
         pure (incomming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
-  IfNode s@(Let pat aux (If sz b1 b2 dec)) toFuse -> do
+  IfNode (Let pat aux (If sz b1 b2 dec)) toFuse -> do
     b1' <- doFusionWithDelayed b1 [] toFuse
     b2' <- doFusionWithDelayed b2 [] toFuse
     rb2' <- renameBody b2'
@@ -728,10 +728,10 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
 -- inserting for delayed fusion
 handleNodes :: [(NodeT, [EdgeT])] -> DepGraphAug
 handleNodes ns g = do
-  let nodes = newNodes (length ns) g
+  let nodes = G.newNodes (length ns) g
   let (nodeTs, edgs) = unzip ns
   let depNodes = zip nodes nodeTs
-  let g' = insNodes depNodes g
+  let g' = G.insNodes depNodes g
   _ <- makeMapping g'
   applyAugs (zipWith (curry addEdgesToGraph) depNodes edgs) g'
 
