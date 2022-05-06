@@ -20,7 +20,7 @@ install: build
 	install -D $$(cabal -v0 list-bin exe:futhark) $(PREFIX)/bin
 
 docs:
-	cabal haddock --enable-documentation
+	cabal haddock --enable-documentation --haddock-options=--quickjump
 
 check:
 	tools/style-check.sh src unittests
