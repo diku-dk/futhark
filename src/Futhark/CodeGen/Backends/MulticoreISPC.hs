@@ -610,7 +610,7 @@ prepareMemStruct lexmems fatmems = do
   pure name
   where
     lexMemDef (name, size) =
-      [ [C.csdecl|$tyqual:uniform unsigned char * $tyqual:varying $id:name;|],
+      [ [C.csdecl|$tyqual:varying unsigned char * $tyqual:uniform $id:name;|],
         [C.csdecl|$tyqual:varying size_t $id:size;|]
       ]
     fatMemDef name =
@@ -622,7 +622,7 @@ compileGetMemStructVals struct lexmems fatmems = do
   forM_ fatmems $ \m ->
     GC.decl [C.cdecl|struct memblock $id:m = *$id:struct->$id:m;|]
   forM_ lexmems $ \(m, s) -> do
-    GC.decl [C.cdecl|unsigned char * $id:m = $id:struct->$id:m;|]
+    GC.decl [C.cdecl|$tyqual:varying unsigned char * $tyqual:uniform $id:m = $id:struct->$id:m;|]
     GC.decl [C.cdecl|size_t $id:s = $id:struct->$id:s;|]
 
 -- | Write back potentially changed memory addresses and sizes to the memory struct
