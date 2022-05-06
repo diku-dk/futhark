@@ -269,6 +269,7 @@ scanStage3 kernel pat space scan_ops kbody = do
   free_params' <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params'
 
+-- Note: This isn't currently used anywhere.
 -- This implementation for a Segmented scan only
 -- parallelize over the segments and each segment is
 -- scanned sequentially.
@@ -299,7 +300,7 @@ compileSegScanBody pat space scan_ops kbody = collect $ do
   sOp $ Imp.GetTaskId (segFlat space)
 
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  generateChunkLoop "SegScan" True $ \segment_i -> do
+  generateChunkLoop "SegScan" False $ \segment_i -> do
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
       let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op

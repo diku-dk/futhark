@@ -212,6 +212,7 @@ lexicalMemoryUsageMC gokernel func =
     -- Critically, don't treat inputs to nested segops as lexical, since we
     -- want to use AoS memory for lexical blocks, which is incompatible with
     -- pointer assignmentes visible in C.
-    set (Op (SegOp _ params _ _ retvals _)) =
-      namesFromList $ map paramName params <> map paramName retvals
+    set (Op (SegOp _ params _ _ retvals _))
+      | gokernel = mempty
+      | otherwise = namesFromList $ map paramName params <> map paramName retvals
     set x = go set x

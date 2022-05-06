@@ -33,7 +33,7 @@ module Futhark.CodeGen.Backends.GenericC
 
     -- * Monadic compiler interface
     CompilerM,
-    CompilerState (compUserState, compNameSrc),
+    CompilerState (compUserState, compNameSrc, compDeclaredMem),
     CompilerEnv (envCachedMem),
     getUserState,
     modifyUserState,
@@ -279,7 +279,7 @@ defError msg stacktrace = do
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
-    [C.citems|if (ctx->error == NULL) 
+    [C.citems|if (ctx->error == NULL)
                 ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
@@ -652,7 +652,7 @@ freeRawMem mem space desc =
 defineMemorySpace :: Space -> CompilerM op s ([C.Definition], [C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
-  -- TODO(pema, K): This is hacky. Workaround for https://github.com/ispc/ispc/issues/2277
+  -- This is a hack to work around https://github.com/ispc/ispc/issues/2277 for the ISPC backend
   let structGuard = "#ifndef __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
   let structDefine = "#define __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
 
@@ -1922,7 +1922,7 @@ compileConstants (Constants ps init_consts) = do
 
 cachingMemory ::
   M.Map VName Space ->
-  ([C.BlockItem] -> [C.Stm] -> CompilerM op s a) ->
+  ([C.BlockItem] -> [C.Stm] -> [(VName, VName)] -> CompilerM op s a) ->
   CompilerM op s a
 cachingMemory lexical f = do
   -- We only consider lexical 'DefaultSpace' memory blocks to be
@@ -1951,14 +1951,14 @@ cachingMemory lexical f = do
       freeCached (mem, _) =
         [C.cstm|free($id:mem);|]
 
-  local lexMem $ f (concatMap declCached cached') (map freeCached cached')
+  local lexMem $ f (concatMap declCached cached') (map freeCached cached') cached'
 
 compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)) = inNewFunction $ do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
 
-  cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
+  cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached _ -> do
     body' <- collect $ compileFunBody out_ptrs outputs body
     decl_mem <- declAllocatedMem
     free_mem <- freeAllocatedMem

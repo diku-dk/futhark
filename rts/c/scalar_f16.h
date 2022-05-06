@@ -419,21 +419,24 @@ static inline f16 futrts_hypot16(f16 x, f16 y) {
   return (float16)futrts_hypot32((float)x, (float)y);
 }
 
-
+extern "C" unmasked uniform float tgammaf(uniform float x);
 static inline f16 futrts_gamma16(f16 x) {
-  uniform f16 y[programCount];
-  foreach_active(i){
-    y[i] = (f16)futrts_ispc_gamma32(extract((float)x,i));
+  f16 res;
+  foreach_active (i) {
+    uniform f16 r = (f16)tgammaf(extract((float)x, i));
+    res = insert(res, i, r);
   }
-  return *((varying f16 * uniform)&y);
+  return res;
 }
 
+extern "C" unmasked uniform float lgammaf(uniform float x);
 static inline f16 futrts_lgamma16(f16 x) {
-  uniform f16 y[programCount];
-  foreach_active(i){
-    y[i] = (f16)futrts_ispc_lgamma32(extract((float)x,i));
+  f16 res;
+  foreach_active (i) {
+    uniform f16 r = (f16)lgammaf(extract((float)x, i));
+    res = insert(res, i, r);
   }
-  return *((varying f16 * uniform)&y);
+  return res;
 }
 
 static inline f16 futrts_cbrt16(f16 x) {

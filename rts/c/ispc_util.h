@@ -1,9 +1,14 @@
+// Start of ispc_util.h.
+
+// This header file implements various operations that are useful only when
+// generating ISPC code. This includes wrappers for parts of Futhark's C runtime.
+
 // Generate missing overloads for extract on pointers
-#define make_extract(ty)                                                \
+#define make_extract(ty)                                                                \
 static inline uniform ty * uniform extract(uniform ty * varying ptr, uniform int idx) { \
-    int64 c = (int64)ptr;                                               \
-    uniform int64 r = extract(c, idx);                                  \
-    return (uniform ty * uniform)r;                                             \
+    int64 c = (int64)ptr;                                                               \
+    uniform int64 r = extract(c, idx);                                                  \
+    return (uniform ty * uniform)r;                                                     \
 }
 
 make_extract(int8)
@@ -33,9 +38,9 @@ make_extract(struct memblock)
 
 
 // Handling of atomics
-#define make_atomic_compare_exchange_wrapper(ty)				     \
+#define make_atomic_compare_exchange_wrapper(ty)                                     \
 static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
-							   uniform ty * uniform old, \
+                               uniform ty * uniform old,                             \
                                                            const uniform ty val){    \
   uniform ty actual = atomic_compare_exchange_global(mem, *old, val);                \
   if (actual == *old){                                                               \
@@ -45,8 +50,8 @@ static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform 
   return 0;                                                                          \
 }                                                                                    \
 static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying mem, \
-							  varying ty * uniform old,  \
-							  const varying ty val){     \
+                              varying ty * uniform old,                              \
+                              const varying ty val){                                 \
   varying ty actual = atomic_compare_exchange_global(mem, *old, val);                \
   if(actual == *old){                                                                \
     return 1;                                                                        \
@@ -65,10 +70,10 @@ make_atomic_compare_exchange_wrapper(double)
 #define __atomic_fetch_add(x,y,z) atomic_add_global(x,y)
 #define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,y)
 #define __atomic_fetch_and(x,y,z) atomic_and_global(x,y)
-#define __atomic_fetch_or(x,y,z)  atomic_or_global(x,y)
+#define __atomic_fetch_or(x,y,z) atomic_or_global(x,y)
 #define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,y)
-#define __atomic_exchange_n(x,y,z)  atomic_swap_global(x,y)
-#define __atomic_compare_exchange_n(x,y,z,h,j,k)  atomic_compare_exchange_wrapper(x,y,z)
+#define __atomic_exchange_n(x,y,z) atomic_swap_global(x,y)
+#define __atomic_compare_exchange_n(x,y,z,h,j,k) atomic_compare_exchange_wrapper(x,y,z)
 
 
 // Memory allocation handling
@@ -95,9 +100,9 @@ extern "C" unmasked uniform char * uniform lexical_realloc_error(uniform int64_t
 extern "C" unmasked uniform char * uniform * uniform futhark_context_get_error_ref(uniform struct futhark_context * uniform ctx);
 
 static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
-                                               unsigned char uniform * uniform * uniform ptr,
-                                               int64_t uniform * uniform old_size,
-                                               uniform int64_t new_size) {
+                                          unsigned char uniform * uniform * uniform ptr,
+                                          int64_t uniform * uniform old_size,
+                                          uniform int64_t new_size) {
   uniform unsigned char * uniform memptr = realloc(*ptr, new_size);
   if (memptr == NULL) {
     *error = lexical_realloc_error(new_size);
@@ -111,16 +116,16 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
 
 
 static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
-                                               unsigned char uniform * uniform * uniform ptr,
-                                               int64_t uniform * uniform old_size,
-                                               varying int64_t new_size) {
+                                          unsigned char uniform * uniform * uniform ptr,
+                                          int64_t uniform * uniform old_size,
+                                          varying int64_t new_size) {
   return lexical_realloc(error, ptr, old_size, reduce_max(new_size));
 }
 
 static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
-                                               unsigned char uniform * varying * uniform ptr,
-                                               int64_t uniform * varying old_size,
-                                               varying int64_t new_size) {
+                                          unsigned char uniform * varying * uniform ptr,
+                                          int64_t uniform * varying old_size,
+                                          varying int64_t new_size) {
   uniform int err = FUTHARK_SUCCESS;
   foreach_active(i){
     uniform unsigned char * uniform memptr = realloc(extract(*ptr,i), extract(new_size,i));
@@ -136,9 +141,9 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
 }
 
 static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
-                                        unsigned char uniform * varying * uniform ptr,
-                                        int64_t varying * uniform old_size,
-                                        varying int64_t new_size) {
+                                          unsigned char uniform * varying * uniform ptr,
+                                          int64_t varying * uniform old_size,
+                                          varying int64_t new_size) {
   uniform int err = FUTHARK_SUCCESS;
   foreach_active(i){
     uniform unsigned char * uniform memptr = realloc(extract(*ptr,i), extract(new_size,i));
@@ -154,16 +159,16 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
 }
 
 static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
-                                               unsigned char uniform * varying * uniform ptr,
-                                               size_t varying * uniform old_size,
-                                               varying int64_t new_size) {
+                                          unsigned char uniform * varying * uniform ptr,
+                                          size_t varying * uniform old_size,
+                                          varying int64_t new_size) {
   return lexical_realloc(error, ptr, (varying int64_t * uniform)old_size, new_size);
 }
 
 static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
-                                               unsigned char varying * uniform * uniform ptr,
-                                               size_t varying * uniform old_size,
-                                               uniform int64_t new_size) {
+                                          unsigned char varying * uniform * uniform ptr,
+                                          size_t varying * uniform old_size,
+                                          uniform int64_t new_size) {
   uniform int err = FUTHARK_SUCCESS;
   uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr, 
                                                         new_size*programCount);
@@ -179,18 +184,18 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
 }
 
 static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
-                                               unsigned char varying * uniform * uniform ptr,
-                                               size_t varying * uniform old_size,
-                                               varying int64_t new_size) {
+                                          unsigned char varying * uniform * uniform ptr,
+                                          size_t varying * uniform old_size,
+                                          varying int64_t new_size) {
   return lexical_realloc(error, ptr, old_size, reduce_max(new_size));
 }
 
 extern "C" unmasked uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
-					                                     uniform struct memblock * uniform lhs,
-					                                     uniform const char * uniform lhs_desc);
+                                               uniform struct memblock * uniform lhs,
+                                               uniform const char * uniform lhs_desc);
 
 static uniform int memblock_unref(uniform struct futhark_context * varying ctx,
-				                          uniform struct memblock * varying lhs,
+                                  uniform struct memblock * varying lhs,
                                   uniform const char * uniform lhs_desc)
 {
   uniform int err = 0;
@@ -202,7 +207,7 @@ static uniform int memblock_unref(uniform struct futhark_context * varying ctx,
   return err;
 }
 static uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
-				                          varying struct memblock * uniform lhs,
+                                  varying struct memblock * uniform lhs,
                                   uniform const char * uniform lhs_desc)
 {
   uniform int err = 0;
@@ -213,8 +218,8 @@ static uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
 
   foreach_active(i){
     err |= memblock_unref(ctx,
-		   &aos[i],
-		   lhs_desc);
+           &aos[i],
+           lhs_desc);
   }
 
   *lhs = aos[programIndex];
@@ -223,13 +228,13 @@ static uniform int memblock_unref(uniform struct futhark_context * uniform ctx,
 }
 
 extern "C" unmasked uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
-				                                       uniform struct memblock * uniform block,
-				                                       uniform int64_t size,
-				                                       uniform const char * uniform block_desc);
+                                               uniform struct memblock * uniform block,
+                                               uniform int64_t size,
+                                               uniform const char * uniform block_desc);
 
 static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
-				                          uniform struct memblock * varying block,
-				                          varying int64_t size,
+                                  uniform struct memblock * varying block,
+                                  varying int64_t size,
                                   uniform const char * uniform block_desc) {
   uniform int err = 0;
 
@@ -241,8 +246,8 @@ static uniform int memblock_alloc(uniform struct futhark_context * varying ctx,
 }
 
 static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
-				                          varying struct memblock * uniform block,
-				                          uniform int64_t size,
+                                  varying struct memblock * uniform block,
+                                  uniform int64_t size,
                                   uniform const char * uniform block_desc) {
   uniform int err = 0;
 
@@ -259,8 +264,8 @@ static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
 }
 
 static uniform int memblock_alloc(uniform struct futhark_context * uniform ctx,
-				                          varying struct memblock * uniform block,
-				                          varying int64_t size,
+                                  varying struct memblock * uniform block,
+                                  varying int64_t size,
                                   uniform const char * uniform block_desc) {
   uniform int err = 0;
 
@@ -381,3 +386,5 @@ memmove_sized(8)
 memmove_sized(16)
 memmove_sized(32)
 memmove_sized(64)
+
+// End of ispc_util.h.

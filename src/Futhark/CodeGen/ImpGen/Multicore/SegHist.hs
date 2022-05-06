@@ -324,6 +324,7 @@ subHistogram pat space histops num_histos kbody = do
     ifPrimType (Prim pt) f = f pt
     ifPrimType _ _ = pure ()
 
+-- Note: This isn't currently used anywhere.
 -- This implementation for a Segmented Hist only
 -- parallelize over the segments,
 -- where each segment is updated sequentially.

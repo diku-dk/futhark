@@ -1098,12 +1098,14 @@ static inline uniform float futrts_hypot32(uniform float x, uniform float y) {
 
 }
 
+extern "C" unmasked uniform float tgammaf(uniform float x);
 static inline uniform float futrts_gamma32(uniform float x) {
-  return futrts_ispc_gamma32(x);
+  return tgammaf(x);
 }
 
+extern "C" unmasked uniform float tgammaf(uniform float x);
 static inline uniform float futrts_lgamma32(uniform float x) {
-  return futrts_ispc_lgamma32(x);
+  return lgammaf(x);
 }
 
 extern "C" unmasked uniform float erff(uniform float);
@@ -1321,16 +1323,19 @@ static inline uniform double futrts_atan2_64(uniform double x, uniform double y)
   return atan2(x, y);
 }
 
+extern "C" unmasked uniform double hypot(uniform double x, uniform double y);
 static inline uniform double futrts_hypot64(uniform double x, uniform double y) {
-  return futrts_ispc_hypot64(x, y);
+  return hypot(x, y);
 }
 
+extern "C" unmasked uniform double tgamma(uniform double x);
 static inline uniform double futrts_gamma64(uniform double x) {
-  return futrts_ispc_gamma64(x);
+  return tgamma(x);
 }
 
+extern "C" unmasked uniform double lgamma(uniform double x);
 static inline uniform double futrts_lgamma64(uniform double x) {
-  return futrts_ispc_lgamma64(x);
+  return lgamma(x);
 }
 
 extern "C" unmasked uniform double erf(uniform double);
@@ -1444,11 +1449,11 @@ static inline uniform float btof_bool_f32(uniform bool x) {
 }
 
 static inline uniform int64_t futrts_to_bits64(uniform double x) {
-  return futrts_ispc_to_bits64(x);
+  return *((uniform int64_t* uniform)&x);
 }
 
 static inline uniform double futrts_from_bits64(uniform int64_t x) {
-  return futrts_ispc_from_bits64(x);
+  return *((uniform double* uniform)&x);
 }
 
 static inline uniform double fmod64(uniform double x, uniform double y) {
@@ -1700,12 +1705,14 @@ static inline uniform f16 futrts_hypot16(uniform f16 x, uniform f16 y) {
   return (uniform f16)futrts_hypot32((uniform float)x, (uniform float)y);
 }
 
+extern "C" unmasked uniform float tgammaf(uniform float x);
 static inline uniform f16 futrts_gamma16(uniform f16 x) {
-  return (uniform f16)futrts_ispc_gamma32((uniform float)x);
+  return (uniform f16)tgammaf((uniform float)x);
 }
 
+extern "C" unmasked uniform float lgammaf(uniform float x);
 static inline uniform f16 futrts_lgamma16(uniform f16 x) {
-  return (uniform f16)futrts_ispc_lgamma32((uniform float)x);
+  return (uniform f16)lgammaf((uniform float)x);
 }
 
 extern "C" unmasked uniform float erff(uniform float);
@@ -1766,3 +1773,5 @@ static inline uniform f16 fpconv_f32_f16(uniform float x) {
   return (uniform f16) x;
 }
 #endif
+
+// End of uniform.h.
