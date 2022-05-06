@@ -1078,6 +1078,24 @@ intrinsics =
                      arr_b $ shape [n]
                    ]
                    $ RetType [] $ uarr_a $ shape [k]
+               ),
+               ( "jvp2",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b]
+                   [ Scalar t_a `arr` Scalar t_b,
+                     Scalar t_a,
+                     Scalar t_a
+                   ]
+                   $ RetType [] $ Scalar $ tupleRecord [Scalar t_b, Scalar t_b]
+               ),
+               ( "vjp2",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b]
+                   [ Scalar t_a `arr` Scalar t_b,
+                     Scalar t_a,
+                     Scalar t_b
+                   ]
+                   $ RetType [] $ Scalar $ tupleRecord [Scalar t_b, Scalar t_a]
                )
              ]
           ++
@@ -1325,34 +1343,62 @@ modExpImports ModLambda {} = []
 
 -- | The set of module types used in any exported (non-local)
 -- declaration.
-progModuleTypes :: Ord vn => ProgBase f vn -> S.Set vn
-progModuleTypes = mconcat . map onDec . progDecs
+progModuleTypes :: ProgBase Info VName -> S.Set VName
+progModuleTypes prog = foldMap reach mtypes_used
   where
-    onDec (OpenDec x _) = onModExp x
-    onDec (ModDec md) =
-      maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
-    onDec SigDec {} = mempty
-    onDec TypeDec {} = mempty
-    onDec ValDec {} = mempty
-    onDec LocalDec {} = mempty
-    onDec ImportDec {} = mempty
+    -- Fixed point iteration.
+    reach v = S.singleton v <> maybe mempty (foldMap reach) (M.lookup v reachable_from_mtype)
 
-    onModExp ModVar {} = mempty
-    onModExp (ModParens p _) = onModExp p
-    onModExp ModImport {} = mempty
-    onModExp (ModDecs ds _) = mconcat $ map onDec ds
-    onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
-    onModExp (ModAscript me se _ _) = onModExp me <> onSigExp se
-    onModExp (ModLambda p r me _) =
-      onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
+    reachable_from_mtype = foldMap onDec $ progDecs prog
+      where
+        onDec OpenDec {} = mempty
+        onDec ModDec {} = mempty
+        onDec (SigDec sb) =
+          M.singleton (sigName sb) (onSigExp (sigExp sb))
+        onDec TypeDec {} = mempty
+        onDec ValDec {} = mempty
+        onDec (LocalDec d _) = onDec d
+        onDec ImportDec {} = mempty
 
-    onModParam = onSigExp . modParamType
+        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
+        onSigExp (SigParens e _) = onSigExp e
+        onSigExp (SigSpecs ss _) = foldMap onSpec ss
+        onSigExp (SigWith e _ _) = onSigExp e
+        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
 
-    onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
-    onSigExp (SigParens e _) = onSigExp e
-    onSigExp SigSpecs {} = mempty
-    onSigExp (SigWith e _ _) = onSigExp e
-    onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
+        onSpec ValSpec {} = mempty
+        onSpec TypeSpec {} = mempty
+        onSpec TypeAbbrSpec {} = mempty
+        onSpec (ModSpec vn e _ _) = S.singleton vn <> onSigExp e
+        onSpec (IncludeSpec e _) = onSigExp e
+
+    mtypes_used = foldMap onDec $ progDecs prog
+      where
+        onDec (OpenDec x _) = onModExp x
+        onDec (ModDec md) =
+          maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
+        onDec SigDec {} = mempty
+        onDec TypeDec {} = mempty
+        onDec ValDec {} = mempty
+        onDec LocalDec {} = mempty
+        onDec ImportDec {} = mempty
+
+        onModExp ModVar {} = mempty
+        onModExp (ModParens p _) = onModExp p
+        onModExp ModImport {} = mempty
+        onModExp (ModDecs ds _) = mconcat $ map onDec ds
+        onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
+        onModExp (ModAscript me se _ _) = onModExp me <> onSigExp se
+        onModExp (ModLambda p r me _) =
+          onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
+
+        onModParam = onSigExp . modParamType
+
+        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
+        onSigExp (SigParens e _) = onSigExp e
+        onSigExp SigSpecs {} = mempty
+        onSigExp (SigWith e _ _) = onSigExp e
+        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
 
 -- | Extract a leading @((name, namespace, file), remainder)@ from a
 -- documentation comment string.  These are formatted as

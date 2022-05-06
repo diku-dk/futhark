@@ -34,6 +34,7 @@ import Futhark.Test
 import Futhark.Test.Values
 import Futhark.Util
   ( directoryContents,
+    fancyTerminal,
     hashText,
     nubOrd,
     runProgramWithExitCode,
@@ -41,6 +42,8 @@ import Futhark.Util
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.ProgressBar
+import System.Console.ANSI (clearLine)
 import System.Directory
   ( copyFile,
     createDirectoryIfMissing,
@@ -750,10 +753,33 @@ processDirective env (DirectiveVideo e params) = do
     format = fromMaybe "webm" $ videoFormat params
     bmpfile dir j = dir </> printf "frame%010d.bmp" (j :: Int)
 
-    renderFrames dir (stepfun, closure) initial num_frames =
+    (progressStep, progressDone)
+      | fancyTerminal,
+        scriptVerbose (envOpts env) > 0 =
+          ( \j num_frames -> do
+              liftIO . T.putStr $
+                "\r"
+                  <> progressBar
+                    (ProgressBar 40 (fromIntegral num_frames) (fromIntegral j))
+                  <> "generating frame "
+                  <> prettyText j
+                  <> "/"
+                  <> prettyText num_frames
+                  <> " "
+              liftIO $ hFlush stdout,
+            liftIO $ do
+              T.putStr "\r"
+              clearLine
+          )
+      | otherwise =
+          (\_ _ -> pure (), pure ())
+
+    renderFrames dir (stepfun, closure) initial num_frames = do
       foldM_ frame initial [0 .. num_frames - 1]
+      progressDone
       where
         frame old_state j = do
+          progressStep j num_frames
           v <-
             evalExp literateBuiltin (envServer env)
               . Call (FuncFut stepfun)

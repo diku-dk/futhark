@@ -95,9 +95,9 @@ parPass f as = do
       let ((x', log), src') = runState (runPassM (f a)) src
        in (x', log, src')
 
--- | Apply some operation to the top-level constants.  Then applies an
--- operation to all the function function definitions, which are also
--- given the transformed constants so they can be brought into scope.
+-- | Apply some operation to the top-level constants. Then applies an
+-- operation to all the function definitions, which are also given the
+-- transformed constants so they can be brought into scope.
 -- The function definition transformations are run in parallel (with
 -- 'parPass'), since they cannot affect each other.
 intraproceduralTransformationWithConsts ::

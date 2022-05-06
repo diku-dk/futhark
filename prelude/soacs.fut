@@ -48,7 +48,7 @@ import "zip"
 --
 -- **Span:** *O(S(f))*
 def map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
-  intrinsics.map (f, as) :> *[n]x
+  intrinsics.map (f, as)
 
 -- | Apply the given function to each element of a single array.
 --
@@ -150,7 +150,7 @@ def reduce_by_index_3d 'a [n] [m] [k] [l] (dest : *[m][k][l]a) (f : a -> a -> a)
 --
 -- **Span:** *O(log(n) ✕ W(op))*
 def scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
-  intrinsics.scan (op, ne, as) :> *[n]a
+  intrinsics.scan (op, ne, as)
 
 -- | Remove all those elements of `as` that do not satisfy the
 -- predicate `p`.
@@ -219,7 +219,7 @@ def reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as
 --
 -- **Span:** *O(S(f))*
 def map_stream [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
-  intrinsics.map_stream (f, as) :> *[n]b
+  intrinsics.map_stream (f, as)
 
 -- | Similar to `map_stream`@term, but the chunks do not necessarily
 -- correspond to subsequences of the original array (they may be
@@ -229,7 +229,7 @@ def map_stream [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
 --
 -- **Span:** *O(S(f))*
 def map_stream_per [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
-  intrinsics.map_stream_per (f, as) :> *[n]b
+  intrinsics.map_stream_per (f, as)
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.
@@ -278,7 +278,7 @@ def any [n] 'a (f: a -> bool) (as: [n]a): bool =
 --
 -- **Span:** *O(1)*
 def scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
-  intrinsics.scatter (dest, is, vs) :> *[m]t
+  intrinsics.scatter (dest, is, vs)
 
 -- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
 -- array.
@@ -287,7 +287,7 @@ def scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
 --
 -- **Span:** *O(1)*
 def scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *[m][n]t =
-  intrinsics.scatter_2d (dest, is, vs) :> *[m][n]t
+  intrinsics.scatter_2d (dest, is, vs)
 
 -- | `scatter_3d as is vs` is the equivalent of a `scatter` on a 3-dimensional
 -- array.
@@ -296,4 +296,4 @@ def scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *
 --
 -- **Span:** *O(1)*
 def scatter_3d 't [m] [n] [o] [l] (dest: *[m][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[m][n][o]t =
-  intrinsics.scatter_3d (dest, is, vs) :> *[m][n][o]t
+  intrinsics.scatter_3d (dest, is, vs)

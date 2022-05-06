@@ -31,35 +31,45 @@ tileLoops =
     onStms scope stms =
       modifyNameSource $
         runState $
-          runReaderT (optimiseStms stms) scope
+          runReaderT (optimiseStms (M.empty, M.empty) stms) scope
 
-optimiseBody :: Body GPU -> TileM (Body GPU)
-optimiseBody (Body () stms res) =
-  Body () <$> optimiseStms stms <*> pure res
+optimiseBody :: Env -> Body GPU -> TileM (Body GPU)
+optimiseBody env (Body () stms res) =
+  Body () <$> optimiseStms env stms <*> pure res
 
-optimiseStms :: Stms GPU -> TileM (Stms GPU)
-optimiseStms stms =
-  localScope (scopeOf stms) $
-    mconcat <$> mapM optimiseStm (stmsToList stms)
+optimiseStms :: Env -> Stms GPU -> TileM (Stms GPU)
+optimiseStms env stms =
+  localScope (scopeOf stms) $ do
+    (_, stms') <- foldM foldfun (env, mempty) $ stmsToList stms
+    pure stms'
+  where
+    foldfun :: (Env, Stms GPU) -> Stm GPU -> TileM (Env, Stms GPU)
+    foldfun (e, ss) s = do
+      (e', s') <- optimiseStm e s
+      pure (e', ss <> s')
 
-optimiseStm :: Stm GPU -> TileM (Stms GPU)
-optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
-  res3dtiling <- doRegTiling3D stm
-  case res3dtiling of
-    Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
-    Nothing -> do
-      blkRegTiling_res <- mmBlkRegTiling stm
-      case blkRegTiling_res of
-        Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
-        Nothing -> localScope (scopeOfSegSpace space) $ do
-          (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
-          pure $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+optimiseStm :: Env -> Stm GPU -> TileM (Env, Stms GPU)
+optimiseStm env stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
+  res3dtiling <- localScope (scopeOfSegSpace space) $ doRegTiling3D stm
+  stms' <-
+    case res3dtiling of
+      Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
+      Nothing -> do
+        blkRegTiling_res <- mmBlkRegTiling env stm
+        case blkRegTiling_res of
+          Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
+          Nothing -> localScope (scopeOfSegSpace space) $ do
+            (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
+            pure $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+  pure (env, stms')
   where
     initial_variance = M.map mempty $ scopeOfSegSpace space
-optimiseStm (Let pat aux e) =
-  pure <$> (Let pat aux <$> mapExpM optimise e)
+optimiseStm env (Let pat aux e) = do
+  env' <- changeEnv env (head $ patNames pat) e
+  e' <- mapExpM (optimise env') e
+  pure (env', oneStm $ Let pat aux e')
   where
-    optimise = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody}
+    optimise env' = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody env'}
 
 tileInKernelBody ::
   Names ->
@@ -618,9 +628,6 @@ protectOutOfBounds desc in_bounds ts m = do
       <$> (zip <$> mapM lookupType m_body_free <*> pure m_body_free)
   let blank t = maybe (eBlank t) (pure . BasicOp . SubExp . Var) $ lookup t t_to_v
   letTupExp desc =<< eIf (toExp in_bounds) (pure m_body) (eBody $ map blank ts)
-  where
-    isAcc Acc {} = True
-    isAcc _ = False
 
 postludeGeneric ::
   Tiling ->

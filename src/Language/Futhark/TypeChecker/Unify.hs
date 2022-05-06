@@ -8,7 +8,7 @@
 -- blocks.
 module Language.Futhark.TypeChecker.Unify
   ( Constraint (..),
-    Usage,
+    Usage (..),
     mkUsage,
     mkUsage',
     Level,

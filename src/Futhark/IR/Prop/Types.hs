@@ -13,6 +13,7 @@ module Futhark.IR.Prop.Types
     staticShapes,
     staticShapes1,
     primType,
+    isAcc,
     arrayOf,
     arrayOfRow,
     arrayOfShape,
@@ -137,7 +138,7 @@ unique :: TypeBase shape Uniqueness -> Bool
 unique = (== Unique) . uniqueness
 
 -- | Convert types with non-existential shapes to types with
--- non-existential shapes.  Only the representation is changed, so all
+-- existential shapes.  Only the representation is changed, so all
 -- the shapes will be 'Free'.
 staticShapes :: [TypeBase Shape u] -> [TypeBase ExtShape u]
 staticShapes = map staticShapes1
@@ -287,12 +288,17 @@ primType :: TypeBase shape u -> Bool
 primType Prim {} = True
 primType _ = False
 
+-- | Is this an accumulator?
+isAcc :: TypeBase shape u -> Bool
+isAcc Acc {} = True
+isAcc _ = False
+
 -- | Returns the bottommost type of an array.  For @[][]i32@, this
 -- would be @i32@.  If the given type is not an array, it is returned.
 elemType :: TypeBase shape u -> PrimType
 elemType (Array t _ _) = t
 elemType (Prim t) = t
-elemType Acc {} = error "Acc"
+elemType Acc {} = error "elemType Acc"
 elemType Mem {} = error "elemType Mem"
 
 -- | Swap the two outer dimensions of the type.
