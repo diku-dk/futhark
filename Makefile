@@ -5,7 +5,7 @@
 
 PREFIX?=$(HOME)/.local
 
-.PHONY: build install docs clean
+.PHONY: all configure build install docs check check-commit clean
 
 all: build
 
