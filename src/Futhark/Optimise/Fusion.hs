@@ -7,8 +7,6 @@
 module Futhark.Optimise.Fusion (fuseSOACs) where
 
 import Control.Monad.State
-import Data.DList (apply)
-import Data.Foldable (foldlM)
 import Data.Graph.Inductive.Graph
 import qualified Data.Graph.Inductive.Query.DFS as Q
 import qualified Data.List as L
@@ -16,19 +14,17 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Debug.Trace
 import qualified Futhark.Analysis.Alias as Alias
-import Futhark.Analysis.HORep.SOAC
 import qualified Futhark.Analysis.HORep.SOAC as H
 import Futhark.Construct
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
-import Futhark.IR.SOACS.SOAC (SOAC (Screma))
-import Futhark.Optimise.Fusion.LoopKernel (pullRearrange, pushRearrange, setInputs, tryFusion)
+import Futhark.Optimise.Fusion.LoopKernel (pullRearrange, pushRearrange, tryFusion)
 import Futhark.Optimise.GraphRep
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (chunk, splitAt3)
+import Futhark.Util (splitAt3)
 
 -- extra util - scans reduces are "a->a->a" - so half of those are the amount of inputs
 scanInput :: [Scan SOACS] -> Int
@@ -254,7 +250,7 @@ pushRearrangeNodeT trs nodeT = case nodeT of
     scope <- askScope
     -- possible bug: only 1-1 fusion
     let soac' = trace (show trs) $ H.setInputs (map (internalizeOutput . H.setInputTransforms trs) (H.inputs soac)) soac
-    maybeSoac <- tryFusion (pushRearrange (map H.inputArray (H.inputs soac)) soac' noTransforms) scope
+    maybeSoac <- tryFusion (pushRearrange (map H.inputArray (H.inputs soac)) soac' H.noTransforms) scope
     case maybeSoac of
       Just (s2, ts) ->
         pure $ Just $ SoacNode s2 (map (internalizeOutput . H.addTransforms ts) outputs) aux
@@ -418,7 +414,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                           if not doFusion
                             then return Nothing
                             else do
-                              (stream1, is_extra_1) <- soacToStream soac1
+                              (stream1, is_extra_1) <- H.soacToStream soac1
                               if stream1 /= soac1
                                 then do
                                   is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
@@ -546,7 +542,7 @@ hFuseNodeT :: NodeT -> NodeT -> FusionEnvM (Maybe NodeT)
 hFuseNodeT s1 s2
   | Just soac1 <- getSoac s1,
     Just soac2 <- getSoac s2,
-    hasNoDifferingInputs (inputs soac1) (inputs soac2) =
+    hasNoDifferingInputs (H.inputs soac1) (H.inputs soac2) =
       case (s1, s2) of
         ( SoacNode soac1 pats1 aux1,
           SoacNode soac2 pats2 aux2
