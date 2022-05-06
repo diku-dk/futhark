@@ -19,7 +19,7 @@ import Futhark.Construct
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
-import Futhark.Optimise.Fusion.LoopKernel (pullRearrange, pushRearrange, tryFusion)
+import Futhark.Optimise.Fusion.LoopKernel (mergeForms, pullRearrange, pushRearrange, tryFusion)
 import Futhark.Optimise.GraphRep
 import Futhark.Pass
 import Futhark.Transform.Rename
@@ -452,8 +452,8 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                   --     fuseNodeT edgs infusible
                   --       (SoacNode s1' pats1 aux1, e1s)
                   --       (SoacNode s2' pats2 aux2, e2s)
-                  ( H.Stream _w1 sform1 lam1 nes1 i1,
-                    H.Stream _w2 sform2 lam2 nes2 i2
+                  ( H.Stream _w1 sform1 _lam1 _nes1 _i1,
+                    H.Stream _w2 sform2 _lam2 _nes2 _i2
                     )
                       | (sform1 == Sequential) /= (sform2 == Sequential) ->
                           pure Nothing
@@ -496,7 +496,7 @@ vFuseLambdas ::
   [H.Input] ->
   [VName] ->
   (Lambda SOACS, [H.Input])
-vFuseLambdas infusible lam_1 i1 o1 lam_2 i2 o2 = (lam, fused_inputs)
+vFuseLambdas infusible lam_1 i1 o1 lam_2 i2 _o2 = (lam, fused_inputs)
   where
     (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
     (lam_1_output, _) = mapT (namesFromRes . resFromLambda) (lam_1, lam_2)
@@ -540,9 +540,9 @@ resFromLambda = bodyResult . lambdaBody
 
 hFuseNodeT :: NodeT -> NodeT -> FusionEnvM (Maybe NodeT)
 hFuseNodeT s1 s2
-  | Just soac1 <- getSoac s1,
-    Just soac2 <- getSoac s2,
-    hasNoDifferingInputs (H.inputs soac1) (H.inputs soac2) =
+  | Just inputs1 <- H.inputs <$> getSoac s1,
+    Just inputs2 <- H.inputs <$> getSoac s2,
+    hasNoDifferingInputs inputs1 inputs2 =
       case (s1, s2) of
         ( SoacNode soac1 pats1 aux1,
           SoacNode soac2 pats2 aux2
@@ -779,34 +779,3 @@ makeCopiesOfConsAliased = mapAcross copyAlised
 --             let nodeT2 = SNode (Let (basicPat new_extra_inputs <> inputs) sz (Op stream)) at
 --             pure (incoming, n, nodeT2, outputs)
 --       _ -> pure ctx
-
--- copied, todo: use as import if possible
-getStreamOrder :: StreamForm rep -> StreamOrd
-getStreamOrder (Parallel o _ _) = o
-getStreamOrder Sequential = InOrder
-
--- also copied, todo: use as import if possible
-toSeqStream :: H.SOAC SOACS -> H.SOAC SOACS
-toSeqStream s@(H.Stream _ Sequential _ _ _) = s
-toSeqStream (H.Stream w Parallel {} l acc is) =
-  H.Stream w Sequential l acc is
-toSeqStream _ = error "toSeqStream expects a stream, but given a SOAC."
-
--- also copied, todo: use as import if possible
-mergeForms :: StreamForm SOACS -> StreamForm SOACS -> StreamForm SOACS
-mergeForms Sequential Sequential = Sequential
-mergeForms (Parallel _ comm2 lam2r) (Parallel o1 comm1 lam1r) =
-  Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
-mergeForms _ _ = error "fusing sequential"
-
--- also copied, todo: use as import if possible
-mergeReduceOps :: Lambda rep -> Lambda rep -> Lambda rep
-mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
-  let body' =
-        Body
-          (bodyDec bdy1)
-          (bodyStms bdy1 <> bodyStms bdy2)
-          (bodyResult bdy1 ++ bodyResult bdy2)
-      (len1, len2) = (length rtp1, length rtp2)
-      par' = take len1 par1 ++ take len2 par2 ++ drop len1 par1 ++ drop len2 par2
-   in Lambda par' body' (rtp1 ++ rtp2)

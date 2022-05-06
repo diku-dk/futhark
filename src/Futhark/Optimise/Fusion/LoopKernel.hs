@@ -14,6 +14,7 @@ module Futhark.Optimise.Fusion.LoopKernel
     pullRearrange,
     pushRearrange,
     iswim,
+    mergeForms,
     SOAC,
     MapNest,
   )
@@ -518,7 +519,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       -- and recursively perform stream-stream fusion.
       (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
       soac_p'' <- case form2 of
-        Sequential {} -> toSeqStream soac_p'
+        Sequential {} -> maybe (fail "not a stream") pure (toSeqStream soac_p')
         _ -> pure soac_p'
       if soac_p' == soac_p
         then fail "SOAC could not be turned into stream."
@@ -540,7 +541,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
       (soac_c', newacc_ids) <- SOAC.soacToStream soac_c
       when (soac_c' == soac_c) $ fail "SOAC could not be turned into stream."
       soac_c'' <- case form_p of
-        Sequential -> toSeqStream soac_c'
+        Sequential -> maybe (fail "not a stream") pure (toSeqStream soac_c')
         _ -> pure soac_c'
 
       fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed $
@@ -598,25 +599,26 @@ fuseStreamHelper
             res_lam'' = res_lam' {lambdaParams = chunk1 : lambdaParams res_lam'}
             unfus_accs = take (length nes1) outVars
             unfus_arrs = filter (`notElem` unfus_accs) $ filter (`nameIn` unfus_set) outVars
-        res_form <- mergeForms form2 form1
+        let res_form = mergeForms form2 form1
         pure
           ( unfus_accs ++ out_kernms ++ unfus_arrs,
             SOAC.Stream w2 res_form res_lam'' (nes1 ++ nes2) new_inp
           )
-    where
-      mergeForms Sequential Sequential = pure Sequential
-      mergeForms (Parallel _ comm2 lam2r) (Parallel o1 comm1 lam1r) =
-        pure $ Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
-      mergeForms _ _ = fail "Fusing sequential to parallel stream disallowed!"
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 
+mergeForms :: StreamForm SOACS -> StreamForm SOACS -> StreamForm SOACS
+mergeForms Sequential Sequential = Sequential
+mergeForms (Parallel _ comm2 lam2r) (Parallel o1 comm1 lam1r) =
+  Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
+mergeForms _ _ = error "Fusing sequential to parallel stream disallowed!"
+
 -- | If a Stream is passed as argument then it converts it to a
---   Sequential Stream; Otherwise it FAILS!
-toSeqStream :: SOAC -> TryFusion SOAC
-toSeqStream s@(SOAC.Stream _ Sequential _ _ _) = pure s
+--   Sequential Stream.
+toSeqStream :: SOAC -> Maybe SOAC
+toSeqStream s@(SOAC.Stream _ Sequential _ _ _) = Just s
 toSeqStream (SOAC.Stream w Parallel {} l acc inps) =
-  pure $ SOAC.Stream w Sequential l acc inps
-toSeqStream _ = fail "toSeqStream expects a stream, but given a SOAC."
+  Just $ SOAC.Stream w Sequential l acc inps
+toSeqStream _ = Nothing
 
 -- Here follows optimizations and transforms to expose fusability.
 
