@@ -58,7 +58,7 @@ static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying 
   }                                                                                  \
   *old = val;                                                                        \
   return 0;                                                                          \
-}                                                                                    
+}
 
 make_atomic_compare_exchange_wrapper(int32)
 make_atomic_compare_exchange_wrapper(int64)
@@ -170,7 +170,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
                                           size_t varying * uniform old_size,
                                           uniform int64_t new_size) {
   uniform int err = FUTHARK_SUCCESS;
-  uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr, 
+  uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr,
                                                         new_size*programCount);
   if (memptr == NULL) {
     *error = lexical_realloc_error(new_size);
@@ -179,7 +179,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
     *ptr = (varying unsigned char * uniform)memptr;
     *old_size = new_size;
   }
-  
+
   return err;
 }
 
@@ -342,46 +342,46 @@ static inline void memmove_##dim(varying uint8 * uniform dst, uniform uint8 * va
         dstp[i] = srcp[i];                                                                                      \
     }                                                                                                           \
 }                                                                                                               \
-static inline void memmove_##dim(uniform uint8 * varying dst, varying uint8 * uniform src, uniform int64_t n) { \                                                                                                                                                                                                                     
-    varying uint##dim * uniform srcp = (varying uint##dim * uniform) src;                                       \                                                                
-    uniform uint##dim * varying dstp = (uniform uint##dim * varying) dst;                                       \                                                                
-    for (uniform int64_t i = 0; i < n / (dim / 8); i++) {                                                       \                                            
-        dstp[i] = srcp[i];                                                                                      \                         
-    }                                                                                                           \    
+static inline void memmove_##dim(uniform uint8 * varying dst, varying uint8 * uniform src, uniform int64_t n) { \
+    varying uint##dim * uniform srcp = (varying uint##dim * uniform) src;                                       \
+    uniform uint##dim * varying dstp = (uniform uint##dim * varying) dst;                                       \
+    for (uniform int64_t i = 0; i < n / (dim / 8); i++) {                                                       \
+        dstp[i] = srcp[i];                                                                                      \
+    }                                                                                                           \
 }                                                                                                               \
-static inline void memmove_##dim(varying uint8 * uniform dst, varying uint8 * uniform src, uniform int64_t n) { \                                                                                                          
-    varying uint##dim * uniform srcp = (varying uint##dim * uniform) src;                                       \                                                                
-    varying uint##dim * uniform dstp = (varying uint##dim * uniform) dst;                                       \                                                                
-    for (uniform int64_t i = 0; i < n / (dim / 8); i++) {                                                       \                                            
-        dstp[i] = srcp[i];                                                                                      \                         
-    }                                                                                                           \    
+static inline void memmove_##dim(varying uint8 * uniform dst, varying uint8 * uniform src, uniform int64_t n) { \
+    varying uint##dim * uniform srcp = (varying uint##dim * uniform) src;                                       \
+    varying uint##dim * uniform dstp = (varying uint##dim * uniform) dst;                                       \
+    for (uniform int64_t i = 0; i < n / (dim / 8); i++) {                                                       \
+        dstp[i] = srcp[i];                                                                                      \
+    }                                                                                                           \
 }                                                                                                               \
-static inline void memmove_##dim(varying uint8 * varying dst, uniform uint8 * varying src, uniform int64_t n) { \                                                                                                          
-    foreach_unique (ptr in dst) {                                                                               \                                
-        memmove_##dim(ptr, src, n);                                                                             \                              
-    }                                                                                                           \    
+static inline void memmove_##dim(varying uint8 * varying dst, uniform uint8 * varying src, uniform int64_t n) { \
+    foreach_unique (ptr in dst) {                                                                               \
+        memmove_##dim(ptr, src, n);                                                                             \
+    }                                                                                                           \
 }                                                                                                               \
-static inline void memmove_##dim(uniform uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) { \                                                                                                          
-    foreach_unique (ptr in src) {                                                                               \                                
-        memmove_##dim(dst, ptr, n);                                                                             \                              
-    }                                                                                                           \    
+static inline void memmove_##dim(uniform uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) { \
+    foreach_unique (ptr in src) {                                                                               \
+        memmove_##dim(dst, ptr, n);                                                                             \
+    }                                                                                                           \
 }                                                                                                               \
-static inline void memmove_##dim(varying uint8 * varying dst, varying uint8 * uniform src, uniform int64_t n) { \                                                                                                          
-    foreach_unique (ptr in dst) {                                                                               \                                
-        memmove_##dim(ptr, src, n);                                                                             \                              
-    }                                                                                                           \    
+static inline void memmove_##dim(varying uint8 * varying dst, varying uint8 * uniform src, uniform int64_t n) { \
+    foreach_unique (ptr in dst) {                                                                               \
+        memmove_##dim(ptr, src, n);                                                                             \
+    }                                                                                                           \
 }                                                                                                               \
-static inline void memmove_##dim(varying uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) { \                                                                                                          
-    if (reduce_equal((varying int64_t)dst)) {                                                                   \                                            
-        foreach_unique (ptr in src) {                                                                           \                                    
-            memmove_##dim(dst, ptr, n);                                                                         \                                  
-        }                                                                                                       \        
-    } else {                                                                                                    \           
-        foreach_unique (ptr in dst) {                                                                           \                                    
-            memmove_##dim(ptr, src, n);                                                                         \                                  
-        }                                                                                                       \        
-    }                                                                                                           \    
-}                                                                                                           
+static inline void memmove_##dim(varying uint8 * varying dst, varying uint8 * varying src, uniform int64_t n) { \
+    if (reduce_equal((varying int64_t)dst)) {                                                                   \
+        foreach_unique (ptr in src) {                                                                           \
+            memmove_##dim(dst, ptr, n);                                                                         \
+        }                                                                                                       \
+    } else {                                                                                                    \
+        foreach_unique (ptr in dst) {                                                                           \
+            memmove_##dim(ptr, src, n);                                                                         \
+        }                                                                                                       \
+    }                                                                                                           \
+}
 memmove_sized(8)
 memmove_sized(16)
 memmove_sized(32)
