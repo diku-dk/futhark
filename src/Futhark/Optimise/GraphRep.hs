@@ -4,7 +4,51 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Optimise.GraphRep (module Futhark.Optimise.GraphRep) where
+module Futhark.Optimise.GraphRep
+  ( EdgeT (..),
+    NodeT (..),
+    FusionEnvM,
+    runFusionEnvM,
+    FusionEnv (..),
+    freshFusionEnv,
+    DepContext,
+    DepGraphAug,
+    DepGraph,
+    mkDepGraph,
+    DepNode,
+    pprg,
+    getName,
+    getSoac,
+    isScanRed,
+    findTransformsBetween,
+    isTrDep,
+    isRealNode,
+    nodeFromLNode,
+    internalizeOutput,
+    finalizeNode,
+    mergedContext,
+    mapAcross,
+    genEdges,
+    edgesBetween,
+    keepTrying,
+    isDep,
+    isInf,
+    applyAugs,
+    makeMapping,
+    namesFromRes,
+    initialGraphConstruction,
+    emptyGraph,
+    isArray,
+    depsFromEdge,
+    contractEdge,
+    isCons,
+    updateTrEdges,
+    mapT,
+    makeMap,
+    fuseMaps,
+    hasNoDifferingInputs,
+  )
+where
 
 import Control.Monad.Reader (ReaderT (runReaderT))
 import Control.Monad.State
@@ -281,14 +325,6 @@ makeMapping g = do
     gen_dep_list :: DepNode -> [(VName, G.Node)]
     gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
 
-makeEdges :: [EdgeT] -> FusionEnvM [(G.Node, EdgeT)]
-makeEdges edgs = do
-  mapping <- gets producerMapping
-  pure $ map (makeEdge mapping) edgs
-  where
-    makeEdge mp e =
-      let node = mp M.! getName e in (node, e)
-
 -- creates deps for the given nodes on the graph using the edgeGenerator
 genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug
 genEdges l_stms edge_fun g = do
@@ -453,9 +489,6 @@ addTransforms orig_g =
 --   let edgs' = map (mapEdgeT (substituteNames m)) edgs in
 --   pure $ insEdges edgs' $ foldl (flip ($)) g (map delLEdge edgs)
 
-mapEdgeT :: (EdgeT -> EdgeT) -> DepEdge -> DepEdge
-mapEdgeT f (n1, n2, e) = (n1, n2, f e)
-
 updateNode :: G.Node -> (NodeT -> Maybe NodeT) -> DepGraphAug
 updateNode n f g =
   case G.context g n of
@@ -492,23 +525,8 @@ stmFromNode _ = []
 nodeFromLNode :: DepNode -> G.Node
 nodeFromLNode = fst
 
-lNodeFromNode :: DepGraph -> G.Node -> DepNode
-lNodeFromNode g n = G.labNode' (G.context g n)
-
-lFromNode :: DepGraph -> G.Node -> NodeT
-lFromNode g n = label $ lNodeFromNode g n
-
-labFromEdge :: DepGraph -> DepEdge -> DepNode
-labFromEdge g (n1, _, _) = lNodeFromNode g n1
-
 depsFromEdge :: DepEdge -> VName
 depsFromEdge = getName . G.edgeLabel
-
-input :: DepGraph -> DepNode -> [DepNode]
-input g node = map (G.labNode' . G.context g) $ G.suc g $ nodeFromLNode node
-
-output :: DepGraph -> DepNode -> [DepNode]
-output g node = map (G.labNode' . G.context g) $ G.pre g $ nodeFromLNode node
 
 edgesBetween :: DepGraph -> G.Node -> G.Node -> [DepEdge]
 edgesBetween g n1 n2 = G.labEdges $ G.subgraph [n1, n2] g
@@ -705,9 +723,6 @@ genOutTransformStms inps = do
 
 inputToIdent :: H.Input -> Ident
 inputToIdent (H.Input _ vn tp) = Ident vn tp
-
-inputToIdent2 :: H.Input -> Ident
-inputToIdent2 i@(H.Input _ vn _) = Ident vn (H.inputType i)
 
 finalizeNode :: NodeT -> FusionEnvM [Stm SOACS]
 finalizeNode nt = case nt of
