@@ -58,6 +58,7 @@ let
                 enableSharedLibraries = false;
                 enableLibraryProfiling = false;
                 configureFlags = [
+                  "--ghc-option=-Werror"
                   "--ghc-option=-optl=-static"
                   "--ghc-option=-split-sections"
                   "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
