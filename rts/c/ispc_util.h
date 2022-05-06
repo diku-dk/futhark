@@ -40,24 +40,33 @@ make_extract(struct memblock)
 // Handling of atomics
 #define make_atomic_compare_exchange_wrapper(ty)                                     \
 static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
-                               uniform ty * uniform old,                             \
+                                                           uniform ty * uniform old, \
                                                            const uniform ty val){    \
   uniform ty actual = atomic_compare_exchange_global(mem, *old, val);                \
   if (actual == *old){                                                               \
     return 1;                                                                        \
   }                                                                                  \
-  *old = val;                                                                        \
+  *old = actual;                                                                     \
   return 0;                                                                          \
 }                                                                                    \
 static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying mem, \
-                              varying ty * uniform old,                              \
-                              const varying ty val){                                 \
+                                                           varying ty * uniform old, \
+                                                           const varying ty val){    \
   varying ty actual = atomic_compare_exchange_global(mem, *old, val);                \
+  bool res = 0;                                                                      \
   if(actual == *old){                                                                \
-    return 1;                                                                        \
+    res = 1;                                                                         \
+  } else {                                                                           \
+    *old = actual;                                                                   \
   }                                                                                  \
-  *old = val;                                                                        \
-  return 0;                                                                          \
+  return res;                                                                        \
+}                                                                                    \
+static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
+                                                           uniform ty * uniform old, \
+                                                           const varying ty val){    \
+  uniform ty v = 0;                                                                  \
+  foreach_active (i) v = extract(val, i);                                            \
+  return atomic_compare_exchange_wrapper(mem, old, v);                               \
 }
 
 make_atomic_compare_exchange_wrapper(int32)
