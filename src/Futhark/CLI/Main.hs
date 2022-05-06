@@ -22,8 +22,8 @@ import qualified Futhark.CLI.LSP as LSP
 import qualified Futhark.CLI.Literate as Literate
 import qualified Futhark.CLI.Misc as Misc
 import qualified Futhark.CLI.Multicore as Multicore
-import qualified Futhark.CLI.MulticoreWASM as MulticoreWASM
 import qualified Futhark.CLI.MulticoreISPC as MulticoreISPC
+import qualified Futhark.CLI.MulticoreWASM as MulticoreWASM
 import qualified Futhark.CLI.OpenCL as OpenCL
 import qualified Futhark.CLI.Pkg as Pkg
 import qualified Futhark.CLI.PyOpenCL as PyOpenCL
