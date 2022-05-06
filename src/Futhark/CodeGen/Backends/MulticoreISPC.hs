@@ -874,7 +874,7 @@ compileOp op = MC.compileOp op
 
 cachingMemoryISPC ::
   M.Map VName Space ->
-  ([C.BlockItem] -> [C.Stm] -> GC.CompilerM op s a) ->
+  ([C.BlockItem] -> [C.Stm] -> [(VName, VName)] -> GC.CompilerM op s a) ->
   GC.CompilerM op s a
 cachingMemoryISPC lexical f = do
   -- We only consider lexical 'DefaultSpace' memory blocks to be
@@ -903,7 +903,7 @@ cachingMemoryISPC lexical f = do
       freeCached (mem, _) =
         [C.cstm|free($id:mem);|]
 
-  local lexMem $ f (concatMap declCached cached') (map freeCached cached')
+  local lexMem $ f (concatMap declCached cached') (map freeCached cached') cached'
 
 -- Variability analysis
 type Dependencies = M.Map VName Names
