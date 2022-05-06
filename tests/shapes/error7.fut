@@ -1,6 +1,6 @@
 -- Ambiguous size of sum type.
 -- ==
--- error: ambiguous
+-- error: Ambiguous.*anonymous size in type expression
 
 type~ sum = #foo ([]i32) | #bar ([]i32)
 

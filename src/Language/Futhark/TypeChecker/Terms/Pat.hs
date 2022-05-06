@@ -223,6 +223,9 @@ patternDims (PatAscription p (TypeDecl _ (Info t)) _) =
     dimIdent _ NamedDim {} = Nothing
 patternDims _ = []
 
+sizeBinderToParam :: SizeBinder VName -> UncheckedTypeParam
+sizeBinderToParam (SizeBinder v loc) = TypeParamDim (baseName v) loc
+
 -- | Check and bind a @let@-pattern.
 bindingPat ::
   [SizeBinder VName] ->
@@ -231,7 +234,7 @@ bindingPat ::
   (Pat -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkForDuplicateNames [p]
+  checkForDuplicateNames (map sizeBinderToParam sizes) [p]
   checkPat sizes p t $ \p' -> binding (S.toList $ patIdents p') $ do
     -- Perform an observation of every declared dimension.  This
     -- prevents unused-name warnings for otherwise unused dimensions.
@@ -388,7 +391,7 @@ checkPat ::
   (Pat -> TermTypeM a) ->
   TermTypeM a
 checkPat sizes p t m = do
-  checkForDuplicateNames [p]
+  checkForDuplicateNames (map sizeBinderToParam sizes) [p]
   p' <- onFailure (CheckingPat p t) $ checkPat' sizes p t
 
   let explicit = mustBeExplicitInType $ patternStructType p'
@@ -408,7 +411,7 @@ bindingParams ::
   ([TypeParam] -> [Pat] -> TermTypeM a) ->
   TermTypeM a
 bindingParams tps orig_ps m = do
-  checkForDuplicateNames orig_ps
+  checkForDuplicateNames tps orig_ps
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
     let descend ps' (p : ps) =
           checkPat [] p NoneInferred $ \p' ->

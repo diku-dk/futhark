@@ -157,10 +157,12 @@ module Futhark.IR.Syntax
     stmsFromList,
     stmsToList,
     stmsHead,
+    stmsLast,
     subExpRes,
     subExpsRes,
     varRes,
     varsRes,
+    subExpResVName,
   )
 where
 
@@ -245,6 +247,12 @@ stmsHead stms = case Seq.viewl stms of
   stm Seq.:< stms' -> Just (stm, stms')
   Seq.EmptyL -> Nothing
 
+-- | The last statement in the sequence, if any.
+stmsLast :: Stms lore -> Maybe (Stms lore, Stm lore)
+stmsLast stms = case Seq.viewr stms of
+  stms' Seq.:> stm -> Just (stms', stm)
+  Seq.EmptyR -> Nothing
+
 -- | A pairing of a subexpression and some certificates.
 data SubExpRes = SubExpRes
   { resCerts :: Certs,
@@ -267,6 +275,11 @@ subExpsRes = map subExpRes
 -- | Construct a 'Result' from variable names.
 varsRes :: [VName] -> Result
 varsRes = map varRes
+
+-- | The 'VName' of a 'SubExpRes', if it exists.
+subExpResVName :: SubExpRes -> Maybe VName
+subExpResVName (SubExpRes _ (Var v)) = Just v
+subExpResVName _ = Nothing
 
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
@@ -363,18 +376,14 @@ data BasicOp
     Update Safety VName (Slice SubExp) SubExp
   | FlatIndex VName (FlatSlice SubExp)
   | FlatUpdate VName (FlatSlice SubExp) VName
-  | -- | @
-    -- concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@.
-    -- @
+  | -- | @concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@
     --
     -- Concatenates the non-empty list of 'VName' resulting in an
     -- array of length t'SubExp'. The 'Int' argument is used to
     -- specify the dimension along which the arrays are
     -- concatenated. For instance:
     --
-    -- @
-    -- concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]
-    -- @
+    -- @concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]@
     Concat Int (NonEmpty VName) SubExp
   | -- | Copy the given array.  The result will not alias anything.
     Copy VName

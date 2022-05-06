@@ -349,26 +349,28 @@ checkTypeExp te = do
   checkForDuplicateNamesInType te
   evalTypeExp te
 
--- | Check for duplication of names inside a pattern group.  Produces
--- a description of all names used in the pattern group.
+-- | Check for duplication of names inside a binding group.
 checkForDuplicateNames ::
-  MonadTypeChecker m =>
-  [UncheckedPat] ->
-  m ()
-checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
+  MonadTypeChecker m => [UncheckedTypeParam] -> [UncheckedPat] -> m ()
+checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
+  mapM_ checkTypeParam tps
+  mapM_ checkPat pats
   where
-    check (Id v _ loc) = seen v loc
-    check (PatParens p _) = check p
-    check (PatAttr _ p _) = check p
-    check Wildcard {} = pure ()
-    check (TuplePat ps _) = mapM_ check ps
-    check (RecordPat fs _) = mapM_ (check . snd) fs
-    check (PatAscription p _ _) = check p
-    check PatLit {} = pure ()
-    check (PatConstr _ _ ps _) = mapM_ check ps
+    checkTypeParam (TypeParamType _ v loc) = seen Type v loc
+    checkTypeParam (TypeParamDim v loc) = seen Term v loc
 
-    seen v loc = do
-      already <- gets $ M.lookup v
+    checkPat (Id v _ loc) = seen Term v loc
+    checkPat (PatParens p _) = checkPat p
+    checkPat (PatAttr _ p _) = checkPat p
+    checkPat Wildcard {} = pure ()
+    checkPat (TuplePat ps _) = mapM_ checkPat ps
+    checkPat (RecordPat fs _) = mapM_ (checkPat . snd) fs
+    checkPat (PatAscription p _ _) = checkPat p
+    checkPat PatLit {} = pure ()
+    checkPat (PatConstr _ _ ps _) = mapM_ checkPat ps
+
+    seen ns v loc = do
+      already <- gets $ M.lookup (ns, v)
       case already of
         Just prev_loc ->
           lift $
@@ -376,7 +378,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
               "Name" <+> pquote (ppr v) <+> "also bound at"
                 <+> text (locStr prev_loc) <> "."
         Nothing ->
-          modify $ M.insert v loc
+          modify $ M.insert (ns, v) loc
 
 -- | Check whether the type contains arrow types that define the same
 -- parameter.  These might also exist further down, but that's not

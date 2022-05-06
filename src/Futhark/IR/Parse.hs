@@ -578,6 +578,8 @@ pSOAC pr =
       keyword "redomap" *> pScrema pRedomapForm,
       keyword "scanomap" *> pScrema pScanomapForm,
       keyword "screma" *> pScrema pScremaForm,
+      keyword "vjp" *> pVJP,
+      keyword "jvp" *> pJVP,
       pScatter,
       pHist,
       pStream
@@ -659,6 +661,18 @@ pSOAC pr =
           <*> pure SOAC.Sequential
           <*> braces (pSubExp `sepBy` pComma) <* pComma
           <*> pLambda pr
+    pVJP =
+      parens $
+        SOAC.VJP
+          <$> pLambda pr <* pComma
+          <*> braces (pSubExp `sepBy` pComma) <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
+    pJVP =
+      parens $
+        SOAC.JVP
+          <$> pLambda pr <* pComma
+          <*> braces (pSubExp `sepBy` pComma) <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
 
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
@@ -843,7 +857,8 @@ pHostOp pr pOther =
   choice
     [ GPU.SegOp <$> pSegOp pr pSegLevel,
       GPU.SizeOp <$> pSizeOp,
-      GPU.OtherOp <$> pOther
+      GPU.OtherOp <$> pOther,
+      keyword "gpu" $> GPU.GPUBody <*> (pColon *> pTypes) <*> braces (pBody pr)
     ]
 
 pMCOp :: PR rep -> Parser op -> Parser (MC.MCOp rep op)

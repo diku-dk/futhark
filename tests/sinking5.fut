@@ -1,10 +1,10 @@
 -- Sinking should be as deep as possible.
 -- ==
 -- structure gpu {
---   /Index 1
---   /If/False/If/True/Index 1
---   /If/False/If/False/If/True/Index 1
---   /If/False/If/False/If/False/Index 2
+--   /GPUBody/Index 1
+--   /GPUBody/If/False/If/True/Index 1
+--   /GPUBody/If/False/If/False/If/True/Index 1
+--   /GPUBody/If/False/If/False/If/False/Index 2
 -- }
 
 def main (arr: [](i32, i32, i32, i32, i32)) =
