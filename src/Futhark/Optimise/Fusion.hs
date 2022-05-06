@@ -39,7 +39,7 @@ doFuseScans m = do
   modify (\s -> s {fuseScans = True})
   r <- m
   modify (\s -> s {fuseScans = fs})
-  return r
+  pure r
 
 dontFuseScans :: FusionEnvM a -> FusionEnvM a
 dontFuseScans m = do
@@ -47,7 +47,7 @@ dontFuseScans m = do
   modify (\s -> s {fuseScans = False})
   r <- m
   modify (\s -> s {fuseScans = fs})
-  return r
+  pure r
 
 -- | The pass definition.
 fuseSOACs :: Pass SOACS SOACS
@@ -67,7 +67,7 @@ fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
   do
     new_stms <- runFusionEnvM (scopeOf stms) freshFusionEnv (fuseGraphLZ stmList results [])
-    return $ stmsFromList new_stms
+    pure $ stmsFromList new_stms
   where
     stmList = trace (pretty stms) $ stmsToList stms
     results = varsRes outputs
@@ -79,7 +79,7 @@ fuseFun _stmts fun = do
   -- stms_new <- fuseGraphLZ stms res (funDefParams  fun)
   -- simplifyStms $ stmsFromList stms_new
   let body = (funDefBody fun) {bodyStms = stmsFromList new_stms}
-  return fun {funDefBody = body}
+  pure fun {funDefBody = body}
   where
     b = funDefBody fun
     stms = trace (pretty (bodyStms b)) $ stmsToList $ bodyStms b
@@ -104,7 +104,7 @@ fuseGraph stms results inputs = localScope (scopeOf stms) $ do
 
   stms_new <- linearizeGraph graph_fused'
   modify (\s -> s {producerMapping = old_mappings})
-  return $ trace (unlines (map pretty stms_new)) stms_new
+  pure $ trace (unlines (map pretty stms_new)) stms_new
 
 unreachableEitherDir :: DepGraph -> Node -> Node -> FusionEnvM Bool
 unreachableEitherDir g a b = do
@@ -118,7 +118,7 @@ reachable g source target = pure $ target `elem` Q.reachable source g
 linearizeGraph :: DepGraph -> FusionEnvM [Stm SOACS]
 linearizeGraph g = do
   stms <- mapM finalizeNode $ reverse $ Q.topsort' g
-  return $ concat stms
+  pure $ concat stms
 
 doAllFusion :: DepGraphAug
 doAllFusion =
@@ -412,7 +412,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                       | Just _ <- isMapSOAC sform1 -> do
                           doFusion <- gets fuseScans
                           if not doFusion
-                            then return Nothing
+                            then pure Nothing
                             else do
                               (stream1, is_extra_1) <- H.soacToStream soac1
                               if stream1 /= soac1
@@ -433,7 +433,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                   --       any isScanRed edgs
                   --     -> do
                   --       doFusion <- gets fuseScans
-                  --       if not doFusion then return Nothing else do
+                  --       if not doFusion then pure Nothing else do
                   --         mstream1 <- soacToStream soac1
                   --         mstream2 <- soacToStream soac2
                   --         case (mstream1, mstream2) of
@@ -443,7 +443,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                   --             fuseStms edgs infusible
                   --               (Let (basicPat is_extra_1' <> pats1) aux1 (Op stream1))
                   --               (Let (basicPat is_extra_2' <> pats2) aux2 (Op stream2))
-                  --           _ -> return Nothing
+                  --           _ -> pure Nothing
                   -- ( H.Stream s_exp1 sform1 nes1 lam1 i1,
                   --   H.Stream s_exp2 sform2 nes2 lam2 i2)
                   --   | getStreamOrder sform1 /= getStreamOrder sform2 ->
@@ -622,7 +622,7 @@ hFuseNodeT s1 s2
                             }
                     -- success (outNames ker ++ returned_outvars) $
                     let soac = H.Hist s_exp1 (ops_1 <> ops_2) lam' (i1 <> i2)
-                    return $ Just $ SoacNode soac (pats1 <> pats2) (aux1 <> aux2)
+                    pure $ Just $ SoacNode soac (pats1 <> pats2) (aux1 <> aux2)
             _ -> pure Nothing
         _ -> pure Nothing
 hFuseNodeT _ _ = pure Nothing
@@ -701,7 +701,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     let newLam = lam {lambdaBody = newbody}
     let newNode = SoacNode (H.setLambda newLam soac) pats aux
     pure (incomming, node, newNode, outgoing)
-  _ -> return c
+  _ -> pure c
   where
     doFusionWithDelayed :: Body SOACS -> [VName] -> [(NodeT, [EdgeT])] -> FusionEnvM (Body SOACS)
     doFusionWithDelayed b extraInputs extraNodes = localScope (scopeOf stms) $
@@ -710,7 +710,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
         -- highly temporary and non-thought-out
         g' <- applyAugs [handleNodes extraNodes, makeMapping, initialGraphConstruction, doAllFusion] g
         new_stms <- trace (pprg g') $ linearizeGraph g'
-        return b {bodyStms = stmsFromList new_stms}
+        pure b {bodyStms = stmsFromList new_stms}
       where
         inputs = map (vNameFromAdj node) outgoing ++ extraInputs
         stms = stmsToList (bodyStms b)
@@ -719,7 +719,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     doFusionInner b extraInputs =
       do
         new_stms <- fuseGraph stms results inputs
-        return b {bodyStms = stmsFromList new_stms}
+        pure b {bodyStms = stmsFromList new_stms}
       where
         inputs = map (vNameFromAdj node) outgoing ++ extraInputs
         stms = stmsToList (bodyStms b)
@@ -761,7 +761,7 @@ makeCopiesOfConsAliased = mapAcross copyAlised
       if not $ null toMakeCopies
         then do
           (new_stms, nameMapping) <- makeCopyStms toMakeCopies
-          return (incoming, node, FinalNode new_stms (substituteNames nameMapping nodeT), outgoing)
+          pure (incoming, node, FinalNode new_stms (substituteNames nameMapping nodeT), outgoing)
         else pure c
     copyAlised c = pure c
 
