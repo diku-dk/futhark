@@ -2567,7 +2567,7 @@ static inline double futrts_erf64(double x) {
 
 extern "C" unmasked uniform double erfc(uniform double x);
 static inline double futrts_erfc64(double x) {
-  float res;
+  double res;
   foreach_active (i) {
     uniform double r = erfc(extract(x, i));
     res = insert(res, i, r);
