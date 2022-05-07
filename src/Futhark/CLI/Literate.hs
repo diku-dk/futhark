@@ -762,14 +762,13 @@ processDirective env (DirectiveVideo e params) = do
                   <> progressBar
                     (ProgressBar 40 (fromIntegral num_frames) (fromIntegral j))
                   <> "generating frame "
-                  <> prettyText j
+                  <> prettyText (j + 1)
                   <> "/"
                   <> prettyText num_frames
                   <> " "
               liftIO $ hFlush stdout,
             liftIO $ do
-              T.putStr "\r"
-              clearLine
+              T.putStrLn ""
           )
       | otherwise =
           (\_ _ -> pure (), pure ())
