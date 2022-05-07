@@ -246,7 +246,8 @@ jobs:
 
     - run: |
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-        futhark test -c --backend=ispc-multicore tests --no-tuning
+        export ISPCFLAGS="--target=avx2-i32x16"
+        futhark test -c --backend=ispc-multicore tests/ad --no-tuning
         make -C tests_lib/c FUTHARK_BACKEND=ispc-multicore
 
   test-python:
