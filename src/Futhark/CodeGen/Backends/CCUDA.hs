@@ -141,6 +141,13 @@ cliOptions =
              optionArgument = NoArgument,
              optionDescription = "Forces futhark only to run using a single GPU device",
              optionAction = [C.cstm|futhark_context_config_set_multi_device(cfg, false);|]
+           },
+          Option
+           { optionLongName = "no-hints",
+             optionShortName = Nothing,
+             optionArgument = NoArgument,
+             optionDescription = "Removes hinting and prefetching",
+             optionAction = [C.cstm|futhark_context_set_hint_memory(cfg, false);|]
            }
        ]
 
@@ -208,6 +215,7 @@ copyCUDAMemory :: GC.Copy OpenCL ()
 copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   let (fn, prof) = memcpyFun dstSpace srcSpace
       (bef, aft) = profilingEnclosure prof
+      hint       = hint_function dstSpace srcSpace
   GC.item
     [C.citem|{
                 if(ctx->use_multi_device){
@@ -226,6 +234,7 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
                          $exp:srcmem + $exp:srcidx,
                          $exp:nbytes));
                 $items:aft
+                $items:hint
                 }
                 |]
   where
@@ -238,6 +247,11 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
           ++ "' from '"
           ++ show srcSpace
           ++ "'."
+    hint_function (Space "device") DefaultSpace = [C.citems|
+      hint_prefetch_variable_array(ctx, $exp:dstmem + $dstidx,  $exp:nbytes);
+    |] 
+    hint_function _ _ = [C.citems|;|]
+
 
 staticCUDAArray :: GC.StaticArray OpenCL ()
 staticCUDAArray name "device" t vs = do
@@ -258,11 +272,13 @@ staticCUDAArray name "device" t vs = do
     [C.cstm|{
     ctx->$id:name.references = NULL;
     ctx->$id:name.size = 0;
-    CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->$id:name.mem,
-                            ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct)));
+    CUDA_SUCCEED_FATAL(cuMemAllocManaged(&ctx->$id:name.mem,
+                            ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct),
+                            CU_MEM_ATTACH_GLOBAL));
     if ($int:num_elems > 0) {
       CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->$id:name.mem, $id:name_realtype,
                                 $int:num_elems*sizeof($ty:ct)));
+      hint_readonly_array(ctx, ctx->$id:name.mem, $int:num_elems*sizeof($ty:ct));
     }
   }|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]

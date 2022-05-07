@@ -46,6 +46,12 @@ profilingEnclosure name =
       }
       |],
     [C.citems|
+      if(ctx->use_multi_device){
+        for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
+          CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, 
+            ctx->cuda.kernel_done[device_id * 2 + !ctx->cuda.kernel_iterator],0));
+        }
+        }
       if (pevents != NULL) {
         CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[1], 0));
       }
@@ -110,6 +116,7 @@ generateConfigFuns sizes = do
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
                               bool use_multi_device;
+                              bool hint_memory;
                               const char *cache_fname;
                             };|]
     )
@@ -137,6 +144,7 @@ generateConfigFuns sizes = do
                                           tuning_param_names, tuning_param_vars,
                                           cfg->tuning_params, tuning_param_classes);
                          cfg->use_multi_device = true;
+                         cff->hint_memory = true;
 
                          return cfg;
                        }|]
@@ -258,6 +266,13 @@ generateConfigFuns sizes = do
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, bool use_multi_device);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, bool use_multi_device) {
         cfg->use_multi_device = use_multi_device;
+      }|]
+    )
+
+  GC.publicDef_ "context_config_set_hint_memory" GC.InitDecl $ \s -> 
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, bool hint_memory);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, bool hint_memory) {
+        cfg->hint_memory = hint_memory;
       }|]
     )
 

@@ -840,4 +840,34 @@ static CUresult cuda_free_all(struct cuda_context *ctx) {
   return CUDA_SUCCESS;
 }
 
+static void hint_prefetch_variable_array(
+  struct futhark_context *ctx, CUdeviceptr mem, size_t size){
+    size_t data_per_device = size / ctx->cuda.device_count; 
+    size_t offset = 0;
+    size_t left = size;
+    for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
+      if(device_id != 0) CUDA_SUCCEED_FATAL(cuMemAdvice(mem, 
+        offset, CU_MEM_ADVISE_SET_ACCESSED_BY, 
+        ctx->cuda.devices[device_id]));
+      CUDA_SUCCEED_FATAL(cuMemAdvice(mem + offset, 
+        data_per_device, CU_MEM_ADVISE_SET_PREFERRED_LOCATION, 
+        ctx->cuda.devices[device_id]));
+      CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(mem + offset, 
+        data_per_device, ctx->cuda.devices[device_id], NULL));
+      CUDA_SUCCEED_FATAL(cuMemAdvice(mem + offset + data_per_device, left, 
+        CU_MEM_ADVISE_SET_ACCESSED_BY, ctx->cuda.devices[device_id]));
+      offset += data_per_device;
+      left   -= data_per_device;
+    }
+}
+
+static void hint_readonly_array(struct futhark_context *ctx, 
+                                CUdeviceptr mem, size_t count){
+  CUDA_SUCCEED_FATAL(cuMemAdvice(mem, count, CU_MEM_ADVISE_SET_READ_MOSTLY));
+  for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
+    CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(
+      mem, count, ctx->devices[device_id], NULL));
+  }
+}
+
 // End of cuda.h.
