@@ -25,6 +25,7 @@ module Futhark.CodeGen.Backends.MulticoreC
     multicoreDef,
     multicoreName,
     DefSpecifier,
+    atomicOps,
   )
 where
 
@@ -703,7 +704,7 @@ compileOp (ParLoop s' body free) = do
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
 compileOp (Atomic aop) =
-  atomicOps aop
+  atomicOps aop (\ty _ -> pure [C.cty|$ty:ty*|])
 compileOp (ISPCKernel body _) =
   scopedBlock body
 compileOp (ForEach i bound body) =
@@ -728,18 +729,20 @@ doAtomic ::
   Exp ->
   String ->
   C.Type ->
+  (C.Type -> VName -> GC.CompilerM op s C.Type) ->
   GC.CompilerM op s ()
-doAtomic old arr ind val op ty = do
+doAtomic old arr ind val op ty castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
+  cast <- castf ty arr
   arr' <- GC.rawMem arr
-  GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
-atomicOps :: AtomicOp -> GC.CompilerM op s ()
-atomicOps (AtomicCmpXchg t old arr ind res val) = do
+atomicOps :: AtomicOp -> (C.Type -> VName -> GC.CompilerM op s C.Type) -> GC.CompilerM op s ()
+atomicOps (AtomicCmpXchg t old arr ind res val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
-  let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
   arr' <- GC.rawMem arr
   GC.stm
     [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
@@ -749,21 +752,21 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
   where
     op :: String
     op = "__atomic_compare_exchange_n"
-atomicOps (AtomicXchg t old arr ind val) = do
+atomicOps (AtomicXchg t old arr ind val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
-  let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_SEQ_CST);|]
   where
     op :: String
     op = "__atomic_exchange_n"
-atomicOps (AtomicAdd t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicSub t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicAnd t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicOr t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicXor t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|]
+atomicOps (AtomicAdd t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps (AtomicSub t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps (AtomicAnd t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps (AtomicOr t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps (AtomicXor t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|] castf

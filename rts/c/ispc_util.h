@@ -92,8 +92,34 @@ make_atomic_compare_exchange_wrapper(uint64)
 make_atomic_compare_exchange_wrapper(float)
 make_atomic_compare_exchange_wrapper(double)
 
+#define make_single_atomic(name, ty)                                        \
+static inline ty atomic_##name##_global(varying ty * uniform mem, ty val) { \
+  uniform ty * uniform base_mem = (uniform ty * uniform)mem;                \
+  ty res = 0;                                                               \
+  foreach_active (i) {                                                      \
+    uniform ty * uniform curr_mem = base_mem + i;                           \
+    uniform ty curr_val = extract(val, i);                                  \
+    uniform ty curr = atomic_##name##_global(curr_mem, curr_val);           \
+    res = insert(res, i, curr);                                             \
+  }                                                                         \
+  return res;                                                               \
+}
+
+#define make_all_atomic(name)    \
+make_single_atomic(name, int32)  \
+make_single_atomic(name, int64)  \
+make_single_atomic(name, uint32) \
+make_single_atomic(name, uint64)
+
+make_all_atomic(add)
+make_all_atomic(subtract)
+make_all_atomic(and)
+make_all_atomic(or)
+make_all_atomic(xor)
+make_all_atomic(swap)
+
 #define __atomic_fetch_add(x,y,z) atomic_add_global(x,y)
-#define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,y)
+#define __atomic_fetch_sub(x,y,z) atomic_subtract_global(x,y)
 #define __atomic_fetch_and(x,y,z) atomic_and_global(x,y)
 #define __atomic_fetch_or(x,y,z) atomic_or_global(x,y)
 #define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,y)

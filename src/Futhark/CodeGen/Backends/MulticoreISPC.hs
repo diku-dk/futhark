@@ -870,23 +870,12 @@ compileOp (ExtractLane dest tar lane) = do
   tar' <- GC.compileExp tar
   lane' <- GC.compileExp lane
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
-compileOp (Atomic (AtomicCmpXchg t old arr ind res val)) = do
-  ind' <- GC.compileExp $ untyped $ unCount ind
-  new_val' <- GC.compileExp val
-  cached <- GC.cacheMem arr
-  let cast =
-        if isJust cached
-          then [C.cty|$tyqual:varying $ty:(GC.primTypeToCType t)* $tyqual:uniform|]
-          else [C.cty|$ty:(GC.primTypeToCType t)*|]
-  arr' <- GC.rawMem arr
-  GC.stm
-    [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
-                 &$id:old,
-                 $exp:new_val',
-                 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);|]
-  where
-    op :: String
-    op = "__atomic_compare_exchange_n"
+compileOp (Atomic aop) =
+  MC.atomicOps aop $ \ty arr -> do
+    cached <- isJust <$> GC.cacheMem arr
+    if cached
+      then pure [C.cty|$tyqual:varying $ty:ty* $tyqual:uniform|]
+      else pure [C.cty|$ty:ty*|]
 compileOp op = MC.compileOp op
 
 cachingMemoryISPC ::
