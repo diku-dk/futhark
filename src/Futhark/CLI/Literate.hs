@@ -43,7 +43,6 @@ import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.ProgressBar
-import System.Console.ANSI (clearLine)
 import System.Directory
   ( copyFile,
     createDirectoryIfMissing,
