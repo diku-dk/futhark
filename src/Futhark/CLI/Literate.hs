@@ -761,7 +761,7 @@ processDirective env (DirectiveVideo e params) = do
                   <> progressBar
                     (ProgressBar 40 (fromIntegral num_frames - 1) (fromIntegral j))
                   <> "generating frame "
-                  <> prettyText j
+                  <> prettyText (j + 1)
                   <> "/"
                   <> prettyText num_frames
                   <> " "
