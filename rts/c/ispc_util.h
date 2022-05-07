@@ -61,6 +61,22 @@ static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying 
   }                                                                                  \
   return res;                                                                        \
 }                                                                                    \
+static inline varying bool atomic_compare_exchange_wrapper(varying ty * uniform mem, \
+                                                           varying ty * uniform old, \
+                                                           const varying ty val){    \
+  uniform ty * uniform base_mem = (uniform ty * uniform)mem;                         \
+  uniform ty * uniform base_old = (uniform ty * uniform)old;                         \
+  bool res = 0;                                                                      \
+  foreach_active (i) {                                                               \
+    uniform ty * uniform curr_mem = base_mem + i;                                    \
+    uniform ty * uniform curr_old = base_old + i;                                    \
+    uniform ty curr_val = extract(val, i);                                           \
+    uniform bool curr = atomic_compare_exchange_wrapper(                             \
+                            curr_mem, curr_old, curr_val);                           \
+    res = insert(res, i, curr);                                                      \
+  }                                                                                  \
+  return res;                                                                        \
+}                                                                                    \
 static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
                                                            uniform ty * uniform old, \
                                                            const varying ty val){    \
