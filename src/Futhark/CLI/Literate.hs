@@ -759,9 +759,9 @@ processDirective env (DirectiveVideo e params) = do
               liftIO . T.putStr $
                 "\r"
                   <> progressBar
-                    (ProgressBar 40 (fromIntegral num_frames) (fromIntegral j))
+                    (ProgressBar 40 (fromIntegral num_frames - 1) (fromIntegral j))
                   <> "generating frame "
-                  <> prettyText (j + 1)
+                  <> prettyText j
                   <> "/"
                   <> prettyText num_frames
                   <> " "
