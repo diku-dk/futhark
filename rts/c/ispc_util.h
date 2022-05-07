@@ -38,6 +38,7 @@ make_extract(struct memblock)
 
 
 // Handling of atomics
+// Atomic CAS acts differently in GCC and ISPC, so we emulate it.
 #define make_atomic_compare_exchange_wrapper(ty)                                     \
 static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
                                                            uniform ty * uniform old, \
@@ -76,12 +77,24 @@ make_atomic_compare_exchange_wrapper(uint64)
 make_atomic_compare_exchange_wrapper(float)
 make_atomic_compare_exchange_wrapper(double)
 
-#define __atomic_fetch_add(x,y,z) atomic_add_global(x,y)
-#define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,y)
-#define __atomic_fetch_and(x,y,z) atomic_and_global(x,y)
-#define __atomic_fetch_or(x,y,z) atomic_or_global(x,y)
-#define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,y)
-#define __atomic_exchange_n(x,y,z) atomic_swap_global(x,y)
+// This is a hack to prevent literals (which have unbound variability)
+// from causing us to pick the wrong overload for atomic operations.
+static inline varying int32  make_varying(uniform int32  x) { return x; }
+static inline varying int32  make_varying(varying int32  x) { return x; }
+static inline varying int64  make_varying(uniform int64  x) { return x; }
+static inline varying int64  make_varying(varying int64  x) { return x; }
+static inline varying uint32 make_varying(uniform uint32 x) { return x; }
+static inline varying uint32 make_varying(varying uint32 x) { return x; }
+static inline varying uint64 make_varying(uniform uint64 x) { return x; }
+static inline varying uint64 make_varying(varying uint64 x) { return x; }
+
+// Redirect atomic operations to the relevant ISPC overloads.
+#define __atomic_fetch_add(x,y,z) atomic_add_global(x,make_varying(y))
+#define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,make_varying(y))
+#define __atomic_fetch_and(x,y,z) atomic_and_global(x,make_varying(y))
+#define __atomic_fetch_or(x,y,z) atomic_or_global(x,make_varying(y))
+#define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,make_varying(y))
+#define __atomic_exchange_n(x,y,z) atomic_swap_global(x,make_varying(y))
 #define __atomic_compare_exchange_n(x,y,z,h,j,k) atomic_compare_exchange_wrapper(x,y,z)
 
 
