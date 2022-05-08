@@ -4,6 +4,7 @@
 module Futhark.CodeGen.Backends.CCUDA.Boilerplate
   ( generateBoilerplate,
     profilingEnclosure,
+    profilingEnclosureKernel,
     module Futhark.CodeGen.Backends.COpenCL.Boilerplate,
   )
 where
@@ -47,11 +48,29 @@ profilingEnclosure name =
       |],
     [C.citems|
       if (pevents != NULL) {
+        CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[1], 0));
+      }
+      |]
+  )
+
+profilingEnclosureKernel :: Name -> ([C.BlockItem], [C.BlockItem])
+profilingEnclosureKernel name =
+  ( [C.citems|
+      typename cudaEvent_t *pevents = NULL;
+      if (ctx->profiling && !ctx->profiling_paused) {
+        pevents = cuda_get_events(&ctx->cuda,
+                                  &ctx->$id:(kernelRuns name),
+                                  &ctx->$id:(kernelRuntime name));
+        CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[0], 0));
+      }
+      |],
+    [C.citems|
+      if (pevents != NULL) {
         if(ctx->use_multi_device){
         for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
-          CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, 
-            ctx->cuda.kernel_done[device_id * 2 + !ctx->cuda.kernel_iterator],0));
-        }
+            CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, 
+              ctx->cuda.kernel_done[device_id * 2 + !ctx->cuda.kernel_iterator],0));
+          }
         }
         CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[1], 0));
       }

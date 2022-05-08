@@ -176,13 +176,7 @@ readCUDAScalar mem idx t "device" _ = do
     [C.citems|
        $ty:t $id:val;
        {
-       if(ctx->use_multi_device){
-         for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
-           CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
-           CUDA_SUCCEED_FATAL(cuCtxSynchronize());
-           CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
-         }
-       }
+
        $items:bef
        CUDA_SUCCEED_OR_RETURN(
           cuMemcpyDtoH(&$id:val,
@@ -215,26 +209,17 @@ copyCUDAMemory :: GC.Copy OpenCL ()
 copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   let (fn, prof) = memcpyFun dstSpace srcSpace
       (bef, aft) = profilingEnclosure prof
-      hint       = hint_function dstSpace srcSpace
+      sync       = sync_mem dstSpace srcSpace
   GC.item
     [C.citem|{
-                if(ctx->use_multi_device){
-                  for(int device_id = 0; device_id < ctx->cuda.device_count;
-                    device_id++){
-                    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(
-                      ctx->cuda.contexts[device_id]));
-                    CUDA_SUCCEED_FATAL(cuCtxSynchronize());
-                    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(
-                      &ctx->cuda.contexts[device_id]));
-                  }
-                }
+                $items:sync
                 $items:bef
                 CUDA_SUCCEED_OR_RETURN(
                   $id:fn($exp:dstmem + $exp:dstidx,
                          $exp:srcmem + $exp:srcidx,
                          $exp:nbytes));
                 $items:aft
-                $items:hint
+                
                 }
                 |]
   where
@@ -247,10 +232,14 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
           ++ "' from '"
           ++ show srcSpace
           ++ "'."
-    hint_function (Space "device") DefaultSpace = [C.citems|
-      hint_prefetch_variable_array(&ctx->cuda, $exp:dstmem + $dstidx,  $exp:nbytes);
-    |] 
-    hint_function _ _ = [C.citems|;|]
+    sync_mem DefaultSpace (Space "device") = [C.citems|
+      for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
+        CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
+        CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+        CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
+      }
+    |]
+    sync_mem _ _ = [C.citems|;|]
 
 
 staticCUDAArray :: GC.StaticArray OpenCL ()
@@ -345,8 +334,8 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             block_y,
             block_z
           ]
-      (bef, aft) = profilingEnclosure kernel_name
-
+      (bef, aft) = profilingEnclosureKernel kernel_name
+  
   GC.stm
     [C.cstm|
     if ($exp:sizes_nonzero) {
@@ -396,6 +385,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
                                                   $exp:block_x, $exp:block_y, $exp:block_z,
                                                   $exp:shared_tot, NULL,
                                                   $id:args_arr, NULL));
+            /*
             // This synchronisation is placed here to ensure that the same level
             // of synchronisation is provided as single streams
             CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[devID * 2
@@ -405,6 +395,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
               CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
                                                    + ctx->cuda.kernel_iterator],0));
             }
+            */
             CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
         }
         ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
