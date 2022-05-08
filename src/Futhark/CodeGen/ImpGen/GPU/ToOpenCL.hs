@@ -293,20 +293,20 @@ onKernel target kernel = do
               -- it past an initial check, then we are good to go.
 
                 ( SafetyCheap,
-                  [C.citems|if (*global_failure >= 0) { return; }|]
+                  [C.citems|if (*(global_failure + page_size * device_id) >= 0) { return; }|]
                 )
         | otherwise =
             if not (kernelHasBarriers kstate)
               then
                 ( SafetyFull,
-                  [C.citems|if (*global_failure >= 0) { return; }|]
+                  [C.citems|if (*(global_failure + page_size * device_id) >= 0) { return; }|]
                 )
               else
                 ( SafetyFull,
                   [C.citems|
                      volatile __local bool local_failure;
                      if (failure_is_an_option) {
-                       int failed = *global_failure >= 0;
+                       int failed = *(global_failure + page_size * device_id) >= 0;
                        if (failed) {
                          return;
                        }
@@ -324,7 +324,8 @@ onKernel target kernel = do
         ]
 
       params =
-        [[C.cparam|const int device_id|],[C.cparam|const int device_count|]]
+        [[C.cparam|const int device_id|],[C.cparam|const int device_count|],
+          [C.cparam| const size_t page_size|]]
           ++ perm_params
           ++ take (numFailureParams safety) failure_params
           ++ catMaybes local_memory_params
@@ -666,6 +667,8 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = device_id;|]
     kernelOps (GetDeviceCount v) =
       GC.stm [C.cstm|$id:v = device_count;|]
+    kernelOps (GetPageSize v) = 
+      GC.stm [C.cstm|$id:v = page_size;|]
     kernelOps (Barrier f) = do
       GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}

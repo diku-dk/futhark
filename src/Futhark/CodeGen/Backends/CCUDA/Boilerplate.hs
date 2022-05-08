@@ -46,13 +46,13 @@ profilingEnclosure name =
       }
       |],
     [C.citems|
-      if(ctx->use_multi_device){
+      if (pevents != NULL) {
+        if(ctx->use_multi_device){
         for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
           CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, 
             ctx->cuda.kernel_done[device_id * 2 + !ctx->cuda.kernel_iterator],0));
         }
         }
-      if (pevents != NULL) {
         CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[1], 0));
       }
       |]
@@ -144,7 +144,7 @@ generateConfigFuns sizes = do
                                           tuning_param_names, tuning_param_vars,
                                           cfg->tuning_params, tuning_param_classes);
                          cfg->use_multi_device = true;
-                         cff->hint_memory = true;
+                         cfg->hint_memory = true;
 
                          return cfg;
                        }|]
@@ -396,6 +396,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          int total_runs;
                          long int total_runtime;
                          bool use_multi_device;
+                         size_t page_size;
                        };|]
     )
 
@@ -443,17 +444,19 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  if (ctx->error != NULL) {
                    futhark_panic(1, "%s\n", ctx->error);
                  }
+                 ctx->page_size = sysconf(_SC_PAGESIZE);
 
                  typename int32_t no_error = -1;
+                 // Since the Global failure is shared, each device needs it 
+                 // own global failure to prevent thrashing.
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
                                       &ctx->global_failure,
-                                      sizeof(no_error),
+                                      ctx->cuda.device_count*ctx->page_size,
                                       CU_MEM_ATTACH_GLOBAL));
                  CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
-                 // The +1 is to avoid zero-byte allocations.
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
                                       &ctx->global_failure_args,
-                                      sizeof(int64_t)*($int:max_failure_args+1),
+                                      ctx->cuda.device_count*ctx->page_size,
                                       CU_MEM_ATTACH_GLOBAL));
 
                  $stms:init_kernel_fields

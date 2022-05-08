@@ -147,7 +147,7 @@ cliOptions =
              optionShortName = Nothing,
              optionArgument = NoArgument,
              optionDescription = "Removes hinting and prefetching",
-             optionAction = [C.cstm|futhark_context_set_hint_memory(cfg, false);|]
+             optionAction = [C.cstm|futhark_context_config_set_hint_memory(cfg, false);|]
            }
        ]
 
@@ -248,7 +248,7 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
           ++ show srcSpace
           ++ "'."
     hint_function (Space "device") DefaultSpace = [C.citems|
-      hint_prefetch_variable_array(ctx, $exp:dstmem + $dstidx,  $exp:nbytes);
+      hint_prefetch_variable_array(&ctx->cuda, $exp:dstmem + $dstidx,  $exp:nbytes);
     |] 
     hint_function _ _ = [C.citems|;|]
 
@@ -278,7 +278,7 @@ staticCUDAArray name "device" t vs = do
     if ($int:num_elems > 0) {
       CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->$id:name.mem, $id:name_realtype,
                                 $int:num_elems*sizeof($ty:ct)));
-      hint_readonly_array(ctx, ctx->$id:name.mem, $int:num_elems*sizeof($ty:ct));
+      hint_readonly_array(&ctx->cuda, ctx->$id:name.mem, $int:num_elems*sizeof($ty:ct));
     }
   }|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
@@ -335,7 +335,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             [C.cinit|&ctx->failure_is_an_option|],
             [C.cinit|&ctx->global_failure_args|]
           ]
-      args'' = [[C.cinit|&device_id|], [C.cinit|&device_count|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
+      args'' = [[C.cinit|&device_id|], [C.cinit|&device_count|], [C.cinit|&page_size|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
       sizes_nonzero =
         expsNotZero
           [ grid_x,
@@ -369,16 +369,10 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
 
       int device_id = 0;
       int device_count = ctx->cuda.device_count;
+      size_t page_size = ctx->page_size;
       void *$id:args_arr[] = { $inits:args''};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
-      if (ctx->debugging) {
-        fprintf(ctx->log, "Launching %s with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
-                $string:(pretty kernel_name),
-                (long int)$exp:grid_x, (long int)$exp:grid_y, (long int)$exp:grid_z,
-                (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
-                (int)$exp:shared_tot);
-        $id:time_start = get_wall_time();
-      }
+      
       $items:bef
       if(ctx->use_multi_device){
         size_t grid_MD[3];
@@ -387,6 +381,14 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
         grid_MD[perm[2]] = $exp:grid_z_MD;
         for(int devID = 0; devID < ctx->cuda.device_count; devID++){
             int device_id = devID;
+            if (ctx->debugging) {
+              fprintf(ctx->log, "Launching %s on Device %d with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
+                $string:(pretty kernel_name), device_id,
+                (long int)$exp:grid_x_MD, (long int)$exp:grid_y_MD, (long int)$exp:grid_z_MD,
+                (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
+                (int)$exp:shared_tot);
+              $id:time_start = get_wall_time();
+            }
             void *$id:args_arr[] = { $inits:args'' };
             CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
             CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:(kernelMultiDevice kernel_name)[devID],
@@ -400,13 +402,21 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
                                              + ctx->cuda.kernel_iterator], NULL));
             for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){
               if(other_dev == devID) continue;
-              CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[devID * 2
+              CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
                                                    + ctx->cuda.kernel_iterator],0));
             }
             CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
         }
         ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
       } else {
+        if (ctx->debugging) {
+        fprintf(ctx->log, "Launching %s with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
+                $string:(pretty kernel_name),
+                (long int)$exp:grid_x, (long int)$exp:grid_y, (long int)$exp:grid_z,
+                (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
+                (int)$exp:shared_tot);
+        $id:time_start = get_wall_time();
+      }
         CUDA_SUCCEED_OR_RETURN(
           cuLaunchKernel(ctx->$id:kernel_name,
                          grid[0], grid[1], grid[2],

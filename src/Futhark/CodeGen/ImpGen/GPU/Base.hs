@@ -103,7 +103,8 @@ data KernelConstants = KernelConstants
     -- iterations the virtualisation loop needs.
     kernelChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32),
     kernelDeviceId :: Imp.TExp Int32,
-    kernelDeviceCount :: Imp.TExp Int32
+    kernelDeviceCount :: Imp.TExp Int32,
+    kernelPageSize :: Imp.TExp Int64
   }
 
 -- | The sizes of nested iteration spaces in the kernel.
@@ -1137,6 +1138,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
   inner_group_size <- newVName "group_size"
   device_id <- newVName "device_id"
   device_count <- newVName "device_count"
+  page_size <- newVName "page_size"
   let constants =
         KernelConstants
           (Imp.le32 global_tid)
@@ -1154,6 +1156,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
           mempty
           (Imp.le32 device_id)
           (Imp.le32 device_count)
+          (Imp.le64 page_size)
 
   let set_constants = do
         dPrim_ global_tid int32
@@ -1163,6 +1166,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
         dPrim_ group_id int32
         dPrim_ device_id int32
         dPrim_ device_count int32
+        dPrim_ page_size int64
 
         sOp (Imp.GetGlobalId global_tid 0)
         sOp (Imp.GetLocalId local_tid 0)
@@ -1171,6 +1175,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
         sOp (Imp.GetGroupId group_id 0)
         sOp (Imp.GetDeviceId device_id)
         sOp (Imp.GetDeviceCount device_count)
+        sOp (Imp.GetPageSize page_size)
 
   pure (constants, set_constants)
 
@@ -1563,6 +1568,7 @@ simpleKernelConstants kernel_size desc = do
   group_id <- newVName $ desc ++ "_gid"
   device_id <- newVName $ desc ++ "_devive_id"
   device_count <- newVName $ desc ++ "_device_count"
+  page_size <- newVName $ desc ++ "_page_size"
   (num_groups, group_size) <- computeMapKernelGroups kernel_size
   let set_constants = do
         dPrim_ thread_gtid int32
@@ -1570,11 +1576,13 @@ simpleKernelConstants kernel_size desc = do
         dPrim_ group_id int32
         dPrim_ device_id int32
         dPrim_ device_count int32
+        dPrim_ page_size int64
         sOp (Imp.GetGlobalId thread_gtid 0)
         sOp (Imp.GetLocalId thread_ltid 0)
         sOp (Imp.GetGroupId group_id 0)
         sOp (Imp.GetDeviceId device_id)
         sOp (Imp.GetDeviceCount device_count)
+        sOp (Imp.GetPageSize page_size)
 
   pure
     ( KernelConstants
@@ -1592,7 +1600,8 @@ simpleKernelConstants kernel_size desc = do
         mempty
         mempty
         (Imp.le32 device_id)
-        (Imp.le32 device_count),
+        (Imp.le32 device_count)
+        (Imp.le64 page_size),
       set_constants
     )
 

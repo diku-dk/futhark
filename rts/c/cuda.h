@@ -841,30 +841,36 @@ static CUresult cuda_free_all(struct cuda_context *ctx) {
 }
 
 static void hint_prefetch_variable_array(
-  struct futhark_context *ctx, CUdeviceptr mem, size_t size){
-    size_t data_per_device = size / ctx->cuda.device_count; 
+  struct cuda_context *ctx, CUdeviceptr mem, size_t size){
+    size_t data_per_device = size / ctx->device_count; 
     size_t offset = 0;
     size_t left = size;
-    for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
-      if(device_id != 0) CUDA_SUCCEED_FATAL(cuMemAdvice(mem, 
+    for(int device_id = 0; device_id < ctx->device_count; device_id++){
+      CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
+      if(device_id != 0) CUDA_SUCCEED_FATAL(cuMemAdvise(mem, 
         offset, CU_MEM_ADVISE_SET_ACCESSED_BY, 
-        ctx->cuda.devices[device_id]));
-      CUDA_SUCCEED_FATAL(cuMemAdvice(mem + offset, 
+        ctx->devices[device_id]));
+      CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset, 
         data_per_device, CU_MEM_ADVISE_SET_PREFERRED_LOCATION, 
-        ctx->cuda.devices[device_id]));
+        ctx->devices[device_id]));
       CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(mem + offset, 
-        data_per_device, ctx->cuda.devices[device_id], NULL));
-      CUDA_SUCCEED_FATAL(cuMemAdvice(mem + offset + data_per_device, left, 
-        CU_MEM_ADVISE_SET_ACCESSED_BY, ctx->cuda.devices[device_id]));
+        data_per_device, ctx->devices[device_id], NULL));
       offset += data_per_device;
       left   -= data_per_device;
+      if(device_id != ctx->device_count -1) CUDA_SUCCEED_FATAL(cuMemAdvise(
+                                                mem + offset, left,
+                                                CU_MEM_ADVISE_SET_ACCESSED_BY,
+                                                ctx->devices[device_id]));
+      CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
     }
 }
 
-static void hint_readonly_array(struct futhark_context *ctx, 
+static void hint_readonly_array(struct cuda_context *ctx, 
                                 CUdeviceptr mem, size_t count){
-  CUDA_SUCCEED_FATAL(cuMemAdvice(mem, count, CU_MEM_ADVISE_SET_READ_MOSTLY));
-  for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
+  //Device argument is ignore for Read mostly hint
+  CUDA_SUCCEED_FATAL(cuMemAdvise(mem, count, CU_MEM_ADVISE_SET_READ_MOSTLY, 
+                                 ctx->devices[0]));
+  for(int device_id = 0; device_id < ctx->device_count; device_id++){
     CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(
       mem, count, ctx->devices[device_id], NULL));
   }
