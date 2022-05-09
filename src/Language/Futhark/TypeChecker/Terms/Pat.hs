@@ -91,9 +91,6 @@ binding stms = check . handleVars
     bindVar scope (Ident name (Info tp) _) =
       let inedges = boundAliases $ aliases tp
           update (BoundV l tparams in_t)
-            -- If 'name' is record or sum-typed, don't alias the
-            -- components to 'name', because these no identity
-            -- beyond their components.
             | Array {} <- tp = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
             | otherwise = BoundV l tparams in_t
           update b = b
