@@ -216,7 +216,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
             ++ cmdISPCFLAGS ispc_flags -- These flags are always needed
         )
         mempty
-  ret <- -- TODO(kris): Clean this shit up
+  ret <-
     liftIO $
       runProgramWithExitCode
         cmdCC
@@ -232,26 +232,22 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
   case ret_ispc of
     Left err ->
       externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
-    Right (ExitFailure code, _, gccerr) ->
+    Right (ExitFailure code, _, gccerr) -> throwError code gccerr
+    Right (ExitSuccess, _, _) ->
+      case ret of
+        Left err ->
+          externalErrorS $ "Failed to run ispc: " ++ show err
+        Right (ExitFailure code, _, gccerr) -> throwError code gccerr
+        Right (ExitSuccess, _, _) ->
+          pure ()
+  where
+    ispcbase = outpath <> ispcextension
+    throwError code gccerr =
       externalErrorS $
         cmdCC ++ " failed with code "
           ++ show code
           ++ ":\n"
           ++ gccerr
-    Right (ExitSuccess, _, _) ->
-      case ret of
-        Left err ->
-          externalErrorS $ "Failed to run ispc: " ++ show err
-        Right (ExitFailure code, _, gccerr) ->
-          externalErrorS $
-            cmdCC ++ " failed with code "
-              ++ show code
-              ++ ":\n"
-              ++ gccerr
-        Right (ExitSuccess, _, _) ->
-          pure ()
-  where
-    ispcbase = outpath <> ispcextension
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
