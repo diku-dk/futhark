@@ -39,9 +39,8 @@ compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   dPrim_ (segFlat space) int64
   sOp $ Imp.GetTaskId (segFlat space)
   kstms' <- mapM renameStm kstms
-  let innermost = null [x | x@(Op (Inner (ParOp _ _))) <- [e | (Let _ _ e) <- stmsToList kstms']]
-  (if innermost then inISPC else id) $
-    generateChunkLoop "SegMap" innermost $ \i -> do
+  inISPC $
+    generateChunkLoop "SegMap" True $ \i -> do
       dIndexSpace (zip is ns') i
       compileStms (freeIn kres) kstms' $
         zipWithM_ (writeResult is) (patElems pat) kres
