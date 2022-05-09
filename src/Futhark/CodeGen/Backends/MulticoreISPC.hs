@@ -779,7 +779,7 @@ compileOp (ISPCKernel body free) = do
   ispcShim <- ispcDef "loop_ispc" $ \s -> do
     mainBody <- GC.inNewFunction $
       analyzeVariability body $
-        cachingMemoryISPC lexical $ \decl_cached free_cached lexmems ->
+        cachingMemory lexical $ \decl_cached free_cached lexmems ->
           GC.collect $ do
             GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
             GC.items =<< compileGetStructVals fstruct free_args free_ctypes
@@ -878,16 +878,12 @@ compileOp (Atomic aop) =
       else pure [C.cty|$ty:ty*|]
 compileOp op = MC.compileOp op
 
-cachingMemoryISPC ::
+-- | Like @GenericC.cachingMemory@, but adapted for ISPC codegen.
+cachingMemory ::
   M.Map VName Space ->
   ([C.BlockItem] -> [C.Stm] -> [(VName, VName)] -> GC.CompilerM op s a) ->
   GC.CompilerM op s a
-cachingMemoryISPC lexical f = do
-  -- We only consider lexical 'DefaultSpace' memory blocks to be
-  -- cached.  This is not a deep technical restriction, but merely a
-  -- heuristic based on GPU memory usually involving larger
-  -- allocations, that do not suffer from the overhead of reference
-  -- counting.
+cachingMemory lexical f = do
   let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do
