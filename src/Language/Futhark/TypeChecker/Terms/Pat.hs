@@ -70,17 +70,17 @@ checkIfUsed occs v
 -- Checks that the identifiers are used properly within the scope
 -- (e.g. consumption).
 binding :: [Ident] -> TermTypeM a -> TermTypeM a
-binding stms = check . handleVars
+binding idents = check . handleVars
   where
     handleVars m =
-      localScope (`bindVars` stms) $ do
+      localScope (`bindVars` idents) $ do
         -- Those identifiers that can potentially also be sizes are
         -- added as type constraints.  This is necessary so that we
         -- can properly detect scope violations during unification.
         -- We do this for *all* identifiers, not just those that are
         -- integers, because they may become integers later due to
         -- inference...
-        forM_ stms $ \ident ->
+        forM_ idents $ \ident ->
           constrain (identName ident) $ ParamSize $ srclocOf ident
         m
 
@@ -111,11 +111,11 @@ binding stms = check . handleVars
       (a, usages) <- collectBindingsOccurrences m
       checkOccurrences usages
 
-      mapM_ (checkIfUsed usages) stms
+      mapM_ (checkIfUsed usages) idents
 
       pure a
 
-    -- Collect and remove all occurences in @stms@.  This relies
+    -- Collect and remove all occurences in @idents@.  This relies
     -- on the fact that no variables shadow any other.
     collectBindingsOccurrences m = do
       (x, usage) <- collectOccurrences m
@@ -123,19 +123,16 @@ binding stms = check . handleVars
       occur rest
       pure (x, relevant)
       where
-        split =
-          unzip
-            . map
-              ( \occ ->
-                  let (obs1, obs2) = divide $ observed occ
-                      occ_cons = divide <$> consumed occ
-                      con1 = fst <$> occ_cons
-                      con2 = snd <$> occ_cons
-                   in ( occ {observed = obs1, consumed = con1},
-                        occ {observed = obs2, consumed = con2}
-                      )
+        onOcc occ =
+          let (obs1, obs2) = divide $ observed occ
+              occ_cons = divide <$> consumed occ
+              con1 = fst <$> occ_cons
+              con2 = snd <$> occ_cons
+           in ( occ {observed = obs1, consumed = con1},
+                occ {observed = obs2, consumed = con2}
               )
-        names = S.fromList $ map identName stms
+        split = unzip . map onOcc
+        names = S.fromList $ map identName idents
         divide s = (s `S.intersection` names, s `S.difference` names)
 
 bindingTypes ::
