@@ -878,6 +878,9 @@ findDeps (Op (GetLoopBounds x y)) = do
   addDeps y mempty
 findDeps (Op (ExtractLane x _ _)) = do
   addDeps x mempty
+findDeps (Op (Atomic (AtomicCmpXchg _ old arr ind res val))) = do
+  addDeps res $ freeIn arr <> freeIn ind <> freeIn val
+  addDeps old $ freeIn arr <> freeIn ind <> freeIn val
 findDeps _ = pure ()
 
 -- | Take a list of dependencies and iterate them to a fixed point.

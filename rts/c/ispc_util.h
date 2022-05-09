@@ -38,27 +38,37 @@ make_extract(struct memblock)
 
 
 // Handling of atomics
+// Atomic CAS acts differently in GCC and ISPC, so we emulate it.
 #define make_atomic_compare_exchange_wrapper(ty)                                     \
 static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
-                               uniform ty * uniform old,                             \
+                                                           uniform ty * uniform old, \
                                                            const uniform ty val){    \
   uniform ty actual = atomic_compare_exchange_global(mem, *old, val);                \
   if (actual == *old){                                                               \
     return 1;                                                                        \
   }                                                                                  \
-  *old = val;                                                                        \
+  *old = actual;                                                                     \
   return 0;                                                                          \
 }                                                                                    \
 static inline varying bool atomic_compare_exchange_wrapper(uniform ty * varying mem, \
-                              varying ty * uniform old,                              \
-                              const varying ty val){                                 \
+                                                           varying ty * uniform old, \
+                                                           const varying ty val){    \
   varying ty actual = atomic_compare_exchange_global(mem, *old, val);                \
+  bool res = 0;                                                                      \
   if(actual == *old){                                                                \
-    return 1;                                                                        \
+    res = 1;                                                                         \
+  } else {                                                                           \
+    *old = actual;                                                                   \
   }                                                                                  \
-  *old = val;                                                                        \
-  return 0;                                                                          \
-}                                                                                    
+  return res;                                                                        \
+}                                                                                    \
+static inline uniform bool atomic_compare_exchange_wrapper(uniform ty * uniform mem, \
+                                                           uniform ty * uniform old, \
+                                                           const varying ty val){    \
+  uniform ty v = 0;                                                                  \
+  foreach_active (i) v = extract(val, i);                                            \
+  return atomic_compare_exchange_wrapper(mem, old, v);                               \
+}
 
 make_atomic_compare_exchange_wrapper(int32)
 make_atomic_compare_exchange_wrapper(int64)
@@ -67,12 +77,24 @@ make_atomic_compare_exchange_wrapper(uint64)
 make_atomic_compare_exchange_wrapper(float)
 make_atomic_compare_exchange_wrapper(double)
 
-#define __atomic_fetch_add(x,y,z) atomic_add_global(x,y)
-#define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,y)
-#define __atomic_fetch_and(x,y,z) atomic_and_global(x,y)
-#define __atomic_fetch_or(x,y,z) atomic_or_global(x,y)
-#define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,y)
-#define __atomic_exchange_n(x,y,z) atomic_swap_global(x,y)
+// This is a hack to prevent literals (which have unbound variability)
+// from causing us to pick the wrong overload for atomic operations.
+static inline varying int32  make_varying(uniform int32  x) { return x; }
+static inline varying int32  make_varying(varying int32  x) { return x; }
+static inline varying int64  make_varying(uniform int64  x) { return x; }
+static inline varying int64  make_varying(varying int64  x) { return x; }
+static inline varying uint32 make_varying(uniform uint32 x) { return x; }
+static inline varying uint32 make_varying(varying uint32 x) { return x; }
+static inline varying uint64 make_varying(uniform uint64 x) { return x; }
+static inline varying uint64 make_varying(varying uint64 x) { return x; }
+
+// Redirect atomic operations to the relevant ISPC overloads.
+#define __atomic_fetch_add(x,y,z) atomic_add_global(x,make_varying(y))
+#define __atomic_fetch_sub(x,y,z) atomic_sub_global(x,make_varying(y))
+#define __atomic_fetch_and(x,y,z) atomic_and_global(x,make_varying(y))
+#define __atomic_fetch_or(x,y,z) atomic_or_global(x,make_varying(y))
+#define __atomic_fetch_xor(x,y,z) atomic_xor_global(x,make_varying(y))
+#define __atomic_exchange_n(x,y,z) atomic_swap_global(x,make_varying(y))
 #define __atomic_compare_exchange_n(x,y,z,h,j,k) atomic_compare_exchange_wrapper(x,y,z)
 
 
@@ -169,7 +191,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
                                           size_t varying * uniform old_size,
                                           uniform int64_t new_size) {
   uniform int err = FUTHARK_SUCCESS;
-  uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr, 
+  uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr,
                                                         new_size*programCount);
   if (memptr == NULL) {
     *error = lexical_realloc_error(new_size);
@@ -178,7 +200,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
     *ptr = (varying unsigned char * uniform)memptr;
     *old_size = new_size;
   }
-  
+
   return err;
 }
 

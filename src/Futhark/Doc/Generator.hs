@@ -141,12 +141,13 @@ renderFiles important_imports imports = runWriter $ do
     forM imports $ \(current, fm) ->
       let ctx =
             Context
-              current
-              fm
-              imports
-              mempty
-              file_map
-              (progModuleTypes $ fileProg fm)
+              { ctxCurrent = current,
+                ctxFileMod = fm,
+                ctxImports = imports,
+                ctxNoLink = mempty,
+                ctxFileMap = file_map,
+                ctxVisibleMTys = progModuleTypes $ fileProg fm
+              }
        in flip runReaderT ctx $ do
             (first_paragraph, maybe_abstract, maybe_sections) <- headerDoc $ fileProg fm
 
@@ -519,10 +520,10 @@ retTypeHtml (RetType dims t) = do
 
 prettyShapeDecl :: ShapeDecl (DimDecl VName) -> DocM Html
 prettyShapeDecl (ShapeDecl ds) =
-  mconcat <$> mapM (fmap brackets . dimDeclHtml) ds
+  mconcat <$> mapM dimDeclHtml ds
 
 typeArgHtml :: TypeArg (DimDecl VName) -> DocM Html
-typeArgHtml (TypeArgDim d _) = brackets <$> dimDeclHtml d
+typeArgHtml (TypeArgDim d _) = dimDeclHtml d
 typeArgHtml (TypeArgType t _) = typeHtml t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
@@ -616,7 +617,7 @@ typeExpHtml e = case e of
   TEArray at d _ -> do
     at' <- typeExpHtml at
     d' <- dimExpHtml d
-    pure $ brackets d' <> at'
+    pure $ d' <> at'
   TETuple ts _ -> parens . commas <$> mapM typeExpHtml ts
   TERecord fs _ -> braces . commas <$> mapM ppField fs
     where
@@ -691,14 +692,14 @@ relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 dimDeclHtml :: DimDecl VName -> DocM Html
-dimDeclHtml (NamedDim v) = qualNameHtml v
-dimDeclHtml (ConstDim n) = pure $ toHtml (show n)
-dimDeclHtml AnyDim {} = pure mempty
+dimDeclHtml (NamedDim v) = brackets <$> qualNameHtml v
+dimDeclHtml (ConstDim n) = pure $ brackets $ toHtml (show n)
+dimDeclHtml AnyDim {} = pure $ brackets mempty
 
 dimExpHtml :: DimExp VName -> DocM Html
-dimExpHtml DimExpAny = pure mempty
-dimExpHtml (DimExpNamed v _) = qualNameHtml v
-dimExpHtml (DimExpConst n _) = pure $ toHtml (show n)
+dimExpHtml DimExpAny = pure $ brackets mempty
+dimExpHtml (DimExpNamed v _) = brackets <$> qualNameHtml v
+dimExpHtml (DimExpConst n _) = pure $ brackets $ toHtml (show n)
 
 typeArgExpHtml :: TypeArgExp VName -> DocM Html
 typeArgExpHtml (TypeArgExpDim d _) = dimExpHtml d
