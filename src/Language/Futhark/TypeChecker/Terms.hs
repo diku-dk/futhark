@@ -1451,16 +1451,16 @@ checkGlobalAliases params body_t loc = do
   let als =
         filter isGlobal . S.toList $
           boundArrayAliases body_t `S.difference` foldMap patNames params
-  case als of
-    v : _
-      | not $ null params ->
-          typeError loc mempty . withIndexLink "alias-free-variable" $
-            "Function result aliases the free variable "
-              <> pquote (pprName v)
-              <> "."
-              </> "Use" <+> pquote "copy" <+> "to break the aliasing."
-    _ ->
-      pure ()
+  unless (null params) $ do
+    case als of
+      v : _ ->
+        typeError loc mempty . withIndexLink "alias-free-variable" $
+          "Function result aliases the free variable "
+            <> pquote (pprName v)
+            <> "."
+            </> "Use" <+> pquote "copy" <+> "to break the aliasing."
+      _ ->
+        pure ()
 
 inferReturnUniqueness :: [Pat] -> PatType -> PatType
 inferReturnUniqueness params t =

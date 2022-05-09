@@ -385,10 +385,13 @@ envToTermScope env =
     }
   where
     vtable = M.mapWithKey valBinding $ envVtable env
-    valBinding k (TypeM.BoundV tps v) =
-      BoundV Global tps $
-        v
-          `setAliases` (if arrayRank v > 0 then S.singleton (AliasBound k) else mempty)
+    valBinding k (TypeM.BoundV tps t) =
+      BoundV Global tps $ t `setAliases` als
+      where
+        als =
+          case t of
+            Scalar (Arrow {}) -> mempty
+            _ -> S.singleton (AliasBound k)
 
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}

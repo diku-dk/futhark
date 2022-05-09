@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Some rare holes in consumption/alias checking, mostly related to
+  subtle interactions with higher-order functions.
+
 ## [0.21.11]
 
 ### Added
