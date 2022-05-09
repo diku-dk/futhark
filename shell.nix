@@ -24,7 +24,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.cabal2nix
     pkgs.ghcid
     pkgs.haskell.packages.ghc922.ormolu_0_4_0_0
-    pkgs.haskell.packages.ghc902.haskell-language-server
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
