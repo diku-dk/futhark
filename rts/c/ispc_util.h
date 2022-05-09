@@ -396,8 +396,7 @@ static uniform int memblock_set (uniform struct futhark_context * uniform ctx,
   return err;
 }
 
-// AOS <-> SOA methods
-// -----------------------------------------------------------------------------
+// AOS <-> SOA memcpy functions
 #define memmove_sized(dim)                                                                                      \
 static inline void memmove_##dim(varying uint8 * uniform dst, uniform uint8 * varying src, uniform int64_t n) { \
     uniform uint##dim * varying srcp = (uniform uint##dim * varying) src;                                       \
