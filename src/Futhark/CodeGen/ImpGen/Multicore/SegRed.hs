@@ -101,15 +101,6 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
   -- Are we working with vectorized inner maps?
   let inner_map = [] `notElem` dims
 
-  -- Checks if this SegOp is innermost (does not contain a nested segOp)
-  let f = stmsToList . bodyStms . lambdaBody . segBinOpLambda
-      innermost =
-        null
-          [ x
-            | x@(Op (Inner (ParOp _ _))) <-
-                [e | (Let _ _ e) <- concatMap f reds]
-          ]
-
   let path
         | comm && scalars = reductionStage1CommScalar
         | inner_map = reductionStage1Array

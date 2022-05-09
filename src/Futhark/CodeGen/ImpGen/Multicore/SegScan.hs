@@ -65,15 +65,6 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
     let paramTypes = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
     let noArrayParam = null [x | x@(Array {}) <- paramTypes]
 
-    -- Checks if this SegOp is innermost (does not contain a nested segOp)
-    let f = stmsToList . bodyStms . lambdaBody . segBinOpLambda
-        innermost =
-          null
-            [ x
-              | x@(Op (Inner (ParOp _ _))) <-
-                  [e | (Let _ _ e) <- concatMap f scan_ops]
-            ]
-
     let (scanStage1, scanStage3)
           | scalars = (scalarStage1, scalarStage3)
           | vectorize && noArrayParam = (vectorizedStage1, vectorizedStage3)
@@ -336,7 +327,6 @@ scalarStage3 ::
   MulticoreGen ()
 scalarStage3 pat space kbody scan_ops = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  -- traceM $ pretty per_scan_pes
   body <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -358,7 +348,6 @@ vectorizedStage3 ::
   MulticoreGen ()
 vectorizedStage3 pat space kbody scan_ops = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  -- traceM $ pretty per_scan_pes
   body <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -382,7 +371,6 @@ fallbackStage3 ::
   MulticoreGen ()
 fallbackStage3 pat space kbody scan_ops = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  -- traceM $ pretty per_scan_pes
   body <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
