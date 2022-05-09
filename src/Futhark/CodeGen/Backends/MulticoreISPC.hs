@@ -400,6 +400,13 @@ handleError msg stacktrace = do
 
     mapArgNames (ErrorMsg parts) = mapArgNames' parts
 
+getMemType :: VName -> PrimType -> ISPCCompilerM C.Type
+getMemType dest elemtype = do
+  cached <- isJust <$> GC.cacheMem dest
+  if cached
+    then pure [C.cty|$tyqual:varying $ty:(primStorageType elemtype)* uniform|]
+    else pure [C.cty|$ty:(primStorageType elemtype)*|]
+
 -- | Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
 -- All recursive constructors are duplicated here, since not doing so
@@ -477,7 +484,7 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       deref <-
         GC.derefPointer dest'
           <$> pure [C.cexp|$id:tmp|]
-          <*> cast
+          <*> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = do
@@ -485,30 +492,20 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       deref <-
         GC.derefPointer dest'
           <$> GC.compileExp (untyped idx)
-          <*> cast
+          <*> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   where
-    cast = do
-      cached <- isJust <$> GC.cacheMem dest
-      if cached
-        then pure [C.cty|$tyqual:varying $ty:(primStorageType elemtype)* uniform|]
-        else pure [C.cty|$ty:(primStorageType elemtype)*|]
     isConstExp = isSimple . constFoldPrimExp
     isSimple (ValueExp _) = True
     isSimple _ = False
 compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
   src' <- GC.rawMem src
-  cached <- isJust <$> GC.cacheMem src
-  let typ =
-        if cached
-          then [C.cty|$tyqual:varying $ty:(primStorageType restype)* uniform|]
-          else [C.cty|$ty:(primStorageType restype)*|]
   e <-
     fmap (fromStorage restype) $
       GC.derefPointer src'
         <$> GC.compileExp (untyped iexp)
-        <*> pure [C.cty|$ty:typ|]
+        <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
 compileCode code@(Copy dest pt (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
   dm <- isJust <$> GC.cacheMem dest
