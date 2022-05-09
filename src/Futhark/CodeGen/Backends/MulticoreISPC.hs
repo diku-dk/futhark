@@ -467,11 +467,6 @@ compileCode (SetMem dest src space) =
   setMem dest src space
 compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
   | isConstExp (untyped idx) = do
-      cached <- isJust <$> GC.cacheMem dest
-      let typ =
-            if cached
-              then [C.cty|$tyqual:varying $ty:(primStorageType elemtype)* $tyqual:uniform|]
-              else [C.cty|$ty:(primStorageType elemtype)*|]
       dest' <- GC.rawMem dest
       idxexp <- GC.compileExp (untyped idx)
       varis <- mapM getVariability (namesToList $ freeIn idx)
@@ -479,27 +474,26 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       tmp <- newVName "tmp_idx"
       -- Disambiguate the variability of the constant index
       GC.decl [C.cdecl|$tyquals:quals typename int64_t $id:tmp = $exp:idxexp;|]
-      let deref =
-            GC.derefPointer
-              dest'
-              [C.cexp|$id:tmp|]
-              [C.cty|$ty:typ|]
+      deref <-
+        GC.derefPointer dest'
+          <$> pure [C.cexp|$id:tmp|]
+          <*> cast
       elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = do
-      cached <- isJust <$> GC.cacheMem dest
-      let typ =
-            if cached
-              then [C.cty|$tyqual:varying $ty:(primStorageType elemtype)* uniform|]
-              else [C.cty|$ty:(primStorageType elemtype)*|]
       dest' <- GC.rawMem dest
       deref <-
         GC.derefPointer dest'
           <$> GC.compileExp (untyped idx)
-          <*> pure [C.cty|$ty:typ|]
+          <*> cast
       elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   where
+    cast = do
+      cached <- isJust <$> GC.cacheMem dest
+      if cached
+        then pure [C.cty|$tyqual:varying $ty:(primStorageType elemtype)* uniform|]
+        else pure [C.cty|$ty:(primStorageType elemtype)*|]
     isConstExp = isSimple . constFoldPrimExp
     isSimple (ValueExp _) = True
     isSimple _ = False
