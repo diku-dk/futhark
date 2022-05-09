@@ -159,11 +159,10 @@ genScanLoop typ pat space kbody scan_ops local_accs mapout kernel i = do
       forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
         getNestLoop typ (segBinOpShape scan_op) $ \vec_is -> do
           -- Read accum value
-          sComment "bla bla" $
-            forM_ (zip (xParams scan_op) acc) $ \(p, acc') -> do
-              copyDWIMFix (paramName p) [] (Var acc') vec_is
+          forM_ (zip (xParams scan_op) acc) $ \(p, acc') -> do
+            copyDWIMFix (paramName p) [] (Var acc') vec_is
           -- Read next value
-          sComment "Read next values blabla" $
+          sComment "Read next values" $
             forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
               getExtract kernel j $
                 collect $
@@ -414,7 +413,7 @@ compileSegScanBody pat space scan_ops kbody = collect $ do
   sOp $ Imp.GetTaskId (segFlat space)
 
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  generateChunkLoop "SegScan" True $ \segment_i -> do
+  generateChunkLoop "SegScan" False $ \segment_i -> do
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
       let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op
