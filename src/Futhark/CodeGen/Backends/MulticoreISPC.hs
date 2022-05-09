@@ -482,12 +482,8 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       -- Disambiguate the variability of the constant index
       GC.decl [C.cdecl|$tyquals:quals typename int64_t $id:tmp = $exp:idxexp;|]
       deref <-
-        pure
-          ( GC.derefPointer
-              dest'
-              [C.cexp|$id:tmp|]
-          )
-          <*> getMemType dest elemtype
+        GC.derefPointer dest' [C.cexp|$id:tmp|]
+          <$> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = do
