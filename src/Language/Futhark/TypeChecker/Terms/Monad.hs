@@ -77,7 +77,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     useAfterConsume,
     unusedSize,
     notConsumable,
-    unexpectedType,
     uniqueReturnAliased,
     returnAliased,
     badLetWithValue,
@@ -210,9 +209,15 @@ altOccurrences occurs1 occurs2 =
     cons1 = allConsumed occurs1
     cons2 = allConsumed occurs2
 
--- | Whether something is a global or a local variable.
-data Locality = Local | Global
-  deriving (Show)
+-- | How something was bound.
+data Locality
+  = -- | In the current function
+    Local
+  | -- | In an enclosing function, but not the current one.
+    Nonlocal
+  | -- | At global scope.
+    Global
+  deriving (Show, Eq, Ord)
 
 data ValBinding
   = -- | Aliases in parameters indicate the lexical
@@ -258,17 +263,6 @@ uniqueReturnAliased :: SrcLoc -> TermTypeM a
 uniqueReturnAliased loc =
   typeError loc mempty . withIndexLink "unique-return-aliased" $
     "A unique-typed component of the return value is aliased to some other component."
-
-unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
-unexpectedType loc _ [] =
-  typeError loc mempty $
-    "Type of expression at" <+> text (locStr loc)
-      <+> "cannot have any type - possibly a bug in the type checker."
-unexpectedType loc t ts =
-  typeError loc mempty $
-    "Type of expression at" <+> text (locStr loc) <+> "must be one of"
-      <+> commasep (map ppr ts) <> ", but is"
-      <+> ppr t <> "."
 
 notConsumable :: MonadTypeChecker m => SrcLoc -> Doc -> m b
 notConsumable loc v =
@@ -392,9 +386,12 @@ envToTermScope env =
   where
     vtable = M.mapWithKey valBinding $ envVtable env
     valBinding k (TypeM.BoundV tps v) =
-      BoundV Global tps $
-        v
-          `setAliases` (if arrayRank v > 0 then S.singleton (AliasBound k) else mempty)
+      BoundV Global tps $ selfAliasing (S.singleton (AliasBound k)) v
+    -- FIXME: hack, #1675
+    selfAliasing als (Scalar (Record ts)) =
+      Scalar $ Record $ M.map (selfAliasing als) ts
+    selfAliasing als t =
+      t `setAliases` (if arrayRank t > 0 then als else mempty)
 
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
@@ -933,7 +930,7 @@ noUnique m = do
   where
     f scope = scope {scopeVtable = M.map set $ scopeVtable scope}
 
-    set (BoundV l tparams t) = BoundV l tparams $ t `setUniqueness` Nonunique
+    set (BoundV l tparams t) = BoundV (max l Nonlocal) tparams t
     set (OverloadedF ts pts rt) = OverloadedF ts pts rt
     set EqualityF = EqualityF
     set (WasConsumed loc) = WasConsumed loc
@@ -951,11 +948,9 @@ checkIfConsumable loc als = do
   vtable <- asks $ scopeVtable . termScope
   let consumable v = case M.lookup v vtable of
         Just (BoundV Local _ t)
-          | arrayRank t > 0 -> unique t
-          | Scalar TypeVar {} <- t -> unique t
           | Scalar Arrow {} <- t -> False
           | otherwise -> True
-        Just (BoundV Global _ _) -> False
+        Just (BoundV l _ _) -> l == Local
         _ -> True
   -- The sort ensures that AliasBound vars are shown before AliasFree.
   case map aliasVar $ sort $ filter (not . consumable . aliasVar) $ S.toList als of
