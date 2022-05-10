@@ -688,7 +688,7 @@ evalType env t@(Array _ u shape _) =
   let et = stripArray (shapeRank shape) t
       et' = evalType env et
       shape' = fmap evalDim shape
-   in arrayOf et' shape' u
+   in arrayOf u shape' et'
   where
     evalDim (NamedDim qn)
       | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
