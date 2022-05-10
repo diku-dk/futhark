@@ -151,7 +151,7 @@ multicoreImpCodeGenAction =
   Action
     { actionName = "Compile to imperative multicore",
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
+      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg True
     }
 
 -- Lines that we prepend (in comments) to generated code.
