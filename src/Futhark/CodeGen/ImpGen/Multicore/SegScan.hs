@@ -228,9 +228,8 @@ scanStage1Fallback pat space kbody scan_ops = do
     genBinOpParams scan_ops
     local_accs <- genLocalAccsStage1 scan_ops
 
-    inISPC $
-      generateChunkLoop "SegScan" False $
-        genScanLoop ScanSeq pat space kbody scan_ops local_accs
+    generateChunkLoop "SegScan" False $
+      genScanLoop ScanSeq pat space kbody scan_ops local_accs
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
@@ -373,9 +372,8 @@ scanStage3Fallback pat space kbody scan_ops = do
     genBinOpParams scan_ops
     local_accs <- genLocalAccsStage3 scan_ops per_scan_pes
 
-    inISPC $
-      generateChunkLoop "SegScan" False $
-        genScanLoop ScanSeq pat space kbody scan_ops local_accs
+    generateChunkLoop "SegScan" False $
+      genScanLoop ScanSeq pat space kbody scan_ops local_accs
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
 
