@@ -55,6 +55,16 @@ library
   exposed-modules:
       Futhark
       Futhark.Actions
+      Futhark.AD.Derivatives
+      Futhark.AD.Fwd
+      Futhark.AD.Rev
+      Futhark.AD.Rev.Loop
+      Futhark.AD.Rev.Map
+      Futhark.AD.Rev.Monad
+      Futhark.AD.Rev.Reduce
+      Futhark.AD.Rev.Scan
+      Futhark.AD.Rev.Scatter
+      Futhark.AD.Rev.SOAC
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
       Futhark.Analysis.DataDependencies
@@ -88,6 +98,7 @@ library
       Futhark.CLI.Doc
       Futhark.CLI.Literate
       Futhark.CLI.LSP
+      Futhark.CLI.Main
       Futhark.CLI.Misc
       Futhark.CLI.Multicore
       Futhark.CLI.MulticoreWASM
@@ -216,6 +227,7 @@ library
       Futhark.LSP.Handlers
       Futhark.LSP.Tool
       Futhark.LSP.State
+      Futhark.LSP.PositionMapping
       Futhark.MonadFreshNames
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
@@ -223,12 +235,18 @@ library
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.LoopKernel
+      Futhark.Optimise.GenRedOpt
+      Futhark.Optimise.HistAccs
       Futhark.Optimise.InPlaceLowering
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
+      Futhark.Optimise.MergeGPUBodies
+      Futhark.Optimise.ReduceDeviceSyncs
+      Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
+      Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.Engine
       Futhark.Optimise.Simplify.Rep
@@ -244,6 +262,7 @@ library
       Futhark.Optimise.TileLoops.Shared
       Futhark.Optimise.Unstream
       Futhark.Pass
+      Futhark.Pass.AD
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.GPU
@@ -284,6 +303,7 @@ library
       Futhark.Util.Log
       Futhark.Util.Options
       Futhark.Util.Pretty
+      Futhark.Util.ProgressBar
       Futhark.Util.Table
       Futhark.Version
       Language.Futhark
@@ -336,13 +356,14 @@ library
     , bmp >=1.2.6.3
     , containers >=0.6.2.1
     , cryptohash-md5
+    , Diff >=0.4.1
     , directory >=1.3.0.0
     , directory-tree >=0.12.1
     , dlist >=0.6.0.1
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=4.12.4
-    , futhark-data >= 1.0.3.0
+    , futhark-data >= 1.1.0.0
     , futhark-server >= 1.1.2.1
     , futhark-manifest >= 1.0.0.0
     , githash >=0.1.6.1
@@ -379,19 +400,17 @@ library
 
 executable futhark
   main-is: src/main.hs
-  other-modules:
-      Paths_futhark
   ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
   build-depends:
       base
     , futhark
-    , text
   default-language: Haskell2010
 
 test-suite unit
   type: exitcode-stdio-1.0
   main-is: futhark_tests.hs
   other-modules:
+      Futhark.AD.DerivativesTests
       Futhark.BenchTests
       Futhark.Pkg.SolveTests
       Futhark.IR.Prop.RearrangeTests

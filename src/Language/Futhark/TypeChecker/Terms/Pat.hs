@@ -58,29 +58,44 @@ boundAliases = S.map aliasVar . S.filter bound
     bound AliasBound {} = True
     bound AliasFree {} = False
 
-checkIfUsed :: Occurrences -> Ident -> TermTypeM ()
-checkIfUsed occs v
+checkIfUsed :: Bool -> Occurrences -> Ident -> TermTypeM ()
+checkIfUsed allow_consume occs v
+  | not allow_consume,
+    not $ unique $ unInfo $ identType v,
+    Just occ <- find consumes occs =
+      typeError (srclocOf occ) mempty $
+        "Consuming"
+          <+> pquote (pprName $ identName v)
+          <+> textwrap ("which is a non-consumable parameter bound at " <> locStr (locOf v) <> ".")
   | not $ identName v `S.member` allOccurring occs,
     not $ "_" `isPrefixOf` prettyName (identName v) =
-      warn (srclocOf v) $ "Unused variable" <+> pquote (pprName $ identName v) <+> "."
+      warn (srclocOf v) $
+        "Unused variable" <+> pquote (pprName $ identName v) <+> "."
   | otherwise =
       pure ()
+  where
+    consumes = maybe False (identName v `S.member`) . consumed
 
 -- | Bind these identifiers locally while running the provided action.
 -- Checks that the identifiers are used properly within the scope
 -- (e.g. consumption).
-binding :: [Ident] -> TermTypeM a -> TermTypeM a
-binding stms = check . handleVars
+binding ::
+  -- | Allow consumption, even if the type is not unique.
+  Bool ->
+  [Ident] ->
+  TermTypeM a ->
+  TermTypeM a
+binding allow_consume idents = check . handleVars
   where
     handleVars m =
-      localScope (`bindVars` stms) $ do
+      localScope (`bindVars` idents) $ do
         -- Those identifiers that can potentially also be sizes are
         -- added as type constraints.  This is necessary so that we
         -- can properly detect scope violations during unification.
         -- We do this for *all* identifiers, not just those that are
         -- integers, because they may become integers later due to
         -- inference...
-        forM_ stms $ \ident ->
+        forM_ idents $ \ident ->
           constrain (identName ident) $ ParamSize $ srclocOf ident
         m
 
@@ -91,9 +106,6 @@ binding stms = check . handleVars
     bindVar scope (Ident name (Info tp) _) =
       let inedges = boundAliases $ aliases tp
           update (BoundV l tparams in_t)
-            -- If 'name' is record or sum-typed, don't alias the
-            -- components to 'name', because these no identity
-            -- beyond their components.
             | Array {} <- tp = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
             | otherwise = BoundV l tparams in_t
           update b = b
@@ -114,11 +126,11 @@ binding stms = check . handleVars
       (a, usages) <- collectBindingsOccurrences m
       checkOccurrences usages
 
-      mapM_ (checkIfUsed usages) stms
+      mapM_ (checkIfUsed allow_consume usages) idents
 
       pure a
 
-    -- Collect and remove all occurences in @stms@.  This relies
+    -- Collect and remove all occurences of @idents@.  This relies
     -- on the fact that no variables shadow any other.
     collectBindingsOccurrences m = do
       (x, usage) <- collectOccurrences m
@@ -126,19 +138,16 @@ binding stms = check . handleVars
       occur rest
       pure (x, relevant)
       where
-        split =
-          unzip
-            . map
-              ( \occ ->
-                  let (obs1, obs2) = divide $ observed occ
-                      occ_cons = divide <$> consumed occ
-                      con1 = fst <$> occ_cons
-                      con2 = snd <$> occ_cons
-                   in ( occ {observed = obs1, consumed = con1},
-                        occ {observed = obs2, consumed = con2}
-                      )
+        onOcc occ =
+          let (obs1, obs2) = divide $ observed occ
+              occ_cons = divide <$> consumed occ
+              con1 = fst <$> occ_cons
+              con2 = snd <$> occ_cons
+           in ( occ {observed = obs1, consumed = con1},
+                occ {observed = obs2, consumed = con2}
               )
-        names = S.fromList $ map identName stms
+        split = unzip . map onOcc
+        names = S.fromList $ map identName idents
         divide s = (s `S.intersection` names, s `S.difference` names)
 
 bindingTypes ::
@@ -158,7 +167,7 @@ bindingTypes types m = do
 
 bindingTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
 bindingTypeParams tparams =
-  binding (mapMaybe typeParamIdent tparams)
+  binding False (mapMaybe typeParamIdent tparams)
     . bindingTypes (concatMap typeParamType tparams)
   where
     typeParamType (TypeParamType l v loc) =
@@ -183,7 +192,7 @@ bindingIdent (Ident v NoInfo vloc) t m =
   bindSpaced [(Term, v)] $ do
     v' <- checkName Term v vloc
     let ident = Ident v' (Info t) vloc
-    binding [ident] $ m ident
+    binding True [ident] $ m ident
 
 -- | Bind @let@-bound sizes.  This is usually followed by 'bindingPat'
 -- immediately afterwards.
@@ -193,7 +202,7 @@ bindingSizes sizes m = do
   foldM_ lookForDuplicates mempty sizes
   bindSpaced (map sizeWithSpace sizes) $ do
     sizes' <- mapM check sizes
-    binding (map sizeWithType sizes') $ m sizes'
+    binding False (map sizeWithType sizes') $ m sizes'
   where
     lookForDuplicates prev size
       | Just prevloc <- M.lookup (sizeName size) prev =
@@ -223,6 +232,9 @@ patternDims (PatAscription p (TypeDecl _ (Info t)) _) =
     dimIdent _ NamedDim {} = Nothing
 patternDims _ = []
 
+sizeBinderToParam :: SizeBinder VName -> UncheckedTypeParam
+sizeBinderToParam (SizeBinder v loc) = TypeParamDim (baseName v) loc
+
 -- | Check and bind a @let@-pattern.
 bindingPat ::
   [SizeBinder VName] ->
@@ -231,8 +243,8 @@ bindingPat ::
   (Pat -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkForDuplicateNames [p]
-  checkPat sizes p t $ \p' -> binding (S.toList $ patIdents p') $ do
+  checkForDuplicateNames (map sizeBinderToParam sizes) [p]
+  checkPat sizes p t $ \p' -> binding True (S.toList $ patIdents p') $ do
     -- Perform an observation of every declared dimension.  This
     -- prevents unused-name warnings for otherwise unused dimensions.
     mapM_ observe $ patternDims p'
@@ -323,31 +335,20 @@ checkPat' sizes (RecordPat fs loc) NoneInferred =
 checkPat' sizes (PatAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
   (t', st, _) <- checkTypeExpNonrigid t
 
-  let st' = fromStruct st
   case maybe_outer_t of
     Ascribed outer_t -> do
       st_forunify <- nonrigidFor sizes st
       unify (mkUsage loc "explicit type ascription") st_forunify (toStruct outer_t)
 
-      -- We also have to make sure that uniqueness matches.  This is
-      -- done explicitly, because it is ignored by unification.
-      st'' <- normTypeFully st'
       outer_t' <- normTypeFully outer_t
-      case unifyTypesU unifyUniqueness st'' outer_t' of
-        Just outer_t'' ->
-          PatAscription <$> checkPat' sizes p (Ascribed outer_t'')
-            <*> pure (TypeDecl t' (Info st))
-            <*> pure loc
-        Nothing ->
-          typeError loc mempty $
-            "Cannot match type" <+> pquote (ppr outer_t') <+> "with expected type"
-              <+> pquote (ppr st'') <> "."
-    NoneInferred ->
-      PatAscription <$> checkPat' sizes p (Ascribed st')
+      PatAscription
+        <$> checkPat' sizes p (Ascribed (addAliasesFromType st outer_t'))
         <*> pure (TypeDecl t' (Info st))
         <*> pure loc
-  where
-    unifyUniqueness u1 u2 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
+    NoneInferred ->
+      PatAscription <$> checkPat' sizes p (Ascribed (fromStruct st))
+        <*> pure (TypeDecl t' (Info st))
+        <*> pure loc
 checkPat' _ (PatLit l NoInfo loc) (Ascribed t) = do
   t' <- patLitMkType l loc
   unify (mkUsage loc "matching against literal") t' (toStruct t)
@@ -388,7 +389,7 @@ checkPat ::
   (Pat -> TermTypeM a) ->
   TermTypeM a
 checkPat sizes p t m = do
-  checkForDuplicateNames [p]
+  checkForDuplicateNames (map sizeBinderToParam sizes) [p]
   p' <- onFailure (CheckingPat p t) $ checkPat' sizes p t
 
   let explicit = mustBeExplicitInType $ patternStructType p'
@@ -408,11 +409,11 @@ bindingParams ::
   ([TypeParam] -> [Pat] -> TermTypeM a) ->
   TermTypeM a
 bindingParams tps orig_ps m = do
-  checkForDuplicateNames orig_ps
+  checkForDuplicateNames tps orig_ps
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
     let descend ps' (p : ps) =
           checkPat [] p NoneInferred $ \p' ->
-            binding (S.toList $ patIdents p') $ descend (p' : ps') ps
+            binding False (S.toList $ patIdents p') $ descend (p' : ps') ps
         descend ps' [] = do
           -- Perform an observation of every type parameter.  This
           -- prevents unused-name warnings for otherwise unused

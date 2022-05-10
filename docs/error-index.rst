@@ -534,6 +534,52 @@ Programming with such *explicit size witnesses* is a fairly advanced
 technique, but often necessary when writing advanced size-dependent
 code.
 
+.. _ambiguous-size:
+
+"Ambiguous size *x*"
+~~~~~~~~~~~~~~~~~~~~
+
+There are various sources for this error, but they all have the same
+ultimate cause: the type checker cannot figure out how some symbolic
+size name should be resolved to a concrete size.  The simplest
+example, although contrived, is probably this:
+
+.. code-block:: futhark
+
+   let [n][m] (xss: [n][m]i64) = []
+
+The type checker can infer that ``n`` should be zero, but how can it
+possibly figure out the shape of the (non-existent) rows of the
+two-dimensional array?  This can be fixed in many ways, but adding a
+type ascription to the array is one of them: ``[] : [0][2]i64``.
+
+Another common case arises when using holes.  For an expression
+``length ???``, how would the type checker figure out the intended
+size of the array that the hole represents?  Again, this can be solved
+with a type ascription: ``length (??? : [10]bool)``.
+
+Finally, ambiguous sizes can also occur for functions that use size
+parameters only in "non-witnessing" position, meaning sizes that are
+not actually uses as sizes of real arrays.  An example:
+
+.. code-block:: futhark
+
+   def f [n] (g: [n]i64 -> i64) : i64 = n
+
+   def main = f (\xs -> xs[0])
+
+Note that ``f`` is a higher order function, and that the size
+parameter ``n`` is only used in the type of the ``g`` function.
+Futhark's value model is such that given a value of type ``[n]i64 ->
+i64``, we cannot extract an ``n`` from it.  Using a function such as
+``f`` is only valid when ``n`` can be inferred from the usage, which
+is not the case here.  Again, we can fix it by adding a type
+ascription to disambiguate:
+
+.. code-block:: futhark
+
+   def main = f (\(xs:[1]i64) -> xs[0])
+
 Module errors
 -------------
 

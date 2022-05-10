@@ -141,7 +141,8 @@ decodeBenchResults = fmap unBenchResults . JSON.eitherDecode'
 
 -- | How to run a benchmark.
 data RunOptions = RunOptions
-  { runMinRuns :: Int,
+  { -- | Applies both to initial and convergence phase.
+    runMinRuns :: Int,
     runMinTime :: NominalDiffTime,
     runTimeout :: Int,
     runVerbose :: Int,
@@ -154,8 +155,8 @@ data RunOptions = RunOptions
     runResultAction :: (Int, Maybe Double) -> IO ()
   }
 
--- | A list of @(autocorrelation,rsd)@ pairs.  When the
--- autocorrelation is above the first element and the RSD is above the
+-- | A list of @(autocorrelation,rse)@ pairs.  When the
+-- autocorrelation is above the first element and the RSE is above the
 -- second element, we want more runs.
 convergenceCriteria :: [(Double, Double)]
 convergenceCriteria =
@@ -168,9 +169,9 @@ convergenceCriteria =
 
 -- Returns the next run count.
 nextRunCount :: Int -> Double -> Double -> Int
-nextRunCount runs rsd acor = if any check convergenceCriteria then div runs 2 else 0
+nextRunCount runs rse acor = if any check convergenceCriteria then div runs 2 else 0
   where
-    check (acor_lb, rsd_lb) = acor > acor_lb && rsd > rsd_lb
+    check (acor_lb, rse_lb) = acor > acor_lb && rse > rse_lb
 
 type BenchM = ExceptT T.Text IO
 
@@ -216,7 +217,7 @@ runConvergence ::
   BenchM (DL.DList (RunResult, [T.Text]))
 runConvergence do_run opts initial_r =
   let runtimes = resultRuntimes (DL.toList initial_r)
-      (n, _, rsd, acor) = runtimesMetrics runtimes
+      (n, _, rse, acor) = runtimesMetrics runtimes
    in -- If the runtimes collected during the runMinimum phase are
       -- unstable enough that we need more in order to converge, we throw
       -- away the runMinimum runtimes.  This is because they often exhibit
@@ -224,11 +225,11 @@ runConvergence do_run opts initial_r =
       -- outliers that poison the metrics we use to determine convergence.
       -- By throwing them away we converge much faster, and still get the
       -- right result.
-      case nextRunCount n rsd acor of
+      case nextRunCount n rse acor of
         x
           | x > 0,
             runConvergencePhase opts ->
-              moreRuns mempty mempty rsd x
+              moreRuns mempty mempty rse (x `max` runMinRuns opts)
           | otherwise ->
               pure initial_r
   where
@@ -237,30 +238,30 @@ runConvergence do_run opts initial_r =
 
     runtimesMetrics runtimes =
       let n = U.length runtimes
-          rsd = (fastStdDev runtimes / sqrt (fromIntegral n)) / mean runtimes
+          rse = (fastStdDev runtimes / sqrt (fromIntegral n)) / mean runtimes
           (x, _, _) = autocorrelation runtimes
        in ( n,
             realToFrac (U.sum runtimes) :: NominalDiffTime,
-            rsd,
+            rse,
             fromMaybe 1 (x U.!? 1)
           )
 
-    sample rsd = do
+    sample rse = do
       x <- do_run
-      liftIO $ runResultAction opts (runMicroseconds (fst x), Just rsd)
+      liftIO $ runResultAction opts (runMicroseconds (fst x), Just rse)
       pure x
 
-    moreRuns runtimes r rsd x = do
-      r' <- replicateM x $ sample rsd
+    moreRuns runtimes r rse x = do
+      r' <- replicateM x $ sample rse
       loop (runtimes <> resultRuntimes r') (r <> DL.fromList r')
 
     loop runtimes r = do
-      let (n, total, rsd, acor) = runtimesMetrics runtimes
-      case nextRunCount n rsd acor of
+      let (n, total, rse, acor) = runtimesMetrics runtimes
+      case nextRunCount n rse acor of
         x
           | x > 0,
             total < runConvergenceMaxTime opts ->
-              moreRuns runtimes r rsd x
+              moreRuns runtimes r rse x
           | otherwise ->
               pure r
 

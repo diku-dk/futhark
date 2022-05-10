@@ -24,6 +24,7 @@ instance IE.IntegralExp Int where
   rem = P.rem
   div = P.div
   mod = P.mod
+  pow = (P.^)
   sgn = Just . P.signum
 
 allPoints :: [Int] -> [[Int]]

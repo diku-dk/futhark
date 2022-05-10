@@ -9,9 +9,40 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Somewhat simplified the handling of "uniqueness types" (which is a
+  term we are moving away from).  You should never see `*` in
+  non-function types, and they are better thought of as effect
+  indicators.
+
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* `futhark test -C` was broken.
+
+## [0.21.11]
+
+### Added
+
+* The CUDA backend now supports compute capability 8.6 and 8.7.
+
+* Philip Børgesen has implemented a new optimisation for GPU backends
+  that migrates scalar work to the GPU, in order to reduce
+  synchronisation.  This results in major speedup for some programs.
+
+* String literals are now allowed in `input` blocks.
+
+* Experimental and undocumented support for automatic differentiation,
+  available on the secret menu.
+
+* Assertions and attributes are now ignored when used as size
+  expressions.  E.g. `iota (assert p n) 0` now has size `n`.
+
+* `futhark test` only runs the interpreter if passed `-i`.
+
+* `futhark literate` now shows progress bars when run with `-v`.
 
 ### Fixed
 
@@ -30,6 +61,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Another defunctorisation bug (#1653).  Somehow we find these every
   time Martin Elsman writes a nontrivial Futhark program.
+
+* `futhark bench`: convergence phase now does at least `--runs` runs.
+
+* Errors and warnings no longer awkwardly mixed together in console output.
+
+* Slightly better type errors for ambiguous sizes (#1661).
+
+* Better type errors for module ascription involving nested modules
+  (#1660).
+
+* `futhark doc`: some formatting bugs.
+
+* `futhark doc` didn't notice all `local` module types (#1666).
+
+* Missing consumption check in optimisation could lead to ICE (#1669).
 
 ## [0.21.10]
 

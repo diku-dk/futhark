@@ -99,6 +99,17 @@ withProgramServer program runner extra_options f = do
   context prog_ctx $
     pureTestResults $ liftIO $ withServer (futharkServerCfg to_run to_run_args) f
 
+data TestMode
+  = -- | Only type check.
+    TypeCheck
+  | -- | Only compile (do not run).
+    Compile
+  | -- | Test compiled code.
+    Compiled
+  | -- | Test interpreted code.
+    Interpreted
+  deriving (Eq, Show)
+
 data TestCase = TestCase
   { _testCaseMode :: TestMode,
     testCaseProgram :: FilePath,
@@ -242,13 +253,13 @@ runTestCase (TestCase mode program testcase progs) = do
       let backend = configBackend progs
           extra_compiler_options = configExtraCompilerOptions progs
 
-      unless (mode == Compile) $
+      when (mode `elem` [Compiled, Interpreted]) $
         context "Generating reference outputs" $
           -- We probably get the concurrency at the test program level,
           -- so force just one data set at a time here.
           ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
 
-      unless (mode == Interpreted) $
+      when (mode `elem` [Compile, Compiled]) $
         context ("Compiling with --backend=" <> T.pack backend) $ do
           compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
           mapM_ (testMetrics progs program) structures
@@ -265,7 +276,7 @@ runTestCase (TestCase mode program testcase progs) = do
                 let run = runCompiledEntry (FutharkExe futhark) server program
                 concat <$> mapM run ios
 
-      unless (mode == Compile || mode == Compiled) $
+      when (mode == Interpreted) $
         context "Interpreting" $
           accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
 
@@ -323,8 +334,8 @@ checkError (ThisError regex_s regex) err
   | not (match regex $ T.unpack err) =
       E.throwError $
         "Expected error:\n  " <> regex_s
-          <> "\nGot error:\n  "
-          <> err
+          <> "\nGot error:\n"
+          <> T.unlines (map ("  " <>) (T.lines err))
 checkError _ _ =
   pure ()
 
@@ -607,7 +618,7 @@ data TestConfig = TestConfig
 defaultConfig :: TestConfig
 defaultConfig =
   TestConfig
-    { configTestMode = Everything,
+    { configTestMode = Compiled,
       configExclude = ["disable"],
       configPrograms =
         ProgConfig
@@ -657,14 +668,6 @@ addCompilerOption option config =
 addOption :: String -> ProgConfig -> ProgConfig
 addOption option config =
   config {configExtraOptions = configExtraOptions config ++ [option]}
-
-data TestMode
-  = TypeCheck
-  | Compile
-  | Compiled
-  | Interpreted
-  | Everything
-  deriving (Eq, Show)
 
 commandLineOptions :: [FunOptDescr TestConfig]
 commandLineOptions =

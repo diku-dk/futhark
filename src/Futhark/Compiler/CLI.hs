@@ -172,13 +172,6 @@ data CompilerConfig cfg = CompilerConfig
     compilerEntryPoints :: [Name]
   }
 
--- | Are we compiling a library or an executable?
-data CompilerMode
-  = ToLibrary
-  | ToExecutable
-  | ToServer
-  deriving (Eq, Ord, Show)
-
 -- | The configuration of the compiler.
 newCompilerConfig :: cfg -> CompilerConfig cfg
 newCompilerConfig x =

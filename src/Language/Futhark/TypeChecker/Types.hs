@@ -8,9 +8,9 @@
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp,
     renameRetType,
-    unifyTypesU,
     subtypeOf,
     subuniqueOf,
+    addAliasesFromType,
     checkForDuplicateNames,
     checkTypeParams,
     typeParamToArg,
@@ -35,6 +35,32 @@ import Futhark.Util.Pretty hiding ((<|>))
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
+
+addAliasesFromType :: StructType -> PatType -> PatType
+addAliasesFromType (Array _ u1 et1 shape1) (Array als _ _ _) =
+  Array als u1 et1 shape1
+addAliasesFromType
+  (Scalar (TypeVar _ u1 tv1 targs1))
+  (Scalar (TypeVar als2 _ _ _)) =
+    Scalar $ TypeVar als2 u1 tv1 targs1
+addAliasesFromType (Scalar (Record ts1)) (Scalar (Record ts2))
+  | length ts1 == length ts2,
+    sort (M.keys ts1) == sort (M.keys ts2) =
+      Scalar $ Record $ M.intersectionWith addAliasesFromType ts1 ts2
+addAliasesFromType
+  (Scalar (Arrow _ mn1 pt1 (RetType dims1 rt1)))
+  (Scalar (Arrow as2 _ pt2 (RetType _ rt2))) =
+    Scalar (Arrow as2 mn1 pt1' (RetType dims1 rt1'))
+    where
+      pt1' = addAliasesFromType pt1 pt2
+      rt1' = addAliasesFromType rt1 rt2
+addAliasesFromType (Scalar (Sum cs1)) (Scalar (Sum cs2))
+  | length cs1 == length cs2,
+    sort (M.keys cs1) == sort (M.keys cs2) =
+      Scalar $ Sum $ M.intersectionWith (zipWith addAliasesFromType) cs1 cs2
+addAliasesFromType (Scalar (Prim t)) _ = Scalar $ Prim t
+addAliasesFromType t1 t2 =
+  error $ "addAliasesFromType invalid args: " ++ show (t1, t2)
 
 -- | @unifyTypes uf t1 t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -349,26 +375,28 @@ checkTypeExp te = do
   checkForDuplicateNamesInType te
   evalTypeExp te
 
--- | Check for duplication of names inside a pattern group.  Produces
--- a description of all names used in the pattern group.
+-- | Check for duplication of names inside a binding group.
 checkForDuplicateNames ::
-  MonadTypeChecker m =>
-  [UncheckedPat] ->
-  m ()
-checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
+  MonadTypeChecker m => [UncheckedTypeParam] -> [UncheckedPat] -> m ()
+checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
+  mapM_ checkTypeParam tps
+  mapM_ checkPat pats
   where
-    check (Id v _ loc) = seen v loc
-    check (PatParens p _) = check p
-    check (PatAttr _ p _) = check p
-    check Wildcard {} = pure ()
-    check (TuplePat ps _) = mapM_ check ps
-    check (RecordPat fs _) = mapM_ (check . snd) fs
-    check (PatAscription p _ _) = check p
-    check PatLit {} = pure ()
-    check (PatConstr _ _ ps _) = mapM_ check ps
+    checkTypeParam (TypeParamType _ v loc) = seen Type v loc
+    checkTypeParam (TypeParamDim v loc) = seen Term v loc
 
-    seen v loc = do
-      already <- gets $ M.lookup v
+    checkPat (Id v _ loc) = seen Term v loc
+    checkPat (PatParens p _) = checkPat p
+    checkPat (PatAttr _ p _) = checkPat p
+    checkPat Wildcard {} = pure ()
+    checkPat (TuplePat ps _) = mapM_ checkPat ps
+    checkPat (RecordPat fs _) = mapM_ (checkPat . snd) fs
+    checkPat (PatAscription p _ _) = checkPat p
+    checkPat PatLit {} = pure ()
+    checkPat (PatConstr _ _ ps _) = mapM_ checkPat ps
+
+    seen ns v loc = do
+      already <- gets $ M.lookup (ns, v)
       case already of
         Just prev_loc ->
           lift $
@@ -376,7 +404,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
               "Name" <+> pquote (ppr v) <+> "also bound at"
                 <+> text (locStr prev_loc) <> "."
         Nothing ->
-          modify $ M.insert v loc
+          modify $ M.insert (ns, v) loc
 
 -- | Check whether the type contains arrow types that define the same
 -- parameter.  These might also exist further down, but that's not

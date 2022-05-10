@@ -1933,6 +1933,10 @@ initialCtx =
                 <> pretty (asInt64 m)
                 <> "]"
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
+    def "vjp2" = Just $
+      fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
+    def "jvp2" = Just $
+      fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s

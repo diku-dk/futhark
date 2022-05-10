@@ -14,7 +14,9 @@ pkgs.stdenv.mkDerivation {
     pkgs.ghc
     pkgs.parallel
     pkgs.haskellPackages.weeder
+    pkgs.haskellPackages.graphmod
     pkgs.haskellPackages.apply-refact
+    pkgs.xdot
     pkgs.hlint
     pkgs.pkgconfig
     pkgs.zlib
@@ -32,6 +34,8 @@ pkgs.stdenv.mkDerivation {
   ]
   ++ pkgs.lib.optionals (pkgs.stdenv.isLinux)
     [ pkgs.opencl-headers
-      pkgs.ocl-icd ]
+      pkgs.ocl-icd
+      pkgs.oclgrind
+    ]
   ;
 }

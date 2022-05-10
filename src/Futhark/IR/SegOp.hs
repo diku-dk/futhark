@@ -56,6 +56,7 @@ where
 
 import Control.Category
 import Control.Monad.Identity hiding (mapM_)
+import Control.Monad.Reader hiding (mapM_)
 import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Data.Bifunctor (first)
@@ -1178,6 +1179,8 @@ simplifyKernelBody space (KernelBody _ stms res) = do
           `Engine.orIf` Engine.isOp
           `Engine.orIf` par_blocker
           `Engine.orIf` Engine.isConsumed
+          `Engine.orIf` Engine.isConsuming
+          `Engine.orIf` Engine.isDeviceMigrated
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
@@ -1201,6 +1204,12 @@ simplifyKernelBody space (KernelBody _ stms res) = do
     consumedInResult _ =
       []
 
+simplifyLambda ::
+  Engine.SimplifiableRep rep =>
+  Lambda (Wise rep) ->
+  Engine.SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+simplifyLambda = Engine.blockMigrated . Engine.simplifyLambda
+
 segSpaceSymbolTable :: ASTRep rep => SegSpace -> ST.SymbolTable rep
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
   foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
@@ -1214,7 +1223,7 @@ simplifySegBinOp ::
 simplifySegBinOp (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      Engine.simplifyLambda lam
+      simplifyLambda lam
   shape' <- Engine.simplify shape
   nes' <- mapM Engine.simplify nes
   pure (SegBinOp comm lam' nes' shape', hoisted)
@@ -1276,7 +1285,7 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
         (lam', op_hoisted) <-
           Engine.localVtable (<> scope_vtable) $
             Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-              Engine.simplifyLambda lam
+              simplifyLambda lam
         pure
           ( HistOp w' rf' arrs' nes' dims' lam',
             op_hoisted
@@ -1301,7 +1310,7 @@ class HasSegOp rep where
 
 -- | Simplification rules for simplifying 'SegOp's.
 segOpRules ::
-  (HasSegOp rep, BuilderOps rep, Buildable rep) =>
+  (HasSegOp rep, BuilderOps rep, Buildable rep, Aliased rep) =>
   RuleBook rep
 segOpRules =
   ruleBook [RuleOp segOpRuleTopDown] [RuleOp segOpRuleBottomUp]
@@ -1316,7 +1325,7 @@ segOpRuleTopDown vtable pat dec op
       Skip
 
 segOpRuleBottomUp ::
-  (HasSegOp rep, BuilderOps rep) =>
+  (HasSegOp rep, BuilderOps rep, Aliased rep) =>
   BottomUpRuleOp rep
 segOpRuleBottomUp vtable pat dec op
   | Just op' <- asSegOp op =
@@ -1431,7 +1440,7 @@ segOpGuts (SegHist lvl space ops kts body) =
   (kts, body, sum $ map (length . histDest) ops, SegHist lvl space ops)
 
 bottomUpSegOp ::
-  (HasSegOp rep, BuilderOps rep) =>
+  (Aliased rep, HasSegOp rep, BuilderOps rep) =>
   (ST.SymbolTable rep, UT.UsageTable) ->
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
@@ -1454,15 +1463,16 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
     (kpes' == kpes)
     cannotSimplify
 
-  kbody <-
+  kbody' <-
     localScope (scopeOfSegSpace space) $
       mkKernelBodyM kstms' kres'
 
-  addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody
+  addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody'
   where
-    (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
+    (kts, kbody@(KernelBody _ kstms kres), num_nonmap_results, mk_segop) =
       segOpGuts segop
     free_in_kstms = foldMap freeIn kstms
+    consumed_in_segop = consumedInKernelBody kbody
     space = segSpace segop
 
     sliceWithGtidsFixed stm
@@ -1494,6 +1504,7 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
                 letBindNames [patElemName kpe'] . BasicOp . Index arr $
                   Slice $ outer_slice <> remaining_slice
           if patElemName kpe `UT.isConsumed` used
+            || arr `nameIn` consumed_in_segop
             then do
               precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
               index kpe {patElemName = precopy}

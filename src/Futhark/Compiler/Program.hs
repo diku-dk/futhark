@@ -18,6 +18,7 @@ module Futhark.Compiler.Program
     lpFilePaths,
     reloadProg,
     extendProg,
+    VFS,
   )
 where
 
@@ -36,7 +37,7 @@ import Control.Monad.State (execStateT, gets, modify)
 import Data.Bifunctor (first)
 import Data.List (intercalate, sort)
 import qualified Data.List.NonEmpty as NE
-import Data.Loc (Loc (..), locOf)
+import Data.Loc (Loc (..), Located, locOf)
 import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
@@ -44,7 +45,7 @@ import qualified Data.Text.IO as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
-import Futhark.Util.Pretty (Doc, align, line, ppr, text, (</>))
+import Futhark.Util.Pretty (Doc, align, ppr, text)
 import qualified Language.Futhark as E
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
@@ -67,9 +68,17 @@ data LoadedFile fm = LoadedFile
 
 -- | Note that the location may be 'NoLoc'.  This essentially only
 -- happens when the problem is that a root file cannot be found.
-data ProgError = ProgError Loc Doc
+data ProgError
+  = ProgError Loc Doc
+  | -- | Not actually an error, but we want them reported
+    -- with errors.
+    ProgWarning Loc Doc
 
 type WithErrors = Either (NE.NonEmpty ProgError)
+
+instance Located ProgError where
+  locOf (ProgError l _) = l
+  locOf (ProgWarning l _) = l
 
 -- | A mapping from absolute pathnames to text representing a virtual
 -- file system.  Before loading a file from the file system, this
@@ -280,10 +289,10 @@ typeCheckProg orig_imports orig_src =
       case E.checkProg (asImports imports) src import_name prog' of
         (prog_ws, Left (E.TypeError loc notes msg)) -> do
           let err' = msg <> ppr notes
-          Left . singleError . ProgError (locOf loc) $
-            if anyWarnings prog_ws
-              then ppr prog_ws </> line <> ppr err'
-              else ppr err'
+              warningToError (wloc, wmsg) = ProgWarning (locOf wloc) wmsg
+          Left $
+            ProgError (locOf loc) err'
+              NE.:| map warningToError (listWarnings prog_ws)
         (prog_ws, Right (m, src')) ->
           let warnHole (loc, t) =
                 singleWarning (E.srclocOf loc) $ "Hole of type: " <> align (ppr t)
@@ -353,19 +362,24 @@ lpFilePaths = map lfPath . lpFiles
 unchangedImports ::
   MonadIO m =>
   VNameSource ->
+  VFS ->
   [LoadedFile CheckedFile] ->
   m ([LoadedFile CheckedFile], VNameSource)
-unchangedImports src [] = pure ([], src)
-unchangedImports src (f : fs)
+unchangedImports src _ [] = pure ([], src)
+unchangedImports src vfs (f : fs)
   | isBuiltin (includeToFilePath (lfImportName f)) =
-      first (f :) <$> unchangedImports src fs
+      first (f :) <$> unchangedImports src vfs fs
   | otherwise = do
-      changed <-
-        maybe True (either (const True) (> lfModTime f))
-          <$> liftIO (interactWithFileSafely (getModificationTime $ lfPath f))
-      if changed
+      let file_path = lfPath f
+      if M.member file_path vfs
         then pure ([], cfNameSource $ lfMod f)
-        else first (f :) <$> unchangedImports src fs
+        else do
+          changed <-
+            maybe True (either (const True) (> lfModTime f))
+              <$> liftIO (interactWithFileSafely (getModificationTime file_path))
+          if changed
+            then pure ([], cfNameSource $ lfMod f)
+            else first (f :) <$> unchangedImports src vfs fs
 
 -- | A "loaded program" containing no actual files.  Use this as a
 -- starting point for 'reloadProg'
@@ -380,10 +394,10 @@ noLoadedProg =
 -- | Find out how many of the old imports can be used.  Here we are
 -- forced to be overly conservative, because our type checker
 -- enforces a linear ordering.
-usableLoadedProg :: MonadIO m => LoadedProg -> [FilePath] -> m LoadedProg
-usableLoadedProg (LoadedProg roots imports src) new_roots
+usableLoadedProg :: MonadIO m => LoadedProg -> VFS -> [FilePath] -> m LoadedProg
+usableLoadedProg (LoadedProg roots imports src) vfs new_roots
   | sort roots == sort new_roots = do
-      (imports', src') <- unchangedImports src imports
+      (imports', src') <- unchangedImports src vfs imports
       pure $ LoadedProg [] imports' src'
   | otherwise =
       pure noLoadedProg
@@ -412,7 +426,7 @@ reloadProg ::
   VFS ->
   IO (Either (NE.NonEmpty ProgError) LoadedProg)
 reloadProg lp new_roots vfs = do
-  lp' <- usableLoadedProg lp new_roots
+  lp' <- usableLoadedProg lp vfs new_roots
   extendProg lp' new_roots vfs
 
 -- | Read and type-check some Futhark files.

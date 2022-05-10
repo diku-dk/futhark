@@ -27,12 +27,5 @@ if git diff-index --cached --check HEAD | egrep -v '^[+-]'; then
     fail
 fi
 
-# Run hlint on changed (but not deleted) Haskell source files.
-files=$(git diff-index --cached --name-status HEAD | awk '$1 != "D" && /\.l?hsc?$/ { print $2 }')
-if [ "$files" ]; then
-    tools/style-check.sh $files || exit 1
-fi
-
-if ! stack build; then
-    fail
-fi
+make check-commit || fail
+make build || fail

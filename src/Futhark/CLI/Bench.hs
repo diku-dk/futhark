@@ -18,14 +18,17 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import qualified Data.Vector.Unboxed as U
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (atMostChars, fancyTerminal, maybeNth, pmapIO)
+import Futhark.Util (atMostChars, fancyTerminal, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
+import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.ProgressBar
 import Statistics.Resampling (Estimator (..), resample)
 import Statistics.Resampling.Bootstrap (bootstrapBCA)
 import Statistics.Types (cl95, confIntLDX, confIntUDX, estError, estPoint)
@@ -248,50 +251,36 @@ runOptions f opts =
       runResultAction = f
     }
 
-progressBar :: Double -> Double -> Int -> String
-progressBar cur bound steps =
-  "|" <> map cell [1 .. steps] <> "| "
-  where
-    step_size :: Double
-    step_size = bound / fromIntegral steps
-    chars = " ▏▎▍▍▌▋▊▉█"
-    char i = fromMaybe ' ' $ maybeNth (i :: Int) chars
-    num_chars = fromIntegral $ length chars
-
-    cell :: Int -> Char
-    cell i
-      | i' * step_size <= cur = char 9
-      | otherwise =
-          char (floor (((cur - (i' - 1) * step_size) * num_chars) / step_size))
-      where
-        i' = fromIntegral i
-
 descString :: String -> Int -> String
 descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
 
-progressBarSteps :: Int
-progressBarSteps = 10
+progress :: Double -> T.Text
+progress elapsed =
+  progressBar
+    ( ProgressBar
+        { progressBarSteps = 10,
+          progressBarBound = 1,
+          progressBarElapsed = elapsed
+        }
+    )
 
-interimResult :: Int -> Int -> Double -> Double -> String
-interimResult us_sum runs elapsed bound =
-  printf "%10.0fμs " avg
-    <> progressBar elapsed bound progressBarSteps
-    <> (" " <> show runs <> " runs")
+interimResult :: Int -> Int -> Double -> T.Text
+interimResult us_sum runs elapsed =
+  T.pack (printf "%10.0fμs " avg) <> progress elapsed
+    <> (" " <> prettyText runs <> " runs")
   where
     avg :: Double
     avg = fromIntegral us_sum / fromIntegral runs
 
-convergenceBar :: (String -> IO ()) -> IORef Int -> Int -> Int -> Double -> IO ()
-convergenceBar p spin_count us_sum i rsd' = do
+convergenceBar :: (T.Text -> IO ()) -> IORef Int -> Int -> Int -> Double -> IO ()
+convergenceBar p spin_count us_sum i rse' = do
   spin_idx <- readIORef spin_count
-  let spin_char = spin_load !! spin_idx
-  p $ printf "%10.0fμs %c (RSD of mean: %2.4f; %4d runs)" avg spin_char rsd' i
-  let spin_count' = (spin_idx + 1) `mod` 10
-  writeIORef spin_count spin_count'
+  let spin = progressSpinner spin_idx
+  p $ T.pack $ printf "%10.0fμs %s (RSE of mean: %2.4f; %4d runs)" avg spin rse' i
+  writeIORef spin_count (spin_idx + 1)
   where
     avg :: Double
     avg = fromIntegral us_sum / fromIntegral i
-    spin_load = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 data BenchPhase = Initial | Convergence
 
@@ -301,11 +290,11 @@ mkProgressPrompt opts pad_to dataset_desc start_time
       count <- newIORef (0, 0)
       phase_var <- newIORef Initial
       spin_count <- newIORef 0
-      pure $ \(us, rsd) -> do
+      pure $ \(us, rse) -> do
         putStr "\r" -- Go to start of line.
         let p s =
-              putStr $
-                descString (atMostChars maxDatasetNameLength dataset_desc) pad_to ++ s
+              T.putStr $
+                T.pack (descString (atMostChars maxDatasetNameLength dataset_desc) pad_to) <> s
 
         (us_sum, i) <- readIORef count
 
@@ -322,27 +311,27 @@ mkProgressPrompt opts pad_to dataset_desc start_time
 
         phase <- readIORef phase_var
 
-        case (us, phase, rsd) of
+        case (us, phase, rse) of
           (Nothing, _, _) ->
             let elapsed = determineProgress i
-             in p $ replicate 13 ' ' <> progressBar elapsed 1.0 progressBarSteps
+             in p $ T.pack (replicate 13 ' ') <> progress elapsed
           (Just us', Initial, Nothing) -> do
             let us_sum' = us_sum + us'
                 i' = i + 1
             writeIORef count (us_sum', i')
             let elapsed = determineProgress i'
-            p $ interimResult us_sum' i' elapsed 1.0
-          (Just us', Initial, Just rsd') -> do
+            p $ interimResult us_sum' i' elapsed
+          (Just us', Initial, Just rse') -> do
             -- Switched from phase 1 to convergence; discard all
             -- prior results.
             writeIORef count (us', 1)
             writeIORef phase_var Convergence
-            convergenceBar p spin_count us' 1 rsd'
-          (Just us', Convergence, Just rsd') -> do
+            convergenceBar p spin_count us' 1 rse'
+          (Just us', Convergence, Just rse') -> do
             let us_sum' = us_sum + us'
                 i' = i + 1
             writeIORef count (us_sum', i')
-            convergenceBar p spin_count us_sum' i' rsd'
+            convergenceBar p spin_count us_sum' i' rse'
           (Just _, Convergence, Nothing) ->
             pure () -- Probably should not happen.
         putStr " " -- Just to move the cursor away from the progress bar.

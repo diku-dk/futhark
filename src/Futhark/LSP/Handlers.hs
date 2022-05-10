@@ -22,14 +22,13 @@ handlers :: IORef State -> Handlers (LspM ())
 handlers state_mvar =
   mconcat
     [ onInitializeHandler,
-      onHoverHandler state_mvar,
       onDocumentOpenHandler state_mvar,
       onDocumentCloseHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,
       goToDefinitionHandler state_mvar,
-      onDocumentChangeHandler state_mvar
+      onHoverHandler state_mvar
     ]
 
 onInitializeHandler :: Handlers (LspM ())
