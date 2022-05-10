@@ -93,6 +93,8 @@ make_atomic_compare_exchange_wrapper(uint64)
 make_atomic_compare_exchange_wrapper(float)
 make_atomic_compare_exchange_wrapper(double)
 
+// This code generates missing overloads for atomic operations on uniform
+// pointers to varying values.
 #define make_single_atomic(name, ty)                                        \
 static inline ty atomic_##name##_global(varying ty * uniform mem, ty val) { \
   uniform ty * uniform base_mem = (uniform ty * uniform)mem;                \

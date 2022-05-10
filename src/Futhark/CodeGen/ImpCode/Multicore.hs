@@ -209,9 +209,9 @@ lexicalMemoryUsageMC gokernel func =
       where
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
-    -- Critically, don't treat inputs to nested segops as lexical, since we
-    -- want to use AoS memory for lexical blocks, which is incompatible with
-    -- pointer assignmentes visible in C.
+    -- Critically, don't treat inputs to nested segops as lexical when generating
+    -- ISPC, since we want to use AoS memory for lexical blocks, which is
+    -- incompatible with pointer assignmentes visible in C.
     set (Op (SegOp _ params _ _ retvals _))
       | gokernel = mempty
       | otherwise = namesFromList $ map paramName params <> map paramName retvals
