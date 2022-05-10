@@ -400,7 +400,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
                                                   $exp:block_x, $exp:block_y, $exp:block_z,
                                                   $exp:shared_tot, NULL,
                                                   $id:args_arr, NULL));
-            /*
+
             // This synchronisation is placed here to ensure that the same level
             // of synchronisation is provided as single streams
             CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[devID * 2
@@ -410,7 +410,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
               CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
                                                    + ctx->cuda.kernel_iterator],0));
             }
-            */
+
             CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
         }
         ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
