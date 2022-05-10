@@ -377,6 +377,7 @@ scanStage3Fallback pat space kbody scan_ops = do
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
 
+-- Note: This isn't currently used anywhere.
 -- This implementation for a Segmented scan only
 -- parallelize over the segments and each segment is
 -- scanned sequentially.
