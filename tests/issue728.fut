@@ -9,7 +9,7 @@ type^ csr 't = {row_off: []i32, col_idx: []i32, vals: []t}
 def expand_reduce 'a 'b [n]
                   (sz: a -> i32) (get: a -> i32 -> b)
                   (f: b -> b -> b) (ne:b)
-                  (arr:[n]a) : []b =
+                  (arr:[n]a) : *[]b =
   let (vals, flags) = expand_with_flags ne sz get arr
   in []
 

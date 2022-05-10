@@ -1,5 +1,5 @@
 -- ==
--- error: consume variable "s"
+-- error: Consuming "s"
 
 def f (xs: [10]i32) : [10]i32 = xs
 

@@ -101,10 +101,6 @@ convergePat loop_loc pat body_cons body_t body_loc = do
   let -- Make the pattern unique where needed.
       pat' = uniquePat (patNames pat `S.intersection` body_cons) pat
 
-  pat_t <- normTypeFully $ patternType pat'
-  unless (toStructural body_t `subtypeOf` toStructural pat_t) $
-    unexpectedType (srclocOf body_loc) (toStruct body_t) [toStruct pat_t]
-
   -- Check that the new values of consumed merge parameters do not
   -- alias something bound outside the loop, AND that anything
   -- returned for a unique merge parameter does not alias anything
@@ -124,7 +120,7 @@ convergePat loop_loc pat body_cons body_t body_loc = do
               "Return value for loop parameter"
                 <+> pquote (pprName pat_v)
                 <+> "aliases"
-                <+> pprName v <> "."
+                <+> pquote (pprName v) <> "."
         | otherwise = do
             (cons, obs) <- get
             unless (S.null $ aliases t `S.intersection` cons) $

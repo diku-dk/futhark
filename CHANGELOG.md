@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Somewhat simplified the handling of "uniqueness types" (which is a
+  term we are moving away from).  You should never see `*` in
+  non-function types, and they are better thought of as effect
+  indicators.
+
 ### Removed
 
 ### Changed

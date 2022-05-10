@@ -1044,33 +1044,33 @@ mustHaveFieldWith ::
 mustHaveFieldWith onDims usage bound bcs l t = do
   constraints <- getConstraints
   l_type <- newTypeVar (srclocOf usage) "t"
-  let l_type' = toStruct l_type
+  let l_type' = l_type `setAliases` aliases t
   case t of
     Scalar (TypeVar _ _ (TypeName _ tn) [])
       | Just (lvl, NoConstraint {}) <- M.lookup tn constraints -> do
-          scopeCheck usage bcs tn lvl l_type'
-          modifyConstraints $ M.insert tn (lvl, HasFields (M.singleton l l_type') usage)
-          pure l_type
+          scopeCheck usage bcs tn lvl l_type
+          modifyConstraints $ M.insert tn (lvl, HasFields (M.singleton l l_type) usage)
+          pure l_type'
       | Just (lvl, HasFields fields _) <- M.lookup tn constraints -> do
           case M.lookup l fields of
-            Just t' -> unifyWith onDims usage bound bcs l_type' t'
+            Just t' -> unifyWith onDims usage bound bcs l_type t'
             Nothing ->
               modifyConstraints $
                 M.insert
                   tn
-                  (lvl, HasFields (M.insert l l_type' fields) usage)
-          pure l_type
+                  (lvl, HasFields (M.insert l l_type fields) usage)
+          pure l_type'
     Scalar (Record fields)
       | Just t' <- M.lookup l fields -> do
-          unify usage l_type' $ toStruct t'
+          unify usage l_type $ toStruct t'
           pure t'
       | otherwise ->
           unifyError usage mempty bcs $
             "Attempt to access field" <+> pquote (ppr l) <+> " of value of type"
               <+> ppr (toStructural t) <> "."
     _ -> do
-      unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type'
-      pure l_type
+      unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type
+      pure l_type'
 
 -- | Assert that some type must have a field with this name and type.
 mustHaveField ::

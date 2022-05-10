@@ -1,5 +1,5 @@
 -- ==
--- error: passed non-unique
+-- error: Consuming "xs"
 
 def consume (xs: *[]i32) = xs
 

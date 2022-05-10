@@ -1,5 +1,5 @@
 -- Type ascriptions must respect uniqueness.
 -- ==
--- error: \*\[.*\]i32
+-- error: aliased to "x"
 
-def main (x: []i32) = x : *[]i32
+def main (x: []i32) : *[]i32 = x : *[]i32
