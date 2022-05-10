@@ -259,7 +259,7 @@ runTestCase (TestCase mode program testcase progs) = do
           -- so force just one data set at a time here.
           ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
 
-      when (mode == Compiled) $
+      when (mode `elem` [Compile, Compiled]) $
         context ("Compiling with --backend=" <> T.pack backend) $ do
           compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
           mapM_ (testMetrics progs program) structures

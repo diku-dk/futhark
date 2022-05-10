@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark test -C` was broken.
+
 ## [0.21.11]
 
 ### Added
