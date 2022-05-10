@@ -164,7 +164,6 @@ struct cuda_context {
   CUcontext* contexts;
   CUmodule* modules;
   CUevent* kernel_done;
-  CUevent* finished;
 };
 
 #define CU_DEV_ATTR(x) (CU_DEVICE_ATTRIBUTE_##x)
@@ -279,7 +278,6 @@ static int cuda_device_setup(struct cuda_context *ctx) {
   ctx->contexts = (CUcontext*)calloc(used_devices, sizeof(CUcontext));
   ctx->modules = (CUmodule*)calloc(used_devices, sizeof(CUmodule));
   ctx->kernel_done = (CUevent*)calloc(used_devices*2, sizeof(CUevent));
-  ctx->finished = (CUevent*)calloc(used_devices, sizeof(CUevent));
 
   for(int devIdx = 0; devIdx < used_devices; devIdx++){
     CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->devices[devIdx], devices[devIdx]));
@@ -289,8 +287,6 @@ static int cuda_device_setup(struct cuda_context *ctx) {
     CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->kernel_done[devIdx * 2],
                                      CU_EVENT_DISABLE_TIMING));
     CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->kernel_done[devIdx * 2 + 1],
-                                     CU_EVENT_DISABLE_TIMING));
-    CUDA_SUCCEED_FATAL(cuEventCreate(&ctx->finished[devIdx],
                                      CU_EVENT_DISABLE_TIMING));
     CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devIdx]));
   }
@@ -338,9 +334,8 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
     { 7, 0, "compute_70" },
     { 7, 2, "compute_72" },
     { 7, 5, "compute_75" },
-    // NVRTC doesn't support compiling to 8.0, See nvrtc.h
-    { 8, 0, "compute_75" },
-    { 8, 6, "compute_75" }
+    { 8, 0, "compute_80" },
+    { 8, 6, "compute_80" }
   };
 
   int major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
@@ -746,13 +741,12 @@ static void cuda_cleanup(struct cuda_context *ctx) {
     CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[devIdx]));
     CUDA_SUCCEED_FATAL(cuEventDestroy(ctx->kernel_done[devIdx * 2]));
     CUDA_SUCCEED_FATAL(cuEventDestroy(ctx->kernel_done[devIdx * 2 + 1]));
-    CUDA_SUCCEED_FATAL(cuEventDestroy(ctx->finished[devIdx]));
     CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->modules[devIdx]));
     CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devIdx]));
     CUDA_SUCCEED_FATAL(cuDevicePrimaryCtxRelease(ctx->devices[devIdx]));
   }
   free(ctx->kernel_done);
-  free(ctx->finished);
+
   free(ctx->modules);
   free(ctx->contexts);
   free(ctx->devices);
@@ -762,18 +756,18 @@ static void cuda_cleanup(struct cuda_context *ctx) {
 
 static void hint_prefetch_variable_array(
   struct cuda_context *ctx, CUdeviceptr mem, size_t size){
-    size_t data_per_device = size / ctx->device_count; 
+    size_t data_per_device = size / ctx->device_count;
     size_t offset = 0;
     size_t left = size;
     for(int device_id = 0; device_id < ctx->device_count; device_id++){
       CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
-      if(device_id != 0) CUDA_SUCCEED_FATAL(cuMemAdvise(mem, 
-        offset, CU_MEM_ADVISE_SET_ACCESSED_BY, 
+      if(device_id != 0) CUDA_SUCCEED_FATAL(cuMemAdvise(mem,
+        offset, CU_MEM_ADVISE_SET_ACCESSED_BY,
         ctx->devices[device_id]));
-      CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset, 
-        data_per_device, CU_MEM_ADVISE_SET_PREFERRED_LOCATION, 
+      CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset,
+        data_per_device, CU_MEM_ADVISE_SET_PREFERRED_LOCATION,
         ctx->devices[device_id]));
-      CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(mem + offset, 
+      CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(mem + offset,
         data_per_device, ctx->devices[device_id], NULL));
       offset += data_per_device;
       left   -= data_per_device;
@@ -785,10 +779,10 @@ static void hint_prefetch_variable_array(
     }
 }
 
-static void hint_readonly_array(struct cuda_context *ctx, 
+static void hint_readonly_array(struct cuda_context *ctx,
                                 CUdeviceptr mem, size_t count){
   //Device argument is ignore for Read mostly hint
-  CUDA_SUCCEED_FATAL(cuMemAdvise(mem, count, CU_MEM_ADVISE_SET_READ_MOSTLY, 
+  CUDA_SUCCEED_FATAL(cuMemAdvise(mem, count, CU_MEM_ADVISE_SET_READ_MOSTLY,
                                  ctx->devices[0]));
   for(int device_id = 0; device_id < ctx->device_count; device_id++){
     CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(

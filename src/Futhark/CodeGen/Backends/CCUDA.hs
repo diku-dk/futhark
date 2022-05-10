@@ -141,13 +141,6 @@ cliOptions =
              optionArgument = NoArgument,
              optionDescription = "Forces futhark only to run using a single GPU device",
              optionAction = [C.cstm|futhark_context_config_set_multi_device(cfg, false);|]
-           },
-          Option
-           { optionLongName = "no-hints",
-             optionShortName = Nothing,
-             optionArgument = NoArgument,
-             optionDescription = "Removes hinting and prefetching",
-             optionAction = [C.cstm|futhark_context_config_set_hint_memory(cfg, false);|]
            }
        ]
 

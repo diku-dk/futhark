@@ -215,7 +215,7 @@ instance Pretty KernelOp where
   ppr (GetDeviceCount dest) =
     ppr dest <+> "<-"
       <+> "device_count"
-  ppr (GetPageSize dest) = 
+  ppr (GetPageSize dest) =
     ppr dest <+> "<-"
       <+> "page_size"
   ppr (GetLockstepWidth dest) =
