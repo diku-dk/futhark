@@ -169,6 +169,9 @@ isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While {} = False
 isLoadBalanced (Imp.Op (Imp.ParLoop _ code _)) = isLoadBalanced code
+isLoadBalanced (Imp.Op (Imp.ForEachActive _ a)) = isLoadBalanced a
+isLoadBalanced (Imp.Op (Imp.ForEach _ _ a)) = isLoadBalanced a
+isLoadBalanced (Imp.Op (Imp.ISPCKernel a _)) = isLoadBalanced a
 isLoadBalanced _ = True
 
 segBinOpComm' :: [SegBinOp rep] -> Commutativity
