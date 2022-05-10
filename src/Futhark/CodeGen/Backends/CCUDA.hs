@@ -373,7 +373,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
 
       int device_id = 0;
       int device_count = ctx->cuda.device_count;
-      size_t page_size = ctx->page_size;
+      typename uint64_t page_size = (typename uint64_t) ctx->page_size;
       void *$id:args_arr[] = { $inits:args''};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
 
