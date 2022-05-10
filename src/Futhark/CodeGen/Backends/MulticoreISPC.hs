@@ -143,7 +143,7 @@ sharedDef s f = do
   ispcDecl [C.cedecl|$tyqual:export void $id:dummy($tyqual:uniform struct $id:s' * $tyqual:uniform a) { (void)a; }|]
   pure s'
 
--- Copy memory where one of the operands is using an AoS layout.
+-- | Copy memory where one of the operands is using an AoS layout.
 copyMemoryAOS ::
   PrimType ->
   C.Exp ->
@@ -400,6 +400,9 @@ handleError msg stacktrace = do
 
     mapArgNames (ErrorMsg parts) = mapArgNames' parts
 
+-- | Given the name and type of a parameter, return the C type used to
+-- represent it. We use uniform pointers to varying values for lexical
+-- memory blocks, as this generally results in less gathers/scatters.
 getMemType :: VName -> PrimType -> ISPCCompilerM C.Type
 getMemType dest elemtype = do
   cached <- isJust <$> GC.cacheMem dest
