@@ -287,7 +287,6 @@ generateConfigFuns sizes = do
       }|]
     )
 
-
   GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value);|],
       [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value) {
@@ -459,7 +458,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->page_size = sysconf(_SC_PAGESIZE);
 
                  typename int32_t no_error = -1;
-                 // Since the Global failure is shared, each device needs it 
+                 // Since the Global failure is shared, each device needs it
                  // own global failure to prevent thrashing.
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
                                       &ctx->global_failure,
