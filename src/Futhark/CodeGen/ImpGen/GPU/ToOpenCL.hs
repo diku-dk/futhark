@@ -324,8 +324,10 @@ onKernel target kernel = do
         ]
 
       params =
-        [[C.cparam|const int device_id|],[C.cparam|const int device_count|],
-          [C.cparam| const size_t page_size|]]
+        [ [C.cparam|const int device_id|],
+          [C.cparam|const int device_count|],
+          [C.cparam|const typename uint64_t page_size|]
+        ]
           ++ perm_params
           ++ take (numFailureParams safety) failure_params
           ++ catMaybes local_memory_params
@@ -667,7 +669,7 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = device_id;|]
     kernelOps (GetDeviceCount v) =
       GC.stm [C.cstm|$id:v = device_count;|]
-    kernelOps (GetPageSize v) = 
+    kernelOps (GetPageSize v) =
       GC.stm [C.cstm|$id:v = page_size;|]
     kernelOps (Barrier f) = do
       GC.stm [C.cstm|barrier($exp:(fence f));|]
