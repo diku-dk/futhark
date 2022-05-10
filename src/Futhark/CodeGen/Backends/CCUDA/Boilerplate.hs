@@ -93,6 +93,7 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
     [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
+      $esc:("#include <unistd.h>")
       $esc:("typedef CUdeviceptr fl_mem_t;")
       $esc:(T.unpack freeListH)
       $esc:(T.unpack cudaH)
