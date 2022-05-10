@@ -171,7 +171,7 @@ emptyShape _ = False
 typeShape :: M.Map VName (Shape d) -> TypeBase d () -> Shape d
 typeShape shapes = go
   where
-    go (Array _ _ et shape) =
+    go (Array _ _ shape et) =
       foldr ShapeDim (go (Scalar et)) $ shapeDims shape
     go (Scalar (Record fs)) =
       ShapeRecord $ M.map go fs
@@ -684,7 +684,7 @@ evalType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 evalType env (Scalar (Record fs)) = Scalar $ Record $ fmap (evalType env) fs
 evalType env (Scalar (Arrow () p t1 (RetType dims t2))) =
   Scalar $ Arrow () p (evalType env t1) (RetType dims (evalType env t2))
-evalType env t@(Array _ u _ shape) =
+evalType env t@(Array _ u shape _) =
   let et = stripArray (shapeRank shape) t
       et' = evalType env et
       shape' = fmap evalDim shape
@@ -2027,7 +2027,7 @@ interpretFunction ctx fname vs = do
     checkInput :: ValueType -> StructType -> Either String ()
     checkInput (Scalar (Prim vt)) (Scalar (Prim pt))
       | vt /= pt = badPrim vt pt
-    checkInput (Array _ _ (Prim vt) _) (Array _ _ (Prim pt) _)
+    checkInput (Array _ _ _ (Prim vt)) (Array _ _ _ (Prim pt))
       | vt /= pt = badPrim vt pt
     checkInput _ _ =
       Right ()

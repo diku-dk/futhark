@@ -160,11 +160,11 @@ entryPoint name params (eret, crets) =
     entryPointType t ts
       | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
           I.TypeUnsigned u
-      | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
+      | E.Array _ _ _ (E.Prim E.Unsigned {}) <- E.entryType t =
           I.TypeUnsigned u
       | E.Scalar E.Prim {} <- E.entryType t =
           I.TypeDirect u
-      | E.Array _ _ E.Prim {} _ <- E.entryType t =
+      | E.Array _ _ _ E.Prim {} <- E.entryType t =
           I.TypeDirect u
       | otherwise =
           I.TypeOpaque u desc $ length ts
@@ -174,7 +174,7 @@ entryPoint name params (eret, crets) =
         t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
     typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
       typeExpOpaqueName te
-    typeExpOpaqueName (TEArray te _ _) =
+    typeExpOpaqueName (TEArray _ te _) =
       let (d, te') = withoutDims te
        in "arr_" ++ typeExpOpaqueName te'
             ++ "_"
@@ -183,7 +183,7 @@ entryPoint name params (eret, crets) =
     typeExpOpaqueName (TEUnique te _) = prettyOneLine te
     typeExpOpaqueName te = prettyOneLine te
 
-    withoutDims (TEArray te _ _) =
+    withoutDims (TEArray _ te _) =
       let (d, te') = withoutDims te
        in (d + 1, te')
     withoutDims te = (0 :: Int, te)
@@ -2246,7 +2246,7 @@ typeExpForError (E.TEDim dims te _) =
   where
     dims' = mconcat (map onDim dims)
     onDim d = "[" <> pretty d <> "]"
-typeExpForError (E.TEArray te d _) = do
+typeExpForError (E.TEArray d te _) = do
   d' <- dimExpForError d
   te' <- typeExpForError te
   pure $ ["[", d', "]"] ++ te'

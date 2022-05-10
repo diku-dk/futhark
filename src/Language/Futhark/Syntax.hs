@@ -382,13 +382,13 @@ instance Bifoldable ScalarTypeBase where
 -- out arrays-of-arrays.
 data TypeBase dim as
   = Scalar (ScalarTypeBase dim as)
-  | Array as Uniqueness (ScalarTypeBase dim ()) (ShapeDecl dim)
+  | Array as Uniqueness (ShapeDecl dim) (ScalarTypeBase dim ())
   deriving (Eq, Ord, Show)
 
 instance Bitraversable TypeBase where
   bitraverse f g (Scalar t) = Scalar <$> bitraverse f g t
-  bitraverse f g (Array a u t shape) =
-    Array <$> g a <*> pure u <*> bitraverse f pure t <*> traverse f shape
+  bitraverse f g (Array a u shape t) =
+    Array <$> g a <*> pure u <*> traverse f shape <*> bitraverse f pure t
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
@@ -468,7 +468,7 @@ data TypeExp vn
   = TEVar (QualName vn) SrcLoc
   | TETuple [TypeExp vn] SrcLoc
   | TERecord [(Name, TypeExp vn)] SrcLoc
-  | TEArray (TypeExp vn) (DimExp vn) SrcLoc
+  | TEArray (DimExp vn) (TypeExp vn) SrcLoc
   | TEUnique (TypeExp vn) SrcLoc
   | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
   | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc

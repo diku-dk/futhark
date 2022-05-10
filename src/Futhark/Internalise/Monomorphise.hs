@@ -714,7 +714,7 @@ inferSizeArgs tparams bind_t t =
 noNamedParams :: MonoType -> MonoType
 noNamedParams = f
   where
-    f (Array () u t shape) = Array () u (f' t) shape
+    f (Array () u shape t) = Array () u shape (f' t)
     f (Scalar t) = Scalar $ f' t
     f' (Arrow () _ t1 (RetType dims t2)) =
       Arrow () Unnamed (f t1) (RetType dims (f t2))

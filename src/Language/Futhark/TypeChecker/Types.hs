@@ -73,10 +73,10 @@ unifyTypesU ::
   TypeBase dim als ->
   TypeBase dim als ->
   Maybe (TypeBase dim als)
-unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 _shape2) =
+unifyTypesU uf (Array als1 u1 shape1 et1) (Array als2 u2 _shape2 et2) =
   Array (als1 <> als2) <$> uf u1 u2
-    <*> unifyScalarTypes uf et1 et2
     <*> pure shape1
+    <*> unifyScalarTypes uf et1 et2
 unifyTypesU uf (Scalar t1) (Scalar t2) = Scalar <$> unifyScalarTypes uf t1 t2
 unifyTypesU _ _ _ = Nothing
 
@@ -190,13 +190,13 @@ evalTypeExp t@(TERecord fs loc) = do
       foldl' max Unlifted ls
     )
 --
-evalTypeExp (TEArray t d loc) = do
+evalTypeExp (TEArray d t loc) = do
   (d_svars, d', d'') <- checkDimExp d
   (t', svars, RetType dims st, l) <- evalTypeExp t
   case (l, arrayOf st (ShapeDecl [d'']) Nonunique) of
     (Unlifted, st') ->
       pure
-        ( TEArray t' d' loc,
+        ( TEArray d' t' loc,
           svars,
           RetType (d_svars ++ dims) st',
           Unlifted
@@ -609,7 +609,7 @@ substTypesRet lookupSubst ot =
 
     onType :: TypeBase (DimDecl VName) as -> State [VName] (TypeBase (DimDecl VName) as)
 
-    onType (Array als u et shape) = do
+    onType (Array als u shape et) = do
       t <-
         arrayOf <$> onType (Scalar et `setAliases` mempty)
           <*> pure (applySubst lookupSubst' shape)

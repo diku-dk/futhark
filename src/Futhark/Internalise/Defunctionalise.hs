@@ -164,8 +164,8 @@ replaceStaticValSizes globals orig_substs sv =
     onTypeArgExp substs (TypeArgExpType te) =
       TypeArgExpType (onTypeExp substs te)
 
-    onTypeExp substs (TEArray te d loc) =
-      TEArray (onTypeExp substs te) (onTypeExpDim substs d) loc
+    onTypeExp substs (TEArray d te loc) =
+      TEArray (onTypeExpDim substs d) (onTypeExp substs te) loc
     onTypeExp substs (TEUnique t loc) =
       TEUnique (onTypeExp substs t) loc
     onTypeExp substs (TEApply t1 t2 loc) =
@@ -289,7 +289,7 @@ arraySizes (Scalar (TypeVar _ _ _ targs)) =
     f TypeArgDim {} = mempty
     f (TypeArgType t _) = arraySizes t
 arraySizes (Scalar Prim {}) = mempty
-arraySizes (Array _ _ t shape) =
+arraySizes (Array _ _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
   where
     dimName :: DimDecl VName -> S.Set VName
@@ -651,7 +651,7 @@ defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
       Monoid als =>
       TypeBase (DimDecl VName) als ->
       TypeBase (DimDecl VName) als
-    defuncType (Array as u t shape) = Array as u (defuncScalar t) shape
+    defuncType (Array as u shape t) = Array as u shape (defuncScalar t)
     defuncType (Scalar t) = Scalar $ defuncScalar t
 
     defuncScalar ::
