@@ -719,7 +719,7 @@ nastyParameter p = nastyType (patternType p) && not (ascripted p)
 niceTypeExp :: TypeExp VName -> Bool
 niceTypeExp (TEVar (QualName [] _) _) = True
 niceTypeExp (TEApply te TypeArgExpDim {} _) = niceTypeExp te
-niceTypeExp (TEArray te _ _) = niceTypeExp te
+niceTypeExp (TEArray _ te _) = niceTypeExp te
 niceTypeExp (TEUnique te _) = niceTypeExp te
 niceTypeExp _ = False
 

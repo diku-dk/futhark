@@ -217,7 +217,7 @@ atPosInTypeExp te pos =
       msum $ map (`atPosInTypeExp` pos) es
     TERecord fields _ ->
       msum $ map ((`atPosInTypeExp` pos) . snd) fields
-    TEArray te' dim _ ->
+    TEArray dim te' _ ->
       atPosInTypeExp te' pos `mplus` inDim dim
     TEUnique te' _ ->
       atPosInTypeExp te' pos

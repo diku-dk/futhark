@@ -461,7 +461,7 @@ TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
            { TEUnique $2 (srcspan $1 $>) }
          | '[' DimExp ']' TypeExpTerm %prec indexprec
-           { TEArray $4 $2 (srcspan $1 $>) }
+           { TEArray $2 $4 (srcspan $1 $>) }
          | TypeExpApply %prec sumprec { $1 }
 
          -- Errors

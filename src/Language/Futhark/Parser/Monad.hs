@@ -91,7 +91,7 @@ mustBe (L loc _) expected =
     "Only the keyword '" <> expected <> "' may appear here."
 
 mustBeEmpty :: Located loc => loc -> ValueType -> ParserMonad ()
-mustBeEmpty _ (Array _ _ _ (ShapeDecl dims))
+mustBeEmpty _ (Array _ _ (ShapeDecl dims) _)
   | 0 `elem` dims = pure ()
 mustBeEmpty loc t =
   parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."

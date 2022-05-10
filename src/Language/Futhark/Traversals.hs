@@ -287,13 +287,9 @@ traverseScalarType f g h (Arrow als v t1 (RetType dims t2)) =
 traverseScalarType f g h (Sum cs) =
   Sum <$> (traverse . traverse) (traverseType f g h) cs
 
-traverseType ::
-  Applicative f =>
-  TypeTraverser f TypeBase dim1 als1 dims als2
-traverseType f g h (Array als u et shape) =
-  Array <$> h als <*> pure u
-    <*> traverseScalarType f g pure et
-    <*> traverse g shape
+traverseType :: Applicative f => TypeTraverser f TypeBase dim1 als1 dims als2
+traverseType f g h (Array als u shape et) =
+  Array <$> h als <*> pure u <*> traverse g shape <*> traverseScalarType f g pure et
 traverseType f g h (Scalar t) =
   Scalar <$> traverseScalarType f g h t
 

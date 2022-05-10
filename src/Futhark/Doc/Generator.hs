@@ -481,7 +481,7 @@ synopsisValBindBind (name, BoundV tps t) = do
 
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
-  Array _ u et shape -> do
+  Array _ u shape et -> do
     shape' <- prettyShapeDecl shape
     et' <- typeHtml $ Scalar et
     pure $ prettyU u <> shape' <> et'
@@ -614,7 +614,7 @@ typeDeclHtml = typeExpHtml . declaredType
 typeExpHtml :: TypeExp VName -> DocM Html
 typeExpHtml e = case e of
   TEUnique t _ -> ("*" <>) <$> typeExpHtml t
-  TEArray at d _ -> do
+  TEArray d at _ -> do
     at' <- typeExpHtml at
     d' <- dimExpHtml d
     pure $ d' <> at'

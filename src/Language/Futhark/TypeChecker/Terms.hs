@@ -68,11 +68,11 @@ sliceShape ::
   Slice ->
   TypeBase (DimDecl VName) as ->
   TermTypeM (TypeBase (DimDecl VName) as, [VName])
-sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
+sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
   runStateT (setDims <$> adjustDims slice orig_dims) []
   where
     setDims [] = stripArray (length orig_dims) t
-    setDims dims' = Array als u et $ ShapeDecl dims'
+    setDims dims' = Array als u (ShapeDecl dims') et
 
     -- If the result is supposed to be a nonrigid size variable, then
     -- don't bother trying to create non-existential sizes.  This is
@@ -866,7 +866,7 @@ type ApplyOp = (Maybe (QualName VName), Int)
 
 -- | Extract all those names that are bound inside the type.
 boundInsideType :: TypeBase (DimDecl VName) as -> S.Set VName
-boundInsideType (Array _ _ t _) = boundInsideType (Scalar t)
+boundInsideType (Array _ _ _ t) = boundInsideType (Scalar t)
 boundInsideType (Scalar Prim {}) = mempty
 boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
   where
