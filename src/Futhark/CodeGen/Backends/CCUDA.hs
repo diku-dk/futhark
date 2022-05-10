@@ -224,7 +224,7 @@ copyCUDAMemory :: GC.Copy OpenCL ()
 copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   let (fn, prof) = memcpyFun dstSpace srcSpace
       (bef, aft) = profilingEnclosure prof
-      sync       = sync_mem dstSpace srcSpace
+      sync = sync_mem dstSpace srcSpace
   GC.item
     [C.citem|{
                 $items:sync
@@ -234,7 +234,7 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
                          $exp:srcmem + $exp:srcidx,
                          $exp:nbytes));
                 $items:aft
-                
+
                 }
                 |]
   where
@@ -247,7 +247,8 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
           ++ "' from '"
           ++ show srcSpace
           ++ "'."
-    sync_mem DefaultSpace (Space "device") = [C.citems|
+    sync_mem DefaultSpace (Space "device") =
+      [C.citems|
       for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
         CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
         CUDA_SUCCEED_FATAL(cuCtxSynchronize());
@@ -255,7 +256,6 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
       }
     |]
     sync_mem _ _ = [C.citems|;|]
-
 
 staticCUDAArray :: GC.StaticArray OpenCL ()
 staticCUDAArray name "device" t vs = do
@@ -350,7 +350,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             block_z
           ]
       (bef, aft) = profilingEnclosureKernel kernel_name
-  
+
   GC.stm
     [C.cstm|
     if ($exp:sizes_nonzero) {
@@ -376,7 +376,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       size_t page_size = ctx->page_size;
       void *$id:args_arr[] = { $inits:args''};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
-      
+
       $items:bef
       if(ctx->use_multi_device){
         size_t grid_MD[3];
