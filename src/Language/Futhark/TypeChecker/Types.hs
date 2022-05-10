@@ -193,7 +193,7 @@ evalTypeExp t@(TERecord fs loc) = do
 evalTypeExp (TEArray d t loc) = do
   (d_svars, d', d'') <- checkDimExp d
   (t', svars, RetType dims st, l) <- evalTypeExp t
-  case (l, arrayOf st (ShapeDecl [d'']) Nonunique) of
+  case (l, arrayOf Nonunique (ShapeDecl [d'']) st) of
     (Unlifted, st') ->
       pure
         ( TEArray d' t' loc,
@@ -611,9 +611,8 @@ substTypesRet lookupSubst ot =
 
     onType (Array als u shape et) = do
       t <-
-        arrayOf <$> onType (Scalar et `setAliases` mempty)
-          <*> pure (applySubst lookupSubst' shape)
-          <*> pure u
+        arrayOf u (applySubst lookupSubst' shape)
+          <$> onType (Scalar et `setAliases` mempty)
       pure $ t `setAliases` als
     onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
     onType (Scalar (TypeVar als u v targs)) = do

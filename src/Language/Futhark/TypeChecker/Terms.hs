@@ -1724,4 +1724,4 @@ arrayOfM ::
   TermTypeM (TypeBase dim as)
 arrayOfM loc t shape u = do
   arrayElemType (mkUsage loc "use as array element") "type used in array" t
-  pure $ arrayOf t shape u
+  pure $ arrayOf u shape t

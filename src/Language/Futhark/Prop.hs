@@ -324,7 +324,7 @@ peelArray n (Array als u shape t)
       Array als u <$> stripDims n shape <*> pure t
 peelArray _ _ = Nothing
 
--- | @arrayOf t s u@ constructs an array type.  The convenience
+-- | @arrayOf u s t@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
 -- itself be an array.  If @t@ is an @n@-dimensional array, and @s@ is
 -- a list of length @n@, the resulting type is of an @n+m@ dimensions.
@@ -332,22 +332,22 @@ peelArray _ _ = Nothing
 -- uniqueness of @t@.
 arrayOf ::
   Monoid as =>
-  TypeBase dim as ->
-  ShapeDecl dim ->
   Uniqueness ->
+  ShapeDecl dim ->
+  TypeBase dim as ->
   TypeBase dim as
-arrayOf t = arrayOfWithAliases (t `setUniqueness` Nonunique) mempty
+arrayOf u s t = arrayOfWithAliases mempty u s (t `setUniqueness` Nonunique)
 
 arrayOfWithAliases ::
   Monoid as =>
-  TypeBase dim as ->
   as ->
-  ShapeDecl dim ->
   Uniqueness ->
+  ShapeDecl dim ->
+  TypeBase dim as ->
   TypeBase dim as
-arrayOfWithAliases (Array as1 _ shape1 et) as2 shape2 u =
+arrayOfWithAliases as2 u shape2 (Array as1 _ shape1 et) =
   Array (as1 <> as2) u (shape2 <> shape1) et
-arrayOfWithAliases (Scalar t) as shape u =
+arrayOfWithAliases as u shape (Scalar t) =
   Array as u shape (second (const ()) t)
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
@@ -448,12 +448,10 @@ combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ 
     f targ _ = targ
 combineTypeShapes (Array als1 u1 shape1 et1) (Array als2 _u2 _shape2 et2) =
   arrayOfWithAliases
-    ( combineTypeShapes (Scalar et1) (Scalar et2)
-        `setAliases` mempty
-    )
     (als1 <> als2)
-    shape1
     u1
+    shape1
+    (combineTypeShapes (Scalar et1) (Scalar et2) `setAliases` mempty)
 combineTypeShapes _ new_tp = new_tp
 
 -- | Match the dimensions of otherwise assumed-equal types.  The
@@ -474,10 +472,9 @@ matchDims onDims = matchDims' mempty
       case (t1, t2) of
         (Array als1 u1 shape1 et1, Array als2 u2 shape2 et2) ->
           flip setAliases (als1 <> als2)
-            <$> ( arrayOf
-                    <$> matchDims' bound (Scalar et1) (Scalar et2)
-                    <*> onShapes bound shape1 shape2
-                    <*> pure (min u1 u2)
+            <$> ( arrayOf (min u1 u2)
+                    <$> onShapes bound shape1 shape2
+                      <*> matchDims' bound (Scalar et1) (Scalar et2)
                 )
         (Scalar (Record f1), Scalar (Record f2)) ->
           Scalar . Record
