@@ -295,7 +295,11 @@ staticOpenCLArray name "device" t vs = do
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
       pure n
   -- Fake a memory block.
-  GC.contextField (C.toIdent name mempty) [C.cty|struct memblock_device|] Nothing
+  GC.contextFieldDyn
+    (C.toIdent name mempty)
+    [C.cty|struct memblock_device|]
+    Nothing
+    [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->$id:name.mem));|]
   -- During startup, copy the data to where we need it.
   GC.atInit
     [C.cstm|{
