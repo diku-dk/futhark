@@ -711,12 +711,14 @@ checkExp (ProjectSection fields NoInfo loc) = do
   a <- newTypeVar loc "a"
   let usage = mkUsage loc "projection at"
   b <- foldM (flip $ mustHaveField usage) a fields
-  pure $ ProjectSection fields (Info $ Scalar $ Arrow mempty Unnamed a $ RetType [] b) loc
+  let ft = Scalar $ Arrow mempty Unnamed (toStruct a) $ RetType [] b
+  pure $ ProjectSection fields (Info ft) loc
 checkExp (IndexSection slice NoInfo loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType loc "e" $ sliceDims slice'
   (t', retext) <- sliceShape Nothing slice' t
-  pure $ IndexSection slice' (Info $ fromStruct $ Scalar $ Arrow mempty Unnamed t $ RetType retext t') loc
+  let ft = Scalar $ Arrow mempty Unnamed t $ RetType retext $ fromStruct t'
+  pure $ IndexSection slice' (Info ft) loc
 checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) = do
   ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
     checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc
@@ -896,13 +898,13 @@ checkApply ::
   ApplyOp ->
   PatType ->
   Arg ->
-  TermTypeM (PatType, PatType, Maybe VName, [VName])
+  TermTypeM (StructType, PatType, Maybe VName, [VName])
 checkApply
   loc
   (fname, _)
   (Scalar (Arrow as pname tp1 tp2))
   (argexp, argtype, dflow, argloc) =
-    onFailure (CheckingApply fname argexp (toStruct tp1) (toStruct argtype)) $ do
+    onFailure (CheckingApply fname argexp tp1 (toStruct argtype)) $ do
       expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
       -- Perform substitutions of instantiated variables in the types.

@@ -357,7 +357,7 @@ data ScalarTypeBase dim as
   | Sum (M.Map Name [TypeBase dim as])
   | -- | The aliasing corresponds to the lexical
     -- closure of the function.
-    Arrow as PName (TypeBase dim as) (RetTypeBase dim as)
+    Arrow as PName (TypeBase dim ()) (RetTypeBase dim as)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
@@ -366,7 +366,7 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (TypeVar als u t args) =
     TypeVar <$> g als <*> pure u <*> pure t <*> traverse (traverse f) args
   bitraverse f g (Arrow als v t1 t2) =
-    Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
+    Arrow <$> g als <*> pure v <*> bitraverse f pure t1 <*> bitraverse f g t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
 
 instance Bifunctor ScalarTypeBase where

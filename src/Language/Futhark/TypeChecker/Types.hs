@@ -49,10 +49,9 @@ addAliasesFromType (Scalar (Record ts1)) (Scalar (Record ts2))
       Scalar $ Record $ M.intersectionWith addAliasesFromType ts1 ts2
 addAliasesFromType
   (Scalar (Arrow _ mn1 pt1 (RetType dims1 rt1)))
-  (Scalar (Arrow as2 _ pt2 (RetType _ rt2))) =
-    Scalar (Arrow as2 mn1 pt1' (RetType dims1 rt1'))
+  (Scalar (Arrow as2 _ _ (RetType _ rt2))) =
+    Scalar (Arrow as2 mn1 pt1 (RetType dims1 rt1'))
     where
-      pt1' = addAliasesFromType pt1 pt2
       rt1' = addAliasesFromType rt1 rt2
 addAliasesFromType (Scalar (Sum cs1)) (Scalar (Sum cs2))
   | length cs1 == length cs2,
@@ -578,7 +577,6 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
       error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
 
 substTypesRet ::
-  forall as.
   Monoid as =>
   (VName -> Maybe (Subst (RetTypeBase (DimDecl VName) as))) ->
   TypeBase (DimDecl VName) as ->
@@ -607,12 +605,14 @@ substTypesRet lookupSubst ot =
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'
 
-    onType :: TypeBase (DimDecl VName) as -> State [VName] (TypeBase (DimDecl VName) as)
+    onType ::
+      forall as.
+      Monoid as =>
+      TypeBase (DimDecl VName) as ->
+      State [VName] (TypeBase (DimDecl VName) as)
 
     onType (Array als u shape et) = do
-      t <-
-        arrayOf u (applySubst lookupSubst' shape)
-          <$> onType (Scalar et `setAliases` mempty)
+      t <- arrayOf u (applySubst lookupSubst' shape) <$> onType (Scalar et)
       pure $ t `setAliases` als
     onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
     onType (Scalar (TypeVar als u v targs)) = do

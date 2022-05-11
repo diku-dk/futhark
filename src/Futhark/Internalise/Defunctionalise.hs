@@ -720,12 +720,13 @@ etaExpand :: PatType -> Exp -> DefM ([Pat], Exp, StructRetType)
 etaExpand e_t e = do
   let (ps, ret) = getType $ RetType [] e_t
   (pats, vars) <- fmap unzip . forM ps $ \(p, t) -> do
+    let t' = fromStruct t
     x <- case p of
       Named x -> pure x
       Unnamed -> newNameFromString "x"
     pure
-      ( Id x (Info t) mempty,
-        Var (qualName x) (Info t) mempty
+      ( Id x (Info t') mempty,
+        Var (qualName x) (Info t') mempty
       )
   let e' =
         foldl'
@@ -885,8 +886,8 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             Var
               fname'
               ( Info
-                  ( Scalar . Arrow mempty Unnamed (fromStruct t1) . RetType [] $
-                      Scalar . Arrow mempty Unnamed (fromStruct t2) $ RetType [] rettype
+                  ( Scalar . Arrow mempty Unnamed t1 . RetType [] $
+                      Scalar . Arrow mempty Unnamed t2 $ RetType [] rettype
                   )
               )
               loc
@@ -906,7 +907,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
                         ( Info $
                             AppRes
                               ( Scalar $
-                                  Arrow mempty Unnamed (fromStruct t2) $
+                                  Arrow mempty Unnamed t2 $
                                     RetType [] rettype
                               )
                               []
@@ -1130,9 +1131,9 @@ typeFromSV IntrinsicSV =
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
-dynamicFunType :: StaticVal -> [PatType] -> ([PatType], PatType)
+dynamicFunType :: StaticVal -> [StructType] -> ([PatType], PatType)
 dynamicFunType (DynamicFun _ sv) (p : ps) =
-  let (ps', ret) = dynamicFunType sv ps in (p : ps', ret)
+  let (ps', ret) = dynamicFunType sv ps in (fromStruct p : ps', ret)
 dynamicFunType sv _ = ([], typeFromSV sv)
 
 -- | Match a pattern with its static value. Returns an environment with
