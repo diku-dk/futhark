@@ -790,7 +790,7 @@ Case :: { CaseBase NoInfo Name }
 
 CPat :: { PatBase NoInfo Name }
           : '#[' AttrInfo ']' CPat    { PatAttr $2 $4 (srcspan $1 $>) }
-          | CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+          | CInnerPat ':' TypeExp     { PatAscription $1 $3 (srcspan $1 $>) }
           | CInnerPat                 { $1 }
           | Constr ConstrFields       { let (n, loc) = $1;
                                             loc' = srcspan loc $>
@@ -819,7 +819,7 @@ ConstrFields :: { [PatBase NoInfo Name] }
 CFieldPat :: { (Name, PatBase NoInfo Name) }
                : FieldId '=' CPat
                { (fst $1, $3) }
-               | FieldId ':' TypeExpDecl
+               | FieldId ':' TypeExp
                { (fst $1, PatAscription (Id (fst $1) NoInfo (srclocOf (snd $1))) $3 (srcspan (snd $1) $>)) }
                | FieldId
                { (fst $1, Id (fst $1) NoInfo (srclocOf (snd $1))) }
@@ -890,8 +890,8 @@ FieldId :: { (Name, Loc) }
 
 Pat :: { PatBase NoInfo Name }
      : '#[' AttrInfo ']' Pat  { PatAttr $2 $4 (srcspan $1 $>) }
-     | InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
-     | InnerPat                 { $1 }
+     | InnerPat ':' TypeExp   { PatAscription $1 $3 (srcspan $1 $>) }
+     | InnerPat               { $1 }
 
 Pats1 :: { [PatBase NoInfo Name] }
        : Pat                    { [$1] }
@@ -909,7 +909,7 @@ InnerPat : id                               { let L loc (ID name) = $1 in Id nam
 FieldPat :: { (Name, PatBase NoInfo Name) }
               : FieldId '=' Pat
                 { (fst $1, $3) }
-              | FieldId ':' TypeExpDecl
+              | FieldId ':' TypeExp
                 { (fst $1, PatAscription (Id (fst $1) NoInfo (srclocOf (snd $1))) $3 (srcspan (snd $1) $>)) }
               | FieldId
                 { (fst $1, Id (fst $1) NoInfo (srclocOf (snd $1))) }

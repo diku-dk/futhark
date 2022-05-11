@@ -693,8 +693,7 @@ patternDimNames (RecordPat fs _) = foldMap (patternDimNames . snd) fs
 patternDimNames (PatParens p _) = patternDimNames p
 patternDimNames (Id _ (Info tp) _) = typeDimNames tp
 patternDimNames (Wildcard (Info tp) _) = typeDimNames tp
-patternDimNames (PatAscription p (TypeDecl _ (Info t)) _) =
-  patternDimNames p <> typeDimNames t
+patternDimNames (PatAscription p _ _) = patternDimNames p
 patternDimNames (PatLit _ (Info tp) _) = typeDimNames tp
 patternDimNames (PatConstr _ _ ps _) = foldMap patternDimNames ps
 patternDimNames (PatAttr _ p _) = patternDimNames p
@@ -774,8 +773,8 @@ patternParam (PatParens p _) =
   patternParam p
 patternParam (PatAttr _ p _) =
   patternParam p
-patternParam (PatAscription (Id v _ _) td _) =
-  (Named v, unInfo $ expandedType td)
+patternParam (PatAscription (Id v (Info t) _) _ _) =
+  (Named v, toStruct t)
 patternParam (Id v (Info t) _) =
   (Named v, toStruct t)
 patternParam p =

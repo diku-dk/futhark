@@ -604,12 +604,10 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
 
     patternEntry (PatParens p _) =
       patternEntry p
-    patternEntry (PatAscription p tdecl _) =
-      EntryParam (patternName p) $
-        EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
+    patternEntry (PatAscription p te _) =
+      EntryParam (patternName p) $ EntryType (patternStructType p) (Just te)
     patternEntry p =
-      EntryParam (patternName p) $
-        EntryType (patternStructType p) Nothing
+      EntryParam (patternName p) $ EntryType (patternStructType p) Nothing
 
     patternName (Id x _ _) = baseName x
     patternName (PatParens p _) = patternName p
@@ -712,7 +710,7 @@ nastyReturnType te t
 nastyParameter :: Pat -> Bool
 nastyParameter p = nastyType (patternType p) && not (ascripted p)
   where
-    ascripted (PatAscription _ (TypeDecl te _) _) = niceTypeExp te
+    ascripted (PatAscription _ te _) = niceTypeExp te
     ascripted (PatParens p' _) = ascripted p'
     ascripted _ = False
 
