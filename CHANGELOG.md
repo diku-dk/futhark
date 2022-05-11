@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark test -C` was broken.
 
+* `futhark_context_free()` for the GPU backends neglected to free some
+  memory used for internal bookkeeping, which could lead to memory
+  leaks for processes that repeatedly create and destroy contexts
+  (#1676).
+
 ## [0.21.11]
 
 ### Added

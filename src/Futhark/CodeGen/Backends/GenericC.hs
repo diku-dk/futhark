@@ -516,9 +516,9 @@ contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
   s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Nothing)}
 
-contextFieldDyn :: C.Id -> C.Type -> C.Exp -> C.Stm -> CompilerM op s ()
+contextFieldDyn :: C.Id -> C.Type -> Maybe C.Exp -> C.Stm -> CompilerM op s ()
 contextFieldDyn name ty initial free = modify $ \s ->
-  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, Just initial, Just free)}
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Just free)}
 
 profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
