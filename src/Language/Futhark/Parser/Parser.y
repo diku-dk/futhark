@@ -246,9 +246,9 @@ SigExp :: { UncheckedSigExp }
                                 in SigArrow (Just name) $4 $7 (srcspan $1 $>) }
         | SigExp '->' SigExp  { SigArrow Nothing $1 $3 (srcspan $1 $>) }
 
-TypeRef :: { TypeRefBase NoInfo Name }
+TypeRef :: { TypeRefBase Name }
          : QualName TypeParams '=' TypeExpTerm
-           { TypeRef (fst $1) $2 (TypeDecl $4 NoInfo) (srcspan (snd $1) $>) }
+           { TypeRef (fst $1) $2 $4 (srcspan (snd $1) $>) }
 
 SigBind :: { SigBindBase NoInfo Name }
          : module type id '=' SigExp
@@ -304,11 +304,11 @@ Liftedness :: { Liftedness }
             | '^' { Lifted }
 
 Spec :: { SpecBase NoInfo Name }
-      : val id TypeParams ':' TypeExpDecl
+      : val id TypeParams ':' TypeExp
         { let L loc (ID name) = $2
-          in ValSpec name $3 $5 Nothing (srcspan $1 $>) }
-      | val BindingBinOp TypeParams ':' TypeExpDecl
-        { ValSpec $2 $3 $5 Nothing (srcspan $1 $>) }
+          in ValSpec name $3 $5 NoInfo Nothing (srcspan $1 $>) }
+      | val BindingBinOp TypeParams ':' TypeExp
+        { ValSpec $2 $3 $5 NoInfo Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
 
@@ -394,30 +394,30 @@ BindingId :: { (Name, Loc) }
      | '(' BindingBinOp ')' { ($2, $1) }
 
 Val    :: { ValBindBase NoInfo Name }
-Val     : def BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+Val     : def BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
           { let (name, _) = $2
-            in ValBind Nothing name (fmap declaredType $5) NoInfo
+            in ValBind Nothing name $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
-        | entry BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+        | entry BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
           { let (name, loc) = $2
-            in ValBind (Just NoInfo) name (fmap declaredType $5) NoInfo
+            in ValBind (Just NoInfo) name $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>) }
 
-        | def FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
-          { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
+        | def FunParam BindingBinOp FunParam maybeAscription(TypeExp) '=' Exp
+          { ValBind Nothing $3 $5 NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
           }
 
         -- The next two for backwards compatibility.
-        | let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+        | let BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
           { let (name, _) = $2
-            in ValBind Nothing name (fmap declaredType $5) NoInfo
+            in ValBind Nothing name $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
-        | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
-          { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
+        | let FunParam BindingBinOp FunParam maybeAscription(TypeExp) '=' Exp
+          { ValBind Nothing $3 $5 NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
           }
 
@@ -433,9 +433,6 @@ Val     : def BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Ex
              unlines ["Cannot bind patterns at top level.",
                       "Bind a single name instead."]
           }
-
-TypeExpDecl :: { TypeDeclBase NoInfo Name }
-             : TypeExp %prec bottom { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
 TypeAbbr : type Liftedness id TypeParams '=' TypeExp
@@ -562,9 +559,9 @@ QualName :: { (QualName Name, Loc) }
 -- permit inside array indices operations (there is an ambiguity with
 -- array slices).
 Exp :: { UncheckedExp }
-     : Exp ':' TypeExpDecl { Ascript $1 $3 (srcspan $1 $>) }
-     | Exp ':>' TypeExpDecl { AppExp (Coerce $1 $3 (srcspan $1 $>)) NoInfo }
-     | Exp2 %prec ':'      { $1 }
+     : Exp ':' TypeExp  { Ascript $1 $3 (srcspan $1 $>) }
+     | Exp ':>' TypeExp { AppExp (Coerce $1 $3 (srcspan $1 $>)) NoInfo }
+     | Exp2 %prec ':'   { $1 }
 
 Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
@@ -758,9 +755,9 @@ LetExp :: { UncheckedExp }
      | let Pat '=' Exp LetBody
        { AppExp (LetPat [] $2 $4 $5 (srcspan $1 $>)) NoInfo }
 
-     | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
+     | let id TypeParams FunParams1 maybeAscription(TypeExp) '=' Exp LetBody
        { let L _ (ID name) = $2
-         in AppExp (LetFun name ($3, fst $4 : snd $4, (fmap declaredType $5), NoInfo, $7)
+         in AppExp (LetFun name ($3, fst $4 : snd $4, $5, NoInfo, $7)
                     $8 (srcspan $1 $>))
                    NoInfo}
 

@@ -145,10 +145,10 @@ noAliasesIfOverloaded t =
 
 checkAscript ::
   SrcLoc ->
-  UncheckedTypeDecl ->
+  UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeDecl, Exp)
-checkAscript loc (TypeDecl te NoInfo) e = do
+  TermTypeM (TypeExp VName, Exp)
+checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
   e' <- checkExp e
   e_t <- toStruct <$> expTypeFully e'
@@ -156,29 +156,27 @@ checkAscript loc (TypeDecl te NoInfo) e = do
   onFailure (CheckingAscription decl_t e_t) $
     unify (mkUsage loc "type ascription") decl_t e_t
 
-  decl_t' <- normTypeFully decl_t
-
-  pure (TypeDecl te' $ Info decl_t', e')
+  pure (te', e')
 
 checkCoerce ::
   SrcLoc ->
-  UncheckedTypeDecl ->
+  UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeDecl, Exp, [VName])
-checkCoerce loc (TypeDecl te NoInfo) e = do
-  (te', decl_t, ext) <- checkTypeExpRigid te RigidCoerce
+  TermTypeM (TypeExp VName, StructType, Exp, [VName])
+checkCoerce loc te e = do
+  (te', te_t, ext) <- checkTypeExpRigid te RigidCoerce
   e' <- checkExp e
   e_t <- toStruct <$> expTypeFully e'
 
   (e_t_nonrigid, _) <-
     allDimsFreshInType loc Nonrigid "coerce_d" e_t
 
-  onFailure (CheckingAscription decl_t e_t) $
-    unify (mkUsage loc "type ascription") decl_t e_t_nonrigid
+  onFailure (CheckingAscription te_t e_t) $
+    unify (mkUsage loc "type ascription") te_t e_t_nonrigid
 
-  decl_t' <- normTypeFully decl_t
+  te_t' <- normTypeFully te_t
 
-  pure (TypeDecl te' $ Info decl_t', e', ext)
+  pure (te', te_t', e', ext)
 
 unscopeType ::
   SrcLoc ->
@@ -354,14 +352,14 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
-checkExp (Ascript e decl loc) = do
-  (decl', e') <- checkAscript loc decl e
-  pure $ Ascript e' decl' loc
-checkExp (AppExp (Coerce e decl loc) _) = do
-  (decl', e', ext) <- checkCoerce loc decl e
+checkExp (Ascript e te loc) = do
+  (te', e') <- checkAscript loc te e
+  pure $ Ascript e' te' loc
+checkExp (AppExp (Coerce e te loc) _) = do
+  (te', te_t, e', ext) <- checkCoerce loc te e
   t <- expTypeFully e'
-  t' <- matchDims (const . const pure) t $ fromStruct $ unInfo $ expandedType decl'
-  pure $ AppExp (Coerce e' decl' loc) (Info $ AppRes t' ext)
+  t' <- matchDims (const . const pure) t $ fromStruct te_t
+  pure $ AppExp (Coerce e' te' loc) (Info $ AppRes t' ext)
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   (op', ftype) <- lookupVar oploc op
   e1_arg <- checkArg e1
