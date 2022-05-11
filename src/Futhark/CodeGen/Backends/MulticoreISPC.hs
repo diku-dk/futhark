@@ -62,7 +62,8 @@ varying = C.EscTypeQual "varying" noLoc
 compileProg ::
   MonadFreshNames m => T.Text -> T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
 compileProg header version prog = do
-  (ws, defs) <- ImpGen.compileProg prog
+  -- Dynamic scheduling seems completely broken currently, so we disable it.
+  (ws, defs) <- ImpGen.compileProg False prog
   let Functions funs = defFuns defs
 
   (ws', (cparts, endstate)) <-

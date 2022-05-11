@@ -59,7 +59,7 @@ compileProg version =
         [DefaultSpace]
         cliOptions
     )
-    <=< ImpGen.compileProg
+    <=< ImpGen.compileProg True
 
 -- | Generate the multicore context definitions.  This is exported
 -- because the WASM backend needs it.

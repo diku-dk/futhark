@@ -40,19 +40,20 @@ gccAtomics = flip lookup cpu
         (Or Int64, Imp.AtomicOr Int64)
       ]
 
--- | Compile the program.
+-- | Compile the program. The boolean indicates whether dynamic scheduling may be used.
 compileProg ::
   MonadFreshNames m =>
+  Bool ->
   Prog MCMem ->
   m (Warnings, Imp.Definitions Imp.Multicore)
-compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops Imp.DefaultSpace
+compileProg dynamic = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops Imp.DefaultSpace
   where
     ops =
       (defaultOperations opCompiler)
         { opsExpCompiler = compileMCExp
         }
     opCompiler dest (Alloc e space) = compileAlloc dest e space
-    opCompiler dest (Inner op) = compileMCOp dest op
+    opCompiler dest (Inner op) = compileMCOp dynamic dest op
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
 updateAcc acc is vs = sComment "UpdateAcc" $ do
@@ -117,11 +118,12 @@ compileMCExp dest e =
   defCompileExp dest e
 
 compileMCOp ::
+  Bool ->
   Pat LetDecMem ->
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
-compileMCOp _ (OtherOp ()) = pure ()
-compileMCOp pat (ParOp par_op op) = do
+compileMCOp _ _ (OtherOp ()) = pure ()
+compileMCOp dynamic pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
@@ -149,7 +151,9 @@ compileMCOp pat (ParOp par_op op) = do
   free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
   emit . Imp.Op $
     Imp.SegOp s free_params seq_task par_task retvals $
-      scheduling_info (decideScheduling' op seq_code)
+      if dynamic
+        then scheduling_info (decideScheduling' op seq_code)
+        else scheduling_info Imp.Static
 
 compileSegOp ::
   Pat LetDecMem ->
