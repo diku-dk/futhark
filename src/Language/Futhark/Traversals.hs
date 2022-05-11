@@ -401,8 +401,7 @@ barePat (RecordPat fs loc) = RecordPat (map (fmap barePat) fs) loc
 barePat (PatParens p loc) = PatParens (barePat p) loc
 barePat (Id v _ loc) = Id v NoInfo loc
 barePat (Wildcard _ loc) = Wildcard NoInfo loc
-barePat (PatAscription pat (TypeDecl t _) loc) =
-  PatAscription (barePat pat) (TypeDecl t NoInfo) loc
+barePat (PatAscription pat t loc) = PatAscription (barePat pat) t loc
 barePat (PatLit v _ loc) = PatLit v NoInfo loc
 barePat (PatConstr c _ ps loc) = PatConstr c NoInfo (map barePat ps) loc
 barePat (PatAttr attr p loc) = PatAttr attr (barePat p) loc

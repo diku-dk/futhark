@@ -249,8 +249,8 @@ atPosInPat (PatParens pat _) pos =
   atPosInPat pat pos
 atPosInPat (PatAttr _ pat _) pos =
   atPosInPat pat pos
-atPosInPat (PatAscription pat tdecl _) pos =
-  atPosInPat pat pos `mplus` atPosInTypeExp (declaredType tdecl) pos
+atPosInPat (PatAscription pat te _) pos =
+  atPosInPat pat pos `mplus` atPosInTypeExp te pos
 atPosInPat (PatConstr _ _ pats _) pos =
   msum $ map (`atPosInPat` pos) pats
 atPosInPat PatLit {} _ = Nothing

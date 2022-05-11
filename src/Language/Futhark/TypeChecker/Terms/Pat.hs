@@ -221,17 +221,6 @@ bindingSizes sizes m = do
     check (SizeBinder v loc) =
       SizeBinder <$> checkName Term v loc <*> pure loc
 
-patternDims :: Pat -> [Ident]
-patternDims (PatParens p _) = patternDims p
-patternDims (TuplePat pats _) = concatMap patternDims pats
-patternDims (PatAscription p (TypeDecl _ (Info t)) _) =
-  patternDims p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims t)
-  where
-    dimIdent _ (AnyDim _) = error "patternDims: AnyDim"
-    dimIdent _ (ConstDim _) = Nothing
-    dimIdent _ NamedDim {} = Nothing
-patternDims _ = []
-
 sizeBinderToParam :: SizeBinder VName -> UncheckedTypeParam
 sizeBinderToParam (SizeBinder v loc) = TypeParamDim (baseName v) loc
 
@@ -247,7 +236,9 @@ bindingPat sizes p t m = do
   checkPat sizes p t $ \p' -> binding True (S.toList $ patIdents p') $ do
     -- Perform an observation of every declared dimension.  This
     -- prevents unused-name warnings for otherwise unused dimensions.
-    mapM_ observe $ patternDims p'
+    let ident (SizeBinder v loc) =
+          Ident v (Info (Scalar $ Prim $ Signed Int64)) loc
+    mapM_ (observe . ident) sizes
 
     let used_sizes = typeDimNames $ patternStructType p'
     case filter ((`S.notMember` used_sizes) . sizeName) sizes of
@@ -332,7 +323,7 @@ checkPat' sizes (RecordPat fs loc) NoneInferred =
   RecordPat . M.toList
     <$> traverse (\p -> checkPat' sizes p NoneInferred) (M.fromList fs)
     <*> pure loc
-checkPat' sizes (PatAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
+checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
   (t', st, _) <- checkTypeExpNonrigid t
 
   case maybe_outer_t of
@@ -343,11 +334,11 @@ checkPat' sizes (PatAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
       outer_t' <- normTypeFully outer_t
       PatAscription
         <$> checkPat' sizes p (Ascribed (addAliasesFromType st outer_t'))
-        <*> pure (TypeDecl t' (Info st))
+        <*> pure t'
         <*> pure loc
     NoneInferred ->
       PatAscription <$> checkPat' sizes p (Ascribed (fromStruct st))
-        <*> pure (TypeDecl t' (Info st))
+        <*> pure t'
         <*> pure loc
 checkPat' _ (PatLit l NoInfo loc) (Ascribed t) = do
   t' <- patLitMkType l loc

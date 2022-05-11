@@ -966,7 +966,7 @@ data PatBase f vn
   | PatParens (PatBase f vn) SrcLoc
   | Id vn (f PatType) SrcLoc
   | Wildcard (f PatType) SrcLoc -- Nothing, i.e. underscore.
-  | PatAscription (PatBase f vn) (TypeDeclBase f vn) SrcLoc
+  | PatAscription (PatBase f vn) (TypeExp vn) SrcLoc
   | PatLit PatLit (f PatType) SrcLoc
   | PatConstr Name (f PatType) [PatBase f vn] SrcLoc
   | PatAttr (AttrInfo vn) (PatBase f vn) SrcLoc

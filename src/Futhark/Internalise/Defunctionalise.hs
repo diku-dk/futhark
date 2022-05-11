@@ -1216,10 +1216,8 @@ updatePat (Id vn (Info tp) loc) sv =
 updatePat pat@(Wildcard (Info tp) loc) sv
   | orderZero tp = pat
   | otherwise = Wildcard (Info $ typeFromSV sv) loc
-updatePat (PatAscription pat tydecl loc) sv
-  | orderZero . unInfo $ expandedType tydecl =
-      PatAscription (updatePat pat sv) tydecl loc
-  | otherwise = updatePat pat sv
+updatePat (PatAscription pat _ _) sv =
+  updatePat pat sv
 updatePat p@PatLit {} _ = p
 updatePat pat@(PatConstr c1 (Info t) ps loc) sv@(SumSV _ svs _)
   | orderZero t = pat
