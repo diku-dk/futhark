@@ -137,10 +137,6 @@ struct profiling_record {
 };
 
 struct cuda_context {
-  CUdevice dev;
-  CUcontext cu_ctx;
-  CUmodule module;
-
   struct cuda_config cfg;
 
   struct free_list free_list;
@@ -290,10 +286,8 @@ static int cuda_device_setup(struct cuda_context *ctx) {
                                      CU_EVENT_DISABLE_TIMING));
     CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devIdx]));
   }
-
   free(devices);
 
-  CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->dev, chosen));
   return 0;
 }
 
@@ -384,7 +378,7 @@ static void cuda_nvrtc_mk_build_options(struct cuda_context *ctx, const char *ex
   char **opts = (char**) malloc(n_opts_alloc * sizeof(char *));
   if (!arch_set) {
     opts[i++] = strdup("-arch");
-    opts[i++] = strdup(cuda_nvrtc_get_arch(ctx->dev));
+    opts[i++] = strdup(cuda_nvrtc_get_arch(ctx->devices[0]));
   }
   opts[i++] = strdup("-default-device");
   if (ctx->cfg.debugging) {
@@ -507,8 +501,8 @@ static void cuda_size_setup(struct cuda_context *ctx)
 
   if (!ctx->cfg.default_grid_size_changed) {
     ctx->cfg.default_grid_size =
-      (device_query(ctx->dev, MULTIPROCESSOR_COUNT) *
-       device_query(ctx->dev, MAX_THREADS_PER_MULTIPROCESSOR))
+      (device_query(ctx->devices[0], MULTIPROCESSOR_COUNT) *
+       device_query(ctx->devices[0], MAX_THREADS_PER_MULTIPROCESSOR))
       / ctx->cfg.default_block_size;
   }
 
@@ -599,20 +593,26 @@ static char* cuda_module_setup(struct cuda_context *ctx,
       if (ctx->cfg.logging) {
         fprintf(stderr, "Restored PTX from cache; now loading module...\n");
       }
-      if (cuModuleLoadData(&ctx->module, ptx) == CUDA_SUCCESS) {
-        if (ctx->cfg.logging) {
-          fprintf(stderr, "Success!\n");
+
+      for(int device_id = 0; device_id < ctx->device_count; device_id){
+          CUDA_SUCCEED_NONFATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
+          if(cuModuleLoadData(&ctx->modules[device_id], ptx) == CUDA_SUCCESS){
+            if (ctx->cfg.logging) {
+              fprintf(stderr, "Success!\n");
+            }
+          } else {
+            if (ctx->cfg.logging) {
+              fprintf(stderr, "Failed!\n");
+            }
+            free(ptx);
+            ptx = NULL;
+            CUDA_SUCCEED_NONFATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
+            break;
+          }
+          CUDA_SUCCEED_NONFATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
         }
-        loaded_ptx_from_cache = 1;
-      } else {
-        if (ctx->cfg.logging) {
-          fprintf(stderr, "Failed!\n");
-        }
-        free(ptx);
-        ptx = NULL;
       }
     }
-  }
 
   if (ptx == NULL) {
     char* problem = cuda_nvrtc_build(ctx, src, (const char**)opts, n_opts, &ptx);
@@ -626,8 +626,10 @@ static char* cuda_module_setup(struct cuda_context *ctx,
     dump_file(ctx->cfg.dump_ptx_to, ptx, strlen(ptx));
   }
 
-  if (!loaded_ptx_from_cache) {
-    CUDA_SUCCEED_FATAL(cuModuleLoadData(&ctx->module, ptx));
+  for(int devID = 0; devID < ctx->device_count; devID++){
+    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[devID]));
+    CUDA_SUCCEED_FATAL(cuModuleLoadData(&ctx->modules[devID], ptx));
+    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devID]));
   }
 
   if (cache_fname != NULL && !loaded_ptx_from_cache) {
@@ -644,13 +646,6 @@ static char* cuda_module_setup(struct cuda_context *ctx,
     free((char *)opts[i]);
   }
   free(opts);
-
-  for(int devID = 0; devID < ctx->device_count; devID++){
-    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[devID]));
-    CUDA_SUCCEED_FATAL(cuModuleLoadData(&ctx->modules[devID], ptx));
-    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devID]));
-  }
-
   free(ptx);
   if (src != NULL) {
     free(src);
@@ -666,17 +661,19 @@ static char* cuda_setup(struct cuda_context *ctx, const char *src_fragments[],
   if (cuda_device_setup(ctx) != 0) {
     futhark_panic(-1, "No suitable CUDA device found.\n");
   }
-  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
+
 
   free_list_init(&ctx->free_list);
 
-  ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
-  ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
-  ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
+  // Just take from the first block,
+  //should probbally set to minimum amoung devices
+  ctx->max_shared_memory = device_query(ctx->devices[0], MAX_SHARED_MEMORY_PER_BLOCK);
+  ctx->max_block_size = device_query(ctx->devices[0], MAX_THREADS_PER_BLOCK);
+  ctx->max_grid_size = device_query(ctx->devices[0], MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_block_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
-  ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
+  ctx->lockstep_width = device_query(ctx->devices[0], WARP_SIZE);
 
   cuda_size_setup(ctx);
   return cuda_module_setup(ctx, src_fragments, extra_opts, cache_fname);
@@ -747,12 +744,9 @@ static void cuda_cleanup(struct cuda_context *ctx) {
     CUDA_SUCCEED_FATAL(cuDevicePrimaryCtxRelease(ctx->devices[devIdx]));
   }
   free(ctx->kernel_done);
-
   free(ctx->modules);
   free(ctx->contexts);
   free(ctx->devices);
-  CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
-  CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
 }
 
 static void hint_prefetch_variable_array(

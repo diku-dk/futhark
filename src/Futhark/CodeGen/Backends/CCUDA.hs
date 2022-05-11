@@ -76,8 +76,8 @@ compileProg version prog = do
           GC.opsCompiler = callKernel,
           GC.opsFatMemory = True,
           GC.opsCritical =
-            ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.cu_ctx));|],
-              [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.cu_ctx));|]
+            ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[0]));|],
+              [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[0]));|]
             )
         }
     cuda_includes =
@@ -135,13 +135,6 @@ cliOptions =
              optionArgument = NoArgument,
              optionDescription = "Gather profiling data while executing and print out a summary at the end.",
              optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
-           },
-         Option
-           { optionLongName = "use-single-device",
-             optionShortName = Nothing,
-             optionArgument = NoArgument,
-             optionDescription = "Forces futhark only to run using a single GPU device",
-             optionAction = [C.cstm|futhark_context_config_set_multi_device(cfg, false);|]
            }
        ]
 
@@ -371,71 +364,52 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       grid[perm[1]] = $exp:grid_y;
       grid[perm[2]] = $exp:grid_z;
 
-      int device_id = 0;
       int device_count = ctx->cuda.device_count;
       typename uint64_t page_size = (typename uint64_t) ctx->page_size;
-      void *$id:args_arr[] = { $inits:args''};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
 
       $items:bef
-      if(ctx->use_multi_device){
-        size_t grid_MD[3];
-        grid_MD[perm[0]] = $exp:grid_x_MD;
-        grid_MD[perm[1]] = $exp:grid_y_MD;
-        grid_MD[perm[2]] = $exp:grid_z_MD;
-        for(int devID = 0; devID < ctx->cuda.device_count; devID++){
-            int device_id = devID;
-            if (ctx->debugging) {
-              fprintf(ctx->log, "Launching %s on Device %d with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
-                $string:(pretty kernel_name), device_id,
-                (long int)$exp:grid_x_MD, (long int)$exp:grid_y_MD, (long int)$exp:grid_z_MD,
-                (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
-                (int)$exp:shared_tot);
-              $id:time_start = get_wall_time();
-            }
-            void *$id:args_arr[] = { $inits:args'' };
-            CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
-            CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:(kernelMultiDevice kernel_name)[devID],
-                                                  grid_MD[0], grid_MD[1], grid_MD[2],
-                                                  $exp:block_x, $exp:block_y, $exp:block_z,
-                                                  $exp:shared_tot, NULL,
-                                                  $id:args_arr, NULL));
 
-            // This synchronisation is placed here to ensure that the same level
-            // of synchronisation is provided as single streams
-            CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[devID * 2
-                                             + ctx->cuda.kernel_iterator], NULL));
-            for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){
-              if(other_dev == devID) continue;
-              CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
-                                                   + ctx->cuda.kernel_iterator],0));
-            }
-
-            CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
-        }
-        ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
-      } else {
+      size_t grid_MD[3];
+      grid_MD[perm[0]] = $exp:grid_x_MD;
+      grid_MD[perm[1]] = $exp:grid_y_MD;
+      grid_MD[perm[2]] = $exp:grid_z_MD;
+      for(int devID = 0; devID < ctx->cuda.device_count; devID++){
+        int device_id = devID;
         if (ctx->debugging) {
-        fprintf(ctx->log, "Launching %s with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
-                $string:(pretty kernel_name),
-                (long int)$exp:grid_x, (long int)$exp:grid_y, (long int)$exp:grid_z,
-                (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
-                (int)$exp:shared_tot);
-        $id:time_start = get_wall_time();
+          fprintf(ctx->log, "Launching %s on Device %d with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
+          $string:(pretty kernel_name), device_id,
+          (long int)$exp:grid_x_MD, (long int)$exp:grid_y_MD, (long int)$exp:grid_z_MD,
+          (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
+          (int)$exp:shared_tot);
+          $id:time_start = get_wall_time();
+        }
+        void *$id:args_arr[] = { $inits:args'' };
+        CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
+        CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:(kernelMultiDevice kernel_name)[devID],
+                                          grid_MD[0], grid_MD[1], grid_MD[2],
+                                          $exp:block_x, $exp:block_y, $exp:block_z,
+                                          $exp:shared_tot, NULL,
+                                          $id:args_arr, NULL));
+
+        // This synchronisation is placed here to ensure that the same level
+        // of synchronisation is provided as single streams
+        CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[devID * 2
+                                             + ctx->cuda.kernel_iterator], NULL));
+        for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){
+          if(other_dev == devID) continue;
+            CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
+                                                + ctx->cuda.kernel_iterator],0));
+          }
+        CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
       }
-        CUDA_SUCCEED_OR_RETURN(
-          cuLaunchKernel(ctx->$id:kernel_name,
-                         grid[0], grid[1], grid[2],
-                         $exp:block_x, $exp:block_y, $exp:block_z,
-                         $exp:shared_tot, NULL,
-                         $id:args_arr, NULL));
-      }
-      $items:aft
-      if (ctx->debugging) {
-        CUDA_SUCCEED_FATAL(cuCtxSynchronize());
-        $id:time_end = get_wall_time();
-        fprintf(ctx->log, "Kernel %s runtime: %ldus\n",
-                $string:(pretty kernel_name), $id:time_end - $id:time_start);
+    ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
+    $items:aft
+    if (ctx->debugging) {
+      CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+      $id:time_end = get_wall_time();
+      fprintf(ctx->log, "Kernel %s runtime: %ldus\n",
+        $string:(pretty kernel_name), $id:time_end - $id:time_start);
       }
     }|]
 

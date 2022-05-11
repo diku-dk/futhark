@@ -66,11 +66,9 @@ profilingEnclosureKernel name =
       |],
     [C.citems|
       if (pevents != NULL) {
-        if(ctx->use_multi_device){
         for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
             CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL,
               ctx->cuda.kernel_done[device_id * 2 + !ctx->cuda.kernel_iterator],0));
-          }
         }
         CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[1], 0));
       }
@@ -135,7 +133,6 @@ generateConfigFuns sizes = do
                               typename int64_t tuning_params[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
-                              bool use_multi_device;
                               const char *cache_fname;
                             };|]
     )
@@ -162,7 +159,6 @@ generateConfigFuns sizes = do
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
                                           tuning_param_names, tuning_param_vars,
                                           cfg->tuning_params, tuning_param_classes);
-                         cfg->use_multi_device = true;
 
                          return cfg;
                        }|]
@@ -280,12 +276,6 @@ generateConfigFuns sizes = do
                          cfg->cu_cfg.default_threshold = size;
                        }|]
     )
-  GC.publicDef_ "context_config_set_multi_device" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, bool use_multi_device);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, bool use_multi_device) {
-        cfg->use_multi_device = use_multi_device;
-      }|]
-    )
 
   GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value);|],
@@ -340,27 +330,12 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   (fields, init_fields, free_fields) <- GC.contextContents
   let forCostCentre name =
         [ ( [C.csdecl|typename int64_t $id:(kernelRuntime name);|],
-            [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
+            [C.cstms|ctx->$id:(kernelRuntime name) = 0;|]
           ),
           ( [C.csdecl|int $id:(kernelRuns name);|],
-            [C.cstm|ctx->$id:(kernelRuns name) = 0;|]
+            [C.cstms|ctx->$id:(kernelRuns name) = 0;|]
           )
         ]
-
-      forKernel name =
-        ( [C.csdecl|typename CUfunction $id:name;|],
-          [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
-                                     &ctx->$id:name,
-                                     ctx->cuda.module,
-                                     $string:(pretty (C.toIdent name mempty))));
-                                     |]
-        ) :
-        forCostCentre name
-
-      (kernel_fields, init_kernel_fields) =
-        unzip $
-          concatMap forKernel (M.keys kernels)
-            ++ concatMap forCostCentre cost_centres
 
       forKernelMD name =
         ( [C.csdecl| typename CUfunction* $id:(kernelMultiDevice name);|],
@@ -372,10 +347,11 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                                                        $string:(pretty (C.toIdent name mempty))));
                 CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
           }|]
-        )
+        ) : forCostCentre name
 
       (kernel_md_fields, init_kernel_md_fields) =
-        unzip $ map forKernelMD (M.keys kernels)
+        unzip $ concatMap forKernelMD (M.keys kernels)
+          ++ concatMap forCostCentre cost_centres
 
       free_functions name =
         [C.cstm| free(ctx->$id:(kernelMultiDevice name));|]
@@ -395,7 +371,6 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          char *error;
                          typename FILE *log;
                          $sdecls:fields
-                         $sdecls:kernel_fields
                          $sdecls:kernel_md_fields
                          typename CUdeviceptr global_failure;
                          typename CUdeviceptr global_failure_args;
@@ -447,30 +422,34 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->failure_is_an_option = 0;
                  ctx->total_runs = 0;
                  ctx->total_runtime = 0;
+
                  $stms:init_fields
 
                  ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
 
-                 ctx->use_multi_device = cfg->use_multi_device && (ctx->cuda.device_count >= 1);
+                 CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[0]));
+
                  if (ctx->error != NULL) {
                    futhark_panic(1, "%s\n", ctx->error);
                  }
                  ctx->page_size = sysconf(_SC_PAGESIZE);
 
                  typename int32_t no_error = -1;
-                 // Since the Global failure is shared, each device needs it
-                 // own global failure to prevent thrashing.
+
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
                                       &ctx->global_failure,
-                                      ctx->cuda.device_count*ctx->page_size,
+                                      sizeof(no_error),
                                       CU_MEM_ATTACH_GLOBAL));
                  CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
                  CUDA_SUCCEED_FATAL(cuMemAllocManaged(
                                       &ctx->global_failure_args,
-                                      ctx->cuda.device_count*ctx->page_size,
+                                      sizeof(int64_t)*($int:max_failure_args+1),
                                       CU_MEM_ATTACH_GLOBAL));
+                 // Note this doesn't make the array readonly,
+                 // changes to the array have large cost instead
+                 hint_readonly_array(&ctx->cuda, ctx->global_failure, sizeof(no_error));
+                 hint_readonly_array(&ctx->cuda, ctx->global_failure_args, sizeof(int64_t)*($int:max_failure_args+1));
 
-                 $stms:init_kernel_fields
                  $stms:(concat init_kernel_md_fields)
 
                  $stms:final_inits
@@ -479,6 +458,8 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  init_constants(ctx);
                  // Clear the free list of any deallocations that occurred while initialising constants.
                  CUDA_SUCCEED_FATAL(cuda_free_all(&ctx->cuda));
+
+                 CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[0]));
 
                  futhark_context_sync(ctx);
 
@@ -504,8 +485,12 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                 CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cuda.cu_ctx));
-                 CUDA_SUCCEED_OR_RETURN(cuCtxSynchronize());
+                 for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
+                  CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
+                  CUDA_SUCCEED_OR_RETURN(cuCtxSynchronize());
+                  CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
+                 }
+                 CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cuda.contexts[0]));
                  if (ctx->failure_is_an_option) {
                    // Check for any delayed error.
                    typename int32_t failure_idx;
@@ -535,7 +520,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                      return FUTHARK_PROGRAM_ERROR;
                    }
                  }
-                 CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.cu_ctx));
+                 CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.contexts[0]));
                  return 0;
                }|]
     )
