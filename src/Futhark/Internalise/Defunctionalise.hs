@@ -139,14 +139,10 @@ replaceStaticValSizes globals orig_substs sv =
           Literal (SignedValue (Int64Value (fromIntegral d))) loc
         Nothing ->
           Var v (replaceTypeSizes substs <$> t) loc
-    onExp substs (AppExp (Coerce e tdecl loc) (Info (AppRes t ext))) =
-      AppExp (Coerce (onExp substs e) tdecl' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
+    onExp substs (AppExp (Coerce e te loc) (Info (AppRes t ext))) =
+      AppExp (Coerce (onExp substs e) te' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
       where
-        tdecl' =
-          TypeDecl
-            { declaredType = onTypeExp substs $ declaredType tdecl,
-              expandedType = replaceTypeSizes substs <$> expandedType tdecl
-            }
+        te' = onTypeExp substs te
     onExp substs e = onAST substs e
 
     onTypeExpDim substs d@(DimExpNamed v loc) =

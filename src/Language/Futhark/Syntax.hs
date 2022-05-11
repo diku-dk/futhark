@@ -42,7 +42,6 @@ module Language.Futhark.Syntax
     PatRetType,
     ValueType,
     Diet (..),
-    TypeDeclBase (..),
 
     -- * Values
     IntValue (..),
@@ -513,25 +512,6 @@ instance Located (TypeArgExp vn) where
   locOf (TypeArgExpDim _ loc) = locOf loc
   locOf (TypeArgExpType t) = locOf t
 
--- | A declaration of the type of something.
-data TypeDeclBase f vn = TypeDecl
-  { -- | The type declared by the user.
-    declaredType :: TypeExp vn,
-    -- | The type deduced by the type checker.
-    expandedType :: f StructType
-  }
-
-deriving instance Show (TypeDeclBase Info VName)
-
-deriving instance Show vn => Show (TypeDeclBase NoInfo vn)
-
-deriving instance Eq (TypeDeclBase NoInfo VName)
-
-deriving instance Ord (TypeDeclBase NoInfo VName)
-
-instance Located (TypeDeclBase f vn) where
-  locOf = locOf . declaredType
-
 -- | Information about which parts of a value/type are consumed.
 data Diet
   = -- | Consumes these fields in the record.
@@ -716,7 +696,7 @@ data AppExpBase f vn
       (f (Diet, Maybe VName))
       SrcLoc
   | -- | Size coercion: @e :> t@.
-    Coerce (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
+    Coerce (ExpBase f vn) (TypeExp vn) SrcLoc
   | Range
       (ExpBase f vn)
       (Maybe (ExpBase f vn))
@@ -866,7 +846,7 @@ data ExpBase f vn
   | -- | Array indexing as a section: @(.[i,j])@.
     IndexSection (SliceBase f vn) (f PatType) SrcLoc
   | -- | Type ascription: @e : t@.
-    Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
+    Ascript (ExpBase f vn) (TypeExp vn) SrcLoc
   | AppExp (AppExpBase f vn) (f AppRes)
 
 deriving instance Show (ExpBase Info VName)
@@ -1113,7 +1093,8 @@ data SpecBase f vn
   = ValSpec
       { specName :: vn,
         specTypeParams :: [TypeParamBase vn],
-        specType :: TypeDeclBase f vn,
+        specTypeExp :: TypeExp vn,
+        specType :: f StructType,
         specDoc :: Maybe DocComment,
         specLocation :: SrcLoc
       }
@@ -1128,7 +1109,7 @@ deriving instance Show (SpecBase Info VName)
 deriving instance Show (SpecBase NoInfo Name)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ _ loc) = locOf loc
+  locOf (ValSpec _ _ _ _ _ loc) = locOf loc
   locOf (TypeAbbrSpec tbind) = locOf tbind
   locOf (TypeSpec _ _ _ _ loc) = locOf loc
   locOf (ModSpec _ _ _ loc) = locOf loc
@@ -1139,7 +1120,7 @@ data SigExpBase f vn
   = SigVar (QualName vn) (f (M.Map VName VName)) SrcLoc
   | SigParens (SigExpBase f vn) SrcLoc
   | SigSpecs [SpecBase f vn] SrcLoc
-  | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
+  | SigWith (SigExpBase f vn) (TypeRefBase vn) SrcLoc
   | SigArrow (Maybe vn) (SigExpBase f vn) (SigExpBase f vn) SrcLoc
 
 deriving instance Show (SigExpBase Info VName)
@@ -1147,13 +1128,13 @@ deriving instance Show (SigExpBase Info VName)
 deriving instance Show (SigExpBase NoInfo Name)
 
 -- | A type refinement.
-data TypeRefBase f vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeDeclBase f vn) SrcLoc
+data TypeRefBase vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeExp vn) SrcLoc
 
-deriving instance Show (TypeRefBase Info VName)
+deriving instance Show (TypeRefBase VName)
 
-deriving instance Show (TypeRefBase NoInfo Name)
+deriving instance Show (TypeRefBase Name)
 
-instance Located (TypeRefBase f vn) where
+instance Located (TypeRefBase vn) where
   locOf (TypeRef _ _ _ loc) = locOf loc
 
 instance Located (SigExpBase f vn) where

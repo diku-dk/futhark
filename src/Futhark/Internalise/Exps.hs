@@ -218,7 +218,7 @@ eValBody es = buildBody_ $ do
   es' <- sequence es
   varsRes . concat <$> mapM (letValExp "x") es'
 
-internaliseAppExp :: String -> [VName] -> E.AppExp -> InternaliseM [I.SubExp]
+internaliseAppExp :: String -> E.AppRes -> E.AppExp -> InternaliseM [I.SubExp]
 internaliseAppExp desc _ (E.Index e idxs loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
@@ -367,9 +367,9 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]
-internaliseAppExp desc ext (E.Coerce e (TypeDecl dt (Info et)) loc) = do
+internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
   ses <- internaliseExp desc e
-  ts <- internaliseReturnType (E.RetType ext et) =<< mapM subExpType ses
+  ts <- internaliseReturnType (E.RetType ext (E.toStruct et)) =<< mapM subExpType ses
   dt' <- typeExpForError dt
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
@@ -621,7 +621,7 @@ internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
     Just substs -> pure substs
     Nothing -> pure [I.Var name]
 internaliseExp desc (E.AppExp e (Info appres)) = do
-  ses <- internaliseAppExp desc (appResExt appres) e
+  ses <- internaliseAppExp desc appres e
   bindExtSizes appres ses
   pure ses
 

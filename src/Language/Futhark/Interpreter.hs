@@ -864,16 +864,16 @@ evalAppExp env (Range start maybe_second end loc) = do
                UpToExclusive x -> "..<" ++ pretty x
            )
         ++ " is invalid."
-evalAppExp env (Coerce e td loc) = do
+evalAppExp env (Coerce e te loc) = do
   v <- eval env e
-  let t = evalType env $ unInfo $ expandedType td
+  let t = evalType env $ toStruct $ typeOf e
   case checkShape (structTypeShape (envShapes env) t) (valueShape v) of
     Just _ -> pure v
     Nothing ->
       bad loc env $
         "Value `" <> pretty v <> "` of shape `" ++ pretty (valueShape v)
           ++ "` cannot match shape of type `"
-          <> pretty (declaredType td)
+          <> pretty te
           <> "` (`"
           <> pretty t
           <> "`)"

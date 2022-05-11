@@ -92,7 +92,6 @@ module Language.Futhark.Prop
     UncheckedType,
     UncheckedTypeExp,
     UncheckedIdent,
-    UncheckedTypeDecl,
     UncheckedDimIndex,
     UncheckedSlice,
     UncheckedExp,
@@ -1466,9 +1465,6 @@ type UncheckedType = TypeBase (ShapeDecl Name) ()
 
 -- | An expression with no type annotations.
 type UncheckedTypeExp = TypeExp Name
-
--- | A type declaration with no expanded type.
-type UncheckedTypeDecl = TypeDeclBase NoInfo Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name

@@ -73,9 +73,6 @@ instance Annot NoInfo where
 instance Annot Info where
   unAnnot = Just . unInfo
 
-pprAnnot :: (Annot f, Pretty a, Pretty b) => a -> f b -> Doc
-pprAnnot a b = maybe (ppr a) ppr $ unAnnot b
-
 instance Pretty Value where
   ppr (PrimValue bv) = ppr bv
   ppr (ArrayValue a t)
@@ -188,9 +185,6 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = brackets $ ppr d
   ppr (TypeArgExpType t) = ppr t
-
-instance (Eq vn, IsName vn, Annot f) => Pretty (TypeDeclBase f vn) where
-  ppr x = pprAnnot (declaredType x) (expandedType x)
 
 instance IsName vn => Pretty (QualName vn) where
   ppr (QualName names name) =
@@ -485,7 +479,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
   ppr (TypeSpec l name ps _ _) =
     text "type" <> ppr l <+> pprName name <+> spread (map ppr ps)
-  ppr (ValSpec name tparams vtype _ _) =
+  ppr (ValSpec name tparams vtype _ _ _) =
     text "val" <+> pprName name <+> spread (map ppr tparams) <> colon <+> ppr vtype
   ppr (ModSpec name sig _ _) =
     text "module" <+> pprName name <> colon <+> ppr sig

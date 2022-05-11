@@ -65,8 +65,9 @@ freeVars expr = case expr of
   AppExp (Range e me incl _) _ ->
     freeVars e <> foldMap freeVars me <> foldMap freeVars incl
   Var qn (Info t) _ -> NameSet $ M.singleton (qualLeaf qn) $ toStruct t
-  Ascript e t _ -> freeVars e <> sizes (typeDimNames $ unInfo $ expandedType t)
-  AppExp (Coerce e t _) _ -> freeVars e <> sizes (typeDimNames $ unInfo $ expandedType t)
+  Ascript e _ _ -> freeVars e
+  AppExp (Coerce e _ _) (Info ar) ->
+    freeVars e <> sizes (typeDimNames (appResType ar))
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeVars e1
       <> ( (sizes (patternDimNames pat) <> freeVars e2)

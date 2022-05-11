@@ -320,10 +320,6 @@ instance ASTMappable StructRetType where
 instance ASTMappable PatRetType where
   astMap tv (RetType ext t) = RetType ext <$> astMap tv t
 
-instance ASTMappable (TypeDeclBase Info VName) where
-  astMap tv (TypeDecl dt (Info et)) =
-    TypeDecl <$> astMap tv dt <*> (Info <$> mapOnStructType tv et)
-
 instance ASTMappable (IdentBase Info VName) where
   astMap tv (Ident name (Info t) loc) =
     Ident <$> mapOnName tv name <*> (Info <$> mapOnPatType tv t) <*> pure loc
@@ -386,9 +382,6 @@ instance (ASTMappable a, ASTMappable b, ASTMappable c) => ASTMappable (a, b, c) 
 -- complex abstraction.  The types ensure that this will be correct
 -- anyway, so it's just tedious, and not actually fragile.
 
-bareTypeDecl :: TypeDeclBase Info VName -> TypeDeclBase NoInfo VName
-bareTypeDecl (TypeDecl te _) = TypeDecl te NoInfo
-
 bareField :: FieldBase Info VName -> FieldBase NoInfo VName
 bareField (RecordFieldExplicit name e loc) =
   RecordFieldExplicit name (bareExp e) loc
@@ -434,8 +427,7 @@ bareExp (TupLit els loc) = TupLit (map bareExp els) loc
 bareExp (StringLit vs loc) = StringLit vs loc
 bareExp (RecordLit fields loc) = RecordLit (map bareField fields) loc
 bareExp (ArrayLit els _ loc) = ArrayLit (map bareExp els) NoInfo loc
-bareExp (Ascript e tdecl loc) =
-  Ascript (bareExp e) (bareTypeDecl tdecl) loc
+bareExp (Ascript e te loc) = Ascript (bareExp e) te loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
 bareExp (Not x loc) = Not (bareExp x) loc
 bareExp (Update src slice v loc) =
@@ -492,8 +484,8 @@ bareExp (AppExp appexp _) =
           LetFun name (fparams, map barePat params, ret, NoInfo, bareExp e) (bareExp body) loc
         Range start next end loc ->
           Range (bareExp start) (fmap bareExp next) (fmap bareExp end) loc
-        Coerce e tdecl loc ->
-          Coerce (bareExp e) (bareTypeDecl tdecl) loc
+        Coerce e te loc ->
+          Coerce (bareExp e) te loc
         Index arr slice loc ->
           Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =

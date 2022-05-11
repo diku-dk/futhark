@@ -154,8 +154,8 @@ modBindDefs mbind =
 specDefs :: Spec -> Defs
 specDefs spec =
   case spec of
-    ValSpec v tparams tdecl _ loc ->
-      let vdef = DefBound $ BoundTerm (unInfo $ expandedType tdecl) (locOf loc)
+    ValSpec v tparams _ (Info t) _ loc ->
+      let vdef = DefBound $ BoundTerm t (locOf loc)
        in M.insert v vdef $ mconcat (map typeParamDefs tparams)
     TypeAbbrSpec tbind -> typeBindDefs tbind
     TypeSpec _ v _ _ loc ->
@@ -273,10 +273,10 @@ atPosInExp (AppExp (LetWith a b _ _ _ _) _) pos
   | b `contains` pos = Just $ RawAtName (qualName $ identName b) (locOf b)
 atPosInExp (AppExp (DoLoop _ merge _ _ _ _) _) pos
   | merge `contains` pos = atPosInPat merge pos
-atPosInExp (Ascript _ tdecl _) pos
-  | tdecl `contains` pos = atPosInTypeExp (declaredType tdecl) pos
-atPosInExp (AppExp (Coerce _ tdecl _) _) pos
-  | tdecl `contains` pos = atPosInTypeExp (declaredType tdecl) pos
+atPosInExp (Ascript _ te _) pos
+  | te `contains` pos = atPosInTypeExp te pos
+atPosInExp (AppExp (Coerce _ te _) _) pos
+  | te `contains` pos = atPosInTypeExp te pos
 atPosInExp e pos = do
   guard $ e `contains` pos
   -- Use the Either monad for short-circuiting for efficiency reasons.
@@ -312,7 +312,7 @@ atPosInModExp (ModLambda _ _ e _) pos =
 atPosInSpec :: Spec -> Pos -> Maybe RawAtPos
 atPosInSpec spec pos =
   case spec of
-    ValSpec _ _ tdecl _ _ -> atPosInTypeExp (declaredType tdecl) pos
+    ValSpec _ _ te _ _ _ -> atPosInTypeExp te pos
     TypeAbbrSpec tbind -> atPosInTypeBind tbind pos
     TypeSpec {} -> Nothing
     ModSpec _ se _ _ -> atPosInSigExp se pos
