@@ -602,9 +602,9 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
 typeOf (OpSection _ (Info t) _) =
   t
 typeOf (OpSectionLeft _ _ _ (_, Info (pn, pt2)) (Info ret, _) _) =
-  Scalar $ Arrow mempty pn (fromStruct pt2) ret
+  Scalar $ Arrow mempty pn pt2 ret
 typeOf (OpSectionRight _ _ _ (Info (pn, pt1), _) (Info ret) _) =
-  Scalar $ Arrow mempty pn (fromStruct pt1) ret
+  Scalar $ Arrow mempty pn pt1 ret
 typeOf (ProjectSection _ (Info t) _) = t
 typeOf (IndexSection _ (Info t) _) = t
 typeOf (Constr _ _ (Info t) _) = t
@@ -613,20 +613,25 @@ typeOf (AppExp _ (Info res)) = appResType res
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.
-foldFunType :: Monoid as => [TypeBase dim as] -> RetTypeBase dim as -> TypeBase dim as
+foldFunType ::
+  Monoid as =>
+  [TypeBase dim pas] ->
+  RetTypeBase dim as ->
+  TypeBase dim as
 foldFunType ps ret =
   let RetType _ t = foldr arrow ret ps
    in t
   where
-    arrow t1 t2 = RetType [] $ Scalar $ Arrow mempty Unnamed t1 t2
+    arrow t1 t2 =
+      RetType [] $ Scalar $ Arrow mempty Unnamed (toStruct t1) t2
 
 -- | Extract the parameter types and return type from a type.
 -- If the type is not an arrow type, the list of parameter types is empty.
-unfoldFunType :: TypeBase dim as -> ([TypeBase dim as], TypeBase dim as)
+unfoldFunType :: TypeBase dim as -> ([TypeBase dim ()], TypeBase dim ())
 unfoldFunType (Scalar (Arrow _ _ t1 (RetType _ t2))) =
   let (ps, r) = unfoldFunType t2
    in (t1 : ps, r)
-unfoldFunType t = ([], t)
+unfoldFunType t = ([], toStruct t)
 
 -- | The type scheme of a value binding, comprising the type
 -- parameters and the actual type.

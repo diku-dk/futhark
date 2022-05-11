@@ -388,7 +388,7 @@ internaliseAppExp desc _ e@E.Apply {} =
       -- easy way to do this is to just ignore the arguments and
       -- create a hole whose type is the type of the entire
       -- application.
-      internaliseExp desc (E.Hole (Info (snd $ E.unfoldFunType t)) loc)
+      internaliseExp desc (E.Hole (Info (fromStruct $ snd $ E.unfoldFunType t)) loc)
     (FunctionName qfname, args) -> do
       -- Argument evaluation is outermost-in so that any existential sizes
       -- created by function applications can be brought into scope.

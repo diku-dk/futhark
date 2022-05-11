@@ -540,7 +540,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
               (Info (Observe, xext))
               loc
           )
-          (Info $ AppRes (Scalar $ Arrow mempty yp (fromStruct ytype) (RetType [] t)) [])
+          (Info $ AppRes (Scalar $ Arrow mempty yp ytype (RetType [] t)) [])
       rettype' =
         let onDim (NamedDim d)
               | Named p <- xp, qualLeaf d == p = NamedDim $ qualName v1
@@ -582,15 +582,16 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
 desugarProjectSection :: [Name] -> PatType -> SrcLoc -> MonoM Exp
 desugarProjectSection fields (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
   p <- newVName "project_p"
-  let body = foldl project (Var (qualName p) (Info t1) mempty) fields
+  let body = foldl project (Var (qualName p) (Info t1') mempty) fields
   pure $
     Lambda
-      [Id p (Info t1) mempty]
+      [Id p (Info t1') mempty]
       body
       Nothing
       (Info (mempty, RetType dims $ toStruct t2))
       loc
   where
+    t1' = fromStruct t1
     project e field =
       case typeOf e of
         Scalar (Record fs)
@@ -606,14 +607,16 @@ desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " 
 desugarIndexSection :: [DimIndex] -> PatType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
   p <- newVName "index_i"
-  let body = AppExp (Index (Var (qualName p) (Info t1) loc) idxs loc) (Info (AppRes t2 []))
+  let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes t2 []))
   pure $
     Lambda
-      [Id p (Info t1) mempty]
+      [Id p (Info (fromStruct t1')) mempty]
       body
       Nothing
       (Info (mempty, RetType dims $ toStruct t2))
       loc
+  where
+    t1' = fromStruct t1
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
