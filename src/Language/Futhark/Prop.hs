@@ -495,11 +495,14 @@ matchDims onDims = matchDims' mempty
         ( Scalar (TypeVar als1 u v targs1),
           Scalar (TypeVar als2 _ _ targs2)
           ) ->
-            Scalar . TypeVar (als1 <> als2) u v <$> zipWithM matchTypeArg targs1 targs2
+            Scalar . TypeVar (als1 <> als2) u v
+              <$> zipWithM (matchTypeArg bound) targs1 targs2
         _ -> pure t1
 
-    matchTypeArg ta@TypeArgType {} _ = pure ta
-    matchTypeArg a _ = pure a
+    matchTypeArg _ ta@TypeArgType {} _ = pure ta
+    matchTypeArg bound (TypeArgDim x loc) (TypeArgDim y _) =
+      TypeArgDim <$> onDims bound x y <*> pure loc
+    matchTypeArg _ a _ = pure a
 
     maybePName (Named v) = Just v
     maybePName Unnamed = Nothing
