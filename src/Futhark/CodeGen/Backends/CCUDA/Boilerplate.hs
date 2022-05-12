@@ -486,9 +486,9 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                  for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
-                  CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
-                  CUDA_SUCCEED_OR_RETURN(cuCtxSynchronize());
-                  CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
+                   CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
+                   CUDA_SUCCEED_OR_RETURN(cuCtxSynchronize());
+                   CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
                  }
                  CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cuda.contexts[0]));
                  if (ctx->failure_is_an_option) {

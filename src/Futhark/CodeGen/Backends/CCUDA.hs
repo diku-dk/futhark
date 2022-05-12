@@ -406,7 +406,11 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
     $items:aft
     if (ctx->debugging) {
-      CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+      for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
+        CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
+        CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+        CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
+      }
       $id:time_end = get_wall_time();
       fprintf(ctx->log, "Kernel %s runtime: %ldus\n",
         $string:(pretty kernel_name), $id:time_end - $id:time_start);
