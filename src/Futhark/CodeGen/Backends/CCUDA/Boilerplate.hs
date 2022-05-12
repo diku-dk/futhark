@@ -347,11 +347,13 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                                                        $string:(pretty (C.toIdent name mempty))));
                 CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
           }|]
-        ) : forCostCentre name
+        ) :
+        forCostCentre name
 
       (kernel_md_fields, init_kernel_md_fields) =
-        unzip $ concatMap forKernelMD (M.keys kernels)
-          ++ concatMap forCostCentre cost_centres
+        unzip $
+          concatMap forKernelMD (M.keys kernels)
+            ++ concatMap forCostCentre cost_centres
 
       free_functions name =
         [C.cstm| free(ctx->$id:(kernelMultiDevice name));|]
