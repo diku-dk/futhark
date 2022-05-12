@@ -273,7 +273,11 @@ onKernel target kernel = do
             ( mempty,
               [ [C.citem|const int block_dim0 = 0;|],
                 [C.citem|const int block_dim1 = 1;|],
-                [C.citem|const int block_dim2 = 2;|]
+                [C.citem|const int block_dim2 = 2;|],
+                -- Dummy definitions.
+                [C.citem|const int device_id = 0;|],
+                [C.citem|const int device_count = 0;|],
+                [C.citem|const typename uint64_t page_size = 0;|]
               ]
             )
 
@@ -324,10 +328,14 @@ onKernel target kernel = do
         ]
 
       params =
-        [ [C.cparam|const int device_id|],
-          [C.cparam|const int device_count|],
-          [C.cparam|const typename uint64_t page_size|]
-        ]
+        ( if target == TargetCUDA
+            then
+              [ [C.cparam|const int device_id|],
+                [C.cparam|const int device_count|],
+                [C.cparam|const typename uint64_t page_size|]
+              ]
+            else []
+        )
           ++ perm_params
           ++ take (numFailureParams safety) failure_params
           ++ catMaybes local_memory_params
