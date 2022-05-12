@@ -413,8 +413,8 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       S.Set VName ->
       TypeBase (DimDecl VName) as ->
       TypeBase (DimDecl VName) as
-    onType except (Array as u et shape) =
-      Array as u (onScalar except et) (fmap (onDim except) shape)
+    onType except (Array as u shape et) =
+      Array as u (fmap (onDim except) shape) (onScalar except et)
     onType except (Scalar t) =
       Scalar $ onScalar except t
 

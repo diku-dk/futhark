@@ -68,11 +68,11 @@ sliceShape ::
   Slice ->
   TypeBase (DimDecl VName) as ->
   TermTypeM (TypeBase (DimDecl VName) as, [VName])
-sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
+sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
   runStateT (setDims <$> adjustDims slice orig_dims) []
   where
     setDims [] = stripArray (length orig_dims) t
-    setDims dims' = Array als u et $ ShapeDecl dims'
+    setDims dims' = Array als u (ShapeDecl dims') et
 
     -- If the result is supposed to be a nonrigid size variable, then
     -- don't bother trying to create non-existential sizes.  This is
@@ -145,10 +145,10 @@ noAliasesIfOverloaded t =
 
 checkAscript ::
   SrcLoc ->
-  UncheckedTypeDecl ->
+  UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeDecl, Exp)
-checkAscript loc (TypeDecl te NoInfo) e = do
+  TermTypeM (TypeExp VName, Exp)
+checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
   e' <- checkExp e
   e_t <- toStruct <$> expTypeFully e'
@@ -156,29 +156,27 @@ checkAscript loc (TypeDecl te NoInfo) e = do
   onFailure (CheckingAscription decl_t e_t) $
     unify (mkUsage loc "type ascription") decl_t e_t
 
-  decl_t' <- normTypeFully decl_t
-
-  pure (TypeDecl te' $ Info decl_t', e')
+  pure (te', e')
 
 checkCoerce ::
   SrcLoc ->
-  UncheckedTypeDecl ->
+  UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeDecl, Exp, [VName])
-checkCoerce loc (TypeDecl te NoInfo) e = do
-  (te', decl_t, ext) <- checkTypeExpRigid te RigidCoerce
+  TermTypeM (TypeExp VName, StructType, Exp, [VName])
+checkCoerce loc te e = do
+  (te', te_t, ext) <- checkTypeExpRigid te RigidCoerce
   e' <- checkExp e
   e_t <- toStruct <$> expTypeFully e'
 
   (e_t_nonrigid, _) <-
     allDimsFreshInType loc Nonrigid "coerce_d" e_t
 
-  onFailure (CheckingAscription decl_t e_t) $
-    unify (mkUsage loc "type ascription") decl_t e_t_nonrigid
+  onFailure (CheckingAscription te_t e_t) $
+    unify (mkUsage loc "type ascription") te_t e_t_nonrigid
 
-  decl_t' <- normTypeFully decl_t
+  te_t' <- normTypeFully te_t
 
-  pure (TypeDecl te' $ Info decl_t', e', ext)
+  pure (te', te_t', e', ext)
 
 unscopeType ::
   SrcLoc ->
@@ -354,14 +352,14 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
-checkExp (Ascript e decl loc) = do
-  (decl', e') <- checkAscript loc decl e
-  pure $ Ascript e' decl' loc
-checkExp (AppExp (Coerce e decl loc) _) = do
-  (decl', e', ext) <- checkCoerce loc decl e
+checkExp (Ascript e te loc) = do
+  (te', e') <- checkAscript loc te e
+  pure $ Ascript e' te' loc
+checkExp (AppExp (Coerce e te loc) _) = do
+  (te', te_t, e', ext) <- checkCoerce loc te e
   t <- expTypeFully e'
-  t' <- matchDims (const . const pure) t $ fromStruct $ unInfo $ expandedType decl'
-  pure $ AppExp (Coerce e' decl' loc) (Info $ AppRes t' ext)
+  t' <- matchDims (const . const pure) t $ fromStruct te_t
+  pure $ AppExp (Coerce e' te' loc) (Info $ AppRes t' ext)
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   (op', ftype) <- lookupVar oploc op
   e1_arg <- checkArg e1
@@ -711,12 +709,14 @@ checkExp (ProjectSection fields NoInfo loc) = do
   a <- newTypeVar loc "a"
   let usage = mkUsage loc "projection at"
   b <- foldM (flip $ mustHaveField usage) a fields
-  pure $ ProjectSection fields (Info $ Scalar $ Arrow mempty Unnamed a $ RetType [] b) loc
+  let ft = Scalar $ Arrow mempty Unnamed (toStruct a) $ RetType [] b
+  pure $ ProjectSection fields (Info ft) loc
 checkExp (IndexSection slice NoInfo loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType loc "e" $ sliceDims slice'
   (t', retext) <- sliceShape Nothing slice' t
-  pure $ IndexSection slice' (Info $ fromStruct $ Scalar $ Arrow mempty Unnamed t $ RetType retext t') loc
+  let ft = Scalar $ Arrow mempty Unnamed t $ RetType retext $ fromStruct t'
+  pure $ IndexSection slice' (Info ft) loc
 checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) = do
   ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
     checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc
@@ -866,7 +866,7 @@ type ApplyOp = (Maybe (QualName VName), Int)
 
 -- | Extract all those names that are bound inside the type.
 boundInsideType :: TypeBase (DimDecl VName) as -> S.Set VName
-boundInsideType (Array _ _ t _) = boundInsideType (Scalar t)
+boundInsideType (Array _ _ _ t) = boundInsideType (Scalar t)
 boundInsideType (Scalar Prim {}) = mempty
 boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
   where
@@ -896,13 +896,13 @@ checkApply ::
   ApplyOp ->
   PatType ->
   Arg ->
-  TermTypeM (PatType, PatType, Maybe VName, [VName])
+  TermTypeM (StructType, PatType, Maybe VName, [VName])
 checkApply
   loc
   (fname, _)
   (Scalar (Arrow as pname tp1 tp2))
   (argexp, argtype, dflow, argloc) =
-    onFailure (CheckingApply fname argexp (toStruct tp1) (toStruct argtype)) $ do
+    onFailure (CheckingApply fname argexp tp1 (toStruct argtype)) $ do
       expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
       -- Perform substitutions of instantiated variables in the types.
@@ -1724,4 +1724,4 @@ arrayOfM ::
   TermTypeM (TypeBase dim as)
 arrayOfM loc t shape u = do
   arrayElemType (mkUsage loc "use as array element") "type used in array" t
-  pure $ arrayOf t shape u
+  pure $ arrayOf u shape t
