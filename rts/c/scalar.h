@@ -68,6 +68,10 @@ static inline uint64_t mul64(uint64_t x, uint64_t y) {
 #if ISPC
 
 static inline uint8_t udiv8(uint8_t x, uint8_t y) {
+  // This strange pattern is used to prevent the ISPC compiler from
+  // causing SIGFPEs and bogus results on divisions where inactive lanes
+  // have 0-valued divisors. It ensures that any inactive lane instead
+  // has a divisor of 1. https://github.com/ispc/ispc/issues/2292
   uint8_t ys = 1;
   foreach_active(i){
     ys = y;
