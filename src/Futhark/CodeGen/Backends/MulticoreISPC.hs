@@ -63,7 +63,7 @@ compileProg ::
   MonadFreshNames m => T.Text -> T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
 compileProg header version prog = do
   -- Dynamic scheduling seems completely broken currently, so we disable it.
-  (ws, defs) <- ImpGen.compileProg False prog
+  (ws, defs) <- ImpGen.compileProg ImpGen.NoDynamicScheduling prog
   let Functions funs = defFuns defs
 
   (ws', (cparts, endstate)) <-
@@ -688,7 +688,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   e' <- GC.compileExp e
 
-  let lexical = lexicalMemoryUsageMC False $ Function Nothing [] params seq_code [] []
+  let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params seq_code [] []
 
   fstruct <-
     MC.prepareTaskStruct sharedDef "task" free_args free_ctypes retval_args retval_ctypes
@@ -715,7 +715,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     -- Generate the nested segop function if available
     fnpar_task <- case par_task of
       Just (ParallelTask nested_code) -> do
-        let lexical_nested = lexicalMemoryUsageMC False $ Function Nothing [] params nested_code [] []
+        let lexical_nested = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params nested_code [] []
         fnpar_task <- MC.generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
         GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
         pure $ zip [fnpar_task] [True]
@@ -765,7 +765,7 @@ compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
 
-  let lexical = lexicalMemoryUsageMC False $ Function Nothing [] free body [] []
+  let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] free body [] []
   -- Generate ISPC kernel
   fstruct <- MC.prepareTaskStruct sharedDef "param_struct" free_args free_ctypes [] []
   let fstruct' = fstruct <> "_"

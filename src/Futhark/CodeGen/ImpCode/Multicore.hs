@@ -9,6 +9,7 @@ module Futhark.CodeGen.ImpCode.Multicore
     SchedulerInfo (..),
     AtomicOp (..),
     ParallelTask (..),
+    KernelHandling (..),
     lexicalMemoryUsageMC,
     module Futhark.CodeGen.ImpCode,
   )
@@ -170,9 +171,10 @@ instance FreeIn Multicore where
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
 
+data KernelHandling = TraverseKernels | OpaqueKernels
+
 -- | Like @lexicalMemoryUsage@, but traverses some inner multicore ops.
--- The boolean indicates whether to enter kernels.
-lexicalMemoryUsageMC :: Bool -> Function Multicore -> M.Map VName Space
+lexicalMemoryUsageMC :: KernelHandling -> Function Multicore -> M.Map VName Space
 lexicalMemoryUsageMC gokernel func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
     declared $ functionBody func
@@ -195,9 +197,10 @@ lexicalMemoryUsageMC gokernel func =
     -- go into new functions. For the Multicore backend, we can do it, though.
     goOp f (ForEach _ _ body) = go f body
     goOp f (ForEachActive _ body) = go f body
-    goOp f (ISPCKernel body _)
-      | gokernel = go f body
-      | otherwise = mempty
+    goOp f (ISPCKernel body _) =
+      case gokernel of
+        TraverseKernels -> go f body
+        OpaqueKernels -> mempty
     goOp _ _ = mempty
 
     declared (DeclareMem mem spc) =
@@ -212,7 +215,8 @@ lexicalMemoryUsageMC gokernel func =
     -- Critically, don't treat inputs to nested segops as lexical when generating
     -- ISPC, since we want to use AoS memory for lexical blocks, which is
     -- incompatible with pointer assignmentes visible in C.
-    set (Op (SegOp _ params _ _ retvals _))
-      | gokernel = mempty
-      | otherwise = namesFromList $ map paramName params <> map paramName retvals
+    set (Op (SegOp _ params _ _ retvals _)) =
+      case gokernel of
+        TraverseKernels -> mempty
+        OpaqueKernels -> namesFromList $ map paramName params <> map paramName retvals
     set x = go set x

@@ -118,7 +118,7 @@ atomicHistogram pat space histops kbody = do
   body <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
-    generateChunkLoop "SegHist" False $ \flat_idx -> do
+    generateChunkLoop "SegHist" Scalar $ \flat_idx -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
       compileStms mempty (kernelBodyStms kbody) $ do
         let (red_res, map_res) =
@@ -228,7 +228,7 @@ subHistogram pat space histops num_histos kbody = do
       pure op_local_subhistograms
 
     inISPC $
-      generateChunkLoop "SegRed" True $ \i -> do
+      generateChunkLoop "SegRed" Vectorized $ \i -> do
         zipWithM_ dPrimV_ is $ unflattenIndex ns_64 i
         compileStms mempty (kernelBodyStms kbody) $ do
           let (red_res, map_res) =
@@ -358,7 +358,7 @@ compileSegHistBody pat space histops kbody = collect $ do
   dPrim_ (segFlat space) int64
   sOp $ Imp.GetTaskId (segFlat space)
 
-  generateChunkLoop "SegHist" False $ \idx -> do
+  generateChunkLoop "SegHist" Scalar $ \idx -> do
     let inner_bound = last ns_64
     sFor "i" inner_bound $ \i -> do
       zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns_64) idx

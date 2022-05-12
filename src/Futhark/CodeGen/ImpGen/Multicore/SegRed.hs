@@ -255,7 +255,7 @@ reductionStage1Fallback space slugs kbody = do
     genBinOpParams slugs
     slug_local_accs <- genAccumulators slugs
     -- Generate main reduction loop
-    generateChunkLoop "SegRed" False $
+    generateChunkLoop "SegRed" Scalar $
       genReductionLoop RedSeq kbody slugs slug_local_accs space
     -- Write back results
     genWriteBack slugs slug_local_accs space
@@ -274,7 +274,7 @@ reductionStage1NonCommScalar space slugs kbody = do
       genBinOpParams slugs
       slug_local_accs <- genAccumulators slugs
       -- Generate main reduction loop
-      generateChunkLoop "SegRed" True $
+      generateChunkLoop "SegRed" Vectorized $
         genReductionLoop RedNonComm kbody slugs slug_local_accs space
       -- Write back results
       genWriteBack slugs slug_local_accs space
@@ -298,7 +298,7 @@ reductionStage1CommScalar space slugs kbody = do
       genBinOpParams slugs
       slug_local_accs <- genAccumulators slugs
       -- Generate the main reduction loop over vectors
-      generateChunkLoop "SegRed" True $
+      generateChunkLoop "SegRed" Vectorized $
         genReductionLoop RedComm kbody slugs slug_local_accs space
       -- Now reduce over those vector accumulators to get scalar results
       generateUniformizeLoop $
@@ -324,7 +324,7 @@ reductionStage1Array space slugs kbody = do
       -- Put the lambda params inside the kernel so they are varying
       emit lparams
       -- Generate the main reduction loop
-      generateChunkLoop "SegRed" False $
+      generateChunkLoop "SegRed" Scalar $
         genReductionLoop RedNested kbody slugs slug_local_accs space
       -- Write back results
       genWriteBack slugs slug_local_accs space
@@ -397,7 +397,7 @@ compileSegRedBody pat space reds kbody = do
   let per_red_pes = segBinOpChunks reds $ patElems pat
   -- Perform sequential reduce on inner most dimension
   collect . inISPC $
-    generateChunkLoop "SegRed" True $ \n_segments -> do
+    generateChunkLoop "SegRed" Vectorized $ \n_segments -> do
       flat_idx <- dPrimVE "flat_idx" $ n_segments * inner_bound
       zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
       sComment "neutral-initialise the accumulators" $

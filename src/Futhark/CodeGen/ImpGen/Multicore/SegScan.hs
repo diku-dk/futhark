@@ -185,7 +185,7 @@ scanStage1Scalar pat space kbody scan_ops = do
     genBinOpParams scan_ops
     local_accs <- genLocalAccsStage1 scan_ops
     inISPC $
-      generateChunkLoop "SegScan" True $
+      generateChunkLoop "SegScan" Vectorized $
         genScanLoop ScanScalar pat space kbody scan_ops local_accs
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
@@ -206,7 +206,7 @@ scanStage1Nested pat space kbody scan_ops = do
 
     inISPC $ do
       emit lparams
-      generateChunkLoop "SegScan" False $ \i -> do
+      generateChunkLoop "SegScan" Scalar $ \i -> do
         genScanLoop ScanNested pat space kbody scan_ops local_accs i
 
   free_params <- freeParams fbody
@@ -228,7 +228,7 @@ scanStage1Fallback pat space kbody scan_ops = do
     genBinOpParams scan_ops
     local_accs <- genLocalAccsStage1 scan_ops
 
-    generateChunkLoop "SegScan" False $
+    generateChunkLoop "SegScan" Scalar $
       genScanLoop ScanSeq pat space kbody scan_ops local_accs
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
@@ -329,7 +329,7 @@ scanStage3Scalar pat space kbody scan_ops = do
     local_accs <- genLocalAccsStage3 scan_ops per_scan_pes
 
     inISPC $
-      generateChunkLoop "SegScan" True $
+      generateChunkLoop "SegScan" Vectorized $
         genScanLoop ScanScalar pat space kbody scan_ops local_accs
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
@@ -351,7 +351,7 @@ scanStage3Nested pat space kbody scan_ops = do
 
     inISPC $ do
       emit lparams
-      generateChunkLoop "SegScan" False $ \i -> do
+      generateChunkLoop "SegScan" Scalar $ \i -> do
         genScanLoop ScanNested pat space kbody scan_ops local_accs i
 
   free_params <- freeParams body
@@ -372,7 +372,7 @@ scanStage3Fallback pat space kbody scan_ops = do
     genBinOpParams scan_ops
     local_accs <- genLocalAccsStage3 scan_ops per_scan_pes
 
-    generateChunkLoop "SegScan" False $
+    generateChunkLoop "SegScan" Scalar $
       genScanLoop ScanSeq pat space kbody scan_ops local_accs
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
@@ -408,7 +408,7 @@ compileSegScanBody pat space scan_ops kbody = collect $ do
   sOp $ Imp.GetTaskId (segFlat space)
 
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
-  generateChunkLoop "SegScan" False $ \segment_i -> do
+  generateChunkLoop "SegScan" Scalar $ \segment_i -> do
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
       let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op

@@ -5,6 +5,7 @@
 module Futhark.CodeGen.ImpGen.Multicore
   ( Futhark.CodeGen.ImpGen.Multicore.compileProg,
     Warnings,
+    SchedulingMode (..),
   )
 where
 
@@ -40,20 +41,22 @@ gccAtomics = flip lookup cpu
         (Or Int64, Imp.AtomicOr Int64)
       ]
 
--- | Compile the program. The boolean indicates whether dynamic scheduling may be used.
+data SchedulingMode = AllowDynamicScheduling | NoDynamicScheduling
+
+-- | Compile the program.
 compileProg ::
   MonadFreshNames m =>
-  Bool ->
+  SchedulingMode ->
   Prog MCMem ->
   m (Warnings, Imp.Definitions Imp.Multicore)
-compileProg dynamic = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops Imp.DefaultSpace
+compileProg sched = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops Imp.DefaultSpace
   where
     ops =
       (defaultOperations opCompiler)
         { opsExpCompiler = compileMCExp
         }
     opCompiler dest (Alloc e space) = compileAlloc dest e space
-    opCompiler dest (Inner op) = compileMCOp dynamic dest op
+    opCompiler dest (Inner op) = compileMCOp sched dest op
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
 updateAcc acc is vs = sComment "UpdateAcc" $ do
@@ -118,12 +121,12 @@ compileMCExp dest e =
   defCompileExp dest e
 
 compileMCOp ::
-  Bool ->
+  SchedulingMode ->
   Pat LetDecMem ->
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ _ (OtherOp ()) = pure ()
-compileMCOp dynamic pat (ParOp par_op op) = do
+compileMCOp sched pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
@@ -151,9 +154,9 @@ compileMCOp dynamic pat (ParOp par_op op) = do
   free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
   emit . Imp.Op $
     Imp.SegOp s free_params seq_task par_task retvals $
-      if dynamic
-        then scheduling_info (decideScheduling' op seq_code)
-        else scheduling_info Imp.Static
+      case sched of
+        AllowDynamicScheduling -> scheduling_info (decideScheduling' op seq_code)
+        NoDynamicScheduling -> scheduling_info Imp.Static
 
 compileSegOp ::
   Pat LetDecMem ->

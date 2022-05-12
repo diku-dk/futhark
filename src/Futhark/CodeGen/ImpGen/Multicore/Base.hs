@@ -20,6 +20,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     getIterationDomain,
     getReturnParams,
     segOpString,
+    ChunkLoopVectorization (..),
     generateChunkLoop,
     generateUniformizeLoop,
     extractVectorLane,
@@ -234,15 +235,16 @@ extractAllocations segop_code = f segop_code
     f code =
       (mempty, code)
 
+data ChunkLoopVectorization = Vectorized | Scalar
+
 -- | Emit code for the chunk loop, given an action that generates code
--- for a single iteration. The boolean indicates whether to generate
--- a (possibly) vectorized loop, or a fully sequential one.
+-- for a single iteration.
 --
 -- The action is called with the (symbolic) index of the current
 -- iteration.
 generateChunkLoop ::
   String ->
-  Bool ->
+  ChunkLoopVectorization ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
 generateChunkLoop desc vec m = do
@@ -256,9 +258,9 @@ generateChunkLoop desc vec m = do
   emit body_allocs
   -- Emit either foreach or normal for loop
   let bound = untyped n
-  if vec
-    then emit $ Imp.Op $ Imp.ForEach i bound body
-    else emit $ Imp.For i bound body
+  case vec of
+    Vectorized -> emit $ Imp.Op $ Imp.ForEach i bound body
+    Scalar -> emit $ Imp.For i bound body
 
 -- | Emit code for a sequential loop over each vector lane, given
 -- and action that generates code for a single iteration. The action

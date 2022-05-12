@@ -40,7 +40,7 @@ compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   sOp $ Imp.GetTaskId (segFlat space)
   kstms' <- mapM renameStm kstms
   inISPC $
-    generateChunkLoop "SegMap" True $ \i -> do
+    generateChunkLoop "SegMap" Vectorized $ \i -> do
       dIndexSpace (zip is ns') i
       compileStms (freeIn kres) kstms' $
         zipWithM_ (writeResult is) (patElems pat) kres
