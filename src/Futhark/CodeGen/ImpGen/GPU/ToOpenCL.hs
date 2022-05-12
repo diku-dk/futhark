@@ -269,7 +269,7 @@ onKernel target kernel = do
               ],
               mempty
             )
-          _ ->
+          (TargetOpenCL, _) ->
             ( mempty,
               [ [C.citem|const int block_dim0 = 0;|],
                 [C.citem|const int block_dim1 = 1;|],
@@ -278,6 +278,13 @@ onKernel target kernel = do
                 [C.citem|const int device_id = 0;|],
                 [C.citem|const int device_count = 0;|],
                 [C.citem|const typename uint64_t page_size = 0;|]
+              ]
+            )
+          (TargetCUDA, _) ->
+            ( mempty,
+              [ [C.citem|const int block_dim0 = 0;|],
+                [C.citem|const int block_dim1 = 1;|],
+                [C.citem|const int block_dim2 = 2;|]
               ]
             )
 
