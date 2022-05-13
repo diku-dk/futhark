@@ -144,8 +144,6 @@ data KernelOp
   = GetGroupId VName Int
   | GetLocalId VName Int
   | GetLocalSize VName Int
-  | GetGlobalSize VName Int
-  | GetGlobalId VName Int
   | GetLockstepWidth VName
   | GetDeviceId VName
   | GetDeviceCount VName
@@ -203,12 +201,6 @@ instance Pretty KernelOp where
   ppr (GetLocalSize dest i) =
     ppr dest <+> "<-"
       <+> "get_local_size" <> parens (ppr i)
-  ppr (GetGlobalSize dest i) =
-    ppr dest <+> "<-"
-      <+> "get_global_size" <> parens (ppr i)
-  ppr (GetGlobalId dest i) =
-    ppr dest <+> "<-"
-      <+> "get_global_id" <> parens (ppr i)
   ppr (GetDeviceId dest) =
     ppr dest <+> "<-"
       <+> "device_id"

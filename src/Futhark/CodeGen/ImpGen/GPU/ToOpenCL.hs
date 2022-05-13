@@ -523,20 +523,20 @@ typedef uint64_t ulong;
 #define __write_only
 #define __read_only
 
-static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
+static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int device_id, int d) {
   switch (d) {
     case 0: d = block_dim0; break;
     case 1: d = block_dim1; break;
     case 2: d = block_dim2; break;
   }
   switch (d) {
-    case 0: return blockIdx.x;
-    case 1: return blockIdx.y;
-    case 2: return blockIdx.z;
+    case 0: return blockIdx.x + gridDim.x * device_id;
+    case 1: return blockIdx.y + gridDim.y * device_id;
+    case 2: return blockIdx.z + gridDim.z * device_id;
     default: return 0;
   }
 }
-#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, d)
+#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, device_id, d)
 
 static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
   switch (d) {
@@ -570,20 +570,6 @@ static inline int get_local_size(int d) {
     default: return 0;
   }
 }
-
-
-static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_num_groups(d) * get_local_size(d);
-}
-
-static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int device_id, int d) {
-  switch (d) {
-    case 0: return get_global_size(block_dim0, block_dim1, block_dim2, d) * device_id +
-      get_group_id(d) * get_local_size(d) + get_local_id(d);
-    default: return get_group_id(d) * get_local_size(d) + get_local_id(d);
-  }
-}
-#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, device_id, d)
 
 #define CLK_LOCAL_MEM_FENCE 1
 #define CLK_GLOBAL_MEM_FENCE 2
@@ -674,10 +660,6 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
     kernelOps (GetLocalSize v i) =
       GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
-    kernelOps (GetGlobalId v i) =
-      GC.stm [C.cstm|$id:v = get_global_id($int:i);|]
-    kernelOps (GetGlobalSize v i) =
-      GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
     kernelOps (GetLockstepWidth v) =
       GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
     kernelOps (GetDeviceId v) =
