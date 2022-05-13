@@ -1051,9 +1051,9 @@ computeKernelUses kernel_body bound_in_kernel = do
   nubOrd <$> readsFromSet actually_free
 
 readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
-readsFromSet free =
-  fmap catMaybes $
-    forM (namesToList free) $ \var -> do
+readsFromSet = fmap catMaybes . mapM f . namesToList
+  where
+    f var = do
       t <- lookupType var
       vtable <- getVTable
       case t of
