@@ -276,8 +276,7 @@ onKernel target kernel = do
                 [C.citem|const int block_dim2 = 2;|],
                 -- Dummy definitions.
                 [C.citem|const int device_id = 0;|],
-                [C.citem|const int device_count = 0;|],
-                [C.citem|const typename uint64_t page_size = 0;|]
+                [C.citem|const int device_count = 0;|]
               ]
             )
           (TargetCUDA, _) ->
@@ -338,8 +337,7 @@ onKernel target kernel = do
         ( if target == TargetCUDA
             then
               [ [C.cparam|const int device_id|],
-                [C.cparam|const int device_count|],
-                [C.cparam|const typename uint64_t page_size|]
+                [C.cparam|const int device_count|]
               ]
             else []
         )
@@ -666,8 +664,6 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = device_id;|]
     kernelOps (GetDeviceCount v) =
       GC.stm [C.cstm|$id:v = device_count;|]
-    kernelOps (GetPageSize v) =
-      GC.stm [C.cstm|$id:v = page_size;|]
     kernelOps (Barrier f) = do
       GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
