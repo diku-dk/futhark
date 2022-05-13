@@ -391,7 +391,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
         }
         void *$id:args_arr[] = { $inits:args'' };
         CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
-        CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:(kernelMultiDevice kernel_name)[device_id],
+        CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:kernel_name[device_id],
                                           device_x_blocks, grid[1], grid[2],
                                           $exp:block_x, $exp:block_y, $exp:block_z,
                                           $exp:shared_tot, NULL,

@@ -15,7 +15,6 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     costCentreReport,
     kernelRuntime,
     kernelRuns,
-    kernelMultiDevice,
     sizeLoggingCode,
   )
 where
@@ -611,9 +610,6 @@ kernelRuntime = (<> "_total_runtime")
 
 kernelRuns :: KernelName -> Name
 kernelRuns = (<> "_runs")
-
-kernelMultiDevice :: KernelName -> Name
-kernelMultiDevice = (<> "_MD")
 
 costCentreReport :: [Name] -> [C.BlockItem]
 costCentreReport names = report_kernels ++ [report_total]
