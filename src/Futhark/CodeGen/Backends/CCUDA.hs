@@ -336,20 +336,10 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             [C.cinit|&ctx->global_failure_args|]
           ]
       args'' = [[C.cinit|&device_id|], [C.cinit|&device_count|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
-      sizes_nonzero =
-        expsNotZero
-          [ grid_x,
-            grid_y,
-            grid_z,
-            block_x,
-            block_y,
-            block_z
-          ]
       (bef, aft) = profilingEnclosureKernel kernel_name
 
   GC.stm
-    [C.cstm|
-    if ($exp:sizes_nonzero) {
+    [C.cstm|{
       int perm[3] = { 0, 1, 2 };
 
       if ($exp:grid_y >= (1<<16)) {
@@ -374,27 +364,30 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
 
       size_t x_blocks_per_device = (grid[0] + ctx->cuda.device_count - 1) / ctx->cuda.device_count;
       for (int device_id = 0; device_id < ctx->cuda.device_count; device_id++) {
+         CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
+
          size_t device_x_blocks = grid[0] - device_id * x_blocks_per_device;
 
          if (device_x_blocks > x_blocks_per_device) {
            device_x_blocks = x_blocks_per_device;
          }
 
-        if (ctx->debugging) {
-          fprintf(ctx->log, "Launching %s on device %d with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
-                  $string:(pretty kernel_name), device_id,
-                  (long int)device_x_blocks, (long int)grid[1], (long int)grid[2],
-                  (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
-                  (int)$exp:shared_tot);
-          $id:time_start = get_wall_time();
+        if (device_x_blocks * grid[1] * grid[2] != 0) {
+          if (ctx->debugging) {
+            fprintf(ctx->log, "Launching %s on device %d with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
+                    $string:(pretty kernel_name), device_id,
+                    (long int)device_x_blocks, (long int)grid[1], (long int)grid[2],
+                    (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
+                    (int)$exp:shared_tot);
+            $id:time_start = get_wall_time();
+          }
+          void *$id:args_arr[] = { $inits:args'' };
+          CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:kernel_name[device_id],
+                                            device_x_blocks, grid[1], grid[2],
+                                            $exp:block_x, $exp:block_y, $exp:block_z,
+                                            $exp:shared_tot, NULL,
+                                            $id:args_arr, NULL));
         }
-        void *$id:args_arr[] = { $inits:args'' };
-        CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
-        CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:kernel_name[device_id],
-                                          device_x_blocks, grid[1], grid[2],
-                                          $exp:block_x, $exp:block_y, $exp:block_z,
-                                          $exp:shared_tot, NULL,
-                                          $id:args_arr, NULL));
 
         // This synchronisation is placed here to ensure that the same level
         // of synchronisation is provided as single streams
@@ -431,9 +424,6 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     addExp x y = [C.cexp|$exp:x + $exp:y|]
     alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
     mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
-    expNotZero e = [C.cexp|$exp:e != 0|]
-    expAnd a b = [C.cexp|$exp:a && $exp:b|]
-    expsNotZero = foldl expAnd [C.cexp|1|] . map expNotZero
     mkArgs (ValueKArg e t@(FloatType Float16)) = do
       arg <- newVName "kernel_arg"
       e' <- GC.compileExp e
