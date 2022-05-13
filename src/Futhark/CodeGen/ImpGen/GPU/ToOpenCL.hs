@@ -552,10 +552,6 @@ static inline int get_local_size(int d) {
   }
 }
 
-static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_num_groups(d) * get_local_size(d);
-}
-
 #define CLK_LOCAL_MEM_FENCE 1
 #define CLK_GLOBAL_MEM_FENCE 2
 static inline void barrier(int x) {
