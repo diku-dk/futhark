@@ -303,20 +303,20 @@ onKernel target kernel = do
               -- it past an initial check, then we are good to go.
 
                 ( SafetyCheap,
-                  [C.citems|if (*(global_failure) >= 0) { return; }|]
+                  [C.citems|if (*global_failure >= 0) { return; }|]
                 )
         | otherwise =
             if not (kernelHasBarriers kstate)
               then
                 ( SafetyFull,
-                  [C.citems|if (*(global_failure) >= 0) { return; }|]
+                  [C.citems|if (*global_failure >= 0) { return; }|]
                 )
               else
                 ( SafetyFull,
                   [C.citems|
                      volatile __local bool local_failure;
                      if (failure_is_an_option) {
-                       int failed = *(global_failure) >= 0;
+                       int failed = *global_failure >= 0;
                        if (failed) {
                          return;
                        }
