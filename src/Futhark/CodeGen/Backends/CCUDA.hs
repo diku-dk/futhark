@@ -335,7 +335,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             [C.cinit|&ctx->failure_is_an_option|],
             [C.cinit|&ctx->global_failure_args|]
           ]
-      args'' = [[C.cinit|&device_id|], [C.cinit|&device_count|], [C.cinit|&page_size|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
+      args'' = [[C.cinit|&device_id|], [C.cinit|&device_count|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
       sizes_nonzero =
         expsNotZero
           [ grid_x,
@@ -368,7 +368,6 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       grid[perm[2]] = $exp:grid_z;
 
       int device_count = ctx->cuda.device_count;
-      typename uint64_t page_size = (typename uint64_t) ctx->page_size;
       typename int64_t $id:time_start = 0, $id:time_end = 0;
 
       $items:bef
