@@ -1550,13 +1550,16 @@ simpleKernelConstants kernel_size desc = do
   thread_gtid <- newVName $ desc ++ "_gtid"
   thread_ltid <- newVName $ desc ++ "_ltid"
   group_id <- newVName $ desc ++ "_gid"
+  inner_group_size <- newVName "group_size"
   (num_groups, group_size) <- computeMapKernelGroups kernel_size
   let set_constants = do
         dPrim_ thread_ltid int32
+        dPrim_ inner_group_size int64
         dPrim_ group_id int32
         sOp (Imp.GetLocalId thread_ltid 0)
+        sOp (Imp.GetLocalSize inner_group_size 0)
         sOp (Imp.GetGroupId group_id 0)
-        dPrimV_ thread_gtid $ le32 group_id * sExt32 group_size + le32 thread_ltid
+        dPrimV_ thread_gtid $ le32 group_id * le32 inner_group_size + le32 thread_ltid
 
   pure
     ( KernelConstants
