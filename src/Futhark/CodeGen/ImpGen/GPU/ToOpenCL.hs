@@ -552,11 +552,6 @@ static inline int get_local_size(int d) {
   }
 }
 
-static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_group_id(d) * get_local_size(d) + get_local_id(d);
-}
-#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)
-
 static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d) {
   return get_num_groups(d) * get_local_size(d);
 }
@@ -650,10 +645,6 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
     kernelOps (GetLocalSize v i) =
       GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
-    kernelOps (GetGlobalId v i) =
-      GC.stm [C.cstm|$id:v = get_global_id($int:i);|]
-    kernelOps (GetGlobalSize v i) =
-      GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
     kernelOps (GetLockstepWidth v) =
       GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
     kernelOps (Barrier f) = do

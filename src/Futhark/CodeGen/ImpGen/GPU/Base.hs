@@ -1150,17 +1150,16 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
           mempty
 
   let set_constants = do
-        dPrim_ global_tid int32
         dPrim_ local_tid int32
         dPrim_ inner_group_size int64
         dPrim_ wave_size int32
         dPrim_ group_id int32
 
-        sOp (Imp.GetGlobalId global_tid 0)
         sOp (Imp.GetLocalId local_tid 0)
         sOp (Imp.GetLocalSize inner_group_size 0)
         sOp (Imp.GetLockstepWidth wave_size)
         sOp (Imp.GetGroupId group_id 0)
+        dPrimV_ global_tid $ le32 group_id * le32 inner_group_size + le32 local_tid
 
   pure (constants, set_constants)
 
@@ -1176,7 +1175,7 @@ isActive limit = case actives of
 -- | Change every memory block to be in the global address space,
 -- except those who are in the local memory space.  This only affects
 -- generated code - we still need to make sure that the memory is
--- actually present on the device (and dared as variables in the
+-- actually present on the device (and declared as variables in the
 -- kernel).
 makeAllMemoryGlobal :: CallKernelGen a -> CallKernelGen a
 makeAllMemoryGlobal =
@@ -1553,12 +1552,11 @@ simpleKernelConstants kernel_size desc = do
   group_id <- newVName $ desc ++ "_gid"
   (num_groups, group_size) <- computeMapKernelGroups kernel_size
   let set_constants = do
-        dPrim_ thread_gtid int32
         dPrim_ thread_ltid int32
         dPrim_ group_id int32
-        sOp (Imp.GetGlobalId thread_gtid 0)
         sOp (Imp.GetLocalId thread_ltid 0)
         sOp (Imp.GetGroupId group_id 0)
+        dPrimV_ thread_gtid $ le32 group_id * sExt32 group_size + le32 thread_ltid
 
   pure
     ( KernelConstants
