@@ -325,7 +325,6 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
 
   (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
   (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
-  (grid_x_MD, grid_y_MD, grid_z_MD) <- mkDimsMD <$> mapM GC.compileExp num_blocks
   let perm_args
         | length num_blocks == 3 = [[C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|]]
         | otherwise = []
@@ -374,38 +373,40 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
 
       $items:bef
 
-      size_t grid_MD[3];
-      grid_MD[perm[0]] = $exp:grid_x_MD;
-      grid_MD[perm[1]] = $exp:grid_y_MD;
-      grid_MD[perm[2]] = $exp:grid_z_MD;
-      for(int devID = 0; devID < ctx->cuda.device_count; devID++){
-        int device_id = devID;
+      size_t x_blocks_per_device = (grid[0] + ctx->cuda.device_count - 1) / ctx->cuda.device_count;
+      for (int device_id = 0; device_id < ctx->cuda.device_count; device_id++) {
+         size_t device_x_blocks = grid[0] - device_id * x_blocks_per_device;
+
+         if (device_x_blocks > x_blocks_per_device) {
+           device_x_blocks = x_blocks_per_device;
+         }
+
         if (ctx->debugging) {
-          fprintf(ctx->log, "Launching %s on Device %d with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
-          $string:(pretty kernel_name), device_id,
-          (long int)$exp:grid_x_MD, (long int)$exp:grid_y_MD, (long int)$exp:grid_z_MD,
-          (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
-          (int)$exp:shared_tot);
+          fprintf(ctx->log, "Launching %s on device %d with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
+                  $string:(pretty kernel_name), device_id,
+                  (long int)device_x_blocks, (long int)grid[1], (long int)grid[2],
+                  (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
+                  (int)$exp:shared_tot);
           $id:time_start = get_wall_time();
         }
         void *$id:args_arr[] = { $inits:args'' };
-        CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[devID]));
-        CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:(kernelMultiDevice kernel_name)[devID],
-                                          grid_MD[0], grid_MD[1], grid_MD[2],
+        CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
+        CUDA_SUCCEED_FATAL(cuLaunchKernel(ctx->$id:(kernelMultiDevice kernel_name)[device_id],
+                                          device_x_blocks, grid[1], grid[2],
                                           $exp:block_x, $exp:block_y, $exp:block_z,
                                           $exp:shared_tot, NULL,
                                           $id:args_arr, NULL));
 
         // This synchronisation is placed here to ensure that the same level
         // of synchronisation is provided as single streams
-        CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[devID * 2
+        CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[device_id * 2
                                              + ctx->cuda.kernel_iterator], NULL));
         for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){
-          if(other_dev == devID) continue;
+          if(other_dev == device_id) continue;
             CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
                                                 + ctx->cuda.kernel_iterator],0));
           }
-        CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[devID]));
+        CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
       }
     ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
     $items:aft
@@ -452,7 +453,3 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       pure (offset, Just (size, offset))
-    mkDimsMD [] = ([C.cexp|0|], [C.cexp|0|], [C.cexp|0|])
-    mkDimsMD [x] = ([C.cexp| $exp:x / ctx->cuda.device_count + 1|], [C.cexp|1|], [C.cexp|1|])
-    mkDimsMD [x, y] = ([C.cexp| $exp:x / ctx->cuda.device_count + 1|], y, [C.cexp|1|])
-    mkDimsMD (x : y : z : _) = ([C.cexp| $exp:x / ctx->cuda.device_count + 1|], y, z)
