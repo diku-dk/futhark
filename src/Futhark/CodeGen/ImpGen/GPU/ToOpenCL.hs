@@ -528,9 +528,9 @@ static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2
     case 2: d = block_dim2; break;
   }
   switch (d) {
-    case 0: return blockIdx.x + gridDim.x * device_id;
-    case 1: return blockIdx.y + gridDim.y * device_id;
-    case 2: return blockIdx.z + gridDim.z * device_id;
+    case 0: return blockIdx.x;
+    case 1: return blockIdx.y;
+    case 2: return blockIdx.z;
     default: return 0;
   }
 }
@@ -653,7 +653,7 @@ inKernelOperations mode body =
 
     kernelOps :: GC.OpCompiler KernelOp KernelState
     kernelOps (GetGroupId v i) =
-      GC.stm [C.cstm|$id:v = get_group_id($int:i);|]
+      GC.stm [C.cstm|$id:v = get_group_id($int:i) + device_id * get_num_groups($int:i);|]
     kernelOps (GetLocalId v i) =
       GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
     kernelOps (GetLocalSize v i) =
