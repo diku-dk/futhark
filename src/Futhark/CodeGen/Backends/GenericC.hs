@@ -1550,7 +1550,7 @@ compileProg backend version ops extra header_extra spaces options prog = do
 
   let headerdefs =
         [untrimming|
-// Headers\n")
+// Headers
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
