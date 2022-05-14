@@ -273,12 +273,12 @@ staticCUDAArray name "device" t vs = do
     [C.cstm|{
     ctx->$id:name.references = NULL;
     ctx->$id:name.size = 0;
-    CUDA_SUCCEED_FATAL(cuMemAllocManaged(&ctx->$id:name.mem,
-                            ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct),
-                            CU_MEM_ATTACH_GLOBAL));
+    CUDA_SUCCEED_FATAL(cuda_alloc_actual(&ctx->cuda,
+                                         &ctx->$id:name.mem,
+                                         ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct)));
     if ($int:num_elems > 0) {
       CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->$id:name.mem, $id:name_realtype,
-                                $int:num_elems*sizeof($ty:ct)));
+                         $int:num_elems*sizeof($ty:ct)));
       hint_readonly_array(&ctx->cuda, ctx->$id:name.mem, $int:num_elems*sizeof($ty:ct));
     }
   }|]
