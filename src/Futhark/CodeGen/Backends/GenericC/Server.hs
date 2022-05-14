@@ -22,6 +22,7 @@ import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
+import Language.Futhark.Core (nameFromText)
 
 genericOptions :: [Option]
 genericOptions =
@@ -168,13 +169,13 @@ entryTypeBoilerplate =
 
 oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
 oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
-  let call_f = "call_" ++ T.unpack name
+  let call_f = "call_" <> nameFromText name
       out_types = map outputType outputs
       in_types = map inputType inputs
-      out_types_name = T.unpack name ++ "_out_types"
-      in_types_name = T.unpack name ++ "_in_types"
-      out_unique_name = T.unpack name ++ "_out_unique"
-      in_unique_name = T.unpack name ++ "_in_unique"
+      out_types_name = nameFromText name <> "_out_types"
+      in_types_name = nameFromText name <> "_in_types"
+      out_unique_name = nameFromText name <> "_out_unique"
+      in_unique_name = nameFromText name <> "_in_unique"
       (out_items, out_args)
         | null out_types = ([C.citems|(void)outs;|], mempty)
         | otherwise = unzip $ zipWith loadOut [0 ..] out_types
