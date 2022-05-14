@@ -82,7 +82,7 @@ OPTIONS
 -v, --verbose
 
   Print verbose information on stderr about directives as they are
-  executing.
+  executing.  This is also needed to see ``#[trace]`` output.
 
 DIRECTIVES
 ==========
