@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark literate`: prints tracing output (and other logging
   messages that may occur) when run with `-v` (#1678).
 
+* Entry points can now be any valid Futhark identifier.
+
 ### Removed
 
 ### Changed
@@ -29,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   memory used for internal bookkeeping, which could lead to memory
   leaks for processes that repeatedly create and destroy contexts
   (#1676).
+
+* FutharkScript now allows `'` in names.
 
 ## [0.21.11]
 

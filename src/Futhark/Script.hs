@@ -176,7 +176,7 @@ parseExp sep =
       guard $ v `notElem` reserved
       pure v
       where
-        constituent c = isAlphaNum c || c == '_'
+        constituent c = isAlphaNum c || c == '\'' || c == '_'
 
 -- | Parse a FutharkScript expression with normal whitespace handling.
 parseExpFromText :: FilePath -> T.Text -> Either T.Text Exp
