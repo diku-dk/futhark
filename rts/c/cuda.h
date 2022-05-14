@@ -750,40 +750,44 @@ static void cuda_cleanup(struct cuda_context *ctx) {
 }
 
 static void hint_prefetch_variable_array(struct cuda_context *ctx, CUdeviceptr mem, size_t size) {
-  size_t data_per_device = size / ctx->device_count;
-  size_t offset = 0;
-  size_t left = size;
-  for (int device_id = 0; device_id < ctx->device_count; device_id++) {
-    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
-    if (device_id != 0) {
-      CUDA_SUCCEED_FATAL(cuMemAdvise(mem,
-                                     offset, CU_MEM_ADVISE_SET_ACCESSED_BY,
+  if (ctx->device_count > 1) {
+    size_t data_per_device = size / ctx->device_count;
+    size_t offset = 0;
+    size_t left = size;
+    for (int device_id = 0; device_id < ctx->device_count; device_id++) {
+      CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
+      if (device_id != 0) {
+        CUDA_SUCCEED_FATAL(cuMemAdvise(mem,
+                                       offset, CU_MEM_ADVISE_SET_ACCESSED_BY,
+                                       ctx->devices[device_id]));
+      }
+      CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset,
+                                     data_per_device, CU_MEM_ADVISE_SET_PREFERRED_LOCATION,
                                      ctx->devices[device_id]));
+      CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(mem + offset,
+                                            data_per_device, ctx->devices[device_id], NULL));
+      offset += data_per_device;
+      left   -= data_per_device;
+      if (device_id != ctx->device_count -1) {
+        CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset, left,
+                                       CU_MEM_ADVISE_SET_ACCESSED_BY,
+                                       ctx->devices[device_id]));
+      }
+      CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
     }
-    CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset,
-                                   data_per_device, CU_MEM_ADVISE_SET_PREFERRED_LOCATION,
-                                   ctx->devices[device_id]));
-    CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(mem + offset,
-                                          data_per_device, ctx->devices[device_id], NULL));
-    offset += data_per_device;
-    left   -= data_per_device;
-    if (device_id != ctx->device_count -1) {
-      CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset, left,
-                                     CU_MEM_ADVISE_SET_ACCESSED_BY,
-                                     ctx->devices[device_id]));
-    }
-    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
   }
 }
 
 static void hint_readonly_array(struct cuda_context *ctx,
                                 CUdeviceptr mem, size_t count){
-  //Device argument is ignore for Read mostly hint
-  CUDA_SUCCEED_FATAL(cuMemAdvise(mem, count, CU_MEM_ADVISE_SET_READ_MOSTLY,
-                                 ctx->devices[0]));
-  for(int device_id = 0; device_id < ctx->device_count; device_id++){
-    CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(
-      mem, count, ctx->devices[device_id], NULL));
+  if (ctx->device_count > 1) {
+    //Device argument is ignore for Read mostly hint
+    CUDA_SUCCEED_FATAL(cuMemAdvise(mem, count, CU_MEM_ADVISE_SET_READ_MOSTLY,
+                                   ctx->devices[0]));
+    for(int device_id = 0; device_id < ctx->device_count; device_id++){
+      CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(
+                                            mem, count, ctx->devices[device_id], NULL));
+    }
   }
 }
 
@@ -807,6 +811,16 @@ static CUresult cuda_all_devices_barrier(struct cuda_context *ctx) {
   ctx->kernel_iterator = !ctx->kernel_iterator;
 
   return CUDA_SUCCESS;
+}
+
+CUresult cuda_alloc_actual(struct cuda_context *ctx, CUdeviceptr* dptr, size_t bytes) {
+  // Non-managed memory appears faster on single devices.  Something
+  // to look at.
+  if (ctx->device_count == 1) {
+    return cuMemAlloc(dptr, bytes);
+  } else {
+    return cuMemAllocManaged(dptr, bytes, CU_MEM_ATTACH_GLOBAL);
+  }
 }
 
 static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
@@ -838,7 +852,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
     fprintf(log, "Actually allocating the desired block.\n");
   }
 
-  CUresult res = cuMemAllocManaged(mem_out, min_size, CU_MEM_ATTACH_GLOBAL);
+  CUresult res = cuda_alloc_actual(ctx, mem_out, min_size);
   while (res == CUDA_ERROR_OUT_OF_MEMORY) {
     CUdeviceptr mem;
     if (free_list_first(&ctx->free_list, &mem) == 0) {
@@ -849,7 +863,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
     } else {
       break;
     }
-    res = cuMemAllocManaged(mem_out, min_size, CU_MEM_ATTACH_GLOBAL);
+    res = cuda_alloc_actual(ctx, mem_out, min_size);
   }
 
   hint_prefetch_variable_array(ctx, *mem_out, min_size);
