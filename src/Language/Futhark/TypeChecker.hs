@@ -21,7 +21,6 @@ where
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor (first, second)
-import Data.Char (isAlpha, isAlphaNum)
 import Data.Either
 import qualified Data.Map.Strict as M
 import Data.Maybe
