@@ -849,8 +849,8 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
     }
     res = cuMemAllocManaged(mem_out, min_size, CU_MEM_ATTACH_GLOBAL);
   }
-  if(min_size > sysconf(_SC_PAGESIZE))
-    hint_prefetch_variable_array(ctx, *mem_out, min_size);
+
+  hint_prefetch_variable_array(ctx, *mem_out, min_size);
 
   return res;
 }
