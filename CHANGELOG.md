@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   non-function types, and they are better thought of as effect
   indicators.
 
+* `futhark literate`: prints tracing output (and other logging
+  messages that may occur) when run with `-v` (#1678).
+
 ### Removed
 
 ### Changed

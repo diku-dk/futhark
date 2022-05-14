@@ -988,7 +988,15 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
           imgdir_rel = dropExtension (takeFileName mdfile) <> "-img"
           imgdir = takeDirectory mdfile </> imgdir_rel
           run_options = scriptExtraOptions opts
-          cfg = futharkServerCfg ("." </> dropExtension prog) run_options
+          onLine "call" l = T.putStrLn l
+          onLine _ _ = pure ()
+          cfg =
+            (futharkServerCfg ("." </> dropExtension prog) run_options)
+              { cfgOnLine =
+                  if scriptVerbose opts > 0
+                    then onLine
+                    else const . const $ pure ()
+              }
 
       withScriptServer cfg $ \server -> do
         let env =
