@@ -794,21 +794,23 @@ static void hint_readonly_array(struct cuda_context *ctx,
 // Ensure that all actions on all devices have finished before
 // launching any more.  Non-blocking on the CPU.
 static CUresult cuda_all_devices_barrier(struct cuda_context *ctx) {
-  for (int device_id = 0; device_id < ctx->device_count; device_id++) {
-    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
-    CUDA_SUCCEED_FATAL(cuEventRecord(ctx->kernel_done[device_id * 2 + ctx->kernel_iterator], NULL));
-    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
-  }
-  for (int device_id = 0; device_id < ctx->device_count; device_id++) {
-    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
-    for (int other_dev = 0; other_dev < ctx->device_count; other_dev++) {
-      if (other_dev != device_id) {
-        CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->kernel_done[other_dev * 2 + ctx->kernel_iterator], 0));
-      }
+  if (ctx->device_count > 1) {
+    for (int device_id = 0; device_id < ctx->device_count; device_id++) {
+      CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
+      CUDA_SUCCEED_FATAL(cuEventRecord(ctx->kernel_done[device_id * 2 + ctx->kernel_iterator], NULL));
+      CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
     }
-    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
+    for (int device_id = 0; device_id < ctx->device_count; device_id++) {
+      CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
+      for (int other_dev = 0; other_dev < ctx->device_count; other_dev++) {
+        if (other_dev != device_id) {
+          CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->kernel_done[other_dev * 2 + ctx->kernel_iterator], 0));
+        }
+      }
+      CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
+    }
+    ctx->kernel_iterator = !ctx->kernel_iterator;
   }
-  ctx->kernel_iterator = !ctx->kernel_iterator;
 
   return CUDA_SUCCESS;
 }
