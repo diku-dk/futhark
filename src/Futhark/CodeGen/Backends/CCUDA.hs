@@ -389,17 +389,23 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
                                             $id:args_arr, NULL));
         }
 
-        // This synchronisation is placed here to ensure that the same level
-        // of synchronisation is provided as single streams
         CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[device_id * 2
                                              + ctx->cuda.kernel_iterator], NULL));
-        for(int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++){
-          if(other_dev == device_id) continue;
-            CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
-                                                + ctx->cuda.kernel_iterator],0));
-          }
+
         CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
+    }
+    // This synchronisation is placed here to ensure that the same level
+    // of synchronisation is provided as single streams
+    for (int device_id = 0; device_id < ctx->cuda.device_count; device_id++) {
+      CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
+      for (int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++) {
+        if (other_dev != device_id) {
+          CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
+                                                     + ctx->cuda.kernel_iterator],0));
+        }
       }
+      CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
+    }
     ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
     $items:aft
     if (ctx->debugging) {
