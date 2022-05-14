@@ -3,8 +3,8 @@
 }:
 mkDerivation {
   pname = "futhark-server";
-  version = "1.1.2.1";
-  sha256 = "7539c7b6044150c499a5cf994b129f3ea694dbb19e75761cca0948700aa76f41";
+  version = "1.2.0.0";
+  sha256 = "ce82485d529e955b9b4b3076e88286c4dbb48962a870dc8225b5ca329cb0172a";
   libraryHaskellDepends = [
     base binary bytestring directory futhark-data mtl process temporary
     text
