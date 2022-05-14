@@ -749,29 +749,31 @@ static void cuda_cleanup(struct cuda_context *ctx) {
   free(ctx->devices);
 }
 
-static void hint_prefetch_variable_array(
-  struct cuda_context *ctx, CUdeviceptr mem, size_t size){
-    size_t data_per_device = size / ctx->device_count;
-    size_t offset = 0;
-    size_t left = size;
-    for(int device_id = 0; device_id < ctx->device_count; device_id++){
-      CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
-      if(device_id != 0) CUDA_SUCCEED_FATAL(cuMemAdvise(mem,
-        offset, CU_MEM_ADVISE_SET_ACCESSED_BY,
-        ctx->devices[device_id]));
-      CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset,
-        data_per_device, CU_MEM_ADVISE_SET_PREFERRED_LOCATION,
-        ctx->devices[device_id]));
-      CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(mem + offset,
-        data_per_device, ctx->devices[device_id], NULL));
-      offset += data_per_device;
-      left   -= data_per_device;
-      if(device_id != ctx->device_count -1) CUDA_SUCCEED_FATAL(cuMemAdvise(
-                                                mem + offset, left,
-                                                CU_MEM_ADVISE_SET_ACCESSED_BY,
-                                                ctx->devices[device_id]));
-      CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
+static void hint_prefetch_variable_array(struct cuda_context *ctx, CUdeviceptr mem, size_t size) {
+  size_t data_per_device = size / ctx->device_count;
+  size_t offset = 0;
+  size_t left = size;
+  for (int device_id = 0; device_id < ctx->device_count; device_id++) {
+    CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->contexts[device_id]));
+    if (device_id != 0) {
+      CUDA_SUCCEED_FATAL(cuMemAdvise(mem,
+                                     offset, CU_MEM_ADVISE_SET_ACCESSED_BY,
+                                     ctx->devices[device_id]));
     }
+    CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset,
+                                   data_per_device, CU_MEM_ADVISE_SET_PREFERRED_LOCATION,
+                                   ctx->devices[device_id]));
+    CUDA_SUCCEED_FATAL(cuMemPrefetchAsync(mem + offset,
+                                          data_per_device, ctx->devices[device_id], NULL));
+    offset += data_per_device;
+    left   -= data_per_device;
+    if (device_id != ctx->device_count -1) {
+      CUDA_SUCCEED_FATAL(cuMemAdvise(mem + offset, left,
+                                     CU_MEM_ADVISE_SET_ACCESSED_BY,
+                                     ctx->devices[device_id]));
+    }
+    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
+  }
 }
 
 static void hint_readonly_array(struct cuda_context *ctx,
