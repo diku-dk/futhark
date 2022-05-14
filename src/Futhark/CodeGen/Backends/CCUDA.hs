@@ -388,25 +388,9 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
                                             $exp:shared_tot, NULL,
                                             $id:args_arr, NULL));
         }
-
-        CUDA_SUCCEED_FATAL(cuEventRecord(ctx->cuda.kernel_done[device_id * 2
-                                             + ctx->cuda.kernel_iterator], NULL));
-
         CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
     }
-    // This synchronisation is placed here to ensure that the same level
-    // of synchronisation is provided as single streams
-    for (int device_id = 0; device_id < ctx->cuda.device_count; device_id++) {
-      CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
-      for (int other_dev = 0; other_dev < ctx->cuda.device_count; other_dev++) {
-        if (other_dev != device_id) {
-          CUDA_SUCCEED_FATAL(cuStreamWaitEvent(NULL, ctx->cuda.kernel_done[other_dev * 2
-                                                     + ctx->cuda.kernel_iterator],0));
-        }
-      }
-      CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
-    }
-    ctx->cuda.kernel_iterator = !ctx->cuda.kernel_iterator;
+    CUDA_SUCCEED_FATAL(cuda_all_devices_barrier(&ctx->cuda));
     $items:aft
     if (ctx->debugging) {
       for(int device_id = 0; device_id < ctx->cuda.device_count; device_id++){
@@ -417,8 +401,8 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       $id:time_end = get_wall_time();
       fprintf(ctx->log, "Kernel %s runtime: %ldus\n",
         $string:(pretty kernel_name), $id:time_end - $id:time_start);
-      }
-    }|]
+    }
+  }|]
 
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
