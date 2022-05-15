@@ -43,7 +43,7 @@ compileProg ::
   Prog MCMem ->
   m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
 compileProg version prog = do
-  (ws, prog') <- ImpGen.compileProg prog
+  (ws, prog') <- ImpGen.compileProg ImpGen.AllowDynamicScheduling prog
 
   prog'' <-
     GC.compileProg
