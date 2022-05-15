@@ -510,7 +510,7 @@ compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
         <$> GC.compileExp (untyped iexp)
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
-compileCode code@(Copy dest pt (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
+compileCode code@(Copy pt dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
   dm <- isJust <$> GC.cacheMem dest
   sm <- isJust <$> GC.cacheMem src
   if dm || sm

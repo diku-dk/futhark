@@ -2223,7 +2223,7 @@ compileCode (If cond tbranch fbranch) = do
       [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
-compileCode (Copy dest _ (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
+compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
   join $
     copyMemoryDefaultSpace
       <$> rawMem dest
@@ -2231,7 +2231,7 @@ compileCode (Copy dest _ (Count destoffset) DefaultSpace src (Count srcoffset) D
       <*> rawMem src
       <*> compileExp (untyped srcoffset)
       <*> compileExp (untyped size)
-compileCode (Copy dest _ (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
+compileCode (Copy _ dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
   join $
     copy

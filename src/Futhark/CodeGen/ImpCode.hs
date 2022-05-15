@@ -270,12 +270,12 @@ data Code a
     -- all memory blocks will be freed with this statement.
     -- Backends are free to ignore it entirely.
     Free VName Space
-  | -- | Destination, offset in destination, destination
-    -- space, source, offset in source, offset space, number
-    -- of bytes.
+  | -- | Element type being copied, destination, offset in
+    -- destination, destination space, source, offset in source,
+    -- offset space, number of bytes.
     Copy
-      VName
       PrimType
+      VName
       (Count Bytes (TExp Int64))
       Space
       VName
@@ -535,10 +535,11 @@ instance Pretty op => Pretty (Code op) where
     ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
   ppr (Assert e msg _) =
     text "assert" <> parens (commasep [ppr msg, ppr e])
-  ppr (Copy dest _ destoffset destspace src srcoffset srcspace size) =
-    text "memcpy"
+  ppr (Copy t dest destoffset destspace src srcoffset srcspace size) =
+    text "copy"
       <> parens
-        ( ppMemLoc dest destoffset <> ppr destspace <> comma
+        ( ppr t <> comma
+            </> ppMemLoc dest destoffset <> ppr destspace <> comma
             </> ppMemLoc src srcoffset <> ppr srcspace <> comma
             </> ppr size
         )
@@ -689,7 +690,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
-  freeIn' (Copy dest _ x _ src y _ n) =
+  freeIn' (Copy _ dest x _ src y _ n) =
     freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y
