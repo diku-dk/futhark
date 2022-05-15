@@ -39,6 +39,7 @@ module Futhark.Optimise.GraphRep
     initialGraphConstruction,
     emptyGraph,
     isArray,
+    isArray2,
     depsFromEdge,
     contractEdge,
     isCons,
@@ -48,7 +49,11 @@ module Futhark.Optimise.GraphRep
     fuseMaps,
     hasNoDifferingInputs,
     printgraph,
-    internalizeAndAdd
+    internalizeAndAdd,
+    mapAcrossWithSE,
+    updateNode,
+    substituteNamesInNodes,
+    substituteNamesInEdges
   )
 where
 
@@ -89,7 +94,7 @@ data NodeT
   | SoacNode (H.SOAC SOACS) [H.Input] (StmAux (ExpDec SOACS))
   | RNode VName
   | InNode VName
-  | FinalNode [Stm SOACS] NodeT
+  | FinalNode [Stm SOACS] NodeT [Stm SOACS]
   | IfNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
   deriving (Eq)
@@ -107,7 +112,7 @@ instance Show EdgeT where
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map pretty $ patNames pat
   show (SoacNode _ pat _) = L.intercalate ", " $ map (pretty . H.inputArray) pat
-  show (FinalNode _ nt) = show nt
+  show (FinalNode _ nt _) = show nt
   show (RNode name) = pretty $ "Res: " ++ pretty name
   show (InNode name) = pretty $ "Input: " ++ pretty name
   show (IfNode stm _) = "If: " ++ L.intercalate ", " (map pretty $ getStmNames stm)
@@ -129,7 +134,7 @@ instance Substitute NodeT where
        in SoacNode so' (f pat) (f sa)
     RNode vn -> RNode (f vn)
     InNode vn -> InNode (f vn)
-    FinalNode stms nt -> FinalNode (map f stms) (f nt)
+    FinalNode stms1 nt stms2 -> FinalNode (map f stms1) (f nt) (map f stms2)
     IfNode stm nodes -> IfNode (f stm) (map f nodes)
     DoNode stm nodes -> DoNode (f stm) (map f nodes)
     where
@@ -267,6 +272,11 @@ keepTrying f g =
 
 isArray :: FParam SOACS -> Bool
 isArray p = case paramDec p of
+  Array {} -> True
+  _ -> False
+
+isArray2 :: LParam SOACS -> Bool
+isArray2 p = case paramDec p of
   Array {} -> True
   _ -> False
 
@@ -489,18 +499,20 @@ addTransforms orig_g =
               contractEdge n ctx g'
       _ -> pure g
 
--- substituteNamesInNodes :: M.Map VName VName -> [Node] -> DepGraphAug
--- substituteNamesInNodes submap ns =
---   applyAugs (map (substituteNameInNode submap) ns)
---   where
---     substituteNameInNode :: M.Map VName VName -> Node -> DepGraphAug
---     substituteNameInNode m n =
---       updateNode n (Just . substituteNames m)
+substituteNamesInNodes :: M.Map VName VName -> [G.Node] -> DepGraphAug
+substituteNamesInNodes submap ns =
+  applyAugs (map (substituteNameInNode submap) ns)
+  where
+    substituteNameInNode :: M.Map VName VName -> G.Node -> DepGraphAug
+    substituteNameInNode m n =
+      updateNode n (Just . substituteNames m)
 
--- substituteNamesInEdges :: M.Map VName VName -> [DepEdge] -> DepGraphAug
--- substituteNamesInEdges m edgs g =
---   let edgs' = map (mapEdgeT (substituteNames m)) edgs in
---   pure $ insEdges edgs' $ foldl (flip ($)) g (map delLEdge edgs)
+substituteNamesInEdges :: M.Map VName VName -> [DepEdge] -> DepGraphAug
+substituteNamesInEdges m edgs g =
+  let edgs' = mapEdgeT (substituteNames m) edgs in
+  pure $ G.insEdges edgs' $ foldl (flip ($)) g (map G.delLEdge edgs)
+  where
+    mapEdgeT f = map (\(a,b,c) -> (a,b,f c))
 
 updateNode :: G.Node -> (NodeT -> Maybe NodeT) -> DepGraphAug
 updateNode n f g =
@@ -755,9 +767,9 @@ finalizeNode nt = case nt of
   IfNode stm lst -> do
     stmsNotFused <- mapM (finalizeNode . fst) lst
     pure $ concat stmsNotFused ++ [stm]
-  FinalNode stms nt' -> do
+  FinalNode stms1 nt' stms2 -> do
     stms' <- finalizeNode nt'
-    pure $ stms <> stms'
+    pure $ stms1 <> stms' <> stms2
 
 -- isRes :: (Node, EdgeT) -> Bool
 -- isRes (_, Res _) = True

@@ -73,8 +73,8 @@ fuseConsts outputs stms =
     results = varsRes outputs
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
-fuseFun _stmts fun = do
-  new_stms <- runFusionEnvM (scopeOf fun <> scopeOf _stmts) freshFusionEnv (fuseGraphLZ stms res (funDefParams fun))
+fuseFun stmts fun = do
+  new_stms <- runFusionEnvM (scopeOf fun <> scopeOf stmts) freshFusionEnv (fuseGraphLZ stms res (funDefParams fun))
   -- new_stms <- runFusionEnvM (scopeOf fun <> scopeOf _stmts) freshFusionEnv $ do
   -- stms_new <- fuseGraphLZ stms res (funDefParams  fun)
   -- simplifyStms $ stmsFromList stms_new
@@ -184,8 +184,9 @@ vTryFuseNodesInGraph node_1 node_2 g
                     then pure nodeT
                     else do
                       let (_,_,_,deps_1) = ctx1
+                      let (_,_,_,deps_2) = ctx2
                       -- make copies of everything that was not previously consumed
-                      let old_cons = map (getName . fst) $ filter (isCons . fst) deps_1
+                      let old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
                       makeCopiesOfFusedExcept old_cons nodeT
                 g' <- contractEdge node_2 (inputs, node_1, nodeT', outputs) g
                 if null trEdgs
@@ -691,7 +692,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
         let extra_is = map (paramName . fst) (filter (isArray . fst) params)
         b <- doFusionWithDelayed body extra_is toFuse
         pure (incomming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
-  IfNode (Let pat aux (If sz b1 b2 dec)) toFuse -> do
+  IfNode (Let pat aux (If sz b1 b2 dec)) toFuse -> doFuseScans $ do
     b1' <- doFusionWithDelayed b1 [] toFuse
     b2' <- doFusionWithDelayed b2 [] toFuse
     rb2' <- renameBody b2'
@@ -699,8 +700,8 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
   SoacNode soac pats aux -> do
     let lam = H.lambda soac
     newbody <- localScope (scopeOf lam) $ case soac of
-      H.Stream {} -> dontFuseScans $ doFusionInner (lambdaBody lam) []
-      _ -> doFuseScans $ doFusionInner (lambdaBody lam) []
+      H.Stream {} -> dontFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
+      _ -> doFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
     let newLam = lam {lambdaBody = newbody}
     let newNode = SoacNode (H.setLambda newLam soac) pats aux
     pure (incomming, node, newNode, outgoing)
@@ -718,13 +719,15 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
         inputs = map (vNameFromAdj node) outgoing ++ extraInputs
         stms = stmsToList (bodyStms b)
         results = namesFromRes (bodyResult b)
-    doFusionInner :: Body SOACS -> [VName] -> FusionEnvM (Body SOACS)
-    doFusionInner b extraInputs =
+    doFusionInner :: Body SOACS -> [LParam SOACS] -> FusionEnvM (Body SOACS)
+    doFusionInner b inp =
       do
         new_stms <- fuseGraph stms results inputs
         pure b {bodyStms = stmsFromList new_stms}
       where
-        inputs = map (vNameFromAdj node) outgoing ++ extraInputs
+        lambda_inputs = map paramName (filter isArray2 inp)
+        other_inputs = map (vNameFromAdj node) $ filter (not . isDep . fst) outgoing
+        inputs = other_inputs ++ lambda_inputs
         stms = stmsToList (bodyStms b)
         results = namesFromRes (bodyResult b)
 
@@ -753,20 +756,95 @@ isFake (Fake _) = True
 isFake _ = False
 
 makeCopiesOfConsAliased :: DepGraphAug
-makeCopiesOfConsAliased = mapAcross copyAlised
+makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
   where
-    -- This funciton is rly important, but doesnt work
-    copyAlised :: DepContext -> FusionEnvM DepContext
-    copyAlised c@(incoming, node, nodeT, outgoing) = do
+    copyAlised :: DepNode -> DepGraphAug
+    copyAlised (n,nt) _ = do
+      let (incoming, _, _, outgoing) = G.context g n
       let incoming' = map getName $ filter isFake (map fst incoming)
       let outgoing' = map getName $ filter isAlias (map fst outgoing)
       let toMakeCopies = incoming' `L.intersect` outgoing'
       if not $ null toMakeCopies
         then do
           (new_stms, nameMapping) <- makeCopyStms toMakeCopies
-          pure (incoming, node, FinalNode new_stms (substituteNames nameMapping nodeT), outgoing)
-        else pure c
-    copyAlised c = pure c
+          let newNode = FinalNode new_stms (substituteNames nameMapping nt) []
+          updateNode n (const (Just newNode)) g
+        else pure g
+    copyAlised _ _ = pure g
+
+-- makeCopiesOfConsAliased :: DepGraphAug
+-- makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
+--   where
+--     copyAlised :: DepNode -> DepGraphAug
+--     copyAlised (n,nt) _ = do
+--       let (incoming, _, _, _) = G.context g n
+--       let cons = map getName $ filter isCons (map fst incoming)
+--       let aliased = map getName $ filter isAlias (map fst incoming)
+--       -- find consumed
+--       -- find aliased
+
+--       -- for each variable, check if adding fake edges is possible
+--       -- otherwise add stms to the end of the variable with copies
+--       let toMakeCopies = cons `L.intersect` aliased
+--       if not $ null toMakeCopies
+--         then do
+--           (new_stms, nameMapping) <- makeCopyStms toMakeCopies
+--           let newNode = FinalNode [] (substituteNames nameMapping nt) new_stms
+--           substituteNamesInNodes nameMapping (G.pre g n)
+--             =<< substituteNamesInEdges nameMapping (G.inn g n)
+--             =<< updateNode n (const (Just newNode)) g
+--         else pure g
+--     copyAlised _ _ = pure g
+
+
+
+
+
+
+
+-- makeCopiesOfConsAliased :: DepGraphAug
+-- makeCopiesOfConsAliased = mapAcrossWithSE f where
+--   f :: DepNode -> DepGraphAug
+--   f (n,nt) g = do
+--     let consFromNode = incomingConsAdj g n
+--     let aliasdFromNode = map incomingAliasAdj
+--     applyAugs (map (f2 n) ) DepGraph
+
+--   --
+--   f2 ::  G.Node -> (EdgeT, G.Node) -> DepGraphAug
+--   f2 n2 (et, n1) g = do
+--     let (_,_,nt1,_) = context g n1
+--     let name = getName et
+--     let ac = findAliasClosure g n
+--     bs <- mapM (\n -> reachable n n2) ac
+--     if any bs then do
+--       (new_stms, nameMapping) <- makeCopyStms [name]
+--       updateNode n1 (FinalNode [] nt1 new_stms
+--     else
+--       applyAugs (map (makeFakeEdge name n2) ac) g
+
+--   makeFakeEdge :: VName -> G.Node -> G.Node -> DepGraphAug
+--   makeFakeEdge name source target g =
+--     G.insEdge (source,target,Fake name)
+
+--   findAliasClosure :: DepGraph -> G.Node -> [G.Node]
+--   findAliasClosure g n =
+--     let aliasing =  incomingAliasAdjf g n in
+--     let nodes = map snd aliasing
+--     in nodes ++ concatMap (findAliasClosure g) nodes
+
+--   incomingAliasAdj :: DepGraph -> G.Node -> G.Adj NodeT
+--   incomingAliasAdj g n
+--     let (depAdjs, _, _, _) = G.context g n in
+--     filter (isAlias . fst) depAdjs
+
+--   incomingConsAdj :: DepGraph -> G.Node -> G.Adj NodeT
+--   incomingConsAdj g n
+--     let (depAdjs, _, _, _) = G.context g n in
+--     filter (isCons . fst) depAdjs
+
+
+
 
 -- testingTurnToStream :: DepGraphAug
 -- testingTurnToStream = mapAcross toStream
