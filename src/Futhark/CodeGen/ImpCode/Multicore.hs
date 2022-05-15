@@ -70,7 +70,7 @@ data SchedulerInfo = SchedulerInfo
   }
 
 -- | A task for a v'SegOp'.
-newtype ParallelTask = ParallelTask (Code Multicore)
+newtype ParallelTask = ParallelTask MCCode
 
 -- | Whether the Scheduler should schedule the tasks as Dynamic
 -- or it is restainted to Static
