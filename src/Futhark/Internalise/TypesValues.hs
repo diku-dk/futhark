@@ -136,7 +136,7 @@ internaliseTypeM ::
   InternaliseTypeM [I.TypeBase ExtShape Uniqueness]
 internaliseTypeM exts orig_t =
   case orig_t of
-    E.Array _ u et shape -> do
+    E.Array _ u shape et -> do
       dims <- internaliseShape shape
       ets <- internaliseTypeM exts $ E.Scalar et
       pure [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets]
@@ -211,7 +211,7 @@ internaliseSumType cs =
 internalisedTypeSize :: E.TypeBase (E.DimDecl VName) als -> InternaliseM Int
 -- A few special cases for performance.
 internalisedTypeSize (E.Scalar (E.Prim _)) = pure 1
-internalisedTypeSize (E.Array _ _ (E.Prim _) _) = pure 1
+internalisedTypeSize (E.Array _ _ _ (E.Prim _)) = pure 1
 internalisedTypeSize t = length <$> internaliseType (t `E.setAliases` ())
 
 -- | Convert an external primitive to an internal primitive.

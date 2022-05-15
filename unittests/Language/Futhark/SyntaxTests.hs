@@ -145,13 +145,8 @@ pScalarNonFun =
         ]
 
 pArrayType :: Parser StructType
-pArrayType = do
-  u <- pUniqueness
-  shape <- pShape
-  t <- pScalarNonFun
-  pure $ Array () u t shape
-  where
-    pShape = ShapeDecl <$> some pDimDecl
+pArrayType =
+  Array () <$> pUniqueness <*> (ShapeDecl <$> some pDimDecl) <*> pScalarNonFun
 
 pNonFunType :: Parser StructType
 pNonFunType =

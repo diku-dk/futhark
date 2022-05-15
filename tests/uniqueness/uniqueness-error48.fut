@@ -1,6 +1,6 @@
 -- Record updates should respect uniqueness and aliases.
 -- ==
--- error: not a subtype
+-- error: "s", which is not consumable
 
 type^ state = { size: i64, world: []i32 }
 

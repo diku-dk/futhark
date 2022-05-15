@@ -96,6 +96,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
+import Data.Char (isAlpha, isAlphaNum)
 import qualified Data.DList as DL
 import Data.List (unzip4)
 import Data.Loc
@@ -111,6 +112,7 @@ import Futhark.CodeGen.RTS.C (cacheH, errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
+import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (ppr, prettyCompact, prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
@@ -534,9 +536,9 @@ contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
   s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Nothing)}
 
-contextFieldDyn :: C.Id -> C.Type -> C.Exp -> C.Stm -> CompilerM op s ()
+contextFieldDyn :: C.Id -> C.Type -> Maybe C.Exp -> C.Stm -> CompilerM op s ()
 contextFieldDyn name ty initial free = modify $ \s ->
-  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, Just initial, Just free)}
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Just free)}
 
 profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
@@ -1390,6 +1392,18 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
             [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
       stms $ zipWith maybeCopyDim shape [0 .. rank - 1]
 
+isValidCName :: Name -> Bool
+isValidCName = check . nameToString
+  where
+    check [] = True -- academic
+    check (c : cs) = isAlpha c && all constituent cs
+    constituent c = isAlphaNum c || c == '_'
+
+entryName :: Name -> String
+entryName v
+  | isValidCName v = "entry_" <> nameToString v
+  | otherwise = "entry_" <> zEncodeString (nameToString v)
+
 onEntryPoint ::
   [C.BlockItem] ->
   Name ->
@@ -1404,7 +1418,7 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
   outputdecls <- collect $ mapM_ stubParam outputs
   decl_mem <- declAllocatedMem
 
-  entry_point_function_name <- publicName $ "entry_" ++ nameToString ename
+  entry_point_function_name <- publicName $ entryName ename
 
   (inputs', unpack_entry_inputs) <- prepareEntryInputs $ map snd args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
@@ -1604,7 +1618,7 @@ compileProg' backend version ops def extra header_extra spaces options prog = do
 
   let headerdefs =
         [untrimming|
-// Headers\n")
+// Headers
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>

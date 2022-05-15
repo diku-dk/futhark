@@ -139,14 +139,10 @@ replaceStaticValSizes globals orig_substs sv =
           Literal (SignedValue (Int64Value (fromIntegral d))) loc
         Nothing ->
           Var v (replaceTypeSizes substs <$> t) loc
-    onExp substs (AppExp (Coerce e tdecl loc) (Info (AppRes t ext))) =
-      AppExp (Coerce (onExp substs e) tdecl' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
+    onExp substs (AppExp (Coerce e te loc) (Info (AppRes t ext))) =
+      AppExp (Coerce (onExp substs e) te' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
       where
-        tdecl' =
-          TypeDecl
-            { declaredType = onTypeExp substs $ declaredType tdecl,
-              expandedType = replaceTypeSizes substs <$> expandedType tdecl
-            }
+        te' = onTypeExp substs te
     onExp substs e = onAST substs e
 
     onTypeExpDim substs d@(DimExpNamed v loc) =
@@ -164,8 +160,8 @@ replaceStaticValSizes globals orig_substs sv =
     onTypeArgExp substs (TypeArgExpType te) =
       TypeArgExpType (onTypeExp substs te)
 
-    onTypeExp substs (TEArray te d loc) =
-      TEArray (onTypeExp substs te) (onTypeExpDim substs d) loc
+    onTypeExp substs (TEArray d te loc) =
+      TEArray (onTypeExpDim substs d) (onTypeExp substs te) loc
     onTypeExp substs (TEUnique t loc) =
       TEUnique (onTypeExp substs t) loc
     onTypeExp substs (TEApply t1 t2 loc) =
@@ -289,7 +285,7 @@ arraySizes (Scalar (TypeVar _ _ _ targs)) =
     f TypeArgDim {} = mempty
     f (TypeArgType t _) = arraySizes t
 arraySizes (Scalar Prim {}) = mempty
-arraySizes (Array _ _ t shape) =
+arraySizes (Array _ _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
   where
     dimName :: DimDecl VName -> S.Set VName
@@ -651,7 +647,7 @@ defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
       Monoid als =>
       TypeBase (DimDecl VName) als ->
       TypeBase (DimDecl VName) als
-    defuncType (Array as u t shape) = Array as u (defuncScalar t) shape
+    defuncType (Array as u shape t) = Array as u shape (defuncScalar t)
     defuncType (Scalar t) = Scalar $ defuncScalar t
 
     defuncScalar ::
@@ -720,12 +716,13 @@ etaExpand :: PatType -> Exp -> DefM ([Pat], Exp, StructRetType)
 etaExpand e_t e = do
   let (ps, ret) = getType $ RetType [] e_t
   (pats, vars) <- fmap unzip . forM ps $ \(p, t) -> do
+    let t' = fromStruct t
     x <- case p of
       Named x -> pure x
       Unnamed -> newNameFromString "x"
     pure
-      ( Id x (Info t) mempty,
-        Var (qualName x) (Info t) mempty
+      ( Id x (Info t') mempty,
+        Var (qualName x) (Info t') mempty
       )
   let e' =
         foldl'
@@ -885,8 +882,8 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             Var
               fname'
               ( Info
-                  ( Scalar . Arrow mempty Unnamed (fromStruct t1) . RetType [] $
-                      Scalar . Arrow mempty Unnamed (fromStruct t2) $ RetType [] rettype
+                  ( Scalar . Arrow mempty Unnamed t1 . RetType [] $
+                      Scalar . Arrow mempty Unnamed t2 $ RetType [] rettype
                   )
               )
               loc
@@ -906,7 +903,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
                         ( Info $
                             AppRes
                               ( Scalar $
-                                  Arrow mempty Unnamed (fromStruct t2) $
+                                  Arrow mempty Unnamed t2 $
                                     RetType [] rettype
                               )
                               []
@@ -1130,9 +1127,9 @@ typeFromSV IntrinsicSV =
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
-dynamicFunType :: StaticVal -> [PatType] -> ([PatType], PatType)
+dynamicFunType :: StaticVal -> [StructType] -> ([PatType], PatType)
 dynamicFunType (DynamicFun _ sv) (p : ps) =
-  let (ps', ret) = dynamicFunType sv ps in (p : ps', ret)
+  let (ps', ret) = dynamicFunType sv ps in (fromStruct p : ps', ret)
 dynamicFunType sv _ = ([], typeFromSV sv)
 
 -- | Match a pattern with its static value. Returns an environment with
@@ -1215,10 +1212,8 @@ updatePat (Id vn (Info tp) loc) sv =
 updatePat pat@(Wildcard (Info tp) loc) sv
   | orderZero tp = pat
   | otherwise = Wildcard (Info $ typeFromSV sv) loc
-updatePat (PatAscription pat tydecl loc) sv
-  | orderZero . unInfo $ expandedType tydecl =
-      PatAscription (updatePat pat sv) tydecl loc
-  | otherwise = updatePat pat sv
+updatePat (PatAscription pat _ _) sv =
+  updatePat pat sv
 updatePat p@PatLit {} _ = p
 updatePat pat@(PatConstr c1 (Info t) ps loc) sv@(SumSV _ svs _)
   | orderZero t = pat
