@@ -298,6 +298,7 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit $
         Imp.Copy
+          bt
           destmem
           (bytes $ sExt64 destoffset)
           destspace
@@ -410,6 +411,7 @@ mapTransposeFunction bt =
     copy_code =
       let num_bytes = sExt64 $ Imp.le32 x * Imp.le32 y * primByteSize bt
        in Imp.Copy
+            bt
             destmem
             (Imp.Count $ sExt64 $ Imp.le32 destoffset)
             space

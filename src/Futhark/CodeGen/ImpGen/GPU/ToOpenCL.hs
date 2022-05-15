@@ -834,17 +834,8 @@ typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode
-  ( Copy
-      _
-      (Count (TPrimExp e1))
-      _
-      _
-      (Count (TPrimExp e2))
-      _
-      (Count (TPrimExp e3))
-    ) =
-    typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode (Copy _ _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _ (Count (TPrimExp e3))) =
+  typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (Read _ _ (Count (TPrimExp e1)) t _ _) =
