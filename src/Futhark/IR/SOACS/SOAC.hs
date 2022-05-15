@@ -236,7 +236,7 @@ mkIdentityLambda ::
   m (Lambda rep)
 mkIdentityLambda ts = do
   params <- mapM (newParam "x") ts
-  return
+  pure
     Lambda
       { lambdaParams = params,
         lambdaBody = mkBody mempty $ varsRes $ map paramName params,
@@ -292,28 +292,28 @@ isScanomapSOAC :: ScremaForm rep -> Maybe ([Scan rep], Lambda rep)
 isScanomapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null reds
   guard $ not $ null scans
-  return (scans, map_lam)
+  pure (scans, map_lam)
 
 -- | Does this Screma correspond to pure scan?
 isScanSOAC :: ScremaForm rep -> Maybe [Scan rep]
 isScanSOAC form = do
   (scans, map_lam) <- isScanomapSOAC form
   guard $ isIdentityLambda map_lam
-  return scans
+  pure scans
 
 -- | Does this Screma correspond to a reduce-map composition?
 isRedomapSOAC :: ScremaForm rep -> Maybe ([Reduce rep], Lambda rep)
 isRedomapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null scans
   guard $ not $ null reds
-  return (reds, map_lam)
+  pure (reds, map_lam)
 
 -- | Does this Screma correspond to a pure reduce?
 isReduceSOAC :: ScremaForm rep -> Maybe [Reduce rep]
 isReduceSOAC form = do
   (reds, map_lam) <- isRedomapSOAC form
   guard $ isIdentityLambda map_lam
-  return reds
+  pure reds
 
 -- | Does this Screma correspond to a simple map, without any
 -- reduction or scan results?
@@ -321,7 +321,7 @@ isMapSOAC :: ScremaForm rep -> Maybe (Lambda rep)
 isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null scans
   guard $ null reds
-  return map_lam
+  pure map_lam
 
 -- | Return the "main" lambda of the Screma.  For a map, this is
 -- equivalent to 'isMapSOAC'.  Note that the meaning of the return
@@ -391,9 +391,9 @@ data SOACMapper frep trep m = SOACMapper
 identitySOACMapper :: Monad m => SOACMapper rep rep m
 identitySOACMapper =
   SOACMapper
-    { mapOnSOACSubExp = return,
-      mapOnSOACLambda = return,
-      mapOnSOACVName = return
+    { mapOnSOACSubExp = pure,
+      mapOnSOACLambda = pure,
+      mapOnSOACVName = pure
     }
 
 -- | Map a monadic action across the immediate children of a
@@ -477,7 +477,7 @@ traverseSOACStms f = mapSOACM mapper
 instance ASTRep rep => FreeIn (SOAC rep) where
   freeIn' = flip execState mempty . mapSOACM free
     where
-      walk f x = modify (<> f x) >> return x
+      walk f x = modify (<> f x) >> pure x
       free =
         SOACMapper
           { mapOnSOACSubExp = walk freeIn',
@@ -491,9 +491,9 @@ instance ASTRep rep => Substitute (SOAC rep) where
     where
       substitute =
         SOACMapper
-          { mapOnSOACSubExp = return . substituteNames subst,
-            mapOnSOACLambda = return . substituteNames subst,
-            mapOnSOACVName = return . substituteNames subst
+          { mapOnSOACSubExp = pure . substituteNames subst,
+            mapOnSOACLambda = pure . substituteNames subst,
+            mapOnSOACVName = pure . substituteNames subst
           }
 
 instance ASTRep rep => Rename (SOAC rep) where
@@ -607,7 +607,7 @@ instance
 
   removeOpAliases = runIdentity . mapSOACM remove
     where
-      remove = SOACMapper return (return . removeLambdaAliases) return
+      remove = SOACMapper pure (pure . removeLambdaAliases) pure
 
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
@@ -648,25 +648,25 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
 
       nthMapOut num_accs lam arrs = do
         se <- maybeNth (num_accs + k) $ bodyResult $ lambdaBody lam
-        return (lam, se, drop num_accs $ lambdaParams lam, arrs)
+        pure (lam, se, drop num_accs $ lambdaParams lam, arrs)
 
       arrIndex p arr = do
         ST.Indexed cs pe <- ST.index' arr [i] vtable
-        return (paramName p, (pe, cs))
+        pure (paramName p, (pe, cs))
 
       expandPrimExpTable table stm
         | [v] <- patNames $ stmPat stm,
           Just (pe, cs) <-
             runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm,
           all (`ST.elem` vtable) (unCerts $ stmCerts stm) =
-          M.insert v (pe, stmCerts stm <> cs) table
+            M.insert v (pe, stmCerts stm <> cs) table
         | otherwise =
-          table
+            table
 
       asPrimExp table v
-        | Just (e, cs) <- M.lookup v table = tell cs >> return e
+        | Just (e, cs) <- M.lookup v table = tell cs >> pure e
         | Just (Prim pt) <- ST.lookupType v vtable =
-          return $ LeafExp v pt
+            pure $ LeafExp v pt
         | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
 
@@ -700,7 +700,7 @@ typeCheckSOAC (Stream size arrexps form accexps lam) = do
               ++ ", but stream's reduce lambda returns type "
               ++ prettyTuple outerRetType
               ++ "."
-    Sequential -> return ()
+    Sequential -> pure ()
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
@@ -818,7 +818,7 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
               ++ prettyTuple (lambdaReturnType scan_lam)
               ++ " but neutral element has type "
               ++ prettyTuple scan_t
-      return scan_nes'
+      pure scan_nes'
 
   red_nes' <- fmap concat $
     forM reds $ \(Reduce _ red_lam red_nes) -> do
@@ -832,7 +832,7 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
               ++ prettyTuple (lambdaReturnType red_lam)
               ++ " but neutral element has type "
               ++ prettyTuple red_t
-      return red_nes'
+      pure red_nes'
 
   let map_lam_ts = lambdaReturnType map_lam
 
@@ -915,28 +915,28 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
   ppr (Screma w arrs (ScremaForm scans reds map_lam))
     | null scans,
       null reds =
-      text "map"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> ppr map_lam
-          )
+        text "map"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> ppr map_lam
+            )
     | null scans =
-      text "redomap"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
-              </> ppr map_lam
-          )
+        text "redomap"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
+                </> ppr map_lam
+            )
     | null reds =
-      text "scanomap"
-        <> parens
-          ( ppr w <> comma
-              </> ppTuple' arrs <> comma
-              </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
-              </> ppr map_lam
-          )
+        text "scanomap"
+          <> parens
+            ( ppr w <> comma
+                </> ppTuple' arrs <> comma
+                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
+                </> ppr map_lam
+            )
   ppr (Screma w arrs form) = ppScrema w arrs form
 
 -- | Prettyprint the given Screma.

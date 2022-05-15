@@ -66,7 +66,7 @@ patternDefs (PatConstr _ _ pats _) =
 
 typeParamDefs :: TypeParamBase VName -> Defs
 typeParamDefs (TypeParamDim vn loc) =
-  M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int32) (locOf loc)
+  M.singleton vn $ DefBound $ BoundTerm (Scalar $ Prim $ Signed Int64) (locOf loc)
 typeParamDefs (TypeParamType _ vn loc) =
   M.singleton vn $ DefBound $ BoundType $ locOf loc
 
@@ -78,7 +78,7 @@ expDefs e =
       identityMapper {mapOnExp = onExp}
     onExp e' = do
       modify (<> expDefs e')
-      return e'
+      pure e'
 
     identDefs (Ident v (Info vt) vloc) =
       M.singleton v $ DefBound $ BoundTerm (toStruct vt) $ locOf vloc
@@ -154,8 +154,8 @@ modBindDefs mbind =
 specDefs :: Spec -> Defs
 specDefs spec =
   case spec of
-    ValSpec v tparams tdecl _ loc ->
-      let vdef = DefBound $ BoundTerm (unInfo $ expandedType tdecl) (locOf loc)
+    ValSpec v tparams _ (Info t) _ loc ->
+      let vdef = DefBound $ BoundTerm t (locOf loc)
        in M.insert v vdef $ mconcat (map typeParamDefs tparams)
     TypeAbbrSpec tbind -> typeBindDefs tbind
     TypeSpec _ v _ _ loc ->
@@ -217,7 +217,7 @@ atPosInTypeExp te pos =
       msum $ map (`atPosInTypeExp` pos) es
     TERecord fields _ ->
       msum $ map ((`atPosInTypeExp` pos) . snd) fields
-    TEArray te' dim _ ->
+    TEArray dim te' _ ->
       atPosInTypeExp te' pos `mplus` inDim dim
     TEUnique te' _ ->
       atPosInTypeExp te' pos
@@ -249,8 +249,8 @@ atPosInPat (PatParens pat _) pos =
   atPosInPat pat pos
 atPosInPat (PatAttr _ pat _) pos =
   atPosInPat pat pos
-atPosInPat (PatAscription pat tdecl _) pos =
-  atPosInPat pat pos `mplus` atPosInTypeExp (declaredType tdecl) pos
+atPosInPat (PatAscription pat te _) pos =
+  atPosInPat pat pos `mplus` atPosInTypeExp te pos
 atPosInPat (PatConstr _ _ pats _) pos =
   msum $ map (`atPosInPat` pos) pats
 atPosInPat PatLit {} _ = Nothing
@@ -273,10 +273,10 @@ atPosInExp (AppExp (LetWith a b _ _ _ _) _) pos
   | b `contains` pos = Just $ RawAtName (qualName $ identName b) (locOf b)
 atPosInExp (AppExp (DoLoop _ merge _ _ _ _) _) pos
   | merge `contains` pos = atPosInPat merge pos
-atPosInExp (Ascript _ tdecl _) pos
-  | tdecl `contains` pos = atPosInTypeExp (declaredType tdecl) pos
-atPosInExp (AppExp (Coerce _ tdecl _) _) pos
-  | tdecl `contains` pos = atPosInTypeExp (declaredType tdecl) pos
+atPosInExp (Ascript _ te _) pos
+  | te `contains` pos = atPosInTypeExp te pos
+atPosInExp (AppExp (Coerce _ te _) _) pos
+  | te `contains` pos = atPosInTypeExp te pos
 atPosInExp e pos = do
   guard $ e `contains` pos
   -- Use the Either monad for short-circuiting for efficiency reasons.
@@ -312,7 +312,7 @@ atPosInModExp (ModLambda _ _ e _) pos =
 atPosInSpec :: Spec -> Pos -> Maybe RawAtPos
 atPosInSpec spec pos =
   case spec of
-    ValSpec _ _ tdecl _ _ -> atPosInTypeExp (declaredType tdecl) pos
+    ValSpec _ _ te _ _ _ -> atPosInTypeExp te pos
     TypeAbbrSpec tbind -> atPosInTypeBind tbind pos
     TypeSpec {} -> Nothing
     ModSpec _ se _ _ -> atPosInSigExp se pos
@@ -371,10 +371,7 @@ containingModule :: Imports -> Pos -> Maybe FileModule
 containingModule imports (Pos file _ _ _) =
   snd <$> find ((== file') . fst) imports
   where
-    file' =
-      includeToString $
-        mkInitialImport $
-          fst $ Posix.splitExtension file
+    file' = includeToString $ mkInitialImport $ fst $ Posix.splitExtension file
 
 -- | Information about what is at the given source location.
 data AtPos = AtName (QualName VName) (Maybe BoundTo) Loc

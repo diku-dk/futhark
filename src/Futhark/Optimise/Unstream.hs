@@ -98,7 +98,7 @@ optimiseLambda ::
   UnstreamM rep (Lambda rep)
 optimiseLambda onOp lam = localScope (scopeOfLParams $ lambdaParams lam) $ do
   body <- optimiseBody onOp $ lambdaBody lam
-  return lam {lambdaBody = body}
+  pure lam {lambdaBody = body}
 
 optimiseStm ::
   ASTRep rep =>
@@ -137,13 +137,13 @@ onMCOp stage pat aux (ParOp par_op op) = do
   pure [Let pat aux $ Op $ ParOp par_op' op']
 onMCOp stage pat aux (MC.OtherOp soac)
   | sequentialise stage soac = do
-    stms <- runBuilder_ $ FOT.transformSOAC pat soac
-    fmap concat $
-      localScope (scopeOf stms) $
-        mapM (optimiseStm (onMCOp stage)) $ stmsToList stms
+      stms <- runBuilder_ $ FOT.transformSOAC pat soac
+      fmap concat $
+        localScope (scopeOf stms) $
+          mapM (optimiseStm (onMCOp stage)) $ stmsToList stms
   | otherwise =
-    -- Still sequentialise whatever's inside.
-    pure <$> (Let pat aux . Op . MC.OtherOp <$> mapSOACM optimise soac)
+      -- Still sequentialise whatever's inside.
+      pure <$> (Let pat aux . Op . MC.OtherOp <$> mapSOACM optimise soac)
   where
     optimise =
       identitySOACMapper
@@ -158,13 +158,13 @@ sequentialise SeqAll _ = True
 onHostOp :: Stage -> OnOp GPU
 onHostOp stage pat aux (GPU.OtherOp soac)
   | sequentialise stage soac = do
-    stms <- runBuilder_ $ FOT.transformSOAC pat soac
-    fmap concat $
-      localScope (scopeOf stms) $
-        mapM (optimiseStm (onHostOp stage)) $ stmsToList stms
+      stms <- runBuilder_ $ FOT.transformSOAC pat soac
+      fmap concat $
+        localScope (scopeOf stms) $
+          mapM (optimiseStm (onHostOp stage)) $ stmsToList stms
   | otherwise =
-    -- Still sequentialise whatever's inside.
-    pure <$> (Let pat aux . Op . GPU.OtherOp <$> mapSOACM optimise soac)
+      -- Still sequentialise whatever's inside.
+      pure <$> (Let pat aux . Op . GPU.OtherOp <$> mapSOACM optimise soac)
   where
     optimise =
       identitySOACMapper
@@ -172,4 +172,4 @@ onHostOp stage pat aux (GPU.OtherOp soac)
         }
 onHostOp stage pat aux (SegOp op) =
   pure <$> (Let pat aux . Op . SegOp <$> optimiseSegOp (onHostOp stage) op)
-onHostOp _ pat aux op = return [Let pat aux $ Op op]
+onHostOp _ pat aux op = pure [Let pat aux $ Op op]

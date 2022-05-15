@@ -218,7 +218,7 @@ transformScanRed lvl space ops kbody = do
   case lvl of
     SegGroup {}
       | not $ null variant_allocs ->
-        throwError "Cannot handle invariant allocations in SegGroup."
+          throwError "Cannot handle invariant allocations in SegGroup."
     _ ->
       pure ()
 
@@ -373,8 +373,8 @@ extractStmAllocations user bound_outside bound_kernel (Let (Pat [patElem]) _ (Op
       -- promise to be super-duper-careful about not having variant
       -- scalar allocations.
       || (boundInKernel size && notScalar space) = do
-    tell $ M.singleton (patElemName patElem) (user, size, space)
-    pure Nothing
+      tell $ M.singleton (patElemName patElem) (user, size, space)
+      pure Nothing
   where
     expandableSize (Var v) = v `nameIn` bound_outside || v `nameIn` bound_kernel
     expandableSize Constant {} = True
@@ -440,7 +440,7 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
     newBase user@(SegThread {}, _) (old_shape, _) =
       let (users_shape, user_ids) = getNumUsers user
           num_dims = length old_shape
-          perm = [num_dims .. num_dims + shapeRank users_shape -1] ++ [0 .. num_dims -1]
+          perm = [num_dims .. num_dims + shapeRank users_shape - 1] ++ [0 .. num_dims - 1]
           root_ixfun = IxFun.iota (old_shape ++ map pe64 (shapeDims users_shape))
           permuted_ixfun = IxFun.permute root_ixfun perm
           offset_ixfun =
@@ -608,7 +608,7 @@ offsetMemoryInStm (Let pat dec e) = do
       (PatElem name (MemArray pt s u _ret))
       (MemArray _ _ _ (Just (ReturnsInBlock m extixfun)))
         | Just ixfun <- instantiateIxFun extixfun =
-          PatElem name (MemArray pt s u (ArrayIn m ixfun))
+            PatElem name (MemArray pt s u (ArrayIn m ixfun))
     pick p _ = p
 
     instantiateIxFun :: ExtIxFun -> Maybe IxFun
@@ -648,11 +648,11 @@ offsetMemoryInMemBound summary = pure summary
 offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
 offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
   | Just ixfun' <- isStaticIxFun ixfun = do
-    new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
-    pure . fromMaybe br $ do
-      new_base' <- new_base
-      pure . MemArray pt shape u . ReturnsInBlock mem $
-        IxFun.rebase (fmap (fmap Free) new_base') ixfun
+      new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
+      pure . fromMaybe br $ do
+        new_base' <- new_base
+        pure . MemArray pt shape u . ReturnsInBlock mem $
+          IxFun.rebase (fmap (fmap Free) new_base') ixfun
 offsetMemoryInBodyReturns br = pure br
 
 offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
@@ -677,7 +677,7 @@ offsetMemoryInLoopParams merge f = do
     extend rm = foldl' onParamArg rm merge
     onParamArg rm (param, Var arg)
       | Just x <- M.lookup arg rm =
-        M.insert (paramName param) x rm
+          M.insert (paramName param) x rm
     onParamArg rm _ = rm
 
 offsetMemoryInExp :: Exp GPUMem -> OffsetM (Exp GPUMem)
@@ -735,6 +735,7 @@ unAllocGPUStms = unAllocStms False
 
     unAllocOp Alloc {} = Left "unAllocOp: unhandled Alloc"
     unAllocOp (Inner OtherOp {}) = Left "unAllocOp: unhandled OtherOp"
+    unAllocOp (Inner GPUBody {}) = Left "unAllocOp: unhandled GPUBody"
     unAllocOp (Inner (SizeOp op)) = pure $ SizeOp op
     unAllocOp (Inner (SegOp op)) = SegOp <$> mapSegOpM mapper op
       where

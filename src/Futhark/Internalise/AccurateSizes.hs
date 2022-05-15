@@ -49,7 +49,7 @@ argShapes shapes all_params valargts = do
         case M.lookup name mapping of
           Just se -> se
           _ -> error $ "argShapes: " ++ pretty name
-  return $ map addShape shapes
+  pure $ map addShape shapes
 
 ensureResultShape ::
   ErrorMsg SubExp ->
@@ -97,8 +97,8 @@ ensureExtShape ::
 ensureExtShape msg loc t name orig
   | Array {} <- t,
     Var v <- orig =
-    Var <$> ensureShapeVar msg loc t name v
-  | otherwise = return orig
+      Var <$> ensureShapeVar msg loc t name v
+  | otherwise = pure orig
 
 ensureShape ::
   ErrorMsg SubExp ->
@@ -123,11 +123,11 @@ ensureArgShapes ::
 ensureArgShapes msg loc shapes paramts args =
   zipWithM ensureArgShape (expectedTypes shapes paramts args) args
   where
-    ensureArgShape _ (Constant v) = return $ Constant v
+    ensureArgShape _ (Constant v) = pure $ Constant v
     ensureArgShape t (Var v)
-      | arrayRank t < 1 = return $ Var v
+      | arrayRank t < 1 = pure $ Var v
       | otherwise =
-        ensureShape msg loc t (baseString v) $ Var v
+          ensureShape msg loc t (baseString v) $ Var v
 
 ensureShapeVar ::
   ErrorMsg SubExp ->
@@ -138,16 +138,16 @@ ensureShapeVar ::
   InternaliseM VName
 ensureShapeVar msg loc t name v
   | Array {} <- t = do
-    newdims <- arrayDims . removeExistentials t <$> lookupType v
-    olddims <- arrayDims <$> lookupType v
-    if newdims == olddims
-      then return v
-      else do
-        matches <- zipWithM checkDim newdims olddims
-        all_match <- letSubExp "match" =<< eAll matches
-        cs <- assert "empty_or_match_cert" all_match msg loc
-        certifying cs $ letExp name $ shapeCoerce newdims v
-  | otherwise = return v
+      newdims <- arrayDims . removeExistentials t <$> lookupType v
+      olddims <- arrayDims <$> lookupType v
+      if newdims == olddims
+        then pure v
+        else do
+          matches <- zipWithM checkDim newdims olddims
+          all_match <- letSubExp "match" =<< eAll matches
+          cs <- assert "empty_or_match_cert" all_match msg loc
+          certifying cs $ letExp name $ shapeCoerce newdims v
+  | otherwise = pure v
   where
     checkDim desired has =
       letSubExp "dim_match" $ BasicOp $ CmpOp (CmpEq int64) desired has

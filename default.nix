@@ -19,32 +19,6 @@ let
     packageOverrides = pkgs: rec {
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
-          aeson =
-            haskellPackagesNew.aeson_2_0_2_0;
-
-          time-compat =
-            haskellPackagesNew.time-compat_1_9_6_1;
-
-          semialign =
-            haskellPackagesNew.semialign_1_2_0_1;
-
-          hashable =
-            haskellPackagesNew.hashable_1_4_0_1;
-
-          OneTuple =
-            haskellPackagesNew.OneTuple_0_3_1;
-
-          # Need to disable the test suite as otherwise we have a
-          # circular dependency with quickcheck-instances.
-          text-short =
-            pkgs.haskell.lib.dontCheck haskellPackagesNew.text-short_0_1_4;
-
-          quickcheck-instances =
-            haskellPackagesNew.quickcheck-instances_0_3_27;
-
-          hashable-time =
-            haskellPackagesNew.hashable-time_0_3;
-
           futhark-data =
             haskellPackagesNew.callPackage ./nix/futhark-data.nix { };
 
@@ -84,6 +58,7 @@ let
                 enableSharedLibraries = false;
                 enableLibraryProfiling = false;
                 configureFlags = [
+                  "--ghc-option=-Werror"
                   "--ghc-option=-optl=-static"
                   "--ghc-option=-split-sections"
                   "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"

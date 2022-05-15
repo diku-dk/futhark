@@ -1,5 +1,4 @@
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 
 -- | This module defines a translation from imperative code with
@@ -58,7 +57,7 @@ translateGPU target prog =
             funs' <- forM funs $ \(fname, fun) ->
               (fname,) <$> traverse (onHostOp target) fun
 
-            return $
+            pure $
               ImpOpenCL.Definitions
                 (ImpOpenCL.Constants ps consts')
                 (ImpOpenCL.Functions funs')
@@ -97,13 +96,13 @@ cleanSizes m = M.map clean m
     clean s = s
 
 pointerQuals :: Monad m => String -> m [C.TypeQual]
-pointerQuals "global" = return [C.ctyquals|__global|]
-pointerQuals "local" = return [C.ctyquals|__local|]
-pointerQuals "private" = return [C.ctyquals|__private|]
-pointerQuals "constant" = return [C.ctyquals|__constant|]
-pointerQuals "write_only" = return [C.ctyquals|__write_only|]
-pointerQuals "read_only" = return [C.ctyquals|__read_only|]
-pointerQuals "kernel" = return [C.ctyquals|__kernel|]
+pointerQuals "global" = pure [C.ctyquals|__global|]
+pointerQuals "local" = pure [C.ctyquals|__local|]
+pointerQuals "private" = pure [C.ctyquals|__private|]
+pointerQuals "constant" = pure [C.ctyquals|__constant|]
+pointerQuals "write_only" = pure [C.ctyquals|__write_only|]
+pointerQuals "read_only" = pure [C.ctyquals|__read_only|]
+pointerQuals "kernel" = pure [C.ctyquals|__kernel|]
 pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
 -- In-kernel name and per-workgroup size in bytes.
@@ -151,12 +150,12 @@ onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
 onHostOp _ (ImpGPU.GetSize v key size_class) = do
   addSize key size_class
-  return $ ImpOpenCL.GetSize v key
+  pure $ ImpOpenCL.GetSize v key
 onHostOp _ (ImpGPU.CmpSizeLe v key size_class x) = do
   addSize key size_class
-  return $ ImpOpenCL.CmpSizeLe v key x
+  pure $ ImpOpenCL.CmpSizeLe v key x
 onHostOp _ (ImpGPU.GetSizeMax v size_class) =
-  return $ ImpOpenCL.GetSizeMax v size_class
+  pure $ ImpOpenCL.GetSizeMax v size_class
 
 genGPUCode ::
   OpsMode ->
@@ -224,8 +223,8 @@ ensureDeviceFuns code = do
           -- comes from.
           let device_func = fmap toDevice host_func
           ensureDeviceFun fname device_func
-          return $ Just fname
-        Nothing -> return Nothing
+          pure $ Just fname
+        Nothing -> pure Nothing
   where
     bad = compilerLimitationS "Cannot generate GPU functions that contain parallelism."
     toDevice :: HostOp -> KernelOp
@@ -286,25 +285,25 @@ onKernel target kernel = do
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
         | not $ null called =
-          (SafetyFull, [])
+            (SafetyFull, [])
         | length (kernelFailures kstate) == length failures =
-          if kernelFailureTolerant kernel
-            then (SafetyNone, [])
-            else -- No possible failures in this kernel, so if we make
-            -- it past an initial check, then we are good to go.
+            if kernelFailureTolerant kernel
+              then (SafetyNone, [])
+              else -- No possible failures in this kernel, so if we make
+              -- it past an initial check, then we are good to go.
 
-              ( SafetyCheap,
-                [C.citems|if (*global_failure >= 0) { return; }|]
-              )
+                ( SafetyCheap,
+                  [C.citems|if (*global_failure >= 0) { return; }|]
+                )
         | otherwise =
-          if not (kernelHasBarriers kstate)
-            then
-              ( SafetyFull,
-                [C.citems|if (*global_failure >= 0) { return; }|]
-              )
-            else
-              ( SafetyFull,
-                [C.citems|
+            if not (kernelHasBarriers kstate)
+              then
+                ( SafetyFull,
+                  [C.citems|if (*global_failure >= 0) { return; }|]
+                )
+              else
+                ( SafetyFull,
+                  [C.citems|
                      volatile __local bool local_failure;
                      if (failure_is_an_option) {
                        int failed = *global_failure >= 0;
@@ -316,7 +315,7 @@ onKernel target kernel = do
                      local_failure = false;
                      barrier(CLK_LOCAL_MEM_FENCE);
                   |]
-              )
+                )
 
       failure_params =
         [ [C.cparam|__global int *global_failure|],
@@ -356,7 +355,7 @@ onKernel target kernel = do
         catMaybes local_memory_args
           ++ kernelArgs kernel
 
-  return $ LaunchKernel safety name args num_groups group_size
+  pure $ LaunchKernel safety name args num_groups group_size
   where
     name = kernelName kernel
     num_groups = kernelNumGroups kernel
@@ -364,14 +363,14 @@ onKernel target kernel = do
 
     prepareLocalMemory TargetOpenCL (mem, size) = do
       mem_aligned <- newVName $ baseString mem ++ "_aligned"
-      return
+      pure
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
           [C.citem|__local volatile unsigned char* restrict $id:mem = (__local volatile unsigned char*) $id:mem_aligned;|]
         )
     prepareLocalMemory TargetCUDA (mem, size) = do
       param <- newVName $ baseString mem ++ "_offset"
-      return
+      pure
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|uint $id:param|],
           [C.citem|volatile $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
@@ -473,7 +472,7 @@ static inline void mem_fence_local() {
   where
     enable_f64
       | FloatType Float64 `S.member` ts =
-        [untrimming|
+          [untrimming|
          #pragma OPENCL EXTENSION cl_khr_fp64 : enable
          #define FUTHARK_F64_ENABLED
          |]
@@ -553,15 +552,6 @@ static inline int get_local_size(int d) {
   }
 }
 
-static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_group_id(d) * get_local_size(d) + get_local_id(d);
-}
-#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)
-
-static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_num_groups(d) * get_local_size(d);
-}
-
 #define CLK_LOCAL_MEM_FENCE 1
 #define CLK_GLOBAL_MEM_FENCE 2
 static inline void barrier(int x) {
@@ -586,7 +576,7 @@ compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
   where
     compileKernelConst (SizeConst key) =
-      return [C.cexp|$id:(zEncodeString (pretty key))|]
+      pure [C.cexp|$id:(zEncodeString (pretty key))|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses
@@ -651,10 +641,6 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
     kernelOps (GetLocalSize v i) =
       GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
-    kernelOps (GetGlobalId v i) =
-      GC.stm [C.cstm|$id:v = get_global_id($int:i);|]
-    kernelOps (GetGlobalSize v i) =
-      GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
     kernelOps (GetLockstepWidth v) =
       GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
     kernelOps (Barrier f) = do
@@ -686,7 +672,7 @@ inKernelOperations mode body =
       quals <- case s of
         Space sid -> pointerQuals sid
         _ -> pointerQuals "global"
-      return [C.cty|$tyquals:(volatile++quals) $ty:t|]
+      pure [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
     atomicSpace (Space sid) = sid
     atomicSpace _ = "global"
@@ -779,7 +765,7 @@ inKernelOperations mode body =
 
     kernelMemoryType space = do
       quals <- pointerQuals space
-      return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
+      pure [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
     kernelWriteScalar =
       GC.writeScalarPointerWithQuals pointerQuals
@@ -790,7 +776,7 @@ inKernelOperations mode body =
     whatNext = do
       label <- nextErrorLabel
       pendingError True
-      return $
+      pure $
         if has_communication
           then [C.citems|local_failure = true; goto $id:label;|]
           else
@@ -800,29 +786,29 @@ inKernelOperations mode body =
 
     callInKernel dests fname args
       | isBuiltInFunction fname =
-        GC.opsCall GC.defaultOperations dests fname args
+          GC.opsCall GC.defaultOperations dests fname args
       | otherwise = do
-        let out_args = [[C.cexp|&$id:d|] | d <- dests]
-            args' =
-              [C.cexp|global_failure|] :
-              [C.cexp|global_failure_args|] :
-              out_args ++ args
+          let out_args = [[C.cexp|&$id:d|] | d <- dests]
+              args' =
+                [C.cexp|global_failure|] :
+                [C.cexp|global_failure_args|] :
+                out_args ++ args
 
-        what_next <- whatNext
+          what_next <- whatNext
 
-        GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
+          GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
 
     errorInKernel msg@(ErrorMsg parts) backtrace = do
       n <- length . kernelFailures <$> GC.getUserState
       GC.modifyUserState $ \s ->
         s {kernelFailures = kernelFailures s ++ [FailureMsg msg backtrace]}
-      let setArgs _ [] = return []
+      let setArgs _ [] = pure []
           setArgs i (ErrorString {} : parts') = setArgs i parts'
           -- FIXME: bogus for non-ints.
           setArgs i (ErrorVal _ x : parts') = do
             x' <- GC.compileExp x
             stms <- setArgs (i + 1) parts'
-            return $ [C.cstm|global_failure_args[$int:i] = (typename int64_t)$exp:x';|] : stms
+            pure $ [C.cstm|global_failure_args[$int:i] = (typename int64_t)$exp:x';|] : stms
       argstms <- setArgs (0 :: Int) parts
 
       what_next <- whatNext
@@ -848,17 +834,8 @@ typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode
-  ( Copy
-      _
-      (Count (TPrimExp e1))
-      _
-      _
-      (Count (TPrimExp e2))
-      _
-      (Count (TPrimExp e3))
-    ) =
-    typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode (Copy _ _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _ (Count (TPrimExp e3))) =
+  typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (Read _ _ (Count (TPrimExp e1)) t _ _) =

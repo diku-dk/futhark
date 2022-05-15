@@ -118,7 +118,7 @@ inPlaceLowering onOp lower =
           descend (stmsToList consts) $
             bindingFParams (funDefParams fundec) $ do
               body <- optimiseBody $ funDefBody fundec
-              return $ fundec {funDefBody = body}
+              pure $ fundec {funDefBody = body}
 
     descend [] m = m
     descend (stm : stms) m = bindingStm stm $ descend stms m
@@ -131,9 +131,9 @@ optimiseBody ::
   ForwardingM rep (Body (Aliases rep))
 optimiseBody (Body als stms res) = do
   stms' <- deepen $ optimiseStms (stmsToList stms) $ mapM_ (seen . resSubExp) res
-  return $ Body als (stmsFromList stms') res
+  pure $ Body als (stmsFromList stms') res
   where
-    seen Constant {} = return ()
+    seen Constant {} = pure ()
     seen (Var v) = seenVar v
 
 optimiseStms ::
@@ -180,7 +180,7 @@ optimiseStms (stm : stms) m = do
     checkIfForwardableUpdate (Let pat (StmAux cs _ _) e)
       | Pat [PatElem v dec] <- pat,
         BasicOp (Update Unsafe src slice (Var ve)) <- e =
-        maybeForward ve v dec cs src slice
+          maybeForward ve v dec cs src slice
     checkIfForwardableUpdate stm' =
       mapM_ seenVar $ namesToList $ freeIn $ stmExp stm'
 
@@ -214,16 +214,16 @@ onSegOp op =
             deepen $
               optimiseStms (stmsToList (kernelBodyStms kbody)) $
                 mapM_ seenVar $ namesToList $ freeIn $ kernelBodyResult kbody
-          return kbody {kernelBodyStms = stmsFromList stms}
+          pure kbody {kernelBodyStms = stmsFromList stms}
     mapSegOpM mapper op
 
 onMCOp :: OnOp MC
 onMCOp (ParOp par_op op) = ParOp <$> traverse onSegOp par_op <*> onSegOp op
-onMCOp op = return op
+onMCOp op = pure op
 
 onKernelOp :: OnOp GPU
 onKernelOp (SegOp op) = SegOp <$> onSegOp op
-onKernelOp op = return op
+onKernelOp op = pure op
 
 data Entry rep = Entry
   { entryNumber :: Int,
@@ -340,7 +340,7 @@ bindingNumber :: VName -> ForwardingM rep Int
 bindingNumber name = do
   res <- asks $ fmap entryNumber . M.lookup name . topDownTable
   case res of
-    Just n -> return n
+    Just n -> pure n
     Nothing ->
       error $
         "bindingNumber: variable "
@@ -354,14 +354,14 @@ areAvailableBefore :: Names -> VName -> ForwardingM rep Bool
 areAvailableBefore names point = do
   pointN <- bindingNumber point
   nameNs <- mapM bindingNumber $ namesToList names
-  return $ all (< pointN) nameNs
+  pure $ all (< pointN) nameNs
 
 isInCurrentBody :: VName -> ForwardingM rep Bool
 isInCurrentBody name = do
   current <- asks topDownDepth
   res <- asks $ fmap entryDepth . M.lookup name . topDownTable
   case res of
-    Just d -> return $ d == current
+    Just d -> pure $ d == current
     Nothing ->
       error $
         "isInCurrentBody: variable "
@@ -372,7 +372,7 @@ isOptimisable :: VName -> ForwardingM rep Bool
 isOptimisable name = do
   res <- asks $ fmap entryOptimisable . M.lookup name . topDownTable
   case res of
-    Just b -> return b
+    Just b -> pure b
     Nothing ->
       error $
         "isOptimisable: variable "
@@ -391,7 +391,7 @@ seenVar name = do
 tapBottomUp :: ForwardingM rep a -> ForwardingM rep (a, BottomUp rep)
 tapBottomUp m = do
   (x, bup) <- listen m
-  return (x, bup)
+  pure (x, bup)
 
 maybeForward ::
   Constraints rep =>

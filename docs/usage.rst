@@ -80,12 +80,48 @@ All generated executables support the following options.
 
     Print help text to standard output and exit.
 
-  ``-D``
+  ``-D/--debugging``
 
     Print debugging information on standard error.  Exactly what is
     printed, and how it looks, depends on which Futhark compiler is
     used.  This option may also enable more conservative (and slower)
     execution, such as frequently synchronising to check for errors.
+    This implies ``--log``.
+
+  ``-L/--log``
+
+    Print low-overhead logging information during initialisation and
+    during execution of entry points.  Enabling this option should not
+    affect program performance.
+
+  ``--cache-file FILE``
+
+    Create (if necessary) and use data in the provided cache file to
+    speed up subsequent launches of the same program.  The cache file
+    is automatically updated by the running program as necessary.  It
+    is safe to delete at any time, and will be recreated as necessary.
+
+  ``--print-params``
+
+    Print a list of tuning parameters followed by their *parameter
+    class* in parentheses, which indicates what they are used for.
+
+  ``--param SIZE=VALUE``
+
+    Set one of the tunable sizes to the given value.  Using the
+    ``--tuning`` option is more convenient.
+
+  ``--tuning FILE``
+
+    Load tuning options from the indicated *tuning file*.  The file
+    must contain lines of the form ``SIZE=VALUE``, where each *SIZE*
+    must be one of the sizes listed by the ``--print-params`` option
+    (without size class), and the *VALUE* must be a non-negative
+    integer.  Extraneous spaces or blank lines are not allowed.  A zero
+    means to use the default size, whatever it may be.  In case of
+    duplicate assignments to the same size, the last one takes
+    predecence.  This is equivalent to passing each size setting on
+    the command line using the ``--params`` option, but more convenient.
 
 Non-Server Executable Options
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -93,7 +129,7 @@ Non-Server Executable Options
 The following options are only supported on non-server executables,
 because they make no sense in a server context.
 
-  ``-t FILE``
+  ``-t/--write-runtime-to FILE``
 
     Print the time taken to execute the program to the indicated file,
     an integral number of microseconds.  The time taken to perform setup
@@ -101,18 +137,22 @@ because they make no sense in a server context.
     not included in the measurement.  See the documentation for specific
     compilers to see exactly what is measured.
 
-  ``-r RUNS``
+  ``-r/--runs RUNS``
 
     Run the specified entry point the given number of times (plus a
     warmup run).  The program result is only printed once, after the
     last run.  If combined with ``-t``, one measurement is printed per
     run.  This is a good way to perform benchmarking.
 
-  ``-b``
+  ``-b/--binary-output``
 
     Print the result using the binary data format
     (:ref:`binary-data-format`).  For large outputs, this is
     significantly faster and takes up less space.
+
+  ``-n/--no-print-result``
+
+    Do not print the result of running the program.
 
 GPU Options
 ~~~~~~~~~~~
@@ -120,33 +160,18 @@ GPU Options
 The following options are supported by executables generated with the
 GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
 
-  ``-d DEVICE``
+  ``-d/--device DEVICE``
 
     Pick the first device whose name contains the given string.  The
     special string ``#k``, where ``k`` is an integer, can be used to
     pick the *k*-th device, numbered from zero.
 
-  ``--tuning=FILE``
+  ``-P/--profile``
 
-    Load tuning options from the indicated *tuning file*.  The file
-    must contain lines of the form ``SIZE=VALUE``, where each *SIZE*
-    must be one of the sizes listed by the ``--print-sizes`` option
-    (without size class), and the *VALUE* must be a non-negative
-    integer.  Extraneous spaces or blank lines are not allowed.  A zero
-    means to use the default size, whatever it may be.  In case of
-    duplicate assignments to the same size, the last one takes
-    predecence.  This is equivalent to passing each size setting on
-    the command like using the ``--size`` option, but more convenient.
-
-  ``--print-sizes``
-
-    Print a list of tunable sizes followed by their *size class* in
-    parentheses, which indicates what they are used for.
-
-  ``--size=SIZE=VALUE``
-
-    Set one of the tunable sizes to the given value.  Using the
-    ``--tuning`` option is more convenient.
+    Measure the time taken by various GPU operations (such as kernels)
+    and print a summary at the end.  Unfortunately, it is currently
+    nontrivial (and manual) to relate these operations back to source
+    Futhark code.
 
 OpenCL-specific Options
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -154,28 +179,13 @@ OpenCL-specific Options
 The following options are supported by executables generated with the
 OpenCL backends (``opencl``, ``pyopencl``):
 
-  ``-P``
-
-    Measure the time taken by various OpenCL operations (such as
-    kernels) and print a summary at the end.  Unfortunately, it is
-    currently nontrivial (and manual) to relate these operations back
-    to source Futhark code.
-
-  ``-p PLATFORM``
+  ``-p/--platform PLATFORM``
 
     Pick the first OpenCL platform whose name contains the given
     string.  The special string ``#k``, where ``k`` is an integer, can
     be used to pick the *k*-th platform, numbered from zero.  If used
     in conjunction with ``-d``, only the devices from matching
     platforms are considered.
-
-  ``-d DEVICE``
-
-    Pick the first OpenCL device whose name contains the given string.
-    The special string ``#k``, where ``k`` is an integer, can be used
-    to pick the *k*-th device, numbered from zero.  If used in
-    conjunction with ``-p``, only the devices from matching platforms
-    are considered.
 
   ``--default-group-size INT``
 
@@ -257,7 +267,7 @@ The following options are supported by executables generated by the
     Instead of using the embedded CUDA program, load compiled PTX code
     from the indicated file.
 
-  ``--nvrtc-option=OPT``
+  ``--nvrtc-option OPT``
 
     Add the given option to the command line used to compile CUDA
     kernels with NVRTC.  The list of supported options varies with the
@@ -276,11 +286,18 @@ Multicore options
 The following options are supported by executables generated by the
 ``multicore`` backend:
 
-  ``--num-threads=INT``
+  ``--num-threads INT``
 
     The number of threads used to run parallel operations.  If set to
     a value less than ``1``, then the runtime system will use one
     thread per detected core.
+
+  ``-P/--profile``
+
+    Measure the time taken by various parallel sections and print a
+    summary at the end.  Unfortunately, it is currently nontrivial
+    (and manual) to relate these operations back to source Futhark
+    code.
 
 Compiling to Library
 --------------------
@@ -303,6 +320,8 @@ returns an *m*-element tuple, then the function will return *m* values
 below).  Extra parameters may be added to pass in context data, or
 *out*-parameters for writing the result, for target languages that do
 not support multiple return values from functions.
+
+The entry point should have a name that is also a valid C identifier.
 
 Not all Futhark types can be mapped cleanly to the target language.
 Arrays of tuples, for example, are a common issue.  In such cases,
@@ -331,7 +350,7 @@ are as follows:
   with a type abbreviation to give it a specific name, otherwise one
   will be generated.
 
-Return types follow the rules, with one addition:
+Return types follow these rules, with one addition:
 
 * If the return type is an *m*-element tuple, then the function
   returns *m* values, mapped according to the rules above (but not

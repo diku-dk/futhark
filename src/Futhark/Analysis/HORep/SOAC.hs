@@ -273,7 +273,7 @@ isVarishInput (Input ts v t)
   | nullTransforms ts = Just v
   | Reshape cs [DimCoercion _] :< ts' <- viewf ts,
     cs == mempty =
-    isVarishInput $ Input ts' v t
+      isVarishInput $ Input ts' v t
 isVarishInput _ = Nothing
 
 -- | Add a transformation to the end of the transformation list.
@@ -356,13 +356,13 @@ transformRows (ArrayTransforms ts) =
       addTransform (ReshapeInner cs shape) inp
     transformRows' inp (Replicate cs n)
       | inputRank inp == 1 =
-        Rearrange mempty [1, 0]
-          `addTransform` (Replicate cs n `addTransform` inp)
+          Rearrange mempty [1, 0]
+            `addTransform` (Replicate cs n `addTransform` inp)
       | otherwise =
-        Rearrange mempty (2 : 0 : 1 : [3 .. inputRank inp])
-          `addTransform` ( Replicate cs n
-                             `addTransform` (Rearrange mempty (1 : 0 : [2 .. inputRank inp -1]) `addTransform` inp)
-                         )
+          Rearrange mempty (2 : 0 : 1 : [3 .. inputRank inp])
+            `addTransform` ( Replicate cs n
+                               `addTransform` (Rearrange mempty (1 : 0 : [2 .. inputRank inp - 1]) `addTransform` inp)
+                           )
     transformRows' inp nts =
       error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
@@ -371,7 +371,7 @@ transformRows (ArrayTransforms ts) =
 -- transformation list.
 transposeInput :: Int -> Int -> Input -> Input
 transposeInput k n inp =
-  addTransform (Rearrange mempty $ transposeIndex k n [0 .. inputRank inp -1]) inp
+  addTransform (Rearrange mempty $ transposeIndex k n [0 .. inputRank inp - 1]) inp
 
 -- | A definite representation of a SOAC expression.
 data SOAC rep
@@ -534,147 +534,147 @@ soacToStream soac = do
   case soac of
     Screma _ form _
       | Just _ <- Futhark.isMapSOAC form -> do
-        -- Map(f,a) => is translated in strem's body to:
-        -- let strm_resids = map(f,a_ch) in strm_resids
-        --
-        -- array result and input IDs of the stream's lambda
-        strm_resids <- mapM (newIdent "res") loutps
-        let insoac =
-              Futhark.Screma chvar (map paramName strm_inpids) $
-                Futhark.mapSOAC lam'
-            insstm = mkLet strm_resids $ Op insoac
-            strmbdy = mkBody (oneStm insstm) $ map (subExpRes . Futhark.Var . identName) strm_resids
-            strmpar = chunk_param : strm_inpids
-            strmlam = Lambda strmpar strmbdy loutps
-            empty_lam = Lambda [] (mkBody mempty []) []
-        -- map(f,a) creates a stream with NO accumulators
-        return (Stream w (Parallel Disorder Commutative empty_lam) strmlam [] inps, [])
+          -- Map(f,a) => is translated in strem's body to:
+          -- let strm_resids = map(f,a_ch) in strm_resids
+          --
+          -- array result and input IDs of the stream's lambda
+          strm_resids <- mapM (newIdent "res") loutps
+          let insoac =
+                Futhark.Screma chvar (map paramName strm_inpids) $
+                  Futhark.mapSOAC lam'
+              insstm = mkLet strm_resids $ Op insoac
+              strmbdy = mkBody (oneStm insstm) $ map (subExpRes . Futhark.Var . identName) strm_resids
+              strmpar = chunk_param : strm_inpids
+              strmlam = Lambda strmpar strmbdy loutps
+              empty_lam = Lambda [] (mkBody mempty []) []
+          -- map(f,a) creates a stream with NO accumulators
+          pure (Stream w (Parallel Disorder Commutative empty_lam) strmlam [] inps, [])
       | Just (scans, _) <- Futhark.isScanomapSOAC form,
         Futhark.Scan scan_lam nes <- Futhark.singleScan scans -> do
-        -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
-        -- 1. let (scan0_ids,map_resids)   = scanomap(scan_lam, nes, map_lam, a_ch)
-        -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
-        -- 3. let outerszm1id = sizeof(0,strm_resids) - 1
-        -- 4. let lasteel_ids = if outerszm1id < 0
-        --                      then nes
-        --                      else strm_resids[outerszm1id]
-        -- 5. let acc'        = acc + lasteel_ids
-        --    {acc', strm_resids, map_resids}
-        -- the array and accumulator result types
-        let scan_arr_ts = map (`arrayOfRow` chvar) $ lambdaReturnType scan_lam
-            map_arr_ts = drop (length nes) loutps
-            accrtps = lambdaReturnType scan_lam
+          -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
+          -- 1. let (scan0_ids,map_resids)   = scanomap(scan_lam, nes, map_lam, a_ch)
+          -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
+          -- 3. let outerszm1id = sizeof(0,strm_resids) - 1
+          -- 4. let lasteel_ids = if outerszm1id < 0
+          --                      then nes
+          --                      else strm_resids[outerszm1id]
+          -- 5. let acc'        = acc + lasteel_ids
+          --    {acc', strm_resids, map_resids}
+          -- the array and accumulator result types
+          let scan_arr_ts = map (`arrayOfRow` chvar) $ lambdaReturnType scan_lam
+              map_arr_ts = drop (length nes) loutps
+              accrtps = lambdaReturnType scan_lam
 
-        -- array result and input IDs of the stream's lambda
-        strm_resids <- mapM (newIdent "res") scan_arr_ts
-        scan0_ids <- mapM (newIdent "resarr0") scan_arr_ts
-        map_resids <- mapM (newIdent "map_res") map_arr_ts
+          -- array result and input IDs of the stream's lambda
+          strm_resids <- mapM (newIdent "res") scan_arr_ts
+          scan0_ids <- mapM (newIdent "resarr0") scan_arr_ts
+          map_resids <- mapM (newIdent "map_res") map_arr_ts
 
-        lastel_ids <- mapM (newIdent "lstel") accrtps
-        lastel_tmp_ids <- mapM (newIdent "lstel_tmp") accrtps
-        empty_arr <- newIdent "empty_arr" $ Prim Bool
-        inpacc_ids <- mapM (newParam "inpacc") accrtps
-        outszm1id <- newIdent "szm1" $ Prim int64
-        -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
-        let insstm =
-              mkLet (scan0_ids ++ map_resids) . Op $
-                Futhark.Screma chvar (map paramName strm_inpids) $
-                  Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
-            -- 2. let outerszm1id = chunksize - 1
-            outszm1stm =
-              mkLet [outszm1id] . BasicOp $
-                BinOp
-                  (Sub Int64 OverflowUndef)
-                  (Futhark.Var $ paramName chunk_param)
-                  (constant (1 :: Int64))
-            -- 3. let lasteel_ids = ...
-            empty_arr_stm =
-              mkLet [empty_arr] . BasicOp $
-                CmpOp
-                  (CmpSlt Int64)
-                  (Futhark.Var $ identName outszm1id)
-                  (constant (0 :: Int64))
-            leltmpstms =
-              zipWith
-                ( \lid arrid ->
-                    mkLet [lid] . BasicOp $
-                      Index (identName arrid) $
-                        fullSlice
-                          (identType arrid)
-                          [DimFix $ Futhark.Var $ identName outszm1id]
-                )
-                lastel_tmp_ids
-                scan0_ids
-            lelstm =
-              mkLet lastel_ids $
-                If
-                  (Futhark.Var $ identName empty_arr)
-                  (mkBody mempty $ subExpsRes nes)
-                  ( mkBody (stmsFromList leltmpstms) $
-                      varsRes $ map identName lastel_tmp_ids
+          lastel_ids <- mapM (newIdent "lstel") accrtps
+          lastel_tmp_ids <- mapM (newIdent "lstel_tmp") accrtps
+          empty_arr <- newIdent "empty_arr" $ Prim Bool
+          inpacc_ids <- mapM (newParam "inpacc") accrtps
+          outszm1id <- newIdent "szm1" $ Prim int64
+          -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
+          let insstm =
+                mkLet (scan0_ids ++ map_resids) . Op $
+                  Futhark.Screma chvar (map paramName strm_inpids) $
+                    Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam'
+              -- 2. let outerszm1id = chunksize - 1
+              outszm1stm =
+                mkLet [outszm1id] . BasicOp $
+                  BinOp
+                    (Sub Int64 OverflowUndef)
+                    (Futhark.Var $ paramName chunk_param)
+                    (constant (1 :: Int64))
+              -- 3. let lasteel_ids = ...
+              empty_arr_stm =
+                mkLet [empty_arr] . BasicOp $
+                  CmpOp
+                    (CmpSlt Int64)
+                    (Futhark.Var $ identName outszm1id)
+                    (constant (0 :: Int64))
+              leltmpstms =
+                zipWith
+                  ( \lid arrid ->
+                      mkLet [lid] . BasicOp $
+                        Index (identName arrid) $
+                          fullSlice
+                            (identType arrid)
+                            [DimFix $ Futhark.Var $ identName outszm1id]
                   )
-                  $ ifCommon $ map identType lastel_tmp_ids
-        -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
-        maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) scan_lam
-        let mapstm =
-              mkLet strm_resids . Op $
-                Futhark.Screma chvar (map identName scan0_ids) (Futhark.mapSOAC maplam)
-        -- 5. let acc'        = acc + lasteel_ids
-        addlelbdy <-
-          mkPlusBnds scan_lam $
-            map Futhark.Var $
-              map paramName inpacc_ids ++ map identName lastel_ids
-        -- Finally, construct the stream
-        let (addlelstm, addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
-            strmbdy =
-              mkBody (stmsFromList [insstm, outszm1stm, empty_arr_stm, lelstm, mapstm] <> addlelstm) $
-                addlelres ++ map (subExpRes . Futhark.Var . identName) (strm_resids ++ map_resids)
-            strmpar = chunk_param : inpacc_ids ++ strm_inpids
-            strmlam = Lambda strmpar strmbdy (accrtps ++ loutps)
-        return
-          ( Stream w Sequential strmlam nes inps,
-            map paramIdent inpacc_ids
-          )
+                  lastel_tmp_ids
+                  scan0_ids
+              lelstm =
+                mkLet lastel_ids $
+                  If
+                    (Futhark.Var $ identName empty_arr)
+                    (mkBody mempty $ subExpsRes nes)
+                    ( mkBody (stmsFromList leltmpstms) $
+                        varsRes $ map identName lastel_tmp_ids
+                    )
+                    $ ifCommon $ map identType lastel_tmp_ids
+          -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
+          maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) scan_lam
+          let mapstm =
+                mkLet strm_resids . Op $
+                  Futhark.Screma chvar (map identName scan0_ids) (Futhark.mapSOAC maplam)
+          -- 5. let acc'        = acc + lasteel_ids
+          addlelbdy <-
+            mkPlusBnds scan_lam $
+              map Futhark.Var $
+                map paramName inpacc_ids ++ map identName lastel_ids
+          -- Finally, construct the stream
+          let (addlelstm, addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
+              strmbdy =
+                mkBody (stmsFromList [insstm, outszm1stm, empty_arr_stm, lelstm, mapstm] <> addlelstm) $
+                  addlelres ++ map (subExpRes . Futhark.Var . identName) (strm_resids ++ map_resids)
+              strmpar = chunk_param : inpacc_ids ++ strm_inpids
+              strmlam = Lambda strmpar strmbdy (accrtps ++ loutps)
+          pure
+            ( Stream w Sequential strmlam nes inps,
+              map paramIdent inpacc_ids
+            )
       | Just (reds, _) <- Futhark.isRedomapSOAC form,
         Futhark.Reduce comm lamin nes <- Futhark.singleReduce reds -> do
-        -- Redomap(+,lam,nes,a) => is translated in strem's body to:
-        -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-        -- 2. let acc'                   = acc + acc0_ids          in
-        --    {acc', strm_resids}
+          -- Redomap(+,lam,nes,a) => is translated in strem's body to:
+          -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
+          -- 2. let acc'                   = acc + acc0_ids          in
+          --    {acc', strm_resids}
 
-        let accrtps = take (length nes) $ lambdaReturnType lam
-            -- the chunked-outersize of the array result and input types
-            loutps' = drop (length nes) loutps
-            -- the lambda with proper index
-            foldlam = lam'
-        -- array result and input IDs of the stream's lambda
-        strm_resids <- mapM (newIdent "res") loutps'
-        inpacc_ids <- mapM (newParam "inpacc") accrtps
-        acc0_ids <- mapM (newIdent "acc0") accrtps
-        -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-        let insoac =
-              Futhark.Screma
-                chvar
-                (map paramName strm_inpids)
-                $ Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
-            insstm = mkLet (acc0_ids ++ strm_resids) $ Op insoac
-        -- 2. let acc'     = acc + acc0_ids    in
-        addaccbdy <-
-          mkPlusBnds lamin $
-            map Futhark.Var $
-              map paramName inpacc_ids ++ map identName acc0_ids
-        -- Construct the stream
-        let (addaccstm, addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
-            strmbdy =
-              mkBody (oneStm insstm <> addaccstm) $
-                addaccres ++ map (subExpRes . Futhark.Var . identName) strm_resids
-            strmpar = chunk_param : inpacc_ids ++ strm_inpids
-            strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
-        lam0 <- renameLambda lamin
-        return (Stream w (Parallel InOrder comm lam0) strmlam nes inps, [])
+          let accrtps = take (length nes) $ lambdaReturnType lam
+              -- the chunked-outersize of the array result and input types
+              loutps' = drop (length nes) loutps
+              -- the lambda with proper index
+              foldlam = lam'
+          -- array result and input IDs of the stream's lambda
+          strm_resids <- mapM (newIdent "res") loutps'
+          inpacc_ids <- mapM (newParam "inpacc") accrtps
+          acc0_ids <- mapM (newIdent "acc0") accrtps
+          -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
+          let insoac =
+                Futhark.Screma
+                  chvar
+                  (map paramName strm_inpids)
+                  $ Futhark.redomapSOAC [Futhark.Reduce comm lamin nes] foldlam
+              insstm = mkLet (acc0_ids ++ strm_resids) $ Op insoac
+          -- 2. let acc'     = acc + acc0_ids    in
+          addaccbdy <-
+            mkPlusBnds lamin $
+              map Futhark.Var $
+                map paramName inpacc_ids ++ map identName acc0_ids
+          -- Construct the stream
+          let (addaccstm, addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
+              strmbdy =
+                mkBody (oneStm insstm <> addaccstm) $
+                  addaccres ++ map (subExpRes . Futhark.Var . identName) strm_resids
+              strmpar = chunk_param : inpacc_ids ++ strm_inpids
+              strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
+          lam0 <- renameLambda lamin
+          pure (Stream w (Parallel InOrder comm lam0) strmlam nes inps, [])
 
     -- Otherwise it cannot become a stream.
-    _ -> return (soac, [])
+    _ -> pure (soac, [])
   where
     mkMapPlusAccLam ::
       (MonadFreshNames m, Buildable rep) =>
@@ -709,4 +709,4 @@ soacToStream soac = do
               (lambdaParams plus')
               accels
           body = lambdaBody plus'
-      return $ body {bodyStms = stmsFromList parstms <> bodyStms body}
+      pure $ body {bodyStms = stmsFromList parstms <> bodyStms body}

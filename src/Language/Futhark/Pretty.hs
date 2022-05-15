@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -49,7 +50,7 @@ class IsName v where
 instance IsName VName where
   pprName
     | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
-      \(VName vn i) -> ppr vn <> text "_" <> text (show i)
+        \(VName vn i) -> ppr vn <> text "_" <> text (show i)
     | otherwise = ppr . baseName
 
 instance IsName Name where
@@ -71,9 +72,6 @@ instance Annot NoInfo where
 
 instance Annot Info where
   unAnnot = Just . unInfo
-
-pprAnnot :: (Annot f, Pretty a, Pretty b) => a -> f b -> Doc
-pprAnnot a b = maybe (ppr a) ppr $ unAnnot b
 
 instance Pretty Value where
   ppr (PrimValue bv) = ppr bv
@@ -133,11 +131,11 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
       ppr u <> ppr (qualNameFromTypeName et) <+> spread (map (pprPrec 3) targs)
   pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
-      oneLine (parens $ commasep $ map ppr ts)
-        <|> parens (align $ mconcat $ punctuate (text "," <> line) $ map ppr ts)
+        oneLine (parens $ commasep $ map ppr ts)
+          <|> parens (align $ mconcat $ punctuate (text "," <> line) $ map ppr ts)
     | otherwise =
-      oneLine (braces $ commasep fs')
-        <|> braces (align $ mconcat $ punctuate (text "," <> line) fs')
+        oneLine (braces $ commasep fs')
+          <|> braces (align $ mconcat $ punctuate (text "," <> line) fs')
     where
       ppField (name, t) = text (nameToString name) <> colon <+> align (ppr t)
       fs' = map ppField $ M.toList fs
@@ -156,7 +154,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr = pprPrec 0
-  pprPrec _ (Array _ u at shape) = ppr u <> ppr shape <> align (pprPrec 1 at)
+  pprPrec _ (Array _ u shape at) = ppr u <> ppr shape <> align (pprPrec 1 at)
   pprPrec p (Scalar t) = pprPrec p t
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
@@ -166,7 +164,7 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
 
 instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
-  ppr (TEArray at d _) = brackets (ppr d) <> ppr at
+  ppr (TEArray d at _) = brackets (ppr d) <> ppr at
   ppr (TETuple ts _) = parens $ commasep $ map ppr ts
   ppr (TERecord fs _) = braces $ commasep $ map ppField fs
     where
@@ -187,9 +185,6 @@ instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = brackets $ ppr d
   ppr (TypeArgExpType t) = ppr t
-
-instance (Eq vn, IsName vn, Annot f) => Pretty (TypeDeclBase f vn) where
-  ppr x = pprAnnot (declaredType x) (expandedType x)
 
 instance IsName vn => Pretty (QualName vn) where
   ppr (QualName names name) =
@@ -268,17 +263,17 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
         Nothing -> mempty
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
-      text "let" <+> ppr dest <> list (map ppr idxs)
-        <+> equals
-        <+> align (ppr ve)
-        </> letBody body
+        text "let" <+> ppr dest <> list (map ppr idxs)
+          <+> equals
+          <+> align (ppr ve)
+          </> letBody body
     | otherwise =
-      text "let" <+> ppr dest <+> equals <+> ppr src
-        <+> text "with"
-        <+> brackets (commasep (map ppr idxs))
-        <+> text "="
-        <+> align (ppr ve)
-        </> letBody body
+        text "let" <+> ppr dest <+> equals <+> ppr src
+          <+> text "with"
+          <+> brackets (commasep (map ppr idxs))
+          <+> text "="
+          <+> align (ppr ve)
+          </> letBody body
   pprPrec p (Range start maybe_step end _) =
     parensIf (p /= -1) $
       ppr start
@@ -301,7 +296,14 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
       inst = case unAnnot t of
         Just t'
           | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
-            text "@" <> parens (align $ ppr t')
+              text "@" <> parens (align $ ppr t')
+        _ -> mempty
+  pprPrec _ (Hole t _) = "???" <> inst
+    where
+      inst = case unAnnot t of
+        Just t'
+          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
+              text "@" <> parens (align $ ppr t')
         _ -> mempty
   pprPrec _ (Parens e _) = align $ parens $ ppr e
   pprPrec _ (QualParens (v, _) e _) = ppr v <> text "." <> align (parens $ ppr e)
@@ -325,7 +327,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
       info' = case unAnnot info of
         Just t
           | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
-            text "@" <> parens (align $ ppr t)
+              text "@" <> parens (align $ ppr t)
         _ -> mempty
   pprPrec _ (StringLit s _) =
     text $ show $ map (chr . fromIntegral) s
@@ -477,7 +479,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
   ppr (TypeSpec l name ps _ _) =
     text "type" <> ppr l <+> pprName name <+> spread (map ppr ps)
-  ppr (ValSpec name tparams vtype _ _) =
+  ppr (ValSpec name tparams vtype _ _ _) =
     text "val" <+> pprName name <+> spread (map ppr tparams) <> colon <+> ppr vtype
   ppr (ModSpec name sig _ _) =
     text "module" <+> pprName name <> colon <+> ppr sig

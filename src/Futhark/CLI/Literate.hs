@@ -34,6 +34,7 @@ import Futhark.Test
 import Futhark.Test.Values
 import Futhark.Util
   ( directoryContents,
+    fancyTerminal,
     hashText,
     nubOrd,
     runProgramWithExitCode,
@@ -41,6 +42,7 @@ import Futhark.Util
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.ProgressBar
 import System.Directory
   ( copyFile,
     createDirectoryIfMissing,
@@ -57,11 +59,21 @@ import Text.Megaparsec hiding (State, failure, token)
 import Text.Megaparsec.Char
 import Text.Printf
 
+newtype ImgParams = ImgParams
+  { imgFile :: Maybe FilePath
+  }
+  deriving (Show)
+
+defaultImgParams :: ImgParams
+defaultImgParams =
+  ImgParams {imgFile = Nothing}
+
 data VideoParams = VideoParams
   { videoFPS :: Maybe Int,
     videoLoop :: Maybe Bool,
     videoAutoplay :: Maybe Bool,
-    videoFormat :: Maybe T.Text
+    videoFormat :: Maybe T.Text,
+    videoFile :: Maybe FilePath
   }
   deriving (Show)
 
@@ -71,14 +83,15 @@ defaultVideoParams =
     { videoFPS = Nothing,
       videoLoop = Nothing,
       videoAutoplay = Nothing,
-      videoFormat = Nothing
+      videoFormat = Nothing,
+      videoFile = Nothing
     }
 
 data Directive
   = DirectiveRes Exp
   | DirectiveBrief Directive
   | DirectiveCovert Directive
-  | DirectiveImg Exp
+  | DirectiveImg Exp ImgParams
   | DirectivePlot Exp (Maybe (Int, Int))
   | DirectiveGnuplot Exp T.Text
   | DirectiveVideo Exp VideoParams
@@ -88,7 +101,7 @@ varsInDirective :: Directive -> S.Set EntryName
 varsInDirective (DirectiveRes e) = varsInExp e
 varsInDirective (DirectiveBrief d) = varsInDirective d
 varsInDirective (DirectiveCovert d) = varsInDirective d
-varsInDirective (DirectiveImg e) = varsInExp e
+varsInDirective (DirectiveImg e _) = varsInExp e
 varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveVideo e _) = varsInExp e
@@ -100,8 +113,17 @@ pprDirective _ (DirectiveBrief f) =
   pprDirective False f
 pprDirective _ (DirectiveCovert f) =
   pprDirective False f
-pprDirective _ (DirectiveImg e) =
+pprDirective _ (DirectiveImg e params) =
   "> :img " <> PP.align (PP.ppr e)
+    <> if null params' then mempty else PP.stack $ ";" : params'
+  where
+    params' =
+      catMaybes
+        [ p "file" imgFile PP.ppr
+        ]
+    p s f ppr = do
+      x <- f params
+      Just $ s <> ": " <> ppr x
 pprDirective True (DirectivePlot e (Just (h, w))) =
   PP.stack
     [ "> :plot2d " <> PP.ppr e <> ";",
@@ -126,7 +148,8 @@ pprDirective True (DirectiveVideo e params) =
         [ p "fps" videoFPS PP.ppr,
           p "loop" videoLoop ppBool,
           p "autoplay" videoAutoplay ppBool,
-          p "format" videoFormat PP.strictText
+          p "format" videoFormat PP.strictText,
+          p "file" videoFile PP.ppr
         ]
     ppBool b = if b then "true" else "false"
     p s f ppr = do
@@ -191,6 +214,35 @@ parsePlotParams =
       *> token "("
       *> ((,) <$> parseInt <* token "," <*> parseInt) <* token ")"
 
+withPredicate :: (a -> Bool) -> String -> Parser a -> Parser a
+withPredicate f msg p = do
+  r <- lookAhead p
+  if f r then p else fail msg
+
+parseFilePath :: Parser FilePath
+parseFilePath =
+  withPredicate ok "filename must not have directory component" p
+  where
+    p = T.unpack <$> lexeme (takeWhileP Nothing (not . isSpace))
+    ok f = takeFileName f == f
+
+parseImgParams :: Parser ImgParams
+parseImgParams =
+  fmap (fromMaybe defaultImgParams) $
+    optional $ ";" *> hspace *> eol *> "-- " *> parseParams defaultImgParams
+  where
+    parseParams params =
+      choice
+        [ choice
+            [pFile params]
+            >>= parseParams,
+          pure params
+        ]
+    pFile params = do
+      token "file:"
+      b <- parseFilePath
+      pure params {imgFile = Just b}
+
 parseVideoParams :: Parser VideoParams
 parseVideoParams =
   fmap (fromMaybe defaultVideoParams) $
@@ -246,7 +298,8 @@ parseBlock =
           directiveName "brief" $> DirectiveBrief
             <*> parseDirective,
           directiveName "img" $> DirectiveImg
-            <*> parseExp postlexeme <* eol,
+            <*> parseExp postlexeme
+            <*> parseImgParams <* eol,
           directiveName "plot2d" $> DirectivePlot
             <*> parseExp postlexeme
             <*> parsePlotParams <* eol,
@@ -341,29 +394,29 @@ vecToBMP h w = BMP.renderBMP . BMP.packRGBA32ToBMP24 w h . SVec.vectorToByteStri
     frobVec vec = SVec.generate (h * w * 4) (pix vec)
     pix vec l =
       let (i, j) = (l `div` 4) `divMod` w
-          argb = vec SVec.! ((h -1 - i) * w + j)
+          argb = vec SVec.! ((h - 1 - i) * w + j)
           c = (argb `shiftR` (24 - ((l + 1) `mod` 4) * 8)) .&. 0xFF
        in fromIntegral c :: Word8
 
 valueToBMP :: Value -> Maybe LBS.ByteString
 valueToBMP v@(U32Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w bytes
+      Just $ vecToBMP h w bytes
 valueToBMP v@(I32Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ SVec.map fromIntegral bytes
+      Just $ vecToBMP h w $ SVec.map fromIntegral bytes
 valueToBMP v@(F32Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ greyFloatToImg bytes
+      Just $ vecToBMP h w $ greyFloatToImg bytes
 valueToBMP v@(U8Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ greyByteToImg bytes
+      Just $ vecToBMP h w $ greyByteToImg bytes
 valueToBMP v@(F64Value _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ greyFloatToImg bytes
+      Just $ vecToBMP h w $ greyFloatToImg bytes
 valueToBMP v@(BoolValue _ bytes)
   | [h, w] <- valueShape v =
-    Just $ vecToBMP h w $ greyByteToImg $ SVec.map ((*) 255 . fromEnum) bytes
+      Just $ vecToBMP h w $ greyByteToImg $ SVec.map ((*) 255 . fromEnum) bytes
 valueToBMP _ = Nothing
 
 valueToBMPs :: Value -> Maybe [LBS.ByteString]
@@ -404,14 +457,14 @@ videoBlock opts f = "\n\n![](" <> T.pack f <> ")" <> opts' <> "\n\n"
   where
     opts'
       | all T.null [loop, autoplay] =
-        mempty
+          mempty
       | otherwise =
-        "{" <> T.unwords [loop, autoplay] <> "}"
+          "{" <> T.unwords [loop, autoplay] <> "}"
     boolOpt s prop
       | Just b <- prop opts =
-        if b then s <> "=\"true\"" else s <> "=\"false\""
+          if b then s <> "=\"true\"" else s <> "=\"false\""
       | otherwise =
-        mempty
+          mempty
     loop = boolOpt "loop" videoLoop
     autoplay = boolOpt "autoplay" videoAutoplay
 
@@ -449,7 +502,7 @@ loadBMP bmpfile = do
           shape = SVec.fromList [fromIntegral h, fromIntegral w]
           pix l =
             let (i, j) = l `divMod` w
-                l' = (h -1 - i) * w + j
+                l' = (h - 1 - i) * w + j
                 r = fromIntegral $ bmp_bs `BS.index` (l' * 4)
                 g = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 1)
                 b = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 2)
@@ -481,8 +534,8 @@ literateBuiltin "loadimg" vs =
   case vs of
     [ValueAtom v]
       | Just path <- getValue v -> do
-        let path' = map (chr . fromIntegral) (path :: [Word8])
-        loadImage path'
+          let path' = map (chr . fromIntegral) (path :: [Word8])
+          loadImage path'
     _ ->
       throwError $
         "$loadimg does not accept arguments of types: "
@@ -491,8 +544,8 @@ literateBuiltin "loaddata" vs =
   case vs of
     [ValueAtom v]
       | Just path <- getValue v -> do
-        let path' = map (chr . fromIntegral) (path :: [Word8])
-        loadData path'
+          let path' = map (chr . fromIntegral) (path :: [Word8])
+          loadData path'
     _ ->
       throwError $
         "$loaddata does not accept arguments of types: "
@@ -533,9 +586,9 @@ data Env = Env
     envHash :: T.Text
   }
 
-newFileWorker :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM (FilePath, FilePath)
-newFileWorker env template m = do
-  let fname_base = T.unpack (envHash env) <> "-" <> template
+newFileWorker :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM (FilePath, FilePath)
+newFileWorker env (fname_desired, template) m = do
+  let fname_base = fromMaybe (T.unpack (envHash env) <> "-" <> template) fname_desired
       fname = envImgDir env </> fname_base
       fname_rel = envRelImgDir env </> fname_base
   exists <- liftIO $ doesFileExist fname
@@ -549,12 +602,12 @@ newFileWorker env template m = do
   modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
   pure (fname, fname_rel)
 
-newFile :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM FilePath
-newFile env template m = snd <$> newFileWorker env template m
+newFile :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM FilePath
+newFile env f m = snd <$> newFileWorker env f m
 
-newFileContents :: Env -> FilePath -> (FilePath -> ScriptM ()) -> ScriptM T.Text
-newFileContents env template m =
-  liftIO . T.readFile . fst =<< newFileWorker env template m
+newFileContents :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM T.Text
+newFileContents env f m =
+  liftIO . T.readFile . fst =<< newFileWorker env f m
 
 processDirective :: Env -> Directive -> ScriptM T.Text
 processDirective env (DirectiveBrief d) =
@@ -563,7 +616,7 @@ processDirective env (DirectiveCovert d) =
   processDirective env d
 processDirective env (DirectiveRes e) = do
   result <-
-    newFileContents env "eval.txt" $ \resultf -> do
+    newFileContents env (Nothing, "eval.txt") $ \resultf -> do
       v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
       liftIO $ T.writeFile resultf $ prettyText v
   pure $
@@ -578,16 +631,16 @@ processDirective env (DirectiveRes e) = do
     nope t =
       throwError $ "Cannot show value of type " <> prettyText t
 --
-processDirective env (DirectiveImg e) = do
-  fmap imgBlock . newFile env "img.png" $ \pngfile -> do
+processDirective env (DirectiveImg e params) = do
+  fmap imgBlock . newFile env (imgFile params, "img.png") $ \pngfile -> do
     maybe_v <- evalExpToGround literateBuiltin (envServer env) e
     case maybe_v of
       Right (ValueAtom v)
         | Just bmp <- valueToBMP v -> do
-          withTempDir $ \dir -> do
-            let bmpfile = dir </> "img.bmp"
-            liftIO $ LBS.writeFile bmpfile bmp
-            void $ system "convert" [bmpfile, pngfile] mempty
+            withTempDir $ \dir -> do
+              let bmpfile = dir </> "img.bmp"
+              liftIO $ LBS.writeFile bmpfile bmp
+              void $ system "convert" [bmpfile, pngfile] mempty
       Right v ->
         nope $ fmap valueType v
       Left t ->
@@ -598,15 +651,15 @@ processDirective env (DirectiveImg e) = do
         "Cannot create image from value of type " <> prettyText t
 --
 processDirective env (DirectivePlot e size) = do
-  fmap imgBlock . newFile env "plot.png" $ \pngfile -> do
+  fmap imgBlock . newFile env (Nothing, "plot.png") $ \pngfile -> do
     maybe_v <- evalExpToGround literateBuiltin (envServer env) e
     case maybe_v of
       Right v
         | Just vs <- plottable2d v ->
-          plotWith [(Nothing, vs)] pngfile
+            plotWith [(Nothing, vs)] pngfile
       Right (ValueRecord m)
         | Just m' <- traverse plottable2d m -> do
-          plotWith (map (first Just) $ M.toList m') pngfile
+            plotWith (map (first Just) $ M.toList m') pngfile
       Right v ->
         throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
       Left t ->
@@ -642,12 +695,12 @@ processDirective env (DirectivePlot e size) = do
         void $ system "gnuplot" [] script
 --
 processDirective env (DirectiveGnuplot e script) = do
-  fmap imgBlock . newFile env "plot.png" $ \pngfile -> do
+  fmap imgBlock . newFile env (Nothing, "plot.png") $ \pngfile -> do
     maybe_v <- evalExpToGround literateBuiltin (envServer env) e
     case maybe_v of
       Right (ValueRecord m)
         | Just m' <- traverse plottable m ->
-          plotWith (M.toList m') pngfile
+            plotWith (M.toList m') pngfile
       Right v ->
         throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
       Left t ->
@@ -667,7 +720,8 @@ processDirective env (DirectiveVideo e params) = do
   when (format `notElem` ["webm", "gif"]) $
     throwError $ "Unknown video format: " <> format
 
-  fmap (videoBlock params) . newFile env ("video" <.> T.unpack format) $ \videofile -> do
+  let file = (videoFile params, "video" <.> T.unpack format)
+  fmap (videoBlock params) . newFile env file $ \videofile -> do
     v <- evalExp literateBuiltin (envServer env) e
     let nope =
           throwError $
@@ -685,12 +739,12 @@ processDirective env (DirectiveVideo e params) = do
         | ValueAtom (SFun stepfun' _ [_, _] closure) <- stepfun,
           ValueAtom (SValue _ _) <- initial,
           ValueAtom (SValue "i64" _) <- num_frames -> do
-          Just (ValueAtom num_frames') <-
-            mapM getValue <$> getExpValue (envServer env) num_frames
-          withTempDir $ \dir -> do
-            let num_frames_int = fromIntegral (num_frames' :: Int64)
-            renderFrames dir (stepfun', map ValueAtom closure) initial num_frames_int
-            onWebM videofile =<< bmpsToVideo dir
+            Just (ValueAtom num_frames') <-
+              mapM getValue <$> getExpValue (envServer env) num_frames
+            withTempDir $ \dir -> do
+              let num_frames_int = fromIntegral (num_frames' :: Int64)
+              renderFrames dir (stepfun', map ValueAtom closure) initial num_frames_int
+              onWebM videofile =<< bmpsToVideo dir
       _ ->
         nope
   where
@@ -698,10 +752,32 @@ processDirective env (DirectiveVideo e params) = do
     format = fromMaybe "webm" $ videoFormat params
     bmpfile dir j = dir </> printf "frame%010d.bmp" (j :: Int)
 
-    renderFrames dir (stepfun, closure) initial num_frames =
-      foldM_ frame initial [0 .. num_frames -1]
+    (progressStep, progressDone)
+      | fancyTerminal,
+        scriptVerbose (envOpts env) > 0 =
+          ( \j num_frames -> do
+              liftIO . T.putStr $
+                "\r"
+                  <> progressBar
+                    (ProgressBar 40 (fromIntegral num_frames - 1) (fromIntegral j))
+                  <> "generating frame "
+                  <> prettyText (j + 1)
+                  <> "/"
+                  <> prettyText num_frames
+                  <> " "
+              liftIO $ hFlush stdout,
+            liftIO $ do
+              T.putStrLn ""
+          )
+      | otherwise =
+          (\_ _ -> pure (), pure ())
+
+    renderFrames dir (stepfun, closure) initial num_frames = do
+      foldM_ frame initial [0 .. num_frames - 1]
+      progressDone
       where
         frame old_state j = do
+          progressStep j num_frames
           v <-
             evalExp literateBuiltin (envServer env)
               . Call (FuncFut stepfun)
@@ -750,9 +826,9 @@ processDirective env (DirectiveVideo e params) = do
 
     onWebM videofile webmfile
       | format == "gif" =
-        void $ system "ffmpeg" ["-i", webmfile, videofile] mempty
+          void $ system "ffmpeg" ["-i", webmfile, videofile] mempty
       | otherwise =
-        liftIO $ copyFile webmfile videofile
+          liftIO $ copyFile webmfile videofile
 
 -- Did this script block succeed or fail?
 data Failure = Failure | Success
@@ -879,7 +955,7 @@ main :: String -> [String] -> IO ()
 main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts ->
   case args of
     [prog] -> Just $ do
-      futhark <- maybe getExecutablePath return $ scriptFuthark opts
+      futhark <- maybe getExecutablePath pure $ scriptFuthark opts
 
       script <- parseProgFile prog
 
@@ -912,7 +988,15 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
           imgdir_rel = dropExtension (takeFileName mdfile) <> "-img"
           imgdir = takeDirectory mdfile </> imgdir_rel
           run_options = scriptExtraOptions opts
-          cfg = futharkServerCfg ("." </> dropExtension prog) run_options
+          onLine "call" l = T.putStrLn l
+          onLine _ _ = pure ()
+          cfg =
+            (futharkServerCfg ("." </> dropExtension prog) run_options)
+              { cfgOnLine =
+                  if scriptVerbose opts > 0
+                    then onLine
+                    else const . const $ pure ()
+              }
 
       withScriptServer cfg $ \server -> do
         let env =

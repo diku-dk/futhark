@@ -25,10 +25,13 @@ module Futhark.IR.GPU.Op
   )
 where
 
+import Control.Monad
+import qualified Data.Sequence as SQ
+import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR
-import Futhark.IR.Aliases (Aliases)
+import Futhark.IR.Aliases (Aliases, removeBodyAliases)
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
@@ -45,7 +48,6 @@ import Futhark.Util.Pretty
     (<+>),
   )
 import qualified Futhark.Util.Pretty as PP
-import Prelude hiding (id, (.))
 
 -- | At which level the *body* of a t'SegOp' executes.
 data SegLevel
@@ -224,11 +226,11 @@ instance OpMetrics SizeOp where
 typeCheckSizeOp :: TC.Checkable rep => SizeOp -> TC.TypeM rep ()
 typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
   case o of
-    SplitContiguous -> return ()
+    SplitContiguous -> pure ()
     SplitStrided stride -> TC.require [Prim int64] stride
   mapM_ (TC.require [Prim int64]) [w, i, elems_per_thread]
-typeCheckSizeOp GetSize {} = return ()
-typeCheckSizeOp GetSizeMax {} = return ()
+typeCheckSizeOp GetSize {} = pure ()
+typeCheckSizeOp GetSizeMax {} = pure ()
 typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int64] x
 typeCheckSizeOp (CalcNumGroups w _ group_size) = do
   TC.require [Prim int64] w
@@ -240,6 +242,9 @@ data HostOp rep op
     SegOp (SegOp SegLevel rep)
   | SizeOp SizeOp
   | OtherOp op
+  | -- | Code to run sequentially on the GPU,
+    -- in a single thread.
+    GPUBody [Type] (Body rep)
   deriving (Eq, Ord, Show)
 
 -- | A helper for defining 'TraverseOpStms'.
@@ -250,6 +255,9 @@ traverseHostOpStms ::
 traverseHostOpStms _ f (SegOp segop) = SegOp <$> traverseSegOpStms f segop
 traverseHostOpStms _ _ (SizeOp sizeop) = pure $ SizeOp sizeop
 traverseHostOpStms onOtherOp f (OtherOp other) = OtherOp <$> onOtherOp f other
+traverseHostOpStms _ f (GPUBody ts body) = do
+  stms <- f mempty $ bodyStms body
+  pure $ GPUBody ts $ body {bodyStms = stms}
 
 instance (ASTRep rep, Substitute op) => Substitute (HostOp rep op) where
   substituteNames substs (SegOp op) =
@@ -258,50 +266,65 @@ instance (ASTRep rep, Substitute op) => Substitute (HostOp rep op) where
     OtherOp $ substituteNames substs op
   substituteNames substs (SizeOp op) =
     SizeOp $ substituteNames substs op
+  substituteNames substs (GPUBody ts body) =
+    GPUBody (substituteNames substs ts) (substituteNames substs body)
 
 instance (ASTRep rep, Rename op) => Rename (HostOp rep op) where
   rename (SegOp op) = SegOp <$> rename op
   rename (OtherOp op) = OtherOp <$> rename op
   rename (SizeOp op) = SizeOp <$> rename op
+  rename (GPUBody ts body) = GPUBody <$> rename ts <*> rename body
 
 instance (ASTRep rep, IsOp op) => IsOp (HostOp rep op) where
   safeOp (SegOp op) = safeOp op
   safeOp (OtherOp op) = safeOp op
   safeOp (SizeOp op) = safeOp op
+  safeOp GPUBody {} = True
 
   cheapOp (SegOp op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
   cheapOp (SizeOp op) = cheapOp op
+  cheapOp (GPUBody types body) =
+    -- Current GPUBody usage only benefits from hoisting kernels that
+    -- transfer scalars to device.
+    SQ.null (bodyStms body) && all ((== 0) . arrayRank) types
 
 instance TypedOp op => TypedOp (HostOp rep op) where
   opType (SegOp op) = opType op
   opType (OtherOp op) = opType op
   opType (SizeOp op) = opType op
+  opType (GPUBody ts _) =
+    pure $ staticShapes $ map (`arrayOfRow` intConst Int64 1) ts
 
 instance (Aliased rep, AliasedOp op, ASTRep rep) => AliasedOp (HostOp rep op) where
   opAliases (SegOp op) = opAliases op
   opAliases (OtherOp op) = opAliases op
   opAliases (SizeOp op) = opAliases op
+  opAliases (GPUBody ts _) = map (const mempty) ts
 
   consumedInOp (SegOp op) = consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
   consumedInOp (SizeOp op) = consumedInOp op
+  consumedInOp (GPUBody _ body) = consumedInBody body
 
 instance (ASTRep rep, FreeIn op) => FreeIn (HostOp rep op) where
   freeIn' (SegOp op) = freeIn' op
   freeIn' (OtherOp op) = freeIn' op
   freeIn' (SizeOp op) = freeIn' op
+  freeIn' (GPUBody ts body) = freeIn' ts <> freeIn' body
 
 instance (CanBeAliased (Op rep), CanBeAliased op, ASTRep rep) => CanBeAliased (HostOp rep op) where
   type OpWithAliases (HostOp rep op) = HostOp (Aliases rep) (OpWithAliases op)
 
   addOpAliases aliases (SegOp op) = SegOp $ addOpAliases aliases op
+  addOpAliases aliases (GPUBody ts body) = GPUBody ts $ Alias.analyseBody aliases body
   addOpAliases aliases (OtherOp op) = OtherOp $ addOpAliases aliases op
   addOpAliases _ (SizeOp op) = SizeOp op
 
   removeOpAliases (SegOp op) = SegOp $ removeOpAliases op
   removeOpAliases (OtherOp op) = OtherOp $ removeOpAliases op
   removeOpAliases (SizeOp op) = SizeOp op
+  removeOpAliases (GPUBody ts body) = GPUBody ts $ removeBodyAliases body
 
 instance (CanBeWise (Op rep), CanBeWise op, ASTRep rep) => CanBeWise (HostOp rep op) where
   type OpWithWisdom (HostOp rep op) = HostOp (Wise rep) (OpWithWisdom op)
@@ -309,10 +332,12 @@ instance (CanBeWise (Op rep), CanBeWise op, ASTRep rep) => CanBeWise (HostOp rep
   removeOpWisdom (SegOp op) = SegOp $ removeOpWisdom op
   removeOpWisdom (OtherOp op) = OtherOp $ removeOpWisdom op
   removeOpWisdom (SizeOp op) = SizeOp op
+  removeOpWisdom (GPUBody ts body) = GPUBody ts $ removeBodyWisdom body
 
   addOpWisdom (SegOp op) = SegOp $ addOpWisdom op
   addOpWisdom (OtherOp op) = OtherOp $ addOpWisdom op
   addOpWisdom (SizeOp op) = SizeOp op
+  addOpWisdom (GPUBody ts body) = GPUBody ts $ informBody body
 
 instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (HostOp rep op) where
   indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is
@@ -323,11 +348,14 @@ instance (PrettyRep rep, PP.Pretty op) => PP.Pretty (HostOp rep op) where
   ppr (SegOp op) = ppr op
   ppr (OtherOp op) = ppr op
   ppr (SizeOp op) = ppr op
+  ppr (GPUBody ts body) =
+    "gpu" <+> PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
 
 instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (HostOp rep op) where
   opMetrics (SegOp op) = opMetrics op
   opMetrics (OtherOp op) = opMetrics op
   opMetrics (SizeOp op) = opMetrics op
+  opMetrics (GPUBody _ body) = inside "GPUBody" $ bodyMetrics body
 
 checkSegLevel ::
   TC.Checkable rep =>
@@ -342,9 +370,9 @@ checkSegLevel (Just SegThread {}) _ =
 checkSegLevel (Just x) y
   | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ pretty x
   | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
-    TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
+      TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
   | otherwise =
-    return ()
+      pure ()
 
 typeCheckHostOp ::
   TC.Checkable rep =>
@@ -356,5 +384,18 @@ typeCheckHostOp ::
 typeCheckHostOp checker lvl _ (SegOp op) =
   TC.checkOpWith (checker $ segLevel op) $
     typeCheckSegOp (checkSegLevel lvl) op
+typeCheckHostOp _ Just {} _ GPUBody {} =
+  TC.bad $ TC.TypeError "GPUBody may not be nested in SegOps."
 typeCheckHostOp _ _ f (OtherOp op) = f op
 typeCheckHostOp _ _ _ (SizeOp op) = typeCheckSizeOp op
+typeCheckHostOp _ Nothing _ (GPUBody ts body) = do
+  mapM_ TC.checkType ts
+  void $ TC.checkBody body
+  body_ts <-
+    extendedScope
+      (traverse subExpResType (bodyResult body))
+      (scopeOf (bodyStms body))
+  unless (body_ts == ts) . TC.bad . TC.TypeError . unlines $
+    [ "Expected type: " ++ prettyTuple ts,
+      "Got body type: " ++ prettyTuple body_ts
+    ]

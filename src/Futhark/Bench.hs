@@ -25,11 +25,16 @@ import qualified Data.Aeson.Key as JSON
 import qualified Data.Aeson.KeyMap as JSON
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.DList as DL
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
+import Data.Time.Clock
+import qualified Data.Vector.Unboxed as U
 import Futhark.Server
 import Futhark.Test
+import Statistics.Autocorrelation (autocorrelation)
+import Statistics.Sample (fastStdDev, mean)
 import System.Exit
 import System.FilePath
 import System.Process.ByteString (readProcessWithExitCode)
@@ -44,7 +49,7 @@ newtype RunResult = RunResult {runMicroseconds :: Int}
 data Result = Result
   { runResults :: [RunResult],
     memoryMap :: M.Map T.Text Int,
-    stdErr :: T.Text
+    stdErr :: Maybe T.Text
   }
   deriving (Eq, Show)
 
@@ -88,18 +93,20 @@ instance JSON.FromJSON DataResults where
         DataResult (JSON.toString k)
           <$> ((Right <$> success v) <|> (Left <$> JSON.parseJSON v))
       success = JSON.withObject "result" $ \o ->
-        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..: "stderr"
+        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..:? "stderr"
 
 dataResultJSON :: DataResult -> (JSON.Key, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
   (JSON.fromString desc, JSON.toJSON err)
-dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr))) =
+dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr_opt))) =
   ( JSON.fromString desc,
-    JSON.object
+    JSON.object $
       [ ("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
-        ("bytes", JSON.toJSON bytes),
-        ("stderr", JSON.toJSON progerr)
+        ("bytes", JSON.toJSON bytes)
       ]
+        ++ case progerr_opt of
+          Nothing -> []
+          Just progerr -> [("stderr", JSON.toJSON progerr)]
   )
 
 benchResultJSON :: BenchResult -> (JSON.Key, JSON.Value)
@@ -134,13 +141,129 @@ decodeBenchResults = fmap unBenchResults . JSON.eitherDecode'
 
 -- | How to run a benchmark.
 data RunOptions = RunOptions
-  { runRuns :: Int,
+  { -- | Applies both to initial and convergence phase.
+    runMinRuns :: Int,
+    runMinTime :: NominalDiffTime,
     runTimeout :: Int,
     runVerbose :: Int,
+    -- | If true, run the convergence phase.
+    runConvergencePhase :: Bool,
+    -- | Stop convergence once this much time has passed.
+    runConvergenceMaxTime :: NominalDiffTime,
     -- | Invoked for every runtime measured during the run.  Can be
     -- used to provide a progress bar.
-    runResultAction :: Maybe (Int -> IO ())
+    runResultAction :: (Int, Maybe Double) -> IO ()
   }
+
+-- | A list of @(autocorrelation,rse)@ pairs.  When the
+-- autocorrelation is above the first element and the RSE is above the
+-- second element, we want more runs.
+convergenceCriteria :: [(Double, Double)]
+convergenceCriteria =
+  [ (0.95, 0.0010),
+    (0.75, 0.0015),
+    (0.65, 0.0025),
+    (0.45, 0.0050),
+    (0.00, 0.0100)
+  ]
+
+-- Returns the next run count.
+nextRunCount :: Int -> Double -> Double -> Int
+nextRunCount runs rse acor = if any check convergenceCriteria then div runs 2 else 0
+  where
+    check (acor_lb, rse_lb) = acor > acor_lb && rse > rse_lb
+
+type BenchM = ExceptT T.Text IO
+
+-- Do the minimum number of runs.
+runMinimum ::
+  BenchM (RunResult, [T.Text]) ->
+  RunOptions ->
+  Int ->
+  NominalDiffTime ->
+  DL.DList (RunResult, [T.Text]) ->
+  BenchM (DL.DList (RunResult, [T.Text]))
+runMinimum do_run opts runs_done elapsed r = do
+  let actions = do
+        x <- do_run
+        liftIO $ runResultAction opts (runMicroseconds (fst x), Nothing)
+        pure x
+
+  -- Figure out how much we have left to do.
+  let todo
+        | runs_done < runMinRuns opts =
+            runMinRuns opts - runs_done
+        | otherwise =
+            -- Guesstimate how many runs we need to reach the minimum
+            -- time.
+            let time_per_run = elapsed / fromIntegral runs_done
+             in ceiling ((runMinTime opts - elapsed) / time_per_run)
+
+  -- Note that todo might be negative if minimum time has been exceeded.
+  if todo <= 0
+    then pure r
+    else do
+      before <- liftIO getCurrentTime
+      r' <- DL.fromList <$> replicateM todo actions
+      after <- liftIO getCurrentTime
+      let elapsed' = elapsed + diffUTCTime after before
+      runMinimum do_run opts (runs_done + todo) elapsed' (r <> r')
+
+-- Do more runs until a convergence criterion is reached.
+runConvergence ::
+  BenchM (RunResult, [T.Text]) ->
+  RunOptions ->
+  DL.DList (RunResult, [T.Text]) ->
+  BenchM (DL.DList (RunResult, [T.Text]))
+runConvergence do_run opts initial_r =
+  let runtimes = resultRuntimes (DL.toList initial_r)
+      (n, _, rse, acor) = runtimesMetrics runtimes
+   in -- If the runtimes collected during the runMinimum phase are
+      -- unstable enough that we need more in order to converge, we throw
+      -- away the runMinimum runtimes.  This is because they often exhibit
+      -- behaviour similar to a "warmup" period, and hence function as
+      -- outliers that poison the metrics we use to determine convergence.
+      -- By throwing them away we converge much faster, and still get the
+      -- right result.
+      case nextRunCount n rse acor of
+        x
+          | x > 0,
+            runConvergencePhase opts ->
+              moreRuns mempty mempty rse (x `max` runMinRuns opts)
+          | otherwise ->
+              pure initial_r
+  where
+    resultRuntimes =
+      U.fromList . map (fromIntegral . runMicroseconds . fst)
+
+    runtimesMetrics runtimes =
+      let n = U.length runtimes
+          rse = (fastStdDev runtimes / sqrt (fromIntegral n)) / mean runtimes
+          (x, _, _) = autocorrelation runtimes
+       in ( n,
+            realToFrac (U.sum runtimes) :: NominalDiffTime,
+            rse,
+            fromMaybe 1 (x U.!? 1)
+          )
+
+    sample rse = do
+      x <- do_run
+      liftIO $ runResultAction opts (runMicroseconds (fst x), Just rse)
+      pure x
+
+    moreRuns runtimes r rse x = do
+      r' <- replicateM x $ sample rse
+      loop (runtimes <> resultRuntimes r') (r <> DL.fromList r')
+
+    loop runtimes r = do
+      let (n, total, rse, acor) = runtimesMetrics runtimes
+      case nextRunCount n rse acor of
+        x
+          | x > 0,
+            total < runConvergenceMaxTime opts ->
+              moreRuns runtimes r rse x
+          | otherwise ->
+              pure r
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
@@ -156,8 +279,8 @@ benchmarkDataset ::
 benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
   output_types <- cmdEither $ cmdOutputs server entry
   input_types <- cmdEither $ cmdInputs server entry
-  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
-      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
+  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types - 1]]
+      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types - 1]]
 
   cmdMaybe . liftIO $ cmdClear server
 
@@ -171,29 +294,31 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,
           [(x, "")] <- reads $ T.unpack l' =
-          Just x
+            Just x
         | otherwise =
-          Nothing
+            Nothing
 
       doRun = do
         call_lines <- cmdEither (cmdCall server entry outs ins)
         when (any inputConsumed input_types) reloadInput
         case mapMaybe runtime call_lines of
-          [call_runtime] -> do
-            liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) call_runtime
-            return (RunResult call_runtime, call_lines)
+          [call_runtime] -> pure (RunResult call_runtime, call_lines)
           [] -> throwError "Could not find runtime in output."
           ls -> throwError $ "Ambiguous runtimes: " <> T.pack (show ls)
 
   maybe_call_logs <- liftIO . timeout (runTimeout opts * 1000000) . runExceptT $ do
     -- First one uncounted warmup run.
     void $ cmdEither $ cmdCall server entry outs ins
-    freeOuts
-    xs <- replicateM (runRuns opts -1) (doRun <* freeOuts)
-    y <- doRun
-    pure $ xs ++ [y]
 
-  call_logs <- case maybe_call_logs of
+    ys <- runMinimum (freeOuts *> doRun) opts 0 0 mempty
+
+    xs <- runConvergence (freeOuts *> doRun) opts ys
+
+    vs <- readResults server outs <* freeOuts
+
+    pure (vs, DL.toList xs)
+
+  (vs, call_logs) <- case maybe_call_logs of
     Nothing ->
       throwError . T.pack $
         "Execution exceeded " ++ show (runTimeout opts) ++ " seconds."
@@ -203,16 +328,14 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   report <- cmdEither $ cmdReport server
 
-  vs <- readResults server outs <* freeOuts
-
   maybe_expected <-
-    liftIO $ maybe (return Nothing) (fmap Just . getExpectedValues) expected_spec
+    liftIO $ maybe (pure Nothing) (fmap Just . getExpectedValues) expected_spec
 
   case maybe_expected of
     Just expected -> checkResult program expected vs
     Nothing -> pure ()
 
-  return
+  pure
     ( map fst call_logs,
       T.unlines $ map (T.unlines . snd) call_logs <> report
     )
@@ -248,7 +371,7 @@ prepareBenchmarkProgram concurrency opts program cases = do
   ref_res <- runExceptT $ ensureReferenceOutput concurrency (FutharkExe futhark) "c" program cases
   case ref_res of
     Left err ->
-      return $
+      pure $
         Left
           ( "Reference output generation for " ++ program ++ " failed:\n"
               ++ unlines (map T.unpack err),
@@ -265,6 +388,6 @@ prepareBenchmarkProgram concurrency opts program cases = do
             ""
 
       case futcode of
-        ExitSuccess -> return $ Right ()
-        ExitFailure 127 -> return $ Left (progNotFound futhark, Nothing)
-        ExitFailure _ -> return $ Left ("Compilation of " ++ program ++ " failed:\n", Just futerr)
+        ExitSuccess -> pure $ Right ()
+        ExitFailure 127 -> pure $ Left (progNotFound futhark, Nothing)
+        ExitFailure _ -> pure $ Left ("Compilation of " ++ program ++ " failed:\n", Just futerr)

@@ -1,5 +1,4 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -56,10 +55,10 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.RTS.Python
-import Futhark.Compiler.CLI (CompilerMode (..))
+import Futhark.Compiler.Config (CompilerMode (..))
 import Futhark.IR.Primitive hiding (Bool)
 import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
-import Futhark.IR.Syntax (Space (..))
+import Futhark.IR.Syntax.Core (Space (..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (pretty, prettyText)
@@ -240,12 +239,12 @@ instance MonadFreshNames (CompilerM op s) where
 collect :: CompilerM op s () -> CompilerM op s [PyStmt]
 collect m = pass $ do
   ((), w) <- listen m
-  return (w, const mempty)
+  pure (w, const mempty)
 
 collect' :: CompilerM op s a -> CompilerM op s (a, [PyStmt])
 collect' m = pass $ do
   (x, w) <- listen m
-  return ((x, w), const mempty)
+  pure ((x, w), const mempty)
 
 atInit :: PyStmt -> CompilerM op s ()
 atInit x = modify $ \s ->
@@ -276,6 +275,13 @@ standardOptions =
         optionShortName = Nothing,
         optionArgument = RequiredArgument "open",
         optionAction = [Exp $ simpleCall "read_tuning_file" [Var "sizes", Var "optarg"]]
+      },
+    -- Does not actually do anything for Python backends.
+    Option
+      { optionLongName = "cache-file",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "str",
+        optionAction = [Pass]
       },
     Option
       { optionLongName = "log",
@@ -397,7 +403,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
         ToLibrary -> do
           (entry_points, entry_point_types) <-
             unzip . catMaybes <$> mapM (compileEntryFun sync DoNotReturnTiming) funs
-          return
+          pure
             [ ClassDef $
                 Class class_name $
                   Assign (Var "entry_points") (Dict entry_point_types) :
@@ -409,7 +415,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
         ToServer -> do
           (entry_points, entry_point_types) <-
             unzip . catMaybes <$> mapM (compileEntryFun sync ReturnTiming) funs
-          return $
+          pure $
             parse_options_server
               ++ [ ClassDef
                      ( Class class_name $
@@ -428,7 +434,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
           let classinst = Assign (Var "self") $ simpleCall class_name []
           (entry_point_defs, entry_point_names, entry_points) <-
             unzip3 . catMaybes <$> mapM (callEntryFun sync) funs
-          return $
+          pure $
             parse_options_executable
               ++ ClassDef
                 ( Class class_name $
@@ -498,7 +504,7 @@ compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
   body' <- collect $ compileCode body
   let inputs' = map (compileName . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
-  return $
+  pure $
     Def (futharkFun . nameToString $ fname) ("self" : inputs') $
       body' ++ [ret]
 
@@ -544,7 +550,7 @@ entryPointOutput (Imp.OpaqueValue u desc vs) =
     <$> mapM (entryPointOutput . Imp.TransparentValue u) vs
 entryPointOutput (Imp.TransparentValue _ (Imp.ScalarValue bt ept name)) = do
   name' <- compileVar name
-  return $ simpleCall tf [name']
+  pure $ simpleCall tf [name']
   where
     tf = compilePrimToExtNp bt ept
 entryPointOutput (Imp.TransparentValue _ (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
@@ -553,7 +559,7 @@ entryPointOutput (Imp.TransparentValue _ (Imp.ArrayValue mem (Imp.Space sid) bt 
 entryPointOutput (Imp.TransparentValue _ (Imp.ArrayValue mem _ bt ept dims)) = do
   mem' <- Cast <$> compileVar mem <*> pure (compilePrimTypeExt bt ept)
   dims' <- mapM compileDim dims
-  return $ simpleCall "createArray" [mem', Tuple dims', Var $ compilePrimToExtNp bt ept]
+  pure $ simpleCall "createArray" [mem', Tuple dims', Var $ compilePrimToExtNp bt ept]
 
 badInput :: Int -> PyExp -> String -> PyStmt
 badInput i e t =
@@ -761,7 +767,7 @@ printValue = fmap concat . mapM (uncurry printValue')
     -- but we will probably need yet another plugin mechanism here in
     -- the future.
     printValue' (Imp.OpaqueValue _ desc _) _ =
-      return
+      pure
         [ Exp $
             simpleCall
               "sys.stdout.write"
@@ -771,7 +777,7 @@ printValue = fmap concat . mapM (uncurry printValue')
       printValue' (Imp.TransparentValue u (Imp.ArrayValue mem DefaultSpace bt ept shape)) $
         simpleCall (pretty e ++ ".get") []
     printValue' (Imp.TransparentValue _ _) e =
-      return
+      pure
         [ Exp $
             Call
               (Var "write_value")
@@ -790,40 +796,11 @@ prepareEntry ::
       [PyStmt],
       [PyStmt],
       [PyStmt],
-      [PyStmt],
-      [(Imp.ExternalValue, PyExp)],
-      [PyStmt]
+      [(Imp.ExternalValue, PyExp)]
     )
 prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
-
-  (argexps_mem_copies, prepare_run) <- collect' $
-    forM inputs $ \case
-      Imp.MemParam name space -> do
-        -- A program might write to its input parameters, so create a new memory
-        -- block and copy the source there.  This way the program can be run more
-        -- than once.
-        name' <- newVName $ baseString name <> "_copy"
-        copy <- asks envCopy
-        allocate <- asks envAllocate
-        let size = Var (extName (compileName name) ++ ".nbytes") -- FIXME
-            dest = name'
-            src = name
-            offset = Integer 0
-        case space of
-          Space sid ->
-            allocate (Var (compileName name')) size sid
-          _ ->
-            stm $
-              Assign
-                (Var (compileName name'))
-                (simpleCall "allocateMem" [size]) -- FIXME
-        dest' <- compileVar dest
-        src' <- compileVar src
-        copy dest' offset space src' offset space size (IntType Int32) -- FIXME
-        return $ Just $ compileName name'
-      _ -> return Nothing
 
   prepareIn <- collect $ do
     declEntryPointInputSizes $ map snd args
@@ -832,7 +809,6 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
   let argexps_lib = map (compileName . Imp.paramName) inputs
-      argexps_bin = zipWith fromMaybe argexps_lib argexps_mem_copies
       fname' = "self." ++ futharkFun (nameToString fname)
 
       -- We ignore overflow errors and the like for executable entry
@@ -846,14 +822,12 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
             [Assign funTuple $ simpleCall fname' (fmap Var argexps)]
         ]
 
-  return
+  pure
     ( map (extValueDescName . snd) args,
       prepareIn,
       call argexps_lib,
-      call argexps_bin,
       prepareOut,
-      zip results res,
-      prepare_run
+      zip results res
     )
 
 copyMemoryDefaultSpace ::
@@ -883,39 +857,39 @@ compileEntryFun ::
   CompilerM op s (Maybe (PyFunDef, (PyExp, PyExp)))
 compileEntryFun sync timing entry
   | Just ename <- Imp.functionEntry $ snd entry = do
-    (params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
-    let (maybe_sync, ret) =
-          case timing of
-            DoNotReturnTiming ->
-              ( [],
-                Return $ tupleOrSingle $ map snd res
-              )
-            ReturnTiming ->
-              ( sync,
-                Return $
-                  Tuple
-                    [ Var "runtime",
-                      tupleOrSingle $ map snd res
-                    ]
-              )
-        (pts, rts) = entryTypes $ snd entry
+      (params, prepareIn, body_lib, prepareOut, res) <- prepareEntry entry
+      let (maybe_sync, ret) =
+            case timing of
+              DoNotReturnTiming ->
+                ( [],
+                  Return $ tupleOrSingle $ map snd res
+                )
+              ReturnTiming ->
+                ( sync,
+                  Return $
+                    Tuple
+                      [ Var "runtime",
+                        tupleOrSingle $ map snd res
+                      ]
+                )
+          (pts, rts) = entryTypes $ snd entry
 
-        do_run =
-          Assign (Var "time_start") (simpleCall "time.time" []) :
-          body_lib ++ maybe_sync
-            ++ [ Assign (Var "runtime") $
-                   BinOp
-                     "-"
-                     (toMicroseconds (simpleCall "time.time" []))
-                     (toMicroseconds (Var "time_start"))
-               ]
+          do_run =
+            Assign (Var "time_start") (simpleCall "time.time" []) :
+            body_lib ++ maybe_sync
+              ++ [ Assign (Var "runtime") $
+                     BinOp
+                       "-"
+                       (toMicroseconds (simpleCall "time.time" []))
+                       (toMicroseconds (Var "time_start"))
+                 ]
 
-    pure $
-      Just
-        ( Def (nameToString ename) ("self" : params) $
-            prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
-          (String (nameToString ename), Tuple [List (map String pts), List (map String rts)])
-        )
+      pure $
+        Just
+          ( Def (nameToString ename) ("self" : params) $
+              prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
+            (String (nameToString ename), Tuple [List (map String pts), List (map String rts)])
+          )
   | otherwise = pure Nothing
 
 entryTypes :: Imp.Function op -> ([String], [String])
@@ -935,7 +909,7 @@ callEntryFun ::
   CompilerM op s (Maybe (PyFunDef, String, PyExp))
 callEntryFun _ (_, Imp.Function Nothing _ _ _ _ _) = pure Nothing
 callEntryFun pre_timing entry@(fname, Imp.Function (Just ename) _ _ _ _ decl_args) = do
-  (_, prepare_in, _, body_bin, _, res, prepare_run) <- prepareEntry entry
+  (_, prepare_in, body_bin, _, res) <- prepareEntry entry
 
   let str_input = map (readInput . snd) decl_args
       end_of_input = [Exp $ simpleCall "end_of_input" [String $ pretty fname]]
@@ -946,13 +920,13 @@ callEntryFun pre_timing entry@(fname, Imp.Function (Just ename) _ _ _ _ decl_arg
       (do_run_with_timing, close_runtime_file) = addTiming do_run
 
       do_warmup_run =
-        If (Var "do_warmup_run") (prepare_run ++ do_run) []
+        If (Var "do_warmup_run") do_run []
 
       do_num_runs =
         For
           "i"
           (simpleCall "range" [simpleCall "int" [Var "num_runs"]])
-          (prepare_run ++ do_run_with_timing)
+          do_run_with_timing
 
   str_output <- printValue res
 
@@ -1019,8 +993,8 @@ compileBinOpLike ::
 compileBinOpLike f x y = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
-  let simple s = return $ BinOp s x' y'
-  return (x', y', simple)
+  let simple s = pure $ BinOp s x' y'
+  pure (x', y', simple)
 
 -- | The ctypes type corresponding to a 'PrimType'.
 compilePrimType :: PrimType -> String
@@ -1109,21 +1083,21 @@ compilePrimValue (IntValue (Int64Value v)) =
   simpleCall "np.int64" [Integer $ toInteger v]
 compilePrimValue (FloatValue (Float16Value v))
   | isInfinite v =
-    if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.inf" else Var "-np.inf"
   | isNaN v =
-    Var "np.nan"
+      Var "np.nan"
   | otherwise = simpleCall "np.float16" [Float $ fromRational $ toRational v]
 compilePrimValue (FloatValue (Float32Value v))
   | isInfinite v =
-    if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.inf" else Var "-np.inf"
   | isNaN v =
-    Var "np.nan"
+      Var "np.nan"
   | otherwise = simpleCall "np.float32" [Float $ fromRational $ toRational v]
 compilePrimValue (FloatValue (Float64Value v))
   | isInfinite v =
-    if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.inf" else Var "-np.inf"
   | isNaN v =
-    Var "np.nan"
+      Var "np.nan"
   | otherwise = simpleCall "np.float64" [Float $ fromRational $ toRational v]
 compilePrimValue (BoolValue v) = Bool v
 compilePrimValue UnitValue = Var "None"
@@ -1134,7 +1108,7 @@ compileVar v =
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m PyExp) -> Imp.PrimExp v -> m PyExp
-compilePrimExp _ (Imp.ValueExp v) = return $ compilePrimValue v
+compilePrimExp _ (Imp.ValueExp v) = pure $ compilePrimValue v
 compilePrimExp f (Imp.LeafExp v _) = f v
 compilePrimExp f (Imp.BinOpExp op x y) = do
   (x', y', simple) <- compileBinOpLike f x y
@@ -1153,10 +1127,10 @@ compilePrimExp f (Imp.BinOpExp op x y) = do
     Shl {} -> simple "<<"
     LogAnd {} -> simple "and"
     LogOr {} -> simple "or"
-    _ -> return $ simpleCall (pretty op) [x', y']
+    _ -> pure $ simpleCall (pretty op) [x', y']
 compilePrimExp f (Imp.ConvOpExp conv x) = do
   x' <- compilePrimExp f x
-  return $ simpleCall (pretty conv) [x']
+  pure $ simpleCall (pretty conv) [x']
 compilePrimExp f (Imp.CmpOpExp cmp x y) = do
   (x', y', simple) <- compileBinOpLike f x y
   case cmp of
@@ -1165,7 +1139,7 @@ compilePrimExp f (Imp.CmpOpExp cmp x y) = do
     FCmpLe {} -> simple "<="
     CmpLlt -> simple "<"
     CmpLle -> simple "<="
-    _ -> return $ simpleCall (pretty cmp) [x', y']
+    _ -> pure $ simpleCall (pretty cmp) [x', y']
 compilePrimExp f (Imp.UnOpExp op exp1) =
   UnOp (compileUnOp op) <$> compilePrimExp f exp1
 compilePrimExp f (Imp.FunExp h args _) =
@@ -1176,7 +1150,7 @@ compileExp = compilePrimExp compileVar
 
 errorMsgString :: Imp.ErrorMsg Imp.Exp -> CompilerM op s (String, [PyExp])
 errorMsgString (Imp.ErrorMsg parts) = do
-  let onPart (Imp.ErrorString s) = return ("%s", String s)
+  let onPart (Imp.ErrorString s) = pure ("%s", String s)
       onPart (Imp.ErrorVal IntType {} x) = ("%d",) <$> compileExp x
       onPart (Imp.ErrorVal FloatType {} x) = ("%f",) <$> compileExp x
       onPart (Imp.ErrorVal Imp.Bool x) = ("%r",) <$> compileExp x
@@ -1186,9 +1160,9 @@ errorMsgString (Imp.ErrorMsg parts) = do
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 compileCode Imp.DebugPrint {} =
-  return ()
+  pure ()
 compileCode Imp.TracePrint {} =
-  return ()
+  pure ()
 compileCode (Imp.Op op) =
   join $ asks envOpCompiler <*> pure op
 compileCode (Imp.If cond tb fb) = do
@@ -1216,11 +1190,11 @@ compileCode (Imp.For i bound body) = do
       body' ++ [AssignOp "+" (Var i') (Var one)]
 compileCode (Imp.SetScalar name exp1) =
   stm =<< Assign <$> compileVar name <*> compileExp exp1
-compileCode Imp.DeclareMem {} = return ()
+compileCode Imp.DeclareMem {} = pure ()
 compileCode (Imp.DeclareScalar v _ Unit) = do
   v' <- compileVar v
   stm $ Assign v' $ Var "True"
-compileCode Imp.DeclareScalar {} = return ()
+compileCode Imp.DeclareScalar {} = pure ()
 compileCode (Imp.DeclareArray name (Space space) t vs) =
   join $
     asks envStaticArray
@@ -1299,7 +1273,7 @@ compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) _) = do
   stm =<< Assign <$> compileVar name <*> pure allocate'
 compileCode (Imp.Free name _) =
   stm =<< Assign <$> compileVar name <*> pure None
-compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
+compileCode (Imp.Copy _ dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
   destoffset' <- compileExp $ Imp.untyped destoffset
   srcoffset' <- compileExp $ Imp.untyped srcoffset
   dest' <- compileVar dest
@@ -1308,7 +1282,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count sr
   let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "ct.c_byte"]
   let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "ct.c_byte"]
   stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, size']
-compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
+compileCode (Imp.Copy pt dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
   copy <- asks envCopy
   join $
     copy
@@ -1319,7 +1293,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
       <*> compileExp (Imp.untyped srcoffset)
       <*> pure srcspace
       <*> compileExp (Imp.untyped size)
-      <*> pure (IntType Int32) -- FIXME
+      <*> pure pt
 compileCode (Imp.Write _ _ Unit _ _ _) = pure ()
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $
@@ -1352,4 +1326,4 @@ compileCode (Imp.Read x src (Imp.Count iexp) bt _ _) = do
   let bt' = compilePrimType bt
   src' <- compileVar src
   stm $ Assign x' $ fromStorage bt $ simpleCall "indexArray" [src', iexp', Var bt']
-compileCode Imp.Skip = return ()
+compileCode Imp.Skip = pure ()

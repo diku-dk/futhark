@@ -8,9 +8,9 @@
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp,
     renameRetType,
-    unifyTypesU,
     subtypeOf,
     subuniqueOf,
+    addAliasesFromType,
     checkForDuplicateNames,
     checkTypeParams,
     typeParamToArg,
@@ -26,14 +26,40 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List (foldl', sort, unzip4, (\\))
+import Data.List (find, foldl', sort, unzip4, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Set as S
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding ((<|>))
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
+
+addAliasesFromType :: StructType -> PatType -> PatType
+addAliasesFromType (Array _ u1 et1 shape1) (Array als _ _ _) =
+  Array als u1 et1 shape1
+addAliasesFromType
+  (Scalar (TypeVar _ u1 tv1 targs1))
+  (Scalar (TypeVar als2 _ _ _)) =
+    Scalar $ TypeVar als2 u1 tv1 targs1
+addAliasesFromType (Scalar (Record ts1)) (Scalar (Record ts2))
+  | length ts1 == length ts2,
+    sort (M.keys ts1) == sort (M.keys ts2) =
+      Scalar $ Record $ M.intersectionWith addAliasesFromType ts1 ts2
+addAliasesFromType
+  (Scalar (Arrow _ mn1 pt1 (RetType dims1 rt1)))
+  (Scalar (Arrow as2 _ _ (RetType _ rt2))) =
+    Scalar (Arrow as2 mn1 pt1 (RetType dims1 rt1'))
+    where
+      rt1' = addAliasesFromType rt1 rt2
+addAliasesFromType (Scalar (Sum cs1)) (Scalar (Sum cs2))
+  | length cs1 == length cs2,
+    sort (M.keys cs1) == sort (M.keys cs2) =
+      Scalar $ Sum $ M.intersectionWith (zipWith addAliasesFromType) cs1 cs2
+addAliasesFromType (Scalar (Prim t)) _ = Scalar $ Prim t
+addAliasesFromType t1 t2 =
+  error $ "addAliasesFromType invalid args: " ++ show (t1, t2)
 
 -- | @unifyTypes uf t1 t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -46,10 +72,10 @@ unifyTypesU ::
   TypeBase dim als ->
   TypeBase dim als ->
   Maybe (TypeBase dim als)
-unifyTypesU uf (Array als1 u1 et1 shape1) (Array als2 u2 et2 _shape2) =
+unifyTypesU uf (Array als1 u1 shape1 et1) (Array als2 u2 _shape2 et2) =
   Array (als1 <> als2) <$> uf u1 u2
-    <*> unifyScalarTypes uf et1 et2
     <*> pure shape1
+    <*> unifyScalarTypes uf et1 et2
 unifyTypesU uf (Scalar t1) (Scalar t2) = Scalar <$> unifyScalarTypes uf t1 t2
 unifyTypesU _ _ _ = Nothing
 
@@ -64,9 +90,9 @@ unifyScalarTypes _ (Prim t1) (Prim t2)
   | otherwise = Nothing
 unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
   | tv1 == tv2 = do
-    u3 <- uf u1 u2
-    targs3 <- zipWithM unifyTypeArgs targs1 targs2
-    Just $ TypeVar (als1 <> als2) u3 tv1 targs3
+      u3 <- uf u1 u2
+      targs3 <- zipWithM unifyTypeArgs targs1 targs2
+      Just $ TypeVar (als1 <> als2) u3 tv1 targs3
   | otherwise = Nothing
   where
     unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim _d2 _) =
@@ -78,10 +104,10 @@ unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
 unifyScalarTypes uf (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
-    Record
-      <$> traverse
-        (uncurry (unifyTypesU uf))
-        (M.intersectionWith (,) ts1 ts2)
+      Record
+        <$> traverse
+          (uncurry (unifyTypesU uf))
+          (M.intersectionWith (,) ts1 ts2)
 unifyScalarTypes
   uf
   (Arrow as1 mn1 t1 (RetType dims1 t1'))
@@ -91,10 +117,10 @@ unifyScalarTypes
 unifyScalarTypes uf (Sum cs1) (Sum cs2)
   | length cs1 == length cs2,
     sort (M.keys cs1) == sort (M.keys cs2) =
-    Sum
-      <$> traverse
-        (uncurry (zipWithM (unifyTypesU uf)))
-        (M.intersectionWith (,) cs1 cs2)
+      Sum
+        <$> traverse
+          (uncurry (zipWithM (unifyTypesU uf)))
+          (M.intersectionWith (,) cs1 cs2)
 unifyScalarTypes _ _ _ = Nothing
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal
@@ -115,12 +141,12 @@ subuniqueOf _ _ = True
 renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
-    dims' <- mapM newName dims
-    let m = M.fromList $ zip dims $ map (SizeSubst . NamedDim . qualName) dims'
-        st' = applySubst (`M.lookup` m) st
-    pure $ RetType dims' st'
+      dims' <- mapM newName dims
+      let m = M.fromList $ zip dims $ map (SizeSubst . NamedDim . qualName) dims'
+          st' = applySubst (`M.lookup` m) st
+      pure $ RetType dims' st'
   | otherwise =
-    pure $ RetType dims st
+      pure $ RetType dims st
 
 evalTypeExp ::
   MonadTypeChecker m =>
@@ -163,13 +189,13 @@ evalTypeExp t@(TERecord fs loc) = do
       foldl' max Unlifted ls
     )
 --
-evalTypeExp (TEArray t d loc) = do
+evalTypeExp (TEArray d t loc) = do
   (d_svars, d', d'') <- checkDimExp d
   (t', svars, RetType dims st, l) <- evalTypeExp t
-  case (l, arrayOf st (ShapeDecl [d'']) Nonunique) of
+  case (l, arrayOf Nonunique (ShapeDecl [d'']) st) of
     (Unlifted, st') ->
       pure
-        ( TEArray t' d' loc,
+        ( TEArray d' t' loc,
           svars,
           RetType (d_svars ++ dims) st',
           Unlifted
@@ -233,12 +259,19 @@ evalTypeExp (TEDim dims t loc) = do
     dims' <- mapM (flip (checkName Term) loc) dims
     bindDims dims' $ do
       (t', svars, RetType t_dims st, l) <- evalTypeExp t
-      return
-        ( TEDim dims' t' loc,
-          svars,
-          RetType (dims' ++ t_dims) st,
-          max l SizeLifted
-        )
+      let (witnessed, _) = determineSizeWitnesses st
+      case find (`S.notMember` witnessed) dims' of
+        Just d ->
+          typeError loc mempty . withIndexLink "unused-existential" $
+            "Existential size " <> pquote (pprName d)
+              <> " not used as array size."
+        Nothing ->
+          pure
+            ( TEDim dims' t' loc,
+              svars,
+              RetType (dims' ++ t_dims) st,
+              max l SizeLifted
+            )
   where
     bindDims [] m = m
     bindDims (d : ds) m =
@@ -257,7 +290,7 @@ evalTypeExp t@(TESum cs loc) = do
       cs_svars = (foldMap . foldMap) (\(_, y, _, _) -> y) checked
       ts_s = (fmap . fmap) (\(_, _, z, _) -> z) checked
       ls = (concatMap . fmap) (\(_, _, _, v) -> v) checked
-  return
+  pure
     ( TESum (M.toList cs') loc,
       cs_svars,
       RetType (foldMap (foldMap retDims) ts_s) $
@@ -276,7 +309,7 @@ evalTypeExp ote@TEApply {} = do
           <+> ppr (length targs) <> "."
     else do
       (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
-      return
+      pure
         ( foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
           [],
           RetType (t_dims ++ mconcat dims) $ applySubst (`M.lookup` mconcat substs) t,
@@ -296,27 +329,27 @@ evalTypeExp ote@TEApply {} = do
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
       v' <- checkNamedDim loc v
-      return
+      pure
         ( TypeArgExpDim (DimExpNamed v' dloc) loc,
           [],
           M.singleton pv $ SizeSubst $ NamedDim v'
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpConst x dloc) loc) =
-      return
+      pure
         ( TypeArgExpDim (DimExpConst x dloc) loc,
           [],
           M.singleton pv $ SizeSubst $ ConstDim x
         )
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) = do
       d <- newTypeName "d"
-      return
+      pure
         ( TypeArgExpDim DimExpAny loc,
           [d],
           M.singleton pv $ SizeSubst $ NamedDim $ qualName d
         )
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
       (te', svars, RetType dims st, _) <- evalTypeExp te
-      return
+      pure
         ( TypeArgExpType te',
           svars ++ dims,
           M.singleton pv $ Subst [] $ RetType [] st
@@ -341,26 +374,28 @@ checkTypeExp te = do
   checkForDuplicateNamesInType te
   evalTypeExp te
 
--- | Check for duplication of names inside a pattern group.  Produces
--- a description of all names used in the pattern group.
+-- | Check for duplication of names inside a binding group.
 checkForDuplicateNames ::
-  MonadTypeChecker m =>
-  [UncheckedPat] ->
-  m ()
-checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
+  MonadTypeChecker m => [UncheckedTypeParam] -> [UncheckedPat] -> m ()
+checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
+  mapM_ checkTypeParam tps
+  mapM_ checkPat pats
   where
-    check (Id v _ loc) = seen v loc
-    check (PatParens p _) = check p
-    check (PatAttr _ p _) = check p
-    check Wildcard {} = pure ()
-    check (TuplePat ps _) = mapM_ check ps
-    check (RecordPat fs _) = mapM_ (check . snd) fs
-    check (PatAscription p _ _) = check p
-    check PatLit {} = pure ()
-    check (PatConstr _ _ ps _) = mapM_ check ps
+    checkTypeParam (TypeParamType _ v loc) = seen Type v loc
+    checkTypeParam (TypeParamDim v loc) = seen Term v loc
 
-    seen v loc = do
-      already <- gets $ M.lookup v
+    checkPat (Id v _ loc) = seen Term v loc
+    checkPat (PatParens p _) = checkPat p
+    checkPat (PatAttr _ p _) = checkPat p
+    checkPat Wildcard {} = pure ()
+    checkPat (TuplePat ps _) = mapM_ checkPat ps
+    checkPat (RecordPat fs _) = mapM_ (checkPat . snd) fs
+    checkPat (PatAscription p _ _) = checkPat p
+    checkPat PatLit {} = pure ()
+    checkPat (PatConstr _ _ ps _) = mapM_ checkPat ps
+
+    seen ns v loc = do
+      already <- gets $ M.lookup (ns, v)
       case already of
         Just prev_loc ->
           lift $
@@ -368,7 +403,7 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
               "Name" <+> pquote (ppr v) <+> "also bound at"
                 <+> text (locStr prev_loc) <> "."
         Nothing ->
-          modify $ M.insert v loc
+          modify $ M.insert (ns, v) loc
 
 -- | Check whether the type contains arrow types that define the same
 -- parameter.  These might also exist further down, but that's not
@@ -389,9 +424,9 @@ checkForDuplicateNamesInType = check mempty
 
     check seen (TEArrow (Just v) t1 t2 loc)
       | Just prev_loc <- M.lookup v seen =
-        bad v loc prev_loc
+          bad v loc prev_loc
       | otherwise =
-        check seen' t1 >> check seen' t2
+          check seen' t1 >> check seen' t2
       where
         seen' = M.insert v loc seen
     check seen (TEArrow Nothing t1 t2 _) =
@@ -406,9 +441,9 @@ checkForDuplicateNamesInType = check mempty
       check seen t1
     check seen (TEDim (v : vs) t loc)
       | Just prev_loc <- M.lookup v seen =
-        bad v loc prev_loc
+          bad v loc prev_loc
       | otherwise =
-        check (M.insert v loc seen) (TEDim vs t loc)
+          check (M.insert v loc seen) (TEDim vs t loc)
     check seen (TEDim [] t _) =
       check seen t
     check _ TEArray {} = pure ()
@@ -515,9 +550,9 @@ instance Substitutable Pat where
     where
       mapper =
         ASTMapper
-          { mapOnExp = return,
-            mapOnName = return,
-            mapOnQualName = return,
+          { mapOnExp = pure,
+            mapOnName = pure,
+            mapOnQualName = pure,
             mapOnStructType = pure . applySubst f,
             mapOnPatType = pure . applySubst f,
             mapOnStructRetType = pure . applySubst f,
@@ -542,7 +577,6 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
       error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
 
 substTypesRet ::
-  forall as.
   Monoid as =>
   (VName -> Maybe (Subst (RetTypeBase (DimDecl VName) as))) ->
   TypeBase (DimDecl VName) as ->
@@ -571,13 +605,14 @@ substTypesRet lookupSubst ot =
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'
 
-    onType :: TypeBase (DimDecl VName) as -> State [VName] (TypeBase (DimDecl VName) as)
+    onType ::
+      forall as.
+      Monoid as =>
+      TypeBase (DimDecl VName) as ->
+      State [VName] (TypeBase (DimDecl VName) as)
 
-    onType (Array als u et shape) = do
-      t <-
-        arrayOf <$> onType (Scalar et `setAliases` mempty)
-          <*> pure (applySubst lookupSubst' shape)
-          <*> pure u
+    onType (Array als u shape et) = do
+      t <- arrayOf u (applySubst lookupSubst' shape) <$> onType (Scalar et)
       pure $ t `setAliases` als
     onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
     onType (Scalar (TypeVar als u v targs)) = do

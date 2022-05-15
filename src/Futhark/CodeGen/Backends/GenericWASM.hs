@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 module Futhark.CodeGen.Backends.GenericWASM
   ( GC.CParts (..),
@@ -318,10 +317,10 @@ toFutharkArray typ =
     shift = T.pack $ show (typeShift ftype)
     heapType = T.pack heap
     arraynd_flat = if d > 1 then arraynd ++ ".flat()" else arraynd
-    arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d -1]]
-    dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d -1]]
-    dims_multiplied = T.pack $ intercalate "*" ["Number(d" ++ show i ++ ")" | i <- [0 .. d -1]]
-    bigint_dims = T.pack $ intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d -1]]
+    arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d - 1]]
+    dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d - 1]]
+    dims_multiplied = T.pack $ intercalate "*" ["Number(d" ++ show i ++ ")" | i <- [0 .. d - 1]]
+    bigint_dims = T.pack $ intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d - 1]]
     mult i s = concat $ replicate i s
     (arraynd_p, arraynd_flat_p, arraynd_dims_p) = (T.pack arraynd, T.pack arraynd_flat, T.pack arraynd_dims)
     args = T.pack $ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]

@@ -5,22 +5,22 @@
         "homepage": "https://github.com/nmattia/niv",
         "owner": "nmattia",
         "repo": "niv",
-        "rev": "ba57d5a29b4e0f2085917010380ef3ddc3cf380f",
-        "sha256": "1kpsvc53x821cmjg1khvp1nz7906gczq8mp83664cr15h94sh8i4",
+        "rev": "df49d53b71ad5b6b5847b32e5254924d60703c46",
+        "sha256": "1j5p8mi1wi3pdcq0lfb881p97i232si07nb605dl92cjwnira88c",
         "type": "tarball",
-        "url": "https://github.com/nmattia/niv/archive/ba57d5a29b4e0f2085917010380ef3ddc3cf380f.tar.gz",
+        "url": "https://github.com/nmattia/niv/archive/df49d53b71ad5b6b5847b32e5254924d60703c46.tar.gz",
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
     },
     "nixpkgs": {
-        "branch": "master",
+        "branch": "haskell-updates",
         "description": "Nix Packages collection",
         "homepage": "",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "93080703881acdfebffd39d9dc5e2031b3efd4db",
-        "sha256": "1f29jyjzkhg6r69d29jmny9vv2jxyfkwksyhlxxynmzcm2lps9c2",
+        "rev": "ca1481350bdf09bff9d329f829626557af84fd5f",
+        "sha256": "1y2yis8dnapiaf5jlc8apd2pws2b5wgcg2j836nx5kavsb47kp7q",
         "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/93080703881acdfebffd39d9dc5e2031b3efd4db.tar.gz",
+        "url": "https://github.com/NixOS/nixpkgs/archive/ca1481350bdf09bff9d329f829626557af84fd5f.tar.gz",
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
     }
 }

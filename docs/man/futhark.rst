@@ -77,11 +77,23 @@ futhark imports PROGRAM
 
 Print all non-builtin imported Futhark files to stdout, one per line.
 
+futhark lsp
+-----------
+
+Run an LSP (Language Server Protocol) server for Futhark that
+communicates on standard input.  There is no reason to run this by
+hand.  It is used by LSP clients to provide editor features.
+
 futhark query PROGRAM LINE COL
 ------------------------------
 
 Print information about the variable at the given position in the
 program.
+
+futhark thanks
+--------------
+
+Expresses gratitude.
 
 SEE ALSO
 ========

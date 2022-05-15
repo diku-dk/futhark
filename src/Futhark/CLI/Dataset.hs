@@ -40,22 +40,22 @@ main = mainWithOptions initialDataOptions commandLineOptions "options..." f
   where
     f [] config
       | null $ optOrders config = Just $ do
-        maybe_vs <- readValues <$> BS.getContents
-        case maybe_vs of
-          Nothing -> do
-            hPutStrLn stderr "Malformed data on standard input."
-            exitFailure
-          Just vs ->
-            case format config of
-              Text -> mapM_ (T.putStrLn . V.valueText) vs
-              Binary -> mapM_ (BS.putStr . Bin.encode) vs
-              Type -> mapM_ (T.putStrLn . V.valueTypeText . V.valueType) vs
+          maybe_vs <- readValues <$> BS.getContents
+          case maybe_vs of
+            Nothing -> do
+              hPutStrLn stderr "Malformed data on standard input."
+              exitFailure
+            Just vs ->
+              case format config of
+                Text -> mapM_ (T.putStrLn . V.valueText) vs
+                Binary -> mapM_ (BS.putStr . Bin.encode) vs
+                Type -> mapM_ (T.putStrLn . V.valueTypeText . V.valueType) vs
       | otherwise =
-        Just $
-          zipWithM_
-            ($)
-            (optOrders config)
-            [fromIntegral (optSeed config) ..]
+          Just $
+            zipWithM_
+              ($)
+              (optOrders config)
+              [fromIntegral (optSeed config) ..]
     f _ _ =
       Nothing
 
@@ -175,12 +175,12 @@ tryMakeGenerator ::
   Either String (RandomConfiguration -> OutputFormat -> Word64 -> IO ())
 tryMakeGenerator t
   | Just vs <- readValues $ BS.pack t =
-    return $ \_ fmt _ -> mapM_ (outValue fmt) vs
+      pure $ \_ fmt _ -> mapM_ (outValue fmt) vs
   | otherwise = do
-    t' <- toValueType =<< either (Left . show) Right (parseType name (T.pack t))
-    return $ \conf fmt seed -> do
-      let v = randomValue conf t' seed
-      outValue fmt v
+      t' <- toValueType =<< either (Left . syntaxErrorMsg) Right (parseType name (T.pack t))
+      pure $ \conf fmt seed -> do
+        let v = randomValue conf t' seed
+        outValue fmt v
   where
     name = "option " ++ t
     outValue Text = T.putStrLn . V.valueText
@@ -195,10 +195,10 @@ toValueType TEArrow {} = Left "Cannot generate functions."
 toValueType TESum {} = Left "Cannot handle sumtypes yet."
 toValueType TEDim {} = Left "Cannot handle existential sizes."
 toValueType (TEUnique t _) = toValueType t
-toValueType (TEArray t d _) = do
+toValueType (TEArray d t _) = do
   d' <- constantDim d
   V.ValueType ds t' <- toValueType t
-  return $ V.ValueType (d' : ds) t'
+  pure $ V.ValueType (d' : ds) t'
   where
     constantDim (DimExpConst k _) = Right k
     constantDim _ = Left "Array has non-constant dimension declaration."
@@ -309,11 +309,11 @@ randomVector range final ds seed = runST $ do
   arr <- USVec.new n
   let fill g i
         | i < n = do
-          let (v, g') = uniformR range g
-          USVec.write arr i v
-          g' `seq` fill g' $! i + 1
+            let (v, g') = uniformR range g
+            USVec.write arr i v
+            g' `seq` fill g' $! i + 1
         | otherwise =
-          pure ()
+            pure ()
   fill (mkStdGen $ fromIntegral seed) 0
   final (SVec.fromList ds) . SVec.convert <$> freeze arr
   where

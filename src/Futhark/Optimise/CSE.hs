@@ -79,7 +79,7 @@ performCSE cse_arrays =
       pure $
         fst $
           runReader
-            (cseInStms (consumedInStms stms) (stmsToList stms) (return ()))
+            (cseInStms (consumedInStms stms) (stmsToList stms) (pure ()))
             (newCSEState cse_arrays)
     onFun _ = pure . cseInFunDef cse_arrays
 
@@ -123,7 +123,7 @@ performCSEOnStms cse_arrays =
           ( cseInStms
               (consumedInStms stms)
               (stmsToList stms)
-              (return ())
+              (pure ())
           )
           (newCSEState cse_arrays)
 
@@ -162,8 +162,8 @@ cseInBody ds (Body bodydec stms res) = do
   (stms', res') <-
     cseInStms (res_cons <> stms_cons) (stmsToList stms) $ do
       CSEState (_, nsubsts) _ <- ask
-      return $ substituteNames nsubsts res
-  return $ Body bodydec stms' res'
+      pure $ substituteNames nsubsts res
+  pure $ Body bodydec stms' res'
   where
     (res_als, stms_cons) = mkStmsAliases stms res
     res_cons = mconcat $ zipWith consumeResult ds res_als
@@ -176,7 +176,7 @@ cseInLambda ::
   CSEM rep (Lambda rep)
 cseInLambda lam = do
   body' <- cseInBody (map (const Observe) $ lambdaReturnType lam) $ lambdaBody lam
-  return lam {lambdaBody = body'}
+  pure lam {lambdaBody = body'}
 
 cseInStms ::
   (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
@@ -186,12 +186,12 @@ cseInStms ::
   CSEM rep (Stms rep, a)
 cseInStms _ [] m = do
   a <- m
-  return (mempty, a)
+  pure (mempty, a)
 cseInStms consumed (stm : stms) m =
   cseInStm consumed stm $ \stm' -> do
     (stms', a) <- cseInStms consumed stms m
     stm'' <- mapM nestedCSE stm'
-    return (stmsFromList stm'' <> stms', a)
+    pure (stmsFromList stm'' <> stms', a)
   where
     nestedCSE stm' = do
       let ds =
@@ -199,7 +199,7 @@ cseInStms consumed (stm : stms) m =
               DoLoop merge _ _ -> map (diet . declTypeOf . fst) merge
               _ -> map patElemDiet $ patElems $ stmPat stm'
       e <- mapExpM (cse ds) $ stmExp stm'
-      return stm' {stmExp = e}
+      pure stm' {stmExp = e}
 
     cse ds =
       identityMapper
@@ -226,7 +226,7 @@ cseInStm ::
   CSEM rep a
 cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
-  let e' = normExp $substituteNames nsubsts e
+  let e' = normExp $ substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
   if any (bad cse_arrays) $ patElems pat
     then m [Let pat' (StmAux cs attrs edec) e']
@@ -288,12 +288,12 @@ class CSEInOp op where
   cseInOp :: op -> CSEM rep op
 
 instance CSEInOp () where
-  cseInOp () = return ()
+  cseInOp () = pure ()
 
 subCSE :: CSEM rep r -> CSEM otherrep r
 subCSE m = do
   CSEState _ cse_arrays <- ask
-  return $ runReader m $ newCSEState cse_arrays
+  pure $ runReader m $ newCSEState cse_arrays
 
 instance
   ( ASTRep rep,
@@ -305,7 +305,9 @@ instance
   where
   cseInOp (GPU.SegOp op) = GPU.SegOp <$> cseInOp op
   cseInOp (GPU.OtherOp op) = GPU.OtherOp <$> cseInOp op
-  cseInOp x = return x
+  cseInOp (GPU.GPUBody types body) =
+    subCSE $ GPU.GPUBody types <$> cseInBody (map (const Observe) types) body
+  cseInOp x = pure x
 
 instance
   ( ASTRep rep,
@@ -327,7 +329,7 @@ instance
   cseInOp =
     subCSE
       . GPU.mapSegOpM
-        (GPU.SegOpMapper return cseInLambda cseInKernelBody return return)
+        (GPU.SegOpMapper pure cseInLambda cseInKernelBody pure pure)
 
 cseInKernelBody ::
   (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
@@ -335,10 +337,10 @@ cseInKernelBody ::
   CSEM rep (GPU.KernelBody rep)
 cseInKernelBody (GPU.KernelBody bodydec stms res) = do
   Body _ stms' _ <- cseInBody (map (const Observe) res) $ Body bodydec stms []
-  return $ GPU.KernelBody bodydec stms' res
+  pure $ GPU.KernelBody bodydec stms' res
 
 instance CSEInOp op => CSEInOp (Memory.MemOp op) where
-  cseInOp o@Memory.Alloc {} = return o
+  cseInOp o@Memory.Alloc {} = pure o
   cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 
 instance
@@ -348,4 +350,4 @@ instance
   ) =>
   CSEInOp (SOAC.SOAC (Aliases rep))
   where
-  cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper return cseInLambda return)
+  cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper pure cseInLambda pure)

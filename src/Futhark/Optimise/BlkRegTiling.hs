@@ -107,23 +107,23 @@ kkLoopBody
                   asss <- aCopyLoc2Reg k ltid_y
                   -- copy B from local memory to registers
                   bsss <- bCopyLoc2Reg k ltid_x
-                  return $ varsRes [asss, bsss]
+                  pure $ varsRes [asss, bsss]
               let [asss, bsss] = reg_mem
               mkRedomapOneTileBody acc_merge asss bsss True
           )
           (resultBodyM [Var acc_merge])
-    return [thd_acc, a_loc, b_loc]
+    pure [thd_acc, a_loc, b_loc]
     where
       mk_ik is_coal (thd_y, thd_x) (i0, k0)
         | is_coal = do
-          -- not-transposed case (i.e., already coalesced)
-          let (t_par, t_seq) = (tx, tk)
-          k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 t_par)
-          i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 t_par)
-          -- we have padded to minimize bank conflicts,
-          -- hence the length of inner dim is (t_seq + 1)
-          let e = le64 k + le64 i * (pe64 t_seq + pe64 se1)
-          return (i, k, e)
+            -- not-transposed case (i.e., already coalesced)
+            let (t_par, t_seq) = (tx, tk)
+            k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 t_par)
+            i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 t_par)
+            -- we have padded to minimize bank conflicts,
+            -- hence the length of inner dim is (t_seq + 1)
+            let e = le64 k + le64 i * (pe64 t_seq + pe64 se1)
+            pure (i, k, e)
       mk_ik _ (thd_y, thd_x) (i0, k0) = do
         -- matrix is transposed case (i.e., uncoalesced):
         let (t_par, tr_par) = (tx, tx_rx)
@@ -132,24 +132,24 @@ kkLoopBody
         -- we have padded to minimize bank conflicts,
         -- hence the length of inner dim is (tr_par + 1)
         let e = le64 i + le64 k * (pe64 tr_par + pe64 se1)
-        return (i, k, e)
+        pure (i, k, e)
       isInnerCoal :: Env -> VName -> Stm GPU -> Bool
       isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
           Nothing <- M.lookup x ixfn_env =
-          True -- if not in the table, we assume not-transposed!
+            True -- if not in the table, we assume not-transposed!
       isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
           Just ixf_fn <- M.lookup x ixfn_env,
           (IxFun.IxFun (lmad :| []) _ _) <- ixf_fn =
-          let lmad_dims = IxFun.lmadDims lmad
-              q = length lmad_dims
-              last_perm = IxFun.ldPerm $ last lmad_dims
-              stride = IxFun.ldStride $ last lmad_dims
-              res = last_perm == q -1 && (stride == pe64 (intConst Int64 1))
-           in res
+            let lmad_dims = IxFun.lmadDims lmad
+                q = length lmad_dims
+                last_perm = IxFun.ldPerm $ last lmad_dims
+                stride = IxFun.ldStride $ last lmad_dims
+                res = last_perm == q - 1 && (stride == pe64 (intConst Int64 1))
+             in res
       isInnerCoal _ _ _ = error "TileLoops/Shared.hs: not an error, but I would like to know why!"
       --
       mkRedomapOneTileBody acc_merge asss bsss fits_ij = do
@@ -198,7 +198,7 @@ kkLoopBody
                     )
                     (resultBodyM [Var css_merge'])
               resultBodyM [Var css]
-            return [varRes css]
+            pure [varRes css]
         resultBodyM $ map Var redomap_res
       --
       copyGlb2ShMem ::
@@ -213,7 +213,7 @@ kkLoopBody
           segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
             scatterFun is_inner_coal
 
-        return (x_loc, copyLoc2Reg is_inner_coal str_A x_loc)
+        pure (x_loc, copyLoc2Reg is_inner_coal str_A x_loc)
         where
           copyLoc2Reg ::
             Bool ->
@@ -272,7 +272,7 @@ kkLoopBody
                   (toExp $ le64 k .<. pe64 t_seq)
                   (eBody [toExp epx_loc_fi])
                   (eBody [eSubExp $ intConst Int64 (-1)])
-            return (a_elem, a_loc_ind)
+            pure (a_elem, a_loc_ind)
           scatterFun _ _ _ = do
             error "Function scatterFun in Shared.hs: 2nd arg should be an array with 2 elements!"
 
@@ -284,7 +284,7 @@ mmBlkRegTiling env stm = do
   res <- mmBlkRegTilingAcc env stm
   case res of
     Nothing -> mmBlkRegTilingNrm env stm
-    _ -> return res
+    _ -> pure res
 
 mmBlkRegTilingAcc :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
@@ -292,7 +292,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
     cs == mempty,
     -- check kernel has one result of primitive type
     [res_tp] <- ts,
-    isAccType res_tp,
+    isAcc res_tp,
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
     (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims_rev <-
@@ -307,122 +307,120 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         ) <-
       matchesBlkRegTile seg_space kstms,
     checkAccumulatesRedomapRes res_nm code2' redomap_orig_res = do
-    -- Here we start the implementation --
-    ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
-    (new_kernel, host_stms) <- runBuilder $ do
-      -- host code
-      (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
-        mkTileMemSizes height_A width_B common_dim
+      -- Here we start the implementation --
+      ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
+      (new_kernel, host_stms) <- runBuilder $ do
+        -- host code
+        (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
+          mkTileMemSizes height_A width_B common_dim
 
-      rk <- letSubExp "rk" $ BasicOp $ SubExp $ intConst Int64 8 -- 16 and 8 seem good values
-      tk_rk <- letSubExp "tk_rk" =<< toExp (pe64 tk * pe64 rk)
+        rk <- letSubExp "rk" $ BasicOp $ SubExp $ intConst Int64 8 -- 16 and 8 seem good values
+        tk_rk <- letSubExp "tk_rk" =<< toExp (pe64 tk * pe64 rk)
 
-      gridDim_t <- letSubExp "gridDim_t" =<< ceilDiv common_dim tk_rk
-      gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv height_A ty_ry
-      gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
+        gridDim_t <- letSubExp "gridDim_t" =<< ceilDiv common_dim tk_rk
+        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv height_A ty_ry
+        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
 
-      let gridxyt_pexp = pe64 gridDim_y * pe64 gridDim_x * pe64 gridDim_t
-          grid_pexp =
-            foldl (\x d -> pe64 d * x) gridxyt_pexp $
-              map snd rem_outer_dims_rev
+        let gridxyt_pexp = pe64 gridDim_y * pe64 gridDim_x * pe64 gridDim_t
+            grid_pexp =
+              foldl (\x d -> pe64 d * x) gridxyt_pexp $
+                map snd rem_outer_dims_rev
 
-      (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
-      (gid_x, gid_y, gid_flat) <- mkGidsXYF
-      gid_t <- newVName "gid_t"
+        (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
+        (gid_x, gid_y, gid_flat) <- mkGidsXYF
+        gid_t <- newVName "gid_t"
 
-      ---- in this binder: outer seggroup ----
-      (ret_seggroup, stms_seggroup) <- runBuilder $ do
-        iii <- letExp "iii" =<< toExp (le64 gid_y * pe64 ty_ry)
-        jjj <- letExp "jjj" =<< toExp (le64 gid_x * pe64 tx_rx)
-        ttt <- letExp "ttt" =<< toExp (le64 gid_t * pe64 tk_rk)
+        ---- in this binder: outer seggroup ----
+        (ret_seggroup, stms_seggroup) <- runBuilder $ do
+          iii <- letExp "iii" =<< toExp (le64 gid_y * pe64 ty_ry)
+          jjj <- letExp "jjj" =<< toExp (le64 gid_x * pe64 tx_rx)
+          ttt <- letExp "ttt" =<< toExp (le64 gid_t * pe64 tk_rk)
 
-        -- initialize register mem with neutral elements and create shmem
-        (cssss, a_loc_init, b_loc_init) <-
-          initRegShmem
-            (rx, tx, ry, ty, a_loc_sz, b_loc_sz)
-            (map_t1, map_t2, red_t)
+          -- initialize register mem with neutral elements and create shmem
+          (cssss, a_loc_init, b_loc_init) <-
+            initRegShmem
+              (rx, tx, ry, ty, a_loc_sz, b_loc_sz)
+              (map_t1, map_t2, red_t)
+              segthd_lvl
+              red_ne
+
+          -- build prologue.
+          elems_on_t <- letSubExp "elems_on_t" =<< toExp (pe64 common_dim - le64 ttt)
+          tiles_on_t <- letSubExp "tiles_on_t" $ BasicOp $ BinOp (SQuot Int64 Unsafe) elems_on_t tk
+          full_tiles <- letExp "full_tiles" $ BasicOp $ BinOp (SMin Int64) rk tiles_on_t
+
+          let ct_arg =
+                ( (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx),
+                  segthd_lvl,
+                  var_dims,
+                  (gtid_x, width_B, gtid_y, height_A, common_dim),
+                  (a_loc_sz, b_loc_sz),
+                  (iii, jjj),
+                  (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
+                  (map_lam, red_lam)
+                )
+
+          prologue_res_list <-
+            forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
+              \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
+                off_t <- letExp "off_t" =<< toExp (pe64 rk * le64 gid_t + le64 kk0)
+                process_full_tiles <-
+                  kkLoopBody env ct_arg off_t (thd_res_merge, a_loc_merge, b_loc_merge) False
+
+                resultBodyM $ map Var process_full_tiles
+
+          let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
+
+          redomap_res_lst <-
+            letTupExp "redomap_res_if"
+              =<< eIf
+                ( toExp $
+                    le64 full_tiles .==. pe64 rk
+                      .||. pe64 common_dim .==. (pe64 tk * le64 full_tiles + le64 ttt)
+                )
+                (resultBodyM $ map Var prologue_res_list)
+                ( do
+                    off_t <- letExp "off_t" =<< toExp (pe64 rk * le64 gid_t + le64 full_tiles)
+                    process_sprs_tile <-
+                      kkLoopBody env ct_arg off_t (prologue_res, a_loc_reuse, b_loc_reuse) True
+
+                    resultBodyM $ map Var process_sprs_tile
+                )
+          let redomap_res : _ = redomap_res_lst
+
+          -- support for non-empty code2'
+          --  segmap (ltid_y < ty, ltid_x < tx) {
+          --    for i < ry do
+          --      for j < rx do
+          --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
+          --              then code2' else dummy
+          --        final_res[i,j] = res
+          mkEpilogueAccRes
             segthd_lvl
-            red_ne
+            (redomap_orig_res, redomap_res)
+            (res_nm, res_tp)
+            (ty, tx, ry, rx)
+            (iii, jjj)
+            (gtid_y, gtid_x)
+            (height_A, width_B, rem_outer_dims)
+            code2'
 
-        -- build prologue.
-        elems_on_t <- letSubExp "elems_on_t" =<< toExp (pe64 common_dim - le64 ttt)
-        tiles_on_t <- letSubExp "tiles_on_t" $ BasicOp $ BinOp (SQuot Int64 Unsafe) elems_on_t tk
-        full_tiles <- letExp "full_tiles" $ BasicOp $ BinOp (SMin Int64) rk tiles_on_t
-
-        let ct_arg =
-              ( (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx),
-                segthd_lvl,
-                var_dims,
-                (gtid_x, width_B, gtid_y, height_A, common_dim),
-                (a_loc_sz, b_loc_sz),
-                (iii, jjj),
-                (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
-                (map_lam, red_lam)
-              )
-
-        prologue_res_list <-
-          forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
-            \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
-              off_t <- letExp "off_t" =<< toExp (pe64 rk * le64 gid_t + le64 kk0)
-              process_full_tiles <-
-                kkLoopBody env ct_arg off_t (thd_res_merge, a_loc_merge, b_loc_merge) False
-
-              resultBodyM $ map Var process_full_tiles
-
-        let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
-
-        redomap_res_lst <-
-          letTupExp "redomap_res_if"
-            =<< eIf
-              ( toExp $
-                  le64 full_tiles .==. pe64 rk
-                    .||. pe64 common_dim .==. (pe64 tk * le64 full_tiles + le64 ttt)
-              )
-              (resultBodyM $ map Var prologue_res_list)
-              ( do
-                  off_t <- letExp "off_t" =<< toExp (pe64 rk * le64 gid_t + le64 full_tiles)
-                  process_sprs_tile <-
-                    kkLoopBody env ct_arg off_t (prologue_res, a_loc_reuse, b_loc_reuse) True
-
-                  resultBodyM $ map Var process_sprs_tile
-              )
-        let redomap_res : _ = redomap_res_lst
-
-        -- support for non-empty code2'
-        --  segmap (ltid_y < ty, ltid_x < tx) {
-        --    for i < ry do
-        --      for j < rx do
-        --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
-        --              then code2' else dummy
-        --        final_res[i,j] = res
-        mkEpilogueAccRes
-          segthd_lvl
-          (redomap_orig_res, redomap_res)
-          (res_nm, res_tp)
-          (ty, tx, ry, rx)
-          (iii, jjj)
-          (gtid_y, gtid_x)
-          (height_A, width_B, rem_outer_dims)
-          code2'
-
-      let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
-          space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_t, gridDim_t), (gid_y, gridDim_y), (gid_x, gridDim_x)])
-          kbody' = KernelBody () stms_seggroup ret_seggroup
-      return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
-    return $ Just (host_stms, new_kernel)
+        let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_t, gridDim_t), (gid_y, gridDim_y), (gid_x, gridDim_x)])
+            kbody' = KernelBody () stms_seggroup ret_seggroup
+        pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
+      pure $ Just (host_stms, new_kernel)
   where
-    isAccType Acc {} = True
-    isAccType _ = False
     sameAccType acc_sglton (Acc sglton _ _ _) =
       acc_sglton == sglton
     sameAccType _ _ = False
     getAccumFV (Acc singleton _shp [_eltp] _) = do
-      let fvs = namesToList $ freeIn old_kbody --code
+      let fvs = namesToList $ freeIn old_kbody -- code
       tps <- localScope (scopeOfSegSpace seg_space) $ do
         mapM lookupType fvs
       let (acc_0s, _) = unzip $ filter (sameAccType singleton . snd) $ zip fvs tps
       case acc_0s of
-        [acc_0] -> return acc_0
+        [acc_0] -> pure acc_0
         _ -> error "Impossible case reached when treating accumulators!"
     getAccumFV tp = error ("Should be an accumulator type at this point, given: " ++ pretty tp)
     --
@@ -435,7 +433,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         getAccumStm False (Let (Pat [pat_el]) _aux (BasicOp (UpdateAcc _acc_nm _ind vals)))
           | [v] <- vals,
             patElemName pat_el == res_nm =
-            v == Var redomap_orig_res
+              v == Var redomap_orig_res
         getAccumStm False _ = False
     --
     -- epilogue for accumulator result type
@@ -470,10 +468,10 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                     (resultBodyM [Var rss_merge'])
               resultBodyM [res_el]
             resultBodyM [Var rss']
-          return [varRes rss]
+          pure [varRes rss]
         let epilogue_res_acc : _ = rssss_list
-        return [Returns ResultMaySimplify (Certs []) $ Var epilogue_res_acc]
-mmBlkRegTilingAcc _ _ = return Nothing
+        pure [Returns ResultMaySimplify (Certs []) $ Var epilogue_res_acc]
+mmBlkRegTilingAcc _ _ = pure Nothing
 
 --------------------------
 --------------------------
@@ -498,89 +496,89 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         (map_lam, red_lam, red_ne, redomap_orig_res, red_t)
         ) <-
       matchesBlkRegTile seg_space kstms = do
-    -- Here we start the implementation
-    ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
-    (new_kernel, host_stms) <- runBuilder $ do
-      -- host code
-      (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
-        mkTileMemSizes height_A width_B common_dim
+      -- Here we start the implementation
+      ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
+      (new_kernel, host_stms) <- runBuilder $ do
+        -- host code
+        (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
+          mkTileMemSizes height_A width_B common_dim
 
-      gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
-      gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv height_A ty_ry
-      let gridxy_pexp = pe64 gridDim_y * pe64 gridDim_x
-      let grid_pexp =
-            foldl (\x d -> pe64 d * x) gridxy_pexp $
-              map snd rem_outer_dims_rev
-      (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
+        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
+        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv height_A ty_ry
+        let gridxy_pexp = pe64 gridDim_y * pe64 gridDim_x
+        let grid_pexp =
+              foldl (\x d -> pe64 d * x) gridxy_pexp $
+                map snd rem_outer_dims_rev
+        (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
 
-      (gid_x, gid_y, gid_flat) <- mkGidsXYF
+        (gid_x, gid_y, gid_flat) <- mkGidsXYF
 
-      ---- in this binder: outer seggroup ----
-      (ret_seggroup, stms_seggroup) <- runBuilder $ do
-        iii <- letExp "iii" =<< toExp (le64 gid_y * pe64 ty_ry)
-        jjj <- letExp "jjj" =<< toExp (le64 gid_x * pe64 tx_rx)
+        ---- in this binder: outer seggroup ----
+        (ret_seggroup, stms_seggroup) <- runBuilder $ do
+          iii <- letExp "iii" =<< toExp (le64 gid_y * pe64 ty_ry)
+          jjj <- letExp "jjj" =<< toExp (le64 gid_x * pe64 tx_rx)
 
-        -- initialize register mem with neutral elements and create shmem
-        (cssss, a_loc_init, b_loc_init) <-
-          initRegShmem
-            (rx, tx, ry, ty, a_loc_sz, b_loc_sz)
-            (map_t1, map_t2, red_t)
+          -- initialize register mem with neutral elements and create shmem
+          (cssss, a_loc_init, b_loc_init) <-
+            initRegShmem
+              (rx, tx, ry, ty, a_loc_sz, b_loc_sz)
+              (map_t1, map_t2, red_t)
+              segthd_lvl
+              red_ne
+
+          -- build prologue.
+          full_tiles <-
+            letExp "full_tiles" $
+              BasicOp $ BinOp (SQuot Int64 Unsafe) common_dim tk
+
+          let ct_arg =
+                ( (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx),
+                  segthd_lvl,
+                  var_dims,
+                  (gtid_x, width_B, gtid_y, height_A, common_dim),
+                  (a_loc_sz, b_loc_sz),
+                  (iii, jjj),
+                  (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
+                  (map_lam, red_lam)
+                )
+
+          prologue_res_list <-
+            forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
+              \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
+                process_full_tiles <-
+                  kkLoopBody env ct_arg kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
+
+                resultBodyM $ map Var process_full_tiles
+
+          let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
+
+          -- build epilogue.
+          epilogue_res_list <- kkLoopBody env ct_arg full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
+
+          let redomap_res : _ = epilogue_res_list
+
+          -- support for non-empty code2'
+          --  segmap (ltid_y < ty, ltid_x < tx) {
+          --    for i < ry do
+          --      for j < rx do
+          --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
+          --              then code2' else dummy
+          --        final_res[i,j] = res
+          mkEpiloguePrimRes
             segthd_lvl
-            red_ne
+            (redomap_orig_res, redomap_res)
+            (res_nm, res_tp)
+            (ty, tx, ry, rx)
+            (iii, jjj)
+            (gtid_y, gtid_x)
+            (height_A, width_B, rem_outer_dims)
+            code2'
 
-        -- build prologue.
-        full_tiles <-
-          letExp "full_tiles" $
-            BasicOp $ BinOp (SQuot Int64 Unsafe) common_dim tk
-
-        let ct_arg =
-              ( (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx),
-                segthd_lvl,
-                var_dims,
-                (gtid_x, width_B, gtid_y, height_A, common_dim),
-                (a_loc_sz, b_loc_sz),
-                (iii, jjj),
-                (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
-                (map_lam, red_lam)
-              )
-
-        prologue_res_list <-
-          forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
-            \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
-              process_full_tiles <-
-                kkLoopBody env ct_arg kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
-
-              resultBodyM $ map Var process_full_tiles
-
-        let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
-
-        -- build epilogue.
-        epilogue_res_list <- kkLoopBody env ct_arg full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
-
-        let redomap_res : _ = epilogue_res_list
-
-        -- support for non-empty code2'
-        --  segmap (ltid_y < ty, ltid_x < tx) {
-        --    for i < ry do
-        --      for j < rx do
-        --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
-        --              then code2' else dummy
-        --        final_res[i,j] = res
-        mkEpiloguePrimRes
-          segthd_lvl
-          (redomap_orig_res, redomap_res)
-          (res_nm, res_tp)
-          (ty, tx, ry, rx)
-          (iii, jjj)
-          (gtid_y, gtid_x)
-          (height_A, width_B, rem_outer_dims)
-          code2'
-
-      let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
-          space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
-          kbody' = KernelBody () stms_seggroup ret_seggroup
-      return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
-    return $ Just (host_stms, new_kernel)
+        let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
+            kbody' = KernelBody () stms_seggroup ret_seggroup
+        pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
+      pure $ Just (host_stms, new_kernel)
   where
     mkEpiloguePrimRes
       segthd_lvl
@@ -593,7 +591,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       code2' = do
         epilogue_res <-
           if redomap_orig_res == res_nm
-            then return redomap_res -- epilogue_res_list
+            then pure redomap_res -- epilogue_res_list
             else do
               rssss_list <- segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
                 rss_init <- scratch "rss_init" (elemType res_tp) [ry, rx]
@@ -617,9 +615,9 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                     rss'' <- update "rss" rss_merge' [i, j] res_el
                     resultBodyM [Var rss'']
                   resultBodyM [Var rss']
-                return [varRes rss]
+                pure [varRes rss]
               let rssss : _ = rssss_list
-              return rssss
+              pure rssss
 
         let regtile_ret_dims =
               map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims
@@ -628,15 +626,15 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         -- Add dummy dimensions to tile to reflect the outer dimensions.
         epilogue_res' <-
           if null rem_outer_dims
-            then return epilogue_res
+            then pure epilogue_res
             else do
               epilogue_t <- lookupType epilogue_res
               let (block_dims, rest_dims) = splitAt 2 $ arrayDims epilogue_t
                   ones = map (const $ intConst Int64 1) rem_outer_dims
                   new_shape = concat [ones, block_dims, ones, rest_dims]
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) epilogue_res
-        return [RegTileReturns mempty regtile_ret_dims epilogue_res']
-mmBlkRegTilingNrm _ _ = return Nothing
+        pure [RegTileReturns mempty regtile_ret_dims epilogue_res']
+mmBlkRegTilingNrm _ _ = pure Nothing
 
 -- pattern match the properties of the code that we look to
 -- tile: a redomap whose two input arrays are each invariant
@@ -692,19 +690,19 @@ matchesBlkRegTile seg_space kstms
     -- identify load_A, load_B
     tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
     length tmp_stms == length arrs =
-    let zip_AB = zip3 tmp_stms arrs [map_t1_0, map_t2_0]
-        [(load_A, inp_A, map_t1), (load_B, inp_B, map_t2)] =
-          if var_dims == [0, 1]
-            then zip_AB
-            else reverse zip_AB
-        code2' = code2'' <> code2
-     in Just
-          ( code2',
-            (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
-            common_dim,
-            var_dims,
-            (map_lam, red_lam, red_ne, redomap_orig_res, elemType red_t1)
-          )
+      let zip_AB = zip3 tmp_stms arrs [map_t1_0, map_t2_0]
+          [(load_A, inp_A, map_t1), (load_B, inp_B, map_t2)] =
+            if var_dims == [0, 1]
+              then zip_AB
+              else reverse zip_AB
+          code2' = code2'' <> code2
+       in Just
+            ( code2',
+              (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
+              common_dim,
+              var_dims,
+              (map_lam, red_lam, red_ne, redomap_orig_res, elemType red_t1)
+            )
 matchesBlkRegTile _ _ = Nothing
 
 -- ceiled division expression
@@ -759,7 +757,7 @@ mkTileMemSizes height_A width_B common_dim = do
   b_loc_sz <-
     letSubExp "b_loc_sz"
       =<< toExp (pe64 tx * pe64 rx * pe64 tk + pad_term) -- (pe64 tk * pe64 tx * pe64 rx)
-  return (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz)
+  pure (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz)
 
 mkNewSegthdLvl ::
   SubExp ->
@@ -770,14 +768,14 @@ mkNewSegthdLvl tx ty grid_pexp = do
   grid_size <- letSubExp "grid_size" =<< toExp grid_pexp
   group_size <- letSubExp "group_size" =<< toExp (pe64 ty * pe64 tx)
   let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
-  return (grid_size, group_size, segthd_lvl)
+  pure (grid_size, group_size, segthd_lvl)
 
 mkGidsXYF :: Builder GPU (VName, VName, VName)
 mkGidsXYF = do
   gid_y <- newVName "gid_y"
   gid_x <- newVName "gid_x"
   gid_flat <- newVName "gid_flat"
-  return (gid_x, gid_y, gid_flat)
+  pure (gid_x, gid_y, gid_flat)
 
 initRegShmem ::
   (SubExp, SubExp, SubExp, SubExp, SubExp, SubExp) ->
@@ -798,12 +796,12 @@ initRegShmem
           css'' <- update "css" css_merge' [i, j] red_ne
           resultBodyM [Var css'']
         resultBodyM [Var css']
-      return [varRes css]
+      pure [varRes css]
     let [cssss] = cssss_list
     -- scratch shared memory
     a_loc_init <- scratch "A_loc" map_t1 [a_loc_sz]
     b_loc_init <- scratch "B_loc" map_t2 [b_loc_sz]
-    return (cssss, a_loc_init, b_loc_init)
+    pure (cssss, a_loc_init, b_loc_init)
 
 getThdRedomapRes ::
   (SubExp, SubExp) ->
@@ -814,7 +812,7 @@ getThdRedomapRes (rx, ry) (ltid_x, ltid_y) (iii, jjj, redomap_res) = do
   css <- index "redomap_thd" redomap_res [ltid_y, ltid_x]
   ii <- letExp "ii" =<< toExp (le64 iii + le64 ltid_y * pe64 ry)
   jj <- letExp "jj" =<< toExp (le64 jjj + le64 ltid_x * pe64 rx)
-  return (css, ii, jj)
+  pure (css, ii, jj)
 
 prereqAddCode2 ::
   (VName, VName) ->
@@ -894,27 +892,27 @@ processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
     [p] <- patElems patt,
     p_nm <- patElemName p,
     nameIn p_nm arrs =
-    Just (ss, M.insert p_nm stm tab)
+      Just (ss, M.insert p_nm stm tab)
 processIndirections _ res_red_var acc stm'@(Let patt _ _)
   | Just (ss, tab) <- acc,
     ps <- patElems patt,
     all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
-    Just (ss Seq.|> stm', tab)
+      Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
 
 getParTiles :: (String, String) -> (Name, Name) -> SubExp -> Builder GPU (SubExp, SubExp)
 getParTiles (t_str, r_str) (t_name, r_name) len_dim =
   case len_dim of
     Constant (IntValue (Int64Value 8)) ->
-      return (se8, se1)
+      pure (se8, se1)
     Constant (IntValue (Int64Value 16)) ->
-      return (se8, se2)
+      pure (se8, se2)
     Constant (IntValue (Int64Value 32)) ->
-      return (se8, se4)
+      pure (se8, se4)
     _ -> do
       t <- letSubExp t_str $ Op $ SizeOp $ GetSize t_name SizeTile
       r <- letSubExp r_str $ Op $ SizeOp $ GetSize r_name SizeRegTile
-      return (t, r)
+      pure (t, r)
 
 getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Builder GPU SubExp
 getSeqTile tk_str tk_name len_dim ty tx =
@@ -1056,237 +1054,237 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     length ker_res_nms == length kres,
     all primType kertp,
     all (variantToDim variance gtid_z) ker_res_nms = do
-    -- HERE STARTS THE IMPLEMENTATION:
-    (new_kernel, host_stms) <- runBuilder $ do
-      -- host code
-      -- process the z-variant arrays that need transposition;
-      -- these "manifest" statements should come before the kernel
-      (tab_inn, tab_out) <-
-        foldM
-          (insertTranspose variance (gtid_z, d_M))
-          (M.empty, M.empty)
-          $ M.toList arr_tab0
+      -- HERE STARTS THE IMPLEMENTATION:
+      (new_kernel, host_stms) <- runBuilder $ do
+        -- host code
+        -- process the z-variant arrays that need transposition;
+        -- these "manifest" statements should come before the kernel
+        (tab_inn, tab_out) <-
+          foldM
+            (insertTranspose variance (gtid_z, d_M))
+            (M.empty, M.empty)
+            $ M.toList arr_tab0
 
-      tx_name <- nameFromString . pretty <$> newVName "Tx"
-      ty_name <- nameFromString . pretty <$> newVName "Ty"
+        tx_name <- nameFromString . pretty <$> newVName "Tx"
+        ty_name <- nameFromString . pretty <$> newVName "Ty"
 
-      tx0 <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
-      ty0 <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
-      ty <- limitTile "Ty" ty0 d_Ky
-      tx <- limitTile "Tx" tx0 d_Kx
-      let rz = reg_tile_se
+        tx0 <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+        ty0 <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
+        ty <- limitTile "Ty" ty0 d_Ky
+        tx <- limitTile "Tx" tx0 d_Kx
+        let rz = reg_tile_se
 
-      gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv d_Kx tx
-      gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv d_Ky ty
-      gridDim_z <- letSubExp "gridDim_z" =<< ceilDiv d_M rz
-      let gridxyz_pexp = pe64 gridDim_z * pe64 gridDim_y * pe64 gridDim_x
-      let grid_pexp = product $ gridxyz_pexp : map (pe64 . snd) rem_outer_dims_rev
-      grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
-      group_size <- letSubExp "group_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
-      let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
+        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv d_Kx tx
+        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv d_Ky ty
+        gridDim_z <- letSubExp "gridDim_z" =<< ceilDiv d_M rz
+        let gridxyz_pexp = pe64 gridDim_z * pe64 gridDim_y * pe64 gridDim_x
+        let grid_pexp = product $ gridxyz_pexp : map (pe64 . snd) rem_outer_dims_rev
+        grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
+        group_size <- letSubExp "group_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
+        let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
 
-      count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz group_size
+        count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz group_size
 
-      gid_x <- newVName "gid_x"
-      gid_y <- newVName "gid_y"
-      gid_z <- newVName "gid_z"
-      gid_flat <- newVName "gid_flat"
+        gid_x <- newVName "gid_x"
+        gid_y <- newVName "gid_y"
+        gid_z <- newVName "gid_z"
+        gid_flat <- newVName "gid_flat"
 
-      ---- in this binder: outer seggroup ----
-      (ret_seggroup, stms_seggroup) <- runBuilder $ do
-        ii <- letExp "ii" =<< toExp (le64 gid_z * pe64 rz)
-        jj1 <- letExp "jj1" =<< toExp (le64 gid_y * pe64 ty)
-        jj2 <- letExp "jj2" =<< toExp (le64 gid_x * pe64 tx)
+        ---- in this binder: outer seggroup ----
+        (ret_seggroup, stms_seggroup) <- runBuilder $ do
+          ii <- letExp "ii" =<< toExp (le64 gid_z * pe64 rz)
+          jj1 <- letExp "jj1" =<< toExp (le64 gid_y * pe64 ty)
+          jj2 <- letExp "jj2" =<< toExp (le64 gid_x * pe64 tx)
 
-        -- initialize the register arrays corresponding to the result of redomap;
-        reg_arr_nms <- segMap2D "res" segthd_lvl ResultPrivate (ty, tx) $ \_ ->
-          forM (zip red_nes red_res_tps) $ \(red_ne, red_t) -> do
-            css_init <- scratch "res_init" (elemType red_t) [rz]
-            css <- forLoop rz [css_init] $ \i [css_merge] -> do
-              css' <- update "css" css_merge [i] red_ne
-              resultBodyM [Var css']
-            return $ varRes css
+          -- initialize the register arrays corresponding to the result of redomap;
+          reg_arr_nms <- segMap2D "res" segthd_lvl ResultPrivate (ty, tx) $ \_ ->
+            forM (zip red_nes red_res_tps) $ \(red_ne, red_t) -> do
+              css_init <- scratch "res_init" (elemType red_t) [rz]
+              css <- forLoop rz [css_init] $ \i [css_merge] -> do
+                css' <- update "css" css_merge [i] red_ne
+                resultBodyM [Var css']
+              pure $ varRes css
 
-        -- scratch the shared-memory arrays corresponding to the arrays that are
-        --   input to the redomap and are invariant to the outermost parallel dimension.
-        loc_arr_nms <- forM (M.toList tab_out) $ \(nm, (ptp, _)) ->
-          scratch (baseString nm ++ "_loc") ptp [rz]
+          -- scratch the shared-memory arrays corresponding to the arrays that are
+          --   input to the redomap and are invariant to the outermost parallel dimension.
+          loc_arr_nms <- forM (M.toList tab_out) $ \(nm, (ptp, _)) ->
+            scratch (baseString nm ++ "_loc") ptp [rz]
 
-        prologue_res_list <-
-          forLoop' common_dim (reg_arr_nms ++ loc_arr_nms) $
-            \q var_nms -> do
-              let reg_arr_merge_nms = take (length red_nes) var_nms
-              let loc_arr_merge_nms = drop (length red_nes) var_nms
+          prologue_res_list <-
+            forLoop' common_dim (reg_arr_nms ++ loc_arr_nms) $
+              \q var_nms -> do
+                let reg_arr_merge_nms = take (length red_nes) var_nms
+                let loc_arr_merge_nms = drop (length red_nes) var_nms
 
-              -- collective copy from global to shared memory
-              loc_arr_nms' <-
-                forLoop' count_shmem loc_arr_merge_nms $ \tt loc_arr_merge2_nms -> do
-                  loc_arr_merge2_nms' <-
-                    forM (zip loc_arr_merge2_nms (M.toList tab_out)) $ \(loc_Y_nm, (glb_Y_nm, (ptp_Y, load_Y))) -> do
-                      ltid_flat <- newVName "ltid_flat"
-                      ltid <- newVName "ltid"
-                      let segspace = SegSpace ltid_flat [(ltid, group_size)]
-                      ((res_v, res_i), stms) <- runBuilder $ do
-                        offs <- letExp "offs" =<< toExp (pe64 group_size * le64 tt)
-                        loc_ind <- letExp "loc_ind" =<< toExp (le64 ltid + le64 offs)
-                        letBindNames [gtid_z] =<< toExp (le64 ii + le64 loc_ind)
-                        let glb_ind = gtid_z
-                        y_elm <-
-                          letSubExp "y_elem"
-                            =<< eIf
-                              (toExp $ le64 glb_ind .<. pe64 d_M)
-                              ( do
-                                  addStm load_Y
-                                  res <- index "Y_elem" glb_Y_nm [q]
-                                  resultBodyM [Var res]
-                              )
-                              (eBody [eBlank $ Prim ptp_Y])
-                        y_ind <-
-                          letSubExp "y_loc_ind"
-                            =<< eIf
-                              (toExp $ le64 loc_ind .<. pe64 rz)
-                              (toExp loc_ind >>= letTupExp' "loc_fi" >>= resultBodyM)
-                              (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
-                        --y_tp  <- subExpType y_elm
-                        return (y_elm, y_ind)
+                -- collective copy from global to shared memory
+                loc_arr_nms' <-
+                  forLoop' count_shmem loc_arr_merge_nms $ \tt loc_arr_merge2_nms -> do
+                    loc_arr_merge2_nms' <-
+                      forM (zip loc_arr_merge2_nms (M.toList tab_out)) $ \(loc_Y_nm, (glb_Y_nm, (ptp_Y, load_Y))) -> do
+                        ltid_flat <- newVName "ltid_flat"
+                        ltid <- newVName "ltid"
+                        let segspace = SegSpace ltid_flat [(ltid, group_size)]
+                        ((res_v, res_i), stms) <- runBuilder $ do
+                          offs <- letExp "offs" =<< toExp (pe64 group_size * le64 tt)
+                          loc_ind <- letExp "loc_ind" =<< toExp (le64 ltid + le64 offs)
+                          letBindNames [gtid_z] =<< toExp (le64 ii + le64 loc_ind)
+                          let glb_ind = gtid_z
+                          y_elm <-
+                            letSubExp "y_elem"
+                              =<< eIf
+                                (toExp $ le64 glb_ind .<. pe64 d_M)
+                                ( do
+                                    addStm load_Y
+                                    res <- index "Y_elem" glb_Y_nm [q]
+                                    resultBodyM [Var res]
+                                )
+                                (eBody [eBlank $ Prim ptp_Y])
+                          y_ind <-
+                            letSubExp "y_loc_ind"
+                              =<< eIf
+                                (toExp $ le64 loc_ind .<. pe64 rz)
+                                (toExp loc_ind >>= letTupExp' "loc_fi" >>= resultBodyM)
+                                (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
+                          -- y_tp  <- subExpType y_elm
+                          pure (y_elm, y_ind)
 
-                      let ret = WriteReturns mempty (Shape [rz]) loc_Y_nm [(Slice [DimFix res_i], res_v)]
-                      let body = KernelBody () stms [ret]
+                        let ret = WriteReturns mempty (Shape [rz]) loc_Y_nm [(Slice [DimFix res_i], res_v)]
+                        let body = KernelBody () stms [ret]
 
-                      res_nms <-
-                        letTupExp "Y_glb2loc" <=< renameExp $
-                          Op $ SegOp $ SegMap segthd_lvl segspace [Prim ptp_Y] body
-                      let res_nm : _ = res_nms
-                      return res_nm
-                  resultBodyM $ map Var loc_arr_merge2_nms'
+                        res_nms <-
+                          letTupExp "Y_glb2loc" <=< renameExp $
+                            Op $ SegOp $ SegMap segthd_lvl segspace [Prim ptp_Y] body
+                        let res_nm : _ = res_nms
+                        pure res_nm
+                    resultBodyM $ map Var loc_arr_merge2_nms'
 
-              redomap_res <-
-                segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tx) $
-                  \(ltid_y, ltid_x) -> do
-                    letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
-                    letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
-                    reg_arr_merge_nms_slc <- forM reg_arr_merge_nms $ \reg_arr_nm ->
-                      index "res_reg_slc" reg_arr_nm [ltid_y, ltid_x]
-                    fmap subExpsRes . letTupExp' "redomap_guarded"
+                redomap_res <-
+                  segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tx) $
+                    \(ltid_y, ltid_x) -> do
+                      letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
+                      letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
+                      reg_arr_merge_nms_slc <- forM reg_arr_merge_nms $ \reg_arr_nm ->
+                        index "res_reg_slc" reg_arr_nm [ltid_y, ltid_x]
+                      fmap subExpsRes . letTupExp' "redomap_guarded"
+                        =<< eIf
+                          (toExp $ le64 gtid_y .<. pe64 d_Ky .&&. le64 gtid_x .<. pe64 d_Kx)
+                          ( do
+                              inp_scals_invar_outer <-
+                                forM (M.toList tab_inn) $ \(inp_arr_nm, load_stm) -> do
+                                  addStm load_stm
+                                  index (baseString inp_arr_nm) inp_arr_nm [q]
+                              -- build the loop of count R whose body is semantically the redomap code
+                              reg_arr_merge_nms' <-
+                                forLoop' rz reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
+                                  letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
+                                  resultBodyM =<< letTupExp' "redomap_lam"
+                                    =<< eIf
+                                      (toExp $ le64 gtid_z .<. pe64 d_M)
+                                      ( do
+                                          -- read from shared memory
+                                          ys <- forM loc_arr_nms' $ \loc_arr_nm ->
+                                            index "inp_reg_var2z" loc_arr_nm [i]
+                                          cs <- forM reg_arr_mm_nms $ \reg_arr_nm ->
+                                            index "res_reg_var2z" reg_arr_nm [i]
+                                          -- here we need to put in order the scalar inputs to map:
+                                          let tab_scals =
+                                                M.fromList $
+                                                  zip (map fst $ M.toList tab_out) ys
+                                                    ++ zip (map fst $ M.toList tab_inn) inp_scals_invar_outer
+                                          map_inp_scals <- forM inp_soac_arrs $ \arr_nm ->
+                                            case M.lookup arr_nm tab_scals of
+                                              Nothing -> error "Impossible case reached in tiling3D\n"
+                                              Just nm -> pure nm
+                                          map_lam' <- renameLambda map_lam
+                                          red_lam' <- renameLambda red_lam
+                                          map_res_scals <- eLambda map_lam' (map (eSubExp . Var) map_inp_scals)
+                                          red_res <- eLambda red_lam' (map eSubExp (map Var cs ++ map resSubExp map_res_scals))
+                                          css <- forM (zip reg_arr_mm_nms red_res) $ \(reg_arr_nm, c) ->
+                                            update (baseString reg_arr_nm) reg_arr_nm [i] (resSubExp c)
+                                          resultBodyM $ map Var css
+                                      )
+                                      (resultBodyM $ map Var reg_arr_mm_nms)
+                              resultBodyM $ map Var reg_arr_merge_nms'
+                          )
+                          (resultBodyM $ map Var reg_arr_merge_nms_slc)
+                resultBodyM $ map Var $ redomap_res ++ loc_arr_nms'
+
+          -- support for non-empty code2'
+          --  segmap (ltid_y < ty, ltid_x < tx) {
+          --    for i < rz do
+          --        res = if (ii+i < d_M && jj1+ltid_y < d_Ky && jj2 + ltid_x < d_Kx)
+          --              then code2' else dummy
+          --        final_res[i] = res
+          let redomap_res = take (length red_nes) prologue_res_list
+          epilogue_res <-
+            if length redomap_orig_res == length ker_res_nms
+              && ker_res_nms == map patElemName redomap_orig_res
+              then segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
+                forM (zip kertp redomap_res) $ \(res_tp, res) -> do
+                  rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
+                  fmap varRes $
+                    forLoop rz [rss_init] $ \i [rss] -> do
+                      let slice = Slice [DimFix $ Var i, DimFix se0, DimFix se0]
+                      thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
+                      rss' <- letSubExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
+                      resultBodyM [rss']
+              else segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) -> do
+                letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
+                letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
+                rss_init <- forM kertp $ \res_tp ->
+                  scratch "rss_init" (elemType res_tp) [rz, se1, se1]
+                rss <- forLoop' rz rss_init $ \i rss_merge -> do
+                  letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
+                  forM_ (zip redomap_orig_res redomap_res) $ \(o_res, n_res) -> do
+                    c <- index "redomap_thd" n_res [ltid_y, ltid_x, i]
+                    letBindNames [patElemName o_res] =<< toExp (le64 c)
+                    pure c
+                  res_els <-
+                    letTupExp' "res_elem"
                       =<< eIf
-                        (toExp $ le64 gtid_y .<. pe64 d_Ky .&&. le64 gtid_x .<. pe64 d_Kx)
-                        ( do
-                            inp_scals_invar_outer <-
-                              forM (M.toList tab_inn) $ \(inp_arr_nm, load_stm) -> do
-                                addStm load_stm
-                                index (baseString inp_arr_nm) inp_arr_nm [q]
-                            -- build the loop of count R whose body is semantically the redomap code
-                            reg_arr_merge_nms' <-
-                              forLoop' rz reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
-                                letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
-                                resultBodyM =<< letTupExp' "redomap_lam"
-                                  =<< eIf
-                                    (toExp $ le64 gtid_z .<. pe64 d_M)
-                                    ( do
-                                        -- read from shared memory
-                                        ys <- forM loc_arr_nms' $ \loc_arr_nm ->
-                                          index "inp_reg_var2z" loc_arr_nm [i]
-                                        cs <- forM reg_arr_mm_nms $ \reg_arr_nm ->
-                                          index "res_reg_var2z" reg_arr_nm [i]
-                                        -- here we need to put in order the scalar inputs to map:
-                                        let tab_scals =
-                                              M.fromList $
-                                                zip (map fst $ M.toList tab_out) ys
-                                                  ++ zip (map fst $ M.toList tab_inn) inp_scals_invar_outer
-                                        map_inp_scals <- forM inp_soac_arrs $ \arr_nm ->
-                                          case M.lookup arr_nm tab_scals of
-                                            Nothing -> error "Impossible case reached in tiling3D\n"
-                                            Just nm -> return nm
-                                        map_lam' <- renameLambda map_lam
-                                        red_lam' <- renameLambda red_lam
-                                        map_res_scals <- eLambda map_lam' (map (eSubExp . Var) map_inp_scals)
-                                        red_res <- eLambda red_lam' (map eSubExp (map Var cs ++ map resSubExp map_res_scals))
-                                        css <- forM (zip reg_arr_mm_nms red_res) $ \(reg_arr_nm, c) ->
-                                          update (baseString reg_arr_nm) reg_arr_nm [i] (resSubExp c)
-                                        resultBodyM $ map Var css
-                                    )
-                                    (resultBodyM $ map Var reg_arr_mm_nms)
-                            resultBodyM $ map Var reg_arr_merge_nms'
+                        ( toExp $
+                            le64 gtid_y .<. pe64 d_Ky
+                              .&&. le64 gtid_x .<. pe64 d_Kx
+                              .&&. le64 gtid_z .<. pe64 d_M
                         )
-                        (resultBodyM $ map Var reg_arr_merge_nms_slc)
-              resultBodyM $ map Var $ redomap_res ++ loc_arr_nms'
-
-        -- support for non-empty code2'
-        --  segmap (ltid_y < ty, ltid_x < tx) {
-        --    for i < rz do
-        --        res = if (ii+i < d_M && jj1+ltid_y < d_Ky && jj2 + ltid_x < d_Kx)
-        --              then code2' else dummy
-        --        final_res[i] = res
-        let redomap_res = take (length red_nes) prologue_res_list
-        epilogue_res <-
-          if length redomap_orig_res == length ker_res_nms
-            && ker_res_nms == map patElemName redomap_orig_res
-            then segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
-              forM (zip kertp redomap_res) $ \(res_tp, res) -> do
-                rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
-                fmap varRes $
-                  forLoop rz [rss_init] $ \i [rss] -> do
+                        ( do
+                            addStms code2'
+                            resultBodyM $ map Var ker_res_nms
+                        )
+                        (eBody $ map eBlank kertp)
+                  rss' <- forM (zip res_els rss_merge) $ \(res_el, rs_merge) -> do
                     let slice = Slice [DimFix $ Var i, DimFix se0, DimFix se0]
-                    thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
-                    rss' <- letSubExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
-                    resultBodyM [rss']
-            else segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) -> do
-              letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
-              letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
-              rss_init <- forM kertp $ \res_tp ->
-                scratch "rss_init" (elemType res_tp) [rz, se1, se1]
-              rss <- forLoop' rz rss_init $ \i rss_merge -> do
-                letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
-                forM_ (zip redomap_orig_res redomap_res) $ \(o_res, n_res) -> do
-                  c <- index "redomap_thd" n_res [ltid_y, ltid_x, i]
-                  letBindNames [patElemName o_res] =<< toExp (le64 c)
-                  return c
-                res_els <-
-                  letTupExp' "res_elem"
-                    =<< eIf
-                      ( toExp $
-                          le64 gtid_y .<. pe64 d_Ky
-                            .&&. le64 gtid_x .<. pe64 d_Kx
-                            .&&. le64 gtid_z .<. pe64 d_M
-                      )
-                      ( do
-                          addStms code2'
-                          resultBodyM $ map Var ker_res_nms
-                      )
-                      (eBody $ map eBlank kertp)
-                rss' <- forM (zip res_els rss_merge) $ \(res_el, rs_merge) -> do
-                  let slice = Slice [DimFix $ Var i, DimFix se0, DimFix se0]
-                  letSubExp "rss" $ BasicOp $ Update Unsafe rs_merge slice res_el
-                resultBodyM rss'
-              return $ varsRes rss
+                    letSubExp "rss" $ BasicOp $ Update Unsafe rs_merge slice res_el
+                  resultBodyM rss'
+                pure $ varsRes rss
 
-        ----------------------------------------------------------------
-        -- Finally, reshape the result arrays for the RegTileReturn  ---
-        ----------------------------------------------------------------
-        let regtile_ret_dims =
-              map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims
-                ++ [(d_M, se1, rz), (d_Ky, ty, se1), (d_Kx, tx, se1)]
+          ----------------------------------------------------------------
+          -- Finally, reshape the result arrays for the RegTileReturn  ---
+          ----------------------------------------------------------------
+          let regtile_ret_dims =
+                map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims
+                  ++ [(d_M, se1, rz), (d_Ky, ty, se1), (d_Kx, tx, se1)]
 
-        epilogue_res' <- forM epilogue_res $ \res ->
-          if null rem_outer_dims
-            then return res
-            else do
-              -- Add dummy dimensions to tile to reflect the outer dimensions
-              res_tp' <- lookupType res
-              let (block_dims, rest_dims) = splitAt 2 $ arrayDims res_tp'
-                  ones = map (const se1) rem_outer_dims
-                  new_shape = concat [ones, block_dims, ones, rest_dims]
-              letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res
+          epilogue_res' <- forM epilogue_res $ \res ->
+            if null rem_outer_dims
+              then pure res
+              else do
+                -- Add dummy dimensions to tile to reflect the outer dimensions
+                res_tp' <- lookupType res
+                let (block_dims, rest_dims) = splitAt 2 $ arrayDims res_tp'
+                    ones = map (const se1) rem_outer_dims
+                    new_shape = concat [ones, block_dims, ones, rest_dims]
+                letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res
 
-        return $ map (RegTileReturns mempty regtile_ret_dims) epilogue_res'
-      -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do
-      let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
-          space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
-          kbody' = KernelBody () stms_seggroup ret_seggroup
+          pure $ map (RegTileReturns mempty regtile_ret_dims) epilogue_res'
+        -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do
+        let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
+            kbody' = KernelBody () stms_seggroup ret_seggroup
 
-      return $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
-    -- END (new_kernel, host_stms) <- runBuilder $ do
-    return $ Just (host_stms, new_kernel)
+        pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
+      -- END (new_kernel, host_stms) <- runBuilder $ do
+      pure $ Just (host_stms, new_kernel)
   where
     getResNm (Returns ResultMaySimplify _ (Var res_nm)) = Just res_nm
     getResNm _ = Nothing
@@ -1303,19 +1301,19 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       | [p] <- patElems patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
-        case L.findIndices (variantSliceDim variance gidz) (unSlice slc) of
-          [] -> return (M.insert p_nm stm tab_inn, tab_out)
-          i : _ -> do
-            arr_tp <- lookupType arr_nm
-            let perm = [i + 1 .. arrayRank arr_tp -1] ++ [0 .. i]
-            let arr_tr_str = baseString arr_nm ++ "_transp"
-            arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest perm arr_nm
-            let e_ind' = BasicOp $ Index arr_tr_nm slc
-            let stm' = Let patt yy e_ind'
-            return (tab_inn, M.insert p_nm (ptp, stm') tab_out)
+          case L.findIndices (variantSliceDim variance gidz) (unSlice slc) of
+            [] -> pure (M.insert p_nm stm tab_inn, tab_out)
+            i : _ -> do
+              arr_tp <- lookupType arr_nm
+              let perm = [i + 1 .. arrayRank arr_tp - 1] ++ [0 .. i]
+              let arr_tr_str = baseString arr_nm ++ "_transp"
+              arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest perm arr_nm
+              let e_ind' = BasicOp $ Index arr_tr_nm slc
+              let stm' = Let patt yy e_ind'
+              pure (tab_inn, M.insert p_nm (ptp, stm') tab_out)
     insertTranspose _ _ _ _ = error "\nUnreachable case reached in insertTranspose case, doRegTiling3D\n"
 
     variantSliceDim :: VarianceTable -> VName -> DimIndex SubExp -> Bool
     variantSliceDim variance gidz (DimFix (Var vnm)) = variantToDim variance gidz vnm
     variantSliceDim _ _ _ = False
-doRegTiling3D _ = return Nothing
+doRegTiling3D _ = pure Nothing

@@ -76,7 +76,7 @@ data Context = Context
     ctxVisibleMTys :: S.Set VName
   }
 
-type FileMap = M.Map VName (String, Namespace)
+type FileMap = M.Map VName (FilePath, Namespace)
 
 type DocM = ReaderT Context (WriterT Documented (Writer Warnings))
 
@@ -119,7 +119,8 @@ vnameToFileMap = mconcat . map forFile
       mconcat (map (vname Type) (M.keys abs))
         <> forEnv file_env
       where
-        vname ns v = M.singleton (qualLeaf v) (file, ns)
+        file' = makeRelative "/" file
+        vname ns v = M.singleton (qualLeaf v) (file', ns)
         vname' ((ns, _), v) = vname ns v
 
         forEnv env =
@@ -140,12 +141,13 @@ renderFiles important_imports imports = runWriter $ do
     forM imports $ \(current, fm) ->
       let ctx =
             Context
-              current
-              fm
-              imports
-              mempty
-              file_map
-              (progModuleTypes $ fileProg fm)
+              { ctxCurrent = current,
+                ctxFileMod = fm,
+                ctxImports = imports,
+                ctxNoLink = mempty,
+                ctxFileMap = file_map,
+                ctxVisibleMTys = progModuleTypes $ fileProg fm
+              }
        in flip runReaderT ctx $ do
             (first_paragraph, maybe_abstract, maybe_sections) <- headerDoc $ fileProg fm
 
@@ -153,7 +155,7 @@ renderFiles important_imports imports = runWriter $ do
 
             description <- describeDecs $ progDecs $ fileProg fm
 
-            return
+            pure
               ( current,
                 ( H.docTypeHtml ! A.lang "en" $
                     addBoilerplateWithNav important_imports imports ("doc" </> current) current $
@@ -168,14 +170,14 @@ renderFiles important_imports imports = runWriter $ do
                 )
               )
 
-  return $
+  pure $
     [ ("index.html", contentsPage important_imports $ map (fmap snd) import_pages),
       ("doc-index.html", indexPage important_imports imports documented file_map)
     ]
       ++ map (importHtml *** fst) import_pages
   where
     file_map = vnameToFileMap imports
-    importHtml import_name = "doc" </> import_name <.> "html"
+    importHtml import_name = "doc" </> makeRelative "/" import_name <.> "html"
 
 -- | The header documentation (which need not be present) can contain
 -- an abstract and further sections.
@@ -187,12 +189,12 @@ headerDoc prog =
       first_paragraph <- docHtml $ Just $ DocComment (firstParagraph abstract) loc
       abstract' <- docHtml $ Just $ DocComment abstract loc
       more_sections' <- docHtml $ Just $ DocComment more_sections loc
-      return
+      pure
         ( first_paragraph,
           selfLink "abstract" (H.h2 "Abstract") <> abstract',
           more_sections'
         )
-    _ -> return mempty
+    _ -> pure mempty
   where
     splitHeaderDoc s =
       fromMaybe (s, mempty) $
@@ -228,7 +230,7 @@ contentsPage important_imports pages =
 
 importLink :: FilePath -> String -> Html
 importLink current name =
-  let file = relativise (makeRelative "/" $ "doc" </> name -<.> "html") current
+  let file = relativise ("doc" </> makeRelative "/" name -<.> "html") current
    in (H.a ! A.href (fromString file) $ fromString name)
 
 indexPage :: [FilePath] -> Imports -> Documented -> FileMap -> Html
@@ -288,8 +290,9 @@ indexPage important_imports imports documented fm =
       H.li $ H.a ! A.href (fromString $ '#' : initial) $ fromString initial
 
     linkTo (name, (file, what)) =
-      let link =
-            (H.a ! A.href (fromString (makeRelative "/" $ "doc" </> vnameLink' name "" file))) $
+      let file' = makeRelative "/" file
+          link =
+            (H.a ! A.href (fromString (makeRelative "/" $ "doc" </> vnameLink' name "" file'))) $
               fromString $ baseString name
           what' = case what of
             IndexValue -> "value"
@@ -297,7 +300,7 @@ indexPage important_imports imports documented fm =
             IndexType -> "type"
             IndexModuleType -> "module type"
             IndexModule -> "module"
-          html_file = makeRelative "/" $ "doc" </> file -<.> "html"
+          html_file = "doc" </> file' -<.> "html"
        in H.tr $
             (H.td ! A.class_ "doc_index_name" $ link)
               <> (H.td ! A.class_ "doc_index_namespace" $ what')
@@ -362,16 +365,16 @@ synopsisDec visible fm dec = case dec of
   TypeDec t -> synopsisType t
   OpenDec x _
     | Just opened <- synopsisOpened x -> Just $ do
-      opened' <- opened
-      return $ fullRow $ keyword "open " <> opened'
+        opened' <- opened
+        pure $ fullRow $ keyword "open " <> opened'
     | otherwise ->
-      Just $
-        return $
-          fullRow $
-            keyword "open" <> fromString (" <" <> pretty x <> ">")
+        Just $
+          pure $
+            fullRow $
+              keyword "open" <> fromString (" <" <> pretty x <> ">")
   LocalDec (SigDec s) _
     | sigName s `S.member` visible ->
-      synopsisModType (keyword "local" <> " ") s
+        synopsisModType (keyword "local" <> " ") s
   LocalDec {} -> Nothing
   ImportDec {} -> Nothing
 
@@ -383,17 +386,17 @@ synopsisOpened (ModParens me _) = do
 synopsisOpened (ModImport _ (Info file) _) = Just $ do
   current <- asks ctxCurrent
   let dest = fromString $ relativise file current <> ".html"
-  return $ keyword "import " <> (H.a ! A.href dest) (fromString $ show file)
+  pure $ keyword "import " <> (H.a ! A.href dest) (fromString $ show file)
 synopsisOpened (ModAscript _ se _ _) = Just $ do
   se' <- synopsisSigExp se
-  return $ "... : " <> se'
+  pure $ "... : " <> se'
 synopsisOpened _ = Nothing
 
 synopsisValBind :: ValBind -> Maybe (DocM Html)
 synopsisValBind vb = Just $ do
   let name' = vnameSynopsisDef $ valBindName vb
   (lhs, mhs, rhs) <- valBindHtml name' vb
-  return $ specRow lhs (mhs <> " : ") rhs
+  pure $ specRow lhs (mhs <> " : ") rhs
 
 valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
 valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = do
@@ -404,7 +407,7 @@ valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = d
             ++ map identName (S.toList $ mconcat $ map patIdents params)
   rettype' <- noLink' $ maybe (retTypeHtml rettype) typeExpHtml retdecl
   params' <- noLink' $ mapM patternHtml params
-  return
+  pure
     ( keyword "val " <> (H.span ! A.class_ "decl_name") name,
       tparams',
       mconcat (intersperse " -> " $ params' ++ [rettype'])
@@ -415,7 +418,7 @@ synopsisModType prefix sb = Just $ do
   let name' = vnameSynopsisDef $ sigName sb
   fullRow <$> do
     se' <- synopsisSigExp $ sigExp sb
-    return $ prefix <> keyword "module type " <> name' <> " = " <> se'
+    pure $ prefix <> keyword "module type " <> name' <> " = " <> se'
 
 synopsisMod :: FileModule -> ModBind -> Maybe (DocM Html)
 synopsisMod fm (ModBind name ps sig _ _ _) =
@@ -426,7 +429,7 @@ synopsisMod fm (ModBind name ps sig _ _ _) =
     proceed sig' = do
       let name' = vnameSynopsisDef name
       ps' <- modParamHtml ps
-      return $ specRow (keyword "module " <> name') ": " (ps' <> sig')
+      pure $ specRow (keyword "module " <> name') ": " (ps' <> sig')
 
     FileModule _abs Env {envModTable = modtable} _ = fm
     envSig (ModEnv e) = renderEnv e
@@ -440,7 +443,7 @@ synopsisType tb = Just $ do
 typeBindHtml :: Html -> TypeBind -> DocM Html
 typeBindHtml name' (TypeBind _ l tparams t _ _ _) = do
   t' <- noLink (map typeParamName tparams) $ typeExpHtml t
-  return $ typeAbbrevHtml l name' tparams <> " = " <> t'
+  pure $ typeAbbrevHtml l name' tparams <> " = " <> t'
 
 renderEnv :: Env -> DocM Html
 renderEnv (Env vtable ttable sigtable modtable _) = do
@@ -448,7 +451,7 @@ renderEnv (Env vtable ttable sigtable modtable _) = do
   valBinds <- mapM renderValBind (M.toList vtable)
   sigBinds <- mapM renderModType (M.toList sigtable)
   modBinds <- mapM renderMod (M.toList modtable)
-  return $ braces $ mconcat $ typeBinds ++ valBinds ++ sigBinds ++ modBinds
+  pure $ braces $ mconcat $ typeBinds ++ valBinds ++ sigBinds ++ modBinds
 
 renderModType :: (VName, MTy) -> DocM Html
 renderModType (name, _sig) =
@@ -464,13 +467,13 @@ renderValBind = fmap H.div . synopsisValBindBind
 renderTypeBind :: (VName, TypeBinding) -> DocM Html
 renderTypeBind (name, TypeAbbr l tps tp) = do
   tp' <- retTypeHtml tp
-  return $ H.div $ typeAbbrevHtml l (vnameHtml name) tps <> " = " <> tp'
+  pure $ H.div $ typeAbbrevHtml l (vnameHtml name) tps <> " = " <> tp'
 
 synopsisValBindBind :: (VName, BoundV) -> DocM Html
 synopsisValBindBind (name, BoundV tps t) = do
   let tps' = map typeParamHtml tps
   t' <- typeHtml t
-  return $
+  pure $
     keyword "val " <> vnameHtml name
       <> mconcat (map (" " <>) tps')
       <> ": "
@@ -478,28 +481,28 @@ synopsisValBindBind (name, BoundV tps t) = do
 
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
-  Array _ u et shape -> do
+  Array _ u shape et -> do
     shape' <- prettyShapeDecl shape
     et' <- typeHtml $ Scalar et
-    return $ prettyU u <> shape' <> et'
-  Scalar (Prim et) -> return $ primTypeHtml et
+    pure $ prettyU u <> shape' <> et'
+  Scalar (Prim et) -> pure $ primTypeHtml et
   Scalar (Record fs)
     | Just ts <- areTupleFields fs ->
-      parens . commas <$> mapM typeHtml ts
+        parens . commas <$> mapM typeHtml ts
     | otherwise ->
-      braces . commas <$> mapM ppField (M.toList fs)
+        braces . commas <$> mapM ppField (M.toList fs)
     where
       ppField (name, tp) = do
         tp' <- typeHtml tp
-        return $ toHtml (nameToString name) <> ": " <> tp'
+        pure $ toHtml (nameToString name) <> ": " <> tp'
   Scalar (TypeVar _ u et targs) -> do
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
-    return $ prettyU u <> et' <> mconcat (map (" " <>) targs')
+    pure $ prettyU u <> et' <> mconcat (map (" " <>) targs')
   Scalar (Arrow _ pname t1 t2) -> do
     t1' <- typeHtml t1
     t2' <- retTypeHtml t2
-    return $ case pname of
+    pure $ case pname of
       Named v ->
         parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
       Unnamed ->
@@ -517,14 +520,14 @@ retTypeHtml (RetType dims t) = do
 
 prettyShapeDecl :: ShapeDecl (DimDecl VName) -> DocM Html
 prettyShapeDecl (ShapeDecl ds) =
-  mconcat <$> mapM (fmap brackets . dimDeclHtml) ds
+  mconcat <$> mapM dimDeclHtml ds
 
 typeArgHtml :: TypeArg (DimDecl VName) -> DocM Html
-typeArgHtml (TypeArgDim d _) = brackets <$> dimDeclHtml d
+typeArgHtml (TypeArgDim d _) = dimDeclHtml d
 typeArgHtml (TypeArgType t _) = typeHtml t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
-modParamHtml [] = return mempty
+modParamHtml [] = pure mempty
 modParamHtml (ModParam pname psig _ _ : mps) =
   liftM2 f (synopsisSigExp psig) (modParamHtml mps)
   where
@@ -542,10 +545,10 @@ synopsisSigExp e = case e of
   SigSpecs ss _ -> braces . (H.table ! A.class_ "specs") . mconcat <$> mapM synopsisSpec ss
   SigWith s (TypeRef v ps t _) _ -> do
     s' <- synopsisSigExp s
-    t' <- typeDeclHtml t
+    t' <- typeExpHtml t
     v' <- qualNameHtml v
     let ps' = mconcat $ map ((" " <>) . typeParamHtml) ps
-    return $ s' <> keyword " with " <> v' <> ps' <> " = " <> t'
+    pure $ s' <> keyword " with " <> v' <> ps' <> " = " <> t'
   SigArrow Nothing e1 e2 _ ->
     liftM2 f (synopsisSigExp e1) (synopsisSigExp e2)
     where
@@ -555,7 +558,7 @@ synopsisSigExp e = case e of
       let name = vnameHtml v
       e1' <- synopsisSigExp e1
       e2' <- noLink [v] $ synopsisSigExp e2
-      return $ "(" <> name <> ": " <> e1' <> ") -> " <> e2'
+      pure $ "(" <> name <> ": " <> e1' <> ") -> " <> e2'
 
 keyword :: String -> Html
 keyword = (H.span ! A.class_ "keyword") . fromString
@@ -567,7 +570,7 @@ vnameHtml (VName name tag) =
 vnameDescDef :: VName -> IndexWhat -> DocM Html
 vnameDescDef v what = do
   document v what
-  return $ H.a ! A.id (fromString (show (baseTag v))) $ renderName (baseName v)
+  pure $ H.a ! A.id (fromString (show (baseTag v))) $ renderName (baseName v)
 
 vnameSynopsisDef :: VName -> Html
 vnameSynopsisDef (VName name tag) =
@@ -585,18 +588,16 @@ synopsisSpec spec = case spec of
   TypeAbbrSpec tpsig ->
     fullRow <$> typeBindHtml (vnameSynopsisDef $ typeAlias tpsig) tpsig
   TypeSpec l name ps _ _ ->
-    return $ fullRow $ keyword l' <> vnameSynopsisDef name <> mconcat (map ((" " <>) . typeParamHtml) ps)
+    pure $ fullRow $ keyword l' <> vnameSynopsisDef name <> mconcat (map ((" " <>) . typeParamHtml) ps)
     where
       l' = case l of
         Unlifted -> "type "
         SizeLifted -> "type~ "
         Lifted -> "type^ "
-  ValSpec name tparams rettype _ _ -> do
+  ValSpec name tparams rettype _ _ _ -> do
     let tparams' = map typeParamHtml tparams
-    rettype' <-
-      noLink (map typeParamName tparams) $
-        typeDeclHtml rettype
-    return $
+    rettype' <- noLink (map typeParamName tparams) $ typeExpHtml rettype
+    pure $
       specRow
         (keyword "val " <> vnameSynopsisDef name)
         (mconcat (map (" " <>) tparams') <> ": ")
@@ -605,33 +606,30 @@ synopsisSpec spec = case spec of
     specRow (keyword "module " <> vnameSynopsisDef name) ": " <$> synopsisSigExp sig
   IncludeSpec e _ -> fullRow . (keyword "include " <>) <$> synopsisSigExp e
 
-typeDeclHtml :: TypeDeclBase f VName -> DocM Html
-typeDeclHtml = typeExpHtml . declaredType
-
 typeExpHtml :: TypeExp VName -> DocM Html
 typeExpHtml e = case e of
   TEUnique t _ -> ("*" <>) <$> typeExpHtml t
-  TEArray at d _ -> do
+  TEArray d at _ -> do
     at' <- typeExpHtml at
     d' <- dimExpHtml d
-    return $ brackets d' <> at'
+    pure $ d' <> at'
   TETuple ts _ -> parens . commas <$> mapM typeExpHtml ts
   TERecord fs _ -> braces . commas <$> mapM ppField fs
     where
       ppField (name, t) = do
         t' <- typeExpHtml t
-        return $ toHtml (nameToString name) <> ": " <> t'
+        pure $ toHtml (nameToString name) <> ": " <> t'
   TEVar name _ -> qualNameHtml name
   TEApply t arg _ -> do
     t' <- typeExpHtml t
     arg' <- typeArgExpHtml arg
-    return $ t' <> " " <> arg'
+    pure $ t' <> " " <> arg'
   TEArrow pname t1 t2 _ -> do
     t1' <- case t1 of
       TEArrow {} -> parens <$> typeExpHtml t1
       _ -> typeExpHtml t1
     t2' <- typeExpHtml t2
-    return $ case pname of
+    pure $ case pname of
       Just v ->
         parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
       Nothing ->
@@ -647,7 +645,7 @@ typeExpHtml e = case e of
 qualNameHtml :: QualName VName -> DocM Html
 qualNameHtml (QualName names vname@(VName name tag)) =
   if tag <= maxIntrinsicTag
-    then return $ renderName name
+    then pure $ renderName name
     else f <$> ref
   where
     prefix :: Html
@@ -658,15 +656,16 @@ qualNameHtml (QualName names vname@(VName name tag)) =
     ref = do
       boring <- asks $ S.member vname . ctxNoLink
       if boring
-        then return Nothing
+        then pure Nothing
         else Just <$> vnameLink vname
 
-vnameLink' :: VName -> String -> String -> String
 vnameLink :: VName -> DocM String
 vnameLink vname = do
   current <- asks ctxCurrent
   file <- asks $ maybe current fst . M.lookup vname . ctxFileMap
-  return $ vnameLink' vname current file
+  pure $ vnameLink' vname current file
+
+vnameLink' :: VName -> String -> String -> String
 vnameLink' (VName _ tag) current file =
   if file == current
     then "#" ++ show tag
@@ -679,7 +678,7 @@ patternHtml :: Pat -> DocM Html
 patternHtml pat = do
   let (pat_param, t) = patternParam pat
   t' <- typeHtml t
-  return $ case pat_param of
+  pure $ case pat_param of
     Named v -> parens (vnameHtml v <> ": " <> t')
     Unnamed -> t'
 
@@ -688,14 +687,14 @@ relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 dimDeclHtml :: DimDecl VName -> DocM Html
-dimDeclHtml (NamedDim v) = qualNameHtml v
-dimDeclHtml (ConstDim n) = return $ toHtml (show n)
-dimDeclHtml AnyDim {} = pure mempty
+dimDeclHtml (NamedDim v) = brackets <$> qualNameHtml v
+dimDeclHtml (ConstDim n) = pure $ brackets $ toHtml (show n)
+dimDeclHtml AnyDim {} = pure $ brackets mempty
 
 dimExpHtml :: DimExp VName -> DocM Html
-dimExpHtml DimExpAny = return mempty
-dimExpHtml (DimExpNamed v _) = qualNameHtml v
-dimExpHtml (DimExpConst n _) = return $ toHtml (show n)
+dimExpHtml DimExpAny = pure $ brackets mempty
+dimExpHtml (DimExpNamed v _) = brackets <$> qualNameHtml v
+dimExpHtml (DimExpConst n _) = pure $ brackets $ toHtml (show n)
 
 typeArgExpHtml :: TypeArgExp VName -> DocM Html
 typeArgExpHtml (TypeArgExpDim d _) = dimExpHtml d
@@ -719,32 +718,32 @@ docHtml (Just (DocComment doc loc)) =
     . GFM.commonmarkToHtml [] [GFM.extAutolink]
     . T.pack
     <$> identifierLinks loc doc
-docHtml Nothing = return mempty
+docHtml Nothing = pure mempty
 
 identifierLinks :: SrcLoc -> String -> DocM String
-identifierLinks _ [] = return []
+identifierLinks _ [] = pure []
 identifierLinks loc s
   | Just ((name, namespace, file), s') <- identifierReference s = do
-    let proceed x = (x <>) <$> identifierLinks loc s'
-        unknown = proceed $ "`" <> name <> "`"
-    case knownNamespace namespace of
-      Just namespace' -> do
-        maybe_v <- lookupName (namespace', name, file)
-        case maybe_v of
-          Nothing -> do
-            warn loc $
-              "Identifier '" <> fromString name <> "' not found in namespace '"
-                <> fromString namespace
-                <> "'"
-                <> fromString (maybe "" (" in file " <>) file)
-                <> "."
-            unknown
-          Just v' -> do
-            link <- vnameLink v'
-            proceed $ "[`" <> name <> "`](" <> link <> ")"
-      _ -> do
-        warn loc $ "Unknown namespace '" <> fromString namespace <> "'."
-        unknown
+      let proceed x = (x <>) <$> identifierLinks loc s'
+          unknown = proceed $ "`" <> name <> "`"
+      case knownNamespace namespace of
+        Just namespace' -> do
+          maybe_v <- lookupName (namespace', name, file)
+          case maybe_v of
+            Nothing -> do
+              warn loc $
+                "Identifier '" <> fromString name <> "' not found in namespace '"
+                  <> fromString namespace
+                  <> "'"
+                  <> fromString (maybe "" (" in file " <>) file)
+                  <> "."
+              unknown
+            Just v' -> do
+              link <- vnameLink v'
+              proceed $ "[`" <> name <> "`](" <> link <> ")"
+        _ -> do
+          warn loc $ "Unknown namespace '" <> fromString namespace <> "'."
+          unknown
   where
     knownNamespace "term" = Just Term
     knownNamespace "mtype" = Just Signature
@@ -758,8 +757,8 @@ lookupName (namespace, name, file) = do
   let file' = includeToString . flip (mkImportFrom (mkInitialImport current)) mempty <$> file
   env <- lookupEnvForFile file'
   case M.lookup (namespace, nameFromString name) . envNameMap =<< env of
-    Nothing -> return Nothing
-    Just qn -> return $ Just $ qualLeaf qn
+    Nothing -> pure Nothing
+    Just qn -> pure $ Just $ qualLeaf qn
 
 lookupEnvForFile :: Maybe FilePath -> DocM (Maybe Env)
 lookupEnvForFile Nothing = asks $ Just . fileEnv . ctxFileMod
@@ -779,7 +778,7 @@ describeGeneric name what doc f = do
       decl_header =
         (H.dt ! A.class_ "desc_header") $
           vnameSynopsisRef name <> decl_type
-  return $ decl_header <> decl_doc
+  pure $ decl_header <> decl_doc
 
 describeGenericMod ::
   VName ->
@@ -801,7 +800,7 @@ describeGenericMod name what se doc f = do
       decl_header =
         (H.dt ! A.class_ "desc_header") $
           vnameSynopsisRef name <> decl_type
-  return $ decl_header <> decl_doc
+  pure $ decl_header <> decl_doc
 
 describeDecs :: [Dec] -> DocM Html
 describeDecs decs = do
@@ -815,21 +814,21 @@ describeDec :: S.Set VName -> Dec -> Maybe (DocM Html)
 describeDec _ (ValDec vb) = Just $
   describeGeneric (valBindName vb) (valBindWhat vb) (valBindDoc vb) $ \name -> do
     (lhs, mhs, rhs) <- valBindHtml name vb
-    return $ lhs <> mhs <> ": " <> rhs
+    pure $ lhs <> mhs <> ": " <> rhs
 describeDec _ (TypeDec vb) =
   Just $
     describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)
 describeDec _ (SigDec (SigBind name se doc _)) = Just $
   describeGenericMod name IndexModuleType se doc $ \name' ->
-    return $ keyword "module type " <> name'
+    pure $ keyword "module type " <> name'
 describeDec _ (ModDec mb) = Just $
   describeGeneric (modName mb) IndexModule (modDoc mb) $ \name' ->
-    return $ keyword "module " <> name'
+    pure $ keyword "module " <> name'
 describeDec _ OpenDec {} = Nothing
 describeDec visible (LocalDec (SigDec (SigBind name se doc _)) _)
   | name `S.member` visible = Just $
-    describeGenericMod name IndexModuleType se doc $ \name' ->
-      return $ keyword "local module type " <> name'
+      describeGenericMod name IndexModuleType se doc $ \name' ->
+        pure $ keyword "local module type " <> name'
 describeDec _ LocalDec {} = Nothing
 describeDec _ ImportDec {} = Nothing
 
@@ -838,39 +837,37 @@ valBindWhat vb
   | null (valBindParams vb),
     RetType _ t <- unInfo $ valBindRetType vb,
     orderZero t =
-    IndexValue
+      IndexValue
   | otherwise =
-    IxFun
+      IxFun
 
 describeSpecs :: [Spec] -> DocM Html
 describeSpecs specs =
   H.dl . mconcat <$> mapM describeSpec specs
 
 describeSpec :: Spec -> DocM Html
-describeSpec (ValSpec name tparams t doc _) =
+describeSpec (ValSpec name tparams t _ doc _) =
   describeGeneric name what doc $ \name' -> do
     let tparams' = mconcat $ map ((" " <>) . typeParamHtml) tparams
-    t' <-
-      noLink (map typeParamName tparams) $
-        typeExpHtml $ declaredType t
-    return $ keyword "val " <> name' <> tparams' <> ": " <> t'
+    t' <- noLink (map typeParamName tparams) $ typeExpHtml t
+    pure $ keyword "val " <> name' <> tparams' <> ": " <> t'
   where
     what =
-      if orderZero (unInfo $ expandedType t)
-        then IndexValue
-        else IxFun
+      case t of
+        TEArrow {} -> IxFun
+        _ -> IndexValue
 describeSpec (TypeAbbrSpec vb) =
   describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)
 describeSpec (TypeSpec l name tparams doc _) =
   describeGeneric name IndexType doc $
-    return . (\name' -> typeAbbrevHtml l name' tparams)
+    pure . (\name' -> typeAbbrevHtml l name' tparams)
 describeSpec (ModSpec name se doc _) =
   describeGenericMod name IndexModule se doc $ \name' ->
     case se of
-      SigSpecs {} -> return $ keyword "module " <> name'
+      SigSpecs {} -> pure $ keyword "module " <> name'
       _ -> do
         se' <- synopsisSigExp se
-        return $ keyword "module " <> name' <> ": " <> se'
+        pure $ keyword "module " <> name' <> ": " <> se'
 describeSpec (IncludeSpec sig _) = do
   sig' <- synopsisSigExp sig
   doc' <- docHtml Nothing
@@ -880,4 +877,4 @@ describeSpec (IncludeSpec sig _) = do
             <> keyword "include "
             <> sig'
       decl_doc = H.dd ! A.class_ "desc_doc" $ doc'
-  return $ decl_header <> decl_doc
+  pure $ decl_header <> decl_doc

@@ -40,24 +40,24 @@ interpret config fp = do
     Left err -> do
       hPutStrLn stderr err
       exitFailure
-    Right env -> return env
+    Right env -> pure env
 
   let entry = interpreterEntryPoint config
   vr <- parseValues "stdin" <$> T.getContents
 
   inps <-
     case vr of
-      Left err -> do
-        hPutStrLn stderr $ "Error when reading input: " ++ show err
+      Left (SyntaxError loc err) -> do
+        hPutStrLn stderr $ "Input syntax error at " <> locStr loc <> ":\n" <> err
         exitFailure
       Right vs ->
-        return vs
+        pure vs
 
   (fname, ret) <-
     case M.lookup (T.Term, entry) $ T.envNameMap tenv of
       Just fname
         | Just (T.BoundV _ t) <- M.lookup (qualLeaf fname) $ T.envVtable tenv ->
-          return (fname, toStructural $ snd $ unfoldFunType t)
+            pure (fname, toStructural $ snd $ unfoldFunType t)
       _ -> do
         hPutStrLn stderr $ "Invalid entry point: " ++ pretty entry
         exitFailure
@@ -119,7 +119,7 @@ newFutharkiState cfg file = runExceptT $ do
       =<< liftIO
         ( runExceptT (readProgramFile [] file)
             `catch` \(err :: IOException) ->
-              return (externalErrorS (show err))
+              pure (externalErrorS (show err))
         )
   when (interpreterPrintWarnings cfg) $
     liftIO $ hPutStr stderr $ pretty ws
@@ -140,19 +140,19 @@ newFutharkiState cfg file = runExceptT $ do
           mkOpen $ toPOSIX $ dropExtension file
   ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
   ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
-  return (tenv2, ienv3)
+  pure (tenv2, ienv3)
   where
     badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
-    badOnLeft _ (Right x) = return x
+    badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
 mkOpen :: FilePath -> UncheckedDec
 mkOpen f = OpenDec (ModImport f NoInfo mempty) mempty
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
-runInterpreter' m = runF m (return . Right) intOp
+runInterpreter' m = runF m (pure . Right) intOp
   where
-    intOp (I.ExtOpError err) = return $ Left err
+    intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ hPutStrLn stderr $ w ++ ": " ++ v
       c

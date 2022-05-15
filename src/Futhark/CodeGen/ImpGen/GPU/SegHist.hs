@@ -145,7 +145,7 @@ computeHistoUsage space op = do
 
   atomics <- hostAtomics <$> askEnv
 
-  return
+  pure
     ( h,
       segmented_h,
       SegHistSlug op num_subhistos subhisto_infos $
@@ -164,9 +164,9 @@ prepareAtomicUpdateGlobal l dests slug =
   -- We need a separate lock array if the operators are not all of a
   -- particularly simple form that permits pure atomic operations.
   case (l, slugAtomicUpdate slug) of
-    (_, AtomicPrim f) -> return (l, f (Space "global") dests)
-    (_, AtomicCAS f) -> return (l, f (Space "global") dests)
-    (Just l', AtomicLocking f) -> return (l, f l' (Space "global") dests)
+    (_, AtomicPrim f) -> pure (l, f (Space "global") dests)
+    (_, AtomicCAS f) -> pure (l, f (Space "global") dests)
+    (Just l', AtomicLocking f) -> pure (l, f l' (Space "global") dests)
     (Nothing, AtomicLocking f) -> do
       -- The number of locks used here is too low, but since we are
       -- currently forced to inline a huge list, I'm keeping it down
@@ -186,7 +186,7 @@ prepareAtomicUpdateGlobal l dests slug =
         sStaticArray "hist_locks" (Space "device") int32 $
           Imp.ArrayZeros num_locks
       let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
-      return (Just l', f l' (Space "global") dests)
+      pure (Just l', f l' (Space "global") dests)
 
 -- | Some kernel bodies are not safe (or efficient) to execute
 -- multiple times.
@@ -195,9 +195,9 @@ data Passage = MustBeSinglePass | MayBeMultiPass deriving (Eq, Ord)
 bodyPassage :: KernelBody GPUMem -> Passage
 bodyPassage kbody
   | mempty == consumedInKernelBody (aliasAnalyseKernelBody mempty kbody) =
-    MayBeMultiPass
+      MayBeMultiPass
   | otherwise =
-    MustBeSinglePass
+      MustBeSinglePass
 
 prepareIntermediateArraysGlobal ::
   Passage ->
@@ -278,7 +278,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
         Nothing
         slugs
 
-  return (tvExp hist_S, histograms)
+  pure (tvExp hist_S, histograms)
   where
     hist_k_ct_min = 2 -- Chosen experimentally
     hist_k_RF = 0.75 -- Chosen experimentally
@@ -371,11 +371,11 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
         sIf (hist_M .==. 1) unitHistoCase multiHistoCase
 
-        return $ subhistosArray info
+        pure $ subhistosArray info
 
       (l', do_op') <- prepareAtomicUpdateGlobal l dests slug
 
-      return (l', do_op')
+      pure (l', do_op')
 
 histKernelGlobalPass ::
   [PatElem LetDecMem] ->
@@ -414,8 +414,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
         num_threads = sExt64 $ kernelNumThreads constants
     kernelLoop gtid num_threads total_w_64 $ \offset -> do
       -- Construct segment indices.
-      zipWithM_ dPrimV_ space_is $
-        map sExt32 $ unflattenIndex space_sizes_64 offset
+      dIndexSpace (zip space_is space_sizes_64) offset
 
       -- We execute the bucket function once and update each histogram serially.
       -- We apply the bucket function if j=offset+ltid is less than
@@ -530,9 +529,9 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
 
       mk_op <-
         case do_op of
-          AtomicPrim f -> return $ const $ return f
-          AtomicCAS f -> return $ const $ return f
-          AtomicLocking f -> return $ \hist_H_chk -> do
+          AtomicPrim f -> pure $ const $ pure f
+          AtomicCAS f -> pure $ const $ pure f
+          AtomicLocking f -> pure $ \hist_H_chk -> do
             let lock_shape =
                   Shape $
                     tvSize num_subhistos_per_group :
@@ -547,7 +546,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
               groupCoverSpace dims $ \is ->
                 copyDWIMFix locks is (intConst Int32 0) []
 
-            return $ f $ Locking locks 0 1 0 id
+            pure $ f $ Locking locks 0 1 0 id
 
       -- Initialise local-memory sub-histograms.  These are
       -- represented as two-dimensional arrays.
@@ -565,14 +564,14 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
 
             do_op' <- mk_op hist_H_chk
 
-            return (local_subhistos, do_op' (Space "local") local_subhistos)
+            pure (local_subhistos, do_op' (Space "local") local_subhistos)
 
       -- Initialise global-memory sub-histograms.
       glob_subhistos <- forM subhisto_info $ \info -> do
         subhistosAlloc info
-        return $ subhistosArray info
+        pure $ subhistosArray info
 
-      return (glob_subhistos, init_local_subhistos)
+      pure (glob_subhistos, init_local_subhistos)
 
 histKernelLocalPass ::
   TV Int32 ->
@@ -623,7 +622,7 @@ histKernelLocalPass
             sExt64 num_subhistos_per_group * histo_size
       init_per_thread <-
         dPrimVE "init_per_thread" $ sExt32 $ group_hists_size `divUp` unCount group_size
-      return (histo_dims, histo_size, init_per_thread)
+      pure (histo_dims, histo_size, init_per_thread)
 
     let attrs = (defKernelAttrs num_groups group_size) {kAttrCheckLocalMemory = False}
     sKernelThread "seghist_local" (segFlat space) attrs $
@@ -649,7 +648,7 @@ histKernelLocalPass
         histograms <- forM (zip init_histograms hist_H_chks) $
           \((glob_subhistos, init_local_subhistos), hist_H_chk) -> do
             (local_subhistos, do_op) <- init_local_subhistos $ Var $ tvVar hist_H_chk
-            return (zip glob_subhistos local_subhistos, hist_H_chk, do_op)
+            pure (zip glob_subhistos local_subhistos, hist_H_chk, do_op)
 
         -- Find index of local subhistograms updated by this thread.  We
         -- try to ensure, as much as possible, that threads in the same
@@ -716,7 +715,7 @@ histKernelLocalPass
         sOp $ Imp.Barrier Imp.FenceLocal
 
         kernelLoop pgtid_in_segment threads_per_segment (sExt32 segment_size') $ \ie -> do
-          dPrimV_ i_in_segment ie
+          dPrimV_ i_in_segment $ sExt64 ie
 
           -- We execute the bucket function once and update each histogram
           -- serially.  This also involves writing to the mapout arrays if
@@ -1020,7 +1019,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
           slugs
           kbody
 
-  return (pick_local, run)
+  pure (pick_local, run)
 
 -- | Generate code for a segmented histogram called from the host.
 compileSegHist ::

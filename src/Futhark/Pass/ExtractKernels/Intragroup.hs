@@ -125,7 +125,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
           Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
-  return
+  pure
     ( (intra_min_par, intra_avail_par),
       Var group_size,
       log,
@@ -142,11 +142,11 @@ readGroupKernelInput ::
   m ()
 readGroupKernelInput inp
   | Array {} <- kernelInputType inp = do
-    v <- newVName $ baseString $ kernelInputName inp
-    readKernelInput inp {kernelInputName = v}
-    letBindNames [kernelInputName inp] $ BasicOp $ Copy v
+      v <- newVName $ baseString $ kernelInputName inp
+      readKernelInput inp {kernelInputName = v}
+      letBindNames [kernelInputName inp] $ BasicOp $ Copy v
   | otherwise =
-    readKernelInput inp
+      readKernelInput inp
 
 data IntraAcc = IntraAcc
   { accMinPar :: S.Set [SubExp],
@@ -213,55 +213,55 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         letBind pat $ If cond tbody' fbody' ifdec
     Op soac
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
-        intraGroupStms lvl . fmap (certify (stmAuxCerts aux))
-          =<< runBuilder_ (FOT.transformSOAC pat soac)
+          intraGroupStms lvl . fmap (certify (stmAuxCerts aux))
+            =<< runBuilder_ (FOT.transformSOAC pat soac)
     Op (Screma w arrs form)
       | Just lam <- isMapSOAC form -> do
-        let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
-            env =
-              DistEnv
-                { distNest =
-                    singleNesting $ Nesting mempty loopnest,
-                  distScope =
-                    scopeOfPat pat
-                      <> scopeForGPU (scopeOf lam)
-                      <> scope,
-                  distOnInnerMap =
-                    distributeMap,
-                  distOnTopLevelStms =
-                    liftInner . collectStms_ . intraGroupStms lvl,
-                  distSegLevel = \minw _ _ -> do
-                    lift $ parallelMin minw
-                    pure lvl,
-                  distOnSOACSStms =
-                    pure . oneStm . soacsStmToGPU,
-                  distOnSOACSLambda =
-                    pure . soacsLambdaToGPU
-                }
-            acc =
-              DistAcc
-                { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam),
-                  distStms = mempty
-                }
+          let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
+              env =
+                DistEnv
+                  { distNest =
+                      singleNesting $ Nesting mempty loopnest,
+                    distScope =
+                      scopeOfPat pat
+                        <> scopeForGPU (scopeOf lam)
+                        <> scope,
+                    distOnInnerMap =
+                      distributeMap,
+                    distOnTopLevelStms =
+                      liftInner . collectStms_ . intraGroupStms lvl,
+                    distSegLevel = \minw _ _ -> do
+                      lift $ parallelMin minw
+                      pure lvl,
+                    distOnSOACSStms =
+                      pure . oneStm . soacsStmToGPU,
+                    distOnSOACSLambda =
+                      pure . soacsLambdaToGPU
+                  }
+              acc =
+                DistAcc
+                  { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam),
+                    distStms = mempty
+                  }
 
-        addStms
-          =<< runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
+          addStms
+            =<< runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
     Op (Screma w arrs form)
       | Just (scans, mapfun) <- isScanomapSOAC form,
         Scan scanfun nes <- singleScan scans -> do
-        let scanfun' = soacsLambdaToGPU scanfun
-            mapfun' = soacsLambdaToGPU mapfun
-        certifying (stmAuxCerts aux) $
-          addStms =<< segScan lvl' pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
-        parallelMin [w]
+          let scanfun' = soacsLambdaToGPU scanfun
+              mapfun' = soacsLambdaToGPU mapfun
+          certifying (stmAuxCerts aux) $
+            addStms =<< segScan lvl' pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
+          parallelMin [w]
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form,
         Reduce comm red_lam nes <- singleReduce reds -> do
-        let red_lam' = soacsLambdaToGPU red_lam
-            map_lam' = soacsLambdaToGPU map_lam
-        certifying (stmAuxCerts aux) $
-          addStms =<< segRed lvl' pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
-        parallelMin [w]
+          let red_lam' = soacsLambdaToGPU red_lam
+              map_lam' = soacsLambdaToGPU map_lam
+          certifying (stmAuxCerts aux) $
+            addStms =<< segRed lvl' pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
+          parallelMin [w]
     Op (Hist w arrs ops bucket_fun) -> do
       ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
         (op', nes', shape) <- determineReduceOp op nes
@@ -274,14 +274,14 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       parallelMin [w]
     Op (Stream w arrs Sequential accs lam)
       | chunk_size_param : _ <- lambdaParams lam -> do
-        types <- asksScope castScope
-        ((), stream_stms) <-
-          runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
-        let replace (Var v) | v == paramName chunk_size_param = w
-            replace se = se
-            replaceSets (IntraAcc x y log) =
-              IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
-        censor replaceSets $ intraGroupStms lvl stream_stms
+          types <- asksScope castScope
+          ((), stream_stms) <-
+            runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
+          let replace (Var v) | v == paramName chunk_size_param = w
+              replace se = se
+              replaceSets (IntraAcc x y log) =
+                IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
+          censor replaceSets $ intraGroupStms lvl stream_stms
     Op (Scatter w ivs lam dests) -> do
       write_i <- newVName "write_i"
       space <- mkSegSpace [(write_i, w)]
@@ -325,7 +325,7 @@ intraGroupParalleliseBody ::
 intraGroupParalleliseBody lvl body = do
   (IntraAcc min_ws avail_ws log, kstms) <-
     runIntraGroupM $ intraGroupStms lvl $ bodyStms body
-  return
+  pure
     ( S.toList min_ws,
       S.toList avail_ws,
       log,

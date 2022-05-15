@@ -21,6 +21,7 @@ module Futhark.Test
     readResults,
     ensureReferenceOutput,
     determineTuning,
+    determineCache,
     binaryName,
     futharkServerCfg,
     V.Mismatch,
@@ -139,15 +140,15 @@ scriptValueAsVars server names_and_types val
   | vals <- V.unCompound val,
     length names_and_types == length vals,
     Just loads <- zipWithM f names_and_types vals =
-    sequence_ loads
+      sequence_ loads
   where
     f (v, t0) (V.ValueAtom (Script.SValue t1 sval))
       | t0 == t1 =
-        Just $ case sval of
-          Script.VVar oldname ->
-            cmdMaybe $ cmdRename server oldname v
-          Script.VVal sval' ->
-            valueAsVar server v sval'
+          Just $ case sval of
+            Script.VVar oldname ->
+              cmdMaybe $ cmdRename server oldname v
+            Script.VVal sval' ->
+              valueAsVar server v sval'
     f _ _ = Nothing
 scriptValueAsVars server names_and_types val = do
   cmdMaybe $ cmdFree server $ S.toList $ Script.serverVarsInValue val
@@ -161,15 +162,19 @@ scriptValueAsVars server names_and_types val = do
     notes = mconcat $ mapMaybe note names_and_types
     note (_, t)
       | "(" `T.isPrefixOf` t =
-        Just $
-          "\nNote: expected type " <> prettyText t <> " is an opaque tuple that cannot be constructed\n"
-            <> "in FutharkScript.  Consider using type annotations to give it a proper name."
+          Just $
+            "\nNote: expected type "
+              <> prettyText t
+              <> " is an opaque tuple that cannot be constructed\n"
+              <> "in FutharkScript.  Consider using type annotations to give it a proper name."
       | "{" `T.isPrefixOf` t =
-        Just $
-          "\nNote: expected type " <> prettyText t <> " is an opaque record that cannot be constructed\n"
-            <> "in FutharkScript.  Consider using type annotations to give it a proper name."
+          Just $
+            "\nNote: expected type "
+              <> prettyText t
+              <> " is an opaque record that cannot be constructed\n"
+              <> "in FutharkScript.  Consider using type annotations to give it a proper name."
       | otherwise =
-        Nothing
+          Nothing
 
 -- | Make the provided 'Values' available as server-side variables.
 -- This may involve arbitrary server-side computation.  Error
@@ -184,17 +189,17 @@ valuesAsVars ::
   m ()
 valuesAsVars server names_and_types _ dir (InFile file)
   | takeExtension file == ".gz" = do
-    s <- liftIO $ readAndDecompress $ dir </> file
-    case s of
-      Left e ->
-        throwError $ T.pack $ show file <> ": " <> show e
-      Right s' ->
-        cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-          BS.hPutStr tmpf_h s'
-          hClose tmpf_h
-          cmdRestore server tmpf names_and_types
+      s <- liftIO $ readAndDecompress $ dir </> file
+      case s of
+        Left e ->
+          throwError $ T.pack $ show file <> ": " <> show e
+        Right s' ->
+          cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+            BS.hPutStr tmpf_h s'
+            hClose tmpf_h
+            cmdRestore server tmpf names_and_types
   | otherwise =
-    cmdMaybe $ cmdRestore server (dir </> file) names_and_types
+      cmdMaybe $ cmdRestore server (dir </> file) names_and_types
 valuesAsVars server names_and_types futhark dir (GenValues gens) = do
   unless (length gens == length names_and_types) $
     throwError "Mismatch between number of expected and generated values."
@@ -205,8 +210,8 @@ valuesAsVars server names_and_types _ _ (Values vs) = do
   let types = map snd names_and_types
       vs_types = map (V.valueTypeTextNoDims . V.valueType) vs
   unless (types == vs_types) . throwError . T.unlines $
-    [ "Expected input of types: " <> prettyTextOneLine types,
-      "Provided input of types: " <> prettyTextOneLine vs_types
+    [ "Expected input of types: " <> T.unwords (map prettyTextOneLine types),
+      "Provided input of types: " <> T.unwords (map prettyTextOneLine vs_types)
     ]
   cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
     mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
@@ -443,13 +448,13 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
 
     isReferenceMissing (entry, tr)
       | Succeeds (Just SuccessGenerateValues) <- runExpectedResult tr =
-        liftIO $
-          ((<) <$> getModificationTime (file (entry, tr)) <*> getModificationTime prog)
-            `catch` (\e -> if isDoesNotExistError e then pure True else E.throw e)
+          liftIO $
+            ((<) <$> getModificationTime (file (entry, tr)) <*> getModificationTime prog)
+              `catch` (\e -> if isDoesNotExistError e then pure True else E.throw e)
       | otherwise =
-        pure False
+          pure False
 
--- | Determine the --tuning options to pass to the program.  The first
+-- | Determine the @--tuning@ options to pass to the program.  The first
 -- argument is the extension of the tuning file, or 'Nothing' if none
 -- should be used.
 determineTuning :: MonadIO m => Maybe FilePath -> FilePath -> m ([String], String)
@@ -463,6 +468,13 @@ determineTuning (Just ext) program = do
           " (using " <> takeFileName (program <.> ext) <> ")"
         )
     else pure ([], " (no tuning file)")
+
+-- | Determine the @--cache-file@ options to pass to the program.  The
+-- first argument is the extension of the cache file, or 'Nothing' if
+-- none should be used.
+determineCache :: Maybe FilePath -> FilePath -> [String]
+determineCache Nothing _ = []
+determineCache (Just ext) program = ["--cache-file", program <.> ext]
 
 -- | Check that the result is as expected, and write files and throw
 -- an error if not.

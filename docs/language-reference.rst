@@ -17,6 +17,15 @@ This reference describes only the language itself.  Documentation for
 the built-in prelude is `available elsewhere
 <https://futhark-lang.org/docs/prelude>`_.
 
+Comments
+--------
+
+Line comments are indicated with ``--`` and continue until end of
+line.  A contiguous block of line comments beginning with ``-- |`` is
+a *documentation comment* and has special meaning to documentation
+tools.  Documentation comments are only allowed immediately before
+declarations.
+
 Identifiers and Keywords
 ------------------------
 
@@ -225,7 +234,7 @@ declaration can only refer to names bound by preceding declarations.
       : | "open" `mod_exp`
       : | "import" `stringlit`
       : | "local" `dec`
-      : | "#[" attr "]" dec
+      : | "#[" `attr` "]" `dec`
 
 Any names defined by a declaration inside a module are by default
 visible to users of that module (see :ref:`module-system`).
@@ -359,8 +368,7 @@ A named value/constant can be declared as follows::
 
 The definition can be an arbitrary expression, including function
 calls and other values, although they must be in scope before the
-value is defined.  A constant value may not have a unique type (see
-`In-place updates`_).  If the return type contains any anonymous sizes
+value is defined.  If the return type contains any anonymous sizes
 (see `Size types`_), new existential sizes will be constructed for
 them.
 
@@ -435,7 +443,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` ")" ("." `fieldid`)*
        : | "(" `exp` ("," `exp`)* ")"
        : | "{" "}"
-       : | "{" field ("," `field`)* "}"
+       : | "{" `field` ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | `quals` "." "(" `exp` ")"
@@ -446,6 +454,7 @@ literals and variables, but also more complicated forms.
        : | "(" `qualbinop` `exp` ")"
        : | "(" ( "." `field` )+ ")"
        : | "(" "." "[" `index` ("," `index`)* "]" ")"
+       : | "???"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -462,7 +471,7 @@ literals and variables, but also more complicated forms.
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
-      : | "loop" `pat` [("=" `exp`)] `loopform` "do" `exp`
+      : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
@@ -474,7 +483,7 @@ literals and variables, but also more complicated forms.
    size : "[" `id` "]"
    pat:   `id`
       : | `pat_literal`
-      : |  "_"
+      : | "_"
       : | "(" ")"
       : | "(" `pat` ")"
       : | "(" `pat` ("," `pat`)+ ")"
@@ -609,6 +618,14 @@ Evaluates to an empty tuple.
 .........
 
 Evaluates to the result of ``e``.
+
+``???``
+.......
+
+A *typed hole*, usable as a placeholder expression.  The type checker
+will infer any necessary type for this expression.  This can sometimes
+result in an ambiguous type, which can be resolved using a type
+ascription.  Evaluating a typed hole results in a run-time error.
 
 ``(e1, e2, ..., eN)``
 .....................
@@ -1036,8 +1053,8 @@ lifted* (``'^t``).  Only fully lifted type parameters may be
 instantiated with a functional type.  Within a function, a lifted type
 parameter is treated as a functional type.
 
-See also `In-place updates`_ for details on how uniqueness types
-interact with higher-order functions.
+See also `In-place updates`_ for details on how consumption
+interacts with higher-order functions.
 
 Type Inference
 --------------
@@ -1047,7 +1064,7 @@ explicit type annotations can be left off.  Record field projection
 cannot in isolation be fully inferred, and may need type annotations
 where their inputs are bound.  The same goes when constructing sum
 types, as Futhark cannot assume that a given constructor only belongs
-to a single type.  Further, unique types (see `In-place updates`_)
+to a single type.  Further, consumed parameters (see `In-place updates`_)
 must be explicitly annotated.
 
 Type inference processes top-level declared in top-down order, and the
@@ -1396,8 +1413,9 @@ update.  This involves also checking that no *alias* of ``a`` is used.
 Generally, most language constructs produce new arrays, but some
 (slicing) create arrays that alias their input arrays.
 
-When defining a function parameter or return type, we can mark it as
-*unique* by prefixing it with an asterisk.  For example::
+When defining a function parameter we can mark it as *consuming* by
+prefixing it with an asterisk.  For a return type, we can mark it as
+*alias-free* by prefixing it with an asterisk.  For example::
 
   def modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
     a with [i] = a[i] + x
@@ -1435,18 +1453,18 @@ fresh arrays, with no aliases.  The main exceptions are ``if``,
 
 * The aliases of a value returned from a function is the most
   interesting case, and depends on whether the return value is
-  declared *unique* (with an asterisk ``*``) or not.  If it is
-  declared unique, then it has no aliases.  Otherwise, it aliases all
-  arguments passed for *non-unique* parameters.
+  declared *alias-free* (with an asterisk ``*``) or not.  If it is
+  declared alias-free, then it has no aliases.  Otherwise, it aliases
+  all arguments passed for *non-consumed* parameters.
 
 In-place Updates and Higher-Order Functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Uniqueness typing generally interacts poorly with higher-order
+Consumption generally interacts inflexibly with higher-order
 functions.  The issue is that we cannot control how many times a
 function argument is applied, or to what, so it is not safe to pass a
 function that consumes its argument.  The following two conservative
-rules govern the interaction between uniqueness types and higher-order
+rules govern the interaction between consumption and higher-order
 functions:
 
 1. In the expression ``let p = e1 in ...``, if *any* in-place update
@@ -1462,7 +1480,7 @@ Modules
 -------
 
 .. productionlist::
-   mod_bind: "module" `id` `mod_param`* "=" [":" mod_type_exp] "=" `mod_exp`
+   mod_bind: "module" `id` `mod_param`* "=" [":" `mod_type_exp`] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
    mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
 
@@ -1582,7 +1600,7 @@ Module Type Expressions
        : | ("type" | "type^" | "type~") `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
-       : | "#[" attr "]" spec
+       : | "#[" `attr` "]" `spec`
 
 Module types classify modules, with the only (unimportant) difference
 in expressivity being that modules can contain module types, but

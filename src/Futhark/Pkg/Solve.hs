@@ -46,7 +46,7 @@ buildList roots (RoughBuildList pkgs) =
   BuildList $ execState (mapM_ addPkg roots) mempty
   where
     addPkg p = case M.lookup p pkgs of
-      Nothing -> return ()
+      Nothing -> pure ()
       Just (v, deps) -> do
         listed <- gets $ M.member p
         modify $ M.insert p v
@@ -67,7 +67,7 @@ doSolveDeps (PkgRevDeps deps) = mapM_ add $ M.toList deps
       RoughBuildList l <- get
       case M.lookup p l of
         -- Already satisfied?
-        Just (cur_v, _) | v <= cur_v -> return ()
+        Just (cur_v, _) | v <= cur_v -> pure ()
         -- No; add 'p' and its dependencies.
         _ -> do
           PkgRevDeps p_deps <- getDeps p v maybe_h
@@ -84,7 +84,7 @@ solveDeps deps =
   buildList (depRoots deps)
     <$> runF
       (execStateT (doSolveDeps deps) emptyRoughBuildList)
-      return
+      pure
       step
   where
     step (OpGetDeps p v h c) = do
@@ -95,18 +95,18 @@ solveDeps deps =
       d <- fmap pkgRevDeps . getManifest $ pkgRevGetManifest pinfo
       c d
 
-    checkHash _ _ _ Nothing = return ()
+    checkHash _ _ _ Nothing = pure ()
     checkHash p v pinfo (Just h)
-      | h == pkgRevCommit pinfo = return ()
+      | h == pkgRevCommit pinfo = pure ()
       | otherwise =
-        fail $
-          T.unpack $
-            "Package " <> p <> " " <> prettySemVer v
-              <> " has commit hash "
-              <> pkgRevCommit pinfo
-              <> ", but expected "
-              <> h
-              <> " from package manifest."
+          fail $
+            T.unpack $
+              "Package " <> p <> " " <> prettySemVer v
+                <> " has commit hash "
+                <> pkgRevCommit pinfo
+                <> ", but expected "
+                <> h
+                <> " from package manifest."
 
 -- | A mapping of package revisions to the dependencies of that
 -- package.  Can be considered a 'PkgRegistry' without the option of

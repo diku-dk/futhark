@@ -34,6 +34,10 @@ programming techniques.
 Image directives and builtin functions shell out to ``convert`` (from
 ImageMagick).  Video generation uses ``ffmpeg``.
 
+For an input file ``foo.fut``, all generated files will be in a
+directory named ``foo-img``.  A ``file`` parameter passed to a
+directive may not contain a directory component or spaces.
+
 OPTIONS
 =======
 
@@ -78,7 +82,7 @@ OPTIONS
 -v, --verbose
 
   Print verbose information on stderr about directives as they are
-  executing.
+  executing.  This is also needed to see ``#[trace]`` output.
 
 DIRECTIVES
 ==========
@@ -118,6 +122,8 @@ The following directives are supported:
 
   * ``format: <webm|gif>``
 
+  * ``file: <name>``.  Make sure to provide a proper extension.
+
   ``e`` must be one of the following:
 
   * A 3D array where the 2D elements is of a type acceptable to
@@ -138,9 +144,14 @@ The following directives are supported:
   ``>``), but do not show the directive itself in the output, only its
   result.
 
-* ``> :img e``
+* ``> :img e[; parameters...]``
 
-  Visualises ``e``. The following types are supported:
+  Visualises ``e``.  The optional parameters are lines of
+  the form *key: value*:
+
+  * ``file: NAME``.  Make sure to use a proper extension.
+
+  The expression ``e`` must have one of the following types:
 
   * ``[][]i32`` and ``[][]u32``
 

@@ -17,7 +17,7 @@ import Futhark.IR.GPU (GPU)
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MC (MC)
 import Futhark.IR.MCMem (MCMem)
-import Futhark.IR.SOACS (SOACS)
+import Futhark.IR.SOACS (SOACS, usesAD)
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.CSE
@@ -28,6 +28,8 @@ import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.MergeGPUBodies
+import Futhark.Optimise.ReduceDeviceSyncs
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -75,6 +77,22 @@ standardPipeline =
       fuseSOACs,
       simplifySOACS
     ]
+    >>> condPipeline usesAD adPipeline
+
+-- | This is the pipeline that applies the AD transformation and
+-- subsequent interesting optimisations.
+adPipeline :: Pipeline SOACS SOACS
+adPipeline =
+  passes
+    [ applyAD,
+      simplifySOACS,
+      performCSE True,
+      fuseSOACs,
+      performCSE True,
+      simplifySOACS,
+      fuseSOACs,
+      simplifySOACS
+    ]
 
 -- | The pipeline used by the CUDA and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
@@ -94,7 +112,13 @@ kernelsPipeline =
         unstreamGPU,
         performCSE True,
         simplifyGPU,
-        sinkGPU,
+        sinkGPU, -- Sink reads before migrating them.
+        reduceDeviceSyncs,
+        simplifyGPU, -- Simplify and hoist storages.
+        performCSE True, -- Eliminate duplicate storages.
+        mergeGPUBodies,
+        simplifyGPU, -- Cleanup merged GPUBody kernels.
+        sinkGPU, -- Sink reads within GPUBody kernels.
         inPlaceLoweringGPU
       ]
 

@@ -175,18 +175,18 @@ instance ArrayShape (ShapeBase ExtSize) where
     length ds1 == length ds2
       && evalState (and <$> zipWithM subDimOf ds1 ds2) M.empty
     where
-      subDimOf (Free se1) (Free se2) = return $ se1 == se2
-      subDimOf (Ext _) (Free _) = return False
-      subDimOf (Free _) (Ext _) = return True
+      subDimOf (Free se1) (Free se2) = pure $ se1 == se2
+      subDimOf (Ext _) (Free _) = pure False
+      subDimOf (Free _) (Ext _) = pure True
       subDimOf (Ext x) (Ext y) = do
         extmap <- get
         case M.lookup y extmap of
           Just ywas
-            | ywas == x -> return True
-            | otherwise -> return False
+            | ywas == x -> pure True
+            | otherwise -> pure False
           Nothing -> do
             put $ M.insert y x extmap
-            return True
+            pure True
 
 instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y

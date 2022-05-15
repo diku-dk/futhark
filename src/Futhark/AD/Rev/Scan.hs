@@ -71,7 +71,7 @@ mkScanLinFunO t = do
       x <- letExp "x" <=< toExp $ pet a2' ~+~ pet b2' ~*~ pet a1'
       y <- letExp "y" <=< toExp $ pet b1' ~*~ pet b2'
       pure [x, y]
-  return $ Scan lam [zero, one]
+  pure $ Scan lam [zero, one]
 
 -- build the map following the scan with linear-function-composition:
 -- for each (ds,cs) length-n array results of the scan, combine them as:

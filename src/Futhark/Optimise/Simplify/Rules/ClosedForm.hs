@@ -50,7 +50,7 @@ foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
 
   t <- case patTypes pat of
-    [Prim t] -> return t
+    [Prim t] -> pure t
     _ -> cannotSimplify
 
   closedBody <-
@@ -88,7 +88,7 @@ loopClosedForm ::
   RuleM rep ()
 loopClosedForm pat merge i it bound body = do
   t <- case patTypes pat of
-    [Prim t] -> return t
+    [Prim t] -> pure t
     _ -> cannotSimplify
 
   closedBody <-
@@ -144,35 +144,35 @@ checkResults pat size untouchable it knownBnds params body accs = do
     checkResult (p, SubExpRes _ (Var v)) (accparam, acc)
       | Just (BasicOp (BinOp bop x y)) <- M.lookup v stmMap,
         x /= y = do
-        -- One of x,y must be *this* accumulator, and the other must
-        -- be something that is free in the body.
-        let isThisAccum = (== Var accparam)
-        (this, el) <- liftMaybe $
-          case ( (asFreeSubExp x, isThisAccum y),
-                 (asFreeSubExp y, isThisAccum x)
-               ) of
-            ((Just free, True), _) -> Just (acc, free)
-            (_, (Just free, True)) -> Just (acc, free)
-            _ -> Nothing
+          -- One of x,y must be *this* accumulator, and the other must
+          -- be something that is free in the body.
+          let isThisAccum = (== Var accparam)
+          (this, el) <- liftMaybe $
+            case ( (asFreeSubExp x, isThisAccum y),
+                   (asFreeSubExp y, isThisAccum x)
+                 ) of
+              ((Just free, True), _) -> Just (acc, free)
+              (_, (Just free, True)) -> Just (acc, free)
+              _ -> Nothing
 
-        case bop of
-          LogAnd ->
-            letBindNames [p] $ BasicOp $ BinOp LogAnd this el
-          Add t w -> do
-            size' <- asIntS t size
-            letBindNames [p]
-              =<< eBinOp
-                (Add t w)
-                (eSubExp this)
-                (pure $ BasicOp $ BinOp (Mul t w) el size')
-          FAdd t | Just properly_typed_size <- properFloatSize t -> do
-            size' <- properly_typed_size
-            letBindNames [p]
-              =<< eBinOp
-                (FAdd t)
-                (eSubExp this)
-                (pure $ BasicOp $ BinOp (FMul t) el size')
-          _ -> cannotSimplify -- Um... sorry.
+          case bop of
+            LogAnd ->
+              letBindNames [p] $ BasicOp $ BinOp LogAnd this el
+            Add t w -> do
+              size' <- asIntS t size
+              letBindNames [p]
+                =<< eBinOp
+                  (Add t w)
+                  (eSubExp this)
+                  (pure $ BasicOp $ BinOp (Mul t w) el size')
+            FAdd t | Just properly_typed_size <- properFloatSize t -> do
+              size' <- properly_typed_size
+              letBindNames [p]
+                =<< eBinOp
+                  (FAdd t)
+                  (eSubExp this)
+                  (pure $ BasicOp $ BinOp (FMul t) el size')
+            _ -> cannotSimplify -- Um... sorry.
     checkResult _ _ = cannotSimplify
 
     asFreeSubExp :: SubExp -> Maybe SubExp
@@ -207,7 +207,7 @@ determineKnownBindings look lam accs arrs =
     isReplicate (p, v)
       | Just (BasicOp (Replicate _ ve), cs) <- look v,
         cs == mempty =
-        Just (p, ve)
+          Just (p, ve)
     isReplicate _ = Nothing
 
 makeBindMap :: Body rep -> M.Map VName (Exp rep)

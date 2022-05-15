@@ -149,7 +149,7 @@ multicoreImpCodeGenAction =
   Action
     { actionName = "Compile to imperative multicore",
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
+      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg ImpGenMulticore.AllowDynamicScheduling
     }
 
 -- Lines that we prepend (in comments) to generated code.
@@ -197,7 +197,7 @@ runCC cpath outpath cflags_def ldflags = do
           ++ ":\n"
           ++ gccerr
     Right (ExitSuccess, _, _) ->
-      return ()
+      pure ()
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
@@ -243,11 +243,11 @@ compileOpenCLAction fcfg mode outpath =
           jsonpath = outpath `addExtension` "json"
           extra_options
             | System.Info.os == "darwin" =
-              ["-framework", "OpenCL"]
+                ["-framework", "OpenCL"]
             | System.Info.os == "mingw32" =
-              ["-lOpenCL64"]
+                ["-lOpenCL64"]
             | otherwise =
-              ["-lOpenCL"]
+                ["-lOpenCL"]
 
       case mode of
         ToLibrary -> do
@@ -400,7 +400,7 @@ runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
           ++ ":\n"
           ++ emccerr
     Right (ExitSuccess, _, _) ->
-      return ()
+      pure ()
 
 -- | The @futhark wasm@ action.
 compileCtoWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem

@@ -153,8 +153,8 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
   (prog, tenv, ienv) <- case maybe_file of
     Nothing -> do
       -- Load the builtins through the type checker.
-      (_, prog) <-
-        badOnLeft prettyProgramErrors =<< liftIO (reloadProg prev_prog [])
+      prog <-
+        badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [] M.empty)
       -- Then into the interpreter.
       ienv <-
         foldM
@@ -167,8 +167,8 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
 
       pure (prog, tenv, ienv')
     Just file -> do
-      (ws, prog) <- badOnLeft prettyProgramErrors =<< liftIO (reloadProg prev_prog [file])
-      liftIO $ putStrLn $ pretty ws
+      prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file] M.empty)
+      liftIO $ putStrLn $ pretty $ lpWarnings prog
 
       ienv <-
         foldM
@@ -181,7 +181,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
 
       pure (prog, tenv, ienv')
 
-  return
+  pure
     FutharkiState
       { futharkiProg = prog,
         futharkiCount = count,
@@ -196,7 +196,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-    prettyProgramErrors = pretty . pprProgramErrors
+    prettyProgErrors = pretty . pprProgErrors
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -238,7 +238,7 @@ readEvalPrint = do
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
 
       case maybe_dec_or_e of
-        Left err -> liftIO $ print err
+        Left (SyntaxError _ err) -> liftIO $ putStrLn err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
@@ -264,10 +264,10 @@ onDec d = do
       files = map (T.includeToFilePath . mkImport) $ decImports d
 
   cur_prog <- gets futharkiProg
-  imp_r <- liftIO $ extendProg cur_prog files
+  imp_r <- liftIO $ extendProg cur_prog files M.empty
   case imp_r of
-    Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgramErrors e
-    Right (_ws, prog) -> do
+    Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgErrors e
+    Right prog -> do
       env <- gets futharkiEnv
       let (tenv, ienv) = extendEnvs prog env (map fst $ decImports d)
           imports = lpImports prog
@@ -296,15 +296,15 @@ onExp e = do
     (_, Left err) -> liftIO $ putStrLn $ pretty err
     (_, Right (tparams, e'))
       | null tparams -> do
-        r <- runInterpreter $ I.interpretExp ienv e'
-        case r of
-          Left err -> liftIO $ print err
-          Right v -> liftIO $ putStrLn $ pretty v
+          r <- runInterpreter $ I.interpretExp ienv e'
+          case r of
+            Left err -> liftIO $ print err
+            Right v -> liftIO $ putStrLn $ pretty v
       | otherwise -> liftIO $ do
-        putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
-        putStrLn $
-          "The following types are ambiguous: "
-            ++ intercalate ", " (map (prettyName . typeParamName) tparams)
+          putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
+          putStrLn $
+            "The following types are ambiguous: "
+              ++ intercalate ", " (map (prettyName . typeParamName) tparams)
 
 prettyBreaking :: Breaking -> String
 prettyBreaking b =
@@ -321,7 +321,7 @@ breakForReason s top _ =
     && locOf top `notElem` futharkiSkipBreaks s
 
 runInterpreter :: F I.ExtOp a -> FutharkiM (Either I.InterpreterError a)
-runInterpreter m = runF m (return . Right) intOp
+runInterpreter m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) =
       pure $ Left err
@@ -374,7 +374,7 @@ runInterpreter m = runF m (return . Right) intOp
       c
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
-runInterpreter' m = runF m (return . Right) intOp
+runInterpreter' m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
@@ -393,15 +393,14 @@ loadCommand file = do
     (False, _) -> throwError $ Load $ T.unpack file
 
 genTypeCommand ::
-  Show err =>
-  (String -> T.Text -> Either err a) ->
+  (String -> T.Text -> Either SyntaxError a) ->
   (Imports -> VNameSource -> T.Env -> a -> (Warnings, Either T.TypeError b)) ->
   (b -> String) ->
   Command
 genTypeCommand f g h e = do
   prompt <- getPrompt
   case f prompt e of
-    Left err -> liftIO $ print err
+    Left (SyntaxError _ err) -> liftIO $ putStrLn err
     Right e' -> do
       (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of
@@ -442,15 +441,15 @@ frameCommand which = do
   case (maybe_stack, readMaybe $ T.unpack which) of
     (Just stack, Just i)
       | frame : _ <- NE.drop i stack -> do
-        let breaking = Breaking stack i
-            ctx = I.stackFrameCtx frame
-            tenv = I.typeCheckerEnv $ I.ctxEnv ctx
-        modify $ \s ->
-          s
-            { futharkiEnv = (tenv, ctx),
-              futharkiBreaking = Just breaking
-            }
-        liftIO $ putStrLn $ prettyBreaking breaking
+          let breaking = Breaking stack i
+              ctx = I.stackFrameCtx frame
+              tenv = I.typeCheckerEnv $ I.ctxEnv ctx
+          modify $ \s ->
+            s
+              { futharkiEnv = (tenv, ctx),
+                futharkiBreaking = Just breaking
+              }
+          liftIO $ putStrLn $ prettyBreaking breaking
     (Just _, _) ->
       liftIO $ putStrLn $ "Invalid stack index: " ++ T.unpack which
     (Nothing, _) ->
@@ -463,9 +462,9 @@ cdCommand :: Command
 cdCommand dir
   | T.null dir = liftIO $ putStrLn "Usage: ':cd <dir>'."
   | otherwise =
-    liftIO $
-      setCurrentDirectory (T.unpack dir)
-        `catch` \(err :: IOException) -> print err
+      liftIO $
+        setCurrentDirectory (T.unpack dir)
+          `catch` \(err :: IOException) -> print err
 
 helpCommand :: Command
 helpCommand _ = liftIO $

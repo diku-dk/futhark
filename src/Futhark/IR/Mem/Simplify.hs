@@ -123,35 +123,35 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
   | ST.simplifyMemory vtable,
     fixable <- foldl hasConcretisableMemory mempty $ patElems pat,
     not $ null fixable = Simplify $ do
-    -- Create non-existential memory blocks big enough to hold the
-    -- arrays.
-    (arr_to_mem, oldmem_to_mem) <-
-      fmap unzip $
-        forM fixable $ \(arr_pe, mem_size, oldmem, space) -> do
-          size <- toSubExp "size" mem_size
-          mem <- letExp "mem" $ Op $ Alloc size space
-          return ((patElemName arr_pe, mem), (oldmem, mem))
+      -- Create non-existential memory blocks big enough to hold the
+      -- arrays.
+      (arr_to_mem, oldmem_to_mem) <-
+        fmap unzip $
+          forM fixable $ \(arr_pe, mem_size, oldmem, space) -> do
+            size <- toSubExp "size" mem_size
+            mem <- letExp "mem" $ Op $ Alloc size space
+            pure ((patElemName arr_pe, mem), (oldmem, mem))
 
-    -- Update the branches to contain Copy expressions putting the
-    -- arrays where they are expected.
-    let updateBody body = buildBody_ $ do
-          res <- bodyBind body
-          zipWithM updateResult (patElems pat) res
-        updateResult pat_elem (SubExpRes cs (Var v))
-          | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
-            (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
-            v_copy <- newVName $ baseString v <> "_nonext_copy"
-            let v_pat =
-                  Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]
-            addStm $ mkWiseLetStm v_pat (defAux ()) $ BasicOp (Copy v)
-            return $ SubExpRes cs $ Var v_copy
-          | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
-            return $ SubExpRes cs $ Var mem
-        updateResult _ se =
-          return se
-    tbranch' <- updateBody tbranch
-    fbranch' <- updateBody fbranch
-    letBind pat $ If cond tbranch' fbranch' ifdec
+      -- Update the branches to contain Copy expressions putting the
+      -- arrays where they are expected.
+      let updateBody body = buildBody_ $ do
+            res <- bodyBind body
+            zipWithM updateResult (patElems pat) res
+          updateResult pat_elem (SubExpRes cs (Var v))
+            | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
+              (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
+                v_copy <- newVName $ baseString v <> "_nonext_copy"
+                let v_pat =
+                      Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]
+                addStm $ mkWiseStm v_pat (defAux ()) $ BasicOp (Copy v)
+                pure $ SubExpRes cs $ Var v_copy
+            | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
+                pure $ SubExpRes cs $ Var mem
+          updateResult _ se =
+            pure se
+      tbranch' <- updateBody tbranch
+      fbranch' <- updateBody fbranch
+      letBind pat $ If cond tbranch' fbranch' ifdec
   where
     onlyUsedIn name here =
       not . any ((name `nameIn`) . freeIn) . filter ((/= here) . patElemName) $
@@ -174,11 +174,11 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
         all knownSize (shapeDims shape),
         not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
         fse /= tse =
-        let mem_size =
-              untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
-         in (pat_elem, mem_size, mem, space) : fixable
+          let mem_size =
+                untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
+           in (pat_elem, mem_size, mem, space) : fixable
       | otherwise =
-        fixable
+          fixable
 unExistentialiseMemory _ _ _ _ = Skip
 
 -- | If we are copying something that is itself a copy, just copy the
@@ -197,14 +197,14 @@ copyCopyToCopy vtable pat@(Pat [pat_elem]) _ (Copy v1)
     Just (Mem dest_space) <- ST.lookupType destmem vtable,
     src_space == dest_space,
     dest_ixfun == src_ixfun =
-    Simplify $ certifying v1_cs $ letBind pat $ BasicOp $ Copy v2
+      Simplify $ certifying v1_cs $ letBind pat $ BasicOp $ Copy v2
 copyCopyToCopy vtable pat _ (Copy v0)
   | Just (BasicOp (Rearrange perm v1), v0_cs) <- ST.lookupExp v0 vtable,
     Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable = Simplify $ do
-    v0' <-
-      certifying (v0_cs <> v1_cs) $
-        letExp "rearrange_v0" $ BasicOp $ Rearrange perm v2
-    letBind pat $ BasicOp $ Copy v0'
+      v0' <-
+        certifying (v0_cs <> v1_cs) $
+          letExp "rearrange_v0" $ BasicOp $ Rearrange perm v2
+      letBind pat $ BasicOp $ Copy v0'
 copyCopyToCopy _ _ _ _ = Skip
 
 -- If an allocation is statically known to be safe, then we can remove
@@ -215,5 +215,5 @@ decertifySafeAlloc _ pat (StmAux cs attrs _) op
   | cs /= mempty,
     [Mem _] <- patTypes pat,
     safeOp op =
-    Simplify $ attributing attrs $ letBind pat $ Op op
+      Simplify $ attributing attrs $ letBind pat $ Op op
 decertifySafeAlloc _ _ _ _ = Skip

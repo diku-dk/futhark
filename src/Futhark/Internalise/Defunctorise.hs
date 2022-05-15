@@ -102,7 +102,7 @@ substituting substs = extendScope mempty {scopeSubsts = substs}
 boundName :: VName -> TransformM VName
 boundName v = do
   g <- asks envGenerating
-  if g then newName v else return v
+  if g then newName v else pure v
 
 bindingNames :: [VName] -> TransformM Scope -> TransformM Scope
 bindingNames names m = do
@@ -122,19 +122,27 @@ bindingAbs abs = local $ \env ->
   env {envAbs = abs <> envAbs env}
 
 lookupImport :: String -> TransformM Scope
-lookupImport name = maybe bad return =<< asks (M.lookup name . envImports)
+lookupImport name = maybe bad pure =<< asks (M.lookup name . envImports)
   where
     bad = error $ "Unknown import: " ++ name
 
 lookupMod' :: QualName VName -> Scope -> Either String Mod
 lookupMod' mname scope =
   let (mname', scope') = lookupSubstInScope mname scope
-   in maybe (Left $ bad mname') Right $ M.lookup (qualLeaf mname') $ scopeMods scope'
+   in maybe (Left $ bad mname') (Right . extend) $ M.lookup (qualLeaf mname') $ scopeMods scope'
   where
     bad mname' = "Unknown module: " ++ pretty mname ++ " (" ++ pretty mname' ++ ")"
+    extend (ModMod (Scope inner_scope inner_mods)) =
+      -- XXX: perhaps hacky fix for #1653.  We need to impose the
+      -- substitutions of abstract types from outside, because the
+      -- inner module may have some incorrect substitutions in some
+      -- cases.  Our treatment of abstract types is completely whack
+      -- and should be fixed.
+      ModMod $ Scope (scopeSubsts scope <> inner_scope) inner_mods
+    extend m = m
 
 lookupMod :: QualName VName -> TransformM Mod
-lookupMod mname = either error return . lookupMod' mname =<< askScope
+lookupMod mname = either error pure . lookupMod' mname =<< askScope
 
 runTransformM :: VNameSource -> TransformM a -> (a, VNameSource, DL.DList Dec)
 runTransformM src (TransformM m) = runRWS m env src
@@ -231,7 +239,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
 evalModExp (ModLambda p ascript e loc) = do
   scope <- askScope
   abs <- asks envAbs
-  return $ ModFun abs scope p $ maybeAscript loc ascript e
+  pure $ ModFun abs scope p $ maybeAscript loc ascript e
 
 transformName :: VName -> TransformM VName
 transformName v = lookupSubst v . scopeSubsts <$> askScope
@@ -240,15 +248,15 @@ transformName v = lookupSubst v . scopeSubsts <$> askScope
 transformNames :: ASTMappable x => x -> TransformM x
 transformNames x = do
   scope <- askScope
-  return $ runIdentity $ astMap (substituter scope) x
+  pure $ runIdentity $ astMap (substituter scope) x
   where
     substituter scope =
       ASTMapper
         { mapOnExp = onExp scope,
           mapOnName = \v ->
-            return $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
+            pure $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
           mapOnQualName = \v ->
-            return $ fst $ lookupSubstInScope v scope,
+            pure $ fst $ lookupSubstInScope v scope,
           mapOnStructType = astMap (substituter scope),
           mapOnPatType = astMap (substituter scope),
           mapOnStructRetType = astMap (substituter scope),
@@ -304,13 +312,13 @@ transformModBind mb = do
         (maybeAscript (srclocOf mb) (modSignature mb) $ modExp mb)
         $ modParams mb
   mname <- transformName $ modName mb
-  return $ Scope (scopeSubsts $ modScope mod) $ M.singleton mname mod
+  pure $ Scope (scopeSubsts $ modScope mod) $ M.singleton mname mod
 
 transformDecs :: [Dec] -> TransformM Scope
 transformDecs ds =
   case ds of
     [] ->
-      return mempty
+      pure mempty
     LocalDec d _ : ds' ->
       transformDecs $ d : ds'
     ValDec fdec : ds' ->
@@ -335,7 +343,7 @@ transformDecs ds =
        in transformDecs $ d : ds'
 
 transformImports :: Imports -> TransformM ()
-transformImports [] = return ()
+transformImports [] = pure ()
 transformImports ((name, imp) : imps) = do
   let abs = S.fromList $ map qualLeaf $ M.keys $ fileAbs imp
   scope <-

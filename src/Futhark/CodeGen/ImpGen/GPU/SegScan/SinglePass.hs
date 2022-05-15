@@ -63,7 +63,7 @@ createLocalArrays (Count groupSize) m types = do
       scanl (\off tySize -> alignTo off tySize + warpSize * tySize) warpSize $
         map primByteSize types
 
-  sComment "Allocate reused shared memeory" $ return ()
+  sComment "Allocate reused shared memeory" $ pure ()
 
   localMem <- sAlloc "local_mem" size (Space "local")
   transposeArrayLength <- dPrimV "trans_arr_len" workSize
@@ -99,7 +99,7 @@ createLocalArrays (Count groupSize) m types = do
         localMem
         $ IxFun.iotaOffset off' [warpSize]
 
-  return (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
+  pure (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 
 inBlockScanLookback ::
   KernelConstants ->
@@ -184,27 +184,27 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
     array_scan = not $ all primType $ lambdaReturnType scan_lam
     barrier
       | array_scan =
-        sOp $ Imp.Barrier Imp.FenceGlobal
+          sOp $ Imp.Barrier Imp.FenceGlobal
       | otherwise =
-        sOp $ Imp.Barrier Imp.FenceLocal
+          sOp $ Imp.Barrier Imp.FenceLocal
 
     readInitial p arr
       | primType $ paramType p =
-        copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+          copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
       | otherwise =
-        copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+          copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
     readParam behind p arr
       | primType $ paramType p =
-        copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+          copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
       | otherwise =
-        copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+          copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
 
     writeResult x y arr
       | primType $ paramType x = do
-        copyDWIM arr [DimFix ltid] (Var $ paramName x) []
-        copyDWIM (paramName y) [] (Var $ paramName x) []
+          copyDWIM arr [DimFix ltid] (Var $ paramName x) []
+          copyDWIM (paramName y) [] (Var $ paramName x) []
       | otherwise =
-        copyDWIM (paramName y) [] (Var $ paramName x) []
+          copyDWIM (paramName y) [] (Var $ paramName x) []
 
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
@@ -359,7 +359,7 @@ compileSegScan pat lvl space scanOp kbody = do
       globalIdx <-
         dPrimVE "gidx" $
           (kernelLocalThreadId constants * m) + 1
-      sFor "i" (m -1) $ \i -> do
+      sFor "i" (m - 1) $ \i -> do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
         -- determine if start of segment
@@ -473,8 +473,8 @@ compileSegScan pat lvl space scanOp kbody = do
               let loopStop = warpSize * (-1)
                   sameSegment readIdx
                     | segmented =
-                      let startIdx = sExt64 (tvExp readIdx + 1) * kernelGroupSize constants * m - 1
-                       in tvExp blockOff - startIdx .<=. sgmIdx
+                        let startIdx = sExt64 (tvExp readIdx + 1) * kernelGroupSize constants * m - 1
+                         in tvExp blockOff - startIdx .<=. sgmIdx
                     | otherwise = true
               sWhile (tvExp readOffset .>. loopStop) $ do
                 readI <- dPrimV "read_i" $ tvExp readOffset + kernelLocalThreadId constants
@@ -606,7 +606,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
     sComment "Transpose scan output and Write it to global memory in coalesced fashion" $ do
       forM_ (zip3 transposedArrays privateArrays $ map patElemName all_pes) $ \(locmem, priv, dest) -> do
-        --sOp localBarrier
+        -- sOp localBarrier
         sFor "i" m $ \i -> do
           sharedIdx <-
             dPrimV "sharedIdx" $

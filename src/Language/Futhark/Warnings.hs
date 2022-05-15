@@ -1,6 +1,6 @@
 -- | A very simple representation of collections of warnings.
 -- Warnings have a position (so they can be ordered), and their
--- 'Show'-instance produces a human-readable string.
+-- 'Pretty'-instance produces a human-readable string.
 module Language.Futhark.Warnings
   ( Warnings,
     anyWarnings,
@@ -12,7 +12,7 @@ where
 
 import Data.List (sortOn)
 import Data.Monoid
-import Futhark.Util.Console (inRed)
+import Futhark.Util.Console (inYellow)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
 import Language.Futhark.Core (locStr, prettyStacktrace)
@@ -37,11 +37,11 @@ instance Pretty Warnings where
       rep NoLoc = ("", 0)
       rep (Loc p _) = (posFile p, posCoff p)
       onWarning (loc, [], w) =
-        text (inRed ("Warning at " ++ locStr loc ++ ":"))
+        text (inYellow ("Warning at " ++ locStr loc ++ ":"))
           </> indent 2 w
       onWarning (loc, locs, w) =
         text
-          ( inRed
+          ( inYellow
               ( "Warning at\n"
                   ++ prettyStacktrace 0 (map locStr (loc : locs))
               )

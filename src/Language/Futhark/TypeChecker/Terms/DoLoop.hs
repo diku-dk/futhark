@@ -42,8 +42,8 @@ someDimsFreshInType loc r desc sizes = bitraverse onDim pure
   where
     onDim (NamedDim d)
       | qualLeaf d `S.member` sizes = do
-        v <- newDimVar loc r desc
-        pure $ NamedDim $ qualName v
+          v <- newDimVar loc r desc
+          pure $ NamedDim $ qualName v
     onDim d = pure d
 
 -- | Replace the specified sizes with fresh size variables of the
@@ -60,13 +60,13 @@ freshDimsInType loc r desc sizes t =
   where
     onDim (NamedDim d)
       | qualLeaf d `S.member` sizes = do
-        prev_subst <- gets $ M.lookup $ qualLeaf d
-        case prev_subst of
-          Just d' -> pure $ NamedDim $ qualName d'
-          Nothing -> do
-            v <- lift $ newDimVar loc r desc
-            modify $ M.insert (qualLeaf d) v
-            pure $ NamedDim $ qualName v
+          prev_subst <- gets $ M.lookup $ qualLeaf d
+          case prev_subst of
+            Just d' -> pure $ NamedDim $ qualName d'
+            Nothing -> do
+              v <- lift $ newDimVar loc r desc
+              modify $ M.insert (qualLeaf d) v
+              pure $ NamedDim $ qualName v
     onDim d = pure d
 
 -- | Mark bindings of names in "consumed" as Unique.
@@ -81,11 +81,11 @@ uniquePat consumed = recurse
       PatAttr attr (recurse p) ploc
     recurse (Id name (Info t) iloc)
       | name `S.member` consumed =
-        let t' = t `setUniqueness` Unique `setAliases` mempty
-         in Id name (Info t') iloc
+          let t' = t `setUniqueness` Unique `setAliases` mempty
+           in Id name (Info t') iloc
       | otherwise =
-        let t' = t `setUniqueness` Nonunique
-         in Id name (Info t') iloc
+          let t' = t `setUniqueness` Nonunique
+           in Id name (Info t') iloc
     recurse (TuplePat pats ploc) =
       TuplePat (map recurse pats) ploc
     recurse (RecordPat fs ploc) =
@@ -100,10 +100,6 @@ convergePat :: SrcLoc -> Pat -> Names -> PatType -> Usage -> TermTypeM Pat
 convergePat loop_loc pat body_cons body_t body_loc = do
   let -- Make the pattern unique where needed.
       pat' = uniquePat (patNames pat `S.intersection` body_cons) pat
-
-  pat_t <- normTypeFully $ patternType pat'
-  unless (toStructural body_t `subtypeOf` toStructural pat_t) $
-    unexpectedType (srclocOf body_loc) (toStruct body_t) [toStruct pat_t]
 
   -- Check that the new values of consumed merge parameters do not
   -- alias something bound outside the loop, AND that anything
@@ -120,31 +116,31 @@ convergePat loop_loc pat body_cons body_t body_loc = do
           v : _ <-
             S.toList $
               S.map aliasVar (aliases t) `S.intersection` bound_outside =
-          lift . typeError loop_loc mempty $
-            "Return value for loop parameter"
-              <+> pquote (pprName pat_v)
-              <+> "aliases"
-              <+> pprName v <> "."
-        | otherwise = do
-          (cons, obs) <- get
-          unless (S.null $ aliases t `S.intersection` cons) $
             lift . typeError loop_loc mempty $
               "Return value for loop parameter"
                 <+> pquote (pprName pat_v)
-                <+> "aliases other consumed loop parameter."
-          when
-            ( unique pat_v_t
-                && not (S.null (aliases t `S.intersection` (cons <> obs)))
-            )
-            $ lift . typeError loop_loc mempty $
-              "Return value for consuming loop parameter"
-                <+> pquote (pprName pat_v)
-                <+> "aliases previously returned value."
-          if unique pat_v_t
-            then put (cons <> aliases t, obs)
-            else put (cons, obs <> aliases t)
+                <+> "aliases"
+                <+> pquote (pprName v) <> "."
+        | otherwise = do
+            (cons, obs) <- get
+            unless (S.null $ aliases t `S.intersection` cons) $
+              lift . typeError loop_loc mempty $
+                "Return value for loop parameter"
+                  <+> pquote (pprName pat_v)
+                  <+> "aliases other consumed loop parameter."
+            when
+              ( unique pat_v_t
+                  && not (S.null (aliases t `S.intersection` (cons <> obs)))
+              )
+              $ lift . typeError loop_loc mempty $
+                "Return value for consuming loop parameter"
+                  <+> pquote (pprName pat_v)
+                  <+> "aliases previously returned value."
+            if unique pat_v_t
+              then put (cons <> aliases t, obs)
+              else put (cons, obs <> aliases t)
 
-          pure $ Id pat_v (Info (combAliases pat_v_t t)) patloc
+            pure $ Id pat_v (Info (combAliases pat_v_t t)) patloc
       checkMergeReturn (Wildcard (Info pat_v_t) patloc) t =
         pure $ Wildcard (Info (combAliases pat_v_t t)) patloc
       checkMergeReturn (PatParens p _) t =
@@ -157,7 +153,7 @@ convergePat loop_loc pat body_cons body_t body_loc = do
           pfs' = M.intersectionWith checkMergeReturn (M.fromList pfs) tfs
       checkMergeReturn (TuplePat pats patloc) t
         | Just ts <- isTupleRecord t =
-          TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
+            TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
       checkMergeReturn p _ =
         pure p
 
@@ -261,13 +257,13 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                 | x == y = pure x
               onDims _ (NamedDim v) d
                 | qualLeaf v `elem` new_dims = do
-                  case M.lookup (qualLeaf v) new_dims_to_initial_dim of
-                    Just d'
-                      | d' == d ->
-                        modify $ first $ M.insert (qualLeaf v) (SizeSubst d)
-                    _ ->
-                      modify $ second (qualLeaf v :)
-                  pure $ NamedDim v
+                    case M.lookup (qualLeaf v) new_dims_to_initial_dim of
+                      Just d'
+                        | d' == d ->
+                            modify $ first $ M.insert (qualLeaf v) (SizeSubst d)
+                      _ ->
+                        modify $ second (qualLeaf v :)
+                    pure $ NamedDim v
               onDims _ x _ = pure x
           loopbody_t' <- normTypeFully loopbody_t
           merge_t' <- normTypeFully merge_t
@@ -319,7 +315,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               \mergepat' -> onlySelfAliasing . tapOccurrences $ do
                 loopbody' <- noSizeEscape $ checkExp loopbody
                 (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                return
+                pure
                   ( sparams,
                     mergepat'',
                     For i' uboundexp',
@@ -332,21 +328,21 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           case t of
             _
               | Just t' <- peelArray 1 t ->
-                bindingPat [] xpat (Ascribed t') $ \xpat' ->
-                  noUnique . bindingPat [] mergepat (Ascribed merge_t) $
-                    \mergepat' -> onlySelfAliasing . tapOccurrences $ do
-                      loopbody' <- noSizeEscape $ checkExp loopbody
-                      (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                      return
-                        ( sparams,
-                          mergepat'',
-                          ForIn xpat' e',
-                          loopbody'
-                        )
+                  bindingPat [] xpat (Ascribed t') $ \xpat' ->
+                    noUnique . bindingPat [] mergepat (Ascribed merge_t) $
+                      \mergepat' -> onlySelfAliasing . tapOccurrences $ do
+                        loopbody' <- noSizeEscape $ checkExp loopbody
+                        (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+                        pure
+                          ( sparams,
+                            mergepat'',
+                            ForIn xpat' e',
+                            loopbody'
+                          )
               | otherwise ->
-                typeError (srclocOf e) mempty $
-                  "Iteratee of a for-in loop must be an array, but expression has type"
-                    <+> ppr t
+                  typeError (srclocOf e) mempty $
+                    "Iteratee of a for-in loop must be an array, but expression has type"
+                      <+> ppr t
         While cond ->
           noUnique . bindingPat [] mergepat (Ascribed merge_t) $ \mergepat' ->
             onlySelfAliasing . tapOccurrences
@@ -357,7 +353,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               $ \cond' _ -> do
                 loopbody' <- noSizeEscape $ checkExp loopbody
                 (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                return
+                pure
                   ( sparams,
                     mergepat'',
                     While cond',
@@ -373,7 +369,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           | unique pt = consume ploc $ aliases mt
         consumeMerge (TuplePat pats _) t
           | Just ts <- isTupleRecord t =
-            zipWithM_ consumeMerge pats ts
+              zipWithM_ consumeMerge pats ts
         consumeMerge (PatParens pat _) t =
           consumeMerge pat t
         consumeMerge (PatAscription pat _ _) t =

@@ -8,7 +8,7 @@
 -- standards.
 module Language.Futhark.Parser.Monad
   ( ParserMonad,
-    ParserEnv,
+    ParserState,
     ReadLineMonad (..),
     parseInMonad,
     parse,
@@ -31,10 +31,11 @@ module Language.Futhark.Parser.Monad
     addDoc,
     addAttr,
     twoDotsRange,
-    ParseError (..),
+    SyntaxError (..),
     emptyArrayError,
     parseError,
     parseErrorAt,
+    backOneCol,
 
     -- * Reexports
     L,
@@ -50,9 +51,10 @@ import Data.Array hiding (index)
 import qualified Data.Map.Strict as M
 import Data.Monoid
 import qualified Data.Text as T
-import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
+import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (line)
 import Language.Futhark.Parser.Lexer
+import Language.Futhark.Parser.Lexer.Wrapper (LexerError (..))
 import Language.Futhark.Pretty ()
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
@@ -67,7 +69,7 @@ addDoc _ dec = dec
 
 addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
 addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig {typeDoc = Just doc})
-addDocSpec doc (ValSpec name ps t _ loc) = ValSpec name ps t (Just doc) loc
+addDocSpec doc (ValSpec name ps t NoInfo _ loc) = ValSpec name ps t NoInfo (Just doc) loc
 addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
 addDocSpec _ spec = spec
@@ -88,18 +90,19 @@ mustBe (L loc _) expected =
   parseErrorAt loc . Just $
     "Only the keyword '" <> expected <> "' may appear here."
 
-mustBeEmpty :: SrcLoc -> ValueType -> ParserMonad ()
-mustBeEmpty _ (Array _ _ _ (ShapeDecl dims))
+mustBeEmpty :: Located loc => loc -> ValueType -> ParserMonad ()
+mustBeEmpty _ (Array _ _ (ShapeDecl dims) _)
   | 0 `elem` dims = pure ()
 mustBeEmpty loc t =
   parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
 
-newtype ParserEnv = ParserEnv
-  { parserFile :: FilePath
+data ParserState = ParserState
+  { _parserFile :: FilePath,
+    parserInput :: T.Text,
+    parserLexical :: ([L Token], Pos)
   }
 
-type ParserMonad =
-  ExceptT String (StateT ParserEnv (StateT ([L Token], Pos) ReadLineMonad))
+type ParserMonad = ExceptT SyntaxError (StateT ParserState ReadLineMonad)
 
 data ReadLineMonad a
   = Value a
@@ -109,7 +112,6 @@ readLineFromMonad :: ReadLineMonad (Maybe T.Text)
 readLineFromMonad = GetLine Value
 
 instance Monad ReadLineMonad where
-  return = pure
   Value x >>= f = f x
   GetLine g >>= f = GetLine $ g >=> f
 
@@ -126,23 +128,23 @@ getLinesFromM fetch (GetLine f) = do
   s <- fetch
   getLinesFromM fetch $ f $ Just s
 
-getNoLines :: ReadLineMonad a -> Either String a
+getNoLines :: ReadLineMonad a -> Either SyntaxError a
 getNoLines (Value x) = Right x
 getNoLines (GetLine f) = getNoLines $ f Nothing
 
-combArrayElements :: Value -> [Value] -> Either String Value
+combArrayElements :: Value -> [Value] -> Either SyntaxError Value
 combArrayElements = foldM comb
   where
     comb x y
       | valueType x == valueType y = Right x
       | otherwise =
-        Left $
-          "Elements " <> pretty x <> " and "
-            <> pretty y
-            <> " cannot exist in same array."
+          Left . SyntaxError NoLoc $
+            "Elements " <> pretty x <> " and "
+              <> pretty y
+              <> " cannot exist in same array."
 
 arrayFromList :: [a] -> Array Int a
-arrayFromList l = listArray (0, length l -1) l
+arrayFromList l = listArray (0, length l - 1) l
 
 applyExp :: [UncheckedExp] -> ParserMonad UncheckedExp
 applyExp all_es@((Constr n [] _ loc1) : es) =
@@ -173,38 +175,38 @@ patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
     field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
 
 eof :: Pos -> L Token
-eof pos = L (SrcLoc $ Loc pos pos) EOF
+eof pos = L (Loc pos pos) EOF
 
-binOpName :: L Token -> (QualName Name, SrcLoc)
+binOpName :: L Token -> (QualName Name, Loc)
 binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)
 binOpName t = error $ "binOpName: unexpected " ++ show t
 
 binOp :: UncheckedExp -> L Token -> UncheckedExp -> UncheckedExp
 binOp x (L loc (SYMBOL _ qs op)) y =
-  AppExp (BinOp (QualName qs op, loc) NoInfo (x, NoInfo) (y, NoInfo) (srcspan x y)) NoInfo
+  AppExp (BinOp (QualName qs op, srclocOf loc) NoInfo (x, NoInfo) (y, NoInfo) (srcspan x y)) NoInfo
 binOp _ t _ = error $ "binOp: unexpected " ++ show t
 
 getTokens :: ParserMonad ([L Token], Pos)
-getTokens = lift $ lift get
+getTokens = lift $ gets parserLexical
 
 putTokens :: ([L Token], Pos) -> ParserMonad ()
-putTokens = lift . lift . put
+putTokens l = lift $ modify $ \env -> env {parserLexical = l}
 
-primTypeFromName :: SrcLoc -> Name -> ParserMonad PrimType
+primTypeFromName :: Loc -> Name -> ParserMonad PrimType
 primTypeFromName loc s = maybe boom pure $ M.lookup s namesToPrimTypes
   where
     boom = parseErrorAt loc $ Just $ "No type named " ++ nameToString s
 
 intNegate :: IntValue -> IntValue
-intNegate (Int8Value v) = Int8Value (- v)
-intNegate (Int16Value v) = Int16Value (- v)
-intNegate (Int32Value v) = Int32Value (- v)
-intNegate (Int64Value v) = Int64Value (- v)
+intNegate (Int8Value v) = Int8Value (-v)
+intNegate (Int16Value v) = Int16Value (-v)
+intNegate (Int32Value v) = Int32Value (-v)
+intNegate (Int64Value v) = Int64Value (-v)
 
 floatNegate :: FloatValue -> FloatValue
-floatNegate (Float16Value v) = Float16Value (- v)
-floatNegate (Float32Value v) = Float32Value (- v)
-floatNegate (Float64Value v) = Float64Value (- v)
+floatNegate (Float16Value v) = Float16Value (-v)
+floatNegate (Float32Value v) = Float32Value (-v)
+floatNegate (Float64Value v) = Float64Value (-v)
 
 primNegate :: PrimValue -> PrimValue
 primNegate (FloatValue v) = FloatValue $ floatNegate v
@@ -213,7 +215,13 @@ primNegate (UnsignedValue v) = UnsignedValue $ intNegate v
 primNegate (BoolValue v) = BoolValue $ not v
 
 readLine :: ParserMonad (Maybe T.Text)
-readLine = lift $ lift $ lift readLineFromMonad
+readLine = do
+  s <- lift $ lift readLineFromMonad
+  case s of
+    Just s' ->
+      lift $ modify $ \env -> env {parserInput = parserInput env <> "\n" <> s'}
+    Nothing -> pure ()
+  pure s
 
 lexer :: (L Token -> ParserMonad a) -> ParserMonad a
 lexer cont = do
@@ -229,10 +237,7 @@ lexer cont = do
             case line of
               Nothing -> throwError parse_e
               Just line' -> pure $ scanTokensText (advancePos pos '\n') line'
-          (ts'', pos') <-
-            case ts' of
-              Right x -> pure x
-              Left lex_e -> throwError lex_e
+          (ts'', pos') <- either (throwError . lexerErrToParseErr) pure ts'
           case ts'' of
             [] -> cont $ eof pos
             xs -> do
@@ -244,49 +249,55 @@ lexer cont = do
 
 parseError :: (L Token, [String]) -> ParserMonad a
 parseError (L loc EOF, expected) =
-  parseErrorAt (srclocOf loc) . Just . unlines $
-    [ "unexpected end of file.",
+  parseErrorAt (locOf loc) . Just . unlines $
+    [ "Unexpected end of file.",
       "Expected one of the following: " ++ unwords expected
     ]
 parseError (L loc DOC {}, _) =
-  parseErrorAt (srclocOf loc) $
-    Just "documentation comments ('-- |') are only permitted when preceding declarations."
-parseError (L loc tok, expected) =
+  parseErrorAt (locOf loc) $
+    Just "Documentation comments ('-- |') are only permitted when preceding declarations."
+parseError (L loc _, expected) = do
+  input <- lift $ gets parserInput
+  let ~(Loc (Pos _ _ _ beg) (Pos _ _ _ end)) = locOf loc
+      tok_src = T.take (end - beg + 1) $ T.drop beg input
   parseErrorAt loc . Just . unlines $
-    [ "unexpected " ++ show tok,
-      "Expected one of the following: " ++ unwords expected
+    [ "Unexpected token: '" <> T.unpack tok_src <> "'",
+      "Expected one of the following: " <> unwords expected
     ]
 
-parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
-parseErrorAt loc Nothing = throwError $ "Error at " ++ locStr loc ++ ": Parse error."
-parseErrorAt loc (Just s) = throwError $ "Error at " ++ locStr loc ++ ": " ++ s
+parseErrorAt :: Located loc => loc -> Maybe String -> ParserMonad a
+parseErrorAt loc Nothing = throwError $ SyntaxError (locOf loc) "Syntax error."
+parseErrorAt loc (Just s) = throwError $ SyntaxError (locOf loc) s
 
-emptyArrayError :: SrcLoc -> ParserMonad a
+emptyArrayError :: Loc -> ParserMonad a
 emptyArrayError loc =
   parseErrorAt loc $
     Just "write empty arrays as 'empty(t)', for element type 't'.\n"
 
-twoDotsRange :: SrcLoc -> ParserMonad a
+twoDotsRange :: Loc -> ParserMonad a
 twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
+
+-- | Move the end position back one column.
+backOneCol :: Loc -> Loc
+backOneCol (Loc start (Pos f l c o)) = Loc start $ Pos f l (c - 1) (o - 1)
+backOneCol NoLoc = NoLoc
 
 --- Now for the parser interface.
 
--- | A parse error.  Use 'show' to get a human-readable description.
-newtype ParseError = ParseError String
+-- | A syntax error.
+data SyntaxError = SyntaxError {syntaxErrorLoc :: Loc, syntaxErrorMsg :: String}
 
-instance Show ParseError where
-  show (ParseError s) = s
+lexerErrToParseErr :: LexerError -> SyntaxError
+lexerErrToParseErr (LexerError loc msg) = SyntaxError loc msg
 
-parseInMonad :: ParserMonad a -> FilePath -> T.Text -> ReadLineMonad (Either ParseError a)
+parseInMonad :: ParserMonad a -> FilePath -> T.Text -> ReadLineMonad (Either SyntaxError a)
 parseInMonad p file program =
-  either (Left . ParseError) Right
-    <$> either
-      (pure . Left)
-      (evalStateT (evalStateT (runExceptT p) env))
-      (scanTokensText (Pos file 1 1 0) program)
+  either
+    (pure . Left . lexerErrToParseErr)
+    (evalStateT (runExceptT p) . env)
+    (scanTokensText (Pos file 1 1 0) program)
   where
-    env = ParserEnv {parserFile = file}
+    env = ParserState file program
 
-parse :: ParserMonad a -> FilePath -> T.Text -> Either ParseError a
-parse p file program =
-  either (Left . ParseError) id $ getNoLines $ parseInMonad p file program
+parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
+parse p file program = join $ getNoLines $ parseInMonad p file program

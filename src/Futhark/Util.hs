@@ -20,6 +20,7 @@ module Futhark.Util
     dropAt,
     takeLast,
     dropLast,
+    debug,
     mapEither,
     maybeNth,
     maybeHead,
@@ -43,6 +44,12 @@ module Futhark.Util
     lgammaf,
     tgamma,
     tgammaf,
+    erf,
+    erff,
+    erfc,
+    erfcf,
+    cbrt,
+    cbrtf,
     hypot,
     hypotf,
     fromPOSIX,
@@ -50,7 +57,6 @@ module Futhark.Util
     trim,
     pmapIO,
     interactWithFileSafely,
-    readFileSafely,
     convFloat,
     UserString,
     EncodedString,
@@ -66,6 +72,7 @@ import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash.MD5 as MD5
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
@@ -81,7 +88,6 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
-import qualified Data.Text.IO as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Numeric
@@ -93,6 +99,7 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
+import System.Log.Logger (debugM)
 import System.Process.ByteString
 import Text.Read (readMaybe)
 
@@ -113,11 +120,11 @@ mapAccumLM ::
   acc ->
   [x] ->
   m (acc, [y])
-mapAccumLM _ acc [] = return (acc, [])
+mapAccumLM _ acc [] = pure (acc, [])
 mapAccumLM f acc (x : xs) = do
   (acc', x') <- f acc x
   (acc'', xs') <- mapAccumLM f acc' xs
-  return (acc'', x' : xs')
+  pure (acc'', x' : xs')
 
 -- | @chunk n a@ splits @a@ into @n@-size-chunks.  If the length of
 -- @a@ is not divisible by @n@, the last chunk will have fewer than
@@ -234,7 +241,7 @@ fancyTerminal :: Bool
 fancyTerminal = unsafePerformIO $ do
   isTTY <- hIsTerminalDevice stdout
   isDumb <- (Just "dumb" ==) <$> lookupEnv "TERM"
-  return $ isTTY && not isDumb
+  pure $ isTTY && not isDumb
 
 -- | Like 'readProcessWithExitCode', but also wraps exceptions when
 -- the indicated binary cannot be launched, or some other exception is
@@ -246,7 +253,7 @@ runProgramWithExitCode ::
   IO (Either IOException (ExitCode, String, String))
 runProgramWithExitCode exe args inp =
   (Right . postprocess <$> readProcessWithExitCode exe args inp)
-    `catch` \e -> return (Left e)
+    `catch` \e -> pure (Left e)
   where
     decode = T.unpack . T.decodeUtf8With T.lenientDecode
     postprocess (code, out, err) =
@@ -255,10 +262,10 @@ runProgramWithExitCode exe args inp =
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]
 directoryContents dir = do
-  _ Dir.:/ tree <- Dir.readDirectoryWith return dir
+  _ Dir.:/ tree <- Dir.readDirectoryWith pure dir
   case Dir.failures tree of
     Dir.Failed _ err : _ -> throw err
-    _ -> return $ mapMaybe isFile $ Dir.flattenDir tree
+    _ -> pure $ mapMaybe isFile $ Dir.flattenDir tree
   where
     isFile (Dir.File _ path) = Just path
     isFile _ = Nothing
@@ -335,6 +342,42 @@ hypot = c_hypot
 hypotf :: Float -> Float -> Float
 hypotf = c_hypotf
 
+foreign import ccall "erf" c_erf :: Double -> Double
+
+foreign import ccall "erff" c_erff :: Float -> Float
+
+foreign import ccall "erfc" c_erfc :: Double -> Double
+
+foreign import ccall "erfcf" c_erfcf :: Float -> Float
+
+-- | The system-level @erf()@ function.
+erf :: Double -> Double
+erf = c_erf
+
+-- | The system-level @erff()@ function.
+erff :: Float -> Float
+erff = c_erff
+
+-- | The system-level @erfc()@ function.
+erfc :: Double -> Double
+erfc = c_erfc
+
+-- | The system-level @erfcf()@ function.
+erfcf :: Float -> Float
+erfcf = c_erfcf
+
+foreign import ccall "cbrt" c_cbrt :: Double -> Double
+
+foreign import ccall "cbrtf" c_cbrtf :: Float -> Float
+
+-- | The system-level @cbrt@ function.
+cbrt :: Double -> Double
+cbrt = c_cbrt
+
+-- | The system-level @cbrtf@ function.
+cbrtf :: Float -> Float
+cbrtf = c_cbrtf
+
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath
 toPOSIX = Posix.joinPath . Native.splitDirectories
@@ -389,15 +432,9 @@ interactWithFileSafely m =
   where
     couldNotRead e
       | isDoesNotExistError e =
-        return Nothing
+          pure Nothing
       | otherwise =
-        return $ Just $ Left $ show e
-
--- | Read a file, returning 'Nothing' if the file does not exist, and
--- 'Left' if some other error occurs.
-readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
-readFileSafely filepath =
-  interactWithFileSafely $ T.readFile filepath
+          pure $ Just $ Left $ show e
 
 -- | Convert between different floating-point types, preserving
 -- infinities and NaNs.
@@ -489,7 +526,7 @@ encodeAsUnicodeCharar c =
 -- characters "..." if truncation is necessary.
 atMostChars :: Int -> String -> String
 atMostChars n s
-  | length s > n = take (n -3) s ++ "..."
+  | length s > n = take (n - 3) s ++ "..."
   | otherwise = s
 
 -- | Invert a map, handling duplicate values (now keys) by
@@ -509,3 +546,7 @@ fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
+
+-- | Issue a debugging statement to the log.
+debug :: MonadIO m => String -> m ()
+debug msg = liftIO $ debugM "futhark" msg

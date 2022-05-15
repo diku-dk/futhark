@@ -20,7 +20,10 @@ instance Arbitrary DataResult where
       <$> printable
       <*> oneof
         [ Left <$> arbText,
-          Right <$> (Result <$> arbitrary <*> arbMap <*> arbText)
+          Right
+            <$> ( Result <$> arbitrary <*> arbMap
+                    <*> oneof [pure Nothing, Just <$> arbText]
+                )
         ]
     where
       arbText = T.pack <$> printable

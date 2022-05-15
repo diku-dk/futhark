@@ -73,10 +73,10 @@ removeLoopVars loop =
           x' <-
             letExp (baseString $ paramName x_param) $
               BasicOp $ Index xs $ fullSlice xs_t [DimFix (Var i)]
-          return (paramName x_param, x')
+          pure (paramName x_param, x')
     (substs_list, subst_stms) <- collectStms $ mapM indexify loop_vars
     let Body aux' stms' res' = substituteNames (M.fromList substs_list) body
-    return $ DoLoop val_pats form $ Body aux' (subst_stms <> stms') res'
+    pure $ DoLoop val_pats form $ Body aux' (subst_stms <> stms') res'
 
 -- | Augments a while-loop to also compute the number of iterations.
 computeWhileIters :: Exp SOACS -> ADM SubExp
@@ -91,9 +91,9 @@ computeWhileIters (DoLoop val_pats (WhileLoop b) body) = do
         let one = Constant $ IntValue $ intValue Int64 (1 :: Int)
          in letSubExp "bound+1" $ BasicOp $ BinOp (Add Int64 OverflowUndef) (Var bound_v) one
       addStms $ bodyStms body
-      return (pure (subExpRes bound_plus_one) <> bodyResult body)
+      pure (pure (subExpRes bound_plus_one) <> bodyResult body)
   res <- letTupExp' "loop" $ DoLoop ((bound_param, bound_init) : val_pats) (WhileLoop b) body'
-  return $ head res
+  pure $ head res
 computeWhileIters e = error $ "convertWhileIters: not a while-loop:\n" <> pretty e
 
 -- | Converts a 'WhileLoop' into a 'ForLoop'. Requires that the
@@ -108,11 +108,11 @@ convertWhileLoop bound_se (DoLoop val_pats (WhileLoop cond) body) =
     body' <-
       eBody
         [ eIf
-            (return $ BasicOp $ SubExp $ Var cond)
-            (return body)
+            (pure $ BasicOp $ SubExp $ Var cond)
+            (pure body)
             (resultBodyM $ map (Var . paramName . fst) val_pats)
         ]
-    return $ DoLoop val_pats (ForLoop i Int64 bound_se mempty) body'
+    pure $ DoLoop val_pats (ForLoop i Int64 bound_se mempty) body'
 convertWhileLoop _ e = error $ "convertWhileLoopBound: not a while-loop:\n" <> pretty e
 
 -- | @nestifyLoop n bound loop@ transforms a loop into a depth-@n@ loop nest
@@ -130,36 +130,36 @@ nestifyLoop bound_se = nestifyLoop' bound_se
       where
         nestify val_pats _form i it _bound loop_vars body
           | n > 1 = do
-            renameForLoop loop $ \_loop' val_pats' _form' i' it' _bound' loop_vars' body' -> do
-              let loop_params = map fst val_pats
-                  loop_params' = map fst val_pats'
-                  loop_inits' = map (Var . paramName) loop_params
-                  val_pats'' = zip loop_params' loop_inits'
-              outer_body <-
-                buildBody_ $
-                  do
-                    offset' <-
-                      letSubExp "offset" $
-                        BasicOp $ BinOp (Mul it OverflowUndef) offset (Var i)
+              renameForLoop loop $ \_loop' val_pats' _form' i' it' _bound' loop_vars' body' -> do
+                let loop_params = map fst val_pats
+                    loop_params' = map fst val_pats'
+                    loop_inits' = map (Var . paramName) loop_params
+                    val_pats'' = zip loop_params' loop_inits'
+                outer_body <-
+                  buildBody_ $
+                    do
+                      offset' <-
+                        letSubExp "offset" $
+                          BasicOp $ BinOp (Mul it OverflowUndef) offset (Var i)
 
-                    inner_body <- insertStmsM $ do
-                      i_inner <-
-                        letExp "i_inner" $
-                          BasicOp $ BinOp (Add it OverflowUndef) offset' (Var i')
-                      return $ substituteNames (M.singleton i' i_inner) body'
+                      inner_body <- insertStmsM $ do
+                        i_inner <-
+                          letExp "i_inner" $
+                            BasicOp $ BinOp (Add it OverflowUndef) offset' (Var i')
+                        pure $ substituteNames (M.singleton i' i_inner) body'
 
-                    inner_loop <-
-                      letTupExp "inner_loop"
-                        =<< nestifyLoop'
-                          offset'
-                          (n - 1)
-                          (DoLoop val_pats'' (ForLoop i' it' bound_se loop_vars') inner_body)
-                    return $ varsRes inner_loop
-              return $
-                DoLoop val_pats (ForLoop i it bound_se loop_vars) outer_body
+                      inner_loop <-
+                        letTupExp "inner_loop"
+                          =<< nestifyLoop'
+                            offset'
+                            (n - 1)
+                            (DoLoop val_pats'' (ForLoop i' it' bound_se loop_vars') inner_body)
+                      pure $ varsRes inner_loop
+                pure $
+                  DoLoop val_pats (ForLoop i it bound_se loop_vars) outer_body
           | n == 1 =
-            return $ DoLoop val_pats (ForLoop i it bound_se loop_vars) body
-          | otherwise = return loop
+              pure $ DoLoop val_pats (ForLoop i it bound_se loop_vars) body
+          | otherwise = pure loop
 
 -- | @stripmine n pat loop@ stripmines a loop into a depth-@n@ loop nest.
 -- An additional @bound - (floor(bound^(1/n)))^n@-iteration remainder loop is
@@ -185,7 +185,7 @@ stripmine n pat loop = do
         i_remain <-
           letExp "i_remain" $
             BasicOp $ BinOp (Add it OverflowUndef) total_iters (Var i')
-        return $ substituteNames (M.singleton i' i_remain) body'
+        pure $ substituteNames (M.singleton i' i_remain) body'
       let loop_params_rem = map fst val_pats'
           loop_inits_rem = map (Var . patElemName) $ patElems pat'
           val_pats_rem = zip loop_params_rem loop_inits_rem
@@ -201,12 +201,12 @@ stripmineStm :: Stm SOACS -> ADM (Stms SOACS)
 stripmineStm stm@(Let pat aux loop@(DoLoop _ ForLoop {} _)) =
   case nums of
     (n : _) -> stripmine n pat loop
-    _ -> return $ oneStm stm
+    _ -> pure $ oneStm stm
   where
     extractNum (AttrComp "stripmine" [AttrInt n]) = Just n
     extractNum _ = Nothing
     nums = catMaybes $ mapAttrs extractNum $ stmAuxAttrs aux
-stripmineStm stm = return $ oneStm stm
+stripmineStm stm = pure $ oneStm stm
 
 stripmineStms :: Stms SOACS -> ADM (Stms SOACS)
 stripmineStms = traverseFold stripmineStm
@@ -252,8 +252,8 @@ fwdLoop pat aux loop =
                     saved_param_v
                     (fullSlice (fromDecl $ paramDec saved_param) [DimFix i_i64])
                     $ substituteNames copy_substs $ BasicOp $ SubExp $ Var v
-              return (saved_update, (saved_pat, saved_param))
-          return (bodyResult body <> varsRes saved_updates, unzip saved_pats_params)
+              pure (saved_update, (saved_pat, saved_param))
+          pure (bodyResult body <> varsRes saved_updates, unzip saved_pats_params)
 
     let pat' = pat <> Pat saved_pats
         val_pats' = val_pats <> zip saved_params empty_saved_array
@@ -266,7 +266,7 @@ valPatAdj v = do
   v_adj <- adjVName v
   init_adj <- lookupAdjVal v
   t <- lookupType init_adj
-  return (Param mempty v_adj (toDecl t Unique), Var init_adj)
+  pure (Param mempty v_adj (toDecl t Unique), Var init_adj)
 
 valPatAdjs :: LoopInfo [VName] -> ADM (LoopInfo [(Param DeclType, SubExp)])
 valPatAdjs = (mapM . mapM) valPatAdj
@@ -292,16 +292,16 @@ reverseIndices loop = do
                   fullSlice
                     xs_t
                     [DimSlice bound_minus_one bound (Constant (IntValue (Int64Value (-1))))]
-          return (xs, xs_rev)
+          pure (xs, xs_rev)
 
     (i_rev, i_stms) <- collectStms $
       inScopeOf form $ do
         letExp (baseString i <> "_rev") $
           BasicOp $ BinOp (Sub it OverflowWrap) bound_minus_one (Var i)
 
-    return (var_arrays_substs, M.singleton i i_rev, i_stms)
+    pure (var_arrays_substs, M.singleton i i_rev, i_stms)
 
--- | Returns a substitution which substitutes values in the reverse
+-- | Pures a substitution which substitutes values in the reverse
 -- loop body with values from the tape.
 restore :: Stms SOACS -> [Param DeclType] -> VName -> ADM Substitutions
 restore stms_adj loop_params' i' =
@@ -311,19 +311,19 @@ restore stms_adj loop_params' i' =
       map paramName $ filter (inAttrs (AttrName "true_dep") . paramAttrs) loop_params'
     f p
       | v `notElem` dont_copy = do
-        m_vs <- lookupLoopTape v
-        case m_vs of
-          Nothing -> return Nothing
-          Just vs -> do
-            vs_t <- lookupType vs
-            i_i64' <- asIntS Int64 $ Var i'
-            v' <- letExp "restore" $ BasicOp $ Index vs $ fullSlice vs_t [DimFix i_i64']
-            t <- lookupType v
-            v'' <- case (t, v `elem` consumed) of
-              (Array {}, True) -> letExp "restore_copy" $ BasicOp $ Copy v'
-              _ -> return v'
-            return $ Just (v, v'')
-      | otherwise = return Nothing
+          m_vs <- lookupLoopTape v
+          case m_vs of
+            Nothing -> pure Nothing
+            Just vs -> do
+              vs_t <- lookupType vs
+              i_i64' <- asIntS Int64 $ Var i'
+              v' <- letExp "restore" $ BasicOp $ Index vs $ fullSlice vs_t [DimFix i_i64']
+              t <- lookupType v
+              v'' <- case (t, v `elem` consumed) of
+                (Array {}, True) -> letExp "restore_copy" $ BasicOp $ Copy v'
+                _ -> pure v'
+              pure $ Just (v, v'')
+      | otherwise = pure Nothing
       where
         v = paramName p
         consumed = namesToList $ consumedInStms $ fst $ Alias.analyseStms mempty stms_adj
@@ -363,7 +363,7 @@ revLoop diffStms pat loop =
         forM_ (zip (bodyResult body') $ patElems pat) $ \(se_res, pe) ->
           case subExpResVName se_res of
             Just v -> setAdj v =<< lookupAdj (patElemName pe)
-            Nothing -> return ()
+            Nothing -> pure ()
 
         (var_array_substs, i_subst, i_stms) <-
           reverseIndices loop'
@@ -397,7 +397,7 @@ revLoop diffStms pat loop =
                   loop_vars_adjs <- mapM lookupAdjVal $ loopVars loop_vnames
                   loop_vals_adjs <- mapM lookupAdjVal $ loopVals loop_vnames
 
-                  return $
+                  pure $
                     LoopInfo
                       { loopRes = loop_res_adjs,
                         loopFree = loop_free_adjs,
@@ -408,7 +408,7 @@ revLoop diffStms pat loop =
                 collectStms $ restore stms_adj loop_params' i'
               addStms $ substituteNames i_subst restore_stms
               addStms $ substituteNames i_subst $ substituteNames substs stms_adj
-              return loop_adjs
+              pure loop_adjs
 
         inScopeOf stms_adj $
           localScope (scopeOfFParams $ map fst val_pat_adjs_list) $ do
@@ -438,19 +438,19 @@ revLoop diffStms pat loop =
 diffLoop :: (Stms SOACS -> ADM ()) -> Pat Type -> StmAux () -> Exp SOACS -> ADM () -> ADM ()
 diffLoop diffStms pat aux loop m
   | isWhileLoop loop =
-    let getBound (AttrComp "bound" [AttrInt b]) = Just b
-        getBound _ = Nothing
-        bounds = catMaybes $ mapAttrs getBound $ stmAuxAttrs aux
-     in case bounds of
-          (bound : _) -> do
-            let bound_se = Constant $ IntValue $ intValue Int64 bound
-            for_loop <- convertWhileLoop bound_se loop
-            diffLoop diffStms pat aux for_loop m
-          _ -> do
-            bound <- computeWhileIters loop
-            for_loop <- convertWhileLoop bound =<< renameExp loop
-            diffLoop diffStms pat aux for_loop m
+      let getBound (AttrComp "bound" [AttrInt b]) = Just b
+          getBound _ = Nothing
+          bounds = catMaybes $ mapAttrs getBound $ stmAuxAttrs aux
+       in case bounds of
+            (bound : _) -> do
+              let bound_se = Constant $ IntValue $ intValue Int64 bound
+              for_loop <- convertWhileLoop bound_se loop
+              diffLoop diffStms pat aux for_loop m
+            _ -> do
+              bound <- computeWhileIters loop
+              for_loop <- convertWhileLoop bound =<< renameExp loop
+              diffLoop diffStms pat aux for_loop m
   | otherwise = do
-    fwdLoop pat aux loop
-    m
-    revLoop diffStms pat loop
+      fwdLoop pat aux loop
+      m
+      revLoop diffStms pat loop

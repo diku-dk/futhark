@@ -54,8 +54,8 @@ import Futhark.Passes
 import Futhark.Util.Log
 import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
-import Language.Futhark.Core (nameFromString)
-import Language.Futhark.Parser (parseFuthark)
+import Language.Futhark.Core (locStr, nameFromString)
+import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import System.Exit
 import System.FilePath
 import System.IO
@@ -195,7 +195,7 @@ kernelsMemProg ::
   UntypedPassState ->
   FutharkM (Prog GPUMem.GPUMem)
 kernelsMemProg _ (GPUMem prog) =
-  return prog
+  pure prog
 kernelsMemProg name rep =
   externalErrorS $
     "Pass " ++ name
@@ -204,7 +204,7 @@ kernelsMemProg name rep =
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
-  return prog
+  pure prog
 soacsProg name rep =
   externalErrorS $
     "Pass " ++ name
@@ -213,7 +213,7 @@ soacsProg name rep =
 
 kernelsProg :: String -> UntypedPassState -> FutharkM (Prog GPU.GPU)
 kernelsProg _ (GPU prog) =
-  return prog
+  pure prog
 kernelsProg name rep =
   externalErrorS $
     "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
@@ -551,7 +551,8 @@ commandLineOptions =
     soacsPassOption inlineAggressively [],
     soacsPassOption inlineConservatively [],
     soacsPassOption removeDeadFunctions [],
-    soacsPassOption algebraicDifferentiation [],
+    soacsPassOption applyAD [],
+    soacsPassOption applyADInnermost [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
@@ -636,7 +637,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
           Left err -> do
             dumpError (futharkConfig config) err
             exitWith $ ExitFailure 2
-          Right () -> return ()
+          Right () -> pure ()
     compile _ _ =
       Nothing
     m file config = do
@@ -652,7 +653,8 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
         PrettyPrint -> liftIO $ do
           maybe_prog <- parseFuthark file <$> T.readFile file
           case maybe_prog of
-            Left err -> fail $ show err
+            Left (SyntaxError loc err) ->
+              fail $ "Syntax error at " <> locStr loc <> ":\n" <> err
             Right prog
               | futharkPrintAST config -> print prog
               | otherwise -> putStrLn $ pretty prog

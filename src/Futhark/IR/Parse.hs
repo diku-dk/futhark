@@ -286,7 +286,7 @@ pBasicOp =
           w <- pSubExp <* pComma
           x <- pVName
           ys <- many (pComma *> pVName)
-          return $ Concat d (x :| ys) w,
+          pure $ Concat d (x :| ys) w,
       pIota,
       try $
         flip Update
@@ -857,7 +857,8 @@ pHostOp pr pOther =
   choice
     [ GPU.SegOp <$> pSegOp pr pSegLevel,
       GPU.SizeOp <$> pSizeOp,
-      GPU.OtherOp <$> pOther
+      GPU.OtherOp <$> pOther,
+      keyword "gpu" $> GPU.GPUBody <*> (pColon *> pTypes) <*> braces (pBody pr)
     ]
 
 pMCOp :: PR rep -> Parser op -> Parser (MC.MCOp rep op)

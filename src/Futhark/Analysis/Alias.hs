@@ -32,6 +32,7 @@ aliasAnalysis ::
 aliasAnalysis (Prog consts funs) =
   Prog (fst (analyseStms mempty consts)) (map analyseFun funs)
 
+-- | Perform alias analysis on function.
 analyseFun ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   FunDef rep ->
@@ -41,6 +42,7 @@ analyseFun (FunDef entry attrs fname restype params body) =
   where
     body' = analyseBody mempty body
 
+-- | Perform alias analysis on Body.
 analyseBody ::
   ( ASTRep rep,
     CanBeAliased (Op rep)
@@ -52,6 +54,7 @@ analyseBody atable (Body rep stms result) =
   let (stms', _atable') = analyseStms atable stms
    in mkAliasedBody rep stms' result
 
+-- | Perform alias analysis on statements.
 analyseStms ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->
@@ -76,6 +79,7 @@ analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
       rep' = (AliasDec $ consumedInExp e', dec)
    in Let pat' (StmAux cs attrs rep') e'
 
+-- | Perform alias analysis on expression.
 analyseExp ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->
@@ -104,16 +108,17 @@ analyseExp aliases e = mapExp analyse e
   where
     analyse =
       Mapper
-        { mapOnSubExp = return,
-          mapOnVName = return,
-          mapOnBody = const $ return . analyseBody aliases,
-          mapOnRetType = return,
-          mapOnBranchType = return,
-          mapOnFParam = return,
-          mapOnLParam = return,
-          mapOnOp = return . addOpAliases aliases
+        { mapOnSubExp = pure,
+          mapOnVName = pure,
+          mapOnBody = const $ pure . analyseBody aliases,
+          mapOnRetType = pure,
+          mapOnBranchType = pure,
+          mapOnFParam = pure,
+          mapOnLParam = pure,
+          mapOnOp = pure . addOpAliases aliases
         }
 
+-- | Perform alias analysis on lambda.
 analyseLambda ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->

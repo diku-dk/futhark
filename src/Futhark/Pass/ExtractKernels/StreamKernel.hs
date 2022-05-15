@@ -56,7 +56,7 @@ numberOfGroups desc w group_size = do
   num_threads <-
     letSubExp "num_threads" $
       BasicOp $ BinOp (Mul Int64 OverflowUndef) num_groups group_size
-  return (num_groups, num_threads)
+  pure (num_groups, num_threads)
 
 blockedKernelSize ::
   (MonadBuilder m, Rep m ~ GPU) =>
@@ -72,7 +72,7 @@ blockedKernelSize desc w = do
     letSubExp "per_thread_elements"
       =<< eBinOp (SDivUp Int64 Unsafe) (eSubExp w) (eSubExp num_threads)
 
-  return $ KernelSize per_thread_elements num_threads
+  pure $ KernelSize per_thread_elements num_threads
 
 splitArrays ::
   (MonadBuilder m, Rep m ~ GPU) =>
@@ -145,10 +145,10 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
 
   chunk_red_pes <- forM red_ts $ \red_t -> do
     pe_name <- newVName "chunk_fold_red"
-    return $ PatElem pe_name red_t
+    pure $ PatElem pe_name red_t
   chunk_map_pes <- forM map_ts $ \map_t -> do
     pe_name <- newVName "chunk_fold_map"
-    return $ PatElem pe_name $ map_t `arrayOfRow` Var (paramName chunk_size)
+    pure $ PatElem pe_name $ map_t `arrayOfRow` Var (paramName chunk_size)
 
   let (chunk_red_ses, chunk_map_ses) =
         splitAt num_nonconcat $ bodyResult $ lambdaBody lam
@@ -164,7 +164,7 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
           | (pe, SubExpRes cs se) <- zip chunk_map_pes chunk_map_ses
         ]
 
-  return (chunk_red_pes, chunk_map_pes)
+  pure (chunk_red_pes, chunk_map_pes)
 
 -- | Given a chunked fold lambda that takes its initial accumulator
 -- value as parameters, bind those parameters to the neutral element
@@ -181,10 +181,10 @@ kerneliseLambda nes lam = do
 
       mkAccInit p (Var v)
         | not $ primType $ paramType p =
-          mkLet [paramIdent p] $ BasicOp $ Copy v
+            mkLet [paramIdent p] $ BasicOp $ Copy v
       mkAccInit p x = mkLet [paramIdent p] $ BasicOp $ SubExp x
       acc_init_stms = stmsFromList $ zipWith mkAccInit fold_acc_params nes
-  return
+  pure
     lam
       { lambdaBody = insertStms acc_init_stms $ lambdaBody lam,
         lambdaParams = thread_index_param : fold_chunk_param : fold_inp_params
@@ -218,7 +218,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
           blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
         let concatReturns pe =
               ConcatReturns mempty split_ordering w elems_per_thread $ patElemName pe
-        return
+        pure
           ( map (Returns ResultMaySimplify mempty . Var . patElemName) chunk_red_pes
               ++ map concatReturns chunk_map_pes
           )
@@ -226,7 +226,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
   let (redout_ts, mapout_ts) = splitAt (length nes) $ lambdaReturnType fold_lam
       ts = redout_ts ++ map rowType mapout_ts
 
-  return (num_threads, space, ts, kbody)
+  pure (num_threads, space, ts, kbody)
 
 streamRed ::
   (MonadFreshNames m, HasScope GPU m) =>
@@ -283,7 +283,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBuilderT' $ d
   lvl <- mk_lvl [w] "stream_map" $ NoRecommendation SegNoVirt
   letBind pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
 
-  return (threads, map patElemName redout_pes)
+  pure (threads, map patElemName redout_pes)
 
 -- | Like 'segThread', but cap the thread count to the input size.
 -- This is more efficient for small kernels, e.g. summing a small
@@ -303,7 +303,7 @@ segThreadCapped ws desc r = do
             (SDivUp Int64 Unsafe)
             (eSubExp w)
             (eSubExp =<< asIntS Int64 group_size)
-      return $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
+      pure $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
     NoRecommendation v -> do
       (num_groups, _) <- numberOfGroups desc w group_size
-      return $ SegThread (Count num_groups) (Count group_size) v
+      pure $ SegThread (Count num_groups) (Count group_size) v

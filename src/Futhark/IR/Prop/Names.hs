@@ -10,7 +10,9 @@ module Futhark.IR.Prop.Names
   ( -- * Free names
     Names,
     namesIntMap,
+    namesIntSet,
     nameIn,
+    notNameIn,
     oneName,
     namesFromList,
     namesToList,
@@ -45,6 +47,7 @@ import Control.Category
 import Control.Monad.State.Strict
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map.Strict as M
 import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Scope
@@ -62,6 +65,10 @@ newtype Names = Names (IM.IntMap VName)
 namesIntMap :: Names -> IM.IntMap VName
 namesIntMap (Names m) = m
 
+-- | Retrieve the set of tags in the names set.
+namesIntSet :: Names -> IS.IntSet
+namesIntSet (Names m) = IM.keysSet m
+
 instance Ord Names where
   x `compare` y = if x == y then EQ else LT
 
@@ -77,6 +84,10 @@ instance Pretty Names where
 -- | Does the set of names contain this name?
 nameIn :: VName -> Names -> Bool
 nameIn v (Names vs) = baseTag v `IM.member` vs
+
+-- | Does the set of names not contain this name?
+notNameIn :: VName -> Names -> Bool
+notNameIn v (Names vs) = baseTag v `IM.notMember` vs
 
 -- | Construct a name set from a list.  Slow.
 namesFromList :: [VName] -> Names

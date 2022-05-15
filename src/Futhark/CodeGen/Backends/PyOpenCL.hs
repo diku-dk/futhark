@@ -41,7 +41,7 @@ compileProg mode class_name prog = do
       prog'
     ) <-
     ImpGen.compileProg prog
-  --prepare the strings for assigning the kernels and set them as global
+  -- prepare the strings for assigning the kernels and set them as global
   let assign =
         unlines $
           map
@@ -260,7 +260,7 @@ launchKernel kernel_name safety kernel_dims workgroup_dims args = do
     processKernelArg (Imp.MemKArg v) = Py.compileVar v
     processKernelArg (Imp.SharedMemoryKArg (Imp.Count num_bytes)) = do
       num_bytes' <- Py.compileExp num_bytes
-      return $ Py.simpleCall "cl.LocalMemory" [asLong num_bytes']
+      pure $ Py.simpleCall "cl.LocalMemory" [asLong num_bytes']
 
 writeOpenCLScalar :: Py.WriteScalar Imp.OpenCL ()
 writeOpenCLScalar mem i bt "device" val = do
@@ -303,7 +303,7 @@ readOpenCLScalar mem i bt "device" = do
           ArgKeyword "is_blocking" $ Var "synchronous"
         ]
   Py.stm $ Exp $ Py.simpleCall "sync" [Var "self"]
-  return $ Index val' $ IdxExp $ Integer 0
+  pure $ Index val' $ IdxExp $ Integer 0
 readOpenCLScalar _ _ _ space =
   error $ "Cannot read from '" ++ space ++ "' memory space."
 
@@ -420,7 +420,7 @@ packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do
   mem' <- Py.compileVar mem
   dims' <- mapM Py.compileDim dims
-  return $
+  pure $
     Call
       (Var "cl.array.Array")
       [ Arg $ Var "self.queue",

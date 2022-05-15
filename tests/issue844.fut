@@ -1,5 +1,5 @@
 -- ==
--- error: non-unique
+-- error: Consuming "xs"
 
 module type mt = {
   type~ t

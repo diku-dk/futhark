@@ -25,6 +25,7 @@ module Futhark.Builder
     runBuilder,
     runBuilder_,
     runBodyBuilder,
+    runLambdaBuilder,
 
     -- * The 'MonadBuilder' typeclass
     module Futhark.Builder.Class,
@@ -65,14 +66,14 @@ class ASTRep rep => BuilderOps rep where
     Pat (LetDec rep) ->
     Exp rep ->
     m (ExpDec rep)
-  mkExpDecB pat e = return $ mkExpDec pat e
+  mkExpDecB pat e = pure $ mkExpDec pat e
 
   default mkBodyB ::
     (MonadBuilder m, Buildable rep) =>
     Stms rep ->
     Result ->
     m (Body rep)
-  mkBodyB stms res = return $ mkBody stms res
+  mkBodyB stms res = pure $ mkBody stms res
 
   default mkLetNamesB ::
     (MonadBuilder m, Rep m ~ rep, Buildable rep) =>
@@ -105,7 +106,7 @@ instance (ASTRep rep, Monad m) => HasScope rep (BuilderT rep m) where
     t <- BuilderT $ gets $ M.lookup name . snd
     case t of
       Nothing -> error $ "BuilderT.lookupType: unknown variable " ++ pretty name
-      Just t' -> return $ typeOf t'
+      Just t' -> pure $ typeOf t'
   askScope = BuilderT $ gets snd
 
 instance (ASTRep rep, Monad m) => LocalScope rep (BuilderT rep m) where
@@ -113,7 +114,7 @@ instance (ASTRep rep, Monad m) => LocalScope rep (BuilderT rep m) where
     modify $ second (M.union types)
     x <- m
     modify $ second (`M.difference` types)
-    return x
+    pure x
 
 instance
   (ASTRep rep, MonadFreshNames m, BuilderOps rep) =>
@@ -135,7 +136,7 @@ instance
     x <- m
     (new_stms, _) <- BuilderT get
     BuilderT $ put (old_stms, old_scope)
-    return (x, new_stms)
+    pure (x, new_stms)
 
 -- | Run a binder action given an initial scope, returning a value and
 -- the statements added ('addStm') during the action.
@@ -146,7 +147,7 @@ runBuilderT ::
   m (a, Stms rep)
 runBuilderT (BuilderT m) scope = do
   (x, (stms, _)) <- runStateT m (mempty, scope)
-  return (x, stms)
+  pure (x, stms)
 
 -- | Like 'runBuilderT', but return only the statements.
 runBuilderT_ ::
@@ -205,6 +206,24 @@ runBodyBuilder ::
   m (Body rep)
 runBodyBuilder = fmap (uncurry $ flip insertStms) . runBuilder
 
+-- | Given lambda parameters, Run a builder action that produces the
+-- statements and returns the 'Result' of the lambda body.
+runLambdaBuilder ::
+  ( Buildable rep,
+    MonadFreshNames m,
+    HasScope somerep m,
+    SameScope somerep rep
+  ) =>
+  [LParam rep] ->
+  Builder rep Result ->
+  m (Lambda rep)
+runLambdaBuilder params m = do
+  ((res, ret), stms) <- runBuilder . localScope (scopeOfLParams params) $ do
+    res <- m
+    ret <- mapM subExpResType res
+    pure (res, ret)
+  pure $ Lambda params (mkBody stms res) ret
+
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.
 
@@ -219,7 +238,7 @@ mapInner f (BuilderT m) = BuilderT $ do
   s <- get
   (x, s') <- lift $ f $ runStateT m s
   put s'
-  return x
+  pure x
 
 instance MonadReader r m => MonadReader r (BuilderT rep m) where
   ask = BuilderT $ lift ask
@@ -233,10 +252,10 @@ instance MonadWriter w m => MonadWriter w (BuilderT rep m) where
   tell = BuilderT . lift . tell
   pass = mapInner $ \m -> pass $ do
     ((x, f), s) <- m
-    return ((x, s), f)
+    pure ((x, s), f)
   listen = mapInner $ \m -> do
     ((x, s), y) <- listen m
-    return ((x, y), s)
+    pure ((x, y), s)
 
 instance MonadError e m => MonadError e (BuilderT rep m) where
   throwError = lift . throwError

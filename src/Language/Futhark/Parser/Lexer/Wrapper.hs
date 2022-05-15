@@ -1,21 +1,23 @@
+{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 -- | Utility definitions used by the lexer.  None of the default Alex
 -- "wrappers" are precisely what we need.  The code here is based on
--- the "monad-bytestring" wrapper.
+-- the "monad-bytestring" wrapper.  The code here is completely
+-- Futhark-agnostic, and perhaps it can even serve as inspiration for
+-- other Alex lexer wrappers.
 module Language.Futhark.Parser.Lexer.Wrapper
-  ( runAlex',
-    Alex (..),
+  ( runAlex,
+    Alex,
     AlexInput,
-    AlexPosn (..),
-    AlexState (..),
     Byte,
+    LexerError (..),
     alexSetInput,
     alexGetInput,
     alexGetByte,
     alexGetStartCode,
-    alexMove,
     alexError,
+    alexGetPos,
   )
 where
 
@@ -23,6 +25,7 @@ import Control.Applicative (liftA)
 import qualified Data.ByteString.Internal as BS (w2c)
 import qualified Data.ByteString.Lazy as BS
 import Data.Int (Int64)
+import Data.Loc (Loc, Pos (..))
 import Data.Word (Word8)
 
 type Byte = Word8
@@ -37,12 +40,13 @@ type Byte = Word8
 --
 -- 4. bytes consumed so far
 type AlexInput =
-  ( AlexPosn, -- current position,
+  ( Pos, -- current position,
     Char, -- previous char
     BS.ByteString, -- current input string
     Int64 -- bytes consumed so far
   )
 
+{-# INLINE alexGetByte #-}
 alexGetByte :: AlexInput -> Maybe (Byte, AlexInput)
 alexGetByte (p, _, cs, n) =
   case BS.uncons cs of
@@ -53,39 +57,30 @@ alexGetByte (p, _, cs, n) =
           n' = n + 1
        in p' `seq` cs' `seq` n' `seq` Just (b, (p', c, cs', n'))
 
--- `Posn' records the location of a token in the input text.  It has three
--- fields: the address (number of chacaters preceding the token), line number
--- and column of a token within the file. `start_pos' gives the position of the
--- start of the file and `eof_pos' a standard encoding for the end of file.
--- `move_pos' calculates the new position after traversing a given character,
--- assuming the usual eight character tab stops.
-
-data AlexPosn = AlexPn !Int !Int !Int
-  deriving (Eq, Show)
-
 tabSize :: Int
 tabSize = 8
 
-alexMove :: AlexPosn -> Char -> AlexPosn
-alexMove (AlexPn a l c) '\t' = AlexPn (a + 1) l (c + tabSize - ((c -1) `mod` tabSize))
-alexMove (AlexPn a l _) '\n' = AlexPn (a + 1) (l + 1) 1
-alexMove (AlexPn a l c) _ = AlexPn (a + 1) l (c + 1)
+{-# INLINE alexMove #-}
+alexMove :: Pos -> Char -> Pos
+alexMove (Pos !f !l !c !a) '\t' = Pos f l (c + tabSize - ((c - 1) `mod` tabSize)) (a + 1)
+alexMove (Pos !f !l _ !a) '\n' = Pos f (l + 1) 1 (a + 1)
+alexMove (Pos !f !l !c !a) _ = Pos f l (c + 1) (a + 1)
 
 data AlexState = AlexState
-  { alex_pos :: !AlexPosn, -- position at current input location
+  { alex_pos :: !Pos, -- position at current input location
     alex_bpos :: !Int64, -- bytes consumed so far
     alex_inp :: BS.ByteString, -- the current input
     alex_chr :: !Char, -- the character before the input
     alex_scd :: !Int -- the current startcode
   }
 
-runAlex' :: AlexPosn -> BS.ByteString -> Alex a -> Either String a
-runAlex' start_pos input__ (Alex f) =
+runAlex :: Pos -> BS.ByteString -> Alex a -> Either LexerError a
+runAlex start_pos input (Alex f) =
   case f
     ( AlexState
         { alex_pos = start_pos,
           alex_bpos = 0,
-          alex_inp = input__,
+          alex_inp = input,
           alex_chr = '\n',
           alex_scd = 0
         }
@@ -93,7 +88,12 @@ runAlex' start_pos input__ (Alex f) =
     Left msg -> Left msg
     Right (_, a) -> Right a
 
-newtype Alex a = Alex {unAlex :: AlexState -> Either String (AlexState, a)}
+newtype Alex a = Alex {unAlex :: AlexState -> Either LexerError (AlexState, a)}
+
+data LexerError = LexerError Loc String
+
+instance Show LexerError where
+  show (LexerError _ s) = s
 
 instance Functor Alex where
   fmap = liftA
@@ -126,8 +126,11 @@ alexSetInput (pos, c, inp, bpos) =
     } of
     state@AlexState {} -> Right (state, ())
 
-alexError :: String -> Alex a
-alexError message = Alex $ const $ Left message
+alexError :: Loc -> String -> Alex a
+alexError loc message = Alex $ const $ Left $ LexerError loc message
 
 alexGetStartCode :: Alex Int
 alexGetStartCode = Alex $ \s@AlexState {alex_scd = sc} -> Right (s, sc)
+
+alexGetPos :: Alex Pos
+alexGetPos = Alex $ \s -> Right (s, alex_pos s)

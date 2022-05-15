@@ -1,20 +1,50 @@
 -- NaN and inf must work.
--- ==
--- input { 2f64 }
--- output { false false false true true true true true }
--- input { f64.nan }
--- output { false false false false false false true false }
--- input { f64.inf }
--- output { false false false false true false true true }
--- input { -f64.inf }
--- output { false false false true true false true false }
 
-def main(x: f64) =
-  (x == f64.nan,
-   x < f64.nan,
-   x <= f64.nan,
-   x < f64.inf,
-   x <= f64.inf,
-   x - f64.inf < x + f64.inf,
-   f64.isnan (x + f64.nan),
-   f64.isinf (x + f64.inf))
+-- ==
+-- entry: eqNaN
+-- input { [2f64, f64.nan, f64.inf, -f64.inf] }
+-- output { [false, false, false, false] }
+
+-- ==
+-- entry: ltNaN
+-- input { [2f64, f64.nan, f64.inf, -f64.inf] }
+-- output { [false, false, false, false] }
+
+-- ==
+-- entry: lteNaN
+-- input { [2f64, f64.nan, f64.inf, -f64.inf] }
+-- output { [false, false, false, false] }
+
+-- ==
+-- entry: ltInf
+-- input { [2f64, f64.nan, f64.inf, -f64.inf] }
+-- output { [true, false, false, true] }
+
+-- ==
+-- entry: lteInf
+-- input { [2f64, f64.nan, f64.inf, -f64.inf] }
+-- output { [true, false, true, true] }
+
+-- ==
+-- entry: diffInf
+-- input { [2f64, f64.nan, f64.inf, -f64.inf] }
+-- output { [true, false, false, false] }
+
+-- ==
+-- entry: sumNaN
+-- input { [2f64, f64.nan, f64.inf, -f64.inf] }
+-- output { [true, true, true, true] }
+
+-- ==
+-- entry: sumInf
+-- input { [2f64, f64.nan, f64.inf, -f64.inf] }
+-- output { [true, false, true, false] }
+
+entry eqNaN = map (\x -> x == f64.nan)
+entry ltNaN = map (\x -> x < f64.nan)
+entry lteNaN = map (\x -> x <= f64.nan)
+entry ltInf = map (\x -> x < f64.inf)
+entry lteInf = map (\x -> x <= f64.inf)
+entry diffInf = map (\x -> x - f64.inf < x + f64.inf)
+entry sumNaN = map (\x -> f64.isnan (x + f64.nan))
+entry sumInf = map (\x -> f64.isinf (x + f64.inf))

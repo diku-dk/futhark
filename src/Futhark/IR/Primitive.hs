@@ -130,9 +130,15 @@ import qualified Data.Map as M
 import Data.Word
 import Foreign.C.Types (CUShort (..))
 import Futhark.Util
-  ( ceilDouble,
+  ( cbrt,
+    cbrtf,
+    ceilDouble,
     ceilFloat,
     convFloat,
+    erf,
+    erfc,
+    erfcf,
+    erff,
     floorDouble,
     floorFloat,
     hypot,
@@ -799,18 +805,18 @@ doUDiv :: IntValue -> IntValue -> Maybe IntValue
 doUDiv v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
-    Just $
-      intValue (intValueType v1) $
-        intToWord64 v1 `div` intToWord64 v2
+      Just $
+        intValue (intValueType v1) $
+          intToWord64 v1 `div` intToWord64 v2
 
 -- | Unsigned integer division.  Rounds towards positive infinity.
 doUDivUp :: IntValue -> IntValue -> Maybe IntValue
 doUDivUp v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
-    Just $
-      intValue (intValueType v1) $
-        (intToWord64 v1 + intToWord64 v2 - 1) `div` intToWord64 v2
+      Just $
+        intValue (intValueType v1) $
+          (intToWord64 v1 + intToWord64 v2 - 1) `div` intToWord64 v2
 
 -- | Signed integer division.  Rounds towards negativity infinity.
 -- Note: this is different from LLVM.
@@ -818,18 +824,18 @@ doSDiv :: IntValue -> IntValue -> Maybe IntValue
 doSDiv v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
-    Just $
-      intValue (intValueType v1) $
-        intToInt64 v1 `div` intToInt64 v2
+      Just $
+        intValue (intValueType v1) $
+          intToInt64 v1 `div` intToInt64 v2
 
 -- | Signed integer division.  Rounds towards positive infinity.
 doSDivUp :: IntValue -> IntValue -> Maybe IntValue
 doSDivUp v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
-    Just $
-      intValue (intValueType v1) $
-        (intToInt64 v1 + intToInt64 v2 - 1) `div` intToInt64 v2
+      Just $
+        intValue (intValueType v1) $
+          (intToInt64 v1 + intToInt64 v2 - 1) `div` intToInt64 v2
 
 -- | Unsigned integer modulus; the countepart to 'UDiv'.
 doUMod :: IntValue -> IntValue -> Maybe IntValue
@@ -1182,6 +1188,10 @@ primFuns =
       f32 "sqrt32" sqrt,
       f64 "sqrt64" sqrt,
       --
+      f16 "cbrt16" $ convFloat . cbrtf . convFloat,
+      f32 "cbrt32" cbrtf,
+      f64 "cbrt64" cbrt,
+      --
       f16 "log16" log,
       f32 "log32" log,
       f64 "log64" log,
@@ -1265,6 +1275,15 @@ primFuns =
       f16 "lgamma16" $ convFloat . lgammaf . convFloat,
       f32 "lgamma32" lgammaf,
       f64 "lgamma64" lgamma,
+      --
+      --
+      f16 "erf16" $ convFloat . erff . convFloat,
+      f32 "erf32" erff,
+      f64 "erf64" erf,
+      --
+      f16 "erfc16" $ convFloat . erfcf . convFloat,
+      f32 "erfc32" erfcf,
+      f64 "erfc64" erfc,
       --
       i8 "clz8" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
       i16 "clz16" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
@@ -1651,7 +1670,7 @@ negativeIshInt (Int16Value k) = k < 0
 negativeIshInt (Int32Value k) = k < 0
 negativeIshInt (Int64Value k) = k < 0
 
--- | The size of a value of a given primitive type in bites.
+-- | The size of a value of a given primitive type in bits.
 primBitSize :: PrimType -> Int
 primBitSize = (* 8) . primByteSize
 

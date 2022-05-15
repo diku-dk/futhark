@@ -152,8 +152,8 @@ parseExp sep =
         [ try $ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
           inParens sep $ parseExp sep,
           inBraces sep (Record <$> (pField `sepBy` pComma)),
-          Const <$> V.parseValue sep,
           StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\""),
+          Const <$> V.parseValue sep,
           Call <$> parseFunc <*> pure []
         ]
 
@@ -176,7 +176,7 @@ parseExp sep =
       guard $ v `notElem` reserved
       pure v
       where
-        constituent c = isAlphaNum c || c == '_'
+        constituent c = isAlphaNum c || c == '\'' || c == '_'
 
 -- | Parse a FutharkScript expression with normal whitespace handling.
 parseExpFromText :: FilePath -> T.Text -> Either T.Text Exp
@@ -325,12 +325,12 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
       letMatch vs val
         | vals <- V.unCompound val,
           length vs == length vals =
-          pure $ M.fromList (zip vs vals)
+            pure $ M.fromList (zip vs vals)
         | otherwise =
-          throwError $
-            "Pat: " <> prettyTextOneLine vs
-              <> "\nDoes not match value of type: "
-              <> prettyTextOneLine (fmap scriptValueType val)
+            throwError $
+              "Pat: " <> prettyTextOneLine vs
+                <> "\nDoes not match value of type: "
+                <> prettyTextOneLine (fmap scriptValueType val)
 
       evalExp' :: VTable -> Exp -> m ExpValue
       evalExp' _ (ServerVar t v) =
@@ -340,9 +340,9 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         pure $ valToInterVal v
       evalExp' vtable (Call (FuncFut name) es)
         | Just e <- M.lookup name vtable = do
-          unless (null es) $
-            throwError $ "Locally bound name cannot be invoked as a function: " <> prettyText name
-          pure e
+            unless (null es) $
+              throwError $ "Locally bound name cannot be invoked as a function: " <> prettyText name
+            pure e
       evalExp' vtable (Call (FuncFut name) es) = do
         in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
         out_types <- fmap (map outputType) $ cmdEither $ cmdOutputs server name
@@ -378,7 +378,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->
-            pure $ V.ValueAtom $ SValue (V.valueTypeText (V.valueType s')) $ VVal s'
+            pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType s')) $ VVal s'
           Nothing -> error $ "Unable to write value " ++ pretty s
       evalExp' _ (Const val) =
         pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType val)) $ VVal val

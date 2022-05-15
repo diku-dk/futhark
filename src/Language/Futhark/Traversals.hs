@@ -50,13 +50,13 @@ data ASTMapper m = ASTMapper
 identityMapper :: Monad m => ASTMapper m
 identityMapper =
   ASTMapper
-    { mapOnExp = return,
-      mapOnName = return,
-      mapOnQualName = return,
-      mapOnStructType = return,
-      mapOnPatType = return,
-      mapOnStructRetType = return,
-      mapOnPatRetType = return
+    { mapOnExp = pure,
+      mapOnName = pure,
+      mapOnQualName = pure,
+      mapOnStructType = pure,
+      mapOnPatType = pure,
+      mapOnStructRetType = pure,
+      mapOnPatRetType = pure
     }
 
 -- | The class of things that we can map an 'ASTMapper' across.
@@ -122,6 +122,8 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Var name t loc) =
     Var <$> mapOnQualName tv name <*> traverse (mapOnPatType tv) t
       <*> pure loc
+  astMap tv (Hole t loc) =
+    Hole <$> traverse (mapOnPatType tv) t <*> pure loc
   astMap _ (Literal val loc) =
     pure $ Literal val loc
   astMap _ (StringLit vs loc) =
@@ -250,9 +252,9 @@ instance ASTMappable (DimIndexBase Info VName) where
   astMap tv (DimFix j) = DimFix <$> mapOnExp tv j
   astMap tv (DimSlice i j stride) =
     DimSlice
-      <$> maybe (return Nothing) (fmap Just . mapOnExp tv) i
-      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) j
-      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) stride
+      <$> maybe (pure Nothing) (fmap Just . mapOnExp tv) i
+      <*> maybe (pure Nothing) (fmap Just . mapOnExp tv) j
+      <*> maybe (pure Nothing) (fmap Just . mapOnExp tv) stride
 
 instance ASTMappable Alias where
   astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v
@@ -280,18 +282,14 @@ traverseScalarType f g h (Record fs) = Record <$> traverse (traverseType f g h) 
 traverseScalarType f g h (TypeVar als u t args) =
   TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
 traverseScalarType f g h (Arrow als v t1 (RetType dims t2)) =
-  Arrow <$> h als <*> pure v <*> traverseType f g h t1
+  Arrow <$> h als <*> pure v <*> traverseType f g pure t1
     <*> (RetType dims <$> traverseType f g h t2)
 traverseScalarType f g h (Sum cs) =
   Sum <$> (traverse . traverse) (traverseType f g h) cs
 
-traverseType ::
-  Applicative f =>
-  TypeTraverser f TypeBase dim1 als1 dims als2
-traverseType f g h (Array als u et shape) =
-  Array <$> h als <*> pure u
-    <*> traverseScalarType f g pure et
-    <*> traverse g shape
+traverseType :: Applicative f => TypeTraverser f TypeBase dim1 als1 dims als2
+traverseType f g h (Array als u shape et) =
+  Array <$> h als <*> pure u <*> traverse g shape <*> traverseScalarType f g pure et
 traverseType f g h (Scalar t) =
   Scalar <$> traverseScalarType f g h t
 
@@ -321,10 +319,6 @@ instance ASTMappable StructRetType where
 
 instance ASTMappable PatRetType where
   astMap tv (RetType ext t) = RetType ext <$> astMap tv t
-
-instance ASTMappable (TypeDeclBase Info VName) where
-  astMap tv (TypeDecl dt (Info et)) =
-    TypeDecl <$> astMap tv dt <*> (Info <$> mapOnStructType tv et)
 
 instance ASTMappable (IdentBase Info VName) where
   astMap tv (Ident name (Info t) loc) =
@@ -388,9 +382,6 @@ instance (ASTMappable a, ASTMappable b, ASTMappable c) => ASTMappable (a, b, c) 
 -- complex abstraction.  The types ensure that this will be correct
 -- anyway, so it's just tedious, and not actually fragile.
 
-bareTypeDecl :: TypeDeclBase Info VName -> TypeDeclBase NoInfo VName
-bareTypeDecl (TypeDecl te _) = TypeDecl te NoInfo
-
 bareField :: FieldBase Info VName -> FieldBase NoInfo VName
 bareField (RecordFieldExplicit name e loc) =
   RecordFieldExplicit name (bareExp e) loc
@@ -403,8 +394,7 @@ barePat (RecordPat fs loc) = RecordPat (map (fmap barePat) fs) loc
 barePat (PatParens p loc) = PatParens (barePat p) loc
 barePat (Id v _ loc) = Id v NoInfo loc
 barePat (Wildcard _ loc) = Wildcard NoInfo loc
-barePat (PatAscription pat (TypeDecl t _) loc) =
-  PatAscription (barePat pat) (TypeDecl t NoInfo) loc
+barePat (PatAscription pat t loc) = PatAscription (barePat pat) t loc
 barePat (PatLit v _ loc) = PatLit v NoInfo loc
 barePat (PatConstr c _ ps loc) = PatConstr c NoInfo (map barePat ps) loc
 barePat (PatAttr attr p loc) = PatAttr attr (barePat p) loc
@@ -427,6 +417,7 @@ bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
 -- name/scope information.
 bareExp :: ExpBase Info VName -> ExpBase NoInfo VName
 bareExp (Var name _ loc) = Var name NoInfo loc
+bareExp (Hole _ loc) = Hole NoInfo loc
 bareExp (Literal v loc) = Literal v loc
 bareExp (IntLit val _ loc) = IntLit val NoInfo loc
 bareExp (FloatLit val _ loc) = FloatLit val NoInfo loc
@@ -436,8 +427,7 @@ bareExp (TupLit els loc) = TupLit (map bareExp els) loc
 bareExp (StringLit vs loc) = StringLit vs loc
 bareExp (RecordLit fields loc) = RecordLit (map bareField fields) loc
 bareExp (ArrayLit els _ loc) = ArrayLit (map bareExp els) NoInfo loc
-bareExp (Ascript e tdecl loc) =
-  Ascript (bareExp e) (bareTypeDecl tdecl) loc
+bareExp (Ascript e te loc) = Ascript (bareExp e) te loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
 bareExp (Not x loc) = Not (bareExp x) loc
 bareExp (Update src slice v loc) =
@@ -494,8 +484,8 @@ bareExp (AppExp appexp _) =
           LetFun name (fparams, map barePat params, ret, NoInfo, bareExp e) (bareExp body) loc
         Range start next end loc ->
           Range (bareExp start) (fmap bareExp next) (fmap bareExp end) loc
-        Coerce e tdecl loc ->
-          Coerce (bareExp e) (bareTypeDecl tdecl) loc
+        Coerce e te loc ->
+          Coerce (bareExp e) te loc
         Index arr slice loc ->
           Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =

@@ -34,7 +34,7 @@ main = mainWithOptions initialDocConfig commandLineOptions "options... -o outdir
           dumpError newFutharkConfig err
           exitWith $ ExitFailure 2
         Right () ->
-          return ()
+          pure ()
     f _ _ = Nothing
 
     m :: DocConfig -> FilePath -> FutharkM ()
@@ -68,7 +68,7 @@ printDecs cfg dir files imports = do
   mapM_ (write . fmap renderHtml) file_htmls
   write ("style.css", cssFile)
   where
-    write :: (String, T.Text) -> IO ()
+    write :: (FilePath, T.Text) -> IO ()
     write (name, content) = do
       let file = dir </> makeRelative "/" name
       when (docVerbose cfg) $

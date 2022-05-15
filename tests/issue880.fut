@@ -1,5 +1,5 @@
 -- ==
--- error: Would consume variable "xs"
+-- error: Consuming "xs"
 
 type t = {xs: [10]i32}
 

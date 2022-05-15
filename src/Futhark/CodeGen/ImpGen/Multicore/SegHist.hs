@@ -24,9 +24,9 @@ compileSegHist ::
   MulticoreGen Imp.MCCode
 compileSegHist pat space histops kbody nsubtasks
   | [_] <- unSegSpace space =
-    nonsegmentedHist pat space histops kbody nsubtasks
+      nonsegmentedHist pat space histops kbody nsubtasks
   | otherwise =
-    segmentedHist pat space histops kbody
+      segmentedHist pat space histops kbody
 
 -- | Split some list into chunks equal to the number of values
 -- returned by each 'SegBinOp'
@@ -77,8 +77,8 @@ onOpAtomic op = do
   let lambda = histOp op
       do_op = atomicUpdateLocking atomics lambda
   case do_op of
-    AtomicPrim f -> return f
-    AtomicCAS f -> return f
+    AtomicPrim f -> pure f
+    AtomicCAS f -> pure f
     AtomicLocking f -> do
       -- Allocate a static array of locks
       -- as in the GPU backend
@@ -88,7 +88,7 @@ onOpAtomic op = do
         sStaticArray "hist_locks" DefaultSpace int32 $
           Imp.ArrayZeros num_locks
       let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
-      return $ f l'
+      pure $ f l'
 
 atomicHistogram ::
   Pat LetDecMem ->

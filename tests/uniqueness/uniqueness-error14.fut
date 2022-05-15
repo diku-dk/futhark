@@ -1,7 +1,7 @@
 -- This program tests whether the compiler catches some of the more
 -- nasty side cases of aliasing in loops.
 -- ==
--- error: Type of expression
+-- error: "arr" aliases "barr"
 
 def main(): i32 =
   let arr = copy(iota(10))

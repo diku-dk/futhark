@@ -23,7 +23,7 @@ import Futhark.Construct
 import Futhark.IR.SOACS
 
 zeroTan :: Type -> ADM SubExp
-zeroTan (Prim t) = return $ constant $ blankPrimValue t
+zeroTan (Prim t) = pure $ constant $ blankPrimValue t
 zeroTan t = error $ "zeroTan on non-primitive type: " ++ pretty t
 
 zeroExp :: Type -> Exp SOACS
@@ -33,15 +33,11 @@ zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ show t
 
-isAcc :: TypeBase s u -> Bool
-isAcc Acc {} = True
-isAcc _ = False
-
 tanType :: TypeBase s u -> ADM (TypeBase s u)
 tanType (Acc acc ispace ts u) = do
   ts_tan <- mapM tanType ts
-  return $ Acc acc ispace (ts ++ ts_tan) u
-tanType t = return t
+  pure $ Acc acc ispace (ts ++ ts_tan) u
+tanType t = pure t
 
 slocal' :: ADM a -> ADM a
 slocal' = slocal id
@@ -52,7 +48,7 @@ slocal f m = do
   modify f
   a <- m
   modify $ \s' -> s' {stateTans = stateTans s}
-  return a
+  pure a
 
 data RState = RState
   { stateTans :: M.Map VName VName,
@@ -112,19 +108,19 @@ instance (Monoid (Bundled a), TanBuilder a) => TanBuilder [a] where
 instance TanBuilder (PatElem (TypeBase s u)) where
   newTan (PatElem p t)
     | isAcc t = do
-      insertTan p p
-      t' <- tanType t
-      return $ PatElem p t'
+        insertTan p p
+        t' <- tanType t
+        pure $ PatElem p t'
     | otherwise = do
-      p' <- tanVName p
-      insertTan p p'
-      t' <- tanType t
-      return $ PatElem p' t'
+        p' <- tanVName p
+        insertTan p p'
+        t' <- tanType t
+        pure $ PatElem p' t'
   bundleNew pe@(PatElem _ t) = do
     pe' <- newTan pe
     if isAcc t
-      then return [pe']
-      else return [pe, pe']
+      then pure [pe']
+      else pure [pe, pe']
 
 instance TanBuilder (Pat (TypeBase s u)) where
   type Bundled (Pat (TypeBase s u)) = Pat (TypeBase s u)
@@ -134,21 +130,21 @@ instance TanBuilder (Pat (TypeBase s u)) where
 instance TanBuilder (Param (TypeBase s u)) where
   newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
-    return $ Param mempty p' t'
+    pure $ Param mempty p' t'
   bundleNew param@(Param _ _ (Prim Unit)) =
     pure [param]
   bundleNew param@(Param _ _ t) = do
     param' <- newTan param
     if isAcc t
-      then return [param']
-      else return [param, param']
+      then pure [param']
+      else pure [param, param']
 
 instance Tangent a => TanBuilder (Param (TypeBase s u), a) where
   newTan (p, x) = (,) <$> newTan p <*> tangent x
   bundleNew (p, x) = do
     b <- bundleNew p
     x_tan <- tangent x
-    return $ zip b [x, x_tan]
+    pure $ zip b [x, x_tan]
 
 class Tangent a where
   type BundledTan a :: Data.Kind.Type
@@ -160,11 +156,11 @@ instance Tangent (TypeBase s u) where
   tangent = tanType
   bundleTan t
     | isAcc t = do
-      t' <- tangent t
-      return [t']
+        t' <- tangent t
+        pure [t']
     | otherwise = do
-      t' <- tangent t
-      return [t, t']
+        t' <- tangent t
+        pure [t, t']
 
 instance (Monoid (BundledTan a), Tangent a) => Tangent [a] where
   type BundledTan [a] = BundledTan a
@@ -175,24 +171,24 @@ instance Tangent VName where
   tangent v = do
     maybeTan <- gets $ M.lookup v . stateTans
     case maybeTan of
-      Just v_tan -> return v_tan
+      Just v_tan -> pure v_tan
       Nothing -> do
         t <- lookupType v
         letExp (baseString v <> "_implicit_tan") $ zeroExp t
   bundleTan v = do
     t <- lookupType v
     if isAcc t
-      then return [v]
+      then pure [v]
       else do
         v_tan <- tangent v
-        return [v, v_tan]
+        pure [v, v_tan]
 
 instance Tangent SubExp where
   tangent (Constant c) = zeroTan $ Prim $ primValueType c
   tangent (Var v) = Var <$> tangent v
   bundleTan c@Constant {} = do
     c_tan <- tangent c
-    return [c, c_tan]
+    pure [c, c_tan]
   bundleTan (Var v) = fmap Var <$> bundleTan v
 
 instance Tangent SubExpRes where
@@ -232,7 +228,7 @@ basicFwd pat aux op = do
     ConvOp cop x -> do
       x_tan <- tangent x
       addStm $ Let pat_tan aux $ BasicOp $ ConvOp cop x_tan
-    Assert {} -> return ()
+    Assert {} -> pure ()
     Index arr slice -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Index arr_tan slice
@@ -300,7 +296,7 @@ fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
     fwdScan sc = do
       op' <- fwdLambda $ scanLambda sc
       neutral_tans <- mapM zeroFromSubExp $ scanNeutral sc
-      return $
+      pure $
         Scan
           { scanNeutral = scanNeutral sc `interleave` map Var neutral_tans,
             scanLambda = op'
@@ -309,7 +305,7 @@ fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
     fwdRed red = do
       op' <- fwdLambda $ redLambda red
       neutral_tans <- mapM zeroFromSubExp $ redNeutral red
-      return $
+      pure $
         Reduce
           { redComm = redComm red,
             redLambda = op',
@@ -332,20 +328,18 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
   pat' <- bundleNew pat
   ops' <- mapM fwdHist ops
   bucket_fun' <- fwdHistBucket bucket_fun
-  vss' <- bundleTan vss
-  addStm $ Let pat' aux $ Op $ Hist w (iss <> vss') ops' bucket_fun'
+  arrs' <- bundleTan arrs
+  addStm $ Let pat' aux $ Op $ Hist w arrs' ops' bucket_fun'
   where
     n_indices = sum $ map (shapeRank . histShape) ops
-    (iss, vss) = splitAt n_indices arrs
     fwdBodyHist (Body _ stms res) = buildBody_ $ do
       mapM_ fwdStm stms
       let (res_is, res_vs) = splitAt n_indices res
       (res_is ++) <$> bundleTan res_vs
     fwdHistBucket l@(Lambda params body ret) =
-      let (p_is, p_vs) = splitAt n_indices params
-          (r_is, r_vs) = splitAt n_indices ret
+      let (r_is, r_vs) = splitAt n_indices ret
        in Lambda
-            <$> ((p_is ++) <$> bundleNew p_vs)
+            <$> bundleNew params
             <*> inScopeOf l (fwdBodyHist body)
             <*> ((r_is ++) <$> bundleTan r_vs)
 
@@ -354,7 +348,7 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
       dest' <- bundleTan dest
       nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
       op' <- fwdLambda op
-      return $
+      pure $
         HistOp
           { histShape = shape,
             histRaceFactor = rf,
@@ -363,7 +357,7 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
             histOp = op'
           }
 fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
-  as_tan <- mapM (\(s, n, a) -> do a_tan <- tangent a; return (s, n, a_tan)) as
+  as_tan <- mapM (\(s, n, a) -> do a_tan <- tangent a; pure (s, n, a_tan)) as
   pes_tan <- newTan pes
   ivs' <- bundleTan ivs
   let (as_ws, as_ns, _as_vs) = unzip3 as
@@ -379,7 +373,7 @@ fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
       body' <- fwdBodyScatter n_indices body
       let indices = concat $ replicate 2 $ take n_indices ret
           ret' = indices ++ drop n_indices ret ++ ret_tan
-      return $ Lambda params' body' ret'
+      pure $ Lambda params' body' ret'
     fwdBodyScatter :: Int -> Body SOACS -> ADM (Body SOACS)
     fwdBodyScatter n_indices (Body _ stms res) = do
       (res_tan, stms') <- collectStms $ do
@@ -387,7 +381,7 @@ fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
         tangent $ drop n_indices res
       let indices = concat $ replicate 2 $ take n_indices res
           res' = indices ++ drop n_indices res ++ res_tan
-      return $ mkBody stms' res'
+      pure $ mkBody stms' res'
 fwdSOAC _ _ JVP {} =
   error "fwdSOAC: nested JVP not allowed."
 fwdSOAC _ _ VJP {} =
@@ -406,26 +400,28 @@ fwdStm stm@(Let pat aux (BasicOp e)) = do
   basicFwd pat aux e
 fwdStm stm@(Let pat _ (Apply f args _ _))
   | Just (ret, argts) <- M.lookup f builtInFunctions = do
-    addStm stm
-    arg_tans <-
-      zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
-    pat_tan <- newTan pat
-    let arg_pes = zipWith primExpFromSubExp argts (map fst args)
-    case pdBuiltin f arg_pes of
-      Nothing ->
-        error $ "No partial derivative defined for builtin function: " ++ pretty f
-      Just derivs -> do
-        let convertTo tt e
-              | e_t == tt = e
-              | otherwise =
-                case (tt, e_t) of
-                  (IntType tt', IntType ft) -> ConvOpExp (SExt ft tt') e
-                  (FloatType tt', FloatType ft) -> ConvOpExp (FPConv ft tt') e
-                  _ -> error $ "fwdStm.convertTo: " ++ pretty (tt, e_t)
-              where
-                e_t = primExpType e
-        zipWithM_ (letBindNames . pure) (patNames pat_tan)
-          =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
+      addStm stm
+      arg_tans <-
+        zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
+      pat_tan <- newTan pat
+      let arg_pes = zipWith primExpFromSubExp argts (map fst args)
+      case pdBuiltin f arg_pes of
+        Nothing ->
+          error $ "No partial derivative defined for builtin function: " ++ pretty f
+        Just derivs -> do
+          let convertTo tt e
+                | e_t == tt = e
+                | otherwise =
+                    case (tt, e_t) of
+                      (IntType tt', IntType ft) -> ConvOpExp (SExt ft tt') e
+                      (FloatType tt', FloatType ft) -> ConvOpExp (FPConv ft tt') e
+                      (Bool, FloatType ft) -> ConvOpExp (FToB ft) e
+                      (FloatType tt', Bool) -> ConvOpExp (BToF tt') e
+                      _ -> error $ "fwdStm.convertTo: " ++ pretty (f, tt, e_t)
+                where
+                  e_t = primExpType e
+          zipWithM_ (letBindNames . pure) (patNames pat_tan)
+            =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
 fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
   t' <- slocal' $ fwdBody t
   f' <- slocal' $ fwdBody f
@@ -451,21 +447,21 @@ fwdStm (Let pat aux (WithAcc inputs lam)) = do
   inputs' <- forM inputs $ \(shape, arrs, op) -> do
     arrs_tan <- tangent arrs
     op' <- case op of
-      Nothing -> return Nothing
+      Nothing -> pure Nothing
       Just (op_lam, nes) -> do
         nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
         op_lam' <- fwdLambda op_lam
         case op_lam' of
           Lambda ps body ret -> do
             let op_lam'' = Lambda (removeIndexTans (shapeRank shape) ps) body ret
-            return $ Just (op_lam'', interleave nes nes_tan)
+            pure $ Just (op_lam'', interleave nes nes_tan)
     pure (shape, arrs <> arrs_tan, op')
   pat' <- bundleNew pat
   lam' <- fwdLambda lam
   addStm $ Let pat' aux $ WithAcc inputs' lam'
   where
     removeIndexTans 0 ps = ps
-    removeIndexTans i (p : _ : ps) = p : removeIndexTans (i -1) ps
+    removeIndexTans i (p : _ : ps) = p : removeIndexTans (i - 1) ps
     removeIndexTans _ ps = ps
 fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
@@ -487,4 +483,4 @@ fwdJVP scope l@(Lambda params body ret) =
     params_tan <- newTan params
     body_tan <- fwdBodyTansLast body
     ret_tan <- tangent ret
-    return $ Lambda (params ++ params_tan) body_tan (ret <> ret_tan)
+    pure $ Lambda (params ++ params_tan) body_tan (ret <> ret_tan)

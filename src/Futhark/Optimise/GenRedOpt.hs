@@ -50,12 +50,12 @@ optimiseStms :: Env -> Stms GPU -> GenRedM (Stms GPU)
 optimiseStms env stms =
   localScope (scopeOf stms) $ do
     (_, stms') <- foldM foldfun (env, mempty) $ stmsToList stms
-    return stms'
+    pure stms'
   where
     foldfun :: (Env, Stms GPU) -> Stm GPU -> GenRedM (Env, Stms GPU)
     foldfun (e, ss) s = do
       (e', s') <- optimiseStm e s
-      return (e', ss <> s')
+      pure (e', ss <> s')
 
 optimiseStm :: Env -> Stm GPU -> GenRedM (Env, Stms GPU)
 optimiseStm env stm@(Let _ _ (Op (SegOp (SegMap SegThread {} _ _ _)))) = do
@@ -64,11 +64,11 @@ optimiseStm env stm@(Let _ _ (Op (SegOp (SegMap SegThread {} _ _ _)))) = do
         case res_genred_opt of
           Just stms -> stms
           Nothing -> oneStm stm
-  return (env, stms')
+  pure (env, stms')
 optimiseStm env (Let pat aux e) = do
   env' <- changeEnv env (head $ patNames pat) e
   e' <- mapExpM (optimise env') e
-  return (env', oneStm $ Let pat aux e')
+  pure (env', oneStm $ Let pat aux e')
   where
     optimise env' = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody env'}
 
@@ -83,12 +83,12 @@ genRedOpts env ker = do
       helperGenRed res_sgrd
     _ -> helperGenRed res_tile
   where
-    helperGenRed Nothing = return Nothing
+    helperGenRed Nothing = pure Nothing
     helperGenRed (Just (stms_before, ker_snd)) = do
       mb_stms_after <- genRedOpts env ker_snd
       case mb_stms_after of
-        Just stms_after -> return $ Just $ stms_before <> stms_after
-        Nothing -> return $ Just $ stms_before <> oneStm ker_snd
+        Just stms_after -> pure $ Just $ stms_before <> stms_after
+        Nothing -> pure $ Just $ stms_before <> oneStm ker_snd
 
 se1 :: SubExp
 se1 = intConst Int64 1
@@ -96,7 +96,7 @@ se1 = intConst Int64 1
 genRed2Tile2d :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU, Stm GPU))
 genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space kres_tps old_kbody))))
   | (SegThread _ seg_group_size _novirt) <- seg_thd,
-    --novirt == SegNoVirtFull || novirt == SegNoVirt,
+    -- novirt == SegNoVirtFull || novirt == SegNoVirt,
     KernelBody () kstms kres <- old_kbody,
     Just (css, r_ses) <- allGoodReturns kres,
     null css,
@@ -130,55 +130,55 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     --   should abort.
     cost <- costRedundantExecution variance pat_acc_nm r_ses kstms,
     maxCost cost (Small 2) == Small 2 = do
-    -- 1. create the first kernel
-    acc_tp <- lookupType acc_nm
-    let inv_dim_len = segSpaceDims seg_space !! gid_ind
-        -- 1.1. get the accumulation operator
-        ((redop0, neutral), el_tps) = getAccLambda acc_tp
-    redop <- renameLambda redop0
-    let red =
-          Reduce
-            { redComm = Commutative,
-              redLambda = redop,
-              redNeutral = neutral
-            }
-        -- 1.2. build the sequential map-reduce screma
-        code1' =
-          stmsFromList $
-            filter (dependsOnAcc pat_acc_nm variance) $
-              stmsToList code1
-    (code1'', code1_tr_host) <- transposeFVs (freeIn kerstm) variance invar_gid code1'
-    let map_lam_body = mkBody code1'' $ map (SubExpRes (Certs [])) acc_vals
-        map_lam0 = Lambda [Param mempty invar_gid (Prim int64)] map_lam_body el_tps
-    map_lam <- renameLambda map_lam0
-    (k1_res, ker1_stms) <- runBuilderT' $ do
-      iota <- letExp "iota" $ BasicOp $ Iota inv_dim_len (intConst Int64 0) (intConst Int64 1) Int64
-      let op_exp = Op (OtherOp (Screma inv_dim_len [iota] (ScremaForm [] [red] map_lam)))
-      res_redmap <- letTupExp "res_mapred" op_exp
-      letSubExp (baseString pat_acc_nm ++ "_big_update") $
-        BasicOp (UpdateAcc acc_nm acc_inds $ map Var res_redmap)
+      -- 1. create the first kernel
+      acc_tp <- lookupType acc_nm
+      let inv_dim_len = segSpaceDims seg_space !! gid_ind
+          -- 1.1. get the accumulation operator
+          ((redop0, neutral), el_tps) = getAccLambda acc_tp
+      redop <- renameLambda redop0
+      let red =
+            Reduce
+              { redComm = Commutative,
+                redLambda = redop,
+                redNeutral = neutral
+              }
+          -- 1.2. build the sequential map-reduce screma
+          code1' =
+            stmsFromList $
+              filter (dependsOnAcc pat_acc_nm variance) $
+                stmsToList code1
+      (code1'', code1_tr_host) <- transposeFVs (freeIn kerstm) variance invar_gid code1'
+      let map_lam_body = mkBody code1'' $ map (SubExpRes (Certs [])) acc_vals
+          map_lam0 = Lambda [Param mempty invar_gid (Prim int64)] map_lam_body el_tps
+      map_lam <- renameLambda map_lam0
+      (k1_res, ker1_stms) <- runBuilderT' $ do
+        iota <- letExp "iota" $ BasicOp $ Iota inv_dim_len (intConst Int64 0) (intConst Int64 1) Int64
+        let op_exp = Op (OtherOp (Screma inv_dim_len [iota] (ScremaForm [] [red] map_lam)))
+        res_redmap <- letTupExp "res_mapred" op_exp
+        letSubExp (baseString pat_acc_nm ++ "_big_update") $
+          BasicOp (UpdateAcc acc_nm acc_inds $ map Var res_redmap)
 
-    -- 1.3. build the kernel expression and rename it!
-    gid_flat_1 <- newVName "gid_flat"
-    let space1 = SegSpace gid_flat_1 gid_dims_new
+      -- 1.3. build the kernel expression and rename it!
+      gid_flat_1 <- newVName "gid_flat"
+      let space1 = SegSpace gid_flat_1 gid_dims_new
 
-    (grid_size, host_stms1) <- runBuilder $ do
-      let grid_pexp = foldl (\x d -> x * pe64 d) (pe64 se1) $ map snd gid_dims_new
-      dim_prod <- letSubExp "dim_prod" =<< toExp grid_pexp
-      letSubExp "grid_size" =<< ceilDiv dim_prod (unCount seg_group_size)
-    let level1 = SegThread (Count grid_size) seg_group_size (SegNoVirtFull (SegSeqDims [])) -- novirt ?
-        kbody1 = KernelBody () ker1_stms [Returns ResultMaySimplify (Certs []) k1_res]
+      (grid_size, host_stms1) <- runBuilder $ do
+        let grid_pexp = foldl (\x d -> x * pe64 d) (pe64 se1) $ map snd gid_dims_new
+        dim_prod <- letSubExp "dim_prod" =<< toExp grid_pexp
+        letSubExp "grid_size" =<< ceilDiv dim_prod (unCount seg_group_size)
+      let level1 = SegThread (Count grid_size) seg_group_size (SegNoVirtFull (SegSeqDims [])) -- novirt ?
+          kbody1 = KernelBody () ker1_stms [Returns ResultMaySimplify (Certs []) k1_res]
 
-    -- is it OK here to use the "aux" from the parrent kernel?
-    ker_exp <- renameExp $ Op (SegOp (SegMap level1 space1 [acc_tp] kbody1))
-    let ker1 = Let pat_accum aux ker_exp
+      -- is it OK here to use the "aux" from the parrent kernel?
+      ker_exp <- renameExp $ Op (SegOp (SegMap level1 space1 [acc_tp] kbody1))
+      let ker1 = Let pat_accum aux ker_exp
 
-    -- 2 build the second kernel
-    let ker2_body = old_kbody {kernelBodyStms = code1 <> code2}
-    ker2_exp <- renameExp $ Op (SegOp (SegMap seg_thd seg_space kres_tps ker2_body))
-    let ker2 = Let pat_ker aux ker2_exp
-    return $
-      Just (code1_tr_host <> host_stms1 <> oneStm ker1, ker2)
+      -- 2 build the second kernel
+      let ker2_body = old_kbody {kernelBodyStms = code1 <> code2}
+      ker2_exp <- renameExp $ Op (SegOp (SegMap seg_thd seg_space kres_tps ker2_body))
+      let ker2 = Let pat_ker aux ker2_exp
+      pure $
+        Just (code1_tr_host <> host_stms1 <> oneStm ker1, ker2)
   where
     isIndVarToParDim _ (Constant _) _ = False
     isIndVarToParDim variance (Var acc_ind) par_dim =
@@ -218,16 +218,16 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     isDimIdxInvar2 variance gid (DimSlice d1 d2 d3) =
       all (isSeInvar2 variance gid) [d1, d2, d3]
     -- is an entire slice invariant to at least one gid of a parallel dimension
-    isSliceInvar2 variance slc gids =
-      any (\gid -> all (isDimIdxInvar2 variance gid) (unSlice slc)) gids
+    isSliceInvar2 variance slc =
+      any (\gid -> all (isDimIdxInvar2 variance gid) (unSlice slc))
     -- are all statements that touch memory invariant to at least one parallel dimension?
     isTileable :: VName -> [(VName, SubExp)] -> VarianceTable -> VName -> Stm GPU -> Bool
     isTileable seq_gid gid_dims variance acc_nm (Let (Pat [pel]) _ (BasicOp (Index _ slc)))
       | acc_deps <- M.findWithDefault mempty acc_nm variance,
         nameIn (patElemName pel) acc_deps =
-        let invar_par = isSliceInvar2 variance slc (map fst gid_dims)
-            invar_seq = isSliceInvar2 variance slc [seq_gid]
-         in invar_par || invar_seq
+          let invar_par = isSliceInvar2 variance slc (map fst gid_dims)
+              invar_seq = isSliceInvar2 variance slc [seq_gid]
+           in invar_par || invar_seq
     -- this relies on the cost model, that currently accepts only
     -- global-memory reads, and for example rejects in-place updates
     -- or loops inside the code that is transformed in a redomap.
@@ -237,11 +237,11 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       let acc_deps = M.findWithDefault mempty pat_acc_nm variance
        in any (`nameIn` acc_deps) $ patNames pat
 genRed2Tile2d _ _ =
-  return Nothing
+  pure Nothing
 
 genRed2SegRed :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU, Stm GPU))
 genRed2SegRed _ _ =
-  return Nothing
+  pure Nothing
 
 transposeFVs ::
   Names ->
@@ -252,11 +252,11 @@ transposeFVs ::
 transposeFVs fvs variance gid stms = do
   (tab, stms') <- foldM foldfun (M.empty, mempty) $ stmsToList stms
   let stms_host = M.foldr (\(_, _, s) ss -> ss <> s) mempty tab
-  return (stms', stms_host)
+  pure (stms', stms_host)
   where
     foldfun (tab, all_stms) stm = do
       (tab', stm') <- transposeFV (tab, stm)
-      return (tab', all_stms <> oneStm stm')
+      pure (tab', all_stms <> oneStm stm')
     -- ToDo: currently handles only 2-dim arrays, please generalize
     transposeFV (tab, Let pat aux (BasicOp (Index arr slc)))
       | dims <- unSlice slc,
@@ -267,21 +267,21 @@ transposeFVs fvs variance gid stms = do
         -- generalize below: treat any rearange and add to tab if not there.
         Nothing <- M.lookup arr tab,
         ii /= length dims - 1,
-        perm <- [0 .. ii -1] ++ [ii + 1 .. length dims - 1] ++ [ii] = do
-        (arr_tr, stms_tr) <- runBuilderT' $ do
-          arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange perm arr --Manifest [1,0] arr
-          letExp (baseString arr' ++ "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
-        let tab' = M.insert arr (perm, arr_tr, stms_tr) tab
-            slc' = Slice $ map (dims !!) perm
-            stm' = Let pat aux $ BasicOp $ Index arr_tr slc'
-        return (tab', stm')
+        perm <- [0 .. ii - 1] ++ [ii + 1 .. length dims - 1] ++ [ii] = do
+          (arr_tr, stms_tr) <- runBuilderT' $ do
+            arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange perm arr -- Manifest [1,0] arr
+            letExp (baseString arr' ++ "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
+          let tab' = M.insert arr (perm, arr_tr, stms_tr) tab
+              slc' = Slice $ map (dims !!) perm
+              stm' = Let pat aux $ BasicOp $ Index arr_tr slc'
+          pure (tab', stm')
       where
         isFixDim DimFix {} = True
         isFixDim _ = False
         depOnGid (DimFix (Var nm)) =
           gid == nm || nameIn gid (M.findWithDefault mempty nm variance)
         depOnGid _ = False
-    transposeFV r = return r
+    transposeFV r = pure r
 
 -- | Tries to identify the following pattern:
 --   code followed by some UpdateAcc-statement
@@ -305,10 +305,10 @@ matchCodeAccumCode kstms =
           (stmsToList kstms)
    in (stmsFromList code1, screma, stmsFromList code2)
 
--- | Checks that there exist a parallel dimension (among `kids`),
---     to which all the indices (`acc_inds`) are invariant to.
+-- | Checks that there exist a parallel dimension (among @kids@),
+--     to which all the indices (@acc_inds@) are invariant to.
 --   It returns the innermost such parallel dimension, as a tuple
---     of the pardim gid (`VName`) and its index (`Int`) in the
+--     of the pardim gid ('VName') and its index ('Int') in the
 --     parallel space.
 isInvarToParDim ::
   Names ->
@@ -322,7 +322,7 @@ isInvarToParDim branch_variant kspace variance acc_inds =
       allvar2 = allvariant2 acc_inds ker_gids
       last_invar_dim =
         foldl (lastNotIn allvar2) Nothing $
-          zip ker_gids [0 .. length ker_gids -1]
+          zip ker_gids [0 .. length ker_gids - 1]
    in if branch_invariant
         then last_invar_dim
         else Nothing
@@ -341,7 +341,7 @@ isInvarToParDim branch_variant kspace variance acc_inds =
 allGoodReturns :: [KernelResult] -> Maybe ([VName], [SubExp])
 allGoodReturns kres
   | all goodReturn kres = do
-    Just $ foldl addCertAndRes ([], []) kres
+      Just $ foldl addCertAndRes ([], []) kres
   where
     goodReturn (Returns ResultMaySimplify _ _) = True
     goodReturn _ = False

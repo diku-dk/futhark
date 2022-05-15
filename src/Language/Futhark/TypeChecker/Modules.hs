@@ -84,11 +84,11 @@ newNamesForMTy :: MTy -> TypeM (MTy, M.Map VName VName)
 newNamesForMTy orig_mty = do
   pairs <- forM (S.toList $ allNamesInMTy orig_mty) $ \v -> do
     v' <- newName v
-    return (v, v')
+    pure (v, v')
   let substs = M.fromList pairs
       rev_substs = M.fromList $ map (uncurry $ flip (,)) pairs
 
-  return (substituteInMTy substs orig_mty, rev_substs)
+  pure (substituteInMTy substs orig_mty, rev_substs)
   where
     substituteInMTy :: M.Map VName VName -> MTy -> MTy
     substituteInMTy substs (MTy mty_abs mty_mod) =
@@ -149,8 +149,8 @@ newNamesForMTy orig_mty = do
           Scalar $ Record $ fmap substituteInType ts
         substituteInType (Scalar (Sum ts)) =
           Scalar $ Sum $ (fmap . fmap) substituteInType ts
-        substituteInType (Array () u t shape) =
-          arrayOf (substituteInType $ Scalar t) (substituteInShape shape) u
+        substituteInType (Array () u shape t) =
+          arrayOf u (substituteInShape shape) (substituteInType $ Scalar t)
         substituteInType (Scalar (Arrow als v t1 (RetType dims t2))) =
           Scalar $ Arrow als v (substituteInType t1) $ RetType dims $ substituteInType t2
 
@@ -196,26 +196,26 @@ refineEnv loc tset env tname ps t
   | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (TypeName qs v) _)))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
-    if paramsMatch cur_ps ps
-      then
-        return
-          ( tname',
-            QualName qs v `M.delete` tset,
-            substituteTypesInEnv
-              ( flip M.lookup $
-                  M.fromList
-                    [ (qualLeaf tname', Subst cur_ps $ RetType [] t),
-                      (v, Subst ps $ RetType [] t)
-                    ]
-              )
-              env
-          )
-      else
-        typeError loc mempty $
-          "Cannot refine a type having"
-            <+> tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
+      if paramsMatch cur_ps ps
+        then
+          pure
+            ( tname',
+              QualName qs v `M.delete` tset,
+              substituteTypesInEnv
+                ( flip M.lookup $
+                    M.fromList
+                      [ (qualLeaf tname', Subst cur_ps $ RetType [] t),
+                        (v, Subst ps $ RetType [] t)
+                      ]
+                )
+                env
+            )
+        else
+          typeError loc mempty $
+            "Cannot refine a type having"
+              <+> tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
-    typeError loc mempty $ pquote (ppr tname) <+> "is not an abstract type in the module type."
+      typeError loc mempty $ pquote (ppr tname) <+> "is not an abstract type in the module type."
   where
     tpMsg [] = "no type parameters"
     tpMsg xs = "type parameters" <+> spread (map ppr xs)
@@ -241,11 +241,11 @@ findTypeDef :: QualName Name -> Mod -> Maybe (QualName VName, TypeBinding)
 findTypeDef _ ModFun {} = Nothing
 findTypeDef (QualName [] name) (ModEnv the_env) = do
   (name', tb) <- findBinding envTypeTable Type name the_env
-  return (qualName name', tb)
+  pure (qualName name', tb)
 findTypeDef (QualName (q : qs) name) (ModEnv the_env) = do
   (q', q_mod) <- findBinding envModTable Term q the_env
   (QualName qs' name', tb) <- findTypeDef (QualName qs name) q_mod
-  return (QualName (q' : qs') name', tb)
+  pure (QualName (q' : qs') name', tb)
 
 resolveAbsTypes ::
   TySet ->
@@ -263,21 +263,21 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
     case findTypeDef (fmap baseName name) mod of
       Just (name', TypeAbbr mod_l ps t)
         | mod_l > name_l ->
-          mismatchedLiftedness
-            name_l
-            (map qualLeaf $ M.keys mod_abs)
-            (qualLeaf name)
-            (mod_l, ps, t)
+            mismatchedLiftedness
+              name_l
+              (map qualLeaf $ M.keys mod_abs)
+              name
+              (mod_l, ps, t)
         | name_l < SizeLifted,
           not $ null $ retDims t ->
-          anonymousSizes
-            (map qualLeaf $ M.keys mod_abs)
-            (qualLeaf name)
-            (mod_l, ps, t)
+            anonymousSizes
+              (map qualLeaf $ M.keys mod_abs)
+              name
+              (mod_l, ps, t)
         | Just (abs_name, _) <- M.lookup (fmap baseName name) abs_mapping ->
-          return (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
+            pure (qualLeaf name, (abs_name, TypeAbbr name_l ps t))
         | otherwise ->
-          return (qualLeaf name, (name', TypeAbbr name_l ps t))
+            pure (qualLeaf name, (name', TypeAbbr name_l ps t))
       _ ->
         missingType loc $ fmap baseName name
   where
@@ -322,7 +322,7 @@ resolveMTyNames = resolveMTyNames'
               Just (QualName _ modname')
                 | Just sig_env_mod <-
                     M.lookup modname' $ envModTable mod_env ->
-                  resolveModNames sig_env_mod mod_env_mod
+                    resolveModNames sig_env_mod mod_env_mod
               _ -> mempty
        in mconcat
             [ resolve Term mod_env $ envVtable sig_env,
@@ -355,25 +355,26 @@ missingMod loc name =
 mismatchedType ::
   Loc ->
   [VName] ->
+  [VName] ->
   VName ->
   (Liftedness, [TypeParam], StructRetType) ->
   (Liftedness, [TypeParam], StructRetType) ->
   Either TypeError b
-mismatchedType loc abs name spec_t env_t =
+mismatchedType loc abs quals name spec_t env_t =
   Left . TypeError loc mempty $
     "Module defines"
-      </> indent 2 (ppTypeAbbr abs name env_t)
+      </> indent 2 (ppTypeAbbr abs (QualName quals name) env_t)
       </> "but module type requires"
-      </> indent 2 (ppTypeAbbr abs name spec_t)
+      </> indent 2 (ppTypeAbbr abs (QualName quals name) spec_t)
 
-ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructRetType) -> Doc
+ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetType) -> Doc
 ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
   | typeLeaf tn `elem` abs,
     map typeParamToArg ps == args =
-    "type" <> ppr l <+> pprName name
-      <+> spread (map ppr ps)
+      "type" <> ppr l <+> ppr name
+        <+> spread (map ppr ps)
 ppTypeAbbr _ name (l, ps, t) =
-  "type" <> ppr l <+> pprName name
+  "type" <> ppr l <+> ppr name
     <+> spread (map ppr ps)
     <+> equals
     <+/> nest 2 (align (ppr t))
@@ -390,29 +391,31 @@ matchMTys ::
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
     (M.map (SizeSubst . NamedDim) $ resolveMTyNames orig_mty orig_mty_sig)
+    []
     orig_mty
     orig_mty_sig
   where
     matchMTys' ::
       M.Map VName (Subst StructRetType) ->
+      [VName] ->
       MTy ->
       MTy ->
       Loc ->
       Either TypeError (M.Map VName VName)
 
-    matchMTys' _ (MTy _ ModFun {}) (MTy _ ModEnv {}) loc =
+    matchMTys' _ _ (MTy _ ModFun {}) (MTy _ ModEnv {}) loc =
       Left $
         TypeError
           loc
           mempty
           "Cannot match parametric module with non-parametric module type."
-    matchMTys' _ (MTy _ ModEnv {}) (MTy _ ModFun {}) loc =
+    matchMTys' _ _ (MTy _ ModEnv {}) (MTy _ ModFun {}) loc =
       Left $
         TypeError
           loc
           mempty
           "Cannot match non-parametric module with paramatric module type."
-    matchMTys' old_abs_subst_to_type (MTy mod_abs mod) (MTy sig_abs sig) loc = do
+    matchMTys' old_abs_subst_to_type quals (MTy mod_abs mod) (MTy sig_abs sig) loc = do
       -- Check that abstract types in 'sig' have an implementation in
       -- 'mod'.  This also gives us a substitution that we use to check
       -- the types of values.
@@ -421,31 +424,33 @@ matchMTys orig_mty orig_mty_sig =
       let abs_subst_to_type =
             old_abs_subst_to_type <> M.map (substFromAbbr . snd) abs_substs
           abs_name_substs = M.map (qualLeaf . fst) abs_substs
-      substs <- matchMods abs_subst_to_type mod sig loc
-      return (substs <> abs_name_substs)
+      substs <- matchMods abs_subst_to_type quals mod sig loc
+      pure (substs <> abs_name_substs)
 
     matchMods ::
       M.Map VName (Subst StructRetType) ->
+      [VName] ->
       Mod ->
       Mod ->
       Loc ->
       Either TypeError (M.Map VName VName)
-    matchMods _ ModEnv {} ModFun {} loc =
+    matchMods _ _ ModEnv {} ModFun {} loc =
       Left $
         TypeError
           loc
           mempty
           "Cannot match non-parametric module with parametric module type."
-    matchMods _ ModFun {} ModEnv {} loc =
+    matchMods _ _ ModFun {} ModEnv {} loc =
       Left $
         TypeError
           loc
           mempty
           "Cannot match parametric module with non-parametric module type."
-    matchMods abs_subst_to_type (ModEnv mod) (ModEnv sig) loc =
-      matchEnvs abs_subst_to_type mod sig loc
+    matchMods abs_subst_to_type quals (ModEnv mod) (ModEnv sig) loc =
+      matchEnvs abs_subst_to_type quals mod sig loc
     matchMods
       old_abs_subst_to_type
+      quals
       (ModFun (FunSig mod_abs mod_pmod mod_mod))
       (ModFun (FunSig sig_abs sig_pmod sig_mod))
       loc = do
@@ -453,17 +458,18 @@ matchMTys orig_mty orig_mty_sig =
         let abs_subst_to_type =
               old_abs_subst_to_type <> M.map (substFromAbbr . snd) abs_substs
             abs_name_substs = M.map (qualLeaf . fst) abs_substs
-        pmod_substs <- matchMods abs_subst_to_type mod_pmod sig_pmod loc
-        mod_substs <- matchMTys' abs_subst_to_type mod_mod sig_mod loc
-        return (pmod_substs <> mod_substs <> abs_name_substs)
+        pmod_substs <- matchMods abs_subst_to_type quals mod_pmod sig_pmod loc
+        mod_substs <- matchMTys' abs_subst_to_type quals mod_mod sig_mod loc
+        pure (pmod_substs <> mod_substs <> abs_name_substs)
 
     matchEnvs ::
       M.Map VName (Subst StructRetType) ->
+      [VName] ->
       Env ->
       Env ->
       Loc ->
       Either TypeError (M.Map VName VName)
-    matchEnvs abs_subst_to_type env sig loc = do
+    matchEnvs abs_subst_to_type quals env sig loc = do
       -- XXX: we only want to create substitutions for visible names.
       -- This must be wrong in some cases.  Probably we need to
       -- rethink how we do shadowing for module types.
@@ -476,7 +482,7 @@ matchMTys orig_mty orig_mty_sig =
           \(name, TypeAbbr spec_l spec_ps spec_t) ->
             case findBinding envTypeTable Type (baseName name) env of
               Just (name', TypeAbbr l ps t) ->
-                matchTypeAbbr loc abs_subst_to_type name spec_l spec_ps spec_t name' l ps t
+                matchTypeAbbr loc abs_subst_to_type quals name spec_l spec_ps spec_t name' l ps t
               Nothing -> missingType loc $ baseName name
 
       -- Check that all values are defined correctly, substituting the
@@ -485,7 +491,7 @@ matchMTys orig_mty orig_mty_sig =
         forM (M.toList $ envVtable sig) $ \(name, spec_bv) -> do
           let spec_bv' = substituteTypesInBoundV (`M.lookup` abs_subst_to_type) spec_bv
           case findBinding envVtable Term (baseName name) env of
-            Just (name', bv) -> matchVal loc name spec_bv' name' bv
+            Just (name', bv) -> matchVal loc quals name spec_bv' name' bv
             _ -> missingVal loc (baseName name)
 
       -- Check for correct modules.
@@ -493,15 +499,17 @@ matchMTys orig_mty orig_mty_sig =
         forM (M.toList $ envModTable sig) $ \(name, modspec) ->
           case findBinding envModTable Term (baseName name) env of
             Just (name', mod) ->
-              M.insert name name' <$> matchMods abs_subst_to_type mod modspec loc
+              M.insert name name'
+                <$> matchMods abs_subst_to_type (quals ++ [name]) mod modspec loc
             Nothing ->
               missingMod loc $ baseName name
 
-      return $ val_substs <> mod_substs <> abbr_name_substs
+      pure $ val_substs <> mod_substs <> abbr_name_substs
 
     matchTypeAbbr ::
       Loc ->
       M.Map VName (Subst StructRetType) ->
+      [VName] ->
       VName ->
       Liftedness ->
       [TypeParam] ->
@@ -511,82 +519,73 @@ matchMTys orig_mty orig_mty_sig =
       [TypeParam] ->
       StructRetType ->
       Either TypeError (VName, VName)
-    matchTypeAbbr loc abs_subst_to_type spec_name spec_l spec_ps spec_t name l ps t = do
-      -- We have to create substitutions for the type parameters, too.
+    matchTypeAbbr loc abs_subst_to_type quals spec_name spec_l spec_ps spec_t name l ps t = do
+      -- Number of type parameters must match.
       unless (length spec_ps == length ps) $ nomatch spec_t
-      param_substs <-
-        mconcat <$> zipWithM (matchTypeParam (nomatch spec_t)) spec_ps ps
 
       -- Abstract types have a particular restriction to ensure that
       -- if we have a value of an abstract type 't [n]', then there is
       -- an array of size 'n' somewhere inside.
       when (M.member spec_name abs_subst_to_type) $
         case S.toList (mustBeExplicitInType (retType t)) `intersect` map typeParamName ps of
-          [] -> return ()
+          [] -> pure ()
           d : _ ->
             Left . TypeError loc mempty $
               "Type"
-                </> indent 2 (ppTypeAbbr [] name (l, ps, t))
+                </> indent 2 (ppTypeAbbr [] (QualName quals name) (l, ps, t))
                 </> textwrap "cannot be made abstract because size parameter"
                 <+/> pquote (pprName d)
                 <+/> textwrap "is not used as an array size in the definition."
 
-      let spec_t' = applySubst (`M.lookup` (param_substs <> abs_subst_to_type)) spec_t
-      if spec_t' == t
-        then return (spec_name, name)
-        else nomatch spec_t'
+      let spec_t' = applySubst (`M.lookup` abs_subst_to_type) spec_t
+          nonrigid = ps <> map (`TypeParamDim` mempty) (retDims t)
+      case doUnification loc spec_ps nonrigid (retType spec_t') (retType t) of
+        Right t'
+          | noSizes t' `subtypeOf` noSizes (retType spec_t') -> pure (spec_name, name)
+        _ -> nomatch spec_t'
       where
         nomatch spec_t' =
           mismatchedType
             loc
             (M.keys abs_subst_to_type)
+            quals
             spec_name
             (spec_l, spec_ps, spec_t')
             (l, ps, t)
 
-    matchTypeParam _ (TypeParamDim x _) (TypeParamDim y _) =
-      pure $ M.singleton x $ SizeSubst $ NamedDim $ qualName y
-    matchTypeParam _ (TypeParamType spec_l x _) (TypeParamType l y _)
-      | spec_l <= l =
-        pure . M.singleton x . Subst [] . RetType [] $
-          Scalar $ TypeVar () Nonunique (typeName y) []
-    matchTypeParam nomatch _ _ =
-      nomatch
-
     matchVal ::
       Loc ->
+      [VName] ->
       VName ->
       BoundV ->
       VName ->
       BoundV ->
       Either TypeError (VName, VName)
-    matchVal loc spec_name spec_v name v =
+    matchVal loc quals spec_name spec_v name v =
       case matchValBinding loc spec_v v of
-        Nothing -> return (spec_name, name)
+        Nothing -> pure (spec_name, name)
         Just problem ->
           Left $
             TypeError loc mempty $
               "Module type specifies"
-                </> indent 2 (ppValBind spec_name spec_v)
+                </> indent 2 (ppValBind (QualName quals spec_name) spec_v)
                 </> "but module provides"
-                </> indent 2 (ppValBind spec_name v)
+                </> indent 2 (ppValBind (QualName quals spec_name) v)
                 </> fromMaybe mempty problem
 
     matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Maybe Doc)
-    matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
-      case doUnification loc tps (toStruct orig_spec_t) (toStruct orig_t) of
+    matchValBinding loc (BoundV spec_tps orig_spec_t) (BoundV tps orig_t) = do
+      case doUnification loc spec_tps tps (toStruct orig_spec_t) (toStruct orig_t) of
         Left (TypeError _ notes msg) ->
           Just $ Just $ msg <> ppr notes
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
         Right t
-          | noSizes t
-              `subtypeOf` noSizes orig_spec_t ->
-            Nothing
+          | noSizes t `subtypeOf` noSizes orig_spec_t -> Nothing
           | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =
-      "val" <+> pprName v <+> spread (map ppr tps) <+> colon
+      "val" <+> ppr v <+> spread (map ppr tps) <+> colon
         </> indent 2 (align (ppr t))
 
 -- | Apply a parametric module to an argument.
@@ -610,4 +609,4 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
       type_subst = M.mapMaybe isSub p_subst
       body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'
-  return (body_mty'', p_subst, body_subst)
+  pure (body_mty'', p_subst, body_subst)

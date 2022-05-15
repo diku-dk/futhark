@@ -49,7 +49,7 @@ transformFunDef ::
   m (AST.FunDef torep)
 transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
   (body', _) <- modifyNameSource $ runState $ runBuilderT m consts_scope
-  return $ FunDef entry attrs fname rettype params body'
+  pure $ FunDef entry attrs fname rettype params body'
   where
     m = localScope (scopeOfFParams params) $ transformBody body
 
@@ -96,10 +96,10 @@ transformStmRecursively (Let pat aux e) =
     transform =
       identityMapper
         { mapOnBody = \scope -> localScope scope . transformBody,
-          mapOnRetType = return,
-          mapOnBranchType = return,
-          mapOnFParam = return,
-          mapOnLParam = return,
+          mapOnRetType = pure,
+          mapOnBranchType = pure,
+          mapOnFParam = pure,
+          mapOnLParam = pure,
           mapOnOp = error "Unhandled Op in first order transform"
         }
 
@@ -110,7 +110,7 @@ resultArray arrs ts = do
   arrs_ts <- mapM lookupType arrs
   let oneArray t@Acc {}
         | Just (v, _) <- find ((== t) . snd) (zip arrs arrs_ts) =
-          pure v
+            pure v
       oneArray t =
         letExp "result" =<< eBlank t
   mapM oneArray ts
@@ -174,13 +174,13 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
               SubExp $ Var $ paramName acc_out_p
           Nothing
             | paramName p `nameIn` lam_cons -> do
-              p' <-
-                letExp (baseString (paramName p)) . BasicOp $
-                  Index arr $ fullSlice arr_t [DimFix $ Var i]
-              letBindNames [paramName p] $ BasicOp $ Copy p'
+                p' <-
+                  letExp (baseString (paramName p)) . BasicOp $
+                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+                letBindNames [paramName p] $ BasicOp $ Copy p'
             | otherwise ->
-              letBindNames [paramName p] $
-                BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
+                letBindNames [paramName p] $
+                  BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -209,7 +209,7 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
         certifying (foldMap resCerts map_res) $
           letwith (map paramName mapout_params) (Var i) $ map resSubExp map_res
 
-      return . mkBody mempty . concat $
+      pure . mkBody mempty . concat $
         [ scan_res',
           varsRes scan_outarrs,
           red_res',
@@ -299,7 +299,7 @@ transformSOAC pat (Scatter len ivs lam as) = do
                 BasicOp $ Update Safe arr' (fullSlice arr_t $ map (DimFix . resSubExp) indexCur) valueCur
 
         foldM saveInArray arr indexes'
-      return $ resultBody (map Var ress)
+      pure $ resultBody (map Var ress)
   letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len imgs ops bucket_fun) = do
   iter <- newVName "iter"
@@ -352,7 +352,7 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
 
           pure $ varsRes hist'
 
-    return $ resultBody $ map Var $ concat hists_out''
+    pure $ resultBody $ map Var $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
   letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
@@ -374,7 +374,7 @@ transformLambda (Lambda params body rettype) = do
     runBodyBuilder $
       localScope (scopeOfLParams params) $
         transformBody body
-  return $ Lambda params body' rettype
+  pure $ Lambda params body' rettype
 
 letwith :: Transformer m => [VName] -> SubExp -> [SubExp] -> m [VName]
 letwith ks i vs = do

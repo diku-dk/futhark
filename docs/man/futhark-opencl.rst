@@ -160,10 +160,6 @@ The following additional options are accepted.
   The special string ``#k``, where ``k`` is an integer, can be used to
   pick the *k*-th platform, numbered from zero.
 
---print-sizes
-
-  Print all sizes that can be set with ``-size`` or ``--tuning``.
-
 -P, --profile
 
   Gather profiling data while executing and print out a summary at the
@@ -174,7 +170,7 @@ The following additional options are accepted.
 
   Set a tuning parameter to the given
   value. ``ASSIGNMENT`` must be of the form ``NAME=INT`` Use
-  ``--print-sizes`` to see which names are available.
+  ``--print-params`` to see which names are available.
 
 --print-params
 

@@ -9,11 +9,162 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Somewhat simplified the handling of "uniqueness types" (which is a
+  term we are moving away from).  You should never see `*` in
+  non-function types, and they are better thought of as effect
+  indicators.
+
+* `futhark literate`: prints tracing output (and other logging
+  messages that may occur) when run with `-v` (#1678).
+
+* Entry points can now be any valid Futhark identifier.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* `futhark test -C` was broken.
+
+* `futhark_context_free()` for the GPU backends neglected to free some
+  memory used for internal bookkeeping, which could lead to memory
+  leaks for processes that repeatedly create and destroy contexts
+  (#1676).
+
+* FutharkScript now allows `'` in names.
+
+## [0.21.11]
+
+### Added
+
+* The CUDA backend now supports compute capability 8.6 and 8.7.
+
+* Philip Børgesen has implemented a new optimisation for GPU backends
+  that migrates scalar work to the GPU, in order to reduce
+  synchronisation.  This results in major speedup for some programs.
+
+* String literals are now allowed in `input` blocks.
+
+* Experimental and undocumented support for automatic differentiation,
+  available on the secret menu.
+
+* Assertions and attributes are now ignored when used as size
+  expressions.  E.g. `iota (assert p n) 0` now has size `n`.
+
+* `futhark test` only runs the interpreter if passed `-i`.
+
+* `futhark literate` now shows progress bars when run with `-v`.
+
+### Fixed
+
+* `futhark lsp` is now better at handling multiple files (#1647).
+
+* Incorrect handling of local quantification when determining type
+  equivalence in during module type ascription (#1648).
+
+* Incorrect checking of liftedness when instantiating polymorphic
+  functions during module type ascription.
+
+* Tightened some restrictions on the use of existential sizes that
+  could otherwise lead to compiler crashes (#1650).  This restriction
+  is perhaps a bit *too* might and it may be possible to loosen it in
+  the future.
+
+* Another defunctorisation bug (#1653).  Somehow we find these every
+  time Martin Elsman writes a nontrivial Futhark program.
+
+* `futhark bench`: convergence phase now does at least `--runs` runs.
+
+* Errors and warnings no longer awkwardly mixed together in console output.
+
+* Slightly better type errors for ambiguous sizes (#1661).
+
+* Better type errors for module ascription involving nested modules
+  (#1660).
+
+* `futhark doc`: some formatting bugs.
+
+* `futhark doc` didn't notice all `local` module types (#1666).
+
+* Missing consumption check in optimisation could lead to ICE (#1669).
+
+## [0.21.10]
+
+### Added
+
+* New math functions: `f16.erf`, `f32.erf`, `f64.erf`.
+
+* New math functions: `f16.erfc`, `f32.erfc`, `f64.erfc`.
+
+* New math functions: `f16.cbrt`, `f32.cbrt`, `f64.cbrt`.
+
+### Fixed
+
+* Variables being indexed now have correct source spans in AST.
+
+* `futhark lsp`s hover information now contains proper range information.
+
+* `futhark query` and `futhark lsp` incorrectly thought size
+  parameters had type `i32`.
+
+* `futhark doc` put documentation for prelude modules in the wrong
+  location (which also led to messed-up style sheets).
+
+## [0.21.9]
+
+### Added
+
+* Sun Haoran has implemented unnamed typed holes, with syntax `???`.
+
+* Sun Haoran has implemented the beginnings of a language server:
+  `futhark lsp`.  A VSCode language extension is available on the
+  marketplace, but the language server should work with any editor.
+
+* Crucial new command: `futhark thanks`.
+
+* The GPU backends now support a caching mechanism for JIT-compiled
+  code, significantly improving startup times.  Use the
+  `futhark_context_config_set_cache_file()` in the C API, the
+  `--cache-file` option on executables, or the `--cache-extension`
+  option on `futhark test` and `futhark bench`.  These also work for
+  the non-GPU backends, but currently have no effect.  (#1614)
+
+* Aleksander Junge has improved `futhark bench` such that it
+  intelligently chooses how many runs to perform (#1335).
+
+### Fixed
+
+* Incomplete simplification would cause some instances of nested
+  parallelism to require irregular allocations (#1610).
+
+* Missing alias checking for a simplification rule related to in-place
+  updates (#1615, #1628).
+
+* Incorrect code generation for certain copies of transposed arrays
+  (#1627).
+
+* Fusion would mistakenly try to treat some loops with irregular sizes
+  (#1631).
+
+* Memory annotation bug for non-inlined functions (#1634).
+
+## [0.21.8]
+
+### Added
+
+* Slightly better parse errors (again).
+
+* `futhark literate` now supports a `file:` option in `:img` and
+  `:video` directives (#1491).
+
+### Fixed
+
+* Improved hoisting of size computations.  This could cause some
+  regular nested parallel programs to run into compiler limitations,
+  as if they were irregular.
+
+* Rare code generation bug for histograms (#1609).
 
 ## [0.21.7]
 

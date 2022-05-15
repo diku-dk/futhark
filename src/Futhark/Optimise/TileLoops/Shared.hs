@@ -80,7 +80,7 @@ forLoop ::
   Builder GPU VName
 forLoop i_bound merge body = do
   res_list <- forLoop' i_bound merge body
-  return $ head res_list
+  pure $ head res_list
 
 segMap1D ::
   String ->
@@ -96,7 +96,7 @@ segMap1D desc lvl manifest f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBuilder $ do
     res <- f ltid
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms res
 
   let ret (SubExpRes cs se) = Returns manifest cs se
@@ -121,7 +121,7 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_yy, ltid_xx)
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
@@ -146,7 +146,7 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
     res <- f (ltid_z, ltid_y, ltid_x)
     ts <- mapM subExpResType res
-    return (ts, res)
+    pure (ts, res)
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
@@ -174,14 +174,14 @@ segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
         SegThread
           (segNumGroups lvl)
           (segGroupSize lvl)
-          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims -1]))
+          (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
   ((t_v, res_v, res_i), stms) <- runBuilder $ do
     (res_v, res_i) <-
       localScope (scopeOfSegSpace segspace) $
         f seq_is (ltid_y, ltid_x)
     t_v <- subExpType res_v
-    return (t_v, res_v, res_i)
+    pure (t_v, res_v, res_i)
 
   let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
@@ -212,9 +212,9 @@ isTileableRedomap stm
     not (null arrs),
     all primType $ lambdaReturnType map_lam,
     all (primType . paramType) $ lambdaParams map_lam =
-    Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
+      Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
   | otherwise =
-    Nothing
+      Nothing
 
 defVarianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 defVarianceInStm variance stm =
@@ -229,24 +229,24 @@ defVarianceInStm variance stm =
 varianceInStm :: VarianceTable -> Stm GPU -> VarianceTable
 varianceInStm v0 stm@(Let _ _ (Op (OtherOp Screma {})))
   | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap stm =
-    let v = defVarianceInStm v0 stm
-        red_ps = lambdaParams red_lam
-        map_ps = lambdaParams map_lam
-        card_red = length red_nes
-        acc_lam_f = take (card_red `quot` 2) red_ps
-        arr_lam_f = drop (card_red `quot` 2) red_ps
-        stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
+      let v = defVarianceInStm v0 stm
+          red_ps = lambdaParams red_lam
+          map_ps = lambdaParams map_lam
+          card_red = length red_nes
+          acc_lam_f = take (card_red `quot` 2) red_ps
+          arr_lam_f = drop (card_red `quot` 2) red_ps
+          stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
 
-        f vacc (v_a, v_fm, v_fr_acc, v_fr_var) =
-          let vrc = oneName v_a <> M.findWithDefault mempty v_a vacc
-              vacc' = M.insert v_fm vrc vacc
-              vrc' = oneName v_fm <> vrc
-           in M.insert v_fr_acc (oneName v_fr_var <> vrc') $ M.insert v_fr_var vrc' vacc'
+          f vacc (v_a, v_fm, v_fr_acc, v_fr_var) =
+            let vrc = oneName v_a <> M.findWithDefault mempty v_a vacc
+                vacc' = M.insert v_fm vrc vacc
+                vrc' = oneName v_fm <> vrc
+             in M.insert v_fr_acc (oneName v_fr_var <> vrc') $ M.insert v_fr_var vrc' vacc'
 
-        v' =
-          foldl' f v $
-            zip4 arrs (map paramName map_ps) (map paramName acc_lam_f) (map paramName arr_lam_f)
-     in varianceInStms v' stm_lam
+          v' =
+            foldl' f v $
+              zip4 arrs (map paramName map_ps) (map paramName acc_lam_f) (map paramName arr_lam_f)
+       in varianceInStms v' stm_lam
 varianceInStm v0 stm = defVarianceInStm v0 stm
 
 varianceInStms :: VarianceTable -> Stms GPU -> VarianceTable
@@ -272,33 +272,33 @@ changeEnv :: Env -> VName -> Exp GPU -> TileM Env
 changeEnv (with_env, ixfn_env) y e = do
   with_env' <- changeWithEnv with_env e
   ixfn_env' <- changeIxFnEnv ixfn_env y e
-  return (with_env', ixfn_env')
+  pure (with_env', ixfn_env')
 
 changeWithEnv :: WithEnv -> Exp GPU -> TileM WithEnv
 changeWithEnv with_env (WithAcc accum_decs inner_lam) = do
   let bindings = map mapfun accum_decs
       par_tps = take (length bindings) $ map paramName $ lambdaParams inner_lam
       with_env' = M.union with_env $ M.fromList $ zip par_tps bindings
-  return with_env'
+  pure with_env'
   where
     mapfun (_, _, Nothing) = error "What the hack is an accumulator without operator?"
     mapfun (shp, _, Just (lam_inds, ne)) =
       let len_inds = length $ shapeDims shp
           lam_op = lam_inds {lambdaParams = drop len_inds $ lambdaParams lam_inds}
        in (lam_op, ne)
-changeWithEnv with_env _ = return with_env
+changeWithEnv with_env _ = pure with_env
 
 composeIxfuns :: IxFnEnv -> VName -> VName -> (IxFun -> IxFun) -> TileM IxFnEnv
 composeIxfuns env y x ixf_fun =
   case M.lookup x env of
-    Just ixf -> return $ M.insert y (ixf_fun ixf) env
+    Just ixf -> pure $ M.insert y (ixf_fun ixf) env
     Nothing -> do
       tp <- lookupType x
       case tp of
         Array _ptp shp _u -> do
           let shp' = map ExpMem.pe64 (shapeDims shp)
-          return $ M.insert y (ixf_fun $ IxFun.iota shp') env
-        _ -> return env
+          pure $ M.insert y (ixf_fun $ IxFun.iota shp') env
+        _ -> pure env
 
 changeIxFnEnv :: IxFnEnv -> VName -> Exp GPU -> TileM IxFnEnv
 changeIxFnEnv env y (BasicOp (Reshape shp_chg x)) =
@@ -309,7 +309,7 @@ changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
     Array _ptp shp _u -> do
       let shp' = map ExpMem.pe64 (shapeDims shp)
       let ixfn = IxFun.permute (IxFun.iota shp') perm
-      return $ M.insert y ixfn env
+      pure $ M.insert y ixfn env
     _ -> error "In TileLoops/Shared.hs, changeIxFnEnv: manifest applied to a non-array!"
 changeIxFnEnv env y (BasicOp (Rearrange perm x)) =
   composeIxfuns env y x (`IxFun.permute` perm)
@@ -319,4 +319,4 @@ changeIxFnEnv env y (BasicOp (Index x slc)) =
   composeIxfuns env y x (`IxFun.slice` (Slice $ map (fmap ExpMem.pe64) $ unSlice slc))
 changeIxFnEnv env y (BasicOp (Opaque _ (Var x))) =
   composeIxfuns env y x id
-changeIxFnEnv env _ _ = return env
+changeIxFnEnv env _ _ = pure env

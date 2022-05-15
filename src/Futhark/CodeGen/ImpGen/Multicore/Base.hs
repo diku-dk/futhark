@@ -55,22 +55,22 @@ data HostEnv = HostEnv
 type MulticoreGen = ImpM MCMem HostEnv Imp.Multicore
 
 segOpString :: SegOp () MCMem -> MulticoreGen String
-segOpString SegMap {} = return "segmap"
-segOpString SegRed {} = return "segred"
-segOpString SegScan {} = return "segscan"
-segOpString SegHist {} = return "seghist"
+segOpString SegMap {} = pure "segmap"
+segOpString SegRed {} = pure "segred"
+segOpString SegScan {} = pure "segscan"
+segOpString SegHist {} = pure "seghist"
 
 arrParam :: VName -> MulticoreGen Imp.Param
 arrParam arr = do
   name_entry <- lookupVar arr
   case name_entry of
     ArrayVar _ (ArrayEntry (MemLoc mem _ _) _) ->
-      return $ Imp.MemParam mem DefaultSpace
+      pure $ Imp.MemParam mem DefaultSpace
     _ -> error $ "arrParam: could not handle array " ++ show arr
 
 toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
-toParam name (Prim pt) = return [Imp.ScalarParam name pt]
-toParam name (Mem space) = return [Imp.MemParam name space]
+toParam name (Prim pt) = pure [Imp.ScalarParam name pt]
+toParam name (Mem space) = pure [Imp.MemParam name space]
 toParam name Array {} = pure <$> arrParam name
 toParam _name Acc {} = pure [] -- FIXME?  Are we sure this works?
 
@@ -91,16 +91,16 @@ getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64
 getIterationDomain SegMap {} space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
-  return $ product ns_64
+  pure $ product ns_64
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
       ns_64 = map toInt64Exp ns
   case unSegSpace space of
-    [_] -> return $ product ns_64
+    [_] -> pure $ product ns_64
     -- A segmented SegOp is over the segments
     -- so we drop the last dimension, which is
     -- executed sequentially
-    _ -> return $ product $ init ns_64
+    _ -> pure $ product $ init ns_64
 
 -- When the SegRed's return value is a scalar
 -- we perform a call by value-result in the segop function
@@ -114,13 +114,13 @@ getReturnParams pat SegRed {} =
       Prim pt -> patElemName pe <~~ ValueExp (blankPrimValue pt)
       _ -> pure ()
     toParam (patElemName pe) (patElemType pe)
-getReturnParams _ _ = return mempty
+getReturnParams _ _ = pure mempty
 
 renameSegBinOp :: [SegBinOp MCMem] -> MulticoreGen [SegBinOp MCMem]
 renameSegBinOp segbinops =
   forM segbinops $ \(SegBinOp comm lam ne shape) -> do
     lam' <- renameLambda lam
-    return $ SegBinOp comm lam' ne shape
+    pure $ SegBinOp comm lam' ne shape
 
 compileThreadResult ::
   SegSpace ->
@@ -196,7 +196,7 @@ extractAllocations segop_code = f segop_code
       (Imp.DeclareMem name space, mempty)
     f (Imp.Allocate name size space)
       | not $ freeIn size `namesIntersect` declared =
-        (Imp.Allocate name size space, mempty)
+          (Imp.Allocate name size space, mempty)
     f (x Imp.:>>: y) = f x <> f y
     f (Imp.While cond body) =
       (mempty, Imp.While cond body)
@@ -254,7 +254,7 @@ renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
 renameHistOpLambda hist_ops =
   forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
     lam' <- renameLambda lam
-    return $ HistOp w rf dest neutral shape lam'
+    pure $ HistOp w rf dest neutral shape lam'
 
 -- | Locking strategy used for an atomic update.
 data Locking = Locking
@@ -294,23 +294,23 @@ atomicUpdateLocking ::
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
     all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
-    primOrCas ops_and_ts $ \arrs bucket ->
-      -- If the operator is a vectorised binary operator on 32-bit values,
-      -- we can use a particularly efficient implementation. If the
-      -- operator has an atomic implementation we use that, otherwise it
-      -- is still a binary operator which can be implemented by atomic
-      -- compare-and-swap if 32 bits.
-      forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
-        -- Common variables.
-        old <- dPrim "old" t
+      primOrCas ops_and_ts $ \arrs bucket ->
+        -- If the operator is a vectorised binary operator on 32-bit values,
+        -- we can use a particularly efficient implementation. If the
+        -- operator has an atomic implementation we use that, otherwise it
+        -- is still a binary operator which can be implemented by atomic
+        -- compare-and-swap if 32 bits.
+        forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
+          -- Common variables.
+          old <- dPrim "old" t
 
-        (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
+          (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
 
-        case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
-          Just f -> sOp $ f $ Imp.var y t
-          Nothing ->
-            atomicUpdateCAS t a (tvVar old) bucket x $
-              x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
+          case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
+            Just f -> sOp $ f $ Imp.var y t
+            Nothing ->
+              atomicUpdateCAS t a (tvVar old) bucket x $
+                x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport old arr' bucket' bop = do
       let atomic f = Imp.Atomic . f old arr' bucket'
@@ -325,9 +325,9 @@ atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
-    old <- dPrim "old" t
-    atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
-      compileBody' [xp] $ lambdaBody op
+      old <- dPrim "old" t
+      atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
+        compileBody' [xp] $ lambdaBody op
 atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)
@@ -455,8 +455,8 @@ supportedPrims _ = False
 
 -- Supported bytes lengths by GCC (and clang) compiler
 toIntegral :: Int -> MulticoreGen PrimType
-toIntegral 8 = return int8
-toIntegral 16 = return int16
-toIntegral 32 = return int32
-toIntegral 64 = return int64
+toIntegral 8 = pure int8
+toIntegral 16 = pure int16
+toIntegral 32 = pure int32
+toIntegral 64 = pure int64
 toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b

@@ -12,14 +12,18 @@ pkgs.stdenv.mkDerivation {
     pkgs.git
     pkgs.git-annex
     pkgs.ghc
+    pkgs.parallel
     pkgs.haskellPackages.weeder
+    pkgs.haskellPackages.graphmod
+    pkgs.haskellPackages.apply-refact
+    pkgs.xdot
     pkgs.hlint
     pkgs.pkgconfig
     pkgs.zlib
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
-    pkgs.ormolu
+    pkgs.haskell.packages.ghc922.ormolu_0_4_0_0
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl
@@ -30,6 +34,8 @@ pkgs.stdenv.mkDerivation {
   ]
   ++ pkgs.lib.optionals (pkgs.stdenv.isLinux)
     [ pkgs.opencl-headers
-      pkgs.ocl-icd ]
+      pkgs.ocl-icd
+      pkgs.oclgrind
+    ]
   ;
 }

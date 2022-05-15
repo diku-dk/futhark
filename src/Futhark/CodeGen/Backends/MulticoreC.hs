@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.
@@ -17,6 +16,7 @@ module Futhark.CodeGen.Backends.MulticoreC
 where
 
 import Control.Monad
+import Data.Loc
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
@@ -45,9 +45,11 @@ compileProg version =
         [DefaultSpace]
         cliOptions
     )
-    <=< ImpGen.compileProg
+    <=< ImpGen.compileProg ImpGen.AllowDynamicScheduling
 
-generateContext :: GC.CompilerM op () ()
+-- | Generate the multicore context definitions.  This is exported
+-- because the WASM backend needs it.
+generateContext :: GC.CompilerM op s ()
 generateContext = do
   mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack schedulerH)|]
 
@@ -57,6 +59,7 @@ generateContext = do
                                int debugging;
                                int profiling;
                                int num_threads;
+                               const char *cache_fname;
                              };|]
     )
 
@@ -70,6 +73,7 @@ generateContext = do
                              cfg->in_use = 0;
                              cfg->debugging = 0;
                              cfg->profiling = 0;
+                             cfg->cache_fname = NULL;
                              cfg->num_threads = 0;
                              return cfg;
                            }|]
@@ -215,6 +219,7 @@ generateContext = do
                    }|]
     )
 
+-- | Multicore-related command line options.
 cliOptions :: [Option]
 cliOptions =
   [ Option
@@ -233,7 +238,8 @@ cliOptions =
       }
   ]
 
-operations :: GC.Operations Multicore ()
+-- | Operations for generating multicore code.
+operations :: GC.Operations Multicore s
 operations =
   GC.defaultOperations
     { GC.opsCompiler = compileOp,
@@ -256,12 +262,12 @@ closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
   nameFromString "retval_" <> nameFromString (pretty v)
 
-data ValueType = Prim | MemBlock | RawMem
+data ValueType = Prim PrimType | MemBlock | RawMem
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
   where
-    field name (ty, Prim) =
+    field name (ty, Prim _) =
       [C.csdecl|$ty:ty $id:(closureFreeStructField name);|]
     field name (_, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
@@ -269,7 +275,7 @@ compileFreeStructFields = zipWith field
 compileRetvalStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileRetvalStructFields = zipWith field
   where
-    field name (ty, Prim) =
+    field name (ty, Prim _) =
       [C.csdecl|$ty:ty *$id:(closureRetvalStructField name);|]
     field name (_, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
@@ -282,8 +288,8 @@ compileSetStructValues ::
   [C.Stm]
 compileSetStructValues struct = zipWith field
   where
-    field name (_, Prim) =
-      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
+    field name (_, Prim pt) =
+      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$exp:(toStorage pt (C.toExp name noLoc));|]
     field name (_, MemBlock) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name.mem;|]
     field name (_, RawMem) =
@@ -295,20 +301,21 @@ compileSetRetvalStructValues ::
   [VName] ->
   [(C.Type, ValueType)] ->
   [C.Stm]
-compileSetRetvalStructValues struct = zipWith field
+compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
   where
-    field name (_, Prim) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=&$id:name;|]
+    field name (ct, Prim _) =
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=(($ty:ct*)&$id:name);|]
     field name (_, MemBlock) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
     field name (_, RawMem) =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
 compileGetRetvalStructVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field
   where
-    field name (ty, Prim) =
-      [C.cdecl|$ty:ty $id:name = *$id:struct->$id:(closureRetvalStructField name);|]
+    field name (ty, Prim pt) =
+      let inner = [C.cexp|*$id:struct->$id:(closureRetvalStructField name)|]
+       in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(pretty name),
@@ -323,8 +330,9 @@ compileGetStructVals ::
   [C.InitGroup]
 compileGetStructVals struct = zipWith field
   where
-    field name (ty, Prim) =
-      [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureFreeStructField name);|]
+    field name (ty, Prim pt) =
+      let inner = [C.cexp|$id:struct->$id:(closureFreeStructField name)|]
+       in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(pretty name),
@@ -334,22 +342,22 @@ compileGetStructVals struct = zipWith field
 compileWriteBackResVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
 compileWriteBackResVals struct = zipWith field
   where
-    field name (_, Prim) =
-      [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $id:name;|]
+    field name (_, Prim pt) =
+      [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $exp:(toStorage pt (C.toExp name noLoc));|]
     field name (_, _) =
       [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
 
 paramToCType :: Param -> GC.CompilerM op s (C.Type, ValueType)
 paramToCType (ScalarParam _ pt) = do
-  let t = GC.primTypeToCType pt
-  return (t, Prim)
+  let t = primStorageType pt
+  pure (t, Prim pt)
 paramToCType (MemParam name space') = mcMemToCType name space'
 
 mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
 mcMemToCType v space = do
   refcount <- GC.fatMemory space
   cached <- isJust <$> GC.cacheMem v
-  return
+  pure
     ( GC.fatMemType space,
       if refcount && not cached
         then MemBlock
@@ -419,17 +427,17 @@ addBenchmarkFields name (Just _) = do
   GC.contextFieldDyn
     (functionRuntime name)
     [C.cty|typename int64_t*|]
-    [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
+    (Just [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|])
     [C.cstm|free(ctx->$id:(functionRuntime name));|]
   GC.contextFieldDyn
     (functionRuns name)
     [C.cty|int*|]
-    [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
+    (Just [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|])
     [C.cstm|free(ctx->$id:(functionRuns name));|]
   GC.contextFieldDyn
     (functionIter name)
     [C.cty|typename int64_t*|]
-    [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|]
+    (Just [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|])
     [C.cstm|free(ctx->$id:(functionIter name));|]
 addBenchmarkFields name Nothing = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
@@ -439,7 +447,7 @@ addBenchmarkFields name Nothing = do
 benchmarkCode :: Name -> Maybe C.Id -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name tid code = do
   addBenchmarkFields name tid
-  return
+  pure
     [C.citems|
      typename uint64_t $id:start = 0;
      if (ctx->profiling && !ctx->profiling_paused) {
@@ -478,13 +486,15 @@ addTimingFields name = do
 multicoreName :: String -> GC.CompilerM op s Name
 multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
-  return $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
+  pure $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
 
-multicoreDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
+type DefSpecifier s = String -> (Name -> GC.CompilerM Multicore s C.Definition) -> GC.CompilerM Multicore s Name
+
+multicoreDef :: DefSpecifier s
 multicoreDef s f = do
   s' <- multicoreName s
   GC.libDecl =<< f s'
-  return s'
+  pure s'
 
 generateParLoopFn ::
   C.ToIdent a =>
@@ -509,7 +519,7 @@ generateParLoopFn lexical basename code fstruct free retval = do
         mapM_ GC.item code'
         free_mem <- GC.freeAllocatedMem
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
-    return
+    pure
       [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
                            int err = 0;
                            int subtask_id = tid;
@@ -523,28 +533,31 @@ generateParLoopFn lexical basename code fstruct free retval = do
                       }|]
 
 prepareTaskStruct ::
+  DefSpecifier s ->
   String ->
   [VName] ->
   [(C.Type, ValueType)] ->
   [VName] ->
   [(C.Type, ValueType)] ->
   GC.CompilerM Multicore s Name
-prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
-  fstruct <- multicoreDef name $ \s ->
-    return
-      [C.cedecl|struct $id:s {
+prepareTaskStruct def name free_args free_ctypes retval_args retval_ctypes = do
+  let makeStruct s =
+        pure
+          [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
-  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
-  GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
-  GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct retval_args retval_ctypes)|]
-  return fstruct
+  fstruct <- def name makeStruct
+  let fstruct' = fstruct <> "_"
+  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct';|]
+  GC.stm [C.cstm|$id:fstruct'.ctx = ctx;|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct' free_args free_ctypes)|]
+  GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct' retval_args retval_ctypes)|]
+  pure fstruct
 
 -- Generate a segop function for top_level and potentially nested SegOp code
-compileOp :: GC.OpCompiler Multicore ()
+compileOp :: GC.OpCompiler Multicore s
 compileOp (GetLoopBounds start end) = do
   GC.stm [C.cstm|$id:start = start;|]
   GC.stm [C.cstm|$id:end = end;|]
@@ -563,17 +576,17 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   e' <- GC.compileExp e
 
-  let lexical = lexicalMemoryUsage $ Function Nothing [] params seq_code [] []
+  let lexical = lexicalMemoryUsageMC TraverseKernels $ Function Nothing [] params seq_code [] []
 
   fstruct <-
-    prepareTaskStruct "task" free_args free_ctypes retval_args retval_ctypes
+    prepareTaskStruct multicoreDef "task" free_args free_ctypes retval_args retval_ctypes
 
   fpar_task <- generateParLoopFn lexical (name ++ "_task") seq_code fstruct free retval
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
   GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
-  GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
+  GC.stm [C.cstm|$id:ftask_name.args = &$id:(fstruct <> "_");|]
   GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
   GC.stm [C.cstm|$id:ftask_name.iterations = $exp:e';|]
@@ -588,13 +601,13 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   -- Generate the nested segop function if available
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code) -> do
-      let lexical_nested = lexicalMemoryUsage $ Function Nothing [] params nested_code [] []
+      let lexical_nested = lexicalMemoryUsageMC TraverseKernels $ Function Nothing [] params nested_code [] []
       fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-      return $ zip [fnpar_task] [True]
+      pure $ zip [fnpar_task] [True]
     Nothing -> do
       GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-      return mempty
+      pure mempty
 
   free_all_mem <- GC.freeAllocatedMem
   let ftask_err = fpar_task <> "_err"
@@ -614,10 +627,10 @@ compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
-  let lexical = lexicalMemoryUsage $ Function Nothing [] free body [] []
+  let lexical = lexicalMemoryUsageMC TraverseKernels $ Function Nothing [] free body [] []
 
   fstruct <-
-    prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
+    prepareTaskStruct multicoreDef (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
 
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
@@ -635,20 +648,24 @@ compileOp (ParLoop s' body free) = do
         free_mem <- GC.freeAllocatedMem
         mapM_ GC.item body'
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
-    return
-      [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int subtask_id, int tid) {
+    pure
+      [C.cedecl|static int $id:s(void *args,
+                                 typename int64_t start,
+                                 typename int64_t end,
+                                 int subtask_id,
+                                 int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
                        $items:fbody
                        return err;
-                     }|]
+                }|]
 
   let ftask_name = ftask <> "_task"
   GC.decl [C.cdecl|struct scheduler_parloop $id:ftask_name;|]
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString ftask);|]
   GC.stm [C.cstm|$id:ftask_name.fn = $id:ftask;|]
-  GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
+  GC.stm [C.cstm|$id:ftask_name.args = &$id:(fstruct <> "_");|]
   GC.stm [C.cstm|$id:ftask_name.iterations = iterations;|]
   GC.stm [C.cstm|$id:ftask_name.info = info;|]
 
@@ -668,7 +685,7 @@ compileOp (ParLoop s' body free) = do
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
 compileOp (Atomic aop) =
-  atomicOps aop
+  atomicOps aop (\ty _ -> pure [C.cty|$ty:ty*|])
 
 doAtomic ::
   (C.ToIdent a1) =>
@@ -678,42 +695,44 @@ doAtomic ::
   Exp ->
   String ->
   C.Type ->
+  (C.Type -> VName -> GC.CompilerM op s C.Type) ->
   GC.CompilerM op s ()
-doAtomic old arr ind val op ty = do
+doAtomic old arr ind val op ty castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
+  cast <- castf ty arr
   arr' <- GC.rawMem arr
-  GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
-atomicOps :: AtomicOp -> GC.CompilerM op s ()
-atomicOps (AtomicCmpXchg t old arr ind res val) = do
+atomicOps :: AtomicOp -> (C.Type -> VName -> GC.CompilerM op s C.Type) -> GC.CompilerM op s ()
+atomicOps (AtomicCmpXchg t old arr ind res val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
-  let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
   arr' <- GC.rawMem arr
   GC.stm
     [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
-                ($ty:cast)&$id:old,
+                 &$id:old,
                  $exp:new_val',
                  0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);|]
   where
     op :: String
     op = "__atomic_compare_exchange_n"
-atomicOps (AtomicXchg t old arr ind val) = do
+atomicOps (AtomicXchg t old arr ind val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
-  let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_SEQ_CST);|]
   where
     op :: String
     op = "__atomic_exchange_n"
-atomicOps (AtomicAdd t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicSub t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicAnd t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicOr t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|]
-atomicOps (AtomicXor t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|]
+atomicOps (AtomicAdd t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps (AtomicSub t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps (AtomicAnd t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps (AtomicOr t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps (AtomicXor t old arr ind val) castf =
+  doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|] castf

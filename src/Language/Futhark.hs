@@ -19,7 +19,6 @@ module Language.Futhark
     Spec,
     Prog,
     TypeBind,
-    TypeDecl,
     StructTypeArg,
     ScalarType,
     TypeParam,
@@ -51,9 +50,6 @@ type Pat = PatBase Info VName
 
 -- | An constant declaration with type information.
 type ValBind = ValBindBase Info VName
-
--- | A type declaration with type information
-type TypeDecl = TypeDeclBase Info VName
 
 -- | A type binding with type information.
 type TypeBind = TypeBindBase Info VName

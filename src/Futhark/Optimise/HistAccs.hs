@@ -39,8 +39,8 @@ extractUpdate accs v stms = do
   case stm of
     Let (Pat [PatElem pe_v _]) _ (BasicOp (UpdateAcc acc is vs))
       | pe_v == v -> do
-        acc_input <- M.lookup acc accs
-        Just ((acc_input, acc, is, vs), stms')
+          acc_input <- M.lookup acc accs
+          Just ((acc_input, acc, is, vs), stms')
     _ -> do
       (x, stms'') <- extractUpdate accs v stms'
       pure (x, oneStm stm <> stms'')
@@ -120,30 +120,30 @@ optimiseStm accs (Let pat aux (Op (SegOp (SegMap lvl space _ kbody))))
     Just (kbody', (acc_shape, _, Just (acc_lam, acc_nes)), acc) <-
       mkHistBody accs kbody,
     all primType $ lambdaReturnType acc_lam = runBuilder_ $ do
-    hist_dests <- forM acc_nes $ \ne ->
-      letExp "hist_dest" $ BasicOp $ Replicate acc_shape ne
+      hist_dests <- forM acc_nes $ \ne ->
+        letExp "hist_dest" $ BasicOp $ Replicate acc_shape ne
 
-    acc_lam' <- withAccLamToHistLam acc_shape acc_lam
+      acc_lam' <- withAccLamToHistLam acc_shape acc_lam
 
-    let ts' =
-          replicate (shapeRank acc_shape) (Prim int64)
-            ++ lambdaReturnType acc_lam
-        histop =
-          HistOp
-            { histShape = acc_shape,
-              histRaceFactor = intConst Int64 1,
-              histDest = hist_dests,
-              histNeutral = acc_nes,
-              histOpShape = mempty,
-              histOp = acc_lam'
-            }
+      let ts' =
+            replicate (shapeRank acc_shape) (Prim int64)
+              ++ lambdaReturnType acc_lam
+          histop =
+            HistOp
+              { histShape = acc_shape,
+                histRaceFactor = intConst Int64 1,
+                histDest = hist_dests,
+                histNeutral = acc_nes,
+                histOpShape = mempty,
+                histOp = acc_lam'
+              }
 
-    (space', kbody'') <- flatKernelBody space kbody'
+      (space', kbody'') <- flatKernelBody space kbody'
 
-    hist_dest_upd <-
-      letTupExp "hist_dest_upd" $ Op $ SegOp $ SegHist lvl space' [histop] ts' kbody''
+      hist_dest_upd <-
+        letTupExp "hist_dest_upd" $ Op $ SegOp $ SegHist lvl space' [histop] ts' kbody''
 
-    addStm . Let pat aux =<< addArrsToAcc lvl acc_shape hist_dest_upd acc
+      addStm . Let pat aux =<< addArrsToAcc lvl acc_shape hist_dest_upd acc
 optimiseStm accs (Let pat aux e) =
   oneStm . Let pat aux <$> optimiseExp accs e
 

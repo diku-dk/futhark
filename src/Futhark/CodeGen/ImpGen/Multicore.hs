@@ -5,6 +5,7 @@
 module Futhark.CodeGen.ImpGen.Multicore
   ( Futhark.CodeGen.ImpGen.Multicore.compileProg,
     Warnings,
+    SchedulingMode (..),
   )
 where
 
@@ -40,18 +41,22 @@ gccAtomics = flip lookup cpu
         (Or Int64, Imp.AtomicOr Int64)
       ]
 
+data SchedulingMode = AllowDynamicScheduling | NoDynamicScheduling
+
+-- | Compile the program.
 compileProg ::
   MonadFreshNames m =>
+  SchedulingMode ->
   Prog MCMem ->
   m (Warnings, Imp.Definitions Imp.Multicore)
-compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops Imp.DefaultSpace
+compileProg sched = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops Imp.DefaultSpace
   where
     ops =
       (defaultOperations opCompiler)
         { opsExpCompiler = compileMCExp
         }
     opCompiler dest (Alloc e space) = compileAlloc dest e space
-    opCompiler dest (Inner op) = compileMCOp dest op
+    opCompiler dest (Inner op) = compileMCOp sched dest op
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
 updateAcc acc is vs = sComment "UpdateAcc" $ do
@@ -97,15 +102,15 @@ withAcc pat inputs lam = do
     locksForInputs atomics ((c, (_, _, op)) : inputs')
       | Just (op_lam, _) <- op,
         AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
-        let num_locks = 100151
-        locks_arr <-
-          sStaticArray "withacc_locks" DefaultSpace int32 $
-            Imp.ArrayZeros num_locks
-        let locks = Locks locks_arr num_locks
-            extend env = env {hostLocks = M.insert c locks $ hostLocks env}
-        localEnv extend $ locksForInputs atomics inputs'
+          let num_locks = 100151
+          locks_arr <-
+            sStaticArray "withacc_locks" DefaultSpace int32 $
+              Imp.ArrayZeros num_locks
+          let locks = Locks locks_arr num_locks
+              extend env = env {hostLocks = M.insert c locks $ hostLocks env}
+          localEnv extend $ locksForInputs atomics inputs'
       | otherwise =
-        locksForInputs atomics inputs'
+          locksForInputs atomics inputs'
 
 compileMCExp :: ExpCompiler MCMem HostEnv Imp.Multicore
 compileMCExp _ (BasicOp (UpdateAcc acc is vs)) =
@@ -116,11 +121,12 @@ compileMCExp dest e =
   defCompileExp dest e
 
 compileMCOp ::
+  SchedulingMode ->
   Pat LetDecMem ->
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
-compileMCOp _ (OtherOp ()) = pure ()
-compileMCOp pat (ParOp par_op op) = do
+compileMCOp _ _ (OtherOp ()) = pure ()
+compileMCOp sched pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
@@ -148,7 +154,9 @@ compileMCOp pat (ParOp par_op op) = do
   free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
   emit . Imp.Op $
     Imp.SegOp s free_params seq_task par_task retvals $
-      scheduling_info (decideScheduling' op seq_code)
+      case sched of
+        AllowDynamicScheduling -> scheduling_info (decideScheduling' op seq_code)
+        NoDynamicScheduling -> scheduling_info Imp.Static
 
 compileSegOp ::
   Pat LetDecMem ->

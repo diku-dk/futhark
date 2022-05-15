@@ -13,6 +13,7 @@ module Futhark.IR.Prop.Types
     staticShapes,
     staticShapes1,
     primType,
+    isAcc,
     arrayOf,
     arrayOfRow,
     arrayOfShape,
@@ -137,7 +138,7 @@ unique :: TypeBase shape Uniqueness -> Bool
 unique = (== Unique) . uniqueness
 
 -- | Convert types with non-existential shapes to types with
--- non-existential shapes.  Only the representation is changed, so all
+-- existential shapes.  Only the representation is changed, so all
 -- the shapes will be 'Free'.
 staticShapes :: [TypeBase Shape u] -> [TypeBase ExtShape u]
 staticShapes = map staticShapes1
@@ -287,12 +288,17 @@ primType :: TypeBase shape u -> Bool
 primType Prim {} = True
 primType _ = False
 
+-- | Is this an accumulator?
+isAcc :: TypeBase shape u -> Bool
+isAcc Acc {} = True
+isAcc _ = False
+
 -- | Returns the bottommost type of an array.  For @[][]i32@, this
 -- would be @i32@.  If the given type is not an array, it is returned.
 elemType :: TypeBase shape u -> PrimType
 elemType (Array t _ _) = t
 elemType (Prim t) = t
-elemType Acc {} = error "Acc"
+elemType Acc {} = error "elemType Acc"
 elemType Mem {} = error "elemType Mem"
 
 -- | Swap the two outer dimensions of the type.
@@ -315,7 +321,7 @@ mapOnExtType ::
   TypeBase ExtShape u ->
   m (TypeBase ExtShape u)
 mapOnExtType _ (Prim bt) =
-  return $ Prim bt
+  pure $ Prim bt
 mapOnExtType f (Acc acc ispace ts u) =
   Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts <*> pure u
   where
@@ -337,7 +343,7 @@ mapOnType ::
   (SubExp -> m SubExp) ->
   TypeBase Shape u ->
   m (TypeBase Shape u)
-mapOnType _ (Prim bt) = return $ Prim bt
+mapOnType _ (Prim bt) = pure $ Prim bt
 mapOnType f (Acc acc ispace ts u) =
   Acc <$> f' acc <*> traverse f ispace <*> mapM (mapOnType f) ts <*> pure u
   where
@@ -429,11 +435,11 @@ extractShapeContext ts shapes =
     extract' (Ext x) v = do
       seen <- gets $ S.member x
       if seen
-        then return Nothing
+        then pure Nothing
         else do
           modify $ S.insert x
-          return $ Just v
-    extract' (Free _) _ = return Nothing
+          pure $ Just v
+    extract' (Free _) _ = pure Nothing
 
 -- | The 'Ext' integers used for existential sizes in the given types.
 shapeContext :: [TypeBase ExtShape u] -> S.Set Int
@@ -467,19 +473,19 @@ generaliseExtTypes rt1 rt2 =
           (shapeDims $ arrayShape t1)
           (shapeDims $ arrayShape t2)
     unifyExtDims (Free se1) (Free se2)
-      | se1 == se2 = return $ Free se1 -- Arbitrary
+      | se1 == se2 = pure $ Free se1 -- Arbitrary
       | otherwise = do
-        (n, m) <- get
-        put (n + 1, m)
-        return $ Ext n
+          (n, m) <- get
+          put (n + 1, m)
+          pure $ Ext n
     unifyExtDims (Ext x) (Ext y)
-      | x == y = Ext <$> (maybe (new x) return =<< gets (M.lookup x . snd))
+      | x == y = Ext <$> (maybe (new x) pure =<< gets (M.lookup x . snd))
     unifyExtDims (Ext x) _ = Ext <$> new x
     unifyExtDims _ (Ext x) = Ext <$> new x
     new x = do
       (n, m) <- get
       put (n + 1, M.insert x n m)
-      return n
+      pure n
 
 -- | Given a list of 'ExtType's and a list of "forbidden" names,
 -- modify the dimensions of the 'ExtType's such that they are 'Ext'
@@ -492,7 +498,7 @@ existentialiseExtTypes inaccessible = map makeBoundShapesFree
       modifyArrayShape $ fmap checkDim
     checkDim (Free (Var v))
       | Just i <- v `elemIndex` inaccessible =
-        Ext i
+          Ext i
     checkDim d = d
 
 -- | Produce a mapping for the dimensions context.

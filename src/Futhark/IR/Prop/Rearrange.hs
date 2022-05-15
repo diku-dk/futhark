@@ -22,7 +22,7 @@ rearrangeShape perm l = map pick perm
     pick i
       | 0 <= i, i < n = l !! i
       | otherwise =
-        error $ show perm ++ " is not a valid permutation for input."
+          error $ show perm ++ " is not a valid permutation for input."
     n = length l
 
 -- | Produce the inverse permutation.
@@ -32,7 +32,7 @@ rearrangeInverse perm = map snd $ sortOn fst $ zip perm [0 ..]
 -- | Return the first dimension not affected by the permutation.  For
 -- example, the permutation @[1,0,2]@ would return @2@.
 rearrangeReach :: [Int] -> Int
-rearrangeReach perm = case dropWhile (uncurry (/=)) $ zip (tails perm) (tails [0 .. n -1]) of
+rearrangeReach perm = case dropWhile (uncurry (/=)) $ zip (tails perm) (tails [0 .. n - 1]) of
   [] -> n + 1
   (perm', _) : _ -> n - length perm'
   where
@@ -59,8 +59,8 @@ isPermutationOf l1 l2 =
     pick i (x : xs) y
       | Just y == x = Just (Nothing : xs, i)
       | otherwise = do
-        (xs', v) <- pick (i + 1) xs y
-        return (x : xs', v)
+          (xs', v) <- pick (i + 1) xs y
+          pure (x : xs', v)
 
 -- | If @l@ is an index into the array @a@, then @transposeIndex k n
 -- l@ is an index to the same element in the array @transposeArray k n
@@ -68,15 +68,15 @@ isPermutationOf l1 l2 =
 transposeIndex :: Int -> Int -> [a] -> [a]
 transposeIndex k n l
   | k + n >= length l =
-    let n' = ((k + n) `mod` length l) - k
-     in transposeIndex k n' l
+      let n' = ((k + n) `mod` length l) - k
+       in transposeIndex k n' l
   | n < 0,
     (pre, needle : end) <- splitAt k l,
     (beg, mid) <- splitAt (length pre + n) pre =
-    beg ++ [needle] ++ mid ++ end
+      beg ++ [needle] ++ mid ++ end
   | (beg, needle : post) <- splitAt k l,
     (mid, end) <- splitAt n post =
-    beg ++ mid ++ [needle] ++ end
+      beg ++ mid ++ [needle] ++ end
   | otherwise = l
 
 -- | If @perm@ is conceptually a map of a transposition,
@@ -90,20 +90,20 @@ transposeIndex k n l
 -- undefined.
 isMapTranspose :: [Int] -> Maybe (Int, Int, Int)
 isMapTranspose perm
-  | posttrans == [length mapped .. length mapped + length posttrans -1],
+  | posttrans == [length mapped .. length mapped + length posttrans - 1],
     not $ null pretrans,
     not $ null posttrans =
-    Just (length mapped, length pretrans, length posttrans)
+      Just (length mapped, length pretrans, length posttrans)
   | otherwise =
-    Nothing
+      Nothing
   where
     (mapped, notmapped) = findIncreasingFrom 0 perm
     (pretrans, posttrans) = findTransposed notmapped
 
     findIncreasingFrom x (i : is)
       | i == x =
-        let (js, ps) = findIncreasingFrom (x + 1) is
-         in (i : js, ps)
+          let (js, ps) = findIncreasingFrom (x + 1) is
+           in (i : js, ps)
     findIncreasingFrom _ is =
       ([], is)
 
