@@ -672,13 +672,17 @@ compileOp (ParLoop s' body free) = do
         mapM_ GC.item body'
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     pure
-      [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int subtask_id, int tid) {
+      [C.cedecl|static int $id:s(void *args,
+                                 typename int64_t start,
+                                 typename int64_t end,
+                                 int subtask_id,
+                                 int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
                        $items:fbody
                        return err;
-                     }|]
+                }|]
 
   let ftask_name = ftask <> "_task"
   GC.decl [C.cdecl|struct scheduler_parloop $id:ftask_name;|]
