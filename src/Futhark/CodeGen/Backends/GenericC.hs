@@ -2001,10 +2001,10 @@ compilePrimExp f (UnOpExp (FAbs Float64) x) = do
   pure [C.cexp|fabs($exp:x')|]
 compilePrimExp f (UnOpExp SSignum {} x) = do
   x' <- compilePrimExp f x
-  pure [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
+  pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0)|]
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
-  pure [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
+  pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
 compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|$id:(pretty op)($exp:x')|]
