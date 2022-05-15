@@ -270,10 +270,11 @@ data Code a
     -- all memory blocks will be freed with this statement.
     -- Backends are free to ignore it entirely.
     Free VName Space
-  | -- | Destination, offset in destination, destination
-    -- space, source, offset in source, offset space, number
-    -- of bytes.
+  | -- | Element type being copied, destination, offset in
+    -- destination, destination space, source, offset in source,
+    -- offset space, number of bytes.
     Copy
+      PrimType
       VName
       (Count Bytes (TExp Int64))
       Space
@@ -534,10 +535,11 @@ instance Pretty op => Pretty (Code op) where
     ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
   ppr (Assert e msg _) =
     text "assert" <> parens (commasep [ppr msg, ppr e])
-  ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
-    text "memcpy"
+  ppr (Copy t dest destoffset destspace src srcoffset srcspace size) =
+    text "copy"
       <> parens
-        ( ppMemLoc dest destoffset <> ppr destspace <> comma
+        ( ppr t <> comma
+            </> ppMemLoc dest destoffset <> ppr destspace <> comma
             </> ppMemLoc src srcoffset <> ppr srcspace <> comma
             </> ppr size
         )
@@ -617,8 +619,8 @@ instance Traversable Code where
     pure $ Allocate name size s
   traverse _ (Free name space) =
     pure $ Free name space
-  traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
-    pure $ Copy dest destoffset destspace src srcoffset srcspace size
+  traverse _ (Copy dest pt destoffset destspace src srcoffset srcspace size) =
+    pure $ Copy dest pt destoffset destspace src srcoffset srcspace size
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (Read x name i bt space vol) =
@@ -688,7 +690,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
-  freeIn' (Copy dest x _ src y _ n) =
+  freeIn' (Copy _ dest x _ src y _ n) =
     freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y
