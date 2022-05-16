@@ -1887,7 +1887,7 @@ cachingMemory lexical f = do
           }
 
       declCached (mem, size) =
-        [ [C.citem|size_t $id:size = 0;|],
+        [ [C.citem|typename int64_t $id:size = 0;|],
           [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]
         ]
 
@@ -2237,7 +2237,11 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
   contextField
     (C.toIdent name noLoc)
     [C.cty|struct memblock|]
-    $ Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
+    $ Just
+      [C.cexp|(struct memblock){NULL,
+                                (unsigned char*)$id:name_realtype,
+                                0,
+                                $string:(pretty name)}|]
   item [C.citem|struct memblock $id:name = ctx->$id:name;|]
 compileCode (DeclareArray name (Space space) t vs) =
   join $

@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * FutharkScript now allows `'` in names.
 
+* `futhark lsp` now handles warnings in programs that also have errors.
+
 ## [0.21.11]
 
 ### Added
