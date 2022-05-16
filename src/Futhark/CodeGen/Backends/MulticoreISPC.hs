@@ -813,7 +813,8 @@ compileOp (ISPCKernel body free) = do
             free_mem <- freeAllocatedMem
             GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
             GC.stm [C.cstm|return err;|]
-    GC.earlyDecl [C.cedecl|int $id:s(typename int64_t start,
+    GC.earlyDecl
+      [C.cedecl|int $id:s(typename int64_t start,
                                   typename int64_t end,
                                   struct $id:fstruct * $id:fstruct');|]
     pure
