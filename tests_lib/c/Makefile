@@ -30,18 +30,16 @@ do_test_%: test_%
 
 test_%: test_%.c %.o
   ifeq ($(FUTHARK_BACKEND),ispc-multicore)
-	gcc -o $@ $^ $(patsubst test_%, %_ispc.h, $@) $(patsubst test_%, %_ispc.o, $@) -Wall -Wextra -pedantic -std=c99 $(LDFLAGS) -lpthread
+	gcc -o $@ $^ $(patsubst test_%, %_ispc.o, $@) -Wall -Wextra -pedantic -std=c99 $(LDFLAGS) -lpthread
   else
 	gcc -o $@ $^ -Wall -Wextra -pedantic -std=c99 $(LDFLAGS) -lpthread
   endif
 
 %.o: %.c
   ifeq ($(FUTHARK_BACKEND),ispc-multicore)
-	ispc -h $*_ispc.h -o $*_ispc.o $*.ispc $(ISPCFLAGS)
-	gcc $*_ispc.h $*_ispc.o $*.c -c $(CFLAGS)
-  else
-	gcc $*.c -c $(CFLAGS)
+	ispc -o $*_ispc.o $*.ispc $(ISPCFLAGS)
   endif
+	gcc $*.c -c $(CFLAGS)
 
 %.c: %.fut
 	futhark $(FUTHARK_BACKEND) --library $^

@@ -113,7 +113,7 @@ import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (ppr, prettyCompact, prettyText)
+import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
@@ -654,20 +654,14 @@ freeRawMem mem space desc =
 defineMemorySpace :: Space -> CompilerM op s ([C.Definition], [C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
-  -- This is a hack to work around https://github.com/ispc/ispc/issues/2277 for the ISPC backend
-  let structGuard = "#ifndef __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
-  let structDefine = "#define __ISPC_STRUCT_" ++ prettyCompact (ppr sname) ++ "__"
 
   let structdef =
-        [C.cunit|$esc:(structGuard)
-                 $esc:(structDefine)
-                 struct $id:sname {
+        [C.cunit|struct $id:sname {
                      int *references;
                      $ty:rm mem;
                      typename int64_t size;
                      const char *desc;
-                 };
-                 $esc:("#endif")|]
+                 };|]
   contextField peakname [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   contextField usagename [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 

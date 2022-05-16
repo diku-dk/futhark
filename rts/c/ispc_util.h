@@ -143,15 +143,12 @@ static inline varying uint64 make_varying(varying uint64 x) { return x; }
 
 
 // Memory allocation handling
-#ifndef __ISPC_STRUCT_memblock__
-#define __ISPC_STRUCT_memblock__
 struct memblock {
     int32_t * references;
     uint8_t * mem;
     int64_t size;
     const int8_t * desc;
 };
-#endif
 
 static inline void free(void* ptr) {
   delete ptr;

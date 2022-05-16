@@ -60,8 +60,8 @@ varying = C.EscTypeQual "varying" noLoc
 
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
-  MonadFreshNames m => T.Text -> T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
-compileProg header version prog = do
+  MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
+compileProg version prog = do
   -- Dynamic scheduling seems completely broken currently, so we disable it.
   (ws, defs) <- ImpGen.compileProg ImpGen.NoDynamicScheduling prog
   let Functions funs = defFuns defs
@@ -74,7 +74,7 @@ compileProg header version prog = do
           operations
           (ISPCState mempty mempty)
           (MC.generateContext >> mapM_ compileBuiltinFun funs)
-          header
+          mempty
           [DefaultSpace]
           MC.cliOptions
       )
@@ -139,9 +139,7 @@ sharedDef :: MC.DefSpecifier ISPCState
 sharedDef s f = do
   s' <- MC.multicoreName s
   ispcDecl =<< f s'
-  -- Workaround for https://github.com/ispc/ispc/issues/2277
-  dummy <- newVName "dummy_struct_usage"
-  ispcDecl [C.cedecl|$tyqual:export void $id:dummy($tyqual:uniform struct $id:s' * $tyqual:uniform a) { (void)a; }|]
+  GC.earlyDecl =<< f s'
   pure s'
 
 -- | Copy memory where one of the operands is using an AoS layout.
@@ -815,11 +813,14 @@ compileOp (ISPCKernel body free) = do
             free_mem <- freeAllocatedMem
             GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
             GC.stm [C.cstm|return err;|]
+    GC.earlyDecl [C.cedecl|int $id:s(typename int64_t start,
+                                  typename int64_t end,
+                                  struct $id:fstruct * $id:fstruct');|]
     pure
       [C.cedecl|
-        $tyqual:export static $tyqual:uniform int $id:s($tyqual:uniform typename int64_t start,
-                                        $tyqual:uniform typename int64_t end,
-                                        struct $id:fstruct $tyqual:uniform * $tyqual:uniform $id:fstruct' ) {
+        $tyqual:export $tyqual:uniform int $id:s($tyqual:uniform typename int64_t start,
+                                                 $tyqual:uniform typename int64_t end,
+                                                 struct $id:fstruct $tyqual:uniform * $tyqual:uniform $id:fstruct' ) {
           $items:mainBody
         }|]
 

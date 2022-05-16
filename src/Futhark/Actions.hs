@@ -211,7 +211,6 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
       runProgramWithExitCode
         "ispc"
         ( [ispcpath, "-o", ispcbase `addExtension` "o"]
-            ++ ["-h", ispcbase `addExtension` "h"]
             ++ ["--addressing=64", "--pic"]
             ++ cmdISPCFLAGS ispc_flags -- These flags are always needed
         )
@@ -220,8 +219,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
     liftIO $
       runProgramWithExitCode
         cmdCC
-        ( [ispcbase `addExtension` "h"]
-            ++ [ispcbase `addExtension` "o"]
+        ( [ispcbase `addExtension` "o"]
             ++ [cpath, "-o", outpath]
             ++ cmdCFLAGS cflags_def
             ++
@@ -386,8 +384,7 @@ compileMulticoreToISPCAction fcfg mode outpath =
           jsonpath = outpath `addExtension` "json"
           ispcpath = outpath `addExtension` "ispc"
           ispcextension = "_ispc"
-          ispcheader = takeBaseName (outpath <> ispcextension) `addExtension` "h"
-      (cprog, ispc) <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack $ "#include \"" <> ispcheader <> "\"") (T.pack versionString) prog
+      (cprog, ispc) <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack versionString) prog
       case mode of
         ToLibrary -> do
           let (header, impl, manifest) = MulticoreC.asLibrary cprog
