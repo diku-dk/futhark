@@ -37,7 +37,7 @@ static void cache_hash(struct cache_hash *out, const char *in, size_t n) {
   // Adaptation of djb2 for larger output size by storing intermediate
   // states.
   uint32_t hash = 5381;
-  for (int i = 0; i < n; i++) {
+  for (size_t i = 0; i < n; i++) {
     hash = ((hash << 5) + hash) + in[i];
     out->hash[i % CACHE_HASH_SIZE] ^= hash;
   }
