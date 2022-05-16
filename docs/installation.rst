@@ -98,9 +98,6 @@ We build such binary snapshots for the following operating systems:
 
   You will still likely need to make a C compiler (such as GCC) available on your own.
 
-.. _`Haskell tool stack`: http://docs.haskellstack.org/
-.. _`installing Stack`: http://docs.haskellstack.org/#how-to-install
-
 .. _linux-installation:
 
 Installing Futhark on Linux
