@@ -160,7 +160,7 @@ static inline void free(void* uniform ptr) {
 
 extern "C" unmasked uniform unsigned char * uniform realloc(uniform unsigned char * uniform ptr, uniform int64_t new_size);
 extern "C" unmasked uniform char * uniform lexical_realloc_error(uniform int64_t new_size);
-extern "C" unmasked uniform char * uniform * uniform futhark_context_get_error_ref(uniform struct futhark_context * uniform ctx);
+extern "C" unmasked uniform char * uniform * uniform futhark_get_error_ref(uniform struct futhark_context * uniform ctx);
 
 static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
                                           unsigned char uniform * uniform * uniform ptr,

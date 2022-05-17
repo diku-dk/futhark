@@ -73,7 +73,11 @@ compileProg version prog = do
           version
           operations
           (ISPCState mempty mempty)
-          (MC.generateContext >> mapM_ compileBuiltinFun funs)
+          ( do
+              GC.libDecl [C.cedecl|char** futhark_get_error_ref(struct futhark_context* ctx) { return &ctx->error; }|]
+              MC.generateContext
+              mapM_ compileBuiltinFun funs
+          )
           mempty
           [DefaultSpace]
           MC.cliOptions
@@ -465,7 +469,7 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
     Just cur_size ->
       GC.stm
         [C.cstm|if ($exp:cur_size < $exp:size) {
-                  err = lexical_realloc(futhark_context_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
+                  err = lexical_realloc(futhark_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
                   if (err != FUTHARK_SUCCESS) {
                     $escstm:("unmasked { return err; }")
                   }

@@ -232,12 +232,6 @@ generateContext = do
                      return 1;
                    }|]
     )
-  GC.publicDef_ "context_get_error_ref" GC.InitDecl $ \s ->
-    ( [C.cedecl|char ** $id:s(struct $id:ctx* ctx);|],
-      [C.cedecl|char ** $id:s(struct $id:ctx* ctx){
-                                return &(ctx->error);
-                             }|]
-    )
 
 -- | Multicore-related command line options.
 cliOptions :: [Option]
