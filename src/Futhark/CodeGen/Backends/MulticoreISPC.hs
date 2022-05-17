@@ -69,7 +69,7 @@ compileProg version prog = do
   (ws', (cparts, endstate)) <-
     traverse
       ( GC.compileProg'
-          "ispc_multicore"
+          "ispc"
           version
           operations
           (ISPCState mempty mempty)

@@ -411,7 +411,7 @@ commandLineOptions =
                 "cuda" -> Right $ GPUMemAction compileCUDAAction
                 "wasm" -> Right $ SeqMemAction compileCtoWASMAction
                 "wasm-multicore" -> Right $ MCMemAction compileMulticoreToWASMAction
-                "ispc-multicore" -> Right $ MCMemAction compileMulticoreToISPCAction
+                "ispc" -> Right $ MCMemAction compileMulticoreToISPCAction
                 "python" -> Right $ SeqMemAction compilePythonAction
                 "pyopencl" -> Right $ GPUMemAction compilePyOpenCLAction
                 _ -> Left $ error $ "Invalid backend: " <> arg

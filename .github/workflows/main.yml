@@ -218,7 +218,7 @@ jobs:
         futhark test -c --backend=multicore tests --no-tuning
         make -C tests_lib/c FUTHARK_BACKEND=multicore
 
-  test-ispc-multicore:
+  test-ispc:
     runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
@@ -246,8 +246,8 @@ jobs:
 
     - run: |
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-        futhark test -c --backend=ispc-multicore tests --no-tuning
-        make -C tests_lib/c FUTHARK_BACKEND=ispc-multicore
+        futhark test -c --backend=ispc tests --no-tuning
+        make -C tests_lib/c FUTHARK_BACKEND=ispc
 
   test-python:
     runs-on: ubuntu-20.04

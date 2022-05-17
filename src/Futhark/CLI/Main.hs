@@ -60,7 +60,7 @@ commands =
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),
       ("wasm", (WASM.main, "Compile to WASM with sequential C")),
       ("wasm-multicore", (MulticoreWASM.main, "Compile to WASM with multicore C")),
-      ("ispc-multicore", (MulticoreISPC.main, "Compile to multicore ISPC")),
+      ("ispc", (MulticoreISPC.main, "Compile to multicore ISPC")),
       ("test", (Test.main, "Test Futhark programs.")),
       ("bench", (Bench.main, "Benchmark Futhark programs.")),
       ("dataset", (Dataset.main, "Generate random test data.")),
