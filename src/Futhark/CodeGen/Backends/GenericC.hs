@@ -651,17 +651,15 @@ freeRawMem mem space desc =
       free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:desc|] sid
     _ -> item [C.citem|free($exp:mem);|]
 
-defineMemorySpace :: Space -> CompilerM op s ([C.Definition], [C.Definition], C.BlockItem)
+defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
-
   let structdef =
-        [C.cunit|struct $id:sname {
-                     int *references;
-                     $ty:rm mem;
-                     typename int64_t size;
-                     const char *desc;
-                 };|]
+        [C.cedecl|struct $id:sname { int *references;
+                                     $ty:rm mem;
+                                     typename int64_t size;
+                                     const char *desc; };|]
+
   contextField peakname [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   contextField usagename [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
@@ -1678,6 +1676,7 @@ $timingH
 #include <errno.h>
 #include <assert.h>
 #include <ctype.h>
+
 $header_extra
 
 $lockH
@@ -1721,7 +1720,7 @@ $entry_point_decls
       (prototypes, functions) <-
         unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
-      mapM_ (mapM_ earlyDecl) memstructs
+      mapM_ earlyDecl memstructs
       (entry_points, entry_points_manifest) <-
         unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
 
@@ -1970,6 +1969,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     body' <- collect $ compileFunBody out_ptrs outputs body
     decl_mem <- declAllocatedMem
     free_mem <- freeAllocatedMem
+
     pure
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
