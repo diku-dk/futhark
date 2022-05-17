@@ -414,14 +414,11 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                            in pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
                       where
                         (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
-                  ( H.Screma s_e1 sform1 _i1,
+                  -- attempt fusing by turning other soac into a stream
+                  ( H.Screma s_e1 _ _i1,
                     H.Stream s_e2 _ _ _ _
                     )
-                      | Just _ <- isMapSOAC sform1, s_e1 == s_e2 -> do
-                          doFusion <- gets fuseScans
-                          if not doFusion
-                            then pure Nothing
-                            else do
+                      | s_e1 == s_e2 -> do
                               (stream1, is_extra_1) <- H.soacToStream soac1
                               if stream1 /= soac1
                                 then do
@@ -432,10 +429,25 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                                     (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
                                     (s2, e2s)
                                 else pure Nothing
+                  ( H.Stream s_e1 _ _ _ _,
+                    H.Screma s_e2 _ _i2
+                    )
+                      | s_e2 == s_e1 -> do
+                              (stream2, is_extra_2) <- H.soacToStream soac2
+                              if stream2 /= soac2
+                                then do
+                                  is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+                                  fuseNodeT
+                                    edgs
+                                    infusible
+                                    (s1, e1s)
+                                    (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
+                                else pure Nothing
                   ( H.Screma s_exp1 sform1 _i1,
-                    H.Screma s_exp2 _sform2 _i2)
+                    H.Screma s_exp2 sform2 _i2)
                       |
                         Just _ <- isScanomapSOAC sform1,
+                        Just _ <- isScanomapSOAC sform2,
                         s_exp1 == s_exp2,
                         any isScanRed edgs
                       -> do
