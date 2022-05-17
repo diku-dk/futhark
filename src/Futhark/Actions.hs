@@ -382,7 +382,7 @@ compileMulticoreToISPCAction fcfg mode outpath =
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
-          ispcpath = outpath `addExtension` "ispc"
+          ispcpath = outpath `addExtension` "kernels.ispc"
           ispcextension = "_ispc"
       (cprog, ispc) <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack versionString) prog
       case mode of

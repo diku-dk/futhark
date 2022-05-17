@@ -6,7 +6,7 @@ LDFLAGS=-lm -lOpenCL
 else ifeq ($(FUTHARK_BACKEND),multicore)
 CFLAGS=-O3 -std=c99
 LDFLAGS=-lm
-else ifeq ($(FUTHARK_BACKEND),ispc-multicore)
+else ifeq ($(FUTHARK_BACKEND),ispc)
 CFLAGS=-O3 -std=c99
 LDFLAGS=-lm
 ISPCFLAGS=--woff --pic --addressing=64
@@ -29,15 +29,15 @@ do_test_%: test_%
 	./test_$*
 
 test_%: test_%.c %.o
-  ifeq ($(FUTHARK_BACKEND),ispc-multicore)
+  ifeq ($(FUTHARK_BACKEND),ispc)
 	gcc -o $@ $^ $(patsubst test_%, %_ispc.o, $@) -Wall -Wextra -pedantic -std=c99 $(LDFLAGS) -lpthread
   else
 	gcc -o $@ $^ -Wall -Wextra -pedantic -std=c99 $(LDFLAGS) -lpthread
   endif
 
 %.o: %.c
-  ifeq ($(FUTHARK_BACKEND),ispc-multicore)
-	ispc -o $*_ispc.o $*.ispc $(ISPCFLAGS)
+  ifeq ($(FUTHARK_BACKEND),ispc)
+	ispc -o $*_ispc.o $*.kernels.ispc $(ISPCFLAGS)
   endif
 	gcc $*.c -c $(CFLAGS)
 
