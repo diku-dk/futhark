@@ -9,10 +9,13 @@ module Futhark.CodeGen.ImpCode.Multicore
     SchedulerInfo (..),
     AtomicOp (..),
     ParallelTask (..),
+    KernelHandling (..),
+    lexicalMemoryUsageMC,
     module Futhark.CodeGen.ImpCode,
   )
 where
 
+import qualified Data.Map as M
 import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty
 
@@ -22,7 +25,7 @@ type Program = Functions Multicore
 -- | A multicore operation.
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
-  | ParLoop String (Code Multicore) [Param]
+  | ParLoop String MCCode [Param]
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -70,7 +73,7 @@ data SchedulerInfo = SchedulerInfo
   }
 
 -- | A task for a v'SegOp'.
-newtype ParallelTask = ParallelTask (Code Multicore)
+newtype ParallelTask = ParallelTask MCCode
 
 -- | Whether the Scheduler should schedule the tasks as Dynamic
 -- or it is restainted to Static
@@ -118,7 +121,8 @@ instance Pretty Multicore where
           [ nestedBlock "params {" "}" (ppr params),
             nestedBlock "body {" "}" (ppr body)
           ]
-  ppr (Atomic _) = "AtomicOp"
+  ppr (Atomic _) =
+    "AtomicOp"
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -137,4 +141,42 @@ instance FreeIn Multicore where
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
   freeIn' (ParLoop _ body _) =
     freeIn' body
-  freeIn' (Atomic aop) = freeIn' aop
+  freeIn' (Atomic aop) =
+    freeIn' aop
+
+data KernelHandling = TraverseKernels | OpaqueKernels
+
+-- | Like @lexicalMemoryUsage@, but traverses some inner multicore ops.
+lexicalMemoryUsageMC :: KernelHandling -> Function Multicore -> M.Map VName Space
+lexicalMemoryUsageMC gokernel func =
+  M.filterWithKey (const . not . (`nameIn` nonlexical)) $
+    declared $ functionBody func
+  where
+    nonlexical =
+      set (functionBody func)
+        <> namesFromList (map paramName (functionOutput func))
+
+    go f (x :>>: y) = f x <> f y
+    go f (If _ x y) = f x <> f y
+    go f (For _ _ x) = f x
+    go f (While _ x) = f x
+    go f (Comment _ x) = f x
+    go _ _ = mempty
+
+    declared (DeclareMem mem spc) =
+      M.singleton mem spc
+    declared x = go declared x
+
+    set (SetMem x y _) = namesFromList [x, y]
+    set (Call _ _ args) = foldMap onArg args
+      where
+        onArg ExpArg {} = mempty
+        onArg (MemArg x) = oneName x
+    -- Critically, don't treat inputs to nested segops as lexical when generating
+    -- ISPC, since we want to use AoS memory for lexical blocks, which is
+    -- incompatible with pointer assignmentes visible in C.
+    set (Op (SegOp _ params _ _ retvals _)) =
+      case gokernel of
+        TraverseKernels -> mempty
+        OpaqueKernels -> namesFromList $ map paramName params <> map paramName retvals
+    set x = go set x

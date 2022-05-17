@@ -183,8 +183,8 @@ vTryFuseNodesInGraph node_1 node_2 g
                   if null fusedC
                     then pure nodeT
                     else do
-                      let (_,_,_,deps_1) = ctx1
-                      let (_,_,_,deps_2) = ctx2
+                      let (_, _, _, deps_1) = ctx1
+                      let (_, _, _, deps_2) = ctx2
                       -- make copies of everything that was not previously consumed
                       let old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
                       makeCopiesOfFusedExcept old_cons nodeT
@@ -258,8 +258,9 @@ pushRearrangeNodeT trs nodeT = case nodeT of
     let soac' = trace (show trs) $ H.setInputs (map (internalizeOutput . H.setInputTransforms trs) (H.inputs soac)) soac
     maybeSoac <- tryFusion (pushRearrange (map H.inputArray (H.inputs soac)) soac' H.noTransforms) scope
     case maybeSoac of
-      Just (s2, ts) | all (H.nullTransforms . H.inputTransforms) (H.inputs s2) ->
-        pure $ Just $ SoacNode s2 (map (internalizeAndAdd ts) outputs) aux
+      Just (s2, ts)
+        | all (H.nullTransforms . H.inputTransforms) (H.inputs s2) ->
+            pure $ Just $ SoacNode s2 (map (internalizeAndAdd ts) outputs) aux
       _ -> pure Nothing
   _ -> pure Nothing
 
@@ -318,7 +319,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                 case newS2m of
                   Just newS2 -> fuseNodeT edgs' infusible (s1, e1s) (newS2, e2s)
                   _ -> pure Nothing
-    (_,_) | any isTrDep edgs -> pure Nothing
+    (_, _) | any isTrDep edgs -> pure Nothing
     ( SoacNode soac1 pats1 aux1,
       SoacNode soac2 pats2 aux2
       ) ->
@@ -329,7 +330,8 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                   ( H.Screma s_exp1 (ScremaForm scans_1 red_1 lam_1) i1,
                     H.Screma s_exp2 (ScremaForm scans_2 red_2 lam_2) i2
                     )
-                      | s_exp1 == s_exp2, not (any isScanRed edgs) ->
+                      | s_exp1 == s_exp2,
+                        not (any isScanRed edgs) ->
                           let soac = H.Screma s_exp2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
                            in pure $ Just $ SoacNode soac ids (aux1 <> aux2)
                       where
@@ -419,47 +421,51 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                     H.Stream s_e2 _ _ _ _
                     )
                       | s_e1 == s_e2 -> do
-                              (stream1, is_extra_1) <- H.soacToStream soac1
-                              if stream1 /= soac1
-                                then do
-                                  is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
-                                  fuseNodeT
-                                    edgs
-                                    infusible
-                                    (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
-                                    (s2, e2s)
-                                else pure Nothing
+                          (stream1, is_extra_1) <- H.soacToStream soac1
+                          if stream1 /= soac1
+                            then do
+                              is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
+                              fuseNodeT
+                                edgs
+                                infusible
+                                (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
+                                (s2, e2s)
+                            else pure Nothing
                   ( H.Stream s_e1 _ _ _ _,
                     H.Screma s_e2 _ _i2
                     )
                       | s_e2 == s_e1 -> do
-                              (stream2, is_extra_2) <- H.soacToStream soac2
-                              if stream2 /= soac2
-                                then do
-                                  is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                                  fuseNodeT
-                                    edgs
-                                    infusible
-                                    (s1, e1s)
-                                    (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
-                                else pure Nothing
+                          (stream2, is_extra_2) <- H.soacToStream soac2
+                          if stream2 /= soac2
+                            then do
+                              is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+                              fuseNodeT
+                                edgs
+                                infusible
+                                (s1, e1s)
+                                (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
+                            else pure Nothing
                   ( H.Screma s_exp1 sform1 _i1,
-                    H.Screma s_exp2 sform2 _i2)
-                      |
-                        Just _ <- isScanomapSOAC sform1,
+                    H.Screma s_exp2 sform2 _i2
+                    )
+                      | Just _ <- isScanomapSOAC sform1,
                         Just _ <- isScanomapSOAC sform2,
                         s_exp1 == s_exp2,
-                        any isScanRed edgs
-                      -> do
-                        doFusion <- gets fuseScans
-                        if not doFusion then pure Nothing else do
-                          (stream1, is_extra_1) <- H.soacToStream soac1
-                          (stream2, is_extra_2) <- H.soacToStream soac2
-                          is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
-                          is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                          fuseNodeT edgs infusible
-                            (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
-                            (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
+                        any isScanRed edgs ->
+                          do
+                            doFusion <- gets fuseScans
+                            if not doFusion
+                              then pure Nothing
+                              else do
+                                (stream1, is_extra_1) <- H.soacToStream soac1
+                                (stream2, is_extra_2) <- H.soacToStream soac2
+                                is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
+                                is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+                                fuseNodeT
+                                  edgs
+                                  infusible
+                                  (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
+                                  (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
                   -- ( H.Stream s_exp1 sform1 nes1 lam1 i1,
                   --   H.Stream s_exp2 sform2 nes2 lam2 i2)
                   --   | getStreamOrder sform1 /= getStreamOrder sform2 ->
@@ -771,7 +777,7 @@ makeCopiesOfConsAliased :: DepGraphAug
 makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
   where
     copyAlised :: DepNode -> DepGraphAug
-    copyAlised (n,nt) _ = do
+    copyAlised (n, nt) _ = do
       let (incoming, _, _, outgoing) = G.context g n
       let incoming' = map getName $ filter isFake (map fst incoming)
       let outgoing' = map getName $ filter isAlias (map fst outgoing)
@@ -807,12 +813,6 @@ makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
 --             =<< updateNode n (const (Just newNode)) g
 --         else pure g
 --     copyAlised _ _ = pure g
-
-
-
-
-
-
 
 -- makeCopiesOfConsAliased :: DepGraphAug
 -- makeCopiesOfConsAliased = mapAcrossWithSE f where
@@ -854,9 +854,6 @@ makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
 --   incomingConsAdj g n
 --     let (depAdjs, _, _, _) = G.context g n in
 --     filter (isCons . fst) depAdjs
-
-
-
 
 -- testingTurnToStream :: DepGraphAug
 -- testingTurnToStream = mapAcross toStream

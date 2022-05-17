@@ -84,6 +84,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
+import Data.Char (isAlpha, isAlphaNum)
 import qualified Data.DList as DL
 import Data.List (unzip4)
 import Data.Loc
@@ -99,6 +100,7 @@ import Futhark.CodeGen.RTS.C (cacheH, errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
+import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
@@ -516,9 +518,9 @@ contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
   s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Nothing)}
 
-contextFieldDyn :: C.Id -> C.Type -> C.Exp -> C.Stm -> CompilerM op s ()
+contextFieldDyn :: C.Id -> C.Type -> Maybe C.Exp -> C.Stm -> CompilerM op s ()
 contextFieldDyn name ty initial free = modify $ \s ->
-  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, Just initial, Just free)}
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Just free)}
 
 profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
@@ -1335,6 +1337,18 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
             [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
       stms $ zipWith maybeCopyDim shape [0 .. rank - 1]
 
+isValidCName :: Name -> Bool
+isValidCName = check . nameToString
+  where
+    check [] = True -- academic
+    check (c : cs) = isAlpha c && all constituent cs
+    constituent c = isAlphaNum c || c == '_'
+
+entryName :: Name -> String
+entryName v
+  | isValidCName v = "entry_" <> nameToString v
+  | otherwise = "entry_" <> zEncodeString (nameToString v)
+
 onEntryPoint ::
   [C.BlockItem] ->
   Name ->
@@ -1349,7 +1363,7 @@ onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results ar
   outputdecls <- collect $ mapM_ stubParam outputs
   decl_mem <- declAllocatedMem
 
-  entry_point_function_name <- publicName $ "entry_" ++ nameToString ename
+  entry_point_function_name <- publicName $ entryName ename
 
   (inputs', unpack_entry_inputs) <- prepareEntryInputs $ map snd args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
@@ -1550,7 +1564,7 @@ compileProg backend version ops extra header_extra spaces options prog = do
 
   let headerdefs =
         [untrimming|
-// Headers\n")
+// Headers
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -1873,7 +1887,7 @@ cachingMemory lexical f = do
           }
 
       declCached (mem, size) =
-        [ [C.citem|size_t $id:size = 0;|],
+        [ [C.citem|typename int64_t $id:size = 0;|],
           [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]
         ]
 
@@ -1987,10 +2001,10 @@ compilePrimExp f (UnOpExp (FAbs Float64) x) = do
   pure [C.cexp|fabs($exp:x')|]
 compilePrimExp f (UnOpExp SSignum {} x) = do
   x' <- compilePrimExp f x
-  pure [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
+  pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0)|]
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
-  pure [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
+  pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
 compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|$id:(pretty op)($exp:x')|]
@@ -2139,7 +2153,7 @@ compileCode (If cond tbranch fbranch) = do
       [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
-compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
+compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
   join $
     copyMemoryDefaultSpace
       <$> rawMem dest
@@ -2147,7 +2161,7 @@ compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) Def
       <*> rawMem src
       <*> compileExp (untyped srcoffset)
       <*> compileExp (untyped size)
-compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
+compileCode (Copy _ dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
   join $
     copy
@@ -2223,7 +2237,11 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
   contextField
     (C.toIdent name noLoc)
     [C.cty|struct memblock|]
-    $ Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
+    $ Just
+      [C.cexp|(struct memblock){NULL,
+                                (unsigned char*)$id:name_realtype,
+                                0,
+                                $string:(pretty name)}|]
   item [C.citem|struct memblock $id:name = ctx->$id:name;|]
 compileCode (DeclareArray name (Space space) t vs) =
   join $

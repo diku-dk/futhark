@@ -1,4 +1,3 @@
-
 def dot [n] (x: [n]bool) (y: [n]bool):i64 =
   i64.sum (map2 (\x y -> i64.bool <| x && y) x y)
 

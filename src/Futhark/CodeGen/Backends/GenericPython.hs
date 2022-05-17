@@ -1,5 +1,4 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -797,40 +796,11 @@ prepareEntry ::
       [PyStmt],
       [PyStmt],
       [PyStmt],
-      [PyStmt],
-      [(Imp.ExternalValue, PyExp)],
-      [PyStmt]
+      [(Imp.ExternalValue, PyExp)]
     )
 prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
-
-  (argexps_mem_copies, prepare_run) <- collect' $
-    forM inputs $ \case
-      Imp.MemParam name space -> do
-        -- A program might write to its input parameters, so create a new memory
-        -- block and copy the source there.  This way the program can be run more
-        -- than once.
-        name' <- newVName $ baseString name <> "_copy"
-        copy <- asks envCopy
-        allocate <- asks envAllocate
-        let size = Var (extName (compileName name) ++ ".nbytes") -- FIXME
-            dest = name'
-            src = name
-            offset = Integer 0
-        case space of
-          Space sid ->
-            allocate (Var (compileName name')) size sid
-          _ ->
-            stm $
-              Assign
-                (Var (compileName name'))
-                (simpleCall "allocateMem" [size]) -- FIXME
-        dest' <- compileVar dest
-        src' <- compileVar src
-        copy dest' offset space src' offset space size (IntType Int32) -- FIXME
-        pure $ Just $ compileName name'
-      _ -> pure Nothing
 
   prepareIn <- collect $ do
     declEntryPointInputSizes $ map snd args
@@ -839,7 +809,6 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
   let argexps_lib = map (compileName . Imp.paramName) inputs
-      argexps_bin = zipWith fromMaybe argexps_lib argexps_mem_copies
       fname' = "self." ++ futharkFun (nameToString fname)
 
       -- We ignore overflow errors and the like for executable entry
@@ -857,10 +826,8 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
     ( map (extValueDescName . snd) args,
       prepareIn,
       call argexps_lib,
-      call argexps_bin,
       prepareOut,
-      zip results res,
-      prepare_run
+      zip results res
     )
 
 copyMemoryDefaultSpace ::
@@ -890,7 +857,7 @@ compileEntryFun ::
   CompilerM op s (Maybe (PyFunDef, (PyExp, PyExp)))
 compileEntryFun sync timing entry
   | Just ename <- Imp.functionEntry $ snd entry = do
-      (params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
+      (params, prepareIn, body_lib, prepareOut, res) <- prepareEntry entry
       let (maybe_sync, ret) =
             case timing of
               DoNotReturnTiming ->
@@ -942,7 +909,7 @@ callEntryFun ::
   CompilerM op s (Maybe (PyFunDef, String, PyExp))
 callEntryFun _ (_, Imp.Function Nothing _ _ _ _ _) = pure Nothing
 callEntryFun pre_timing entry@(fname, Imp.Function (Just ename) _ _ _ _ decl_args) = do
-  (_, prepare_in, _, body_bin, _, res, prepare_run) <- prepareEntry entry
+  (_, prepare_in, body_bin, _, res) <- prepareEntry entry
 
   let str_input = map (readInput . snd) decl_args
       end_of_input = [Exp $ simpleCall "end_of_input" [String $ pretty fname]]
@@ -953,13 +920,13 @@ callEntryFun pre_timing entry@(fname, Imp.Function (Just ename) _ _ _ _ decl_arg
       (do_run_with_timing, close_runtime_file) = addTiming do_run
 
       do_warmup_run =
-        If (Var "do_warmup_run") (prepare_run ++ do_run) []
+        If (Var "do_warmup_run") do_run []
 
       do_num_runs =
         For
           "i"
           (simpleCall "range" [simpleCall "int" [Var "num_runs"]])
-          (prepare_run ++ do_run_with_timing)
+          do_run_with_timing
 
   str_output <- printValue res
 
@@ -1306,7 +1273,7 @@ compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) _) = do
   stm =<< Assign <$> compileVar name <*> pure allocate'
 compileCode (Imp.Free name _) =
   stm =<< Assign <$> compileVar name <*> pure None
-compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
+compileCode (Imp.Copy _ dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
   destoffset' <- compileExp $ Imp.untyped destoffset
   srcoffset' <- compileExp $ Imp.untyped srcoffset
   dest' <- compileVar dest
@@ -1315,7 +1282,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count sr
   let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "ct.c_byte"]
   let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "ct.c_byte"]
   stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, size']
-compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
+compileCode (Imp.Copy pt dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
   copy <- asks envCopy
   join $
     copy
@@ -1326,7 +1293,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
       <*> compileExp (Imp.untyped srcoffset)
       <*> pure srcspace
       <*> compileExp (Imp.untyped size)
-      <*> pure (IntType Int32) -- FIXME
+      <*> pure pt
 compileCode (Imp.Write _ _ Unit _ _ _) = pure ()
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $

@@ -160,11 +160,11 @@ entryPoint name params (eret, crets) =
     entryPointType t ts
       | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
           I.TypeUnsigned u
-      | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
+      | E.Array _ _ _ (E.Prim E.Unsigned {}) <- E.entryType t =
           I.TypeUnsigned u
       | E.Scalar E.Prim {} <- E.entryType t =
           I.TypeDirect u
-      | E.Array _ _ E.Prim {} _ <- E.entryType t =
+      | E.Array _ _ _ E.Prim {} <- E.entryType t =
           I.TypeDirect u
       | otherwise =
           I.TypeOpaque u desc $ length ts
@@ -174,7 +174,7 @@ entryPoint name params (eret, crets) =
         t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
     typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
       typeExpOpaqueName te
-    typeExpOpaqueName (TEArray te _ _) =
+    typeExpOpaqueName (TEArray _ te _) =
       let (d, te') = withoutDims te
        in "arr_" ++ typeExpOpaqueName te'
             ++ "_"
@@ -183,7 +183,7 @@ entryPoint name params (eret, crets) =
     typeExpOpaqueName (TEUnique te _) = prettyOneLine te
     typeExpOpaqueName te = prettyOneLine te
 
-    withoutDims (TEArray te _ _) =
+    withoutDims (TEArray _ te _) =
       let (d, te') = withoutDims te
        in (d + 1, te')
     withoutDims te = (0 :: Int, te)
@@ -218,7 +218,7 @@ eValBody es = buildBody_ $ do
   es' <- sequence es
   varsRes . concat <$> mapM (letValExp "x") es'
 
-internaliseAppExp :: String -> [VName] -> E.AppExp -> InternaliseM [I.SubExp]
+internaliseAppExp :: String -> E.AppRes -> E.AppExp -> InternaliseM [I.SubExp]
 internaliseAppExp desc _ (E.Index e idxs loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
@@ -367,9 +367,9 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]
-internaliseAppExp desc ext (E.Coerce e (TypeDecl dt (Info et)) loc) = do
+internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
   ses <- internaliseExp desc e
-  ts <- internaliseReturnType (E.RetType ext et) =<< mapM subExpType ses
+  ts <- internaliseReturnType (E.RetType ext (E.toStruct et)) =<< mapM subExpType ses
   dt' <- typeExpForError dt
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
@@ -388,7 +388,7 @@ internaliseAppExp desc _ e@E.Apply {} =
       -- easy way to do this is to just ignore the arguments and
       -- create a hole whose type is the type of the entire
       -- application.
-      internaliseExp desc (E.Hole (Info (snd $ E.unfoldFunType t)) loc)
+      internaliseExp desc (E.Hole (Info (fromStruct $ snd $ E.unfoldFunType t)) loc)
     (FunctionName qfname, args) -> do
       -- Argument evaluation is outermost-in so that any existential sizes
       -- created by function applications can be brought into scope.
@@ -621,7 +621,7 @@ internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
     Just substs -> pure substs
     Nothing -> pure [I.Var name]
 internaliseExp desc (E.AppExp e (Info appres)) = do
-  ses <- internaliseAppExp desc (appResExt appres) e
+  ses <- internaliseAppExp desc appres e
   bindExtSizes appres ses
   pure ses
 
@@ -2246,7 +2246,7 @@ typeExpForError (E.TEDim dims te _) =
   where
     dims' = mconcat (map onDim dims)
     onDim d = "[" <> pretty d <> "]"
-typeExpForError (E.TEArray te d _) = do
+typeExpForError (E.TEArray d te _) = do
   d' <- dimExpForError d
   te' <- typeExpForError te
   pure $ ["[", d', "]"] ++ te'

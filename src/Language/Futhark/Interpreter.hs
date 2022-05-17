@@ -171,7 +171,7 @@ emptyShape _ = False
 typeShape :: M.Map VName (Shape d) -> TypeBase d () -> Shape d
 typeShape shapes = go
   where
-    go (Array _ _ et shape) =
+    go (Array _ _ shape et) =
       foldr ShapeDim (go (Scalar et)) $ shapeDims shape
     go (Scalar (Record fs)) =
       ShapeRecord $ M.map go fs
@@ -684,11 +684,11 @@ evalType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 evalType env (Scalar (Record fs)) = Scalar $ Record $ fmap (evalType env) fs
 evalType env (Scalar (Arrow () p t1 (RetType dims t2))) =
   Scalar $ Arrow () p (evalType env t1) (RetType dims (evalType env t2))
-evalType env t@(Array _ u _ shape) =
+evalType env t@(Array _ u shape _) =
   let et = stripArray (shapeRank shape) t
       et' = evalType env et
       shape' = fmap evalDim shape
-   in arrayOf et' shape' u
+   in arrayOf u shape' et'
   where
     evalDim (NamedDim qn)
       | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
@@ -816,8 +816,8 @@ returned env ret retext v = do
       resolveExistentials retext (evalType env $ toStruct ret) $ valueShape v
   pure v
 
-evalAppExp :: Env -> AppExp -> EvalM Value
-evalAppExp env (Range start maybe_second end loc) = do
+evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
+evalAppExp env _ (Range start maybe_second end loc) = do
   start' <- asInteger <$> eval env start
   maybe_second' <- traverse (fmap asInteger . eval env) maybe_second
   end' <- traverse (fmap asInteger . eval env) end
@@ -864,31 +864,31 @@ evalAppExp env (Range start maybe_second end loc) = do
                UpToExclusive x -> "..<" ++ pretty x
            )
         ++ " is invalid."
-evalAppExp env (Coerce e td loc) = do
+evalAppExp env t (Coerce e te loc) = do
   v <- eval env e
-  let t = evalType env $ unInfo $ expandedType td
   case checkShape (structTypeShape (envShapes env) t) (valueShape v) of
     Just _ -> pure v
     Nothing ->
       bad loc env $
         "Value `" <> pretty v <> "` of shape `" ++ pretty (valueShape v)
           ++ "` cannot match shape of type `"
-          <> pretty (declaredType td)
+          <> pretty te
           <> "` (`"
           <> pretty t
           <> "`)"
-evalAppExp env (LetPat sizes p e body _) = do
+evalAppExp env _ (LetPat sizes p e body _) = do
   v <- eval env e
   env' <- matchPat env p v
   let p_t = evalType env $ patternStructType p
       v_s = valueShape v
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
-evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
+evalAppExp env _ (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalFunctionBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
 evalAppExp
   env
+  _
   (BinOp (op, _) op_t (x, Info (_, xext)) (y, Info (_, yext)) loc)
     | baseString (qualLeaf op) == "&&" = do
         x' <- asBool <$> eval env x
@@ -905,20 +905,20 @@ evalAppExp
         x' <- evalArg env x xext
         y' <- evalArg env y yext
         apply2 loc env op' x' y'
-evalAppExp env (If cond e1 e2 _) = do
+evalAppExp env _ (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
-evalAppExp env (Apply f x (Info (_, ext)) loc) = do
+evalAppExp env _ (Apply f x (Info (_, ext)) loc) = do
   -- It is important that 'x' is evaluated first in order to bring any
   -- sizes into scope that may be used in the type of 'f'.
   x' <- evalArg env x ext
   f' <- eval env f
   apply loc env f' x'
-evalAppExp env (Index e is loc) = do
+evalAppExp env _ (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
   evalIndex loc env is' arr
-evalAppExp env (LetWith dest src is v body loc) = do
+evalAppExp env _ (LetWith dest src is v body loc) = do
   let Ident src_vn (Info src_t) _ = src
   dest' <-
     maybe oob pure
@@ -929,7 +929,7 @@ evalAppExp env (LetWith dest src is v body loc) = do
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Bad update"
-evalAppExp env (DoLoop sparams pat init_e form body _) = do
+evalAppExp env _ (DoLoop sparams pat init_e form body _) = do
   init_v <- eval env init_e
   case form of
     For iv bound -> do
@@ -980,7 +980,7 @@ evalAppExp env (DoLoop sparams pat init_e form body _) = do
       env' <- withLoopParams v
       env'' <- matchPat env' in_pat in_v
       eval env'' body
-evalAppExp env (Match e cs _) = do
+evalAppExp env _ (Match e cs _) = do
   v <- eval env e
   match v (NE.toList cs)
   where
@@ -1023,7 +1023,9 @@ eval env (ArrayLit (v : vs) _ _) = do
   vs' <- mapM (eval env) vs
   pure $ toArray' (valueShape v') (v' : vs')
 eval env (AppExp e (Info (AppRes t retext))) =
-  returned env t retext =<< evalAppExp env e
+  returned env t' retext =<< evalAppExp env t' e
+  where
+    t' = evalType env $ toStruct t
 eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
 eval _ (IntLit v (Info t) _) =
@@ -2027,7 +2029,7 @@ interpretFunction ctx fname vs = do
     checkInput :: ValueType -> StructType -> Either String ()
     checkInput (Scalar (Prim vt)) (Scalar (Prim pt))
       | vt /= pt = badPrim vt pt
-    checkInput (Array _ _ (Prim vt) _) (Array _ _ (Prim pt) _)
+    checkInput (Array _ _ _ (Prim vt)) (Array _ _ _ (Prim pt))
       | vt /= pt = badPrim vt pt
     checkInput _ _ =
       Right ()

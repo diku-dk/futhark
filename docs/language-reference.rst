@@ -368,8 +368,7 @@ A named value/constant can be declared as follows::
 
 The definition can be an arbitrary expression, including function
 calls and other values, although they must be in scope before the
-value is defined.  A constant value may not have a unique type (see
-`In-place updates`_).  If the return type contains any anonymous sizes
+value is defined.  If the return type contains any anonymous sizes
 (see `Size types`_), new existential sizes will be constructed for
 them.
 
@@ -1054,8 +1053,8 @@ lifted* (``'^t``).  Only fully lifted type parameters may be
 instantiated with a functional type.  Within a function, a lifted type
 parameter is treated as a functional type.
 
-See also `In-place updates`_ for details on how uniqueness types
-interact with higher-order functions.
+See also `In-place updates`_ for details on how consumption
+interacts with higher-order functions.
 
 Type Inference
 --------------
@@ -1065,7 +1064,7 @@ explicit type annotations can be left off.  Record field projection
 cannot in isolation be fully inferred, and may need type annotations
 where their inputs are bound.  The same goes when constructing sum
 types, as Futhark cannot assume that a given constructor only belongs
-to a single type.  Further, unique types (see `In-place updates`_)
+to a single type.  Further, consumed parameters (see `In-place updates`_)
 must be explicitly annotated.
 
 Type inference processes top-level declared in top-down order, and the
@@ -1414,8 +1413,9 @@ update.  This involves also checking that no *alias* of ``a`` is used.
 Generally, most language constructs produce new arrays, but some
 (slicing) create arrays that alias their input arrays.
 
-When defining a function parameter or return type, we can mark it as
-*unique* by prefixing it with an asterisk.  For example::
+When defining a function parameter we can mark it as *consuming* by
+prefixing it with an asterisk.  For a return type, we can mark it as
+*alias-free* by prefixing it with an asterisk.  For example::
 
   def modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
     a with [i] = a[i] + x
@@ -1453,18 +1453,18 @@ fresh arrays, with no aliases.  The main exceptions are ``if``,
 
 * The aliases of a value returned from a function is the most
   interesting case, and depends on whether the return value is
-  declared *unique* (with an asterisk ``*``) or not.  If it is
-  declared unique, then it has no aliases.  Otherwise, it aliases all
-  arguments passed for *non-unique* parameters.
+  declared *alias-free* (with an asterisk ``*``) or not.  If it is
+  declared alias-free, then it has no aliases.  Otherwise, it aliases
+  all arguments passed for *non-consumed* parameters.
 
 In-place Updates and Higher-Order Functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Uniqueness typing generally interacts poorly with higher-order
+Consumption generally interacts inflexibly with higher-order
 functions.  The issue is that we cannot control how many times a
 function argument is applied, or to what, so it is not safe to pass a
 function that consumes its argument.  The following two conservative
-rules govern the interaction between uniqueness types and higher-order
+rules govern the interaction between consumption and higher-order
 functions:
 
 1. In the expression ``let p = e1 in ...``, if *any* in-place update

@@ -561,7 +561,7 @@ soacToStream soac = do
               strmlam = Lambda strmpar strmbdy loutps
               empty_lam = Lambda [] (mkBody mempty []) []
           -- map(f,a) creates a stream with NO accumulators
-          return (Stream w (Parallel Disorder Commutative empty_lam) strmlam [] inps, [])
+          pure (Stream w (Parallel Disorder Commutative empty_lam) strmlam [] inps, [])
       | Just (scans, _) <- Futhark.isScanomapSOAC form,
         Futhark.Scan scan_lam nes <- Futhark.singleScan scans -> do
           -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
@@ -644,7 +644,7 @@ soacToStream soac = do
                   addlelres ++ map (subExpRes . Futhark.Var . identName) (strm_resids ++ map_resids)
               strmpar = chunk_param : inpacc_ids ++ strm_inpids
               strmlam = Lambda strmpar strmbdy (accrtps ++ loutps)
-          return
+          pure
             ( Stream w Sequential strmlam nes inps,
               map paramIdent inpacc_ids
             )
@@ -684,7 +684,7 @@ soacToStream soac = do
               strmpar = chunk_param : inpacc_ids ++ strm_inpids
               strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
           lam0 <- renameLambda lamin
-          return (Stream w (Parallel InOrder comm lam0) strmlam nes inps, [])
+          pure (Stream w (Parallel InOrder comm lam0) strmlam nes inps, [])
 
     -- Otherwise it cannot become a stream.
     _ -> pure (soac, [])

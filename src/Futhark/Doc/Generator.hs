@@ -481,7 +481,7 @@ synopsisValBindBind (name, BoundV tps t) = do
 
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
-  Array _ u et shape -> do
+  Array _ u shape et -> do
     shape' <- prettyShapeDecl shape
     et' <- typeHtml $ Scalar et
     pure $ prettyU u <> shape' <> et'
@@ -545,7 +545,7 @@ synopsisSigExp e = case e of
   SigSpecs ss _ -> braces . (H.table ! A.class_ "specs") . mconcat <$> mapM synopsisSpec ss
   SigWith s (TypeRef v ps t _) _ -> do
     s' <- synopsisSigExp s
-    t' <- typeDeclHtml t
+    t' <- typeExpHtml t
     v' <- qualNameHtml v
     let ps' = mconcat $ map ((" " <>) . typeParamHtml) ps
     pure $ s' <> keyword " with " <> v' <> ps' <> " = " <> t'
@@ -594,11 +594,9 @@ synopsisSpec spec = case spec of
         Unlifted -> "type "
         SizeLifted -> "type~ "
         Lifted -> "type^ "
-  ValSpec name tparams rettype _ _ -> do
+  ValSpec name tparams rettype _ _ _ -> do
     let tparams' = map typeParamHtml tparams
-    rettype' <-
-      noLink (map typeParamName tparams) $
-        typeDeclHtml rettype
+    rettype' <- noLink (map typeParamName tparams) $ typeExpHtml rettype
     pure $
       specRow
         (keyword "val " <> vnameSynopsisDef name)
@@ -608,13 +606,10 @@ synopsisSpec spec = case spec of
     specRow (keyword "module " <> vnameSynopsisDef name) ": " <$> synopsisSigExp sig
   IncludeSpec e _ -> fullRow . (keyword "include " <>) <$> synopsisSigExp e
 
-typeDeclHtml :: TypeDeclBase f VName -> DocM Html
-typeDeclHtml = typeExpHtml . declaredType
-
 typeExpHtml :: TypeExp VName -> DocM Html
 typeExpHtml e = case e of
   TEUnique t _ -> ("*" <>) <$> typeExpHtml t
-  TEArray at d _ -> do
+  TEArray d at _ -> do
     at' <- typeExpHtml at
     d' <- dimExpHtml d
     pure $ d' <> at'
@@ -851,18 +846,16 @@ describeSpecs specs =
   H.dl . mconcat <$> mapM describeSpec specs
 
 describeSpec :: Spec -> DocM Html
-describeSpec (ValSpec name tparams t doc _) =
+describeSpec (ValSpec name tparams t _ doc _) =
   describeGeneric name what doc $ \name' -> do
     let tparams' = mconcat $ map ((" " <>) . typeParamHtml) tparams
-    t' <-
-      noLink (map typeParamName tparams) $
-        typeExpHtml $ declaredType t
+    t' <- noLink (map typeParamName tparams) $ typeExpHtml t
     pure $ keyword "val " <> name' <> tparams' <> ": " <> t'
   where
     what =
-      if orderZero (unInfo $ expandedType t)
-        then IndexValue
-        else IxFun
+      case t of
+        TEArrow {} -> IxFun
+        _ -> IndexValue
 describeSpec (TypeAbbrSpec vb) =
   describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)
 describeSpec (TypeSpec l name tparams doc _) =

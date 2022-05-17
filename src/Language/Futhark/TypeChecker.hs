@@ -21,7 +21,6 @@ where
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor (first, second)
-import Data.Char (isAlpha, isAlphaNum)
 import Data.Either
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -201,11 +200,11 @@ bindingTypeParams tparams = localEnv env
         }
 
 checkTypeDecl ::
-  TypeDeclBase NoInfo Name ->
-  TypeM ([VName], TypeDeclBase Info VName, Liftedness)
-checkTypeDecl (TypeDecl te NoInfo) = do
+  UncheckedTypeExp ->
+  TypeM ([VName], TypeExp VName, StructType, Liftedness)
+checkTypeDecl te = do
   (te', svars, RetType dims st, l) <- checkTypeExp te
-  pure (svars ++ dims, TypeDecl te' $ Info st, l)
+  pure (svars ++ dims, te', st, l)
 
 -- In this function, after the recursion, we add the Env of the
 -- current Spec *after* the one that is returned from the recursive
@@ -215,21 +214,21 @@ checkTypeDecl (TypeDecl te NoInfo) = do
 -- redundantly imported multiple times).
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
 checkSpecs [] = pure (mempty, mempty, [])
-checkSpecs (ValSpec name tparams vtype doc loc : specs) =
+checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    (tparams', vtype') <-
+    (tparams', vtype', vtype_t) <-
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
-        (ext, vtype', _) <- checkTypeDecl vtype
+        (ext, vtype', vtype_t, _) <- checkTypeDecl vtype
 
         unless (null ext) $
           typeError loc mempty $
             "All function parameters must have non-anonymous sizes."
               </> "Hint: add size parameters to" <+> pquote (pprName name') <> "."
 
-        pure (tparams', vtype')
+        pure (tparams', vtype', vtype_t)
 
-    let binding = BoundV tparams' $ unInfo $ expandedType vtype'
+    let binding = BoundV tparams' vtype_t
         valenv =
           mempty
             { envVtable = M.singleton name' binding,
@@ -239,7 +238,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     pure
       ( abstypes,
         env <> valenv,
-        ValSpec name' tparams' vtype' doc loc : specs'
+        ValSpec name' tparams' vtype' (Info vtype_t) doc loc : specs'
       )
 checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
@@ -315,14 +314,14 @@ checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
   (abstypes, env, specs') <- checkSpecs specs
   pure (abstypes, MTy abstypes $ ModEnv env, SigSpecs specs' loc)
-checkSigExp (SigWith s (TypeRef tname ps td trloc) loc) = do
+checkSigExp (SigWith s (TypeRef tname ps te trloc) loc) = do
   (abs, s_abs, s_env, s') <- checkSigExpToEnv s
   checkTypeParams ps $ \ps' -> do
-    (ext, td', _) <- bindingTypeParams ps' $ checkTypeDecl td
+    (ext, te', te_t, _) <- bindingTypeParams ps' $ checkTypeDecl te
     unless (null ext) $
-      typeError td' mempty "Anonymous dimensions are not allowed here."
-    (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' $ unInfo $ expandedType td'
-    pure (abs, MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' td' trloc) loc)
+      typeError te' mempty "Anonymous dimensions are not allowed here."
+    (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname ps' te_t
+    pure (abs, MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' ps' te' trloc) loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
   (e1_abs, MTy s_abs e1_mod, e1') <- checkSigExp e1
   (env_for_e2, maybe_pname') <-
@@ -533,7 +532,7 @@ checkForDuplicateSpecs =
           dupDefinitionError namespace name loc loc'
         _ -> pure $ M.insert (namespace, name) loc known
 
-    f (ValSpec name _ _ _ loc) =
+    f (ValSpec name _ _ _ _ loc) =
       check Term name loc
     f (TypeAbbrSpec (TypeBind name _ _ _ _ _ loc)) =
       check Type name loc
@@ -604,12 +603,10 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
 
     patternEntry (PatParens p _) =
       patternEntry p
-    patternEntry (PatAscription p tdecl _) =
-      EntryParam (patternName p) $
-        EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
+    patternEntry (PatAscription p te _) =
+      EntryParam (patternName p) $ EntryType (patternStructType p) (Just te)
     patternEntry p =
-      EntryParam (patternName p) $
-        EntryType (patternStructType p) Nothing
+      EntryParam (patternName p) $ EntryType (patternStructType p) Nothing
 
     patternName (Id x _ _) = baseName x
     patternName (PatParens p _) = patternName p
@@ -626,13 +623,6 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
     onRetType te t =
       ([], EntryType t te)
 
-entryPointNameIsAcceptable :: Name -> Bool
-entryPointNameIsAcceptable = check . nameToString
-  where
-    check [] = True -- academic
-    check (c : cs) = isAlpha c && all constituent cs
-    constituent c = isAlphaNum c || c == '_'
-
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
   top_level <- atTopLevel
@@ -648,8 +638,6 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
 
   case entry' of
     Just _
-      | not $ entryPointNameIsAcceptable fname ->
-          typeError loc mempty "Entry point names must start with a letter and contain only letters, digits, and underscores."
       | any isTypeParam tparams' ->
           typeError loc mempty "Entry point functions may not be polymorphic."
       | not (all patternOrderZero params')
@@ -712,14 +700,14 @@ nastyReturnType te t
 nastyParameter :: Pat -> Bool
 nastyParameter p = nastyType (patternType p) && not (ascripted p)
   where
-    ascripted (PatAscription _ (TypeDecl te _) _) = niceTypeExp te
+    ascripted (PatAscription _ te _) = niceTypeExp te
     ascripted (PatParens p' _) = ascripted p'
     ascripted _ = False
 
 niceTypeExp :: TypeExp VName -> Bool
 niceTypeExp (TEVar (QualName [] _) _) = True
 niceTypeExp (TEApply te TypeArgExpDim {} _) = niceTypeExp te
-niceTypeExp (TEArray te _ _) = niceTypeExp te
+niceTypeExp (TEArray _ te _) = niceTypeExp te
 niceTypeExp (TEUnique te _) = niceTypeExp te
 niceTypeExp _ = False
 

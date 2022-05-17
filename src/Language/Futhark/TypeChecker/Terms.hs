@@ -68,11 +68,11 @@ sliceShape ::
   Slice ->
   TypeBase (DimDecl VName) as ->
   TermTypeM (TypeBase (DimDecl VName) as, [VName])
-sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
+sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
   runStateT (setDims <$> adjustDims slice orig_dims) []
   where
     setDims [] = stripArray (length orig_dims) t
-    setDims dims' = Array als u et $ ShapeDecl dims'
+    setDims dims' = Array als u (ShapeDecl dims') et
 
     -- If the result is supposed to be a nonrigid size variable, then
     -- don't bother trying to create non-existential sizes.  This is
@@ -128,10 +128,10 @@ sliceShape _ _ t = pure (t, [])
 lexicalClosure :: [Pat] -> Occurrences -> TermTypeM Aliasing
 lexicalClosure params closure = do
   vtable <- asks $ scopeVtable . termScope
-  let isLocal v = case v `M.lookup` vtable of
-        Just (BoundV Local _ _) -> True
+  let isGlobal v = case v `M.lookup` vtable of
+        Just (BoundV Global _ _) -> True
         _ -> False
-  pure . S.map AliasBound . S.filter isLocal $
+  pure . S.map AliasBound . S.filter (not . isGlobal) $
     allOccurring closure S.\\ mconcat (map patNames params)
 
 noAliasesIfOverloaded :: PatType -> TermTypeM PatType
@@ -145,10 +145,10 @@ noAliasesIfOverloaded t =
 
 checkAscript ::
   SrcLoc ->
-  UncheckedTypeDecl ->
+  UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeDecl, Exp)
-checkAscript loc (TypeDecl te NoInfo) e = do
+  TermTypeM (TypeExp VName, Exp)
+checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
   e' <- checkExp e
   e_t <- toStruct <$> expTypeFully e'
@@ -156,43 +156,27 @@ checkAscript loc (TypeDecl te NoInfo) e = do
   onFailure (CheckingAscription decl_t e_t) $
     unify (mkUsage loc "type ascription") decl_t e_t
 
-  -- We also have to make sure that uniqueness matches.  This is done
-  -- explicitly, because uniqueness is ignored by unification.
-  e_t' <- normTypeFully e_t
-  decl_t' <- normTypeFully decl_t
-  unless (noSizes e_t' `subtypeOf` noSizes decl_t') $
-    typeError loc mempty $
-      "Type" <+> pquote (ppr e_t') <+> "is not a subtype of"
-        <+> pquote (ppr decl_t') <> "."
-
-  pure (TypeDecl te' $ Info decl_t', e')
+  pure (te', e')
 
 checkCoerce ::
   SrcLoc ->
-  UncheckedTypeDecl ->
+  UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeDecl, Exp, [VName])
-checkCoerce loc (TypeDecl te NoInfo) e = do
-  (te', decl_t, ext) <- checkTypeExpRigid te RigidCoerce
+  TermTypeM (TypeExp VName, StructType, Exp, [VName])
+checkCoerce loc te e = do
+  (te', te_t, ext) <- checkTypeExpRigid te RigidCoerce
   e' <- checkExp e
   e_t <- toStruct <$> expTypeFully e'
 
   (e_t_nonrigid, _) <-
     allDimsFreshInType loc Nonrigid "coerce_d" e_t
 
-  onFailure (CheckingAscription decl_t e_t) $
-    unify (mkUsage loc "type ascription") decl_t e_t_nonrigid
+  onFailure (CheckingAscription te_t e_t) $
+    unify (mkUsage loc "type ascription") te_t e_t_nonrigid
 
-  -- We also have to make sure that uniqueness matches.  This is done
-  -- explicitly, because uniqueness is ignored by unification.
-  e_t' <- normTypeFully e_t
-  decl_t' <- normTypeFully decl_t
-  unless (noSizes e_t' `subtypeOf` noSizes decl_t') $
-    typeError loc mempty $
-      "Type" <+> pquote (ppr e_t') <+> "is not a subtype of"
-        <+> pquote (ppr decl_t') <> "."
+  te_t' <- normTypeFully te_t
 
-  pure (TypeDecl te' $ Info decl_t', e', ext)
+  pure (te', te_t', e', ext)
 
 unscopeType ::
   SrcLoc ->
@@ -368,14 +352,14 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
-checkExp (Ascript e decl loc) = do
-  (decl', e') <- checkAscript loc decl e
-  pure $ Ascript e' decl' loc
-checkExp (AppExp (Coerce e decl loc) _) = do
-  (decl', e', ext) <- checkCoerce loc decl e
+checkExp (Ascript e te loc) = do
+  (te', e') <- checkAscript loc te e
+  pure $ Ascript e' te' loc
+checkExp (AppExp (Coerce e te loc) _) = do
+  (te', te_t, e', ext) <- checkCoerce loc te e
   t <- expTypeFully e'
-  t' <- matchDims (const . const pure) t $ fromStruct $ unInfo $ expandedType decl'
-  pure $ AppExp (Coerce e' decl' loc) (Info $ AppRes t' ext)
+  t' <- matchDims (const . const pure) t $ fromStruct te_t
+  pure $ AppExp (Coerce e' te' loc) (Info $ AppRes t' ext)
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   (op', ftype) <- lookupVar oploc op
   e1_arg <- checkArg e1
@@ -545,8 +529,6 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
 
     (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
-    unless (unique src_t) $ notConsumable loc $ pquote $ pprName $ identName src
-
     sequentially (unifies "type of target array" (toStruct elemt) =<< checkExp ve) $ \ve' _ -> do
       ve_t <- expTypeFully ve'
       when (AliasBound (identName src') `S.member` aliases ve_t) $
@@ -566,8 +548,6 @@ checkExp (Update src slice ve loc) = do
   sequentially (checkExp ve >>= unifies "type of target array" elemt) $ \ve' _ ->
     sequentially (checkExp src >>= unifies "type of target array" t) $ \src' _ -> do
       src_t <- expTypeFully src'
-
-      unless (unique src_t) $ notConsumable loc $ pquote $ ppr src
 
       let src_als = aliases src_t
       ve_t <- expTypeFully ve'
@@ -624,37 +604,40 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2
   pure $ Assert e1' e2' (Info (pretty e1)) loc
-checkExp (Lambda params body rettype_te NoInfo loc) =
-  removeSeminullOccurrences . noUnique . incLevel . bindingParams [] params $ \_ params' -> do
-    rettype_checked <- traverse checkTypeExpNonrigid rettype_te
-    let declared_rettype =
-          case rettype_checked of
-            Just (_, st, _) -> Just st
-            Nothing -> Nothing
-    (body', closure) <-
-      tapOccurrences $ checkFunBody params' body declared_rettype loc
-    body_t <- expTypeFully body'
+checkExp (Lambda params body rettype_te NoInfo loc) = do
+  (params', body', body_t, rettype', info) <-
+    removeSeminullOccurrences . noUnique . incLevel . bindingParams [] params $ \_ params' -> do
+      rettype_checked <- traverse checkTypeExpNonrigid rettype_te
+      let declared_rettype =
+            case rettype_checked of
+              Just (_, st, _) -> Just st
+              Nothing -> Nothing
+      (body', closure) <-
+        tapOccurrences $ checkFunBody params' body declared_rettype loc
+      body_t <- expTypeFully body'
 
-    params'' <- mapM updateTypes params'
+      params'' <- mapM updateTypes params'
 
-    (rettype', rettype_st) <-
-      case rettype_checked of
-        Just (te, st, ext) -> do
-          let st_structural = toStructural st
-          checkReturnAlias loc st_structural params'' body_t
-          pure (Just te, RetType ext st)
-        Nothing -> do
-          ret <-
-            inferReturnSizes params'' . toStruct $
-              inferReturnUniqueness params'' body_t
-          pure (Nothing, ret)
+      (rettype', rettype_st) <-
+        case rettype_checked of
+          Just (te, st, ext) -> do
+            let st_structural = toStructural st
+            checkReturnAlias loc st_structural params'' body_t
+            pure (Just te, RetType ext st)
+          Nothing -> do
+            ret <-
+              inferReturnSizes params'' . toStruct $
+                inferReturnUniqueness params'' body_t
+            pure (Nothing, ret)
 
-    checkGlobalAliases params' body_t loc
-    verifyFunctionParams Nothing params'
+      closure' <- lexicalClosure params'' closure
 
-    closure' <- lexicalClosure params'' closure
+      pure (params'', body', body_t, rettype', Info (closure', rettype_st))
 
-    pure $ Lambda params'' body' rettype' (Info (closure', rettype_st)) loc
+  checkGlobalAliases params' body_t loc
+  verifyFunctionParams Nothing params'
+
+  pure $ Lambda params' body' rettype' info loc
   where
     -- Inferring the sizes of the return type of a lambda is a lot
     -- like let-generalisation.  We wish to remove any rigid sizes
@@ -726,12 +709,14 @@ checkExp (ProjectSection fields NoInfo loc) = do
   a <- newTypeVar loc "a"
   let usage = mkUsage loc "projection at"
   b <- foldM (flip $ mustHaveField usage) a fields
-  pure $ ProjectSection fields (Info $ Scalar $ Arrow mempty Unnamed a $ RetType [] b) loc
+  let ft = Scalar $ Arrow mempty Unnamed (toStruct a) $ RetType [] b
+  pure $ ProjectSection fields (Info ft) loc
 checkExp (IndexSection slice NoInfo loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType loc "e" $ sliceDims slice'
   (t', retext) <- sliceShape Nothing slice' t
-  pure $ IndexSection slice' (Info $ fromStruct $ Scalar $ Arrow mempty Unnamed t $ RetType retext t') loc
+  let ft = Scalar $ Arrow mempty Unnamed t $ RetType retext $ fromStruct t'
+  pure $ IndexSection slice' (Info ft) loc
 checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) = do
   ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
     checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc
@@ -881,7 +866,7 @@ type ApplyOp = (Maybe (QualName VName), Int)
 
 -- | Extract all those names that are bound inside the type.
 boundInsideType :: TypeBase (DimDecl VName) as -> S.Set VName
-boundInsideType (Array _ _ t _) = boundInsideType (Scalar t)
+boundInsideType (Array _ _ _ t) = boundInsideType (Scalar t)
 boundInsideType (Scalar Prim {}) = mempty
 boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
   where
@@ -911,13 +896,13 @@ checkApply ::
   ApplyOp ->
   PatType ->
   Arg ->
-  TermTypeM (PatType, PatType, Maybe VName, [VName])
+  TermTypeM (StructType, PatType, Maybe VName, [VName])
 checkApply
   loc
   (fname, _)
   (Scalar (Arrow as pname tp1 tp2))
   (argexp, argtype, dflow, argloc) =
-    onFailure (CheckingApply fname argexp (toStruct tp1) (toStruct argtype)) $ do
+    onFailure (CheckingApply fname argexp tp1 (toStruct argtype)) $ do
       expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
       -- Perform substitutions of instantiated variables in the types.
@@ -951,8 +936,8 @@ checkApply
 
       -- Unification ignores uniqueness in higher-order arguments, so
       -- we check for that here.
-      unless (toStructural argtype' `subtypeOf` toStructural tp1') $
-        typeError loc mempty "Uniqueness does not match."
+      unless (toStructural argtype' `subtypeOf` setUniqueness (toStructural tp1') Nonunique) $
+        typeError loc mempty "Consumption/aliasing does not match."
 
       (argext, parsubst) <-
         case pname of
@@ -1006,9 +991,9 @@ returnType ::
   PatType ->
   PatType
 returnType (Array _ Unique et shape) _ _ =
-  Array mempty Unique et shape
+  Array mempty Nonunique et shape -- Intentional!
 returnType (Array als Nonunique et shape) d arg =
-  Array (als <> arg_als) Unique et shape -- Intentional!
+  Array (als <> arg_als) Nonunique et shape
   where
     arg_als = aliases $ maskAliases arg d
 returnType (Scalar (Record fs)) d arg =
@@ -1016,9 +1001,9 @@ returnType (Scalar (Record fs)) d arg =
 returnType (Scalar (Prim t)) _ _ =
   Scalar $ Prim t
 returnType (Scalar (TypeVar _ Unique t targs)) _ _ =
-  Scalar $ TypeVar mempty Unique t targs
+  Scalar $ TypeVar mempty Nonunique t targs -- Intentional!
 returnType (Scalar (TypeVar als Nonunique t targs)) d arg =
-  Scalar $ TypeVar (als <> arg_als) Unique t targs -- Intentional!
+  Scalar $ TypeVar (als <> arg_als) Unique t targs
   where
     arg_als = aliases $ maskAliases arg d
 returnType (Scalar (Arrow old_als v t1 (RetType dims t2))) d arg =
@@ -1050,12 +1035,6 @@ consumeArg loc (Scalar (Record ets)) (RecordDiet ds) =
   concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
 consumeArg loc (Scalar (Sum ets)) (SumDiet ds) =
   concat <$> traverse (uncurry $ consumeArg loc) (concat $ M.elems $ M.intersectionWith zip ets ds)
-consumeArg loc (Array _ Nonunique _ _) Consume =
-  typeError loc mempty . withIndexLink "consuming-parameter" $
-    "Consuming parameter passed non-unique argument."
-consumeArg loc (Scalar (TypeVar _ Nonunique _ _)) Consume =
-  typeError loc mempty . withIndexLink "consuming-parameter" $
-    "Consuming parameter passed non-unique argument."
 consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
   | not $ contravariantArg t1 d =
       typeError loc mempty . withIndexLink "consuming-argument" $
@@ -1350,17 +1329,15 @@ hiddenParamNames params = hidden
     hidden = param_all_names `S.difference` param_names
 
 inferredReturnType :: SrcLoc -> [Pat] -> PatType -> TermTypeM StructType
-inferredReturnType loc params t =
+inferredReturnType loc params t = do
   -- The inferred type may refer to names that are bound by the
   -- parameter patterns, but which will not be visible in the type.
   -- These we must turn into fresh type variables, which will be
   -- existential in the return type.
   fmap (toStruct . fst) $
-    unscopeType
-      loc
-      (M.filterWithKey (const . (`S.member` hidden)) $ foldMap patternMap params)
-      $ inferReturnUniqueness params t
+    unscopeType loc hidden_params $ inferReturnUniqueness params t
   where
+    hidden_params = M.filterWithKey (const . (`S.member` hidden)) $ foldMap patternMap params
     hidden = hiddenParamNames params
 
 checkReturnAlias :: SrcLoc -> TypeBase () () -> [Pat] -> PatType -> TermTypeM ()
@@ -1443,12 +1420,12 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 
     verifyFunctionParams (Just fname) params''
 
-    (tparams'', params''', rettype'') <-
+    (tparams'', params''', rettype') <-
       letGeneralise fname loc tparams' params'' rettype
 
     checkGlobalAliases params'' body_t loc
 
-    pure (tparams'', params''', maybe_retdecl'', rettype'', body')
+    pure (tparams'', params''', maybe_retdecl'', rettype', body')
 
 -- | Extract all the shape names that occur in positive position
 -- (roughly, left side of an arrow) in a given type.
@@ -1468,20 +1445,19 @@ typeDimNamesPos _ = mempty
 checkGlobalAliases :: [Pat] -> PatType -> SrcLoc -> TermTypeM ()
 checkGlobalAliases params body_t loc = do
   vtable <- asks $ scopeVtable . termScope
-  let isLocal v = case v `M.lookup` vtable of
-        Just (BoundV Local _ _) -> True
+  let isGlobal v = case v `M.lookup` vtable of
+        Just (BoundV Global _ _) -> True
         _ -> False
   let als =
-        filter (not . isLocal) . S.toList $
+        filter isGlobal . S.toList $
           boundArrayAliases body_t `S.difference` foldMap patNames params
-  case als of
-    v : _
-      | not $ null params ->
-          typeError loc mempty . withIndexLink "alias-free-variable" $
-            "Function result aliases the free variable "
-              <> pquote (pprName v)
-              <> "."
-              </> "Use" <+> pquote "copy" <+> "to break the aliasing."
+  unless (null params) $ case als of
+    v : _ ->
+      typeError loc mempty . withIndexLink "alias-free-variable" $
+        "Function result aliases the free variable "
+          <> pquote (pprName v)
+          <> "."
+          </> "Use" <+> pquote "copy" <+> "to break the aliasing."
     _ ->
       pure ()
 
@@ -1494,7 +1470,7 @@ inferReturnUniqueness params t =
       delve t'
         | all (`S.member` uniques) (boundArrayAliases t'),
           not $ any ((`S.member` forbidden) . aliasVar) (aliases t') =
-            t'
+            t' `setUniqueness` Unique
         | otherwise =
             t' `setUniqueness` Nonunique
    in delve t
@@ -1735,16 +1711,6 @@ checkFunBody params body maybe_rettype loc = do
       let usage = mkUsage (srclocOf body) "return type annotation"
       onFailure (CheckingReturn rettype (toStruct body_t')) $
         expect usage rettype $ toStruct body_t'
-
-      -- We also have to make sure that uniqueness matches.  This is done
-      -- explicitly, because uniqueness is ignored by unification.
-      rettype' <- normTypeFully rettype
-      body_t'' <- normTypeFully body_t' -- Substs may have changed.
-      unless (toStructural body_t'' `subtypeOf` toStructural rettype') $
-        typeError (srclocOf body) mempty $
-          "Body type" </> indent 2 (ppr body_t'')
-            </> "is not a subtype of annotated type"
-            </> indent 2 (ppr rettype')
     Nothing -> pure ()
 
   pure body'
@@ -1758,4 +1724,4 @@ arrayOfM ::
   TermTypeM (TypeBase dim as)
 arrayOfM loc t shape u = do
   arrayElemType (mkUsage loc "use as array element") "type used in array" t
-  pure $ arrayOf t shape u
+  pure $ arrayOf u shape t

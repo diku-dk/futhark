@@ -552,15 +552,6 @@ static inline int get_local_size(int d) {
   }
 }
 
-static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_group_id(d) * get_local_size(d) + get_local_id(d);
-}
-#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)
-
-static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_num_groups(d) * get_local_size(d);
-}
-
 #define CLK_LOCAL_MEM_FENCE 1
 #define CLK_GLOBAL_MEM_FENCE 2
 static inline void barrier(int x) {
@@ -650,10 +641,6 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
     kernelOps (GetLocalSize v i) =
       GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
-    kernelOps (GetGlobalId v i) =
-      GC.stm [C.cstm|$id:v = get_global_id($int:i);|]
-    kernelOps (GetGlobalSize v i) =
-      GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
     kernelOps (GetLockstepWidth v) =
       GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
     kernelOps (Barrier f) = do
@@ -847,17 +834,8 @@ typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode
-  ( Copy
-      _
-      (Count (TPrimExp e1))
-      _
-      _
-      (Count (TPrimExp e2))
-      _
-      (Count (TPrimExp e3))
-    ) =
-    typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode (Copy _ _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _ (Count (TPrimExp e3))) =
+  typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (Read _ _ (Count (TPrimExp e1)) t _ _) =

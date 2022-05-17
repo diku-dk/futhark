@@ -43,7 +43,6 @@ import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.ProgressBar
-import System.Console.ANSI (clearLine)
 import System.Directory
   ( copyFile,
     createDirectoryIfMissing,
@@ -760,16 +759,15 @@ processDirective env (DirectiveVideo e params) = do
               liftIO . T.putStr $
                 "\r"
                   <> progressBar
-                    (ProgressBar 40 (fromIntegral num_frames) (fromIntegral j))
+                    (ProgressBar 40 (fromIntegral num_frames - 1) (fromIntegral j))
                   <> "generating frame "
-                  <> prettyText j
+                  <> prettyText (j + 1)
                   <> "/"
                   <> prettyText num_frames
                   <> " "
               liftIO $ hFlush stdout,
             liftIO $ do
-              T.putStr "\r"
-              clearLine
+              T.putStrLn ""
           )
       | otherwise =
           (\_ _ -> pure (), pure ())
@@ -990,7 +988,15 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
           imgdir_rel = dropExtension (takeFileName mdfile) <> "-img"
           imgdir = takeDirectory mdfile </> imgdir_rel
           run_options = scriptExtraOptions opts
-          cfg = futharkServerCfg ("." </> dropExtension prog) run_options
+          onLine "call" l = T.putStrLn l
+          onLine _ _ = pure ()
+          cfg =
+            (futharkServerCfg ("." </> dropExtension prog) run_options)
+              { cfgOnLine =
+                  if scriptVerbose opts > 0
+                    then onLine
+                    else const . const $ pure ()
+              }
 
       withScriptServer cfg $ \server -> do
         let env =

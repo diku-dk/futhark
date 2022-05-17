@@ -53,7 +53,7 @@ module Futhark.Optimise.GraphRep
     mapAcrossWithSE,
     updateNode,
     substituteNamesInNodes,
-    substituteNamesInEdges
+    substituteNamesInEdges,
   )
 where
 
@@ -430,12 +430,11 @@ internalizeOutput :: H.Input -> H.Input
 internalizeOutput i@(H.Input ts name _) = H.Input ts name (H.inputType i)
 
 internalizeAndAdd :: H.ArrayTransforms -> H.Input -> H.Input
-internalizeAndAdd ts i = H.setInputTransforms newTs $  internalizeOutput temporaryI
+internalizeAndAdd ts i = H.setInputTransforms newTs $ internalizeOutput temporaryI
   where
     oldTs = H.inputTransforms i
     temporaryI = H.setInputTransforms ts i
     newTs = ts <> oldTs
-
 
 findTransformsBetween :: VName -> NodeT -> NodeT -> H.ArrayTransforms
 findTransformsBetween vname n1 n2 =
@@ -509,10 +508,10 @@ substituteNamesInNodes submap ns =
 
 substituteNamesInEdges :: M.Map VName VName -> [DepEdge] -> DepGraphAug
 substituteNamesInEdges m edgs g =
-  let edgs' = mapEdgeT (substituteNames m) edgs in
-  pure $ G.insEdges edgs' $ foldl (flip ($)) g (map G.delLEdge edgs)
+  let edgs' = mapEdgeT (substituteNames m) edgs
+   in pure $ G.insEdges edgs' $ foldl (flip ($)) g (map G.delLEdge edgs)
   where
-    mapEdgeT f = map (\(a,b,c) -> (a,b,f c))
+    mapEdgeT f = map (\(a, b, c) -> (a, b, f c))
 
 updateNode :: G.Node -> (NodeT -> Maybe NodeT) -> DepGraphAug
 updateNode n f g =

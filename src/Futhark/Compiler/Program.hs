@@ -18,6 +18,7 @@ module Futhark.Compiler.Program
     lpFilePaths,
     reloadProg,
     extendProg,
+    VFS,
   )
 where
 

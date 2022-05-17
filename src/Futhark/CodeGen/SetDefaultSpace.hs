@@ -63,8 +63,8 @@ setCodeSpace space (DeclareMem name old_space) =
   DeclareMem name $ setSpace space old_space
 setCodeSpace space (DeclareArray name _ t vs) =
   DeclareArray name space t vs
-setCodeSpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
-  Copy dest dest_offset dest_space' src src_offset src_space' n
+setCodeSpace space (Copy t dest dest_offset dest_space src src_offset src_space n) =
+  Copy t dest dest_offset dest_space' src src_offset src_space' n
   where
     dest_space' = setSpace space dest_space
     src_space' = setSpace space src_space

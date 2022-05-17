@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Somewhat simplified the handling of "uniqueness types" (which is a
+  term we are moving away from).  You should never see `*` in
+  non-function types, and they are better thought of as effect
+  indicators.
+
+* `futhark literate`: prints tracing output (and other logging
+  messages that may occur) when run with `-v` (#1678).
+
+* Entry points can now be any valid Futhark identifier.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `futhark test -C` was broken.
+
+* `futhark_context_free()` for the GPU backends neglected to free some
+  memory used for internal bookkeeping, which could lead to memory
+  leaks for processes that repeatedly create and destroy contexts
+  (#1676).
+
+* FutharkScript now allows `'` in names.
+
+* `futhark lsp` now handles warnings in programs that also have errors.
+
+## [0.21.11]
+
+### Added
+
 * The CUDA backend now supports compute capability 8.6 and 8.7.
 
 * Philip Børgesen has implemented a new optimisation for GPU backends
@@ -26,10 +57,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark test` only runs the interpreter if passed `-i`.
 
 * `futhark literate` now shows progress bars when run with `-v`.
-
-### Removed
-
-### Changed
 
 ### Fixed
 

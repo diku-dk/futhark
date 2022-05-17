@@ -69,7 +69,7 @@ addDoc _ dec = dec
 
 addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
 addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig {typeDoc = Just doc})
-addDocSpec doc (ValSpec name ps t _ loc) = ValSpec name ps t (Just doc) loc
+addDocSpec doc (ValSpec name ps t NoInfo _ loc) = ValSpec name ps t NoInfo (Just doc) loc
 addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
 addDocSpec _ spec = spec
@@ -91,7 +91,7 @@ mustBe (L loc _) expected =
     "Only the keyword '" <> expected <> "' may appear here."
 
 mustBeEmpty :: Located loc => loc -> ValueType -> ParserMonad ()
-mustBeEmpty _ (Array _ _ _ (ShapeDecl dims))
+mustBeEmpty _ (Array _ _ (ShapeDecl dims) _)
   | 0 `elem` dims = pure ()
 mustBeEmpty loc t =
   parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."

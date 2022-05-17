@@ -5,7 +5,7 @@
 
 PREFIX?=$(HOME)/.local
 
-.PHONY: build install docs clean
+.PHONY: all configure build install docs check check-commit clean
 
 all: build
 
@@ -20,7 +20,7 @@ install: build
 	install -D $$(cabal -v0 list-bin exe:futhark) $(PREFIX)/bin
 
 docs:
-	cabal haddock --enable-documentation
+	cabal haddock --enable-documentation --haddock-options=--quickjump
 
 check:
 	tools/style-check.sh src unittests
