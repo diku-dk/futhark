@@ -19,7 +19,7 @@ subcommands, the ``futhark`` tool provides facilities for compiling,
 developing, or analysing Futhark programs.  Most subcommands are
 documented in their own manpage.  For example, ``futhark opencl`` is
 documented as :ref:`futhark-opencl(1)`.  The remaining subcommands are
-documented in this page.
+documented below.
 
 COMMANDS
 ========
