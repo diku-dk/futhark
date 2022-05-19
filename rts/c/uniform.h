@@ -55,156 +55,124 @@ static inline uniform uint64_t mul64(uniform uint64_t x, uniform uint64_t y) {
 }
 
 static inline uniform uint8_t udiv8(uniform uint8_t x, uniform uint8_t y) {
-  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uniform uint16_t udiv16(uniform uint16_t x, uniform uint16_t y) {
-  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uniform uint32_t udiv32(uniform uint32_t x, uniform uint32_t y) {
-  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uniform uint64_t udiv64(uniform uint64_t x, uniform uint64_t y) {
-  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uniform uint8_t udiv_up8(uniform uint8_t x, uniform uint8_t y) {
-  #pragma ignore warning(perf)
   return (x + y - 1) / y;
 }
 
 static inline uniform uint16_t udiv_up16(uniform uint16_t x, uniform uint16_t y) {
-  #pragma ignore warning(perf)
   return (x + y - 1) / y;
 }
 
 static inline uniform uint32_t udiv_up32(uniform uint32_t x, uniform uint32_t y) {
-  #pragma ignore warning(perf)
   return (x + y - 1) / y;
 }
 
 static inline uniform uint64_t udiv_up64(uniform uint64_t x, uniform uint64_t y) {
-  #pragma ignore warning(perf)
   return (x + y - 1) / y;
 }
 
 static inline uniform uint8_t umod8(uniform uint8_t x, uniform uint8_t y) {
-  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uniform uint16_t umod16(uniform uint16_t x, uniform uint16_t y) {
-  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uniform uint32_t umod32(uniform uint32_t x, uniform uint32_t y) {
-  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uniform uint64_t umod64(uniform uint64_t x, uniform uint64_t y) {
-  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uniform uint8_t udiv_safe8(uniform uint8_t x, uniform uint8_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uniform uint16_t udiv_safe16(uniform uint16_t x, uniform uint16_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uniform uint32_t udiv_safe32(uniform uint32_t x, uniform uint32_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uniform uint64_t udiv_safe64(uniform uint64_t x, uniform uint64_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uniform uint8_t udiv_up_safe8(uniform uint8_t x, uniform uint8_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
 static inline uniform uint16_t udiv_up_safe16(uniform uint16_t x, uniform uint16_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
 static inline uniform uint32_t udiv_up_safe32(uniform uint32_t x, uniform uint32_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
 static inline uniform uint64_t udiv_up_safe64(uniform uint64_t x, uniform uint64_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : (x + y - 1) / y;
 }
 
 static inline uniform uint8_t umod_safe8(uniform uint8_t x, uniform uint8_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uniform uint16_t umod_safe16(uniform uint16_t x, uniform uint16_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uniform uint32_t umod_safe32(uniform uint32_t x, uniform uint32_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uniform uint64_t umod_safe64(uniform uint64_t x, uniform uint64_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uniform int8_t sdiv8(uniform int8_t x, uniform int8_t y) {
-  #pragma ignore warning(perf)
   uniform int8_t q = x / y;
-  #pragma ignore warning(perf)
   uniform int8_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
 static inline uniform int16_t sdiv16(uniform int16_t x, uniform int16_t y) {
-  #pragma ignore warning(perf)
   uniform int16_t q = x / y;
-  #pragma ignore warning(perf)
   uniform int16_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
 static inline uniform int32_t sdiv32(uniform int32_t x, uniform int32_t y) {
-  #pragma ignore warning(perf)
   uniform int32_t q = x / y;
-  #pragma ignore warning(perf)
   uniform int32_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
 static inline uniform int64_t sdiv64(uniform int64_t x, uniform int64_t y) {
-  #pragma ignore warning(perf)
   uniform int64_t q = x / y;
-  #pragma ignore warning(perf)
   uniform int64_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
@@ -227,28 +195,24 @@ static inline uniform int64_t sdiv_up64(uniform int64_t x, uniform int64_t y) {
 }
 
 static inline uniform int8_t smod8(uniform int8_t x, uniform int8_t y) {
-  #pragma ignore warning(perf)
   uniform int8_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline uniform int16_t smod16(uniform int16_t x, uniform int16_t y) {
-  #pragma ignore warning(perf)
   uniform int16_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline uniform int32_t smod32(uniform int32_t x, uniform int32_t y) {
-  #pragma ignore warning(perf)
   uniform int32_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline uniform int64_t smod64(uniform int64_t x, uniform int64_t y) {
-  #pragma ignore warning(perf)
   uniform int64_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
@@ -303,82 +267,66 @@ static inline uniform int64_t smod_safe64(uniform int64_t x, uniform int64_t y) 
 }
 
 static inline uniform int8_t squot8(uniform int8_t x, uniform int8_t y) {
-  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uniform int16_t squot16(uniform int16_t x, uniform int16_t y) {
-  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uniform int32_t squot32(uniform int32_t x, uniform int32_t y) {
-  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uniform int64_t squot64(uniform int64_t x, uniform int64_t y) {
-  #pragma ignore warning(perf)
   return x / y;
 }
 
 static inline uniform int8_t srem8(uniform int8_t x, uniform int8_t y) {
-  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uniform int16_t srem16(uniform int16_t x, uniform int16_t y) {
-  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uniform int32_t srem32(uniform int32_t x, uniform int32_t y) {
-  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uniform int64_t srem64(uniform int64_t x, uniform int64_t y) {
-  #pragma ignore warning(perf)
   return x % y;
 }
 
 static inline uniform int8_t squot_safe8(uniform int8_t x, uniform int8_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uniform int16_t squot_safe16(uniform int16_t x, uniform int16_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uniform int32_t squot_safe32(uniform int32_t x, uniform int32_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uniform int64_t squot_safe64(uniform int64_t x, uniform int64_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x / y;
 }
 
 static inline uniform int8_t srem_safe8(uniform int8_t x, uniform int8_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uniform int16_t srem_safe16(uniform int16_t x, uniform int16_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uniform int32_t srem_safe32(uniform int32_t x, uniform int32_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
 static inline uniform int64_t srem_safe64(uniform int64_t x, uniform int64_t y) {
-  #pragma ignore warning(perf)
   return y == 0 ? 0 : x % y;
 }
 
@@ -463,42 +411,34 @@ static inline uniform uint64_t shl64(uniform uint64_t x, uniform uint64_t y) {
 }
 
 static inline uniform uint8_t lshr8(uniform uint8_t x, uniform uint8_t y) {
-  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uniform uint16_t lshr16(uniform uint16_t x, uniform uint16_t y) {
-  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uniform uint32_t lshr32(uniform uint32_t x, uniform uint32_t y) {
-  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uniform uint64_t lshr64(uniform uint64_t x, uniform uint64_t y) {
-  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uniform int8_t ashr8(uniform int8_t x, uniform int8_t y) {
-  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uniform int16_t ashr16(uniform int16_t x, uniform int16_t y) {
-  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uniform int32_t ashr32(uniform int32_t x, uniform int32_t y) {
-  #pragma ignore warning(perf)
   return x >> y;
 }
 
 static inline uniform int64_t ashr64(uniform int64_t x, uniform int64_t y) {
-  #pragma ignore warning(perf)
   return x >> y;
 }
 
@@ -878,7 +818,6 @@ static inline uniform float uitofp_i16_f32(uniform uint16_t x) {
 }
 
 static inline uniform float uitofp_i32_f32(uniform uint32_t x) {
-  #pragma ignore warning(perf)
   return (uniform float) x;
 }
 
@@ -1091,7 +1030,6 @@ static inline uniform float futrts_hypot32(uniform float x, uniform float y) {
     cn = sqrt (an * an + bn * bn);
     return ldexp (cn, e);
   } else {
-    #pragma ignore warning(all)
     if (futrts_isinf32(x) || futrts_isinf32(y)) return INFINITY;
     else return x + y;
   }
@@ -1544,17 +1482,14 @@ static inline uniform f16 uitofp_i16_f16(uniform uint16_t x) {
 }
 
 static inline uniform f16 uitofp_i32_f16(uniform uint32_t x) {
-  #pragma ignore warning(perf)
   return (uniform f16) x;
 }
 
 static inline uniform f16 uitofp_i64_f16(uniform uint64_t x) {
-  #pragma ignore warning(perf)
   return (uniform f16) x;
 }
 
 static inline uniform int8_t fptosi_f16_i8(uniform f16 x) {
-  #pragma ignore warning(perf)
   return (uniform int8_t) (uniform float) x;
 }
 
@@ -1571,22 +1506,18 @@ static inline uniform int64_t fptosi_f16_i64(uniform f16 x) {
 }
 
 static inline uniform uint8_t fptoui_f16_i8(uniform f16 x) {
-  #pragma ignore warning(perf)
   return (uniform uint8_t) (uniform float) x;
 }
 
 static inline uniform uint16_t fptoui_f16_i16(uniform f16 x) {
-  #pragma ignore warning(perf)
   return (uniform uint16_t) x;
 }
 
 static inline uniform uint32_t fptoui_f16_i32(uniform f16 x) {
-  #pragma ignore warning(perf)
   return (uniform uint32_t) x;
 }
 
 static inline uniform uint64_t fptoui_f16_i64(uniform f16 x) {
-  #pragma ignore warning(perf)
   return (uniform uint64_t) x;
 }
 
