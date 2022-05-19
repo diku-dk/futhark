@@ -235,6 +235,9 @@ extractAllocations segop_code = f segop_code
     f code =
       (mempty, code)
 
+-- | Indicates whether to vectorize a chunk loop of keep it sequential.
+-- We use this to allow falling back to sequential chunk loops in cases
+-- we don't care about trying to vectorize.
 data ChunkLoopVectorization = Vectorized | Scalar
 
 -- | Emit code for the chunk loop, given an action that generates code
