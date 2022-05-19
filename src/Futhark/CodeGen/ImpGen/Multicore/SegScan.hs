@@ -56,14 +56,13 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   collect $ do
     -- Are we working with nested arrays
     let dims = map (shapeDims . segBinOpShape) scan_ops
-    let isScalar x = case x of MemPrim _ -> True; _ -> False
     -- Are we only working on scalars
-    let scalars = all (all (isScalar . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (== []) dims
+    let scalars = all (all (primType . typeOf . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (== []) dims
     -- Do we have nested vector operations
     let vectorize = [] `notElem` dims
 
     let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
-    let no_array_param = null [x | x@(Array {}) <- param_types]
+    let no_array_param = all primType param_types
 
     let (scanStage1, scanStage3)
           | scalars = (scanStage1Scalar, scanStage3Scalar)
