@@ -176,44 +176,49 @@ makeStringLiteral str = do
     [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform char* $tyqual:uniform $id:name();|]
   pure name
 
--- | Allocate memory in ISPC
-allocMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> ISPCCompilerM ()
-allocMem mem size space on_failure = GC.allocMem' mem size space on_failure stmt
-  where
-    stmt space' mem' size' mem_s' on_failure' = do
-      strlit <- makeStringLiteral mem_s'
-      pure
-        [C.cstm|if ($id:(GC.fatMemAlloc space')(ctx, &$exp:mem', $exp:size',
-                  $id:strlit())) {
-                  $stm:on_failure'
-        }|]
-
 -- | Set memory in ISPC
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
-setMem dest src space = GC.setMem' dest src space stmt
-  where
-    stmt space' dest' src' src_s' = do
-      strlit <- makeStringLiteral src_s'
-      pure
-        [C.cstm|if ($id:(GC.fatMemSet space')(ctx, &$exp:dest', &$exp:src',
-          $id:strlit()) != 0) {
-          $escstm:("unmasked { return 1; }")
-        }|]
+setMem dest src space = do
+  let src_s = pretty $ C.toExp src noLoc
+  strlit <- makeStringLiteral src_s
+  GC.stm
+    [C.cstm|if ($id:(GC.fatMemSet space)(ctx, &$exp:dest, &$exp:src,
+                                            $id:strlit()) != 0) {
+                    $escstm:("unmasked { return 1; }")
+                  }|]
 
 -- | Unref memory in ISPC
 unRefMem :: C.ToExp a => a -> Space -> ISPCCompilerM ()
-unRefMem mem space = GC.unRefMem' mem space cstm
-  where
-    cstm s m m_s = do
-      strlit <- makeStringLiteral m_s
-      pure
-        [C.cstm|if ($id:(GC.fatMemUnRef s)(ctx, &$exp:m, $id:strlit()) != 0) {
-          $escstm:("unmasked { return 1; }")
-        }|]
+unRefMem mem space = do
+  cached <- isJust <$> GC.cacheMem mem
+  let mem_s = pretty $ C.toExp mem noLoc
+  strlit <- makeStringLiteral mem_s
+  unless cached $
+    GC.stm
+      [C.cstm|if ($id:(GC.fatMemUnRef space)(ctx, &$exp:mem, $id:strlit()) != 0) {
+                  $escstm:("unmasked { return 1; }")
+                }|]
+
+-- | Allocate memory in ISPC
+allocMem ::
+  (C.ToExp a, C.ToExp b) =>
+  a ->
+  b ->
+  Space ->
+  C.Stm ->
+  ISPCCompilerM ()
+allocMem mem size space on_failure = do
+  let mem_s = pretty $ C.toExp mem noLoc
+  strlit <- makeStringLiteral mem_s
+  GC.stm
+    [C.cstm|if ($id:(GC.fatMemAlloc space)(ctx, &$exp:mem, $exp:size,
+                                              $id:strlit())) {
+                    $stm:on_failure
+                  }|]
 
 -- | Free memory in ISPC
 freeAllocatedMem :: ISPCCompilerM [C.BlockItem]
-freeAllocatedMem = GC.freeAllocatedMem' unRefMem
+freeAllocatedMem = GC.collect $ mapM_ (uncurry unRefMem) =<< gets GC.compDeclaredMem
 
 -- | Given a ImpCode function, generate all the required machinery for calling
 -- it in ISPC, both in a varying or uniform context. This involves handling
