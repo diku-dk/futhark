@@ -338,7 +338,7 @@ static inline f16 futrts_fma16(f16 a, f16 b, f16 c) {
 #elif ISPC
 
 static inline f16 futrts_log16(f16 x) {
-  return futrts_isfinite16(x) || (futrts_isinf16(x) && x < 0)? log(x) : x;
+  return futrts_isfinite16(x) || (futrts_isinf16(x) && x < 0) ? log(x) : x;
 }
 
 static inline f16 futrts_log2_16(f16 x) {
