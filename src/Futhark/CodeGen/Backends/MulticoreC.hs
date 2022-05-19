@@ -705,8 +705,16 @@ compileOp (Atomic aop) =
   atomicOps aop (\ty _ -> pure [C.cty|$ty:ty*|])
 compileOp (ISPCKernel body _) =
   scopedBlock body
-compileOp (ForEach i bound body) =
-  GC.compileCode (For i bound body)
+compileOp (ForEach i from bound body) = do
+  let i' = C.toIdent i
+      t = primTypeToCType $ primExpType bound
+  from' <- GC.compileExp from
+  bound' <- GC.compileExp bound
+  body' <- GC.collect $ GC.compileCode body
+  GC.stm
+    [C.cstm|for ($ty:t $id:i' = $exp:from'; $id:i' < $exp:bound'; $id:i'++) {
+            $items:body'
+          }|]
 compileOp (ForEachActive i body) = do
   GC.decl [C.cdecl|typename int64_t $id:i = 0;|]
   scopedBlock body

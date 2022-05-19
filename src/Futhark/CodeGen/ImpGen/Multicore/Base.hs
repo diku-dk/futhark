@@ -171,7 +171,7 @@ isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While {} = False
 isLoadBalanced (Imp.Op (Imp.ParLoop _ code _)) = isLoadBalanced code
 isLoadBalanced (Imp.Op (Imp.ForEachActive _ a)) = isLoadBalanced a
-isLoadBalanced (Imp.Op (Imp.ForEach _ _ a)) = isLoadBalanced a
+isLoadBalanced (Imp.Op (Imp.ForEach _ _ _ a)) = isLoadBalanced a
 isLoadBalanced (Imp.Op (Imp.ISPCKernel a _)) = isLoadBalanced a
 isLoadBalanced _ = True
 
@@ -247,7 +247,7 @@ generateChunkLoop ::
   ChunkLoopVectorization ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
-generateChunkLoop desc vec m = do
+generateChunkLoop desc Scalar m = do
   (start, end) <- getLoopBounds
   n <- dPrimVE "n" $ end - start
   i <- newVName (desc <> "_i")
@@ -258,9 +258,20 @@ generateChunkLoop desc vec m = do
   emit body_allocs
   -- Emit either foreach or normal for loop
   let bound = untyped n
-  case vec of
-    Vectorized -> emit $ Imp.Op $ Imp.ForEach i bound body
-    Scalar -> emit $ Imp.For i bound body
+  emit $ Imp.For i bound body
+generateChunkLoop desc Vectorized m = do
+  (start, end) <- getLoopBounds
+  n <- dPrimVE "n" $ end - start
+  i <- newVName (desc <> "_i")
+  (body_allocs, body) <- fmap extractAllocations $
+    collect $ do
+      addLoopVar i Int64
+      m $ Imp.le64 i
+  emit body_allocs
+  -- Emit either foreach or normal for loop
+  let from = untyped start
+  let bound = untyped (start + n)
+  emit $ Imp.Op $ Imp.ForEach i from bound body
 
 -- | Emit code for a sequential loop over each vector lane, given
 -- and action that generates code for a single iteration. The action
@@ -313,7 +324,7 @@ sForVectorized' i bound body = do
         t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
   addLoopVar i it
   body' <- collect body
-  emit $ Imp.Op $ Imp.ForEach i bound body'
+  emit $ Imp.Op $ Imp.ForEach i (Imp.ValueExp $ blankPrimValue $ Imp.IntType Imp.Int64) bound body'
 
 sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
 sForVectorized i bound body = do
