@@ -40,6 +40,16 @@
 -- input { [2f32, f32.nan, f32.inf, -f32.inf] }
 -- output { [true, false, true, false] }
 
+-- ==
+-- entry: log2
+-- input { [2f32, f32.nan, f32.inf, -f32.inf] }
+-- output { [1f32, f32.nan, f32.inf, f32.nan] }
+
+-- ==
+-- entry: log10
+-- input { [10f32, f32.nan, f32.inf, -f32.inf] }
+-- output { [1f32, f32.nan, f32.inf, f32.nan] }
+
 entry eqNaN = map (\x -> x == f32.nan)
 entry ltNaN = map (\x -> x < f32.nan)
 entry lteNaN = map (\x -> x <= f32.nan)
@@ -48,3 +58,5 @@ entry lteInf = map (\x -> x <= f32.inf)
 entry diffInf = map (\x -> x - f32.inf < x + f32.inf)
 entry sumNaN = map (\x -> f32.isnan (x + f32.nan))
 entry sumInf = map (\x -> f32.isinf (x + f32.inf))
+entry log2 = map (\x -> f32.log2 (x))
+entry log10 = map (\x -> f32.log10 (x))

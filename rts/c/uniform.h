@@ -981,15 +981,15 @@ static inline uniform uint64_t fptoui_f32_i64(uniform float x) {
 
 
 static inline uniform float futrts_log32(uniform float x) {
-  return log(x);
+  return futrts_isfinite32(x) || (futrts_isinf32(x) && x < 0)? log(x) : x;
 }
 
 static inline uniform float futrts_log2_32(uniform float x) {
-  return log(x) / log(2.0f);
+  return futrts_log32(x) / log(2.0f);
 }
 
 static inline uniform float futrts_log10_32(uniform float x) {
-  return log(x) / log(10.0f);
+  return futrts_log32(x) / log(10.0f);
 }
 
 static inline uniform float futrts_sqrt32(uniform float x) {
@@ -1240,15 +1240,15 @@ static inline uniform double fpow64(uniform double x, uniform double y) {
 }
 
 static inline uniform double futrts_log64(uniform double x) {
-  return log(x);
+  return futrts_isfinite64(x) || (futrts_isinf64(x) && x < 0)? log(x) : x;
 }
 
 static inline uniform double futrts_log2_64(uniform double x) {
-  return log(x)/log(2.0d);
+  return futrts_log64(x)/log(2.0d);
 }
 
 static inline uniform double futrts_log10_64(uniform double x) {
-  return log(x)/log(10.0d);
+  return futrts_log64(x)/log(10.0d);
 }
 
 static inline uniform double futrts_sqrt64(uniform double x) {
@@ -1493,7 +1493,7 @@ static inline uniform double fpconv_f16_f64(uniform f16 x) {
 }
 
 static inline uniform f16 fpconv_f64_f16(uniform double x) {
-  return (uniform f16) ((uniform float)x);
+  return (uniform f16) ((uniform float)x); 
 }
 
 #endif
@@ -1619,15 +1619,15 @@ static inline uniform bool futrts_isfinite16(uniform float x) {
 
 
 static inline uniform f16 futrts_log16(uniform f16 x) {
-  return log(x);
+  return futrts_isfinite16(x) || (futrts_isinf16(x) && x < 0)? log(x) : x;
 }
 
 static inline uniform f16 futrts_log2_16(uniform f16 x) {
-  return log(x) / log(2.0f16);
+  return futrts_log16(x) / log(2.0f16);
 }
 
 static inline uniform f16 futrts_log10_16(uniform f16 x) {
-  return log(x) / log(10.0f16);
+  return futrts_log16(x) / log(10.0f16);
 }
 
 static inline uniform f16 futrts_sqrt16(uniform f16 x) {

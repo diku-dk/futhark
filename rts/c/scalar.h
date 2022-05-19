@@ -2001,15 +2001,15 @@ static inline float futrts_fma32(float a, float b, float c) {
 #elif ISPC
 
 static inline float futrts_log32(float x) {
-  return log(x);
+  return futrts_isfinite32(x) || (futrts_isinf32(x) && x < 0)? log(x) : x;
 }
 
 static inline float futrts_log2_32(float x) {
-  return log(x) / log(2.0f);
+  return futrts_log32(x) / log(2.0f);
 }
 
 static inline float futrts_log10_32(float x) {
-  return log(x) / log(10.0f);
+  return futrts_log32(x) / log(10.0f);
 }
 
 static inline float futrts_sqrt32(float x) {
@@ -2441,15 +2441,15 @@ static inline double fpow64(double a, double b) {
 }
 
 static inline double futrts_log64(double x) {
-  return log(x);
+  return futrts_isfinite64(x) || (futrts_isinf64(x) && x < 0)? log(x) : x;
 }
 
 static inline double futrts_log2_64(double x) {
-  return log(x)/log(2.0d);
+  return futrts_log64(x)/log(2.0d);
 }
 
 static inline double futrts_log10_64(double x) {
-  return log(x)/log(10.0d);
+  return futrts_log64(x)/log(10.0d);
 }
 
 static inline double futrts_sqrt64(double x) {
