@@ -23,41 +23,7 @@ implement the Futhark server protocol and can be run with Node.js.
 OPTIONS
 =======
 
--h
-  Print help text to standard output and exit.
-
---entry-point NAME
-  Treat this top-level function as an entry point.
-
---library
-  Generate a library instead of an executable.  Appends ``.js``
-  to the name indicated by the ``-o`` option to determine output
-  file names.
-
--o outfile
-  Where to write the result.  If the source program is named
-  ``foo.fut``, this defaults to ``foo``.
-
---safe
-  Ignore ``unsafe`` in program and perform safety checks unconditionally.
-
---server
-  Generate a server-mode executable that reads commands from stdin.
-  This is the default.
-
--v verbose
-  Enable debugging output.  If compilation fails due to a compiler
-  error, the result of the last successful compiler step will be
-  printed to standard error.
-
--V
-  Print version information on standard output and exit.
-
--W
-  Do not print any warnings.
-
---Werror
-  Treat warnings as errors.
+Accepts the same options as :ref:`futhark-c(1)`.
 
 ENVIRONMENT VARIABLES
 =====================
