@@ -84,17 +84,14 @@ static inline f16 uitofp_i16_f16(uint16_t x) {
 }
 
 static inline f16 uitofp_i32_f16(uint32_t x) {
-  #pragma ignore warning(perf)
   return (f16) x;
 }
 
 static inline f16 uitofp_i64_f16(uint64_t x) {
-  #pragma ignore warning(perf)
   return (f16) x;
 }
 
 static inline int8_t fptosi_f16_i8(f16 x) {
-  #pragma ignore warning(perf)
   return (int8_t) (float) x;
 }
 
@@ -111,22 +108,18 @@ static inline int64_t fptosi_f16_i64(f16 x) {
 }
 
 static inline uint8_t fptoui_f16_i8(f16 x) {
-  #pragma ignore warning(perf)
   return (uint8_t) (float) x;
 }
 
 static inline uint16_t fptoui_f16_i16(f16 x) {
-  #pragma ignore warning(perf)
   return (uint16_t) x;
 }
 
 static inline uint32_t fptoui_f16_i32(f16 x) {
-  #pragma ignore warning(perf)
   return (uint32_t) x;
 }
 
 static inline uint64_t fptoui_f16_i64(f16 x) {
-  #pragma ignore warning(perf)
   return (uint64_t) x;
 }
 
