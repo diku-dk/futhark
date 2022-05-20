@@ -386,7 +386,7 @@ emptyOfType ctx_names (Array et shape _) = do
   let dims = map zeroIfContext $ shapeDims shape
   pure $ BasicOp $ Scratch et dims
   where
-    zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
+    zeroIfContext (Var v) | v `elem` ctx_names = intConst Int64 0
     zeroIfContext se = se
 
 -- | Statements that are not worth hoisting out of loops, because they
