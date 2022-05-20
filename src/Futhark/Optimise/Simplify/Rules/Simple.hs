@@ -10,8 +10,10 @@ where
 
 import Control.Monad
 import Data.List (isSuffixOf)
+import qualified Data.List.NonEmpty as NE
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR
+import Futhark.Util (focusNth)
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup rep = VName -> Maybe (Exp rep, Certs)
@@ -300,6 +302,17 @@ simplifyReshapeIota defOf _ (Reshape newshape v)
       Just (Iota n offset stride it, v_cs)
 simplifyReshapeIota _ _ _ = Nothing
 
+simplifyReshapeConcat :: SimpleRule rep
+simplifyReshapeConcat defOf seType (Reshape newshape v) = do
+  (BasicOp (Concat d arrs _), v_cs) <- defOf v
+  (bef, w', aft) <- focusNth d =<< shapeCoercion newshape
+  (arr_bef, _, arr_aft) <-
+    focusNth d <=< fmap arrayDims $ seType $ Var $ NE.head arrs
+  guard $ arr_bef == bef
+  guard $ arr_aft == aft
+  Just (Concat d arrs w', v_cs)
+simplifyReshapeConcat _ _ _ = Nothing
+
 reshapeSlice :: [DimIndex d] -> [d] -> [DimIndex d]
 reshapeSlice (DimFix i : slice') scs =
   DimFix i : reshapeSlice slice' scs
@@ -369,6 +382,7 @@ simpleRules =
     simplifyReshapeScratch,
     simplifyReshapeReplicate,
     simplifyReshapeIota,
+    simplifyReshapeConcat,
     simplifyReshapeIndex,
     simplifyUpdateReshape,
     improveReshape
