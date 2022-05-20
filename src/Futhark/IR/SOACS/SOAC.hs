@@ -611,7 +611,7 @@ instance
 
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
-  cheapOp _ = True
+  cheapOp _ = False
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
