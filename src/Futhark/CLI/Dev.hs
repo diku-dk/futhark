@@ -37,6 +37,7 @@ import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -558,6 +559,7 @@ commandLineOptions =
     kernelsPassOption histAccsGPU [],
     kernelsPassOption unstreamGPU [],
     kernelsPassOption sinkGPU [],
+    kernelsPassOption reduceDeviceSyncs [],
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
     iplOption [],
