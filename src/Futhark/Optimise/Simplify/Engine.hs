@@ -613,6 +613,7 @@ cheapExp (BasicOp SubExp {}) = True
 cheapExp (BasicOp UnOp {}) = True
 cheapExp (BasicOp CmpOp {}) = True
 cheapExp (BasicOp ConvOp {}) = True
+cheapExp (BasicOp Assert {}) = True
 cheapExp (BasicOp Copy {}) = False
 cheapExp (BasicOp Replicate {}) = False
 cheapExp (BasicOp Manifest {}) = False
