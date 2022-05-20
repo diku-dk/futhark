@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.21.12]
+
+### Added
+
 * Somewhat simplified the handling of "uniqueness types" (which is a
   term we are moving away from).  You should never see `*` in
   non-function types, and they are better thought of as effect
@@ -18,10 +28,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   messages that may occur) when run with `-v` (#1678).
 
 * Entry points can now be any valid Futhark identifier.
-
-### Removed
-
-### Changed
 
 ### Fixed
 

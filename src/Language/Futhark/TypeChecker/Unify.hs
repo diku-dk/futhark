@@ -253,10 +253,8 @@ dimNotes ctx (NamedDim d) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
-      pure $
-        aNote $
-          pretty $
-            pquote (ppr d) <+> prettySource (srclocOf ctx) loc rsrc
+      pure . aNote . pretty $
+        pquote (ppr d) <+> prettySource (srclocOf ctx) loc rsrc
     _ -> pure mempty
 dimNotes _ _ = pure mempty
 
