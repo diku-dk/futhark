@@ -55,7 +55,6 @@ where
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Parallel.Strategies
-import Data.Bifunctor (second)
 import Data.List (find, intercalate, isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
@@ -310,9 +309,9 @@ instance
 runTypeM ::
   Env rep ->
   TypeM rep a ->
-  Either (TypeError rep) (a, Consumption)
+  Either (TypeError rep) a
 runTypeM env (TypeM m) =
-  second stateCons <$> runStateT (runReaderT m env) (TState mempty mempty)
+  evalStateT (runReaderT m env) (TState mempty mempty)
 
 -- | Signal a type error.
 bad :: ErrorCase rep -> TypeM rep a
@@ -570,15 +569,15 @@ checkProg (Prog consts funs) = do
             envContext = [],
             envCheckOp = checkOp
           }
-  let onFunction ftable vtable fun =
-        fmap fst $
-          runTypeM typeenv $
-            local (\env -> env {envFtable = ftable, envVtable = vtable}) $
-              checkFun fun
-  (ftable, _) <- runTypeM typeenv buildFtable
-  (vtable, _) <-
-    runTypeM typeenv {envFtable = ftable} $
-      checkStms consts $ asks envVtable
+  let const_names = foldMap (patNames . stmPat) consts
+      onFunction ftable vtable fun = runTypeM typeenv $ do
+        modify $ \s -> s {stateNames = namesFromList const_names}
+        local (\env -> env {envFtable = ftable, envVtable = vtable}) $
+          checkFun fun
+  ftable <-
+    runTypeM typeenv buildFtable
+  vtable <-
+    runTypeM typeenv {envFtable = ftable} $ checkStms consts $ asks envVtable
   sequence_ $ parMap rpar (onFunction ftable vtable) funs
   where
     buildFtable = do
