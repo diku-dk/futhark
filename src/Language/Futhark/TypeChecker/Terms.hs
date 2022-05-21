@@ -804,16 +804,16 @@ instance Pretty (Unmatched (PatBase Info VName)) where
 checkUnmatched :: Exp -> TermTypeM ()
 checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
   where
-    checkUnmatched' (AppExp (Match _ cs loc) _) =
+    checkUnmatched' (AppExp (Match _ cs loc) _) = do
       let ps = fmap (\(CasePat p _ _) -> p) cs
-       in case unmatched $ NE.toList ps of
-            [] -> pure ()
-            ps' ->
-              typeError loc mempty . withIndexLink "unmatched-cases" $
-                "Unmatched cases in match expression:"
-                  </> indent 2 (stack (map ppr ps'))
+      case unmatched $ NE.toList ps of
+        [] -> pure ()
+        ps' ->
+          typeError loc mempty . withIndexLink "unmatched-cases" $
+            "Unmatched cases in match expression:"
+              </> indent 2 (stack (map ppr ps'))
     checkUnmatched' _ = pure ()
-    tv = identityMapper {mapOnExp = \e' -> checkUnmatched' e' >> pure e'}
+    tv = identityMapper {mapOnExp = \e' -> checkUnmatched' e' >> astMap tv e'}
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
