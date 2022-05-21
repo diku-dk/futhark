@@ -1,6 +1,6 @@
 -- Missing pattern warning 5 (integers).
 -- ==
--- error:
+-- error: Unmatched
 
 def f : i32 =
   match (1 : i32)

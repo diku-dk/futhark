@@ -1,6 +1,6 @@
 -- Missing pattern warning 8 (bool).
 -- ==
--- error:
+-- error: Unmatched
 
 def f : bool =
   match (true, false)
