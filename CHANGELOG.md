@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Sometimes missing cases in `match` expressions were not detected.
+
 ## [0.21.12]
 
 ### Added
