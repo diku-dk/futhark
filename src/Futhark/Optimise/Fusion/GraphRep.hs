@@ -68,11 +68,10 @@ import qualified Data.Set as S
 import Debug.Trace (trace)
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.HORep.SOAC as H
-import Futhark.Builder (MonadFreshNames (putNameSource), VNameSource, auxing, blankNameSource, getNameSource, letBind, modifyNameSource, runBuilder)
+import Futhark.Builder
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
-import Futhark.MonadFreshNames (newName)
 import qualified Futhark.Optimise.Fusion.LoopKernel as LK
 import Futhark.Transform.Substitute
 
