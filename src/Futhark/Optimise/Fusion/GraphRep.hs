@@ -210,7 +210,7 @@ type DepGraph = G.Gr NodeT EdgeT
 
 type DepGraphAug = DepGraph -> FusionEnvM DepGraph
 
-type DepGenerator = Stm SOACS -> [VName] -- depGenerators can be used to make edgeGenerators
+type DepGenerator = Stm SOACS -> Names -- depGenerators can be used to make edgeGenerators
 
 type EdgeGenerator = NodeT -> [(VName, EdgeT)] -- for each node, what producer should the node depend on and what type
 
@@ -560,16 +560,22 @@ augWithFun :: EdgeGenerator -> DepGraphAug
 augWithFun f g = genEdges (G.labNodes g) f g
 
 toAlias :: DepGenerator -> EdgeGenerator
-toAlias f stmt = map (\vname -> (vname, Alias vname)) (concatMap f (stmFromNode stmt))
+toAlias f stmt =
+  map (\vname -> (vname, Alias vname)) $
+    namesToList $ foldMap f (stmFromNode stmt)
 
 toDep :: DepGenerator -> EdgeGenerator
-toDep f stmt = map (\vname -> (vname, Dep vname)) (concatMap f (stmFromNode stmt))
+toDep f stmt =
+  map (\vname -> (vname, Dep vname)) $
+    namesToList $ foldMap f (stmFromNode stmt)
 
 addDeps :: DepGraphAug
 addDeps = augWithFun $ toDep fusibleInputs
 
 toInfDep :: DepGenerator -> EdgeGenerator
-toInfDep f stmt = map (\vname -> (vname, InfDep vname)) (concatMap f (stmFromNode stmt))
+toInfDep f stmt =
+  map (\vname -> (vname, InfDep vname)) $
+    namesToList $ foldMap f (stmFromNode stmt)
 
 addInfDeps :: DepGraphAug
 addInfDeps = augWithFun $ toInfDep infusibleInputs
@@ -639,53 +645,52 @@ makeScanInfusible g = pure $ G.emap change_node_to_idep g
 -- Utils for fusibility/infusibility
 -- find dependencies - either fusible or infusible. edges are generated based on these
 
-fusibleInputs :: Stm SOACS -> [VName]
-fusibleInputs (Let _ _ expr) = L.nub $ fusibleInputsFromExp expr
+fusibleInputs :: Stm SOACS -> Names
+fusibleInputs = fusibleInputsFromExp . stmExp
 
-fusibleInputsFromExp :: Exp SOACS -> [VName]
+fusibleInputsFromExp :: Exp SOACS -> Names
 fusibleInputsFromExp (If _ b1 b2 _) =
-  concatMap fusibleInputs (bodyStms b1) <> namesFromRes (bodyResult b1)
-    <> concatMap fusibleInputs (bodyStms b2)
-    <> namesFromRes (bodyResult b2)
+  foldMap fusibleInputs (bodyStms b1) <> freeIn (bodyResult b1)
+    <> foldMap fusibleInputs (bodyStms b2)
+    <> freeIn (bodyResult b2)
 fusibleInputsFromExp (DoLoop _ _ b1) =
-  concatMap fusibleInputs (bodyStms b1) <> namesFromRes (bodyResult b1)
+  foldMap fusibleInputs (bodyStms b1) <> freeIn (bodyResult b1)
 fusibleInputsFromExp (Op soac) = case soac of
-  Futhark.Screma _ is _ -> is
-  Futhark.Hist _ is _ _ -> is
-  Futhark.Scatter _ is _ _ -> is
-  Futhark.Stream _ is _ _ _ -> is
-  Futhark.JVP {} -> []
-  Futhark.VJP {} -> []
-fusibleInputsFromExp _ = []
+  Futhark.Screma _ is _ -> freeIn is
+  Futhark.Hist _ is _ _ -> freeIn is
+  Futhark.Scatter _ is _ _ -> freeIn is
+  Futhark.Stream _ is _ _ _ -> freeIn is
+  Futhark.JVP {} -> mempty
+  Futhark.VJP {} -> mempty
+fusibleInputsFromExp _ = mempty
 
-infusibleInputs :: Stm SOACS -> [VName]
-infusibleInputs (Let _ aux e) = L.nub $ infusibleInputsFromExp e ++ namesToList (freeIn aux)
+infusibleInputs :: Stm SOACS -> Names
+infusibleInputs (Let _ aux e) = infusibleInputsFromExp e <> freeIn aux
 
-infusibleInputsFromExp :: Exp SOACS -> [VName]
+infusibleInputsFromExp :: Exp SOACS -> Names
 infusibleInputsFromExp (Op soac) = case soac of
   Futhark.Screma e _ s ->
-    namesToList $ freeIn $ Futhark.Screma e [] s
+    freeIn $ Futhark.Screma e [] s
   Futhark.Hist e _ histops lam ->
-    namesToList $ freeIn $ Futhark.Hist e [] histops lam
+    freeIn $ Futhark.Hist e [] histops lam
   Futhark.Scatter e _ lam other ->
-    namesToList $ freeIn $ Futhark.Scatter e [] lam other
+    freeIn $ Futhark.Scatter e [] lam other
   Futhark.Stream a1 _ a3 a4 lam ->
-    namesToList $ freeIn $ Futhark.Stream a1 [] a3 a4 lam
-  Futhark.JVP {} -> namesToList $ freeIn soac
-  Futhark.VJP {} -> namesToList $ freeIn soac
+    freeIn $ Futhark.Stream a1 [] a3 a4 lam
+  Futhark.JVP {} -> freeIn soac
+  Futhark.VJP {} -> freeIn soac
 infusibleInputsFromExp (If e b1 b2 cond) =
-  namesToList (freeIn e <> freeIn cond)
-    <> concatMap infusibleInputs (bodyStms b1)
-    <> concatMap infusibleInputs (bodyStms b2)
+  (freeIn e <> freeIn cond)
+    <> foldMap infusibleInputs (bodyStms b1)
+    <> foldMap infusibleInputs (bodyStms b2)
 infusibleInputsFromExp (DoLoop e loopform b1) =
   let emptyB = Body mempty mempty mempty :: Body SOACS
-   in concatMap infusibleInputs (bodyStms b1)
-        <> namesToList (freeIn (DoLoop e loopform emptyB))
-infusibleInputsFromExp op = namesToList $ freeIn op
+   in foldMap infusibleInputs (bodyStms b1)
+        <> freeIn (DoLoop e loopform emptyB)
+infusibleInputsFromExp op = freeIn op
 
-aliasInputs :: Stm SOACS -> [VName]
-aliasInputs op = case op of
-  Let _ _ expr -> concatMap namesToList $ expAliases $ Alias.analyseExp mempty expr
+aliasInputs :: Stm SOACS -> Names
+aliasInputs = mconcat . expAliases . Alias.analyseExp mempty . stmExp
 
 getStmNames :: Stm SOACS -> [VName]
 getStmNames s = case s of
