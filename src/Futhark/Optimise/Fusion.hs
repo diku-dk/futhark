@@ -112,11 +112,10 @@ tryFuseAll nodes_list = applyAugs (map (uncurry hTryFuseNodesInGraph) pairs)
     pairs = [(x, y) | x <- nodes_list, y <- nodes_list, x < y]
 
 vFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
-vFusionFeasability g n1 n2 =
-  do
-    let b2 = not (any isInf (edgesBetween g n1 n2))
-    reach <- mapM (reachable g n2) (filter (/= n2) (G.pre g n1))
-    pure $ b2 && all not reach
+vFusionFeasability g n1 n2 = do
+  let b2 = not (any isInf (edgesBetween g n1 n2))
+  reach <- mapM (reachable g n2) (filter (/= n2) (G.pre g n1))
+  pure $ b2 && all not reach
 
 hFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 hFusionFeasability = unreachableEitherDir
@@ -134,30 +133,29 @@ vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
 vTryFuseNodesInGraph node_1 node_2 g
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure g
-  | otherwise =
-      do
-        b <- vFusionFeasability g node_1 node_2
-        if b
-          then do
-            let (ctx1, ctx2) = mapT (G.context g) (node_1, node_2)
-            fres <- vFuseContexts edgs infusable_nodes ctx1 ctx2
-            case fres of
-              Just (inputs, _, nodeT, outputs) -> do
-                nodeT' <-
-                  if null fusedC
-                    then pure nodeT
-                    else do
-                      let (_, _, _, deps_1) = ctx1
-                      let (_, _, _, deps_2) = ctx2
-                      -- make copies of everything that was not previously consumed
-                      let old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
-                      makeCopiesOfFusedExcept old_cons nodeT
-                g' <- contractEdge node_2 (inputs, node_1, nodeT', outputs) g
-                if null trEdgs
-                  then pure g'
-                  else updateTrEdges node_1 g'
-              Nothing -> pure g
-          else pure g
+  | otherwise = do
+      b <- vFusionFeasability g node_1 node_2
+      if b
+        then do
+          let (ctx1, ctx2) = mapT (G.context g) (node_1, node_2)
+          fres <- vFuseContexts edgs infusable_nodes ctx1 ctx2
+          case fres of
+            Just (inputs, _, nodeT, outputs) -> do
+              nodeT' <-
+                if null fusedC
+                  then pure nodeT
+                  else do
+                    let (_, _, _, deps_1) = ctx1
+                    let (_, _, _, deps_2) = ctx2
+                    -- make copies of everything that was not previously consumed
+                    let old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
+                    makeCopiesOfFusedExcept old_cons nodeT
+              g' <- contractEdge node_2 (inputs, node_1, nodeT', outputs) g
+              if null trEdgs
+                then pure g'
+                else updateTrEdges node_1 g'
+            Nothing -> pure g
+        else pure g
   where
     edgs = map G.edgeLabel $ edgesBetween g node_1 node_2
     fusedC = map getName $ filter isCons edgs
@@ -182,12 +180,11 @@ hTryFuseNodesInGraph node_1 node_2 g
 hFuseContexts :: DepContext -> DepContext -> FusionEnvM (Maybe DepContext)
 hFuseContexts
   c1@(_, _, nodeT1, _)
-  c2@(_, _, nodeT2, _) =
-    do
-      fres <- hFuseNodeT nodeT1 nodeT2
-      case fres of
-        Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
-        Nothing -> pure Nothing
+  c2@(_, _, nodeT2, _) = do
+    fres <- hFuseNodeT nodeT1 nodeT2
+    case fres of
+      Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
+      Nothing -> pure Nothing
 hFuseContexts _ _ = pure Nothing
 
 vFuseContexts :: [EdgeT] -> [VName] -> DepContext -> DepContext -> FusionEnvM (Maybe DepContext)
@@ -195,12 +192,11 @@ vFuseContexts
   edgs
   infusable
   c1@(_i1, n1, nodeT1, o1)
-  c2@(_i2, _n2, nodeT2, o2) =
-    do
-      fres <- fuseNodeT edgs infusable (nodeT1, map fst o1) (nodeT2, map fst $ filter ((/=) n1 . snd) o2)
-      case fres of
-        Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
-        Nothing -> pure Nothing
+  c2@(_i2, _n2, nodeT2, o2) = do
+    fres <- fuseNodeT edgs infusable (nodeT1, map fst o1) (nodeT2, map fst $ filter ((/=) n1 . snd) o2)
+    case fres of
+      Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
+      Nothing -> pure Nothing
 
 pullRearrangeNodeT :: H.ArrayTransforms -> NodeT -> FusionEnvM (Maybe NodeT)
 pullRearrangeNodeT ts nodeT = case nodeT of
@@ -229,22 +225,20 @@ pushRearrangeNodeT trs nodeT = case nodeT of
   _ -> pure Nothing
 
 makeCopiesOfFusedExcept :: [VName] -> NodeT -> FusionEnvM NodeT
-makeCopiesOfFusedExcept noCopy (SoacNode soac pats aux) =
-  do
-    let lam = H.lambda soac
-    let fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
-    lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
-    pure $ SoacNode (H.setLambda lam' soac) pats aux
+makeCopiesOfFusedExcept noCopy (SoacNode soac pats aux) = do
+  let lam = H.lambda soac
+  let fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
+  lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
+  pure $ SoacNode (H.setLambda lam' soac) pats aux
 makeCopiesOfFusedExcept _ nodeT = pure nodeT
 
 makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionEnvM (Lambda SOACS)
-makeCopiesInLambda toCopy lam =
-  do
-    (copies, nameMap) <- localScope (scopeOf lam) $ makeCopyStms toCopy
-    let l_body = lambdaBody lam
-        newBody = insertStms copies (substituteNames nameMap l_body)
-        newLambda = lam {lambdaBody = newBody}
-    pure newLambda
+makeCopiesInLambda toCopy lam = do
+  (copies, nameMap) <- localScope (scopeOf lam) $ makeCopyStms toCopy
+  let l_body = lambdaBody lam
+      newBody = insertStms copies (substituteNames nameMap l_body)
+      newLambda = lam {lambdaBody = newBody}
+  pure newLambda
 
 makeCopyStms :: [VName] -> FusionEnvM (Stms SOACS, M.Map VName VName)
 makeCopyStms toCopy = do
@@ -691,22 +685,20 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
   _ -> pure c
   where
     doFusionWithDelayed :: Body SOACS -> [VName] -> [(NodeT, [EdgeT])] -> FusionEnvM (Body SOACS)
-    doFusionWithDelayed b extraInputs extraNodes = localScope (scopeOf stms) $
-      do
-        let g = emptyGraph stms results (inputs <> extraInputs)
-        -- highly temporary and non-thought-out
-        g' <- applyAugs [handleNodes extraNodes, makeMapping, initialGraphConstruction, printgraph, doAllFusion] g
-        new_stms <- trace (pprg g') $ linearizeGraph g'
-        pure b {bodyStms = new_stms}
+    doFusionWithDelayed b extraInputs extraNodes = localScope (scopeOf stms) $ do
+      let g = emptyGraph stms results (inputs <> extraInputs)
+      -- highly temporary and non-thought-out
+      g' <- applyAugs [handleNodes extraNodes, makeMapping, initialGraphConstruction, printgraph, doAllFusion] g
+      new_stms <- trace (pprg g') $ linearizeGraph g'
+      pure b {bodyStms = new_stms}
       where
         inputs = map (vNameFromAdj node) outgoing ++ extraInputs
         stms = bodyStms b
         results = namesFromRes (bodyResult b)
     doFusionInner :: Body SOACS -> [LParam SOACS] -> FusionEnvM (Body SOACS)
-    doFusionInner b inp =
-      do
-        new_stms <- fuseGraph stms results inputs
-        pure b {bodyStms = new_stms}
+    doFusionInner b inp = do
+      new_stms <- fuseGraph stms results inputs
+      pure b {bodyStms = new_stms}
       where
         lambda_inputs = map paramName (filter isArray2 inp)
         other_inputs = map (vNameFromAdj node) $ filter (not . isDep . fst) outgoing
