@@ -94,7 +94,7 @@ data NodeT
   | SoacNode (H.SOAC SOACS) [H.Input] (StmAux (ExpDec SOACS))
   | RNode VName
   | InNode VName
-  | FinalNode [Stm SOACS] NodeT [Stm SOACS]
+  | FinalNode (Stms SOACS) NodeT (Stms SOACS)
   | IfNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
   deriving (Eq)
@@ -134,7 +134,7 @@ instance Substitute NodeT where
        in SoacNode so' (f pat) (f sa)
     RNode vn -> RNode (f vn)
     InNode vn -> InNode (f vn)
-    FinalNode stms1 nt stms2 -> FinalNode (map f stms1) (f nt) (map f stms2)
+    FinalNode stms1 nt stms2 -> FinalNode (fmap f stms1) (f nt) (fmap f stms2)
     IfNode stm nodes -> IfNode (f stm) (map f nodes)
     DoNode stm nodes -> DoNode (f stm) (map f nodes)
     where
@@ -299,15 +299,15 @@ isArray2 p = case paramDec p of
 --     pure $ pprg g
 --   _ -> pure ""
 
-emptyGraph :: [Stm SOACS] -> [VName] -> [VName] -> DepGraph
+emptyGraph :: Stms SOACS -> [VName] -> [VName] -> DepGraph
 emptyGraph stms res inputs = G.mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
   where
     label_nodes = zip [0 ..]
-    snodes = map StmNode stms
+    snodes = map StmNode $ stmsToList stms
     rnodes = map RNode res
     inNodes = map InNode inputs
 
-mkDepGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM DepGraph
+mkDepGraph :: Stms SOACS -> [VName] -> [VName] -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
   let g = emptyGraph stms res inputs
   _ <- makeMapping g
@@ -542,9 +542,9 @@ convertGraph = mapAcrossNodeTs nodeToSoacNode
 label :: DepNode -> NodeT
 label = snd
 
-stmFromNode :: NodeT -> [Stm SOACS] -- do not use outside of edge generation
-stmFromNode (StmNode x) = [x]
-stmFromNode _ = []
+stmFromNode :: NodeT -> Stms SOACS -- do not use outside of edge generation
+stmFromNode (StmNode x) = oneStm x
+stmFromNode _ = mempty
 
 nodeFromLNode :: DepNode -> G.Node
 nodeFromLNode = fst
@@ -624,7 +624,7 @@ makeScanInfusible g = pure $ G.emap change_node_to_idep g
     find_scan_results _ = []
 
     scan_res_set :: S.Set VName
-    scan_res_set = S.fromList (concatMap find_scan_results (concatMap (stmFromNode . label) (G.labNodes g)))
+    scan_res_set = S.fromList (concatMap find_scan_results (foldMap (stmFromNode . label) (G.labNodes g)))
 
     is_scan_res :: VName -> Bool
     is_scan_res name = S.member name scan_res_set
@@ -750,24 +750,24 @@ genOutTransformStms inps = do
 inputToIdent :: H.Input -> Ident
 inputToIdent (H.Input _ vn tp) = Ident vn tp
 
-finalizeNode :: NodeT -> FusionEnvM [Stm SOACS]
+finalizeNode :: NodeT -> FusionEnvM (Stms SOACS)
 finalizeNode nt = case nt of
-  StmNode stm -> pure [stm]
+  StmNode stm -> pure $ oneStm stm
   SoacNode soac outputs aux -> do
     let outputs' = outputs
     (mapping, outputTrs) <- genOutTransformStms outputs'
     (_, stms) <- runBuilder $ do
       new_soac <- H.toSOAC soac
       auxing aux $ letBind (basicPat (map inputToIdent outputs')) $ Op new_soac
-    pure $ stmsToList (substituteNames mapping stms <> outputTrs)
-  RNode _ -> pure []
-  InNode _ -> pure []
+    pure $ substituteNames mapping stms <> outputTrs
+  RNode _ -> pure mempty
+  InNode _ -> pure mempty
   DoNode stm lst -> do
     stmsNotFused <- mapM (finalizeNode . fst) lst
-    pure $ concat stmsNotFused ++ [stm]
+    pure $ mconcat stmsNotFused <> oneStm stm
   IfNode stm lst -> do
     stmsNotFused <- mapM (finalizeNode . fst) lst
-    pure $ concat stmsNotFused ++ [stm]
+    pure $ mconcat stmsNotFused <> oneStm stm
   FinalNode stms1 nt' stms2 -> do
     stms' <- finalizeNode nt'
     pure $ stms1 <> stms' <> stms2

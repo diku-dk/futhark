@@ -50,14 +50,14 @@ dontFuseScans m = do
   pure r
 
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
-fuseGraphLZ :: [Stm SOACS] -> Result -> [Param DeclType] -> FusionEnvM [Stm SOACS]
+fuseGraphLZ :: Stms SOACS -> Result -> [Param DeclType] -> FusionEnvM (Stms SOACS)
 fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
   where
     resNames = namesFromRes results
     inputNames = map paramName $ filter isArray inputs
 
 -- main fusion function.
-fuseGraph :: [Stm SOACS] -> [VName] -> [VName] -> FusionEnvM [Stm SOACS]
+fuseGraph :: Stms SOACS -> [VName] -> [VName] -> FusionEnvM (Stms SOACS)
 fuseGraph stms results inputs = localScope (scopeOf stms) $ do
   old_mappings <- gets producerMapping
   graph_not_fused <- mkDepGraph stms results inputs
@@ -68,7 +68,7 @@ fuseGraph stms results inputs = localScope (scopeOf stms) $ do
 
   stms_new <- linearizeGraph graph_fused'
   modify (\s -> s {producerMapping = old_mappings})
-  pure $ trace (unlines (map pretty stms_new)) stms_new
+  pure stms_new
 
 unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 unreachableEitherDir g a b = do
@@ -79,10 +79,10 @@ unreachableEitherDir g a b = do
 reachable :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 reachable g source target = pure $ target `elem` Q.reachable source g
 
-linearizeGraph :: DepGraph -> FusionEnvM [Stm SOACS]
+linearizeGraph :: DepGraph -> FusionEnvM (Stms SOACS)
 linearizeGraph g = do
   stms <- mapM finalizeNode $ reverse $ Q.topsort' g
-  pure $ concat stms
+  pure $ mconcat stms
 
 doAllFusion :: DepGraphAug
 doAllFusion =
@@ -242,15 +242,16 @@ makeCopiesInLambda toCopy lam =
   do
     (copies, nameMap) <- localScope (scopeOf lam) $ makeCopyStms toCopy
     let l_body = lambdaBody lam
-    let newBody = insertStms (stmsFromList copies) (substituteNames nameMap l_body)
-    let newLambda = lam {lambdaBody = newBody}
+        newBody = insertStms copies (substituteNames nameMap l_body)
+        newLambda = lam {lambdaBody = newBody}
     pure newLambda
 
-makeCopyStms :: [VName] -> FusionEnvM ([Stm SOACS], M.Map VName VName)
+makeCopyStms :: [VName] -> FusionEnvM (Stms SOACS, M.Map VName VName)
 makeCopyStms toCopy = do
   newNames <- mapM makeNewName toCopy
-  copies <- mapM (\(name, name_fused) -> mkLetNames [name_fused] (BasicOp $ Copy name)) (zip toCopy newNames)
-  pure (copies, makeMap toCopy newNames)
+  copies <- forM (zip toCopy newNames) $ \(name, name_fused) ->
+    mkLetNames [name_fused] (BasicOp $ Copy name)
+  pure (stmsFromList copies, makeMap toCopy newNames)
   where
     makeNewName name = newVName $ baseString name <> "_copy"
 
@@ -696,21 +697,21 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
         -- highly temporary and non-thought-out
         g' <- applyAugs [handleNodes extraNodes, makeMapping, initialGraphConstruction, printgraph, doAllFusion] g
         new_stms <- trace (pprg g') $ linearizeGraph g'
-        pure b {bodyStms = stmsFromList new_stms}
+        pure b {bodyStms = new_stms}
       where
         inputs = map (vNameFromAdj node) outgoing ++ extraInputs
-        stms = stmsToList (bodyStms b)
+        stms = bodyStms b
         results = namesFromRes (bodyResult b)
     doFusionInner :: Body SOACS -> [LParam SOACS] -> FusionEnvM (Body SOACS)
     doFusionInner b inp =
       do
         new_stms <- fuseGraph stms results inputs
-        pure b {bodyStms = stmsFromList new_stms}
+        pure b {bodyStms = new_stms}
       where
         lambda_inputs = map paramName (filter isArray2 inp)
         other_inputs = map (vNameFromAdj node) $ filter (not . isDep . fst) outgoing
         inputs = other_inputs ++ lambda_inputs
-        stms = stmsToList (bodyStms b)
+        stms = bodyStms b
         results = namesFromRes (bodyResult b)
 
 -- inserting for delayed fusion
@@ -749,18 +750,17 @@ makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
       if not $ null toMakeCopies
         then do
           (new_stms, nameMapping) <- makeCopyStms toMakeCopies
-          let newNode = FinalNode new_stms (substituteNames nameMapping nt) []
+          let newNode = FinalNode new_stms (substituteNames nameMapping nt) mempty
           updateNode n (const (Just newNode)) g
         else pure g
     copyAlised _ _ = pure g
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
-  stmsFromList
-    <$> runFusionEnvM
-      (scopeOf stms)
-      freshFusionEnv
-      (fuseGraphLZ (stmsToList stms) (varsRes outputs) [])
+  runFusionEnvM
+    (scopeOf stms)
+    freshFusionEnv
+    (fuseGraphLZ stms (varsRes outputs) [])
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun consts fun = do
@@ -768,12 +768,10 @@ fuseFun consts fun = do
     runFusionEnvM
       (scopeOf fun <> scopeOf consts)
       freshFusionEnv
-      (fuseGraphLZ fun_stms fun_res (funDefParams fun))
-  pure fun {funDefBody = fun_body {bodyStms = stmsFromList fun_stms'}}
+      (fuseGraphLZ (bodyStms fun_body) (bodyResult fun_body) (funDefParams fun))
+  pure fun {funDefBody = fun_body {bodyStms = fun_stms'}}
   where
     fun_body = funDefBody fun
-    fun_stms = stmsToList $ bodyStms fun_body
-    fun_res = bodyResult fun_body
 
 -- | The pass definition.
 fuseSOACs :: Pass SOACS SOACS
