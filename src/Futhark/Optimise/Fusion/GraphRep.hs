@@ -671,10 +671,8 @@ infusableInputsFromExp (Op soac) = case soac of
     namesToList $ freeIn $ Futhark.Scatter e [] lam other
   Futhark.Stream a1 _ a3 a4 lam ->
     namesToList $ freeIn $ Futhark.Stream a1 [] a3 a4 lam
-  -- this likely causes bugs, as infusible inputs are what
-  -- keep the ordering of a program correct
-  Futhark.JVP {} -> []
-  Futhark.VJP {} -> []
+  Futhark.JVP {} -> namesToList $ freeIn soac
+  Futhark.VJP {} -> namesToList $ freeIn soac
 infusableInputsFromExp (If e b1 b2 cond) =
   namesToList (freeIn e <> freeIn cond)
     <> concatMap infusableInputs (bodyStms b1)
