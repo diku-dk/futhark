@@ -1135,19 +1135,20 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
   inner_group_size <- newVName "group_size"
   let constants =
         KernelConstants
-          (Imp.le32 global_tid)
-          (Imp.le32 local_tid)
-          (Imp.le32 group_id)
-          global_tid
-          local_tid
-          group_id
-          num_groups
-          group_size
-          (sExt32 (group_size * num_groups))
-          (Imp.le32 wave_size)
-          true
-          mempty
-          mempty
+          { kernelGlobalThreadId = Imp.le32 global_tid,
+            kernelLocalThreadId = Imp.le32 local_tid,
+            kernelGroupId = Imp.le32 group_id,
+            kernelGlobalThreadIdVar = global_tid,
+            kernelLocalThreadIdVar = local_tid,
+            kernelGroupIdVar = group_id,
+            kernelNumGroups = num_groups,
+            kernelGroupSize = group_size,
+            kernelNumThreads = sExt32 (group_size * num_groups),
+            kernelWaveSize = Imp.le32 wave_size,
+            kernelThreadActive = true,
+            kernelLocalIdMap = mempty,
+            kernelChunkItersMap = mempty
+          }
 
   let set_constants = do
         dPrim_ local_tid int32
@@ -1563,19 +1564,20 @@ simpleKernelConstants kernel_size desc = do
 
   pure
     ( KernelConstants
-        (Imp.le32 thread_gtid)
-        (Imp.le32 thread_ltid)
-        (Imp.le32 group_id)
-        thread_gtid
-        thread_ltid
-        group_id
-        num_groups
-        group_size
-        (sExt32 (group_size * num_groups))
-        0
-        (Imp.le64 thread_gtid .<. kernel_size)
-        mempty
-        mempty,
+        { kernelGlobalThreadId = Imp.le32 thread_gtid,
+          kernelLocalThreadId = Imp.le32 thread_ltid,
+          kernelGroupId = Imp.le32 group_id,
+          kernelGlobalThreadIdVar = thread_gtid,
+          kernelLocalThreadIdVar = thread_ltid,
+          kernelGroupIdVar = group_id,
+          kernelNumGroups = num_groups,
+          kernelGroupSize = group_size,
+          kernelNumThreads = sExt32 (group_size * num_groups),
+          kernelWaveSize = 0,
+          kernelThreadActive = Imp.le64 thread_gtid .<. kernel_size,
+          kernelLocalIdMap = mempty,
+          kernelChunkItersMap = mempty
+        },
       set_constants
     )
 
