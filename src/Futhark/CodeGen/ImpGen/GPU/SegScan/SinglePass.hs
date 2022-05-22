@@ -255,10 +255,10 @@ compileSegScan pat lvl space scanOp kbody = do
       statusA = 1
       statusP = 2
 
-  emit $ Imp.DebugPrint "SegScan: number of elements processed sequentially per thread is m:" $ Just $ untyped (m :: Imp.TExp Int32)
-  emit $ Imp.DebugPrint "SegScan: memory constraints is: " $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
-  emit $ Imp.DebugPrint "SegScan: register constraints is: " $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
-  emit $ Imp.DebugPrint "SegScan: sumT' is: " $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Sequential elements per thread (m):" $ Just $ untyped (m :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Memory constraint " $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Register constraint" $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "sumT'" $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
 
   globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
   statusFlags <- sAllocArray "status_flags" int8 (Shape [unCount num_groups]) (Space "device")
