@@ -1296,10 +1296,9 @@ internaliseStreamAcc desc dest op lam bs = do
       acc_t = Acc acc_cert_v (Shape [dest_w]) (map rowType dest_ts) NoUniqueness
   acc_p <- newParam "acc_p" acc_t
   withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
-    lam' <-
-      internaliseMapLambda internaliseLambda lam $
-        map I.Var $ paramName acc_p : bs'
-    w <- arraysSize 0 <$> mapM lookupType bs'
+    bs_ts <- mapM lookupType bs'
+    lam' <- internaliseLambdaCoerce lam $ map rowType $ paramType acc_p : bs_ts
+    let w = arraysSize 0 bs_ts
     fmap subExpsRes . letValExp' "acc_res" $
       I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
 
@@ -1563,6 +1562,16 @@ internaliseLambda (E.Lambda params body _ (Info (_, RetType _ rettype)) _) rowty
     pure (params', body', rettype')
 internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
 
+internaliseLambdaCoerce :: E.Exp -> [Type] -> InternaliseM (I.Lambda SOACS)
+internaliseLambdaCoerce lam argtypes = do
+  (params, body, rettype) <- internaliseLambda lam argtypes
+  mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "unexpected lambda result size"])
+      (srclocOf lam)
+      rettype
+      =<< bodyBind body
+
 -- | Some operators and functions are overloaded or otherwise special
 -- - we detect and treat them here.
 isOverloadedFunction ::
@@ -1688,11 +1697,10 @@ isOverloadedFunction qname args loc = do
 
     handleSOACs [TupLit [lam, arr] _] "map" = Just $ \desc -> do
       arr' <- internaliseExpToVars "map_arr" arr
-      lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
-      w <- arraysSize 0 <$> mapM lookupType arr'
-      letTupExp' desc $
-        I.Op $
-          I.Screma w arr' (I.mapSOAC lam')
+      arr_ts <- mapM lookupType arr'
+      lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
+      let w = arraysSize 0 arr_ts
+      letTupExp' desc $ I.Op $ I.Screma w arr' (I.mapSOAC lam')
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
@@ -1751,9 +1759,7 @@ isOverloadedFunction qname args loc = do
       | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
-          xts <- mapM subExpType x'
-          (ps, body, ret) <- internaliseLambda f xts
-          let lam = I.Lambda ps body ret
+          lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
               "jvp2" -> JVP lam x' v'
