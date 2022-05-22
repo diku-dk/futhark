@@ -51,11 +51,11 @@ dontFuseScans m = do
 fuseGraphLZ :: Stms SOACS -> Result -> [Param DeclType] -> FusionEnvM (Stms SOACS)
 fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
   where
-    resNames = namesFromRes results
-    inputNames = map paramName $ filter isArray inputs
+    resNames = freeIn results
+    inputNames = namesFromList $ map paramName $ filter isArray inputs
 
 -- main fusion function.
-fuseGraph :: Stms SOACS -> [VName] -> [VName] -> FusionEnvM (Stms SOACS)
+fuseGraph :: Stms SOACS -> Names -> Names -> FusionEnvM (Stms SOACS)
 fuseGraph stms results inputs = localScope (scopeOf stms) $ do
   old_mappings <- gets producerMapping
   graph_not_fused <- mkDepGraph stms results inputs
@@ -662,12 +662,12 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
   DoNode (Let pat aux (DoLoop params form body)) toFuse ->
     doFuseScans $
       localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
-        let extra_is = map (paramName . fst) (filter (isArray . fst) params)
+        let extra_is = namesFromList $ map (paramName . fst) (filter (isArray . fst) params)
         b <- doFusionWithDelayed body extra_is toFuse
         pure (incomming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
   IfNode (Let pat aux (If sz b1 b2 dec)) toFuse -> doFuseScans $ do
-    b1' <- doFusionWithDelayed b1 [] toFuse
-    b2' <- doFusionWithDelayed b2 [] toFuse
+    b1' <- doFusionWithDelayed b1 mempty toFuse
+    b2' <- doFusionWithDelayed b2 mempty toFuse
     rb2' <- renameBody b2'
     pure (incomming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
   SoacNode soac pats aux -> do
@@ -680,17 +680,17 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     pure (incomming, node, newNode, outgoing)
   _ -> pure c
   where
-    doFusionWithDelayed :: Body SOACS -> [VName] -> [(NodeT, [EdgeT])] -> FusionEnvM (Body SOACS)
+    doFusionWithDelayed :: Body SOACS -> Names -> [(NodeT, [EdgeT])] -> FusionEnvM (Body SOACS)
     doFusionWithDelayed b extraInputs extraNodes = localScope (scopeOf stms) $ do
-      let g = emptyGraph stms results (inputs <> extraInputs)
+      let g = emptyGraph stms results inputs
       -- highly temporary and non-thought-out
       g' <- applyAugs [handleNodes extraNodes, makeMapping, initialGraphConstruction, printgraph, doAllFusion] g
       new_stms <- trace (pprg g') $ linearizeGraph g'
       pure b {bodyStms = new_stms}
       where
-        inputs = map (vNameFromAdj node) outgoing ++ extraInputs
+        inputs = namesFromList (map (vNameFromAdj node) outgoing) <> extraInputs
         stms = bodyStms b
-        results = namesFromRes (bodyResult b)
+        results = freeIn (bodyResult b)
     doFusionInner :: Body SOACS -> [LParam SOACS] -> FusionEnvM (Body SOACS)
     doFusionInner b inp = do
       new_stms <- fuseGraph stms results inputs
@@ -698,9 +698,9 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
       where
         lambda_inputs = map paramName (filter isArray2 inp)
         other_inputs = map (vNameFromAdj node) $ filter (not . isDep . fst) outgoing
-        inputs = other_inputs ++ lambda_inputs
+        inputs = namesFromList $ other_inputs ++ lambda_inputs
         stms = bodyStms b
-        results = namesFromRes (bodyResult b)
+        results = freeIn (bodyResult b)
 
 -- inserting for delayed fusion
 handleNodes :: [(NodeT, [EdgeT])] -> DepGraphAug

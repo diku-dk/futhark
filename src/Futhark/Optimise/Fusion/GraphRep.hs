@@ -299,15 +299,15 @@ isArray2 p = case paramDec p of
 --     pure $ pprg g
 --   _ -> pure ""
 
-emptyGraph :: Stms SOACS -> [VName] -> [VName] -> DepGraph
+emptyGraph :: Stms SOACS -> Names -> Names -> DepGraph
 emptyGraph stms res inputs = G.mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
   where
     label_nodes = zip [0 ..]
     snodes = map StmNode $ stmsToList stms
-    rnodes = map RNode res
-    inNodes = map InNode inputs
+    rnodes = map RNode $ namesToList res
+    inNodes = map InNode $ namesToList inputs
 
-mkDepGraph :: Stms SOACS -> [VName] -> [VName] -> FusionEnvM DepGraph
+mkDepGraph :: Stms SOACS -> Names -> Names -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
   let g = emptyGraph stms res inputs
   _ <- makeMapping g
