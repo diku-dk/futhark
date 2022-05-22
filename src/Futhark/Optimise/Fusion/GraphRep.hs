@@ -566,13 +566,13 @@ toDep :: DepGenerator -> EdgeGenerator
 toDep f stmt = map (\vname -> (vname, Dep vname)) (concatMap f (stmFromNode stmt))
 
 addDeps :: DepGraphAug
-addDeps = augWithFun $ toDep fusableInputs
+addDeps = augWithFun $ toDep fusibleInputs
 
 toInfDep :: DepGenerator -> EdgeGenerator
 toInfDep f stmt = map (\vname -> (vname, InfDep vname)) (concatMap f (stmFromNode stmt))
 
 addInfDeps :: DepGraphAug
-addInfDeps = augWithFun $ toInfDep infusableInputs
+addInfDeps = augWithFun $ toInfDep infusibleInputs
 
 addAliases :: DepGraphAug
 addAliases = augWithFun $ toAlias aliasInputs
@@ -637,32 +637,32 @@ makeScanInfusible g = pure $ G.emap change_node_to_idep g
     change_node_to_idep e = e
 
 -- Utils for fusibility/infusibility
--- find dependencies - either fusable or infusable. edges are generated based on these
+-- find dependencies - either fusible or infusible. edges are generated based on these
 
-fusableInputs :: Stm SOACS -> [VName]
-fusableInputs (Let _ _ expr) = L.nub $ fusableInputsFromExp expr
+fusibleInputs :: Stm SOACS -> [VName]
+fusibleInputs (Let _ _ expr) = L.nub $ fusibleInputsFromExp expr
 
-fusableInputsFromExp :: Exp SOACS -> [VName]
-fusableInputsFromExp (If _ b1 b2 _) =
-  concatMap fusableInputs (bodyStms b1) <> namesFromRes (bodyResult b1)
-    <> concatMap fusableInputs (bodyStms b2)
+fusibleInputsFromExp :: Exp SOACS -> [VName]
+fusibleInputsFromExp (If _ b1 b2 _) =
+  concatMap fusibleInputs (bodyStms b1) <> namesFromRes (bodyResult b1)
+    <> concatMap fusibleInputs (bodyStms b2)
     <> namesFromRes (bodyResult b2)
-fusableInputsFromExp (DoLoop _ _ b1) =
-  concatMap fusableInputs (bodyStms b1) <> namesFromRes (bodyResult b1)
-fusableInputsFromExp (Op soac) = case soac of
+fusibleInputsFromExp (DoLoop _ _ b1) =
+  concatMap fusibleInputs (bodyStms b1) <> namesFromRes (bodyResult b1)
+fusibleInputsFromExp (Op soac) = case soac of
   Futhark.Screma _ is _ -> is
   Futhark.Hist _ is _ _ -> is
   Futhark.Scatter _ is _ _ -> is
   Futhark.Stream _ is _ _ _ -> is
   Futhark.JVP {} -> []
   Futhark.VJP {} -> []
-fusableInputsFromExp _ = []
+fusibleInputsFromExp _ = []
 
-infusableInputs :: Stm SOACS -> [VName]
-infusableInputs (Let _ aux e) = L.nub $ infusableInputsFromExp e ++ namesToList (freeIn aux)
+infusibleInputs :: Stm SOACS -> [VName]
+infusibleInputs (Let _ aux e) = L.nub $ infusibleInputsFromExp e ++ namesToList (freeIn aux)
 
-infusableInputsFromExp :: Exp SOACS -> [VName]
-infusableInputsFromExp (Op soac) = case soac of
+infusibleInputsFromExp :: Exp SOACS -> [VName]
+infusibleInputsFromExp (Op soac) = case soac of
   Futhark.Screma e _ s ->
     namesToList $ freeIn $ Futhark.Screma e [] s
   Futhark.Hist e _ histops lam ->
@@ -673,15 +673,15 @@ infusableInputsFromExp (Op soac) = case soac of
     namesToList $ freeIn $ Futhark.Stream a1 [] a3 a4 lam
   Futhark.JVP {} -> namesToList $ freeIn soac
   Futhark.VJP {} -> namesToList $ freeIn soac
-infusableInputsFromExp (If e b1 b2 cond) =
+infusibleInputsFromExp (If e b1 b2 cond) =
   namesToList (freeIn e <> freeIn cond)
-    <> concatMap infusableInputs (bodyStms b1)
-    <> concatMap infusableInputs (bodyStms b2)
-infusableInputsFromExp (DoLoop e loopform b1) =
+    <> concatMap infusibleInputs (bodyStms b1)
+    <> concatMap infusibleInputs (bodyStms b2)
+infusibleInputsFromExp (DoLoop e loopform b1) =
   let emptyB = Body mempty mempty mempty :: Body SOACS
-   in concatMap infusableInputs (bodyStms b1)
+   in concatMap infusibleInputs (bodyStms b1)
         <> namesToList (freeIn (DoLoop e loopform emptyB))
-infusableInputsFromExp op = namesToList $ freeIn op
+infusibleInputsFromExp op = namesToList $ freeIn op
 
 aliasInputs :: Stm SOACS -> [VName]
 aliasInputs op = case op of
