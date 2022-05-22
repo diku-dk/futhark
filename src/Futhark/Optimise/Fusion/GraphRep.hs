@@ -115,8 +115,8 @@ instance Show NodeT where
   show (FinalNode _ nt _) = show nt
   show (RNode name) = pretty $ "Res: " ++ pretty name
   show (InNode name) = pretty $ "Input: " ++ pretty name
-  show (IfNode stm _) = "If: " ++ L.intercalate ", " (map pretty $ getStmNames stm)
-  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map pretty $ getStmNames stm)
+  show (IfNode stm _) = "If: " ++ L.intercalate ", " (map pretty $ stmNames stm)
+  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map pretty $ stmNames stm)
 
 instance Substitute EdgeT where
   substituteNames m edgeT =
@@ -692,9 +692,8 @@ infusibleInputsFromExp op = freeIn op
 aliasInputs :: Stm SOACS -> Names
 aliasInputs = mconcat . expAliases . Alias.analyseExp mempty . stmExp
 
-getStmNames :: Stm SOACS -> [VName]
-getStmNames s = case s of
-  Let pat _ _ -> patNames pat
+stmNames :: Stm SOACS -> [VName]
+stmNames = patNames . stmPat
 
 getStmCons :: EdgeGenerator
 getStmCons (StmNode s) = zip names (map Cons names)
@@ -718,11 +717,11 @@ namesFromRes =
 
 getOutputs :: NodeT -> [VName]
 getOutputs node = case node of
-  (StmNode stm) -> getStmNames stm
+  (StmNode stm) -> stmNames stm
   (RNode _) -> []
   (InNode name) -> [name]
-  (IfNode stm _) -> getStmNames stm
-  (DoNode stm _) -> getStmNames stm
+  (IfNode stm _) -> stmNames stm
+  (DoNode stm _) -> stmNames stm
   FinalNode {} -> error "Final nodes cannot generate edges"
   (SoacNode _ outputs _) -> map H.inputArray outputs
 
