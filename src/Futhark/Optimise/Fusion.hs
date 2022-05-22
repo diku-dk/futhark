@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -Wno-overlapping-patterns #-}
-
 -- | Perform horizontal and vertical fusion of SOACs.  See the paper
 -- /A T2 Graph-Reduction Approach To Fusion/ for the basic idea (some
 -- extensions discussed in /Design and GPGPU Performance of Futhark’s
@@ -185,7 +183,6 @@ hFuseContexts
     case fres of
       Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
       Nothing -> pure Nothing
-hFuseContexts _ _ = pure Nothing
 
 vFuseContexts :: [EdgeT] -> [VName] -> DepContext -> DepContext -> FusionEnvM (Maybe DepContext)
 vFuseContexts
@@ -632,7 +629,6 @@ removeUnusedOutputsFromContext (incoming, n1, nodeT, outgoing) =
   where
     toKeep = map (vNameFromAdj n1) incoming
     nodeT' = removeOutputsExcept toKeep nodeT
-removeUnusedOutputsFromContext c = pure c
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
@@ -745,7 +741,6 @@ makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
           let newNode = FinalNode new_stms (substituteNames nameMapping nt) mempty
           updateNode n (const (Just newNode)) g
         else pure g
-    copyAlised _ _ = pure g
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
