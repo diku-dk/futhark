@@ -32,7 +32,9 @@
 -- Børgesen (2022).
 module Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
   ( -- * Analysis
-    analyseProg,
+    analyseFunDef,
+    analyseConsts,
+    hostOnlyFunDefs,
 
     -- * Types
     MigrationTable,
@@ -56,7 +58,6 @@ import Control.Monad.Trans.Class
 import qualified Control.Monad.Trans.Reader as R
 import Control.Monad.Trans.State.Strict ()
 import Control.Monad.Trans.State.Strict hiding (State)
-import Control.Parallel.Strategies (parMap, rpar)
 import Data.Bifunctor (first, second)
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
@@ -104,6 +105,9 @@ data MigrationStatus
 --         all such statements have been moved.
 newtype MigrationTable = MigrationTable (IM.IntMap MigrationStatus)
 
+instance Semigroup MigrationTable where
+  MigrationTable a <> MigrationTable b = MigrationTable (a `IM.union` b)
+
 -- | Where should the value bound by this name be computed?
 statusOf :: VName -> MigrationTable -> MigrationStatus
 statusOf n (MigrationTable mt) =
@@ -140,10 +144,6 @@ shouldMove n mt = statusOf n mt /= StayOnHost
 -- | Will the value bound by this name be used on host?
 usedOnHost :: VName -> MigrationTable -> Bool
 usedOnHost n mt = statusOf n mt /= MoveToDevice
-
--- | Merges two migration tables that are assumed to be disjoint.
-merge :: MigrationTable -> MigrationTable -> MigrationTable
-merge (MigrationTable a) (MigrationTable b) = MigrationTable (a `IM.union` b)
 
 --------------------------------------------------------------------------------
 --                         HOST-ONLY FUNCTION ANALYSIS                        --
@@ -232,15 +232,6 @@ type HostUsage = [Id]
 
 nameToId :: VName -> Id
 nameToId = baseTag
-
--- | Analyses a program to return a migration table that covers all its
--- statements and variables.
-analyseProg :: Prog GPU -> MigrationTable
-analyseProg (Prog consts funs) =
-  let hof = hostOnlyFunDefs funs
-      mt = analyseConsts hof funs consts
-      mts = parMap rpar (analyseFunDef hof) funs
-   in foldl' merge mt mts
 
 -- | Analyses top-level constants.
 analyseConsts :: HostOnlyFuns -> [FunDef GPU] -> Stms GPU -> MigrationTable

@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 -- | This module implements an optimization that migrates host
 -- statements into 'GPUBody' kernels to reduce the number of
 -- host-device synchronizations that occur when a scalar variable is
@@ -8,10 +10,9 @@
 module Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs) where
 
 import Control.Monad
-import Control.Monad.Trans.Class
-import qualified Control.Monad.Trans.Reader as R
-import Control.Monad.Trans.State.Strict hiding (State)
-import Control.Parallel.Strategies (parMap, rpar)
+import Control.Monad.Reader
+import Control.Monad.State hiding (State)
+import Data.Bifunctor (second)
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
 import Data.List (unzip4, zip4)
@@ -20,9 +21,8 @@ import Data.Sequence ((<|), (><), (|>))
 import qualified Data.Text as T
 import Futhark.Construct (fullSlice, sliceDim)
 import Futhark.Error
-import qualified Futhark.FreshNames as FN
 import Futhark.IR.GPU
-import Futhark.MonadFreshNames (VNameSource, getNameSource, putNameSource)
+import Futhark.MonadFreshNames
 import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
 import Futhark.Pass
 import Futhark.Transform.Substitute
@@ -34,27 +34,22 @@ reduceDeviceSyncs =
   Pass
     "reduce device synchronizations"
     "Move host statements to device to reduce blocking memory operations."
-    run
+    $ \prog -> do
+      let hof = hostOnlyFunDefs $ progFuns prog
+          consts_mt = analyseConsts hof (progFuns prog) (progConsts prog)
+      consts <- onConsts consts_mt $ progConsts prog
+      funs <- parPass (onFun hof consts_mt) (progFuns prog)
+      pure $ prog {progConsts = consts, progFuns = funs}
   where
-    run prog = do
-      ns <- getNameSource
-      let mt = analyseProg prog
-      let st = initialState ns
-      let (prog', st') = R.runReader (runStateT (optimizeProgram prog) st) mt
-      putNameSource (stateNameSource st')
-      pure prog'
+    onConsts consts_mt stms =
+      runReduceM consts_mt (optimizeStms stms)
+    onFun hof consts_mt fd = do
+      let mt = consts_mt <> analyseFunDef hof fd
+      runReduceM mt (optimizeFunDef fd)
 
 --------------------------------------------------------------------------------
 --                            AD HOC OPTIMIZATION                             --
 --------------------------------------------------------------------------------
-
--- | Optimize a whole program. The type signatures of top-level functions will
--- remain unchanged.
-optimizeProgram :: Prog GPU -> ReduceM (Prog GPU)
-optimizeProgram (Prog consts funs) = do
-  consts' <- optimizeStms consts
-  funs' <- sequence $ parMap rpar optimizeFunDef funs
-  pure (Prog consts' funs')
 
 -- | Optimize a function definition. Its type signature will remain unchanged.
 optimizeFunDef :: FunDef GPU -> ReduceM (FunDef GPU)
@@ -372,7 +367,22 @@ withSuffix name sfx = nameFromText $ T.append (nameToText name) (T.pack sfx)
 --------------------------------------------------------------------------------
 
 -- | The monad used to perform migration-based synchronization reductions.
-type ReduceM = StateT State (R.Reader MigrationTable)
+newtype ReduceM a = ReduceM (StateT State (Reader MigrationTable) a)
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadState State,
+      MonadReader MigrationTable
+    )
+
+runReduceM :: MonadFreshNames m => MigrationTable -> ReduceM a -> m a
+runReduceM mt (ReduceM m) = modifyNameSource $ \src ->
+  second stateNameSource (runReader (runStateT m (initialState src)) mt)
+
+instance MonadFreshNames ReduceM where
+  getNameSource = gets stateNameSource
+  putNameSource src = modify $ \s -> s {stateNameSource = src}
 
 -- | The state used by a 'ReduceM' monad.
 data State = State
@@ -403,14 +413,6 @@ initialState ns =
       stateGPUBodyOk = True
     }
 
--- | Retrieve a function of the current environment.
-asks :: (MigrationTable -> a) -> ReduceM a
-asks = lift . R.asks
-
--- | Fetch the value of the environment.
-ask :: ReduceM MigrationTable
-ask = lift R.ask
-
 -- | Perform non-migration optimizations without introducing any GPUBody
 -- kernels.
 noGPUBody :: ReduceM a -> ReduceM a
@@ -420,15 +422,6 @@ noGPUBody m = do
   res <- m
   modify $ \st -> st {stateGPUBodyOk = prev}
   pure res
-
--- | Produce a fresh name, using the given name as a template.
-newName :: VName -> ReduceM VName
-newName n = do
-  st <- get
-  let ns = stateNameSource st
-  let (n', ns') = FN.newName ns n
-  put (st {stateNameSource = ns'})
-  pure n'
 
 -- | Create a 'PatElem' that binds the array of a migrated variable binding.
 arrayizePatElem :: PatElem Type -> ReduceM (PatElem Type)
@@ -474,7 +467,7 @@ migratedTo pe (dev, stms) = do
 -- provided statements and be returned.
 useScalar :: Stms GPU -> VName -> ReduceM (Stms GPU, VName)
 useScalar stms n = do
-  entry <- IM.lookup (baseTag n) <$> gets stateMigrated
+  entry <- gets $ IM.lookup (baseTag n) . stateMigrated
   case entry of
     Nothing ->
       pure (stms, n)
@@ -499,7 +492,7 @@ bind pe = Let (Pat [pe]) (StmAux mempty mempty ())
 storedScalar :: SubExp -> ReduceM (Maybe VName)
 storedScalar (Constant _) = pure Nothing
 storedScalar (Var n) = do
-  entry <- IM.lookup (baseTag n) <$> gets stateMigrated
+  entry <- gets $ IM.lookup (baseTag n) . stateMigrated
   pure $ fmap (\(_, _, arr, _) -> arr) entry
 
 -- | @storeScalar stms se t@ returns a variable that binds a single element
@@ -510,7 +503,7 @@ storedScalar (Var n) = do
 storeScalar :: Stms GPU -> SubExp -> Type -> ReduceM (Stms GPU, VName)
 storeScalar stms se t = do
   entry <- case se of
-    Var n -> IM.lookup (baseTag n) <$> gets stateMigrated
+    Var n -> gets $ IM.lookup (baseTag n) . stateMigrated
     _ -> pure Nothing
   case entry of
     Just (_, _, arr, _) -> pure (stms, arr)
@@ -553,7 +546,7 @@ storeScalar stms se t = do
 -- host, the name of a single element array containing its value.
 resolveName :: VName -> ReduceM VName
 resolveName n = do
-  entry <- IM.lookup (baseTag n) <$> gets stateMigrated
+  entry <- gets $ IM.lookup (baseTag n) . stateMigrated
   case entry of
     Nothing -> pure n
     Just (_, _, _, True) -> pure n
