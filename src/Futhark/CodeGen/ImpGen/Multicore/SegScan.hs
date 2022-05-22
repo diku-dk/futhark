@@ -57,7 +57,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
     -- Are we working with nested arrays
     let dims = map (shapeDims . segBinOpShape) scan_ops
     -- Are we only working on scalars
-    let scalars = all (all (primType . typeOf . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all (== []) dims
+    let scalars = all (all (primType . typeOf . paramDec) . (lambdaParams . segBinOpLambda)) scan_ops && all null dims
     -- Do we have nested vector operations
     let vectorize = [] `notElem` dims
 
