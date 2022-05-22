@@ -145,7 +145,8 @@ opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
   tid <- newVName "tid"
-  sKernelThread "gpuseq" tid (defKernelAttrs 1 1) $
+  let one = Count (intConst Int64 1)
+  sKernelThread "gpuseq" tid (defKernelAttrs one one) $
     compileStms (freeIn res) stms $
       forM_ (zip pes res) $ \(pe, SubExpRes _ se) ->
         copyDWIM (patElemName pe) [DimFix 0] se []
