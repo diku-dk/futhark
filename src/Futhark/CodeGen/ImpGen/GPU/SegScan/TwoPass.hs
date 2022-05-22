@@ -170,7 +170,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
             (to - from) .>. (to `rem` segment_size)
           _ -> Nothing
 
-  sKernelThread "scan_stage1" (segFlat space) (defKernelAttrs num_groups' group_size') $ do
+  sKernelThread "scan_stage1" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
     all_local_arrs <- makeLocalArrays group_size (tvSize num_threads) scans
 
@@ -331,7 +331,6 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSe
 
   -- Our group size is the number of groups for the stage 1 kernel.
   let group_size = Count $ unCount num_groups
-      group_size' = fmap toInt64Exp group_size
 
   let crossesSegment' = do
         f <- crossesSegment
@@ -340,7 +339,7 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSe
             ((sExt64 from + 1) * elems_per_group - 1)
             ((sExt64 to + 1) * elems_per_group - 1)
 
-  sKernelThread "scan_stage2" (segFlat space) (defKernelAttrs 1 group_size') $ do
+  sKernelThread "scan_stage2" (segFlat space) (defKernelAttrs (Count (intConst Int64 1)) group_size) $ do
     constants <- kernelConstants <$> askEnv
     per_scan_local_arrs <- makeLocalArrays group_size (tvSize stage1_num_threads) scans
     let per_scan_rets = map (lambdaReturnType . segBinOpLambda) scans
@@ -403,15 +402,14 @@ scanStage3 ::
   [SegBinOp GPUMem] ->
   CallKernelGen ()
 scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
-  let num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
+  let group_size' = fmap toInt64Exp group_size
       (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt64Exp dims
   required_groups <-
     dPrimVE "required_groups" $
       sExt32 $ product dims' `divUp` sExt64 (unCount group_size')
 
-  sKernelThread "scan_stage3" (segFlat space) (defKernelAttrs num_groups' group_size') $
+  sKernelThread "scan_stage3" (segFlat space) (defKernelAttrs num_groups group_size) $
     virtualiseGroups SegVirt required_groups $ \virt_group_id -> do
       constants <- kernelConstants <$> askEnv
 
