@@ -731,10 +731,10 @@ isFake (Fake _) = True
 isFake _ = False
 
 makeCopiesOfConsAliased :: DepGraphAug
-makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
+makeCopiesOfConsAliased g = mapAcrossWithSE copyAliased g
   where
-    copyAlised :: DepNode -> DepGraphAug
-    copyAlised (n, nt) _ = do
+    copyAliased :: DepNode -> DepGraphAug
+    copyAliased (n, nt) _ = do
       let (incoming, _, _, outgoing) = G.context g n
       let incoming' = map getName $ filter isFake (map fst incoming)
       let outgoing' = map getName $ filter isAlias (map fst outgoing)
