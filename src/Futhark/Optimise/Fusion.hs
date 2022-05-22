@@ -49,42 +49,6 @@ dontFuseScans m = do
   modify (\s -> s {fuseScans = fs})
   pure r
 
--- | The pass definition.
-fuseSOACs :: Pass SOACS SOACS
-fuseSOACs =
-  Pass
-    { passName = "Fuse SOACs",
-      passDescription = "Perform higher-order optimisation, i.e., fusion.",
-      passFunction = \p ->
-        intraproceduralTransformationWithConsts
-          (fuseConsts (namesToList $ freeIn (progFuns p)))
-          fuseFun
-          p
-          -- (\y x -> pure x)
-    }
-
-fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
-fuseConsts outputs stms =
-  do
-    new_stms <- runFusionEnvM (scopeOf stms) freshFusionEnv (fuseGraphLZ stmList results [])
-    pure $ stmsFromList new_stms
-  where
-    stmList = trace (pretty stms) $ stmsToList stms
-    results = varsRes outputs
-
-fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
-fuseFun stmts fun = do
-  new_stms <- runFusionEnvM (scopeOf fun <> scopeOf stmts) freshFusionEnv (fuseGraphLZ stms res (funDefParams fun))
-  -- new_stms <- runFusionEnvM (scopeOf fun <> scopeOf _stmts) freshFusionEnv $ do
-  -- stms_new <- fuseGraphLZ stms res (funDefParams  fun)
-  -- simplifyStms $ stmsFromList stms_new
-  let body = (funDefBody fun) {bodyStms = stmsFromList new_stms}
-  pure fun {funDefBody = body}
-  where
-    b = funDefBody fun
-    stms = trace (pretty (bodyStms b)) $ stmsToList $ bodyStms b
-    res = bodyResult b
-
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
 fuseGraphLZ :: [Stm SOACS] -> Result -> [Param DeclType] -> FusionEnvM [Stm SOACS]
 fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
@@ -869,3 +833,38 @@ makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
 --             let nodeT2 = SNode (Let (basicPat new_extra_inputs <> inputs) sz (Op stream)) at
 --             pure (incoming, n, nodeT2, outputs)
 --       _ -> pure ctx
+
+fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
+fuseConsts outputs stms =
+  do
+    new_stms <- runFusionEnvM (scopeOf stms) freshFusionEnv (fuseGraphLZ stmList results [])
+    pure $ stmsFromList new_stms
+  where
+    stmList = trace (pretty stms) $ stmsToList stms
+    results = varsRes outputs
+
+fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
+fuseFun consts fun = do
+  fun_stms' <-
+    runFusionEnvM
+      (scopeOf fun <> scopeOf consts)
+      freshFusionEnv
+      (fuseGraphLZ fun_stms fun_res (funDefParams fun))
+  pure fun {funDefBody = fun_body {bodyStms = stmsFromList fun_stms'}}
+  where
+    fun_body = funDefBody fun
+    fun_stms = stmsToList $ bodyStms fun_body
+    fun_res = bodyResult fun_body
+
+-- | The pass definition.
+fuseSOACs :: Pass SOACS SOACS
+fuseSOACs =
+  Pass
+    { passName = "Fuse SOACs",
+      passDescription = "Perform higher-order optimisation, i.e., fusion.",
+      passFunction = \p ->
+        intraproceduralTransformationWithConsts
+          (fuseConsts (namesToList $ freeIn (progFuns p)))
+          fuseFun
+          p
+    }
