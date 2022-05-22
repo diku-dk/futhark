@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -35,7 +34,6 @@ module Futhark.Optimise.Fusion.GraphRep
     isInf,
     applyAugs,
     makeMapping,
-    namesFromRes,
     initialGraphConstruction,
     emptyGraph,
     isArray,
@@ -704,16 +702,6 @@ getStmCons _ = []
 getStmRes :: EdgeGenerator
 getStmRes (RNode name) = [(name, Res name)]
 getStmRes _ = []
-
-namesFromRes :: [SubExpRes] -> [VName]
-namesFromRes =
-  concatMap
-    ( ( \case
-          Var z -> [z]
-          Constant _ -> []
-      )
-        . resSubExp
-    )
 
 getOutputs :: NodeT -> [VName]
 getOutputs node = case node of

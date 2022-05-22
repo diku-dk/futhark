@@ -49,10 +49,11 @@ dontFuseScans m = do
 
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
 fuseGraphLZ :: Stms SOACS -> Result -> [Param DeclType] -> FusionEnvM (Stms SOACS)
-fuseGraphLZ stms results inputs = fuseGraph stms resNames inputNames
-  where
-    resNames = freeIn results
-    inputNames = namesFromList $ map paramName $ filter isArray inputs
+fuseGraphLZ stms results inputs =
+  fuseGraph
+    stms
+    (freeIn results)
+    (namesFromList $ map paramName $ filter isArray inputs)
 
 -- main fusion function.
 fuseGraph :: Stms SOACS -> Names -> Names -> FusionEnvM (Stms SOACS)
@@ -246,6 +247,9 @@ makeCopyStms toCopy = do
   where
     makeNewName name = newVName $ baseString name <> "_copy"
 
+resNames :: [SubExpRes] -> [VName]
+resNames = subExpVars . map resSubExp
+
 fuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT]) -> (NodeT, [EdgeT]) -> FusionEnvM (Maybe NodeT)
 fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
   case (s1, s2) of
@@ -292,7 +296,7 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                            in pure $ Just $ SoacNode soac ids (aux1 <> aux2)
                       where
                         (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
-                        (lam_1_output, lam_2_output) = mapT (namesFromRes . resFromLambda) (lam_1, lam_2)
+                        (lam_1_output, lam_2_output) = mapT (resNames . resFromLambda) (lam_1, lam_2)
 
                         fused_inputs = fuseInputs o1 i1 i2
                         lparams =
@@ -477,7 +481,7 @@ vFuseLambdas ::
 vFuseLambdas infusible lam_1 i1 o1 lam_2 i2 _o2 = (lam, fused_inputs)
   where
     (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
-    (lam_1_output, _) = mapT (namesFromRes . resFromLambda) (lam_1, lam_2)
+    (lam_1_output, _) = mapT (resNames . resFromLambda) (lam_1, lam_2)
 
     fused_inputs = fuseInputs o1 i1 i2
     fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
