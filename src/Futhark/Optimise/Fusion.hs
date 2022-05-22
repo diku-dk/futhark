@@ -19,8 +19,8 @@ import Futhark.Construct
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
+import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.LoopKernel (mergeForms, pullOutputTransforms, pushRearrange, tryFusion)
-import Futhark.Optimise.GraphRep
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute

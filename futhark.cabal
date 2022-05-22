@@ -234,9 +234,9 @@ library
       Futhark.Optimise.DoubleBuffer
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
+      Futhark.Optimise.Fusion.GraphRep
       Futhark.Optimise.Fusion.LoopKernel
       Futhark.Optimise.GenRedOpt
-      Futhark.Optimise.GraphRep
       Futhark.Optimise.HistAccs
       Futhark.Optimise.InPlaceLowering
       Futhark.Optimise.InPlaceLowering.LowerIntoStm

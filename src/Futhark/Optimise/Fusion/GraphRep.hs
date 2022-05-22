@@ -4,7 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Optimise.GraphRep
+module Futhark.Optimise.Fusion.GraphRep
   ( EdgeT (..),
     NodeT (..),
     FusionEnvM,
