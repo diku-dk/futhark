@@ -756,12 +756,11 @@ makeCopiesOfConsAliased g = mapAcrossWithSE copyAlised g
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
-  do
-    new_stms <- runFusionEnvM (scopeOf stms) freshFusionEnv (fuseGraphLZ stmList results [])
-    pure $ stmsFromList new_stms
-  where
-    stmList = trace (pretty stms) $ stmsToList stms
-    results = varsRes outputs
+  stmsFromList
+    <$> runFusionEnvM
+      (scopeOf stms)
+      freshFusionEnv
+      (fuseGraphLZ (stmsToList stms) (varsRes outputs) [])
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun consts fun = do
