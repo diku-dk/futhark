@@ -3,6 +3,7 @@
 module Futhark.Internalise.Lambdas
   ( InternaliseLambda,
     internaliseMapLambda,
+    internaliseADLambda,
     internaliseStreamMapLambda,
     internaliseFoldLambda,
     internaliseStreamLambda,
@@ -28,6 +29,21 @@ internaliseMapLambda internaliseLambda lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda lam rowtypes
+  mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "not all iterations produce same shape"])
+      (srclocOf lam)
+      rettype
+      =<< bodyBind body
+
+internaliseADLambda ::
+  InternaliseLambda ->
+  E.Exp ->
+  [I.SubExp] ->
+  InternaliseM (I.Lambda SOACS)
+internaliseADLambda internaliseLambda lam args = do
+  argtypes <- mapM I.subExpType args
+  (params, body, rettype) <- internaliseLambda lam argtypes
   mkLambda params $
     ensureResultShape
       (ErrorMsg [ErrorString "not all iterations produce same shape"])

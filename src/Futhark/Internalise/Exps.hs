@@ -1751,9 +1751,7 @@ isOverloadedFunction qname args loc = do
       | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
-          xts <- mapM subExpType x'
-          (ps, body, ret) <- internaliseLambda f xts
-          let lam = I.Lambda ps body ret
+          lam <- internaliseADLambda internaliseLambda f x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
               "jvp2" -> JVP lam x' v'

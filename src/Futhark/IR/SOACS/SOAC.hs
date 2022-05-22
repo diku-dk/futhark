@@ -672,8 +672,26 @@ instance RepTypes rep => ST.IndexOp (SOAC rep) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: TC.Checkable rep => SOAC (Aliases rep) -> TC.TypeM rep ()
-typeCheckSOAC JVP {} = pure ()
-typeCheckSOAC VJP {} = pure ()
+typeCheckSOAC (VJP lam args vec) = do
+  args' <- mapM TC.checkArg args
+  TC.checkLambda lam $ map TC.noArgAliases args'
+  vec_ts <- mapM TC.checkSubExp vec
+  unless (vec_ts == lambdaReturnType lam) $
+    TC.bad . TC.TypeError . pretty $
+      "Return type"
+        </> PP.indent 2 (ppr (lambdaReturnType lam))
+        </> "does not match type of seed vector"
+        </> PP.indent 2 (ppr vec_ts)
+typeCheckSOAC (JVP lam args vec) = do
+  args' <- mapM TC.checkArg args
+  TC.checkLambda lam $ map TC.noArgAliases args'
+  vec_ts <- mapM TC.checkSubExp vec
+  unless (vec_ts == map TC.argType args') $
+    TC.bad . TC.TypeError . pretty $
+      "Parameter type"
+        </> PP.indent 2 (ppr $ map TC.argType args')
+        </> "does not match type of seed vector"
+        </> PP.indent 2 (ppr vec_ts)
 typeCheckSOAC (Stream size arrexps form accexps lam) = do
   TC.require [Prim int64] size
   accargs <- mapM TC.checkArg accexps
