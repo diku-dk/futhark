@@ -91,6 +91,8 @@ data KernelConstants = KernelConstants
     kernelGlobalThreadIdVar :: VName,
     kernelLocalThreadIdVar :: VName,
     kernelGroupIdVar :: VName,
+    kernelNumGroupsCount :: Count NumGroups SubExp,
+    kernelGroupSizeCount :: Count GroupSize SubExp,
     kernelNumGroups :: Imp.TExp Int64,
     kernelGroupSize :: Imp.TExp Int64,
     kernelNumThreads :: Imp.TExp Int32,
@@ -1124,26 +1126,30 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
         .<. (thread_index + 1) * Imp.unCount elements_per_thread
 
 kernelInitialisationSimple ::
-  Count NumGroups (Imp.TExp Int64) ->
-  Count GroupSize (Imp.TExp Int64) ->
+  Count NumGroups SubExp ->
+  Count GroupSize SubExp ->
   CallKernelGen (KernelConstants, InKernelGen ())
-kernelInitialisationSimple (Count num_groups) (Count group_size) = do
+kernelInitialisationSimple num_groups group_size = do
   global_tid <- newVName "global_tid"
   local_tid <- newVName "local_tid"
   group_id <- newVName "group_tid"
   wave_size <- newVName "wave_size"
   inner_group_size <- newVName "group_size"
-  let constants =
+  let num_groups' = Imp.pe64 (unCount num_groups)
+      group_size' = Imp.pe64 (unCount group_size)
+      constants =
         KernelConstants
           { kernelGlobalThreadId = Imp.le32 global_tid,
             kernelLocalThreadId = Imp.le32 local_tid,
             kernelGroupId = Imp.le32 group_id,
             kernelGlobalThreadIdVar = global_tid,
             kernelLocalThreadIdVar = local_tid,
+            kernelNumGroupsCount = num_groups,
+            kernelGroupSizeCount = group_size,
             kernelGroupIdVar = group_id,
-            kernelNumGroups = num_groups,
-            kernelGroupSize = group_size,
-            kernelNumThreads = sExt32 (group_size * num_groups),
+            kernelNumGroups = num_groups',
+            kernelGroupSize = group_size',
+            kernelNumThreads = sExt32 (group_size' * num_groups'),
             kernelWaveSize = Imp.le32 wave_size,
             kernelThreadActive = true,
             kernelLocalIdMap = mempty,
@@ -1534,14 +1540,16 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
       | otherwise =
           copyDWIM (paramName y) [] (Var $ paramName x) []
 
-computeMapKernelGroups :: Imp.TExp Int64 -> CallKernelGen (Imp.TExp Int64, Imp.TExp Int64)
+computeMapKernelGroups ::
+  Imp.TExp Int64 ->
+  CallKernelGen (Count NumGroups SubExp, Count GroupSize SubExp)
 computeMapKernelGroups kernel_size = do
   group_size <- dPrim "group_size" int64
   fname <- askFunction
   let group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty $ tvVar group_size
   sOp $ Imp.GetSize (tvVar group_size) group_size_key Imp.SizeGroup
   num_groups <- dPrimV "num_groups" $ kernel_size `divUp` tvExp group_size
-  pure (tvExp num_groups, tvExp group_size)
+  pure (Count $ tvSize num_groups, Count $ tvSize group_size)
 
 simpleKernelConstants ::
   Imp.TExp Int64 ->
@@ -1561,6 +1569,8 @@ simpleKernelConstants kernel_size desc = do
         sOp (Imp.GetLocalSize inner_group_size 0)
         sOp (Imp.GetGroupId group_id 0)
         dPrimV_ thread_gtid $ le32 group_id * le32 inner_group_size + le32 thread_ltid
+      group_size' = Imp.pe64 $ unCount group_size
+      num_groups' = Imp.pe64 $ unCount num_groups
 
   pure
     ( KernelConstants
@@ -1570,9 +1580,11 @@ simpleKernelConstants kernel_size desc = do
           kernelGlobalThreadIdVar = thread_gtid,
           kernelLocalThreadIdVar = thread_ltid,
           kernelGroupIdVar = group_id,
-          kernelNumGroups = num_groups,
-          kernelGroupSize = group_size,
-          kernelNumThreads = sExt32 (group_size * num_groups),
+          kernelNumGroupsCount = num_groups,
+          kernelGroupSizeCount = group_size,
+          kernelNumGroups = num_groups',
+          kernelGroupSize = group_size',
+          kernelNumThreads = sExt32 (group_size' * num_groups'),
           kernelWaveSize = 0,
           kernelThreadActive = Imp.le64 thread_gtid .<. kernel_size,
           kernelLocalIdMap = mempty,
@@ -1620,15 +1632,15 @@ data KernelAttrs = KernelAttrs
     -- | Does whatever launch this kernel check for local memory capacity itself?
     kAttrCheckLocalMemory :: Bool,
     -- | Number of groups.
-    kAttrNumGroups :: Count NumGroups (Imp.TExp Int64),
+    kAttrNumGroups :: Count NumGroups SubExp,
     -- | Group size.
-    kAttrGroupSize :: Count GroupSize (Imp.TExp Int64)
+    kAttrGroupSize :: Count GroupSize SubExp
   }
 
 -- | The default kernel attributes.
 defKernelAttrs ::
-  Count NumGroups (Imp.TExp Int64) ->
-  Count GroupSize (Imp.TExp Int64) ->
+  Count NumGroups SubExp ->
+  Count GroupSize SubExp ->
   KernelAttrs
 defKernelAttrs num_groups group_size =
   KernelAttrs
@@ -1705,8 +1717,8 @@ sKernelFailureTolerant tol ops constants name m = do
   where
     attrs =
       ( defKernelAttrs
-          (Count (kernelNumGroups constants))
-          (Count (kernelGroupSize constants))
+          (kernelNumGroupsCount constants)
+          (kernelGroupSizeCount constants)
       )
         { kAttrFailureTolerant = tol
         }

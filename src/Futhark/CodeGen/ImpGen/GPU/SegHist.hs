@@ -379,8 +379,8 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
 histKernelGlobalPass ::
   [PatElem LetDecMem] ->
-  Count NumGroups (Imp.TExp Int64) ->
-  Count GroupSize (Imp.TExp Int64) ->
+  Count NumGroups SubExp ->
+  Count GroupSize SubExp ->
   SegSpace ->
   [SegHistSlug] ->
   KernelBody GPUMem ->
@@ -493,8 +493,8 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
   sFor "chk_i" hist_S $ \chk_i ->
     histKernelGlobalPass
       map_pes
-      num_groups'
-      group_size'
+      num_groups
+      group_size
       space
       slugs
       kbody
@@ -577,8 +577,8 @@ histKernelLocalPass ::
   TV Int32 ->
   Count NumGroups (Imp.TExp Int64) ->
   [PatElem LetDecMem] ->
-  Count NumGroups (Imp.TExp Int64) ->
-  Count GroupSize (Imp.TExp Int64) ->
+  Count NumGroups SubExp ->
+  Count GroupSize SubExp ->
   SegSpace ->
   [SegHistSlug] ->
   KernelBody GPUMem ->
@@ -621,7 +621,7 @@ histKernelLocalPass
       let group_hists_size =
             sExt64 num_subhistos_per_group * histo_size
       init_per_thread <-
-        dPrimVE "init_per_thread" $ sExt32 $ group_hists_size `divUp` unCount group_size
+        dPrimVE "init_per_thread" $ sExt32 $ group_hists_size `divUp` pe64 (unCount group_size)
       pure (histo_dims, histo_size, init_per_thread)
 
     let attrs = (defKernelAttrs num_groups group_size) {kAttrCheckLocalMemory = False}
@@ -833,9 +833,7 @@ histKernelLocal ::
   KernelBody GPUMem ->
   CallKernelGen ()
 histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_groups group_size space hist_S slugs kbody = do
-  let num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
-      num_subhistos_per_group = tvExp num_subhistos_per_group_var
+  let num_subhistos_per_group = tvExp num_subhistos_per_group_var
 
   emit $
     Imp.DebugPrint "Number of local subhistograms per group" $
@@ -849,8 +847,8 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
       num_subhistos_per_group_var
       groups_per_segment
       map_pes
-      num_groups'
-      group_size'
+      num_groups
+      group_size
       space
       slugs
       kbody
