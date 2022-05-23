@@ -225,13 +225,7 @@ freshFusionEnv =
       fuseScans = True
     }
 
-newtype FusionEnvM a
-  = FusionEnvM
-      ( ReaderT
-          (Scope SOACS)
-          (State FusionEnv)
-          a
-      )
+newtype FusionEnvM a = FusionEnvM (ReaderT (Scope SOACS) (State FusionEnv) a)
   deriving
     ( Monad,
       Applicative,
@@ -249,18 +243,17 @@ instance MonadFreshNames FusionEnvM where
 runFusionEnvM :: MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionEnvM a -> m a
 runFusionEnvM scope fenv (FusionEnvM a) = modifyNameSource $ \src ->
   let x = runReaderT a scope
-   in let (y, z) = runState x (fenv {vNameSource = src})
-       in (y, vNameSource z)
+      (y, z) = runState x (fenv {vNameSource = src})
+   in (y, vNameSource z)
 
 -- Fixed-point
 keepTrying :: DepGraphAug -> DepGraphAug
-keepTrying f g =
-  do
-    r <- f g
-    r2 <- f r
-    if G.equal r r2
-      then pure r
-      else keepTrying f r2
+keepTrying f g = do
+  r <- f g
+  r2 <- f r
+  if G.equal r r2
+    then pure r
+    else keepTrying f r2
 
 -- initGraph :: DepGraphAug
 -- initGraph g = do
