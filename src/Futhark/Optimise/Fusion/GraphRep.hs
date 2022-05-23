@@ -56,6 +56,7 @@ where
 
 import Control.Monad.Reader (ReaderT (runReaderT))
 import Control.Monad.State
+import Data.Bifunctor (bimap)
 import Data.Foldable (foldlM)
 import qualified Data.Graph.Inductive.Dot as G
 import qualified Data.Graph.Inductive.Graph as G
@@ -322,20 +323,19 @@ mkDepGraph stms res inputs = do
 applyAugs :: [DepGraphAug] -> DepGraphAug
 applyAugs augs g = foldlM (flip ($)) g augs
 
--- | Add edges for fusible inputs to the graph.
+-- | Add edges for straightforward dependencies to the graph.
 addDeps :: DepGraphAug
 addDeps = augWithFun toDep
   where
     toDep stmt =
-      map (\vname -> (vname, Dep vname)) $
-        namesToList $ foldMap fusibleInputs (stmFromNode stmt)
-
-addInfDeps :: DepGraphAug
-addInfDeps = augWithFun toInfDep
-  where
-    toInfDep stmt =
-      map (\vname -> (vname, InfDep vname)) $
-        namesToList $ foldMap infusibleInputs (stmFromNode stmt)
+      let (fusible, infusible) =
+            bimap (map fst) (map fst)
+              . L.partition ((== SOACInput) . snd)
+              . S.toList
+              $ foldMap stmInputs (stmFromNode stmt)
+          mkDep vname = (vname, Dep vname)
+          mkInfDep vname = (vname, InfDep vname)
+       in map mkDep fusible <> map mkInfDep infusible
 
 makeScanInfusible :: DepGraphAug
 makeScanInfusible g = pure $ G.emap change_node_to_idep g
@@ -364,7 +364,6 @@ initialGraphConstruction =
   applyAugs
     [ addDeps,
       makeScanInfusible,
-      addInfDeps,
       addCons,
       addExtraCons,
       addResEdges,
@@ -637,53 +636,43 @@ addResEdges = augWithFun getStmRes
 -- Utils for fusibility/infusibility
 -- find dependencies - either fusible or infusible. edges are generated based on these
 
--- | Those inputs of a statement that are theoretically able to be
--- fused into the statement.
-fusibleInputs :: Stm SOACS -> Names
-fusibleInputs = fusibleInputsFromExp . stmExp
+-- | A classification of a free variable.
+data Classification
+  = -- | Used as array input to a SOAC (meaning fusible).
+    SOACInput
+  | -- | Used in some other way.
+    Other
+  deriving (Eq, Ord, Show)
 
-fusibleInputsFromBody :: Body SOACS -> Names
-fusibleInputsFromBody (Body _ stms res) =
-  foldMap fusibleInputs stms <> freeIn res
+type Classifications = S.Set (VName, Classification)
 
-fusibleInputsFromExp :: Exp SOACS -> Names
-fusibleInputsFromExp (If _ b1 b2 _) =
-  fusibleInputsFromBody b1 <> fusibleInputsFromBody b2
-fusibleInputsFromExp (DoLoop _ _ b1) =
-  fusibleInputsFromBody b1
-fusibleInputsFromExp (Op soac) = case soac of
-  Futhark.Screma _ is _ -> freeIn is
-  Futhark.Hist _ is _ _ -> freeIn is
-  Futhark.Scatter _ is _ _ -> freeIn is
-  Futhark.Stream _ is _ _ _ -> freeIn is
-  Futhark.JVP {} -> mempty
-  Futhark.VJP {} -> mempty
-fusibleInputsFromExp _ = mempty
+freeClassifications :: FreeIn a => a -> Classifications
+freeClassifications =
+  S.fromList . (`zip` repeat Other) . namesToList . freeIn
 
-infusibleInputs :: Stm SOACS -> Names
-infusibleInputs (Let _ aux e) = infusibleInputsFromExp e <> freeIn aux
+stmInputs :: Stm SOACS -> Classifications
+stmInputs (Let pat aux e) =
+  freeClassifications (pat, aux) <> expInputs e
 
-infusibleInputsFromExp :: Exp SOACS -> Names
-infusibleInputsFromExp (Op soac) = case soac of
-  Futhark.Screma e _ s ->
-    freeIn $ Futhark.Screma e [] s
-  Futhark.Hist e _ histops lam ->
-    freeIn $ Futhark.Hist e [] histops lam
-  Futhark.Scatter e _ lam other ->
-    freeIn $ Futhark.Scatter e [] lam other
-  Futhark.Stream a1 _ a3 a4 lam ->
-    freeIn $ Futhark.Stream a1 [] a3 a4 lam
-  Futhark.JVP {} -> freeIn soac
-  Futhark.VJP {} -> freeIn soac
-infusibleInputsFromExp (If e b1 b2 cond) =
-  (freeIn e <> freeIn cond)
-    <> foldMap infusibleInputs (bodyStms b1)
-    <> foldMap infusibleInputs (bodyStms b2)
-infusibleInputsFromExp (DoLoop e loopform b1) =
-  let emptyB = Body mempty mempty mempty :: Body SOACS
-   in foldMap infusibleInputs (bodyStms b1)
-        <> freeIn (DoLoop e loopform emptyB)
-infusibleInputsFromExp op = freeIn op
+bodyInputs :: Body SOACS -> Classifications
+bodyInputs (Body _ stms res) = foldMap stmInputs stms <> freeClassifications res
+
+expInputs :: Exp SOACS -> Classifications
+expInputs (If cond b1 b2 attr) =
+  bodyInputs b1 <> bodyInputs b2 <> freeClassifications (cond, attr)
+expInputs (DoLoop params form b1) =
+  freeClassifications (params, form) <> bodyInputs b1
+expInputs (Op soac) = case soac of
+  Futhark.Screma w is form -> inputs is <> freeClassifications (w, form)
+  Futhark.Hist w is ops lam -> inputs is <> freeClassifications (w, ops, lam)
+  Futhark.Scatter w is lam iws -> inputs is <> freeClassifications (w, lam, iws)
+  Futhark.Stream w is form nes lam ->
+    inputs is <> freeClassifications (w, form, nes, lam)
+  Futhark.JVP {} -> freeClassifications soac
+  Futhark.VJP {} -> freeClassifications soac
+  where
+    inputs = S.fromList . (`zip` repeat SOACInput)
+expInputs e = freeClassifications e
 
 aliasInputs :: Stm SOACS -> Names
 aliasInputs = mconcat . expAliases . Alias.analyseExp mempty . stmExp
