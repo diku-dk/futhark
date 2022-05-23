@@ -24,7 +24,6 @@ module Futhark.Optimise.Fusion.GraphRep
     isRealNode,
     nodeFromLNode,
     internalizeOutput,
-    finalizeNode,
     mergedContext,
     mapAcross,
     genEdges,
@@ -45,7 +44,6 @@ module Futhark.Optimise.Fusion.GraphRep
     mapT,
     makeMap,
     fuseMaps,
-    hasNoDifferingInputs,
     internalizeAndAdd,
     mapAcrossWithSE,
     updateNode,
@@ -63,7 +61,7 @@ import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Tree as G
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
-import Data.Maybe (isNothing, mapMaybe)
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.HORep.SOAC as H
@@ -702,52 +700,6 @@ getOutputs node = case node of
 
 mapT :: (a -> b) -> (a, a) -> (b, b) -- tuple map
 mapT f (a, b) = (f a, f b)
-
-inputSetName :: VName -> H.Input -> H.Input
-inputSetName vn (H.Input ts _ tp) = H.Input ts vn tp
-
-isNotVarInput :: [H.Input] -> [H.Input]
-isNotVarInput = filter (isNothing . H.isVarInput)
-
-hasNoDifferingInputs :: [H.Input] -> [H.Input] -> Bool
-hasNoDifferingInputs is1 is2 =
-  let (vs1, vs2) = mapT isNotVarInput (is1, is2 L.\\ is1)
-   in null $ vs1 `L.intersect` vs2
-
-genOutTransformStms :: [H.Input] -> FusionEnvM (M.Map VName VName, Stms SOACS)
-genOutTransformStms inps = do
-  let inps' = isNotVarInput inps
-  let names = map H.inputArray inps'
-  newNames <- mapM newName names
-  let newInputs = zipWith inputSetName newNames inps'
-  let weirdScope = scopeOfPat (basicPat (map inputToIdent newInputs))
-  (namesToRep, stms) <- localScope weirdScope $ runBuilder (H.inputsToSubExps newInputs)
-  pure (makeMap names newNames, substituteNames (makeMap namesToRep names) stms)
-
-inputToIdent :: H.Input -> Ident
-inputToIdent (H.Input _ vn tp) = Ident vn tp
-
-finalizeNode :: NodeT -> FusionEnvM (Stms SOACS)
-finalizeNode nt = case nt of
-  StmNode stm -> pure $ oneStm stm
-  SoacNode soac outputs aux -> do
-    let outputs' = outputs
-    (mapping, outputTrs) <- genOutTransformStms outputs'
-    (_, stms) <- runBuilder $ do
-      new_soac <- H.toSOAC soac
-      auxing aux $ letBind (basicPat (map inputToIdent outputs')) $ Op new_soac
-    pure $ substituteNames mapping stms <> outputTrs
-  RNode _ -> pure mempty
-  InNode _ -> pure mempty
-  DoNode stm lst -> do
-    stmsNotFused <- mapM (finalizeNode . fst) lst
-    pure $ mconcat stmsNotFused <> oneStm stm
-  IfNode stm lst -> do
-    stmsNotFused <- mapM (finalizeNode . fst) lst
-    pure $ mconcat stmsNotFused <> oneStm stm
-  FinalNode stms1 nt' stms2 -> do
-    stms' <- finalizeNode nt'
-    pure $ stms1 <> stms' <> stms2
 
 -- isRes :: (Node, EdgeT) -> Bool
 -- isRes (_, Res _) = True
