@@ -46,7 +46,6 @@ module Futhark.Optimise.Fusion.GraphRep
     makeMap,
     fuseMaps,
     hasNoDifferingInputs,
-    printgraph,
     internalizeAndAdd,
     mapAcrossWithSE,
     updateNode,
@@ -194,9 +193,6 @@ isRealNode _ = True
 pprg :: DepGraph -> String
 pprg = G.showDot . G.fglToDotString . G.nemap show show
 
-printgraph :: DepGraphAug
-printgraph g = trace (pprg g) $ pure g
-
 type DepNode = G.LNode NodeT
 
 type DepEdge = G.LEdge EdgeT
@@ -334,6 +330,35 @@ addDeps = augWithFun toDep
     toDep stmt =
       map (\vname -> (vname, Dep vname)) $
         namesToList $ foldMap fusibleInputs (stmFromNode stmt)
+
+addInfDeps :: DepGraphAug
+addInfDeps = augWithFun toInfDep
+  where
+    toInfDep stmt =
+      map (\vname -> (vname, InfDep vname)) $
+        namesToList $ foldMap infusibleInputs (stmFromNode stmt)
+
+makeScanInfusible :: DepGraphAug
+makeScanInfusible g = pure $ G.emap change_node_to_idep g
+  where
+    find_scan_results :: Stm SOACS -> [VName]
+    find_scan_results (Let pat _ (Op (Futhark.Screma _ _ (ScremaForm scns rdcs _)))) =
+      let resLen = scanResults scns + redResults rdcs
+       in take resLen (patNames pat)
+    find_scan_results _ = []
+
+    scan_res_set :: S.Set VName
+    scan_res_set = S.fromList (concatMap find_scan_results (foldMap (stmFromNode . label) (G.labNodes g)))
+
+    is_scan_res :: VName -> Bool
+    is_scan_res name = S.member name scan_res_set
+
+    change_node_to_idep :: EdgeT -> EdgeT
+    change_node_to_idep (Dep name) =
+      if is_scan_res name
+        then ScanRed name
+        else Dep name
+    change_node_to_idep e = e
 
 initialGraphConstruction :: DepGraphAug
 initialGraphConstruction =
@@ -571,14 +596,6 @@ toAlias f stmt =
   map (\vname -> (vname, Alias vname)) $
     namesToList $ foldMap f (stmFromNode stmt)
 
-toInfDep :: DepGenerator -> EdgeGenerator
-toInfDep f stmt =
-  map (\vname -> (vname, InfDep vname)) $
-    namesToList $ foldMap f (stmFromNode stmt)
-
-addInfDeps :: DepGraphAug
-addInfDeps = augWithFun $ toInfDep infusibleInputs
-
 addAliases :: DepGraphAug
 addAliases = augWithFun $ toAlias aliasInputs
 
@@ -618,28 +635,6 @@ addExtraCons g = depGraphInsertEdges new_edges g
 
 addResEdges :: DepGraphAug
 addResEdges = augWithFun getStmRes
-
-makeScanInfusible :: DepGraphAug
-makeScanInfusible g = pure $ G.emap change_node_to_idep g
-  where
-    find_scan_results :: Stm SOACS -> [VName]
-    find_scan_results (Let pat _ (Op (Futhark.Screma _ _ (ScremaForm scns rdcs _)))) =
-      let resLen = scanResults scns + redResults rdcs
-       in take resLen (patNames pat)
-    find_scan_results _ = []
-
-    scan_res_set :: S.Set VName
-    scan_res_set = S.fromList (concatMap find_scan_results (foldMap (stmFromNode . label) (G.labNodes g)))
-
-    is_scan_res :: VName -> Bool
-    is_scan_res name = S.member name scan_res_set
-
-    change_node_to_idep :: EdgeT -> EdgeT
-    change_node_to_idep (Dep name) =
-      if is_scan_res name
-        then ScanRed name
-        else Dep name
-    change_node_to_idep e = e
 
 -- Utils for fusibility/infusibility
 -- find dependencies - either fusible or infusible. edges are generated based on these
