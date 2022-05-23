@@ -203,16 +203,25 @@ type DepEdge = G.LEdge EdgeT
 
 type DepContext = G.Context NodeT EdgeT
 
+-- | A dependency graph.  Edges go from *consumers* to *producers*
+-- (i.e. from usage to definition).  That means the incoming edges of
+-- a node are the dependents of that node, and the outgoing edges are
+-- the dependencies of that node.
 type DepGraph = G.Gr NodeT EdgeT
 
 type DepGraphAug = DepGraph -> FusionEnvM DepGraph
 
-type DepGenerator = Stm SOACS -> Names -- depGenerators can be used to make edgeGenerators
+-- | 'DepGenerator's can be used to make 'EdgeGenerators'.
+type DepGenerator = Stm SOACS -> Names
 
-type EdgeGenerator = NodeT -> [(VName, EdgeT)] -- for each node, what producer should the node depend on and what type
+-- | For each node, what producer should the node depend on and what
+-- type is it.
+type EdgeGenerator = NodeT -> [(VName, EdgeT)]
 
 data FusionEnv = FusionEnv -- monadic state environment for fusion.
   { vNameSource :: VNameSource,
+    -- | A mapping from variable name to the graph node that produces
+    -- it.
     producerMapping :: M.Map VName G.Node,
     fuseScans :: Bool
   }
@@ -298,6 +307,17 @@ emptyGraph stms res inputs = G.mkGraph (labelNodes (stmnodes <> resnodes <> inpu
     resnodes = map RNode $ namesToList res
     inputnodes = map InNode $ namesToList inputs
 
+-- | Construct a mapping from output names to the node that produces
+-- it and add it to the 'producerMapping' of the monad.
+makeMapping :: DepGraphAug
+makeMapping g = do
+  let mapping = M.fromList $ concatMap gen_dep_list (G.labNodes g)
+  modify (\s -> s {producerMapping = mapping})
+  pure g
+  where
+    gen_dep_list :: DepNode -> [(VName, G.Node)]
+    gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
+
 mkDepGraph :: Stms SOACS -> Names -> Names -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
   let g = emptyGraph stms res inputs
@@ -306,6 +326,14 @@ mkDepGraph stms res inputs = do
 
 applyAugs :: [DepGraphAug] -> DepGraphAug
 applyAugs augs g = foldlM (flip ($)) g augs
+
+-- | Add edges for fusible inputs to the graph.
+addDeps :: DepGraphAug
+addDeps = augWithFun toDep
+  where
+    toDep stmt =
+      map (\vname -> (vname, Dep vname)) $
+        namesToList $ foldMap fusibleInputs (stmFromNode stmt)
 
 initialGraphConstruction :: DepGraphAug
 initialGraphConstruction =
@@ -322,16 +350,7 @@ initialGraphConstruction =
       iswim
     ]
 
-makeMapping :: DepGraphAug
-makeMapping g = do
-  let mapping = M.fromList $ concatMap gen_dep_list (G.labNodes g)
-  modify (\s -> s {producerMapping = mapping})
-  pure g
-  where
-    gen_dep_list :: DepNode -> [(VName, G.Node)]
-    gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
-
--- creates deps for the given nodes on the graph using the edgeGenerator
+-- | Creates deps for the given nodes on the graph using the 'EdgeGenerator'.
 genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug
 genEdges l_stms edge_fun g = do
   name_map <- gets producerMapping
@@ -552,14 +571,6 @@ toAlias f stmt =
   map (\vname -> (vname, Alias vname)) $
     namesToList $ foldMap f (stmFromNode stmt)
 
-toDep :: DepGenerator -> EdgeGenerator
-toDep f stmt =
-  map (\vname -> (vname, Dep vname)) $
-    namesToList $ foldMap f (stmFromNode stmt)
-
-addDeps :: DepGraphAug
-addDeps = augWithFun $ toDep fusibleInputs
-
 toInfDep :: DepGenerator -> EdgeGenerator
 toInfDep f stmt =
   map (\vname -> (vname, InfDep vname)) $
@@ -633,16 +644,20 @@ makeScanInfusible g = pure $ G.emap change_node_to_idep g
 -- Utils for fusibility/infusibility
 -- find dependencies - either fusible or infusible. edges are generated based on these
 
+-- | Those inputs of a statement that are theoretically able to be
+-- fused into the statement.
 fusibleInputs :: Stm SOACS -> Names
 fusibleInputs = fusibleInputsFromExp . stmExp
 
+fusibleInputsFromBody :: Body SOACS -> Names
+fusibleInputsFromBody (Body _ stms res) =
+  foldMap fusibleInputs stms <> freeIn res
+
 fusibleInputsFromExp :: Exp SOACS -> Names
 fusibleInputsFromExp (If _ b1 b2 _) =
-  foldMap fusibleInputs (bodyStms b1) <> freeIn (bodyResult b1)
-    <> foldMap fusibleInputs (bodyStms b2)
-    <> freeIn (bodyResult b2)
+  fusibleInputsFromBody b1 <> fusibleInputsFromBody b2
 fusibleInputsFromExp (DoLoop _ _ b1) =
-  foldMap fusibleInputs (bodyStms b1) <> freeIn (bodyResult b1)
+  fusibleInputsFromBody b1
 fusibleInputsFromExp (Op soac) = case soac of
   Futhark.Screma _ is _ -> freeIn is
   Futhark.Hist _ is _ _ -> freeIn is
