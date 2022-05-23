@@ -298,222 +298,213 @@ resNames :: [SubExpRes] -> [VName]
 resNames = subExpVars . map resSubExp
 
 fuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT]) -> (NodeT, [EdgeT]) -> FusionEnvM (Maybe NodeT)
-fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
-  case (s1, s2) of
-    ( _,
-      IfNode stm2 dfused
+fuseNodeT _ infusible (s1, e1s) (IfNode stm2 dfused, _)
+  | isRealNode s1,
+    null infusible =
+      pure $ Just $ IfNode stm2 $ (s1, e1s) : dfused
+fuseNodeT edgs infusible (s1@SoacNode {}, e1s) (s2@SoacNode {}, e2s)
+  | null infusible,
+    ns <- map getName $ filter isTrDep edgs,
+    (not . null) ns,
+    not $ any isDep e2s,
+    [ts] <- L.nub $ map (\x -> findTransformsBetween x s1 s2) ns = do
+      let edgs' = filter (not . isTrDep) edgs
+      newS1m <- pullRearrangeNodeT ts s1
+      case newS1m of
+        Just newS1 -> fuseNodeT edgs' infusible (newS1, e1s) (s2, e2s)
+        _ -> do
+          newS2m <- pushRearrangeNodeT ts s2
+          case newS2m of
+            Just newS2 -> fuseNodeT edgs' infusible (s1, e1s) (newS2, e2s)
+            _ -> pure Nothing
+fuseNodeT edgs _ _ _
+  | any isTrDep edgs =
+      pure Nothing
+fuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode soac2 pats2 aux2), e2s) = do
+  let (o1, o2) = mapT (map H.inputArray) (pats1, pats2)
+      aux = aux1 <> aux2
+  case (soac1, soac2) of
+    -- Screma-Screma fusion
+    ( H.Screma w1 (ScremaForm scans_1 red_1 lam_1) i1,
+      H.Screma w2 (ScremaForm scans_2 red_2 lam_2) i2
       )
-        | isRealNode s1,
-          null infusible ->
-            pure $ Just $ IfNode stm2 $ (s1, e1s) : dfused
-    -- ( _,
-    --   DoNode stm2 dfused) | isRealNode s1, null infusible
-    --     -> pure $ Just $ DoNode stm2 $ (s1, e1s) : dfused
-    -- requirements for this type of fusion should be really tough
-    (SoacNode {}, SoacNode {})
-      | null infusible,
-        ns <- map getName $ filter isTrDep edgs,
-        (not . null) ns,
-        not $ any isDep e2s,
-        [ts] <- L.nub $ map (\x -> findTransformsBetween x s1 s2) ns -> do
-          let edgs' = filter (not . isTrDep) edgs
-          newS1m <- pullRearrangeNodeT ts s1
-          case newS1m of
-            Just newS1 -> fuseNodeT edgs' infusible (newS1, e1s) (s2, e2s)
-            _ -> do
-              newS2m <- pushRearrangeNodeT ts s2
-              case newS2m of
-                Just newS2 -> fuseNodeT edgs' infusible (s1, e1s) (newS2, e2s)
-                _ -> pure Nothing
-    (_, _) | any isTrDep edgs -> pure Nothing
-    ( SoacNode soac1 pats1 aux1,
-      SoacNode soac2 pats2 aux2
-      ) ->
-        let (o1, o2) = mapT (map H.inputArray) (pats1, pats2)
-            aux = (aux1 <> aux2)
-         in case (soac1, soac2) of
-              -- Screma-Screma fusion
-              ( H.Screma w1 (ScremaForm scans_1 red_1 lam_1) i1,
-                H.Screma w2 (ScremaForm scans_2 red_2 lam_2) i2
+        | w1 == w2,
+          not (any isScanRed edgs) ->
+            let soac = H.Screma w2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
+             in pure $ Just $ SoacNode soac ids (aux1 <> aux2)
+        where
+          (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
+          (lam_1_output, lam_2_output) = mapT (resNames . resFromLambda) (lam_1, lam_2)
+
+          fused_inputs = fuseInputs o1 i1 i2
+          lparams =
+            changeAll
+              (i1 ++ i2)
+              (lambdaParams lam_1 ++ lambdaParams lam_2)
+              fused_inputs
+
+          (scan_in_size_1, scan_in_size_2) = mapT scanInput (scans_1, scans_2)
+          (red_in_size_1, red_in_size_2) = mapT redInput (red_1, red_2)
+
+          (scan_inputs_1, red_inputs_1, lambda_outputs_1) = splitAt3 scan_in_size_1 red_in_size_1 lam_1_output
+          (scan_inputs_2, red_inputs_2, lambda_outputs_2) = splitAt3 scan_in_size_2 red_in_size_2 lam_2_output
+
+          fused_lambda_outputs =
+            concat
+              [ scan_inputs_1 ++ scan_inputs_2,
+                red_inputs_1 ++ red_inputs_2,
+                lambda_outputs_1 ++ lambda_outputs_2
+              ]
+
+          (types, body_res) =
+            unzip $
+              changeAll
+                (lam_1_output ++ lam_2_output)
+                ( zip (lambdaReturnType lam_1) (resFromLambda lam_1)
+                    ++ zip (lambdaReturnType lam_2) (resFromLambda lam_2)
                 )
-                  | w1 == w2,
-                    not (any isScanRed edgs) ->
-                      let soac = H.Screma w2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
-                       in pure $ Just $ SoacNode soac ids (aux1 <> aux2)
-                  where
-                    (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
-                    (lam_1_output, lam_2_output) = mapT (resNames . resFromLambda) (lam_1, lam_2)
+                fused_lambda_outputs
 
-                    fused_inputs = fuseInputs o1 i1 i2
-                    lparams =
-                      changeAll
-                        (i1 ++ i2)
-                        (lambdaParams lam_1 ++ lambdaParams lam_2)
-                        fused_inputs
+          (scan_outputs_1, red_outputs_1, lambda_used_outputs_1) = splitAt3 (Futhark.scanResults scans_1) (Futhark.redResults red_1) o1
+          (scan_outputs_2, red_outputs_2, lambda_used_outputs_2) = splitAt3 (Futhark.scanResults scans_2) (Futhark.redResults red_2) o2
 
-                    (scan_in_size_1, scan_in_size_2) = mapT scanInput (scans_1, scans_2)
-                    (red_in_size_1, red_in_size_2) = mapT redInput (red_1, red_2)
+          fused_outputs =
+            concat
+              [ scan_outputs_1,
+                scan_outputs_2,
+                red_outputs_1,
+                red_outputs_2,
+                lambda_used_outputs_1,
+                lambda_used_outputs_2
+              ]
 
-                    (scan_inputs_1, red_inputs_1, lambda_outputs_1) = splitAt3 scan_in_size_1 red_in_size_1 lam_1_output
-                    (scan_inputs_2, red_inputs_2, lambda_outputs_2) = splitAt3 scan_in_size_2 red_in_size_2 lam_2_output
+          ids = changeAll (o1 ++ o2) (pats1 ++ pats2) fused_outputs
 
-                    fused_lambda_outputs =
-                      concat
-                        [ scan_inputs_1 ++ scan_inputs_2,
-                          red_inputs_1 ++ red_inputs_2,
-                          lambda_outputs_1 ++ lambda_outputs_2
-                        ]
+          fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
 
-                    (types, body_res) =
-                      unzip $
-                        changeAll
-                          (lam_1_output ++ lam_2_output)
-                          ( zip (lambdaReturnType lam_1) (resFromLambda lam_1)
-                              ++ zip (lambdaReturnType lam_2) (resFromLambda lam_2)
-                          )
-                          fused_lambda_outputs
+          map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (map H.inputArray (i1 ++ i2))
+          map2 = makeMap o1 lam_1_output
+          map4 = makeMap (map H.inputArray fused_inputs) fused_inputs_inner
+          map3 = fuseMaps map1 (M.union map2 map4)
 
-                    (scan_outputs_1, red_outputs_1, lambda_used_outputs_1) = splitAt3 (Futhark.scanResults scans_1) (Futhark.redResults red_1) o1
-                    (scan_outputs_2, red_outputs_2, lambda_used_outputs_2) = splitAt3 (Futhark.scanResults scans_2) (Futhark.redResults red_2) o2
+          lam' = fuseLambda lam_1 lam_2
+          lam =
+            substituteNames map3 $
+              lam'
+                { lambdaParams = lparams,
+                  lambdaReturnType = types,
+                  lambdaBody = (lambdaBody lam') {bodyResult = body_res}
+                }
+    -- vertical map-scatter fusion
+    ( H.Screma w1 (ScremaForm [] [] lam_1) i1,
+      H.Scatter w2 lam_2 i2 other
+      )
+        | L.null infusible -- only if map outputs are used exclusivly by the scatter
+            && w1 == w2 ->
+            let soac = H.Scatter w2 lam fused_inputs other
+             in pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
+        where
+          (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
+    ( H.Screma w1 (ScremaForm [] [] lam_1) i1,
+      H.Hist w2 other lam_2 i2
+      )
+        | L.null infusible -- only if map outputs are used exclusivly by the hist
+            && w1 == w2 ->
+            let soac = H.Hist w2 other lam fused_inputs
+             in pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
+        where
+          (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
+    -- attempt fusing by turning other soac into a stream
+    ( H.Screma s_e1 _ _i1,
+      H.Stream s_e2 _ _ _ _
+      )
+        | s_e1 == s_e2 -> do
+            (stream1, is_extra_1) <- H.soacToStream soac1
+            if stream1 /= soac1
+              then do
+                is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
+                fuseNodeT
+                  edgs
+                  infusible
+                  (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
+                  (s2, e2s)
+              else pure Nothing
+    ( H.Stream s_e1 _ _ _ _,
+      H.Screma s_e2 _ _i2
+      )
+        | s_e2 == s_e1 -> do
+            (stream2, is_extra_2) <- H.soacToStream soac2
+            if stream2 /= soac2
+              then do
+                is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+                fuseNodeT
+                  edgs
+                  infusible
+                  (s1, e1s)
+                  (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
+              else pure Nothing
+    ( H.Screma w1 sform1 _i1,
+      H.Screma w2 sform2 _i2
+      )
+        | Just _ <- isScanomapSOAC sform1,
+          Just _ <- isScanomapSOAC sform2,
+          w1 == w2,
+          any isScanRed edgs ->
+            do
+              doFusion <- gets fuseScans
+              if not doFusion
+                then pure Nothing
+                else do
+                  (stream1, is_extra_1) <- H.soacToStream soac1
+                  (stream2, is_extra_2) <- H.soacToStream soac2
+                  is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
+                  is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+                  fuseNodeT
+                    edgs
+                    infusible
+                    (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
+                    (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
+    -- ( H.Stream w1 sform1 nes1 lam1 i1,
+    --   H.Stream w2 sform2 nes2 lam2 i2)
+    --   | getStreamOrder sform1 /= getStreamOrder sform2 ->
+    --     let s1' = toSeqStream soac1 in
+    --     let s2' = toSeqStream soac2 in
+    --     fuseNodeT edgs infusible
+    --       (SoacNode s1' pats1 aux1, e1s)
+    --       (SoacNode s2' pats2 aux2, e2s)
+    ( H.Stream _w1 sform1 _lam1 _nes1 _i1,
+      H.Stream _w2 sform2 _lam2 _nes2 _i2
+      )
+        | (sform1 == Sequential) /= (sform2 == Sequential) ->
+            pure Nothing
+    ( H.Stream w1 sform1 lam1 nes1 i1,
+      H.Stream w2 sform2 lam2 nes2 i2
+      ) | w1 == w2 -> do
+        let chunk1 = head $ lambdaParams lam1
+        let chunk2 = head $ lambdaParams lam2
+        let mmap = makeMap [paramName chunk2] [paramName chunk1]
+        let (lam1Rps, lam1ps) = splitAt (length nes1) $ tail $ lambdaParams lam1
+        let (lam1Rts, lam1ts) = splitAt (length nes1) $ lambdaReturnType lam1
+        let (lam1Rrs, lam1rs) = splitAt (length nes1) $ bodyResult $ lambdaBody lam1
 
-                    fused_outputs =
-                      concat
-                        [ scan_outputs_1,
-                          scan_outputs_2,
-                          red_outputs_1,
-                          red_outputs_2,
-                          lambda_used_outputs_1,
-                          lambda_used_outputs_2
-                        ]
+        let (lam2Rps, lam2ps) = splitAt (length nes2) $ tail $ lambdaParams lam2
+        let (lam2Rts, lam2ts) = splitAt (length nes2) $ lambdaReturnType lam2
+        let (lam2Rrs, lam2rs) = splitAt (length nes2) $ bodyResult $ lambdaBody lam2
 
-                    ids = changeAll (o1 ++ o2) (pats1 ++ pats2) fused_outputs
+        let lam1' = lam1 {lambdaParams = lam1ps, lambdaReturnType = lam1ts, lambdaBody = (lambdaBody lam1) {bodyResult = lam1rs}}
+        let lam2' = lam2 {lambdaParams = lam2ps, lambdaReturnType = lam2ts, lambdaBody = (lambdaBody lam2) {bodyResult = lam2rs}}
+        let (lam, is_new) = vFuseLambdas infusible lam1' i1 (drop (length nes1) o1) lam2' i2 (drop (length nes2) o2)
+        let lam' = lam {lambdaParams = chunk1 : lam1Rps ++ lam2Rps ++ lambdaParams lam}
+        let lam'' = lam' {lambdaBody = (lambdaBody lam') {bodyResult = lam1Rrs ++ lam2Rrs ++ bodyResult (lambdaBody lam')}}
+        let lam''' = lam'' {lambdaReturnType = lam1Rts <> lam2Rts <> lambdaReturnType lam''}
 
-                    fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
+        let toKeep = filter (\x -> H.inputArray x `elem` infusible) (drop (length nes1) pats1)
+        let pats = take (length nes1) pats1 ++ take (length nes2) pats2 ++ toKeep ++ drop (length nes2) pats2
 
-                    map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (map H.inputArray (i1 ++ i2))
-                    map2 = makeMap o1 lam_1_output
-                    map4 = makeMap (map H.inputArray fused_inputs) fused_inputs_inner
-                    map3 = fuseMaps map1 (M.union map2 map4)
-
-                    lam' = fuseLambda lam_1 lam_2
-                    lam =
-                      substituteNames map3 $
-                        lam'
-                          { lambdaParams = lparams,
-                            lambdaReturnType = types,
-                            lambdaBody = (lambdaBody lam') {bodyResult = body_res}
-                          }
-              -- vertical map-scatter fusion
-              ( H.Screma w1 (ScremaForm [] [] lam_1) i1,
-                H.Scatter w2 lam_2 i2 other
-                )
-                  | L.null infusible -- only if map outputs are used exclusivly by the scatter
-                      && w1 == w2 ->
-                      let soac = H.Scatter w2 lam fused_inputs other
-                       in pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
-                  where
-                    (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
-              ( H.Screma w1 (ScremaForm [] [] lam_1) i1,
-                H.Hist w2 other lam_2 i2
-                )
-                  | L.null infusible -- only if map outputs are used exclusivly by the hist
-                      && w1 == w2 ->
-                      let soac = H.Hist w2 other lam fused_inputs
-                       in pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
-                  where
-                    (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
-              -- attempt fusing by turning other soac into a stream
-              ( H.Screma s_e1 _ _i1,
-                H.Stream s_e2 _ _ _ _
-                )
-                  | s_e1 == s_e2 -> do
-                      (stream1, is_extra_1) <- H.soacToStream soac1
-                      if stream1 /= soac1
-                        then do
-                          is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
-                          fuseNodeT
-                            edgs
-                            infusible
-                            (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
-                            (s2, e2s)
-                        else pure Nothing
-              ( H.Stream s_e1 _ _ _ _,
-                H.Screma s_e2 _ _i2
-                )
-                  | s_e2 == s_e1 -> do
-                      (stream2, is_extra_2) <- H.soacToStream soac2
-                      if stream2 /= soac2
-                        then do
-                          is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                          fuseNodeT
-                            edgs
-                            infusible
-                            (s1, e1s)
-                            (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
-                        else pure Nothing
-              ( H.Screma w1 sform1 _i1,
-                H.Screma w2 sform2 _i2
-                )
-                  | Just _ <- isScanomapSOAC sform1,
-                    Just _ <- isScanomapSOAC sform2,
-                    w1 == w2,
-                    any isScanRed edgs ->
-                      do
-                        doFusion <- gets fuseScans
-                        if not doFusion
-                          then pure Nothing
-                          else do
-                            (stream1, is_extra_1) <- H.soacToStream soac1
-                            (stream2, is_extra_2) <- H.soacToStream soac2
-                            is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
-                            is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                            fuseNodeT
-                              edgs
-                              infusible
-                              (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
-                              (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
-              -- ( H.Stream w1 sform1 nes1 lam1 i1,
-              --   H.Stream w2 sform2 nes2 lam2 i2)
-              --   | getStreamOrder sform1 /= getStreamOrder sform2 ->
-              --     let s1' = toSeqStream soac1 in
-              --     let s2' = toSeqStream soac2 in
-              --     fuseNodeT edgs infusible
-              --       (SoacNode s1' pats1 aux1, e1s)
-              --       (SoacNode s2' pats2 aux2, e2s)
-              ( H.Stream _w1 sform1 _lam1 _nes1 _i1,
-                H.Stream _w2 sform2 _lam2 _nes2 _i2
-                )
-                  | (sform1 == Sequential) /= (sform2 == Sequential) ->
-                      pure Nothing
-              ( H.Stream w1 sform1 lam1 nes1 i1,
-                H.Stream w2 sform2 lam2 nes2 i2
-                ) | w1 == w2 -> do
-                  let chunk1 = head $ lambdaParams lam1
-                  let chunk2 = head $ lambdaParams lam2
-                  let mmap = makeMap [paramName chunk2] [paramName chunk1]
-
-                  let (lam1Rps, lam1ps) = splitAt (length nes1) $ tail $ lambdaParams lam1
-                  let (lam1Rts, lam1ts) = splitAt (length nes1) $ lambdaReturnType lam1
-                  let (lam1Rrs, lam1rs) = splitAt (length nes1) $ bodyResult $ lambdaBody lam1
-
-                  let (lam2Rps, lam2ps) = splitAt (length nes2) $ tail $ lambdaParams lam2
-                  let (lam2Rts, lam2ts) = splitAt (length nes2) $ lambdaReturnType lam2
-                  let (lam2Rrs, lam2rs) = splitAt (length nes2) $ bodyResult $ lambdaBody lam2
-
-                  let lam1' = lam1 {lambdaParams = lam1ps, lambdaReturnType = lam1ts, lambdaBody = (lambdaBody lam1) {bodyResult = lam1rs}}
-                  let lam2' = lam2 {lambdaParams = lam2ps, lambdaReturnType = lam2ts, lambdaBody = (lambdaBody lam2) {bodyResult = lam2rs}}
-                  let (lam, is_new) = vFuseLambdas infusible lam1' i1 (drop (length nes1) o1) lam2' i2 (drop (length nes2) o2)
-                  let lam' = lam {lambdaParams = chunk1 : lam1Rps ++ lam2Rps ++ lambdaParams lam}
-                  let lam'' = lam' {lambdaBody = (lambdaBody lam') {bodyResult = lam1Rrs ++ lam2Rrs ++ bodyResult (lambdaBody lam')}}
-                  let lam''' = lam'' {lambdaReturnType = lam1Rts <> lam2Rts <> lambdaReturnType lam''}
-
-                  let toKeep = filter (\x -> H.inputArray x `elem` infusible) (drop (length nes1) pats1)
-                  let pats = take (length nes1) pats1 ++ take (length nes2) pats2 ++ toKeep ++ drop (length nes2) pats2
-
-                  let soac = H.Stream w1 (mergeForms sform1 sform2) lam''' (nes1 <> nes2) is_new
-                  pure $ Just $ substituteNames mmap $ SoacNode soac pats aux
-              _ -> pure Nothing -- not fusable soac combos
-    _ -> pure Nothing -- not op statements
+        let soac = H.Stream w1 (mergeForms sform1 sform2) lam''' (nes1 <> nes2) is_new
+        pure $ Just $ substituteNames mmap $ SoacNode soac pats aux
+    _ -> pure Nothing -- not fusable soac combos
+fuseNodeT _ _ _ _ = pure Nothing
 
 vFuseLambdas ::
   [VName] ->
