@@ -474,6 +474,24 @@ traverseSOACStms f = mapSOACM mapper
   where
     mapper = identitySOACMapper {mapOnSOACLambda = traverseLambdaStms f}
 
+instance ASTRep rep => FreeIn (Scan rep) where
+  freeIn' (Scan lam ne) = freeIn' lam <> freeIn' ne
+
+instance ASTRep rep => FreeIn (Reduce rep) where
+  freeIn' (Reduce _ lam ne) = freeIn' lam <> freeIn' ne
+
+instance ASTRep rep => FreeIn (ScremaForm rep) where
+  freeIn' (ScremaForm scans reds lam) =
+    freeIn' scans <> freeIn' reds <> freeIn' lam
+
+instance ASTRep rep => FreeIn (StreamForm rep) where
+  freeIn' Sequential = mempty
+  freeIn' (Parallel _ _ lam) = freeIn' lam
+
+instance ASTRep rep => FreeIn (HistOp rep) where
+  freeIn' (HistOp w rf dests nes lam) =
+    freeIn' w <> freeIn' rf <> freeIn' dests <> freeIn' nes <> freeIn' lam
+
 instance ASTRep rep => FreeIn (SOAC rep) where
   freeIn' = flip execState mempty . mapSOACM free
     where
