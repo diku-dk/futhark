@@ -150,16 +150,15 @@ doVerticalFusion g = applyAugs (map tryFuseNodeInGraph $ G.labNodes g) g
 doHorizontalFusion :: DepGraphAug
 doHorizontalFusion g = applyAugs (map horizontalFusionOnNode (G.nodes g)) g
 
--- for each node, find what came before, attempt to fuse
+-- | For each node, find what came before, attempt to fuse them
+-- horizontally.  This means we only perform horizontal fusion for
+-- SOACs that use the same input in some way.
 horizontalFusionOnNode :: G.Node -> DepGraphAug
-horizontalFusionOnNode node g = tryFuseAll incoming_nodes g
+horizontalFusionOnNode node g =
+  applyAugs (map (uncurry hTryFuseNodesInGraph) pairs) g
   where
-    (incoming_nodes, _) = unzip $ filter (isDep . snd) $ G.lpre g node
-
-tryFuseAll :: [G.Node] -> DepGraphAug
-tryFuseAll nodes_list = applyAugs (map (uncurry hTryFuseNodesInGraph) pairs)
-  where
-    pairs = [(x, y) | x <- nodes_list, y <- nodes_list, x < y]
+    incoming_nodes = map fst $ filter (isDep . snd) $ G.lpre g node
+    pairs = [(x, y) | x <- incoming_nodes, y <- incoming_nodes, x < y]
 
 vFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 vFusionFeasability g n1 n2 = do
