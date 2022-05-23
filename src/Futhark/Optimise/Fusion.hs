@@ -241,7 +241,7 @@ vFuseContexts
   infusable
   c1@(_i1, n1, nodeT1, o1)
   c2@(_i2, _n2, nodeT2, o2) = do
-    fres <- fuseNodeT edgs infusable (nodeT1, map fst o1) (nodeT2, map fst $ filter ((/=) n1 . snd) o2)
+    fres <- vFuseNodeT edgs infusable (nodeT1, map fst o1) (nodeT2, map fst $ filter ((/=) n1 . snd) o2)
     case fres of
       Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
       Nothing -> pure Nothing
@@ -300,12 +300,12 @@ makeCopyStms toCopy = do
 resNames :: [SubExpRes] -> [VName]
 resNames = subExpVars . map resSubExp
 
-fuseScremas ::
+vFuseScremas ::
   [EdgeT] ->
   (SubExp, ScremaForm SOACS, [H.Input], StmAux (), [H.Input]) ->
   (SubExp, ScremaForm SOACS, [H.Input], StmAux (), [H.Input]) ->
   Maybe NodeT
-fuseScremas edges (w1, screma1, pats1, aux1, i1) (w2, screma2, pats2, aux2, i2) = do
+vFuseScremas edges (w1, screma1, pats1, aux1, i1) (w2, screma2, pats2, aux2, i2) = do
   guard $ w1 == w2
   guard $ not $ any isScanRed edges
   let soac = H.Screma w2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
@@ -378,12 +378,13 @@ fuseScremas edges (w1, screma1, pats1, aux1, i1) (w2, screma2, pats2, aux2, i2) 
             lambdaBody = (lambdaBody lam') {bodyResult = body_res}
           }
 
-fuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT]) -> (NodeT, [EdgeT]) -> FusionEnvM (Maybe NodeT)
-fuseNodeT _ infusible (s1, e1s) (IfNode stm2 dfused, _)
+-- First node is producer, second is consumer.
+vFuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT]) -> (NodeT, [EdgeT]) -> FusionEnvM (Maybe NodeT)
+vFuseNodeT _ infusible (s1, e1s) (IfNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
       pure $ Just $ IfNode stm2 $ (s1, e1s) : dfused
-fuseNodeT edgs infusible (s1@SoacNode {}, e1s) (s2@SoacNode {}, e2s)
+vFuseNodeT edgs infusible (s1@SoacNode {}, e1s) (s2@SoacNode {}, e2s)
   | null infusible,
     ns <- map getName $ filter isTrDep edgs,
     (not . null) ns,
@@ -392,16 +393,16 @@ fuseNodeT edgs infusible (s1@SoacNode {}, e1s) (s2@SoacNode {}, e2s)
       let edgs' = filter (not . isTrDep) edgs
       newS1m <- pullRearrangeNodeT ts s1
       case newS1m of
-        Just newS1 -> fuseNodeT edgs' infusible (newS1, e1s) (s2, e2s)
+        Just newS1 -> vFuseNodeT edgs' infusible (newS1, e1s) (s2, e2s)
         _ -> do
           newS2m <- pushRearrangeNodeT ts s2
           case newS2m of
-            Just newS2 -> fuseNodeT edgs' infusible (s1, e1s) (newS2, e2s)
+            Just newS2 -> vFuseNodeT edgs' infusible (s1, e1s) (newS2, e2s)
             _ -> pure Nothing
-fuseNodeT edgs _ _ _
+vFuseNodeT edgs _ _ _
   | any isTrDep edgs =
       pure Nothing
-fuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode soac2 pats2 aux2), e2s) = do
+vFuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode soac2 pats2 aux2), e2s) = do
   let (o1, o2) = mapT (map H.inputArray) (pats1, pats2)
       aux = aux1 <> aux2
   case (soac1, soac2) of
@@ -409,8 +410,28 @@ fuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode soa
     ( H.Screma w1 screma1 i1,
       H.Screma w2 screma2 i2
       )
-        | Just res <- fuseScremas edgs (w1, screma1, pats1, aux1, i1) (w2, screma2, pats2, aux2, i2) ->
+        | Just res <- vFuseScremas edgs (w1, screma1, pats1, aux1, i1) (w2, screma2, pats2, aux2, i2) ->
             pure $ Just res
+    ( H.Screma w1 sform1 _i1,
+      H.Screma w2 sform2 _i2
+      )
+        | isJust (isScanomapSOAC sform1),
+          isJust (isScanomapSOAC sform2) || isJust (isRedomapSOAC sform2),
+          w1 == w2,
+          any isScanRed edgs -> do
+            doFusion <- gets fuseScans
+            if not doFusion
+              then pure Nothing
+              else do
+                (stream1, is_extra_1) <- H.soacToStream soac1
+                (stream2, is_extra_2) <- H.soacToStream soac2
+                is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
+                is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
+                vFuseNodeT
+                  edgs
+                  infusible
+                  (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
+                  (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
     -- vertical map-scatter fusion
     ( H.Screma w1 (ScremaForm [] [] lam_1) i1,
       H.Scatter w2 lam_2 i2 other
@@ -439,7 +460,7 @@ fuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode soa
             if stream1 /= soac1
               then do
                 is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
-                fuseNodeT
+                vFuseNodeT
                   edgs
                   infusible
                   (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
@@ -453,39 +474,18 @@ fuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode soa
             if stream2 /= soac2
               then do
                 is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                fuseNodeT
+                vFuseNodeT
                   edgs
                   infusible
                   (s1, e1s)
                   (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
               else pure Nothing
-    ( H.Screma w1 sform1 _i1,
-      H.Screma w2 sform2 _i2
-      )
-        | Just _ <- isScanomapSOAC sform1,
-          Just _ <- isScanomapSOAC sform2,
-          w1 == w2,
-          any isScanRed edgs ->
-            do
-              doFusion <- gets fuseScans
-              if not doFusion
-                then pure Nothing
-                else do
-                  (stream1, is_extra_1) <- H.soacToStream soac1
-                  (stream2, is_extra_2) <- H.soacToStream soac2
-                  is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
-                  is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
-                  fuseNodeT
-                    edgs
-                    infusible
-                    (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
-                    (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
     -- ( H.Stream w1 sform1 nes1 lam1 i1,
     --   H.Stream w2 sform2 nes2 lam2 i2)
     --   | getStreamOrder sform1 /= getStreamOrder sform2 ->
     --     let s1' = toSeqStream soac1 in
     --     let s2' = toSeqStream soac2 in
-    --     fuseNodeT edgs infusible
+    --     vFuseNodeT edgs infusible
     --       (SoacNode s1' pats1 aux1, e1s)
     --       (SoacNode s2' pats2 aux2, e2s)
     ( H.Stream _w1 sform1 _lam1 _nes1 _i1,
@@ -520,7 +520,7 @@ fuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode soa
         let soac = H.Stream w1 (mergeForms sform1 sform2) lam''' (nes1 <> nes2) is_new
         pure $ Just $ substituteNames mmap $ SoacNode soac pats aux
     _ -> pure Nothing -- not fusable soac combos
-fuseNodeT _ _ _ _ = pure Nothing
+vFuseNodeT _ _ _ _ = pure Nothing
 
 vFuseLambdas ::
   [VName] ->
@@ -586,7 +586,7 @@ hFuseNodeT s1@(SoacNode soac1 pats1 aux1) s2@(SoacNode soac2 pats2 aux2)
       case (soac1, soac2) of
         ( H.Screma {},
           H.Screma {}
-          ) -> fuseNodeT [] (map H.inputArray pats1) (s1, []) (s2, [])
+          ) -> vFuseNodeT [] (map H.inputArray pats1) (s1, []) (s2, [])
         ( H.Scatter w1 lam_1 i1 outputs1,
           H.Scatter w2 lam_2 i2 outputs2
           )
