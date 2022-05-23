@@ -379,19 +379,17 @@ mapAcross f g = foldlM (flip helper) g (G.nodes g)
   where
     helper :: G.Node -> DepGraphAug
     helper n g' = case G.match n g' of
-      (Just c, g_new) ->
-        do
-          c' <- f c
-          pure $ c' G.& g_new
+      (Just c, g_new) -> do
+        c' <- f c
+        pure $ c' G.& g_new
       (Nothing, _) -> pure g'
 
 mapAcrossNodeTs :: (NodeT -> FusionEnvM NodeT) -> DepGraphAug
 mapAcrossNodeTs f = mapAcross f'
   where
-    f' (ins, n, nodeT, outs) =
-      do
-        nodeT' <- f nodeT
-        pure (ins, n, nodeT', outs)
+    f' (ins, n, nodeT, outs) = do
+      nodeT' <- f nodeT
+      pure (ins, n, nodeT', outs)
 
 mapAcrossWithSE :: (DepNode -> DepGraphAug) -> DepGraphAug
 mapAcrossWithSE f g =
@@ -470,22 +468,21 @@ addTransforms orig_g =
               (getName . G.edgeLabel)
               (filter (\(a, _, _) -> a /= n) (G.inn g n')),
           Just (SoacNode soac outps aux2) <- G.lab g n',
-          [trName] <- patNames pat ->
-            do
-              let sucNodes = G.pre g n
-              g' <- depGraphInsertEdges (map (\nd -> (nd, n', TrDep trName)) sucNodes) g
-              let outps' =
-                    map
-                      ( \inp ->
-                          if H.inputArray inp /= vn
-                            then inp
-                            else H.addTransform transform inp
-                      )
-                      outps
-              let mapping = makeMap [vn] [trName]
-              let newNode = substituteNames mapping (SoacNode soac outps' (aux <> aux2))
-              let ctx = mergedContext newNode (G.context g' n') (G.context g' n)
-              contractEdge n ctx g'
+          [trName] <- patNames pat -> do
+            let sucNodes = G.pre g n
+            g' <- depGraphInsertEdges (map (\nd -> (nd, n', TrDep trName)) sucNodes) g
+            let outps' =
+                  map
+                    ( \inp ->
+                        if H.inputArray inp /= vn
+                          then inp
+                          else H.addTransform transform inp
+                    )
+                    outps
+            let mapping = makeMap [vn] [trName]
+            let newNode = substituteNames mapping (SoacNode soac outps' (aux <> aux2))
+            let ctx = mergedContext newNode (G.context g' n') (G.context g' n)
+            contractEdge n ctx g'
       _ -> pure g
 
 substituteNamesInNodes :: M.Map VName VName -> [G.Node] -> DepGraphAug
