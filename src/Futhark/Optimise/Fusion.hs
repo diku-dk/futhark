@@ -420,11 +420,10 @@ vFuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode so
         | Just res <- vFuseScremas edgs (w1, screma1, pats1, aux1, i1) (w2, screma2, pats2, aux2, i2) ->
             pure $ Just res
     ( H.Screma w1 sform1 _i1,
-      H.Screma w2 sform2 _i2
+      H.Screma w2 _ _
       )
-        | isJust (isScanomapSOAC sform1),
-          isJust (isScanomapSOAC sform2) || isJust (isRedomapSOAC sform2),
-          w1 == w2,
+        | w1 == w2,
+          isJust (isScanomapSOAC sform1),
           any isScanRed edgs -> do
             doFusion <- gets fuseScans
             if not doFusion
