@@ -289,13 +289,14 @@ isArray2 p = case paramDec p of
 --     pure $ pprg g
 --   _ -> pure ""
 
+-- | Construct a graph with only nodes, but no edges.
 emptyGraph :: Stms SOACS -> Names -> Names -> DepGraph
-emptyGraph stms res inputs = G.mkGraph (label_nodes (snodes ++ rnodes ++ inNodes)) []
+emptyGraph stms res inputs = G.mkGraph (labelNodes (stmnodes <> resnodes <> inputnodes)) []
   where
-    label_nodes = zip [0 ..]
-    snodes = map StmNode $ stmsToList stms
-    rnodes = map RNode $ namesToList res
-    inNodes = map InNode $ namesToList inputs
+    labelNodes = zip [0 ..]
+    stmnodes = map StmNode $ stmsToList stms
+    resnodes = map RNode $ namesToList res
+    inputnodes = map InNode $ namesToList inputs
 
 mkDepGraph :: Stms SOACS -> Names -> Names -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
