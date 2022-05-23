@@ -258,11 +258,6 @@ keepTrying f g = do
     then pure r
     else keepTrying f r2
 
--- initGraph :: DepGraphAug
--- initGraph g = do
---   _ <- makeMapping g
---   initialGraphConstruction g
-
 isArray :: FParam SOACS -> Bool
 isArray p = case paramDec p of
   Array {} -> True
@@ -272,25 +267,6 @@ isArray2 :: LParam SOACS -> Bool
 isArray2 p = case paramDec p of
   Array {} -> True
   _ -> False
-
--- displayGraphFromfun ::  FunDef SOACS -> FusionEnvM String
--- displayGraphFromfun fun = do
---   g <- mkDepGraph stms resNames inputNames
---   let str = pprg g
---   strs <-  mapM displayGraphFromNode (nodes' g)
---   pure $ str ++ concat strs
---   where
---     stms = (stmsToList . bodyStms . funDefBody) fun
---     resNames = namesFromRes ((bodyResult . funDefBody) fun)
---     inputNames = map paramName $ filter isArray (funDefParams  fun)
---     nodes' g' = mapMaybe (lab g') (nodes g')
-
--- displayGraphFromNode :: NodeT -> FusionEnvM String
--- displayGraphFromNode n = case n of
---   SoacNode soac _ _ -> do
---     g <- mkDepGraph ((stmsToList . bodyStms . lambdaBody . lambda)soac) [] []
---     pure $ pprg g
---   _ -> pure ""
 
 -- | Construct a graph with only nodes, but no edges.
 emptyGraph :: Stms SOACS -> Names -> Names -> DepGraph
@@ -700,10 +676,6 @@ getOutputs node = case node of
 
 mapT :: (a -> b) -> (a, a) -> (b, b) -- tuple map
 mapT f (a, b) = (f a, f b)
-
--- isRes :: (Node, EdgeT) -> Bool
--- isRes (_, Res _) = True
--- isRes _ = False
 
 isDep :: EdgeT -> Bool -- Is there a possibility of fusion?
 isDep (Dep _) = True
