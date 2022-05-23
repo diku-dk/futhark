@@ -292,12 +292,12 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
             aux = (aux1 <> aux2)
          in case (soac1, soac2) of
               -- Screma-Screma fusion
-              ( H.Screma s_exp1 (ScremaForm scans_1 red_1 lam_1) i1,
-                H.Screma s_exp2 (ScremaForm scans_2 red_2 lam_2) i2
+              ( H.Screma w1 (ScremaForm scans_1 red_1 lam_1) i1,
+                H.Screma w2 (ScremaForm scans_2 red_2 lam_2) i2
                 )
-                  | s_exp1 == s_exp2,
+                  | w1 == w2,
                     not (any isScanRed edgs) ->
-                      let soac = H.Screma s_exp2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
+                      let soac = H.Screma w2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
                        in pure $ Just $ SoacNode soac ids (aux1 <> aux2)
                   where
                     (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
@@ -363,21 +363,21 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                             lambdaBody = (lambdaBody lam') {bodyResult = body_res}
                           }
               -- vertical map-scatter fusion
-              ( H.Screma s_exp1 (ScremaForm [] [] lam_1) i1,
-                H.Scatter s_exp2 lam_2 i2 other
+              ( H.Screma w1 (ScremaForm [] [] lam_1) i1,
+                H.Scatter w2 lam_2 i2 other
                 )
                   | L.null infusible -- only if map outputs are used exclusivly by the scatter
-                      && s_exp1 == s_exp2 ->
-                      let soac = H.Scatter s_exp2 lam fused_inputs other
+                      && w1 == w2 ->
+                      let soac = H.Scatter w2 lam fused_inputs other
                        in pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
                   where
                     (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
-              ( H.Screma s_exp1 (ScremaForm [] [] lam_1) i1,
-                H.Hist s_exp2 other lam_2 i2
+              ( H.Screma w1 (ScremaForm [] [] lam_1) i1,
+                H.Hist w2 other lam_2 i2
                 )
                   | L.null infusible -- only if map outputs are used exclusivly by the hist
-                      && s_exp1 == s_exp2 ->
-                      let soac = H.Hist s_exp2 other lam fused_inputs
+                      && w1 == w2 ->
+                      let soac = H.Hist w2 other lam fused_inputs
                        in pure $ Just $ SoacNode soac pats2 (aux1 <> aux2)
                   where
                     (lam, fused_inputs) = vFuseLambdas [] lam_1 i1 o1 lam_2 i2 o2
@@ -410,12 +410,12 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                             (s1, e1s)
                             (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
                         else pure Nothing
-              ( H.Screma s_exp1 sform1 _i1,
-                H.Screma s_exp2 sform2 _i2
+              ( H.Screma w1 sform1 _i1,
+                H.Screma w2 sform2 _i2
                 )
                   | Just _ <- isScanomapSOAC sform1,
                     Just _ <- isScanomapSOAC sform2,
-                    s_exp1 == s_exp2,
+                    w1 == w2,
                     any isScanRed edgs ->
                       do
                         doFusion <- gets fuseScans
@@ -431,8 +431,8 @@ fuseNodeT edgs infusible (s1, e1s) (s2, e2s) =
                               infusible
                               (SoacNode stream1 (map H.identInput is_extra_1' <> pats1) aux1, e1s)
                               (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
-              -- ( H.Stream s_exp1 sform1 nes1 lam1 i1,
-              --   H.Stream s_exp2 sform2 nes2 lam2 i2)
+              -- ( H.Stream w1 sform1 nes1 lam1 i1,
+              --   H.Stream w2 sform2 nes2 lam2 i2)
               --   | getStreamOrder sform1 /= getStreamOrder sform2 ->
               --     let s1' = toSeqStream soac1 in
               --     let s2' = toSeqStream soac2 in
@@ -537,11 +537,11 @@ hFuseNodeT s1 s2
             ( H.Screma {},
               H.Screma {}
               ) -> fuseNodeT [] (map H.inputArray pats1) (s1, []) (s2, [])
-            ( H.Scatter s_exp1 lam_1 i1 outputs1,
-              H.Scatter s_exp2 lam_2 i2 outputs2
+            ( H.Scatter w1 lam_1 i1 outputs1,
+              H.Scatter w2 lam_2 i2 outputs2
               )
-                | s_exp1 == s_exp2 ->
-                    let soac = H.Scatter s_exp2 lam fused_inputs outputs
+                | w1 == w2 ->
+                    let soac = H.Scatter w2 lam fused_inputs outputs
                      in pure $ Just $ SoacNode soac pats aux
                 where
                   pats = pats1 <> pats2
@@ -581,10 +581,10 @@ hFuseNodeT s1 s2
                           lambdaReturnType = types,
                           lambdaBody = (lambdaBody lam') {bodyResult = res}
                         }
-            ( H.Hist s_exp1 ops_1 lam_1 i1,
-              H.Hist s_exp2 ops_2 lam_2 i2 -- pretty much copied too
+            ( H.Hist w1 ops_1 lam_1 i1,
+              H.Hist w2 ops_2 lam_2 i2 -- pretty much copied too
               )
-                | s_exp1 == s_exp2 -> do
+                | w1 == w2 -> do
                     let num_buckets_2 = length ops_2
                     let num_buckets_1 = length ops_1
                     let (body_2, body_1) = (lambdaBody lam_2, lambdaBody lam_1)
@@ -608,7 +608,7 @@ hFuseNodeT s1 s2
                                   ++ drop num_buckets_2 (lambdaReturnType lam_2)
                             }
                     -- success (outNames ker ++ returned_outvars) $
-                    let soac = H.Hist s_exp1 (ops_1 <> ops_2) lam' (i1 <> i2)
+                    let soac = H.Hist w1 (ops_1 <> ops_2) lam' (i1 <> i2)
                     pure $ Just $ SoacNode soac (pats1 <> pats2) (aux1 <> aux2)
             _ -> pure Nothing
         _ -> pure Nothing
