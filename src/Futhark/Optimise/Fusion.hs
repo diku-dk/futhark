@@ -297,6 +297,84 @@ makeCopyStms toCopy = do
 resNames :: [SubExpRes] -> [VName]
 resNames = subExpVars . map resSubExp
 
+fuseScremas ::
+  [EdgeT] ->
+  (SubExp, ScremaForm SOACS, [H.Input], StmAux (), [H.Input]) ->
+  (SubExp, ScremaForm SOACS, [H.Input], StmAux (), [H.Input]) ->
+  Maybe NodeT
+fuseScremas edges (w1, screma1, pats1, aux1, i1) (w2, screma2, pats2, aux2, i2) = do
+  guard $ w1 == w2
+  guard $ not $ any isScanRed edges
+  let soac = H.Screma w2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
+  Just $ SoacNode soac ids (aux1 <> aux2)
+  where
+    ScremaForm scans_1 red_1 lam_1 = screma1
+    ScremaForm scans_2 red_2 lam_2 = screma2
+    (o1, o2) = mapT (map H.inputArray) (pats1, pats2)
+
+    (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
+    (lam_1_output, lam_2_output) = mapT (resNames . resFromLambda) (lam_1, lam_2)
+
+    fused_inputs = fuseInputs o1 i1 i2
+    lparams =
+      changeAll
+        (i1 ++ i2)
+        (lambdaParams lam_1 ++ lambdaParams lam_2)
+        fused_inputs
+
+    (scan_in_size_1, scan_in_size_2) = mapT scanInput (scans_1, scans_2)
+    (red_in_size_1, red_in_size_2) = mapT redInput (red_1, red_2)
+
+    (scan_inputs_1, red_inputs_1, lambda_outputs_1) = splitAt3 scan_in_size_1 red_in_size_1 lam_1_output
+    (scan_inputs_2, red_inputs_2, lambda_outputs_2) = splitAt3 scan_in_size_2 red_in_size_2 lam_2_output
+
+    fused_lambda_outputs =
+      concat
+        [ scan_inputs_1 ++ scan_inputs_2,
+          red_inputs_1 ++ red_inputs_2,
+          lambda_outputs_1 ++ lambda_outputs_2
+        ]
+
+    (types, body_res) =
+      unzip $
+        changeAll
+          (lam_1_output ++ lam_2_output)
+          ( zip (lambdaReturnType lam_1) (resFromLambda lam_1)
+              ++ zip (lambdaReturnType lam_2) (resFromLambda lam_2)
+          )
+          fused_lambda_outputs
+
+    (scan_outputs_1, red_outputs_1, lambda_used_outputs_1) = splitAt3 (Futhark.scanResults scans_1) (Futhark.redResults red_1) o1
+    (scan_outputs_2, red_outputs_2, lambda_used_outputs_2) = splitAt3 (Futhark.scanResults scans_2) (Futhark.redResults red_2) o2
+
+    fused_outputs =
+      concat
+        [ scan_outputs_1,
+          scan_outputs_2,
+          red_outputs_1,
+          red_outputs_2,
+          lambda_used_outputs_1,
+          lambda_used_outputs_2
+        ]
+
+    ids = changeAll (o1 ++ o2) (pats1 ++ pats2) fused_outputs
+
+    fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
+
+    map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (map H.inputArray (i1 ++ i2))
+    map2 = makeMap o1 lam_1_output
+    map4 = makeMap (map H.inputArray fused_inputs) fused_inputs_inner
+    map3 = fuseMaps map1 (M.union map2 map4)
+
+    lam' = fuseLambda lam_1 lam_2
+    lam =
+      substituteNames map3 $
+        lam'
+          { lambdaParams = lparams,
+            lambdaReturnType = types,
+            lambdaBody = (lambdaBody lam') {bodyResult = body_res}
+          }
+
 fuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT]) -> (NodeT, [EdgeT]) -> FusionEnvM (Maybe NodeT)
 fuseNodeT _ infusible (s1, e1s) (IfNode stm2 dfused, _)
   | isRealNode s1,
@@ -325,76 +403,11 @@ fuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode soa
       aux = aux1 <> aux2
   case (soac1, soac2) of
     -- Screma-Screma fusion
-    ( H.Screma w1 (ScremaForm scans_1 red_1 lam_1) i1,
-      H.Screma w2 (ScremaForm scans_2 red_2 lam_2) i2
+    ( H.Screma w1 screma1 i1,
+      H.Screma w2 screma2 i2
       )
-        | w1 == w2,
-          not (any isScanRed edgs) ->
-            let soac = H.Screma w2 (ScremaForm (scans_1 ++ scans_2) (red_1 ++ red_2) lam) fused_inputs
-             in pure $ Just $ SoacNode soac ids (aux1 <> aux2)
-        where
-          (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
-          (lam_1_output, lam_2_output) = mapT (resNames . resFromLambda) (lam_1, lam_2)
-
-          fused_inputs = fuseInputs o1 i1 i2
-          lparams =
-            changeAll
-              (i1 ++ i2)
-              (lambdaParams lam_1 ++ lambdaParams lam_2)
-              fused_inputs
-
-          (scan_in_size_1, scan_in_size_2) = mapT scanInput (scans_1, scans_2)
-          (red_in_size_1, red_in_size_2) = mapT redInput (red_1, red_2)
-
-          (scan_inputs_1, red_inputs_1, lambda_outputs_1) = splitAt3 scan_in_size_1 red_in_size_1 lam_1_output
-          (scan_inputs_2, red_inputs_2, lambda_outputs_2) = splitAt3 scan_in_size_2 red_in_size_2 lam_2_output
-
-          fused_lambda_outputs =
-            concat
-              [ scan_inputs_1 ++ scan_inputs_2,
-                red_inputs_1 ++ red_inputs_2,
-                lambda_outputs_1 ++ lambda_outputs_2
-              ]
-
-          (types, body_res) =
-            unzip $
-              changeAll
-                (lam_1_output ++ lam_2_output)
-                ( zip (lambdaReturnType lam_1) (resFromLambda lam_1)
-                    ++ zip (lambdaReturnType lam_2) (resFromLambda lam_2)
-                )
-                fused_lambda_outputs
-
-          (scan_outputs_1, red_outputs_1, lambda_used_outputs_1) = splitAt3 (Futhark.scanResults scans_1) (Futhark.redResults red_1) o1
-          (scan_outputs_2, red_outputs_2, lambda_used_outputs_2) = splitAt3 (Futhark.scanResults scans_2) (Futhark.redResults red_2) o2
-
-          fused_outputs =
-            concat
-              [ scan_outputs_1,
-                scan_outputs_2,
-                red_outputs_1,
-                red_outputs_2,
-                lambda_used_outputs_1,
-                lambda_used_outputs_2
-              ]
-
-          ids = changeAll (o1 ++ o2) (pats1 ++ pats2) fused_outputs
-
-          fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
-
-          map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (map H.inputArray (i1 ++ i2))
-          map2 = makeMap o1 lam_1_output
-          map4 = makeMap (map H.inputArray fused_inputs) fused_inputs_inner
-          map3 = fuseMaps map1 (M.union map2 map4)
-
-          lam' = fuseLambda lam_1 lam_2
-          lam =
-            substituteNames map3 $
-              lam'
-                { lambdaParams = lparams,
-                  lambdaReturnType = types,
-                  lambdaBody = (lambdaBody lam') {bodyResult = body_res}
-                }
+        | Just res <- fuseScremas edgs (w1, screma1, pats1, aux1, i1) (w2, screma2, pats2, aux2, i2) ->
+            pure $ Just res
     -- vertical map-scatter fusion
     ( H.Screma w1 (ScremaForm [] [] lam_1) i1,
       H.Scatter w2 lam_2 i2 other
