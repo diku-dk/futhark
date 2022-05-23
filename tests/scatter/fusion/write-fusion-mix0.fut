@@ -1,5 +1,6 @@
 -- Test that map-scatter fusion and scatter-scatter fusion work together.
 -- ==
+-- tags { disable }
 -- input {
 --   [2i64, 0i64]
 --   [1i64, 0i64]

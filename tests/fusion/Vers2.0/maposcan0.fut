@@ -1,4 +1,5 @@
 -- ==
+-- tags { disable }
 -- input {
 --   [1.0,-4.0,-2.4]
 -- }
@@ -10,7 +11,6 @@
 --    /Stream 1
 --    /Screma 0
 -- }
---
 def main(arr: []f64): ([]f64,[]f64) =
     let sa = scan (+) (0.0) arr
     let b  = map  (*2.0) sa in

@@ -12,6 +12,7 @@
 --     scan
 --
 -- ==
+-- tags { disable }
 -- structure gpu { SegMap 1 }
 
 def combineVs [n] (n_row: [n]f64, vol_row: [n]f64, dr_row: [n]f64): [n]f64 =
