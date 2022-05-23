@@ -40,6 +40,7 @@ module Futhark.IR.SOACS.SOAC
     scremaLambda,
     ppScrema,
     ppHist,
+    ppStream,
     groupScatterResults,
     groupScatterResults',
     splitScatterResults,
@@ -916,28 +917,7 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
               </> PP.braces (commasep $ map ppr vec)
         )
   ppr (Stream size arrs form acc lam) =
-    case form of
-      Parallel o comm lam0 ->
-        let ord_str = if o == Disorder then "Per" else ""
-            comm_str = case comm of
-              Commutative -> "Comm"
-              Noncommutative -> ""
-         in text ("streamPar" ++ ord_str ++ comm_str)
-              <> parens
-                ( ppr size <> comma
-                    </> ppTuple' arrs <> comma
-                    </> ppr lam0 <> comma
-                    </> ppTuple' acc <> comma
-                    </> ppr lam
-                )
-      Sequential ->
-        text "streamSeq"
-          <> parens
-            ( ppr size <> comma
-                </> ppTuple' arrs <> comma
-                </> ppTuple' acc <> comma
-                </> ppr lam
-            )
+    ppStream size arrs form acc lam
   ppr (Scatter w arrs lam dests) =
     "scatter"
       <> parens
@@ -987,6 +967,33 @@ ppScrema w arrs (ScremaForm scans reds map_lam) =
           </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
           </> ppr map_lam
       )
+
+-- | Prettyprint the given Stream.
+ppStream ::
+  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> StreamForm rep -> [SubExp] -> Lambda rep -> Doc
+ppStream size arrs form acc lam =
+  case form of
+    Parallel o comm lam0 ->
+      let ord_str = if o == Disorder then "Per" else ""
+          comm_str = case comm of
+            Commutative -> "Comm"
+            Noncommutative -> ""
+       in text ("streamPar" ++ ord_str ++ comm_str)
+            <> parens
+              ( ppr size <> comma
+                  </> ppTuple' arrs <> comma
+                  </> ppr lam0 <> comma
+                  </> ppTuple' acc <> comma
+                  </> ppr lam
+              )
+    Sequential ->
+      text "streamSeq"
+        <> parens
+          ( ppr size <> comma
+              </> ppTuple' arrs <> comma
+              </> ppTuple' acc <> comma
+              </> ppr lam
+          )
 
 instance PrettyRep rep => Pretty (Scan rep) where
   ppr (Scan scan_lam scan_nes) =
