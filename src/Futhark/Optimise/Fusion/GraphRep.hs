@@ -41,7 +41,6 @@ module Futhark.Optimise.Fusion.GraphRep
     contractEdge,
     isCons,
     updateTrEdges,
-    mapT,
     makeMap,
     fuseMaps,
     internalizeAndAdd,
@@ -384,7 +383,8 @@ updateTrEdgesBetween n1 n2 g = do
   let edgs = mapMaybe insEdge ns
   depGraphInsertEdges edgs =<< delLEdges edgs g
   where
-    (nt1, nt2) = mapT (G.lab' . G.context g) (n1, n2)
+    nt1 = G.lab' $ G.context g n1
+    nt2 = G.lab' $ G.context g n2
     insEdge :: VName -> Maybe DepEdge
     insEdge name =
       if H.nullTransforms $ findTransformsBetween name nt1 nt2
@@ -673,9 +673,6 @@ getOutputs node = case node of
   (DoNode stm _) -> stmNames stm
   FinalNode {} -> error "Final nodes cannot generate edges"
   (SoacNode _ outputs _) -> map H.inputArray outputs
-
-mapT :: (a -> b) -> (a, a) -> (b, b) -- tuple map
-mapT f (a, b) = (f a, f b)
 
 isDep :: EdgeT -> Bool -- Is there a possibility of fusion?
 isDep (Dep _) = True

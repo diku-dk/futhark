@@ -24,6 +24,9 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (isEnvVarAtLeast, splitAt3)
 
+mapT :: (a -> b) -> (a, a) -> (b, b) -- tuple map
+mapT f (a, b) = (f a, f b)
+
 -- extra util - scans reduces are "a->a->a" - so half of those are the amount of inputs
 scanInput :: [Scan SOACS] -> Int
 scanInput l = flip div 2 $ sum (map (length . lambdaParams . scanLambda) l)
