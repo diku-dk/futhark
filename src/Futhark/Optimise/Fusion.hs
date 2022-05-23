@@ -5,6 +5,7 @@
 module Futhark.Optimise.Fusion (fuseSOACs) where
 
 import Control.Monad.State
+import Data.Bifunctor (first)
 import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Query.DFS as Q
 import qualified Data.List as L
@@ -300,6 +301,12 @@ makeCopyStms toCopy = do
 resNames :: [SubExpRes] -> [VName]
 resNames = subExpVars . map resSubExp
 
+toSeqStream :: H.SOAC SOACS -> H.SOAC SOACS
+toSeqStream s@(H.Stream _ Sequential _ _ _) = s
+toSeqStream (H.Stream w Parallel {} l acc inps) =
+  H.Stream w Sequential l acc inps
+toSeqStream _ = error "toSeqStream expects a stream, but given a SOAC."
+
 vFuseScremas ::
   [EdgeT] ->
   (SubExp, ScremaForm SOACS, [H.Input], StmAux (), [H.Input]) ->
@@ -424,7 +431,7 @@ vFuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode so
               then pure Nothing
               else do
                 (stream1, is_extra_1) <- H.soacToStream soac1
-                (stream2, is_extra_2) <- H.soacToStream soac2
+                (stream2, is_extra_2) <- first toSeqStream <$> H.soacToStream soac2
                 is_extra_1' <- mapM (newIdent "unused" . identType) is_extra_1
                 is_extra_2' <- mapM (newIdent "unused" . identType) is_extra_2
                 vFuseNodeT
@@ -480,14 +487,6 @@ vFuseNodeT edgs infusible (s1@(SoacNode soac1 pats1 aux1), e1s) (s2@(SoacNode so
                   (s1, e1s)
                   (SoacNode stream2 (map H.identInput is_extra_2' <> pats2) aux2, e2s)
               else pure Nothing
-    -- ( H.Stream w1 sform1 nes1 lam1 i1,
-    --   H.Stream w2 sform2 nes2 lam2 i2)
-    --   | getStreamOrder sform1 /= getStreamOrder sform2 ->
-    --     let s1' = toSeqStream soac1 in
-    --     let s2' = toSeqStream soac2 in
-    --     vFuseNodeT edgs infusible
-    --       (SoacNode s1' pats1 aux1, e1s)
-    --       (SoacNode s2' pats2 aux2, e2s)
     ( H.Stream _w1 sform1 _lam1 _nes1 _i1,
       H.Stream _w2 sform2 _lam2 _nes2 _i2
       )
