@@ -64,7 +64,6 @@ import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe (isNothing, mapMaybe)
 import qualified Data.Set as S
-import Debug.Trace (trace)
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.HORep.SOAC as H
 import Futhark.Builder
@@ -483,10 +482,9 @@ iswim = mapAcrossWithSE f
       maybeISWIM <- LK.tryFusion (LK.iswim Nothing soac H.noTransforms) scope
       case maybeISWIM of
         Just (newSOAC, newts) ->
-          trace (show $ H.width newSOAC) $
-            updateNode n (const (Just $ SoacNode newSOAC (map (internalizeAndAdd newts) ots) aux)) g
-              >>= updateTrEdges n
-              >>= updateContext n
+          updateNode n (const (Just $ SoacNode newSOAC (map (internalizeAndAdd newts) ots) aux)) g
+            >>= updateTrEdges n
+            >>= updateContext n
         Nothing -> pure g
     f _ g = pure g
 
