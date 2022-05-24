@@ -444,8 +444,8 @@ internalizeAndAdd ts i = H.setInputTransforms newTs $ internalizeOutput temporar
 findTransformsBetween :: VName -> NodeT -> NodeT -> H.ArrayTransforms
 findTransformsBetween vname n1 n2 =
   let outs = nodeOutputTransforms vname n1
-   in let ins = nodeInputTransforms vname n2
-       in outs <> ins
+      ins = nodeInputTransforms vname n2
+   in outs <> ins
 
 iswim :: DepGraphAug
 iswim = mapAcrossWithSE f
