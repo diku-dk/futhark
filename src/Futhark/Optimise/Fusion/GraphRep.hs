@@ -471,9 +471,8 @@ iswim = mapAcrossWithSE f
 
 addTransforms :: DepGraphAug
 addTransforms orig_g =
-  applyAugs (map helper ns) orig_g
+  applyAugs (map helper (G.nodes orig_g)) orig_g
   where
-    ns = G.nodes orig_g
     helper :: G.Node -> DepGraphAug
     helper n g = case G.lab g n of
       Just (StmNode (Let pat aux e))
