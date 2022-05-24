@@ -18,7 +18,6 @@ module Futhark.Optimise.Fusion.GraphRep
     pprg,
     getName,
     getSoac,
-    isScanRed,
     findTransformsBetween,
     isRealNode,
     nodeFromLNode,
@@ -75,7 +74,6 @@ data EdgeT
   | Cons VName
   | Fake VName
   | Res VName
-  | ScanRed VName
   deriving (Eq, Ord)
 
 data NodeT
@@ -95,7 +93,6 @@ instance Show EdgeT where
   show (Fake _) = "Fake"
   show (Res _) = "Res"
   show (Alias _) = "Alias"
-  show (ScanRed vName) = "SR " <> pretty vName
 
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map pretty $ patNames pat
@@ -152,7 +149,6 @@ getName edgeT = case edgeT of
   Cons vn -> vn
   Fake vn -> vn
   Res vn -> vn
-  ScanRed vn -> vn
 
 setName :: VName -> EdgeT -> EdgeT
 setName vn edgeT = case edgeT of
@@ -162,7 +158,6 @@ setName vn edgeT = case edgeT of
   Cons _ -> Cons vn
   Fake _ -> Fake vn
   Res _ -> Res vn
-  ScanRed _ -> ScanRed vn
 
 inputFromPat :: Typed rep => Pat rep -> [H.Input]
 inputFromPat = map H.identInput . patIdents
@@ -303,33 +298,10 @@ addDeps = augWithFun toDep
           mkInfDep vname = (vname, InfDep vname)
        in map mkDep fusible <> map mkInfDep infusible
 
-makeScanInfusible :: DepGraphAug
-makeScanInfusible g = pure $ G.emap change_node_to_idep g
-  where
-    find_scan_results :: Stm SOACS -> [VName]
-    find_scan_results (Let pat _ (Op (Futhark.Screma _ _ (ScremaForm scns rdcs _)))) =
-      let resLen = scanResults scns + redResults rdcs
-       in take resLen (patNames pat)
-    find_scan_results _ = []
-
-    scan_res_set :: S.Set VName
-    scan_res_set = S.fromList (concatMap find_scan_results (foldMap (stmFromNode . label) (G.labNodes g)))
-
-    is_scan_res :: VName -> Bool
-    is_scan_res name = S.member name scan_res_set
-
-    change_node_to_idep :: EdgeT -> EdgeT
-    change_node_to_idep (Dep name) =
-      if is_scan_res name
-        then ScanRed name
-        else Dep name
-    change_node_to_idep e = e
-
 initialGraphConstruction :: DepGraphAug
 initialGraphConstruction =
   applyAugs
     [ addDeps,
-      makeScanInfusible,
       addCons,
       addExtraCons,
       addResEdges,
@@ -448,9 +420,6 @@ nodeToSoacNode n = pure n
 
 convertGraph :: DepGraphAug
 convertGraph = mapAcrossNodeTs nodeToSoacNode
-
-label :: DepNode -> NodeT
-label = snd
 
 stmFromNode :: NodeT -> Stms SOACS -- do not use outside of edge generation
 stmFromNode (StmNode x) = oneStm x
@@ -587,7 +556,6 @@ getOutputs node = case node of
 
 isDep :: EdgeT -> Bool -- Is there a possibility of fusion?
 isDep (Dep _) = True
-isDep (ScanRed _) = True
 isDep (Res _) = True
 isDep _ = False
 
@@ -601,7 +569,3 @@ isInf (_, _, e) = case e of
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
-
-isScanRed :: EdgeT -> Bool
-isScanRed (ScanRed _) = True
-isScanRed _ = False
