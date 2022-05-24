@@ -311,7 +311,7 @@ vFuseNodeT _ _ (SoacNode soac1 pats1 aux1, i1s, _e1s) (SoacNode soac2 pats2 aux2
       preserve = namesFromList $ map getName $ filter preserveEdge i1s
   ok <- okToFuseProducer soac1
   r <-
-    if ok
+    if ok && all ((== mempty) . H.inputTransforms) (pats1 <> pats2)
       then LK.attemptFusion preserve (map H.inputArray pats1) soac1 ker
       else pure Nothing
   when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
