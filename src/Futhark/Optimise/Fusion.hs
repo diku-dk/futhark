@@ -779,7 +779,7 @@ isFake (Fake _) = True
 isFake _ = False
 
 makeCopiesOfConsAliased :: DepGraphAug
-makeCopiesOfConsAliased g = mapAcrossWithSE copyAliased g
+makeCopiesOfConsAliased = mapAcrossWithSE copyAliased
   where
     copyAliased :: DepNode -> DepGraphAug
     copyAliased (n, nt) g' = do
