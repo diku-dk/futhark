@@ -7,8 +7,6 @@ module Futhark.Optimise.Fusion.LoopKernel
     newKernel,
     inputs,
     setInputs,
-    arrInputs,
-    transformOutput,
     attemptFusion,
     pullOutputTransforms,
     pushRearrange,
@@ -27,7 +25,6 @@ import Control.Monad.State
 import Data.List (find, tails, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import qualified Data.Set as S
 import qualified Futhark.Analysis.HORep.MapNest as MapNest
 import qualified Futhark.Analysis.HORep.SOAC as SOAC
 import Futhark.Construct
@@ -75,45 +72,6 @@ type SOAC = SOAC.SOAC SOACS
 
 type MapNest = MapNest.MapNest SOACS
 
--- XXX: This function is very gross.
-transformOutput ::
-  SOAC.ArrayTransforms ->
-  [VName] ->
-  [Ident] ->
-  Builder SOACS ()
-transformOutput ts names = descend ts
-  where
-    descend ts' validents =
-      case SOAC.viewf ts' of
-        SOAC.EmptyF ->
-          forM_ (zip names validents) $ \(k, valident) ->
-            letBindNames [k] $ BasicOp $ SubExp $ Var $ identName valident
-        t SOAC.:< ts'' -> do
-          let (es, css) = unzip $ map (applyTransform t) validents
-              mkPat (Ident nm tp) = Pat [PatElem nm tp]
-          opts <- concat <$> mapM basicOpType es
-          newIds <- forM (zip names opts) $ \(k, opt) ->
-            newIdent (baseString k) opt
-          forM_ (zip3 css newIds es) $ \(cs, ids, e) ->
-            certifying cs $ letBind (mkPat ids) (BasicOp e)
-          descend ts'' newIds
-
-applyTransform :: SOAC.ArrayTransform -> Ident -> (BasicOp, Certs)
-applyTransform (SOAC.Rearrange cs perm) v =
-  (Rearrange perm' $ identName v, cs)
-  where
-    perm' = perm ++ drop (length perm) [0 .. arrayRank (identType v) - 1]
-applyTransform (SOAC.Reshape cs shape) v =
-  (Reshape shape $ identName v, cs)
-applyTransform (SOAC.ReshapeOuter cs shape) v =
-  let shapes = reshapeOuter shape 1 $ arrayShape $ identType v
-   in (Reshape shapes $ identName v, cs)
-applyTransform (SOAC.ReshapeInner cs shape) v =
-  let shapes = reshapeInner shape 1 $ arrayShape $ identType v
-   in (Reshape shapes $ identName v, cs)
-applyTransform (SOAC.Replicate cs n) v =
-  (Replicate n $ Var $ identName v, cs)
-
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
 inputToOutput (SOAC.Input ts ia iat) =
   case SOAC.viewf ts of
@@ -138,9 +96,6 @@ newKernel soac out_nms scope =
       outNames = out_nms,
       kernelScope = scope
     }
-
-arrInputs :: FusedKer -> S.Set VName
-arrInputs = S.fromList . map SOAC.inputArray . inputs
 
 inputs :: FusedKer -> [SOAC.Input]
 inputs = SOAC.inputs . fsoac

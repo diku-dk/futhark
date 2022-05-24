@@ -18,10 +18,8 @@ module Futhark.Optimise.Fusion.GraphRep
     pprg,
     getName,
     getSoac,
-    findTransformsBetween,
     isRealNode,
     nodeFromLNode,
-    internalizeOutput,
     mergedContext,
     mapAcross,
     genEdges,
@@ -40,11 +38,8 @@ module Futhark.Optimise.Fusion.GraphRep
     isCons,
     makeMap,
     fuseMaps,
-    internalizeAndAdd,
     mapAcrossWithSE,
     updateNode,
-    substituteNamesInNodes,
-    substituteNamesInEdges,
   )
 where
 
@@ -344,56 +339,6 @@ mapAcrossNodeTs f = mapAcross f'
 mapAcrossWithSE :: (DepNode -> DepGraphAug) -> DepGraphAug
 mapAcrossWithSE f g =
   applyAugs (map f (G.labNodes g)) g
-
-transformsFromInputs :: VName -> [H.Input] -> H.ArrayTransforms
-transformsFromInputs name1 is = case L.filter filterFun is of
-  [] -> error "missing input from list"
-  [x] -> H.inputTransforms x
-  xs | [ts] <- L.nub (map H.inputTransforms xs) -> ts
-  _ -> error "variable with differeing transformations"
-  where
-    filterFun (H.Input _ name2 _) = name1 == name2
-
-nodeInputTransforms :: VName -> NodeT -> H.ArrayTransforms
-nodeInputTransforms vname nodeT = case nodeT of
-  SoacNode soac _ _ -> transformsFromInputs vname (H.inputs soac)
-  _ -> H.noTransforms
-
-nodeOutputTransforms :: VName -> NodeT -> H.ArrayTransforms
-nodeOutputTransforms vname nodeT = case nodeT of
-  SoacNode _ outs _ -> transformsFromInputs vname outs
-  _ -> H.noTransforms
-
-internalizeOutput :: H.Input -> H.Input
-internalizeOutput i@(H.Input ts name _) = H.Input ts name (H.inputType i)
-
-internalizeAndAdd :: H.ArrayTransforms -> H.Input -> H.Input
-internalizeAndAdd ts i = H.setInputTransforms newTs $ internalizeOutput temporaryI
-  where
-    oldTs = H.inputTransforms i
-    temporaryI = H.setInputTransforms ts i
-    newTs = ts <> oldTs
-
-findTransformsBetween :: VName -> NodeT -> NodeT -> H.ArrayTransforms
-findTransformsBetween vname n1 n2 =
-  let outs = nodeOutputTransforms vname n1
-      ins = nodeInputTransforms vname n2
-   in outs <> ins
-
-substituteNamesInNodes :: M.Map VName VName -> [G.Node] -> DepGraphAug
-substituteNamesInNodes submap ns =
-  applyAugs (map (substituteNameInNode submap) ns)
-  where
-    substituteNameInNode :: M.Map VName VName -> G.Node -> DepGraphAug
-    substituteNameInNode m n =
-      updateNode n (Just . substituteNames m)
-
-substituteNamesInEdges :: M.Map VName VName -> [DepEdge] -> DepGraphAug
-substituteNamesInEdges m edgs g =
-  let edgs' = mapEdgeT (substituteNames m) edgs
-   in pure $ G.insEdges edgs' $ foldl (flip ($)) g (map G.delLEdge edgs)
-  where
-    mapEdgeT f = map (\(a, b, c) -> (a, b, f c))
 
 updateNode :: G.Node -> (NodeT -> Maybe NodeT) -> DepGraphAug
 updateNode n f g =
