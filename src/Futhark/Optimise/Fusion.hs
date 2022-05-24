@@ -88,35 +88,17 @@ unreachableEitherDir g a b = do
 reachable :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 reachable g source target = pure $ target `elem` Q.reachable source g
 
-inputSetName :: VName -> H.Input -> H.Input
-inputSetName vn (H.Input ts _ tp) = H.Input ts vn tp
-
 isNotVarInput :: [H.Input] -> [H.Input]
 isNotVarInput = filter (isNothing . H.isVarInput)
-
-inputToIdent :: H.Input -> Ident
-inputToIdent (H.Input _ vn tp) = Ident vn tp
-
-genOutTransformStms :: [H.Input] -> FusionEnvM (M.Map VName VName, Stms SOACS)
-genOutTransformStms inps = do
-  let inps' = isNotVarInput inps
-  let names = map H.inputArray inps'
-  newNames <- mapM newName names
-  let newInputs = zipWith inputSetName newNames inps'
-  let weirdScope = scopeOfPat (basicPat (map inputToIdent newInputs))
-  (namesToRep, stms) <- localScope weirdScope $ runBuilder (H.inputsToSubExps newInputs)
-  pure (makeMap names newNames, substituteNames (makeMap namesToRep names) stms)
 
 finalizeNode :: NodeT -> FusionEnvM (Stms SOACS)
 finalizeNode nt = case nt of
   StmNode stm -> pure $ oneStm stm
-  SoacNode soac outputs aux -> do
-    let outputs' = outputs
-    (mapping, outputTrs) <- genOutTransformStms outputs'
-    (_, stms) <- runBuilder $ do
-      new_soac <- H.toSOAC soac
-      auxing aux $ letBind (basicPat (map inputToIdent outputs')) $ Op new_soac
-    pure $ substituteNames mapping stms <> outputTrs
+  SoacNode ots outputs soac aux -> runBuilder_ $ do
+    untransformed_outputs <- mapM newName $ patNames outputs
+    auxing aux $ letBindNames untransformed_outputs . Op =<< H.toSOAC soac
+    forM_ (zip (patNames outputs) untransformed_outputs) $ \(output, v) ->
+      letBindNames [output] . BasicOp . SubExp . Var =<< H.applyTransforms ots v
   RNode _ -> pure mempty
   InNode _ -> pure mempty
   DoNode stm lst -> do
@@ -248,11 +230,11 @@ vFuseContexts
       Nothing -> pure Nothing
 
 makeCopiesOfFusedExcept :: [VName] -> NodeT -> FusionEnvM NodeT
-makeCopiesOfFusedExcept noCopy (SoacNode soac pats aux) = do
+makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
   let lam = H.lambda soac
   let fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
   lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
-  pure $ SoacNode (H.setLambda lam' soac) pats aux
+  pure $ SoacNode ots pats (H.setLambda lam' soac) aux
 makeCopiesOfFusedExcept _ nodeT = pure nodeT
 
 makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionEnvM (Lambda SOACS)
@@ -284,7 +266,7 @@ vFuseNodeT _ infusible (s1, _, e1s) (IfNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
       pure $ Just $ IfNode stm2 $ (s1, e1s) : dfused
-vFuseNodeT _ infusible (StmNode stm1, _, _) (SoacNode soac2 pats2 aux2, _)
+vFuseNodeT _ infusible (StmNode stm1, _, _) (SoacNode ots2 pats2 soac2 aux2, _)
   | null infusible,
     [stm1_out] <- patNames $ stmPat stm1,
     Just (stm1_in, tr) <-
@@ -296,49 +278,56 @@ vFuseNodeT _ infusible (StmNode stm1, _, _) (SoacNode soac2 pats2 aux2, _)
             | otherwise =
                 inp
           soac2' = map onInput (H.inputs soac2) `H.setInputs` soac2
-      pure $ Just $ SoacNode soac2' pats2 aux2
-vFuseNodeT _ _ (SoacNode soac1 pats1 aux1, i1s, _e1s) (SoacNode soac2 pats2 aux2, _e2s) = do
-  scope <- askScope
-  let ker =
-        LK.FusedKer
-          { LK.fsoac = soac2,
-            LK.kernelScope = scope,
-            LK.outputTransform = mempty,
-            LK.outNames = map H.inputArray pats2
-          }
-      preserveEdge InfDep {} = True
-      preserveEdge e = isDep e
-      preserve = namesFromList $ map getName $ filter preserveEdge i1s
-  ok <- okToFuseProducer soac1
-  r <-
-    if ok && all ((== mempty) . H.inputTransforms) (pats1 <> pats2)
-      then LK.attemptFusion preserve (map H.inputArray pats1) soac1 ker
-      else pure Nothing
-  case r of
-    Just ker' -> do
-      when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
-        traceM $
-          unlines
-            [ show preserve,
-              "vfused",
-              pretty soac1,
-              "outputs",
-              pretty (map H.inputArray pats1),
-              "and",
-              pretty soac2,
-              "got",
-              pretty (LK.fsoac <$> r),
-              "outputs",
-              pretty (LK.outNames <$> r)
-            ]
+      pure $ Just $ SoacNode ots2 pats2 soac2' aux2
+vFuseNodeT
+  _
+  _
+  (SoacNode ots1 pats1 soac1 aux1, i1s, _e1s)
+  (SoacNode ots2 pats2 soac2 aux2, _e2s) = do
+    scope <- askScope
+    let ker =
+          LK.FusedKer
+            { LK.fsoac = soac2,
+              LK.kernelScope = scope,
+              LK.outputTransform = ots2,
+              LK.outNames = patNames pats2
+            }
+        preserveEdge InfDep {} = True
+        preserveEdge e = isDep e
+        preserve = namesFromList $ map getName $ filter preserveEdge i1s
+    ok <- okToFuseProducer soac1
+    r <-
+      if ok && ots1 == mempty
+        then LK.attemptFusion preserve (patNames pats1) soac1 ker
+        else pure Nothing
+    case r of
+      Just ker' -> do
+        when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
+          traceM $
+            unlines
+              [ show preserve,
+                "vfused",
+                pretty soac1,
+                "outputs",
+                pretty pats1,
+                "and",
+                pretty soac2,
+                "got",
+                pretty (LK.fsoac <$> r),
+                "outputs",
+                pretty (LK.outNames <$> r)
+              ]
 
-      let pats2' =
-            zipWith
-              (H.Input (LK.outputTransform ker'))
-              (LK.outNames ker')
-              (H.typeOf (LK.fsoac ker'))
-      pure $ Just $ SoacNode (LK.fsoac ker') pats2' (aux1 <> aux2)
-    Nothing -> pure Nothing
+        let pats2' =
+              zipWith PatElem (LK.outNames ker') (H.typeOf (LK.fsoac ker'))
+        pure $
+          Just $
+            SoacNode
+              (LK.outputTransform ker')
+              (Pat pats2')
+              (LK.fsoac ker')
+              (aux1 <> aux2)
+      Nothing -> pure Nothing
 vFuseNodeT _ _ _ _ = pure Nothing
 
 changeAll :: Ord b => [b] -> [a] -> [b] -> [a]
@@ -355,9 +344,11 @@ hasNoDifferingInputs is1 is2 =
    in null $ vs1 `L.intersect` vs2
 
 hFuseNodeT :: NodeT -> NodeT -> FusionEnvM (Maybe NodeT)
-hFuseNodeT (SoacNode soac1 pats1 aux1) (SoacNode soac2 pats2 aux2)
+hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
   | inputs1 <- H.inputs soac1,
     inputs2 <- H.inputs soac2,
+    ots1 == mempty,
+    ots2 == mempty,
     hasNoDifferingInputs inputs1 inputs2 = do
       scope <- askScope
       case (soac1, soac2) of
@@ -369,10 +360,10 @@ hFuseNodeT (SoacNode soac1 pats1 aux1) (SoacNode soac2 pats2 aux2)
                     { LK.fsoac = soac2,
                       LK.kernelScope = scope,
                       LK.outputTransform = mempty,
-                      LK.outNames = map H.inputArray pats2
+                      LK.outNames = patNames pats2
                     }
-                preserve = namesFromList $ map H.inputArray pats1
-            r <- LK.attemptFusion preserve (map H.inputArray pats1) soac1 ker
+                preserve = namesFromList $ patNames pats1
+            r <- LK.attemptFusion preserve (patNames pats1) soac1 ker
             when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
               traceM $
                 unlines
@@ -380,7 +371,7 @@ hFuseNodeT (SoacNode soac1 pats1 aux1) (SoacNode soac2 pats2 aux2)
                     "hfused",
                     pretty soac1,
                     "outputs",
-                    pretty (map H.inputArray pats1),
+                    pretty pats1,
                     "and",
                     pretty soac2,
                     "got",
@@ -391,18 +382,15 @@ hFuseNodeT (SoacNode soac1 pats1 aux1) (SoacNode soac2 pats2 aux2)
             case r of
               Just ker' -> do
                 let pats2' =
-                      zipWith
-                        (H.Input (LK.outputTransform ker'))
-                        (LK.outNames ker')
-                        (H.typeOf (LK.fsoac ker'))
-                pure $ Just $ SoacNode (LK.fsoac ker') pats2' (aux1 <> aux2)
+                      zipWith PatElem (LK.outNames ker') (H.typeOf (LK.fsoac ker'))
+                pure $ Just $ SoacNode mempty (Pat pats2') (LK.fsoac ker') (aux1 <> aux2)
               Nothing -> pure Nothing
         ( H.Scatter w1 lam_1 i1 outputs1,
           H.Scatter w2 lam_2 i2 outputs2
           )
             | w1 == w2 ->
                 let soac = H.Scatter w2 lam fused_inputs outputs
-                 in pure $ Just $ SoacNode soac pats aux
+                 in pure $ Just $ SoacNode mempty pats soac aux
             where
               pats = pats1 <> pats2
               aux = aux1 <> aux2
@@ -468,7 +456,7 @@ hFuseNodeT (SoacNode soac1 pats1 aux1) (SoacNode soac2 pats2 aux2)
                         }
                 -- success (outNames ker ++ returned_outvars) $
                 let soac = H.Hist w1 (ops_1 <> ops_2) lam' (i1 <> i2)
-                pure $ Just $ SoacNode soac (pats1 <> pats2) (aux1 <> aux2)
+                pure $ Just $ SoacNode mempty (pats1 <> pats2) soac (aux1 <> aux2)
         _ -> pure Nothing
 hFuseNodeT _ _ = pure Nothing
 
@@ -499,8 +487,8 @@ removeUnusedOutputsFromContext (incoming, n1, nodeT, outgoing) =
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode soac@(H.Screma _ (ScremaForm scans_1 red_1 lam_1) _) pats1 aux1 ->
-    SoacNode (H.setLambda lam_new soac) (pats_unchanged ++ pats_new) aux1
+  SoacNode ots (Pat pats1) soac@(H.Screma _ (ScremaForm scans_1 red_1 lam_1) _) aux1 ->
+    SoacNode ots (Pat $ pats_unchanged <> pats_new) (H.setLambda lam_new soac) aux1
     where
       scan_input_size = scanInput scans_1
       red_input_size = redInput red_1
@@ -510,7 +498,7 @@ removeOutputsExcept toKeep s = case s of
       (pats_unchanged, pats_toChange) = splitAt (scan_output_size + red_outputs_size) pats1
       (res_unchanged, res_toChange) = splitAt (scan_input_size + red_input_size) (zip (resFromLambda lam_1) (lambdaReturnType lam_1))
 
-      (pats_new, other) = unzip $ filter (\(x, _) -> H.inputArray x `elem` toKeep) (zip pats_toChange res_toChange)
+      (pats_new, other) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
       (results, types) = unzip (res_unchanged ++ other)
       lam_new =
         lam_1
@@ -535,13 +523,13 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     b2' <- doFusionWithDelayed b2 mempty toFuse
     rb2' <- renameBody b2'
     pure (incomming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
-  SoacNode soac pats aux -> do
+  SoacNode ots pat soac aux -> do
     lam <- simplifyLambda $ H.lambda soac
     newbody <- localScope (scopeOf lam) $ case soac of
       H.Stream {} -> dontFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
       _ -> doFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
     let newLam = lam {lambdaBody = newbody}
-    let newNode = SoacNode (H.setLambda newLam soac) pats aux
+        newNode = SoacNode ots pat (H.setLambda newLam soac) aux
     pure (incomming, node, newNode, outgoing)
   _ -> pure c
   where

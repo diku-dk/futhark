@@ -73,7 +73,7 @@ data EdgeT
 
 data NodeT
   = StmNode (Stm SOACS)
-  | SoacNode (H.SOAC SOACS) [H.Input] (StmAux (ExpDec SOACS))
+  | SoacNode H.ArrayTransforms (Pat Type) (H.SOAC SOACS) (StmAux (ExpDec SOACS))
   | RNode VName
   | InNode VName
   | FinalNode (Stms SOACS) NodeT (Stms SOACS)
@@ -91,7 +91,7 @@ instance Show EdgeT where
 
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map pretty $ patNames pat
-  show (SoacNode _ pat _) = L.intercalate ", " $ map (pretty . H.inputArray) pat
+  show (SoacNode _ pat _ _) = pretty pat
   show (FinalNode _ nt _) = show nt
   show (RNode name) = pretty $ "Res: " ++ pretty name
   show (InNode name) = pretty $ "Input: " ++ pretty name
@@ -105,13 +105,13 @@ instance Substitute EdgeT where
 instance Substitute NodeT where
   substituteNames m nodeT = case nodeT of
     StmNode stm -> StmNode (f stm)
-    SoacNode so pat sa ->
-      let so' = case so of
+    SoacNode ots pat soac aux ->
+      let soac' = case soac of
             H.Stream se sf la ses ins -> H.Stream (f se) (fStreamForm sf) (f la) (f ses) (f ins)
             H.Scatter se la ins x0 -> H.Scatter (f se) (f la) (f ins) (map fShape x0)
             H.Screma se sf ins -> H.Screma (f se) (fScremaForm sf) (f ins)
             H.Hist se hos la ins -> H.Hist (f se) (map fHistOp hos) (f la) (f ins)
-       in SoacNode so' (f pat) (f sa)
+       in SoacNode (f ots) (f pat) soac' (f aux)
     RNode vn -> RNode (f vn)
     InNode vn -> InNode (f vn)
     FinalNode stms1 nt stms2 -> FinalNode (fmap f stms1) (f nt) (fmap f stms2)
@@ -133,7 +133,7 @@ instance Substitute NodeT where
 
 getSoac :: NodeT -> Maybe (H.SOAC SOACS)
 getSoac s = case s of
-  SoacNode soac _ _ -> Just soac
+  SoacNode _ _ soac _ -> Just soac
   _ -> Nothing
 
 getName :: EdgeT -> VName
@@ -153,9 +153,6 @@ setName vn edgeT = case edgeT of
   Cons _ -> Cons vn
   Fake _ -> Fake vn
   Res _ -> Res vn
-
-inputFromPat :: Typed rep => Pat rep -> [H.Input]
-inputFromPat = map H.identInput . patIdents
 
 makeMap :: Ord a => [a] -> [b] -> M.Map a b
 makeMap x y = M.fromList $ zip x y
@@ -350,11 +347,11 @@ updateNode n f g =
         Nothing -> pure g
 
 nodeToSoacNode :: NodeT -> FusionEnvM NodeT
-nodeToSoacNode n@(StmNode s@(Let pats aux op)) = case op of
+nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
   Op {} -> do
     maybeSoac <- H.fromExp op
     case maybeSoac of
-      Right hsoac -> pure $ SoacNode hsoac (inputFromPat pats) aux
+      Right hsoac -> pure $ SoacNode mempty pat hsoac aux
       Left H.NotSOAC -> pure n
   DoLoop {} ->
     pure $ DoNode s []
@@ -497,7 +494,7 @@ getOutputs node = case node of
   (IfNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
   FinalNode {} -> error "Final nodes cannot generate edges"
-  (SoacNode _ outputs _) -> map H.inputArray outputs
+  (SoacNode _ pat _ _) -> patNames pat
 
 isDep :: EdgeT -> Bool -- Is there a possibility of fusion?
 isDep (Dep _) = True
