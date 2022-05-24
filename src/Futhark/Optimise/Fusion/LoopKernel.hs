@@ -182,35 +182,9 @@ attemptFusion ::
   FusedKer ->
   m (Maybe FusedKer)
 attemptFusion unfus_nms outVars soac ker =
-  fmap removeUnusedParamsFromKer
-    <$> tryFusion
-      (applyFusionRules unfus_nms outVars soac ker)
-      (kernelScope ker)
-
-removeUnusedParamsFromKer :: FusedKer -> FusedKer
-removeUnusedParamsFromKer ker =
-  case soac of
-    SOAC.Screma {} -> ker {fsoac = soac'}
-    _ -> ker
-  where
-    soac = fsoac ker
-    l = SOAC.lambda soac
-    inps = SOAC.inputs soac
-    (l', inps') = removeUnusedParams l inps
-    soac' =
-      l'
-        `SOAC.setLambda` (inps' `SOAC.setInputs` soac)
-
-removeUnusedParams :: Lambda SOACS -> [SOAC.Input] -> (Lambda SOACS, [SOAC.Input])
-removeUnusedParams l inps =
-  (l {lambdaParams = ps'}, inps')
-  where
-    pInps = zip (lambdaParams l) inps
-    (ps', inps') = case (unzip $ filter (used . fst) pInps, pInps) of
-      (([], []), (p, inp) : _) -> ([p], [inp])
-      ((ps_, inps_), _) -> (ps_, inps_)
-    used p = paramName p `nameIn` freeVars
-    freeVars = freeIn $ lambdaBody l
+  tryFusion
+    (applyFusionRules unfus_nms outVars soac ker)
+    (kernelScope ker)
 
 -- | Check that the consumer does not use any scan or reduce results.
 scremaFusionOK :: ([VName], [VName]) -> FusedKer -> Bool
