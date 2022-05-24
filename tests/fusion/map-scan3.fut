@@ -5,7 +5,6 @@
 -- with only small input data sets.
 --
 -- ==
--- tags { disable }
 -- input { 3i64 3i64 }
 -- output { 488i32 }
 -- input { 10i64 1000i64 }

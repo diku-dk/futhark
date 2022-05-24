@@ -1,6 +1,5 @@
 -- test mpr sim with ad for params
 -- ==
--- tags { disable }
 
 def pi = 3.141592653589793f32
 
