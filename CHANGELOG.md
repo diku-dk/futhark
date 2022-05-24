@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Sometimes missing cases in `match` expressions were not detected.
 
+* A defective simplification rule could in very rare cases lead to
+  infinite recursion in the compiler (#1685).
+
 ## [0.21.12]
 
 ### Added
