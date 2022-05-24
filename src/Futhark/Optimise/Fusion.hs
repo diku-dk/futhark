@@ -314,23 +314,24 @@ vFuseNodeT _ _ (SoacNode soac1 pats1 aux1, i1s, _e1s) (SoacNode soac2 pats2 aux2
     if ok && all ((== mempty) . H.inputTransforms) (pats1 <> pats2)
       then LK.attemptFusion preserve (map H.inputArray pats1) soac1 ker
       else pure Nothing
-  when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
-    traceM $
-      unlines
-        [ show preserve,
-          "fused",
-          pretty soac1,
-          "outputs",
-          pretty (map H.inputArray pats1),
-          "and",
-          pretty soac2,
-          "got",
-          pretty (LK.fsoac <$> r),
-          "outputs",
-          pretty (LK.outNames <$> r)
-        ]
   case r of
     Just ker' -> do
+      when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
+        traceM $
+          unlines
+            [ show preserve,
+              "vfused",
+              pretty soac1,
+              "outputs",
+              pretty (map H.inputArray pats1),
+              "and",
+              pretty soac2,
+              "got",
+              pretty (LK.fsoac <$> r),
+              "outputs",
+              pretty (LK.outNames <$> r)
+            ]
+
       let pats2' =
             zipWith
               (H.Input (LK.outputTransform ker'))
@@ -372,6 +373,21 @@ hFuseNodeT (SoacNode soac1 pats1 aux1) (SoacNode soac2 pats2 aux2)
                     }
                 preserve = namesFromList $ map H.inputArray pats1
             r <- LK.attemptFusion preserve (map H.inputArray pats1) soac1 ker
+            when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
+              traceM $
+                unlines
+                  [ show preserve,
+                    "hfused",
+                    pretty soac1,
+                    "outputs",
+                    pretty (map H.inputArray pats1),
+                    "and",
+                    pretty soac2,
+                    "got",
+                    pretty (LK.fsoac <$> r),
+                    "outputs",
+                    pretty (LK.outNames <$> r)
+                  ]
             case r of
               Just ker' -> do
                 let pats2' =
