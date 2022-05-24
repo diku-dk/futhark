@@ -286,6 +286,24 @@ static int cuda_device_setup(struct cuda_context *ctx) {
                                      CU_EVENT_DISABLE_TIMING));
     CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[devIdx]));
   }
+
+  for(int device_id = 0; device_id < used_devices; device_id++){
+    cuCtxPushCurrent(ctx->contexts[device_id]);
+    for(int other_device = 0; other_device < used_devices; other_device){
+      if(device_id == other_device) continue;
+      int can_access_peer;
+      CUDA_SUCCEED_FATAL(cuDeviceCanAccessPeer(
+        &can_access_peer,
+        ctx->devices[device_id],
+        ctx->devices[other_device]
+      ));
+      if(can_access_peer){
+        // Note: enabling peer access is not bi directional
+        CUDA_SUCCEED_FATAL(cuCtxEnablePeerAccess(ctx->contexts[other_device],0));
+      }
+    }
+    CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->contexts[device_id]));
+  }
   free(devices);
 
   return 0;
