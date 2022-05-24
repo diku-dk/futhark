@@ -11,7 +11,7 @@
 -- }
 -- structure {
 --    /Stream 1
---    /Screma 1
+--    /Screma 0
 -- }
 --
 def main(arr: []f64): (f64,[]f64,[]f64,[]f64,[]f64) =

@@ -20,7 +20,6 @@ module Futhark.Optimise.Fusion.GraphRep
     getSoac,
     isScanRed,
     findTransformsBetween,
-    isTrDep,
     isRealNode,
     nodeFromLNode,
     internalizeOutput,
@@ -40,7 +39,6 @@ module Futhark.Optimise.Fusion.GraphRep
     depsFromEdge,
     contractEdge,
     isCons,
-    updateTrEdges,
     makeMap,
     fuseMaps,
     internalizeAndAdd,
@@ -60,7 +58,6 @@ import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Tree as G
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
-import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.HORep.SOAC as H
@@ -68,8 +65,8 @@ import Futhark.Builder
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
-import qualified Futhark.Optimise.Fusion.LoopKernel as LK
 import Futhark.Transform.Substitute
+import Futhark.Util (nubOrd)
 
 data EdgeT
   = Alias VName
@@ -79,7 +76,6 @@ data EdgeT
   | Fake VName
   | Res VName
   | ScanRed VName
-  | TrDep VName
   deriving (Eq, Ord)
 
 data NodeT
@@ -100,7 +96,6 @@ instance Show EdgeT where
   show (Res _) = "Res"
   show (Alias _) = "Alias"
   show (ScanRed vName) = "SR " <> pretty vName
-  show (TrDep vName) = "Tr " <> pretty vName
 
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map pretty $ patNames pat
@@ -158,7 +153,6 @@ getName edgeT = case edgeT of
   Fake vn -> vn
   Res vn -> vn
   ScanRed vn -> vn
-  TrDep vn -> vn
 
 setName :: VName -> EdgeT -> EdgeT
 setName vn edgeT = case edgeT of
@@ -169,7 +163,6 @@ setName vn edgeT = case edgeT of
   Fake _ -> Fake vn
   Res _ -> Res vn
   ScanRed _ -> ScanRed vn
-  TrDep _ -> TrDep vn
 
 inputFromPat :: Typed rep => Pat rep -> [H.Input]
 inputFromPat = map H.identInput . patIdents
@@ -341,9 +334,7 @@ initialGraphConstruction =
       addExtraCons,
       addResEdges,
       addAliases,
-      convertGraph, -- Must be done after adding edges
-      keepTrying addTransforms,
-      iswim
+      convertGraph -- Must be done after adding edges
     ]
 
 -- | Creates deps for the given nodes on the graph using the 'EdgeGenerator'.
@@ -358,38 +349,8 @@ genEdges l_stms edge_fun g = do
       [ G.toLEdge (from, to) edgeT | (dep, edgeT) <- edge_fun node, Just to <- [M.lookup dep name_map]
       ]
 
-delLEdges :: [DepEdge] -> DepGraphAug
-delLEdges edgs g = pure $ foldl (flip ($)) g (map G.delLEdge edgs)
-
 depGraphInsertEdges :: [DepEdge] -> DepGraphAug
 depGraphInsertEdges edgs g = pure $ G.insEdges edgs g
-
-updateTrEdges :: G.Node -> DepGraphAug
-updateTrEdges n1 g = do
-  let (inc, _, _nt, otg) = G.context g n1
-  let relevantInc = relNodes inc
-  let relevantOtg = relNodes otg
-  let augs =
-        map (updateTrEdgesBetween n1) relevantInc
-          <> map (`updateTrEdgesBetween` n1) relevantOtg
-  applyAugs augs g
-  where
-    relNodes :: G.Adj EdgeT -> [G.Node]
-    relNodes adjs = map snd $ filter (isDep . fst) adjs
-
-updateTrEdgesBetween :: G.Node -> G.Node -> DepGraphAug
-updateTrEdgesBetween n1 n2 g = do
-  let ns = map (getName . G.edgeLabel) $ filter (isDep . G.edgeLabel) $ edgesBetween g n1 n2
-  let edgs = mapMaybe insEdge ns
-  depGraphInsertEdges edgs =<< delLEdges edgs g
-  where
-    nt1 = G.lab' $ G.context g n1
-    nt2 = G.lab' $ G.context g n2
-    insEdge :: VName -> Maybe DepEdge
-    insEdge name =
-      if H.nullTransforms $ findTransformsBetween name nt1 nt2
-        then Nothing
-        else Just (n2, n1, TrDep name)
 
 mapAcross :: (DepContext -> FusionEnvM DepContext) -> DepGraphAug
 mapAcross f g = foldlM (flip helper) g (G.nodes g)
@@ -446,59 +407,6 @@ findTransformsBetween vname n1 n2 =
   let outs = nodeOutputTransforms vname n1
       ins = nodeInputTransforms vname n2
    in outs <> ins
-
-iswim :: DepGraphAug
-iswim = mapAcrossWithSE f
-  where
-    f (n, SoacNode soac ots aux) g = do
-      scope <- askScope
-      maybeISWIM <- LK.tryFusion (LK.iswim Nothing soac H.noTransforms) scope
-      case maybeISWIM of
-        Just (newSOAC, newts) ->
-          updateNode n (const (Just $ SoacNode newSOAC (map (internalizeAndAdd newts) ots) aux)) g
-            >>= updateTrEdges n
-            >>= updateContext n
-        Nothing -> pure g
-    f _ g = pure g
-
-    updateContext :: G.Node -> DepGraphAug
-    updateContext n g =
-      case G.match n g of
-        (Just (ins, _, l, outs), g') -> do
-          let newins = map (\(e, n2) -> if isScanRed e then (Dep (getName e), n2) else (e, n2)) ins
-          pure $ (newins, n, l, outs) G.& g'
-        _ -> pure g
-
-addTransforms :: DepGraphAug
-addTransforms orig_g =
-  applyAugs (map helper (G.nodes orig_g)) orig_g
-  where
-    helper :: G.Node -> DepGraphAug
-    helper n g = case G.lab g n of
-      Just (StmNode (Let pat aux e))
-        | Just (vn, transform) <- H.transformFromExp (stmAuxCerts aux) e,
-          [n'] <- L.nub $ G.suc g n,
-          vn
-            `notElem` map
-              (getName . G.edgeLabel)
-              (filter (\(a, _, _) -> a /= n) (G.inn g n')),
-          Just (SoacNode soac outps aux2) <- G.lab g n',
-          [trName] <- patNames pat -> do
-            let sucNodes = G.pre g n
-            g' <- depGraphInsertEdges (map (\nd -> (nd, n', TrDep trName)) sucNodes) g
-            let outps' =
-                  map
-                    ( \inp ->
-                        if H.inputArray inp /= vn
-                          then inp
-                          else H.addTransform transform inp
-                    )
-                    outps
-            let mapping = makeMap [vn] [trName]
-            let newNode = substituteNames mapping (SoacNode soac outps' (aux <> aux2))
-            let ctx = mergedContext newNode (G.context g' n') (G.context g' n)
-            contractEdge n ctx g'
-      _ -> pure g
 
 substituteNamesInNodes :: M.Map VName VName -> [G.Node] -> DepGraphAug
 substituteNamesInNodes submap ns =
@@ -573,11 +481,11 @@ addCons :: DepGraphAug
 addCons = augWithFun getStmCons
 
 -- Merges two contexts
-mergedContext :: (Eq b) => a -> G.Context a b -> G.Context a b -> G.Context a b
+mergedContext :: Ord b => a -> G.Context a b -> G.Context a b -> G.Context a b
 mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
-  let new_inp = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (inp1 `L.union` inp2)
-   in let new_out = L.nub $ filter (\n -> snd n /= n1 && snd n /= n2) (out1 `L.union` out2)
-       in (new_inp, n1, mergedlabel, new_out)
+  let new_inp = filter (\n -> snd n /= n1 && snd n /= n2) (nubOrd (inp1 <> inp2))
+      new_out = filter (\n -> snd n /= n1 && snd n /= n2) (nubOrd (out1 <> out2))
+   in (new_inp, n1, mergedlabel, new_out)
 
 contractEdge :: G.Node -> DepContext -> DepGraphAug
 contractEdge n2 ctx g = do
@@ -645,7 +553,11 @@ expInputs (Op soac) = case soac of
   Futhark.VJP {} -> freeClassifications soac
   where
     inputs = S.fromList . (`zip` repeat SOACInput)
-expInputs e = freeClassifications e
+expInputs e
+  | Just (arr, _) <- H.transformFromExp mempty e =
+      S.singleton (arr, SOACInput)
+        <> freeClassifications (freeIn e `namesSubtract` oneName arr)
+  | otherwise = freeClassifications e
 
 aliasInputs :: Stm SOACS -> Names
 aliasInputs = mconcat . expAliases . Alias.analyseExp mempty . stmExp
@@ -684,7 +596,6 @@ isInf (_, _, e) = case e of
   InfDep _ -> True
   Cons _ -> False
   Fake _ -> True -- this is infusible to avoid simultaneous cons/dep edges
-  TrDep _ -> False
   _ -> False
 
 isCons :: EdgeT -> Bool
@@ -694,7 +605,3 @@ isCons _ = False
 isScanRed :: EdgeT -> Bool
 isScanRed (ScanRed _) = True
 isScanRed _ = False
-
-isTrDep :: EdgeT -> Bool
-isTrDep (TrDep _) = True
-isTrDep _ = False

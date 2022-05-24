@@ -10,7 +10,6 @@ module Futhark.Optimise.Fusion.LoopKernel
     arrInputs,
     transformOutput,
     attemptFusion,
-    tryFusion,
     pullOutputTransforms,
     pushRearrange,
     iswim,
@@ -124,37 +123,20 @@ inputToOutput (SOAC.Input ts ia iat) =
 data FusedKer = FusedKer
   { -- | the SOAC expression, e.g., mapT( f(a,b), x, y )
     fsoac :: SOAC,
-    -- | Variables used in in-place updates in the kernel itself, as
-    -- well as on the path to the kernel from the current position.
-    -- This is used to avoid fusion that would violate in-place
-    -- restrictions.
-    inplace :: Names,
-    -- | whether at least a fusion has been performed.
-    fusedVars :: [VName],
-    -- | The set of variables that were consumed by the SOACs
-    -- contributing to this kernel.  Note that, by the type rules, the
-    -- final SOAC may actually consume _more_ than its original
-    -- contributors, which implies the need for 'Copy' expressions.
-    fusedConsumed :: Names,
     -- | The names in scope at the kernel.
     kernelScope :: Scope SOACS,
     outputTransform :: SOAC.ArrayTransforms,
-    outNames :: [VName],
-    kerAux :: StmAux ()
+    outNames :: [VName]
   }
   deriving (Show)
 
-newKernel :: StmAux () -> SOAC -> Names -> [VName] -> Scope SOACS -> FusedKer
-newKernel aux soac consumed out_nms scope =
+newKernel :: SOAC -> [VName] -> Scope SOACS -> FusedKer
+newKernel soac out_nms scope =
   FusedKer
     { fsoac = soac,
-      inplace = consumed,
-      fusedVars = [],
-      fusedConsumed = consumed,
       outputTransform = SOAC.noTransforms,
       outNames = out_nms,
-      kernelScope = scope,
-      kerAux = aux
+      kernelScope = scope
     }
 
 arrInputs :: FusedKer -> S.Set VName
@@ -170,15 +152,14 @@ tryOptimizeSOAC ::
   Names ->
   [VName] ->
   SOAC ->
-  Names ->
   FusedKer ->
   TryFusion FusedKer
-tryOptimizeSOAC unfus_nms outVars soac consumed ker = do
+tryOptimizeSOAC unfus_nms outVars soac ker = do
   (soac', ots) <- optimizeSOAC Nothing soac mempty
   let ker' = map (addInitialTransformIfRelevant ots) (inputs ker) `setInputs` ker
       outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
       ker'' = fixInputTypes outIdents ker'
-  applyFusionRules unfus_nms outVars soac' consumed ker''
+  applyFusionRules unfus_nms outVars soac' ker''
   where
     addInitialTransformIfRelevant ots inp
       | SOAC.inputArray inp `elem` outVars =
@@ -190,30 +171,29 @@ tryOptimizeKernel ::
   Names ->
   [VName] ->
   SOAC ->
-  Names ->
   FusedKer ->
   TryFusion FusedKer
-tryOptimizeKernel unfus_nms outVars soac consumed ker = do
+tryOptimizeKernel unfus_nms outVars soac ker = do
   ker' <- optimizeKernel (Just outVars) ker
-  applyFusionRules unfus_nms outVars soac consumed ker'
+  applyFusionRules unfus_nms outVars soac ker'
 
 tryExposeInputs ::
   Names ->
   [VName] ->
   SOAC ->
-  Names ->
   FusedKer ->
   TryFusion FusedKer
-tryExposeInputs unfus_nms outVars soac consumed ker = do
+tryExposeInputs unfus_nms outVars soac ker = do
   (ker', ots) <- exposeInputs outVars ker
   if SOAC.nullTransforms ots
-    then fuseSOACwithKer unfus_nms outVars soac consumed ker'
+    then fuseSOACwithKer unfus_nms outVars soac ker'
     else do
+      guard $ unfus_nms == mempty
       (soac', ots') <- pullOutputTransforms soac ots
       let outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
           ker'' = fixInputTypes outIdents ker'
       if SOAC.nullTransforms ots'
-        then applyFusionRules unfus_nms outVars soac' consumed ker''
+        then applyFusionRules unfus_nms outVars soac' ker''
         else fail "tryExposeInputs could not pull SOAC transforms"
 
 fixInputTypes :: [Ident] -> FusedKer -> FusedKer
@@ -231,27 +211,25 @@ applyFusionRules ::
   Names ->
   [VName] ->
   SOAC ->
-  Names ->
   FusedKer ->
   TryFusion FusedKer
-applyFusionRules unfus_nms outVars soac consumed ker =
-  tryOptimizeSOAC unfus_nms outVars soac consumed ker
-    <|> tryOptimizeKernel unfus_nms outVars soac consumed ker
-    <|> fuseSOACwithKer unfus_nms outVars soac consumed ker
-    <|> tryExposeInputs unfus_nms outVars soac consumed ker
+applyFusionRules unfus_nms outVars soac ker =
+  tryOptimizeSOAC unfus_nms outVars soac ker
+    <|> tryOptimizeKernel unfus_nms outVars soac ker
+    <|> fuseSOACwithKer unfus_nms outVars soac ker
+    <|> tryExposeInputs unfus_nms outVars soac ker
 
 attemptFusion ::
   MonadFreshNames m =>
   Names ->
   [VName] ->
   SOAC ->
-  Names ->
   FusedKer ->
   m (Maybe FusedKer)
-attemptFusion unfus_nms outVars soac consumed ker =
+attemptFusion unfus_nms outVars soac ker =
   fmap removeUnusedParamsFromKer
     <$> tryFusion
-      (applyFusionRules unfus_nms outVars soac consumed ker)
+      (applyFusionRules unfus_nms outVars soac ker)
       (kernelScope ker)
 
 removeUnusedParamsFromKer :: FusedKer -> FusedKer
@@ -279,12 +257,10 @@ removeUnusedParams l inps =
     used p = paramName p `nameIn` freeVars
     freeVars = freeIn $ lambdaBody l
 
--- | Check that the consumer uses at least one output of the producer
--- unmodified.
-mapFusionOK :: [VName] -> FusedKer -> Bool
-mapFusionOK outVars ker = any (`elem` inpIds) outVars
-  where
-    inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
+-- | Check that the consumer does not use any scan or reduce results.
+scremaFusionOK :: ([VName], [VName]) -> FusedKer -> Bool
+scremaFusionOK (nonmap_outs, _map_outs) ker =
+  all (`notElem` nonmap_outs) $ mapMaybe SOAC.isVarishInput (inputs ker)
 
 -- | Check that the consumer uses all the outputs of the producer unmodified.
 mapWriteFusionOK :: [VName] -> FusedKer -> Bool
@@ -297,35 +273,39 @@ fuseSOACwithKer ::
   Names ->
   [VName] ->
   SOAC ->
-  Names ->
   FusedKer ->
   TryFusion FusedKer
-fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
+fuseSOACwithKer unfus_set outVars soac_p ker = do
   -- We are fusing soac_p into soac_c, i.e, the output of soac_p is going
   -- into soac_c.
   let soac_c = fsoac ker
       inp_p_arr = SOAC.inputs soac_p
-      horizFuse =
-        unfus_set /= mempty
-          && SOAC.width soac_p == SOAC.width soac_c
+      horizFuse = unfus_set /= mempty
       inp_c_arr = SOAC.inputs soac_c
       lam_p = SOAC.lambda soac_p
       lam_c = SOAC.lambda soac_c
       w = SOAC.width soac_p
       returned_outvars = filter (`nameIn` unfus_set) outVars
       success res_outnms res_soac = do
-        let fusedVars_new = fusedVars ker ++ outVars
         -- Avoid name duplication, because the producer lambda is not
         -- removed from the program until much later.
         uniq_lam <- renameLambda $ SOAC.lambda res_soac
         pure $
           ker
             { fsoac = uniq_lam `SOAC.setLambda` res_soac,
-              fusedVars = fusedVars_new,
-              inplace = inplace ker <> soac_p_consumed,
-              fusedConsumed = fusedConsumed ker <> soac_p_consumed,
               outNames = res_outnms
             }
+
+  -- Can only fuse SOACs with same width.
+  guard $ SOAC.width soac_p == SOAC.width soac_c
+
+  -- If we are getting rid of a producer output, then it must be used
+  -- without any transformation.
+  let bare_inputs = mapMaybe SOAC.isVarishInput (inputs ker)
+      ker_inputs = map SOAC.inputArray (inputs ker)
+      inputOrUnfus v = v `elem` bare_inputs || v `notElem` ker_inputs
+
+  guard $ all inputOrUnfus outVars
 
   outPairs <- forM (zip outVars $ map rowType $ SOAC.typeOf soac_p) $ \(outVar, t) -> do
     outVar' <- newVName $ baseString outVar ++ "_elem"
@@ -348,8 +328,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ( SOAC.Screma _ (ScremaForm scans_c reds_c _) _,
       SOAC.Screma _ (ScremaForm scans_p reds_p _) _
       )
-        | mapFusionOK (drop (Futhark.scanResults scans_p + Futhark.redResults reds_p) outVars) ker
-            || horizFuse -> do
+        | scremaFusionOK (splitAt (Futhark.scanResults scans_p + Futhark.redResults reds_p) outVars) ker -> do
             let red_nes_p = concatMap redNeutral reds_p
                 red_nes_c = concatMap redNeutral reds_c
                 scan_nes_p = concatMap scanNeutral scans_p
@@ -485,24 +464,14 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
-    (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ nes _)
-      | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
-          -- fuse two SEQUENTIAL streams
-          (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
-          success res_nms res_stream
-    (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ _ _) ->
-      fail "Fusion conditions not met for two SEQ streams!"
-    (SOAC.Stream _ Sequential _ _ _, SOAC.Stream {}) ->
-      fail "Cannot fuse a parallel with a sequential Stream!"
-    (SOAC.Stream {}, SOAC.Stream _ Sequential _ _ _) ->
-      fail "Cannot fuse a parallel with a sequential Stream!"
-    (SOAC.Stream {}, SOAC.Stream _ _ _ nes _)
-      | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
-          -- fuse two PARALLEL streams
-          (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
-          success res_nms res_stream
-    (SOAC.Stream {}, SOAC.Stream {}) ->
-      fail "Fusion conditions not met for two PAR streams!"
+    (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ _ _) -> do
+      -- fuse two SEQUENTIAL streams
+      (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
+      success res_nms res_stream
+    (SOAC.Stream {}, SOAC.Stream {}) -> do
+      -- fuse two PARALLEL streams
+      (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
+      success res_nms res_stream
     -------------------------------------------------------------------
     --- If one is a stream, translate the other to a stream as well.---
     --- This does not get in trouble (infinite computation) because ---
@@ -523,14 +492,24 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
         _ -> pure soac_p'
       if soac_p' == soac_p
         then fail "SOAC could not be turned into stream."
-        else fuseSOACwithKer unfus_set (map identName newacc_ids ++ outVars) soac_p'' soac_p_consumed ker
-    (_, SOAC.Screma _ form _) | Just _ <- Futhark.isScanSOAC form -> do
+        else
+          fuseSOACwithKer
+            (namesFromList (map identName newacc_ids) <> unfus_set)
+            (map identName newacc_ids ++ outVars)
+            soac_p''
+            ker
+    (_, SOAC.Screma _ form _) | Just _ <- Futhark.isScanomapSOAC form -> do
       -- A Scan soac can be currently only fused as a (sequential) stream,
       -- hence it is first translated to a (sequential) Stream and then
       -- fusion with a kernel is attempted.
       (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
       if soac_p' /= soac_p
-        then fuseSOACwithKer unfus_set (map identName newacc_ids ++ outVars) soac_p' soac_p_consumed ker
+        then
+          fuseSOACwithKer
+            (namesFromList (map identName newacc_ids) <> unfus_set)
+            (map identName newacc_ids ++ outVars)
+            soac_p'
+            ker
         else fail "SOAC could not be turned into stream."
     (_, SOAC.Stream _ form_p _ _ _) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
@@ -544,8 +523,11 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
         Sequential -> maybe (fail "not a stream") pure (toSeqStream soac_c')
         _ -> pure soac_c'
 
-      fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed $
-        ker {fsoac = soac_c'', outNames = map identName newacc_ids ++ outNames ker}
+      fuseSOACwithKer
+        (namesFromList (map identName newacc_ids) <> unfus_set)
+        outVars
+        soac_p
+        $ ker {fsoac = soac_c'', outNames = map identName newacc_ids ++ outNames ker}
 
     ---------------------------------
     --- DEFAULT, CANNOT FUSE CASE ---
