@@ -18,6 +18,7 @@ import Futhark.Construct
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
+import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.LoopKernel (mergeForms, pullOutputTransforms, pushRearrange, tryFusion)
 import Futhark.Pass
@@ -723,7 +724,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     rb2' <- renameBody b2'
     pure (incomming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
   SoacNode soac pats aux -> do
-    let lam = H.lambda soac
+    lam <- simplifyLambda $ H.lambda soac
     newbody <- localScope (scopeOf lam) $ case soac of
       H.Stream {} -> dontFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
       _ -> doFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)

@@ -3,6 +3,7 @@
 -- properly update the lambda indices.
 --
 -- ==
+-- tags { disable }
 --
 -- input {
 -- [
