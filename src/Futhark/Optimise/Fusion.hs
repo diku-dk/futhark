@@ -297,7 +297,7 @@ vFuseNodeT _ infusible (StmNode stm1, _, _) (SoacNode soac2 pats2 aux2, _)
                 inp
           soac2' = map onInput (H.inputs soac2) `H.setInputs` soac2
       pure $ Just $ SoacNode soac2' pats2 aux2
-vFuseNodeT _ infusible (SoacNode soac1 pats1 aux1, i1s, _e1s) (SoacNode soac2 pats2 aux2, _e2s) | null infusible = do
+vFuseNodeT _ _ (SoacNode soac1 pats1 aux1, i1s, _e1s) (SoacNode soac2 pats2 aux2, _e2s) = do
   scope <- askScope
   let ker =
         LK.FusedKer
