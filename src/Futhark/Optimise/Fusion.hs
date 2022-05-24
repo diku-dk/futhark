@@ -782,8 +782,8 @@ makeCopiesOfConsAliased :: DepGraphAug
 makeCopiesOfConsAliased g = mapAcrossWithSE copyAliased g
   where
     copyAliased :: DepNode -> DepGraphAug
-    copyAliased (n, nt) _ = do
-      let (incoming, _, _, outgoing) = G.context g n
+    copyAliased (n, nt) g' = do
+      let (incoming, _, _, outgoing) = G.context g' n
       let incoming' = map getName $ filter isFake (map fst incoming)
       let outgoing' = map getName $ filter isAlias (map fst outgoing)
       let toMakeCopies = incoming' `L.intersect` outgoing'
@@ -791,8 +791,8 @@ makeCopiesOfConsAliased g = mapAcrossWithSE copyAliased g
         then do
           (new_stms, nameMapping) <- makeCopyStms toMakeCopies
           let newNode = FinalNode new_stms (substituteNames nameMapping nt) mempty
-          updateNode n (const (Just newNode)) g
-        else pure g
+          updateNode n (const (Just newNode)) g'
+        else pure g'
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
