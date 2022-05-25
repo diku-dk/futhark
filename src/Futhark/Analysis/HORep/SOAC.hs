@@ -416,7 +416,7 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
   ppr (Screma w form arrs) = Futhark.ppScrema w arrs form
   ppr (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
   ppr (Stream w form lam nes arrs) = Futhark.ppStream w arrs form nes lam
-  ppr soac = text $ show soac
+  ppr (Scatter w lam arrs dests) = Futhark.ppScatter w arrs lam dests
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC rep -> [Input]
