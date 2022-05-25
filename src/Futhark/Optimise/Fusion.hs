@@ -137,9 +137,9 @@ doAllFusion =
     [ keepTrying . applyAugs $
         [ doVerticalFusion,
           doHorizontalFusion,
-          runInnerFusion,
-          removeUnusedOutputs
+          runInnerFusion
         ],
+      removeUnusedOutputs,
       makeCopiesOfConsAliased
     ]
 
