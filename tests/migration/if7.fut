@@ -1,6 +1,5 @@
 -- Reads can be delayed into if statements.
 -- ==
--- tags { disable }
 -- structure gpu {
 --   /Index 0
 --   /If/True/GPUBody/BinOp 1
