@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A defective simplification rule could in very rare cases lead to
   infinite recursion in the compiler (#1685).
 
+* Some broken links in `futhark doc` output (#1686).
+
 ## [0.21.12]
 
 ### Added

@@ -141,7 +141,7 @@ renderFiles important_imports imports = runWriter $ do
     forM imports $ \(current, fm) ->
       let ctx =
             Context
-              { ctxCurrent = current,
+              { ctxCurrent = makeRelative "/" current,
                 ctxFileMod = fm,
                 ctxImports = imports,
                 ctxNoLink = mempty,
@@ -208,13 +208,14 @@ contentsPage important_imports pages =
   H.docTypeHtml $
     addBoilerplate "index.html" "Futhark Library Documentation" $
       H.main $
-        H.h2 "Main libraries"
-          <> fileList important_pages
-          <> if null unimportant_pages
+        ( if null important_pages
             then mempty
-            else
-              H.h2 "Supporting libraries"
-                <> fileList unimportant_pages
+            else H.h2 "Main libraries" <> fileList important_pages
+        )
+          <> ( if null unimportant_pages
+                 then mempty
+                 else H.h2 "Supporting libraries" <> fileList unimportant_pages
+             )
   where
     (important_pages, unimportant_pages) =
       partition ((`elem` important_imports) . fst) pages

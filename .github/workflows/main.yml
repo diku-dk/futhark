@@ -455,7 +455,7 @@ jobs:
         cd tests_adhoc && sh test.sh
 
     - run: |
-        futhark doc -o prelude-docs prelude
+        futhark doc -o prelude-docs /dev/null
         tar -Jcf prelude-docs.tar.xz prelude-docs
 
     - uses: actions/upload-artifact@v1
