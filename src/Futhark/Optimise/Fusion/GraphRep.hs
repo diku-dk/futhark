@@ -17,7 +17,6 @@ module Futhark.Optimise.Fusion.GraphRep
     DepNode,
     pprg,
     getName,
-    getSoac,
     isRealNode,
     nodeFromLNode,
     mergedContext,
@@ -130,11 +129,6 @@ instance Substitute NodeT where
       fScremaForm (ScremaForm scans reds lam) = ScremaForm (map fScan scans) (map fRed reds) (f lam)
       fScan (Scan red_lam red_nes) = Scan (f red_lam) (map f red_nes)
       fRed (Reduce comm red_lam red_nes) = Reduce comm (f red_lam) (map f red_nes)
-
-getSoac :: NodeT -> Maybe (H.SOAC SOACS)
-getSoac s = case s of
-  SoacNode _ _ soac _ -> Just soac
-  _ -> Nothing
 
 getName :: EdgeT -> VName
 getName edgeT = case edgeT of

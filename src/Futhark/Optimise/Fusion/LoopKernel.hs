@@ -4,7 +4,6 @@
 
 module Futhark.Optimise.Fusion.LoopKernel
   ( FusedKer (..),
-    newKernel,
     inputs,
     setInputs,
     attemptFusion,
@@ -87,15 +86,6 @@ data FusedKer = FusedKer
     outNames :: [VName]
   }
   deriving (Show)
-
-newKernel :: SOAC -> [VName] -> Scope SOACS -> FusedKer
-newKernel soac out_nms scope =
-  FusedKer
-    { fsoac = soac,
-      outputTransform = SOAC.noTransforms,
-      outNames = out_nms,
-      kernelScope = scope
-    }
 
 inputs :: FusedKer -> [SOAC.Input]
 inputs = SOAC.inputs . fsoac
