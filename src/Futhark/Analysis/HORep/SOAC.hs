@@ -298,9 +298,10 @@ applyTransform :: MonadBuilder m => ArrayTransform -> VName -> m VName
 applyTransform (Replicate cs n) ia =
   certifying cs $
     letExp "repeat" $ BasicOp $ Futhark.Replicate n (Futhark.Var ia)
-applyTransform (Rearrange cs perm) ia =
+applyTransform (Rearrange cs perm) ia = do
+  r <- arrayRank <$> lookupType ia
   certifying cs $
-    letExp "rearrange" $ BasicOp $ Futhark.Rearrange perm ia
+    letExp "rearrange" $ BasicOp $ Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia
 applyTransform (Reshape cs shape) ia =
   certifying cs $
     letExp "reshape" $ BasicOp $ Futhark.Reshape shape ia
