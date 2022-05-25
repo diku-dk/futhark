@@ -289,7 +289,7 @@ static int cuda_device_setup(struct cuda_context *ctx) {
 
   for(int device_id = 0; device_id < used_devices; device_id++){
     cuCtxPushCurrent(ctx->contexts[device_id]);
-    for(int other_device = 0; other_device < used_devices; other_device){
+    for(int other_device = 0; other_device < used_devices; other_device++){
       if(device_id == other_device) continue;
       int can_access_peer;
       CUDA_SUCCEED_FATAL(cuDeviceCanAccessPeer(
