@@ -41,6 +41,7 @@ module Futhark.IR.SOACS.SOAC
     ppScrema,
     ppHist,
     ppStream,
+    ppScatter,
     groupScatterResults,
     groupScatterResults',
     splitScatterResults,
@@ -919,13 +920,7 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
   ppr (Stream size arrs form acc lam) =
     ppStream size arrs form acc lam
   ppr (Scatter w arrs lam dests) =
-    "scatter"
-      <> parens
-        ( ppr w <> comma
-            </> ppTuple' arrs <> comma
-            </> ppr lam <> comma
-            </> commasep (map ppr dests)
-        )
+    ppScatter w arrs lam dests
   ppr (Hist w arrs ops bucket_fun) =
     ppHist w arrs ops bucket_fun
   ppr (Screma w arrs (ScremaForm scans reds map_lam))
@@ -994,6 +989,18 @@ ppStream size arrs form acc lam =
               </> ppTuple' acc <> comma
               </> ppr lam
           )
+
+-- | Prettyprint the given Scatter.
+ppScatter ::
+  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> Lambda rep -> [(Shape, Int, VName)] -> Doc
+ppScatter w arrs lam dests =
+  "scatter"
+    <> parens
+      ( ppr w <> comma
+          </> ppTuple' arrs <> comma
+          </> ppr lam <> comma
+          </> commasep (map ppr dests)
+      )
 
 instance PrettyRep rep => Pretty (Scan rep) where
   ppr (Scan scan_lam scan_nes) =
