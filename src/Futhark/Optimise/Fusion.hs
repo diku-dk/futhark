@@ -526,8 +526,10 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
   SoacNode ots pat soac aux -> do
     lam <- simplifyLambda $ H.lambda soac
     newbody <- localScope (scopeOf lam) $ case soac of
-      H.Stream {} -> dontFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
-      _ -> doFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
+      H.Stream _ Sequential {} _ _ _ ->
+        dontFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
+      _ ->
+        doFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
     let newLam = lam {lambdaBody = newbody}
         newNode = SoacNode ots pat (H.setLambda newLam soac) aux
     pure (incomming, node, newNode, outgoing)
