@@ -740,7 +740,12 @@ pullReshape (SOAC.Screma _ form inps) ots
       let mapw' = case reverse $ newDims shape of
             [] -> intConst Int64 0
             d : _ -> d
-          inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) inps
+          trInput inp
+            | arrayRank (SOAC.inputType inp) == 1 =
+                SOAC.addTransform (SOAC.Reshape cs shape) inp
+            | otherwise =
+                SOAC.addTransform (SOAC.ReshapeOuter cs shape) inp
+          inputs' = map trInput inps
           inputTypes = map SOAC.inputType inputs'
 
       let outersoac ::
