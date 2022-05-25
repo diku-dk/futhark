@@ -23,7 +23,6 @@ module Futhark.Optimise.Fusion.GraphRep
     mapAcross,
     genEdges,
     edgesBetween,
-    keepTrying,
     isDep,
     isInf,
     applyAugs,
@@ -190,6 +189,8 @@ data FusionEnv = FusionEnv -- monadic state environment for fusion.
     -- | A mapping from variable name to the graph node that produces
     -- it.
     producerMapping :: M.Map VName G.Node,
+    -- | Fused anything yet?
+    fusedAnything :: Bool,
     fuseScans :: Bool
   }
 
@@ -198,6 +199,7 @@ freshFusionEnv =
   FusionEnv
     { vNameSource = blankNameSource,
       producerMapping = M.empty,
+      fusedAnything = False,
       fuseScans = True
     }
 
@@ -221,15 +223,6 @@ runFusionEnvM scope fenv (FusionEnvM a) = modifyNameSource $ \src ->
   let x = runReaderT a scope
       (y, z) = runState x (fenv {vNameSource = src})
    in (y, vNameSource z)
-
--- Fixed-point
-keepTrying :: DepGraphAug -> DepGraphAug
-keepTrying f g = do
-  r <- f g
-  r2 <- f r
-  if G.equal r r2
-    then pure r
-    else keepTrying f r2
 
 isArray :: FParam SOACS -> Bool
 isArray p = case paramDec p of

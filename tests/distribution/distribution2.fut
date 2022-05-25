@@ -2,7 +2,6 @@
 -- blackScholes computation from GenericPricing.
 --
 -- ==
--- tags { disable }
 -- structure gpu {
 --   SegMap 6
 --   DoLoop 10

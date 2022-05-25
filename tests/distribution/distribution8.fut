@@ -13,7 +13,6 @@
 --     scan
 --
 -- ==
--- tags { disable }
 -- structure gpu { DoLoop/SegMap 1 DoLoop 2 }
 
 

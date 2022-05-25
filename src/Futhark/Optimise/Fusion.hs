@@ -116,18 +116,35 @@ linearizeGraph g = do
   stms <- mapM finalizeNode $ reverse $ Q.topsort' g
   pure $ mconcat stms
 
+fusedSomething :: NodeT -> FusionEnvM (Maybe NodeT)
+fusedSomething x = do
+  modify $ \s -> s {fusedAnything = True}
+  pure $ Just x
+
+-- Fixed-point
+keepTrying :: DepGraphAug -> DepGraphAug
+keepTrying f g = do
+  prev_fused <- gets fusedAnything
+  modify $ \s -> s {fusedAnything = False}
+  g' <- f g
+  fused <- gets fusedAnything
+  (if fused then keepTrying f g' else pure g')
+    <* modify (\s -> s {fusedAnything = prev_fused || fused})
+
 doAllFusion :: DepGraphAug
 doAllFusion =
   applyAugs
-    [ keepTrying doVerticalFusion,
-      doHorizontalFusion,
-      removeUnusedOutputs,
-      makeCopiesOfConsAliased,
-      runInnerFusion
+    [ keepTrying . applyAugs $
+        [ doVerticalFusion,
+          doHorizontalFusion,
+          runInnerFusion,
+          removeUnusedOutputs
+        ],
+      makeCopiesOfConsAliased
     ]
 
 doVerticalFusion :: DepGraphAug
-doVerticalFusion g = applyAugs (map tryFuseNodeInGraph $ G.labNodes g) g
+doVerticalFusion g = applyAugs (map tryFuseNodeInGraph $ reverse $ G.labNodes g) g
 
 doHorizontalFusion :: DepGraphAug
 doHorizontalFusion g = applyAugs (map horizontalFusionOnNode (G.nodes g)) g
@@ -309,7 +326,7 @@ vFuseNodeT
                 "vfused",
                 pretty soac1,
                 "outputs",
-                pretty pats1,
+                pretty (pats1, show ots1),
                 "and",
                 pretty soac2,
                 "got",
@@ -320,13 +337,12 @@ vFuseNodeT
 
         let pats2' =
               zipWith PatElem (LK.outNames ker') (H.typeOf (LK.fsoac ker'))
-        pure $
-          Just $
-            SoacNode
-              (LK.outputTransform ker')
-              (Pat pats2')
-              (LK.fsoac ker')
-              (aux1 <> aux2)
+        fusedSomething $
+          SoacNode
+            (LK.outputTransform ker')
+            (Pat pats2')
+            (LK.fsoac ker')
+            (aux1 <> aux2)
       Nothing -> pure Nothing
 vFuseNodeT _ _ _ _ = pure Nothing
 
@@ -524,15 +540,17 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     rb2' <- renameBody b2'
     pure (incomming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
   SoacNode ots pat soac aux -> do
+    -- To clean up previous instances of fusion.
     lam <- simplifyLambda $ H.lambda soac
     newbody <- localScope (scopeOf lam) $ case soac of
       H.Stream _ Sequential {} _ _ _ ->
         dontFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
       _ ->
         doFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
-    let newLam = lam {lambdaBody = newbody}
-        newNode = SoacNode ots pat (H.setLambda newLam soac) aux
-    pure (incomming, node, newNode, outgoing)
+    -- To clean up any inner fusion.
+    lam' <- simplifyLambda $ lam {lambdaBody = newbody}
+    let nodeT' = SoacNode ots pat (H.setLambda lam' soac) aux
+    pure (incomming, node, nodeT', outgoing)
   _ -> pure c
   where
     doFusionWithDelayed :: Body SOACS -> Names -> [(NodeT, [EdgeT])] -> FusionEnvM (Body SOACS)
