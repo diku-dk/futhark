@@ -66,12 +66,12 @@ fuseGraph stms results inputs = localScope (scopeOf stms) $ do
   graph_not_fused <- mkDepGraph stms results inputs
 
   let graph_not_fused'
-        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
+        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 =
             trace (pprg graph_not_fused) graph_not_fused
         | otherwise = graph_not_fused
   graph_fused <- doAllFusion graph_not_fused'
   let graph_fused'
-        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
+        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 =
             trace (pprg graph_fused) graph_fused
         | otherwise = graph_fused
 
