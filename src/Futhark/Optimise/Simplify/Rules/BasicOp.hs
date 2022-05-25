@@ -21,7 +21,6 @@ import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.Loop
 import Futhark.Optimise.Simplify.Rules.Simple
-import Futhark.Util
 
 isCt1 :: SubExp -> Bool
 isCt1 (Constant v) = oneIsh v
@@ -336,24 +335,6 @@ ruleBasicOp vtable pat aux (Rotate offsets1 v)
           letBind pat $ BasicOp $ Rotate offsets v2
   where
     add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int64 OverflowWrap) x y
-
--- If we see an Update with a scalar where the value to be written is
--- the result of indexing some other array, then we convert it into an
--- Update with a slice of that array.  This matters when the arrays
--- are far away (on the GPU, say), because it avoids a copy of the
--- scalar to and from the host.
-ruleBasicOp vtable pat aux (Update safety arr_x (Slice slice_x) (Var v))
-  | Just _ <- sliceIndices (Slice slice_x),
-    Just (Index arr_y (Slice slice_y), cs_y) <- ST.lookupBasicOp v vtable,
-    ST.available arr_y vtable,
-    not $ ST.aliases arr_x arr_y vtable,
-    Just (slice_x_bef, DimFix i, []) <- focusNth (length slice_x - 1) slice_x,
-    Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = Simplify $ do
-      let slice_x' = Slice $ slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]
-          slice_y' = Slice $ slice_y_bef ++ [DimSlice j (intConst Int64 1) (intConst Int64 1)]
-      v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
-      certifying cs_y . auxing aux $
-        letBind pat $ BasicOp $ Update safety arr_x slice_x' $ Var v'
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)
