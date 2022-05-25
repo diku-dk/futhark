@@ -4,15 +4,7 @@
 
 module Futhark.Optimise.Fusion.LoopKernel
   ( FusedKer (..),
-    inputs,
-    setInputs,
     attemptFusion,
-    pullOutputTransforms,
-    pushRearrange,
-    iswim,
-    mergeForms,
-    SOAC,
-    MapNest,
   )
 where
 
