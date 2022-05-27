@@ -5,6 +5,9 @@
 
 PREFIX?=$(HOME)/.local
 
+# Disable all implicit rules.
+.SUFFIXES:
+
 .PHONY: all configure build install docs check check-commit clean
 
 all: build
