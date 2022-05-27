@@ -85,7 +85,9 @@ analyzeHostOp m (SegOp (SegScan _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m (SegOp (SegHist _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
-analyzeHostOp _ _ = pure mempty
+analyzeHostOp m SizeOp {} = pure m
+analyzeHostOp m GPUBody {} = pure m
+analyzeHostOp m (OtherOp ()) = pure m
 
 analyzeStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => MemAliases -> Stm rep -> MemAliasesM inner MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
