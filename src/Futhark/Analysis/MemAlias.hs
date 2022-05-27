@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Analysis.MemAlias
@@ -45,7 +46,9 @@ instance Monoid MemAliases where
   mempty = MemAliases mempty
 
 instance Pretty MemAliases where
-  ppr (MemAliases m) = ppr m
+  ppr (MemAliases m) = stack $ map f $ M.toList m
+    where
+      f (v, vs) = ppr v <+> "aliases:" </> indent 2 (oneLine $ ppr vs)
 
 addAlias :: VName -> VName -> MemAliases -> MemAliases
 addAlias v1 v2 m =
