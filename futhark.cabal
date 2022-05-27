@@ -436,8 +436,6 @@ test-suite unit
     , containers
     , futhark
     , megaparsec
-    , mtl
-    , parser-combinators
     , tasty
     , tasty-hunit
     , tasty-quickcheck
