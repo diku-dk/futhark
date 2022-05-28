@@ -315,7 +315,8 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
             MemArray pt shape u (ArrayIn _ arg_ixfun) -> do
               arg_copy <- newVName (baseString arg <> "_dbcopy")
               letBind (Pat [PatElem arg_copy $ MemArray pt shape u $ ArrayIn mem' arg_ixfun]) $
-                BasicOp $ Copy arg
+                BasicOp $
+                  Copy arg
               -- We need to make this parameter unique to avoid invalid
               -- hoisting (see #1533), because we are invalidating the
               -- underlying memory.
@@ -361,8 +362,10 @@ doubleBufferMergeParams ctx_and_res bound_in_loop =
   where
     params = map fst ctx_and_res
     loopVariant v =
-      v `nameIn` bound_in_loop
-        || v `elem` map (paramName . fst) ctx_and_res
+      v
+        `nameIn` bound_in_loop
+        || v
+        `elem` map (paramName . fst) ctx_and_res
 
     loopInvariantSize (Constant v) =
       Just (Constant v, True)
@@ -467,7 +470,8 @@ doubleBufferResult valparams buffered (Body _ stms res) =
           summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
           copystm =
             Let (Pat [PatElem copyname summary]) (defAux ()) $
-              BasicOp $ Copy v
+              BasicOp $
+                Copy v
        in (Just copystm, SubExpRes cs (Var copyname))
     buffer _ _ se =
       (Nothing, se)

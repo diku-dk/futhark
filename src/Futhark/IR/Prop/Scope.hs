@@ -88,7 +88,8 @@ class (Applicative m, RepTypes rep) => HasScope rep m | m -> rep where
     where
       notFound =
         error $
-          "Scope.lookupInfo: Name " ++ pretty name
+          "Scope.lookupInfo: Name "
+            ++ pretty name
             ++ " not found in type environment."
 
   -- | Return the type environment contained in the applicative

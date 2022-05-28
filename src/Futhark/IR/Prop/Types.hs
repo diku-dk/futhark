@@ -376,9 +376,12 @@ subtypeOf ::
   TypeBase shape u ->
   Bool
 subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
-  u2 <= u1
-    && t1 == t2
-    && shape1 `subShapeOf` shape2
+  u2
+    <= u1
+    && t1
+    == t2
+    && shape1
+    `subShapeOf` shape2
 subtypeOf t1 t2 = t1 == t2
 
 -- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,

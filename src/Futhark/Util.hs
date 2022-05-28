@@ -515,10 +515,10 @@ encodeChar c = encodeAsUnicodeCharar c
 
 encodeAsUnicodeCharar :: Char -> EncodedString
 encodeAsUnicodeCharar c =
-  'z' :
-  if isDigit (head hex_str)
-    then hex_str
-    else '0' : hex_str
+  'z'
+    : if isDigit (head hex_str)
+      then hex_str
+      else '0' : hex_str
   where
     hex_str = showHex (ord c) "U"
 

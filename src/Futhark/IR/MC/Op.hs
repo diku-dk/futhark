@@ -131,8 +131,10 @@ instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (MCOp rep op) where
 instance (PrettyRep rep, Pretty op) => Pretty (MCOp rep op) where
   ppr (ParOp Nothing op) = ppr op
   ppr (ParOp (Just par_op) op) =
-    "par" <+> nestedBlock "{" "}" (ppr par_op)
-      </> "seq" <+> nestedBlock "{" "}" (ppr op)
+    "par"
+      <+> nestedBlock "{" "}" (ppr par_op)
+      </> "seq"
+      <+> nestedBlock "{" "}" (ppr op)
   ppr (OtherOp op) = ppr op
 
 instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (MCOp rep op) where

@@ -248,7 +248,8 @@ onKernel target kernel = do
 
       (local_memory_args, local_memory_params, local_memory_init) =
         unzip3 . flip evalState (blankNameSource :: VNameSource) $
-          mapM (prepareLocalMemory target) $ kernelLocalMemory kstate
+          mapM (prepareLocalMemory target) $
+            kernelLocalMemory kstate
 
       -- CUDA has very strict restrictions on the number of blocks
       -- permitted along the 'y' and 'z' dimensions of the grid
@@ -790,9 +791,10 @@ inKernelOperations mode body =
       | otherwise = do
           let out_args = [[C.cexp|&$id:d|] | d <- dests]
               args' =
-                [C.cexp|global_failure|] :
-                [C.cexp|global_failure_args|] :
-                out_args ++ args
+                [C.cexp|global_failure|]
+                  : [C.cexp|global_failure_args|]
+                  : out_args
+                  ++ args
 
           what_next <- whatNext
 

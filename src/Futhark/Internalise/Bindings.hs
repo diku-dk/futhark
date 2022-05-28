@@ -53,7 +53,8 @@ bindingFParams tparams params m = do
     let (certparams, valueparams') = unzip $ map fixAccParam (concat valueparams)
     I.localScope (I.scopeOfFParams $ catMaybes certparams ++ shape_params ++ valueparams') $
       substitutingVars shape_subst $
-        m (catMaybes certparams ++ shape_params) $ chunks num_param_ts valueparams'
+        m (catMaybes certparams ++ shape_params) $
+          chunks num_param_ts valueparams'
   where
     fixAccParam (I.Param attrs pv (I.Acc acc ispace ts u)) =
       ( Just (I.Param attrs acc $ I.Prim I.Unit),
@@ -76,7 +77,9 @@ bindingLoopParams tparams pat ts m = do
 
   bindingFlatPat pat_idents pat_ts $ \valueparams ->
     I.localScope (I.scopeOfFParams $ shape_params ++ concat valueparams) $
-      substitutingVars shape_subst $ m shape_params $ concat valueparams
+      substitutingVars shape_subst $
+        m shape_params $
+          concat valueparams
 
 bindingLambdaParams ::
   [E.Pat] ->

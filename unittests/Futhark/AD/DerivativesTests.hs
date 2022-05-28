@@ -14,7 +14,8 @@ tests =
     "Futhark.AD.DerivativesTests"
     [ testGroup "Primitive functions" $
         map primFunTest $
-          filter (not . (`elem` missing_primfuns) . fst) $ M.toList primFuns,
+          filter (not . (`elem` missing_primfuns) . fst) $
+            M.toList primFuns,
       testGroup "BinOps" $ map binOpTest allBinOps,
       testGroup "UnOps" $ map unOpTest allUnOps
     ]

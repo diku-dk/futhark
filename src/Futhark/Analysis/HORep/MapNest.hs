@@ -153,7 +153,8 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
   let nparams = zipWith (Param mempty) npnames $ map SOAC.inputRowType inps
   body <- runBodyBuilder $
     localScope (scopeOfLParams nparams) $ do
-      letBindNames nres =<< SOAC.toExp
+      letBindNames nres
+        =<< SOAC.toExp
         =<< toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
       pure $ resultBody $ map Var nres
   let outerlam =

@@ -81,11 +81,13 @@ instance PP.Pretty SegLevel where
 
 instance Engine.Simplifiable SegLevel where
   simplify (SegThread num_groups group_size virt) =
-    SegThread <$> traverse Engine.simplify num_groups
+    SegThread
+      <$> traverse Engine.simplify num_groups
       <*> traverse Engine.simplify group_size
       <*> pure virt
   simplify (SegGroup num_groups group_size virt) =
-    SegGroup <$> traverse Engine.simplify num_groups
+    SegGroup
+      <$> traverse Engine.simplify num_groups
       <*> traverse Engine.simplify group_size
       <*> pure virt
 

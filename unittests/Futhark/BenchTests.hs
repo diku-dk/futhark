@@ -21,7 +21,9 @@ instance Arbitrary DataResult where
       <*> oneof
         [ Left <$> arbText,
           Right
-            <$> ( Result <$> arbitrary <*> arbMap
+            <$> ( Result
+                    <$> arbitrary
+                    <*> arbMap
                     <*> oneof [pure Nothing, Just <$> arbText]
                 )
         ]

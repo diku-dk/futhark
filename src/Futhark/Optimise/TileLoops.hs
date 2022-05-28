@@ -180,14 +180,14 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
               merge_params = map fst merge
 
           maybe_tiled <-
-            localScope (M.insert i (IndexName it) $ scopeOfFParams merge_params) $
-              tileInBody
+            localScope (M.insert i (IndexName it) $ scopeOfFParams merge_params)
+              $ tileInBody
                 branch_variant'
                 variance
                 initial_lvl
                 initial_space
                 (map paramType merge_params)
-                $ mkBody (bodyStms loopbody) (bodyResult loopbody)
+              $ mkBody (bodyStms loopbody) (bodyResult loopbody)
 
           case maybe_tiled of
             Nothing -> next
@@ -235,7 +235,8 @@ preludeToPostlude variance prelude stm_to_tile postlude =
 
     used stm =
       any (`nameIn` used_in_stm_variant) $
-        patNames $ stmPat stm
+        patNames $
+          stmPat stm
 
     (prelude_used, prelude_not_used) =
       Seq.partition used prelude
@@ -276,7 +277,8 @@ partitionPrelude variance prestms private used_after =
     later_consumed =
       namesFromList $
         concatMap (patNames . stmPat) $
-          stmsToList $ Seq.filter consumedStm prestms
+          stmsToList $
+            Seq.filter consumedStm prestms
 
     groupInvariant stm =
       invariantTo private stm
@@ -301,7 +303,8 @@ partitionPrelude variance prestms private used_after =
     must_be_inlined =
       namesFromList $
         concatMap (patNames . stmPat) $
-          stmsToList $ Seq.filter mustBeInlined variant_prestms
+          stmsToList $
+            Seq.filter mustBeInlined variant_prestms
     recompute stm =
       any (`nameIn` must_be_inlined) (patNames (stmPat stm))
         || not (invariantTo must_be_inlined stm)
@@ -519,7 +522,9 @@ sliceUntiled arr tile_id full_tile_size this_tile_size = do
     letSubExp "slice_offset" =<< toExp (pe64 tile_id * pe64 full_tile_size)
   let slice = DimSlice slice_offset this_tile_size (intConst Int64 1)
   letExp "untiled_slice" $
-    BasicOp $ Index arr $ fullSlice arr_t [slice]
+    BasicOp $
+      Index arr $
+        fullSlice arr_t [slice]
 
 -- | Statements that we insert directly into every thread-private
 -- SegMaps.  This is for things that cannot efficiently be computed
@@ -868,7 +873,8 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
   -- the whole tiles.
   residual_input <-
     letSubExp "residual_input" $
-      BasicOp $ BinOp (SRem Int64 Unsafe) w tile_size
+      BasicOp $
+        BinOp (SRem Int64 Unsafe) w tile_size
 
   letTupExp "acc_after_residual"
     =<< eIf
@@ -932,12 +938,14 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
       else do
         group_size <-
           letSubExp "computed_group_size" $
-            BasicOp $ BinOp (SMin Int64) (unCount (segGroupSize initial_lvl)) kdim
+            BasicOp $
+              BinOp (SMin Int64) (unCount (segGroupSize initial_lvl)) kdim
 
         -- How many groups we need to exhaust the innermost dimension.
         ldim <-
           letSubExp "ldim" $
-            BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim group_size
+            BasicOp $
+              BinOp (SDivUp Int64 Unsafe) kdim group_size
 
         num_groups <-
           letSubExp "computed_num_groups"
@@ -965,7 +973,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
         tilingTileShape = Shape [tile_size],
         tilingNumWholeTiles =
           letSubExp "num_whole_tiles" $
-            BasicOp $ BinOp (SQuot Int64 Unsafe) w tile_size,
+            BasicOp $
+              BinOp (SQuot Int64 Unsafe) w tile_size,
         tilingLevel = lvl,
         tilingSpace = space
       }
@@ -1118,7 +1127,9 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
             tile_t <- lookupType tile
             let idx = DimFix $ Var $ head $ rearrangeShape perm [ltid_x, ltid_y]
             letExp "tile" $
-              BasicOp $ Index tile $ sliceAt tile_t (head perm) [idx]
+              BasicOp $
+                Index tile $
+                  sliceAt tile_t (head perm) [idx]
 
       tiles' <- mapM sliceTile tiles
 
@@ -1151,7 +1162,8 @@ processResidualTile2D
     -- the whole tiles.
     residual_input <-
       letSubExp "residual_input" $
-        BasicOp $ BinOp (SRem Int64 Unsafe) w tile_size
+        BasicOp $
+          BinOp (SRem Int64 Unsafe) w tile_size
 
     letTupExp "acc_after_residual"
       =<< eIf
@@ -1219,10 +1231,12 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
 
   num_groups_x <-
     letSubExp "num_groups_x" $
-      BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim_x tile_size
+      BasicOp $
+        BinOp (SDivUp Int64 Unsafe) kdim_x tile_size
   num_groups_y <-
     letSubExp "num_groups_y" $
-      BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim_y tile_size
+      BasicOp $
+        BinOp (SDivUp Int64 Unsafe) kdim_y tile_size
 
   num_groups <-
     letSubExp "num_groups_top"
@@ -1254,7 +1268,8 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
         tilingTileShape = Shape [tile_size, tile_size],
         tilingNumWholeTiles =
           letSubExp "num_whole_tiles" $
-            BasicOp $ BinOp (SQuot Int64 Unsafe) w tile_size,
+            BasicOp $
+              BinOp (SQuot Int64 Unsafe) w tile_size,
         tilingLevel = lvl,
         tilingSpace = space
       }

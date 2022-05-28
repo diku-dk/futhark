@@ -145,8 +145,9 @@ underscoreUse ::
   m a
 underscoreUse loc name =
   typeError loc mempty $
-    "Use of" <+> pquote (ppr name)
-      <> ": variables prefixed with underscore may not be accessed."
+    "Use of"
+      <+> pquote (ppr name)
+        <> ": variables prefixed with underscore may not be accessed."
 
 -- | A mapping from import strings to 'Env's.  This is used to resolve
 -- @import@ declarations.
@@ -244,8 +245,10 @@ lookupImport loc file = do
   case M.lookup canonical_import imports of
     Nothing ->
       typeError loc mempty $
-        "Unknown import" <+> dquotes (text canonical_import)
-          </> "Known:" <+> commasep (map text (M.keys imports))
+        "Unknown import"
+          <+> dquotes (text canonical_import)
+          </> "Known:"
+          <+> commasep (map text (M.keys imports))
     Just scope -> pure (canonical_import, scope)
 
 -- | Evaluate a 'TypeM' computation within an extended (/not/
@@ -287,7 +290,9 @@ class Monad m => MonadTypeChecker m where
       Scalar (Prim (Signed Int64)) -> pure v'
       _ ->
         typeError loc mempty $
-          "Sizes must have type i64, but" <+> pquote (ppr v) <+> "has type:"
+          "Sizes must have type i64, but"
+            <+> pquote (ppr v)
+            <+> "has type:"
             </> ppr t
 
   typeError :: Located loc => loc -> Notes -> Doc -> m a

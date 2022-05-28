@@ -348,7 +348,8 @@ instance Monoid (Code a) where
 lexicalMemoryUsage :: Function a -> M.Map VName Space
 lexicalMemoryUsage func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
-    declared $ functionBody func
+    declared $
+      functionBody func
   where
     nonlexical =
       set (functionBody func)
@@ -435,14 +436,16 @@ instance Pretty op => Pretty (Functions op) where
 
 instance Pretty op => Pretty (Constants op) where
   ppr (Constants decls code) =
-    text "Constants:" </> indent 2 (stack $ map ppr decls)
+    text "Constants:"
+      </> indent 2 (stack $ map ppr decls)
       </> mempty
       </> text "Initialisation:"
       </> indent 2 (ppr code)
 
 instance Pretty op => Pretty (FunctionT op) where
   ppr (Function _ outs ins body results args) =
-    text "Inputs:" </> block ins
+    text "Inputs:"
+      </> block ins
       </> text "Outputs:"
       </> block outs
       </> text "Arguments:"
@@ -477,7 +480,8 @@ instance Pretty ValueDesc where
 instance Pretty ExternalValue where
   ppr (TransparentValue u v) = ppr u <> ppr v
   ppr (OpaqueValue u desc vs) =
-    ppr u <> text "opaque" <+> text desc
+    ppr u <> text "opaque"
+      <+> text desc
       <+> nestedBlock "{" "}" (stack $ map ppr vs)
 
 instance Pretty ArrayContents where
@@ -489,11 +493,17 @@ instance Pretty op => Pretty (Code op) where
   ppr Skip = text "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
   ppr (For i limit body) =
-    text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{"
+    text "for"
+      <+> ppr i
+      <+> langle
+      <+> ppr limit
+      <+> text "{"
       </> indent 2 (ppr body)
       </> text "}"
   ppr (While cond body) =
-    text "while" <+> ppr cond <+> text "{"
+    text "while"
+      <+> ppr cond
+      <+> text "{"
       </> indent 2 (ppr body)
       </> text "}"
   ppr (DeclareMem name space) =
@@ -505,7 +515,10 @@ instance Pretty op => Pretty (Code op) where
         Volatile -> text "volatile "
         Nonvolatile -> mempty
   ppr (DeclareArray name space t vs) =
-    text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t
+    text "array"
+      <+> ppr name <> text "@" <> ppr space
+      <+> text ":"
+      <+> ppr t
       <+> equals
       <+> ppr vs
   ppr (Allocate name e space) =
@@ -521,7 +534,8 @@ instance Pretty op => Pretty (Code op) where
         Volatile -> text "volatile "
         Nonvolatile -> mempty
   ppr (Read name v is bt space vol) =
-    ppr name <+> text "<-"
+    ppr name
+      <+> text "<-"
       <+> ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
     where
       vol' = case vol of
@@ -547,13 +561,16 @@ instance Pretty op => Pretty (Code op) where
       ppMemLoc base offset =
         ppr base <+> text "+" <+> ppr offset
   ppr (If cond tbranch fbranch) =
-    text "if" <+> ppr cond <+> text "then {"
+    text "if"
+      <+> ppr cond
+      <+> text "then {"
       </> indent 2 (ppr tbranch)
       </> text "} else {"
       </> indent 2 (ppr fbranch)
       </> text "}"
   ppr (Call dests fname args) =
-    commasep (map ppr dests) <+> text "<-"
+    commasep (map ppr dests)
+      <+> text "<-"
       <+> ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code

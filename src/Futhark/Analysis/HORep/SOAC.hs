@@ -298,21 +298,31 @@ inputsToSubExps = mapM inputToExp'
 
     transform ia (Replicate cs n) =
       certifying cs $
-        letExp "repeat" $ BasicOp $ Futhark.Replicate n (Futhark.Var ia)
+        letExp "repeat" $
+          BasicOp $
+            Futhark.Replicate n (Futhark.Var ia)
     transform ia (Rearrange cs perm) =
       certifying cs $
-        letExp "rearrange" $ BasicOp $ Futhark.Rearrange perm ia
+        letExp "rearrange" $
+          BasicOp $
+            Futhark.Rearrange perm ia
     transform ia (Reshape cs shape) =
       certifying cs $
-        letExp "reshape" $ BasicOp $ Futhark.Reshape shape ia
+        letExp "reshape" $
+          BasicOp $
+            Futhark.Reshape shape ia
     transform ia (ReshapeOuter cs shape) = do
       shape' <- reshapeOuter shape 1 . arrayShape <$> lookupType ia
       certifying cs $
-        letExp "reshape_outer" $ BasicOp $ Futhark.Reshape shape' ia
+        letExp "reshape_outer" $
+          BasicOp $
+            Futhark.Reshape shape' ia
     transform ia (ReshapeInner cs shape) = do
       shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
       certifying cs $
-        letExp "reshape_inner" $ BasicOp $ Futhark.Reshape shape' ia
+        letExp "reshape_inner" $
+          BasicOp $
+            Futhark.Reshape shape' ia
 
 -- | Return the array name of the input.
 inputArray :: Input -> VName
@@ -607,14 +617,16 @@ soacToStream soac = do
                   lastel_tmp_ids
                   scan0_ids
               lelstm =
-                mkLet lastel_ids $
-                  If
+                mkLet lastel_ids
+                  $ If
                     (Futhark.Var $ identName empty_arr)
                     (mkBody mempty $ subExpsRes nes)
                     ( mkBody (stmsFromList leltmpstms) $
-                        varsRes $ map identName lastel_tmp_ids
+                        varsRes $
+                          map identName lastel_tmp_ids
                     )
-                    $ ifCommon $ map identType lastel_tmp_ids
+                  $ ifCommon
+                  $ map identType lastel_tmp_ids
           -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
           maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) scan_lam
           let mapstm =

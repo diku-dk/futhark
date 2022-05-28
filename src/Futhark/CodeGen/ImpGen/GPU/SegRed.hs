@@ -139,7 +139,9 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
       MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [num_threads] <> shape
         sArray "red_arr" pt shape' mem $
-          IxFun.iota $ map pe64 $ shapeDims shape'
+          IxFun.iota $
+            map pe64 $
+              shapeDims shape'
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [group_size]
@@ -188,7 +190,10 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
 
   counter <-
     sStaticArray "counter" (Space "device") int32 $
-      Imp.ArrayValues $ replicate (fromIntegral maxNumOps) $ IntValue $ Int32Value 0
+      Imp.ArrayValues $
+        replicate (fromIntegral maxNumOps) $
+          IntValue $
+            Int32Value 0
 
   reds_group_res_arrs <- groupResultArrays num_groups group_size reds
 
@@ -340,22 +345,23 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
-      sComment "save final values of segments" $
-        sWhen
+      sComment "save final values of segments"
+        $ sWhen
           ( sExt64 group_id' * segments_per_group + sExt64 ltid .<. num_segments
               .&&. ltid .<. segments_per_group
           )
-          $ forM_ (zip segred_pes (concat reds_arrs)) $ \(pe, arr) -> do
-            -- Figure out which segment result this thread should write...
-            let flat_segment_index =
-                  sExt64 group_id' * segments_per_group + sExt64 ltid
-                gtids' =
-                  unflattenIndex (init dims') flat_segment_index
-            copyDWIMFix
-              (patElemName pe)
-              gtids'
-              (Var arr)
-              [(ltid + 1) * segment_size_nonzero - 1]
+        $ forM_ (zip segred_pes (concat reds_arrs))
+        $ \(pe, arr) -> do
+          -- Figure out which segment result this thread should write...
+          let flat_segment_index =
+                sExt64 group_id' * segments_per_group + sExt64 ltid
+              gtids' =
+                unflattenIndex (init dims') flat_segment_index
+          copyDWIMFix
+            (patElemName pe)
+            gtids'
+            (Var arr)
+            [(ltid + 1) * segment_size_nonzero - 1]
 
       -- Finally another barrier, because we will be writing to the
       -- local memory array first thing in the next iteration.
@@ -640,7 +646,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
           let index_in_segment = global_tid `quot` kernelGroupSize constants
            in sExt64 local_tid
                 + (index_in_segment * Imp.unCount elems_per_thread + i)
-                * kernelGroupSize constants
+                  * kernelGroupSize constants
 
     check_bounds $
       sComment "apply map function" $
@@ -655,16 +661,16 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
               sComment "load new values" $
                 forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
                   copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-              sComment "apply reduction operator" $
-                compileStms mempty (bodyStms $ slugBody slug) $
-                  sComment "store in accumulator" $
-                    forM_
-                      ( zip
-                          (slugAccs slug)
-                          (map resSubExp $ bodyResult $ slugBody slug)
-                      )
-                      $ \((acc, acc_is), se) ->
-                        copyDWIMFix acc (acc_is ++ vec_is) se []
+              sComment "apply reduction operator"
+                $ compileStms mempty (bodyStms $ slugBody slug)
+                $ sComment "store in accumulator"
+                $ forM_
+                  ( zip
+                      (slugAccs slug)
+                      (map resSubExp $ bodyResult $ slugBody slug)
+                  )
+                $ \((acc, acc_is), se) ->
+                  copyDWIMFix acc (acc_is ++ vec_is) se []
 
     case comm of
       Noncommutative -> do
@@ -756,14 +762,14 @@ reductionStageTwo
         sOp $ Imp.MemFence Imp.FenceGlobal
         -- Increment the counter, thus stating that our result is
         -- available.
-        sOp $
-          Imp.Atomic DefaultSpace $
-            Imp.AtomicAdd
-              Int32
-              (tvVar old_counter)
-              counter_mem
-              counter_offset
-              $ untyped (1 :: Imp.TExp Int32)
+        sOp
+          $ Imp.Atomic DefaultSpace
+          $ Imp.AtomicAdd
+            Int32
+            (tvVar old_counter)
+            counter_mem
+            counter_offset
+          $ untyped (1 :: Imp.TExp Int32)
         -- Now check if we were the last group to write our result.  If
         -- so, it is our responsibility to produce the final result.
         sWrite sync_arr [0] $ untyped $ tvExp old_counter .==. groups_per_segment - 1
@@ -783,7 +789,8 @@ reductionStageTwo
         sOp $
           Imp.Atomic DefaultSpace $
             Imp.AtomicAdd Int32 (tvVar old_counter) counter_mem counter_offset $
-              untyped $ negate groups_per_segment
+              untyped $
+                negate groups_per_segment
 
       sLoopNest (slugShape slug) $ \vec_is -> do
         -- There is no guarantee that the number of workgroups for the

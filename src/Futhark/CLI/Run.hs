@@ -122,7 +122,9 @@ newFutharkiState cfg file = runExceptT $ do
               pure (externalErrorS (show err))
         )
   when (interpreterPrintWarnings cfg) $
-    liftIO $ hPutStr stderr $ pretty ws
+    liftIO $
+      hPutStr stderr $
+        pretty ws
 
   let imp = T.mkInitialImport "."
   ienv1 <-
@@ -137,7 +139,9 @@ newFutharkiState cfg file = runExceptT $ do
     badOnLeft pretty $
       snd $
         T.checkDec imports src' tenv1 imp $
-          mkOpen $ toPOSIX $ dropExtension file
+          mkOpen $
+            toPOSIX $
+              dropExtension file
   ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
   ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
   pure (tenv2, ienv3)

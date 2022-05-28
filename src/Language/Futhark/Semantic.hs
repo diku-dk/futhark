@@ -174,15 +174,21 @@ instance Pretty Env where
             ]
     where
       renderTypeBind (name, TypeAbbr l tps tp) =
-        p l <+> pprName name <> mconcat (map ((text " " <>) . ppr) tps)
-          <> text " =" <+> ppr tp
+        p l
+          <+> pprName name
+            <> mconcat (map ((text " " <>) . ppr) tps)
+            <> text " ="
+          <+> ppr tp
         where
           p Lifted = text "type^"
           p SizeLifted = text "type~"
           p Unlifted = text "type"
       renderValBind (name, BoundV tps t) =
-        text "val" <+> pprName name <> mconcat (map ((text " " <>) . ppr) tps)
-          <> text " =" <+> ppr t
+        text "val"
+          <+> pprName name
+            <> mconcat (map ((text " " <>) . ppr) tps)
+            <> text " ="
+          <+> ppr t
       renderModType (name, _sig) =
         text "module type" <+> pprName name
       renderMod (name, mod) =

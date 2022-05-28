@@ -331,7 +331,9 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
             (extra_nms, extra_rtps) =
               unzip $
                 filter ((`nameIn` unfus_set) . fst) $
-                  zip outVars $ map (stripArray 1) $ SOAC.typeOf soac_p
+                  zip outVars $
+                    map (stripArray 1) $
+                      SOAC.typeOf soac_p
             res_lam' = res_lam {lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps}
          in (extra_nms, res_lam', new_inp)
 
@@ -368,7 +370,8 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
                   splitAt3 (length scan_nes_c) (length red_nes_c) $ outNames ker
                 unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
             success
-              ( soac_p_scanout ++ soac_c_scanout
+              ( soac_p_scanout
+                  ++ soac_c_scanout
                   ++ soac_p_redout
                   ++ soac_c_redout
                   ++ soac_c_mapout
@@ -685,9 +688,11 @@ iswim _ (SOAC.Screma w form arrs) ots
             mkBody
               ( oneStm $
                   Let (setPatOuterDimTo w map_pat) (defAux ()) $
-                    Op $ Futhark.Screma w arrs' scan_form
+                    Op $
+                      Futhark.Screma w arrs' scan_form
               )
-              $ varsRes $ patNames map_pat
+              $ varsRes
+              $ patNames map_pat
           map_fun' = Lambda map_params map_body map_rettype
           perm = case lambdaReturnType map_fun of
             [] -> []
@@ -798,7 +803,8 @@ rearrangeReturnTypes nest@(MapNest.MapNest w body nestings inps) perm =
     ( zipWith
         setReturnType
         nestings
-        $ drop 1 $ iterate (map rowType) ts
+        $ drop 1
+        $ iterate (map rowType) ts
     )
     inps
   where
@@ -870,7 +876,11 @@ pullReshape (SOAC.Screma _ form inps) ots
       op' <-
         foldM outersoac (SOAC.Screma mapw' $ Futhark.mapSOAC maplam) $
           zip (drop 1 $ reverse $ newDims shape) $
-            drop 1 $ reverse $ drop 1 $ tails $ newDims shape
+            drop 1 $
+              reverse $
+                drop 1 $
+                  tails $
+                    newDims shape
       pure (op' inputs', ots')
 pullReshape _ _ = fail "Cannot pull reshape"
 

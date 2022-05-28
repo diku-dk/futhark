@@ -66,12 +66,12 @@ dumpError config err =
   where
     report s info = do
       T.hPutStrLn stderr s
-      when (fst (futharkVerbose config) > NotVerbose) $
-        maybe
+      when (fst (futharkVerbose config) > NotVerbose)
+        $ maybe
           (T.hPutStr stderr)
           T.writeFile
           (snd (futharkVerbose config))
-          $ info <> "\n"
+        $ info <> "\n"
 
 -- | Read a program from the given 'FilePath', run the given
 -- 'Pipeline', and finish up with the given 'Action'.
@@ -93,7 +93,8 @@ runCompilerOnProgram config pipeline action file = do
     compile = do
       prog <- runPipelineOnProgram config pipeline file
       when ((> NotVerbose) . fst $ futharkVerbose config) $
-        logMsg $ "Running action " ++ actionName action
+        logMsg $
+          "Running action " ++ actionName action
       actionProcedure action prog
       when ((> NotVerbose) . fst $ futharkVerbose config) $
         logMsg ("Done." :: String)

@@ -95,7 +95,8 @@ analyseExp aliases (If cond tb fb dec) =
         any (`nameIn` unAliases cons) $
           v : namesToList (M.findWithDefault mempty v aliases)
       notConsumed =
-        AliasDec . namesFromList
+        AliasDec
+          . namesFromList
           . filter (not . isConsumed)
           . namesToList
           . unAliases

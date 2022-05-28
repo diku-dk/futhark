@@ -72,7 +72,8 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
     -- simplifier applies bottom-up rules in a kind of deepest-first
     -- order.
     not (patElemName d `UT.isInResult` used)
-      || patElemName d `UT.isConsumed` used
+      || patElemName d
+      `UT.isConsumed` used
       -- Always OK to remove the copy if 'v' has no aliases and is never
       -- used again.
       || (v_is_fresh && v_not_used_again),
@@ -104,7 +105,10 @@ constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
       Simplify $
         certifying cs $
           attributing attrs $
-            letBind pat $ BasicOp $ SubExp $ Constant result
+            letBind pat $
+              BasicOp $
+                SubExp $
+                  Constant result
   where
     isConst (Constant v) = Just v
     isConst _ = Nothing
@@ -117,10 +121,14 @@ simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
       attributing attrs $ case res of
         SubExpResult cs' se ->
           certifying (cs <> cs') $
-            letBindNames (patNames pat) $ BasicOp $ SubExp se
+            letBindNames (patNames pat) $
+              BasicOp $
+                SubExp se
         IndexResult extra_cs idd' inds' ->
           certifying (cs <> extra_cs) $
-            letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
+            letBindNames (patNames pat) $
+              BasicOp $
+                Index idd' inds'
   where
     consumed = patElemName pe `UT.isConsumed` used
     seType (Var v) = ST.lookupType v vtable
@@ -193,7 +201,9 @@ ruleIf _ pat _ (cond, tb, fb, _)
       if oneIshInt t && zeroIshInt f && tcs == mempty && fcs == mempty
         then
           Simplify $
-            letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond
+            letBind pat $
+              BasicOp $
+                ConvOp (BToI (intValueType t)) cond
         else
           if zeroIshInt t && oneIshInt f
             then Simplify $ do
@@ -219,7 +229,9 @@ ruleIf vtable (Pat [pe]) aux (_c, tb, fb, IfDec [_] _)
     matches x y || matches y x =
       Simplify $
         certifying (stmAuxCerts aux <> xcs <> ycs) $
-          letBind (Pat [pe]) $ BasicOp $ SubExp y
+          letBind (Pat [pe]) $
+            BasicOp $
+              SubExp y
   where
     z = patElemName pe
     matches (Var x) y
@@ -262,7 +274,10 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
       -- Do both branches return the same value?
       | tse == fse = do
           certifying (resCerts tse <> resCerts fse) $
-            letBindNames [patElemName pe] $ BasicOp $ SubExp $ resSubExp tse
+            letBindNames [patElemName pe] $
+              BasicOp $
+                SubExp $
+                  resSubExp tse
           hoisted i pe
 
       -- Do both branches return values that are free in the
@@ -274,7 +289,8 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
         Prim _ <- patElemType pe = do
           bt <- expTypesFromPat $ Pat [pe]
           letBindNames [patElemName pe]
-            =<< ( If cond <$> resultBodyM [resSubExp tse]
+            =<< ( If cond
+                    <$> resultBodyM [resSubExp tse]
                     <*> resultBodyM [resSubExp fse]
                     <*> pure (IfDec bt ifsort)
                 )
@@ -357,7 +373,8 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
 
   lam' <-
     mkLambda (cert_params' ++ acc_params') $
-      bodyBind $ (lambdaBody lam) {bodyResult = acc_res' <> nonacc_res'}
+      bodyBind $
+        (lambdaBody lam) {bodyResult = acc_res' <> nonacc_res'}
 
   letBind (Pat (concat acc_pes' <> nonacc_pes')) $ WithAcc inputs' lam'
   where
@@ -420,10 +437,10 @@ withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
 
       -- Eliminate unused accumulator results
       let get_rid_of =
-            map snd . filter getRidOf $
-              zip
+            map snd . filter getRidOf
+              $ zip
                 (chunks (map inputArrs inputs) acc_pes)
-                $ map paramName cert_params
+              $ map paramName cert_params
 
       -- Eliminate unused non-accumulator results
       let (nonacc_pes', nonacc_res') =

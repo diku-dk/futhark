@@ -52,10 +52,13 @@ numberOfGroups desc w group_size = do
   max_num_groups_key <- nameFromString . pretty <$> newVName (desc ++ "_num_groups")
   num_groups <-
     letSubExp "num_groups" $
-      Op $ SizeOp $ CalcNumGroups w max_num_groups_key group_size
+      Op $
+        SizeOp $
+          CalcNumGroups w max_num_groups_key group_size
   num_threads <-
     letSubExp "num_threads" $
-      BasicOp $ BinOp (Mul Int64 OverflowUndef) num_groups group_size
+      BasicOp $
+        BinOp (Mul Int64 OverflowUndef) num_groups group_size
   pure (num_groups, num_threads)
 
 blockedKernelSize ::

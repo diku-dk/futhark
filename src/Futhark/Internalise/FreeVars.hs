@@ -108,7 +108,9 @@ freeVars expr = case expr of
       <> freeVars e2
   Project _ e _ _ -> freeVars e
   AppExp (LetWith id1 id2 idxs e1 e2 _) _ ->
-    ident id2 <> foldMap freeDimIndex idxs <> freeVars e1
+    ident id2
+      <> foldMap freeDimIndex idxs
+      <> freeVars e1
       <> (freeVars e2 `without` S.singleton (identName id1))
   AppExp (Index e idxs _) _ -> freeVars e <> foldMap freeDimIndex idxs
   Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2

@@ -75,9 +75,13 @@ addArrsToAcc lvl shape arrs acc = do
     vs <- forM arrs $ \arr -> do
       arr_t <- lookupType arr
       letSubExp (baseString arr <> "_elem") $
-        BasicOp $ Index arr $ fullSlice arr_t $ map (DimFix . Var) gtids
+        BasicOp $
+          Index arr $
+            fullSlice arr_t $
+              map (DimFix . Var) gtids
     letExp (baseString acc <> "_upd") $
-      BasicOp $ UpdateAcc acc (map Var gtids) vs
+      BasicOp $
+        UpdateAcc acc (map Var gtids) vs
 
   acc_t <- lookupType acc
   pure . Op . SegOp . SegMap lvl space [acc_t] $

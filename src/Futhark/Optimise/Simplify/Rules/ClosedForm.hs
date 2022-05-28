@@ -65,7 +65,8 @@ foldClosedForm look pat lam accs arrs = do
       accs
   isEmpty <- newVName "fold_input_is_empty"
   letBindNames [isEmpty] $
-    BasicOp $ CmpOp (CmpEq int64) inputsize (intConst Int64 0)
+    BasicOp $
+      CmpOp (CmpEq int64) inputsize (intConst Int64 0)
   letBind pat
     =<< ( If (Var isEmpty)
             <$> resultBodyM accs
@@ -103,7 +104,8 @@ loopClosedForm pat merge i it bound body = do
       mergeexp
   isEmpty <- newVName "bound_is_zero"
   letBindNames [isEmpty] $
-    BasicOp $ CmpOp (CmpSlt it) bound (intConst it 0)
+    BasicOp $
+      CmpOp (CmpSlt it) bound (intConst it 0)
 
   letBind pat
     =<< ( If (Var isEmpty)
@@ -183,7 +185,8 @@ checkResults pat size untouchable it knownBnds params body accs = do
     properFloatSize t =
       Just $
         letSubExp "converted_size" $
-          BasicOp $ ConvOp (SIToFP it t) size
+          BasicOp $
+            ConvOp (SIToFP it t) size
 
 determineKnownBindings ::
   VarLookup rep ->

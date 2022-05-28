@@ -43,7 +43,9 @@ makeLocalArrays (Count group_size) num_threads scans = do
               let shape' = Shape [num_threads] <> shape
               arr <-
                 lift . sArray "scan_arr" pt shape' mem $
-                  IxFun.iota $ map pe64 $ shapeDims shape'
+                  IxFun.iota $
+                    map pe64 $
+                      shapeDims shape'
               pure (arr, [])
             _ -> do
               let pt = elemType $ paramType p
@@ -219,7 +221,8 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
         sWhen in_bounds when_in_bounds
 
       unless (all (null . segBinOpShape) scans) $
-        sOp $ Imp.Barrier Imp.FenceGlobal
+        sOp $
+          Imp.Barrier Imp.FenceGlobal
 
       forM_ (zip3 per_scan_pes scans all_local_arrs) $
         \(pes, scan@(SegBinOp _ scan_op nes vec_shape), local_arrs) ->
@@ -287,7 +290,8 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                             then sExt64 (kernelGroupSize constants) - 1
                             else
                               (sExt64 (kernelGroupId constants) + 1)
-                                * sExt64 (kernelGroupSize constants) - 1
+                                * sExt64 (kernelGroupSize constants)
+                                - 1
                         ]
                   load_neutral =
                     forM_ (zip nes scan_x_params) $ \(ne, p) ->
@@ -300,7 +304,8 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                     Just f ->
                       f
                         ( tvExp chunk_offset
-                            + sExt64 (kernelGroupSize constants) - 1
+                            + sExt64 (kernelGroupSize constants)
+                            - 1
                         )
                         ( tvExp chunk_offset
                             + sExt64 (kernelGroupSize constants)
@@ -407,7 +412,8 @@ scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment sp
       dims' = map toInt64Exp dims
   required_groups <-
     dPrimVE "required_groups" $
-      sExt32 $ product dims' `divUp` sExt64 (unCount group_size')
+      sExt32 $
+        product dims' `divUp` sExt64 (unCount group_size')
 
   sKernelThread "scan_stage3" (segFlat space) (defKernelAttrs num_groups group_size) $
     virtualiseGroups SegVirt required_groups $ \virt_group_id -> do
@@ -496,7 +502,9 @@ compileSegScan pat lvl space scans kbody = do
     fmap (Imp.Count . tvSize) $
       dPrimV "stage1_num_groups" $
         sMin64 (tvExp stage1_max_num_groups) $
-          toInt64Exp $ Imp.unCount $ segNumGroups lvl
+          toInt64Exp $
+            Imp.unCount $
+              segNumGroups lvl
 
   (stage1_num_threads, elems_per_group, crossesSegment) <-
     scanStage1 pat stage1_num_groups (segGroupSize lvl) space scans kbody

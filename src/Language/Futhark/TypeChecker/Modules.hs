@@ -58,7 +58,8 @@ substituteTypesInBoundV substs (BoundV tps t) =
 allNamesInEnv :: Env -> S.Set VName
 allNamesInEnv (Env vtable ttable stable modtable _names) =
   S.fromList
-    ( M.keys vtable ++ M.keys ttable
+    ( M.keys vtable
+        ++ M.keys ttable
         ++ M.keys stable
         ++ M.keys modtable
     )
@@ -285,7 +286,8 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
       Left . TypeError (locOf loc) mempty $
         "Module defines"
           </> indent 2 (ppTypeAbbr abs name mod_t)
-          </> "but module type requires" <+> text what <> "."
+          </> "but module type requires"
+          <+> text what <> "."
       where
         what = case name_l of
           Unlifted -> "a non-lifted type"
@@ -371,10 +373,12 @@ ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetTy
 ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
   | typeLeaf tn `elem` abs,
     map typeParamToArg ps == args =
-      "type" <> ppr l <+> ppr name
+      "type" <> ppr l
+        <+> ppr name
         <+> spread (map ppr ps)
 ppTypeAbbr _ name (l, ps, t) =
-  "type" <> ppr l <+> ppr name
+  "type" <> ppr l
+    <+> ppr name
     <+> spread (map ppr ps)
     <+> equals
     <+/> nest 2 (align (ppr t))
@@ -585,7 +589,10 @@ matchMTys orig_mty orig_mty_sig =
           | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =
-      "val" <+> ppr v <+> spread (map ppr tps) <+> colon
+      "val"
+        <+> ppr v
+        <+> spread (map ppr tps)
+        <+> colon
         </> indent 2 (align (ppr t))
 
 -- | Apply a parametric module to an argument.

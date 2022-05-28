@@ -19,33 +19,35 @@ tests =
 
 psumTest :: TestTree
 psumTest =
-  testCase "psumTest" $
-    assertEqual
+  testCase "psumTest"
+    $ assertEqual
       "Color simple 1-2-3 using two colors"
       ([(0, "local"), (1, "local")], [(1 :: Int, 0), (2, 1), (3, 0)])
-      $ (M.toList *** M.toList) $
-        GreedyColoring.colorGraph
-          (M.fromList [(1, "local"), (2, "local"), (3, "local")])
-          $ S.fromList [(1, 2), (2, 3)]
+    $ (M.toList *** M.toList)
+    $ GreedyColoring.colorGraph
+      (M.fromList [(1, "local"), (2, "local"), (3, "local")])
+    $ S.fromList [(1, 2), (2, 3)]
 
 allIntersect :: TestTree
 allIntersect =
-  testCase "allIntersect" $
-    assertEqual
+  testCase "allIntersect"
+    $ assertEqual
       "Color a graph where all values intersect"
       ([(0, "local"), (1, "local"), (2, "local")], [(1 :: Int, 2), (2, 1), (3, 0)])
-      $ (M.toList *** M.toList) $
-        GreedyColoring.colorGraph
-          (M.fromList [(1, "local"), (2, "local"), (3, "local")])
-          $ S.fromList [(1, 2), (2, 3), (1, 3)]
+    $ (M.toList *** M.toList)
+    $ GreedyColoring.colorGraph
+      (M.fromList [(1, "local"), (2, "local"), (3, "local")])
+    $ S.fromList [(1, 2), (2, 3), (1, 3)]
 
 emptyGraph :: TestTree
 emptyGraph =
-  testCase "emptyGraph" $
-    assertEqual
+  testCase "emptyGraph"
+    $ assertEqual
       "Color an empty graph"
       ([] :: [(Int, Char)], [] :: [(Int, Int)])
-      $ (M.toList *** M.toList) $ GreedyColoring.colorGraph M.empty $ S.fromList []
+    $ (M.toList *** M.toList)
+    $ GreedyColoring.colorGraph M.empty
+    $ S.fromList []
 
 noIntersections :: TestTree
 noIntersections =

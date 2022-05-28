@@ -91,7 +91,8 @@ mapExpM tv (BasicOp (SubExp se)) =
   BasicOp <$> (SubExp <$> mapOnSubExp tv se)
 mapExpM tv (BasicOp (ArrayLit els rowt)) =
   BasicOp
-    <$> ( ArrayLit <$> mapM (mapOnSubExp tv) els
+    <$> ( ArrayLit
+            <$> mapM (mapOnSubExp tv) els
             <*> mapOnType (mapOnSubExp tv) rowt
         )
 mapExpM tv (BasicOp (BinOp bop x y)) =
@@ -103,7 +104,10 @@ mapExpM tv (BasicOp (ConvOp conv x)) =
 mapExpM tv (BasicOp (UnOp op x)) =
   BasicOp <$> (UnOp op <$> mapOnSubExp tv x)
 mapExpM tv (If c texp fexp (IfDec ts s)) =
-  If <$> mapOnSubExp tv c <*> mapOnBody tv mempty texp <*> mapOnBody tv mempty fexp
+  If
+    <$> mapOnSubExp tv c
+    <*> mapOnBody tv mempty texp
+    <*> mapOnBody tv mempty fexp
     <*> (IfDec <$> mapM (mapOnBranchType tv) ts <*> pure s)
 mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
@@ -111,23 +115,27 @@ mapExpM tv (Apply fname args ret loc) = do
   Apply fname args' <$> mapM (mapOnRetType tv) ret <*> pure loc
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp
-    <$> ( Index <$> mapOnVName tv arr
+    <$> ( Index
+            <$> mapOnVName tv arr
             <*> traverse (mapOnSubExp tv) slice
         )
 mapExpM tv (BasicOp (Update safety arr slice se)) =
   BasicOp
-    <$> ( Update safety <$> mapOnVName tv arr
+    <$> ( Update safety
+            <$> mapOnVName tv arr
             <*> traverse (mapOnSubExp tv) slice
             <*> mapOnSubExp tv se
         )
 mapExpM tv (BasicOp (FlatIndex arr slice)) =
   BasicOp
-    <$> ( FlatIndex <$> mapOnVName tv arr
+    <$> ( FlatIndex
+            <$> mapOnVName tv arr
             <*> traverse (mapOnSubExp tv) slice
         )
 mapExpM tv (BasicOp (FlatUpdate arr slice se)) =
   BasicOp
-    <$> ( FlatUpdate <$> mapOnVName tv arr
+    <$> ( FlatUpdate
+            <$> mapOnVName tv arr
             <*> traverse (mapOnSubExp tv) slice
             <*> mapOnVName tv se
         )
@@ -171,7 +179,9 @@ mapExpM tv (WithAcc inputs lam) =
   WithAcc <$> mapM onInput inputs <*> mapOnLambda tv lam
   where
     onInput (shape, vs, op) =
-      (,,) <$> mapOnShape tv shape <*> mapM (mapOnVName tv) vs
+      (,,)
+        <$> mapOnShape tv shape
+        <*> mapM (mapOnVName tv) vs
         <*> traverse (bitraverse (mapOnLambda tv) (mapM (mapOnSubExp tv))) op
 mapExpM tv (DoLoop merge form loopbody) = do
   params' <- mapM (mapOnFParam tv) params
@@ -195,7 +205,10 @@ mapOnLoopForm ::
   LoopForm frep ->
   m (LoopForm trep)
 mapOnLoopForm tv (ForLoop i it bound loop_vars) =
-  ForLoop <$> mapOnVName tv i <*> pure it <*> mapOnSubExp tv bound
+  ForLoop
+    <$> mapOnVName tv i
+    <*> pure it
+    <*> mapOnSubExp tv bound
     <*> (zip <$> mapM (mapOnLParam tv) loop_lparams <*> mapM (mapOnVName tv) loop_arrs)
   where
     (loop_lparams, loop_arrs) = unzip loop_vars
@@ -259,7 +272,8 @@ walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
 walkOnLoopForm :: Monad m => Walker rep m -> LoopForm rep -> m ()
 walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
-  walkOnVName tv i >> walkOnSubExp tv bound
+  walkOnVName tv i
+    >> walkOnSubExp tv bound
     >> mapM_ (walkOnLParam tv) loop_lparams
     >> mapM_ (walkOnVName tv) loop_arrs
   where

@@ -139,7 +139,9 @@ combArrayElements = foldM comb
       | valueType x == valueType y = Right x
       | otherwise =
           Left . SyntaxError NoLoc $
-            "Elements " <> pretty x <> " and "
+            "Elements "
+              <> pretty x
+              <> " and "
               <> pretty y
               <> " cannot exist in same array."
 
@@ -155,7 +157,8 @@ applyExp es =
     op (AppExp (Index e is floc) _) (ArrayLit xs _ xloc) =
       parseErrorAt (srcspan floc xloc) . Just . pretty $
         "Incorrect syntax for multi-dimensional indexing."
-          </> "Use" <+> align (ppr index)
+          </> "Use"
+          <+> align (ppr index)
       where
         index = AppExp (Index e (is ++ map DimFix xs) xloc) NoInfo
     op f x =

@@ -102,7 +102,8 @@ instance Checkable rep => Show (ErrorCase rep) where
       ++ pretty t
       ++ "."
   show (ReturnTypeError fname rettype bodytype) =
-    "Declaration of function " ++ nameToString fname
+    "Declaration of function "
+      ++ nameToString fname
       ++ " declares return type\n  "
       ++ prettyTuple rettype
       ++ "\nBut body has type\n  "
@@ -110,14 +111,16 @@ instance Checkable rep => Show (ErrorCase rep) where
   show (DupDefinitionError name) =
     "Duplicate definition of function " ++ nameToString name ++ ""
   show (DupParamError funname paramname) =
-    "Parameter " ++ pretty paramname
+    "Parameter "
+      ++ pretty paramname
       ++ " mentioned multiple times in argument list of function "
       ++ nameToString funname
       ++ "."
   show (DupPatError name) =
     "Variable " ++ pretty name ++ " bound twice in pattern."
   show (InvalidPatError pat t desc) =
-    "Pat\n" ++ pretty pat
+    "Pat\n"
+      ++ pretty pat
       ++ "\ncannot match value of type\n"
       ++ prettyTupleLines t
       ++ end
@@ -130,7 +133,9 @@ instance Checkable rep => Show (ErrorCase rep) where
   show (UnknownFunctionError fname) =
     "Call of unknown function " ++ nameToString fname ++ "."
   show (ParameterMismatch fname expected got) =
-    "In call of " ++ fname' ++ ":\n"
+    "In call of "
+      ++ fname'
+      ++ ":\n"
       ++ "expecting "
       ++ show nexpected
       ++ " arguments of type(s)\n"
@@ -146,12 +151,16 @@ instance Checkable rep => Show (ErrorCase rep) where
   show (SlicingError dims got) =
     show got ++ " indices given, but type of indexee has " ++ show dims ++ " dimension(s)."
   show (BadAnnotation desc expected got) =
-    "Annotation of \"" ++ desc ++ "\" type of expression is " ++ pretty expected
+    "Annotation of \""
+      ++ desc
+      ++ "\" type of expression is "
+      ++ pretty expected
       ++ ", but derived to be "
       ++ pretty got
       ++ "."
   show (ReturnAliased fname name) =
-    "Unique return value of function " ++ nameToString fname
+    "Unique return value of function "
+      ++ nameToString fname
       ++ " is aliased to "
       ++ pretty name
       ++ ", which is not consumed."
@@ -160,12 +169,14 @@ instance Checkable rep => Show (ErrorCase rep) where
       ++ nameToString fname
       ++ " is aliased to some other tuple component."
   show (NotAnArray e t) =
-    "The expression " ++ pretty e
+    "The expression "
+      ++ pretty e
       ++ " is expected to be an array, but is "
       ++ pretty t
       ++ "."
   show (PermutationError perm rank name) =
-    "The permutation (" ++ intercalate ", " (map show perm)
+    "The permutation ("
+      ++ intercalate ", " (map show perm)
       ++ ") is not valid for array "
       ++ name'
       ++ "of rank "
@@ -347,7 +358,9 @@ bound :: VName -> TypeM rep ()
 bound name = do
   already_seen <- gets $ nameIn name . stateNames
   when already_seen $
-    bad $ TypeError $ "Name " ++ pretty name ++ " bound twice"
+    bad $
+      TypeError $
+        "Name " ++ pretty name ++ " bound twice"
   modify $ \s -> s {stateNames = oneName name <> stateNames s}
 
 occur :: Occurences -> TypeM rep ()
@@ -521,7 +534,8 @@ require :: Checkable rep => [Type] -> SubExp -> TypeM rep ()
 require ts se = do
   t <- checkSubExp se
   unless (t `elem` ts) $
-    bad $ UnexpectedType (BasicOp $ SubExp se) t ts
+    bad $
+      UnexpectedType (BasicOp $ SubExp se) t ts
 
 -- | Variant of 'require' working on variable names.
 requireI :: Checkable rep => [Type] -> VName -> TypeM rep ()
@@ -602,17 +616,17 @@ checkFun ::
   FunDef (Aliases rep) ->
   TypeM rep ()
 checkFun (FunDef _ _ fname rettype params body) =
-  context ("In function " ++ nameToString fname) $
-    checkFun'
+  context ("In function " ++ nameToString fname)
+    $ checkFun'
       ( fname,
         map declExtTypeOf rettype,
         funParamsToNameInfos params
       )
       (Just consumable)
-      $ do
-        checkFunParams params
-        checkRetType rettype
-        context "When checking function body" $ checkFunBody rettype body
+    $ do
+      checkFunParams params
+      checkRetType rettype
+      context "When checking function body" $ checkFunBody rettype body
   where
     consumable =
       [ (paramName param, mempty)
@@ -666,7 +680,8 @@ checkFun' (fname, rettype, params) consumable check = do
         ( "When checking the body aliases: "
             ++ pretty (map namesToList body_aliases)
         )
-        $ checkReturnAlias $ map (namesFromList . filter isArray . namesToList) body_aliases
+        $ checkReturnAlias
+        $ map (namesFromList . filter isArray . namesToList) body_aliases
   where
     param_names = map fst params
 
@@ -770,7 +785,8 @@ checkLambdaResult ::
 checkLambdaResult ts es
   | length ts /= length es =
       bad . TypeError $
-        "Lambda has return type " ++ prettyTuple ts
+        "Lambda has return type "
+          ++ prettyTuple ts
           ++ " describing "
           ++ show (length ts)
           ++ " values, but body returns "
@@ -780,7 +796,10 @@ checkLambdaResult ts es
   | otherwise = forM_ (zip ts es) $ \(t, e) -> do
       et <- checkSubExpRes e
       unless (et == t) . bad . TypeError $
-        "Subexpression " ++ pretty e ++ " has type " ++ pretty et
+        "Subexpression "
+          ++ pretty e
+          ++ " has type "
+          ++ pretty et
           ++ " but expected "
           ++ pretty t
 
@@ -825,16 +844,19 @@ checkBasicOp (Index ident (Slice idxes)) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt /= length idxes) $
-    bad $ SlicingError (arrayRank vt) (length idxes)
+    bad $
+      SlicingError (arrayRank vt) (length idxes)
   mapM_ checkDimIndex idxes
 checkBasicOp (Update _ src (Slice idxes) se) = do
   (src_shape, src_pt) <- checkArrIdent src
   when (shapeRank src_shape /= length idxes) $
-    bad $ SlicingError (shapeRank src_shape) (length idxes)
+    bad $
+      SlicingError (shapeRank src_shape) (length idxes)
 
   se_aliases <- subExpAliasesM se
   when (src `nameIn` se_aliases) $
-    bad $ TypeError "The target of an Update must not alias the value to be written."
+    bad $
+      TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
   require [arrayOf (Prim src_pt) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
@@ -843,16 +865,19 @@ checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt /= 1) $
-    bad $ SlicingError (arrayRank vt) 1
+    bad $
+      SlicingError (arrayRank vt) 1
   checkFlatSlice slice
 checkBasicOp (FlatUpdate src slice v) = do
   (src_shape, src_pt) <- checkArrIdent src
   when (shapeRank src_shape /= 1) $
-    bad $ SlicingError (shapeRank src_shape) 1
+    bad $
+      SlicingError (shapeRank src_shape) 1
 
   v_aliases <- lookupAliases v
   when (src `nameIn` v_aliases) $
-    bad $ TypeError "The target of an Update must not alias the value to be written."
+    bad $
+      TypeError "The target of an Update must not alias the value to be written."
 
   checkFlatSlice slice
   requireI [arrayOf (Prim src_pt) (Shape (flatSliceDims slice)) NoUniqueness] v
@@ -876,7 +901,10 @@ checkBasicOp (Reshape newshape arrexp) = do
     checkDimChange rank (DimCoercion se) i
       | i >= rank =
           bad . TypeError $
-            "Asked to coerce dimension " ++ show i ++ " to " ++ pretty se
+            "Asked to coerce dimension "
+              ++ show i
+              ++ " to "
+              ++ pretty se
               ++ ", but array "
               ++ pretty arrexp
               ++ " has only "
@@ -888,7 +916,9 @@ checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0 .. rank - 1]) $
-    bad $ PermutationError perm rank $ Just arr
+    bad $
+      PermutationError perm rank $
+        Just arr
 checkBasicOp (Rotate rots arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
@@ -896,7 +926,8 @@ checkBasicOp (Rotate rots arr) = do
   when (length rots /= rank) $
     bad $
       TypeError $
-        "Cannot rotate " ++ show (length rots)
+        "Cannot rotate "
+          ++ show (length rots)
           ++ " dimensions of "
           ++ show rank
           ++ "-dimensional array."
@@ -904,7 +935,8 @@ checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
   arr1_dims <- shapeDims . fst <$> checkArrIdent arr1exp
   arr2s_dims <- map (shapeDims . fst) <$> mapM checkArrIdent arr2exps
   unless (all ((== dropAt i 1 arr1_dims) . dropAt i 1) arr2s_dims) $
-    bad $ TypeError "Types of arguments to concat do not match."
+    bad $
+      TypeError "Types of arguments to concat do not match."
   require [Prim int64] ressize
 checkBasicOp (Copy e) =
   void $ checkArrIdent e
@@ -945,7 +977,8 @@ matchLoopResultExt ::
 matchLoopResultExt merge loopres = do
   let rettype_ext =
         existentialiseExtTypes (map paramName merge) $
-          staticShapes $ map typeOf merge
+          staticShapes $
+            map typeOf merge
 
   bodyt <- mapM subExpResType loopres
 
@@ -1002,28 +1035,30 @@ checkExp (DoLoop merge form loopbody) = do
           ]
             ++ form_consumable
 
-    context "Inside the loop body" $
-      checkFun'
+    context "Inside the loop body"
+      $ checkFun'
         ( nameFromString "<loop body>",
           staticShapes rettype,
           funParamsToNameInfos mergepat
         )
         (Just consumable)
-        $ do
-          checkFunParams mergepat
-          checkBodyDec $ snd $ bodyDec loopbody
+      $ do
+        checkFunParams mergepat
+        checkBodyDec $ snd $ bodyDec loopbody
 
-          checkStms (bodyStms loopbody) $ do
-            context "In loop body result" $
-              checkResult $ bodyResult loopbody
+        checkStms (bodyStms loopbody) $ do
+          context "In loop body result" $
+            checkResult $
+              bodyResult loopbody
 
-            context "When matching result of body with loop parameters" $
-              matchLoopResult (map fst merge) $ bodyResult loopbody
+          context "When matching result of body with loop parameters" $
+            matchLoopResult (map fst merge) $
+              bodyResult loopbody
 
-            let bound_here =
-                  namesFromList $ M.keys $ scopeOf $ bodyStms loopbody
-            map (`namesSubtract` bound_here)
-              <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
+          let bound_here =
+                namesFromList $ M.keys $ scopeOf $ bodyStms loopbody
+          map (`namesSubtract` bound_here)
+            <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
   where
     checkLoopVar (p, a) = do
       a_t <- lookupType a
@@ -1033,7 +1068,8 @@ checkExp (DoLoop merge form loopbody) = do
           checkLParamDec (paramName p) $ paramDec p
           unless (a_t_r `subtypeOf` typeOf (paramDec p)) $
             bad . TypeError $
-              "Loop parameter " ++ pretty p
+              "Loop parameter "
+                ++ pretty p
                 ++ " not valid for element of "
                 ++ pretty a
                 ++ ", which has row type "
@@ -1042,7 +1078,8 @@ checkExp (DoLoop merge form loopbody) = do
           pure (paramName p, als)
         _ ->
           bad . TypeError $
-            "Cannot loop over " ++ pretty a
+            "Cannot loop over "
+              ++ pretty a
               ++ " of type "
               ++ pretty a_t
     checkForm mergeargs (ForLoop loopvar it boundexp loopvars) = do
@@ -1060,7 +1097,9 @@ checkExp (DoLoop merge form loopbody) = do
         Just (condparam, _) ->
           unless (paramType condparam == Prim Bool) $
             bad . TypeError $
-              "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but "
+              "Conditional '"
+                ++ pretty cond
+                ++ "' of while-loop is not boolean, but "
                 ++ pretty (paramType condparam)
                 ++ "."
         Nothing ->
@@ -1100,7 +1139,8 @@ checkExp (WithAcc inputs lam) = do
     elem_ts <- forM arrs $ \arr -> do
       arr_t <- lookupType arr
       unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
-        bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty shape
+        bad . TypeError $
+          pretty arr <> " is not an array of outer shape " <> pretty shape
       consume =<< lookupAliases arr
       pure $ stripArray (shapeRank shape) arr_t
 
@@ -1144,7 +1184,9 @@ checkSOACArrayArgs width = mapM checkSOACArrayArg
         Array {} -> do
           let argSize = arraySize 0 t
           unless (argSize == width) . bad . TypeError $
-            "SOAC argument " ++ pretty v ++ " has outer size "
+            "SOAC argument "
+              ++ pretty v
+              ++ " has outer size "
               ++ pretty argSize
               ++ ", but width of SOAC is "
               ++ pretty width
@@ -1265,7 +1307,8 @@ matchExtPat ::
   TypeM rep ()
 matchExtPat pat ts =
   unless (expExtTypesFromPat pat == ts) $
-    bad $ InvalidPatError pat ts Nothing
+    bad $
+      InvalidPatError pat ts Nothing
 
 matchExtReturnType ::
   Checkable rep =>
@@ -1352,7 +1395,9 @@ checkFuncall ::
 checkFuncall fname paramts args = do
   let argts = map argType args
   unless (validApply paramts argts) $
-    bad $ ParameterMismatch fname (map fromDecl paramts) $ map argType args
+    bad $
+      ParameterMismatch fname (map fromDecl paramts) $
+        map argType args
   consumeArgs paramts args
 
 consumeArgs ::
@@ -1394,7 +1439,9 @@ checkAnyLambda soac (Lambda params body rettype) args = do
           checkLambdaBody rettype body
     else
       bad . TypeError $
-        "Anonymous function defined with " ++ show (length params) ++ " parameters:\n"
+        "Anonymous function defined with "
+          ++ show (length params)
+          ++ " parameters:\n"
           ++ pretty params
           ++ "\nbut expected to take "
           ++ show (length args)
@@ -1421,12 +1468,14 @@ checkPrimExp (FunExp h args t) = do
       pure
       $ M.lookup h primFuns
   when (length h_ts /= length args) . bad . TypeError $
-    "Function expects " ++ show (length h_ts)
+    "Function expects "
+      ++ show (length h_ts)
       ++ " parameters, but given "
       ++ show (length args)
       ++ " arguments."
   when (h_ret /= t) . bad . TypeError $
-    "Function return annotation is " ++ pretty t
+    "Function return annotation is "
+      ++ pretty t
       ++ ", but expected "
       ++ pretty h_ret
   zipWithM_ requirePrimExp h_ts args

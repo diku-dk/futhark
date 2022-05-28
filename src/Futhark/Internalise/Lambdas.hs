@@ -105,8 +105,8 @@ internalisePartitionLambda internaliseLambda k lam args = do
     rettype = replicate (k + 2) $ I.Prim int64
     result i =
       map constant $
-        fromIntegral i :
-        (replicate i 0 ++ [1 :: Int64] ++ replicate (k - i) 0)
+        fromIntegral i
+          : (replicate i 0 ++ [1 :: Int64] ++ replicate (k - i) 0)
 
     mkResult _ i | i >= k = pure $ result i
     mkResult eq_class i = do
@@ -114,7 +114,8 @@ internalisePartitionLambda internaliseLambda k lam args = do
         letSubExp "is_i" $
           BasicOp $
             CmpOp (CmpEq int64) eq_class $
-              intConst Int64 $ toInteger i
+              intConst Int64 $
+                toInteger i
       letTupExp' "part_res"
         =<< eIf
           (eSubExp is_i)

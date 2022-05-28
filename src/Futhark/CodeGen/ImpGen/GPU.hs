@@ -297,8 +297,8 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
       let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
-      emit $
-        Imp.Copy
+      emit
+        $ Imp.Copy
           bt
           destmem
           (bytes $ sExt64 destoffset)
@@ -306,7 +306,7 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
           srcmem
           (bytes $ sExt64 srcoffset)
           srcspace
-          $ num_elems `Imp.withElemType` bt
+        $ num_elems `Imp.withElemType` bt
   | otherwise = sCopy bt destloc srcloc
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
@@ -422,7 +422,8 @@ mapTransposeFunction bt =
             (Imp.Count num_bytes)
 
     callTransposeKernel =
-      Imp.Op . Imp.CallKernel
+      Imp.Op
+        . Imp.CallKernel
         . mapTransposeKernel
           (mapTransposeName bt)
           block_dim_int

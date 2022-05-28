@@ -204,7 +204,9 @@ arrayPointer arg typ =
 
 makeResult :: Int -> String -> String
 makeResult i typ =
-  "  var result" ++ show i ++ " = "
+  "  var result"
+    ++ show i
+    ++ " = "
     ++ if isArray typ
       then "this.new_" ++ signature ++ "_from_ptr(" ++ readout ++ ");"
       else

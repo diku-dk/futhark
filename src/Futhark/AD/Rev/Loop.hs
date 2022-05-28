@@ -72,7 +72,9 @@ removeLoopVars loop =
           xs_t <- lookupType xs
           x' <-
             letExp (baseString $ paramName x_param) $
-              BasicOp $ Index xs $ fullSlice xs_t [DimFix (Var i)]
+              BasicOp $
+                Index xs $
+                  fullSlice xs_t [DimFix (Var i)]
           pure (paramName x_param, x')
     (substs_list, subst_stms) <- collectStms $ mapM indexify loop_vars
     let Body aux' stms' res' = substituteNames (M.fromList substs_list) body
@@ -140,12 +142,14 @@ nestifyLoop bound_se = nestifyLoop' bound_se
                     do
                       offset' <-
                         letSubExp "offset" $
-                          BasicOp $ BinOp (Mul it OverflowUndef) offset (Var i)
+                          BasicOp $
+                            BinOp (Mul it OverflowUndef) offset (Var i)
 
                       inner_body <- insertStmsM $ do
                         i_inner <-
                           letExp "i_inner" $
-                            BasicOp $ BinOp (Add it OverflowUndef) offset' (Var i')
+                            BasicOp $
+                              BinOp (Add it OverflowUndef) offset' (Var i')
                         pure $ substituteNames (M.singleton i' i_inner) body'
 
                       inner_loop <-
@@ -175,7 +179,8 @@ stripmine n pat loop = do
     bound_int <- letSubExp "bound_int" $ BasicOp $ ConvOp (FPToUI Float64 it) bound'
     total_iters <-
       letSubExp "total_iters" $
-        BasicOp $ BinOp (Pow it) bound_int (Constant $ IntValue $ intValue it n)
+        BasicOp $
+          BinOp (Pow it) bound_int (Constant $ IntValue $ intValue it n)
     remain_iters <-
       letSubExp "remain_iters" $ BasicOp $ BinOp (Sub it OverflowUndef) bound total_iters
     mined_loop <- nestifyLoop bound_int n loop
@@ -184,7 +189,8 @@ stripmine n pat loop = do
       remain_body <- insertStmsM $ do
         i_remain <-
           letExp "i_remain" $
-            BasicOp $ BinOp (Add it OverflowUndef) total_iters (Var i')
+            BasicOp $
+              BinOp (Add it OverflowUndef) total_iters (Var i')
         pure $ substituteNames (M.singleton i' i_remain) body'
       let loop_params_rem = map fst val_pats'
           loop_inits_rem = map (Var . patElemName) $ patElems pat'
@@ -246,12 +252,15 @@ fwdLoop pat aux loop =
               let saved_param = Param mempty saved_param_v $ arrayOf t (Shape [bound64]) Unique
                   saved_pat = PatElem saved_pat_v $ arrayOf t (Shape [bound64]) NoUniqueness
               saved_update <-
-                localScope (scopeOfFParams [saved_param]) $
-                  letInPlace
+                localScope (scopeOfFParams [saved_param])
+                  $ letInPlace
                     (baseString v <> "_saved_update")
                     saved_param_v
                     (fullSlice (fromDecl $ paramDec saved_param) [DimFix i_i64])
-                    $ substituteNames copy_substs $ BasicOp $ SubExp $ Var v
+                  $ substituteNames copy_substs
+                  $ BasicOp
+                  $ SubExp
+                  $ Var v
               pure (saved_update, (saved_pat, saved_param))
           pure (bodyResult body <> varsRes saved_updates, unzip saved_pats_params)
 
@@ -297,7 +306,8 @@ reverseIndices loop = do
     (i_rev, i_stms) <- collectStms $
       inScopeOf form $ do
         letExp (baseString i <> "_rev") $
-          BasicOp $ BinOp (Sub it OverflowWrap) bound_minus_one (Var i)
+          BasicOp $
+            BinOp (Sub it OverflowWrap) bound_minus_one (Var i)
 
     pure (var_arrays_substs, M.singleton i i_rev, i_stms)
 

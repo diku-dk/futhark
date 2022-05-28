@@ -72,7 +72,8 @@ printDecs cfg dir files imports = do
     write (name, content) = do
       let file = dir </> makeRelative "/" name
       when (docVerbose cfg) $
-        hPutStrLn stderr $ "Writing " <> file
+        hPutStrLn stderr $
+          "Writing " <> file
       createDirectoryIfMissing True $ takeDirectory file
       T.writeFile file content
 

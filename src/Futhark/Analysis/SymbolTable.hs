@@ -422,7 +422,8 @@ insertEntry name entry vtable =
    in vtable
         { bindings =
             adjustSeveral isSize dims $
-              M.insert name entry' $ bindings vtable
+              M.insert name entry' $
+                bindings vtable
         }
 
 insertEntries ::

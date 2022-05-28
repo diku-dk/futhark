@@ -314,7 +314,8 @@ checkPat' sizes p@(RecordPat fields loc) (Ascribed t) = do
   fields' <- traverse (const $ newTypeVar loc "t") $ M.fromList fields
 
   when (sort (M.keys fields') /= sort (map fst fields)) $
-    typeError loc mempty $ "Duplicate fields in record pattern" <+> ppr p <> "."
+    typeError loc mempty $
+      "Duplicate fields in record pattern" <+> ppr p <> "."
 
   unify (mkUsage loc "matching a record pattern") (Scalar (Record fields')) $ toStruct t
   t' <- normTypeFully t
@@ -337,7 +338,8 @@ checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
         <*> pure t'
         <*> pure loc
     NoneInferred ->
-      PatAscription <$> checkPat' sizes p (Ascribed (fromStruct st))
+      PatAscription
+        <$> checkPat' sizes p (Ascribed (fromStruct st))
         <*> pure t'
         <*> pure loc
 checkPat' _ (PatLit l NoInfo loc) (Ascribed t) = do
@@ -388,7 +390,8 @@ checkPat sizes p t m = do
   case filter ((`S.member` explicit) . sizeName) sizes of
     size : _ ->
       typeError size mempty $
-        "Cannot bind" <+> ppr size
+        "Cannot bind"
+          <+> ppr size
           <+> "as it is never used as the size of a concrete (non-function) value."
     [] ->
       bindNameMap (patNameMap p') $ m p'

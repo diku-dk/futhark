@@ -115,7 +115,8 @@ sizeHeuristicsToPython = List . map f
         what' =
           Lambda "device" $
             runIdentity $
-              Py.compilePrimExp onLeaf $ untyped what
+              Py.compilePrimExp onLeaf $
+                untyped what
 
         onLeaf (DeviceInfo s) =
           pure $

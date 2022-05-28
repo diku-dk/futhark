@@ -213,7 +213,10 @@ onSegOp op =
           stms <-
             deepen $
               optimiseStms (stmsToList (kernelBodyStms kbody)) $
-                mapM_ seenVar $ namesToList $ freeIn $ kernelBodyResult kbody
+                mapM_ seenVar $
+                  namesToList $
+                    freeIn $
+                      kernelBodyResult kbody
           pure kbody {kernelBodyStms = stmsFromList stms}
     mapSegOpM mapper op
 

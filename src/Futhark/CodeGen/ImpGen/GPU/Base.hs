@@ -446,7 +446,9 @@ prepareIntraGroupSegHist group_size =
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
           dArray locks int32 (arrayShape locks_t) locks_mem $
-            IxFun.iota $ map pe64 $ arrayDims locks_t
+            IxFun.iota $
+              map pe64 $
+                arrayDims locks_t
 
           sComment "All locks start out unlocked" $
             groupCoverSpace [kernelGroupSize constants] $ \is ->
@@ -464,7 +466,8 @@ fenceForArrays :: [VName] -> InKernelGen Imp.Fence
 fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
   where
     need arr =
-      fmap (fenceForSpace . entryMemSpace) . lookupMemory
+      fmap (fenceForSpace . entryMemSpace)
+        . lookupMemory
         . memLocName
         . entryArrayLoc
         =<< lookupArray arr
@@ -509,7 +512,9 @@ flattenArray k flat arr = do
   ArrayEntry arr_loc pt <- lookupArray arr
   let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
   sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
-    IxFun.reshape (memLocIxFun arr_loc) $ map (DimNew . pe64) $ shapeDims flat_shape
+    IxFun.reshape (memLocIxFun arr_loc) $
+      map (DimNew . pe64) $
+        shapeDims flat_shape
 
 -- | @applyLambda lam dests args@ emits code that:
 --
@@ -630,7 +635,8 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
       num_scan_results = length $ segBinOpNeutral scan
   arrs_flat <-
     mapM (flattenArray (length dims') dims_flat) $
-      take num_scan_results $ patNames pat
+      take num_scan_results $
+        patNames pat
 
   case segVirt lvl of
     SegVirt ->
@@ -895,7 +901,8 @@ atomicUpdateLocking _ op
     primBitSize t `elem` [32, 64] = AtomicCAS $ \space [arr] bucket -> do
       old <- dPrim "old" t
       atomicUpdateCAS space t arr (tvVar old) bucket (paramName xp) $
-        compileBody' [xp] $ lambdaBody op
+        compileBody' [xp] $
+          lambdaBody op
 atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimVol "continue" Bool true
@@ -949,12 +956,14 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
 
   let op_body =
         sComment "execute operation" $
-          compileBody' acc_params $ lambdaBody op
+          compileBody' acc_params $
+            lambdaBody op
 
       do_hist =
         everythingVolatile $
           sComment "update global result" $
-            zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
+            zipWithM_ (writeArray bucket) arrs $
+              map (Var . paramName) acc_params
 
       fence = sOp $ Imp.MemFence $ fenceForSpace space
 
@@ -1248,7 +1257,8 @@ groupReduceWithOffset offset w lam arrs = do
         comment "read array element" $
           zipWithM_ readReduceArgument reduce_arr_params arrs
         comment "apply reduction operation" $
-          compileBody' reduce_acc_params $ lambdaBody lam
+          compileBody' reduce_acc_params $
+            lambdaBody lam
         comment "write result of operation" $
           zipWithM_ writeReduceOpResult reduce_acc_params arrs
       in_wave_reduce = everythingVolatile do_reduce
@@ -1477,7 +1487,8 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
   let op_to_x in_block_thread_active
         | Nothing <- seg_flag =
             sWhen in_block_thread_active $
-              compileBody' x_params $ lambdaBody scan_lam
+              compileBody' x_params $
+                lambdaBody scan_lam
         | Just flag_true <- seg_flag = do
             inactive <-
               dPrimVE "inactive" $ flag_true (ltid32 - tvExp skip_threads) ltid32
@@ -1488,7 +1499,8 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
             -- hit this barrier (if applicable).
             when array_scan barrier
             sWhen in_block_thread_active . sUnless inactive $
-              compileBody' x_params $ lambdaBody scan_lam
+              compileBody' x_params $
+                lambdaBody scan_lam
 
       maybeBarrier =
         sWhen
@@ -1508,7 +1520,8 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
       maybeBarrier
 
       sWhen thread_active . sComment "write result" $
-        sequence_ $ zipWith3 writeResult x_params y_params arrs
+        sequence_ $
+          zipWith3 writeResult x_params y_params arrs
 
       maybeBarrier
 
@@ -1793,7 +1806,8 @@ sReplicateKernel arr se = do
     set_constants
     is' <- dIndexSpace' "rep_i" dims $ sExt64 $ kernelGlobalThreadId constants
     sWhen (kernelThreadActive constants) $
-      copyDWIMFix arr is' se $ drop (length ds) is'
+      copyDWIMFix arr is' se $
+        drop (length ds) is'
 
 replicateName :: PrimType -> String
 replicateName bt = "replicate_" ++ pretty bt
@@ -1817,7 +1831,9 @@ replicateForType bt = do
     function fname [] params $ do
       arr <-
         sArray "arr" bt shape mem $
-          IxFun.iota $ map pe64 $ shapeDims shape
+          IxFun.iota $
+            map pe64 $
+              shapeDims shape
       sReplicateKernel arr $ Var val
 
   pure fname
@@ -1868,7 +1884,9 @@ sIotaKernel arr n x s et = do
   let name =
         keyWithEntryPoint fname $
           nameFromString $
-            "iota_" ++ pretty et ++ "_"
+            "iota_"
+              ++ pretty et
+              ++ "_"
               ++ show (baseTag $ kernelGlobalThreadIdVar constants)
 
   sKernelFailureTolerant True threadOperations constants name $ do
@@ -1912,7 +1930,9 @@ iotaForType bt = do
     function fname [] params $ do
       arr <-
         sArray "arr" (IntType bt) shape mem $
-          IxFun.iota $ map pe64 $ shapeDims shape
+          IxFun.iota $
+            map pe64 $
+              shapeDims shape
       sIotaKernel arr (sExt64 n') x' s' bt
 
   pure fname

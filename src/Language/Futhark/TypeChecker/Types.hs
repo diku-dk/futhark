@@ -73,7 +73,8 @@ unifyTypesU ::
   TypeBase dim als ->
   Maybe (TypeBase dim als)
 unifyTypesU uf (Array als1 u1 shape1 et1) (Array als2 u2 _shape2 et2) =
-  Array (als1 <> als2) <$> uf u1 u2
+  Array (als1 <> als2)
+    <$> uf u1 u2
     <*> pure shape1
     <*> unifyScalarTypes uf et1 et2
 unifyTypesU uf (Scalar t1) (Scalar t2) = Scalar <$> unifyScalarTypes uf t1 t2
@@ -112,7 +113,8 @@ unifyScalarTypes
   uf
   (Arrow as1 mn1 t1 (RetType dims1 t1'))
   (Arrow as2 _ t2 (RetType _ t2')) =
-    Arrow (as1 <> as2) mn1 <$> unifyTypesU (flip uf) t1 t2
+    Arrow (as1 <> as2) mn1
+      <$> unifyTypesU (flip uf) t1 t2
       <*> (RetType dims1 <$> unifyTypesU uf t1' t2')
 unifyScalarTypes uf (Sum cs1) (Sum cs2)
   | length cs1 == length cs2,
@@ -159,7 +161,8 @@ evalTypeExp (TEVar name loc) = do
     [] -> pure (TEVar name' loc, [], t', l)
     _ ->
       typeError loc mempty $
-        "Type constructor" <+> pquote (spread (ppr name : map ppr ps))
+        "Type constructor"
+          <+> pquote (spread (ppr name : map ppr ps))
           <+> "used without any arguments."
 --
 evalTypeExp (TETuple ts loc) = do
@@ -175,7 +178,8 @@ evalTypeExp t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (sort field_names == sort (nubOrd field_names)) $
-    typeError loc mempty $ "Duplicate record fields in" <+> ppr t <> "."
+    typeError loc mempty $
+      "Duplicate record fields in" <+> ppr t <> "."
 
   checked <- traverse evalTypeExp $ M.fromList fs
   let fs' = fmap (\(x, _, _, _) -> x) checked
@@ -202,11 +206,13 @@ evalTypeExp (TEArray d t loc) = do
         )
     (SizeLifted, _) ->
       typeError loc mempty $
-        "Cannot create array with elements of size-lifted type" <+> pquote (ppr t)
+        "Cannot create array with elements of size-lifted type"
+          <+> pquote (ppr t)
           <+/> "(might cause irregular array)."
     (Lifted, _) ->
       typeError loc mempty $
-        "Cannot create array with elements of lifted type" <+> pquote (ppr t)
+        "Cannot create array with elements of lifted type"
+          <+> pquote (ppr t)
           <+/> "(might contain function)."
   where
     checkDimExp DimExpAny = do
@@ -221,7 +227,8 @@ evalTypeExp (TEArray d t loc) = do
 evalTypeExp (TEUnique t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp t
   unless (mayContainArray st) $
-    warn loc $ "Declaring" <+> pquote (ppr st) <+> "as unique has no effect."
+    warn loc $
+      "Declaring" <+> pquote (ppr st) <+> "as unique has no effect."
   pure (TEUnique t' loc, svars, RetType dims $ st `setUniqueness` Unique, l)
   where
     mayContainArray (Scalar Prim {}) = False
@@ -263,7 +270,8 @@ evalTypeExp (TEDim dims t loc) = do
       case find (`S.notMember` witnessed) dims' of
         Just d ->
           typeError loc mempty . withIndexLink "unused-existential" $
-            "Existential size " <> pquote (pprName d)
+            "Existential size "
+              <> pquote (pprName d)
               <> " not used as array size."
         Nothing ->
           pure
@@ -280,7 +288,8 @@ evalTypeExp (TEDim dims t loc) = do
 evalTypeExp t@(TESum cs loc) = do
   let constructors = map fst cs
   unless (sort constructors == sort (nubOrd constructors)) $
-    typeError loc mempty $ "Duplicate constructors in" <+> ppr t
+    typeError loc mempty $
+      "Duplicate constructors in" <+> ppr t
 
   unless (length constructors < 256) $
     typeError loc mempty "Sum types must have less than 256 constructors."
@@ -294,7 +303,9 @@ evalTypeExp t@(TESum cs loc) = do
     ( TESum (M.toList cs') loc,
       cs_svars,
       RetType (foldMap (foldMap retDims) ts_s) $
-        Scalar $ Sum $ M.map (map retType) ts_s,
+        Scalar $
+          Sum $
+            M.map (map retType) ts_s,
       foldl' max Unlifted ls
     )
 evalTypeExp ote@TEApply {} = do
@@ -304,7 +315,10 @@ evalTypeExp ote@TEApply {} = do
   if length ps /= length targs
     then
       typeError tloc mempty $
-        "Type constructor" <+> pquote (ppr tname) <+> "requires" <+> ppr (length ps)
+        "Type constructor"
+          <+> pquote (ppr tname)
+          <+> "requires"
+          <+> ppr (length ps)
           <+> "arguments, but provided"
           <+> ppr (length targs) <> "."
     else do
@@ -356,7 +370,8 @@ evalTypeExp ote@TEApply {} = do
         )
     checkArgApply p a =
       typeError tloc mempty $
-        "Type argument" <+> ppr a
+        "Type argument"
+          <+> ppr a
           <+> "not valid for a type parameter"
           <+> ppr p <> "."
 
@@ -400,7 +415,9 @@ checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
         Just prev_loc ->
           lift $
             typeError loc mempty $
-              "Name" <+> pquote (ppr v) <+> "also bound at"
+              "Name"
+                <+> pquote (ppr v)
+                <+> "also bound at"
                 <+> text (locStr prev_loc) <> "."
         Nothing ->
           modify $ M.insert (ns, v) loc
@@ -418,7 +435,8 @@ checkForDuplicateNamesInType = check mempty
   where
     bad v loc prev_loc =
       typeError loc mempty $
-        text "Name" <+> pquote (ppr v)
+        text "Name"
+          <+> pquote (ppr v)
           <+> "also bound at"
           <+> text (locStr prev_loc) <> "."
 
@@ -470,7 +488,8 @@ checkTypeParams ps m =
         Just prev ->
           lift $
             typeError loc mempty $
-              text "Type parameter" <+> pquote (ppr v)
+              text "Type parameter"
+                <+> pquote (ppr v)
                 <+> "previously defined at"
                 <+> text (locStr prev) <> "."
         Nothing -> do
@@ -623,7 +642,8 @@ substTypesRet lookupSubst ot =
           modify (ext ++)
           pure $
             applyType ps (t `setAliases` mempty) targs'
-              `setUniqueness` u `addAliases` (<> als)
+              `setUniqueness` u
+              `addAliases` (<> als)
         Just PrimSubst ->
           pure $ Scalar $ TypeVar mempty u v targs'
         _ ->

@@ -407,15 +407,18 @@ mapSOACM ::
   SOAC frep ->
   m (SOAC trep)
 mapSOACM tv (JVP lam args vec) =
-  JVP <$> mapOnSOACLambda tv lam
+  JVP
+    <$> mapOnSOACLambda tv lam
     <*> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
 mapSOACM tv (VJP lam args vec) =
-  VJP <$> mapOnSOACLambda tv lam
+  VJP
+    <$> mapOnSOACLambda tv lam
     <*> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
 mapSOACM tv (Stream size arrs form accs lam) =
-  Stream <$> mapOnSOACSubExp tv size
+  Stream
+    <$> mapOnSOACSubExp tv size
     <*> mapM (mapOnSOACVName tv) arrs
     <*> mapOnStreamForm form
     <*> mapM (mapOnSOACSubExp tv) accs
@@ -432,7 +435,8 @@ mapSOACM tv (Scatter w ivs lam as) =
     <*> mapOnSOACLambda tv lam
     <*> mapM
       ( \(aw, an, a) ->
-          (,,) <$> mapM (mapOnSOACSubExp tv) aw
+          (,,)
+            <$> mapM (mapOnSOACSubExp tv) aw
             <*> pure an
             <*> mapOnSOACVName tv a
       )
@@ -443,7 +447,8 @@ mapSOACM tv (Hist w arrs ops bucket_fun) =
     <*> mapM (mapOnSOACVName tv) arrs
     <*> mapM
       ( \(HistOp shape rf op_arrs nes op) ->
-          HistOp <$> mapM (mapOnSOACSubExp tv) shape
+          HistOp
+            <$> mapM (mapOnSOACSubExp tv) shape
             <*> mapOnSOACSubExp tv rf
             <*> mapM (mapOnSOACVName tv) op_arrs
             <*> mapM (mapOnSOACSubExp tv) nes
@@ -452,19 +457,22 @@ mapSOACM tv (Hist w arrs ops bucket_fun) =
       ops
     <*> mapOnSOACLambda tv bucket_fun
 mapSOACM tv (Screma w arrs (ScremaForm scans reds map_lam)) =
-  Screma <$> mapOnSOACSubExp tv w
+  Screma
+    <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) arrs
     <*> ( ScremaForm
             <$> forM
               scans
               ( \(Scan red_lam red_nes) ->
-                  Scan <$> mapOnSOACLambda tv red_lam
+                  Scan
+                    <$> mapOnSOACLambda tv red_lam
                     <*> mapM (mapOnSOACSubExp tv) red_nes
               )
             <*> forM
               reds
               ( \(Reduce comm red_lam red_nes) ->
-                  Reduce comm <$> mapOnSOACLambda tv red_lam
+                  Reduce comm
+                    <$> mapOnSOACLambda tv red_lam
                     <*> mapM (mapOnSOACSubExp tv) red_nes
               )
             <*> mapOnSOACLambda tv map_lam
@@ -724,7 +732,8 @@ typeCheckSOAC (Stream size arrexps form accexps lam) = do
   let acc_len = length accexps
   let lamrtp = take acc_len $ lambdaReturnType lam
   unless (map TC.argType accargs == lamrtp) $
-    TC.bad $ TC.TypeError "Stream with inconsistent accumulator type in lambda."
+    TC.bad $
+      TC.TypeError "Stream with inconsistent accumulator type in lambda."
   -- check reduce's lambda, if any
   _ <- case form of
     Parallel _ _ lam0 -> do
@@ -734,7 +743,8 @@ typeCheckSOAC (Stream size arrexps form accexps lam) = do
       unless (acct == outerRetType) $
         TC.bad $
           TC.TypeError $
-            "Initial value is of type " ++ prettyTuple acct
+            "Initial value is of type "
+              ++ prettyTuple acct
               ++ ", but stream's reduce lambda returns type "
               ++ prettyTuple outerRetType
               ++ "."
@@ -777,12 +787,14 @@ typeCheckSOAC (Scatter w arrs lam as) = do
 
   -- 1.
   unless (length rts == sum as_ns + sum (zipWith (*) as_ns $ map length as_ws)) $
-    TC.bad $ TC.TypeError "Scatter: number of index types, value types and array outputs do not match."
+    TC.bad $
+      TC.TypeError "Scatter: number of index types, value types and array outputs do not match."
 
   -- 2.
   forM_ rtsI $ \rtI ->
     unless (Prim int64 == rtI) $
-      TC.bad $ TC.TypeError "Scatter: Index return type must be i64."
+      TC.bad $
+        TC.TypeError "Scatter: Index return type must be i64."
 
   forM_ (zip (chunks as_ns rtsV) as) $ \(rtVs, (aw, _, a)) -> do
     -- All lengths must have type i64.
@@ -878,10 +890,11 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
     ( take (length scan_nes' + length red_nes') map_lam_ts
         == map TC.argType (scan_nes' ++ red_nes')
     )
-    $ TC.bad $
-      TC.TypeError $
-        "Map function return type " ++ prettyTuple map_lam_ts
-          ++ " wrong for given scan and reduction functions."
+    $ TC.bad
+    $ TC.TypeError
+    $ "Map function return type "
+      ++ prettyTuple map_lam_ts
+      ++ " wrong for given scan and reduction functions."
 
 instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
   opMetrics (VJP lam _ _) =
@@ -1033,6 +1046,8 @@ ppHist w arrs ops bucket_fun =
       )
   where
     ppOp (HistOp dest_w rf dests nes op) =
-      ppr dest_w <> comma <+> ppr rf <> comma <+> PP.braces (commasep $ map ppr dests) <> comma
+      ppr dest_w <> comma
+        <+> ppr rf <> comma
+        <+> PP.braces (commasep $ map ppr dests) <> comma
         </> ppTuple' nes <> comma
         </> ppr op

@@ -140,7 +140,8 @@ onMCOp stage pat aux (MC.OtherOp soac)
       stms <- runBuilder_ $ FOT.transformSOAC pat soac
       fmap concat $
         localScope (scopeOf stms) $
-          mapM (optimiseStm (onMCOp stage)) $ stmsToList stms
+          mapM (optimiseStm (onMCOp stage)) $
+            stmsToList stms
   | otherwise =
       -- Still sequentialise whatever's inside.
       pure <$> (Let pat aux . Op . MC.OtherOp <$> mapSOACM optimise soac)
@@ -161,7 +162,8 @@ onHostOp stage pat aux (GPU.OtherOp soac)
       stms <- runBuilder_ $ FOT.transformSOAC pat soac
       fmap concat $
         localScope (scopeOf stms) $
-          mapM (optimiseStm (onHostOp stage)) $ stmsToList stms
+          mapM (optimiseStm (onHostOp stage)) $
+            stmsToList stms
   | otherwise =
       -- Still sequentialise whatever's inside.
       pure <$> (Let pat aux . Op . GPU.OtherOp <$> mapSOACM optimise soac)

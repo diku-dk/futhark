@@ -112,8 +112,10 @@ inlineBecauseTiny :: Prog SOACS -> S.Set Name
 inlineBecauseTiny = foldMap onFunDef . progFuns
   where
     onFunDef fd
-      | length (bodyStms (funDefBody fd)) < 2
-          || "inline" `inAttrs` funDefAttrs fd =
+      | length (bodyStms (funDefBody fd))
+          < 2
+          || "inline"
+          `inAttrs` funDefAttrs fd =
           S.singleton (funDefName fd)
       | otherwise = mempty
 
@@ -164,7 +166,8 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
 
     body_stms =
       addLocations (stmAuxAttrs aux) safety (filter notmempty (loc : locs)) $
-        bodyStms $ funDefBody fun
+        bodyStms $
+          funDefBody fun
 
     -- Note that the sizes of arrays may not be correct at this
     -- point - it is crucial that we run copy propagation before

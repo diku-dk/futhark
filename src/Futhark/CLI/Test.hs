@@ -97,7 +97,9 @@ withProgramServer program runner extra_options f = do
         "Running " <> T.pack (unwords $ binpath : extra_options)
 
   context prog_ctx $
-    pureTestResults $ liftIO $ withServer (futharkServerCfg to_run to_run_args) f
+    pureTestResults $
+      liftIO $
+        withServer (futharkServerCfg to_run to_run_args) f
 
 data TestMode
   = -- | Only type check.
@@ -175,12 +177,18 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
         Nothing
           | expected_occurences > 0 ->
               throwError $
-                name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
+                name
+                  <> maybePipeline pipeline
+                  <> " should have occurred "
+                  <> T.pack (show expected_occurences)
                   <> " times, but did not occur at all in optimised program."
         Just actual_occurences
           | expected_occurences /= actual_occurences ->
               throwError $
-                name <> maybePipeline pipeline <> " should have occurred " <> T.pack (show expected_occurences)
+                name
+                  <> maybePipeline pipeline
+                  <> " should have occurred "
+                  <> T.pack (show expected_occurences)
                   <> " times, but occurred "
                   <> T.pack (show actual_occurences)
                   <> " times."
@@ -192,7 +200,8 @@ testWarnings warnings futerr = accErrors_ $ map testWarning warnings
     testWarning (ExpectedWarning regex_s regex)
       | not (match regex $ T.unpack $ T.decodeUtf8 futerr) =
           throwError $
-            "Expected warning:\n  " <> regex_s
+            "Expected warning:\n  "
+              <> regex_s
               <> "\nGot warnings:\n  "
               <> T.decodeUtf8 futerr
       | otherwise = pure ()
@@ -278,7 +287,8 @@ runTestCase (TestCase mode program testcase progs) = do
 
       when (mode == Interpreted) $
         context "Interpreting" $
-          accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
+          accErrors_ $
+            map (runInterpretedEntry (FutharkExe futhark) program) ios
 
 liftCommand ::
   (MonadError T.Text m, MonadIO m) =>
@@ -308,7 +318,9 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
     runCompiledCase input_types outs ins run = runExceptT $ do
       let TestRun _ input_spec _ index _ = run
           case_ctx =
-            "Entry point: " <> entry <> "; dataset: "
+            "Entry point: "
+              <> entry
+              <> "; dataset: "
               <> T.pack (runDescription run)
 
       context1 case_ctx $ do
@@ -325,7 +337,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
           Right _ ->
             SuccessResult
               <$> readResults server outs
-                <* liftCommand (cmdFree server outs)
+              <* liftCommand (cmdFree server outs)
 
         compareResult entry index program expected res
 
@@ -333,7 +345,8 @@ checkError :: MonadError T.Text m => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
   | not (match regex $ T.unpack err) =
       E.throwError $
-        "Expected error:\n  " <> regex_s
+        "Expected error:\n  "
+          <> regex_s
           <> "\nGot error:\n"
           <> T.unlines (map ("  " <>) (T.lines err))
 checkError _ _ =
@@ -487,7 +500,9 @@ moveCursorToTableTop = cursorUpLine tableLines
 reportText :: TestStatus -> IO ()
 reportText ts =
   putStr $
-    "(" ++ show (testStatusFail ts) ++ " failed, "
+    "("
+      ++ show (testStatusFail ts)
+      ++ " failed, "
       ++ show (testStatusPass ts)
       ++ " passed, "
       ++ show num_remain
@@ -539,7 +554,8 @@ runTests config paths = do
             case msg of
               TestStarted test -> do
                 unless fancy $
-                  putStr $ "Started testing " <> testCaseProgram test <> " "
+                  putStr $
+                    "Started testing " <> testCaseProgram test <> " "
                 getResults $ ts {testStatusRun = test : testStatusRun ts}
               TestDone test res -> do
                 let ts' =
@@ -558,7 +574,8 @@ runTests config paths = do
                                 testStatusRunPass ts' + numTestCases test
                             }
                     unless fancy $
-                      putStr $ "Finished testing " <> testCaseProgram test <> " "
+                      putStr $
+                        "Finished testing " <> testCaseProgram test <> " "
                     getResults $ ts'' {testStatusPass = testStatusPass ts + 1}
                   Failure s -> do
                     when fancy moveCursorToTableTop
@@ -570,7 +587,8 @@ runTests config paths = do
                         { testStatusFail = testStatusFail ts' + 1,
                           testStatusRunPass =
                             testStatusRunPass ts'
-                              + numTestCases test - length s,
+                              + numTestCases test
+                              - length s,
                           testStatusRunFail =
                             testStatusRunFail ts'
                               + length s
@@ -766,8 +784,8 @@ excludeBackend :: TestConfig -> TestConfig
 excludeBackend config =
   config
     { configExclude =
-        "no_" <> T.pack (configBackend (configPrograms config)) :
-        configExclude config
+        "no_" <> T.pack (configBackend (configPrograms config))
+          : configExclude config
     }
 
 -- | Run @futhark test@.

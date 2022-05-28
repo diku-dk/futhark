@@ -88,10 +88,12 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
                   `add` primExpFromSubExp (IntType to_it) i_offset'
             i_stride'' <-
               letSubExp "iota_offset" $
-                BasicOp $ BinOp (Mul Int64 OverflowWrap) s i_stride'
+                BasicOp $
+                  BinOp (Mul Int64 OverflowWrap) s i_stride'
             fmap (SubExpResult cs) $
               letSubExp "slice_iota" $
-                BasicOp $ Iota i_n i_offset'' i_stride'' to_it
+                BasicOp $
+                  Iota i_n i_offset'' i_stride'' to_it
 
     -- A rotate cannot be simplified away if we are slicing a rotated dimension.
     Just (Rotate offsets a, cs)
@@ -195,7 +197,8 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
                 (thisres, thisstms) <- collectStms $ do
                   i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int64 OverflowWrap) i start
                   letSubExp "index_concat" . BasicOp . Index x' $
-                    Slice $ ibef ++ DimFix i' : iaft
+                    Slice $
+                      ibef ++ DimFix i' : iaft
                 thisbody <- mkBodyM thisstms [subExpRes thisres]
                 (altres, altstms) <- collectStms $ mkBranch xs_and_starts'
                 altbody <- mkBodyM altstms [subExpRes altres]

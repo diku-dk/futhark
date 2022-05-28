@@ -613,7 +613,8 @@ allocRawMem ::
 allocRawMem dest size space desc = case space of
   Space sid ->
     join $
-      asks envAllocate <*> pure [C.cexp|$exp:dest|]
+      asks envAllocate
+        <*> pure [C.cexp|$exp:dest|]
         <*> pure [C.cexp|$exp:size|]
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid

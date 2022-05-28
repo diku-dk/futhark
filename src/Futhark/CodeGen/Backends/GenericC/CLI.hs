@@ -409,7 +409,8 @@ cliDefs options manifest =
       (cli_entry_point_decls, entry_point_inits) =
         unzip $
           map (uncurry (cliEntryPoint manifest)) $
-            M.toList $ manifestEntryPoints manifest
+            M.toList $
+              manifestEntryPoints manifest
    in prettyText
         [C.cunit|
 $esc:("#include <getopt.h>")

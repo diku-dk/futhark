@@ -235,7 +235,10 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
         local (addNameSubst pat' subpat) $ do
           let lets =
                 [ Let (Pat [patElem']) (StmAux cs attrs edec) $
-                    BasicOp $ SubExp $ Var $ patElemName patElem
+                    BasicOp $
+                      SubExp $
+                        Var $
+                          patElemName patElem
                   | (name, patElem) <- zip (patNames pat') $ patElems subpat,
                     let patElem' = patElem {patElemName = name}
                 ]

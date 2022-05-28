@@ -278,7 +278,11 @@ interleave xs ys = concat $ transpose [xs, ys]
 zeroFromSubExp :: SubExp -> ADM VName
 zeroFromSubExp (Constant c) =
   letExp "zero" $
-    BasicOp $ SubExp $ Constant $ blankPrimValue $ primValueType c
+    BasicOp $
+      SubExp $
+        Constant $
+          blankPrimValue $
+            primValueType c
 zeroFromSubExp (Var v) = do
   t <- lookupType v
   letExp "zero" $ zeroExp t
@@ -433,7 +437,8 @@ fwdStm (Let pat aux (DoLoop val_pats loop@(WhileLoop v) body)) = do
   pat' <- bundleNew pat
   body' <-
     localScope (scopeOfFParams (map fst val_pats) <> scopeOf loop) $
-      slocal' $ fwdBody body
+      slocal' $
+        fwdBody body
   addStm $ Let pat' aux $ DoLoop val_pats' (WhileLoop v) body'
 fwdStm (Let pat aux (DoLoop val_pats loop@(ForLoop i it bound loop_vars) body)) = do
   pat' <- bundleNew pat
@@ -441,7 +446,8 @@ fwdStm (Let pat aux (DoLoop val_pats loop@(ForLoop i it bound loop_vars) body)) 
   loop_vars' <- bundleNew loop_vars
   body' <-
     localScope (scopeOfFParams (map fst val_pats) <> scopeOf loop) $
-      slocal' $ fwdBody body
+      slocal' $
+        fwdBody body
   addStm $ Let pat' aux $ DoLoop val_pats' (ForLoop i it bound loop_vars') body'
 fwdStm (Let pat aux (WithAcc inputs lam)) = do
   inputs' <- forM inputs $ \(shape, arrs, op) -> do

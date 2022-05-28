@@ -31,7 +31,8 @@ allocInLambda ::
   AllocM fromrep torep (Lambda torep)
 allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $
-    pure $ bodyResult body
+    pure $
+      bodyResult body
 
 allocInBinOpParams ::
   Allocable fromrep torep inner =>
@@ -48,7 +49,9 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
         Array pt shape u -> do
           twice_num_threads <-
             letSubExp "twice_num_threads" $
-              BasicOp $ BinOp (Mul Int64 OverflowUndef) num_threads $ intConst Int64 2
+              BasicOp $
+                BinOp (Mul Int64 OverflowUndef) num_threads $
+                  intConst Int64 2
           let t = paramType x `arrayOfRow` twice_num_threads
           mem <- allocForArray t DefaultSpace
           -- XXX: this iota ixfun is a bit inefficient; leading to

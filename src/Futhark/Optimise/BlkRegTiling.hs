@@ -93,7 +93,8 @@ kkLoopBody
 
     -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
     thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] ->
-      resultBodyM =<< letTupExp' "foo"
+      resultBodyM
+        =<< letTupExp' "foo"
         =<< eIf
           ( toExp $
               if epilogue
@@ -162,7 +163,8 @@ kkLoopBody
 
             css <- forLoop ry [css_init] $ \i [css_merge] -> do
               css <- forLoop rx [css_merge] $ \j [css_merge'] ->
-                resultBodyM =<< letTupExp' "foo"
+                resultBodyM
+                  =<< letTupExp' "foo"
                   =<< eIf
                     ( toExp $
                         if fits_ij
@@ -174,8 +176,8 @@ kkLoopBody
 
                             le64 iii + le64 i + pe64 ry * le64 ltid_y
                               .<. pe64 height_A
-                                .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
-                              .<. pe64 width_B
+                              .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
+                                .<. pe64 width_B
                     )
                     ( do
                         a <- index "a" as [i]
@@ -529,7 +531,8 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
           -- build prologue.
           full_tiles <-
             letExp "full_tiles" $
-              BasicOp $ BinOp (SQuot Int64 Unsafe) common_dim tk
+              BasicOp $
+                BinOp (SQuot Int64 Unsafe) common_dim tk
 
           let ct_arg =
                 ( (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx),
@@ -1153,7 +1156,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
 
                         res_nms <-
                           letTupExp "Y_glb2loc" <=< renameExp $
-                            Op $ SegOp $ SegMap segthd_lvl segspace [Prim ptp_Y] body
+                            Op $
+                              SegOp $
+                                SegMap segthd_lvl segspace [Prim ptp_Y] body
                         let res_nm : _ = res_nms
                         pure res_nm
                     resultBodyM $ map Var loc_arr_merge2_nms'
@@ -1177,7 +1182,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                               reg_arr_merge_nms' <-
                                 forLoop' rz reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
                                   letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
-                                  resultBodyM =<< letTupExp' "redomap_lam"
+                                  resultBodyM
+                                    =<< letTupExp' "redomap_lam"
                                     =<< eIf
                                       (toExp $ le64 gtid_z .<. pe64 d_M)
                                       ( do

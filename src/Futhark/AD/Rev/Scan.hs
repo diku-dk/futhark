@@ -82,7 +82,9 @@ mkScan2ndMaps w (arr_tp, y_adj, (ds, cs)) = do
   nm1 <- letSubExp "nm1" =<< toExp (pe64 w - 1)
   y_adj_last <-
     letExp (baseString y_adj ++ "_last") $
-      BasicOp $ Index y_adj $ fullSlice arr_tp [DimFix nm1]
+      BasicOp $
+        Index y_adj $
+          fullSlice arr_tp [DimFix nm1]
 
   par_i <- newParam "i" $ Prim int64
   lam <- mkLambda [par_i] $ do

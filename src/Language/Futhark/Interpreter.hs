@@ -549,12 +549,14 @@ data Indexing
 instance Pretty Indexing where
   ppr (IndexingFix i) = ppr i
   ppr (IndexingSlice i j (Just s)) =
-    maybe mempty ppr i <> text ":"
+    maybe mempty ppr i
+      <> text ":"
       <> maybe mempty ppr j
       <> text ":"
       <> ppr s
   ppr (IndexingSlice i (Just j) s) =
-    maybe mempty ppr i <> text ":"
+    maybe mempty ppr i
+      <> text ":"
       <> ppr j
       <> maybe mempty ((text ":" <>) . ppr) s
   ppr (IndexingSlice i Nothing Nothing) =
@@ -663,7 +665,8 @@ evalDimIndex :: Env -> DimIndex -> EvalM Indexing
 evalDimIndex env (DimFix x) =
   IndexingFix . asInt64 <$> eval env x
 evalDimIndex env (DimSlice start end stride) =
-  IndexingSlice <$> traverse (fmap asInt64 . eval env) start
+  IndexingSlice
+    <$> traverse (fmap asInt64 . eval env) start
     <*> traverse (fmap asInt64 . eval env) end
     <*> traverse (fmap asInt64 . eval env) stride
 
@@ -671,7 +674,8 @@ evalIndex :: SrcLoc -> Env -> [Indexing] -> Value -> EvalM Value
 evalIndex loc env is arr = do
   let oob =
         bad loc env $
-          "Index [" <> intercalate ", " (map pretty is)
+          "Index ["
+            <> intercalate ", " (map pretty is)
             <> "] out of bounds for array of shape "
             <> pretty (valueShape arr)
             <> "."
@@ -813,7 +817,8 @@ returned _ _ [] v = pure v
 returned env ret retext v = do
   mapM_ (uncurry putExtSize) $
     M.toList $
-      resolveExistentials retext (evalType env $ toStruct ret) $ valueShape v
+      resolveExistentials retext (evalType env $ toStruct ret) $
+        valueShape v
   pure v
 
 evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
@@ -853,7 +858,8 @@ evalAppExp env _ (Range start maybe_second end loc) = do
         t -> error $ "Nonsensical range type: " ++ show t
 
     badRange start' maybe_second' end' =
-      "Range " ++ pretty start'
+      "Range "
+        ++ pretty start'
         ++ ( case maybe_second' of
                Nothing -> ""
                Just second' -> ".." ++ pretty second'
@@ -870,12 +876,13 @@ evalAppExp env t (Coerce e te loc) = do
     Just _ -> pure v
     Nothing ->
       bad loc env $
-        "Value `" <> pretty v <> "` of shape `" ++ pretty (valueShape v)
+        "Value `" <> pretty v <> "` of shape `"
+          ++ pretty (valueShape v)
           ++ "` cannot match shape of type `"
-          <> pretty te
-          <> "` (`"
-          <> pretty t
-          <> "`)"
+            <> pretty te
+            <> "` (`"
+            <> pretty t
+            <> "`)"
 evalAppExp env _ (LetPat sizes p e body _) = do
   v <- eval env e
   env' <- matchPat env p v
@@ -922,9 +929,10 @@ evalAppExp env _ (LetWith dest src is v body loc) = do
   let Ident src_vn (Info src_t) _ = src
   dest' <-
     maybe oob pure
-      =<< writeArray <$> mapM (evalDimIndex env) is
-      <*> evalTermVar env (qualName src_vn) (toStruct src_t)
-      <*> eval env v
+      =<< writeArray
+        <$> mapM (evalDimIndex env) is
+        <*> evalTermVar env (qualName src_vn) (toStruct src_t)
+        <*> eval env v
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
@@ -1522,27 +1530,31 @@ initialCtx =
     def "<" =
       Just $
         bopDef $
-          sintCmp P.CmpSlt ++ uintCmp P.CmpUlt
+          sintCmp P.CmpSlt
+            ++ uintCmp P.CmpUlt
             ++ floatCmp P.FCmpLt
             ++ boolCmp P.CmpLlt
     def ">" =
       Just $
         bopDef $
           flipCmps $
-            sintCmp P.CmpSlt ++ uintCmp P.CmpUlt
+            sintCmp P.CmpSlt
+              ++ uintCmp P.CmpUlt
               ++ floatCmp P.FCmpLt
               ++ boolCmp P.CmpLlt
     def "<=" =
       Just $
         bopDef $
-          sintCmp P.CmpSle ++ uintCmp P.CmpUle
+          sintCmp P.CmpSle
+            ++ uintCmp P.CmpUle
             ++ floatCmp P.FCmpLe
             ++ boolCmp P.CmpLle
     def ">=" =
       Just $
         bopDef $
           flipCmps $
-            sintCmp P.CmpSle ++ uintCmp P.CmpUle
+            sintCmp P.CmpSle
+              ++ uintCmp P.CmpUle
               ++ floatCmp P.FCmpLe
               ++ boolCmp P.CmpLle
     def s
@@ -1892,7 +1904,8 @@ initialCtx =
             ShapeDim _ ys_rowshape = valueShape ys
         pure $
           toArray' (ShapeRecord (tupleFields [xs_rowshape, ys_rowshape])) $
-            map toTuple $ transpose [snd $ fromArray xs, snd $ fromArray ys]
+            map toTuple $
+              transpose [snd $ fromArray xs, snd $ fromArray ys]
     def "concat" = Just $
       fun2t $ \xs ys -> do
         let (ShapeDim _ rowshape, xs') = fromArray xs
@@ -1903,7 +1916,9 @@ initialCtx =
         let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
         pure $
           toArray (ShapeDim m (ShapeDim n shape)) $
-            map (toArray (ShapeDim n shape)) $ transpose $ map (snd . fromArray) xs'
+            map (toArray (ShapeDim n shape)) $
+              transpose $
+                map (snd . fromArray) xs'
     def "rotate" = Just $
       fun2t $ \i xs -> do
         let (shape, xs') = fromArray xs
@@ -1928,7 +1943,8 @@ initialCtx =
         if asInt64 n * asInt64 m /= xs_size
           then
             bad mempty mempty $
-              "Cannot unflatten array of shape [" <> pretty xs_size
+              "Cannot unflatten array of shape ["
+                <> pretty xs_size
                 <> "] to array of shape ["
                 <> pretty (asInt64 n)
                 <> "]["
@@ -1936,9 +1952,11 @@ initialCtx =
                 <> "]"
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "vjp2" = Just $
-      fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
+      fun3t $
+        \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
     def "jvp2" = Just $
-      fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
+      fun3t $
+        \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s
@@ -2037,8 +2055,10 @@ interpretFunction ctx fname vs = do
     badPrim vt pt =
       Left . pretty $
         "Invalid argument type."
-          </> "Expected:" <+> align (ppr pt)
-          </> "Got:     " <+> align (ppr vt)
+          </> "Expected:"
+          <+> align (ppr pt)
+          </> "Got:     "
+          <+> align (ppr vt)
 
     convertValue (F.PrimValue p) = Just $ ValuePrim p
     convertValue (F.ArrayValue arr t) = mkArray t =<< mapM convertValue (elems arr)

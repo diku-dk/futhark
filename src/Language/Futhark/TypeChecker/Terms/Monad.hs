@@ -241,7 +241,8 @@ useAfterConsume :: VName -> SrcLoc -> SrcLoc -> TermTypeM a
 useAfterConsume name rloc wloc = do
   name' <- describeVar rloc name
   typeError rloc mempty . withIndexLink "use-after-consume" $
-    "Using" <+> name' <> ", but this was consumed at"
+    "Using"
+      <+> name' <> ", but this was consumed at"
       <+> text (locStrRel rloc wloc) <> ".  (Possibly through aliasing.)"
 
 badLetWithValue :: (Pretty arr, Pretty src) => arr -> src -> SrcLoc -> TermTypeM a
@@ -251,7 +252,9 @@ badLetWithValue arre vale loc =
       </> indent 2 (ppr arre)
       </> "might alias update value"
       </> indent 2 (ppr vale)
-      </> "Hint: use" <+> pquote "copy" <+> "to remove aliases from the value."
+      </> "Hint: use"
+      <+> pquote "copy"
+      <+> "to remove aliases from the value."
 
 returnAliased :: Name -> SrcLoc -> TermTypeM ()
 returnAliased name loc =
@@ -296,8 +299,10 @@ data Checking
 instance Pretty Checking where
   ppr (CheckingApply f e expected actual) =
     header
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
     where
       header =
         case f of
@@ -305,16 +310,22 @@ instance Pretty Checking where
             "Cannot apply function to"
               <+> pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
           Just fname ->
-            "Cannot apply" <+> pquote (ppr fname) <+> "to"
+            "Cannot apply"
+              <+> pquote (ppr fname)
+              <+> "to"
               <+> pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
   ppr (CheckingReturn expected actual) =
     "Function body does not have expected type."
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
   ppr (CheckingAscription expected actual) =
     "Expression does not have expected type from explicit ascription."
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
   ppr (CheckingLetGeneralise fname) =
     "Cannot generalise type of" <+> pquote (ppr fname) <> "."
   ppr (CheckingParams fname) =
@@ -324,35 +335,49 @@ instance Pretty Checking where
   ppr (CheckingPat pat NoneInferred) =
     "Invalid pattern" <+> pquote (ppr pat) <> "."
   ppr (CheckingPat pat (Ascribed t)) =
-    "Pat" <+> pquote (ppr pat)
+    "Pat"
+      <+> pquote (ppr pat)
       <+> "cannot match value of type"
       </> indent 2 (ppr t)
   ppr (CheckingLoopBody expected actual) =
     "Loop body does not have expected type."
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
   ppr (CheckingLoopInitial expected actual) =
     "Initial loop values do not have expected type."
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
   ppr (CheckingRecordUpdate fs expected actual) =
-    "Type mismatch when updating record field" <+> pquote fs' <> "."
-      </> "Existing:" <+> align (ppr expected)
-      </> "New:     " <+> align (ppr actual)
+    "Type mismatch when updating record field"
+      <+> pquote fs' <> "."
+      </> "Existing:"
+      <+> align (ppr expected)
+      </> "New:     "
+      <+> align (ppr actual)
     where
       fs' = mconcat $ punctuate "." $ map ppr fs
   ppr (CheckingRequired [expected] actual) =
-    "Expression must must have type" <+> ppr expected <> "."
-      </> "Actual type:" <+> align (ppr actual)
+    "Expression must must have type"
+      <+> ppr expected <> "."
+      </> "Actual type:"
+      <+> align (ppr actual)
   ppr (CheckingRequired expected actual) =
-    "Type of expression must must be one of " <+> expected' <> "."
-      </> "Actual type:" <+> align (ppr actual)
+    "Type of expression must must be one of "
+      <+> expected' <> "."
+      </> "Actual type:"
+      <+> align (ppr actual)
     where
       expected' = commasep (map ppr expected)
   ppr (CheckingBranches t1 t2) =
     "Branches differ in type."
-      </> "Former:" <+> ppr t1
-      </> "Latter:" <+> ppr t2
+      </> "Former:"
+      <+> ppr t1
+      </> "Latter:"
+      <+> ppr t2
 
 -- | Type checking happens with access to this environment.  The
 -- 'TermScope' will be extended during type-checking as bindings come into
@@ -429,7 +454,8 @@ nameReason :: SrcLoc -> NameReason -> Doc
 nameReason loc (NameAppRes Nothing apploc) =
   "result of application at" <+> text (locStrRel loc apploc)
 nameReason loc (NameAppRes fname apploc) =
-  "result of applying" <+> pquote (ppr fname)
+  "result of applying"
+    <+> pquote (ppr fname)
     <+> parens ("at" <+> text (locStrRel loc apploc))
 
 -- | The state is a set of constraints and a counter for generating
@@ -660,7 +686,11 @@ instance MonadTypeChecker TermTypeM where
         equalityType usage argtype
         pure $
           Scalar . Arrow mempty Unnamed argtype . RetType [] $
-            Scalar $ Arrow mempty Unnamed argtype $ RetType [] $ Scalar $ Prim Bool
+            Scalar $
+              Arrow mempty Unnamed argtype $
+                RetType [] $
+                  Scalar $
+                    Prim Bool
       Just (OverloadedF ts pts rt) -> do
         argtype <- newTypeVar loc "t"
         mustBeOneOf ts usage argtype
@@ -680,7 +710,9 @@ instance MonadTypeChecker TermTypeM where
     (v', t) <- lookupVar loc v
     onFailure (CheckingRequired [Scalar $ Prim $ Signed Int64] (toStruct t)) $
       unify (mkUsage loc "use as array size") (toStruct t) $
-        Scalar $ Prim $ Signed Int64
+        Scalar $
+          Prim $
+            Signed Int64
     pure v'
 
   typeError loc notes s = do
@@ -1003,7 +1035,9 @@ initialTermScope =
       Just
         ( name,
           BoundV Global tvs $
-            fromStruct $ Scalar $ Arrow mempty Unnamed pts' rt
+            fromStruct $
+              Scalar $
+                Arrow mempty Unnamed pts' rt
         )
       where
         pts' = case pts of

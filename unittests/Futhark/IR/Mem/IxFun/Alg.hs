@@ -57,7 +57,8 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Index fun is) = ppr fun <> ppr is
   ppr (FlatIndex fun is) = ppr fun <> ppr is
   ppr (Reshape fun oldshape) =
-    ppr fun <> text "->reshape"
+    ppr fun
+      <> text "->reshape"
       <> parens (commasep (map ppr oldshape))
   ppr (OffsetIndex fun i) =
     ppr fun <> text "->offset_index" <> parens (ppr i)

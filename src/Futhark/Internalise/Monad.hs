@@ -152,7 +152,9 @@ bindConstant cname fd = do
   let stms = bodyStms $ funDefBody fd
       substs =
         drop (length (shapeContext (funDefRetType fd))) $
-          map resSubExp $ bodyResult $ funDefBody fd
+          map resSubExp $
+            bodyResult $
+              funDefBody fd
   addStms stms
   modify $ \s ->
     s
@@ -178,7 +180,8 @@ assert desc se msg loc = assertingOne $ do
   attrs <- asks $ attrsForAssert . envAttrs
   attributing attrs $
     letExp desc $
-      BasicOp $ Assert se msg (loc, mempty)
+      BasicOp $
+        Assert se msg (loc, mempty)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

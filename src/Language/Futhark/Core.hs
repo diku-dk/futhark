@@ -156,8 +156,8 @@ prettyStacktrace cur = unlines . zipWith f [(0 :: Int) ..]
     -- beyond that would require a truly perverse program.
     f i x =
       (if cur == i then "-> " else "   ")
-        ++ '#' :
-      show i
+        ++ '#'
+        : show i
         ++ (if i > 9 then "" else " ")
         ++ " "
         ++ x

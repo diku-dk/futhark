@@ -104,7 +104,8 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     (sinking_here, sinking') = M.partitionWithKey sunkHere sinking
     sunk_stms = stmsFromList $ M.elems sinking_here
     sunkHere v stm =
-      v `nameIn` free_in_stms
+      v
+        `nameIn` free_in_stms
         && all (`ST.available` vtable) (namesToList (freeIn stm))
     sunk = namesFromList $ foldMap (patNames . stmPat) sunk_stms
 
@@ -279,7 +280,9 @@ sink onOp =
       pure $
         fst $
           optimiseStms onOp mempty mempty consts $
-            namesFromList $ M.keys $ scopeOf consts
+            namesFromList $
+              M.keys $
+                scopeOf consts
 
 -- | Sinking in GPU kernels.
 sinkGPU :: Pass GPU GPU

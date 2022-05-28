@@ -49,7 +49,9 @@ installInDir (BuildList bl) dir = do
             -- matter the host OS.
             when (".." `elem` Posix.splitPath (Zip.eRelativePath entry)) $
               fail $
-                "Zip archive for " <> pdir <> " contains suspicious path: "
+                "Zip archive for "
+                  <> pdir
+                  <> " contains suspicious path: "
                   <> Zip.eRelativePath entry
             let f = pdir </> makeRelative from_dir (Zip.eRelativePath entry)
             createDirectoryIfMissing True $ takeDirectory f
@@ -68,7 +70,9 @@ installInDir (BuildList bl) dir = do
     -- package files.
     let noPkgDir =
           fail $
-            "futhark.pkg for " ++ T.unpack p ++ "-"
+            "futhark.pkg for "
+              ++ T.unpack p
+              ++ "-"
               ++ T.unpack (prettySemVer v)
               ++ " does not define a package path."
     from_dir <- maybe noPkgDir (pure . (pkgRevZipballDir info <>)) $ pkgDir m
@@ -89,7 +93,8 @@ installInDir (BuildList bl) dir = do
 
     when (null written) $
       fail $
-        "Zip archive for package " ++ T.unpack p
+        "Zip archive for package "
+          ++ T.unpack p
           ++ " does not contain any files in "
           ++ from_dir
 
@@ -311,7 +316,9 @@ doAdd = cmdMain "PKGPATH" $ \args cfg ->
           | otherwise ->
               liftIO $
                 T.putStrLn $
-                  "Replaced " <> p <> " "
+                  "Replaced "
+                    <> p
+                    <> " "
                     <> prettySemVer (requiredPkgRev prev_r')
                     <> " => "
                     <> prettySemVer v
@@ -385,7 +392,9 @@ doUpgrade = cmdMain "" $ \args cfg ->
       when (v /= requiredPkgRev req) $
         liftIO $
           T.putStrLn $
-            "Upgraded " <> requiredPkg req <> " "
+            "Upgraded "
+              <> requiredPkg req
+              <> " "
               <> prettySemVer (requiredPkgRev req)
               <> " => "
               <> prettySemVer v

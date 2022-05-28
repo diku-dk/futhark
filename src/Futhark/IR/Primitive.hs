@@ -582,8 +582,8 @@ data ConvOp
 -- | A list of all unary operators for all types.
 allUnOps :: [UnOp]
 allUnOps =
-  Not :
-  map Complement [minBound .. maxBound]
+  Not
+    : map Complement [minBound .. maxBound]
     ++ map Abs [minBound .. maxBound]
     ++ map FAbs [minBound .. maxBound]
     ++ map SSignum [minBound .. maxBound]
