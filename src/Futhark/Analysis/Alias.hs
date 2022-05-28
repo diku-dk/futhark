@@ -55,7 +55,6 @@ analyseBody atable (Body rep stms result) =
   let (stms', _atable') = analyseStms atable stms
    in mkAliasedBody rep stms' result
 
-
 -- | Perform alias analysis on statements.
 analyseStms ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
