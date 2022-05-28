@@ -524,18 +524,18 @@ runInnerFusion :: DepGraphAug -- do fusion on the inner lambdas
 runInnerFusion = mapAcross runInnerFusionOnContext
 
 runInnerFusionOnContext :: DepContext -> FusionEnvM DepContext
-runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
+runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   DoNode (Let pat aux (DoLoop params form body)) toFuse ->
     doFuseScans $
       localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
         let extra_is = namesFromList $ map (paramName . fst) (filter (isArray . fst) params)
         b <- doFusionWithDelayed body extra_is toFuse
-        pure (incomming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
+        pure (incoming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
   IfNode (Let pat aux (If sz b1 b2 dec)) toFuse -> doFuseScans $ do
     b1' <- doFusionWithDelayed b1 mempty toFuse
     b2' <- doFusionWithDelayed b2 mempty toFuse
     rb2' <- renameBody b2'
-    pure (incomming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
+    pure (incoming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
   SoacNode ots pat soac aux -> do
     -- To clean up previous instances of fusion.
     lam <- simplifyLambda $ H.lambda soac
@@ -547,7 +547,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
     -- To clean up any inner fusion.
     lam' <- simplifyLambda $ lam {lambdaBody = newbody}
     let nodeT' = SoacNode ots pat (H.setLambda lam' soac) aux
-    pure (incomming, node, nodeT', outgoing)
+    pure (incoming, node, nodeT', outgoing)
   _ -> pure c
   where
     doFusionWithDelayed :: Body SOACS -> Names -> [(NodeT, [EdgeT])] -> FusionEnvM (Body SOACS)
