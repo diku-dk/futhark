@@ -60,8 +60,6 @@ import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import Futhark.Transform.Substitute
 import Futhark.Util (nubOrd)
-import qualified Futhark.IR.Prop.Aliases as Alias2
-import Debug.Trace (trace)
 
 data EdgeT
   = Alias VName
@@ -193,7 +191,7 @@ data FusionEnv = FusionEnv -- monadic state environment for fusion.
     -- it.
     producerMapping :: M.Map VName G.Node,
     -- a table mapping VNames to VNames that are aliased to it
-    aliasTable :: Alias2.AliasTable,
+    aliasTable :: AliasTable,
     -- | Fused anything yet?
     fusedAnything :: Bool,
     fuseScans :: Bool
@@ -270,10 +268,12 @@ makeAliasTable stms g = do
 mkDepGraph :: Stms SOACS -> Names -> Names -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
   let g = emptyGraph stms res inputs
-  applyAugs [
-    makeMapping,
-    makeAliasTable stms,
-    initialGraphConstruction] g
+  applyAugs
+    [ makeMapping,
+      makeAliasTable stms,
+      initialGraphConstruction
+    ]
+    g
 
 applyAugs :: [DepGraphAug] -> DepGraphAug
 applyAugs augs g = foldlM (flip ($)) g augs
@@ -414,27 +414,21 @@ addExtraCons g = do
   mapping <- gets producerMapping
   let edges = concatMap (make_edge aliasTab mapping) (G.labEdges g)
   depGraphInsertEdges edges g
-    where
-    make_edge ::  Alias2.AliasTable -> M.Map VName G.Node -> DepEdge -> [DepEdge]
+  where
+    make_edge :: AliasTable -> M.Map VName G.Node -> DepEdge -> [DepEdge]
     make_edge aliasTab mapping (from, to, Cons cname) =
-      let aliasses = namesToList $  M.findWithDefault (namesFromList []) cname aliasTab in
-      let to' = map (mapping M.!) aliasses in
-      trace ("here " <> show to') $
-      [ G.toLEdge (from, to2) (Fake cname)
-        | (to2, _) <-
-            filter
-              ( \(tonode, toedge) ->
-                  tonode /= from
-                    && getName toedge `elem` aliasses <> [cname]
-              )
-              $ concatMap (G.lpre g) to' <> G.lpre g to
-      ]
+      let aliasses = namesToList $ M.findWithDefault (namesFromList []) cname aliasTab
+          to' = map (mapping M.!) aliasses
+       in [ G.toLEdge (from, to2) (Fake cname)
+            | (to2, _) <-
+                filter
+                  ( \(tonode, toedge) ->
+                      tonode /= from
+                        && getName toedge `elem` aliasses <> [cname]
+                  )
+                  $ concatMap (G.lpre g) to' <> G.lpre g to
+          ]
     make_edge _ _ _ = []
-
-
-
-
-
 
 addResEdges :: DepGraphAug
 addResEdges = augWithFun getStmRes
