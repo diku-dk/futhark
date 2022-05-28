@@ -135,17 +135,15 @@ diffBasicOp pat aux e m =
       returnSweepCode $ do
         arr_dims <- arrayDims <$> lookupType arr
         void $
-          updateAdj arr <=< letExp "adj_reshape" $
-            BasicOp $
-              Reshape (map DimNew arr_dims) pat_adj
+          updateAdj arr <=< letExp "adj_reshape" . BasicOp $
+            Reshape (map DimNew arr_dims) pat_adj
     --
     Rearrange perm arr -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $
         void $
-          updateAdj arr <=< letExp "adj_rearrange" $
-            BasicOp $
-              Rearrange (rearrangeInverse perm) pat_adj
+          updateAdj arr <=< letExp "adj_rearrange" . BasicOp $
+            Rearrange (rearrangeInverse perm) pat_adj
     --
     Rotate rots arr -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -153,9 +151,8 @@ diffBasicOp pat aux e m =
         let neg = BasicOp . BinOp (Sub Int64 OverflowWrap) (intConst Int64 0)
         rots' <- mapM (letSubExp "rot_neg" . neg) rots
         void $
-          updateAdj arr <=< letExp "adj_rotate" $
-            BasicOp $
-              Rotate rots' pat_adj
+          updateAdj arr <=< letExp "adj_rotate" . BasicOp $
+            Rotate rots' pat_adj
     --
     Replicate (Shape ns) x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -165,9 +162,8 @@ diffBasicOp pat aux e m =
         ne <- letSubExp "zero" $ zeroExp x_t
         n <- letSubExp "rep_size" =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ns
         pat_adj_flat <-
-          letExp (baseString pat_adj <> "_flat") $
-            BasicOp $
-              Reshape (map DimNew $ n : arrayDims x_t) pat_adj
+          letExp (baseString pat_adj <> "_flat") . BasicOp $
+            Reshape (map DimNew $ n : arrayDims x_t) pat_adj
         reduce <- reduceSOAC [Reduce Commutative lam [ne]]
         updateSubExpAdj x
           =<< letExp "rep_contrib" (Op $ Screma n [pat_adj_flat] reduce)

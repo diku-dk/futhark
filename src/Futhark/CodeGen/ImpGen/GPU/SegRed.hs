@@ -190,10 +190,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
 
   counter <-
     sStaticArray "counter" (Space "device") int32 $
-      Imp.ArrayValues $
-        replicate (fromIntegral maxNumOps) $
-          IntValue $
-            Int32Value 0
+      Imp.ArrayZeros (fromIntegral maxNumOps)
 
   reds_group_res_arrs <- groupResultArrays num_groups group_size reds
 
@@ -323,9 +320,12 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
 
       sComment "apply map function if in bounds" $
         sIf
-          ( segment_size .>. 0
+          ( segment_size
+              .>. 0
               .&&. isActive (init $ zip gtids dims)
-              .&&. ltid .<. segment_size * segments_per_group
+              .&&. ltid
+                .<. segment_size
+                  * segments_per_group
           )
           in_bounds
           out_of_bounds
@@ -347,8 +347,12 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
 
       sComment "save final values of segments"
         $ sWhen
-          ( sExt64 group_id' * segments_per_group + sExt64 ltid .<. num_segments
-              .&&. ltid .<. segments_per_group
+          ( sExt64 group_id'
+              * segments_per_group
+              + sExt64 ltid
+              .<. num_segments
+              .&&. ltid
+                .<. segments_per_group
           )
         $ forM_ (zip segred_pes (concat reds_arrs))
         $ \(pe, arr) -> do

@@ -71,10 +71,8 @@ removeLoopVars loop =
     let indexify (x_param, xs) = do
           xs_t <- lookupType xs
           x' <-
-            letExp (baseString $ paramName x_param) $
-              BasicOp $
-                Index xs $
-                  fullSlice xs_t [DimFix (Var i)]
+            letExp (baseString $ paramName x_param) . BasicOp . Index xs $
+              fullSlice xs_t [DimFix (Var i)]
           pure (paramName x_param, x')
     (substs_list, subst_stms) <- collectStms $ mapM indexify loop_vars
     let Body aux' stms' res' = substituteNames (M.fromList substs_list) body
@@ -138,27 +136,24 @@ nestifyLoop bound_se = nestifyLoop' bound_se
                     loop_inits' = map (Var . paramName) loop_params
                     val_pats'' = zip loop_params' loop_inits'
                 outer_body <-
-                  buildBody_ $
-                    do
-                      offset' <-
-                        letSubExp "offset" $
-                          BasicOp $
-                            BinOp (Mul it OverflowUndef) offset (Var i)
+                  buildBody_ $ do
+                    offset' <-
+                      letSubExp "offset" . BasicOp $
+                        BinOp (Mul it OverflowUndef) offset (Var i)
 
-                      inner_body <- insertStmsM $ do
-                        i_inner <-
-                          letExp "i_inner" $
-                            BasicOp $
-                              BinOp (Add it OverflowUndef) offset' (Var i')
-                        pure $ substituteNames (M.singleton i' i_inner) body'
+                    inner_body <- insertStmsM $ do
+                      i_inner <-
+                        letExp "i_inner" . BasicOp $
+                          BinOp (Add it OverflowUndef) offset' (Var i')
+                      pure $ substituteNames (M.singleton i' i_inner) body'
 
-                      inner_loop <-
-                        letTupExp "inner_loop"
-                          =<< nestifyLoop'
-                            offset'
-                            (n - 1)
-                            (DoLoop val_pats'' (ForLoop i' it' bound_se loop_vars') inner_body)
-                      pure $ varsRes inner_loop
+                    inner_loop <-
+                      letTupExp "inner_loop"
+                        =<< nestifyLoop'
+                          offset'
+                          (n - 1)
+                          (DoLoop val_pats'' (ForLoop i' it' bound_se loop_vars') inner_body)
+                    pure $ varsRes inner_loop
                 pure $
                   DoLoop val_pats (ForLoop i it bound_se loop_vars) outer_body
           | n == 1 =
@@ -178,9 +173,8 @@ stripmine n pat loop = do
     bound' <- letSubExp "bound" $ BasicOp $ BinOp (FPow Float64) bound_float n_root
     bound_int <- letSubExp "bound_int" $ BasicOp $ ConvOp (FPToUI Float64 it) bound'
     total_iters <-
-      letSubExp "total_iters" $
-        BasicOp $
-          BinOp (Pow it) bound_int (Constant $ IntValue $ intValue it n)
+      letSubExp "total_iters" . BasicOp $
+        BinOp (Pow it) bound_int (Constant $ IntValue $ intValue it n)
     remain_iters <-
       letSubExp "remain_iters" $ BasicOp $ BinOp (Sub it OverflowUndef) bound total_iters
     mined_loop <- nestifyLoop bound_int n loop
@@ -188,9 +182,8 @@ stripmine n pat loop = do
     renameForLoop loop $ \_loop' val_pats' _form' i' it' _bound' loop_vars' body' -> do
       remain_body <- insertStmsM $ do
         i_remain <-
-          letExp "i_remain" $
-            BasicOp $
-              BinOp (Add it OverflowUndef) total_iters (Var i')
+          letExp "i_remain" . BasicOp $
+            BinOp (Add it OverflowUndef) total_iters (Var i')
         pure $ substituteNames (M.singleton i' i_remain) body'
       let loop_params_rem = map fst val_pats'
           loop_inits_rem = map (Var . patElemName) $ patElems pat'
@@ -295,12 +288,10 @@ reverseIndices loop = do
         forM (map snd loop_vars) $ \xs -> do
           xs_t <- lookupType xs
           xs_rev <-
-            letExp "reverse" $
-              BasicOp $
-                Index xs $
-                  fullSlice
-                    xs_t
-                    [DimSlice bound_minus_one bound (Constant (IntValue (Int64Value (-1))))]
+            letExp "reverse" . BasicOp . Index xs $
+              fullSlice
+                xs_t
+                [DimSlice bound_minus_one bound (Constant (IntValue (Int64Value (-1))))]
           pure (xs, xs_rev)
 
     (i_rev, i_stms) <- collectStms $

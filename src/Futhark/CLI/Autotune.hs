@@ -177,8 +177,7 @@ prepare opts futhark prog = do
           ropts = runOptions timeout opts
 
       when (optVerbose opts > 1) $
-        putStrLn $
-          "Trying path: " ++ show path
+        putStrLn ("Trying path: " ++ show path)
 
       -- Setting the tuning parameters is a stateful action, so we
       -- must be careful to restore the defaults below.  This is
