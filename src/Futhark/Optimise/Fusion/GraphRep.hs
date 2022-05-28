@@ -28,6 +28,7 @@ module Futhark.Optimise.Fusion.GraphRep
     isInf,
     applyAugs,
     makeMapping,
+    makeAliasTable,
     initialGraphConstruction,
     emptyGraph,
     isArray,
@@ -60,6 +61,8 @@ import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import Futhark.Transform.Substitute
 import Futhark.Util (nubOrd)
+import qualified Futhark.IR.Prop.Aliases as Alias2
+import Debug.Trace (trace)
 
 data EdgeT
   = Alias VName
@@ -190,6 +193,7 @@ data FusionEnv = FusionEnv -- monadic state environment for fusion.
     -- | A mapping from variable name to the graph node that produces
     -- it.
     producerMapping :: M.Map VName G.Node,
+    aliasTable :: Alias2.AliasTable,
     fuseScans :: Bool
   }
 
@@ -198,6 +202,7 @@ freshFusionEnv =
   FusionEnv
     { vNameSource = blankNameSource,
       producerMapping = M.empty,
+      aliasTable = M.empty,
       fuseScans = True
     }
 
@@ -261,11 +266,20 @@ makeMapping g = do
     gen_dep_list :: DepNode -> [(VName, G.Node)]
     gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
 
+-- make a table to handle transitive aliases
+makeAliasTable :: Stms SOACS -> DepGraphAug
+makeAliasTable stms g = do
+  let (_, (aliasTable', _)) = Alias.analyseStms mempty stms
+  modify (\s -> s {aliasTable = aliasTable'})
+  pure g
+
 mkDepGraph :: Stms SOACS -> Names -> Names -> FusionEnvM DepGraph
 mkDepGraph stms res inputs = do
   let g = emptyGraph stms res inputs
-  _ <- makeMapping g
-  initialGraphConstruction g
+  applyAugs [
+    makeMapping,
+    makeAliasTable stms,
+    initialGraphConstruction] g
 
 applyAugs :: [DepGraphAug] -> DepGraphAug
 applyAugs augs g = foldlM (flip ($)) g augs
@@ -398,23 +412,35 @@ contractEdge n2 ctx g = do
   pure $ ctx G.& G.delNodes [n1, n2] g
 
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
--- nodes coming before it
+-- nodes coming before it (now also adds fake edges to aliases - hope this
+-- fixes asymptotic complexity guarantees)
 addExtraCons :: DepGraphAug
-addExtraCons g = depGraphInsertEdges new_edges g
-  where
-    new_edges = concatMap make_edge (G.labEdges g)
-    make_edge :: DepEdge -> [DepEdge]
-    make_edge (from, to, Cons cname) =
+addExtraCons g = do
+  aliasTab <- gets aliasTable
+  mapping <- gets producerMapping
+  let edges = concatMap (make_edge aliasTab mapping) (G.labEdges g)
+  depGraphInsertEdges edges g
+    where
+    make_edge ::  Alias2.AliasTable -> M.Map VName G.Node -> DepEdge -> [DepEdge]
+    make_edge aliasTab mapping (from, to, Cons cname) =
+      let aliasses = namesToList $  M.findWithDefault (namesFromList []) cname aliasTab in
+      let to' = map (mapping M.!) aliasses in
+      trace ("here " <> show to') $
       [ G.toLEdge (from, to2) (Fake cname)
         | (to2, _) <-
             filter
               ( \(tonode, toedge) ->
                   tonode /= from
-                    && cname == getName toedge
+                    && getName toedge `elem` aliasses <> [cname]
               )
-              $ G.lpre g to
+              $ concatMap (G.lpre g) to' <> G.lpre g to
       ]
-    make_edge _ = []
+    make_edge _ _ _ = []
+
+
+
+
+
 
 addResEdges :: DepGraphAug
 addResEdges = augWithFun getStmRes
