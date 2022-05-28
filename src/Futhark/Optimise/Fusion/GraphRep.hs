@@ -33,10 +33,6 @@ module Futhark.Optimise.Fusion.GraphRep
     depsFromEdge,
     contractEdge,
     isCons,
-    makeMap,
-    fuseMaps,
-    mapAcrossWithSE,
-    updateNode,
   )
 where
 
@@ -145,12 +141,6 @@ setName vn edgeT = case edgeT of
   Cons _ -> Cons vn
   Fake _ -> Fake vn
   Res _ -> Res vn
-
-makeMap :: Ord a => [a] -> [b] -> M.Map a b
-makeMap x y = M.fromList $ zip x y
-
-fuseMaps :: Ord b => M.Map a b -> M.Map b c -> M.Map a c
-fuseMaps m1 m2 = M.mapMaybe (`M.lookup` m2) m1
 
 -- does the node acutally represent something in the program
 -- (non-real nodes are not delayed-fused into other nodes)
@@ -322,19 +312,6 @@ mapAcrossNodeTs f = mapAcross f'
     f' (ins, n, nodeT, outs) = do
       nodeT' <- f nodeT
       pure (ins, n, nodeT', outs)
-
-mapAcrossWithSE :: (DepNode -> DepGraphAug) -> DepGraphAug
-mapAcrossWithSE f g =
-  applyAugs (map f (G.labNodes g)) g
-
-updateNode :: G.Node -> (NodeT -> Maybe NodeT) -> DepGraphAug
-updateNode n f g =
-  case G.context g n of
-    (ins, _, l, outs) ->
-      case f l of
-        Just newLab ->
-          pure $ (ins, n, newLab, outs) G.& G.delNode n g
-        Nothing -> pure g
 
 nodeToSoacNode :: NodeT -> FusionEnvM NodeT
 nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of

@@ -240,6 +240,12 @@ vFuseContexts
       Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
       Nothing -> pure Nothing
 
+makeMap :: Ord a => [a] -> [b] -> M.Map a b
+makeMap x y = M.fromList $ zip x y
+
+fuseMaps :: Ord b => M.Map a b -> M.Map b c -> M.Map a c
+fuseMaps m1 m2 = M.mapMaybe (`M.lookup` m2) m1
+
 makeCopiesOfFusedExcept :: [VName] -> NodeT -> FusionEnvM NodeT
 makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
   let lam = H.lambda soac
