@@ -41,6 +41,11 @@ dontFuseScans m = do
   modify (\s -> s {fuseScans = fs})
   pure r
 
+isArray :: Typed t => Param t -> Bool
+isArray p = case paramType p of
+  Array {} -> True
+  _ -> False
+
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
 fuseGraphLZ :: Stms SOACS -> Result -> [Param DeclType] -> FusionEnvM (Stms SOACS)
 fuseGraphLZ stms results inputs =
@@ -564,7 +569,7 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
       new_stms <- fuseGraph stms results inputs
       pure b {bodyStms = new_stms}
       where
-        lambda_inputs = map paramName (filter isArray2 inp)
+        lambda_inputs = map paramName (filter isArray inp)
         other_inputs = map (vNameFromAdj node) $ filter (not . isDep . fst) outgoing
         inputs = namesFromList $ other_inputs ++ lambda_inputs
         stms = bodyStms b

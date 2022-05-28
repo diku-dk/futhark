@@ -30,8 +30,6 @@ module Futhark.Optimise.Fusion.GraphRep
     makeAliasTable,
     initialGraphConstruction,
     emptyGraph,
-    isArray,
-    isArray2,
     depsFromEdge,
     contractEdge,
     isCons,
@@ -227,16 +225,6 @@ runFusionEnvM scope fenv (FusionEnvM a) = modifyNameSource $ \src ->
   let x = runReaderT a scope
       (y, z) = runState x (fenv {vNameSource = src})
    in (y, vNameSource z)
-
-isArray :: FParam SOACS -> Bool
-isArray p = case paramDec p of
-  Array {} -> True
-  _ -> False
-
-isArray2 :: LParam SOACS -> Bool
-isArray2 p = case paramDec p of
-  Array {} -> True
-  _ -> False
 
 -- | Construct a graph with only nodes, but no edges.
 emptyGraph :: Stms SOACS -> Names -> Names -> DepGraph
