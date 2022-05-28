@@ -36,7 +36,7 @@
 --    [2.326897180853236f32, 2.372540501622419f32, 2.135902194722964f32],
 --    [2.6295904397262726f32, 2.8264486916069096f32, 2.4935049184863627f32]]
 -- }
--- structure { /Screma 1 /Screma/Screma 2 /Screma/Screma/Screma 1 }
+-- structure { /Screma 1 /Screma/Screma 1 /Screma/Screma/Screma 1 }
 
 def correlateDeltas [num_und][num_dates]
                    (md_c: [num_und][num_und]f32,
