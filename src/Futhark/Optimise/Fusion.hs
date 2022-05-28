@@ -558,8 +558,15 @@ runInnerFusionOnContext c@(incomming, node, nodeT, outgoing) = case nodeT of
       let g = emptyGraph stms results inputs
       -- highly temporary and non-thought-out
       stm_node <- mapM (finalizeNode . fst) extraNodes
-      let stms_node = foldl (<>) mempty stm_node
-      g' <- applyAugs [handleNodes extraNodes, makeMapping, makeAliasTable (stms_node <> stms), initialGraphConstruction, doAllFusion] g
+      g' <-
+        applyAugs
+          [ handleNodes extraNodes,
+            makeMapping,
+            makeAliasTable (mconcat stm_node <> stms),
+            initialGraphConstruction,
+            doAllFusion
+          ]
+          g
       new_stms <- linearizeGraph g'
       pure b {bodyStms = new_stms}
       where
@@ -592,30 +599,6 @@ addEdgesToGraph (n, edgs) = genEdges [n] (const edgs')
   where
     f e = (getName e, e)
     edgs' = map f edgs
-
--- isAlias :: EdgeT -> Bool
--- isAlias (Alias _) = True
--- isAlias _ = False
-
--- isFake :: EdgeT -> Bool
--- isFake (Fake _) = True
--- isFake _ = False
-
--- makeCopiesOfConsAliased :: DepGraphAug
--- makeCopiesOfConsAliased = mapAcrossWithSE copyAliased
---   where
---     copyAliased :: DepNode -> DepGraphAug
---     copyAliased (n, nt) g' = do
---       let (incoming, _, _, outgoing) = G.context g' n
---       let incoming' = map getName $ filter isFake (map fst incoming)
---       let outgoing' = map getName $ filter isAlias (map fst outgoing)
---       let toMakeCopies = incoming' `L.intersect` outgoing'
---       if not $ null toMakeCopies
---         then do
---           (new_stms, nameMapping) <- makeCopyStms toMakeCopies
---           let newNode = FinalNode new_stms (substituteNames nameMapping nt) mempty
---           updateNode n (const (Just newNode)) g'
---         else pure g'
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
