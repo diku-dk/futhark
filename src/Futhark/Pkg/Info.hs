@@ -209,7 +209,10 @@ ghglRevGetManifest url owner repo tag = GetManifest $ do
 
   let path =
         T.unpack $
-          owner <> "/" <> repo <> "@"
+          owner
+            <> "/"
+            <> repo
+            <> "@"
             <> tag
             <> "/"
             <> T.pack futharkPkg
@@ -258,7 +261,8 @@ ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir owner repo versio
 
   head_ref <-
     maybe (fail $ "Cannot find HEAD ref for " <> T.unpack repo_url) pure $
-      maybeHead $ mapMaybe isHeadRef remote_lines
+      maybeHead $
+        mapMaybe isHeadRef remote_lines
   let def = fromMaybe head_ref
 
   rev_info <- M.fromList . catMaybes <$> mapM revInfo remote_lines
@@ -347,14 +351,17 @@ glPkgInfo owner repo versions =
     base_url = "https://gitlab.com/" <> owner <> "/" <> repo
     repo_url = base_url <> ".git"
     mk_archive_url r =
-      base_url <> "/-/archive/" <> r
+      base_url
+        <> "/-/archive/"
+        <> r
         <> "/"
         <> repo
         <> "-"
         <> r
         <> ".zip"
     mk_manifest_url r =
-      base_url <> "/raw/"
+      base_url
+        <> "/raw/"
         <> r
         <> "/"
         <> T.pack futharkPkg
@@ -444,7 +451,8 @@ lookupPackageRev p v
               major
                 | (_, vs) <- majorRevOfPkg p,
                   _svMajor v `notElem` vs =
-                    "\nFor major version " <> T.pack (show (_svMajor v))
+                    "\nFor major version "
+                      <> T.pack (show (_svMajor v))
                       <> ", use package path "
                       <> p
                       <> "@"
@@ -452,7 +460,11 @@ lookupPackageRev p v
                 | otherwise = mempty
            in fail $
                 T.unpack $
-                  "package " <> p <> " does not have a version " <> prettySemVer v <> ".\n"
+                  "package "
+                    <> p
+                    <> " does not have a version "
+                    <> prettySemVer v
+                    <> ".\n"
                     <> versions
                     <> major
         Just v' -> pure v'

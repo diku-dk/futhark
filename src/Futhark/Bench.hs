@@ -373,7 +373,9 @@ prepareBenchmarkProgram concurrency opts program cases = do
     Left err ->
       pure $
         Left
-          ( "Reference output generation for " ++ program ++ " failed:\n"
+          ( "Reference output generation for "
+              ++ program
+              ++ " failed:\n"
               ++ unlines (map T.unpack err),
             Nothing
           )

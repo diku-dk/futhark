@@ -40,7 +40,9 @@ subShapeTests =
     subShapeTest :: ExtShape -> ExtShape -> Bool -> TestTree
     subShapeTest shape1 shape2 expected =
       testCase
-        ( "subshapeOf " ++ pretty shape1 ++ " "
+        ( "subshapeOf "
+            ++ pretty shape1
+            ++ " "
             ++ pretty shape2
             ++ " == "
             ++ show expected

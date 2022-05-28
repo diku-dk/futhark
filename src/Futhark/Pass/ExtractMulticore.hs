@@ -173,14 +173,17 @@ unstreamLambda attrs nes lam = do
   body <- runBodyBuilder $
     localScope (scopeOfLParams inp_params) $ do
       letBindNames [paramName chunk_param] $
-        BasicOp $ SubExp $ intConst Int64 1
+        BasicOp $
+          SubExp $
+            intConst Int64 1
 
       forM_ (zip acc_params nes) $ \(p, ne) ->
         letBindNames [paramName p] $ BasicOp $ SubExp ne
 
       forM_ (zip slice_params inp_params) $ \(slice, v) ->
         letBindNames [paramName slice] $
-          BasicOp $ ArrayLit [Var $ paramName v] (paramType v)
+          BasicOp $
+            ArrayLit [Var $ paramName v] (paramType v)
 
       (red_res, map_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
@@ -188,7 +191,8 @@ unstreamLambda attrs nes lam = do
         v <- letExp "map_res" $ BasicOp $ SubExp se
         v_t <- lookupType v
         certifying cs . letSubExp "chunk" . BasicOp $
-          Index v $ fullSlice v_t [DimFix $ intConst Int64 0]
+          Index v $
+            fullSlice v_t [DimFix $ intConst Int64 0]
 
       pure $ mkBody mempty $ red_res <> subExpsRes map_res'
 
@@ -381,7 +385,8 @@ transformSOAC pat attrs (Stream w arrs (Parallel _ comm red_lam) red_nes fold_la
           (par_red_stms, par_op) <-
             transformParStream DoRename transformBody w comm red_lam red_nes map_lam arrs
           pure $
-            seq_red_stms <> par_red_stms
+            seq_red_stms
+              <> par_red_stms
               <> oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
         else
           pure $

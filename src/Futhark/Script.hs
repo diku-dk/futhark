@@ -132,9 +132,12 @@ inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 parseExp :: Parsec Void T.Text () -> Parsec Void T.Text Exp
 parseExp sep =
   choice
-    [ lexeme sep "let" $> Let
-        <*> pPat <* lexeme sep "="
-        <*> parseExp sep <* lexeme sep "in"
+    [ lexeme sep "let"
+        $> Let
+        <*> pPat
+        <* lexeme sep "="
+        <*> parseExp sep
+        <* lexeme sep "in"
         <*> parseExp sep,
       try $ Call <$> parseFunc <*> many pAtom,
       pAtom
@@ -328,7 +331,8 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             pure $ M.fromList (zip vs vals)
         | otherwise =
             throwError $
-              "Pat: " <> prettyTextOneLine vs
+              "Pat: "
+                <> prettyTextOneLine vs
                 <> "\nDoes not match value of type: "
                 <> prettyTextOneLine (fmap scriptValueType val)
 
@@ -341,7 +345,8 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
       evalExp' vtable (Call (FuncFut name) es)
         | Just e <- M.lookup name vtable = do
             unless (null es) $
-              throwError $ "Locally bound name cannot be invoked as a function: " <> prettyText name
+              throwError $
+                "Locally bound name cannot be invoked as a function: " <> prettyText name
             pure e
       evalExp' vtable (Call (FuncFut name) es) = do
         in_types <- fmap (map inputType) $ cmdEither $ cmdInputs server name
@@ -360,7 +365,9 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         let too_many = length es_types > length in_types
             too_wrong = zipWith (/=) es_types (map (V.ValueAtom . STValue) in_types)
         when (or $ too_many : too_wrong) . throwError $
-          "Function \"" <> name <> "\" expects arguments of types:\n"
+          "Function \""
+            <> name
+            <> "\" expects arguments of types:\n"
             <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
             <> "\nBut called with arguments of types:\n"
             <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
@@ -374,7 +381,8 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
           else
             pure . V.ValueAtom . SFun name in_types out_types $
-              zipWith SValue in_types $ map VVar ins
+              zipWith SValue in_types $
+                map VVar ins
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->
@@ -386,7 +394,8 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         V.ValueTuple <$> mapM (evalExp' vtable) es
       evalExp' vtable e@(Record m) = do
         when (length (nubOrd (map fst m)) /= length (map fst m)) $
-          throwError $ "Record " <> prettyText e <> " has duplicate fields."
+          throwError $
+            "Record " <> prettyText e <> " has duplicate fields."
         V.ValueRecord <$> traverse (evalExp' vtable) (M.fromList m)
       evalExp' vtable (Let pat e1 e2) = do
         v <- evalExp' vtable e1

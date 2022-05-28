@@ -295,7 +295,8 @@ transformTypeBind :: TypeBind -> TransformM ()
 transformTypeBind (TypeBind name l tparams te (Info (RetType dims t)) doc loc) = do
   name' <- transformName name
   emit . TypeDec
-    =<< ( TypeBind name' l <$> traverse transformNames tparams
+    =<< ( TypeBind name' l
+            <$> traverse transformNames tparams
             <*> transformTypeExp te
             <*> (Info . RetType dims <$> transformStructType t)
             <*> pure doc
@@ -306,11 +307,11 @@ transformModBind :: ModBind -> TransformM Scope
 transformModBind mb = do
   let addParam p me = ModLambda p Nothing me $ srclocOf me
   mod <-
-    evalModExp $
-      foldr
+    evalModExp
+      $ foldr
         addParam
         (maybeAscript (srclocOf mb) (modSignature mb) $ modExp mb)
-        $ modParams mb
+      $ modParams mb
   mname <- transformName $ modName mb
   pure $ Scope (scopeSubsts $ modScope mod) $ M.singleton mname mod
 
@@ -348,7 +349,10 @@ transformImports ((name, imp) : imps) = do
   let abs = S.fromList $ map qualLeaf $ M.keys $ fileAbs imp
   scope <-
     censor (fmap maybeHideEntryPoint) $
-      bindingAbs abs $ transformDecs $ progDecs $ fileProg imp
+      bindingAbs abs $
+        transformDecs $
+          progDecs $
+            fileProg imp
   bindingAbs abs $ bindingImport name scope $ transformImports imps
   where
     -- Only the "main" file (last import) is allowed to have entry points.

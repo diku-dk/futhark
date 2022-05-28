@@ -109,7 +109,8 @@ instance PrettyRep rep => Pretty (Body rep) where
     | null stms = braces (commasep $ map ppr res)
     | otherwise =
         stack (map ppr $ stmsToList stms)
-          </> text "in" <+> braces (commasep $ map ppr res)
+          </> text "in"
+          <+> braces (commasep $ map ppr res)
 
 instance Pretty Attr where
   ppr (AttrName v) = ppr v
@@ -148,7 +149,8 @@ instance Pretty t => Pretty (Param t) where
 instance PrettyRep rep => Pretty (Stm rep) where
   ppr stm@(Let pat aux e) =
     align . hang 2 $
-      text "let" <+> align (ppr pat)
+      text "let"
+        <+> align (ppr pat)
         <+> case (linebreak, stmannot) of
           (True, []) -> equals </> ppr e
           (False, []) -> equals <+/> ppr e
@@ -235,7 +237,9 @@ instance Pretty a => Pretty (ErrorMsg a) where
 
 instance PrettyRep rep => Pretty (Exp rep) where
   ppr (If c t f (IfDec ret ifsort)) =
-    text "if" <+> info' <+> ppr c
+    text "if"
+      <+> info'
+      <+> ppr c
       </> text "then"
       <+> maybeNest t
       <+> text "else"
@@ -254,7 +258,7 @@ instance PrettyRep rep => Pretty (Exp rep) where
   ppr (Apply fname args ret (safety, _, _)) =
     applykw
       <+> text (nameToString fname)
-      <> apply (map (align . pprArg) args)
+        <> apply (map (align . pprArg) args)
       </> colon
       <+> braces (commasep $ map ppr ret)
     where
@@ -265,7 +269,8 @@ instance PrettyRep rep => Pretty (Exp rep) where
         Safe -> text "apply"
   ppr (Op op) = ppr op
   ppr (DoLoop merge form loopbody) =
-    text "loop" <+> braces (commastack $ map ppr params)
+    text "loop"
+      <+> braces (commastack $ map ppr params)
       <+> equals
       <+> ppTuple' args
       </> ( case form of
@@ -298,17 +303,19 @@ instance PrettyRep rep => Pretty (Exp rep) where
     where
       ppInput (shape, arrs, op) =
         parens
-          ( ppr shape <> comma <+> ppTuple' arrs
-              <> case op of
-                Nothing -> mempty
-                Just (op', nes) ->
-                  comma </> parens (ppr op' <> comma </> ppTuple' (map ppr nes))
+          ( ppr shape <> comma
+              <+> ppTuple' arrs
+                <> case op of
+                  Nothing -> mempty
+                  Just (op', nes) ->
+                    comma </> parens (ppr op' <> comma </> ppTuple' (map ppr nes))
           )
 
 instance PrettyRep rep => Pretty (Lambda rep) where
   ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
-    text "\\" <+> ppTuple' params
+    text "\\"
+      <+> ppTuple' params
       </> indent 2 (colon <+> ppTupleLines' rettype <+> text "->")
       </> indent 2 (ppr body)
 

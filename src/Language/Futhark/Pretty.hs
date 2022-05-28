@@ -201,12 +201,14 @@ hasArrayLit _ = False
 instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
   ppr (DimFix e) = ppr e
   ppr (DimSlice i j (Just s)) =
-    maybe mempty ppr i <> text ":"
+    maybe mempty ppr i
+      <> text ":"
       <> maybe mempty ppr j
       <> text ":"
       <> ppr s
   ppr (DimSlice i (Just j) s) =
-    maybe mempty ppr i <> text ":"
+    maybe mempty ppr i
+      <> text ":"
       <> ppr j
       <> maybe mempty ((text ":" <>) . ppr) s
   ppr (DimSlice i Nothing Nothing) =
@@ -230,9 +232,11 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
     text "loop"
       <+> align
         ( spread (map (brackets . pprName) sizeparams)
-            <+/> ppr pat <+> equals
+            <+/> ppr pat
+            <+> equals
             <+/> ppr initexp
-            <+/> ppr form <+> text "do"
+            <+/> ppr form
+            <+> text "do"
         )
       </> indent 2 (ppr loopbody)
   pprPrec _ (Index e idxs _) =
@@ -240,7 +244,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pprPrec p (LetPat sizes pat e body _) =
     parensIf (p /= -1) $
       align $
-        text "let" <+> spread (map ppr sizes) <+> align (ppr pat)
+        text "let"
+          <+> spread (map ppr sizes)
+          <+> align (ppr pat)
           <+> ( if linebreak
                   then equals </> indent 2 (ppr e)
                   else equals <+> align (ppr e)
@@ -253,8 +259,11 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
         ArrayLit {} -> False
         _ -> hasArrayLit e
   pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
-    text "let" <+> pprName fname <+> spread (map ppr tparams ++ map ppr params)
-      <> retdecl' <+> equals
+    text "let"
+      <+> pprName fname
+      <+> spread (map ppr tparams ++ map ppr params)
+        <> retdecl'
+      <+> equals
       </> indent 2 (ppr e)
       </> letBody body
     where
@@ -263,12 +272,16 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
         Nothing -> mempty
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
-        text "let" <+> ppr dest <> list (map ppr idxs)
+        text "let"
+          <+> ppr dest <> list (map ppr idxs)
           <+> equals
           <+> align (ppr ve)
           </> letBody body
     | otherwise =
-        text "let" <+> ppr dest <+> equals <+> ppr src
+        text "let"
+          <+> ppr dest
+          <+> equals
+          <+> ppr src
           <+> text "with"
           <+> brackets (commasep (map ppr idxs))
           <+> text "="
@@ -283,9 +296,12 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
           ToInclusive end' -> text "..." <> ppr end'
           UpToExclusive end' -> text "..<" <> ppr end'
   pprPrec _ (If c t f _) =
-    text "if" <+> ppr c
-      </> text "then" <+> align (ppr t)
-      </> text "else" <+> align (ppr f)
+    text "if"
+      <+> ppr c
+      </> text "then"
+      <+> align (ppr t)
+      </> text "else"
+      <+> align (ppr f)
   pprPrec p (Apply f arg _ _) =
     parensIf (p >= 10) $ pprPrec 0 f <+/> pprPrec 10 arg
 
@@ -335,12 +351,14 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec _ (Not e _) = text "-" <> ppr e
   pprPrec _ (Update src idxs ve _) =
-    ppr src <+> text "with"
+    ppr src
+      <+> text "with"
       <+> brackets (commasep (map ppr idxs))
       <+> text "="
       <+> align (ppr ve)
   pprPrec _ (RecordUpdate src fs ve _ _) =
-    ppr src <+> text "with"
+    ppr src
+      <+> text "with"
       <+> mconcat (intersperse (text ".") (map ppr fs))
       <+> text "="
       <+> align (ppr ve)
@@ -348,7 +366,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec p (Lambda params body rettype _ _) =
     parensIf (p /= -1) $
       text "\\" <> spread (map ppr params) <> ppAscription rettype
-        <+> text "->" </> indent 2 (ppr body)
+        <+> text "->"
+        </> indent 2 (ppr body)
   pprPrec _ (OpSection binop _ _) =
     parens $ ppr binop
   pprPrec _ (OpSectionLeft binop _ x _ _ _) =
@@ -436,7 +455,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
   ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se
   ppr (ModLambda param maybe_sig body _) =
     text "\\" <> ppr param <> maybe_sig'
-      <+> text "->" </> indent 2 (ppr body)
+      <+> text "->"
+      </> indent 2 (ppr body)
     where
       maybe_sig' = case maybe_sig of
         Nothing -> mempty
@@ -449,7 +469,8 @@ instance Pretty Liftedness where
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
   ppr (TypeBind name l params te rt _ _) =
-    text "type" <> ppr l <+> pprName name
+    text "type" <> ppr l
+      <+> pprName name
       <+> spread (map ppr params)
       <+> equals
       <+> maybe (ppr te) ppr (unAnnot rt)
@@ -464,8 +485,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
       <> text fun
       <+> pprName name
       <+> align (sep (map ppr tparams ++ map ppr args))
-      <> retdecl'
-      <> text " ="
+        <> retdecl'
+        <> text " ="
       </> indent 2 (ppr body)
     where
       fun

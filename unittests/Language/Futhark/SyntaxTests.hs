@@ -78,7 +78,8 @@ pName =
 pVName :: Parser VName
 pVName = lexeme $ do
   (s, tag) <-
-    satisfy constituent `manyTill_` try pTag
+    satisfy constituent
+      `manyTill_` try pTag
       <?> "variable name"
   pure $ VName (nameFromString s) tag
   where

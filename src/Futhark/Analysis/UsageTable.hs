@@ -67,7 +67,9 @@ expand look (UsageTable m) = UsageTable $ foldl' grow m $ IM.toList m
   where
     grow m' (k, v) =
       foldl' (grow'' $ v `withoutU` presentU) m' $
-        namesIntMap $ look $ VName (nameFromString "") k
+        namesIntMap $
+          look $
+            VName (nameFromString "") k
     grow'' v m'' k = IM.insertWith (<>) (baseTag k) v m''
 
 is :: Usages -> VName -> UsageTable -> Bool
@@ -173,7 +175,8 @@ usageInExp (Apply _ args _ _) =
   mconcat
     [ mconcat $
         map consumedUsage $
-          namesToList $ subExpAliases arg
+          namesToList $
+            subExpAliases arg
       | (arg, d) <- args,
         d == Consume
     ]

@@ -212,7 +212,8 @@ parseAction :: Parser () -> Parser TestAction
 parseAction sep =
   choice
     [ CompileTimeFailure <$> (lexstr' "error:" *> parseExpectedError sep),
-      RunCases <$> parseInputOutputs sep
+      RunCases
+        <$> parseInputOutputs sep
         <*> many (parseExpectedStructure sep)
         <*> many (parseWarning sep)
     ]
@@ -373,7 +374,9 @@ pProgramTest = do
           cases <- many $ pInputOutputs <* many pNonTestLine
           pure spec {testAction = RunCases (old_cases ++ concat cases) structures warnings}
       | otherwise ->
-          many pNonTestLine *> notFollowedBy "-- ==" *> pure spec
+          many pNonTestLine
+            *> notFollowedBy "-- =="
+            *> pure spec
             <?> "no more test blocks, since first test block specifies type error."
     Nothing ->
       eof $> noTest

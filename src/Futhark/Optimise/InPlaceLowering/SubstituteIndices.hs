@@ -68,7 +68,8 @@ substituteIndicesInStm substs (Let pat _ (BasicOp (Rotate rots v)))
     [v'] <- patNames pat = do
       src' <-
         letExp (baseString v' <> "_subst") $
-          BasicOp $ Rotate (replicate (arrayRank src_t - length rots) zero ++ rots) src
+          BasicOp $
+            Rotate (replicate (arrayRank src_t - length rots) zero ++ rots) src
       src_t' <- lookupType src'
       pure $ (v', (cs, src', src_t', is)) : substs
   where
@@ -99,7 +100,9 @@ substituteIndicesInExp substs (Op op) = do
       v' <-
         certifying cs $
           letExp (baseString src <> "_op_idx") $
-            BasicOp $ Index src $ fullSlice (typeOf src_dec) is
+            BasicOp $
+              Index src $
+                fullSlice (typeOf src_dec) is
       pure $ M.singleton v v'
   pure $ Op $ substituteNames var_substs op
 substituteIndicesInExp substs e = do
@@ -119,7 +122,9 @@ substituteIndicesInExp substs e = do
                 row <-
                   certifying cs2 $
                     letExp (baseString v ++ "_row") $
-                      BasicOp $ Index src2 $ fullSlice (typeOf src2dec) (unSlice is2)
+                      BasicOp $
+                        Index src2 $
+                          fullSlice (typeOf src2dec) (unSlice is2)
                 row_copy <-
                   letExp (baseString v ++ "_row_copy") $ BasicOp $ Copy row
                 pure $
@@ -157,11 +162,16 @@ substituteIndicesInVar ::
 substituteIndicesInVar substs v
   | Just (cs2, src2, _, Slice []) <- lookup v substs =
       certifying cs2 $
-        letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
+        letExp (baseString src2) $
+          BasicOp $
+            SubExp $
+              Var src2
   | Just (cs2, src2, src2_dec, Slice is2) <- lookup v substs =
       certifying cs2 $
         letExp (baseString src2 <> "_v_idx") $
-          BasicOp $ Index src2 $ fullSlice (typeOf src2_dec) is2
+          BasicOp $
+            Index src2 $
+              fullSlice (typeOf src2_dec) is2
   | otherwise =
       pure v
 
@@ -173,10 +183,12 @@ substituteIndicesInBody ::
 substituteIndicesInBody substs (Body _ stms res) = do
   (substs', stms') <-
     inScopeOf stms $
-      collectStms $ substituteIndicesInStms substs stms
+      collectStms $
+        substituteIndicesInStms substs stms
   (res', res_stms) <-
     inScopeOf stms' $
-      collectStms $ mapM (onSubExpRes substs') res
+      collectStms $
+        mapM (onSubExpRes substs') res
   mkBodyM (stms' <> res_stms) res'
   where
     onSubExpRes substs' (SubExpRes cs se) =

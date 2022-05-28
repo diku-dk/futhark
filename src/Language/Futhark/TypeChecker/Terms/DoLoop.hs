@@ -132,10 +132,10 @@ convergePat loop_loc pat body_cons body_t body_loc = do
               ( unique pat_v_t
                   && not (S.null (aliases t `S.intersection` (cons <> obs)))
               )
-              $ lift . typeError loop_loc mempty $
-                "Return value for consuming loop parameter"
-                  <+> pquote (pprName pat_v)
-                  <+> "aliases previously returned value."
+              $ lift . typeError loop_loc mempty
+              $ "Return value for consuming loop parameter"
+                <+> pquote (pprName pat_v)
+                <+> "aliases previously returned value."
             if unique pat_v_t
               then put (cons <> aliases t, obs)
               else put (cons, obs <> aliases t)
@@ -171,7 +171,8 @@ wellTypedLoopArg :: ArgSource -> [VName] -> Pat -> Exp -> TermTypeM ()
 wellTypedLoopArg src sparams pat arg = do
   (merge_t, _) <-
     freshDimsInType (srclocOf arg) Nonrigid "loop" (S.fromList sparams) $
-      toStruct $ patternType pat
+      toStruct $
+        patternType pat
   arg_t <- toStruct <$> expTypeFully arg
   onFailure (checking merge_t arg_t) $
     unify
@@ -345,7 +346,8 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                       <+> ppr t
         While cond ->
           noUnique . bindingPat [] mergepat (Ascribed merge_t) $ \mergepat' ->
-            onlySelfAliasing . tapOccurrences
+            onlySelfAliasing
+              . tapOccurrences
               . sequentially
                 ( checkExp cond
                     >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)

@@ -43,15 +43,15 @@ compileProg mode class_name prog = do
     ImpGen.compileProg prog
   -- prepare the strings for assigning the kernels and set them as global
   let assign =
-        unlines $
-          map
+        unlines
+          $ map
             ( \x ->
                 pretty $
                   Assign
                     (Var ("self." ++ zEncodeString (nameToString x) ++ "_var"))
                     (Var $ "program." ++ zEncodeString (nameToString x))
             )
-            $ M.keys kernels
+          $ M.keys kernels
 
   let defines =
         [ Assign (Var "synchronous") $ Bool False,
@@ -206,7 +206,8 @@ callKernel (Imp.GetSizeMax v size_class) = do
   v' <- Py.compileVar v
   Py.stm $
     Assign v' $
-      Var $ "self.max_" ++ pretty size_class
+      Var $
+        "self.max_" ++ pretty size_class
 callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
   workgroup_size' <- mapM (fmap asLong . Py.compileExp) workgroup_size
@@ -408,7 +409,8 @@ staticOpenCLArray name "device" t vs = do
     -- Store the memory block for later reference.
     Py.stm $
       Assign (Field (Var "self") name') $
-        Var $ Py.compileName static_mem
+        Var $
+          Py.compileName static_mem
 
   Py.stm $ Assign (Var name') (Field (Var "self") name')
   where

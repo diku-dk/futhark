@@ -411,7 +411,9 @@ defuncFun tparams pats e0 ret loc = do
           <> patternArraySizes pat
       notSize = not . (`S.member` sizes_of_arrays)
       (fields, env) =
-        second M.fromList . unzip . map closureFromDynamicFun
+        second M.fromList
+          . unzip
+          . map closureFromDynamicFun
           . filter (notSize . fst)
           $ M.toList used_env
 
@@ -661,7 +663,9 @@ defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
     defuncScalar (TypeVar as u tn targs) = TypeVar as u tn targs
 defuncExp (Constr name _ (Info t) loc) =
   error $
-    "Constructor " ++ pretty name ++ " given type "
+    "Constructor "
+      ++ pretty name
+      ++ " given type "
       ++ pretty t
       ++ " at "
       ++ locStr loc
@@ -799,7 +803,9 @@ sizesForAll bound_sizes params = do
       pure $ NamedDim $ qualName v
     onDim (NamedDim d) = do
       unless (qualLeaf d `S.member` bound) $
-        modify $ S.insert $ qualLeaf d
+        modify $
+          S.insert $
+            qualLeaf d
       pure $ NamedDim d
     onDim d = pure d
 
@@ -844,7 +850,8 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
           rettype = buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
 
           already_bound =
-            globals <> S.fromList dims
+            globals
+              <> S.fromList dims
               <> S.map identName (foldMap patIdents params)
 
           more_dims =
@@ -883,7 +890,8 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
               fname'
               ( Info
                   ( Scalar . Arrow mempty Unnamed t1 . RetType [] $
-                      Scalar . Arrow mempty Unnamed t2 $ RetType [] rettype
+                      Scalar . Arrow mempty Unnamed t2 $
+                        RetType [] rettype
                   )
               )
               loc
@@ -1089,7 +1097,9 @@ buildRetType env pats = comb
       S.fromList (M.keys env) <> S.map identName (foldMap patIdents pats)
     boundAsUnique v =
       maybe False (unique . unInfo . identType) $
-        find ((== v) . identName) $ S.toList $ foldMap patIdents pats
+        find ((== v) . identName) $
+          S.toList $
+            foldMap patIdents pats
     problematic v = (v `S.member` bound) && not (boundAsUnique v)
     comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
       Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
@@ -1174,7 +1184,8 @@ matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
 matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
 matchPatSV pat sv =
   error $
-    "Tried to match pattern " ++ pretty pat
+    "Tried to match pattern "
+      ++ pretty pat
       ++ " with static value "
       ++ show sv
       ++ "."
@@ -1226,7 +1237,8 @@ updatePat (PatConstr c1 _ ps loc) (Dynamic t) =
 updatePat pat (Dynamic t) = updatePat pat (svFromType t)
 updatePat pat sv =
   error $
-    "Tried to update pattern " ++ pretty pat
+    "Tried to update pattern "
+      ++ pretty pat
       ++ "to reflect the static value "
       ++ show sv
 
@@ -1260,7 +1272,8 @@ defuncValBind (ValBind entry name _ (Info (RetType _ rettype)) tparams params bo
 defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) tparams params body _ _ _) = do
   when (any isTypeParam tparams) $
     error $
-      prettyName name ++ " has type parameters, "
+      prettyName name
+        ++ " has type parameters, "
         ++ "but the defunctionaliser expects a monomorphic input program."
   (tparams', params', body', sv) <-
     defuncLet (map typeParamName tparams) params body $ RetType ret_dims rettype

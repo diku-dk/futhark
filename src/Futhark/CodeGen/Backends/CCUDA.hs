@@ -232,7 +232,8 @@ copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
     memcpyFun (Space "device") (Space "device") = ("cuMemcpy", copyDevToDev)
     memcpyFun _ _ =
       error $
-        "Cannot copy to '" ++ show dstSpace
+        "Cannot copy to '"
+          ++ show dstSpace
           ++ "' from '"
           ++ show srcSpace
           ++ "'."
@@ -270,7 +271,8 @@ staticCUDAArray name "device" t vs = do
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
 staticCUDAArray _ space _ _ =
   error $
-    "CUDA backend cannot create static array in '" ++ space
+    "CUDA backend cannot create static array in '"
+      ++ space
       ++ "' memory space"
 
 cudaMemoryType :: GC.MemoryType OpenCL ()

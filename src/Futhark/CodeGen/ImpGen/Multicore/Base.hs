@@ -327,7 +327,8 @@ atomicUpdateLocking _ op
     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
       old <- dPrim "old" t
       atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
-        compileBody' [xp] $ lambdaBody op
+        compileBody' [xp] $
+          lambdaBody op
 atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)
@@ -373,12 +374,14 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
 
   let op_body =
         sComment "execute operation" $
-          compileBody' acc_params $ lambdaBody op
+          compileBody' acc_params $
+            lambdaBody op
 
       do_hist =
         everythingVolatile $
           sComment "update global result" $
-            zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
+            zipWithM_ (writeArray bucket) arrs $
+              map (Var . paramName) acc_params
 
   -- While-loop: Try to insert your value
   sWhile (tvExp continue .==. 0) $ do

@@ -203,7 +203,9 @@ copyCopyToCopy vtable pat _ (Copy v0)
     Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable = Simplify $ do
       v0' <-
         certifying (v0_cs <> v1_cs) $
-          letExp "rearrange_v0" $ BasicOp $ Rearrange perm v2
+          letExp "rearrange_v0" $
+            BasicOp $
+              Rearrange perm v2
       letBind pat $ BasicOp $ Copy v0'
 copyCopyToCopy _ _ _ _ = Skip
 

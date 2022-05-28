@@ -83,7 +83,9 @@ generateOptionParser options =
       For
         "optarg"
         ( Index (Var "parser_result") $
-            IdxExp $ String $ fieldName option
+            IdxExp $
+              String $
+                fieldName option
         )
         $ optionAction option
 

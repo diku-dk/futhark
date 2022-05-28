@@ -192,7 +192,8 @@ runCC cpath outpath cflags_def ldflags = do
       externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
     Right (ExitFailure code, _, gccerr) ->
       externalErrorS $
-        cmdCC ++ " failed with code "
+        cmdCC
+          ++ " failed with code "
           ++ show code
           ++ ":\n"
           ++ gccerr

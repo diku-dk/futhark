@@ -37,13 +37,16 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
 
           resIsNecessary ((v, _), _) =
             usedAfterLoop v
-              || paramName v `nameIn` necessaryForReturned
+              || paramName v
+              `nameIn` necessaryForReturned
               || referencedInPat v
               || referencedInForm v
 
           (keep_valpart, discard_valpart) =
             partition (resIsNecessary . snd) $
-              zip (patElems pat) $ zip merge $ bodyResult body
+              zip (patElems pat) $
+                zip merge $
+                  bodyResult body
 
           (keep_valpatelems, keep_val) = unzip keep_valpart
           (_discard_valpatelems, discard_val) = unzip discard_valpart
@@ -164,7 +167,8 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
           freeIn mergeParam `namesSubtract` oneName (paramName mergeParam)
     invariantOrNotMergeParam namesOfInvariant name =
       not (name `nameIn` namesOfMergeParams)
-        || name `nameIn` namesOfInvariant
+        || name
+        `nameIn` namesOfInvariant
 
 simplifyClosedFormLoop :: BuilderOps rep => TopDownRuleDoLoop rep
 simplifyClosedFormLoop _ pat _ (val, ForLoop i it bound [], body) =

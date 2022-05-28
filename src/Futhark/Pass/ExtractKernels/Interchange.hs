@@ -79,7 +79,8 @@ interchangeLoop
     let lam = Lambda (params' <> new_params) body rettype
         map_stm =
           Let loop_pat_expanded aux $
-            Op $ Screma w (arrs' <> new_arrs) (mapSOAC lam)
+            Op $
+              Screma w (arrs' <> new_arrs) (mapSOAC lam)
         res = varsRes $ patNames loop_pat_expanded
         pat' = Pat $ rearrangeShape perm $ patElems pat
 
@@ -100,7 +101,8 @@ interchangeLoop
             pure $ Var arr
       expandedInit param_name se =
         letSubExp (param_name <> "_expanded_init") $
-          BasicOp $ Replicate (Shape [w]) se
+          BasicOp $
+            Replicate (Shape [w]) se
 
       expand (merge_param, merge_init) = do
         expanded_param <-
@@ -148,7 +150,8 @@ manifestMaps (n : ns) res stms =
    in ( patNames $ loopNestingPat n,
         oneStm $
           Let (loopNestingPat n) (loopNestingAux n) $
-            Op $ Screma (loopNestingWidth n) arrs (mapSOAC lam)
+            Op $
+              Screma (loopNestingWidth n) arrs (mapSOAC lam)
       )
 
 -- | Given a (parallel) map nesting and an inner sequential loop, move
@@ -261,7 +264,8 @@ interchangeWithAcc1
           maplam_ret = lambdaReturnType acc_lam
           maplam = Lambda (iota_p : orig_acc_params ++ params) (lambdaBody acc_lam) maplam_ret
       auxing map_aux . fmap subExpsRes . letTupExp' "withacc_inter" $
-        Op $ Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
+        Op $
+          Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
     let pat = Pat $ rearrangeShape perm $ patElems map_pat
     pure $ WithAccStm perm pat inputs' acc_lam'
     where

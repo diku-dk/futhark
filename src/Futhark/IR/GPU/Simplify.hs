@@ -59,7 +59,9 @@ simplifyKernelOp _ (SegOp op) = do
 simplifyKernelOp _ (SizeOp (SplitSpace o w i elems_per_thread)) =
   (,)
     <$> ( SizeOp
-            <$> ( SplitSpace <$> Engine.simplify o <*> Engine.simplify w
+            <$> ( SplitSpace
+                    <$> Engine.simplify o
+                    <*> Engine.simplify w
                     <*> Engine.simplify i
                     <*> Engine.simplify elems_per_thread
                 )
@@ -105,7 +107,8 @@ instance SOAC.HasSOAC (Wise GPU) where
 
 kernelRules :: RuleBook (Wise GPU)
 kernelRules =
-  standardRules <> segOpRules
+  standardRules
+    <> segOpRules
     <> ruleBook
       [ RuleOp SOAC.simplifyKnownIterationSOAC,
         RuleOp SOAC.removeReplicateMapping,
@@ -154,6 +157,9 @@ removeScalarCopy vtable pat aux (Update safety arr_x (Slice slice_x) (Var v))
           slice_y' = Slice $ slice_y_bef ++ [DimSlice j (intConst Int64 1) (intConst Int64 1)]
       v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
       certifying cs_y . auxing aux $
-        letBind pat $ BasicOp $ Update safety arr_x slice_x' $ Var v'
+        letBind pat $
+          BasicOp $
+            Update safety arr_x slice_x' $
+              Var v'
 removeScalarCopy _ _ _ _ =
   Skip

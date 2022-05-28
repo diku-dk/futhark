@@ -405,7 +405,9 @@ maxCost c1 c2 = addCosts c1 c2
 costBody :: Body GPU -> Cost
 costBody bdy =
   foldl addCosts (Small 0) $
-    map costRedundantStmt $ stmsToList $ bodyStms bdy
+    map costRedundantStmt $
+      stmsToList $
+        bodyStms bdy
 
 costRedundantStmt :: Stm GPU -> Cost
 costRedundantStmt (Let _ _ (Op _)) = Big

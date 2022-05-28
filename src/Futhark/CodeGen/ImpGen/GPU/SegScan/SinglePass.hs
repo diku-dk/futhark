@@ -265,7 +265,8 @@ compileSegScan pat lvl space scanOp kbody = do
   (aggregateArrays, incprefixArrays) <-
     fmap unzip $
       forM tys $ \ty ->
-        (,) <$> sAllocArray "aggregates" ty (Shape [unCount num_groups]) (Space "device")
+        (,)
+          <$> sAllocArray "aggregates" ty (Shape [unCount num_groups]) (Space "device")
           <*> sAllocArray "incprefixes" ty (Shape [unCount num_groups]) (Space "device")
 
   sReplicate statusFlags $ intConst Int8 statusX
@@ -303,10 +304,12 @@ compileSegScan pat lvl space scanOp kbody = do
     sgmIdx <- dPrimVE "sgm_idx" $ tvExp blockOff `mod` segment_size
     boundary <-
       dPrimVE "boundary" $
-        sExt32 $ sMin64 (m * group_size') (segment_size - sgmIdx)
+        sExt32 $
+          sMin64 (m * group_size') (segment_size - sgmIdx)
     segsize_compact <-
       dPrimVE "segsize_compact" $
-        sExt32 $ sMin64 (m * group_size') segment_size
+        sExt32 $
+          sMin64 (m * group_size') segment_size
     privateArrays <-
       forM tys $ \ty ->
         sAllocArray
@@ -320,7 +323,8 @@ compileSegScan pat lvl space scanOp kbody = do
         -- The map's input index
         phys_tid <-
           dPrimVE "phys_tid" $
-            tvExp blockOff + sExt64 (kernelLocalThreadId constants)
+            tvExp blockOff
+              + sExt64 (kernelLocalThreadId constants)
               + i * kernelGroupSize constants
         dIndexSpace (zip gtids dims') phys_tid
         -- Perform the map
@@ -473,7 +477,8 @@ compileSegScan pat lvl space scanOp kbody = do
           ( do
               readOffset <-
                 dPrimV "readOffset" $
-                  sExt32 $ tvExp dynamicId - sExt64 (kernelWaveSize constants)
+                  sExt32 $
+                    tvExp dynamicId - sExt64 (kernelWaveSize constants)
               let loopStop = warpSize * (-1)
                   sameSegment readIdx
                     | segmented =
@@ -620,7 +625,8 @@ compileSegScan pat lvl space scanOp kbody = do
         sFor "i" m $ \i -> do
           flat_idx <-
             dPrimVE "flat_idx" $
-              tvExp blockOff + kernelGroupSize constants * i
+              tvExp blockOff
+                + kernelGroupSize constants * i
                 + sExt64 (kernelLocalThreadId constants)
           dIndexSpace (zip gtids dims') flat_idx
           sWhen (flat_idx .<. n) $ do

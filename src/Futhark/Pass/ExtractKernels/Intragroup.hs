@@ -122,7 +122,9 @@ intraGroupParallelise knest lam = runMaybeT $ do
       lvl = SegGroup (Count num_groups) (Count $ Var group_size) SegNoVirt
       kstm =
         Let nested_pat aux $
-          Op $ SegOp $ SegMap lvl kspace rts kbody'
+          Op $
+            SegOp $
+              SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
   pure
@@ -201,7 +203,8 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         localScope (scopeOfFParams $ map fst merge) $ do
           loopbody' <- intraGroupBody lvl loopbody
           certifying (stmAuxCerts aux) $
-            letBind pat $ DoLoop merge form' loopbody'
+            letBind pat $
+              DoLoop merge form' loopbody'
       where
         form' = case form of
           ForLoop i it bound inps -> ForLoop i it bound inps
@@ -210,7 +213,8 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       tbody' <- intraGroupBody lvl tbody
       fbody' <- intraGroupBody lvl fbody
       certifying (stmAuxCerts aux) $
-        letBind pat $ If cond tbody' fbody' ifdec
+        letBind pat $
+          If cond tbody' fbody' ifdec
     Op soac
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
           intraGroupStms lvl . fmap (certify (stmAuxCerts aux))
