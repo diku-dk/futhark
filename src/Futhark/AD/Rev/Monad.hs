@@ -138,7 +138,9 @@ zeroArray shape t
   | otherwise = do
       zero <- letSubExp "zero" $ zeroExp t
       attributing (oneAttr "sequential") $
-        letExp "zeroes_" $ BasicOp $ Replicate shape zero
+        letExp "zeroes_" $
+          BasicOp $
+            Replicate shape zero
 
 sparseArray :: (MonadBuilder m, Rep m ~ SOACS) => Sparse -> m VName
 sparseArray (Sparse shape t ivs) = do
@@ -391,7 +393,8 @@ updateAdj v d = do
           ~[v_adj'] <-
             tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] ->
               letTupExp "acc" $
-                BasicOp $ UpdateAcc v_adj' (map Var is) [Var d']
+                BasicOp $
+                  UpdateAcc v_adj' (map Var is) [Var d']
           insAdj v v_adj'
         _ -> do
           v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
@@ -411,7 +414,8 @@ updateAdjSlice slice v d = do
         tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] -> do
           slice' <-
             traverse (toSubExp "index") $
-              fixSlice (fmap pe64 slice) $ map le64 is
+              fixSlice (fmap pe64 slice) $
+                map le64 is
           letTupExp (baseString v_adj') . BasicOp $
             UpdateAcc v_adj' slice' [Var d']
       pure v_adj'
@@ -458,14 +462,16 @@ updateAdjIndex v (check, i) se = do
                 ~[v_adj'] <-
                   tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
                     letTupExp "acc" $
-                      BasicOp $ UpdateAcc v_adj' (i : map Var is) [Var se_v']
+                      BasicOp $
+                        UpdateAcc v_adj' (i : map Var is) [Var se_v']
                 pure v_adj'
           _ -> do
             let stms s = do
                   v_adj_i <- letExp (baseString v_adj <> "_i") $ BasicOp $ Index v_adj $ fullSlice v_adj_t [DimFix i]
                   se_update <- letSubExp "updated_adj_i" =<< addExp se_v v_adj_i
                   letExp (baseString v_adj) $
-                    BasicOp $ Update s v_adj (fullSlice v_adj_t [DimFix i]) se_update
+                    BasicOp $
+                      Update s v_adj (fullSlice v_adj_t [DimFix i]) se_update
             case check of
               CheckBounds _ -> stms Safe
               AssumeBounds -> stms Unsafe

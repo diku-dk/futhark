@@ -192,7 +192,9 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
         forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) -> do
           arr_t <- lookupType arr
           letBindNames [paramName p] $
-            BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
+            BasicOp $
+              Index arr $
+                fullSlice arr_t [DimFix $ Var gtid]
         res <- bodyBind (lambdaBody lam)
         forM res $ \(SubExpRes cs se) ->
           pure $ Returns ResultMaySimplify cs se

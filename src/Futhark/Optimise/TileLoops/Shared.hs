@@ -68,7 +68,8 @@ forLoop' i_bound merge body = do
 
   loop_body <-
     runBodyBuilder . inScopeOf loop_form . localScope (scopeOfFParams loop_inits) $
-      body i $ map paramName loop_inits
+      body i $
+        map paramName loop_inits
 
   letTupExp "loop" $
     DoLoop (zip loop_inits $ map Var merge) loop_form loop_body
@@ -101,7 +102,10 @@ segMap1D desc lvl manifest f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc $
-    Op . SegOp $ SegMap lvl space ts $ KernelBody () stms' $ map ret res'
+    Op . SegOp $
+      SegMap lvl space ts $
+        KernelBody () stms' $
+          map ret res'
 
 segMap2D ::
   String -> -- desc
@@ -125,7 +129,10 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op . SegOp $ SegMap lvl segspace ts $ KernelBody () stms $ map ret res
+    Op . SegOp $
+      SegMap lvl segspace ts $
+        KernelBody () stms $
+          map ret res
 
 segMap3D ::
   String -> -- desc
@@ -150,7 +157,10 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
 
   let ret (SubExpRes cs se) = Returns manifest cs se
   letTupExp desc <=< renameExp $
-    Op . SegOp $ SegMap lvl segspace ts $ KernelBody () stms $ map ret res
+    Op . SegOp $
+      SegMap lvl segspace ts $
+        KernelBody () stms $
+          map ret res
 
 segScatter2D ::
   String ->

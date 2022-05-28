@@ -406,11 +406,11 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
           pure
             [ ClassDef $
                 Class class_name $
-                  Assign (Var "entry_points") (Dict entry_point_types) :
-                  Assign
-                    (Var "opaques")
-                    (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads)) :
-                  map FunDef (constructor' : definitions ++ entry_points)
+                  Assign (Var "entry_points") (Dict entry_point_types)
+                    : Assign
+                      (Var "opaques")
+                      (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads))
+                    : map FunDef (constructor' : definitions ++ entry_points)
             ]
         ToServer -> do
           (entry_points, entry_point_types) <-
@@ -419,11 +419,11 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
             parse_options_server
               ++ [ ClassDef
                      ( Class class_name $
-                         Assign (Var "entry_points") (Dict entry_point_types) :
-                         Assign
-                           (Var "opaques")
-                           (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads)) :
-                         map FunDef (constructor' : definitions ++ entry_points)
+                         Assign (Var "entry_points") (Dict entry_point_types)
+                           : Assign
+                             (Var "opaques")
+                             (Dict $ zip (map String opaque_names) (map Tuple opaque_payloads))
+                           : map FunDef (constructor' : definitions ++ entry_points)
                      ),
                    Assign
                      (Var "server")
@@ -440,18 +440,18 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
                 ( Class class_name $
                     map FunDef $
                       constructor' : definitions
-                ) :
-            classinst :
-            map FunDef entry_point_defs
+                )
+              : classinst
+              : map FunDef entry_point_defs
               ++ selectEntryPoint entry_point_names entry_points
 
     parse_options_executable =
-      Assign (Var "runtime_file") None :
-      Assign (Var "do_warmup_run") (Bool False) :
-      Assign (Var "num_runs") (Integer 1) :
-      Assign (Var "entry_point") (String "main") :
-      Assign (Var "binary_output") (Bool False) :
-      generateOptionParser (executableOptions ++ options)
+      Assign (Var "runtime_file") None
+        : Assign (Var "do_warmup_run") (Bool False)
+        : Assign (Var "num_runs") (Integer 1)
+        : Assign (Var "entry_point") (String "main")
+        : Assign (Var "binary_output") (Bool False)
+        : generateOptionParser (executableOptions ++ options)
 
     parse_options_server =
       generateOptionParser (standardOptions ++ options)
@@ -461,7 +461,8 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
 
     selectEntryPoint entry_point_names entry_points =
       [ Assign (Var "entry_points") $
-          Dict $ zip (map String entry_point_names) entry_points,
+          Dict $
+            zip (map String entry_point_names) entry_points,
         Assign (Var "entry_point_fun") $
           simpleCall "entry_points.get" [Var "entry_point"],
         If
@@ -492,7 +493,10 @@ withConstantSubsts (Imp.Constants ps _) =
     constExp p =
       M.singleton (Imp.paramName p) $
         Index (Var "self.constants") $
-          IdxExp $ String $ pretty $ Imp.paramName p
+          IdxExp $
+            String $
+              pretty $
+                Imp.paramName p
 
 compileConstants :: Imp.Constants op -> CompilerM op s ()
 compileConstants (Imp.Constants _ init_consts) = do
@@ -875,8 +879,9 @@ compileEntryFun sync timing entry
           (pts, rts) = entryTypes $ snd entry
 
           do_run =
-            Assign (Var "time_start") (simpleCall "time.time" []) :
-            body_lib ++ maybe_sync
+            Assign (Var "time_start") (simpleCall "time.time" [])
+              : body_lib
+              ++ maybe_sync
               ++ [ Assign (Var "runtime") $
                      BinOp
                        "-"
@@ -935,7 +940,9 @@ callEntryFun pre_timing entry@(fname, Imp.Function (Just ename) _ _ _ _ decl_arg
   pure $
     Just
       ( Def fname' [] $
-          str_input ++ end_of_input ++ prepare_in
+          str_input
+            ++ end_of_input
+            ++ prepare_in
             ++ [Try [do_warmup_run, do_num_runs] [except']]
             ++ [close_runtime_file]
             ++ str_output,

@@ -216,7 +216,8 @@ subHistogram pat space histops num_histos kbody = do
       compileStms mempty (kernelBodyStms kbody) $ do
         let (red_res, map_res) =
               splitFromEnd (length map_pes) $
-                map kernelResultSubExp $ kernelBodyResult kbody
+                map kernelResultSubExp $
+                  kernelBodyResult kbody
 
         sComment "save map-out results" $
           forM_ (zip map_pes map_res) $ \(pe, res) ->
@@ -325,7 +326,8 @@ compileSegHistBody pat space histops kbody = collect $ do
       compileStms mempty (kernelBodyStms kbody) $ do
         let (red_res, map_res) =
               splitFromEnd (length map_pes) $
-                map kernelResultSubExp $ kernelBodyResult kbody
+                map kernelResultSubExp $
+                  kernelBodyResult kbody
         forM_ (zip3 per_red_pes histops (splitHistResults histops red_res)) $
           \(red_pes, HistOp dest_shape _ _ _ shape lam, (bucket, vs')) -> do
             let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam

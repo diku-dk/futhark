@@ -409,7 +409,8 @@ genTypeCommand f g h e = do
 
 typeCommand :: Command
 typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
-  pretty e <> concatMap ((" " <>) . pretty) ps
+  pretty e
+    <> concatMap ((" " <>) . pretty) ps
     <> " : "
     <> pretty (typeOf e)
 

@@ -99,10 +99,10 @@ type DatasetName = String
 
 serverOptions :: AutotuneOptions -> [String]
 serverOptions opts =
-  "--default-threshold" :
-  show (optDefaultThreshold opts) :
-  "-L" :
-  optExtraOptions opts
+  "--default-threshold"
+    : show (optDefaultThreshold opts)
+    : "-L"
+    : optExtraOptions opts
 
 setTuningParam :: Server -> String -> Int -> IO ()
 setTuningParam server name val =
@@ -177,7 +177,8 @@ prepare opts futhark prog = do
           ropts = runOptions timeout opts
 
       when (optVerbose opts > 1) $
-        putStrLn $ "Trying path: " ++ show path
+        putStrLn $
+          "Trying path: " ++ show path
 
       -- Setting the tuning parameters is a stateful action, so we
       -- must be careful to restore the defaults below.  This is
@@ -235,7 +236,8 @@ thresholdForest prog = do
   let root (v, _) = ((v, False), [])
   pure $
     unfoldForest (unfold thresholds) $
-      map root $ filter (null . snd) thresholds
+      map root $
+        filter (null . snd) thresholds
   where
     getThresholds = mapMaybe findThreshold . lines
     regex = makeRegex ("(.*) \\(threshold\\(([^ ]+,)(.*)\\)\\)" :: String)
@@ -245,14 +247,14 @@ thresholdForest prog = do
       [grp1, _, grp2] <- regexGroups regex l
       pure
         ( grp1,
-          filter (not . null . fst) $
-            map
+          filter (not . null . fst)
+            $ map
               ( \x ->
                   if "!" `isPrefixOf` x
                     then (drop 1 x, False)
                     else (x, True)
               )
-              $ words grp2
+            $ words grp2
         )
 
     unfold thresholds ((parent, parent_cmp), ancestors) =
@@ -294,7 +296,8 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
       if not $ isPrefixOf (T.unpack entry_point ++ ".") v
         then do
           when (optVerbose opts > 0) $
-            putStrLn $ unwords [v, "is irrelevant for", T.unpack entry_point]
+            putStrLn $
+              unwords [v, "is irrelevant for", T.unpack entry_point]
           pure (thresholds, best_runtimes)
         else do
           putStrLn $
@@ -340,7 +343,8 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
                         pure Nothing
 
               when (optVerbose opts > 1) $
-                putStrLn $ unwords ("Got ePars: " : map show ePars)
+                putStrLn $
+                  unwords ("Got ePars: " : map show ePars)
 
               (best_t, newMax) <- binarySearch runner (t, tMax) ePars
               let newMinIdx = do
@@ -417,7 +421,8 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
               pure (best_t, best_e_par)
         (_, _) -> do
           when (optVerbose opts > 0) $
-            putStrLn $ unwords ["Trying e_pars", show xs]
+            putStrLn $
+              unwords ["Trying e_pars", show xs]
           candidates <-
             catMaybes . zipWith (fmap . flip (,)) xs
               <$> mapM (runner $ timeout best_t) xs
@@ -434,7 +439,10 @@ tune opts prog = do
 
   forest <- thresholdForest prog
   when (optVerbose opts > 0) $
-    putStrLn $ ("Threshold forest:\n" ++) $ drawForest $ map (fmap show) forest
+    putStrLn $
+      ("Threshold forest:\n" ++) $
+        drawForest $
+          map (fmap show) forest
 
   let progbin = "." </> dropExtension prog
   putStrLn $ "Running with options: " ++ unwords (serverOptions opts)

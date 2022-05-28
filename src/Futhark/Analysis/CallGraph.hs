@@ -186,5 +186,6 @@ instance Pretty CallGraph where
         ppFunCalls ("called at top level", cg) : map ppFunCalls (M.toList fg)
     where
       ppFunCalls (f, fcalls) =
-        ppr f </> text (map (const '=') (nameToString f))
+        ppr f
+          </> text (map (const '=') (nameToString f))
           </> indent 2 (ppr fcalls)

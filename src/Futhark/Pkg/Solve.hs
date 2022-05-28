@@ -101,7 +101,10 @@ solveDeps deps =
       | otherwise =
           fail $
             T.unpack $
-              "Package " <> p <> " " <> prettySemVer v
+              "Package "
+                <> p
+                <> " "
+                <> prettySemVer v
                 <> " has commit hash "
                 <> pkgRevCommit pinfo
                 <> ", but expected "

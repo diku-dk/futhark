@@ -434,7 +434,8 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
             nest'' =
               removeUnusedNestingParts free_in_kernel $
-                MapNesting pat aux w $ zip actual_params actual_arrs
+                MapNesting pat aux w $
+                  zip actual_params actual_arrs
 
             free_in_kernel'' =
               (freeIn nest'' <> free_in_kernel) `namesSubtract` actual_param_names
@@ -553,7 +554,8 @@ tryDistribute mk_lvl nest targets stms =
       Just (targets', distributed) -> do
         (kernel_stm, w_stms) <-
           localScope (targetsScope targets') $
-            constructKernel mk_lvl distributed $ mkBody stms inner_body_res
+            constructKernel mk_lvl distributed $
+              mkBody stms inner_body_res
         distributed' <- renameStm kernel_stm
         logMsg $
           "distributing\n"

@@ -44,7 +44,9 @@ iswim res_pat w scan_fun scan_input
           scan_fun' = Lambda scan_params scan_body scan_rettype
           scan_input' =
             map (first Var) $
-              uncurry zip $ splitAt (length arrs') $ map paramName map_params
+              uncurry zip $
+                splitAt (length arrs') $
+                  map paramName map_params
           (nes', scan_arrs) = unzip scan_input'
 
       scan_soac <- scanSOAC [Scan scan_fun' nes']
@@ -52,9 +54,11 @@ iswim res_pat w scan_fun scan_input
             mkBody
               ( oneStm $
                   Let (setPatOuterDimTo w map_pat) (defAux ()) $
-                    Op $ Screma w scan_arrs scan_soac
+                    Op $
+                      Screma w scan_arrs scan_soac
               )
-              $ varsRes $ patNames map_pat
+              $ varsRes
+              $ patNames map_pat
           map_fun' = Lambda map_params map_body map_rettype
 
       res_pat' <-
@@ -64,13 +68,16 @@ iswim res_pat w scan_fun scan_input
 
       addStm $
         Let res_pat' (StmAux map_cs mempty ()) $
-          Op $ Screma map_w map_arrs' (mapSOAC map_fun')
+          Op $
+            Screma map_w map_arrs' (mapSOAC map_fun')
 
       forM_ (zip (patIdents res_pat) (patIdents res_pat')) $ \(to, from) -> do
         let perm = [1, 0] ++ [2 .. arrayRank (identType from) - 1]
         addStm $
           Let (basicPat [to]) (defAux ()) $
-            BasicOp $ Rearrange perm $ identName from
+            BasicOp $
+              Rearrange perm $
+                identName from
   | otherwise = Nothing
 
 -- | Interchange Reduce With Inner Map. Tries to turn a @reduce(map)@ into a
@@ -115,13 +122,15 @@ irwim res_pat w comm red_fun red_input
         case irwim red_pat w comm red_fun' red_input' of
           Nothing -> do
             reduce_soac <- reduceSOAC [Reduce comm red_fun' $ map fst red_input']
-            pure $
-              mkBody
+            pure
+              $ mkBody
                 ( oneStm $
                     Let red_pat (defAux ()) $
-                      Op $ Screma w (map snd red_input') reduce_soac
+                      Op $
+                        Screma w (map snd red_input') reduce_soac
                 )
-                $ varsRes $ patNames map_pat
+              $ varsRes
+              $ patNames map_pat
           Just m -> localScope (scopeOfLParams map_params) $ do
             map_body_stms <- collectStms_ m
             pure $ mkBody map_body_stms $ varsRes $ patNames map_pat
@@ -130,7 +139,9 @@ irwim res_pat w comm red_fun red_input
 
       addStm $
         Let res_pat (StmAux map_cs mempty ()) $
-          Op $ Screma map_w arrs' $ mapSOAC map_fun'
+          Op $
+            Screma map_w arrs' $
+              mapSOAC map_fun'
   | otherwise = Nothing
 
 -- | Does this reduce operator contain an inner map, and if so, what

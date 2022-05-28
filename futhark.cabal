@@ -51,7 +51,13 @@ source-repository head
   type: git
   location: https://github.com/diku-dk/futhark
 
+common common
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
+  default-language: Haskell2010
+
 library
+  import: common
+  hs-source-dirs: src
   exposed-modules:
       Futhark
       Futhark.Actions
@@ -338,9 +344,6 @@ library
       Paths_futhark
   autogen-modules:
       Paths_futhark
-  hs-source-dirs:
-      src
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
   build-tool-depends:
       alex:alex
     , happy:happy
@@ -399,19 +402,18 @@ library
     , zlib >=0.6.1.2
     , statistics
     , mwc-random
-  default-language: Haskell2010
 
 executable futhark
+  import: common
   main-is: src/main.hs
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
-  build-depends:
-      base
-    , futhark
-  default-language: Haskell2010
+  ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
+  build-depends: base, futhark
 
 test-suite unit
+  import: common
   type: exitcode-stdio-1.0
   main-is: futhark_tests.hs
+  hs-source-dirs: unittests
   other-modules:
       Futhark.AD.DerivativesTests
       Futhark.BenchTests
@@ -431,19 +433,13 @@ test-suite unit
       Language.Futhark.TypeChecker.TypesTests
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
       Paths_futhark
-  hs-source-dirs:
-      unittests
-  ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists
   build-depends:
       QuickCheck >=2.8
     , base
     , containers
     , futhark
     , megaparsec
-    , mtl
-    , parser-combinators
     , tasty
     , tasty-hunit
     , tasty-quickcheck
     , text
-  default-language: Haskell2010

@@ -286,7 +286,8 @@ unbalancedLambda orig_lam =
     unbalancedStm bound (WithAcc _ lam) =
       unbalancedBody bound (lambdaBody lam)
     unbalancedStm bound (If cond tbranch fbranch _) =
-      cond `subExpBound` bound
+      cond
+        `subExpBound` bound
         && (unbalancedBody bound tbranch || unbalancedBody bound fbranch)
     unbalancedStm _ (BasicOp _) =
       False
@@ -338,7 +339,8 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
 
   letBind pat $
-    If cond alt alt_body $ IfDec (staticShapes (patTypes pat)) IfEquiv
+    If cond alt alt_body $
+      IfDec (staticShapes (patTypes pat)) IfEquiv
 
 transformLambda :: KernelPath -> Lambda SOACS -> DistribM (Lambda GPU)
 transformLambda path (Lambda params body ret) =
@@ -432,7 +434,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
               =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
       if not (lambdaContainsParallelism map_lam)
-        || "sequential_inner" `inAttrs` stmAuxAttrs aux
+        || "sequential_inner"
+        `inAttrs` stmAuxAttrs aux
         then paralleliseOuter
         else do
           ((outer_suff, outer_suff_key), suff_stms) <-
@@ -647,7 +650,8 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
       | WithAcc _ withacc_lam <- stmExp stm =
           bodyInterest (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm =
-          1 + bodyInterest (lambdaBody lam')
+          1
+            + bodyInterest (lambdaBody lam')
             +
             -- Give this a bigger score if it's a redomap, as these
             -- are often tileable and thus benefit more from
@@ -710,14 +714,18 @@ onlyExploitIntra attrs =
 mayExploitOuter :: Attrs -> Bool
 mayExploitOuter attrs =
   not $
-    AttrComp "incremental_flattening" ["no_outer"] `inAttrs` attrs
-      || AttrComp "incremental_flattening" ["only_inner"] `inAttrs` attrs
+    AttrComp "incremental_flattening" ["no_outer"]
+      `inAttrs` attrs
+      || AttrComp "incremental_flattening" ["only_inner"]
+      `inAttrs` attrs
 
 mayExploitIntra :: Attrs -> Bool
 mayExploitIntra attrs =
   not $
-    AttrComp "incremental_flattening" ["no_intra"] `inAttrs` attrs
-      || AttrComp "incremental_flattening" ["only_inner"] `inAttrs` attrs
+    AttrComp "incremental_flattening" ["no_intra"]
+      `inAttrs` attrs
+      || AttrComp "incremental_flattening" ["only_inner"]
+      `inAttrs` attrs
 
 -- The minimum amount of inner parallelism we require (by default) in
 -- intra-group versions.  Less than this is usually pointless on a GPU
@@ -755,8 +763,10 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
       | Just m <- mkSeqAlts -> do
           (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
           par_body <-
-            renameBody =<< mkBody
-              <$> mk_par_stms ((outer_suff_key, False) : path) <*> pure res
+            renameBody
+              =<< mkBody
+                <$> mk_par_stms ((outer_suff_key, False) : path)
+                <*> pure res
           (outer_suff_stms <>) <$> kernelAlternatives pat par_body [(outer_suff, seq_body)]
       --
       | otherwise -> do
@@ -778,8 +788,10 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
                 checkSuffIntraPar path intra'
 
               par_body <-
-                renameBody =<< mkBody
-                  <$> mk_par_stms ((intra_suff_key, False) : path) <*> pure res
+                renameBody
+                  =<< mkBody
+                    <$> mk_par_stms ((intra_suff_key, False) : path)
+                    <*> pure res
 
               (intra_suff_stms <>)
                 <$> kernelAlternatives pat par_body [(intra_ok, group_par_body)]
@@ -790,13 +802,14 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
                 checkSuffIntraPar ((outer_suff_key, False) : path) intra'
 
               par_body <-
-                renameBody =<< mkBody
-                  <$> mk_par_stms
-                    ( [ (outer_suff_key, False),
-                        (intra_suff_key, False)
-                      ]
-                        ++ path
-                    )
+                renameBody
+                  =<< mkBody
+                    <$> mk_par_stms
+                      ( [ (outer_suff_key, False),
+                          (intra_suff_key, False)
+                        ]
+                          ++ path
+                      )
                     <*> pure res
 
               ((outer_suff_stms <> intra_suff_stms) <>)
@@ -815,8 +828,10 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
         mayExploitOuter attrs = Just $ do
           ((outer_suff, outer_suff_key), outer_suff_stms) <- checkSuffOuterPar
           seq_body <-
-            renameBody =<< mkBody
-              <$> mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
+            renameBody
+              =<< mkBody
+                <$> mk_seq_stms ((outer_suff_key, True) : path)
+                <*> pure res
           pure (outer_suff, outer_suff_key, outer_suff_stms, seq_body)
       | otherwise =
           Nothing
@@ -914,7 +929,8 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
           -- order instead.
           let lam_res' =
                 rearrangeShape (rearrangeInverse perm) $
-                  bodyResult $ lambdaBody lam'
+                  bodyResult $
+                    lambdaBody lam'
               lam'' = lam' {lambdaBody = (lambdaBody lam') {bodyResult = lam_res'}}
               map_nesting = MapNesting pat' aux w $ zip (lambdaParams lam') arrs
               nest' = pushInnerKernelNesting (pat', lam_res') map_nesting nest

@@ -150,7 +150,8 @@ data KernelHandling = TraverseKernels | OpaqueKernels
 lexicalMemoryUsageMC :: KernelHandling -> Function Multicore -> M.Map VName Space
 lexicalMemoryUsageMC gokernel func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
-    declared $ functionBody func
+    declared $
+      functionBody func
   where
     nonlexical =
       set (functionBody func)

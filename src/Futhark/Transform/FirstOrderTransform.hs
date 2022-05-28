@@ -171,16 +171,21 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
         case paramForAcc arr_t of
           Just acc_out_p ->
             letBindNames [paramName p] . BasicOp $
-              SubExp $ Var $ paramName acc_out_p
+              SubExp $
+                Var $
+                  paramName acc_out_p
           Nothing
             | paramName p `nameIn` lam_cons -> do
                 p' <-
                   letExp (baseString (paramName p)) . BasicOp $
-                    Index arr $ fullSlice arr_t [DimFix $ Var i]
+                    Index arr $
+                      fullSlice arr_t [DimFix $ Var i]
                 letBindNames [paramName p] $ BasicOp $ Copy p'
             | otherwise ->
                 letBindNames [paramName p] $
-                  BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
+                  BasicOp $
+                    Index arr $
+                      fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -188,7 +193,8 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
       -- Split into scan results, reduce results, and map results.
       let (scan_res, red_res, map_res) =
             splitAt3 (length scan_nes) (length red_nes) $
-              bodyResult $ lambdaBody map_lam
+              bodyResult $
+                lambdaBody map_lam
 
       scan_res' <-
         eLambda scan_lam $
@@ -202,12 +208,14 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
       -- Write the scan accumulator to the scan result arrays.
       scan_outarrs <-
         certifying (foldMap resCerts scan_res) $
-          letwith (map paramName scanout_params) (Var i) $ map resSubExp scan_res'
+          letwith (map paramName scanout_params) (Var i) $
+            map resSubExp scan_res'
 
       -- Write the map results to the map result arrays.
       map_outarrs <-
         certifying (foldMap resCerts map_res) $
-          letwith (map paramName mapout_params) (Var i) $ map resSubExp map_res
+          letwith (map paramName mapout_params) (Var i) $
+            map resSubExp map_res
 
       pure . mkBody mempty . concat $
         [ scan_res',
@@ -256,7 +264,9 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
   let loop_form = ForLoop i Int64 w []
 
   letBindNames [paramName chunk_size_param] $
-    BasicOp $ SubExp $ intConst Int64 1
+    BasicOp $
+      SubExp $
+        intConst Int64 1
 
   loop_body <- runBodyBuilder $
     localScope (scopeOf loop_form <> scopeOfFParams merge_params) $ do
@@ -296,7 +306,8 @@ transformSOAC pat (Scatter len ivs lam as) = do
         arr_t <- lookupType arr
         let saveInArray arr' (indexCur, SubExpRes value_cs valueCur) =
               certifying (foldMap resCerts indexCur <> value_cs) . letExp "write_out" $
-                BasicOp $ Update Safe arr' (fullSlice arr_t $ map (DimFix . resSubExp) indexCur) valueCur
+                BasicOp $
+                  Update Safe arr' (fullSlice arr_t $ map (DimFix . resSubExp) indexCur) valueCur
 
         foldM saveInArray arr indexes'
       pure $ resultBody (map Var ress)
@@ -348,7 +359,8 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
           hist' <- forM (zip hist h_val') $ \(arr, SubExpRes cs v) -> do
             arr_t <- lookupType arr
             certifying cs . letInPlace "hist_out" arr (fullSlice arr_t $ map DimFix idxs) $
-              BasicOp $ SubExp v
+              BasicOp $
+                SubExp v
 
           pure $ varsRes hist'
 

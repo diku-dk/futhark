@@ -241,7 +241,8 @@ entryBoilerplate manifest =
   first concat $
     unzip $
       map (oneEntryBoilerplate manifest) $
-        M.toList $ manifestEntryPoints manifest
+        M.toList $
+          manifestEntryPoints manifest
 
 mkBoilerplate ::
   Manifest ->

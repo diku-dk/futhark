@@ -155,7 +155,8 @@ dupDefinitionError ::
   m a
 dupDefinitionError space name loc1 loc2 =
   typeError loc1 mempty $
-    "Duplicate definition of" <+> ppr space
+    "Duplicate definition of"
+      <+> ppr space
       <+> pprName name <> ".  Previously defined at"
       <+> text (locStr loc2) <> "."
 
@@ -224,7 +225,8 @@ checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) =
         unless (null ext) $
           typeError loc mempty $
             "All function parameters must have non-anonymous sizes."
-              </> "Hint: add size parameters to" <+> pquote (pprName name') <> "."
+              </> "Hint: add size parameters to"
+              <+> pquote (pprName name') <> "."
 
         pure (tparams', vtype', vtype_t)
 
@@ -730,7 +732,8 @@ checkOneDec (LocalDec d loc) = do
 checkOneDec (ImportDec name NoInfo loc) = do
   (name', env) <- lookupImport loc name
   when (isBuiltin name) $
-    typeError loc mempty $ ppr name <+> "may not be explicitly imported."
+    typeError loc mempty $
+      ppr name <+> "may not be explicitly imported."
   pure (mempty, env, ImportDec name (Info name') loc)
 checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb

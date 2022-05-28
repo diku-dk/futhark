@@ -94,7 +94,8 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
 
   let scanomap = scanomapSOAC scans map_lam
   letBindNames (scan_res <> to_red <> map_res) $
-    Op $ Screma w arrs scanomap
+    Op $
+      Screma w arrs scanomap
 
   reduce <- reduceSOAC reds
   letBindNames red_res $ Op $ Screma w to_red reduce

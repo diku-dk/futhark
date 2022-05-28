@@ -30,5 +30,7 @@ main = mainWithOptions newCheckConfig options "program" $ \args cfg ->
     [file] -> Just $ do
       (warnings, _, _) <- readProgramOrDie file
       when (checkWarn cfg && anyWarnings warnings) $
-        liftIO $ hPutStrLn stderr $ pretty warnings
+        liftIO $
+          hPutStrLn stderr $
+            pretty warnings
     _ -> Nothing

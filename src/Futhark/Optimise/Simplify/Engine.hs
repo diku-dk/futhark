@@ -320,7 +320,8 @@ protectLoopHoisted merge form m = do
           | otherwise -> pure $ constant True -- infinite loop
         ForLoop _ it bound _ ->
           letSubExp "loop_nonempty" $
-            BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
+            BasicOp $
+              CmpOp (CmpSlt it) (intConst it 0) bound
 
 protectIf ::
   MonadBuilder m =>
@@ -332,7 +333,8 @@ protectIf ::
 protectIf _ _ taken (Let pat aux (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
   auxing aux . letBind pat $
-    If cond' taken_body untaken_body $ IfDec if_ts IfFallback
+    If cond' taken_body untaken_body $
+      IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
@@ -351,7 +353,8 @@ protectIf _ f taken (Let pat aux e)
             eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
           if_ts <- expTypesFromPat pat
           auxing aux . letBind pat $
-            If taken taken_body untaken_body $ IfDec if_ts IfFallback
+            If taken taken_body untaken_body $
+              IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -544,7 +547,8 @@ expandUsage usageInStm vtable utable stm@(Let pat aux e) =
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
       pure . mconcat $
-        map (`UT.usage` (uses `UT.withoutU` UT.presentU)) $ namesToList aliases
+        map (`UT.usage` (uses `UT.withoutU` UT.presentU)) $
+          namesToList aliases
 
 type BlockPred rep = ST.SymbolTable rep -> UT.UsageTable -> Stm rep -> Bool
 
@@ -831,21 +835,22 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
         )
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   (loopres, loopstms, hoisted) <-
-    enterLoop . consumeMerge $
-      bindMerge (zipWith withRes merge' (bodyResult loopbody)) . wrapbody $
-        blockIf
-          ( hasFree boundnames `orIf` isConsumed
-              `orIf` seq_blocker
-              `orIf` notWorthHoisting
-          )
-          (bodyStms loopbody)
-          $ do
-            let params_usages =
-                  map
-                    (\p -> if unique (paramDeclType p) then UT.consumedU else mempty)
-                    params'
-            (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
-            pure (res, uses <> isDoLoopResult res)
+    enterLoop . consumeMerge
+      $ bindMerge (zipWith withRes merge' (bodyResult loopbody)) . wrapbody
+      $ blockIf
+        ( hasFree boundnames
+            `orIf` isConsumed
+            `orIf` seq_blocker
+            `orIf` notWorthHoisting
+        )
+        (bodyStms loopbody)
+      $ do
+        let params_usages =
+              map
+                (\p -> if unique (paramDeclType p) then UT.consumedU else mempty)
+                params'
+        (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
+        pure (res, uses <> isDoLoopResult res)
   loopbody' <- constructBody loopstms loopres
   pure (DoLoop merge' form' loopbody', hoisted)
   where

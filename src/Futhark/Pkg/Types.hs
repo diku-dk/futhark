@@ -194,7 +194,9 @@ prettyPkgManifest (PkgManifest name required endcs) =
 -- | The required packages listed in a package manifest.
 pkgRevDeps :: PkgManifest -> PkgRevDeps
 pkgRevDeps =
-  PkgRevDeps . M.fromList . mapMaybe onR
+  PkgRevDeps
+    . M.fromList
+    . mapMaybe onR
     . commented
     . manifestRequire
   where
@@ -206,7 +208,8 @@ pkgRevDeps =
 pkgDir :: PkgManifest -> Maybe Posix.FilePath
 pkgDir =
   fmap
-    ( Posix.addTrailingPathSeparator . ("lib" Posix.</>)
+    ( Posix.addTrailingPathSeparator
+        . ("lib" Posix.</>)
         . T.unpack
     )
     . commented
@@ -280,12 +283,14 @@ pPkgManifest = do
     spaceNoEol = many $ oneOf (" \t" :: String)
 
     pPkgPath =
-      T.pack <$> some (alphaNumChar <|> oneOf ("@-/.:" :: String))
+      T.pack
+        <$> some (alphaNumChar <|> oneOf ("@-/.:" :: String))
         <?> "package path"
 
     pRequired =
       space
-        *> ( Required <$> lexeme' pPkgPath
+        *> ( Required
+               <$> lexeme' pPkgPath
                <*> lexeme' semver'
                <*> optional (lexeme' pHash)
            )

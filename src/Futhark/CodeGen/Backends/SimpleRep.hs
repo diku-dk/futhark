@@ -129,9 +129,11 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
 
     -- FIXME: a stupid hash algorithm; may have collisions.
     hash =
-      printf "%x" . foldl xor 0
+      printf "%x"
+        . foldl xor 0
         . map
-          ( iter . (* 0x45d9f3b)
+          ( iter
+              . (* 0x45d9f3b)
               . iter
               . (* 0x45d9f3b)
               . iter
