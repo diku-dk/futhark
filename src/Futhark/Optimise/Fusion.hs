@@ -25,9 +25,6 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (isEnvVarAtLeast)
 
-mapT :: (a -> b) -> (a, a) -> (b, b) -- tuple map
-mapT f (a, b) = (f a, f b)
-
 -- extra util - scans reduces are "a->a->a" - so half of those are the amount of inputs
 scanInput :: [Scan SOACS] -> Int
 scanInput l = flip div 2 $ sum (map (length . lambdaParams . scanLambda) l)
@@ -140,7 +137,6 @@ doAllFusion =
           runInnerFusion
         ],
       removeUnusedOutputs
-      -- makeCopiesOfConsAliased
     ]
 
 doVerticalFusion :: DepGraphAug
@@ -185,7 +181,7 @@ vTryFuseNodesInGraph node_1 node_2 g
       b <- vFusionFeasability g node_1 node_2
       if b
         then do
-          let (ctx1, ctx2) = mapT (G.context g) (node_1, node_2)
+          let (ctx1, ctx2) = (G.context g node_1, G.context g node_2)
           fres <- vFuseContexts edgs infusable_nodes ctx1 ctx2
           case fres of
             Just (inputs, _, nodeT, outputs) -> do
@@ -356,7 +352,7 @@ resFromLambda = bodyResult . lambdaBody
 
 hasNoDifferingInputs :: [H.Input] -> [H.Input] -> Bool
 hasNoDifferingInputs is1 is2 =
-  let (vs1, vs2) = mapT isNotVarInput (is1, is2 L.\\ is1)
+  let (vs1, vs2) = (isNotVarInput is1, isNotVarInput $ is2 L.\\ is1)
    in null $ vs1 `L.intersect` vs2
 
 hFuseNodeT :: NodeT -> NodeT -> FusionEnvM (Maybe NodeT)
@@ -412,8 +408,8 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
               aux = aux1 <> aux2
               outputs = outputs1 <> outputs2
 
-              (lam_1_inputs, lam_2_inputs) = mapT boundByLambda (lam_1, lam_2)
-              (lam_1_output, lam_2_output) = mapT resFromLambda (lam_1, lam_2)
+              (lam_1_inputs, lam_2_inputs) = (boundByLambda lam_1, boundByLambda lam_2)
+              (lam_1_output, lam_2_output) = (resFromLambda lam_1, resFromLambda lam_2)
 
               fused_inputs = fuseInputs [] i1 i2
               fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
@@ -430,8 +426,8 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
                   (lambdaParams lam_1 ++ lambdaParams lam_2)
                   fused_inputs
 
-              (types1, types2) = mapT lambdaReturnType (lam_1, lam_2)
-              (res1, res2) = mapT resFromLambda (lam_1, lam_2)
+              (types1, types2) = (lambdaReturnType lam_1, lambdaReturnType lam_2)
+              (res1, res2) = (resFromLambda lam_1, resFromLambda lam_2)
 
               (ids1, vals1) = splitScatterResults outputs1 (zip3 types1 res1 lam_1_output)
               (ids2, vals2) = splitScatterResults outputs2 (zip3 types2 res2 lam_2_output)
@@ -449,9 +445,9 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
           )
             | w1 == w2 -> do
                 let num_buckets_2 = length ops_2
-                let num_buckets_1 = length ops_1
-                let (body_2, body_1) = (lambdaBody lam_2, lambdaBody lam_1)
-                let body' =
+                    num_buckets_1 = length ops_1
+                    (body_2, body_1) = (lambdaBody lam_2, lambdaBody lam_1)
+                    body' =
                       Body
                         { bodyDec = bodyDec body_1, -- body_p and body_c have the same decorations
                           bodyStms = bodyStms body_2 <> bodyStms body_1,
@@ -461,7 +457,7 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
                               ++ drop num_buckets_1 (bodyResult body_1)
                               ++ drop num_buckets_2 (bodyResult body_2)
                         }
-                let lam' =
+                    lam' =
                       Lambda
                         { lambdaParams = lambdaParams lam_1 ++ lambdaParams lam_2,
                           lambdaBody = body',
@@ -470,8 +466,7 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
                               ++ drop num_buckets_1 (lambdaReturnType lam_1)
                               ++ drop num_buckets_2 (lambdaReturnType lam_2)
                         }
-                -- success (outNames ker ++ returned_outvars) $
-                let soac = H.Hist w1 (ops_1 <> ops_2) lam' (i1 <> i2)
+                    soac = H.Hist w1 (ops_1 <> ops_2) lam' (i1 <> i2)
                 pure $ Just $ SoacNode mempty (pats1 <> pats2) soac (aux1 <> aux2)
         _ -> pure Nothing
 hFuseNodeT _ _ = pure Nothing

@@ -296,33 +296,23 @@ addTransforms ts (Input ots a t) = Input (ots <> ts) a t
 
 applyTransform :: MonadBuilder m => ArrayTransform -> VName -> m VName
 applyTransform (Replicate cs n) ia =
-  certifying cs $
-    letExp "repeat" $
-      BasicOp $
-        Futhark.Replicate n (Futhark.Var ia)
+  certifying cs . letExp "repeat" . BasicOp $
+    Futhark.Replicate n (Futhark.Var ia)
 applyTransform (Rearrange cs perm) ia = do
   r <- arrayRank <$> lookupType ia
-  certifying cs $
-    letExp "rearrange" $
-      BasicOp $
-        Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia
+  certifying cs . letExp "rearrange" . BasicOp $
+    Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia
 applyTransform (Reshape cs shape) ia =
-  certifying cs $
-    letExp "reshape" $
-      BasicOp $
-        Futhark.Reshape shape ia
+  certifying cs . letExp "reshape" . BasicOp $
+    Futhark.Reshape shape ia
 applyTransform (ReshapeOuter cs shape) ia = do
   shape' <- reshapeOuter shape 1 . arrayShape <$> lookupType ia
-  certifying cs $
-    letExp "reshape_outer" $
-      BasicOp $
-        Futhark.Reshape shape' ia
+  certifying cs . letExp "reshape_outer" . BasicOp $
+    Futhark.Reshape shape' ia
 applyTransform (ReshapeInner cs shape) ia = do
   shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
-  certifying cs $
-    letExp "reshape_inner" $
-      BasicOp $
-        Futhark.Reshape shape' ia
+  certifying cs . letExp "reshape_inner" . BasicOp $
+    Futhark.Reshape shape' ia
 
 applyTransforms :: MonadBuilder m => ArrayTransforms -> VName -> m VName
 applyTransforms (ArrayTransforms ts) a = foldlM (flip applyTransform) a ts
