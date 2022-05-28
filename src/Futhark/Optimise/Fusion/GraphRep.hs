@@ -383,9 +383,8 @@ augWithFun :: EdgeGenerator -> DepGraphAug
 augWithFun f g = genEdges (G.labNodes g) f g
 
 toAlias :: DepGenerator -> EdgeGenerator
-toAlias f stmt =
-  map (\vname -> (vname, Alias vname)) $
-    namesToList $ foldMap f (stmFromNode stmt)
+toAlias f =
+  map (\vname -> (vname, Alias vname)) . namesToList . foldMap f . stmFromNode
 
 addAliases :: DepGraphAug
 addAliases = augWithFun $ toAlias aliasInputs
