@@ -25,13 +25,6 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (isEnvVarAtLeast)
 
--- extra util - scans reduces are "a->a->a" - so half of those are the amount of inputs
-scanInput :: [Scan SOACS] -> Int
-scanInput l = flip div 2 $ sum (map (length . lambdaParams . scanLambda) l)
-
-redInput :: [Reduce rep] -> Int
-redInput l = flip div 2 $ sum (map (length . lambdaParams . redLambda) l)
-
 doFuseScans :: FusionEnvM a -> FusionEnvM a
 doFuseScans m = do
   fs <- gets fuseScans
@@ -501,13 +494,11 @@ removeOutputsExcept toKeep s = case s of
   SoacNode ots (Pat pats1) soac@(H.Screma _ (ScremaForm scans_1 red_1 lam_1) _) aux1 ->
     SoacNode ots (Pat $ pats_unchanged <> pats_new) (H.setLambda lam_new soac) aux1
     where
-      scan_input_size = scanInput scans_1
-      red_input_size = redInput red_1
       scan_output_size = Futhark.scanResults scans_1
-      red_outputs_size = Futhark.redResults red_1
+      red_output_size = Futhark.redResults red_1
 
-      (pats_unchanged, pats_toChange) = splitAt (scan_output_size + red_outputs_size) pats1
-      (res_unchanged, res_toChange) = splitAt (scan_input_size + red_input_size) (zip (resFromLambda lam_1) (lambdaReturnType lam_1))
+      (pats_unchanged, pats_toChange) = splitAt (scan_output_size + red_output_size) pats1
+      (res_unchanged, res_toChange) = splitAt (scan_output_size + red_output_size) (zip (resFromLambda lam_1) (lambdaReturnType lam_1))
 
       (pats_new, other) = unzip $ filter (\(x, _) -> patElemName x `elem` toKeep) (zip pats_toChange res_toChange)
       (results, types) = unzip (res_unchanged ++ other)
