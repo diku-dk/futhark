@@ -23,9 +23,8 @@ eReverse arr = do
   arr_t <- lookupType arr
   let w = arraySize 0 arr_t
   start <-
-    letSubExp "rev_start" $
-      BasicOp $
-        BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
+    letSubExp "rev_start" . BasicOp $
+      BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
   let stride = intConst Int64 (-1)
       slice = fullSlice arr_t [DimSlice start w stride]
   letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice

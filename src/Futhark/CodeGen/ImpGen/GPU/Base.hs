@@ -446,9 +446,8 @@ prepareIntraGroupSegHist group_size =
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
           dArray locks int32 (arrayShape locks_t) locks_mem $
-            IxFun.iota $
-              map pe64 $
-                arrayDims locks_t
+            IxFun.iota . map pe64 . arrayDims $
+              locks_t
 
           sComment "All locks start out unlocked" $
             groupCoverSpace [kernelGroupSize constants] $ \is ->
@@ -1132,7 +1131,8 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
       num_elements - Imp.elements thread_index * elements_per_thread
     is_last_thread =
       Imp.unCount num_elements
-        .<. (thread_index + 1) * Imp.unCount elements_per_thread
+        .<. (thread_index + 1)
+          * Imp.unCount elements_per_thread
 
 kernelInitialisationSimple ::
   Count NumGroups SubExp ->
