@@ -110,14 +110,12 @@ fuseGraph stms results inputs = localScope (scopeOf stms) $ do
 
   linearizeGraph graph_fused'
 
-unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> FusionM Bool
-unreachableEitherDir g a b = do
-  b1 <- reachable g a b
-  b2 <- reachable g b a
-  pure $ not (b1 || b2)
+unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> Bool
+unreachableEitherDir g a b =
+  not (reachable g a b || reachable g b a)
 
-reachable :: DepGraph -> G.Node -> G.Node -> FusionM Bool
-reachable dg source target = pure $ target `elem` Q.reachable source (dgGraph dg)
+reachable :: DepGraph -> G.Node -> G.Node -> Bool
+reachable dg source target = target `elem` Q.reachable source (dgGraph dg)
 
 isNotVarInput :: [H.Input] -> [H.Input]
 isNotVarInput = filter (isNothing . H.isVarInput)
@@ -188,13 +186,12 @@ horizontalFusionOnNode node dg@DepGraph {dgGraph = g} =
     incoming_nodes = map fst $ filter (isDep . snd) $ G.lpre g node
     pairs = [(x, y) | x <- incoming_nodes, y <- incoming_nodes, x < y]
 
-vFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionM Bool
-vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 = do
-  let b2 = not (any isInf (edgesBetween dg n1 n2))
-  reach <- mapM (reachable dg n2) (filter (/= n2) (G.pre g n1))
-  pure $ b2 && all not reach
+vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
+vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
+  not (any isInf (edgesBetween dg n1 n2))
+    && not (any (reachable dg n2) (filter (/= n2) (G.pre g n1)))
 
-hFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionM Bool
+hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 hFusionFeasability = unreachableEitherDir
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
@@ -210,26 +207,23 @@ vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
 vTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure dg
-  | otherwise = do
-      b <- vFusionFeasability dg node_1 node_2
-      if b
-        then do
-          let (ctx1, ctx2) = (G.context g node_1, G.context g node_2)
-          fres <- vFuseContexts edgs infusable_nodes ctx1 ctx2
-          case fres of
-            Just (inputs, _, nodeT, outputs) -> do
-              nodeT' <-
-                if null fusedC
-                  then pure nodeT
-                  else do
-                    let (_, _, _, deps_1) = ctx1
-                    let (_, _, _, deps_2) = ctx2
-                    -- make copies of everything that was not previously consumed
-                    let old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
-                    makeCopiesOfFusedExcept old_cons nodeT
-              contractEdge node_2 (inputs, node_1, nodeT', outputs) dg
-            Nothing -> pure dg
-        else pure dg
+  | vFusionFeasability dg node_1 node_2 = do
+      let (ctx1, ctx2) = (G.context g node_1, G.context g node_2)
+      fres <- vFuseContexts edgs infusable_nodes ctx1 ctx2
+      case fres of
+        Just (inputs, _, nodeT, outputs) -> do
+          nodeT' <-
+            if null fusedC
+              then pure nodeT
+              else do
+                let (_, _, _, deps_1) = ctx1
+                let (_, _, _, deps_2) = ctx2
+                -- make copies of everything that was not previously consumed
+                let old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
+                makeCopiesOfFusedExcept old_cons nodeT
+          contractEdge node_2 (inputs, node_1, nodeT', outputs) dg
+        Nothing -> pure dg
+  | otherwise = pure dg
   where
     edgs = map G.edgeLabel $ edgesBetween dg node_1 node_2
     fusedC = map getName $ filter isCons edgs
@@ -241,14 +235,12 @@ vTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
 hTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 hTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure dg
-  | otherwise = do
-      b <- hFusionFeasability dg node_1 node_2
+  | hFusionFeasability dg node_1 node_2 = do
       fres <- hFuseContexts (G.context g node_1) (G.context g node_2)
-      if b
-        then case fres of
-          Just new_Context -> contractEdge node_2 new_Context dg
-          Nothing -> pure dg
-        else pure dg
+      case fres of
+        Just new_Context -> contractEdge node_2 new_Context dg
+        Nothing -> pure dg
+  | otherwise = pure dg
 
 hFuseContexts :: DepContext -> DepContext -> FusionM (Maybe DepContext)
 hFuseContexts
