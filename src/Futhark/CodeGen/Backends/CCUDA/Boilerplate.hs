@@ -317,8 +317,8 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                                      &ctx->$id:name,
                                      ctx->cuda.module,
                                      $string:(pretty (C.toIdent name mempty))));|]
-        ) :
-        forCostCentre name
+        )
+          : forCostCentre name
 
       (kernel_fields, init_kernel_fields) =
         unzip $

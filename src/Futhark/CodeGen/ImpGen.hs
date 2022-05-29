@@ -553,8 +553,8 @@ compileInParams params eparams = do
                 u
                 desc
                 (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams')
-            ) :
-            mkExts epts rest
+            )
+              : mkExts epts rest
       mkExts (EntryParam v (TypeUnsigned u) : epts) (fparam : fparams) =
         maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
           ++ mkExts epts fparams
@@ -664,7 +664,8 @@ compileFunDef (FunDef entry _ fname rettype params body) =
 
       let Body _ stms ses = body
       compileStms (freeIn ses) stms $
-        forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
+        forM_ (zip dests ses) $
+          \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
       pure (outparams, inparams, results, args)
 
@@ -672,12 +673,14 @@ compileBody :: Pat (LetDec rep) -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ stms ses) = do
   dests <- destinationFromPat pat
   compileStms (freeIn ses) stms $
-    forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
+    forM_ (zip dests ses) $
+      \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
 compileBody' :: [Param dec] -> Body rep -> ImpM rep r op ()
 compileBody' params (Body _ stms ses) =
   compileStms (freeIn ses) stms $
-    forM_ (zip params ses) $ \(param, SubExpRes _ se) -> copyDWIM (paramName param) [] se []
+    forM_ (zip params ses) $
+      \(param, SubExpRes _ se) -> copyDWIM (paramName param) [] se []
 
 compileLoopBody :: Typed dec => [Param dec] -> Body rep -> ImpM rep r op ()
 compileLoopBody mergeparams (Body _ stms ses) = do
@@ -725,11 +728,13 @@ defCompileStms alive_after_stms all_stms m =
 
       e_code <-
         localAttrs (stmAuxAttrs aux) $
-          collect $ compileExp pat e
+          collect $
+            compileExp pat e
       (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
       let dies_here v =
             not (v `nameIn` live_after)
-              && v `nameIn` freeIn e_code
+              && v
+              `nameIn` freeIn e_code
           to_free = S.filter (dies_here . fst) allocs
 
       emit e_code
@@ -1018,7 +1023,9 @@ addFParams = mapM_ addFParam
   where
     addFParam fparam =
       addVar (paramName fparam) $
-        memBoundToVarEntry Nothing $ noUniquenessReturns $ paramDec fparam
+        memBoundToVarEntry Nothing $
+          noUniquenessReturns $
+            paramDec fparam
 
 -- | Another hack.
 addLoopVar :: VName -> IntType -> ImpM rep r op ()
@@ -1379,17 +1386,18 @@ copy
   src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmads@(src_lmad :| _) _ _)) = do
     -- If we can statically determine that the two index-functions
     -- are equivalent, don't do anything
-    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn) $
+    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn)
+      $
       -- It's also possible that we can dynamically determine that the two
       -- index-functions are equivalent.
       sUnless
         ( fromBool (dst_name == src_name && length dst_lmads == 1 && length src_lmads == 1)
             .&&. IxFun.dynamicEqualsLMAD dst_lmad src_lmad
         )
-        $ do
-          -- If none of the above is true, actually do the copy
-          cc <- asks envCopyCompiler
-          cc bt dst src
+      $ do
+        -- If none of the above is true, actually do the copy
+        cc <- asks envCopyCompiler
+        cc bt dst src
 
 -- | Is this copy really a mapping with transpose?
 isMapTransposeCopy ::
@@ -1453,19 +1461,19 @@ defaultCopy pt dest src
   | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
       isMapTransposeCopy pt dest src = do
       fname <- mapTransposeForType pt
-      emit $
-        Imp.Call
+      emit
+        $ Imp.Call
           []
           fname
-          $ transposeArgs
-            pt
-            destmem
-            (bytes destoffset)
-            srcmem
-            (bytes srcoffset)
-            num_arrays
-            size_x
-            size_y
+        $ transposeArgs
+          pt
+          destmem
+          (bytes destoffset)
+          srcmem
+          (bytes srcoffset)
+          num_arrays
+          size_x
+          size_y
   | Just destoffset <-
       IxFun.linearWithOffset dest_ixfun pt_size,
     Just srcoffset <-
@@ -1475,8 +1483,8 @@ defaultCopy pt dest src
       if isScalarSpace srcspace || isScalarSpace destspace
         then copyElementWise pt dest src
         else
-          emit $
-            Imp.Copy
+          emit
+            $ Imp.Copy
               pt
               destmem
               (bytes destoffset)
@@ -1484,7 +1492,7 @@ defaultCopy pt dest src
               srcmem
               (bytes srcoffset)
               srcspace
-              $ num_elems `withElemType` pt
+            $ num_elems `withElemType` pt
   | otherwise =
       copyElementWise pt dest src
   where
@@ -1744,7 +1752,11 @@ sFor :: String -> Imp.TExp t -> (Imp.TExp t -> ImpM rep r op ()) -> ImpM rep r o
 sFor i bound body = do
   i' <- newVName i
   sFor' i' (untyped bound) $
-    body $ TPrimExp $ Imp.var i' $ primExpType $ untyped bound
+    body $
+      TPrimExp $
+        Imp.var i' $
+          primExpType $
+            untyped bound
 
 sWhile :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op ()
 sWhile cond body = do
@@ -1808,7 +1820,9 @@ sArray name bt shape mem ixfun = do
 sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
 sArrayInMem name pt shape mem =
   sArray name pt shape mem $
-    IxFun.iota $ map (isInt64 . primExpFromSubExp int64) $ shapeDims shape
+    IxFun.iota $
+      map (isInt64 . primExpFromSubExp int64) $
+        shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
@@ -1817,7 +1831,8 @@ sAllocArrayPerm name pt shape space perm = do
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
   let iota_ixfun = IxFun.iota $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
-    IxFun.permute iota_ixfun $ rearrangeInverse perm
+    IxFun.permute iota_ixfun $
+      rearrangeInverse perm
 
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName

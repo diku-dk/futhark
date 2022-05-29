@@ -189,7 +189,10 @@ analyseHistOp ::
 analyseHistOp (lumap, used) (HistOp width race dest neutral shp lambda) = do
   (lumap', used') <- analyseLambda (lumap, used) lambda
   let nms =
-        ( freeIn width <> freeIn race <> freeIn dest <> freeIn neutral
+        ( freeIn width
+            <> freeIn race
+            <> freeIn dest
+            <> freeIn neutral
             <> freeIn shp
         )
           `namesSubtract` used'

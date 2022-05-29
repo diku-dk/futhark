@@ -67,22 +67,26 @@ mapTranspose block_dim args t kind =
       mkTranspose $
         lowDimBody
           (le32 get_group_id_0 * block_dim + (le32 get_local_id_0 `quot` muly))
-          ( le32 get_group_id_1 * block_dim * muly + le32 get_local_id_1
+          ( le32 get_group_id_1 * block_dim * muly
+              + le32 get_local_id_1
               + (le32 get_local_id_0 `rem` muly) * block_dim
           )
-          ( le32 get_group_id_1 * block_dim * muly + le32 get_local_id_0
+          ( le32 get_group_id_1 * block_dim * muly
+              + le32 get_local_id_0
               + (le32 get_local_id_1 `rem` muly) * block_dim
           )
           (le32 get_group_id_0 * block_dim + (le32 get_local_id_1 `quot` muly))
     TransposeLowHeight ->
       mkTranspose $
         lowDimBody
-          ( le32 get_group_id_0 * block_dim * mulx + le32 get_local_id_0
+          ( le32 get_group_id_0 * block_dim * mulx
+              + le32 get_local_id_0
               + (le32 get_local_id_1 `rem` mulx) * block_dim
           )
           (le32 get_group_id_1 * block_dim + (le32 get_local_id_1 `quot` mulx))
           (le32 get_group_id_1 * block_dim + (le32 get_local_id_0 `quot` mulx))
-          ( le32 get_group_id_0 * block_dim * mulx + le32 get_local_id_1
+          ( le32 get_group_id_0 * block_dim * mulx
+              + le32 get_local_id_1
               + (le32 get_local_id_0 `rem` mulx) * block_dim
           )
     TransposeNormal ->

@@ -123,7 +123,8 @@ bindingFamilyVar faml env (Ident nm t) =
         M.insert
           nm
           ( IsArray nm (LetName t) mempty $
-              SOAC.identInput $ Ident nm t
+              SOAC.identInput $
+                Ident nm t
           )
           $ varsInScope env
     }
@@ -131,7 +132,8 @@ bindingFamilyVar faml env (Ident nm t) =
 varAliases :: VName -> FusionGM Names
 varAliases v =
   asks $
-    (oneName v <>) . maybe mempty varEntryAliases
+    (oneName v <>)
+      . maybe mempty varEntryAliases
       . M.lookup v
       . varsInScope
 
@@ -218,7 +220,8 @@ fuseSOACs =
     { passName = "Fuse SOACs",
       passDescription = "Perform higher-order optimisation, i.e., fusion.",
       passFunction = \prog ->
-        simplifySOACS =<< renameProg
+        simplifySOACS
+          =<< renameProg
           =<< intraproceduralTransformationWithConsts
             (fuseConsts (freeIn (progFuns prog)))
             fuseFun
@@ -602,7 +605,10 @@ horizontGreedyFuse rem_stms res (out_idds, aux, soac, consumed) = do
                     `namesIntersect` freeIn (lambdaBody $ SOAC.lambda $ fsoac ker)
 
           let interm_stms_ok =
-                cur_ok && consumer_ok && out_transf_ok && cons_no_out_transf
+                cur_ok
+                  && consumer_ok
+                  && out_transf_ok
+                  && cons_no_out_transf
                   && foldl
                     ( \ok stm ->
                         ok
@@ -731,7 +737,8 @@ fusionGatherStms
               [ pure $
                   DoLoop merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
                 pure $
-                  BasicOp $ BinOp (Add Int64 OverflowUndef) (Futhark.Var offset) (Futhark.Var chunk_size)
+                  BasicOp $
+                    BinOp (Add Int64 OverflowUndef) (Futhark.Var offset) (Futhark.Var chunk_size)
               ]
         let lam =
               Lambda
@@ -912,8 +919,8 @@ fuseInExp (DoLoop merge form loopbody) =
     form_idents = case form of
       WhileLoop {} -> []
       ForLoop i it _ loopvars ->
-        Ident i (Prim $ IntType it) :
-        map (paramIdent . fst) loopvars
+        Ident i (Prim $ IntType it)
+          : map (paramIdent . fst) loopvars
 fuseInExp e = mapExpM fuseIn e
 
 fuseIn :: Mapper SOACS SOACS FusionGM
@@ -1063,7 +1070,8 @@ copyNewlyConsumed was_consumed soac =
             lam'
               { lambdaBody =
                   insertStms stms $
-                    substituteNames subst $ lambdaBody lam'
+                    substituteNames subst $
+                      lambdaBody lam'
               }
 
     copyFree (stms, subst) v = do

@@ -320,7 +320,8 @@ protectLoopHoisted merge form m = do
           | otherwise -> pure $ constant True -- infinite loop
         ForLoop _ it bound _ ->
           letSubExp "loop_nonempty" $
-            BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
+            BasicOp $
+              CmpOp (CmpSlt it) (intConst it 0) bound
 
 protectIf ::
   MonadBuilder m =>
@@ -332,7 +333,8 @@ protectIf ::
 protectIf _ _ taken (Let pat aux (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
   auxing aux . letBind pat $
-    If cond' taken_body untaken_body $ IfDec if_ts IfFallback
+    If cond' taken_body untaken_body $
+      IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
@@ -351,7 +353,8 @@ protectIf _ f taken (Let pat aux e)
             eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
           if_ts <- expTypesFromPat pat
           auxing aux . letBind pat $
-            If taken taken_body untaken_body $ IfDec if_ts IfFallback
+            If taken taken_body untaken_body $
+              IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -386,7 +389,7 @@ emptyOfType ctx_names (Array et shape _) = do
   let dims = map zeroIfContext $ shapeDims shape
   pure $ BasicOp $ Scratch et dims
   where
-    zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
+    zeroIfContext (Var v) | v `elem` ctx_names = intConst Int64 0
     zeroIfContext se = se
 
 -- | Statements that are not worth hoisting out of loops, because they
@@ -529,13 +532,13 @@ expandUsage ::
   UT.UsageTable ->
   Stm rep ->
   UT.UsageTable
-expandUsage usageInStm vtable utable stm@(Let pat _ e) =
+expandUsage usageInStm vtable utable stm@(Let pat aux e) =
   stmUsages <> utable
   where
     stmUsages =
       UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases)
         <> ( if any (`UT.isSize` utable) (patNames pat)
-               then UT.sizeUsages (freeIn e)
+               then UT.sizeUsages (freeIn (stmAuxCerts aux) <> freeIn e)
                else mempty
            )
     usageThroughAliases =
@@ -544,7 +547,8 @@ expandUsage usageInStm vtable utable stm@(Let pat _ e) =
     usageThroughBindeeAliases (name, aliases) = do
       uses <- UT.lookup name utable
       pure . mconcat $
-        map (`UT.usage` (uses `UT.withoutU` UT.presentU)) $ namesToList aliases
+        map (`UT.usage` (uses `UT.withoutU` UT.presentU)) $
+          namesToList aliases
 
 type BlockPred rep = ST.SymbolTable rep -> UT.UsageTable -> Stm rep -> Bool
 
@@ -613,8 +617,10 @@ cheapExp (BasicOp SubExp {}) = True
 cheapExp (BasicOp UnOp {}) = True
 cheapExp (BasicOp CmpOp {}) = True
 cheapExp (BasicOp ConvOp {}) = True
+cheapExp (BasicOp Assert {}) = True
 cheapExp (BasicOp Copy {}) = False
 cheapExp (BasicOp Replicate {}) = False
+cheapExp (BasicOp Concat {}) = False
 cheapExp (BasicOp Manifest {}) = False
 cheapExp DoLoop {} = False
 cheapExp (If _ tbranch fbranch _) =
@@ -623,9 +629,6 @@ cheapExp (If _ tbranch fbranch _) =
 cheapExp (Op op) = cheapOp op
 cheapExp _ = True -- Used to be False, but
 -- let's try it out.
-
-stmIs :: (Stm rep -> Bool) -> BlockPred rep
-stmIs f _ _ = f
 
 loopInvariantStm :: ASTRep rep => ST.SymbolTable rep -> Stm rep -> Bool
 loopInvariantStm vtable =
@@ -660,7 +663,7 @@ hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
       cond_loop_invariant =
         all (`nameIn` ST.availableAtClosestLoop vtable) $ namesToList $ freeIn cond
 
-      desirableToHoist stm =
+      desirableToHoist usage stm =
         is_alloc_fun stm
           || ( ST.loopDepth vtable > 0
                  && cond_loop_invariant
@@ -670,6 +673,11 @@ hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
                  -- asymptotics of the program.
                  && all primType (patTypes (stmPat stm))
              )
+          || ( ifsort /= IfFallback
+                 && any (`UT.isSize` usage) (patNames (stmPat stm))
+                 && all primType (patTypes (stmPat stm))
+             )
+      notDesirableToHoist _ usage stm = not $ desirableToHoist usage stm
 
       -- No matter what, we always want to hoist constants as much as
       -- possible.
@@ -682,9 +690,6 @@ hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
       isNotHoistableBnd _ _ (Let _ _ (BasicOp (Index _ slice))) =
         null $ sliceDims slice
       --
-      isNotHoistableBnd _ usage (Let pat _ _)
-        | any (`UT.isSize` usage) $ patNames pat =
-            False
       isNotHoistableBnd _ _ stm
         | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
@@ -694,7 +699,7 @@ hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
       block =
         branch_blocker
           `orIf` ( (isNotSafe `orIf` isNotCheap `orIf` isNotHoistableBnd)
-                     `andAlso` stmIs (not . desirableToHoist)
+                     `andAlso` notDesirableToHoist
                  )
           `orIf` isConsuming
 
@@ -830,21 +835,22 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
         )
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   (loopres, loopstms, hoisted) <-
-    enterLoop . consumeMerge $
-      bindMerge (zipWith withRes merge' (bodyResult loopbody)) . wrapbody $
-        blockIf
-          ( hasFree boundnames `orIf` isConsumed
-              `orIf` seq_blocker
-              `orIf` notWorthHoisting
-          )
-          (bodyStms loopbody)
-          $ do
-            let params_usages =
-                  map
-                    (\p -> if unique (paramDeclType p) then UT.consumedU else mempty)
-                    params'
-            (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
-            pure (res, uses <> isDoLoopResult res)
+    enterLoop . consumeMerge
+      $ bindMerge (zipWith withRes merge' (bodyResult loopbody)) . wrapbody
+      $ blockIf
+        ( hasFree boundnames
+            `orIf` isConsumed
+            `orIf` seq_blocker
+            `orIf` notWorthHoisting
+        )
+        (bodyStms loopbody)
+      $ do
+        let params_usages =
+              map
+                (\p -> if unique (paramDeclType p) then UT.consumedU else mempty)
+                params'
+        (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
+        pure (res, uses <> isDoLoopResult res)
   loopbody' <- constructBody loopstms loopres
   pure (DoLoop merge' form' loopbody', hoisted)
   where

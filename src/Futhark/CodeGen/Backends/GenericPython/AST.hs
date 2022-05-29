@@ -131,18 +131,22 @@ instance Pretty PyExp where
 
 instance Pretty PyStmt where
   ppr (If cond [] []) =
-    text "if" <+> ppr cond <> text ":"
+    text "if"
+      <+> ppr cond <> text ":"
       </> indent 2 (text "pass")
   ppr (If cond [] fbranch) =
-    text "if" <+> ppr cond <> text ":"
+    text "if"
+      <+> ppr cond <> text ":"
       </> indent 2 (text "pass")
       </> text "else:"
       </> indent 2 (stack $ map ppr fbranch)
   ppr (If cond tbranch []) =
-    text "if" <+> ppr cond <> text ":"
+    text "if"
+      <+> ppr cond <> text ":"
       </> indent 2 (stack $ map ppr tbranch)
   ppr (If cond tbranch fbranch) =
-    text "if" <+> ppr cond <> text ":"
+    text "if"
+      <+> ppr cond <> text ":"
       </> indent 2 (stack $ map ppr tbranch)
       </> text "else:"
       </> indent 2 (stack $ map ppr fbranch)
@@ -151,13 +155,18 @@ instance Pretty PyStmt where
       </> indent 2 (stack $ map ppr pystms)
       </> stack (map ppr pyexcepts)
   ppr (While cond body) =
-    text "while" <+> ppr cond <> text ":"
+    text "while"
+      <+> ppr cond <> text ":"
       </> indent 2 (stack $ map ppr body)
   ppr (For i what body) =
-    text "for" <+> ppr i <+> text "in" <+> ppr what <> text ":"
+    text "for"
+      <+> ppr i
+      <+> text "in"
+      <+> ppr what <> text ":"
       </> indent 2 (stack $ map ppr body)
   ppr (With what body) =
-    text "with" <+> ppr what <> text ":"
+    text "with"
+      <+> ppr what <> text ":"
       </> indent 2 (stack $ map ppr body)
   ppr (Assign e1 e2) = ppr e1 <+> text "=" <+> ppr e2
   ppr (AssignOp op e1 e2) = ppr e1 <+> text (op ++ "=") <+> ppr e2
@@ -177,17 +186,21 @@ instance Pretty PyStmt where
 
 instance Pretty PyFunDef where
   ppr (Def fname params body) =
-    text "def" <+> text fname <> parens (commasep $ map ppr params) <> text ":"
+    text "def"
+      <+> text fname <> parens (commasep $ map ppr params) <> text ":"
       </> indent 2 (stack (map ppr body))
 
 instance Pretty PyClassDef where
   ppr (Class cname body) =
-    text "class" <+> text cname <> text ":"
+    text "class"
+      <+> text cname <> text ":"
       </> indent 2 (stack (map ppr body))
 
 instance Pretty PyExcept where
   ppr (Catch pyexp stms) =
-    text "except" <+> ppr pyexp <+> text "as e:"
+    text "except"
+      <+> ppr pyexp
+      <+> text "as e:"
       </> indent 2 (stack $ map ppr stms)
 
 instance Pretty PyProg where

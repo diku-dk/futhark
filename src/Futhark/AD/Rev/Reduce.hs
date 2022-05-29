@@ -23,8 +23,8 @@ eReverse arr = do
   arr_t <- lookupType arr
   let w = arraySize 0 arr_t
   start <-
-    letSubExp "rev_start" $
-      BasicOp $ BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
+    letSubExp "rev_start" . BasicOp $
+      BinOp (Sub Int64 OverflowUndef) w (intConst Int64 1)
   let stride = intConst Int64 (-1)
       slice = fullSlice arr_t [DimSlice start w stride]
   letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
@@ -91,7 +91,9 @@ diffReduce _ops [adj] w [a] red
     isAdd op = do
       adj_rep <-
         letExp (baseString adj <> "_rep") $
-          BasicOp $ Replicate (Shape [w]) $ Var adj
+          BasicOp $
+            Replicate (Shape [w]) $
+              Var adj
       void $ updateAdj a adj_rep
   where
     isAdd FAdd {} = True
@@ -190,7 +192,8 @@ diffMinMaxReduce _ops x aux w minmax ne as m = do
 
   red_iota <-
     letExp "red_iota" $
-      BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      BasicOp $
+        Iota w (intConst Int64 0) (intConst Int64 1) Int64
   form <- reduceSOAC [Reduce Commutative red_lam [ne, intConst Int64 (-1)]]
   x_ind <- newVName (baseString x <> "_ind")
   auxing aux $ letBindNames [x, x_ind] $ Op $ Screma w [as, red_iota] form

@@ -176,7 +176,8 @@ entryPoint name params (eret, crets) =
       typeExpOpaqueName te
     typeExpOpaqueName (TEArray _ te _) =
       let (d, te') = withoutDims te
-       in "arr_" ++ typeExpOpaqueName te'
+       in "arr_"
+            ++ typeExpOpaqueName te'
             ++ "_"
             ++ show (1 + d)
             ++ "d"
@@ -277,7 +278,8 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
     Just second' -> do
       subtracted_step <-
         letSubExp "subtracted_step" $
-          I.BasicOp $ I.BinOp (I.Sub it I.OverflowWrap) second' start'
+          I.BasicOp $
+            I.BinOp (I.Sub it I.OverflowWrap) second' start'
       step_zero <- letSubExp "step_zero" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
       pure (subtracted_step, step_zero)
     Nothing ->
@@ -288,53 +290,61 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   bounds_invalid_downwards <-
     letSubExp "bounds_invalid_downwards" $
-      I.BasicOp $ I.CmpOp le_op start' end'
+      I.BasicOp $
+        I.CmpOp le_op start' end'
   bounds_invalid_upwards <-
     letSubExp "bounds_invalid_upwards" $
-      I.BasicOp $ I.CmpOp lt_op end' start'
+      I.BasicOp $
+        I.CmpOp lt_op end' start'
 
   (distance, step_wrong_dir, bounds_invalid) <- case end of
     DownToExclusive {} -> do
       step_wrong_dir <-
         letSubExp "step_wrong_dir" $
-          I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign one
+          I.BasicOp $
+            I.CmpOp (I.CmpEq $ IntType it) step_sign one
       distance <-
         letSubExp "distance" $
-          I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) start' end'
+          I.BasicOp $
+            I.BinOp (Sub it I.OverflowWrap) start' end'
       distance_i64 <- asIntS Int64 distance
       pure (distance_i64, step_wrong_dir, bounds_invalid_downwards)
     UpToExclusive {} -> do
       step_wrong_dir <-
         letSubExp "step_wrong_dir" $
-          I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+          I.BasicOp $
+            I.CmpOp (I.CmpEq $ IntType it) step_sign negone
       distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) end' start'
       distance_i64 <- asIntS Int64 distance
       pure (distance_i64, step_wrong_dir, bounds_invalid_upwards)
     ToInclusive {} -> do
       downwards <-
         letSubExp "downwards" $
-          I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+          I.BasicOp $
+            I.CmpOp (I.CmpEq $ IntType it) step_sign negone
       distance_downwards_exclusive <-
         letSubExp "distance_downwards_exclusive" $
-          I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) start' end'
+          I.BasicOp $
+            I.BinOp (Sub it I.OverflowWrap) start' end'
       distance_upwards_exclusive <-
         letSubExp "distance_upwards_exclusive" $
-          I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) end' start'
+          I.BasicOp $
+            I.BinOp (Sub it I.OverflowWrap) end' start'
 
       bounds_invalid <-
-        letSubExp "bounds_invalid" $
-          I.If
+        letSubExp "bounds_invalid"
+          $ I.If
             downwards
             (resultBody [bounds_invalid_downwards])
             (resultBody [bounds_invalid_upwards])
-            $ ifCommon [I.Prim I.Bool]
+          $ ifCommon [I.Prim I.Bool]
       distance_exclusive <-
-        letSubExp "distance_exclusive" $
-          I.If
+        letSubExp "distance_exclusive"
+          $ I.If
             downwards
             (resultBody [distance_downwards_exclusive])
             (resultBody [distance_upwards_exclusive])
-            $ ifCommon [I.Prim $ IntType it]
+          $ ifCommon [I.Prim $ IntType it]
       distance_exclusive_i64 <- asIntS Int64 distance_exclusive
       distance <-
         letSubExp "distance" $
@@ -347,23 +357,27 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   step_invalid <-
     letSubExp "step_invalid" $
-      I.BasicOp $ I.BinOp I.LogOr step_wrong_dir step_zero
+      I.BasicOp $
+        I.BinOp I.LogOr step_wrong_dir step_zero
 
   invalid <-
     letSubExp "range_invalid" $
-      I.BasicOp $ I.BinOp I.LogOr step_invalid bounds_invalid
+      I.BasicOp $
+        I.BinOp I.LogOr step_invalid bounds_invalid
   valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp I.Not invalid
   cs <- assert "range_valid_c" valid errmsg loc
 
   step_i64 <- asIntS Int64 step
   pos_step <-
     letSubExp "pos_step" $
-      I.BasicOp $ I.BinOp (Mul Int64 I.OverflowWrap) step_i64 step_sign_i64
+      I.BasicOp $
+        I.BinOp (Mul Int64 I.OverflowWrap) step_i64 step_sign_i64
 
   num_elems <-
     certifying cs $
       letSubExp "num_elems" $
-        I.BasicOp $ I.BinOp (SDivUp Int64 I.Unsafe) distance pos_step
+        I.BasicOp $
+          I.BinOp (SDivUp Int64 I.Unsafe) distance pos_step
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]
@@ -545,7 +559,9 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
           loop_end_cond_body <- renameBody <=< buildBody_ $ do
             forM_ (zip shapepat shapeargs) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
-                letBindNames [paramName p] $ BasicOp $ SubExp se
+                letBindNames [paramName p] $
+                  BasicOp $
+                    SubExp se
             forM_ (zip mergepat' ses) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
                 letBindNames [paramName p] $
@@ -586,7 +602,8 @@ internaliseAppExp desc _ (E.Match e cs _) = do
         (_, pertinent) <- generateCond pLast ses
         eLast' <- internalisePat' [] pLast pertinent eLast (internaliseBody desc)
         foldM (\bf c' -> eValBody $ pure $ generateCaseIf ses c' bf) eLast' $
-          reverse $ NE.init cs'
+          reverse $
+            NE.init cs'
       letValExp' desc =<< generateCaseIf ses c bFalse
 internaliseAppExp desc _ (E.If ce te fe _) =
   letValExp' desc
@@ -614,7 +631,9 @@ internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 internaliseExp desc (E.StringLit vs _) =
   fmap pure . letSubExp desc $
-    I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
+    I.BasicOp $
+      I.ArrayLit (map constant vs) $
+        I.Prim int8
 internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
   subst <- lookupSubst name
   case subst of
@@ -757,7 +776,8 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
           i <-
             fmap sum $
               mapM (internalisedTypeSize . snd) $
-                takeWhile ((/= f) . fst) $ sortFields m
+                takeWhile ((/= f) . fst) $
+                  sortFields m
           k <- internalisedTypeSize t
           let (bef, to_update, aft) = splitAt3 i k src'
           src'' <- replace t fs ve' to_update
@@ -984,7 +1004,8 @@ internaliseSlice loc dims idxs = do
   ok <- letSubExp "index_ok" =<< eAll oks
   let msg =
         errorMsg $
-          ["Index ["] ++ intercalate [", "] parts
+          ["Index ["]
+            ++ intercalate [", "] parts
             ++ ["] out of bounds for array of shape ["]
             ++ intersperse "][" (map (ErrorVal int64) $ take (length idxs) dims)
             ++ ["]."]
@@ -1014,7 +1035,8 @@ internaliseDimIndex
     ) = do
     w_minus_1 <-
       letSubExp "w_minus_1" $
-        BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) w one
+        BasicOp $
+          I.BinOp (Sub Int64 I.OverflowWrap) w one
     pure
       ( I.DimSlice w_minus_1 w $ intConst Int64 (-1),
         constant True,
@@ -1028,19 +1050,19 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int64) s_sign negone
   w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) w one
   let i_def =
-        letSubExp "i_def" $
-          I.If
+        letSubExp "i_def"
+          $ I.If
             backwards
             (resultBody [w_minus_1])
             (resultBody [zero])
-            $ ifCommon [I.Prim int64]
+          $ ifCommon [I.Prim int64]
       j_def =
-        letSubExp "j_def" $
-          I.If
+        letSubExp "j_def"
+          $ I.If
             backwards
             (resultBody [negone])
             (resultBody [w])
-            $ ifCommon [I.Prim int64]
+          $ ifCommon [I.Prim int64]
   i' <- maybe i_def (fmap fst . internaliseDimExp "i") i
   j' <- maybe j_def (fmap fst . internaliseDimExp "j") j
   j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) j' i'
@@ -1071,13 +1093,16 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   i_p_m_t_s <- letSubExp "i_p_m_t_s" $ I.BasicOp $ I.BinOp (Add Int64 I.OverflowWrap) i' m_t_s
   zero_leq_i_p_m_t_s <-
     letSubExp "zero_leq_i_p_m_t_s" $
-      I.BasicOp $ I.CmpOp (I.CmpSle Int64) zero i_p_m_t_s
+      I.BasicOp $
+        I.CmpOp (I.CmpSle Int64) zero i_p_m_t_s
   i_p_m_t_s_leq_w <-
     letSubExp "i_p_m_t_s_leq_w" $
-      I.BasicOp $ I.CmpOp (I.CmpSle Int64) i_p_m_t_s w
+      I.BasicOp $
+        I.CmpOp (I.CmpSle Int64) i_p_m_t_s w
   i_p_m_t_s_lth_w <-
     letSubExp "i_p_m_t_s_leq_w" $
-      I.BasicOp $ I.CmpOp (I.CmpSlt Int64) i_p_m_t_s w
+      I.BasicOp $
+        I.CmpOp (I.CmpSlt Int64) i_p_m_t_s w
 
   zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) zero i'
   i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) i' j'
@@ -1093,20 +1118,22 @@ internaliseDimIndex w (E.DimSlice i j s) = do
         [negone_lte_j, negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
 
   slice_ok <-
-    letSubExp "slice_ok" $
-      I.If
+    letSubExp "slice_ok"
+      $ I.If
         backwards
         (resultBody [backwards_ok])
         (resultBody [forwards_ok])
-        $ ifCommon [I.Prim I.Bool]
+      $ ifCommon [I.Prim I.Bool]
 
   ok_or_empty <-
     letSubExp "ok_or_empty" $
-      I.BasicOp $ I.BinOp I.LogOr empty_slice slice_ok
+      I.BasicOp $
+        I.BinOp I.LogOr empty_slice slice_ok
 
   acceptable <-
     letSubExp "slice_acceptable" $
-      I.BasicOp $ I.BinOp I.LogAnd nonzero_stride ok_or_empty
+      I.BasicOp $
+        I.BinOp I.LogAnd nonzero_stride ok_or_empty
 
   let parts = case (i, j, s) of
         (_, _, Just {}) ->
@@ -1238,11 +1265,14 @@ internaliseStreamRed desc o comm lam0 lam arr = do
   -- Synthesize neutral elements by applying the fold function
   -- to an empty chunk.
   letBindNames [I.paramName chunk_param] $
-    I.BasicOp $ I.SubExp $ constant (0 :: Int64)
+    I.BasicOp $
+      I.SubExp $
+        constant (0 :: Int64)
   forM_ lam_val_params $ \p ->
     letBindNames [I.paramName p] $
       I.BasicOp . I.Scratch (I.elemType $ I.paramType p) $
-        I.arrayDims $ I.paramType p
+        I.arrayDims $
+          I.paramType p
   nes <- bodyBind =<< renameBody lam_body
 
   nes_ts <- mapM I.subExpResType nes
@@ -1296,12 +1326,12 @@ internaliseStreamAcc desc dest op lam bs = do
       acc_t = Acc acc_cert_v (Shape [dest_w]) (map rowType dest_ts) NoUniqueness
   acc_p <- newParam "acc_p" acc_t
   withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
-    lam' <-
-      internaliseMapLambda internaliseLambda lam $
-        map I.Var $ paramName acc_p : bs'
-    w <- arraysSize 0 <$> mapM lookupType bs'
+    bs_ts <- mapM lookupType bs'
+    lam' <- internaliseLambdaCoerce lam $ map rowType $ paramType acc_p : bs_ts
+    let w = arraysSize 0 bs_ts
     fmap subExpsRes . letValExp' "acc_res" $
-      I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
+      I.Op $
+        I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
 
   op' <-
     case op of
@@ -1318,7 +1348,8 @@ internaliseStreamAcc desc dest op lam bs = do
 
   destw <- arraysSize 0 <$> mapM lookupType dest'
   fmap (map I.Var) $
-    letTupExp desc $ WithAcc [(Shape [destw], dest', op')] withacc_lam
+    letTupExp desc $
+      WithAcc [(Shape [destw], dest', op')] withacc_lam
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1503,7 +1534,8 @@ internaliseBinOp _ desc E.Geq x y E.Bool _ =
   simpleCmpOp desc I.CmpLle y x -- Note the swapped x and y
 internaliseBinOp _ _ op _ _ t1 t2 =
   error $
-    "Invalid binary operator " ++ pretty op
+    "Invalid binary operator "
+      ++ pretty op
       ++ " with operand types "
       ++ pretty t1
       ++ ", "
@@ -1562,6 +1594,16 @@ internaliseLambda (E.Lambda params body _ (Info (_, RetType _ rettype)) _) rowty
     rettype' <- internaliseLambdaReturnType rettype =<< bodyExtType body'
     pure (params', body', rettype')
 internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
+
+internaliseLambdaCoerce :: E.Exp -> [Type] -> InternaliseM (I.Lambda SOACS)
+internaliseLambdaCoerce lam argtypes = do
+  (params, body, rettype) <- internaliseLambda lam argtypes
+  mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "unexpected lambda result size"])
+      (srclocOf lam)
+      rettype
+      =<< bodyBind body
 
 -- | Some operators and functions are overloaded or otherwise special
 -- - we detect and treat them here.
@@ -1688,11 +1730,10 @@ isOverloadedFunction qname args loc = do
 
     handleSOACs [TupLit [lam, arr] _] "map" = Just $ \desc -> do
       arr' <- internaliseExpToVars "map_arr" arr
-      lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
-      w <- arraysSize 0 <$> mapM lookupType arr'
-      letTupExp' desc $
-        I.Op $
-          I.Screma w arr' (I.mapSOAC lam')
+      arr_ts <- mapM lookupType arr'
+      lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
+      let w = arraysSize 0 arr_ts
+      letTupExp' desc $ I.Op $ I.Screma w arr' (I.mapSOAC lam')
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
@@ -1751,9 +1792,7 @@ isOverloadedFunction qname args loc = do
       | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
-          xts <- mapM subExpType x'
-          (ps, body, ret) <- internaliseLambda f xts
-          let lam = I.Lambda ps body ret
+          lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
               "jvp2" -> JVP lam x' v'
@@ -1858,12 +1897,12 @@ isOverloadedFunction qname args loc = do
       e' <- internaliseExp1 "trunc_arg" e
       case E.typeOf e of
         E.Scalar (E.Prim E.Bool) ->
-          letTupExp' desc $
-            I.If
+          letTupExp' desc
+            $ I.If
               e'
               (resultBody [intConst int_to 1])
               (resultBody [intConst int_to 0])
-              $ ifCommon [I.Prim $ I.IntType int_to]
+            $ ifCommon [I.Prim $ I.IntType int_to]
         E.Scalar (E.Prim (E.Signed int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
         E.Scalar (E.Prim (E.Unsigned int_from)) ->
@@ -1876,12 +1915,12 @@ isOverloadedFunction qname args loc = do
       e' <- internaliseExp1 "trunc_arg" e
       case E.typeOf e of
         E.Scalar (E.Prim E.Bool) ->
-          letTupExp' desc $
-            I.If
+          letTupExp' desc
+            $ I.If
               e'
               (resultBody [intConst int_to 1])
               (resultBody [intConst int_to 0])
-              $ ifCommon [I.Prim $ I.IntType int_to]
+            $ ifCommon [I.Prim $ I.IntType int_to]
         E.Scalar (E.Prim (E.Signed int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
         E.Scalar (E.Prim (E.Unsigned int_from)) ->
@@ -1916,7 +1955,8 @@ isOverloadedFunction qname args loc = do
             loc
         certifying c $
           letExp (baseString sv ++ "_write_sv") $
-            I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
+            I.BasicOp $
+              I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
       indexType <- fmap rowType <$> mapM lookupType si'
       indexName <- mapM (\_ -> newVName "write_index") indexType
@@ -2165,7 +2205,9 @@ partitionWithSOACS k lam arrs = do
   sizes <-
     letTupExp "partition_size" $
       I.If is_empty empty_body nonempty_body $
-        ifCommon $ replicate k $ I.Prim int64
+        ifCommon $
+          replicate k $
+            I.Prim int64
 
   -- The total size of all partitions must necessarily be equal to the
   -- size of the input array.
@@ -2173,7 +2215,8 @@ partitionWithSOACS k lam arrs = do
   -- Create scratch arrays for the result.
   blanks <- forM arr_ts $ \arr_t ->
     letExp "partition_dest" $
-      I.BasicOp $ Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
+      I.BasicOp $
+        Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
 
   -- Now write into the result.
   write_lam <- do
@@ -2205,7 +2248,8 @@ partitionWithSOACS k lam arrs = do
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $
-        I.ArrayLit (map I.Var sizes) $ I.Prim int64
+        I.ArrayLit (map I.Var sizes) $
+          I.Prim int64
   pure (map I.Var results, [sizes'])
   where
     mkOffsetLambdaBody ::
@@ -2221,7 +2265,8 @@ partitionWithSOACS k lam arrs = do
         letSubExp "is_this_one" $
           I.BasicOp $
             I.CmpOp (CmpEq int64) c $
-              intConst Int64 $ toInteger i
+              intConst Int64 $
+                toInteger i
       next_one <- mkOffsetLambdaBody sizes c (i + 1) ps
       this_one <-
         letSubExp "this_offset"
@@ -2229,12 +2274,12 @@ partitionWithSOACS k lam arrs = do
             (Add Int64 OverflowUndef)
             (constant (-1 :: Int64))
             (I.Var (I.paramName p) : take i sizes)
-      letSubExp "total_res" $
-        I.If
+      letSubExp "total_res"
+        $ I.If
           is_this_one
           (resultBody [this_one])
           (resultBody [next_one])
-          $ ifCommon [I.Prim int64]
+        $ ifCommon [I.Prim int64]
 
 typeExpForError :: E.TypeExp VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =

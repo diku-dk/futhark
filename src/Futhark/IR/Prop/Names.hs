@@ -299,7 +299,8 @@ instance
   FreeIn (Stm rep)
   where
   freeIn' (Let pat (StmAux cs attrs dec) e) =
-    freeIn' cs <> freeIn' attrs
+    freeIn' cs
+      <> freeIn' attrs
       <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
 
 instance FreeIn (Stm rep) => FreeIn (Stms rep) where

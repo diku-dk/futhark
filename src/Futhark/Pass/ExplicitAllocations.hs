@@ -178,7 +178,8 @@ arraySizeInBytesExpM chunkmap t = do
       elm_size_i64 = elemSize t
   pure $
     BinOpExp (SMax Int64) (ValueExp $ IntValue $ Int64Value 0) $
-      untyped $ dim_prod_i64 * elm_size_i64
+      untyped $
+        dim_prod_i64 * elm_size_i64
 
 arraySizeInBytes :: MonadBuilder m => ChunkMap -> Type -> m SubExp
 arraySizeInBytes chunkmap = letSubExp "bytes" <=< toExp <=< arraySizeInBytesExpM chunkmap
@@ -628,7 +629,10 @@ explicitAllocationsInStmsGeneric ::
 explicitAllocationsInStmsGeneric handleOp hints stms = do
   scope <- askScope
   runAllocM handleOp hints $
-    localScope scope $ collectStms_ $ allocInStms stms $ pure ()
+    localScope scope $
+      collectStms_ $
+        allocInStms stms $
+          pure ()
 
 memoryInDeclExtType :: Int -> [DeclExtType] -> [FunReturns]
 memoryInDeclExtType k dets = evalState (mapM addMem dets) 0
@@ -639,7 +643,9 @@ memoryInDeclExtType k dets = evalState (mapM addMem dets) 0
       i <- get <* modify (+ 1)
       let shape' = fmap shift shape
       pure . MemArray pt shape' u . ReturnsNewBlock DefaultSpace i $
-        IxFun.iota $ map convert $ shapeDims shape'
+        IxFun.iota $
+          map convert $
+            shapeDims shape'
     addMem (Acc acc ispace ts u) = pure $ MemAcc acc ispace ts u
 
     convert (Ext i) = le64 $ Ext i
@@ -851,7 +857,9 @@ allocInExp (WithAcc inputs bodylam) =
 
     mkP attrs p pt shape u mem ixfun is =
       Param attrs p . MemArray pt shape u . ArrayIn mem . IxFun.slice ixfun $
-        fmap pe64 $ Slice $ is ++ map sliceDim (shapeDims shape)
+        fmap pe64 $
+          Slice $
+            is ++ map sliceDim (shapeDims shape)
 
     onXParam _ (Param attrs p (Prim t)) _ =
       pure $ Param attrs p (MemPrim t)
@@ -962,7 +970,9 @@ addResCtxInIfBody ifrets (Body _ stms res) spaces substs = buildBody $ do
           shape' = fmap (adjustExt num_new_ctx) shape
           bodyret =
             MemArray pt shape' u . ReturnsNewBlock space' k $
-              IxFun.iota $ map convert $ shapeDims shape'
+              IxFun.iota $
+                map convert $
+                  shapeDims shape'
        in bodyret
     inspect _ _ (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
     inspect _ _ (Prim pt) _ = MemPrim pt
@@ -1105,7 +1115,8 @@ simplifiable innerUsage simplifyInnerOp =
       fbody <- resultBodyM [intConst Int64 0]
       size' <-
         letSubExp "hoisted_alloc_size" $
-          If taken tbody fbody $ IfDec [MemPrim int64] IfFallback
+          If taken tbody fbody $
+            IfDec [MemPrim int64] IfFallback
       letBind pat $ Op $ Alloc size' space
     protectOp _ _ _ = Nothing
 

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Analysis.MemAlias
@@ -45,7 +46,9 @@ instance Monoid MemAliases where
   mempty = MemAliases mempty
 
 instance Pretty MemAliases where
-  ppr (MemAliases m) = ppr m
+  ppr (MemAliases m) = stack $ map f $ M.toList m
+    where
+      f (v, vs) = ppr v <+> "aliases:" </> indent 2 (oneLine $ ppr vs)
 
 addAlias :: VName -> VName -> MemAliases -> MemAliases
 addAlias v1 v2 m =
@@ -82,7 +85,9 @@ analyzeHostOp m (SegOp (SegScan _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m (SegOp (SegHist _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
-analyzeHostOp _ _ = pure mempty
+analyzeHostOp m SizeOp {} = pure m
+analyzeHostOp m GPUBody {} = pure m
+analyzeHostOp m (OtherOp ()) = pure m
 
 analyzeStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => MemAliases -> Stm rep -> MemAliasesM inner MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =

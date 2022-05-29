@@ -288,7 +288,8 @@ checkExp (RecordLit fs loc) = do
       case maybe_sloc of
         Just sloc ->
           lift . typeError rloc mempty $
-            "Field" <+> pquote (ppr f)
+            "Field"
+              <+> pquote (ppr f)
               <+> "previously defined at"
               <+> text (locStrRel rloc sloc) <> "."
         Nothing -> pure ()
@@ -804,16 +805,16 @@ instance Pretty (Unmatched (PatBase Info VName)) where
 checkUnmatched :: Exp -> TermTypeM ()
 checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
   where
-    checkUnmatched' (AppExp (Match _ cs loc) _) =
+    checkUnmatched' (AppExp (Match _ cs loc) _) = do
       let ps = fmap (\(CasePat p _ _) -> p) cs
-       in case unmatched $ NE.toList ps of
-            [] -> pure ()
-            ps' ->
-              typeError loc mempty . withIndexLink "unmatched-cases" $
-                "Unmatched cases in match expression:"
-                  </> indent 2 (stack (map ppr ps'))
+      case unmatched $ NE.toList ps of
+        [] -> pure ()
+        ps' ->
+          typeError loc mempty . withIndexLink "unmatched-cases" $
+            "Unmatched cases in match expression:"
+              </> indent 2 (stack (map ppr ps'))
     checkUnmatched' _ = pure ()
-    tv = identityMapper {mapOnExp = \e' -> checkUnmatched' e' >> pure e'}
+    tv = identityMapper {mapOnExp = \e' -> checkUnmatched' e' >> astMap tv e'}
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
@@ -958,7 +959,9 @@ checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   -- to infer that a function is consuming.
   let argt_nonunique = toStruct (argType arg) `setUniqueness` Nonunique
   unify (mkUsage loc "use as function") (toStruct tfun) $
-    Scalar $ Arrow mempty Unnamed argt_nonunique $ RetType [] tv
+    Scalar $
+      Arrow mempty Unnamed argt_nonunique $
+        RetType [] tv
   tfun' <- normPatType tfun
   checkApply loc fname tfun' arg
 checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
@@ -967,10 +970,14 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
   typeError loc mempty $
     if prev_applied == 0
       then
-        "Cannot apply" <+> fname' <+> "as function, as it has type:"
+        "Cannot apply"
+          <+> fname'
+          <+> "as function, as it has type:"
           </> indent 2 (ppr ftype)
       else
-        "Cannot apply" <+> fname' <+> "to argument #" <> ppr (prev_applied + 1)
+        "Cannot apply"
+          <+> fname'
+          <+> "to argument #" <> ppr (prev_applied + 1)
           <+> pquote (shorten $ pretty $ flatten $ ppr argexp) <> ","
           <+/> "as"
           <+> fname'
@@ -1079,7 +1086,9 @@ causalityCheck binding_body = do
   let checkCausality what known t loc
         | (d, dloc) : _ <-
             mapMaybe (unknown constraints known) $
-              S.toList $ typeDimNames $ toStruct t =
+              S.toList $
+                typeDimNames $
+                  toStruct t =
             Just $ lift $ causality what (locOf loc) d dloc t
         | otherwise = Nothing
 
@@ -1162,7 +1171,8 @@ causalityCheck binding_body = do
 
     causality what loc d dloc t =
       Left . TypeError loc mempty . withIndexLink "causality-check" $
-        "Causality check: size" <+/> pquote (pprName d)
+        "Causality check: size"
+          <+/> pquote (pprName d)
           <+/> "needed for type of"
           <+> what <> colon
           </> indent 2 (ppr t)
@@ -1173,7 +1183,8 @@ causalityCheck binding_body = do
           </> ""
           </> "Hint:"
           <+> align
-            ( textwrap "Bind the expression producing" <+> pquote (pprName d)
+            ( textwrap "Bind the expression producing"
+                <+> pquote (pprName d)
                 <+> "with 'let' beforehand."
             )
 
@@ -1210,7 +1221,8 @@ literalOverflowCheck = void . check
     warnBounds inBounds x ty loc =
       unless inBounds $
         typeError loc mempty . withIndexLink "literal-out-of-bounds" $
-          "Literal " <> ppr x
+          "Literal "
+            <> ppr x
             <> " out of bounds for inferred type "
             <> ppr ty
             <> "."
@@ -1276,22 +1288,28 @@ fixOverloadedTypes tyvars_at_toplevel =
     fixOverloaded (v, Overloaded ots usage)
       | Signed Int32 `elem` ots = do
           unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
-            Scalar $ Prim $ Signed Int32
+            Scalar $
+              Prim $
+                Signed Int32
           when (v `S.member` tyvars_at_toplevel) $
             warn usage "Defaulting ambiguous type to i32."
       | FloatType Float64 `elem` ots = do
           unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
-            Scalar $ Prim $ FloatType Float64
+            Scalar $
+              Prim $
+                FloatType Float64
           when (v `S.member` tyvars_at_toplevel) $
             warn usage "Defaulting ambiguous type to f64."
       | otherwise =
           typeError usage mempty . withIndexLink "ambiguous-type" $
-            "Type is ambiguous (could be one of" <+> commasep (map ppr ots) <> ")."
+            "Type is ambiguous (could be one of"
+              <+> commasep (map ppr ots) <> ")."
               </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
       unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
-        Scalar $ tupleRecord []
+        Scalar $
+          tupleRecord []
       when (v `S.member` tyvars_at_toplevel) $
         warn usage "Defaulting ambiguous type to ()."
     fixOverloaded (_, Equality usage) =
@@ -1335,7 +1353,8 @@ inferredReturnType loc params t = do
   -- These we must turn into fresh type variables, which will be
   -- existential in the return type.
   fmap (toStruct . fst) $
-    unscopeType loc hidden_params $ inferReturnUniqueness params t
+    unscopeType loc hidden_params $
+      inferReturnUniqueness params t
   where
     hidden_params = M.filterWithKey (const . (`S.member` hidden)) $ foldMap patternMap params
     hidden = hiddenParamNames params
@@ -1457,7 +1476,9 @@ checkGlobalAliases params body_t loc = do
         "Function result aliases the free variable "
           <> pquote (pprName v)
           <> "."
-          </> "Use" <+> pquote "copy" <+> "to break the aliasing."
+          </> "Use"
+          <+> pquote "copy"
+          <+> "to break the aliasing."
     _ ->
       pure ()
 
@@ -1523,15 +1544,17 @@ verifyFunctionParams fname params =
     verifyParams forbidden (p : ps)
       | d : _ <- S.toList $ patternDimNames p `S.intersection` forbidden =
           typeError p mempty . withIndexLink "inaccessible-size" $
-            "Parameter" <+> pquote (ppr p)
-              <+/> "refers to size" <+> pquote (pprName d)
-              <> comma
+            "Parameter"
+              <+> pquote (ppr p)
+              <+/> "refers to size"
+              <+> pquote (pprName d)
+                <> comma
               <+/> textwrap "which will not be accessible to the caller"
-              <> comma
+                <> comma
               <+/> textwrap "possibly because it is nested in a tuple or record."
               <+/> textwrap "Consider ascribing an explicit type that does not reference "
-              <> pquote (pprName d)
-              <> "."
+                <> pquote (pprName d)
+                <> "."
       | otherwise = verifyParams forbidden' ps
       where
         forbidden' =
@@ -1619,10 +1642,11 @@ closeOverTypes defname defloc tparams paramts ret substs = do
         k `S.notMember` produced_sizes = do
           notes <- dimNotes defloc $ NamedDim $ qualName k
           typeError defloc notes . withIndexLink "unknowable-param-def" $
-            "Unknowable size" <+> pquote (pprName k)
+            "Unknowable size"
+              <+> pquote (pprName k)
               <+> "in parameter of"
               <+> pquote (pprName defname)
-              <> ", which is inferred as:"
+                <> ", which is inferred as:"
               </> indent 2 (ppr t)
       | k `S.member` produced_sizes =
           pure $ Just $ Right k
@@ -1710,7 +1734,8 @@ checkFunBody params body maybe_rettype loc = do
 
       let usage = mkUsage (srclocOf body) "return type annotation"
       onFailure (CheckingReturn rettype (toStruct body_t')) $
-        expect usage rettype $ toStruct body_t'
+        expect usage rettype $
+          toStruct body_t'
     Nothing -> pure ()
 
   pure body'

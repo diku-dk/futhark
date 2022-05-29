@@ -104,8 +104,8 @@ vjpMap ops res_adjs _ w map_lam as
           inBounds res_i adj_i adj_v = subAD . buildRenamedBody $ do
             forM_ (zip (lambdaParams map_lam) as) $ \(p, a) -> do
               a_t <- lookupType a
-              letBindNames [paramName p] $
-                BasicOp $ Index a $ fullSlice a_t [DimFix adj_i]
+              letBindNames [paramName p] . BasicOp . Index a $
+                fullSlice a_t [DimFix adj_i]
             adj_elems <-
               fmap (map resSubExp) . bodyBind . lambdaBody
                 =<< vjpLambda ops (oneHot res_i (AdjVal adj_v)) adjs_for map_lam
@@ -228,6 +228,6 @@ vjpMap ops pat_adj aux w map_lam as = returnSweepCode $ do
           zero <- letSubExp "zero" $ zeroExp t
           reduce <- reduceSOAC [Reduce Commutative lam [zero]]
           contrib_sum <-
-            letExp (baseString v <> "_contrib_sum") $
-              Op $ Screma w [contribs] reduce
+            letExp (baseString v <> "_contrib_sum") . Op $
+              Screma w [contribs] reduce
           void $ updateAdj v contrib_sum

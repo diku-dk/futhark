@@ -115,7 +115,8 @@ runBenchmarks opts paths = do
       <> show (optMinTime opts)
       <> ")."
   when (optConvergencePhase opts) . putStrLn $
-    "More runs automatically performed for up to " <> show (optConvergenceMaxTime opts)
+    "More runs automatically performed for up to "
+      <> show (optConvergenceMaxTime opts)
       <> " to ensure accurate measurement."
 
   futhark <- FutharkExe . compFuthark <$> compileOptions opts
@@ -266,7 +267,8 @@ progress elapsed =
 
 interimResult :: Int -> Int -> Double -> T.Text
 interimResult us_sum runs elapsed =
-  T.pack (printf "%10.0fμs " avg) <> progress elapsed
+  T.pack (printf "%10.0fμs " avg)
+    <> progress elapsed
     <> (" " <> prettyText runs <> " runs")
   where
     avg :: Double

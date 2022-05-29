@@ -37,6 +37,7 @@ import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -198,7 +199,8 @@ kernelsMemProg _ (GPUMem prog) =
   pure prog
 kernelsMemProg name rep =
   externalErrorS $
-    "Pass " ++ name
+    "Pass "
+      ++ name
       ++ " expects GPUMem representation, but got "
       ++ representation rep
 
@@ -207,7 +209,8 @@ soacsProg _ (SOACS prog) =
   pure prog
 soacsProg name rep =
   externalErrorS $
-    "Pass " ++ name
+    "Pass "
+      ++ name
       ++ " expects SOACS representation, but got "
       ++ representation rep
 
@@ -348,7 +351,9 @@ pipelineOption getprog repdesc repf desc pipeline =
           repf <$> runPipeline pipeline config prog
         Nothing ->
           externalErrorS $
-            "Expected " ++ repdesc ++ " representation, but got "
+            "Expected "
+              ++ repdesc
+              ++ " representation, but got "
               ++ representation rep
 
 soacsPipelineOption ::
@@ -388,7 +393,9 @@ commandLineOptions =
       []
       ["no-check"]
       ( NoArg $
-          Right $ changeFutharkConfig $ \opts -> opts {futharkTypeCheck = False}
+          Right $
+            changeFutharkConfig $
+              \opts -> opts {futharkTypeCheck = False}
       )
       "Disable type-checking.",
     Option
@@ -559,6 +566,7 @@ commandLineOptions =
     kernelsPassOption histAccsGPU [],
     kernelsPassOption unstreamGPU [],
     kernelsPassOption sinkGPU [],
+    kernelsPassOption reduceDeviceSyncs [],
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
     iplOption [],
@@ -633,7 +641,9 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
       Just $ do
         res <-
           runFutharkM (m file config) $
-            fst $ futharkVerbose $ futharkConfig config
+            fst $
+              futharkVerbose $
+                futharkConfig config
         case res of
           Left err -> do
             dumpError (futharkConfig config) err

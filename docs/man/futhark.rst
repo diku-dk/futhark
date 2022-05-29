@@ -19,7 +19,7 @@ subcommands, the ``futhark`` tool provides facilities for compiling,
 developing, or analysing Futhark programs.  Most subcommands are
 documented in their own manpage.  For example, ``futhark opencl`` is
 documented as :ref:`futhark-opencl(1)`.  The remaining subcommands are
-documented in this page.
+documented below.
 
 COMMANDS
 ========
@@ -57,7 +57,7 @@ futhark defs PROGRAM
 
 Print names and locations of every top-level definition in the program
 (including top levels of modules), one per line.  The program need not
-be type-correct, but it must be contain syntax errors.
+be type-correct, but it must not contain syntax errors.
 
 futhark dev options... PROGRAM
 ------------------------------

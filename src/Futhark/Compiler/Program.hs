@@ -248,10 +248,14 @@ readUntypedLibraryExceptKnown known vfs fps = do
                       }
                 Just (Left e) ->
                   pure . UncheckedImport . Left . singleError $
-                    ProgError NoLoc $ text $ show e
+                    ProgError NoLoc $
+                      text $
+                        show e
                 Nothing ->
                   pure . UncheckedImport . Left . singleError $
-                    ProgError NoLoc $ text $ fp <> ": file not found."
+                    ProgError NoLoc $
+                      text $
+                        fp <> ": file not found."
             pure (M.insert include prog_mvar state, (include, prog_mvar))
       where
         include = mkInitialImport fp_name

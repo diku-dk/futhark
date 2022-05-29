@@ -135,10 +135,14 @@ instance Pretty Multicore where
   ppr (ISPCKernel body _) =
     "ispc" <+> nestedBlock "{" "}" (ppr body)
   ppr (ForEach i limit body) =
-    "foreach" <+> ppr i <+> langle <+> ppr limit
+    "foreach"
+      <+> ppr i
+      <+> langle
+      <+> ppr limit
       <+> nestedBlock "{" "}" (ppr body)
   ppr (ForEachActive i body) =
-    "foreach_active" <+> ppr i
+    "foreach_active"
+      <+> ppr i
       <+> nestedBlock "{" "}" (ppr body)
   ppr (ExtractLane dest tar lane) =
     ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
@@ -177,7 +181,8 @@ data KernelHandling = TraverseKernels | OpaqueKernels
 lexicalMemoryUsageMC :: KernelHandling -> Function Multicore -> M.Map VName Space
 lexicalMemoryUsageMC gokernel func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
-    declared $ functionBody func
+    declared $
+      functionBody func
   where
     nonlexical =
       set (functionBody func)

@@ -240,7 +240,9 @@ class
 expExtTypesFromPat :: Typed dec => Pat dec -> [ExtType]
 expExtTypesFromPat pat =
   existentialiseExtTypes (patNames pat) $
-    staticShapes $ map patElemType $ patElems pat
+    staticShapes $
+      map patElemType $
+        patElems pat
 
 -- | Keep only those attributes that are relevant for 'Assert'
 -- expressions.
@@ -259,7 +261,9 @@ lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
       guard $ cs == mempty
       Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
         find (([res] ==) . patNames . stmPat) $
-          stmsToList $ bodyStms $ lambdaBody lam
+          stmsToList $
+            bodyStms $
+              lambdaBody lam
       i <- Var res `elemIndex` map resSubExp (bodyResult (lambdaBody lam))
       xp <- maybeNth i $ lambdaParams lam
       yp <- maybeNth (n + i) $ lambdaParams lam

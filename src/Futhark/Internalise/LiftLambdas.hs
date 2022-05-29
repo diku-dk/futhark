@@ -85,7 +85,8 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
         let immediate_free = FV.freeVars funbody `FV.without` (bound <> existentials funbody)
             sizes_in_free =
               foldMap typeDimNames $
-                M.elems $ FV.unNameSet immediate_free
+                M.elems $
+                  FV.unNameSet immediate_free
             sizes =
               FV.sizes $
                 sizes_in_free
@@ -117,10 +118,10 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
         valBindEntryPoint = Nothing
       }
 
-  pure $
-    apply
+  pure
+    $ apply
       (Var (qualName fname) (Info (augType $ free_dims ++ free_nondims)) mempty)
-      $ free_dims ++ free_nondims
+    $ free_dims ++ free_nondims
   where
     orig_type = funType params $ RetType dims ret
     mkParam (v, t) = Id v (Info (fromStruct t)) mempty

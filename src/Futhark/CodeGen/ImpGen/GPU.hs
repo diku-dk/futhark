@@ -145,7 +145,8 @@ opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
   tid <- newVName "tid"
-  sKernelThread "gpuseq" tid (defKernelAttrs 1 1) $
+  let one = Count (intConst Int64 1)
+  sKernelThread "gpuseq" tid (defKernelAttrs one one) $
     compileStms (freeIn res) stms $
       forM_ (zip pes res) $ \(pe, SubExpRes _ se) ->
         copyDWIM (patElemName pe) [DimFix 0] se []
@@ -296,8 +297,8 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
       let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
-      emit $
-        Imp.Copy
+      emit
+        $ Imp.Copy
           bt
           destmem
           (bytes $ sExt64 destoffset)
@@ -305,7 +306,7 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
           srcmem
           (bytes $ sExt64 srcoffset)
           srcspace
-          $ num_elems `Imp.withElemType` bt
+        $ num_elems `Imp.withElemType` bt
   | otherwise = sCopy bt destloc srcloc
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
@@ -421,7 +422,8 @@ mapTransposeFunction bt =
             (Imp.Count num_bytes)
 
     callTransposeKernel =
-      Imp.Op . Imp.CallKernel
+      Imp.Op
+        . Imp.CallKernel
         . mapTransposeKernel
           (mapTransposeName bt)
           block_dim_int

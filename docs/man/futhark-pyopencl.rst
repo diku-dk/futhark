@@ -34,43 +34,7 @@ The generated code requires at least PyOpenCL version 2015.2.
 OPTIONS
 =======
 
--h
-  Print help text to standard output and exit.
-
---entry-point NAME
-  Treat this top-level function as an entry point.
-
---library
-  Instead of compiling to an executable program, generate a Python
-  module that can be imported by other Python code.  The module will
-  contain a class of the same name as the Futhark source file with
-  ``.fut`` removed.  Objects of the class define one method per entry
-  point in the Futhark program, with matching parameters and return
-  value.
-
--o outfile
-  Where to write the resulting binary.  By default, if the source
-  program is named 'foo.fut', the binary will be named 'foo'.
-
---server
-  Generate a server-mode executable that reads commands from stdin.
-
---safe
-  Ignore ``unsafe`` in program and perform safety checks unconditionally.
-
--v verbose
-  Enable debugging output.  If compilation fails due to a compiler
-  error, the result of the last successful compiler step will be
-  printed to standard error.
-
--V
-  Print version information on standard output and exit.
-
--W
-  Do not print any warnings.
-
---Werror
-  Treat warnings as errors.
+Accepts the same options as :ref:`futhark-c(1)`.
 
 SEE ALSO
 ========

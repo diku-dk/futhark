@@ -288,7 +288,8 @@ transformAppExp (Coerce e tp loc) res =
 transformAppExp (LetPat sizes pat e1 e2 loc) res = do
   (pat', rr) <- transformPat pat
   AppExp
-    <$> ( LetPat sizes pat' <$> transformExp e1
+    <$> ( LetPat sizes pat'
+            <$> transformExp e1
             <*> withRecordReplacements rr (transformExp e2)
             <*> pure loc
         )
@@ -491,11 +492,15 @@ transformExp (Project n e tp loc) = do
       e' <- transformExp e
       pure $ Project n e' tp loc
 transformExp (Update e1 idxs e2 loc) =
-  Update <$> transformExp e1 <*> mapM transformDimIndex idxs
+  Update
+    <$> transformExp e1
+    <*> mapM transformDimIndex idxs
     <*> transformExp e2
     <*> pure loc
 transformExp (RecordUpdate e1 fs e2 t loc) =
-  RecordUpdate <$> transformExp e1 <*> pure fs
+  RecordUpdate
+    <$> transformExp e1
+    <*> pure fs
     <*> transformExp e2
     <*> pure t
     <*> pure loc
@@ -599,7 +604,8 @@ desugarProjectSection fields (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
               Project field e (Info t) mempty
         t ->
           error $
-            "desugarOpSection: type " ++ pretty t
+            "desugarOpSection: type "
+              ++ pretty t
               ++ " does not have field "
               ++ pretty field
 desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
@@ -833,7 +839,8 @@ typeSubstsM loc orig_t1 orig_t2 =
           sub t1' t2'
     sub (Scalar (TypeVar _ _ v _)) t =
       unless (baseTag (typeLeaf v) <= maxIntrinsicTag) $
-        addSubst v $ RetType [] t
+        addSubst v $
+          RetType [] t
     sub (Scalar (Record fields1)) (Scalar (Record fields2)) =
       zipWithM_
         sub
@@ -930,10 +937,11 @@ transformValBind valbind = do
 
   when (isJust $ valBindEntryPoint valbind) $ do
     t <-
-      removeTypeVariablesInType $
-        foldFunType
+      removeTypeVariablesInType
+        $ foldFunType
           (map patternStructType (valBindParams valbind))
-          $ unInfo $ valBindRetType valbind
+        $ unInfo
+        $ valBindRetType valbind
     (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
     tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = valBindEntryPoint valbind})
     addLifted (valBindName valbind) (monoType t) (name, infer)

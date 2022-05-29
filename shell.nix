@@ -23,7 +23,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
-    pkgs.haskell.packages.ghc922.ormolu_0_4_0_0
+    pkgs.haskell.packages.ghc922.ormolu_0_5_0_0
     pkgs.niv
     pkgs.python3Packages.numpy
     pkgs.python3Packages.pyopencl

@@ -113,7 +113,8 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
     -- creating xs_adj
     zeros <-
       replicateM (length val_as) . letExp "zeros" $
-        zeroExp $ xs_t `setOuterSize` w
+        zeroExp $
+          xs_t `setOuterSize` w
     let f_tps = replicate (rank * num_vals) (Prim int64) ++ replicate num_vals val_t
     f <- mkIdentityLambda f_tps
     xs_adj <-

@@ -217,52 +217,57 @@ compileSegScan ::
   CallKernelGen ()
 compileSegScan pat lvl space scanOp kbody = do
   let Pat all_pes = pat
-      group_size = toInt64Exp <$> segGroupSize lvl
-      n = product $ map toInt64Exp $ segSpaceDims space
-      num_groups = Count (n `divUp` (unCount group_size * m))
-      num_threads = unCount num_groups * unCount group_size
-      (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
-      segmented = length dims' > 1
-      not_segmented_e = if segmented then false else true
-      segment_size = last dims'
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
-
-      statusX, statusA, statusP :: Num a => a
-      statusX = 0
-      statusA = 1
-      statusP = 2
+      n = product $ map pe64 $ segSpaceDims space
       sumT :: Integer
       maxT :: Integer
       sumT = foldl (\bytes typ -> bytes + primByteSize typ) 0 tys
       primByteSize' = max 4 . primByteSize
       sumT' = foldl (\bytes typ -> bytes + primByteSize' typ) 0 tys `div` 4
       maxT = maximum (map primByteSize tys)
+      m :: Num a => a
+      m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
       -- TODO: Make these constants dynamic by querying device
       k_reg = 64
       k_mem = 95
       mem_constraint = max k_mem sumT `div` maxT
       reg_constraint = (k_reg - 1 - sumT') `div` (2 * sumT')
-      m :: Num a => a
-      m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
 
-  emit $ Imp.DebugPrint "SegScan: number of elements processed sequentially per thread is m:" $ Just $ untyped (m :: Imp.TExp Int32)
-  emit $ Imp.DebugPrint "SegScan: memory constraints is: " $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
-  emit $ Imp.DebugPrint "SegScan: register constraints is: " $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
-  emit $ Imp.DebugPrint "SegScan: sumT' is: " $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
+      group_size = segGroupSize lvl
+      group_size' = pe64 $ unCount group_size
 
-  -- Allocate the shared memory for output component
-  numThreads <- dPrimV "numThreads" num_threads
-  numGroups <- dPrimV "numGroups" $ unCount num_groups
+  num_groups <-
+    Count . tvSize <$> dPrimV "num_groups" (n `divUp` (group_size' * m))
+  let num_groups' = pe64 (unCount num_groups)
+
+  num_threads <-
+    dPrimVE "num_threads" $ num_groups' * group_size'
+
+  let (gtids, dims) = unzip $ unSegSpace space
+      dims' = map toInt64Exp dims
+      segmented = length dims' > 1
+      not_segmented_e = if segmented then false else true
+      segment_size = last dims'
+
+      statusX, statusA, statusP :: Num a => a
+      statusX = 0
+      statusA = 1
+      statusP = 2
+
+  emit $ Imp.DebugPrint "Sequential elements per thread (m):" $ Just $ untyped (m :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Memory constraint " $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Register constraint" $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "sumT'" $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
 
   globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
-  statusFlags <- sAllocArray "status_flags" int8 (Shape [tvSize numGroups]) (Space "device")
+  statusFlags <- sAllocArray "status_flags" int8 (Shape [unCount num_groups]) (Space "device")
   (aggregateArrays, incprefixArrays) <-
     fmap unzip $
       forM tys $ \ty ->
-        (,) <$> sAllocArray "aggregates" ty (Shape [tvSize numGroups]) (Space "device")
-          <*> sAllocArray "incprefixes" ty (Shape [tvSize numGroups]) (Space "device")
+        (,)
+          <$> sAllocArray "aggregates" ty (Shape [unCount num_groups]) (Space "device")
+          <*> sAllocArray "incprefixes" ty (Shape [unCount num_groups]) (Space "device")
 
   sReplicate statusFlags $ intConst Int8 statusX
 
@@ -299,10 +304,12 @@ compileSegScan pat lvl space scanOp kbody = do
     sgmIdx <- dPrimVE "sgm_idx" $ tvExp blockOff `mod` segment_size
     boundary <-
       dPrimVE "boundary" $
-        sExt32 $ sMin64 (m * unCount group_size) (segment_size - sgmIdx)
+        sExt32 $
+          sMin64 (m * group_size') (segment_size - sgmIdx)
     segsize_compact <-
       dPrimVE "segsize_compact" $
-        sExt32 $ sMin64 (m * unCount group_size) segment_size
+        sExt32 $
+          sMin64 (m * group_size') segment_size
     privateArrays <-
       forM tys $ \ty ->
         sAllocArray
@@ -316,7 +323,8 @@ compileSegScan pat lvl space scanOp kbody = do
         -- The map's input index
         phys_tid <-
           dPrimVE "phys_tid" $
-            tvExp blockOff + sExt64 (kernelLocalThreadId constants)
+            tvExp blockOff
+              + sExt64 (kernelLocalThreadId constants)
               + i * kernelGroupSize constants
         dIndexSpace (zip gtids dims') phys_tid
         -- Perform the map
@@ -397,7 +405,7 @@ compileSegScan pat lvl space scanOp kbody = do
     sComment "Scan results (with warp scan)" $ do
       groupScan
         crossesSegment
-        (tvExp numThreads)
+        num_threads
         (kernelGroupSize constants)
         scanOp'
         prefixArrays
@@ -434,7 +442,7 @@ compileSegScan pat lvl space scanOp kbody = do
       sWhen (bNot blockNewSgm .&&. kernelLocalThreadId constants .<. warpSize) $ do
         sWhen (kernelLocalThreadId constants .==. 0) $ do
           sIf
-            (not_segmented_e .||. boundary .==. sExt32 (unCount group_size * m))
+            (not_segmented_e .||. boundary .==. sExt32 (group_size' * m))
             ( do
                 everythingVolatile $
                   forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
@@ -469,7 +477,8 @@ compileSegScan pat lvl space scanOp kbody = do
           ( do
               readOffset <-
                 dPrimV "readOffset" $
-                  sExt32 $ tvExp dynamicId - sExt64 (kernelWaveSize constants)
+                  sExt32 $
+                    tvExp dynamicId - sExt64 (kernelWaveSize constants)
               let loopStop = warpSize * (-1)
                   sameSegment readIdx
                     | segmented =
@@ -510,7 +519,7 @@ compileSegScan pat lvl space scanOp kbody = do
                   lam' <- renameLambda scanOp'
                   inBlockScanLookback
                     constants
-                    (tvExp numThreads)
+                    num_threads
                     warpscan
                     exchanges
                     lam'
@@ -544,7 +553,7 @@ compileSegScan pat lvl space scanOp kbody = do
           scanOp'''' <- renameLambda scanOp'
           let xs = map paramName $ take (length tys) $ lambdaParams scanOp''''
               ys = map paramName $ drop (length tys) $ lambdaParams scanOp''''
-          sWhen (boundary .==. sExt32 (unCount group_size * m)) $ do
+          sWhen (boundary .==. sExt32 (group_size' * m)) $ do
             forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
             forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
             compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
@@ -616,7 +625,8 @@ compileSegScan pat lvl space scanOp kbody = do
         sFor "i" m $ \i -> do
           flat_idx <-
             dPrimVE "flat_idx" $
-              tvExp blockOff + kernelGroupSize constants * i
+              tvExp blockOff
+                + kernelGroupSize constants * i
                 + sExt64 (kernelLocalThreadId constants)
           dIndexSpace (zip gtids dims') flat_idx
           sWhen (flat_idx .<. n) $ do
@@ -628,5 +638,5 @@ compileSegScan pat lvl space scanOp kbody = do
         sOp localBarrier
 
     sComment "If this is the last block, reset the dynamicId" $
-      sWhen (tvExp dynamicId .==. unCount num_groups - 1) $
+      sWhen (tvExp dynamicId .==. num_groups' - 1) $
         copyDWIMFix globalId [0] (constant (0 :: Int32)) []

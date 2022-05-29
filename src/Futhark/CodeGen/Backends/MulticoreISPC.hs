@@ -963,7 +963,8 @@ findDeps (Op (SegOp _ free _ _ retvals _)) =
   mapM_
     ( \x ->
         addDeps (paramName x) $
-          namesFromList $ map paramName free
+          namesFromList $
+            map paramName free
     )
     retvals
 findDeps (Op (ForEach _ _ body)) =

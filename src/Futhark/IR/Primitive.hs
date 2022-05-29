@@ -582,8 +582,8 @@ data ConvOp
 -- | A list of all unary operators for all types.
 allUnOps :: [UnOp]
 allUnOps =
-  Not :
-  map Complement [minBound .. maxBound]
+  Not
+    : map Complement [minBound .. maxBound]
     ++ map Abs [minBound .. maxBound]
     ++ map FAbs [minBound .. maxBound]
     ++ map SSignum [minBound .. maxBound]
@@ -805,18 +805,16 @@ doUDiv :: IntValue -> IntValue -> Maybe IntValue
 doUDiv v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
-      Just $
-        intValue (intValueType v1) $
-          intToWord64 v1 `div` intToWord64 v2
+      Just . intValue (intValueType v1) $
+        intToWord64 v1 `div` intToWord64 v2
 
 -- | Unsigned integer division.  Rounds towards positive infinity.
 doUDivUp :: IntValue -> IntValue -> Maybe IntValue
 doUDivUp v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
-      Just $
-        intValue (intValueType v1) $
-          (intToWord64 v1 + intToWord64 v2 - 1) `div` intToWord64 v2
+      Just . intValue (intValueType v1) $
+        (intToWord64 v1 + intToWord64 v2 - 1) `div` intToWord64 v2
 
 -- | Signed integer division.  Rounds towards negativity infinity.
 -- Note: this is different from LLVM.
@@ -833,9 +831,8 @@ doSDivUp :: IntValue -> IntValue -> Maybe IntValue
 doSDivUp v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
-      Just $
-        intValue (intValueType v1) $
-          (intToInt64 v1 + intToInt64 v2 - 1) `div` intToInt64 v2
+      Just . intValue (intValueType v1) $
+        (intToInt64 v1 + intToInt64 v2 - 1) `div` intToInt64 v2
 
 -- | Unsigned integer modulus; the countepart to 'UDiv'.
 doUMod :: IntValue -> IntValue -> Maybe IntValue

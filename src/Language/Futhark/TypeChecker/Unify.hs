@@ -60,7 +60,8 @@ data BreadCrumb
 
 instance Pretty BreadCrumb where
   ppr (MatchingTypes t1 t2) =
-    "When matching type" </> indent 2 (ppr t1)
+    "When matching type"
+      </> indent 2 (ppr t1)
       </> "with"
       </> indent 2 (ppr t2)
   ppr (MatchingFields fields) =
@@ -198,19 +199,24 @@ prettySource ctx loc (RigidRet Nothing) =
   "is unknown size returned by function at"
     <+> text (locStrRel ctx loc) <> "."
 prettySource ctx loc (RigidRet (Just fname)) =
-  "is unknown size returned by" <+> pquote (ppr fname)
+  "is unknown size returned by"
+    <+> pquote (ppr fname)
     <+> "at"
     <+> text (locStrRel ctx loc) <> "."
 prettySource ctx loc (RigidArg fname arg) =
   "is value of argument"
     </> indent 2 (shorten arg)
-    </> "passed to" <+> fname' <+> "at" <+> text (locStrRel ctx loc) <> "."
+    </> "passed to"
+    <+> fname'
+    <+> "at"
+    <+> text (locStrRel ctx loc) <> "."
   where
     fname' = maybe "function" (pquote . ppr) fname
 prettySource ctx loc (RigidSlice d slice) =
   "is size produced by slice"
     </> indent 2 (shorten slice)
-    </> d_desc <> "at" <+> text (locStrRel ctx loc) <> "."
+    </> d_desc <> "at"
+    <+> text (locStrRel ctx loc) <> "."
   where
     d_desc = case d of
       Just d' -> "of dimension of size " <> pquote (ppr d') <> " "
@@ -224,13 +230,14 @@ prettySource ctx loc (RigidBound bound) =
     </> indent 2 (shorten bound)
     </> "used in range at " <> text (locStrRel ctx loc) <> "."
 prettySource ctx loc (RigidOutOfScope boundloc v) =
-  "is an unknown size arising from " <> pquote (pprName v)
+  "is an unknown size arising from "
+    <> pquote (pprName v)
     <> " going out of scope at "
     <> text (locStrRel ctx loc)
     <> "."
     </> "Originally bound at "
-    <> text (locStrRel ctx boundloc)
-    <> "."
+      <> text (locStrRel ctx boundloc)
+      <> "."
 prettySource ctx loc RigidCoerce =
   "is an unknown size arising from empty dimension in coercion at"
     <+> text (locStrRel ctx loc) <> "."
@@ -241,9 +248,9 @@ prettySource ctx loc (RigidCond t1 t2) =
     <> text (locStrRel ctx loc)
     <> "."
     </> "One branch returns array of type: "
-    <> align (ppr t1)
+      <> align (ppr t1)
     </> "The other an array of type:       "
-    <> align (ppr t2)
+      <> align (ppr t2)
 
 -- | Retrieve notes describing the purpose or origin of the given
 -- 'DimDecl'.  The location is used as the *current* location, for the
@@ -253,16 +260,15 @@ dimNotes ctx (NamedDim d) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
-      pure $
-        aNote $
-          pretty $
-            pquote (ppr d) <+> prettySource (srclocOf ctx) loc rsrc
+      pure . aNote . pretty $
+        pquote (ppr d) <+> prettySource (srclocOf ctx) loc rsrc
     _ -> pure mempty
 dimNotes _ _ = pure mempty
 
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
-  fmap mconcat . mapM (dimNotes ctx . NamedDim . qualName)
+  fmap mconcat
+    . mapM (dimNotes ctx . NamedDim . qualName)
     . S.toList
     . typeDimNames
 
@@ -270,13 +276,15 @@ typeVarNotes :: MonadUnify m => VName -> m Notes
 typeVarNotes v = maybe mempty (aNote . note . snd) . M.lookup v <$> getConstraints
   where
     note (HasConstrs cs _) =
-      pprName v <+> "="
+      pprName v
+        <+> "="
         <+> mconcat (map ppConstr (M.toList cs))
         <+> "..."
     note (Overloaded ts _) =
       pprName v <+> "must be one of" <+> mconcat (punctuate ", " (map ppr ts))
     note (HasFields fs _) =
-      pprName v <+> "="
+      pprName v
+        <+> "="
         <+> braces (mconcat (punctuate ", " (map ppField (M.toList fs))))
     note _ = mempty
 
@@ -554,7 +562,8 @@ unifyDims usage bcs _ nonrigid d1 (NamedDim (QualName _ d2))
 unifyDims usage bcs _ _ d1 d2 = do
   notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
   unifyError usage notes bcs $
-    "Dimensions" <+> pquote (ppr d1)
+    "Dimensions"
+      <+> pquote (ppr d1)
       <+> "and"
       <+> pquote (ppr d2)
       <+> "do not match."
@@ -582,7 +591,8 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
     onDims bcs _ _ d1 d2 = do
       notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
       unifyError usage notes bcs $
-        "Dimensions" <+> pquote (ppr d1)
+        "Dimensions"
+          <+> pquote (ppr d1)
           <+> "and"
           <+> pquote (ppr d2)
           <+> "do not match."
@@ -669,7 +679,8 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
               M.insert vn (lvl, Constraint (RetType ext tp) usage)
           problems ->
             unifyError usage mempty bcs . withIndexLink "unify-param-existential" $
-              "Parameter(s) " <> commasep (map (pquote . pprName) problems)
+              "Parameter(s) "
+                <> commasep (map (pquote . pprName) problems)
                 <> " used as size(s) would go out of scope."
 
   case snd <$> M.lookup vn constraints of
@@ -677,7 +688,8 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       let bcs' =
             breadCrumb
               ( Matching $
-                  "When verifying that" <+> pquote (pprName vn)
+                  "When verifying that"
+                    <+> pquote (pprName vn)
                     <+> textwrap "is not instantiated with a function type, due to"
                     <+> ppr unlift_usage
               )
@@ -688,7 +700,8 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       arrayElemTypeWith usage bcs' tp
       when (any (`elem` bound) (typeDimNames tp)) $
         unifyError usage mempty bcs $
-          "Type variable" <+> pprName vn
+          "Type variable"
+            <+> pprName vn
             <+> "cannot be instantiated with type containing anonymous sizes:"
             </> indent 2 (ppr tp)
             </> textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size being a value parameter.  Add type annotation to clarify."
@@ -704,8 +717,11 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   linkVarToTypes usage v ts
             _ ->
               unifyError usage mempty bcs $
-                "Cannot instantiate" <+> pquote (pprName vn)
-                  <+> "with type" </> indent 2 (ppr tp) </> "as"
+                "Cannot instantiate"
+                  <+> pquote (pprName vn)
+                  <+> "with type"
+                  </> indent 2 (ppr tp)
+                  </> "as"
                   <+> pquote (pprName vn)
                   <+> "must be one of"
                   <+> commasep (map ppr ts)
@@ -738,11 +754,16 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   (lvl, HasFields required_fields old_usage)
         _ ->
           unifyError usage mempty bcs $
-            "Cannot instantiate" <+> pquote (pprName vn) <+> "with type"
+            "Cannot instantiate"
+              <+> pquote (pprName vn)
+              <+> "with type"
               </> indent 2 (ppr tp)
-              </> "as" <+> pquote (pprName vn) <+> "must be a record with fields"
+              </> "as"
+              <+> pquote (pprName vn)
+              <+> "must be a record with fields"
               </> indent 2 (ppr (Record required_fields))
-              </> "due to" <+> ppr old_usage <> "."
+              </> "due to"
+              <+> ppr old_usage <> "."
     -- See Note [Linking variables to sum types]
     Just (HasConstrs required_cs old_usage) ->
       case tp of
@@ -801,7 +822,8 @@ linkVarToDim usage bcs vn lvl dim = do
             ParamSize {} -> do
               notes <- dimNotes usage dim
               unifyError usage notes bcs $
-                "Cannot unify size variable" <+> pquote (ppr dim')
+                "Cannot unify size variable"
+                  <+> pquote (ppr dim')
                   <+> "with"
                   <+> pquote (pprName vn)
                   <+> "(scope violation)."
@@ -829,7 +851,8 @@ mustBeOneOf ts usage t = do
   where
     failure =
       unifyError usage mempty noBreadCrumbs $
-        text "Cannot unify type" <+> pquote (ppr t)
+        text "Cannot unify type"
+          <+> pquote (ppr t)
           <+> "with any of " <> commasep (map ppr ts) <> "."
 
 linkVarToTypes :: MonadUnify m => Usage -> VName -> [PrimType] -> m ()
@@ -849,14 +872,18 @@ linkVarToTypes usage vn ts = do
         ts' -> modifyConstraints $ M.insert vn (lvl, Overloaded ts' usage)
     Just (_, HasConstrs _ vn_usage) ->
       unifyError usage mempty noBreadCrumbs $
-        "Type constrained to one of" <+> commasep (map ppr ts)
-          <> ", but also inferred to be sum type due to" <+> ppr vn_usage
-          <> "."
+        "Type constrained to one of"
+          <+> commasep (map ppr ts)
+            <> ", but also inferred to be sum type due to"
+          <+> ppr vn_usage
+            <> "."
     Just (_, HasFields _ vn_usage) ->
       unifyError usage mempty noBreadCrumbs $
-        "Type constrained to one of" <+> commasep (map ppr ts)
-          <> ", but also inferred to be record due to" <+> ppr vn_usage
-          <> "."
+        "Type constrained to one of"
+          <+> commasep (map ppr ts)
+            <> ", but also inferred to be record due to"
+          <+> ppr vn_usage
+            <> "."
     Just (lvl, _) -> modifyConstraints $ M.insert vn (lvl, Overloaded ts usage)
     Nothing ->
       unifyError usage mempty noBreadCrumbs $
@@ -882,8 +909,12 @@ equalityType usage t = do
         Just (_, Constraint (RetType _ vn_t) cusage)
           | not $ orderZero vn_t ->
               unifyError usage mempty noBreadCrumbs $
-                "Type" <+> pquote (ppr t) <+> "does not support equality."
-                  </> "Constrained to be higher-order due to" <+> ppr cusage <+> "."
+                "Type"
+                  <+> pquote (ppr t)
+                  <+> "does not support equality."
+                  </> "Constrained to be higher-order due to"
+                  <+> ppr cusage
+                  <+> "."
           | otherwise -> pure ()
         Just (lvl, NoConstraint _ _) ->
           modifyConstraints $ M.insert vn (lvl, Equality usage)
@@ -1066,7 +1097,9 @@ mustHaveFieldWith onDims usage bound bcs l t = do
           pure t'
       | otherwise ->
           unifyError usage mempty bcs $
-            "Attempt to access field" <+> pquote (ppr l) <+> " of value of type"
+            "Attempt to access field"
+              <+> pquote (ppr l)
+              <+> " of value of type"
               <+> ppr (toStructural t) <> "."
     _ -> do
       unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type
