@@ -23,7 +23,7 @@ import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
-import qualified Futhark.Optimise.Fusion.LoopKernel as LK
+import qualified Futhark.Optimise.Fusion.TryFusion as TF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -286,10 +286,10 @@ vFuseNodeT
   (SoacNode ots1 pats1 soac1 aux1, i1s, _e1s)
   (SoacNode ots2 pats2 soac2 aux2, _e2s) = do
     let ker =
-          LK.FusedSOAC
-            { LK.fsoac = soac2,
-              LK.outputTransform = ots2,
-              LK.outNames = patNames pats2
+          TF.FusedSOAC
+            { TF.fsSOAC = soac2,
+              TF.fsOutputTransform = ots2,
+              TF.fsOutNames = patNames pats2
             }
         preserveEdge InfDep {} = True
         preserveEdge e = isDep e
@@ -297,7 +297,7 @@ vFuseNodeT
     ok <- okToFuseProducer soac1
     r <-
       if ok && ots1 == mempty
-        then LK.attemptFusion preserve (patNames pats1) soac1 ker
+        then TF.attemptFusion preserve (patNames pats1) soac1 ker
         else pure Nothing
     case r of
       Just ker' -> do
@@ -312,18 +312,18 @@ vFuseNodeT
                 "and",
                 pretty soac2,
                 "got",
-                pretty (LK.fsoac <$> r),
+                pretty (TF.fsSOAC <$> r),
                 "outputs",
-                pretty (LK.outNames <$> r)
+                pretty (TF.fsOutNames <$> r)
               ]
 
         let pats2' =
-              zipWith PatElem (LK.outNames ker') (H.typeOf (LK.fsoac ker'))
+              zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
         fusedSomething $
           SoacNode
-            (LK.outputTransform ker')
+            (TF.fsOutputTransform ker')
             (Pat pats2')
-            (LK.fsoac ker')
+            (TF.fsSOAC ker')
             (aux1 <> aux2)
       Nothing -> pure Nothing
 vFuseNodeT _ _ _ _ = pure Nothing
@@ -365,13 +365,13 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
           H.Screma {}
           ) -> do
             let ker =
-                  LK.FusedSOAC
-                    { LK.fsoac = soac2,
-                      LK.outputTransform = mempty,
-                      LK.outNames = patNames pats2
+                  TF.FusedSOAC
+                    { TF.fsSOAC = soac2,
+                      TF.fsOutputTransform = mempty,
+                      TF.fsOutNames = patNames pats2
                     }
                 preserve = namesFromList $ patNames pats1
-            r <- LK.attemptFusion preserve (patNames pats1) soac1 ker
+            r <- TF.attemptFusion preserve (patNames pats1) soac1 ker
             when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
               traceM $
                 unlines
@@ -383,15 +383,15 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
                     "and",
                     pretty soac2,
                     "got",
-                    pretty (LK.fsoac <$> r),
+                    pretty (TF.fsSOAC <$> r),
                     "outputs",
-                    pretty (LK.outNames <$> r)
+                    pretty (TF.fsOutNames <$> r)
                   ]
             case r of
               Just ker' -> do
                 let pats2' =
-                      zipWith PatElem (LK.outNames ker') (H.typeOf (LK.fsoac ker'))
-                pure $ Just $ SoacNode mempty (Pat pats2') (LK.fsoac ker') (aux1 <> aux2)
+                      zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
+                pure $ Just $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2)
               Nothing -> pure Nothing
         ( H.Scatter w1 lam_1 i1 outputs1,
           H.Scatter w2 lam_2 i2 outputs2

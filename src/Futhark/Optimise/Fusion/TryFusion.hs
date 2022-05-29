@@ -2,7 +2,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Optimise.Fusion.LoopKernel
+-- | Facilities for fusing two SOACs.
+--
+-- When the fusion algorithm decides that it's worth fusing two SOAC
+-- statements, this is the module that tries to see if that's
+-- possible.  May involve massaging either producer or consumer in
+-- various ways.
+module Futhark.Optimise.Fusion.TryFusion
   ( FusedSOAC (..),
     attemptFusion,
   )
@@ -69,19 +75,23 @@ inputToOutput (SOAC.Input ts ia iat) =
     t SOAC.:< ts' -> Just (t, SOAC.Input ts' ia iat)
     SOAC.EmptyF -> Nothing
 
+-- | A fused SOAC contains a bit of extra information.
 data FusedSOAC = FusedSOAC
-  { -- | the SOAC expression, e.g., mapT( f(a,b), x, y )
-    fsoac :: SOAC,
-    outputTransform :: SOAC.ArrayTransforms,
-    outNames :: [VName]
+  { -- | The actual SOAC.
+    fsSOAC :: SOAC,
+    -- | A transformation to be applied to *all* results of the SOAC.
+    fsOutputTransform :: SOAC.ArrayTransforms,
+    -- | The outputs of the SOAC (i.e. the names in the pattern that
+    -- the result of this SOAC should be bound to).
+    fsOutNames :: [VName]
   }
   deriving (Show)
 
 inputs :: FusedSOAC -> [SOAC.Input]
-inputs = SOAC.inputs . fsoac
+inputs = SOAC.inputs . fsSOAC
 
 setInputs :: [SOAC.Input] -> FusedSOAC -> FusedSOAC
-setInputs inps ker = ker {fsoac = inps `SOAC.setInputs` fsoac ker}
+setInputs inps ker = ker {fsSOAC = inps `SOAC.setInputs` fsSOAC ker}
 
 tryOptimizeSOAC ::
   Names ->
@@ -133,7 +143,7 @@ tryExposeInputs unfus_nms outVars soac ker = do
 
 fixInputTypes :: [Ident] -> FusedSOAC -> FusedSOAC
 fixInputTypes outIdents ker =
-  ker {fsoac = fixInputTypes' $ fsoac ker}
+  ker {fsSOAC = fixInputTypes' $ fsSOAC ker}
   where
     fixInputTypes' soac =
       map fixInputType (SOAC.inputs soac) `SOAC.setInputs` soac
@@ -154,9 +164,13 @@ applyFusionRules unfus_nms outVars soac ker =
     <|> fuseSOACwithKer unfus_nms outVars soac ker
     <|> tryExposeInputs unfus_nms outVars soac ker
 
+-- | Attempt fusing the producer into the consumer.
 attemptFusion ::
   (HasScope SOACS m, MonadFreshNames m) =>
+  -- | Outputs of the producer that should still be output by the
+  -- fusion result (corresponding to "diagonal fusion").
   Names ->
+  -- | The outputs of the SOAC.
   [VName] ->
   SOAC ->
   FusedSOAC ->
@@ -186,7 +200,7 @@ fuseSOACwithKer ::
 fuseSOACwithKer unfus_set outVars soac_p ker = do
   -- We are fusing soac_p into soac_c, i.e, the output of soac_p is going
   -- into soac_c.
-  let soac_c = fsoac ker
+  let soac_c = fsSOAC ker
       inp_p_arr = SOAC.inputs soac_p
       horizFuse = unfus_set /= mempty
       inp_c_arr = SOAC.inputs soac_c
@@ -200,8 +214,8 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
         uniq_lam <- renameLambda $ SOAC.lambda res_soac
         pure $
           ker
-            { fsoac = uniq_lam `SOAC.setLambda` res_soac,
-              outNames = res_outnms
+            { fsSOAC = uniq_lam `SOAC.setLambda` res_soac,
+              fsOutNames = res_outnms
             }
 
   -- Can only fuse SOACs with same width.
@@ -230,7 +244,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
             res_lam' = res_lam {lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps}
          in (extra_nms, res_lam', new_inp)
 
-  when (horizFuse && not (SOAC.nullTransforms $ outputTransform ker)) $
+  when (horizFuse && not (SOAC.nullTransforms $ fsOutputTransform ker)) $
     fail "Horizontal fusion is invalid in the presence of output transforms."
 
   case (soac_c, soac_p) of
@@ -259,7 +273,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
                 (soac_p_scanout, soac_p_redout, _soac_p_mapout) =
                   splitAt3 (length scan_nes_p) (length red_nes_p) outVars
                 (soac_c_scanout, soac_c_redout, soac_c_mapout) =
-                  splitAt3 (length scan_nes_c) (length red_nes_c) $ outNames ker
+                  splitAt3 (length scan_nes_c) (length red_nes_c) $ fsOutNames ker
                 unfus_arrs = returned_outvars \\ (soac_p_scanout ++ soac_p_redout)
             success
               ( soac_p_scanout
@@ -293,7 +307,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
           -- 2. all arrays produced by the map are input to the scatter.
           mapWriteFusionOK outVars ker -> do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-            success (outNames ker ++ extra_nms) $
+            success (fsOutNames ker ++ extra_nms) $
               SOAC.Scatter w res_lam' new_inp dests
 
     -- Map-Hist fusion.
@@ -311,7 +325,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
           -- 2. all arrays produced by the map are input to the scatter.
           mapWriteFusionOK outVars ker -> do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-            success (outNames ker ++ extra_nms) $
+            success (fsOutNames ker ++ extra_nms) $
               SOAC.Hist w ops res_lam' new_inp
 
     -- Hist-Hist fusion
@@ -341,7 +355,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
                           ++ drop c_num_buckets (lambdaReturnType lam_c)
                           ++ drop p_num_buckets (lambdaReturnType lam_p)
                     }
-            success (outNames ker ++ returned_outvars) $
+            success (fsOutNames ker ++ returned_outvars) $
               SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
 
     -- Scatter-write fusion.
@@ -366,7 +380,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
                       lambdaBody = body',
                       lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
                     }
-            success (outNames ker ++ returned_outvars) $
+            success (fsOutNames ker ++ returned_outvars) $
               SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
     (SOAC.Scatter {}, _) ->
       fail "Cannot fuse a write with anything else than a write or a map"
@@ -377,11 +391,11 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
     ----------------------------
     (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ _ _) -> do
       -- fuse two SEQUENTIAL streams
-      (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
+      (res_nms, res_stream) <- fuseStreamHelper (fsOutNames ker) unfus_set outVars outPairs soac_c soac_p
       success res_nms res_stream
     (SOAC.Stream {}, SOAC.Stream {}) -> do
       -- fuse two PARALLEL streams
-      (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac_c soac_p
+      (res_nms, res_stream) <- fuseStreamHelper (fsOutNames ker) unfus_set outVars outPairs soac_c soac_p
       success res_nms res_stream
     -------------------------------------------------------------------
     --- If one is a stream, translate the other to a stream as well.---
@@ -438,7 +452,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
         (namesFromList (map identName newacc_ids) <> unfus_set)
         outVars
         soac_p
-        $ ker {fsoac = soac_c'', outNames = map identName newacc_ids ++ outNames ker}
+        $ ker {fsSOAC = soac_c'', fsOutNames = map identName newacc_ids ++ fsOutNames ker}
 
     ---------------------------------
     --- DEFAULT, CANNOT FUSE CASE ---
@@ -517,14 +531,8 @@ toSeqStream _ = Nothing
 
 optimizeKernel :: Maybe [VName] -> FusedSOAC -> TryFusion FusedSOAC
 optimizeKernel inp ker = do
-  (soac, resTrans) <- optimizeSOAC inp (fsoac ker) startTrans
-  pure $
-    ker
-      { fsoac = soac,
-        outputTransform = resTrans
-      }
-  where
-    startTrans = outputTransform ker
+  (soac, resTrans) <- optimizeSOAC inp (fsSOAC ker) (fsOutputTransform ker)
+  pure $ ker {fsSOAC = soac, fsOutputTransform = resTrans}
 
 optimizeSOAC ::
   Maybe [VName] ->
@@ -798,31 +806,31 @@ exposeInputs inpIds ker =
     <|> (exposeInputs' =<< pullRearrange')
     <|> exposeInputs' ker
   where
-    ot = outputTransform ker
+    ot = fsOutputTransform ker
 
     pushRearrange' = do
-      (soac', ot') <- pushRearrange inpIds (fsoac ker) ot
+      (soac', ot') <- pushRearrange inpIds (fsSOAC ker) ot
       pure
         ker
-          { fsoac = soac',
-            outputTransform = ot'
+          { fsSOAC = soac',
+            fsOutputTransform = ot'
           }
 
     pullRearrange' = do
-      (soac', ot') <- pullRearrange (fsoac ker) ot
+      (soac', ot') <- pullRearrange (fsSOAC ker) ot
       unless (SOAC.nullTransforms ot') $
         fail "pullRearrange was not enough"
       pure
         ker
-          { fsoac = soac',
-            outputTransform = SOAC.noTransforms
+          { fsSOAC = soac',
+            fsOutputTransform = SOAC.noTransforms
           }
 
     exposeInputs' ker' =
       case commonTransforms inpIds $ inputs ker' of
         (ot', inps')
           | all exposed inps' ->
-              pure (ker' {fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
+              pure (ker' {fsSOAC = inps' `SOAC.setInputs` fsSOAC ker'}, ot')
         _ -> fail "Cannot expose"
 
     exposed (SOAC.Input ts _ _)
