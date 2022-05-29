@@ -576,19 +576,8 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   where
     doFusionWithDelayed :: Body SOACS -> Names -> [(NodeT, [EdgeT])] -> FusionM (Body SOACS)
     doFusionWithDelayed b extraInputs extraNodes = localScope (scopeOf stms) $ do
-      let g = emptyGraph stms results inputs
-      -- highly temporary and non-thought-out
       stm_node <- mapM (finalizeNode . fst) extraNodes
-      g' <-
-        applyAugs
-          [ handleNodes extraNodes,
-            makeMapping,
-            makeAliasTable (mconcat stm_node <> stms),
-            initialGraphConstruction,
-            doAllFusion
-          ]
-          g
-      new_stms <- linearizeGraph g'
+      new_stms <- fuseGraph (mconcat stm_node <> stms) results inputs
       pure b {bodyStms = new_stms}
       where
         inputs = namesFromList (map (vNameFromAdj node) outgoing) <> extraInputs
@@ -604,21 +593,6 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
         inputs = namesFromList $ other_inputs ++ lambda_inputs
         stms = bodyStms b
         results = freeIn (bodyResult b)
-
--- inserting for delayed fusion
-handleNodes :: [(NodeT, [EdgeT])] -> DepGraphAug FusionM
-handleNodes ns dg@DepGraph {dgGraph = g} = do
-  let nodes = G.newNodes (length ns) g
-      (nodeTs, edgs) = unzip ns
-      depNodes = zip nodes nodeTs
-      dg' = dg {dgGraph = G.insNodes depNodes g}
-  applyAugs (zipWith (curry addEdgesToGraph) depNodes edgs) =<< makeMapping dg'
-
-addEdgesToGraph :: (DepNode, [EdgeT]) -> DepGraphAug FusionM
-addEdgesToGraph (n, edgs) = genEdges [n] (const edgs')
-  where
-    f e = (getName e, e)
-    edgs' = map f edgs
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
