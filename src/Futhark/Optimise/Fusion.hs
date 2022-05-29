@@ -114,9 +114,6 @@ unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> Bool
 unreachableEitherDir g a b =
   not (reachable g a b || reachable g b a)
 
-reachable :: DepGraph -> G.Node -> G.Node -> Bool
-reachable dg source target = target `elem` Q.reachable source (dgGraph dg)
-
 isNotVarInput :: [H.Input] -> [H.Input]
 isNotVarInput = filter (isNothing . H.isVarInput)
 

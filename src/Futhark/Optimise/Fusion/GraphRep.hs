@@ -18,6 +18,7 @@ module Futhark.Optimise.Fusion.GraphRep
     mapAcross,
     genEdges,
     edgesBetween,
+    reachable,
     isDep,
     isInf,
     applyAugs,
@@ -35,6 +36,7 @@ import Data.Bifunctor (bimap)
 import Data.Foldable (foldlM)
 import qualified Data.Graph.Inductive.Dot as G
 import qualified Data.Graph.Inductive.Graph as G
+import qualified Data.Graph.Inductive.Query.DFS as Q
 import qualified Data.Graph.Inductive.Tree as G
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
@@ -305,6 +307,10 @@ depsFromEdge = getName . G.edgeLabel
 
 edgesBetween :: DepGraph -> G.Node -> G.Node -> [DepEdge]
 edgesBetween dg n1 n2 = G.labEdges $ G.subgraph [n1, n2] $ dgGraph dg
+
+-- | @reachable dg from to@ is true if @to@ is reachable from @from@.
+reachable :: DepGraph -> G.Node -> G.Node -> Bool
+reachable dg source target = target `elem` Q.reachable source (dgGraph dg)
 
 -- Utility func for augs
 augWithFun :: Monad m => EdgeGenerator -> DepGraphAug m
