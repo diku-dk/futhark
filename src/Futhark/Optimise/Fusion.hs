@@ -117,7 +117,7 @@ fusedSomething x = do
   pure $ Just x
 
 -- Fixed-point
-keepTrying :: DepGraphAug -> DepGraphAug
+keepTrying :: DepGraphAug FusionEnvM -> DepGraphAug FusionEnvM
 keepTrying f g = do
   prev_fused <- gets fusedAnything
   modify $ \s -> s {fusedAnything = False}
@@ -126,7 +126,7 @@ keepTrying f g = do
   (if fused then keepTrying f g' else pure g')
     <* modify (\s -> s {fusedAnything = prev_fused || fused})
 
-doAllFusion :: DepGraphAug
+doAllFusion :: DepGraphAug FusionEnvM
 doAllFusion =
   applyAugs
     [ keepTrying . applyAugs $
@@ -137,16 +137,16 @@ doAllFusion =
       removeUnusedOutputs
     ]
 
-doVerticalFusion :: DepGraphAug
+doVerticalFusion :: DepGraphAug FusionEnvM
 doVerticalFusion g = applyAugs (map tryFuseNodeInGraph $ reverse $ G.labNodes g) g
 
-doHorizontalFusion :: DepGraphAug
+doHorizontalFusion :: DepGraphAug FusionEnvM
 doHorizontalFusion g = applyAugs (map horizontalFusionOnNode (G.nodes g)) g
 
 -- | For each node, find what came before, attempt to fuse them
 -- horizontally.  This means we only perform horizontal fusion for
 -- SOACs that use the same input in some way.
-horizontalFusionOnNode :: G.Node -> DepGraphAug
+horizontalFusionOnNode :: G.Node -> DepGraphAug FusionEnvM
 horizontalFusionOnNode node g =
   applyAugs (map (uncurry hTryFuseNodesInGraph) pairs) g
   where
@@ -162,7 +162,7 @@ vFusionFeasability g n1 n2 = do
 hFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
 hFusionFeasability = unreachableEitherDir
 
-tryFuseNodeInGraph :: DepNode -> DepGraphAug
+tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionEnvM
 tryFuseNodeInGraph node_to_fuse g =
   if G.gelem node_to_fuse_id g
     then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) g
@@ -171,7 +171,7 @@ tryFuseNodeInGraph node_to_fuse g =
     fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
     node_to_fuse_id = nodeFromLNode node_to_fuse
 
-vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug
+vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionEnvM
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
 vTryFuseNodesInGraph node_1 node_2 g
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure g
@@ -203,7 +203,7 @@ vTryFuseNodesInGraph node_1 node_2 g
         depsFromEdge
         (concatMap (edgesBetween g node_1) (filter (/= node_2) $ G.pre g node_1))
 
-hTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug
+hTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionEnvM
 hTryFuseNodesInGraph node_1 node_2 g
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure g
   | otherwise = do
@@ -487,7 +487,7 @@ fuseLambda lam_1 lam_2 =
     l_body_2 = lambdaBody lam_2
     l_body_new = insertStms (bodyStms l_body_1) l_body_2
 
-removeUnusedOutputs :: DepGraphAug
+removeUnusedOutputs :: DepGraphAug FusionEnvM
 removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 
 vNameFromAdj :: G.Node -> (EdgeT, G.Node) -> VName
@@ -520,7 +520,7 @@ removeOutputsExcept toKeep s = case s of
           }
   node -> node
 
-runInnerFusion :: DepGraphAug -- do fusion on the inner lambdas
+runInnerFusion :: DepGraphAug FusionEnvM -- do fusion on the inner lambdas
 runInnerFusion = mapAcross runInnerFusionOnContext
 
 runInnerFusionOnContext :: DepContext -> FusionEnvM DepContext
@@ -582,7 +582,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
         results = freeIn (bodyResult b)
 
 -- inserting for delayed fusion
-handleNodes :: [(NodeT, [EdgeT])] -> DepGraphAug
+handleNodes :: [(NodeT, [EdgeT])] -> DepGraphAug FusionEnvM
 handleNodes ns g = do
   let nodes = G.newNodes (length ns) g
   let (nodeTs, edgs) = unzip ns
@@ -591,7 +591,7 @@ handleNodes ns g = do
   _ <- makeMapping g'
   applyAugs (zipWith (curry addEdgesToGraph) depNodes edgs) g'
 
-addEdgesToGraph :: (DepNode, [EdgeT]) -> DepGraphAug
+addEdgesToGraph :: (DepNode, [EdgeT]) -> DepGraphAug FusionEnvM
 addEdgesToGraph (n, edgs) = genEdges [n] (const edgs')
   where
     f e = (getName e, e)

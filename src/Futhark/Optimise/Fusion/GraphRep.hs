@@ -4,12 +4,9 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.Fusion.GraphRep
-  ( EdgeT (..),
+  ( -- * Graph representation
+    EdgeT (..),
     NodeT (..),
-    FusionEnvM,
-    runFusionEnvM,
-    FusionEnv (..),
-    freshFusionEnv,
     DepContext,
     DepGraphAug,
     DepGraph,
@@ -33,6 +30,12 @@ module Futhark.Optimise.Fusion.GraphRep
     depsFromEdge,
     contractEdge,
     isCons,
+
+    -- * Monadic fusion environment
+    FusionEnvM,
+    runFusionEnvM,
+    FusionEnv (..),
+    freshFusionEnv,
   )
 where
 
@@ -164,7 +167,8 @@ type DepContext = G.Context NodeT EdgeT
 -- the dependencies of that node.
 type DepGraph = G.Gr NodeT EdgeT
 
-type DepGraphAug = DepGraph -> FusionEnvM DepGraph
+-- | A "graph augmentation" is a monadic action that modifies the graph.
+type DepGraphAug m = DepGraph -> m DepGraph
 
 -- | 'DepGenerator's can be used to make 'EdgeGenerators'.
 type DepGenerator = Stm SOACS -> Names
@@ -227,7 +231,7 @@ emptyGraph stms res inputs = G.mkGraph (labelNodes (stmnodes <> resnodes <> inpu
 
 -- | Construct a mapping from output names to the node that produces
 -- it and add it to the 'producerMapping' of the monad.
-makeMapping :: DepGraphAug
+makeMapping :: DepGraphAug FusionEnvM
 makeMapping g = do
   let mapping = M.fromList $ concatMap gen_dep_list (G.labNodes g)
   modify (\s -> s {producerMapping = mapping})
@@ -237,7 +241,7 @@ makeMapping g = do
     gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
 
 -- make a table to handle transitive aliases
-makeAliasTable :: Stms SOACS -> DepGraphAug
+makeAliasTable :: Stms SOACS -> DepGraphAug FusionEnvM
 makeAliasTable stms g = do
   let (_, (aliasTable', _)) = Alias.analyseStms mempty stms
   modify (\s -> s {aliasTable = aliasTable'})
@@ -253,11 +257,12 @@ mkDepGraph stms res inputs = do
     ]
     g
 
-applyAugs :: [DepGraphAug] -> DepGraphAug
+-- | Apply several graph augmentations in sequence.
+applyAugs :: Monad m => [DepGraphAug m] -> DepGraphAug m
 applyAugs augs g = foldlM (flip ($)) g augs
 
 -- | Add edges for straightforward dependencies to the graph.
-addDeps :: DepGraphAug
+addDeps :: DepGraphAug FusionEnvM
 addDeps = augWithFun toDep
   where
     toDep stmt =
@@ -270,7 +275,7 @@ addDeps = augWithFun toDep
           mkInfDep vname = (vname, InfDep vname)
        in map mkDep fusible <> map mkInfDep infusible
 
-initialGraphConstruction :: DepGraphAug
+initialGraphConstruction :: DepGraphAug FusionEnvM
 initialGraphConstruction =
   applyAugs
     [ addDeps,
@@ -282,31 +287,30 @@ initialGraphConstruction =
     ]
 
 -- | Creates deps for the given nodes on the graph using the 'EdgeGenerator'.
-genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug
+genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug FusionEnvM
 genEdges l_stms edge_fun g = do
   name_map <- gets producerMapping
-  depGraphInsertEdges (concatMap (gen_edge name_map) l_stms) g
+  depGraphInsertEdges (concatMap (genEdge name_map) l_stms) g
   where
     -- statements -> mapping from declared array names to soac index
-    gen_edge :: M.Map VName G.Node -> DepNode -> [G.LEdge EdgeT]
-    gen_edge name_map (from, node) =
+    genEdge :: M.Map VName G.Node -> DepNode -> [G.LEdge EdgeT]
+    genEdge name_map (from, node) =
       [ G.toLEdge (from, to) edgeT | (dep, edgeT) <- edge_fun node, Just to <- [M.lookup dep name_map]
       ]
 
-depGraphInsertEdges :: [DepEdge] -> DepGraphAug
+depGraphInsertEdges :: Monad m => [DepEdge] -> DepGraphAug m
 depGraphInsertEdges edgs g = pure $ G.insEdges edgs g
 
-mapAcross :: (DepContext -> FusionEnvM DepContext) -> DepGraphAug
+mapAcross :: Monad m => (DepContext -> m DepContext) -> DepGraphAug m
 mapAcross f g = foldlM (flip helper) g (G.nodes g)
   where
-    helper :: G.Node -> DepGraphAug
     helper n g' = case G.match n g' of
       (Just c, g_new) -> do
         c' <- f c
         pure $ c' G.& g_new
       (Nothing, _) -> pure g'
 
-mapAcrossNodeTs :: (NodeT -> FusionEnvM NodeT) -> DepGraphAug
+mapAcrossNodeTs :: Monad m => (NodeT -> m NodeT) -> DepGraphAug m
 mapAcrossNodeTs f = mapAcross f'
   where
     f' (ins, n, nodeT, outs) = do
@@ -327,7 +331,7 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
   _ -> pure n
 nodeToSoacNode n = pure n
 
-convertGraph :: DepGraphAug
+convertGraph :: DepGraphAug FusionEnvM
 convertGraph = mapAcrossNodeTs nodeToSoacNode
 
 stmFromNode :: NodeT -> Stms SOACS -- do not use outside of edge generation
@@ -344,17 +348,17 @@ edgesBetween :: DepGraph -> G.Node -> G.Node -> [DepEdge]
 edgesBetween g n1 n2 = G.labEdges $ G.subgraph [n1, n2] g
 
 -- Utility func for augs
-augWithFun :: EdgeGenerator -> DepGraphAug
+augWithFun :: EdgeGenerator -> DepGraphAug FusionEnvM
 augWithFun f g = genEdges (G.labNodes g) f g
 
 toAlias :: DepGenerator -> EdgeGenerator
 toAlias f =
   map (\vname -> (vname, Alias vname)) . namesToList . foldMap f . stmFromNode
 
-addAliases :: DepGraphAug
+addAliases :: DepGraphAug FusionEnvM
 addAliases = augWithFun $ toAlias aliasInputs
 
-addCons :: DepGraphAug
+addCons :: DepGraphAug FusionEnvM
 addCons = augWithFun getStmCons
 
 -- Merges two contexts
@@ -364,7 +368,7 @@ mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
       new_out = filter (\n -> snd n /= n1 && snd n /= n2) (nubOrd (out1 <> out2))
    in (new_inp, n1, mergedlabel, new_out)
 
-contractEdge :: G.Node -> DepContext -> DepGraphAug
+contractEdge :: Monad m => G.Node -> DepContext -> DepGraphAug m
 contractEdge n2 ctx g = do
   let n1 = G.node' ctx -- n1 remains
   pure $ ctx G.& G.delNodes [n1, n2] g
@@ -372,7 +376,7 @@ contractEdge n2 ctx g = do
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it (now also adds fake edges to aliases - hope this
 -- fixes asymptotic complexity guarantees)
-addExtraCons :: DepGraphAug
+addExtraCons :: DepGraphAug FusionEnvM
 addExtraCons g = do
   aliasTab <- gets aliasTable
   mapping <- gets producerMapping
@@ -394,7 +398,7 @@ addExtraCons g = do
           ]
     make_edge _ _ _ = []
 
-addResEdges :: DepGraphAug
+addResEdges :: DepGraphAug FusionEnvM
 addResEdges = augWithFun getStmRes
 
 -- Utils for fusibility/infusibility
