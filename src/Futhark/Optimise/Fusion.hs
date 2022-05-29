@@ -285,11 +285,9 @@ vFuseNodeT
   _
   (SoacNode ots1 pats1 soac1 aux1, i1s, _e1s)
   (SoacNode ots2 pats2 soac2 aux2, _e2s) = do
-    scope <- askScope
     let ker =
           LK.FusedSOAC
             { LK.fsoac = soac2,
-              LK.kernelScope = scope,
               LK.outputTransform = ots2,
               LK.outNames = patNames pats2
             }
@@ -362,7 +360,6 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
     ots1 == mempty,
     ots2 == mempty,
     hasNoDifferingInputs inputs1 inputs2 = do
-      scope <- askScope
       case (soac1, soac2) of
         ( H.Screma {},
           H.Screma {}
@@ -370,7 +367,6 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
             let ker =
                   LK.FusedSOAC
                     { LK.fsoac = soac2,
-                      LK.kernelScope = scope,
                       LK.outputTransform = mempty,
                       LK.outNames = patNames pats2
                     }

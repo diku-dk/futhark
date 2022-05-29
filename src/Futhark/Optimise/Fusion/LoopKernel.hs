@@ -72,8 +72,6 @@ inputToOutput (SOAC.Input ts ia iat) =
 data FusedSOAC = FusedSOAC
   { -- | the SOAC expression, e.g., mapT( f(a,b), x, y )
     fsoac :: SOAC,
-    -- | The names in scope at the kernel.
-    kernelScope :: Scope SOACS,
     outputTransform :: SOAC.ArrayTransforms,
     outNames :: [VName]
   }
@@ -157,16 +155,15 @@ applyFusionRules unfus_nms outVars soac ker =
     <|> tryExposeInputs unfus_nms outVars soac ker
 
 attemptFusion ::
-  MonadFreshNames m =>
+  (HasScope SOACS m, MonadFreshNames m) =>
   Names ->
   [VName] ->
   SOAC ->
   FusedSOAC ->
   m (Maybe FusedSOAC)
-attemptFusion unfus_nms outVars soac ker =
-  tryFusion
-    (applyFusionRules unfus_nms outVars soac ker)
-    (kernelScope ker)
+attemptFusion unfus_nms outVars soac ker = do
+  scope <- askScope
+  tryFusion (applyFusionRules unfus_nms outVars soac ker) scope
 
 -- | Check that the consumer does not use any scan or reduce results.
 scremaFusionOK :: ([VName], [VName]) -> FusedSOAC -> Bool
