@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.Fusion.LoopKernel
-  ( FusedKer (..),
+  ( FusedSOAC (..),
     attemptFusion,
   )
 where
@@ -69,7 +69,7 @@ inputToOutput (SOAC.Input ts ia iat) =
     t SOAC.:< ts' -> Just (t, SOAC.Input ts' ia iat)
     SOAC.EmptyF -> Nothing
 
-data FusedKer = FusedKer
+data FusedSOAC = FusedSOAC
   { -- | the SOAC expression, e.g., mapT( f(a,b), x, y )
     fsoac :: SOAC,
     -- | The names in scope at the kernel.
@@ -79,18 +79,18 @@ data FusedKer = FusedKer
   }
   deriving (Show)
 
-inputs :: FusedKer -> [SOAC.Input]
+inputs :: FusedSOAC -> [SOAC.Input]
 inputs = SOAC.inputs . fsoac
 
-setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
+setInputs :: [SOAC.Input] -> FusedSOAC -> FusedSOAC
 setInputs inps ker = ker {fsoac = inps `SOAC.setInputs` fsoac ker}
 
 tryOptimizeSOAC ::
   Names ->
   [VName] ->
   SOAC ->
-  FusedKer ->
-  TryFusion FusedKer
+  FusedSOAC ->
+  TryFusion FusedSOAC
 tryOptimizeSOAC unfus_nms outVars soac ker = do
   (soac', ots) <- optimizeSOAC Nothing soac mempty
   let ker' = map (addInitialTransformIfRelevant ots) (inputs ker) `setInputs` ker
@@ -108,8 +108,8 @@ tryOptimizeKernel ::
   Names ->
   [VName] ->
   SOAC ->
-  FusedKer ->
-  TryFusion FusedKer
+  FusedSOAC ->
+  TryFusion FusedSOAC
 tryOptimizeKernel unfus_nms outVars soac ker = do
   ker' <- optimizeKernel (Just outVars) ker
   applyFusionRules unfus_nms outVars soac ker'
@@ -118,8 +118,8 @@ tryExposeInputs ::
   Names ->
   [VName] ->
   SOAC ->
-  FusedKer ->
-  TryFusion FusedKer
+  FusedSOAC ->
+  TryFusion FusedSOAC
 tryExposeInputs unfus_nms outVars soac ker = do
   (ker', ots) <- exposeInputs outVars ker
   if SOAC.nullTransforms ots
@@ -133,7 +133,7 @@ tryExposeInputs unfus_nms outVars soac ker = do
         then applyFusionRules unfus_nms outVars soac' ker''
         else fail "tryExposeInputs could not pull SOAC transforms"
 
-fixInputTypes :: [Ident] -> FusedKer -> FusedKer
+fixInputTypes :: [Ident] -> FusedSOAC -> FusedSOAC
 fixInputTypes outIdents ker =
   ker {fsoac = fixInputTypes' $ fsoac ker}
   where
@@ -148,8 +148,8 @@ applyFusionRules ::
   Names ->
   [VName] ->
   SOAC ->
-  FusedKer ->
-  TryFusion FusedKer
+  FusedSOAC ->
+  TryFusion FusedSOAC
 applyFusionRules unfus_nms outVars soac ker =
   tryOptimizeSOAC unfus_nms outVars soac ker
     <|> tryOptimizeKernel unfus_nms outVars soac ker
@@ -161,20 +161,20 @@ attemptFusion ::
   Names ->
   [VName] ->
   SOAC ->
-  FusedKer ->
-  m (Maybe FusedKer)
+  FusedSOAC ->
+  m (Maybe FusedSOAC)
 attemptFusion unfus_nms outVars soac ker =
   tryFusion
     (applyFusionRules unfus_nms outVars soac ker)
     (kernelScope ker)
 
 -- | Check that the consumer does not use any scan or reduce results.
-scremaFusionOK :: ([VName], [VName]) -> FusedKer -> Bool
+scremaFusionOK :: ([VName], [VName]) -> FusedSOAC -> Bool
 scremaFusionOK (nonmap_outs, _map_outs) ker =
   all (`notElem` nonmap_outs) $ mapMaybe SOAC.isVarishInput (inputs ker)
 
 -- | Check that the consumer uses all the outputs of the producer unmodified.
-mapWriteFusionOK :: [VName] -> FusedKer -> Bool
+mapWriteFusionOK :: [VName] -> FusedSOAC -> Bool
 mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
@@ -184,8 +184,8 @@ fuseSOACwithKer ::
   Names ->
   [VName] ->
   SOAC ->
-  FusedKer ->
-  TryFusion FusedKer
+  FusedSOAC ->
+  TryFusion FusedSOAC
 fuseSOACwithKer unfus_set outVars soac_p ker = do
   -- We are fusing soac_p into soac_c, i.e, the output of soac_p is going
   -- into soac_c.
@@ -518,7 +518,7 @@ toSeqStream _ = Nothing
 
 -- Here follows optimizations and transforms to expose fusability.
 
-optimizeKernel :: Maybe [VName] -> FusedKer -> TryFusion FusedKer
+optimizeKernel :: Maybe [VName] -> FusedSOAC -> TryFusion FusedSOAC
 optimizeKernel inp ker = do
   (soac, resTrans) <- optimizeSOAC inp (fsoac ker) startTrans
   pure $
@@ -794,8 +794,8 @@ pullReshape _ _ = fail "Cannot pull reshape"
 
 exposeInputs ::
   [VName] ->
-  FusedKer ->
-  TryFusion (FusedKer, SOAC.ArrayTransforms)
+  FusedSOAC ->
+  TryFusion (FusedSOAC, SOAC.ArrayTransforms)
 exposeInputs inpIds ker =
   (exposeInputs' =<< pushRearrange')
     <|> (exposeInputs' =<< pullRearrange')

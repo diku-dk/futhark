@@ -287,7 +287,7 @@ vFuseNodeT
   (SoacNode ots2 pats2 soac2 aux2, _e2s) = do
     scope <- askScope
     let ker =
-          LK.FusedKer
+          LK.FusedSOAC
             { LK.fsoac = soac2,
               LK.kernelScope = scope,
               LK.outputTransform = ots2,
@@ -368,7 +368,7 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
           H.Screma {}
           ) -> do
             let ker =
-                  LK.FusedKer
+                  LK.FusedSOAC
                     { LK.fsoac = soac2,
                       LK.kernelScope = scope,
                       LK.outputTransform = mempty,
