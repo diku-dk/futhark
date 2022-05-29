@@ -1,5 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 
+-- | A graph representation of a sequence of Futhark statements
+-- (i.e. a 'Body'), built to handle fusion.  Could perhaps be made
+-- more general.  An important property is that it does not handle
+-- "nested bodies" (e.g. 'If'); these are represented as single nodes.
 module Futhark.Optimise.Fusion.GraphRep
   ( EdgeT (..),
     NodeT (..),
@@ -7,7 +11,6 @@ module Futhark.Optimise.Fusion.GraphRep
     DepGraphAug,
     DepGraph (..),
     mkDepGraph,
-    ProducerMapping,
     DepNode,
     pprg,
     getName,
@@ -43,6 +46,7 @@ import qualified Futhark.IR.SOACS as Futhark
 import Futhark.Transform.Substitute
 import Futhark.Util (nubOrd)
 
+-- | Information associated with an edge in the graph.
 data EdgeT
   = Alias VName
   | InfDep VName
@@ -52,6 +56,7 @@ data EdgeT
   | Res VName
   deriving (Eq, Ord)
 
+-- | Information associated with a node in the graph.
 data NodeT
   = StmNode (Stm SOACS)
   | SoacNode H.ArrayTransforms (Pat Type) (H.SOAC SOACS) (StmAux (ExpDec SOACS))
@@ -160,7 +165,7 @@ data DepGraph = DepGraph
 -- | A "graph augmentation" is a monadic action that modifies the graph.
 type DepGraphAug m = DepGraph -> m DepGraph
 
--- | 'DepGenerator's can be used to make 'EdgeGenerators'.
+-- 'DepGenerator's can be used to make 'EdgeGenerators'.
 type DepGenerator = Stm SOACS -> Names
 
 -- | For each node, what producer should the node depend on and what
@@ -185,8 +190,6 @@ emptyGraph stms res inputs =
     resnodes = map RNode $ namesToList res
     inputnodes = map InNode $ namesToList inputs
 
--- | Construct a mapping from output names to the node that produces
--- it and add it to the 'producerMapping' of the monad.
 makeMapping :: Monad m => DepGraphAug m
 makeMapping dg@(DepGraph {dgGraph = g}) =
   pure dg {dgProducerMapping = M.fromList $ concatMap gen_dep_list (G.labNodes g)}
@@ -320,7 +323,7 @@ addAliases = augWithFun $ toAlias aliasInputs
 addCons :: Monad m => DepGraphAug m
 addCons = augWithFun getStmCons
 
--- Merges two contexts
+-- | Merges two contexts.
 mergedContext :: Ord b => a -> G.Context a b -> G.Context a b -> G.Context a b
 mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
   let new_inp = filter (\n -> snd n /= n1 && snd n /= n2) (nubOrd (inp1 <> inp2))
@@ -444,6 +447,7 @@ isInf (_, _, e) = case e of
   Fake _ -> True -- this is infusible to avoid simultaneous cons/dep edges
   _ -> False
 
+-- | Is this a 'Cons' edge?
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
