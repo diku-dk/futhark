@@ -1,8 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Futhark.Optimise.Fusion.GraphRep
-  ( -- * Graph representation
-    EdgeT (..),
+  ( EdgeT (..),
     NodeT (..),
     DepContext,
     DepGraphAug,
@@ -16,16 +15,11 @@ module Futhark.Optimise.Fusion.GraphRep
     nodeFromLNode,
     mergedContext,
     mapAcross,
-    genEdges,
     edgesBetween,
     reachable,
     isDep,
     isInf,
     applyAugs,
-    makeMapping,
-    makeAliasTable,
-    initialGraphConstruction,
-    emptyGraph,
     depsFromEdge,
     contractEdge,
     isCons,
