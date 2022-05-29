@@ -9,8 +9,9 @@ module Futhark.Optimise.Fusion.GraphRep
     NodeT (..),
     DepContext,
     DepGraphAug,
-    DepGraph,
+    DepGraph (..),
     mkDepGraph,
+    ProducerMapping,
     DepNode,
     pprg,
     getName,
@@ -153,7 +154,7 @@ isRealNode InNode {} = False
 isRealNode _ = True
 
 pprg :: DepGraph -> String
-pprg = G.showDot . G.fglToDotString . G.nemap show show
+pprg = G.showDot . G.fglToDotString . G.nemap show show . dgGraph
 
 type DepNode = G.LNode NodeT
 
@@ -165,7 +166,12 @@ type DepContext = G.Context NodeT EdgeT
 -- (i.e. from usage to definition).  That means the incoming edges of
 -- a node are the dependents of that node, and the outgoing edges are
 -- the dependencies of that node.
-type DepGraph = G.Gr NodeT EdgeT
+data DepGraph = DepGraph
+  { dgGraph :: G.Gr NodeT EdgeT,
+    dgProducerMapping :: ProducerMapping,
+    -- | A table mapping VNames to VNames that are aliased to it.
+    dgAliasTable :: AliasTable
+  }
 
 -- | A "graph augmentation" is a monadic action that modifies the graph.
 type DepGraphAug m = DepGraph -> m DepGraph
@@ -177,52 +183,18 @@ type DepGenerator = Stm SOACS -> Names
 -- type is it.
 type EdgeGenerator = NodeT -> [(VName, EdgeT)]
 
-data FusionEnv = FusionEnv -- monadic state environment for fusion.
-  { vNameSource :: VNameSource,
-    -- | A mapping from variable name to the graph node that produces
-    -- it.
-    producerMapping :: M.Map VName G.Node,
-    -- a table mapping VNames to VNames that are aliased to it
-    aliasTable :: AliasTable,
-    -- | Fused anything yet?
-    fusedAnything :: Bool,
-    fuseScans :: Bool
-  }
-
-freshFusionEnv :: FusionEnv
-freshFusionEnv =
-  FusionEnv
-    { vNameSource = blankNameSource,
-      producerMapping = M.empty,
-      aliasTable = M.empty,
-      fusedAnything = False,
-      fuseScans = True
-    }
-
-newtype FusionEnvM a = FusionEnvM (ReaderT (Scope SOACS) (State FusionEnv) a)
-  deriving
-    ( Monad,
-      Applicative,
-      Functor,
-      MonadState FusionEnv,
-      HasScope SOACS,
-      LocalScope SOACS
-    )
-
-instance MonadFreshNames FusionEnvM where
-  getNameSource = gets vNameSource
-  putNameSource source =
-    modify (\env -> env {vNameSource = source})
-
-runFusionEnvM :: MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionEnvM a -> m a
-runFusionEnvM scope fenv (FusionEnvM a) = modifyNameSource $ \src ->
-  let x = runReaderT a scope
-      (y, z) = runState x (fenv {vNameSource = src})
-   in (y, vNameSource z)
+-- | A mapping from variable name to the graph node that produces
+-- it.
+type ProducerMapping = M.Map VName G.Node
 
 -- | Construct a graph with only nodes, but no edges.
 emptyGraph :: Stms SOACS -> Names -> Names -> DepGraph
-emptyGraph stms res inputs = G.mkGraph (labelNodes (stmnodes <> resnodes <> inputnodes)) []
+emptyGraph stms res inputs =
+  DepGraph
+    { dgGraph = G.mkGraph (labelNodes (stmnodes <> resnodes <> inputnodes)) [],
+      dgProducerMapping = mempty,
+      dgAliasTable = mempty
+    }
   where
     labelNodes = zip [0 ..]
     stmnodes = map StmNode $ stmsToList stms
@@ -231,23 +203,20 @@ emptyGraph stms res inputs = G.mkGraph (labelNodes (stmnodes <> resnodes <> inpu
 
 -- | Construct a mapping from output names to the node that produces
 -- it and add it to the 'producerMapping' of the monad.
-makeMapping :: DepGraphAug FusionEnvM
-makeMapping g = do
-  let mapping = M.fromList $ concatMap gen_dep_list (G.labNodes g)
-  modify (\s -> s {producerMapping = mapping})
-  pure g
+makeMapping :: Monad m => DepGraphAug m
+makeMapping dg@(DepGraph {dgGraph = g}) =
+  pure dg {dgProducerMapping = M.fromList $ concatMap gen_dep_list (G.labNodes g)}
   where
     gen_dep_list :: DepNode -> [(VName, G.Node)]
     gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
 
 -- make a table to handle transitive aliases
-makeAliasTable :: Stms SOACS -> DepGraphAug FusionEnvM
-makeAliasTable stms g = do
+makeAliasTable :: Monad m => Stms SOACS -> DepGraphAug m
+makeAliasTable stms dg = do
   let (_, (aliasTable', _)) = Alias.analyseStms mempty stms
-  modify (\s -> s {aliasTable = aliasTable'})
-  pure g
+  pure $ dg {dgAliasTable = aliasTable'}
 
-mkDepGraph :: Stms SOACS -> Names -> Names -> FusionEnvM DepGraph
+mkDepGraph :: (HasScope SOACS m, Monad m) => Stms SOACS -> Names -> Names -> m DepGraph
 mkDepGraph stms res inputs = do
   let g = emptyGraph stms res inputs
   applyAugs
@@ -262,7 +231,7 @@ applyAugs :: Monad m => [DepGraphAug m] -> DepGraphAug m
 applyAugs augs g = foldlM (flip ($)) g augs
 
 -- | Add edges for straightforward dependencies to the graph.
-addDeps :: DepGraphAug FusionEnvM
+addDeps :: Monad m => DepGraphAug m
 addDeps = augWithFun toDep
   where
     toDep stmt =
@@ -275,7 +244,7 @@ addDeps = augWithFun toDep
           mkInfDep vname = (vname, InfDep vname)
        in map mkDep fusible <> map mkInfDep infusible
 
-initialGraphConstruction :: DepGraphAug FusionEnvM
+initialGraphConstruction :: (HasScope SOACS m, Monad m) => DepGraphAug m
 initialGraphConstruction =
   applyAugs
     [ addDeps,
@@ -287,22 +256,24 @@ initialGraphConstruction =
     ]
 
 -- | Creates deps for the given nodes on the graph using the 'EdgeGenerator'.
-genEdges :: [DepNode] -> EdgeGenerator -> DepGraphAug FusionEnvM
-genEdges l_stms edge_fun g = do
-  name_map <- gets producerMapping
-  depGraphInsertEdges (concatMap (genEdge name_map) l_stms) g
+genEdges :: Monad m => [DepNode] -> EdgeGenerator -> DepGraphAug m
+genEdges l_stms edge_fun dg =
+  depGraphInsertEdges (concatMap (genEdge (dgProducerMapping dg)) l_stms) dg
   where
     -- statements -> mapping from declared array names to soac index
     genEdge :: M.Map VName G.Node -> DepNode -> [G.LEdge EdgeT]
-    genEdge name_map (from, node) =
-      [ G.toLEdge (from, to) edgeT | (dep, edgeT) <- edge_fun node, Just to <- [M.lookup dep name_map]
-      ]
+    genEdge name_map (from, node) = do
+      (dep, edgeT) <- edge_fun node
+      Just to <- [M.lookup dep name_map]
+      pure $ G.toLEdge (from, to) edgeT
 
 depGraphInsertEdges :: Monad m => [DepEdge] -> DepGraphAug m
-depGraphInsertEdges edgs g = pure $ G.insEdges edgs g
+depGraphInsertEdges edgs dg = pure $ dg {dgGraph = G.insEdges edgs $ dgGraph dg}
 
 mapAcross :: Monad m => (DepContext -> m DepContext) -> DepGraphAug m
-mapAcross f g = foldlM (flip helper) g (G.nodes g)
+mapAcross f dg = do
+  g' <- foldlM (flip helper) (dgGraph dg) (G.nodes (dgGraph dg))
+  pure $ dg {dgGraph = g'}
   where
     helper n g' = case G.match n g' of
       (Just c, g_new) -> do
@@ -317,7 +288,7 @@ mapAcrossNodeTs f = mapAcross f'
       nodeT' <- f nodeT
       pure (ins, n, nodeT', outs)
 
-nodeToSoacNode :: NodeT -> FusionEnvM NodeT
+nodeToSoacNode :: (HasScope SOACS m, Monad m) => NodeT -> m NodeT
 nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
   Op {} -> do
     maybeSoac <- H.fromExp op
@@ -331,7 +302,7 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
   _ -> pure n
 nodeToSoacNode n = pure n
 
-convertGraph :: DepGraphAug FusionEnvM
+convertGraph :: (HasScope SOACS m, Monad m) => DepGraphAug m
 convertGraph = mapAcrossNodeTs nodeToSoacNode
 
 stmFromNode :: NodeT -> Stms SOACS -- do not use outside of edge generation
@@ -345,20 +316,20 @@ depsFromEdge :: DepEdge -> VName
 depsFromEdge = getName . G.edgeLabel
 
 edgesBetween :: DepGraph -> G.Node -> G.Node -> [DepEdge]
-edgesBetween g n1 n2 = G.labEdges $ G.subgraph [n1, n2] g
+edgesBetween dg n1 n2 = G.labEdges $ G.subgraph [n1, n2] $ dgGraph dg
 
 -- Utility func for augs
-augWithFun :: EdgeGenerator -> DepGraphAug FusionEnvM
-augWithFun f g = genEdges (G.labNodes g) f g
+augWithFun :: Monad m => EdgeGenerator -> DepGraphAug m
+augWithFun f dg = genEdges (G.labNodes (dgGraph dg)) f dg
 
 toAlias :: DepGenerator -> EdgeGenerator
 toAlias f =
   map (\vname -> (vname, Alias vname)) . namesToList . foldMap f . stmFromNode
 
-addAliases :: DepGraphAug FusionEnvM
+addAliases :: Monad m => DepGraphAug m
 addAliases = augWithFun $ toAlias aliasInputs
 
-addCons :: DepGraphAug FusionEnvM
+addCons :: Monad m => DepGraphAug m
 addCons = augWithFun getStmCons
 
 -- Merges two contexts
@@ -369,20 +340,21 @@ mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
    in (new_inp, n1, mergedlabel, new_out)
 
 contractEdge :: Monad m => G.Node -> DepContext -> DepGraphAug m
-contractEdge n2 ctx g = do
+contractEdge n2 ctx dg = do
   let n1 = G.node' ctx -- n1 remains
-  pure $ ctx G.& G.delNodes [n1, n2] g
+  pure $ dg {dgGraph = ctx G.& G.delNodes [n1, n2] (dgGraph dg)}
 
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it (now also adds fake edges to aliases - hope this
 -- fixes asymptotic complexity guarantees)
-addExtraCons :: DepGraphAug FusionEnvM
-addExtraCons g = do
-  aliasTab <- gets aliasTable
-  mapping <- gets producerMapping
-  let edges = concatMap (make_edge aliasTab mapping) (G.labEdges g)
-  depGraphInsertEdges edges g
+addExtraCons :: Monad m => DepGraphAug m
+addExtraCons dg = do
+  let aliasTab = dgAliasTable dg
+      mapping = dgProducerMapping dg
+      edges = concatMap (make_edge aliasTab mapping) (G.labEdges g)
+  depGraphInsertEdges edges dg
   where
+    g = dgGraph dg
     make_edge :: AliasTable -> M.Map VName G.Node -> DepEdge -> [DepEdge]
     make_edge aliasTab mapping (from, to, Cons cname) =
       let aliasses = namesToList $ M.findWithDefault (namesFromList []) cname aliasTab
@@ -398,7 +370,7 @@ addExtraCons g = do
           ]
     make_edge _ _ _ = []
 
-addResEdges :: DepGraphAug FusionEnvM
+addResEdges :: Monad m => DepGraphAug m
 addResEdges = augWithFun getStmRes
 
 -- Utils for fusibility/infusibility
@@ -487,3 +459,39 @@ isInf (_, _, e) = case e of
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
+
+data FusionEnv = FusionEnv -- monadic state environment for fusion.
+  { vNameSource :: VNameSource,
+    -- | Fused anything yet?
+    fusedAnything :: Bool,
+    fuseScans :: Bool
+  }
+
+freshFusionEnv :: FusionEnv
+freshFusionEnv =
+  FusionEnv
+    { vNameSource = blankNameSource,
+      fusedAnything = False,
+      fuseScans = True
+    }
+
+newtype FusionEnvM a = FusionEnvM (ReaderT (Scope SOACS) (State FusionEnv) a)
+  deriving
+    ( Monad,
+      Applicative,
+      Functor,
+      MonadState FusionEnv,
+      HasScope SOACS,
+      LocalScope SOACS
+    )
+
+instance MonadFreshNames FusionEnvM where
+  getNameSource = gets vNameSource
+  putNameSource source =
+    modify (\env -> env {vNameSource = source})
+
+runFusionEnvM :: MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionEnvM a -> m a
+runFusionEnvM scope fenv (FusionEnvM a) = modifyNameSource $ \src ->
+  let x = runReaderT a scope
+      (y, z) = runState x (fenv {vNameSource = src})
+   in (y, vNameSource z)
