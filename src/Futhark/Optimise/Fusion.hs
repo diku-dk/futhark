@@ -551,11 +551,10 @@ runInnerFusion = mapAcross runInnerFusionOnContext
 runInnerFusionOnContext :: DepContext -> FusionM DepContext
 runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   DoNode (Let pat aux (DoLoop params form body)) toFuse ->
-    doFuseScans $
-      localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
-        let extra_is = namesFromList $ map (paramName . fst) (filter (isArray . fst) params)
-        b <- doFusionWithDelayed body extra_is toFuse
-        pure (incoming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
+    doFuseScans . localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
+      let extra_is = namesFromList $ map (paramName . fst) (filter (isArray . fst) params)
+      b <- doFusionWithDelayed body extra_is toFuse
+      pure (incoming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
   IfNode (Let pat aux (If sz b1 b2 dec)) toFuse -> doFuseScans $ do
     b1' <- doFusionWithDelayed b1 mempty toFuse
     b2' <- doFusionWithDelayed b2 mempty toFuse
