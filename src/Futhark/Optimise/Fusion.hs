@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 -- | Perform horizontal and vertical fusion of SOACs.  See the paper
@@ -117,7 +118,7 @@ unreachableEitherDir g a b =
 isNotVarInput :: [H.Input] -> [H.Input]
 isNotVarInput = filter (isNothing . H.isVarInput)
 
-finalizeNode :: NodeT -> FusionM (Stms SOACS)
+finalizeNode :: (HasScope SOACS m, MonadFreshNames m) => NodeT -> m (Stms SOACS)
 finalizeNode nt = case nt of
   StmNode stm -> pure $ oneStm stm
   SoacNode ots outputs soac aux -> runBuilder_ $ do
