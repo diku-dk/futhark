@@ -1,9 +1,12 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 -- | Perform horizontal and vertical fusion of SOACs.  See the paper
 -- /A T2 Graph-Reduction Approach To Fusion/ for the basic idea (some
 -- extensions discussed in /Design and GPGPU Performance of Futhark’s
 -- Redomap Construct/).
 module Futhark.Optimise.Fusion (fuseSOACs) where
 
+import Control.Monad.Reader
 import Control.Monad.State
 import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Query.DFS as Q
@@ -25,7 +28,43 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (isEnvVarAtLeast)
 
-doFuseScans :: FusionEnvM a -> FusionEnvM a
+data FusionEnv = FusionEnv
+  { vNameSource :: VNameSource,
+    -- | Fused anything yet?
+    fusedAnything :: Bool,
+    fuseScans :: Bool
+  }
+
+freshFusionEnv :: FusionEnv
+freshFusionEnv =
+  FusionEnv
+    { vNameSource = blankNameSource,
+      fusedAnything = False,
+      fuseScans = True
+    }
+
+newtype FusionM a = FusionM (ReaderT (Scope SOACS) (State FusionEnv) a)
+  deriving
+    ( Monad,
+      Applicative,
+      Functor,
+      MonadState FusionEnv,
+      HasScope SOACS,
+      LocalScope SOACS
+    )
+
+instance MonadFreshNames FusionM where
+  getNameSource = gets vNameSource
+  putNameSource source =
+    modify (\env -> env {vNameSource = source})
+
+runFusionM :: MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionM a -> m a
+runFusionM scope fenv (FusionM a) = modifyNameSource $ \src ->
+  let x = runReaderT a scope
+      (y, z) = runState x (fenv {vNameSource = src})
+   in (y, vNameSource z)
+
+doFuseScans :: FusionM a -> FusionM a
 doFuseScans m = do
   fs <- gets fuseScans
   modify (\s -> s {fuseScans = True})
@@ -33,7 +72,7 @@ doFuseScans m = do
   modify (\s -> s {fuseScans = fs})
   pure r
 
-dontFuseScans :: FusionEnvM a -> FusionEnvM a
+dontFuseScans :: FusionM a -> FusionM a
 dontFuseScans m = do
   fs <- gets fuseScans
   modify (\s -> s {fuseScans = False})
@@ -47,7 +86,7 @@ isArray p = case paramType p of
   _ -> False
 
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
-fuseGraphLZ :: Stms SOACS -> Result -> [Param DeclType] -> FusionEnvM (Stms SOACS)
+fuseGraphLZ :: Stms SOACS -> Result -> [Param DeclType] -> FusionM (Stms SOACS)
 fuseGraphLZ stms results inputs =
   fuseGraph
     stms
@@ -55,7 +94,7 @@ fuseGraphLZ stms results inputs =
     (namesFromList $ map paramName $ filter isArray inputs)
 
 -- main fusion function.
-fuseGraph :: Stms SOACS -> Names -> Names -> FusionEnvM (Stms SOACS)
+fuseGraph :: Stms SOACS -> Names -> Names -> FusionM (Stms SOACS)
 fuseGraph stms results inputs = localScope (scopeOf stms) $ do
   graph_not_fused <- mkDepGraph stms results inputs
 
@@ -71,19 +110,19 @@ fuseGraph stms results inputs = localScope (scopeOf stms) $ do
 
   linearizeGraph graph_fused'
 
-unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
+unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> FusionM Bool
 unreachableEitherDir g a b = do
   b1 <- reachable g a b
   b2 <- reachable g b a
   pure $ not (b1 || b2)
 
-reachable :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
+reachable :: DepGraph -> G.Node -> G.Node -> FusionM Bool
 reachable dg source target = pure $ target `elem` Q.reachable source (dgGraph dg)
 
 isNotVarInput :: [H.Input] -> [H.Input]
 isNotVarInput = filter (isNothing . H.isVarInput)
 
-finalizeNode :: NodeT -> FusionEnvM (Stms SOACS)
+finalizeNode :: NodeT -> FusionM (Stms SOACS)
 finalizeNode nt = case nt of
   StmNode stm -> pure $ oneStm stm
   SoacNode ots outputs soac aux -> runBuilder_ $ do
@@ -103,17 +142,17 @@ finalizeNode nt = case nt of
     stms' <- finalizeNode nt'
     pure $ stms1 <> stms' <> stms2
 
-linearizeGraph :: DepGraph -> FusionEnvM (Stms SOACS)
+linearizeGraph :: DepGraph -> FusionM (Stms SOACS)
 linearizeGraph dg =
   fmap mconcat $ mapM finalizeNode $ reverse $ Q.topsort' (dgGraph dg)
 
-fusedSomething :: NodeT -> FusionEnvM (Maybe NodeT)
+fusedSomething :: NodeT -> FusionM (Maybe NodeT)
 fusedSomething x = do
   modify $ \s -> s {fusedAnything = True}
   pure $ Just x
 
 -- Fixed-point
-keepTrying :: DepGraphAug FusionEnvM -> DepGraphAug FusionEnvM
+keepTrying :: DepGraphAug FusionM -> DepGraphAug FusionM
 keepTrying f g = do
   prev_fused <- gets fusedAnything
   modify $ \s -> s {fusedAnything = False}
@@ -122,7 +161,7 @@ keepTrying f g = do
   (if fused then keepTrying f g' else pure g')
     <* modify (\s -> s {fusedAnything = prev_fused || fused})
 
-doAllFusion :: DepGraphAug FusionEnvM
+doAllFusion :: DepGraphAug FusionM
 doAllFusion =
   applyAugs
     [ keepTrying . applyAugs $
@@ -133,32 +172,32 @@ doAllFusion =
       removeUnusedOutputs
     ]
 
-doVerticalFusion :: DepGraphAug FusionEnvM
+doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ G.labNodes (dgGraph dg)) dg
 
-doHorizontalFusion :: DepGraphAug FusionEnvM
+doHorizontalFusion :: DepGraphAug FusionM
 doHorizontalFusion dg = applyAugs (map horizontalFusionOnNode (G.nodes (dgGraph dg))) dg
 
 -- | For each node, find what came before, attempt to fuse them
 -- horizontally.  This means we only perform horizontal fusion for
 -- SOACs that use the same input in some way.
-horizontalFusionOnNode :: G.Node -> DepGraphAug FusionEnvM
+horizontalFusionOnNode :: G.Node -> DepGraphAug FusionM
 horizontalFusionOnNode node dg@DepGraph {dgGraph = g} =
   applyAugs (map (uncurry hTryFuseNodesInGraph) pairs) dg
   where
     incoming_nodes = map fst $ filter (isDep . snd) $ G.lpre g node
     pairs = [(x, y) | x <- incoming_nodes, y <- incoming_nodes, x < y]
 
-vFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
+vFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionM Bool
 vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 = do
   let b2 = not (any isInf (edgesBetween dg n1 n2))
   reach <- mapM (reachable dg n2) (filter (/= n2) (G.pre g n1))
   pure $ b2 && all not reach
 
-hFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionEnvM Bool
+hFusionFeasability :: DepGraph -> G.Node -> G.Node -> FusionM Bool
 hFusionFeasability = unreachableEitherDir
 
-tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionEnvM
+tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
 tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
   if G.gelem node_to_fuse_id g
     then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
@@ -167,7 +206,7 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
     fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
     node_to_fuse_id = nodeFromLNode node_to_fuse
 
-vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionEnvM
+vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
 vTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure dg
@@ -199,7 +238,7 @@ vTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
         depsFromEdge
         (concatMap (edgesBetween dg node_1) (filter (/= node_2) $ G.pre g node_1))
 
-hTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionEnvM
+hTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 hTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
   | not (G.gelem node_1 g && G.gelem node_2 g) = pure dg
   | otherwise = do
@@ -211,7 +250,7 @@ hTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
           Nothing -> pure dg
         else pure dg
 
-hFuseContexts :: DepContext -> DepContext -> FusionEnvM (Maybe DepContext)
+hFuseContexts :: DepContext -> DepContext -> FusionM (Maybe DepContext)
 hFuseContexts
   c1@(_, _, nodeT1, _)
   c2@(_, _, nodeT2, _) = do
@@ -220,7 +259,7 @@ hFuseContexts
       Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
       Nothing -> pure Nothing
 
-vFuseContexts :: [EdgeT] -> [VName] -> DepContext -> DepContext -> FusionEnvM (Maybe DepContext)
+vFuseContexts :: [EdgeT] -> [VName] -> DepContext -> DepContext -> FusionM (Maybe DepContext)
 vFuseContexts
   edgs
   infusable
@@ -242,7 +281,7 @@ makeMap x y = M.fromList $ zip x y
 fuseMaps :: Ord b => M.Map a b -> M.Map b c -> M.Map a c
 fuseMaps m1 m2 = M.mapMaybe (`M.lookup` m2) m1
 
-makeCopiesOfFusedExcept :: [VName] -> NodeT -> FusionEnvM NodeT
+makeCopiesOfFusedExcept :: [VName] -> NodeT -> FusionM NodeT
 makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
   let lam = H.lambda soac
   let fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
@@ -250,7 +289,7 @@ makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
   pure $ SoacNode ots pats (H.setLambda lam' soac) aux
 makeCopiesOfFusedExcept _ nodeT = pure nodeT
 
-makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionEnvM (Lambda SOACS)
+makeCopiesInLambda :: [VName] -> Lambda SOACS -> FusionM (Lambda SOACS)
 makeCopiesInLambda toCopy lam = do
   (copies, nameMap) <- localScope (scopeOf lam) $ makeCopyStms toCopy
   let l_body = lambdaBody lam
@@ -258,7 +297,7 @@ makeCopiesInLambda toCopy lam = do
       newLambda = lam {lambdaBody = newBody}
   pure newLambda
 
-makeCopyStms :: [VName] -> FusionEnvM (Stms SOACS, M.Map VName VName)
+makeCopyStms :: [VName] -> FusionM (Stms SOACS, M.Map VName VName)
 makeCopyStms toCopy = do
   newNames <- mapM makeNewName toCopy
   copies <- forM (zip toCopy newNames) $ \(name, name_fused) ->
@@ -267,14 +306,14 @@ makeCopyStms toCopy = do
   where
     makeNewName name = newVName $ baseString name <> "_copy"
 
-okToFuseProducer :: H.SOAC SOACS -> FusionEnvM Bool
+okToFuseProducer :: H.SOAC SOACS -> FusionM Bool
 okToFuseProducer (H.Screma _ form _) = do
   let is_scan = isJust $ Futhark.isScanomapSOAC form
   gets $ (not is_scan ||) . fuseScans
 okToFuseProducer _ = pure True
 
 -- First node is producer, second is consumer.
-vFuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT], [EdgeT]) -> (NodeT, [EdgeT]) -> FusionEnvM (Maybe NodeT)
+vFuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT], [EdgeT]) -> (NodeT, [EdgeT]) -> FusionM (Maybe NodeT)
 vFuseNodeT _ infusible (s1, _, e1s) (IfNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
@@ -355,7 +394,7 @@ hasNoDifferingInputs is1 is2 =
   let (vs1, vs2) = (isNotVarInput is1, isNotVarInput $ is2 L.\\ is1)
    in null $ vs1 `L.intersect` vs2
 
-hFuseNodeT :: NodeT -> NodeT -> FusionEnvM (Maybe NodeT)
+hFuseNodeT :: NodeT -> NodeT -> FusionM (Maybe NodeT)
 hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
   | inputs1 <- H.inputs soac1,
     inputs2 <- H.inputs soac2,
@@ -483,13 +522,13 @@ fuseLambda lam_1 lam_2 =
     l_body_2 = lambdaBody lam_2
     l_body_new = insertStms (bodyStms l_body_1) l_body_2
 
-removeUnusedOutputs :: DepGraphAug FusionEnvM
+removeUnusedOutputs :: DepGraphAug FusionM
 removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 
 vNameFromAdj :: G.Node -> (EdgeT, G.Node) -> VName
 vNameFromAdj n1 (edge, n2) = depsFromEdge (n2, n1, edge)
 
-removeUnusedOutputsFromContext :: DepContext -> FusionEnvM DepContext
+removeUnusedOutputsFromContext :: DepContext -> FusionM DepContext
 removeUnusedOutputsFromContext (incoming, n1, nodeT, outgoing) =
   pure (incoming, n1, nodeT', outgoing)
   where
@@ -516,10 +555,10 @@ removeOutputsExcept toKeep s = case s of
           }
   node -> node
 
-runInnerFusion :: DepGraphAug FusionEnvM -- do fusion on the inner lambdas
+runInnerFusion :: DepGraphAug FusionM -- do fusion on the inner lambdas
 runInnerFusion = mapAcross runInnerFusionOnContext
 
-runInnerFusionOnContext :: DepContext -> FusionEnvM DepContext
+runInnerFusionOnContext :: DepContext -> FusionM DepContext
 runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   DoNode (Let pat aux (DoLoop params form body)) toFuse ->
     doFuseScans $
@@ -546,7 +585,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     pure (incoming, node, nodeT', outgoing)
   _ -> pure c
   where
-    doFusionWithDelayed :: Body SOACS -> Names -> [(NodeT, [EdgeT])] -> FusionEnvM (Body SOACS)
+    doFusionWithDelayed :: Body SOACS -> Names -> [(NodeT, [EdgeT])] -> FusionM (Body SOACS)
     doFusionWithDelayed b extraInputs extraNodes = localScope (scopeOf stms) $ do
       let g = emptyGraph stms results inputs
       -- highly temporary and non-thought-out
@@ -566,7 +605,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
         inputs = namesFromList (map (vNameFromAdj node) outgoing) <> extraInputs
         stms = bodyStms b
         results = freeIn (bodyResult b)
-    doFusionInner :: Body SOACS -> [LParam SOACS] -> FusionEnvM (Body SOACS)
+    doFusionInner :: Body SOACS -> [LParam SOACS] -> FusionM (Body SOACS)
     doFusionInner b inp = do
       new_stms <- fuseGraph stms results inputs
       pure b {bodyStms = new_stms}
@@ -578,7 +617,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
         results = freeIn (bodyResult b)
 
 -- inserting for delayed fusion
-handleNodes :: [(NodeT, [EdgeT])] -> DepGraphAug FusionEnvM
+handleNodes :: [(NodeT, [EdgeT])] -> DepGraphAug FusionM
 handleNodes ns dg@DepGraph {dgGraph = g} = do
   let nodes = G.newNodes (length ns) g
       (nodeTs, edgs) = unzip ns
@@ -586,7 +625,7 @@ handleNodes ns dg@DepGraph {dgGraph = g} = do
       dg' = dg {dgGraph = G.insNodes depNodes g}
   applyAugs (zipWith (curry addEdgesToGraph) depNodes edgs) =<< makeMapping dg'
 
-addEdgesToGraph :: (DepNode, [EdgeT]) -> DepGraphAug FusionEnvM
+addEdgesToGraph :: (DepNode, [EdgeT]) -> DepGraphAug FusionM
 addEdgesToGraph (n, edgs) = genEdges [n] (const edgs')
   where
     f e = (getName e, e)
@@ -594,7 +633,7 @@ addEdgesToGraph (n, edgs) = genEdges [n] (const edgs')
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
-  runFusionEnvM
+  runFusionM
     (scopeOf stms)
     freshFusionEnv
     (fuseGraphLZ stms (varsRes outputs) [])
@@ -602,7 +641,7 @@ fuseConsts outputs stms =
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun consts fun = do
   fun_stms' <-
-    runFusionEnvM
+    runFusionM
       (scopeOf fun <> scopeOf consts)
       freshFusionEnv
       (fuseGraphLZ (bodyStms fun_body) (bodyResult fun_body) (funDefParams fun))

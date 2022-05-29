@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -31,17 +30,9 @@ module Futhark.Optimise.Fusion.GraphRep
     depsFromEdge,
     contractEdge,
     isCons,
-
-    -- * Monadic fusion environment
-    FusionEnvM,
-    runFusionEnvM,
-    FusionEnv (..),
-    freshFusionEnv,
   )
 where
 
-import Control.Monad.Reader (ReaderT (runReaderT))
-import Control.Monad.State
 import Data.Bifunctor (bimap)
 import Data.Foldable (foldlM)
 import qualified Data.Graph.Inductive.Dot as G
@@ -52,7 +43,6 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.HORep.SOAC as H
-import Futhark.Builder
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
@@ -459,39 +449,3 @@ isInf (_, _, e) = case e of
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
-
-data FusionEnv = FusionEnv -- monadic state environment for fusion.
-  { vNameSource :: VNameSource,
-    -- | Fused anything yet?
-    fusedAnything :: Bool,
-    fuseScans :: Bool
-  }
-
-freshFusionEnv :: FusionEnv
-freshFusionEnv =
-  FusionEnv
-    { vNameSource = blankNameSource,
-      fusedAnything = False,
-      fuseScans = True
-    }
-
-newtype FusionEnvM a = FusionEnvM (ReaderT (Scope SOACS) (State FusionEnv) a)
-  deriving
-    ( Monad,
-      Applicative,
-      Functor,
-      MonadState FusionEnv,
-      HasScope SOACS,
-      LocalScope SOACS
-    )
-
-instance MonadFreshNames FusionEnvM where
-  getNameSource = gets vNameSource
-  putNameSource source =
-    modify (\env -> env {vNameSource = source})
-
-runFusionEnvM :: MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionEnvM a -> m a
-runFusionEnvM scope fenv (FusionEnvM a) = modifyNameSource $ \src ->
-  let x = runReaderT a scope
-      (y, z) = runState x (fenv {vNameSource = src})
-   in (y, vNameSource z)
