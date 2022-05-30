@@ -206,9 +206,6 @@ vFuseContexts
       Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
       Nothing -> pure Nothing
 
-makeMap :: Ord a => [a] -> [b] -> M.Map a b
-makeMap x y = M.fromList $ zip x y
-
 makeCopiesOfFusedExcept ::
   (LocalScope SOACS m, MonadFreshNames m) =>
   [VName] ->
@@ -237,11 +234,11 @@ makeCopyStms ::
   (LocalScope SOACS m, MonadFreshNames m) =>
   [VName] ->
   m (Stms SOACS, M.Map VName VName)
-makeCopyStms toCopy = do
-  newNames <- mapM makeNewName toCopy
-  copies <- forM (zip toCopy newNames) $ \(name, name_fused) ->
-    mkLetNames [name_fused] (BasicOp $ Copy name)
-  pure (stmsFromList copies, makeMap toCopy newNames)
+makeCopyStms vs = do
+  vs' <- mapM makeNewName vs
+  copies <- forM (zip vs vs') $ \(name, name') ->
+    mkLetNames [name'] $ BasicOp $ Copy name
+  pure (stmsFromList copies, M.fromList $ zip vs vs')
   where
     makeNewName name = newVName $ baseString name <> "_copy"
 
