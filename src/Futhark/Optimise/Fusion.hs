@@ -160,9 +160,10 @@ vTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
               then pure nodeT
               else do
                 let (_, _, _, deps_1) = ctx1
-                let (_, _, _, deps_2) = ctx2
-                -- make copies of everything that was not previously consumed
-                let old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
+                    (_, _, _, deps_2) = ctx2
+                    -- make copies of everything that was not
+                    -- previously consumed
+                    old_cons = map (getName . fst) $ filter (isCons . fst) (deps_1 <> deps_2)
                 makeCopiesOfFusedExcept old_cons nodeT
           contractEdge node_2 (inputs, node_1, nodeT', outputs) dg
         Nothing -> pure dg
