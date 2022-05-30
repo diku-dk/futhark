@@ -29,8 +29,7 @@ import Futhark.Transform.Substitute
 
 data FusionEnv = FusionEnv
   { vNameSource :: VNameSource,
-    -- | Fused anything yet?
-    fusedAnything :: Bool,
+    fusionCount :: Int,
     fuseScans :: Bool
   }
 
@@ -38,7 +37,7 @@ freshFusionEnv :: FusionEnv
 freshFusionEnv =
   FusionEnv
     { vNameSource = blankNameSource,
-      fusedAnything = False,
+      fusionCount = 0,
       fuseScans = True
     }
 
@@ -117,7 +116,7 @@ linearizeGraph dg =
 
 fusedSomething :: NodeT -> FusionM (Maybe NodeT)
 fusedSomething x = do
-  modify $ \s -> s {fusedAnything = True}
+  modify $ \s -> s {fusionCount = 1 + fusionCount s}
   pure $ Just x
 
 -- | For each node, find what came before, attempt to fuse them
@@ -479,12 +478,10 @@ doInnerFusion = mapAcross runInnerFusionOnContext
 -- Fixed-point iteration.
 keepTrying :: DepGraphAug FusionM -> DepGraphAug FusionM
 keepTrying f g = do
-  prev_fused <- gets fusedAnything
-  modify $ \s -> s {fusedAnything = False}
+  prev_fused <- gets fusionCount
   g' <- f g
-  fused <- gets fusedAnything
-  (if fused then keepTrying f g' else pure g')
-    <* modify (\s -> s {fusedAnything = prev_fused || fused})
+  aft_fused <- gets fusionCount
+  if prev_fused /= aft_fused then keepTrying f g' else pure g'
 
 doAllFusion :: DepGraphAug FusionM
 doAllFusion =
@@ -512,13 +509,17 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   SoacNode ots pat soac aux -> do
     -- To clean up previous instances of fusion.
     lam <- simplifyLambda $ H.lambda soac
+    prev_count <- gets fusionCount
     newbody <- localScope (scopeOf lam) $ case soac of
       H.Stream _ Sequential {} _ _ _ ->
         dontFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
       _ ->
         doFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
+    aft_count <- gets fusionCount
     -- To clean up any inner fusion.
-    lam' <- simplifyLambda $ lam {lambdaBody = newbody}
+    lam' <-
+      (if prev_count /= aft_count then simplifyLambda else pure)
+        lam {lambdaBody = newbody}
     let nodeT' = SoacNode ots pat (H.setLambda lam' soac) aux
     pure (incoming, node, nodeT', outgoing)
   _ -> pure c
