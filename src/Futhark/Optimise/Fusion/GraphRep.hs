@@ -93,8 +93,9 @@ getName edgeT = case edgeT of
   Fake vn -> vn
   Res vn -> vn
 
--- does the node acutally represent something in the program
--- (non-real nodes are not delayed-fused into other nodes)
+-- | Does the node acutally represent something in the program?  A
+-- "non-real" node represents things like fake nodes inserted to
+-- express ordering due to consumption.
 isRealNode :: NodeT -> Bool
 isRealNode RNode {} = False
 isRealNode InNode {} = False
