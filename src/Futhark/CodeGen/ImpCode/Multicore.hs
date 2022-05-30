@@ -135,7 +135,12 @@ instance Pretty Multicore where
   ppr (ISPCKernel body _) =
     "ispc" <+> nestedBlock "{" "}" (ppr body)
   ppr (ForEach i from to body) =
-    "foreach" <+> ppr i <+> "=" <+> ppr from <+> "to" <+> ppr to
+    "foreach"
+      <+> ppr i
+      <+> "="
+      <+> ppr from
+      <+> "to"
+      <+> ppr to
       <+> nestedBlock "{" "}" (ppr body)
   ppr (ForEachActive i body) =
     "foreach_active"
