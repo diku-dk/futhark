@@ -101,11 +101,11 @@ finalizeNode nt = case nt of
   RNode _ -> pure mempty
   InNode _ -> pure mempty
   DoNode stm lst -> do
-    stmsNotFused <- mapM (finalizeNode . fst) lst
-    pure $ mconcat stmsNotFused <> oneStm stm
+    lst' <- mapM (finalizeNode . fst) lst
+    pure $ mconcat lst' <> oneStm stm
   IfNode stm lst -> do
-    stmsNotFused <- mapM (finalizeNode . fst) lst
-    pure $ mconcat stmsNotFused <> oneStm stm
+    lst' <- mapM (finalizeNode . fst) lst
+    pure $ mconcat lst' <> oneStm stm
   FinalNode stms1 nt' stms2 -> do
     stms' <- finalizeNode nt'
     pure $ stms1 <> stms' <> stms2
@@ -182,7 +182,7 @@ hTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
   | hFusionFeasability dg node_1 node_2 = do
       fres <- hFuseContexts (G.context g node_1) (G.context g node_2)
       case fres of
-        Just new_Context -> contractEdge node_2 new_Context dg
+        Just ctx -> contractEdge node_2 ctx dg
         Nothing -> pure dg
   | otherwise = pure dg
 
