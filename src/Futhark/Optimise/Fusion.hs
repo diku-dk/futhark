@@ -326,7 +326,7 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
         Just ker' -> do
           let pats2' =
                 zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
-          pure $ Just $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2)
+          fusedSomething $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2)
         Nothing -> pure Nothing
 hFuseNodeT _ _ = pure Nothing
 
