@@ -673,7 +673,7 @@ mayProduceError (For _ _ x) = mayProduceError x
 mayProduceError (While _ x) = mayProduceError x
 mayProduceError (Comment _ x) = mayProduceError x
 mayProduceError (Op (ForEachActive _ body)) = mayProduceError body
-mayProduceError (Op (ForEach _ _ body)) = mayProduceError body
+mayProduceError (Op (ForEach _ _ _ body)) = mayProduceError body
 mayProduceError (Op SegOp {}) = True
 mayProduceError Allocate {} = True
 mayProduceError Assert {} = True
@@ -841,25 +841,26 @@ compileOp (ISPCKernel body free) = do
     if (err != 0) {
       goto cleanup;
     }|]
-compileOp (ForEach i bound body) = do
+compileOp (ForEach i from bound body) = do
+  from' <- GC.compileExp from
   bound' <- GC.compileExp bound
   body' <- GC.collect $ compileCode body
   if mayProduceError body
     then
       GC.stms
         [C.cstms|
-      for ($tyqual:uniform typename int64_t i = 0; i < ($exp:bound' / programCount); i++) {
-        typename int64_t $id:i = programIndex + i * programCount;
+      for ($tyqual:uniform typename int64_t i = 0; i < (($exp:bound' - $exp:from') / programCount); i++) {
+        typename int64_t $id:i = $exp:from' + programIndex + i * programCount;
         $items:body'
       }
-      if (programIndex < ($exp:bound' % programCount)) {
-        typename int64_t $id:i = programIndex + (($exp:bound' / programCount) * programCount);
+      if (programIndex < (($exp:bound' - $exp:from') % programCount)) {
+        typename int64_t $id:i = $exp:from' + programIndex + ((($exp:bound' - $exp:from') / programCount) * programCount);
         $items:body'
       }|]
     else
       GC.stms
         [C.cstms|
-      $escstm:("foreach (" <> pretty i <> " = 0 ... " <> pretty bound' <> ")") {
+      $escstm:("foreach (" <> pretty i <> " = " <> pretty from' <> " ... " <> pretty bound' <> ")") {
         $items:body'
       }|]
 compileOp (ForEachActive name body) = do
@@ -967,7 +968,7 @@ findDeps (Op (SegOp _ free _ _ retvals _)) =
             map paramName free
     )
     retvals
-findDeps (Op (ForEach _ _ body)) =
+findDeps (Op (ForEach _ _ _ body)) =
   findDeps body
 findDeps (Op (ForEachActive _ body)) =
   findDeps body
@@ -1010,7 +1011,7 @@ findVarying (For _ _ x) = findVarying x
 findVarying (While _ x) = findVarying x
 findVarying (Comment _ x) = findVarying x
 findVarying (Op (ForEachActive _ body)) = findVarying body
-findVarying (Op (ForEach idx _ body)) = idx : findVarying body
+findVarying (Op (ForEach idx _ _ body)) = idx : findVarying body
 findVarying (DeclareMem mem _) = [mem]
 findVarying _ = []
 
