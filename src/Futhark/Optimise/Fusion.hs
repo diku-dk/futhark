@@ -528,31 +528,28 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     doFusionWithDelayed :: Body SOACS -> Names -> [(NodeT, [EdgeT])] -> FusionM (Body SOACS)
     doFusionWithDelayed (Body () stms res) extraInputs extraNodes = localScope (scopeOf stms) $ do
       stm_node <- mapM (finalizeNode . fst) extraNodes
-      stms' <- fuseGraph (mconcat stm_node <> stms) (freeIn res) inputs
+      stms' <- fuseGraph (mkBody (mconcat stm_node <> stms) res) inputs
       pure $ Body () stms' res
       where
         inputs = namesFromList (map (vNameFromAdj node) outgoing) <> extraInputs
     doFusionInner :: Body SOACS -> [LParam SOACS] -> FusionM (Body SOACS)
-    doFusionInner (Body () stms res) inp = do
-      stms' <- fuseGraph stms (freeIn res) inputs
-      pure $ Body () stms' res
+    doFusionInner body inp = do
+      stms' <- fuseGraph body inputs
+      pure $ body {bodyStms = stms'}
       where
         lambda_inputs = map paramName (filter isArray inp)
         other_inputs = map (vNameFromAdj node) $ filter (not . isDep . fst) outgoing
         inputs = namesFromList $ other_inputs ++ lambda_inputs
 
 -- lazy version of fuse graph - removes inputs from the graph that are not arrays
-fuseGraphLZ :: Stms SOACS -> Result -> [Param DeclType] -> FusionM (Stms SOACS)
-fuseGraphLZ stms results inputs =
-  fuseGraph
-    stms
-    (freeIn results)
-    (namesFromList $ map paramName $ filter isArray inputs)
+fuseGraphLZ :: Body SOACS -> [Param DeclType] -> FusionM (Stms SOACS)
+fuseGraphLZ body inputs =
+  fuseGraph body $ namesFromList $ map paramName $ filter isArray inputs
 
 -- main fusion function.
-fuseGraph :: Stms SOACS -> Names -> Names -> FusionM (Stms SOACS)
-fuseGraph stms results inputs = localScope (scopeOf stms) $ do
-  graph_not_fused <- mkDepGraph stms results inputs
+fuseGraph :: Body SOACS -> Names -> FusionM (Stms SOACS)
+fuseGraph body inputs = localScope (scopeOf (bodyStms body)) $ do
+  graph_not_fused <- mkDepGraph body inputs
   graph_fused <- doAllFusion graph_not_fused
   linearizeGraph graph_fused
 
@@ -561,7 +558,7 @@ fuseConsts outputs stms =
   runFusionM
     (scopeOf stms)
     freshFusionEnv
-    (fuseGraphLZ stms (varsRes outputs) [])
+    (fuseGraphLZ (mkBody stms (varsRes outputs)) [])
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun consts fun = do
@@ -569,10 +566,8 @@ fuseFun consts fun = do
     runFusionM
       (scopeOf fun <> scopeOf consts)
       freshFusionEnv
-      (fuseGraphLZ (bodyStms fun_body) (bodyResult fun_body) (funDefParams fun))
-  pure fun {funDefBody = fun_body {bodyStms = fun_stms'}}
-  where
-    fun_body = funDefBody fun
+      (fuseGraphLZ (funDefBody fun) (funDefParams fun))
+  pure fun {funDefBody = (funDefBody fun) {bodyStms = fun_stms'}}
 
 -- | The pass definition.
 {-# NOINLINE fuseSOACs #-}

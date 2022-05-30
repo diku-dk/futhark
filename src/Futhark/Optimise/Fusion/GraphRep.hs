@@ -4,6 +4,12 @@
 -- (i.e. a 'Body'), built to handle fusion.  Could perhaps be made
 -- more general.  An important property is that it does not handle
 -- "nested bodies" (e.g. 'If'); these are represented as single nodes.
+--
+-- This is all implemented on top of the graph representation provided
+-- by the @fgl@ package ("Data.Graph.Inductive").  The graph provided
+-- by this package allows nodes and edges to have arbitrarily-typed
+-- "labels".  It is these labels ('EdgeT', 'NodeT') that we use to
+-- contain Futhark-specific information.
 module Futhark.Optimise.Fusion.GraphRep
   ( -- * Data structure
     EdgeT (..),
@@ -110,10 +116,13 @@ isRealNode _ = True
 pprg :: DepGraph -> String
 pprg = G.showDot . G.fglToDotString . G.nemap show show . dgGraph
 
+-- | A pair of a 'G.Node' and the node label.
 type DepNode = G.LNode NodeT
 
 type DepEdge = G.LEdge EdgeT
 
+-- | A tuple with four parts: inbound links to the node, the node
+-- itself, the 'NodeT' "label", and outbound links from the node.
 type DepContext = G.Context NodeT EdgeT
 
 -- | A dependency graph.  Edges go from *consumers* to *producers*
@@ -168,9 +177,11 @@ makeAliasTable stms dg = do
   let (_, (aliasTable', _)) = Alias.analyseStms mempty stms
   pure $ dg {dgAliasTable = aliasTable'}
 
-mkDepGraph :: (HasScope SOACS m, Monad m) => Stms SOACS -> Names -> Names -> m DepGraph
-mkDepGraph stms res inputs = do
-  let g = emptyGraph stms res inputs
+-- | Make a dependency graph corresponding to a 'Body' and with the
+-- provided "inputs" (i.e. free variables).
+mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> Names -> m DepGraph
+mkDepGraph (Body () stms res) inputs = do
+  let g = emptyGraph stms (freeIn res) inputs
   applyAugs
     [ makeMapping,
       makeAliasTable stms,
