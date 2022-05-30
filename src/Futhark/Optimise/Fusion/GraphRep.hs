@@ -9,7 +9,11 @@
 -- by the @fgl@ package ("Data.Graph.Inductive").  The graph provided
 -- by this package allows nodes and edges to have arbitrarily-typed
 -- "labels".  It is these labels ('EdgeT', 'NodeT') that we use to
--- contain Futhark-specific information.
+-- contain Futhark-specific information.  An edge goes *from* uses of
+-- variables to the node that produces that variable.  There are also
+-- edges that do not represent normal data dependencies, but other
+-- things.  This means that a node can have multiple edges for the
+-- same name, indicating different kinds of dependencies.
 module Futhark.Optimise.Fusion.GraphRep
   ( -- * Data structure
     EdgeT (..),
@@ -129,6 +133,7 @@ type DepEdge = G.LEdge EdgeT
 
 -- | A tuple with four parts: inbound links to the node, the node
 -- itself, the 'NodeT' "label", and outbound links from the node.
+-- This type is used to modify the graph in 'mapAcross'.
 type DepContext = G.Context NodeT EdgeT
 
 -- | A dependency graph.  Edges go from *consumers* to *producers*
@@ -237,6 +242,7 @@ genEdges l_stms edge_fun dg =
 depGraphInsertEdges :: Monad m => [DepEdge] -> DepGraphAug m
 depGraphInsertEdges edgs dg = pure $ dg {dgGraph = G.insEdges edgs $ dgGraph dg}
 
+-- | Monadically modify every node of the graph.
 mapAcross :: Monad m => (DepContext -> m DepContext) -> DepGraphAug m
 mapAcross f dg = do
   g' <- foldlM (flip helper) (dgGraph dg) (G.nodes (dgGraph dg))
@@ -276,12 +282,15 @@ stmFromNode :: NodeT -> Stms SOACS -- do not use outside of edge generation
 stmFromNode (StmNode x) = oneStm x
 stmFromNode _ = mempty
 
+-- | Get the underlying @fgl@ node.
 nodeFromLNode :: DepNode -> G.Node
 nodeFromLNode = fst
 
+-- | Get the variable name that this edge refers to.
 depsFromEdge :: DepEdge -> VName
 depsFromEdge = getName . G.edgeLabel
 
+-- | Find all the edges connecting the two nodes.
 edgesBetween :: DepGraph -> G.Node -> G.Node -> [DepEdge]
 edgesBetween dg n1 n2 = G.labEdges $ G.subgraph [n1, n2] $ dgGraph dg
 
@@ -310,6 +319,9 @@ mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
       new_out = filter (\n -> snd n /= n1 && snd n /= n2) (nubOrd (out1 <> out2))
    in (new_inp, n1, mergedlabel, new_out)
 
+-- | Remove the given node, and insert the 'DepContext' into the
+-- graph, replacing any existing information about the node contained
+-- in the 'DepContext'.
 contractEdge :: Monad m => G.Node -> DepContext -> DepGraphAug m
 contractEdge n2 ctx dg = do
   let n1 = G.node' ctx -- n1 remains
@@ -415,15 +427,16 @@ getOutputs node = case node of
   FinalNode {} -> error "Final nodes cannot generate edges"
   (SoacNode _ pat _ _) -> patNames pat
 
-isDep :: EdgeT -> Bool -- Is there a possibility of fusion?
+-- | Is there a possibility of fusion?
+isDep :: EdgeT -> Bool
 isDep (Dep _) = True
 isDep (Res _) = True
 isDep _ = False
 
-isInf :: (G.Node, G.Node, EdgeT) -> Bool -- No possibility of fusion
+-- | Is this an infusible edge?
+isInf :: (G.Node, G.Node, EdgeT) -> Bool
 isInf (_, _, e) = case e of
   InfDep _ -> True
-  Cons _ -> False
   Fake _ -> True -- this is infusible to avoid simultaneous cons/dep edges
   _ -> False
 

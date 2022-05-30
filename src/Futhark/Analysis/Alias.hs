@@ -69,6 +69,7 @@ analyseStms orig_aliases =
           atable' = trackAliases aliases stm'
        in (stms <> oneStm stm', atable')
 
+-- | Perform alias analysis on single statement.
 analyseStm ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->
