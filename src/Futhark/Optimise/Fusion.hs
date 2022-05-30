@@ -209,9 +209,6 @@ vFuseContexts
 makeMap :: Ord a => [a] -> [b] -> M.Map a b
 makeMap x y = M.fromList $ zip x y
 
-fuseMaps :: Ord b => M.Map a b -> M.Map b c -> M.Map a c
-fuseMaps m1 m2 = M.mapMaybe (`M.lookup` m2) m1
-
 makeCopiesOfFusedExcept ::
   (LocalScope SOACS m, MonadFreshNames m) =>
   [VName] ->
@@ -305,11 +302,6 @@ vFuseNodeT
       Nothing -> pure Nothing
 vFuseNodeT _ _ _ _ = pure Nothing
 
-changeAll :: Ord b => [b] -> [a] -> [b] -> [a]
-changeAll orig_names orig_other = mapMaybe (mapping M.!)
-  where
-    mapping = M.map Just $ makeMap orig_names orig_other
-
 resFromLambda :: Lambda rep -> Result
 resFromLambda = bodyResult . lambdaBody
 
@@ -317,18 +309,6 @@ hasNoDifferingInputs :: [H.Input] -> [H.Input] -> Bool
 hasNoDifferingInputs is1 is2 =
   let (vs1, vs2) = (isNotVarInput is1, isNotVarInput $ is2 L.\\ is1)
    in null $ vs1 `L.intersect` vs2
-
-fuseInputs :: [VName] -> [H.Input] -> [H.Input] -> [H.Input]
-fuseInputs fusing inputs1 inputs2 =
-  L.nub $ inputs1 `L.union` filter ((`notElem` fusing) . H.inputArray) inputs2
-
-fuseLambda :: Lambda SOACS -> Lambda SOACS -> Lambda SOACS
-fuseLambda lam_1 lam_2 =
-  lam_2 {lambdaBody = l_body_new}
-  where
-    l_body_1 = lambdaBody lam_1
-    l_body_2 = lambdaBody lam_2
-    l_body_new = insertStms (bodyStms l_body_1) l_body_2
 
 hFuseNodeT :: NodeT -> NodeT -> FusionM (Maybe NodeT)
 hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
