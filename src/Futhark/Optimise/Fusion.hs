@@ -337,96 +337,20 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
     ots1 == mempty,
     ots2 == mempty,
     hasNoDifferingInputs inputs1 inputs2 = do
-      case (soac1, soac2) of
-        ( H.Screma {},
-          H.Screma {}
-          ) -> do
-            let ker =
-                  TF.FusedSOAC
-                    { TF.fsSOAC = soac2,
-                      TF.fsOutputTransform = mempty,
-                      TF.fsOutNames = patNames pats2
-                    }
-                preserve = namesFromList $ patNames pats1
-            r <- TF.attemptFusion preserve (patNames pats1) soac1 ker
-            case r of
-              Just ker' -> do
-                let pats2' =
-                      zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
-                pure $ Just $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2)
-              Nothing -> pure Nothing
-        ( H.Scatter w1 lam_1 i1 outputs1,
-          H.Scatter w2 lam_2 i2 outputs2
-          )
-            | w1 == w2 ->
-                let soac = H.Scatter w2 lam fused_inputs outputs
-                 in pure $ Just $ SoacNode mempty pats soac aux
-            where
-              pats = pats1 <> pats2
-              aux = aux1 <> aux2
-              outputs = outputs1 <> outputs2
-
-              (lam_1_inputs, lam_2_inputs) = (boundByLambda lam_1, boundByLambda lam_2)
-              (lam_1_output, lam_2_output) = (resFromLambda lam_1, resFromLambda lam_2)
-
-              fused_inputs = fuseInputs [] i1 i2
-              fused_inputs_inner = changeAll (i1 ++ i2) (lam_1_inputs ++ lam_2_inputs) fused_inputs
-
-              map1 = makeMap (lam_1_inputs ++ lam_2_inputs) (i1 ++ i2)
-              map4 = makeMap fused_inputs fused_inputs_inner
-              map3 = fuseMaps map1 map4
-
-              lam' = fuseLambda lam_1 lam_2
-
-              lparams =
-                changeAll
-                  (i1 ++ i2)
-                  (lambdaParams lam_1 ++ lambdaParams lam_2)
-                  fused_inputs
-
-              (types1, types2) = (lambdaReturnType lam_1, lambdaReturnType lam_2)
-              (res1, res2) = (resFromLambda lam_1, resFromLambda lam_2)
-
-              (ids1, vals1) = splitScatterResults outputs1 (zip3 types1 res1 lam_1_output)
-              (ids2, vals2) = splitScatterResults outputs2 (zip3 types2 res2 lam_2_output)
-              (types, res, _) = unzip3 $ ids1 ++ ids2 ++ vals1 ++ vals2
-
-              lam =
-                substituteNames map3 $
-                  lam'
-                    { lambdaParams = lparams,
-                      lambdaReturnType = types,
-                      lambdaBody = (lambdaBody lam') {bodyResult = res}
-                    }
-        ( H.Hist w1 ops_1 lam_1 i1,
-          H.Hist w2 ops_2 lam_2 i2 -- pretty much copied too
-          )
-            | w1 == w2 -> do
-                let num_buckets_2 = length ops_2
-                    num_buckets_1 = length ops_1
-                    (body_2, body_1) = (lambdaBody lam_2, lambdaBody lam_1)
-                    body' =
-                      Body
-                        { bodyDec = bodyDec body_1, -- body_p and body_c have the same decorations
-                          bodyStms = bodyStms body_2 <> bodyStms body_1,
-                          bodyResult =
-                            take num_buckets_1 (bodyResult body_1)
-                              ++ take num_buckets_2 (bodyResult body_2)
-                              ++ drop num_buckets_1 (bodyResult body_1)
-                              ++ drop num_buckets_2 (bodyResult body_2)
-                        }
-                    lam' =
-                      Lambda
-                        { lambdaParams = lambdaParams lam_1 ++ lambdaParams lam_2,
-                          lambdaBody = body',
-                          lambdaReturnType =
-                            replicate (num_buckets_1 + num_buckets_2) (Prim int64)
-                              ++ drop num_buckets_1 (lambdaReturnType lam_1)
-                              ++ drop num_buckets_2 (lambdaReturnType lam_2)
-                        }
-                    soac = H.Hist w1 (ops_1 <> ops_2) lam' (i1 <> i2)
-                pure $ Just $ SoacNode mempty (pats1 <> pats2) soac (aux1 <> aux2)
-        _ -> pure Nothing
+      let ker =
+            TF.FusedSOAC
+              { TF.fsSOAC = soac2,
+                TF.fsOutputTransform = mempty,
+                TF.fsOutNames = patNames pats2
+              }
+          preserve = namesFromList $ patNames pats1
+      r <- TF.attemptFusion preserve (patNames pats1) soac1 ker
+      case r of
+        Just ker' -> do
+          let pats2' =
+                zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
+          pure $ Just $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2)
+        Nothing -> pure Nothing
 hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
