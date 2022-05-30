@@ -43,7 +43,6 @@ import qualified Futhark.Analysis.HORep.SOAC as H
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
-import Futhark.Transform.Substitute
 import Futhark.Util (nubOrd)
 
 -- | Information associated with an edge in the graph.
@@ -84,39 +83,6 @@ instance Show NodeT where
   show (IfNode stm _) = "If: " ++ L.intercalate ", " (map pretty $ stmNames stm)
   show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map pretty $ stmNames stm)
 
-instance Substitute EdgeT where
-  substituteNames m edgeT =
-    setName (substituteNames m (getName edgeT)) edgeT
-
-instance Substitute NodeT where
-  substituteNames m nodeT = case nodeT of
-    StmNode stm -> StmNode (f stm)
-    SoacNode ots pat soac aux ->
-      let soac' = case soac of
-            H.Stream se sf la ses ins -> H.Stream (f se) (fStreamForm sf) (f la) (f ses) (f ins)
-            H.Scatter se la ins x0 -> H.Scatter (f se) (f la) (f ins) (map fShape x0)
-            H.Screma se sf ins -> H.Screma (f se) (fScremaForm sf) (f ins)
-            H.Hist se hos la ins -> H.Hist (f se) (map fHistOp hos) (f la) (f ins)
-       in SoacNode (f ots) (f pat) soac' (f aux)
-    RNode vn -> RNode (f vn)
-    InNode vn -> InNode (f vn)
-    FinalNode stms1 nt stms2 -> FinalNode (fmap f stms1) (f nt) (fmap f stms2)
-    IfNode stm nodes -> IfNode (f stm) (map f nodes)
-    DoNode stm nodes -> DoNode (f stm) (map f nodes)
-    where
-      f :: Substitute a => a -> a
-      f = substituteNames m
-      fStreamForm :: StreamForm SOACS -> StreamForm SOACS
-      fStreamForm (Parallel o comm lam0) =
-        Parallel o comm (f lam0)
-      fStreamForm s = s
-      fShape (shp, i, vn) = (f shp, i, f vn)
-      fHistOp (HistOp shape rf op_arrs nes op) =
-        HistOp (f shape) (f rf) (f op_arrs) (f nes) (f op)
-      fScremaForm (ScremaForm scans reds lam) = ScremaForm (map fScan scans) (map fRed reds) (f lam)
-      fScan (Scan red_lam red_nes) = Scan (f red_lam) (map f red_nes)
-      fRed (Reduce comm red_lam red_nes) = Reduce comm (f red_lam) (map f red_nes)
-
 -- | The name that this edge depends on.
 getName :: EdgeT -> VName
 getName edgeT = case edgeT of
@@ -126,15 +92,6 @@ getName edgeT = case edgeT of
   Cons vn -> vn
   Fake vn -> vn
   Res vn -> vn
-
-setName :: VName -> EdgeT -> EdgeT
-setName vn edgeT = case edgeT of
-  Alias _ -> Alias vn
-  InfDep _ -> InfDep vn
-  Dep _ -> Dep vn
-  Cons _ -> Cons vn
-  Fake _ -> Fake vn
-  Res _ -> Res vn
 
 -- does the node acutally represent something in the program
 -- (non-real nodes are not delayed-fused into other nodes)
