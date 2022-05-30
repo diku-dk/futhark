@@ -5,27 +5,32 @@
 -- more general.  An important property is that it does not handle
 -- "nested bodies" (e.g. 'If'); these are represented as single nodes.
 module Futhark.Optimise.Fusion.GraphRep
-  ( EdgeT (..),
+  ( -- * Data structure
+    EdgeT (..),
     NodeT (..),
     DepContext,
     DepGraphAug,
     DepGraph (..),
-    mkDepGraph,
     DepNode,
+
+    -- * Construction
+    mkDepGraph,
     pprg,
+
+    -- * Queries
     getName,
-    isRealNode,
     nodeFromLNode,
     mergedContext,
     mapAcross,
     edgesBetween,
     reachable,
-    isDep,
-    isInf,
     applyAugs,
     depsFromEdge,
     contractEdge,
+    isRealNode,
     isCons,
+    isDep,
+    isInf,
   )
 where
 
