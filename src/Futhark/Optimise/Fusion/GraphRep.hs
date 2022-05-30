@@ -70,8 +70,14 @@ data EdgeT
 data NodeT
   = StmNode (Stm SOACS)
   | SoacNode H.ArrayTransforms (Pat Type) (H.SOAC SOACS) (StmAux (ExpDec SOACS))
-  | RNode VName
-  | InNode VName
+  | -- | Node corresponding to a result of the entire computation
+    -- (i.e. the 'Result' of a body).  Any node that is not
+    -- transitively reachable from one of these can be considered
+    -- dead.
+    ResNode VName
+  | -- | Node corresponding to a free variable.
+    -- Unclear whether we actually need these.
+    FreeNode VName
   | FinalNode (Stms SOACS) NodeT (Stms SOACS)
   | IfNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
@@ -89,8 +95,8 @@ instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map pretty $ patNames pat
   show (SoacNode _ pat _ _) = pretty pat
   show (FinalNode _ nt _) = show nt
-  show (RNode name) = pretty $ "Res: " ++ pretty name
-  show (InNode name) = pretty $ "Input: " ++ pretty name
+  show (ResNode name) = pretty $ "Res: " ++ pretty name
+  show (FreeNode name) = pretty $ "Input: " ++ pretty name
   show (IfNode stm _) = "If: " ++ L.intercalate ", " (map pretty $ stmNames stm)
   show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map pretty $ stmNames stm)
 
@@ -108,8 +114,8 @@ getName edgeT = case edgeT of
 -- "non-real" node represents things like fake nodes inserted to
 -- express ordering due to consumption.
 isRealNode :: NodeT -> Bool
-isRealNode RNode {} = False
-isRealNode InNode {} = False
+isRealNode ResNode {} = False
+isRealNode FreeNode {} = False
 isRealNode _ = True
 
 -- | Prettyprint dependency graph.
@@ -161,8 +167,8 @@ emptyGraph stms res inputs =
   where
     labelNodes = zip [0 ..]
     stmnodes = map StmNode $ stmsToList stms
-    resnodes = map RNode $ namesToList res
-    inputnodes = map InNode $ namesToList inputs
+    resnodes = map ResNode $ namesToList res
+    inputnodes = map FreeNode $ namesToList inputs
 
 makeMapping :: Monad m => DepGraphAug m
 makeMapping dg@(DepGraph {dgGraph = g}) =
@@ -177,11 +183,10 @@ makeAliasTable stms dg = do
   let (_, (aliasTable', _)) = Alias.analyseStms mempty stms
   pure $ dg {dgAliasTable = aliasTable'}
 
--- | Make a dependency graph corresponding to a 'Body' and with the
--- provided "inputs" (i.e. free variables).
-mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> Names -> m DepGraph
-mkDepGraph (Body () stms res) inputs = do
-  let g = emptyGraph stms (freeIn res) inputs
+-- | Make a dependency graph corresponding to a 'Body'.
+mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> m DepGraph
+mkDepGraph body@(Body () stms res) = do
+  let g = emptyGraph stms (freeIn res) (freeIn body)
   applyAugs
     [ makeMapping,
       makeAliasTable stms,
@@ -398,14 +403,14 @@ getStmCons (StmNode s) = zip names (map Cons names)
 getStmCons _ = []
 
 getStmRes :: EdgeGenerator
-getStmRes (RNode name) = [(name, Res name)]
+getStmRes (ResNode name) = [(name, Res name)]
 getStmRes _ = []
 
 getOutputs :: NodeT -> [VName]
 getOutputs node = case node of
   (StmNode stm) -> stmNames stm
-  (RNode _) -> []
-  (InNode name) -> [name]
+  (ResNode _) -> []
+  (FreeNode name) -> [name]
   (IfNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
   FinalNode {} -> error "Final nodes cannot generate edges"

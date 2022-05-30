@@ -78,11 +78,6 @@ dontFuseScans m = do
   modify (\s -> s {fuseScans = fs})
   pure r
 
-isArray :: Typed t => Param t -> Bool
-isArray p = case paramType p of
-  Array {} -> True
-  _ -> False
-
 unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> Bool
 unreachableEitherDir g a b =
   not (reachable g a b || reachable g b a)
@@ -98,8 +93,8 @@ finalizeNode nt = case nt of
     auxing aux $ letBindNames untransformed_outputs . Op =<< H.toSOAC soac
     forM_ (zip (patNames outputs) untransformed_outputs) $ \(output, v) ->
       letBindNames [output] . BasicOp . SubExp . Var =<< H.applyTransforms ots v
-  RNode _ -> pure mempty
-  InNode _ -> pure mempty
+  ResNode _ -> pure mempty
+  FreeNode _ -> pure mempty
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm
@@ -497,14 +492,13 @@ doAllFusion =
 
 runInnerFusionOnContext :: DepContext -> FusionM DepContext
 runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
-  DoNode (Let pat aux (DoLoop params form body)) toFuse ->
+  DoNode (Let pat aux (DoLoop params form body)) to_fuse ->
     doFuseScans . localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
-      let extra_is = namesFromList $ map (paramName . fst) (filter (isArray . fst) params)
-      b <- doFusionWithDelayed body extra_is toFuse
+      b <- doFusionWithDelayed body to_fuse
       pure (incoming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
-  IfNode (Let pat aux (If sz b1 b2 dec)) toFuse -> doFuseScans $ do
-    b1' <- doFusionWithDelayed b1 mempty toFuse
-    b2' <- doFusionWithDelayed b2 mempty toFuse
+  IfNode (Let pat aux (If sz b1 b2 dec)) to_fuse -> doFuseScans $ do
+    b1' <- doFusionWithDelayed b1 to_fuse
+    b2' <- doFusionWithDelayed b2 to_fuse
     rb2' <- renameBody b2'
     pure (incoming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
   SoacNode ots pat soac aux -> do
@@ -513,9 +507,9 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     prev_count <- gets fusionCount
     newbody <- localScope (scopeOf lam) $ case soac of
       H.Stream _ Sequential {} _ _ _ ->
-        dontFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
+        dontFuseScans $ doFusionInner (lambdaBody lam)
       _ ->
-        doFuseScans $ doFusionInner (lambdaBody lam) (lambdaParams lam)
+        doFuseScans $ doFusionInner (lambdaBody lam)
     aft_count <- gets fusionCount
     -- To clean up any inner fusion.
     lam' <-
@@ -525,31 +519,20 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     pure (incoming, node, nodeT', outgoing)
   _ -> pure c
   where
-    doFusionWithDelayed :: Body SOACS -> Names -> [(NodeT, [EdgeT])] -> FusionM (Body SOACS)
-    doFusionWithDelayed (Body () stms res) extraInputs extraNodes = localScope (scopeOf stms) $ do
+    doFusionWithDelayed :: Body SOACS -> [(NodeT, [EdgeT])] -> FusionM (Body SOACS)
+    doFusionWithDelayed (Body () stms res) extraNodes = localScope (scopeOf stms) $ do
       stm_node <- mapM (finalizeNode . fst) extraNodes
-      stms' <- fuseGraph (mkBody (mconcat stm_node <> stms) res) inputs
+      stms' <- fuseGraph (mkBody (mconcat stm_node <> stms) res)
       pure $ Body () stms' res
-      where
-        inputs = namesFromList (map (vNameFromAdj node) outgoing) <> extraInputs
-    doFusionInner :: Body SOACS -> [LParam SOACS] -> FusionM (Body SOACS)
-    doFusionInner body inp = do
-      stms' <- fuseGraph body inputs
+    doFusionInner :: Body SOACS -> FusionM (Body SOACS)
+    doFusionInner body = do
+      stms' <- fuseGraph body
       pure $ body {bodyStms = stms'}
-      where
-        lambda_inputs = map paramName (filter isArray inp)
-        other_inputs = map (vNameFromAdj node) $ filter (not . isDep . fst) outgoing
-        inputs = namesFromList $ other_inputs ++ lambda_inputs
-
--- lazy version of fuse graph - removes inputs from the graph that are not arrays
-fuseGraphLZ :: Body SOACS -> [Param DeclType] -> FusionM (Stms SOACS)
-fuseGraphLZ body inputs =
-  fuseGraph body $ namesFromList $ map paramName $ filter isArray inputs
 
 -- main fusion function.
-fuseGraph :: Body SOACS -> Names -> FusionM (Stms SOACS)
-fuseGraph body inputs = localScope (scopeOf (bodyStms body)) $ do
-  graph_not_fused <- mkDepGraph body inputs
+fuseGraph :: Body SOACS -> FusionM (Stms SOACS)
+fuseGraph body = localScope (scopeOf (bodyStms body)) $ do
+  graph_not_fused <- mkDepGraph body
   graph_fused <- doAllFusion graph_not_fused
   linearizeGraph graph_fused
 
@@ -558,7 +541,7 @@ fuseConsts outputs stms =
   runFusionM
     (scopeOf stms)
     freshFusionEnv
-    (fuseGraphLZ (mkBody stms (varsRes outputs)) [])
+    (fuseGraph (mkBody stms (varsRes outputs)))
 
 fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 fuseFun consts fun = do
@@ -566,7 +549,7 @@ fuseFun consts fun = do
     runFusionM
       (scopeOf fun <> scopeOf consts)
       freshFusionEnv
-      (fuseGraphLZ (funDefBody fun) (funDefParams fun))
+      (fuseGraph (funDefBody fun))
   pure fun {funDefBody = (funDefBody fun) {bodyStms = fun_stms'}}
 
 -- | The pass definition.
