@@ -14,7 +14,6 @@ import qualified Data.Graph.Inductive.Query.DFS as Q
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Debug.Trace
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.HORep.SOAC as H
 import Futhark.Construct
@@ -27,7 +26,6 @@ import qualified Futhark.Optimise.Fusion.TryFusion as TF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (isEnvVarAtLeast)
 
 data FusionEnv = FusionEnv
   { vNameSource :: VNameSource,
@@ -301,22 +299,6 @@ vFuseNodeT
         else pure Nothing
     case r of
       Just ker' -> do
-        when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
-          traceM $
-            unlines
-              [ show preserve,
-                "vfused",
-                pretty soac1,
-                "outputs",
-                pretty (pats1, show ots1),
-                "and",
-                pretty soac2,
-                "got",
-                pretty (TF.fsSOAC <$> r),
-                "outputs",
-                pretty (TF.fsOutNames <$> r)
-              ]
-
         let pats2' =
               zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
         fusedSomething $
@@ -372,21 +354,6 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
                     }
                 preserve = namesFromList $ patNames pats1
             r <- TF.attemptFusion preserve (patNames pats1) soac1 ker
-            when (isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1) $
-              traceM $
-                unlines
-                  [ show preserve,
-                    "hfused",
-                    pretty soac1,
-                    "outputs",
-                    pretty pats1,
-                    "and",
-                    pretty soac2,
-                    "got",
-                    pretty (TF.fsSOAC <$> r),
-                    "outputs",
-                    pretty (TF.fsOutNames <$> r)
-                  ]
             case r of
               Just ker' -> do
                 let pats2' =
@@ -584,18 +551,8 @@ fuseGraphLZ stms results inputs =
 fuseGraph :: Stms SOACS -> Names -> Names -> FusionM (Stms SOACS)
 fuseGraph stms results inputs = localScope (scopeOf stms) $ do
   graph_not_fused <- mkDepGraph stms results inputs
-
-  let graph_not_fused'
-        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 =
-            trace (pprg graph_not_fused) graph_not_fused
-        | otherwise = graph_not_fused
-  graph_fused <- doAllFusion graph_not_fused'
-  let graph_fused'
-        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 =
-            trace (pprg graph_fused) graph_fused
-        | otherwise = graph_fused
-
-  linearizeGraph graph_fused'
+  graph_fused <- doAllFusion graph_not_fused
+  linearizeGraph graph_fused
 
 fuseConsts :: [VName] -> Stms SOACS -> PassM (Stms SOACS)
 fuseConsts outputs stms =
