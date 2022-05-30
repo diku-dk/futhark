@@ -117,6 +117,7 @@ instance Substitute NodeT where
       fScan (Scan red_lam red_nes) = Scan (f red_lam) (map f red_nes)
       fRed (Reduce comm red_lam red_nes) = Reduce comm (f red_lam) (map f red_nes)
 
+-- | The name that this edge depends on.
 getName :: EdgeT -> VName
 getName edgeT = case edgeT of
   Alias vn -> vn
@@ -142,6 +143,7 @@ isRealNode RNode {} = False
 isRealNode InNode {} = False
 isRealNode _ = True
 
+-- | Prettyprint dependency graph.
 pprg :: DepGraph -> String
 pprg = G.showDot . G.fglToDotString . G.nemap show show . dgGraph
 
