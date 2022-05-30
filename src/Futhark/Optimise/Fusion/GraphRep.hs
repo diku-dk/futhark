@@ -157,8 +157,8 @@ type EdgeGenerator = NodeT -> [(VName, EdgeT)]
 type ProducerMapping = M.Map VName G.Node
 
 -- | Construct a graph with only nodes, but no edges.
-emptyGraph :: Stms SOACS -> Names -> Names -> DepGraph
-emptyGraph stms res inputs =
+emptyGraph :: Body SOACS -> DepGraph
+emptyGraph body =
   DepGraph
     { dgGraph = G.mkGraph (labelNodes (stmnodes <> resnodes <> inputnodes)) [],
       dgProducerMapping = mempty,
@@ -166,9 +166,9 @@ emptyGraph stms res inputs =
     }
   where
     labelNodes = zip [0 ..]
-    stmnodes = map StmNode $ stmsToList stms
-    resnodes = map ResNode $ namesToList res
-    inputnodes = map FreeNode $ namesToList inputs
+    stmnodes = map StmNode $ stmsToList $ bodyStms body
+    resnodes = map ResNode $ namesToList $ freeIn $ bodyResult body
+    inputnodes = map FreeNode $ namesToList $ freeIn body
 
 makeMapping :: Monad m => DepGraphAug m
 makeMapping dg@(DepGraph {dgGraph = g}) =
@@ -185,14 +185,13 @@ makeAliasTable stms dg = do
 
 -- | Make a dependency graph corresponding to a 'Body'.
 mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> m DepGraph
-mkDepGraph body@(Body () stms res) = do
-  let g = emptyGraph stms (freeIn res) (freeIn body)
-  applyAugs
-    [ makeMapping,
-      makeAliasTable stms,
-      initialGraphConstruction
-    ]
-    g
+mkDepGraph body = applyAugs augs $ emptyGraph body
+  where
+    augs =
+      [ makeMapping,
+        makeAliasTable (bodyStms body),
+        initialGraphConstruction
+      ]
 
 -- | Apply several graph augmentations in sequence.
 applyAugs :: Monad m => [DepGraphAug m] -> DepGraphAug m
