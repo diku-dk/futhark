@@ -247,6 +247,16 @@ addCons = augWithFun getStmCons
         names = namesToList . consumedInStm . Alias.analyseStm mempty $ s
     getStmCons _ = []
 
+addAliases :: Monad m => DepGraphAug m
+addAliases = augWithFun toAlias
+  where
+    toAlias =
+      map (\vname -> (vname, Alias vname))
+        . namesToList
+        . foldMap aliasInputs
+        . stmFromNode
+    aliasInputs = mconcat . expAliases . Alias.analyseExp mempty . stmExp
+
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it (now also adds fake edges to aliases - hope this
 -- fixes asymptotic complexity guarantees)
@@ -265,15 +275,6 @@ addExtraCons dg =
       (to2, _) <- filter p $ concatMap (G.lpre g) to' <> G.lpre g to
       pure $ G.toLEdge (from, to2) (Fake cname)
     makeEdge _ = []
-
-addAliases :: Monad m => DepGraphAug m
-addAliases = augWithFun toAlias
-  where
-    toAlias =
-      map (\vname -> (vname, Alias vname))
-        . namesToList
-        . foldMap aliasInputs
-        . stmFromNode
 
 mapAcrossNodeTs :: Monad m => (NodeT -> m NodeT) -> DepGraphAug m
 mapAcrossNodeTs f = mapAcross f'
@@ -304,8 +305,8 @@ initialGraphConstruction =
   applyAugs
     [ addDeps,
       addCons,
-      addExtraCons,
       addAliases,
+      addExtraCons,
       addResEdges,
       convertGraph -- Must be done after adding edges
     ]
@@ -396,9 +397,6 @@ expInputs e
       S.singleton (arr, SOACInput)
         <> freeClassifications (freeIn e `namesSubtract` oneName arr)
   | otherwise = freeClassifications e
-
-aliasInputs :: Stm SOACS -> Names
-aliasInputs = mconcat . expAliases . Alias.analyseExp mempty . stmExp
 
 stmNames :: Stm SOACS -> [VName]
 stmNames = patNames . stmPat
