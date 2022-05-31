@@ -10,8 +10,8 @@
 --   [7.0, 1.0, -9.8]
 -- }
 -- structure {
---    Stream 0
---    Screma 3
+--    /Stream 1
+--    /Screma 0
 -- }
 --
 def main(arr: []f64): (f64,[]f64,[]f64,[]f64,[]f64) =
