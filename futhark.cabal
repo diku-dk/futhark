@@ -240,7 +240,8 @@ library
       Futhark.Optimise.DoubleBuffer
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
-      Futhark.Optimise.Fusion.LoopKernel
+      Futhark.Optimise.Fusion.GraphRep
+      Futhark.Optimise.Fusion.TryFusion
       Futhark.Optimise.GenRedOpt
       Futhark.Optimise.HistAccs
       Futhark.Optimise.InPlaceLowering
@@ -363,6 +364,8 @@ library
     , directory >=1.3.0.0
     , directory-tree >=0.12.1
     , dlist >=0.6.0.1
+    , fgl
+    , fgl-visualize
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=4.12.4

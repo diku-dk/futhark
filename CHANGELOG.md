@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* New fusion engine by Amar Topalovic and Walter Restelli-Nielsen.
+  Fuses more, which is good for some programs and bad for others.
+  Most programs see no change.  This is mainly a robust foundation for
+  further improvements.
+
 ### Removed
 
 ### Changed
