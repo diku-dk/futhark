@@ -13,7 +13,6 @@ module Futhark.Analysis.Alias
 
     -- * Ad-hoc utilities
     analyseFun,
-    analyseStm,
     analyseStms,
     analyseExp,
     analyseBody,
@@ -69,7 +68,6 @@ analyseStms orig_aliases =
           atable' = trackAliases aliases stm'
        in (stms <> oneStm stm', atable')
 
--- | Perform alias analysis on single statement.
 analyseStm ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   AliasTable ->
@@ -97,8 +95,7 @@ analyseExp aliases (If cond tb fb dec) =
         any (`nameIn` unAliases cons) $
           v : namesToList (M.findWithDefault mempty v aliases)
       notConsumed =
-        AliasDec
-          . namesFromList
+        AliasDec . namesFromList
           . filter (not . isConsumed)
           . namesToList
           . unAliases

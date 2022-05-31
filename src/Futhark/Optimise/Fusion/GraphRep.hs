@@ -239,23 +239,21 @@ addDeps = augWithFun toDep
           mkInfDep vname = (vname, InfDep vname)
        in map mkDep fusible <> map mkInfDep infusible
 
-addCons :: Monad m => DepGraphAug m
-addCons = augWithFun getStmCons
+addConsAndAliases :: Monad m => DepGraphAug m
+addConsAndAliases = augWithFun edges
   where
-    getStmCons (StmNode s) = zip names (map Cons names)
+    edges (StmNode s) = consEdges e <> aliasEdges e
       where
-        names = namesToList . consumedInStm . Alias.analyseStm mempty $ s
-    getStmCons _ = []
-
-addAliases :: Monad m => DepGraphAug m
-addAliases = augWithFun toAlias
-  where
-    toAlias =
+        e = Alias.analyseExp mempty $ stmExp s
+    edges _ = mempty
+    consEdges e = zip names (map Cons names)
+      where
+        names = namesToList $ consumedInExp e
+    aliasEdges =
       map (\vname -> (vname, Alias vname))
         . namesToList
-        . foldMap aliasInputs
-        . stmFromNode
-    aliasInputs = mconcat . expAliases . Alias.analyseExp mempty . stmExp
+        . mconcat
+        . expAliases
 
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it (now also adds fake edges to aliases - hope this
@@ -304,8 +302,7 @@ initialGraphConstruction :: (HasScope SOACS m, Monad m) => DepGraphAug m
 initialGraphConstruction =
   applyAugs
     [ addDeps,
-      addCons,
-      addAliases,
+      addConsAndAliases,
       addExtraCons,
       addResEdges,
       convertGraph -- Must be done after adding edges
