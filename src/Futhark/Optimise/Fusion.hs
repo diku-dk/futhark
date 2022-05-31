@@ -406,6 +406,9 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   StmNode (Let pat aux (Op (Futhark.JVP lam args vec))) -> doFuseScans $ do
     lam' <- doFusionLambda lam
     pure (incoming, node, StmNode (Let pat aux (Op (Futhark.JVP lam' args vec))), outgoing)
+  StmNode (Let pat aux (WithAcc inputs lam)) -> doFuseScans $ do
+    lam' <- doFusionLambda lam
+    pure (incoming, node, StmNode (Let pat aux (WithAcc inputs lam')), outgoing)
   SoacNode ots pat soac aux -> do
     let lam = H.lambda soac
     lam' <- localScope (scopeOf lam) $ case soac of
