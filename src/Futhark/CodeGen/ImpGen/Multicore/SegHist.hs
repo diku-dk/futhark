@@ -115,10 +115,11 @@ atomicHistogram pat space histops kbody = do
 
   atomicOps <- mapM onOpAtomic histops
 
+
   body <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
-    generateChunkLoop "SegHist" Scalar $ \flat_idx -> do
+    inISPC $ generateChunkLoop "SegHist" Vectorized $ \flat_idx -> do
       zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
       compileStms mempty (kernelBodyStms kbody) $ do
         let (red_res, map_res) =
