@@ -58,10 +58,6 @@ standardPipeline =
       simplifySOACS,
       performCSE True,
       simplifySOACS,
-      -- We run fusion twice
-      fuseSOACs,
-      performCSE True,
-      simplifySOACS,
       fuseSOACs,
       performCSE True,
       simplifySOACS,
@@ -79,8 +75,6 @@ adPipeline =
       performCSE True,
       fuseSOACs,
       performCSE True,
-      simplifySOACS,
-      fuseSOACs,
       simplifySOACS
     ]
 
