@@ -150,9 +150,6 @@ data DepGraph = DepGraph
 -- | A "graph augmentation" is a monadic action that modifies the graph.
 type DepGraphAug m = DepGraph -> m DepGraph
 
--- 'DepGenerator's can be used to make 'EdgeGenerators'.
-type DepGenerator = Stm SOACS -> Names
-
 -- | For each node, what producer should the node depend on and what
 -- type is it.
 type EdgeGenerator = NodeT -> [(VName, EdgeT)]
@@ -212,8 +209,8 @@ initialGraphConstruction =
     [ addDeps,
       addCons,
       addExtraCons,
-      addResEdges,
       addAliases,
+      addResEdges,
       convertGraph -- Must be done after adding edges
     ]
 
@@ -302,15 +299,41 @@ reachable dg source target = target `elem` Q.reachable source (dgGraph dg)
 augWithFun :: Monad m => EdgeGenerator -> DepGraphAug m
 augWithFun f dg = genEdges (G.labNodes (dgGraph dg)) f dg
 
-toAlias :: DepGenerator -> EdgeGenerator
-toAlias f =
-  map (\vname -> (vname, Alias vname)) . namesToList . foldMap f . stmFromNode
-
-addAliases :: Monad m => DepGraphAug m
-addAliases = augWithFun $ toAlias aliasInputs
-
 addCons :: Monad m => DepGraphAug m
 addCons = augWithFun getStmCons
+  where
+    getStmCons (StmNode s) = zip names (map Cons names)
+      where
+        names = namesToList . consumedInStm . Alias.analyseStm mempty $ s
+    getStmCons _ = []
+
+-- extra dependencies mask the fact that consuming nodes "depend" on all other
+-- nodes coming before it (now also adds fake edges to aliases - hope this
+-- fixes asymptotic complexity guarantees)
+addExtraCons :: Monad m => DepGraphAug m
+addExtraCons dg =
+  depGraphInsertEdges (concatMap makeEdge (G.labEdges g)) dg
+  where
+    g = dgGraph dg
+    alias_table = dgAliasTable dg
+    mapping = dgProducerMapping dg
+    makeEdge (from, to, Cons cname) = do
+      let aliases = namesToList $ M.findWithDefault mempty cname alias_table
+          to' = map (mapping M.!) aliases
+          p (tonode, toedge) =
+            tonode /= from && getName toedge `elem` (cname : aliases)
+      (to2, _) <- filter p $ concatMap (G.lpre g) to' <> G.lpre g to
+      pure $ G.toLEdge (from, to2) (Fake cname)
+    makeEdge _ = []
+
+addAliases :: Monad m => DepGraphAug m
+addAliases = augWithFun toAlias
+  where
+    toAlias =
+      map (\vname -> (vname, Alias vname))
+        . namesToList
+        . foldMap aliasInputs
+        . stmFromNode
 
 -- | Merges two contexts.
 mergedContext :: Ord b => a -> G.Context a b -> G.Context a b -> G.Context a b
@@ -326,32 +349,6 @@ contractEdge :: Monad m => G.Node -> DepContext -> DepGraphAug m
 contractEdge n2 ctx dg = do
   let n1 = G.node' ctx -- n1 remains
   pure $ dg {dgGraph = ctx G.& G.delNodes [n1, n2] (dgGraph dg)}
-
--- extra dependencies mask the fact that consuming nodes "depend" on all other
--- nodes coming before it (now also adds fake edges to aliases - hope this
--- fixes asymptotic complexity guarantees)
-addExtraCons :: Monad m => DepGraphAug m
-addExtraCons dg = do
-  let aliasTab = dgAliasTable dg
-      mapping = dgProducerMapping dg
-      edges = concatMap (make_edge aliasTab mapping) (G.labEdges g)
-  depGraphInsertEdges edges dg
-  where
-    g = dgGraph dg
-    make_edge :: AliasTable -> M.Map VName G.Node -> DepEdge -> [DepEdge]
-    make_edge aliasTab mapping (from, to, Cons cname) =
-      let aliases = namesToList $ M.findWithDefault (namesFromList []) cname aliasTab
-          to' = map (mapping M.!) aliases
-       in [ G.toLEdge (from, to2) (Fake cname)
-            | (to2, _) <-
-                filter
-                  ( \(tonode, toedge) ->
-                      tonode /= from
-                        && getName toedge `elem` (cname : aliases)
-                  )
-                  $ concatMap (G.lpre g) to' <> G.lpre g to
-          ]
-    make_edge _ _ _ = []
 
 addResEdges :: Monad m => DepGraphAug m
 addResEdges = augWithFun getStmRes
@@ -406,12 +403,6 @@ aliasInputs = mconcat . expAliases . Alias.analyseExp mempty . stmExp
 
 stmNames :: Stm SOACS -> [VName]
 stmNames = patNames . stmPat
-
-getStmCons :: EdgeGenerator
-getStmCons (StmNode s) = zip names (map Cons names)
-  where
-    names = namesToList . consumedInStm . Alias.analyseStm mempty $ s
-getStmCons _ = []
 
 getStmRes :: EdgeGenerator
 getStmRes (ResNode name) = [(name, Res name)]
