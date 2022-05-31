@@ -400,20 +400,22 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     b2' <- doFusionWithDelayed b2 to_fuse
     rb2' <- renameBody b2'
     pure (incoming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
+  StmNode (Let pat aux (Op (Futhark.VJP lam args vec))) -> doFuseScans $ do
+    lam' <- doFusionLambda lam
+    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP lam' args vec))), outgoing)
+  StmNode (Let pat aux (Op (Futhark.JVP lam args vec))) -> doFuseScans $ do
+    lam' <- doFusionLambda lam
+    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.JVP lam' args vec))), outgoing)
+  StmNode (Let pat aux (WithAcc inputs lam)) -> doFuseScans $ do
+    lam' <- doFusionLambda lam
+    pure (incoming, node, StmNode (Let pat aux (WithAcc inputs lam')), outgoing)
   SoacNode ots pat soac aux -> do
-    -- To clean up previous instances of fusion.
-    lam <- simplifyLambda $ H.lambda soac
-    prev_count <- gets fusionCount
-    newbody <- localScope (scopeOf lam) $ case soac of
+    let lam = H.lambda soac
+    lam' <- localScope (scopeOf lam) $ case soac of
       H.Stream _ Sequential {} _ _ _ ->
-        dontFuseScans $ doFusionInner (lambdaBody lam)
+        dontFuseScans $ doFusionLambda lam
       _ ->
-        doFuseScans $ doFusionInner (lambdaBody lam)
-    aft_count <- gets fusionCount
-    -- To clean up any inner fusion.
-    lam' <-
-      (if prev_count /= aft_count then simplifyLambda else pure)
-        lam {lambdaBody = newbody}
+        doFuseScans $ doFusionLambda lam
     let nodeT' = SoacNode ots pat (H.setLambda lam' soac) aux
     pure (incoming, node, nodeT', outgoing)
   _ -> pure c
@@ -423,10 +425,20 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
       stm_node <- mapM (finalizeNode . fst) extraNodes
       stms' <- fuseGraph (mkBody (mconcat stm_node <> stms) res)
       pure $ Body () stms' res
-    doFusionInner :: Body SOACS -> FusionM (Body SOACS)
-    doFusionInner body = do
+    doFusionBody :: Body SOACS -> FusionM (Body SOACS)
+    doFusionBody body = do
       stms' <- fuseGraph body
       pure $ body {bodyStms = stms'}
+    doFusionLambda :: Lambda SOACS -> FusionM (Lambda SOACS)
+    doFusionLambda lam = do
+      -- To clean up previous instances of fusion.
+      lam' <- simplifyLambda lam
+      prev_count <- gets fusionCount
+      newbody <- localScope (scopeOf lam') $ doFusionBody $ lambdaBody lam'
+      aft_count <- gets fusionCount
+      -- To clean up any inner fusion.
+      (if prev_count /= aft_count then simplifyLambda else pure)
+        lam' {lambdaBody = newbody}
 
 -- main fusion function.
 fuseGraph :: Body SOACS -> FusionM (Stms SOACS)
