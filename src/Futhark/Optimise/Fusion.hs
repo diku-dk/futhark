@@ -309,11 +309,9 @@ hasNoDifferingInputs is1 is2 =
 
 hFuseNodeT :: NodeT -> NodeT -> FusionM (Maybe NodeT)
 hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
-  | inputs1 <- H.inputs soac1,
-    inputs2 <- H.inputs soac2,
-    ots1 == mempty,
+  | ots1 == mempty,
     ots2 == mempty,
-    hasNoDifferingInputs inputs1 inputs2 = do
+    hasNoDifferingInputs (H.inputs soac1) (H.inputs soac2) = do
       let ker =
             TF.FusedSOAC
               { TF.fsSOAC = soac2,
