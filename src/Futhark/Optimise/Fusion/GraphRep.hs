@@ -188,16 +188,6 @@ makeAliasTable stms dg = do
   let (_, (aliasTable', _)) = Alias.analyseStms mempty stms
   pure $ dg {dgAliasTable = aliasTable'}
 
--- | Make a dependency graph corresponding to a 'Body'.
-mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> m DepGraph
-mkDepGraph body = applyAugs augs $ emptyGraph body
-  where
-    augs =
-      [ makeMapping,
-        makeAliasTable (bodyStms body),
-        initialGraphConstruction
-      ]
-
 -- | Apply several graph augmentations in sequence.
 applyAugs :: Monad m => [DepGraphAug m] -> DepGraphAug m
 applyAugs augs g = foldlM (flip ($)) g augs
@@ -226,6 +216,16 @@ initialGraphConstruction =
       addAliases,
       convertGraph -- Must be done after adding edges
     ]
+
+-- | Make a dependency graph corresponding to a 'Body'.
+mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> m DepGraph
+mkDepGraph body = applyAugs augs $ emptyGraph body
+  where
+    augs =
+      [ makeMapping,
+        makeAliasTable (bodyStms body),
+        initialGraphConstruction
+      ]
 
 -- | Creates deps for the given nodes on the graph using the 'EdgeGenerator'.
 genEdges :: Monad m => [DepNode] -> EdgeGenerator -> DepGraphAug m
@@ -340,14 +340,14 @@ addExtraCons dg = do
     g = dgGraph dg
     make_edge :: AliasTable -> M.Map VName G.Node -> DepEdge -> [DepEdge]
     make_edge aliasTab mapping (from, to, Cons cname) =
-      let aliasses = namesToList $ M.findWithDefault (namesFromList []) cname aliasTab
-          to' = map (mapping M.!) aliasses
+      let aliases = namesToList $ M.findWithDefault (namesFromList []) cname aliasTab
+          to' = map (mapping M.!) aliases
        in [ G.toLEdge (from, to2) (Fake cname)
             | (to2, _) <-
                 filter
                   ( \(tonode, toedge) ->
                       tonode /= from
-                        && getName toedge `elem` aliasses <> [cname]
+                        && getName toedge `elem` (cname : aliases)
                   )
                   $ concatMap (G.lpre g) to' <> G.lpre g to
           ]
