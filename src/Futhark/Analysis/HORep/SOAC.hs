@@ -46,7 +46,6 @@ module Futhark.Analysis.HORep.SOAC
     isVarInput,
     isVarishInput,
     addTransform,
-    setInputTransforms,
     addInitialTransforms,
     addTransforms,
     inputArray,
@@ -56,7 +55,6 @@ module Futhark.Analysis.HORep.SOAC
     transformRows,
     transposeInput,
     applyTransforms,
-    inputsToSubExps,
 
     -- ** Input transformations
     ArrayTransforms,
@@ -330,11 +328,9 @@ inputsToSubExps = mapM f
 inputArray :: Input -> VName
 inputArray (Input _ v _) = v
 
+-- | The transformations applied to an input.
 inputTransforms :: Input -> ArrayTransforms
 inputTransforms (Input ts _ _) = ts
-
-setInputTransforms :: ArrayTransforms -> Input -> Input
-setInputTransforms ts (Input _ vName typ) = Input ts vName typ
 
 -- | Return the type of an input.
 inputType :: Input -> Type
