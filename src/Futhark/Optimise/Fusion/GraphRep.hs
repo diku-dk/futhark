@@ -23,10 +23,6 @@ module Futhark.Optimise.Fusion.GraphRep
     DepGraph (..),
     DepNode,
 
-    -- * Construction
-    mkDepGraph,
-    pprg,
-
     -- * Queries
     getName,
     nodeFromLNode,
@@ -41,6 +37,10 @@ module Futhark.Optimise.Fusion.GraphRep
     isCons,
     isDep,
     isInf,
+
+    -- * Construction
+    mkDepGraph,
+    pprg,
   )
 where
 
@@ -189,41 +189,6 @@ makeAliasTable stms dg = do
 applyAugs :: Monad m => [DepGraphAug m] -> DepGraphAug m
 applyAugs augs g = foldlM (flip ($)) g augs
 
--- | Add edges for straightforward dependencies to the graph.
-addDeps :: Monad m => DepGraphAug m
-addDeps = augWithFun toDep
-  where
-    toDep stmt =
-      let (fusible, infusible) =
-            bimap (map fst) (map fst)
-              . L.partition ((== SOACInput) . snd)
-              . S.toList
-              $ foldMap stmInputs (stmFromNode stmt)
-          mkDep vname = (vname, Dep vname)
-          mkInfDep vname = (vname, InfDep vname)
-       in map mkDep fusible <> map mkInfDep infusible
-
-initialGraphConstruction :: (HasScope SOACS m, Monad m) => DepGraphAug m
-initialGraphConstruction =
-  applyAugs
-    [ addDeps,
-      addCons,
-      addExtraCons,
-      addAliases,
-      addResEdges,
-      convertGraph -- Must be done after adding edges
-    ]
-
--- | Make a dependency graph corresponding to a 'Body'.
-mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> m DepGraph
-mkDepGraph body = applyAugs augs $ emptyGraph body
-  where
-    augs =
-      [ makeMapping,
-        makeAliasTable (bodyStms body),
-        initialGraphConstruction
-      ]
-
 -- | Creates deps for the given nodes on the graph using the 'EdgeGenerator'.
 genEdges :: Monad m => [DepNode] -> EdgeGenerator -> DepGraphAug m
 genEdges l_stms edge_fun dg =
@@ -251,30 +216,6 @@ mapAcross f dg = do
         pure $ c' G.& g_new
       (Nothing, _) -> pure g'
 
-mapAcrossNodeTs :: Monad m => (NodeT -> m NodeT) -> DepGraphAug m
-mapAcrossNodeTs f = mapAcross f'
-  where
-    f' (ins, n, nodeT, outs) = do
-      nodeT' <- f nodeT
-      pure (ins, n, nodeT', outs)
-
-nodeToSoacNode :: (HasScope SOACS m, Monad m) => NodeT -> m NodeT
-nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
-  Op {} -> do
-    maybeSoac <- H.fromExp op
-    case maybeSoac of
-      Right hsoac -> pure $ SoacNode mempty pat hsoac aux
-      Left H.NotSOAC -> pure n
-  DoLoop {} ->
-    pure $ DoNode s []
-  If {} ->
-    pure $ IfNode s []
-  _ -> pure n
-nodeToSoacNode n = pure n
-
-convertGraph :: (HasScope SOACS m, Monad m) => DepGraphAug m
-convertGraph = mapAcrossNodeTs nodeToSoacNode
-
 stmFromNode :: NodeT -> Stms SOACS -- do not use outside of edge generation
 stmFromNode (StmNode x) = oneStm x
 stmFromNode _ = mempty
@@ -298,6 +239,19 @@ reachable dg source target = target `elem` Q.reachable source (dgGraph dg)
 -- Utility func for augs
 augWithFun :: Monad m => EdgeGenerator -> DepGraphAug m
 augWithFun f dg = genEdges (G.labNodes (dgGraph dg)) f dg
+
+addDeps :: Monad m => DepGraphAug m
+addDeps = augWithFun toDep
+  where
+    toDep stmt =
+      let (fusible, infusible) =
+            bimap (map fst) (map fst)
+              . L.partition ((== SOACInput) . snd)
+              . S.toList
+              $ foldMap stmInputs (stmFromNode stmt)
+          mkDep vname = (vname, Dep vname)
+          mkInfDep vname = (vname, InfDep vname)
+       in map mkDep fusible <> map mkInfDep infusible
 
 addCons :: Monad m => DepGraphAug m
 addCons = augWithFun getStmCons
@@ -334,6 +288,51 @@ addAliases = augWithFun toAlias
         . namesToList
         . foldMap aliasInputs
         . stmFromNode
+
+mapAcrossNodeTs :: Monad m => (NodeT -> m NodeT) -> DepGraphAug m
+mapAcrossNodeTs f = mapAcross f'
+  where
+    f' (ins, n, nodeT, outs) = do
+      nodeT' <- f nodeT
+      pure (ins, n, nodeT', outs)
+
+nodeToSoacNode :: (HasScope SOACS m, Monad m) => NodeT -> m NodeT
+nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
+  Op {} -> do
+    maybeSoac <- H.fromExp op
+    case maybeSoac of
+      Right hsoac -> pure $ SoacNode mempty pat hsoac aux
+      Left H.NotSOAC -> pure n
+  DoLoop {} ->
+    pure $ DoNode s []
+  If {} ->
+    pure $ IfNode s []
+  _ -> pure n
+nodeToSoacNode n = pure n
+
+convertGraph :: (HasScope SOACS m, Monad m) => DepGraphAug m
+convertGraph = mapAcrossNodeTs nodeToSoacNode
+
+initialGraphConstruction :: (HasScope SOACS m, Monad m) => DepGraphAug m
+initialGraphConstruction =
+  applyAugs
+    [ addDeps,
+      addCons,
+      addExtraCons,
+      addAliases,
+      addResEdges,
+      convertGraph -- Must be done after adding edges
+    ]
+
+-- | Make a dependency graph corresponding to a 'Body'.
+mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> m DepGraph
+mkDepGraph body = applyAugs augs $ emptyGraph body
+  where
+    augs =
+      [ makeMapping,
+        makeAliasTable (bodyStms body),
+        initialGraphConstruction
+      ]
 
 -- | Merges two contexts.
 mergedContext :: Ord b => a -> G.Context a b -> G.Context a b -> G.Context a b
