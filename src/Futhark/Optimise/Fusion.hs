@@ -213,9 +213,12 @@ makeCopiesOfFusedExcept ::
   m NodeT
 makeCopiesOfFusedExcept noCopy (SoacNode ots pats soac aux) = do
   let lam = H.lambda soac
-      fused_inner = namesToList $ consumedByLambda $ Alias.analyseLambda mempty lam
-  lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
-  pure $ SoacNode ots pats (H.setLambda lam' soac) aux
+  localScope (scopeOf lam) $ do
+    fused_inner <-
+      filterM (fmap (not . isAcc) . lookupType) . namesToList . consumedByLambda $
+        Alias.analyseLambda mempty lam
+    lam' <- makeCopiesInLambda (fused_inner L.\\ noCopy) lam
+    pure $ SoacNode ots pats (H.setLambda lam' soac) aux
 makeCopiesOfFusedExcept _ nodeT = pure nodeT
 
 makeCopiesInLambda ::
@@ -224,7 +227,7 @@ makeCopiesInLambda ::
   Lambda SOACS ->
   m (Lambda SOACS)
 makeCopiesInLambda toCopy lam = do
-  (copies, nameMap) <- localScope (scopeOf lam) $ makeCopyStms toCopy
+  (copies, nameMap) <- makeCopyStms toCopy
   let l_body = lambdaBody lam
       newBody = insertStms copies (substituteNames nameMap l_body)
       newLambda = lam {lambdaBody = newBody}
