@@ -398,7 +398,7 @@ handleError msg stacktrace = do
     getErrorVal (ErrorString _) = Nothing
     getErrorVal (ErrorVal _ v) = Just v
 
-    getErrorValExps (ErrorMsg m) = mapM GC.compileExp $ mapMaybe getErrorVal m
+    getErrorValExps (ErrorMsg m) = mapM compileExp $ mapMaybe getErrorVal m
 
     mapArgNames' (x : xs) (y : ys) (t : ts)
       | isJust $ getErrorVal x = [C.cexp|$id:t|] : mapArgNames' xs ys ts
@@ -417,6 +417,70 @@ getMemType dest elemtype = do
   if cached
     then pure [C.cty|$tyqual:varying $ty:(primStorageType elemtype)* uniform|]
     else pure [C.cty|$ty:(primStorageType elemtype)*|]
+
+compileExp :: Exp -> ISPCCompilerM C.Exp
+compileExp (ValueExp (FloatValue (Float64Value v))) =
+  pure [C.cexp|$esc:(pretty v <> "d")|]
+compileExp (ValueExp (FloatValue (Float16Value v))) =
+  pure [C.cexp|$esc:(pretty v <> "f16")|]
+compileExp (ValueExp val) =
+  pure $ C.toExp val mempty
+compileExp (LeafExp v _) =
+  pure [C.cexp|$id:v|]
+compileExp (UnOpExp Complement {} x) = do
+  x' <- compileExp x
+  pure [C.cexp|~$exp:x'|]
+compileExp (UnOpExp Not {} x) = do
+  x' <- compileExp x
+  pure [C.cexp|!$exp:x'|]
+compileExp (UnOpExp (FAbs Float32) x) = do
+  x' <- compileExp x
+  pure [C.cexp|(float)fabs($exp:x')|]
+compileExp (UnOpExp (FAbs Float64) x) = do
+  x' <- compileExp x
+  pure [C.cexp|fabs($exp:x')|]
+compileExp (UnOpExp SSignum {} x) = do
+  x' <- compileExp x
+  pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0)|]
+compileExp (UnOpExp USignum {} x) = do
+  x' <- compileExp x
+  pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
+compileExp (UnOpExp op x) = do
+  x' <- compileExp x
+  pure [C.cexp|$id:(pretty op)($exp:x')|]
+compileExp (CmpOpExp cmp x y) = do
+  x' <- compileExp x
+  y' <- compileExp y
+  pure $ case cmp of
+    CmpEq {} -> [C.cexp|$exp:x' == $exp:y'|]
+    FCmpLt {} -> [C.cexp|$exp:x' < $exp:y'|]
+    FCmpLe {} -> [C.cexp|$exp:x' <= $exp:y'|]
+    CmpLlt {} -> [C.cexp|$exp:x' < $exp:y'|]
+    CmpLle {} -> [C.cexp|$exp:x' <= $exp:y'|]
+    _ -> [C.cexp|$id:(pretty cmp)($exp:x', $exp:y')|]
+compileExp (ConvOpExp conv x) = do
+  x' <- compileExp x
+  pure [C.cexp|$id:(pretty conv)($exp:x')|]
+compileExp (BinOpExp bop x y) = do
+  x' <- compileExp x
+  y' <- compileExp y
+  pure $ case bop of
+    Add _ OverflowUndef -> [C.cexp|$exp:x' + $exp:y'|]
+    Sub _ OverflowUndef -> [C.cexp|$exp:x' - $exp:y'|]
+    Mul _ OverflowUndef -> [C.cexp|$exp:x' * $exp:y'|]
+    FAdd {} -> [C.cexp|$exp:x' + $exp:y'|]
+    FSub {} -> [C.cexp|$exp:x' - $exp:y'|]
+    FMul {} -> [C.cexp|$exp:x' * $exp:y'|]
+    FDiv {} -> [C.cexp|$exp:x' / $exp:y'|]
+    Xor {} -> [C.cexp|$exp:x' ^ $exp:y'|]
+    And {} -> [C.cexp|$exp:x' & $exp:y'|]
+    Or {} -> [C.cexp|$exp:x' | $exp:y'|]
+    LogAnd {} -> [C.cexp|$exp:x' && $exp:y'|]
+    LogOr {} -> [C.cexp|$exp:x' || $exp:y'|]
+    _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
+compileExp (FunExp h args _) = do
+  args' <- mapM compileExp args
+  pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
 -- | Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
@@ -461,14 +525,14 @@ compileCode (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
     go (DeclareScalar name _ t : SetScalar dest e : code)
       | name == dest = do
           let ct = GC.primTypeToCType t
-          e' <- GC.compileExp e
+          e' <- compileExp e
           quals <- getVariabilityQuals name
           GC.item [C.citem|$tyquals:quals $ty:ct $id:name = $exp:e';|]
           go code
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
 compileCode (Allocate name (Count (TPrimExp e)) space) = do
-  size <- GC.compileExp e
+  size <- compileExp e
   cached <- GC.cacheMem name
   case cached of
     Just cur_size ->
@@ -486,7 +550,7 @@ compileCode (SetMem dest src space) =
 compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
   | isConstExp (untyped idx) = do
       dest' <- GC.rawMem dest
-      idxexp <- GC.compileExp (untyped idx)
+      idxexp <- compileExp (untyped idx)
       varis <- mapM getVariability (namesToList $ freeIn idx)
       let quals = if all (== Uniform) varis then [C.ctyquals|$tyqual:uniform|] else []
       tmp <- newVName "tmp_idx"
@@ -495,15 +559,15 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       deref <-
         GC.derefPointer dest' [C.cexp|$id:tmp|]
           <$> getMemType dest elemtype
-      elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
+      elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = do
       dest' <- GC.rawMem dest
       deref <-
         GC.derefPointer dest'
-          <$> GC.compileExp (untyped idx)
+          <$> compileExp (untyped idx)
           <*> getMemType dest elemtype
-      elemexp' <- toStorage elemtype <$> GC.compileExp elemexp
+      elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   where
     isConstExp = isSimple . constFoldPrimExp
@@ -514,7 +578,7 @@ compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
   e <-
     fmap (fromStorage restype) $
       GC.derefPointer src'
-        <$> GC.compileExp (untyped iexp)
+        <$> compileExp (untyped iexp)
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
 compileCode code@(Copy pt dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
@@ -525,10 +589,10 @@ compileCode code@(Copy pt dest (Count destoffset) DefaultSpace src (Count srcoff
       join $
         copyMemoryAOS pt
           <$> GC.rawMem dest
-          <*> GC.compileExp (untyped destoffset)
+          <*> compileExp (untyped destoffset)
           <*> GC.rawMem src
-          <*> GC.compileExp (untyped srcoffset)
-          <*> GC.compileExp (untyped size)
+          <*> compileExp (untyped srcoffset)
+          <*> compileExp (untyped size)
     else GC.compileCode code
 compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
@@ -536,7 +600,7 @@ compileCode (Free name space) = do
 compileCode (For i bound body) = do
   let i' = C.toIdent i
       t = GC.primTypeToCType $ primExpType bound
-  bound' <- GC.compileExp bound
+  bound' <- compileExp bound
   body' <- GC.collect $ compileCode body
   quals <- getVariabilityQuals i
   GC.stm
@@ -544,14 +608,14 @@ compileCode (For i bound body) = do
             $items:body'
           }|]
 compileCode (While cond body) = do
-  cond' <- GC.compileExp $ untyped cond
+  cond' <- compileExp $ untyped cond
   body' <- GC.collect $ compileCode body
   GC.stm
     [C.cstm|while ($exp:cond') {
             $items:body'
           }|]
 compileCode (If cond tbranch fbranch) = do
-  cond' <- GC.compileExp $ untyped cond
+  cond' <- compileExp $ untyped cond
   tbranch' <- GC.collect $ compileCode tbranch
   fbranch' <- GC.collect $ compileCode fbranch
   GC.stm $ case (tbranch', fbranch') of
@@ -565,7 +629,7 @@ compileCode (Call dests fname args) =
   defCallIspc dests fname =<< mapM compileArg args
   where
     compileArg (MemArg m) = pure [C.cexp|$exp:m|]
-    compileArg (ExpArg e) = GC.compileExp e
+    compileArg (ExpArg e) = compileExp e
     defCallIspc dests' fname' args' = do
       let out_args = [[C.cexp|&$id:d|] | d <- dests']
           args''
@@ -582,7 +646,7 @@ compileCode (Call dests fname args) =
               $escstm:("unmasked { return 1; }")
             }|]
 compileCode (Assert e msg (loc, locs)) = do
-  e' <- GC.compileExp e
+  e' <- compileExp e
   err <- GC.collect $ handleError msg stacktrace
   GC.stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
@@ -693,7 +757,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       free = zip free_args free_ctypes
       retval = zip retval_args retval_ctypes
 
-  e' <- GC.compileExp e
+  e' <- compileExp e
 
   let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params seq_code [] []
 
@@ -842,8 +906,8 @@ compileOp (ISPCKernel body free) = do
       goto cleanup;
     }|]
 compileOp (ForEach i from bound body) = do
-  from' <- GC.compileExp from
-  bound' <- GC.compileExp bound
+  from' <- compileExp from
+  bound' <- compileExp bound
   body' <- GC.collect $ compileCode body
   if mayProduceError body
     then
@@ -873,8 +937,8 @@ compileOp (ForEachActive name body) = do
       }
     }|]
 compileOp (ExtractLane dest tar lane) = do
-  tar' <- GC.compileExp tar
-  lane' <- GC.compileExp lane
+  tar' <- compileExp tar
+  lane' <- compileExp lane
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
 compileOp (Atomic aop) =
   MC.atomicOps aop $ \ty arr -> do
