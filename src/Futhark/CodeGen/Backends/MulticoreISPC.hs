@@ -1065,9 +1065,7 @@ depsFixedPoint deps =
     else depsFixedPoint deps'
   where
     grow names =
-      namesFromList $
-        concatMap (\n -> n : namesToList (M.findWithDefault mempty n deps)) $
-          namesToList names
+      names <> foldMap (\n -> M.findWithDefault mempty n deps) (namesIntMap names)
     deps' = M.map grow deps
 
 -- | Find roots of variance. These are memory blocks declared in
@@ -1088,9 +1086,9 @@ findVarying _ = []
 analyzeVariability :: MCCode -> ISPCCompilerM a -> ISPCCompilerM a
 analyzeVariability code m = do
   let roots = findVarying code
-  let deps = M.toList $ depsFixedPoint $ execVariabilityM $ findDeps code
-  let safelist = filter (\(_, b) -> not $ any (`nameIn` b) roots) deps
-  let safe = namesFromList $ map fst safelist
+  let deps = depsFixedPoint $ execVariabilityM $ findDeps code
+  let safelist = M.filter (\b -> not $ any (`nameIn` b) roots) deps
+  let safe = namesFromList $ M.keys safelist
   pre_state <- GC.getUserState
   GC.modifyUserState (\s -> s {sUniform = safe})
   a <- m
