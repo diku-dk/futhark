@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Some broken links in `futhark doc` output (#1686).
 
+* Incorrect checking of whether a function parameter is consumable
+  based on its type (#1687).
+
 ## [0.21.12]
 
 ### Added
