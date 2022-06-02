@@ -50,6 +50,9 @@ jobs:
     - name: Build Futhark
       run: guix time-machine --channels=channels.scm -- build -f futhark.scm
 
+    - name: Get hash of output binary
+      run: guix hash "$(guix time-machine --channels=channels.scm -- build -f futhark.scm | head -n 1)/bin/futhark"
+
   build-linux-cabal:
     runs-on: ubuntu-20.04
 
