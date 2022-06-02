@@ -1080,7 +1080,6 @@ static int scheduler_init(struct scheduler *scheduler,
 #ifdef FUTHARK_BACKEND_ispc
   int64_t get_gang_size();
   minimum_chunk_size = get_gang_size();
-  printf("%li\n", minimum_chunk_size);
 #endif
   
   assert(num_workers > 0);
