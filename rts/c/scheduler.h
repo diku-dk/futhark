@@ -534,12 +534,13 @@ static int random_other_worker(struct scheduler *scheduler, int my_id) {
   return i;
 }
 
+int64_t minimum_chunk_size = 1;
 
 static inline int64_t compute_chunk_size(double kappa, struct subtask* subtask)
 {
   double C = (double)*subtask->task_time / (double)*subtask->task_iter;
   if (C == 0.0F) C += DBL_EPSILON;
-  return smax64((int64_t)(kappa / C), 1);
+  return smax64((int64_t)(kappa / C), minimum_chunk_size);
 }
 
 /* Takes a chunk from subtask and enqueues the remaining iterations onto the worker's queue */
@@ -1076,6 +1077,12 @@ static int determine_kappa(double *kappa) {
 static int scheduler_init(struct scheduler *scheduler,
                           int num_workers,
                           double kappa) {
+#ifdef FUTHARK_BACKEND_ispc
+  int64_t get_gang_size();
+  minimum_chunk_size = get_gang_size();
+  printf("%li\n", minimum_chunk_size);
+#endif
+  
   assert(num_workers > 0);
 
   scheduler->kappa = kappa;

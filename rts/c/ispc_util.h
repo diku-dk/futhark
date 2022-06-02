@@ -3,6 +3,11 @@
 // This header file implements various operations that are useful only when
 // generating ISPC code. This includes wrappers for parts of Futhark's C runtime.
 
+// Expose gang size
+export uniform int64_t get_gang_size() {
+  return programCount;
+}
+
 // Generate missing overloads for extract on pointers
 #define make_extract(ty)                                                                \
 static inline uniform ty * uniform extract(uniform ty * varying ptr, uniform int idx) { \

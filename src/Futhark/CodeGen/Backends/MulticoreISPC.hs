@@ -63,7 +63,7 @@ compileProg ::
   MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
 compileProg version prog = do
   -- Dynamic scheduling seems completely broken currently, so we disable it.
-  (ws, defs) <- ImpGen.compileProg ImpGen.NoDynamicScheduling prog
+  (ws, defs) <- ImpGen.compileProg prog
   let Functions funs = defFuns defs
 
   (ws', (cparts, endstate)) <-
