@@ -61,7 +61,7 @@ boundAliases = S.map aliasVar . S.filter bound
 checkIfUsed :: Bool -> Occurrences -> Ident -> TermTypeM ()
 checkIfUsed allow_consume occs v
   | not allow_consume,
-    not $ unique $ unInfo $ identType v,
+    not $ consumable $ unInfo $ identType v,
     Just occ <- find consumes occs =
       typeError (srclocOf occ) mempty $
         "Consuming"
@@ -75,6 +75,13 @@ checkIfUsed allow_consume occs v
       pure ()
   where
     consumes = maybe False (identName v `S.member`) . consumed
+
+    consumable (Scalar (Record fs)) = all consumable fs
+    consumable (Scalar (Sum cs)) = all (all consumable) cs
+    consumable (Scalar (TypeVar _ u _ _)) = u == Unique
+    consumable (Scalar Arrow {}) = True
+    consumable (Scalar Prim {}) = True
+    consumable (Array _ u _ _) = u == Unique
 
 -- | Bind these identifiers locally while running the provided action.
 -- Checks that the identifiers are used properly within the scope
