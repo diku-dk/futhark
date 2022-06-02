@@ -791,7 +791,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   enum scheduling sched = info.sched;
   /* If each subtasks should be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
-  int64_t chunk_size = 1; // The initial chunk size when no info is avaliable
+  int64_t chunk_size = minimum_chunk_size; // The initial chunk size when no info is avaliable
 
 
   if (info.wake_up_threads || sched == DYNAMIC)
