@@ -1084,7 +1084,7 @@ static int scheduler_init(struct scheduler *scheduler,
   scheduler->minimum_chunk_size = get_gang_size();
 #else
   scheduler->minimum_chunk_size = 1;
-#fi
+#endif
 
   assert(num_workers > 0);
 
