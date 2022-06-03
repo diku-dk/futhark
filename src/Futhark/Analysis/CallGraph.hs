@@ -10,7 +10,6 @@ module Futhark.Analysis.CallGraph
     calledByConsts,
     allCalledBy,
     numOccurences,
-    findNoninlined,
   )
 where
 
@@ -140,39 +139,6 @@ buildFGstm (Let _ _ e) = execWriter $ mapExpM folder e
             tell $ buildFGBody body
             pure body
         }
-
--- | The set of all functions that are called noinline somewhere, or
--- have a noinline attribute on their definition.
-findNoninlined :: Prog SOACS -> S.Set Name
-findNoninlined prog =
-  foldMap noinlineDef (progFuns prog)
-    <> foldMap onStm (foldMap (bodyStms . funDefBody) (progFuns prog) <> progConsts prog)
-  where
-    onStm :: Stm SOACS -> S.Set Name
-    onStm (Let _ aux (Apply fname _ _ _))
-      | "noinline" `inAttrs` stmAuxAttrs aux =
-          S.singleton fname
-    onStm (Let _ _ e) = execWriter $ mapExpM folder e
-      where
-        folder =
-          identityMapper
-            { mapOnBody = \_ body -> do
-                tell $ foldMap onStm $ bodyStms body
-                pure body,
-              mapOnOp =
-                mapSOACM
-                  identitySOACMapper
-                    { mapOnSOACLambda = \lam -> do
-                        tell $ foldMap onStm $ bodyStms $ lambdaBody lam
-                        pure lam
-                    }
-            }
-
-    noinlineDef fd
-      | "noinline" `inAttrs` funDefAttrs fd =
-          S.singleton $ funDefName fd
-      | otherwise =
-          mempty
 
 instance Pretty FunCalls where
   ppr = stack . map f . M.toList . fcMap
