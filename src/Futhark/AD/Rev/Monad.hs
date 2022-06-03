@@ -29,7 +29,6 @@ module Futhark.AD.Rev.Monad
     updateAdjIndex,
     setAdj,
     insAdj,
-    insSubExpAdj,
     adjsReps,
     --
     copyConsumedArrsInStm,
@@ -428,10 +427,6 @@ updateAdjSlice slice v d = do
 updateSubExpAdj :: SubExp -> VName -> ADM ()
 updateSubExpAdj Constant {} _ = pure ()
 updateSubExpAdj (Var v) d = void $ updateAdj v d
-
-insSubExpAdj :: SubExp -> VName -> ADM ()
-insSubExpAdj Constant {} _ = pure ()
-insSubExpAdj (Var v) d = void $ insAdj v d
 
 -- The index may be negative, in which case the update has no effect.
 updateAdjIndex :: VName -> (InBounds, SubExp) -> SubExp -> ADM ()

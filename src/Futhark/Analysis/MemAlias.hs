@@ -5,7 +5,6 @@
 module Futhark.Analysis.MemAlias
   ( analyzeSeqMem,
     analyzeGPUMem,
-    canBeSameMemory,
     aliasesOf,
     MemAliases,
   )
@@ -56,15 +55,6 @@ addAlias v1 v2 m =
 
 singleton :: VName -> Names -> MemAliases
 singleton v ns = MemAliases $ M.singleton v ns
-
-canBeSameMemory :: MemAliases -> VName -> VName -> Bool
-canBeSameMemory (MemAliases m) v1 v2 =
-  case fmap (v2 `nameIn`) (M.lookup v1 m) of
-    Just True -> True
-    Just False -> case fmap (v1 `nameIn`) (M.lookup v2 m) of
-      Just b -> b
-      Nothing -> error $ "VName not found in MemAliases: " <> pretty v2
-    Nothing -> error $ "VName not found in MemAliases: " <> pretty v1
 
 aliasesOf :: MemAliases -> VName -> Names
 aliasesOf (MemAliases m) v = fromMaybe mempty $ M.lookup v m
