@@ -8,6 +8,7 @@
   -- Modules intended as externally visible for library code.
   , "^Language.Futhark.Query"
   , "^Language.Futhark.Parser"
+  , "^Futhark.Bench.decodeBenchResults"
 
   -- Generated code that we cannot do anything about.
   , "^Paths_futhark"
@@ -16,7 +17,7 @@
   -- for consistency of the internal API.
   , "^Futhark.Analysis.AlgSimplify.ppRangesRep"
   , "^Futhark.Analysis.PrimExp"
-  , "^Futhark.Binder"
+  , "^Futhark.Builder"
   , "^Futhark.Construct.eConvOp"
   , "^Futhark.Pass.ExtractKernels.Distribution.ppKernelNest"
   , "^Futhark.Representation.AST.Attributes.Types.int16"
