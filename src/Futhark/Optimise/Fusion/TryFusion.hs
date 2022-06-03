@@ -303,7 +303,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
         | isJust $ isMapSOAC form,
           -- 1. all arrays produced by the map are ONLY used (consumed)
           --    by the scatter, i.e., not used elsewhere.
-          not (any (`nameIn` unfus_set) outVars),
+          all (`notNameIn` unfus_set) outVars,
           -- 2. all arrays produced by the map are input to the scatter.
           mapWriteFusionOK outVars ker -> do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
@@ -321,7 +321,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
         | isJust $ isMapSOAC form,
           -- 1. all arrays produced by the map are ONLY used (consumed)
           --    by the hist, i.e., not used elsewhere.
-          not (any (`nameIn` unfus_set) outVars),
+          all (`notNameIn` unfus_set) outVars,
           -- 2. all arrays produced by the map are input to the scatter.
           mapWriteFusionOK outVars ker -> do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck

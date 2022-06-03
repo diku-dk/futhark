@@ -210,7 +210,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     -- is a subexp invariant to a gid of a parallel dimension?
     isSeInvar2 variance gid (Var x) =
       let x_deps = M.findWithDefault mempty x variance
-       in gid /= x && not (nameIn gid x_deps)
+       in gid /= x && gid `notNameIn` x_deps
     isSeInvar2 _ _ _ = True
     -- is a DimIndex invar to a gid of a parallel dimension?
     isDimIdxInvar2 variance gid (DimFix d) =
@@ -224,7 +224,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     isTileable :: VName -> [(VName, SubExp)] -> VarianceTable -> VName -> Stm GPU -> Bool
     isTileable seq_gid gid_dims variance acc_nm (Let (Pat [pel]) _ (BasicOp (Index _ slc)))
       | acc_deps <- M.findWithDefault mempty acc_nm variance,
-        nameIn (patElemName pel) acc_deps =
+        patElemName pel `nameIn` acc_deps =
           let invar_par = isSliceInvar2 variance slc (map fst gid_dims)
               invar_seq = isSliceInvar2 variance slc [seq_gid]
            in invar_par || invar_seq
@@ -261,7 +261,7 @@ transposeFVs fvs variance gid stms = do
     transposeFV (tab, Let pat aux (BasicOp (Index arr slc)))
       | dims <- unSlice slc,
         all isFixDim dims,
-        nameIn arr fvs,
+        arr `nameIn` fvs,
         iis <- L.findIndices depOnGid dims,
         [ii] <- iis,
         -- generalize below: treat any rearange and add to tab if not there.
@@ -318,7 +318,7 @@ isInvarToParDim ::
   Maybe (VName, Int)
 isInvarToParDim branch_variant kspace variance acc_inds =
   let ker_gids = map fst $ unSegSpace kspace
-      branch_invariant = not $ any (`nameIn` branch_variant) ker_gids
+      branch_invariant = all (`notNameIn` branch_variant) ker_gids
       allvar2 = allvariant2 acc_inds ker_gids
       last_invar_dim =
         foldl (lastNotIn allvar2) Nothing $
@@ -336,7 +336,7 @@ isInvarToParDim branch_variant kspace variance acc_inds =
     allvariant2 ind_ses kids =
       namesFromList $ concatMap (`variant2` kids) ind_ses
     lastNotIn allvar2 acc (kid, k) =
-      if nameIn kid allvar2 then acc else Just (kid, k)
+      if kid `nameIn` allvar2 then acc else Just (kid, k)
 
 allGoodReturns :: [KernelResult] -> Maybe ([VName], [SubExp])
 allGoodReturns kres

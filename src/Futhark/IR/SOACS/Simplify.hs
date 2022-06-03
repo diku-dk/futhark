@@ -397,7 +397,7 @@ removeReplicateInput vtable fun arrs
     isReplicateAndNotConsumed p v
       | Just (BasicOp (Replicate (Shape (_ : ds)) e), v_cs) <-
           ST.lookupExp v vtable,
-        not $ paramName p `nameIn` consumedByLambda fun =
+        paramName p `notNameIn` consumedByLambda fun =
           Right
             ( [paramName p],
               v_cs,
@@ -960,7 +960,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
 
     mapOverArr (pat, op)
       | Just (_, arr) <- find ((== arrayOpArr op) . fst) (zip map_param_names arrs),
-        not $ arr `nameIn` consumed = do
+        arr `notNameIn` consumed = do
           arr_t <- lookupType arr
           let whole_dim = DimSlice (intConst Int64 0) (arraySize 0 arr_t) (intConst Int64 1)
           arr_transformed <- certifying (arrayOpCerts op) $

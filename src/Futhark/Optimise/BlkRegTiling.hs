@@ -877,10 +877,10 @@ isInvarTo1of2InnerDims branch_variant kspace variance arrs =
       if not branch_invariant
         then Nothing -- if i or j in branch_variant; return nothing
         else
-          if nameIn i variant_to && not (nameIn j variant_to)
+          if nameIn i variant_to && j `notNameIn` variant_to
             then Just 0
             else
-              if nameIn j variant_to && not (nameIn i variant_to)
+              if nameIn j variant_to && i `notNameIn` variant_to
                 then Just 1
                 else Nothing
 
@@ -894,12 +894,12 @@ processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
   | Just (ss, tab) <- acc,
     [p] <- patElems patt,
     p_nm <- patElemName p,
-    nameIn p_nm arrs =
+    p_nm `nameIn` arrs =
       Just (ss, M.insert p_nm stm tab)
 processIndirections _ res_red_var acc stm'@(Let patt _ _)
   | Just (ss, tab) <- acc,
     ps <- patElems patt,
-    all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
+    all (\p -> patElemName p `notNameIn` res_red_var) ps =
       Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
 

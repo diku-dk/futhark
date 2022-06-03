@@ -222,7 +222,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
 
   -- Safety condition (8).
   forM_ (zip val $ bodyAliases body) $ \((p, _), als) ->
-    guard $ not $ paramName p `nameIn` als
+    guard $ paramName p `notNameIn` als
 
   mk_in_place_map <- summariseLoop scope updates usedInBody resmap val
 

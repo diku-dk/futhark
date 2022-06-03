@@ -121,7 +121,7 @@ optimiseLoop onOp vtable sinking (merge, form, body0)
       let stms' = foldr (inline i) (bodyStms body0) loop_vars
           body1 = body0 {bodyStms = stms'}
           (body2, sunk) = optimiseBody onOp vtable' sinking body1
-          notSunk (x, _) = not $ paramName x `nameIn` sunk
+          notSunk (x, _) = paramName x `notNameIn` sunk
           loop_vars' = filter notSunk loop_vars
           form' = ForLoop i it bound loop_vars'
           body3 = body2 {bodyStms = SQ.drop (length loop_vars') (bodyStms body2)}

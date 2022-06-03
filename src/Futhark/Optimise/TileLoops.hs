@@ -148,7 +148,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
         Just (w, arrs, form) <- tileable stm_to_tile,
         inputs <- map (is1DTileable gtid variance) arrs,
         not $ null $ tiledInputs inputs,
-        not $ gtid `nameIn` branch_variant,
+        gtid `notNameIn` branch_variant,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
         used <- freeIn stm_to_tile <> freeIn poststms' <> freeIn stms_res =
@@ -269,7 +269,7 @@ partitionPrelude variance prestms private used_after =
     invariantTo names stm =
       case patNames (stmPat stm) of
         [] -> True -- Does not matter.
-        v : _ -> not $ any (`nameIn` names) $ namesToList $ M.findWithDefault mempty v variance
+        v : _ -> all (`notNameIn` names) (namesToList $ M.findWithDefault mempty v variance)
 
     consumed v = v `nameIn` consumed_in_prestms
     consumedStm stm = any consumed (patNames (stmPat stm))
@@ -282,7 +282,7 @@ partitionPrelude variance prestms private used_after =
 
     groupInvariant stm =
       invariantTo private stm
-        && not (any (`nameIn` later_consumed) (patNames (stmPat stm)))
+        && all (`notNameIn` later_consumed) (patNames (stmPat stm))
         && invariantTo later_consumed stm
     (invariant_prestms, variant_prestms) =
       Seq.partition groupInvariant prestms
@@ -989,10 +989,10 @@ invariantToOneOfTwoInnerDims branch_variant variance dims arr = do
   j : i : _ <- Just $ reverse dims
   let variant_to = M.findWithDefault mempty arr variance
       branch_invariant = not $ nameIn j branch_variant || nameIn i branch_variant
-  if branch_invariant && i `nameIn` variant_to && not (j `nameIn` variant_to)
+  if branch_invariant && i `nameIn` variant_to && j `notNameIn` variant_to
     then Just $ InputTile [0, 1] arr
     else
-      if branch_invariant && j `nameIn` variant_to && not (i `nameIn` variant_to)
+      if branch_invariant && j `nameIn` variant_to && i `notNameIn` variant_to
         then Just $ InputTile [1, 0] arr
         else Just $ InputDontTile arr
 
