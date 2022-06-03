@@ -47,7 +47,6 @@ module Futhark.Analysis.HORep.SOAC
     isVarishInput,
     addTransform,
     addInitialTransforms,
-    addTransforms,
     inputArray,
     inputRank,
     inputType,
@@ -288,9 +287,6 @@ addTransform tr (Input trs a t) =
 -- list.
 addInitialTransforms :: ArrayTransforms -> Input -> Input
 addInitialTransforms ts (Input ots a t) = Input (ts <> ots) a t
-
-addTransforms :: ArrayTransforms -> Input -> Input
-addTransforms ts (Input ots a t) = Input (ots <> ts) a t
 
 applyTransform :: MonadBuilder m => ArrayTransform -> VName -> m VName
 applyTransform (Replicate cs n) ia =
