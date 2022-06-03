@@ -91,7 +91,7 @@ interchangeLoop
       free_in_body = freeIn body
 
       copyOrRemoveParam (param, arr)
-        | not (paramName param `nameIn` free_in_body) =
+        | paramName param `notNameIn` free_in_body =
             pure Nothing
         | otherwise =
             pure $ Just (param, arr)

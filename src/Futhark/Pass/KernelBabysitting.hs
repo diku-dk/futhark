@@ -287,7 +287,7 @@ ensureCoalescedAccess
           not $ tooSmallSlice (primByteSize pt) rem_slice,
           is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
           not (null thread_gids || null is),
-          not (last thread_gids `nameIn` (freeIn is <> freeIn rem_slice)) ->
+          last thread_gids `notNameIn` (freeIn is <> freeIn rem_slice) ->
             pure Nothing
         -- We are not fully indexing the array, and the indices are not
         -- a proper prefix of the thread indices, and some indices are

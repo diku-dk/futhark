@@ -347,7 +347,7 @@ instance Monoid (Code a) where
 -- to 'SetMem' a memory block declared outside it.
 lexicalMemoryUsage :: Function a -> M.Map VName Space
 lexicalMemoryUsage func =
-  M.filterWithKey (const . not . (`nameIn` nonlexical)) $
+  M.filterWithKey (const . (`notNameIn` nonlexical)) $
     declared $
       functionBody func
   where
