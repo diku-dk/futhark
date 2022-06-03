@@ -7,8 +7,6 @@
 module Futhark.Pass
   ( PassM,
     runPassM,
-    liftEither,
-    liftEitherM,
     Pass (..),
     passLongOption,
     parPass,
@@ -21,8 +19,6 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer.Strict
 import Control.Parallel.Strategies
 import Data.Char
-import Data.Either
-import Futhark.Error
 import Futhark.IR
 import Futhark.MonadFreshNames
 import Futhark.Util.Log
@@ -47,18 +43,6 @@ runPassM ::
   m (a, Log)
 runPassM (PassM m) = modifyNameSource $ runState (runWriterT m)
 
--- | Turn an 'Either' computation into a 'PassM'.  If the 'Either' is
--- 'Left', the result is a 'CompilerBug'.
-liftEither :: Show err => Either err a -> PassM a
-liftEither (Left e) = compilerBugS $ show e
-liftEither (Right v) = pure v
-
--- | Turn an 'Either' monadic computation into a 'PassM'.  If the 'Either' is
--- 'Left', the result is an exception.
-liftEitherM :: Show err => PassM (Either err a) -> PassM a
-liftEitherM m = liftEither =<< m
-
--- | A compiler pass transforming a 'Prog' of a given rep to a 'Prog'
 -- of another rep.
 data Pass fromrep torep = Pass
   { -- | Name of the pass.  Keep this short and simple.  It will
