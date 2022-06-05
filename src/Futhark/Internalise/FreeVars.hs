@@ -3,10 +3,8 @@
 module Futhark.Internalise.FreeVars
   ( freeVars,
     without,
-    ident,
     sizes,
     NameSet (..),
-    patVars,
   )
 where
 
