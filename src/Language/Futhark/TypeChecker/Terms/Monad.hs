@@ -800,7 +800,6 @@ updateTypes = astMap tv
       ASTMapper
         { mapOnExp = astMap tv,
           mapOnName = pure,
-          mapOnQualName = pure,
           mapOnStructType = normTypeFully,
           mapOnPatType = normTypeFully,
           mapOnStructRetType = normTypeFully,
