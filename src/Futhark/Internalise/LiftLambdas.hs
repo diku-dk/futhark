@@ -84,19 +84,17 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
       free =
         let immediate_free = FV.freeVars funbody `FV.without` (bound <> existentials funbody)
             sizes_in_free =
-              foldMap typeDimNames $
-                M.elems $
-                  FV.unNameSet immediate_free
+              foldMap sizeNames $ M.elems $ FV.unNameSet immediate_free
             sizes =
               FV.sizes $
                 sizes_in_free
-                  <> foldMap patternDimNames params
-                  <> typeDimNames ret
+                  <> foldMap patternSizeNames params
+                  <> sizeNames ret
          in M.toList $ FV.unNameSet $ immediate_free <> (sizes `FV.without` bound)
 
       -- Those parameters that correspond to sizes must come first.
       sizes_in_types =
-        foldMap typeDimNames (ret : map snd free ++ map patternStructType params)
+        foldMap sizeNames (ret : map snd free ++ map patternStructType params)
       isSize (v, _) = v `S.member` sizes_in_types
       (free_dims, free_nondims) = partition isSize free
 

@@ -833,12 +833,11 @@ termCheckTypeExp te = do
 
   -- Observe the sizes so we do not get any warnings about them not
   -- being used.
-  mapM_ observeDim $ nestedDims st
+  mapM_ observeDim $ sizeNames st
   pure (te', svars, RetType dims st)
   where
-    observeDim (NamedSize v) =
-      observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int64) mempty
-    observeDim _ = pure ()
+    observeDim v =
+      observe $ Ident v (Info $ Scalar $ Prim $ Signed Int64) mempty
 
 checkTypeExpNonrigid :: TypeExp Name -> TermTypeM (TypeExp VName, StructType, [VName])
 checkTypeExpNonrigid te = do

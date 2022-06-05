@@ -42,7 +42,7 @@ module Language.Futhark.Prop
     patternStructType,
     patternParam,
     patternOrderZero,
-    patternDimNames,
+    patternSizeNames,
 
     -- * Queries on types
     uniqueness,
@@ -51,12 +51,11 @@ module Language.Futhark.Prop
     diet,
     arrayRank,
     arrayShape,
-    nestedDims,
     orderZero,
     unfoldFunType,
     foldFunType,
     typeVars,
-    typeDimNames,
+    sizeNames,
 
     -- * Operations on types
     peelArray,
@@ -121,7 +120,7 @@ import Data.Ord
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Futhark.IR.Primitive as Primitive
-import Futhark.Util (maxinum, nubOrd)
+import Futhark.Util (maxinum)
 import Futhark.Util.Pretty
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals
@@ -136,32 +135,6 @@ arrayRank = shapeRank . arrayShape
 arrayShape :: TypeBase dim as -> Shape dim
 arrayShape (Array _ _ ds _) = ds
 arrayShape _ = mempty
-
--- | Return any free shape declarations in the type, with duplicates
--- removed.
-nestedDims :: TypeBase Size as -> [Size]
-nestedDims t =
-  case t of
-    Array _ _ ds a ->
-      nubOrd $ nestedDims (Scalar a) <> shapeDims ds
-    Scalar (Record fs) ->
-      nubOrd $ foldMap nestedDims fs
-    Scalar Prim {} ->
-      mempty
-    Scalar (Sum cs) ->
-      nubOrd $ foldMap (foldMap nestedDims) cs
-    Scalar (Arrow _ v t1 (RetType dims t2)) ->
-      filter (notV v) $ filter (`notElem` dims') $ nestedDims t1 <> nestedDims t2
-      where
-        dims' = map (NamedSize . qualName) dims
-    Scalar (TypeVar _ _ _ targs) ->
-      concatMap typeArgDims targs
-  where
-    typeArgDims (TypeArgDim d _) = [d]
-    typeArgDims (TypeArgType at _) = nestedDims at
-
-    notV Unnamed = const True
-    notV (Named v) = (/= NamedSize (qualName v))
 
 -- | Change the shape of a type to be just the rank.
 noSizes :: TypeBase Size as -> TypeBase () as
@@ -261,7 +234,7 @@ mustBeExplicit bind_t =
       alsoRet =
         M.unionWith (&&) $
           M.fromList $
-            zip (S.toList $ typeDimNames ret) $
+            zip (S.toList $ sizeNames ret) $
               repeat True
    in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty ts
   where
@@ -601,7 +574,7 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
    in t' `setAliases` als
   where
     arrow (Named v, x) (RetType dims y)
-      | v `S.member` typeDimNames y =
+      | v `S.member` sizeNames y =
           RetType [] $ Scalar $ Arrow () (Named v) x $ RetType (v : dims) y
     arrow (pn, tx) y =
       RetType [] $ Scalar $ Arrow () pn tx y
@@ -693,23 +666,42 @@ orderZero (Scalar Arrow {}) = False
 orderZero (Scalar (Sum cs)) = all (all orderZero) cs
 
 -- | Extract all the shape names that occur in a given pattern.
-patternDimNames :: PatBase Info VName -> S.Set VName
-patternDimNames (TuplePat ps _) = foldMap patternDimNames ps
-patternDimNames (RecordPat fs _) = foldMap (patternDimNames . snd) fs
-patternDimNames (PatParens p _) = patternDimNames p
-patternDimNames (Id _ (Info tp) _) = typeDimNames tp
-patternDimNames (Wildcard (Info tp) _) = typeDimNames tp
-patternDimNames (PatAscription p _ _) = patternDimNames p
-patternDimNames (PatLit _ (Info tp) _) = typeDimNames tp
-patternDimNames (PatConstr _ _ ps _) = foldMap patternDimNames ps
-patternDimNames (PatAttr _ p _) = patternDimNames p
+patternSizeNames :: PatBase Info VName -> S.Set VName
+patternSizeNames (TuplePat ps _) = foldMap patternSizeNames ps
+patternSizeNames (RecordPat fs _) = foldMap (patternSizeNames . snd) fs
+patternSizeNames (PatParens p _) = patternSizeNames p
+patternSizeNames (Id _ (Info tp) _) = sizeNames tp
+patternSizeNames (Wildcard (Info tp) _) = sizeNames tp
+patternSizeNames (PatAscription p _ _) = patternSizeNames p
+patternSizeNames (PatLit _ (Info tp) _) = sizeNames tp
+patternSizeNames (PatConstr _ _ ps _) = foldMap patternSizeNames ps
+patternSizeNames (PatAttr _ p _) = patternSizeNames p
 
--- | Extract all the shape names that occur free in a given type.
-typeDimNames :: TypeBase Size als -> S.Set VName
-typeDimNames = foldMap dimName . nestedDims
+-- | Extract all names that occur free as sizes in a given type.
+sizeNames :: TypeBase Size as -> S.Set VName
+sizeNames t =
+  case t of
+    Array _ _ s a ->
+      sizeNames (Scalar a) <> foldMap onSize (shapeDims s)
+    Scalar (Record fs) ->
+      foldMap sizeNames fs
+    Scalar Prim {} ->
+      mempty
+    Scalar (Sum cs) ->
+      foldMap (foldMap sizeNames) cs
+    Scalar (Arrow _ v t1 (RetType dims t2)) ->
+      S.filter (notV v) $ S.filter (`notElem` dims) $ sizeNames t1 <> sizeNames t2
+    Scalar (TypeVar _ _ _ targs) ->
+      foldMap typeArgDims targs
   where
-    dimName (NamedSize qn) = S.singleton $ qualLeaf qn
-    dimName _ = mempty
+    typeArgDims (TypeArgDim d _) = onSize d
+    typeArgDims (TypeArgType at _) = sizeNames at
+
+    notV Unnamed = const True
+    notV (Named v) = (/= v)
+
+    onSize (NamedSize qn) = S.singleton $ qualLeaf qn
+    onSize _ = mempty
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.

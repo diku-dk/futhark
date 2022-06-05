@@ -272,7 +272,7 @@ lookupVar t x = do
           -- Anything not in scope is going to be an existential size.
           pure $ Dynamic $ Scalar $ Prim $ Signed Int64
 
--- Like patternDimNames, but ignores sizes that are only found in
+-- Like patternSizeNames, but ignores sizes that are only found in
 -- funtion types.
 arraySizes :: StructType -> S.Set VName
 arraySizes (Scalar Arrow {}) = mempty
@@ -339,7 +339,7 @@ sizesToRename (RecordSV fs) =
 sizesToRename (SumSV _ svs _) =
   foldMap sizesToRename svs
 sizesToRename (LambdaSV param _ _ _) =
-  patternDimNames param
+  patternSizeNames param
     <> S.map identName (S.filter couldBeSize $ patIdents param)
   where
     couldBeSize ident =
@@ -766,7 +766,7 @@ defuncLet ::
   DefM ([VName], [Pat], Exp, StaticVal)
 defuncLet dims ps@(pat : pats) body (RetType ret_dims rettype)
   | patternOrderZero pat = do
-      let bound_by_pat = (`S.member` patternDimNames pat)
+      let bound_by_pat = (`S.member` patternSizeNames pat)
           -- Take care to not include more size parameters than necessary.
           (pat_dims, rest_dims) = partition bound_by_pat dims
           env = envFromPat pat <> envFromDimNames pat_dims
@@ -1059,7 +1059,7 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
     mkExt v
       | not $ v `S.member` bound_here = Just v
     mkExt _ = Nothing
-    rettype_st = RetType (mapMaybe mkExt (S.toList (typeDimNames ret)) ++ ret_dims) ret
+    rettype_st = RetType (mapMaybe mkExt (S.toList (sizeNames ret)) ++ ret_dims) ret
 
     dec =
       ValBind
@@ -1169,7 +1169,7 @@ matchPatSV (Id vn (Info t) _) sv =
     else dim_env <> M.singleton vn (Binding Nothing sv)
   where
     dim_env =
-      M.fromList $ map (,i64) $ S.toList $ typeDimNames t
+      M.fromList $ map (,i64) $ S.toList $ sizeNames t
     i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
 matchPatSV (Wildcard _ _) _ = mempty
 matchPatSV (PatAscription pat _ _) sv = matchPatSV pat sv
@@ -1290,7 +1290,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
         -- applications of lifted functions, we don't properly update
         -- the types in the return type annotation.
         combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
-      ret_dims' = filter (`S.member` typeDimNames rettype') ret_dims
+      ret_dims' = filter (`S.member` sizeNames rettype') ret_dims
   (missing_dims, params'') <- sizesForAll bound_sizes params'
 
   pure
