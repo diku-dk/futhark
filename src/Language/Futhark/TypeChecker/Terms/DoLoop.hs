@@ -36,8 +36,8 @@ someDimsFreshInType ::
   Rigidity ->
   Name ->
   S.Set VName ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als)
+  TypeBase DimDecl als ->
+  TermTypeM (TypeBase DimDecl als)
 someDimsFreshInType loc r desc sizes = bitraverse onDim pure
   where
     onDim (NamedDim d)
@@ -53,8 +53,8 @@ freshDimsInType ::
   Rigidity ->
   Name ->
   S.Set VName ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als, [VName])
+  TypeBase DimDecl als ->
+  TermTypeM (TypeBase DimDecl als, [VName])
 freshDimsInType loc r desc sizes t =
   second M.elems <$> runStateT (bitraverse onDim pure t) mempty
   where

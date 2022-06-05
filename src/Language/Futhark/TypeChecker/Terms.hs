@@ -66,8 +66,8 @@ unifyBranches loc e1 e2 = do
 sliceShape ::
   Maybe (SrcLoc, Rigidity) ->
   Slice ->
-  TypeBase (DimDecl VName) as ->
-  TermTypeM (TypeBase (DimDecl VName) as, [VName])
+  TypeBase DimDecl as ->
+  TermTypeM (TypeBase DimDecl as, [VName])
 sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
   runStateT (setDims <$> adjustDims slice orig_dims) []
   where
@@ -855,8 +855,8 @@ checkArg arg = do
 instantiateDimsInReturnType ::
   SrcLoc ->
   Maybe (QualName VName) ->
-  RetTypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als, [VName])
+  RetTypeBase DimDecl als ->
+  TermTypeM (TypeBase DimDecl als, [VName])
 instantiateDimsInReturnType tloc fname =
   instantiateEmptyArrayDims tloc $ Rigid $ RigidRet fname
 
@@ -866,7 +866,7 @@ instantiateDimsInReturnType tloc fname =
 type ApplyOp = (Maybe (QualName VName), Int)
 
 -- | Extract all those names that are bound inside the type.
-boundInsideType :: TypeBase (DimDecl VName) as -> S.Set VName
+boundInsideType :: TypeBase DimDecl as -> S.Set VName
 boundInsideType (Array _ _ _ t) = boundInsideType (Scalar t)
 boundInsideType (Scalar Prim {}) = mempty
 boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
@@ -1448,10 +1448,10 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 
 -- | Extract all the shape names that occur in positive position
 -- (roughly, left side of an arrow) in a given type.
-typeDimNamesPos :: TypeBase (DimDecl VName) als -> S.Set VName
+typeDimNamesPos :: TypeBase DimDecl als -> S.Set VName
 typeDimNamesPos (Scalar (Arrow _ _ t1 (RetType _ t2))) = onParam t1 <> typeDimNamesPos t2
   where
-    onParam :: TypeBase (DimDecl VName) als -> S.Set VName
+    onParam :: TypeBase DimDecl als -> S.Set VName
     onParam (Scalar Arrow {}) = mempty
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs

@@ -167,7 +167,7 @@ instance Pretty (ShapeDecl MonoSize) where
 -- they are known or anonymous/local.
 type MonoType = TypeBase MonoSize ()
 
-monoType :: TypeBase (DimDecl VName) als -> MonoType
+monoType :: TypeBase DimDecl als -> MonoType
 monoType = (`evalState` (0, mempty)) . traverseDims onDim . toStruct
   where
     onDim bound _ (NamedDim d)
@@ -625,7 +625,7 @@ desugarIndexSection idxs (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
     t1' = fromStruct t1
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
-noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
+noticeDims :: TypeBase DimDecl as -> MonoM ()
 noticeDims = mapM_ notice . nestedDims
   where
     notice (NamedDim v) = void $ transformFName mempty v i64
@@ -684,12 +684,12 @@ wildcard (Scalar (Record fs)) loc =
 wildcard t loc =
   Wildcard (Info t) loc
 
-type DimInst = M.Map VName (DimDecl VName)
+type DimInst = M.Map VName DimDecl
 
 dimMapping ::
   Monoid a =>
-  TypeBase (DimDecl VName) a ->
-  TypeBase (DimDecl VName) a ->
+  TypeBase DimDecl a ->
+  TypeBase DimDecl a ->
   DimInst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where

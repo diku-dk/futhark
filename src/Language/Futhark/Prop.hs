@@ -139,7 +139,7 @@ arrayShape _ = mempty
 
 -- | Return any free shape declarations in the type, with duplicates
 -- removed.
-nestedDims :: TypeBase (DimDecl VName) as -> [DimDecl VName]
+nestedDims :: TypeBase DimDecl as -> [DimDecl]
 nestedDims t =
   case t of
     Array _ _ ds a ->
@@ -164,7 +164,7 @@ nestedDims t =
     notV (Named v) = (/= NamedDim (qualName v))
 
 -- | Change the shape of a type to be just the rank.
-noSizes :: TypeBase (DimDecl vn) as -> TypeBase () as
+noSizes :: TypeBase DimDecl as -> TypeBase () as
 noSizes = first $ const ()
 
 -- | Where does this dimension occur?
@@ -705,7 +705,7 @@ patternDimNames (PatConstr _ _ ps _) = foldMap patternDimNames ps
 patternDimNames (PatAttr _ p _) = patternDimNames p
 
 -- | Extract all the shape names that occur free in a given type.
-typeDimNames :: TypeBase (DimDecl VName) als -> S.Set VName
+typeDimNames :: TypeBase DimDecl als -> S.Set VName
 typeDimNames = foldMap dimName . nestedDims
   where
     dimName (NamedDim qn) = S.singleton $ qualLeaf qn
@@ -807,7 +807,7 @@ namesToPrimTypes =
 data Intrinsic
   = IntrinsicMonoFun [PrimType] PrimType
   | IntrinsicOverloadedFun [PrimType] [Maybe PrimType] (Maybe PrimType)
-  | IntrinsicPolyFun [TypeParamBase VName] [StructType] (RetTypeBase (DimDecl VName) ())
+  | IntrinsicPolyFun [TypeParamBase VName] [StructType] (RetTypeBase DimDecl ())
   | IntrinsicType Liftedness [TypeParamBase VName] StructType
   | IntrinsicEquality -- Special cased.
 

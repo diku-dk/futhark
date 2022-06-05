@@ -77,8 +77,8 @@ areGlobal vs = local $ Arrow.first (S.fromList vs <>)
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
-  TypeBase (DimDecl VName) als ->
-  TypeBase (DimDecl VName) als
+  TypeBase DimDecl als ->
+  TypeBase DimDecl als
 replaceTypeSizes substs = first onDim
   where
     onDim (NamedDim v) =
@@ -288,7 +288,7 @@ arraySizes (Scalar Prim {}) = mempty
 arraySizes (Array _ _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
   where
-    dimName :: DimDecl VName -> S.Set VName
+    dimName :: DimDecl -> S.Set VName
     dimName (NamedDim qn) = S.singleton $ qualLeaf qn
     dimName _ = mempty
 
@@ -302,8 +302,8 @@ data SizeSubst
 
 dimMapping ::
   Monoid a =>
-  TypeBase (DimDecl VName) a ->
-  TypeBase (DimDecl VName) a ->
+  TypeBase DimDecl a ->
+  TypeBase DimDecl a ->
   M.Map VName SizeSubst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where
@@ -319,8 +319,8 @@ dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
 
 dimMapping' ::
   Monoid a =>
-  TypeBase (DimDecl VName) a ->
-  TypeBase (DimDecl VName) a ->
+  TypeBase DimDecl a ->
+  TypeBase DimDecl a ->
   M.Map VName VName
 dimMapping' t1 t2 = M.mapMaybe f $ dimMapping t1 t2
   where
@@ -529,7 +529,12 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   -- newly computed body type.
   let mapping = dimMapping' (typeOf e2) t
       subst v = fromMaybe v $ M.lookup v mapping
-      t' = first (fmap subst) $ typeOf e2'
+      mapper =
+        identityMapper
+          { mapOnName = pure . subst,
+            mapOnQualName = pure . fmap subst
+          }
+      t' = first (runIdentity . astMap mapper) $ typeOf e2'
   pure (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
   error $ "defuncExp: Unexpected LetFun: " ++ prettyName vn
@@ -647,15 +652,15 @@ defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
   where
     defuncType ::
       Monoid als =>
-      TypeBase (DimDecl VName) als ->
-      TypeBase (DimDecl VName) als
+      TypeBase DimDecl als ->
+      TypeBase DimDecl als
     defuncType (Array as u shape t) = Array as u shape (defuncScalar t)
     defuncType (Scalar t) = Scalar $ defuncScalar t
 
     defuncScalar ::
       Monoid als =>
-      ScalarTypeBase (DimDecl VName) als ->
-      ScalarTypeBase (DimDecl VName) als
+      ScalarTypeBase DimDecl als ->
+      ScalarTypeBase DimDecl als
     defuncScalar (Record fs) = Record $ M.map defuncType fs
     defuncScalar Arrow {} = Record mempty
     defuncScalar (Sum fs) = Sum $ M.map (map defuncType) fs

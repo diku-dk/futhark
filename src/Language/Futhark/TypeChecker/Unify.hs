@@ -133,7 +133,7 @@ data Constraint
   | ParamSize SrcLoc
   | -- | Is not actually a type, but a term-level size,
     -- possibly already set to something specific.
-    Size (Maybe (DimDecl VName)) Usage
+    Size (Maybe DimDecl) Usage
   | -- | A size that does not unify with anything -
     -- created from the result of applying a function
     -- whose return size is existential, or otherwise
@@ -175,7 +175,7 @@ data RigidSource
     RigidRet (Maybe (QualName VName))
   | RigidLoop
   | -- | Produced by a complicated slice expression.
-    RigidSlice (Maybe (DimDecl VName)) String
+    RigidSlice (Maybe DimDecl) String
   | -- | Produced by a complicated range expression.
     RigidRange
   | -- | Produced by a range expression with this bound.
@@ -255,7 +255,7 @@ prettySource ctx loc (RigidCond t1 t2) =
 -- | Retrieve notes describing the purpose or origin of the given
 -- 'DimDecl'.  The location is used as the *current* location, for the
 -- purpose of reporting relative locations.
-dimNotes :: (Located a, MonadUnify m) => a -> DimDecl VName -> m Notes
+dimNotes :: (Located a, MonadUnify m) => a -> DimDecl -> m Notes
 dimNotes ctx (NamedDim d) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
@@ -359,8 +359,8 @@ instantiateEmptyArrayDims ::
   MonadUnify m =>
   SrcLoc ->
   Rigidity ->
-  RetTypeBase (DimDecl VName) als ->
-  m (TypeBase (DimDecl VName) als, [VName])
+  RetTypeBase DimDecl als ->
+  m (TypeBase DimDecl als, [VName])
 instantiateEmptyArrayDims tloc r (RetType dims t) = do
   dims' <- mapM new dims
   pure (first (onDim $ zip dims dims') t, dims')
@@ -384,7 +384,7 @@ isNonRigid v constraints = do
   pure lvl
 
 type UnifyDims m =
-  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> DimDecl VName -> DimDecl VName -> m ()
+  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> DimDecl -> DimDecl -> m ()
 
 flipUnifyDims :: UnifyDims m -> UnifyDims m
 flipUnifyDims onDims bcs bound nonrigid t1 t2 =
@@ -809,7 +809,7 @@ linkVarToDim ::
   BreadCrumbs ->
   VName ->
   Level ->
-  DimDecl VName ->
+  DimDecl ->
   m ()
 linkVarToDim usage bcs vn lvl dim = do
   constraints <- getConstraints
@@ -1117,9 +1117,9 @@ mustHaveField usage = mustHaveFieldWith (unifyDims usage) usage mempty noBreadCr
 newDimOnMismatch ::
   (Monoid as, MonadUnify m) =>
   SrcLoc ->
-  TypeBase (DimDecl VName) as ->
-  TypeBase (DimDecl VName) as ->
-  m (TypeBase (DimDecl VName) as, [VName])
+  TypeBase DimDecl as ->
+  TypeBase DimDecl as ->
+  m (TypeBase DimDecl as, [VName])
 newDimOnMismatch loc t1 t2 = do
   (t, seen) <- runStateT (matchDims onDims t1 t2) mempty
   pure (t, M.elems seen)

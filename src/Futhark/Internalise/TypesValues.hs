@@ -48,7 +48,7 @@ runInternaliseTypeM' :: [VName] -> InternaliseTypeM a -> InternaliseM a
 runInternaliseTypeM' exts (InternaliseTypeM m) = evalStateT m $ TypeState (length exts)
 
 internaliseParamTypes ::
-  [E.TypeBase (E.DimDecl VName) ()] ->
+  [E.TypeBase E.DimDecl ()] ->
   InternaliseM [[I.TypeBase Shape Uniqueness]]
 internaliseParamTypes ts =
   runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM mempty) ts
@@ -66,7 +66,7 @@ fixupTypes = zipWith fixup
     fixup _ t = t
 
 internaliseLoopParamType ::
-  E.TypeBase (E.DimDecl VName) () ->
+  E.TypeBase E.DimDecl () ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
@@ -82,7 +82,7 @@ internaliseReturnType (E.RetType dims et) ts =
     exts = M.fromList $ zip dims [0 ..]
 
 internaliseLambdaReturnType ::
-  E.TypeBase (E.DimDecl VName) () ->
+  E.TypeBase E.DimDecl () ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape NoUniqueness]
 internaliseLambdaReturnType et ts =
@@ -102,7 +102,7 @@ internaliseEntryReturnType (E.RetType dims et) =
     exts = M.fromList $ zip dims [0 ..]
 
 internaliseType ::
-  E.TypeBase (E.DimDecl VName) () ->
+  E.TypeBase E.DimDecl () ->
   InternaliseM [I.TypeBase I.ExtShape Uniqueness]
 internaliseType = runInternaliseTypeM . internaliseTypeM mempty
 
@@ -114,7 +114,7 @@ newId = do
 
 internaliseDim ::
   M.Map VName Int ->
-  E.DimDecl VName ->
+  E.DimDecl ->
   InternaliseTypeM ExtSize
 internaliseDim exts d =
   case d of
@@ -208,7 +208,7 @@ internaliseSumType cs =
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.TypeBase (E.DimDecl VName) als -> InternaliseM Int
+internalisedTypeSize :: E.TypeBase E.DimDecl als -> InternaliseM Int
 -- A few special cases for performance.
 internalisedTypeSize (E.Scalar (E.Prim _)) = pure 1
 internalisedTypeSize (E.Array _ _ _ (E.Prim _)) = pure 1

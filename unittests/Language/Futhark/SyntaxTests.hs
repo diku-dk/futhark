@@ -115,7 +115,7 @@ pPrimType =
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [lexeme "*" $> Unique, pure Nonunique]
 
-pDimDecl :: Parser (DimDecl VName)
+pDimDecl :: Parser DimDecl
 pDimDecl =
   brackets $
     choice
@@ -123,7 +123,7 @@ pDimDecl =
         NamedDim <$> pQualName
       ]
 
-pScalarNonFun :: Parser (ScalarTypeBase (DimDecl VName) ())
+pScalarNonFun :: Parser (ScalarTypeBase DimDecl ())
 pScalarNonFun =
   choice
     [ Prim <$> pPrimType,
@@ -153,7 +153,7 @@ pNonFunType :: Parser StructType
 pNonFunType =
   choice [try pArrayType, try $ parens pStructType, Scalar <$> pScalarNonFun]
 
-pScalarType :: Parser (ScalarTypeBase (DimDecl VName) ())
+pScalarType :: Parser (ScalarTypeBase DimDecl ())
 pScalarType = choice [try pFun, pScalarNonFun]
   where
     pFun =
@@ -181,7 +181,7 @@ fromStringParse p what s =
     onError e =
       error $ "not a " <> what <> ": " <> s <> "\n" <> errorBundlePretty e
 
-instance IsString (ScalarTypeBase (DimDecl VName) ()) where
+instance IsString (ScalarTypeBase DimDecl ()) where
   fromString = fromStringParse pScalarType "ScalarType"
 
 instance IsString StructType where

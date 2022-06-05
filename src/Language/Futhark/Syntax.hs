@@ -229,38 +229,23 @@ instance ArrayDim () where
   unifyDims () () = Just ()
 
 -- | Declaration of a dimension size.
-data DimDecl vn
+data DimDecl
   = -- | The size of the dimension is this name, which
     -- must be in scope.  In a return type, this will
     -- give rise to an assertion.
-    NamedDim (QualName vn)
+    NamedDim (QualName VName)
   | -- | The size is a constant.
     ConstDim Int
   | -- | No known size.  If @Nothing@, then this is a name distinct
     -- from any other.  The type checker should _never_ produce these
     -- - they are a (hopefully temporary) thing introduced by
     -- defunctorisation and monomorphisation.
-    AnyDim (Maybe vn)
-  deriving (Show)
-
-deriving instance Eq (DimDecl VName)
-
-deriving instance Ord (DimDecl VName)
-
-instance Functor DimDecl where
-  fmap = fmapDefault
-
-instance Foldable DimDecl where
-  foldMap = foldMapDefault
-
-instance Traversable DimDecl where
-  traverse f (NamedDim qn) = NamedDim <$> traverse f qn
-  traverse _ (ConstDim x) = pure $ ConstDim x
-  traverse f (AnyDim v) = AnyDim <$> traverse f v
+    AnyDim (Maybe VName)
+  deriving (Eq, Ord, Show)
 
 -- Note that the notion of unifyDims here is intentionally not what we
 -- use when we do real type unification in the type checker.
-instance ArrayDim (DimDecl VName) where
+instance ArrayDim DimDecl where
   unifyDims AnyDim {} y = Just y
   unifyDims x AnyDim {} = Just x
   unifyDims (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
@@ -426,20 +411,20 @@ type Aliasing = S.Set Alias
 
 -- | A type with aliasing information and shape annotations, used for
 -- describing the type patterns and expressions.
-type PatType = TypeBase (DimDecl VName) Aliasing
+type PatType = TypeBase DimDecl Aliasing
 
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
-type StructType = TypeBase (DimDecl VName) ()
+type StructType = TypeBase DimDecl ()
 
 -- | A value type contains full, manifest size information.
 type ValueType = TypeBase Int64 ()
 
 -- | The return type version of 'StructType'.
-type StructRetType = RetTypeBase (DimDecl VName) ()
+type StructRetType = RetTypeBase DimDecl ()
 
 -- | The return type version of 'PatType'.
-type PatRetType = RetTypeBase (DimDecl VName) Aliasing
+type PatRetType = RetTypeBase DimDecl Aliasing
 
 -- | A dimension declaration expression for use in a 'TypeExp'.
 data DimExp vn
