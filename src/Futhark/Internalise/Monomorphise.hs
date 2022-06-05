@@ -626,10 +626,9 @@ desugarIndexSection idxs (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase Size as -> MonoM ()
-noticeDims = mapM_ notice . nestedDims
+noticeDims = mapM_ notice . sizeNames
   where
-    notice (NamedSize v) = void $ transformFName mempty v i64
-    notice _ = pure ()
+    notice v = void $ transformFName mempty (qualName v) i64
 
 -- Convert a collection of 'ValBind's to a nested sequence of let-bound,
 -- monomorphic functions with the given expression at the bottom.

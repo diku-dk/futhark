@@ -651,7 +651,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
           named (Unnamed, _) = Nothing
           param_names = mapMaybe (named . patternParam) params'
           pos_sizes =
-            typeDimNamesPos . foldFunType (map patternStructType params') $
+            sizeNamesPos . foldFunType (map patternStructType params') $
               RetType [] ret
           hide k (lvl, _) =
             lvl >= cur_lvl && k `notElem` param_names && k `S.notMember` pos_sizes
@@ -659,11 +659,11 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
       hidden_sizes <-
         S.fromList . M.keys . M.filterWithKey hide <$> getConstraints
 
-      let onDim (NamedSize name)
-            | qualLeaf name `S.member` hidden_sizes = S.singleton $ qualLeaf name
+      let onDim name
+            | name `S.member` hidden_sizes = S.singleton name
           onDim _ = mempty
 
-      pure $ RetType (S.toList $ foldMap onDim $ nestedDims ret) ret
+      pure $ RetType (S.toList $ foldMap onDim $ sizeNames ret) ret
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
   pure $ OpSection op' (Info ftype) loc
@@ -1087,7 +1087,7 @@ causalityCheck binding_body = do
         | (d, dloc) : _ <-
             mapMaybe (unknown constraints known) $
               S.toList $
-                typeDimNames $
+                sizeNames $
                   toStruct t =
             Just $ lift $ causality what (locOf loc) d dloc t
         | otherwise = Nothing
@@ -1448,18 +1448,18 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 
 -- | Extract all the shape names that occur in positive position
 -- (roughly, left side of an arrow) in a given type.
-typeDimNamesPos :: TypeBase Size als -> S.Set VName
-typeDimNamesPos (Scalar (Arrow _ _ t1 (RetType _ t2))) = onParam t1 <> typeDimNamesPos t2
+sizeNamesPos :: TypeBase Size als -> S.Set VName
+sizeNamesPos (Scalar (Arrow _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesPos t2
   where
     onParam :: TypeBase Size als -> S.Set VName
     onParam (Scalar Arrow {}) = mempty
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs
-    onParam t = typeDimNames t
+    onParam t = sizeNames t
     onTypeArg (TypeArgDim (NamedSize d) _) = S.singleton $ qualLeaf d
     onTypeArg (TypeArgDim _ _) = mempty
     onTypeArg (TypeArgType t _) = onParam t
-typeDimNamesPos _ = mempty
+sizeNamesPos _ = mempty
 
 checkGlobalAliases :: [Pat] -> PatType -> SrcLoc -> TermTypeM ()
 checkGlobalAliases params body_t loc = do
@@ -1542,7 +1542,7 @@ verifyFunctionParams fname params =
     verifyParams (foldMap patNames params) =<< mapM updateTypes params
   where
     verifyParams forbidden (p : ps)
-      | d : _ <- S.toList $ patternDimNames p `S.intersection` forbidden =
+      | d : _ <- S.toList $ patternSizeNames p `S.intersection` forbidden =
           typeError p mempty . withIndexLink "inaccessible-size" $
             "Parameter"
               <+> pquote (ppr p)
@@ -1610,20 +1610,18 @@ closeOverTypes defname defloc tparams paramts ret substs = do
   (more_tparams, retext) <-
     partitionEithers . catMaybes
       <$> mapM closeOver (M.toList $ M.map snd to_close_over)
-  let mkExt (NamedSize v) =
-        case M.lookup (qualLeaf v) substs of
-          Just (_, UnknowableSize {}) -> Just $ qualLeaf v
+  let mkExt v =
+        case M.lookup v substs of
+          Just (_, UnknowableSize {}) -> Just v
           _ -> Nothing
-      mkExt ConstSize {} = Nothing
-      mkExt AnySize {} = error "closeOverTypes: AnySize"
   pure
     ( tparams ++ more_tparams,
-      injectExt (retext ++ mapMaybe mkExt (nestedDims ret)) ret
+      injectExt (retext ++ mapMaybe mkExt (S.toList $ sizeNames ret)) ret
     )
   where
     t = foldFunType paramts $ RetType [] ret
     to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
-    visible = typeVars t <> typeDimNames t
+    visible = typeVars t <> sizeNames t
 
     (produced_sizes, param_sizes) = dimUses t
 
@@ -1696,7 +1694,7 @@ letGeneralise defname defloc tparams params rettype =
     rettype'' <- updateTypes rettype'
 
     let used_sizes =
-          foldMap typeDimNames $ rettype'' : map patternStructType params
+          foldMap sizeNames $ rettype'' : map patternStructType params
     case filter ((`S.notMember` used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
       [] -> pure ()

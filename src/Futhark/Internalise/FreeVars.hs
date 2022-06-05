@@ -61,20 +61,20 @@ freeVars expr = case expr of
       freeVarsField (RecordFieldExplicit _ e _) = freeVars e
       freeVarsField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
   ArrayLit es t _ ->
-    foldMap freeVars es <> sizes (typeDimNames $ unInfo t)
+    foldMap freeVars es <> sizes (sizeNames $ unInfo t)
   AppExp (Range e me incl _) _ ->
     freeVars e <> foldMap freeVars me <> foldMap freeVars incl
   Var qn (Info t) _ -> NameSet $ M.singleton (qualLeaf qn) $ toStruct t
   Ascript e _ _ -> freeVars e
   AppExp (Coerce e _ _) (Info ar) ->
-    freeVars e <> sizes (typeDimNames (appResType ar))
+    freeVars e <> sizes (sizeNames (appResType ar))
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeVars e1
-      <> ( (sizes (patternDimNames pat) <> freeVars e2)
+      <> ( (sizes (patternSizeNames pat) <> freeVars e2)
              `withoutM` (patVars pat <> foldMap (size . sizeName) let_sizes)
          )
   AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
-    ( (freeVars e1 <> sizes (foldMap patternDimNames pats))
+    ( (freeVars e1 <> sizes (foldMap patternSizeNames pats))
         `without` ( S.map identName (foldMap patIdents pats)
                       <> S.fromList (map typeParamName tparams)
                   )
@@ -85,7 +85,7 @@ freeVars expr = case expr of
   Negate e _ -> freeVars e
   Not e _ -> freeVars e
   Lambda pats e0 _ (Info (_, RetType dims t)) _ ->
-    (sizes (foldMap patternDimNames pats) <> freeVars e0 <> sizes (typeDimNames t))
+    (sizes (foldMap patternSizeNames pats) <> freeVars e0 <> sizes (sizeNames t))
       `withoutM` (foldMap patVars pats <> foldMap size dims)
   OpSection {} -> mempty
   OpSectionLeft _ _ e _ _ _ -> freeVars e
@@ -121,7 +121,7 @@ freeVars expr = case expr of
   AppExp (Match e cs _) _ -> freeVars e <> foldMap caseFV cs
     where
       caseFV (CasePat p eCase _) =
-        (sizes (patternDimNames p) <> freeVars eCase)
+        (sizes (patternSizeNames p) <> freeVars eCase)
           `withoutM` patVars p
 
 freeDimIndex :: DimIndexBase Info VName -> NameSet
