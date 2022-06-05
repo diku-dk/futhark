@@ -553,7 +553,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
     (te', svars, RetType dims t, l') <- bindingTypeParams tps' $ checkTypeExp te
     let elab_t = RetType (svars ++ dims) t
 
-    let used_dims = sizeNames t
+    let used_dims = freeInType t
     case filter ((`S.notMember` used_dims) . typeParamName) $
       filter isSizeParam tps' of
       [] -> pure ()
@@ -648,8 +648,8 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
           typeError loc mempty "Entry point functions may not be higher-order."
       | sizes_only_in_ret <-
           S.fromList (map typeParamName tparams')
-            `S.intersection` sizeNames rettype'
-            `S.difference` foldMap sizeNames (map patternStructType params' ++ rettype_params),
+            `S.intersection` freeInType rettype'
+            `S.difference` foldMap freeInType (map patternStructType params' ++ rettype_params),
         not $ S.null sizes_only_in_ret ->
           typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
       | p : _ <- filter nastyParameter params' ->

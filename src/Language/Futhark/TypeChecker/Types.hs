@@ -19,6 +19,11 @@ module Language.Futhark.TypeChecker.Types
     TypeSubs,
     Substitutable (..),
     substTypesAny,
+
+    -- * Witnesses
+    mustBeExplicitInType,
+    mustBeExplicitInBinding,
+    determineSizeWitnesses,
   )
 where
 
@@ -35,6 +40,53 @@ import Futhark.Util.Pretty hiding ((<|>))
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
+
+mustBeExplicitAux :: StructType -> M.Map VName Bool
+mustBeExplicitAux t =
+  execState (traverseDims onDim t) mempty
+  where
+    onDim bound _ (NamedSize d)
+      | qualLeaf d `S.member` bound =
+          modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
+    onDim _ PosImmediate (NamedSize d) =
+      modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
+    onDim _ _ (NamedSize d) =
+      modify $ M.insertWith (&&) (qualLeaf d) True
+    onDim _ _ _ =
+      pure ()
+
+-- | Determine which of the sizes in a type are used as sizes outside
+-- of functions in the type, and which are not.  The former are said
+-- to be "witnessed" by this type, while the latter are not.  In
+-- practice, the latter means that the actual sizes must come from
+-- somewhere else.
+determineSizeWitnesses :: StructType -> (S.Set VName, S.Set VName)
+determineSizeWitnesses t =
+  bimap (S.fromList . M.keys) (S.fromList . M.keys) $
+    M.partition not $
+      mustBeExplicitAux t
+
+-- | Figure out which of the sizes in a binding type must be passed
+-- explicitly, because their first use is as something else than just
+-- an array dimension.
+mustBeExplicitInBinding :: StructType -> S.Set VName
+mustBeExplicitInBinding bind_t =
+  let (ts, ret) = unfoldFunType bind_t
+      alsoRet =
+        M.unionWith (&&) $
+          M.fromList $
+            zip (S.toList $ freeInType ret) $
+              repeat True
+   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty ts
+  where
+    onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
+
+-- | Figure out which of the sizes in a parameter type must be passed
+-- explicitly, because their first use is as something else than just
+-- an array dimension.  'mustBeExplicit' is like this function, but
+-- first decomposes into parameter types.
+mustBeExplicitInType :: StructType -> S.Set VName
+mustBeExplicitInType = snd . determineSizeWitnesses
 
 addAliasesFromType :: StructType -> PatType -> PatType
 addAliasesFromType (Array _ u1 et1 shape1) (Array als _ _ _) =

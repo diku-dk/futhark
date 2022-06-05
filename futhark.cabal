@@ -222,7 +222,6 @@ library
       Futhark.Internalise.Defunctionalise
       Futhark.Internalise.Defunctorise
       Futhark.Internalise.Exps
-      Futhark.Internalise.FreeVars
       Futhark.Internalise.Lambdas
       Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad
@@ -316,6 +315,7 @@ library
       Language.Futhark
       Language.Futhark.Core
       Language.Futhark.Interpreter
+      Language.Futhark.FreeVars
       Language.Futhark.Parser
       Language.Futhark.Parser.Monad
       Language.Futhark.Parser.Lexer.Tokens

@@ -42,7 +42,6 @@ module Language.Futhark.Prop
     patternStructType,
     patternParam,
     patternOrderZero,
-    patternSizeNames,
 
     -- * Queries on types
     uniqueness,
@@ -55,7 +54,6 @@ module Language.Futhark.Prop
     unfoldFunType,
     foldFunType,
     typeVars,
-    sizeNames,
 
     -- * Operations on types
     peelArray,
@@ -70,9 +68,6 @@ module Language.Futhark.Prop
     noSizes,
     traverseDims,
     DimPos (..),
-    mustBeExplicit,
-    mustBeExplicitInType,
-    determineSizeWitnesses,
     tupleRecord,
     isTupleRecord,
     areTupleFields,
@@ -192,53 +187,6 @@ traverseDims f = go mempty PosImmediate
       TypeArgDim <$> f bound b d <*> pure loc
     onTypeArg bound b (TypeArgType t loc) =
       TypeArgType <$> go bound b t <*> pure loc
-
-mustBeExplicitAux :: StructType -> M.Map VName Bool
-mustBeExplicitAux t =
-  execState (traverseDims onDim t) mempty
-  where
-    onDim bound _ (NamedSize d)
-      | qualLeaf d `S.member` bound =
-          modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ PosImmediate (NamedSize d) =
-      modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ _ (NamedSize d) =
-      modify $ M.insertWith (&&) (qualLeaf d) True
-    onDim _ _ _ =
-      pure ()
-
--- | Determine which of the sizes in a type are used as sizes outside
--- of functions in the type, and which are not.  The former are said
--- to be "witnessed" by this type, while the latter are not.  In
--- practice, the latter means that the actual sizes must come from
--- somewhere else.
-determineSizeWitnesses :: StructType -> (S.Set VName, S.Set VName)
-determineSizeWitnesses t =
-  bimap (S.fromList . M.keys) (S.fromList . M.keys) $
-    M.partition not $
-      mustBeExplicitAux t
-
--- | Figure out which of the sizes in a parameter type must be passed
--- explicitly, because their first use is as something else than just
--- an array dimension.  'mustBeExplicit' is like this function, but
--- first decomposes into parameter types.
-mustBeExplicitInType :: StructType -> S.Set VName
-mustBeExplicitInType = snd . determineSizeWitnesses
-
--- | Figure out which of the sizes in a binding type must be passed
--- explicitly, because their first use is as something else than just
--- an array dimension.
-mustBeExplicit :: StructType -> S.Set VName
-mustBeExplicit bind_t =
-  let (ts, ret) = unfoldFunType bind_t
-      alsoRet =
-        M.unionWith (&&) $
-          M.fromList $
-            zip (S.toList $ sizeNames ret) $
-              repeat True
-   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty ts
-  where
-    onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
@@ -573,9 +521,8 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
   let RetType [] t' = foldr (arrow . patternParam) t params
    in t' `setAliases` als
   where
-    arrow (Named v, x) (RetType dims y)
-      | v `S.member` sizeNames y =
-          RetType [] $ Scalar $ Arrow () (Named v) x $ RetType (v : dims) y
+    arrow (Named v, x) (RetType dims y) =
+      RetType [] $ Scalar $ Arrow () (Named v) x $ RetType (v : dims) y
     arrow (pn, tx) y =
       RetType [] $ Scalar $ Arrow () pn tx y
 typeOf (OpSection _ (Info t) _) =
@@ -664,44 +611,6 @@ orderZero (Scalar (Record fs)) = all orderZero $ M.elems fs
 orderZero (Scalar TypeVar {}) = True
 orderZero (Scalar Arrow {}) = False
 orderZero (Scalar (Sum cs)) = all (all orderZero) cs
-
--- | Extract all the shape names that occur in a given pattern.
-patternSizeNames :: PatBase Info VName -> S.Set VName
-patternSizeNames (TuplePat ps _) = foldMap patternSizeNames ps
-patternSizeNames (RecordPat fs _) = foldMap (patternSizeNames . snd) fs
-patternSizeNames (PatParens p _) = patternSizeNames p
-patternSizeNames (Id _ (Info tp) _) = sizeNames tp
-patternSizeNames (Wildcard (Info tp) _) = sizeNames tp
-patternSizeNames (PatAscription p _ _) = patternSizeNames p
-patternSizeNames (PatLit _ (Info tp) _) = sizeNames tp
-patternSizeNames (PatConstr _ _ ps _) = foldMap patternSizeNames ps
-patternSizeNames (PatAttr _ p _) = patternSizeNames p
-
--- | Extract all names that occur free as sizes in a given type.
-sizeNames :: TypeBase Size as -> S.Set VName
-sizeNames t =
-  case t of
-    Array _ _ s a ->
-      sizeNames (Scalar a) <> foldMap onSize (shapeDims s)
-    Scalar (Record fs) ->
-      foldMap sizeNames fs
-    Scalar Prim {} ->
-      mempty
-    Scalar (Sum cs) ->
-      foldMap (foldMap sizeNames) cs
-    Scalar (Arrow _ v t1 (RetType dims t2)) ->
-      S.filter (notV v) $ S.filter (`notElem` dims) $ sizeNames t1 <> sizeNames t2
-    Scalar (TypeVar _ _ _ targs) ->
-      foldMap typeArgDims targs
-  where
-    typeArgDims (TypeArgDim d _) = onSize d
-    typeArgDims (TypeArgType at _) = sizeNames at
-
-    notV Unnamed = const True
-    notV (Named v) = (/= v)
-
-    onSize (NamedSize qn) = S.singleton $ qualLeaf qn
-    onSize _ = mempty
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.

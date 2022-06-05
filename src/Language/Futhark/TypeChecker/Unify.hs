@@ -270,7 +270,7 @@ typeNotes ctx =
   fmap mconcat
     . mapM (dimNotes ctx . NamedSize . qualName)
     . S.toList
-    . sizeNames
+    . freeInType
 
 typeVarNotes :: MonadUnify m => VName -> m Notes
 typeVarNotes v = maybe mempty (aNote . note . snd) . M.lookup v <$> getConstraints
@@ -628,7 +628,7 @@ scopeCheck usage bcs vn max_lvl tp = do
   checkType constraints tp
   where
     checkType constraints t =
-      mapM_ (check constraints) $ typeVars t <> sizeNames t
+      mapM_ (check constraints) $ typeVars t <> freeInType t
 
     check constraints v
       | Just (lvl, c) <- M.lookup v constraints,
@@ -698,7 +698,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       link
 
       arrayElemTypeWith usage bcs' tp
-      when (any (`elem` bound) (sizeNames tp)) $
+      when (any (`elem` bound) (freeInType tp)) $
         unifyError usage mempty bcs $
           "Type variable"
             <+> pprName vn
@@ -770,7 +770,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
         Scalar (Sum ts)
           | all (`M.member` ts) $ M.keys required_cs -> do
               let tp' = Scalar $ Sum $ required_cs <> ts -- Crucially left-biased.
-                  ext = filter (`S.member` sizeNames tp') bound
+                  ext = filter (`S.member` freeInType tp') bound
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedConstructors onDims usage bound bcs required_cs ts
