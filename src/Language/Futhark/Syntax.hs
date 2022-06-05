@@ -493,7 +493,7 @@ data Diet
   | -- | Only observes value in this position, does
     -- not consume.
     Observe
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 -- | Simple Futhark values.  Values are fully evaluated and their type
 -- is always unambiguous.
@@ -602,7 +602,11 @@ deriving instance Show vn => Show (DimIndexBase NoInfo vn)
 
 deriving instance Eq (DimIndexBase NoInfo VName)
 
+deriving instance Eq (DimIndexBase Info VName)
+
 deriving instance Ord (DimIndexBase NoInfo VName)
+
+deriving instance Ord (DimIndexBase Info VName)
 
 -- | A slicing of an array (potentially multiple dimensions).
 type SliceBase f vn = [DimIndexBase f vn]
@@ -715,7 +719,11 @@ deriving instance Show vn => Show (AppExpBase NoInfo vn)
 
 deriving instance Eq (AppExpBase NoInfo VName)
 
+deriving instance Eq (AppExpBase Info VName)
+
 deriving instance Ord (AppExpBase NoInfo VName)
+
+deriving instance Ord (AppExpBase Info VName)
 
 instance Located (AppExpBase f vn) where
   locOf (Range _ _ _ pos) = locOf pos
@@ -823,6 +831,10 @@ deriving instance Eq (ExpBase NoInfo VName)
 
 deriving instance Ord (ExpBase NoInfo VName)
 
+deriving instance Eq (ExpBase Info VName)
+
+deriving instance Ord (ExpBase Info VName)
+
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc) = locOf loc
   locOf (IntLit _ _ loc) = locOf loc
@@ -863,7 +875,11 @@ deriving instance Show vn => Show (FieldBase NoInfo vn)
 
 deriving instance Eq (FieldBase NoInfo VName)
 
+deriving instance Eq (FieldBase Info VName)
+
 deriving instance Ord (FieldBase NoInfo VName)
+
+deriving instance Ord (FieldBase Info VName)
 
 instance Located (FieldBase f vn) where
   locOf (RecordFieldExplicit _ _ loc) = locOf loc
@@ -878,7 +894,11 @@ deriving instance Show vn => Show (CaseBase NoInfo vn)
 
 deriving instance Eq (CaseBase NoInfo VName)
 
+deriving instance Eq (CaseBase Info VName)
+
 deriving instance Ord (CaseBase NoInfo VName)
+
+deriving instance Ord (CaseBase Info VName)
 
 instance Located (CaseBase f vn) where
   locOf (CasePat _ _ loc) = locOf loc
@@ -895,7 +915,11 @@ deriving instance Show vn => Show (LoopFormBase NoInfo vn)
 
 deriving instance Eq (LoopFormBase NoInfo VName)
 
+deriving instance Eq (LoopFormBase Info VName)
+
 deriving instance Ord (LoopFormBase NoInfo VName)
+
+deriving instance Ord (LoopFormBase Info VName)
 
 -- | A literal in a pattern.
 data PatLit
@@ -923,7 +947,11 @@ deriving instance Show vn => Show (PatBase NoInfo vn)
 
 deriving instance Eq (PatBase NoInfo VName)
 
+deriving instance Eq (PatBase Info VName)
+
 deriving instance Ord (PatBase NoInfo VName)
+
+deriving instance Ord (PatBase Info VName)
 
 instance Located (PatBase f vn) where
   locOf (TuplePat _ loc) = locOf loc
