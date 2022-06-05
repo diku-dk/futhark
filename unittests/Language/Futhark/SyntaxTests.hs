@@ -89,9 +89,6 @@ pVName = lexeme $ do
 pQualName :: Parser (QualName VName)
 pQualName = QualName [] <$> pVName
 
-pTypeName :: Parser TypeName
-pTypeName = TypeName [] <$> pVName
-
 pPrimType :: Parser PrimType
 pPrimType =
   choice $
@@ -133,7 +130,7 @@ pScalarNonFun =
     ]
   where
     pField = (,) <$> pName <* lexeme ":" <*> pStructType
-    pTypeVar = TypeVar () <$> pUniqueness <*> pTypeName <*> many pTypeArg
+    pTypeVar = TypeVar () <$> pUniqueness <*> pQualName <*> many pTypeArg
     pTypeArg =
       choice
         [ TypeArgDim <$> pSize <*> pure mempty,
