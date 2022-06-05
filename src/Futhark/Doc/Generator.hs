@@ -526,11 +526,11 @@ retTypeHtml (RetType dims t) = do
   t' <- typeHtml t
   pure $ "?" <> mconcat (map (brackets . vnameHtml) dims) <> "." <> t'
 
-prettyShapeDecl :: ShapeDecl DimDecl -> DocM Html
+prettyShapeDecl :: ShapeDecl Size -> DocM Html
 prettyShapeDecl (ShapeDecl ds) =
   mconcat <$> mapM dimDeclHtml ds
 
-typeArgHtml :: TypeArg DimDecl -> DocM Html
+typeArgHtml :: TypeArg Size -> DocM Html
 typeArgHtml (TypeArgDim d _) = dimDeclHtml d
 typeArgHtml (TypeArgType t _) = typeHtml t
 
@@ -697,15 +697,15 @@ relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
-dimDeclHtml :: DimDecl -> DocM Html
-dimDeclHtml (NamedDim v) = brackets <$> qualNameHtml v
-dimDeclHtml (ConstDim n) = pure $ brackets $ toHtml (show n)
-dimDeclHtml AnyDim {} = pure $ brackets mempty
+dimDeclHtml :: Size -> DocM Html
+dimDeclHtml (NamedSize v) = brackets <$> qualNameHtml v
+dimDeclHtml (ConstSize n) = pure $ brackets $ toHtml (show n)
+dimDeclHtml AnySize {} = pure $ brackets mempty
 
-dimExpHtml :: DimExp VName -> DocM Html
-dimExpHtml DimExpAny = pure $ brackets mempty
-dimExpHtml (DimExpNamed v _) = brackets <$> qualNameHtml v
-dimExpHtml (DimExpConst n _) = pure $ brackets $ toHtml (show n)
+dimExpHtml :: SizeExp VName -> DocM Html
+dimExpHtml SizeExpAny = pure $ brackets mempty
+dimExpHtml (SizeExpNamed v _) = brackets <$> qualNameHtml v
+dimExpHtml (SizeExpConst n _) = pure $ brackets $ toHtml (show n)
 
 typeArgExpHtml :: TypeArgExp VName -> DocM Html
 typeArgExpHtml (TypeArgExpDim d _) = dimExpHtml d

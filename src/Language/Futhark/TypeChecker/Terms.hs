@@ -66,8 +66,8 @@ unifyBranches loc e1 e2 = do
 sliceShape ::
   Maybe (SrcLoc, Rigidity) ->
   Slice ->
-  TypeBase DimDecl as ->
-  TermTypeM (TypeBase DimDecl as, [VName])
+  TypeBase Size as ->
+  TermTypeM (TypeBase Size as, [VName])
 sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
   runStateT (setDims <$> adjustDims slice orig_dims) []
   where
@@ -91,11 +91,11 @@ sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
           modify (maybeToList ext ++)
           pure d
         Just (loc, Nonrigid) ->
-          lift $ NamedDim . qualName <$> newDimVar loc Nonrigid "slice_dim"
+          lift $ NamedSize . qualName <$> newDimVar loc Nonrigid "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
           modify (v :)
-          pure $ NamedDim $ qualName v
+          pure $ NamedSize $ qualName v
       where
         -- The original size does not matter if the slice is fully specified.
         orig_d'
@@ -187,7 +187,7 @@ unscopeType tloc unscoped t = do
   (t', m) <- runStateT (traverseDims onDim t) mempty
   pure (t' `addAliases` S.map unAlias, M.elems m)
   where
-    onDim bound _ (NamedDim d)
+    onDim bound _ (NamedSize d)
       | Just loc <- srclocOf <$> M.lookup (qualLeaf d) unscoped,
         not $ qualLeaf d `S.member` bound =
           inst loc $ qualLeaf d
@@ -196,11 +196,11 @@ unscopeType tloc unscoped t = do
     inst loc d = do
       prev <- gets $ M.lookup d
       case prev of
-        Just d' -> pure $ NamedDim $ qualName d'
+        Just d' -> pure $ NamedSize $ qualName d'
         Nothing -> do
           d' <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope loc d) "d"
           modify $ M.insert d d'
-          pure $ NamedDim $ qualName d'
+          pure $ NamedSize $ qualName d'
 
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
@@ -302,14 +302,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do
       et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (ShapeDecl [ConstDim 0]) Unique
+      t <- arrayOfM loc et (ShapeDecl [ConstSize 0]) Unique
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (ShapeDecl [ConstDim $ length all_es]) Unique
+      t <- arrayOfM loc et' (ShapeDecl [ConstSize $ length all_es]) Unique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -347,7 +347,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
             dimFromBound end''
       _ -> do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
-        pure (NamedDim $ qualName d, Just d)
+        pure (NamedSize $ qualName d, Just d)
 
   t <- arrayOfM loc start_t (ShapeDecl [dim]) Unique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
@@ -659,7 +659,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
       hidden_sizes <-
         S.fromList . M.keys . M.filterWithKey hide <$> getConstraints
 
-      let onDim (NamedDim name)
+      let onDim (NamedSize name)
             | qualLeaf name `S.member` hidden_sizes = S.singleton $ qualLeaf name
           onDim _ = mempty
 
@@ -855,8 +855,8 @@ checkArg arg = do
 instantiateDimsInReturnType ::
   SrcLoc ->
   Maybe (QualName VName) ->
-  RetTypeBase DimDecl als ->
-  TermTypeM (TypeBase DimDecl als, [VName])
+  RetTypeBase Size als ->
+  TermTypeM (TypeBase Size als, [VName])
 instantiateDimsInReturnType tloc fname =
   instantiateEmptyArrayDims tloc $ Rigid $ RigidRet fname
 
@@ -866,7 +866,7 @@ instantiateDimsInReturnType tloc fname =
 type ApplyOp = (Maybe (QualName VName), Int)
 
 -- | Extract all those names that are bound inside the type.
-boundInsideType :: TypeBase DimDecl as -> S.Set VName
+boundInsideType :: TypeBase Size as -> S.Set VName
 boundInsideType (Array _ _ _ t) = boundInsideType (Scalar t)
 boundInsideType (Scalar Prim {}) = mempty
 boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
@@ -887,9 +887,9 @@ boundInsideType (Scalar (Arrow _ pn t1 (RetType dims t2))) =
 dimUses :: StructType -> (Names, Names)
 dimUses = flip execState mempty . traverseDims f
   where
-    f bound _ (NamedDim v) | qualLeaf v `S.member` bound = pure ()
-    f _ PosImmediate (NamedDim v) = modify ((S.singleton (qualLeaf v), mempty) <>)
-    f _ PosParam (NamedDim v) = modify ((mempty, S.singleton (qualLeaf v)) <>)
+    f bound _ (NamedSize v) | qualLeaf v `S.member` bound = pure ()
+    f _ PosImmediate (NamedSize v) = modify ((S.singleton (qualLeaf v), mempty) <>)
+    f _ PosParam (NamedSize v) = modify ((mempty, S.singleton (qualLeaf v)) <>)
     f _ _ _ = pure ()
 
 checkApply ::
@@ -944,7 +944,7 @@ checkApply
         case pname of
           Named pname'
             | (Scalar (Prim (Signed Int64))) <- tp1' -> do
-                (d, argext) <- dimFromArg fname argexp
+                (d, argext) <- sizeFromArg fname argexp
                 pure
                   ( argext,
                     (`M.lookup` M.singleton pname' (SizeSubst d))
@@ -1448,15 +1448,15 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 
 -- | Extract all the shape names that occur in positive position
 -- (roughly, left side of an arrow) in a given type.
-typeDimNamesPos :: TypeBase DimDecl als -> S.Set VName
+typeDimNamesPos :: TypeBase Size als -> S.Set VName
 typeDimNamesPos (Scalar (Arrow _ _ t1 (RetType _ t2))) = onParam t1 <> typeDimNamesPos t2
   where
-    onParam :: TypeBase DimDecl als -> S.Set VName
+    onParam :: TypeBase Size als -> S.Set VName
     onParam (Scalar Arrow {}) = mempty
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs
     onParam t = typeDimNames t
-    onTypeArg (TypeArgDim (NamedDim d) _) = S.singleton $ qualLeaf d
+    onTypeArg (TypeArgDim (NamedSize d) _) = S.singleton $ qualLeaf d
     onTypeArg (TypeArgDim _ _) = mempty
     onTypeArg (TypeArgType t _) = onParam t
 typeDimNamesPos _ = mempty
@@ -1610,12 +1610,12 @@ closeOverTypes defname defloc tparams paramts ret substs = do
   (more_tparams, retext) <-
     partitionEithers . catMaybes
       <$> mapM closeOver (M.toList $ M.map snd to_close_over)
-  let mkExt (NamedDim v) =
+  let mkExt (NamedSize v) =
         case M.lookup (qualLeaf v) substs of
           Just (_, UnknowableSize {}) -> Just $ qualLeaf v
           _ -> Nothing
-      mkExt ConstDim {} = Nothing
-      mkExt AnyDim {} = error "closeOverTypes: AnyDim"
+      mkExt ConstSize {} = Nothing
+      mkExt AnySize {} = error "closeOverTypes: AnySize"
   pure
     ( tparams ++ more_tparams,
       injectExt (retext ++ mapMaybe mkExt (nestedDims ret)) ret
@@ -1640,7 +1640,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, UnknowableSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
-          notes <- dimNotes defloc $ NamedDim $ qualName k
+          notes <- dimNotes defloc $ NamedSize $ qualName k
           typeError defloc notes . withIndexLink "unknowable-param-def" $
             "Unknowable size"
               <+> pquote (pprName k)

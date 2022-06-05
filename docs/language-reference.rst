@@ -396,8 +396,8 @@ from conditional or loop expressions.
 
 A type abbreviation can have zero or more parameters.  A type
 parameter enclosed with square brackets is a *size parameter*, and
-can be used in the definition as an array dimension size, or as a
-dimension argument to other type abbreviations.  When passing an
+can be used in the definition as an array size, or as a
+size argument to other type abbreviations.  When passing an
 argument for a shape parameter, it must be enclosed in square
 brackets.  Example::
 

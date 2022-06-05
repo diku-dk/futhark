@@ -21,7 +21,7 @@ module Language.Futhark.Syntax
     FloatType (..),
     PrimType (..),
     ArrayDim (..),
-    DimDecl (..),
+    Size (..),
     ShapeDecl (..),
     shapeRank,
     stripDims,
@@ -30,7 +30,7 @@ module Language.Futhark.Syntax
     qualNameFromTypeName,
     TypeBase (..),
     TypeArg (..),
-    DimExp (..),
+    SizeExp (..),
     TypeExp (..),
     TypeArgExp (..),
     PName (..),
@@ -228,28 +228,28 @@ class Eq dim => ArrayDim dim where
 instance ArrayDim () where
   unifyDims () () = Just ()
 
--- | Declaration of a dimension size.
-data DimDecl
+-- | The elaborated size of a dimension.
+data Size
   = -- | The size of the dimension is this name, which
     -- must be in scope.  In a return type, this will
     -- give rise to an assertion.
-    NamedDim (QualName VName)
+    NamedSize (QualName VName)
   | -- | The size is a constant.
-    ConstDim Int
+    ConstSize Int
   | -- | No known size.  If @Nothing@, then this is a name distinct
     -- from any other.  The type checker should _never_ produce these
     -- - they are a (hopefully temporary) thing introduced by
     -- defunctorisation and monomorphisation.
-    AnyDim (Maybe VName)
+    AnySize (Maybe VName)
   deriving (Eq, Ord, Show)
 
 -- Note that the notion of unifyDims here is intentionally not what we
 -- use when we do real type unification in the type checker.
-instance ArrayDim DimDecl where
-  unifyDims AnyDim {} y = Just y
-  unifyDims x AnyDim {} = Just x
-  unifyDims (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
-  unifyDims (ConstDim x) (ConstDim y) | x == y = Just $ ConstDim x
+instance ArrayDim Size where
+  unifyDims AnySize {} y = Just y
+  unifyDims x AnySize {} = Just x
+  unifyDims (NamedSize x) (NamedSize y) | x == y = Just $ NamedSize x
+  unifyDims (ConstSize x) (ConstSize y) | x == y = Just $ ConstSize x
   unifyDims _ _ = Nothing
 
 -- | The size of an array type is a list of its dimension sizes.  If
@@ -411,39 +411,39 @@ type Aliasing = S.Set Alias
 
 -- | A type with aliasing information and shape annotations, used for
 -- describing the type patterns and expressions.
-type PatType = TypeBase DimDecl Aliasing
+type PatType = TypeBase Size Aliasing
 
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
-type StructType = TypeBase DimDecl ()
+type StructType = TypeBase Size ()
 
 -- | A value type contains full, manifest size information.
 type ValueType = TypeBase Int64 ()
 
 -- | The return type version of 'StructType'.
-type StructRetType = RetTypeBase DimDecl ()
+type StructRetType = RetTypeBase Size ()
 
 -- | The return type version of 'PatType'.
-type PatRetType = RetTypeBase DimDecl Aliasing
+type PatRetType = RetTypeBase Size Aliasing
 
--- | A dimension declaration expression for use in a 'TypeExp'.
-data DimExp vn
+-- | A size expression for use in a 'TypeExp'.
+data SizeExp vn
   = -- | The size of the dimension is this name, which
     -- must be in scope.
-    DimExpNamed (QualName vn) SrcLoc
+    SizeExpNamed (QualName vn) SrcLoc
   | -- | The size is a constant.
-    DimExpConst Int SrcLoc
+    SizeExpConst Int SrcLoc
   | -- | No dimension declaration.
-    DimExpAny
+    SizeExpAny
   deriving (Show)
 
-deriving instance Eq (DimExp Name)
+deriving instance Eq (SizeExp Name)
 
-deriving instance Eq (DimExp VName)
+deriving instance Eq (SizeExp VName)
 
-deriving instance Ord (DimExp Name)
+deriving instance Ord (SizeExp Name)
 
-deriving instance Ord (DimExp VName)
+deriving instance Ord (SizeExp VName)
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -452,7 +452,7 @@ data TypeExp vn
   = TEVar (QualName vn) SrcLoc
   | TETuple [TypeExp vn] SrcLoc
   | TERecord [(Name, TypeExp vn)] SrcLoc
-  | TEArray (DimExp vn) (TypeExp vn) SrcLoc
+  | TEArray (SizeExp vn) (TypeExp vn) SrcLoc
   | TEUnique (TypeExp vn) SrcLoc
   | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
   | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc
@@ -481,7 +481,7 @@ instance Located (TypeExp vn) where
 
 -- | A type argument expression passed to a type constructor.
 data TypeArgExp vn
-  = TypeArgExpDim (DimExp vn) SrcLoc
+  = TypeArgExpDim (SizeExp vn) SrcLoc
   | TypeArgExpType (TypeExp vn)
   deriving (Show)
 

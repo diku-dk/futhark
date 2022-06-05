@@ -133,7 +133,7 @@ data Constraint
   | ParamSize SrcLoc
   | -- | Is not actually a type, but a term-level size,
     -- possibly already set to something specific.
-    Size (Maybe DimDecl) Usage
+    Size (Maybe Size) Usage
   | -- | A size that does not unify with anything -
     -- created from the result of applying a function
     -- whose return size is existential, or otherwise
@@ -175,7 +175,7 @@ data RigidSource
     RigidRet (Maybe (QualName VName))
   | RigidLoop
   | -- | Produced by a complicated slice expression.
-    RigidSlice (Maybe DimDecl) String
+    RigidSlice (Maybe Size) String
   | -- | Produced by a complicated range expression.
     RigidRange
   | -- | Produced by a range expression with this bound.
@@ -253,10 +253,10 @@ prettySource ctx loc (RigidCond t1 t2) =
       <> align (ppr t2)
 
 -- | Retrieve notes describing the purpose or origin of the given
--- 'DimDecl'.  The location is used as the *current* location, for the
+-- 'Size'.  The location is used as the *current* location, for the
 -- purpose of reporting relative locations.
-dimNotes :: (Located a, MonadUnify m) => a -> DimDecl -> m Notes
-dimNotes ctx (NamedDim d) = do
+dimNotes :: (Located a, MonadUnify m) => a -> Size -> m Notes
+dimNotes ctx (NamedSize d) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
@@ -268,7 +268,7 @@ dimNotes _ _ = pure mempty
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
   fmap mconcat
-    . mapM (dimNotes ctx . NamedDim . qualName)
+    . mapM (dimNotes ctx . NamedSize . qualName)
     . S.toList
     . typeDimNames
 
@@ -359,15 +359,15 @@ instantiateEmptyArrayDims ::
   MonadUnify m =>
   SrcLoc ->
   Rigidity ->
-  RetTypeBase DimDecl als ->
-  m (TypeBase DimDecl als, [VName])
+  RetTypeBase Size als ->
+  m (TypeBase Size als, [VName])
 instantiateEmptyArrayDims tloc r (RetType dims t) = do
   dims' <- mapM new dims
   pure (first (onDim $ zip dims dims') t, dims')
   where
     new = newDimVar tloc r . nameFromString . takeWhile isAscii . baseString
-    onDim dims' (NamedDim d) =
-      NamedDim $ maybe d qualName (lookup (qualLeaf d) dims')
+    onDim dims' (NamedSize d) =
+      NamedSize $ maybe d qualName (lookup (qualLeaf d) dims')
     onDim _ d = d
 
 -- | Is the given type variable the name of an abstract type or type
@@ -384,7 +384,7 @@ isNonRigid v constraints = do
   pure lvl
 
 type UnifyDims m =
-  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> DimDecl -> DimDecl -> m ()
+  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> Size -> Size -> m ()
 
 flipUnifyDims :: UnifyDims m -> UnifyDims m
 flipUnifyDims onDims bcs bound nonrigid t1 t2 =
@@ -520,7 +520,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ SizeSubst $ NamedDim $ qualName p1'
+                          | v == p2' = Just $ SizeSubst $ NamedSize $ qualName p1'
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -553,10 +553,10 @@ unifyWith onDims usage = subunify False
 unifyDims :: MonadUnify m => Usage -> UnifyDims m
 unifyDims _ _ _ _ d1 d2
   | d1 == d2 = pure ()
-unifyDims usage bcs _ nonrigid (NamedDim (QualName _ d1)) d2
+unifyDims usage bcs _ nonrigid (NamedSize (QualName _ d1)) d2
   | Just lvl1 <- nonrigid d1 =
       linkVarToDim usage bcs d1 lvl1 d2
-unifyDims usage bcs _ nonrigid d1 (NamedDim (QualName _ d2))
+unifyDims usage bcs _ nonrigid d1 (NamedSize (QualName _ d2))
   | Just lvl2 <- nonrigid d2 =
       linkVarToDim usage bcs d2 lvl2 d1
 unifyDims usage bcs _ _ d1 d2 = do
@@ -580,11 +580,11 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
       | d1 == d2 = pure ()
     -- We identify existentially bound names by them being nonrigid
     -- and yet bound.  It's OK to unify with those.
-    onDims bcs bound nonrigid (NamedDim (QualName _ d1)) d2
+    onDims bcs bound nonrigid (NamedSize (QualName _ d1)) d2
       | Just lvl1 <- nonrigid d1,
         not (boundParam bound d2) || (d1 `elem` bound) =
           linkVarToDim usage bcs d1 lvl1 d2
-    onDims bcs bound nonrigid d1 (NamedDim (QualName _ d2))
+    onDims bcs bound nonrigid d1 (NamedSize (QualName _ d2))
       | Just lvl2 <- nonrigid d2,
         not (boundParam bound d1) || (d2 `elem` bound) =
           linkVarToDim usage bcs d2 lvl2 d1
@@ -597,7 +597,7 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
           <+> pquote (ppr d2)
           <+> "do not match."
 
-    boundParam bound (NamedDim (QualName _ d)) = d `elem` bound
+    boundParam bound (NamedSize (QualName _ d)) = d `elem` bound
     boundParam _ _ = False
 
 occursCheck ::
@@ -809,13 +809,13 @@ linkVarToDim ::
   BreadCrumbs ->
   VName ->
   Level ->
-  DimDecl ->
+  Size ->
   m ()
 linkVarToDim usage bcs vn lvl dim = do
   constraints <- getConstraints
 
   case dim of
-    NamedDim dim'
+    NamedSize dim'
       | Just (dim_lvl, c) <- qualLeaf dim' `M.lookup` constraints,
         dim_lvl > lvl ->
           case c of
@@ -1117,9 +1117,9 @@ mustHaveField usage = mustHaveFieldWith (unifyDims usage) usage mempty noBreadCr
 newDimOnMismatch ::
   (Monoid as, MonadUnify m) =>
   SrcLoc ->
-  TypeBase DimDecl as ->
-  TypeBase DimDecl as ->
-  m (TypeBase DimDecl as, [VName])
+  TypeBase Size as ->
+  TypeBase Size as ->
+  m (TypeBase Size as, [VName])
 newDimOnMismatch loc t1 t2 = do
   (t, seen) <- runStateT (matchDims onDims t1 t2) mempty
   pure (t, M.elems seen)
@@ -1132,11 +1132,11 @@ newDimOnMismatch loc t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ NamedDim $ qualName d
+            Just d -> pure $ NamedSize $ qualName d
             Nothing -> do
               d <- lift $ newDimVar loc r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ NamedDim $ qualName d
+              pure $ NamedSize $ qualName d
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.

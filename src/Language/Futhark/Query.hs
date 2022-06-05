@@ -233,7 +233,7 @@ atPosInTypeExp te pos =
   where
     inArg (TypeArgExpDim dim _) = inDim dim
     inArg (TypeArgExpType e2) = atPosInTypeExp e2 pos
-    inDim (DimExpNamed qn loc) = do
+    inDim (SizeExpNamed qn loc) = do
       guard $ loc `contains` pos
       Just $ RawAtName qn $ locOf loc
     inDim _ = Nothing

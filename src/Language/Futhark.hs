@@ -79,7 +79,7 @@ type Spec = SpecBase Info VName
 type Prog = ProgBase Info VName
 
 -- | A known type arg with shape annotations.
-type StructTypeArg = TypeArg DimDecl
+type StructTypeArg = TypeArg Size
 
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName

@@ -457,12 +457,12 @@ TypeExpDims :: { [Name] }
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
            { TEUnique $2 (srcspan $1 $>) }
-         | '[' DimExp ']' TypeExpTerm %prec indexprec
+         | '[' SizeExp ']' TypeExpTerm %prec indexprec
            { TEArray $2 $4 (srcspan $1 $>) }
          | TypeExpApply %prec sumprec { $1 }
 
          -- Errors
-         | '[' DimExp ']' %prec bottom
+         | '[' SizeExp ']' %prec bottom
            {% parseErrorAt (srcspan $1 $>) $ Just $
                 unlines ["missing array row type.",
                          "Did you mean []"  ++ pretty $2 ++ "?"]
@@ -487,12 +487,12 @@ SumClause :: { (Name, [UncheckedTypeExp], Loc) }
 TypeExpApply :: { UncheckedTypeExp }
               : TypeExpApply TypeArg
                 { TEApply $1 $2 (srcspan $1 $>) }
-              | 'id[' DimExp ']'
+              | 'id[' SizeExp ']'
                 { let L loc (INDEXING v) = $1
                   in TEApply (TEVar (qualName v) (srclocOf (backOneCol loc)))
                              (TypeArgExpDim $2 (srclocOf loc))
                              (srcspan $1 $>) }
-              | 'qid[' DimExp ']'
+              | 'qid[' SizeExp ']'
                 { let L loc (QUALINDEXING qs v) = $1
                   in TEApply (TEVar (QualName qs v) (srclocOf (backOneCol loc)))
                              (TypeArgExpDim $2 (srclocOf loc))
@@ -513,7 +513,7 @@ Constr :: { (Name, Loc) }
         : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, locOf $1) }
 
 TypeArg :: { TypeArgExp Name }
-         : '[' DimExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
+         : '[' SizeExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
          | TypeExpAtom     { TypeArgExpType $1 }
 
 FieldType :: { (Name, UncheckedTypeExp) }
@@ -527,14 +527,14 @@ TupleTypes :: { [UncheckedTypeExp] }
             : TypeExp                { [$1] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
-DimExp :: { DimExp Name }
+SizeExp :: { SizeExp Name }
         : QualName
-          { DimExpNamed (fst $1) (srclocOf (snd $1)) }
+          { SizeExpNamed (fst $1) (srclocOf (snd $1)) }
         | intlit
           { let L loc (INTLIT n) = $1
-            in DimExpConst (fromIntegral n) (srclocOf loc) }
+            in SizeExpConst (fromIntegral n) (srclocOf loc) }
         |
-          { DimExpAny }
+          { SizeExpAny }
 
 FunParam :: { PatBase NoInfo Name }
 FunParam : InnerPat { $1 }

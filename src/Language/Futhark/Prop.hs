@@ -139,7 +139,7 @@ arrayShape _ = mempty
 
 -- | Return any free shape declarations in the type, with duplicates
 -- removed.
-nestedDims :: TypeBase DimDecl as -> [DimDecl]
+nestedDims :: TypeBase Size as -> [Size]
 nestedDims t =
   case t of
     Array _ _ ds a ->
@@ -153,7 +153,7 @@ nestedDims t =
     Scalar (Arrow _ v t1 (RetType dims t2)) ->
       filter (notV v) $ filter (`notElem` dims') $ nestedDims t1 <> nestedDims t2
       where
-        dims' = map (NamedDim . qualName) dims
+        dims' = map (NamedSize . qualName) dims
     Scalar (TypeVar _ _ _ targs) ->
       concatMap typeArgDims targs
   where
@@ -161,10 +161,10 @@ nestedDims t =
     typeArgDims (TypeArgType at _) = nestedDims at
 
     notV Unnamed = const True
-    notV (Named v) = (/= NamedDim (qualName v))
+    notV (Named v) = (/= NamedSize (qualName v))
 
 -- | Change the shape of a type to be just the rank.
-noSizes :: TypeBase DimDecl as -> TypeBase () as
+noSizes :: TypeBase Size as -> TypeBase () as
 noSizes = first $ const ()
 
 -- | Where does this dimension occur?
@@ -224,12 +224,12 @@ mustBeExplicitAux :: StructType -> M.Map VName Bool
 mustBeExplicitAux t =
   execState (traverseDims onDim t) mempty
   where
-    onDim bound _ (NamedDim d)
+    onDim bound _ (NamedSize d)
       | qualLeaf d `S.member` bound =
           modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ PosImmediate (NamedDim d) =
+    onDim _ PosImmediate (NamedSize d) =
       modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ _ (NamedDim d) =
+    onDim _ _ (NamedSize d) =
       modify $ M.insertWith (&&) (qualLeaf d) True
     onDim _ _ _ =
       pure ()
@@ -585,7 +585,7 @@ typeOf (StringLit vs _) =
   Array
     mempty
     Unique
-    (ShapeDecl [ConstDim $ genericLength vs])
+    (ShapeDecl [ConstSize $ genericLength vs])
     (Prim (Unsigned Int8))
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
@@ -705,10 +705,10 @@ patternDimNames (PatConstr _ _ ps _) = foldMap patternDimNames ps
 patternDimNames (PatAttr _ p _) = patternDimNames p
 
 -- | Extract all the shape names that occur free in a given type.
-typeDimNames :: TypeBase DimDecl als -> S.Set VName
+typeDimNames :: TypeBase Size als -> S.Set VName
 typeDimNames = foldMap dimName . nestedDims
   where
-    dimName (NamedDim qn) = S.singleton $ qualLeaf qn
+    dimName (NamedSize qn) = S.singleton $ qualLeaf qn
     dimName _ = mempty
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
@@ -807,7 +807,7 @@ namesToPrimTypes =
 data Intrinsic
   = IntrinsicMonoFun [PrimType] PrimType
   | IntrinsicOverloadedFun [PrimType] [Maybe PrimType] (Maybe PrimType)
-  | IntrinsicPolyFun [TypeParamBase VName] [StructType] (RetTypeBase DimDecl ())
+  | IntrinsicPolyFun [TypeParamBase VName] [StructType] (RetTypeBase Size ())
   | IntrinsicType Liftedness [TypeParamBase VName] StructType
   | IntrinsicEquality -- Special cased.
 
@@ -1254,7 +1254,7 @@ intrinsics =
 
     [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 
-    shape = ShapeDecl . map (NamedDim . qualName)
+    shape = ShapeDecl . map (NamedSize . qualName)
 
     tuple_arr x y s =
       Array
@@ -1266,9 +1266,9 @@ intrinsics =
 
     arr x y = Scalar $ Arrow mempty Unnamed x (RetType [] y)
 
-    arr_ka = Array () Nonunique (ShapeDecl [NamedDim $ qualName k]) t_a
-    uarr_ka = Array () Unique (ShapeDecl [NamedDim $ qualName k]) t_a
-    arr_kb = Array () Nonunique (ShapeDecl [NamedDim $ qualName k]) t_b
+    arr_ka = Array () Nonunique (ShapeDecl [NamedSize $ qualName k]) t_a
+    uarr_ka = Array () Unique (ShapeDecl [NamedSize $ qualName k]) t_a
+    arr_kb = Array () Nonunique (ShapeDecl [NamedSize $ qualName k]) t_b
     karr x y = Scalar $ Arrow mempty (Named k) x (RetType [] y)
 
     accType t =
