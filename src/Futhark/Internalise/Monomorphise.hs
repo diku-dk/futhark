@@ -794,7 +794,6 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
       ASTMapper
         { mapOnExp = updateExpTypes substs,
           mapOnName = pure,
-          mapOnQualName = pure,
           mapOnStructType = pure . applySubst substs,
           mapOnPatType = pure . applySubst substs,
           mapOnStructRetType = pure . applySubst substs,
@@ -905,7 +904,6 @@ removeTypeVariables entry valbind = do
         ASTMapper
           { mapOnExp = onExp,
             mapOnName = pure,
-            mapOnQualName = pure,
             mapOnStructType = pure . applySubst (`M.lookup` subs),
             mapOnPatType = pure . applySubst (`M.lookup` subs),
             mapOnStructRetType = pure . applySubst (`M.lookup` subs),

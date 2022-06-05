@@ -623,7 +623,6 @@ instance Substitutable Pat where
         ASTMapper
           { mapOnExp = pure,
             mapOnName = pure,
-            mapOnQualName = pure,
             mapOnStructType = pure . applySubst f,
             mapOnPatType = pure . applySubst f,
             mapOnStructRetType = pure . applySubst f,

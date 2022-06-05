@@ -528,11 +528,7 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   -- newly computed body type.
   let mapping = dimMapping' (typeOf e2) t
       subst v = fromMaybe v $ M.lookup v mapping
-      mapper =
-        identityMapper
-          { mapOnName = pure . subst,
-            mapOnQualName = pure . fmap subst
-          }
+      mapper = identityMapper {mapOnName = pure . subst}
       t' = first (runIdentity . astMap mapper) $ typeOf e2'
   pure (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
