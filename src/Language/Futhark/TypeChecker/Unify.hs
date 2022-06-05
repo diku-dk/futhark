@@ -529,8 +529,8 @@ unifyWith onDims usage = subunify False
               pname (Named x) = Just x
               pname Unnamed = Nothing
         (Array {}, Array {})
-          | ShapeDecl (t1_d : _) <- arrayShape t1',
-            ShapeDecl (t2_d : _) <- arrayShape t2',
+          | Shape (t1_d : _) <- arrayShape t1',
+            Shape (t2_d : _) <- arrayShape t2',
             Just t1'' <- peelArray 1 t1',
             Just t2'' <- peelArray 1 t2' -> do
               onDims' bcs (swap ord t1_d t2_d)
@@ -891,7 +891,7 @@ linkVarToTypes usage vn ts = do
 
 -- | Assert that this type must support equality.
 equalityType ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   TypeBase dim as ->
   m ()
@@ -929,7 +929,7 @@ equalityType usage t = do
             "Type" <+> pprName vn <+> "does not support equality."
 
 zeroOrderTypeWith ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   BreadCrumbs ->
   TypeBase dim as ->
@@ -956,7 +956,7 @@ zeroOrderTypeWith usage bcs t = do
 
 -- | Assert that this type must be zero-order.
 zeroOrderType ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   String ->
   TypeBase dim as ->
@@ -967,7 +967,7 @@ zeroOrderType usage desc =
     bc = Matching $ "When checking" <+> textwrap desc
 
 arrayElemTypeWith ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   BreadCrumbs ->
   TypeBase dim as ->
@@ -995,7 +995,7 @@ arrayElemTypeWith usage bcs t = do
 
 -- | Assert that this type must be valid as an array element.
 arrayElemType ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   String ->
   TypeBase dim as ->

@@ -196,7 +196,7 @@ evalTypeExp t@(TERecord fs loc) = do
 evalTypeExp (TEArray d t loc) = do
   (d_svars, d', d'') <- checkSizeExp d
   (t', svars, RetType dims st, l) <- evalTypeExp t
-  case (l, arrayOf Nonunique (ShapeDecl [d'']) st) of
+  case (l, arrayOf Nonunique (Shape [d'']) st) of
     (Unlifted, st') ->
       pure
         ( TEArray d' t' loc,
@@ -561,7 +561,7 @@ instance Substitutable Size where
     | Just (SizeSubst d) <- f v = d
   applySubst _ d = d
 
-instance Substitutable d => Substitutable (ShapeDecl d) where
+instance Substitutable d => Substitutable (Shape d) where
   applySubst f = fmap $ applySubst f
 
 instance Substitutable Pat where

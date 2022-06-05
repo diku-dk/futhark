@@ -50,7 +50,7 @@ import qualified Futhark.IR.Primitive as P
 import Futhark.Util (chunk, maybeHead, splitFromEnd)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply, bool)
-import Language.Futhark hiding (Value, matchDims)
+import Language.Futhark hiding (Shape, Value, matchDims)
 import qualified Language.Futhark as F
 import qualified Language.Futhark.Semantic as T
 import Prelude hiding (break, mod)

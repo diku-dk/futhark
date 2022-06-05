@@ -1227,7 +1227,7 @@ internaliseHist dim desc rf hist op ne buckets img loc = do
         =<< bodyBind body
 
   -- get sizes of histogram and image arrays
-  shape_hist <- Shape . take dim . I.arrayDims <$> lookupType (head hist')
+  shape_hist <- I.Shape . take dim . I.arrayDims <$> lookupType (head hist')
   w_img <- I.arraySize 0 <$> lookupType (head img')
 
   letValExp' desc . I.Op $
@@ -1323,7 +1323,7 @@ internaliseStreamAcc desc dest op lam bs = do
   acc_cert_v <- newVName "acc_cert"
   dest_ts <- mapM lookupType dest'
   let dest_w = arraysSize 0 dest_ts
-      acc_t = Acc acc_cert_v (Shape [dest_w]) (map rowType dest_ts) NoUniqueness
+      acc_t = Acc acc_cert_v (I.Shape [dest_w]) (map rowType dest_ts) NoUniqueness
   acc_p <- newParam "acc_p" acc_t
   withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
     bs_ts <- mapM lookupType bs'
@@ -1349,7 +1349,7 @@ internaliseStreamAcc desc dest op lam bs = do
   destw <- arraysSize 0 <$> mapM lookupType dest'
   fmap (map I.Var) $
     letTupExp desc $
-      WithAcc [(Shape [destw], dest', op')] withacc_lam
+      WithAcc [(I.Shape [destw], dest', op')] withacc_lam
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1988,7 +1988,7 @@ isOverloadedFunction qname args loc = do
               }
           sivs = si' <> svs'
 
-      let sa_ws = map (Shape . take dim . arrayDims) sa_ts
+      let sa_ws = map (I.Shape . take dim . arrayDims) sa_ts
       letTupExp' desc $ I.Op $ I.Scatter si_w sivs lam $ zip3 sa_ws (repeat 1) sas
 
 flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
@@ -2244,7 +2244,7 @@ partitionWithSOACS k lam arrs = do
   results <-
     letTupExp "partition_res" . I.Op $
       I.Scatter w (classes : all_offsets ++ arrs) write_lam $
-        zip3 (repeat $ Shape [w]) (repeat 1) blanks
+        zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $

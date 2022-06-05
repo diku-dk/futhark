@@ -133,7 +133,7 @@ arrayRank :: TypeBase dim as -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
-arrayShape :: TypeBase dim as -> ShapeDecl dim
+arrayShape :: TypeBase dim as -> Shape dim
 arrayShape (Array _ _ ds _) = ds
 arrayShape _ = mempty
 
@@ -335,7 +335,7 @@ peelArray _ _ = Nothing
 arrayOf ::
   Monoid as =>
   Uniqueness ->
-  ShapeDecl dim ->
+  Shape dim ->
   TypeBase dim as ->
   TypeBase dim as
 arrayOf u s t = arrayOfWithAliases mempty u s (t `setUniqueness` Nonunique)
@@ -344,7 +344,7 @@ arrayOfWithAliases ::
   Monoid as =>
   as ->
   Uniqueness ->
-  ShapeDecl dim ->
+  Shape dim ->
   TypeBase dim as ->
   TypeBase dim as
 arrayOfWithAliases as2 u shape2 (Array as1 _ shape1 et) =
@@ -511,7 +511,7 @@ matchDims onDims = matchDims' mempty
     maybePName Unnamed = Nothing
 
     onShapes bound shape1 shape2 =
-      ShapeDecl <$> zipWithM (onDims bound) (shapeDims shape1) (shapeDims shape2)
+      Shape <$> zipWithM (onDims bound) (shapeDims shape1) (shapeDims shape2)
 
 -- | Set the uniqueness attribute of a type.  If the type is a record
 -- or sum type, the uniqueness of its components will be modified.
@@ -585,7 +585,7 @@ typeOf (StringLit vs _) =
   Array
     mempty
     Unique
-    (ShapeDecl [ConstSize $ genericLength vs])
+    (Shape [ConstSize $ genericLength vs])
     (Prim (Unsigned Int8))
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
@@ -1254,7 +1254,7 @@ intrinsics =
 
     [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 
-    shape = ShapeDecl . map (NamedSize . qualName)
+    shape = Shape . map (NamedSize . qualName)
 
     tuple_arr x y s =
       Array
@@ -1266,9 +1266,9 @@ intrinsics =
 
     arr x y = Scalar $ Arrow mempty Unnamed x (RetType [] y)
 
-    arr_ka = Array () Nonunique (ShapeDecl [NamedSize $ qualName k]) t_a
-    uarr_ka = Array () Unique (ShapeDecl [NamedSize $ qualName k]) t_a
-    arr_kb = Array () Nonunique (ShapeDecl [NamedSize $ qualName k]) t_b
+    arr_ka = Array () Nonunique (Shape [NamedSize $ qualName k]) t_a
+    uarr_ka = Array () Unique (Shape [NamedSize $ qualName k]) t_a
+    arr_kb = Array () Nonunique (Shape [NamedSize $ qualName k]) t_b
     karr x y = Scalar $ Arrow mempty (Named k) x (RetType [] y)
 
     accType t =
@@ -1518,7 +1518,7 @@ progHoles = foldMap holesInDec . progDecs
     onExp e = astMap (identityMapper {mapOnExp = onExp}) e
 
 -- | A type with no aliasing information but shape annotations.
-type UncheckedType = TypeBase (ShapeDecl Name) ()
+type UncheckedType = TypeBase (Shape Name) ()
 
 -- | An expression with no type annotations.
 type UncheckedTypeExp = TypeExp Name

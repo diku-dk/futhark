@@ -1000,13 +1000,13 @@ FloatLit :: { (FloatValue, Loc) }
 ArrayValue :: { Value }
 ArrayValue :  '[' Value ']'
              {% pure $ ArrayValue (arrayFromList [$2]) $
-                arrayOf Unique (ShapeDecl [1]) (valueType $2)
+                arrayOf Unique (Shape [1]) (valueType $2)
              }
            |  '[' Value ',' Values ']'
              {% case combArrayElements $2 $4 of
                   Left e -> throwError e
                   Right v -> pure $ ArrayValue (arrayFromList $ $2:$4) $
-                             arrayOf Unique (ShapeDecl [1+fromIntegral (length $4)]) (valueType v)
+                             arrayOf Unique (Shape [1+fromIntegral (length $4)]) (valueType v)
              }
            | id '(' ValueType ')'
              {% ($1 `mustBe` "empty") >> mustBeEmpty (srcspan $2 $4) $3 >> pure (ArrayValue (listArray (0,-1) []) $3) }
@@ -1019,8 +1019,8 @@ Dim :: { Int64 }
 Dim : intlit { let L _ (INTLIT num) = $1 in fromInteger num }
 
 ValueType :: { ValueType }
-ValueType : '[' Dim ']' ValueType  { arrayOf Nonunique (ShapeDecl [$2]) $4 }
-          | '[' Dim ']' PrimType { arrayOf Nonunique (ShapeDecl [$2]) (Scalar (Prim $4)) }
+ValueType : '[' Dim ']' ValueType  { arrayOf Nonunique (Shape [$2]) $4 }
+          | '[' Dim ']' PrimType { arrayOf Nonunique (Shape [$2]) (Scalar (Prim $4)) }
 
 Values :: { [Value] }
 Values : Value ',' Values { $1 : $3 }
