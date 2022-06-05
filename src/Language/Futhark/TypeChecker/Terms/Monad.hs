@@ -773,7 +773,7 @@ newArrayType loc desc r = do
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
   let rowt = TypeVar () Nonunique (typeName v) []
   pure
-    ( Array () Nonunique (ShapeDecl $ map (NamedSize . qualName) dims) rowt,
+    ( Array () Nonunique (Shape $ map (NamedSize . qualName) dims) rowt,
       Scalar rowt
     )
 

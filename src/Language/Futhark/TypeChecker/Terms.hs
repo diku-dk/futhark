@@ -68,11 +68,11 @@ sliceShape ::
   Slice ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
-sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
+sliceShape r slice t@(Array als u (Shape orig_dims) et) =
   runStateT (setDims <$> adjustDims slice orig_dims) []
   where
     setDims [] = stripArray (length orig_dims) t
-    setDims dims' = Array als u (ShapeDecl dims') et
+    setDims dims' = Array als u (Shape dims') et
 
     -- If the result is supposed to be a nonrigid size variable, then
     -- don't bother trying to create non-existential sizes.  This is
@@ -302,14 +302,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do
       et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (ShapeDecl [ConstSize 0]) Unique
+      t <- arrayOfM loc et (Shape [ConstSize 0]) Unique
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (ShapeDecl [ConstSize $ length all_es]) Unique
+      t <- arrayOfM loc et' (Shape [ConstSize $ length all_es]) Unique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -349,7 +349,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
         pure (NamedSize $ qualName d, Just d)
 
-  t <- arrayOfM loc start_t (ShapeDecl [dim]) Unique
+  t <- arrayOfM loc start_t (Shape [dim]) Unique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
@@ -1741,10 +1741,10 @@ checkFunBody params body maybe_rettype loc = do
   pure body'
 
 arrayOfM ::
-  (Pretty (ShapeDecl dim), Monoid as) =>
+  (Pretty (Shape dim), Monoid as) =>
   SrcLoc ->
   TypeBase dim as ->
-  ShapeDecl dim ->
+  Shape dim ->
   Uniqueness ->
   TermTypeM (TypeBase dim as)
 arrayOfM loc t shape u = do

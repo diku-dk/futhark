@@ -159,8 +159,8 @@ instance Pretty MonoSize where
   ppr (MonoKnown i) = text "?" <> ppr i
   ppr (MonoAnon v) = text "?" <> pprName v
 
-instance Pretty (ShapeDecl MonoSize) where
-  ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
+instance Pretty (Shape MonoSize) where
+  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
 
 -- The kind of type relative to which we monomorphise.  What is most
 -- important to us is not the specific dimensions, but merely whether

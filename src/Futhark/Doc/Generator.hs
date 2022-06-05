@@ -490,7 +490,7 @@ synopsisValBindBind (name, BoundV tps t) = do
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
   Array _ u shape et -> do
-    shape' <- prettyShapeDecl shape
+    shape' <- prettyShape shape
     et' <- typeHtml $ Scalar et
     pure $ prettyU u <> shape' <> et'
   Scalar (Prim et) -> pure $ primTypeHtml et
@@ -526,8 +526,8 @@ retTypeHtml (RetType dims t) = do
   t' <- typeHtml t
   pure $ "?" <> mconcat (map (brackets . vnameHtml) dims) <> "." <> t'
 
-prettyShapeDecl :: ShapeDecl Size -> DocM Html
-prettyShapeDecl (ShapeDecl ds) =
+prettyShape :: Shape Size -> DocM Html
+prettyShape (Shape ds) =
   mconcat <$> mapM dimDeclHtml ds
 
 typeArgHtml :: TypeArg Size -> DocM Html

@@ -147,7 +147,7 @@ pScalarNonFun =
 
 pArrayType :: Parser StructType
 pArrayType =
-  Array () <$> pUniqueness <*> (ShapeDecl <$> some pSize) <*> pScalarNonFun
+  Array () <$> pUniqueness <*> (Shape <$> some pSize) <*> pScalarNonFun
 
 pNonFunType :: Parser StructType
 pNonFunType =

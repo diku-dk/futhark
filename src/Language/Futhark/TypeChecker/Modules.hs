@@ -155,8 +155,8 @@ newNamesForMTy orig_mty = do
         substituteInType (Scalar (Arrow als v t1 (RetType dims t2))) =
           Scalar $ Arrow als v (substituteInType t1) $ RetType dims $ substituteInType t2
 
-        substituteInShape (ShapeDecl ds) =
-          ShapeDecl $ map substituteInDim ds
+        substituteInShape (Shape ds) =
+          Shape $ map substituteInDim ds
         substituteInDim (NamedSize (QualName qs v)) =
           NamedSize $ QualName (map substitute qs) $ substitute v
         substituteInDim d = d

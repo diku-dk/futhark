@@ -21,7 +21,7 @@ module Language.Futhark.Syntax
     FloatType (..),
     PrimType (..),
     Size (..),
-    ShapeDecl (..),
+    Shape (..),
     shapeRank,
     stripDims,
     TypeName (..),
@@ -235,34 +235,34 @@ data Size
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-newtype ShapeDecl dim = ShapeDecl {shapeDims :: [dim]}
+newtype Shape dim = Shape {shapeDims :: [dim]}
   deriving (Eq, Ord, Show)
 
-instance Foldable ShapeDecl where
-  foldr f x (ShapeDecl ds) = foldr f x ds
+instance Foldable Shape where
+  foldr f x (Shape ds) = foldr f x ds
 
-instance Traversable ShapeDecl where
-  traverse f (ShapeDecl ds) = ShapeDecl <$> traverse f ds
+instance Traversable Shape where
+  traverse f (Shape ds) = Shape <$> traverse f ds
 
-instance Functor ShapeDecl where
-  fmap f (ShapeDecl ds) = ShapeDecl $ map f ds
+instance Functor Shape where
+  fmap f (Shape ds) = Shape $ map f ds
 
-instance Semigroup (ShapeDecl dim) where
-  ShapeDecl l1 <> ShapeDecl l2 = ShapeDecl $ l1 ++ l2
+instance Semigroup (Shape dim) where
+  Shape l1 <> Shape l2 = Shape $ l1 ++ l2
 
-instance Monoid (ShapeDecl dim) where
-  mempty = ShapeDecl []
+instance Monoid (Shape dim) where
+  mempty = Shape []
 
 -- | The number of dimensions contained in a shape.
-shapeRank :: ShapeDecl dim -> Int
+shapeRank :: Shape dim -> Int
 shapeRank = length . shapeDims
 
 -- | @stripDims n shape@ strips the outer @n@ dimensions from
 -- @shape@, returning 'Nothing' if this would result in zero or
 -- fewer dimensions.
-stripDims :: Int -> ShapeDecl dim -> Maybe (ShapeDecl dim)
-stripDims i (ShapeDecl l)
-  | i < length l = Just $ ShapeDecl $ drop i l
+stripDims :: Int -> Shape dim -> Maybe (Shape dim)
+stripDims i (Shape l)
+  | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
 
 -- | A type name consists of qualifiers (for error messages) and a
@@ -347,7 +347,7 @@ instance Bifoldable ScalarTypeBase where
 -- out arrays-of-arrays.
 data TypeBase dim as
   = Scalar (ScalarTypeBase dim as)
-  | Array as Uniqueness (ShapeDecl dim) (ScalarTypeBase dim ())
+  | Array as Uniqueness (Shape dim) (ScalarTypeBase dim ())
   deriving (Eq, Ord, Show)
 
 instance Bitraversable TypeBase where
