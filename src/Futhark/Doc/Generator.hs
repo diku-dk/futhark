@@ -505,7 +505,7 @@ typeHtml t = case t of
         pure $ toHtml (nameToString name) <> ": " <> tp'
   Scalar (TypeVar _ u et targs) -> do
     targs' <- mapM typeArgHtml targs
-    et' <- typeNameHtml et
+    et' <- qualNameHtml et
     pure $ prettyU u <> et' <> mconcat (map (" " <>) targs')
   Scalar (Arrow _ pname t1 t2) -> do
     t1' <- typeHtml t1
@@ -681,9 +681,6 @@ vnameLink' (VName _ tag) current file =
   if file == current
     then "#" ++ show tag
     else relativise file current ++ ".html#" ++ show tag
-
-typeNameHtml :: TypeName -> DocM Html
-typeNameHtml = qualNameHtml . qualNameFromTypeName
 
 patternHtml :: Pat -> DocM Html
 patternHtml pat = do

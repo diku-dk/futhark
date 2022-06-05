@@ -197,7 +197,7 @@ bindingTypeParams tparams = localEnv env
         { envTypeTable =
             M.singleton v $
               TypeAbbr l [] . RetType [] . Scalar $
-                TypeVar () Nonunique (typeName v) []
+                TypeVar () Nonunique (qualName v) []
         }
 
 checkTypeDecl ::
@@ -262,7 +262,7 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
                 envTypeTable =
                   M.singleton name' $
                     TypeAbbr l ps' . RetType [] . Scalar $
-                      TypeVar () Nonunique (typeName name') $
+                      TypeVar () Nonunique (qualName name') $
                         map typeParamToArg ps'
               }
       (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs

@@ -558,7 +558,7 @@ typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
   TypeArgDim (NamedSize $ qualName v) ploc
 typeParamToArg (TypeParamType _ v ploc) =
-  TypeArgType (Scalar $ TypeVar () Nonunique (typeName v) []) ploc
+  TypeArgType (Scalar $ TypeVar () Nonunique (qualName v) []) ploc
 
 -- | A type substitution may be a substitution or a yet-unknown
 -- substitution (but which is certainly an overloaded primitive
@@ -687,7 +687,7 @@ substTypesRet lookupSubst ot =
     onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
     onType (Scalar (TypeVar als u v targs)) = do
       targs' <- mapM subsTypeArg targs
-      case lookupSubst $ qualLeaf (qualNameFromTypeName v) of
+      case lookupSubst $ qualLeaf v of
         Just (Subst ps rt) -> do
           RetType ext t <- freshDims rt
           modify (ext ++)

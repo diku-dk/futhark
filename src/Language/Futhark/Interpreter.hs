@@ -177,7 +177,7 @@ typeShape shapes = go
       ShapeRecord $ M.map go fs
     go (Scalar (Sum cs)) =
       ShapeSum $ M.map (map go) cs
-    go (Scalar (TypeVar _ _ (TypeName [] v) []))
+    go (Scalar (TypeVar _ _ (QualName [] v) []))
       | Just shape <- M.lookup v shapes =
           shape
     go _ =
@@ -194,8 +194,8 @@ resolveTypeParams :: [VName] -> StructType -> StructType -> Env
 resolveTypeParams names = match
   where
     match (Scalar (TypeVar _ _ tn _)) t
-      | typeLeaf tn `elem` names =
-          typeEnv $ M.singleton (typeLeaf tn) t
+      | qualLeaf tn `elem` names =
+          typeEnv $ M.singleton (qualLeaf tn) t
     match (Scalar (Record poly_fields)) (Scalar (Record fields)) =
       mconcat $
         M.elems $
@@ -700,7 +700,7 @@ evalType env t@(Array _ u shape _) =
           ConstSize $ fromIntegral x
     evalDim d = d
 evalType env t@(Scalar (TypeVar () _ tn args)) =
-  case lookupType (qualNameFromTypeName tn) env of
+  case lookupType tn env of
     Just (T.TypeAbbr _ ps (RetType _ t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
           onDim (NamedSize v) = fromMaybe (NamedSize v) $ M.lookup (qualLeaf v) substs

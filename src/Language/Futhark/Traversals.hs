@@ -68,9 +68,6 @@ class ASTMappable x where
 instance ASTMappable (QualName VName) where
   astMap tv = traverse (mapOnName tv)
 
-instance ASTMappable TypeName where
-  astMap tv (TypeName qs v) = TypeName qs <$> mapOnName tv v
-
 instance ASTMappable (AppExpBase Info VName) where
   astMap tv (Range start next end loc) =
     Range
@@ -294,7 +291,7 @@ instance ASTMappable AppRes where
     AppRes <$> mapOnPatType tv t <*> pure ext
 
 type TypeTraverser f t dim1 als1 dim2 als2 =
-  (TypeName -> f TypeName) ->
+  (QualName VName -> f (QualName VName)) ->
   (dim1 -> f dim2) ->
   (als1 -> f als2) ->
   t dim1 als1 ->
@@ -324,7 +321,7 @@ traverseType f g h (Scalar t) =
 
 traverseTypeArg ::
   Applicative f =>
-  (TypeName -> f TypeName) ->
+  (QualName VName -> f (QualName VName)) ->
   (dim1 -> f dim2) ->
   TypeArg dim1 ->
   f (TypeArg dim2)

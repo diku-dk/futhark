@@ -136,7 +136,7 @@ lexicalClosure params closure = do
 
 noAliasesIfOverloaded :: PatType -> TermTypeM PatType
 noAliasesIfOverloaded t@(Scalar (TypeVar _ u tn [])) = do
-  subst <- fmap snd . M.lookup (typeLeaf tn) <$> getConstraints
+  subst <- fmap snd . M.lookup (qualLeaf tn) <$> getConstraints
   case subst of
     Just Overloaded {} -> pure $ Scalar $ TypeVar mempty u tn []
     _ -> pure t
@@ -1287,14 +1287,14 @@ fixOverloadedTypes tyvars_at_toplevel =
   where
     fixOverloaded (v, Overloaded ots usage)
       | Signed Int32 `elem` ots = do
-          unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
+          unify usage (Scalar (TypeVar () Nonunique (qualName v) [])) $
             Scalar $
               Prim $
                 Signed Int32
           when (v `S.member` tyvars_at_toplevel) $
             warn usage "Defaulting ambiguous type to i32."
       | FloatType Float64 `elem` ots = do
-          unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
+          unify usage (Scalar (TypeVar () Nonunique (qualName v) [])) $
             Scalar $
               Prim $
                 FloatType Float64
@@ -1307,7 +1307,7 @@ fixOverloadedTypes tyvars_at_toplevel =
               </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
-      unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
+      unify usage (Scalar (TypeVar () Nonunique (qualName v) [])) $
         Scalar $
           tupleRecord []
       when (v `S.member` tyvars_at_toplevel) $
