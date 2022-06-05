@@ -77,15 +77,15 @@ areGlobal vs = local $ Arrow.first (S.fromList vs <>)
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
-  TypeBase DimDecl als ->
-  TypeBase DimDecl als
+  TypeBase Size als ->
+  TypeBase Size als
 replaceTypeSizes substs = first onDim
   where
-    onDim (NamedDim v) =
+    onDim (NamedSize v) =
       case M.lookup (qualLeaf v) substs of
-        Just (SubstNamed v') -> NamedDim v'
-        Just (SubstConst d) -> ConstDim d
-        Nothing -> NamedDim v
+        Just (SubstNamed v') -> NamedSize v'
+        Just (SubstConst d) -> ConstSize d
+        Nothing -> NamedSize v
     onDim d = d
 
 replaceStaticValSizes ::
@@ -145,12 +145,12 @@ replaceStaticValSizes globals orig_substs sv =
         te' = onTypeExp substs te
     onExp substs e = onAST substs e
 
-    onTypeExpDim substs d@(DimExpNamed v loc) =
+    onTypeExpDim substs d@(SizeExpNamed v loc) =
       case M.lookup (qualLeaf v) substs of
         Just (SubstNamed v') ->
-          DimExpNamed v' loc
+          SizeExpNamed v' loc
         Just (SubstConst x) ->
-          DimExpConst x loc
+          SizeExpConst x loc
         Nothing ->
           d
     onTypeExpDim _ d = d
@@ -281,15 +281,15 @@ arraySizes (Scalar (Sum cs)) = foldMap (foldMap arraySizes) cs
 arraySizes (Scalar (TypeVar _ _ _ targs)) =
   mconcat $ map f targs
   where
-    f (TypeArgDim (NamedDim d) _) = S.singleton $ qualLeaf d
+    f (TypeArgDim (NamedSize d) _) = S.singleton $ qualLeaf d
     f TypeArgDim {} = mempty
     f (TypeArgType t _) = arraySizes t
 arraySizes (Scalar Prim {}) = mempty
 arraySizes (Array _ _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
   where
-    dimName :: DimDecl -> S.Set VName
-    dimName (NamedDim qn) = S.singleton $ qualLeaf qn
+    dimName :: Size -> S.Set VName
+    dimName (NamedSize qn) = S.singleton $ qualLeaf qn
     dimName _ = mempty
 
 patternArraySizes :: Pat -> S.Set VName
@@ -302,25 +302,25 @@ data SizeSubst
 
 dimMapping ::
   Monoid a =>
-  TypeBase DimDecl a ->
-  TypeBase DimDecl a ->
+  TypeBase Size a ->
+  TypeBase Size a ->
   M.Map VName SizeSubst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where
-    f bound d1 (NamedDim d2)
+    f bound d1 (NamedSize d2)
       | qualLeaf d2 `elem` bound = pure d1
-    f _ (NamedDim d1) (NamedDim d2) = do
+    f _ (NamedSize d1) (NamedSize d2) = do
       modify $ M.insert (qualLeaf d1) $ SubstNamed d2
-      pure $ NamedDim d1
-    f _ (NamedDim d1) (ConstDim d2) = do
+      pure $ NamedSize d1
+    f _ (NamedSize d1) (ConstSize d2) = do
       modify $ M.insert (qualLeaf d1) $ SubstConst d2
-      pure $ NamedDim d1
+      pure $ NamedSize d1
     f _ d _ = pure d
 
 dimMapping' ::
   Monoid a =>
-  TypeBase DimDecl a ->
-  TypeBase DimDecl a ->
+  TypeBase Size a ->
+  TypeBase Size a ->
   M.Map VName VName
 dimMapping' t1 t2 = M.mapMaybe f $ dimMapping t1 t2
   where
@@ -652,15 +652,15 @@ defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
   where
     defuncType ::
       Monoid als =>
-      TypeBase DimDecl als ->
-      TypeBase DimDecl als
+      TypeBase Size als ->
+      TypeBase Size als
     defuncType (Array as u shape t) = Array as u shape (defuncScalar t)
     defuncType (Scalar t) = Scalar $ defuncScalar t
 
     defuncScalar ::
       Monoid als =>
-      ScalarTypeBase DimDecl als ->
-      ScalarTypeBase DimDecl als
+      ScalarTypeBase Size als ->
+      ScalarTypeBase Size als
     defuncScalar (Record fs) = Record $ M.map defuncType fs
     defuncScalar Arrow {} = Record mempty
     defuncScalar (Sum fs) = Sum $ M.map (map defuncType) fs
@@ -799,26 +799,26 @@ sizesForAll bound_sizes params = do
   where
     bound = bound_sizes <> foldMap patNames params
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
-    onDim (AnyDim (Just v)) = do
+    onDim (AnySize (Just v)) = do
       modify $ S.insert v
-      pure $ NamedDim $ qualName v
-    onDim (AnyDim Nothing) = do
+      pure $ NamedSize $ qualName v
+    onDim (AnySize Nothing) = do
       v <- lift $ newVName "size"
       modify $ S.insert v
-      pure $ NamedDim $ qualName v
-    onDim (NamedDim d) = do
+      pure $ NamedSize $ qualName v
+    onDim (NamedSize d) = do
       unless (qualLeaf d `S.member` bound) $
         modify $
           S.insert $
             qualLeaf d
-      pure $ NamedDim d
+      pure $ NamedSize d
     onDim d = pure d
 
 unRetType :: StructRetType -> StructType
 unRetType (RetType [] t) = t
 unRetType (RetType ext t) = first onDim t
   where
-    onDim (NamedDim d) | qualLeaf d `elem` ext = AnyDim Nothing
+    onDim (NamedSize d) | qualLeaf d `elem` ext = AnySize Nothing
     onDim d = d
 
 -- | Defunctionalize an application expression at a given depth of application.
@@ -873,7 +873,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             liftedName (i + 1) f
           liftedName _ _ = "defunc"
 
-      -- Ensure that no parameter sizes are AnyDim.  The internaliser
+      -- Ensure that no parameter sizes are AnySize.  The internaliser
       -- expects this.  This is easy, because they are all
       -- first-order.
       let bound_sizes = S.fromList (dims <> more_dims) <> globals
@@ -980,7 +980,7 @@ defuncApply depth e@(Var qn (Info t) loc) = do
               (argtypes', rettype) = dynamicFunType sv' argtypes
               dims' = mempty
 
-          -- Ensure that no parameter sizes are AnyDim.  The internaliser
+          -- Ensure that no parameter sizes are AnySize.  The internaliser
           -- expects this.  This is easy, because they are all
           -- first-order.
           globals <- asks fst
@@ -1312,8 +1312,8 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
           sv
     )
   where
-    anyDimIfNotBound bound_sizes (NamedDim v)
-      | qualLeaf v `S.notMember` bound_sizes = AnyDim $ Just $ qualLeaf v
+    anyDimIfNotBound bound_sizes (NamedSize v)
+      | qualLeaf v `S.notMember` bound_sizes = AnySize $ Just $ qualLeaf v
     anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.

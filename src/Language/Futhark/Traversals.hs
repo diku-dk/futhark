@@ -256,16 +256,16 @@ instance ASTMappable (TypeArgExp VName) where
   astMap tv (TypeArgExpType te) =
     TypeArgExpType <$> astMap tv te
 
-instance ASTMappable (DimExp VName) where
-  astMap tv (DimExpNamed vn loc) =
-    DimExpNamed <$> mapOnQualName tv vn <*> pure loc
-  astMap _ (DimExpConst k loc) = pure $ DimExpConst k loc
-  astMap _ DimExpAny = pure DimExpAny
+instance ASTMappable (SizeExp VName) where
+  astMap tv (SizeExpNamed vn loc) =
+    SizeExpNamed <$> mapOnQualName tv vn <*> pure loc
+  astMap _ (SizeExpConst k loc) = pure $ SizeExpConst k loc
+  astMap _ SizeExpAny = pure SizeExpAny
 
-instance ASTMappable DimDecl where
-  astMap tv (NamedDim vn) = NamedDim <$> mapOnQualName tv vn
-  astMap _ (ConstDim k) = pure $ ConstDim k
-  astMap tv (AnyDim vn) = AnyDim <$> traverse (mapOnName tv) vn
+instance ASTMappable Size where
+  astMap tv (NamedSize vn) = NamedSize <$> mapOnQualName tv vn
+  astMap _ (ConstSize k) = pure $ ConstSize k
+  astMap tv (AnySize vn) = AnySize <$> traverse (mapOnName tv) vn
 
 instance ASTMappable (TypeParamBase VName) where
   astMap = traverse . mapOnName

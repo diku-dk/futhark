@@ -144,7 +144,7 @@ renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
       dims' <- mapM newName dims
-      let m = M.fromList $ zip dims $ map (SizeSubst . NamedDim . qualName) dims'
+      let m = M.fromList $ zip dims $ map (SizeSubst . NamedSize . qualName) dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
   | otherwise =
@@ -194,7 +194,7 @@ evalTypeExp t@(TERecord fs loc) = do
     )
 --
 evalTypeExp (TEArray d t loc) = do
-  (d_svars, d', d'') <- checkDimExp d
+  (d_svars, d', d'') <- checkSizeExp d
   (t', svars, RetType dims st, l) <- evalTypeExp t
   case (l, arrayOf Nonunique (ShapeDecl [d'']) st) of
     (Unlifted, st') ->
@@ -215,14 +215,14 @@ evalTypeExp (TEArray d t loc) = do
           <+> pquote (ppr t)
           <+/> "(might contain function)."
   where
-    checkDimExp DimExpAny = do
+    checkSizeExp SizeExpAny = do
       dv <- newTypeName "d"
-      pure ([dv], DimExpAny, NamedDim $ qualName dv)
-    checkDimExp (DimExpConst k dloc) =
-      pure ([], DimExpConst k dloc, ConstDim k)
-    checkDimExp (DimExpNamed v dloc) = do
-      v' <- checkNamedDim loc v
-      pure ([], DimExpNamed v' dloc, NamedDim v')
+      pure ([dv], SizeExpAny, NamedSize $ qualName dv)
+    checkSizeExp (SizeExpConst k dloc) =
+      pure ([], SizeExpConst k dloc, ConstSize k)
+    checkSizeExp (SizeExpNamed v dloc) = do
+      v' <- checkNamedSize loc v
+      pure ([], SizeExpNamed v' dloc, NamedSize v')
 --
 evalTypeExp (TEUnique t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp t
@@ -341,25 +341,25 @@ evalTypeExp ote@TEApply {} = do
       typeError (srclocOf te') mempty $
         "Type" <+> pquote (ppr te') <+> "is not a type constructor."
 
-    checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
-      v' <- checkNamedDim loc v
+    checkArgApply (TypeParamDim pv _) (TypeArgExpDim (SizeExpNamed v dloc) loc) = do
+      v' <- checkNamedSize loc v
       pure
-        ( TypeArgExpDim (DimExpNamed v' dloc) loc,
+        ( TypeArgExpDim (SizeExpNamed v' dloc) loc,
           [],
-          M.singleton pv $ SizeSubst $ NamedDim v'
+          M.singleton pv $ SizeSubst $ NamedSize v'
         )
-    checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpConst x dloc) loc) =
+    checkArgApply (TypeParamDim pv _) (TypeArgExpDim (SizeExpConst x dloc) loc) =
       pure
-        ( TypeArgExpDim (DimExpConst x dloc) loc,
+        ( TypeArgExpDim (SizeExpConst x dloc) loc,
           [],
-          M.singleton pv $ SizeSubst $ ConstDim x
+          M.singleton pv $ SizeSubst $ ConstSize x
         )
-    checkArgApply (TypeParamDim pv _) (TypeArgExpDim DimExpAny loc) = do
+    checkArgApply (TypeParamDim pv _) (TypeArgExpDim SizeExpAny loc) = do
       d <- newTypeName "d"
       pure
-        ( TypeArgExpDim DimExpAny loc,
+        ( TypeArgExpDim SizeExpAny loc,
           [d],
-          M.singleton pv $ SizeSubst $ NamedDim $ qualName d
+          M.singleton pv $ SizeSubst $ NamedSize $ qualName d
         )
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
       (te', svars, RetType dims st, _) <- evalTypeExp te
@@ -504,7 +504,7 @@ checkTypeParams ps m =
 -- | Construct a type argument corresponding to a type parameter.
 typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
-  TypeArgDim (NamedDim $ qualName v) ploc
+  TypeArgDim (NamedSize $ qualName v) ploc
 typeParamToArg (TypeParamType _ v ploc) =
   TypeArgType (Scalar $ TypeVar () Nonunique (typeName v) []) ploc
 
@@ -512,7 +512,7 @@ typeParamToArg (TypeParamType _ v ploc) =
 -- substitution (but which is certainly an overloaded primitive
 -- type!).  The latter is used to remove aliases from types that are
 -- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst DimDecl
+data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst Size
   deriving (Show)
 
 instance Pretty t => Pretty (Subst t) where
@@ -538,26 +538,26 @@ instance Functor Subst where
 class Substitutable a where
   applySubst :: TypeSubs -> a -> a
 
-instance Substitutable (RetTypeBase DimDecl ()) where
+instance Substitutable (RetTypeBase Size ()) where
   applySubst f (RetType dims t) =
     let RetType more_dims t' = substTypesRet f t
      in RetType (dims ++ more_dims) t'
 
-instance Substitutable (RetTypeBase DimDecl Aliasing) where
+instance Substitutable (RetTypeBase Size Aliasing) where
   applySubst f (RetType dims t) =
     let RetType more_dims t' = substTypesRet f' t
      in RetType (dims ++ more_dims) t'
     where
       f' = fmap (fmap (second (const mempty))) . f
 
-instance Substitutable (TypeBase DimDecl ()) where
+instance Substitutable (TypeBase Size ()) where
   applySubst = substTypesAny
 
-instance Substitutable (TypeBase DimDecl Aliasing) where
+instance Substitutable (TypeBase Size Aliasing) where
   applySubst = substTypesAny . (fmap (fmap (second (const mempty))) .)
 
-instance Substitutable DimDecl where
-  applySubst f (NamedDim (QualName _ v))
+instance Substitutable Size where
+  applySubst f (NamedSize (QualName _ v))
     | Just (SizeSubst d) <- f v = d
   applySubst _ d = d
 
@@ -581,9 +581,9 @@ instance Substitutable Pat where
 applyType ::
   Monoid als =>
   [TypeParam] ->
-  TypeBase DimDecl als ->
+  TypeBase Size als ->
   [StructTypeArg] ->
-  TypeBase DimDecl als
+  TypeBase Size als
 applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
@@ -597,9 +597,9 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
 
 substTypesRet ::
   Monoid as =>
-  (VName -> Maybe (Subst (RetTypeBase DimDecl as))) ->
-  TypeBase DimDecl as ->
-  RetTypeBase DimDecl as
+  (VName -> Maybe (Subst (RetTypeBase Size as))) ->
+  TypeBase Size as ->
+  RetTypeBase Size as
 substTypesRet lookupSubst ot =
   uncurry (flip RetType) $ runState (onType ot) []
   where
@@ -620,15 +620,15 @@ substTypesRet lookupSubst ot =
         else do
           let start = maximum $ map baseTag seen_ext
               ext' = zipWith VName (map baseName ext) [start + 1 ..]
-              extsubsts = M.fromList $ zip ext $ map (SizeSubst . NamedDim . qualName) ext'
+              extsubsts = M.fromList $ zip ext $ map (SizeSubst . NamedSize . qualName) ext'
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'
 
     onType ::
       forall as.
       Monoid as =>
-      TypeBase DimDecl as ->
-      State [VName] (TypeBase DimDecl as)
+      TypeBase Size as ->
+      State [VName] (TypeBase Size as)
 
     onType (Array als u shape et) = do
       t <- arrayOf u (applySubst lookupSubst' shape) <$> onType (Scalar et)
@@ -679,23 +679,23 @@ substTypesRet lookupSubst ot =
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny ::
   Monoid as =>
-  (VName -> Maybe (Subst (RetTypeBase DimDecl as))) ->
-  TypeBase DimDecl as ->
-  TypeBase DimDecl as
+  (VName -> Maybe (Subst (RetTypeBase Size as))) ->
+  TypeBase Size as ->
+  TypeBase Size as
 substTypesAny lookupSubst ot =
   case substTypesRet lookupSubst ot of
     RetType [] ot' -> ot'
     RetType dims ot' ->
       -- XXX HACK FIXME: turn any sizes that propagate to the top into
-      -- AnyDim.  This should _never_ happen during type-checking, but
+      -- AnySize.  This should _never_ happen during type-checking, but
       -- may happen as we substitute types during monomorphisation and
-      -- defunctorisation later on. See Note [AnyDim]
-      let toAny (NamedDim v)
-            | qualLeaf v `elem` dims = AnyDim Nothing
+      -- defunctorisation later on. See Note [AnySize]
+      let toAny (NamedSize v)
+            | qualLeaf v `elem` dims = AnySize Nothing
           toAny d = d
        in first toAny ot'
 
--- Note [AnyDim]
+-- Note [AnySize]
 --
 -- Consider a program:
 --
@@ -715,13 +715,13 @@ substTypesAny lookupSubst ot =
 --
 -- let f (x: []bool) (y: []bool) = 0
 --
--- I.e. we put in empty dimensions (AnyDim), which are much later
+-- I.e. we put in empty dimensions (AnySize), which are much later
 -- turned into distinct sizes in Futhark.Internalise.Exps.  This will
 -- result in unnecessary dynamic size checks, which will hopefully be
 -- optimised away.
 --
 -- Important: The type checker will _never_ produce programs with
--- AnyDim, but unfortunately some of the compilation steps
+-- AnySize, but unfortunately some of the compilation steps
 -- (defunctorisation, monomorphisation, defunctionalisation) will do
 -- so.  Similarly, the core language is also perfectly well behaved.
 --

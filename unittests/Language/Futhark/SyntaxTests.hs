@@ -115,15 +115,15 @@ pPrimType =
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [lexeme "*" $> Unique, pure Nonunique]
 
-pDimDecl :: Parser DimDecl
-pDimDecl =
+pSize :: Parser Size
+pSize =
   brackets $
     choice
-      [ ConstDim <$> lexeme L.decimal,
-        NamedDim <$> pQualName
+      [ ConstSize <$> lexeme L.decimal,
+        NamedSize <$> pQualName
       ]
 
-pScalarNonFun :: Parser (ScalarTypeBase DimDecl ())
+pScalarNonFun :: Parser (ScalarTypeBase Size ())
 pScalarNonFun =
   choice
     [ Prim <$> pPrimType,
@@ -136,7 +136,7 @@ pScalarNonFun =
     pTypeVar = TypeVar () <$> pUniqueness <*> pTypeName <*> many pTypeArg
     pTypeArg =
       choice
-        [ TypeArgDim <$> pDimDecl <*> pure mempty,
+        [ TypeArgDim <$> pSize <*> pure mempty,
           TypeArgType <$> pTypeArgType <*> pure mempty
         ]
     pTypeArgType =
@@ -147,13 +147,13 @@ pScalarNonFun =
 
 pArrayType :: Parser StructType
 pArrayType =
-  Array () <$> pUniqueness <*> (ShapeDecl <$> some pDimDecl) <*> pScalarNonFun
+  Array () <$> pUniqueness <*> (ShapeDecl <$> some pSize) <*> pScalarNonFun
 
 pNonFunType :: Parser StructType
 pNonFunType =
   choice [try pArrayType, try $ parens pStructType, Scalar <$> pScalarNonFun]
 
-pScalarType :: Parser (ScalarTypeBase DimDecl ())
+pScalarType :: Parser (ScalarTypeBase Size ())
 pScalarType = choice [try pFun, pScalarNonFun]
   where
     pFun =
@@ -181,7 +181,7 @@ fromStringParse p what s =
     onError e =
       error $ "not a " <> what <> ": " <> s <> "\n" <> errorBundlePretty e
 
-instance IsString (ScalarTypeBase DimDecl ()) where
+instance IsString (ScalarTypeBase Size ()) where
   fromString = fromStringParse pScalarType "ScalarType"
 
 instance IsString StructType where

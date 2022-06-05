@@ -167,10 +167,10 @@ instance Pretty (ShapeDecl MonoSize) where
 -- they are known or anonymous/local.
 type MonoType = TypeBase MonoSize ()
 
-monoType :: TypeBase DimDecl als -> MonoType
+monoType :: TypeBase Size als -> MonoType
 monoType = (`evalState` (0, mempty)) . traverseDims onDim . toStruct
   where
-    onDim bound _ (NamedDim d)
+    onDim bound _ (NamedSize d)
       -- A locally bound size.
       | qualLeaf d `S.member` bound = pure $ MonoAnon $ qualLeaf d
     onDim _ _ d = do
@@ -267,10 +267,10 @@ sizesForPat pat = do
   pure (sizes, params')
   where
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
-    onDim (AnyDim _) = do
+    onDim (AnySize _) = do
       v <- lift $ newVName "size"
       modify (v :)
-      pure $ NamedDim $ qualName v
+      pure $ NamedSize $ qualName v
     onDim d = pure d
 
 transformAppRes :: AppRes -> MonoM AppRes
@@ -325,7 +325,7 @@ transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
     While e2 -> While <$> transformExp e2
   e3' <- transformExp e3
   -- Maybe monomorphisation introduced new arrays to the loop, and
-  -- maybe they have AnyDim sizes.  This is not allowed.  Invent some
+  -- maybe they have AnySize sizes.  This is not allowed.  Invent some
   -- sizes for them.
   (pat_sizes, pat') <- sizesForPat pat
   pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' loc) (Info res)
@@ -547,9 +547,9 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
           )
           (Info $ AppRes (Scalar $ Arrow mempty yp ytype (RetType [] t)) [])
       rettype' =
-        let onDim (NamedDim d)
-              | Named p <- xp, qualLeaf d == p = NamedDim $ qualName v1
-              | Named p <- yp, qualLeaf d == p = NamedDim $ qualName v2
+        let onDim (NamedSize d)
+              | Named p <- xp, qualLeaf d == p = NamedSize $ qualName v1
+              | Named p <- yp, qualLeaf d == p = NamedSize $ qualName v2
             onDim d = d
          in first onDim rettype
       body =
@@ -625,10 +625,10 @@ desugarIndexSection idxs (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
     t1' = fromStruct t1
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
-noticeDims :: TypeBase DimDecl as -> MonoM ()
+noticeDims :: TypeBase Size as -> MonoM ()
 noticeDims = mapM_ notice . nestedDims
   where
-    notice (NamedDim v) = void $ transformFName mempty v i64
+    notice (NamedSize v) = void $ transformFName mempty v i64
     notice _ = pure ()
 
 -- Convert a collection of 'ValBind's to a nested sequence of let-bound,
@@ -684,20 +684,20 @@ wildcard (Scalar (Record fs)) loc =
 wildcard t loc =
   Wildcard (Info t) loc
 
-type DimInst = M.Map VName DimDecl
+type DimInst = M.Map VName Size
 
 dimMapping ::
   Monoid a =>
-  TypeBase DimDecl a ->
-  TypeBase DimDecl a ->
+  TypeBase Size a ->
+  TypeBase Size a ->
   DimInst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where
-    f bound d1 (NamedDim d2)
+    f bound d1 (NamedSize d2)
       | qualLeaf d2 `elem` bound = pure d1
-    f _ (NamedDim d1) d2 = do
+    f _ (NamedSize d1) d2 = do
       modify $ M.insert (qualLeaf d1) d2
-      pure $ NamedDim d1
+      pure $ NamedSize d1
     f _ d _ = pure d
 
 inferSizeArgs :: [TypeParam] -> StructType -> StructType -> [Exp]
@@ -706,9 +706,9 @@ inferSizeArgs tparams bind_t t =
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
-        Just (NamedDim d) ->
+        Just (NamedSize d) ->
           Just $ Var d (Info i64) mempty
-        Just (ConstDim x) ->
+        Just (ConstSize x) ->
           Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         _ ->
           Just $ Literal (SignedValue $ Int64Value 0) mempty
@@ -871,10 +871,10 @@ typeSubstsM loc orig_t1 orig_t2 =
           d <- lift $ lift $ newVName "d"
           tell [TypeParamDim d loc]
           put (ts, M.insert i d sizes)
-          pure $ NamedDim $ qualName d
+          pure $ NamedSize $ qualName d
         Just d ->
-          pure $ NamedDim $ qualName d
-    onDim (MonoAnon v) = pure $ AnyDim $ Just v
+          pure $ NamedSize $ qualName d
+    onDim (MonoAnon v) = pure $ AnySize $ Just v
 
 -- Perform a given substitution on the types in a pattern.
 substPat :: Bool -> (PatType -> PatType) -> Pat -> Pat

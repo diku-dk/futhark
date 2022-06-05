@@ -283,8 +283,8 @@ class Monad m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
-  checkNamedDim :: SrcLoc -> QualName Name -> m (QualName VName)
-  checkNamedDim loc v = do
+  checkNamedSize :: SrcLoc -> QualName Name -> m (QualName VName)
+  checkNamedSize loc v = do
     (v', t) <- lookupVar loc v
     case t of
       Scalar (Prim (Signed Int64)) -> pure v'
@@ -410,14 +410,14 @@ qualifyTypeVars ::
   Env ->
   [VName] ->
   [VName] ->
-  TypeBase DimDecl as ->
-  TypeBase DimDecl as
+  TypeBase Size as ->
+  TypeBase Size as
 qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
   where
     onType ::
       S.Set VName ->
-      TypeBase DimDecl as ->
-      TypeBase DimDecl as
+      TypeBase Size as ->
+      TypeBase Size as
     onType except (Array as u shape et) =
       Array as u (fmap (onDim except) shape) (onScalar except et)
     onType except (Scalar t) =
@@ -444,7 +444,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
     onTypeArg except (TypeArgType t loc) =
       TypeArgType (onType except t) loc
 
-    onDim except (NamedDim qn) = NamedDim $ qual except qn
+    onDim except (NamedSize qn) = NamedSize $ qual except qn
     onDim _ d = d
 
     qual except (QualName orig_qs name)

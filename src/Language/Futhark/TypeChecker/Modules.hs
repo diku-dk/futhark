@@ -157,16 +157,16 @@ newNamesForMTy orig_mty = do
 
         substituteInShape (ShapeDecl ds) =
           ShapeDecl $ map substituteInDim ds
-        substituteInDim (NamedDim (QualName qs v)) =
-          NamedDim $ QualName (map substitute qs) $ substitute v
+        substituteInDim (NamedSize (QualName qs v)) =
+          NamedSize $ QualName (map substitute qs) $ substitute v
         substituteInDim d = d
 
-        substituteInTypeArg (TypeArgDim (NamedDim (QualName qs v)) loc) =
-          TypeArgDim (NamedDim $ QualName (map substitute qs) $ substitute v) loc
-        substituteInTypeArg (TypeArgDim (ConstDim x) loc) =
-          TypeArgDim (ConstDim x) loc
-        substituteInTypeArg (TypeArgDim (AnyDim v) loc) =
-          TypeArgDim (AnyDim v) loc
+        substituteInTypeArg (TypeArgDim (NamedSize (QualName qs v)) loc) =
+          TypeArgDim (NamedSize $ QualName (map substitute qs) $ substitute v) loc
+        substituteInTypeArg (TypeArgDim (ConstSize x) loc) =
+          TypeArgDim (ConstSize x) loc
+        substituteInTypeArg (TypeArgDim (AnySize v) loc) =
+          TypeArgDim (AnySize v) loc
         substituteInTypeArg (TypeArgType t loc) =
           TypeArgType (substituteInType t) loc
 
@@ -394,7 +394,7 @@ matchMTys ::
   Either TypeError (M.Map VName VName)
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
-    (M.map (SizeSubst . NamedDim) $ resolveMTyNames orig_mty orig_mty_sig)
+    (M.map (SizeSubst . NamedSize) $ resolveMTyNames orig_mty orig_mty_sig)
     []
     orig_mty
     orig_mty_sig
@@ -612,7 +612,7 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   let a_abbrs = mtyTypeAbbrs a_mty
       isSub v = case M.lookup v a_abbrs of
         Just abbr -> Just $ substFromAbbr abbr
-        _ -> Just $ SizeSubst $ NamedDim $ qualName v
+        _ -> Just $ SizeSubst $ NamedSize $ qualName v
       type_subst = M.mapMaybe isSub p_subst
       body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'

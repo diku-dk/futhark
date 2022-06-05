@@ -200,8 +200,8 @@ toValueType (TEArray d t _) = do
   V.ValueType ds t' <- toValueType t
   pure $ V.ValueType (d' : ds) t'
   where
-    constantDim (DimExpConst k _) = Right k
-    constantDim _ = Left "Array has non-constant dimension declaration."
+    constantDim (SizeExpConst k _) = Right k
+    constantDim _ = Left "Array has non-constant size."
 toValueType (TEVar (QualName [] v) _)
   | Just t <- lookup v m = Right $ V.ValueType [] t
   where

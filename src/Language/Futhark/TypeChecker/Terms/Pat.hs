@@ -38,7 +38,7 @@ nonrigidFor :: [SizeBinder VName] -> StructType -> TermTypeM StructType
 nonrigidFor [] t = pure t -- Minor optimisation.
 nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
   where
-    onDim (NamedDim (QualName _ v))
+    onDim (NamedSize (QualName _ v))
       | Just size <- find ((== v) . sizeName) sizes = do
           prev <- gets $ lookup v
           case prev of
@@ -46,9 +46,9 @@ nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
               v' <- lift $ newID $ baseName v
               lift $ constrain v' $ Size Nothing $ mkUsage' $ srclocOf size
               modify ((v, v') :)
-              pure $ NamedDim $ qualName v'
+              pure $ NamedSize $ qualName v'
             Just v' ->
-              pure $ NamedDim $ qualName v'
+              pure $ NamedSize $ qualName v'
     onDim d = pure d
 
 -- | The set of in-scope variables that are being aliased.
