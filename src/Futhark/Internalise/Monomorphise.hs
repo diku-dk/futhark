@@ -626,7 +626,7 @@ desugarIndexSection idxs (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase Size as -> MonoM ()
-noticeDims = mapM_ notice . sizeNames
+noticeDims = mapM_ notice . freeInType
   where
     notice v = void $ transformFName mempty (qualName v) i64
 
@@ -751,7 +751,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         params' = map (substPat entry substPatType) params
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
         (shape_params_explicit, shape_params_implicit) =
-          partition ((`S.member` mustBeExplicit bind_t') . typeParamName) $
+          partition ((`S.member` mustBeExplicitInBinding bind_t') . typeParamName) $
             shape_params ++ t_shape_params
 
     (params'', rrs) <- unzip <$> mapM transformPat params'

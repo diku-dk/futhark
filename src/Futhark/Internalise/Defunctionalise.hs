@@ -19,7 +19,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Futhark.IR.Pretty ()
-import qualified Futhark.Internalise.FreeVars as FV
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -203,8 +202,8 @@ replaceStaticValSizes globals orig_substs sv =
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names and types.
-restrictEnvTo :: FV.NameSet -> DefM Env
-restrictEnvTo (FV.NameSet m) = asks restrict
+restrictEnvTo :: FV -> DefM Env
+restrictEnvTo (FV m) = asks restrict
   where
     restrict (globals, env) = M.mapMaybeWithKey keep env
       where
@@ -272,7 +271,7 @@ lookupVar t x = do
           -- Anything not in scope is going to be an existential size.
           pure $ Dynamic $ Scalar $ Prim $ Signed Int64
 
--- Like patternSizeNames, but ignores sizes that are only found in
+-- Like freeInPat, but ignores sizes that are only found in
 -- funtion types.
 arraySizes :: StructType -> S.Set VName
 arraySizes (Scalar Arrow {}) = mempty
@@ -339,7 +338,7 @@ sizesToRename (RecordSV fs) =
 sizesToRename (SumSV _ svs _) =
   foldMap sizesToRename svs
 sizesToRename (LambdaSV param _ _ _) =
-  patternSizeNames param
+  freeInPat param
     <> S.map identName (S.filter couldBeSize $ patIdents param)
   where
     couldBeSize ident =
@@ -400,8 +399,8 @@ defuncFun tparams pats e0 ret loc = do
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   let used =
-        FV.freeVars (Lambda pats e0 Nothing (Info (mempty, ret)) loc)
-          `FV.without` S.fromList tparams
+        freeInExp (Lambda pats e0 Nothing (Info (mempty, ret)) loc)
+          `freeWithout` S.fromList tparams
   used_env <- restrictEnvTo used
 
   -- The closure parts that are sizes are proactively turned into size
@@ -766,7 +765,7 @@ defuncLet ::
   DefM ([VName], [Pat], Exp, StaticVal)
 defuncLet dims ps@(pat : pats) body (RetType ret_dims rettype)
   | patternOrderZero pat = do
-      let bound_by_pat = (`S.member` patternSizeNames pat)
+      let bound_by_pat = (`S.member` freeInPat pat)
           -- Take care to not include more size parameters than necessary.
           (pat_dims, rest_dims) = partition bound_by_pat dims
           env = envFromPat pat <> envFromDimNames pat_dims
@@ -1059,7 +1058,7 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
     mkExt v
       | not $ v `S.member` bound_here = Just v
     mkExt _ = Nothing
-    rettype_st = RetType (mapMaybe mkExt (S.toList (sizeNames ret)) ++ ret_dims) ret
+    rettype_st = RetType (mapMaybe mkExt (S.toList (freeInType ret)) ++ ret_dims) ret
 
     dec =
       ValBind
@@ -1169,7 +1168,7 @@ matchPatSV (Id vn (Info t) _) sv =
     else dim_env <> M.singleton vn (Binding Nothing sv)
   where
     dim_env =
-      M.fromList $ map (,i64) $ S.toList $ sizeNames t
+      M.fromList $ map (,i64) $ S.toList $ freeInType t
     i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
 matchPatSV (Wildcard _ _) _ = mempty
 matchPatSV (PatAscription pat _ _) sv = matchPatSV pat sv
@@ -1290,7 +1289,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
         -- applications of lifted functions, we don't properly update
         -- the types in the return type annotation.
         combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
-      ret_dims' = filter (`S.member` sizeNames rettype') ret_dims
+      ret_dims' = filter (`S.member` freeInType rettype') ret_dims
   (missing_dims, params'') <- sizesForAll bound_sizes params'
 
   pure
