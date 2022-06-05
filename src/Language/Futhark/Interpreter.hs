@@ -812,7 +812,7 @@ evalArg env e ext = do
     Nothing -> pure ()
   pure v
 
-returned :: Env -> TypeBase (DimDecl VName) als -> [VName] -> Value -> EvalM Value
+returned :: Env -> TypeBase DimDecl als -> [VName] -> Value -> EvalM Value
 returned _ _ [] v = pure v
 returned env ret retext v = do
   mapM_ (uncurry putExtSize) $

@@ -438,7 +438,7 @@ data SizeSource
   = SourceArg FName (ExpBase NoInfo VName)
   | SourceBound (ExpBase NoInfo VName)
   | SourceSlice
-      (Maybe (DimDecl VName))
+      (Maybe DimDecl)
       (Maybe (ExpBase NoInfo VName))
       (Maybe (ExpBase NoInfo VName))
       (Maybe (ExpBase NoInfo VName))
@@ -726,7 +726,7 @@ instance MonadTypeChecker TermTypeM where
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}
 
-extSize :: SrcLoc -> SizeSource -> TermTypeM (DimDecl VName, Maybe VName)
+extSize :: SrcLoc -> SizeSource -> TermTypeM (DimDecl, Maybe VName)
 extSize loc e = do
   prev <- gets $ M.lookup e . stateDimTable
   case prev of
@@ -782,8 +782,8 @@ allDimsFreshInType ::
   SrcLoc ->
   Rigidity ->
   Name ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als, M.Map VName (DimDecl VName))
+  TypeBase DimDecl als ->
+  TermTypeM (TypeBase DimDecl als, M.Map VName DimDecl)
 allDimsFreshInType loc r desc t =
   runStateT (bitraverse onDim pure t) mempty
   where
@@ -865,13 +865,13 @@ isInt64 (IntLit k' _ _) = Just $ fromInteger k'
 isInt64 (Negate x _) = negate <$> isInt64 x
 isInt64 _ = Nothing
 
-maybeDimFromExp :: Exp -> Maybe (DimDecl VName)
+maybeDimFromExp :: Exp -> Maybe DimDecl
 maybeDimFromExp (Var v _ _) = Just $ NamedDim v
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
 maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
 
-dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
+dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl, Maybe VName)
 dimFromExp rf (Attr _ e _) = dimFromExp rf e
 dimFromExp rf (Assert _ e _ _) = dimFromExp rf e
 dimFromExp rf (Parens e _) = dimFromExp rf e
@@ -882,7 +882,7 @@ dimFromExp rf e
   | otherwise =
       extSize (srclocOf e) $ rf e
 
-dimFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
+dimFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (DimDecl, Maybe VName)
 dimFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
 
 -- | Any argument sizes created with 'extSize' inside the given action

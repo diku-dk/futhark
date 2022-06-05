@@ -94,7 +94,7 @@ instance Pretty PrimValue where
   ppr (BoolValue False) = text "false"
   ppr (FloatValue v) = ppr v
 
-instance IsName vn => Pretty (DimDecl vn) where
+instance Pretty DimDecl where
   ppr (AnyDim Nothing) = mempty
   ppr (AnyDim (Just v)) = text "?" <> pprName v
   ppr (NamedDim v) = ppr v
@@ -105,7 +105,7 @@ instance IsName vn => Pretty (DimExp vn) where
   ppr (DimExpNamed v _) = ppr v
   ppr (DimExpConst n _) = ppr n
 
-instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
+instance Pretty (ShapeDecl DimDecl) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
 
 instance Pretty (ShapeDecl ()) where

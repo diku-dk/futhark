@@ -512,7 +512,7 @@ typeParamToArg (TypeParamType _ v ploc) =
 -- substitution (but which is certainly an overloaded primitive
 -- type!).  The latter is used to remove aliases from types that are
 -- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst (DimDecl VName)
+data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst DimDecl
   deriving (Show)
 
 instance Pretty t => Pretty (Subst t) where
@@ -538,25 +538,25 @@ instance Functor Subst where
 class Substitutable a where
   applySubst :: TypeSubs -> a -> a
 
-instance Substitutable (RetTypeBase (DimDecl VName) ()) where
+instance Substitutable (RetTypeBase DimDecl ()) where
   applySubst f (RetType dims t) =
     let RetType more_dims t' = substTypesRet f t
      in RetType (dims ++ more_dims) t'
 
-instance Substitutable (RetTypeBase (DimDecl VName) Aliasing) where
+instance Substitutable (RetTypeBase DimDecl Aliasing) where
   applySubst f (RetType dims t) =
     let RetType more_dims t' = substTypesRet f' t
      in RetType (dims ++ more_dims) t'
     where
       f' = fmap (fmap (second (const mempty))) . f
 
-instance Substitutable (TypeBase (DimDecl VName) ()) where
+instance Substitutable (TypeBase DimDecl ()) where
   applySubst = substTypesAny
 
-instance Substitutable (TypeBase (DimDecl VName) Aliasing) where
+instance Substitutable (TypeBase DimDecl Aliasing) where
   applySubst = substTypesAny . (fmap (fmap (second (const mempty))) .)
 
-instance Substitutable (DimDecl VName) where
+instance Substitutable DimDecl where
   applySubst f (NamedDim (QualName _ v))
     | Just (SizeSubst d) <- f v = d
   applySubst _ d = d
@@ -581,9 +581,9 @@ instance Substitutable Pat where
 applyType ::
   Monoid als =>
   [TypeParam] ->
-  TypeBase (DimDecl VName) als ->
+  TypeBase DimDecl als ->
   [StructTypeArg] ->
-  TypeBase (DimDecl VName) als
+  TypeBase DimDecl als
 applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
@@ -597,9 +597,9 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
 
 substTypesRet ::
   Monoid as =>
-  (VName -> Maybe (Subst (RetTypeBase (DimDecl VName) as))) ->
-  TypeBase (DimDecl VName) as ->
-  RetTypeBase (DimDecl VName) as
+  (VName -> Maybe (Subst (RetTypeBase DimDecl as))) ->
+  TypeBase DimDecl as ->
+  RetTypeBase DimDecl as
 substTypesRet lookupSubst ot =
   uncurry (flip RetType) $ runState (onType ot) []
   where
@@ -627,8 +627,8 @@ substTypesRet lookupSubst ot =
     onType ::
       forall as.
       Monoid as =>
-      TypeBase (DimDecl VName) as ->
-      State [VName] (TypeBase (DimDecl VName) as)
+      TypeBase DimDecl as ->
+      State [VName] (TypeBase DimDecl as)
 
     onType (Array als u shape et) = do
       t <- arrayOf u (applySubst lookupSubst' shape) <$> onType (Scalar et)
@@ -679,9 +679,9 @@ substTypesRet lookupSubst ot =
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny ::
   Monoid as =>
-  (VName -> Maybe (Subst (RetTypeBase (DimDecl VName) as))) ->
-  TypeBase (DimDecl VName) as ->
-  TypeBase (DimDecl VName) as
+  (VName -> Maybe (Subst (RetTypeBase DimDecl as))) ->
+  TypeBase DimDecl as ->
+  TypeBase DimDecl as
 substTypesAny lookupSubst ot =
   case substTypesRet lookupSubst ot of
     RetType [] ot' -> ot'

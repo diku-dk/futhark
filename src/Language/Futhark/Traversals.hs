@@ -262,7 +262,7 @@ instance ASTMappable (DimExp VName) where
   astMap _ (DimExpConst k loc) = pure $ DimExpConst k loc
   astMap _ DimExpAny = pure DimExpAny
 
-instance ASTMappable (DimDecl VName) where
+instance ASTMappable DimDecl where
   astMap tv (NamedDim vn) = NamedDim <$> mapOnQualName tv vn
   astMap _ (ConstDim k) = pure $ ConstDim k
   astMap tv (AnyDim vn) = AnyDim <$> traverse (mapOnName tv) vn
