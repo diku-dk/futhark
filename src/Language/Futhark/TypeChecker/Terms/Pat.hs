@@ -178,7 +178,7 @@ bindingTypeParams tparams =
     . bindingTypes (concatMap typeParamType tparams)
   where
     typeParamType (TypeParamType l v loc) =
-      [ Left (v, TypeAbbr l [] $ RetType [] $ Scalar (TypeVar () Nonunique (typeName v) [])),
+      [ Left (v, TypeAbbr l [] $ RetType [] $ Scalar (TypeVar () Nonunique (qualName v) [])),
         Right (v, ParamType l loc)
       ]
     typeParamType (TypeParamDim v loc) =

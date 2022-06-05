@@ -826,7 +826,7 @@ typeSubstsM loc orig_t1 orig_t2 =
   runWriterT $ fst <$> execStateT (sub orig_t1 orig_t2) (mempty, mempty)
   where
     subRet (Scalar (TypeVar _ _ v _)) rt =
-      unless (baseTag (typeLeaf v) <= maxIntrinsicTag) $
+      unless (baseTag (qualLeaf v) <= maxIntrinsicTag) $
         addSubst v rt
     subRet t1 (RetType _ t2) =
       sub t1 t2
@@ -836,7 +836,7 @@ typeSubstsM loc orig_t1 orig_t2 =
         Just t2' <- peelArray (arrayRank t1) t2 =
           sub t1' t2'
     sub (Scalar (TypeVar _ _ v _)) t =
-      unless (baseTag (typeLeaf v) <= maxIntrinsicTag) $
+      unless (baseTag (qualLeaf v) <= maxIntrinsicTag) $
         addSubst v $
           RetType [] t
     sub (Scalar (Record fields1)) (Scalar (Record fields2)) =
@@ -856,7 +856,7 @@ typeSubstsM loc orig_t1 orig_t2 =
     sub t1 t2@(Scalar Sum {}) = sub t1 t2
     sub t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
 
-    addSubst (TypeName _ v) (RetType ext t) = do
+    addSubst (QualName _ v) (RetType ext t) = do
       (ts, sizes) <- get
       unless (v `M.member` ts) $ do
         t' <- bitraverse onDim pure t

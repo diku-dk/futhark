@@ -140,9 +140,9 @@ newNamesForMTy orig_mty = do
           TypeParamType l (substitute p) loc
 
         substituteInType :: StructType -> StructType
-        substituteInType (Scalar (TypeVar () u (TypeName qs v) targs)) =
+        substituteInType (Scalar (TypeVar () u (QualName qs v) targs)) =
           Scalar $
-            TypeVar () u (TypeName (map substitute qs) $ substitute v) $
+            TypeVar () u (QualName (map substitute qs) $ substitute v) $
               map substituteInTypeArg targs
         substituteInType (Scalar (Prim t)) =
           Scalar $ Prim t
@@ -194,7 +194,7 @@ refineEnv ::
   StructType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (TypeName qs v) _)))) <-
+  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (QualName qs v) _)))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
       if paramsMatch cur_ps ps
@@ -371,7 +371,7 @@ mismatchedType loc abs quals name spec_t env_t =
 
 ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetType) -> Doc
 ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
-  | typeLeaf tn `elem` abs,
+  | qualLeaf tn `elem` abs,
     map typeParamToArg ps == args =
       "type" <> ppr l
         <+> ppr name

@@ -507,7 +507,7 @@ instance MonadUnify TermTypeM where
     i <- incCounter
     v <- newID $ mkTypeVarName desc i
     constrain v $ NoConstraint Lifted $ mkUsage' loc
-    pure $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+    pure $ Scalar $ TypeVar mempty Nonunique (qualName v) []
 
   curLevel = asks termLevel
 
@@ -582,7 +582,7 @@ instantiateTypeParam qn loc tparam = do
     TypeParamType x _ _ -> do
       constrain v . NoConstraint x . mkUsage loc $
         "instantiated type parameter of " <> quote (pretty qn) <> "."
-      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
+      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (qualName v) [])
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc $
         "instantiated size parameter of " <> quote (pretty qn) <> "."
@@ -771,7 +771,7 @@ newArrayType loc desc r = do
   v <- newTypeName desc
   constrain v $ NoConstraint Unlifted $ mkUsage' loc
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
-  let rowt = TypeVar () Nonunique (typeName v) []
+  let rowt = TypeVar () Nonunique (qualName v) []
   pure
     ( Array () Nonunique (Shape $ map (NamedSize . qualName) dims) rowt,
       Scalar rowt

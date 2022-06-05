@@ -24,9 +24,6 @@ module Language.Futhark.Syntax
     Shape (..),
     shapeRank,
     stripDims,
-    TypeName (..),
-    typeNameFromQualName,
-    qualNameFromTypeName,
     TypeBase (..),
     TypeArg (..),
     SizeExp (..),
@@ -265,25 +262,6 @@ stripDims i (Shape l)
   | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
 
--- | A type name consists of qualifiers (for error messages) and a
--- 'VName' (for equality checking).
-data TypeName = TypeName {typeQuals :: [VName], typeLeaf :: VName}
-  deriving (Show)
-
-instance Eq TypeName where
-  TypeName _ x == TypeName _ y = x == y
-
-instance Ord TypeName where
-  TypeName _ x `compare` TypeName _ y = x `compare` y
-
--- | Convert a 'QualName' to a 'TypeName'.
-typeNameFromQualName :: QualName VName -> TypeName
-typeNameFromQualName (QualName qs x) = TypeName qs x
-
--- | Convert a 'TypeName' to a 'QualName'.
-qualNameFromTypeName :: TypeName -> QualName VName
-qualNameFromTypeName (TypeName qs x) = QualName qs x
-
 -- | The name (if any) of a function parameter.  The 'Eq' and 'Ord'
 -- instances always compare values of this type equal.
 data PName = Named VName | Unnamed
@@ -317,7 +295,7 @@ instance Bifoldable RetTypeBase where
 -- convolutes the code too much if we try to statically rule it out.
 data ScalarTypeBase dim as
   = Prim PrimType
-  | TypeVar as Uniqueness TypeName [TypeArg dim]
+  | TypeVar as Uniqueness (QualName VName) [TypeArg dim]
   | Record (M.Map Name (TypeBase dim as))
   | Sum (M.Map Name [TypeBase dim as])
   | -- | The aliasing corresponds to the lexical

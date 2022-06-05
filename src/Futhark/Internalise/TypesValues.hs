@@ -149,8 +149,8 @@ internaliseTypeM exts orig_t =
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
-      | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
-        baseString (E.typeLeaf tn) == "acc" -> do
+      | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
+        baseString (E.qualLeaf tn) == "acc" -> do
           ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
           acc_param <- liftInternaliseM $ newVName "acc_cert"
           let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u

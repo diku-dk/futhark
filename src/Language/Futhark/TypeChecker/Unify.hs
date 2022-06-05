@@ -331,7 +331,7 @@ normTypeFully t = do
 
 -- | Replace any top-level type variable with its substitution.
 normType :: MonadUnify m => StructType -> m StructType
-normType t@(Scalar (TypeVar _ _ (TypeName [] v) [])) = do
+normType t@(Scalar (TypeVar _ _ (QualName [] v) [])) = do
   constraints <- getConstraints
   case snd <$> M.lookup v constraints of
     Just (Constraint (RetType [] t') _) -> normType t'
@@ -340,7 +340,7 @@ normType t = pure t
 
 -- | Replace any top-level type variable with its substitution.
 normPatType :: MonadUnify m => PatType -> m PatType
-normPatType t@(Scalar (TypeVar als u (TypeName [] v) [])) = do
+normPatType t@(Scalar (TypeVar als u (QualName [] v) [])) = do
   constraints <- getConstraints
   case snd <$> M.lookup v constraints of
     Just (Constraint (RetType [] t') _) ->
@@ -456,15 +456,15 @@ unifyWith onDims usage = subunify False
                         ++ filter (`notElem` M.keys fs) (M.keys arg_fs)
                 unifyError usage mempty bcs $
                   "Unshared fields:" <+> commasep (map ppr missing) <> "."
-        ( Scalar (TypeVar _ _ (TypeName _ tn) targs),
-          Scalar (TypeVar _ _ (TypeName _ arg_tn) arg_targs)
+        ( Scalar (TypeVar _ _ (QualName _ tn) targs),
+          Scalar (TypeVar _ _ (QualName _ arg_tn) arg_targs)
           )
             | tn == arg_tn,
               length targs == length arg_targs -> do
                 let bcs' = breadCrumb (Matching "When matching type arguments.") bcs
                 zipWithM_ (unifyTypeArg bcs') targs arg_targs
-        ( Scalar (TypeVar _ _ (TypeName [] v1) []),
-          Scalar (TypeVar _ _ (TypeName [] v2) [])
+        ( Scalar (TypeVar _ _ (QualName [] v1) []),
+          Scalar (TypeVar _ _ (QualName [] v2) [])
           ) ->
             case (nonrigid v1, nonrigid v2) of
               (Nothing, Nothing) -> failure
@@ -473,10 +473,10 @@ unifyWith onDims usage = subunify False
               (Just lvl1, Just lvl2)
                 | lvl1 <= lvl2 -> link ord v1 lvl1 t2'
                 | otherwise -> link (not ord) v2 lvl2 t1'
-        (Scalar (TypeVar _ _ (TypeName [] v1) []), _)
+        (Scalar (TypeVar _ _ (QualName [] v1) []), _)
           | Just lvl <- nonrigid v1 ->
               link ord v1 lvl t2'
-        (_, Scalar (TypeVar _ _ (TypeName [] v2) []))
+        (_, Scalar (TypeVar _ _ (QualName [] v2) []))
           | Just lvl <- nonrigid v2 ->
               link (not ord) v2 lvl t1'
         ( Scalar (Arrow _ p1 a1 (RetType b1_dims b1)),
@@ -712,7 +712,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       | tp `notElem` map (Scalar . Prim) ts -> do
           link
           case tp of
-            Scalar (TypeVar _ _ (TypeName [] v) [])
+            Scalar (TypeVar _ _ (QualName [] v) [])
               | not $ isRigid v constraints ->
                   linkVarToTypes usage v ts
             _ ->
@@ -746,7 +746,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
               mapM_ (uncurry $ unifyWith onDims usage bound bcs') $
                 M.elems $
                   M.intersectionWith (,) required_fields tp_fields
-        Scalar (TypeVar _ _ (TypeName [] v) [])
+        Scalar (TypeVar _ _ (QualName [] v) [])
           | not $ isRigid v constraints ->
               modifyConstraints $
                 M.insert
@@ -774,7 +774,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedConstructors onDims usage bound bcs required_cs ts
-        Scalar (TypeVar _ _ (TypeName [] v) []) -> do
+        Scalar (TypeVar _ _ (QualName [] v) []) -> do
           case M.lookup v constraints of
             Just (_, HasConstrs v_cs _) -> do
               unifySharedConstructors onDims usage bound bcs required_cs v_cs
@@ -844,7 +844,7 @@ mustBeOneOf ts usage t = do
   let isRigid' v = isRigid v constraints
 
   case t' of
-    Scalar (TypeVar _ _ (TypeName [] v) [])
+    Scalar (TypeVar _ _ (QualName [] v) [])
       | not $ isRigid' v -> linkVarToTypes usage v ts
     Scalar (Prim pt) | pt `elem` ts -> pure ()
     _ -> failure
@@ -904,7 +904,7 @@ equalityType usage t = do
     mustBeEquality vn = do
       constraints <- getConstraints
       case M.lookup vn constraints of
-        Just (_, Constraint (RetType [] (Scalar (TypeVar _ _ (TypeName [] vn') []))) _) ->
+        Just (_, Constraint (RetType [] (Scalar (TypeVar _ _ (QualName [] vn') []))) _) ->
           mustBeEquality vn'
         Just (_, Constraint (RetType _ vn_t) cusage)
           | not $ orderZero vn_t ->
@@ -1038,7 +1038,7 @@ mustHaveConstr ::
 mustHaveConstr usage c t fs = do
   constraints <- getConstraints
   case t of
-    Scalar (TypeVar _ _ (TypeName _ tn) [])
+    Scalar (TypeVar _ _ (QualName _ tn) [])
       | Just (lvl, NoConstraint {}) <- M.lookup tn constraints -> do
           mapM_ (scopeCheck usage noBreadCrumbs tn lvl) fs
           modifyConstraints $ M.insert tn (lvl, HasConstrs (M.singleton c fs) usage)
@@ -1077,7 +1077,7 @@ mustHaveFieldWith onDims usage bound bcs l t = do
   l_type <- newTypeVar (srclocOf usage) "t"
   let l_type' = l_type `setAliases` aliases t
   case t of
-    Scalar (TypeVar _ _ (TypeName _ tn) [])
+    Scalar (TypeVar _ _ (QualName _ tn) [])
       | Just (lvl, NoConstraint {}) <- M.lookup tn constraints -> do
           scopeCheck usage bcs tn lvl l_type
           modifyConstraints $ M.insert tn (lvl, HasFields (M.singleton l l_type) usage)
@@ -1181,7 +1181,7 @@ instance MonadUnify UnifyM where
   newTypeVar loc name = do
     v <- newVar name
     modifyConstraints $ M.insert v (0, NoConstraint Lifted $ Usage Nothing loc)
-    pure $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+    pure $ Scalar $ TypeVar mempty Nonunique (qualName v) []
 
   newDimVar loc rigidity name = do
     dim <- newVar name

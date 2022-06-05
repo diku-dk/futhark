@@ -126,9 +126,9 @@ instance Pretty (Shape dim) => Pretty (RetTypeBase dim as) where
 instance Pretty (Shape dim) => Pretty (ScalarTypeBase dim as) where
   ppr = pprPrec 0
   pprPrec _ (Prim et) = ppr et
-  pprPrec p (TypeVar _ u et targs) =
+  pprPrec p (TypeVar _ u v targs) =
     parensIf (not (null targs) && p > 3) $
-      ppr u <> ppr (qualNameFromTypeName et) <+> spread (map (pprPrec 3) targs)
+      ppr u <> ppr v <+> spread (map (pprPrec 3) targs)
   pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
         oneLine (parens $ commasep $ map ppr ts)

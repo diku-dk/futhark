@@ -17,7 +17,6 @@ module Language.Futhark.Prop
     namesToPrimTypes,
     qualName,
     qualify,
-    typeName,
     valueType,
     primValueType,
     leadingOperator,
@@ -591,13 +590,12 @@ typeVars t =
   case t of
     Scalar Prim {} -> mempty
     Scalar (TypeVar _ _ tn targs) ->
-      mconcat $ typeVarFree tn : map typeArgFree targs
+      mconcat $ S.singleton (qualLeaf tn) : map typeArgFree targs
     Scalar (Arrow _ _ t1 (RetType _ t2)) -> typeVars t1 <> typeVars t2
     Scalar (Record fields) -> foldMap typeVars fields
     Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
     Array _ _ _ rt -> typeVars $ Scalar rt
   where
-    typeVarFree = S.singleton . typeLeaf
     typeArgFree (TypeArgType ta _) = typeVars ta
     typeArgFree TypeArgDim {} = mempty
 
@@ -717,12 +715,12 @@ intrinsicAcc =
   ( acc_v,
     IntrinsicType SizeLifted [TypeParamType Unlifted t_v mempty] $
       Scalar $
-        TypeVar () Nonunique (TypeName [] acc_v) [arg]
+        TypeVar () Nonunique (qualName acc_v) [arg]
   )
   where
     acc_v = VName "acc" 10
     t_v = VName "t" 11
-    arg = TypeArgType (Scalar (TypeVar () Nonunique (TypeName [] t_v) [])) mempty
+    arg = TypeArgType (Scalar (TypeVar () Nonunique (qualName t_v) [])) mempty
 
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
@@ -1143,12 +1141,12 @@ intrinsics =
   where
     [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
-    t_a = TypeVar () Nonunique (typeName a) []
+    t_a = TypeVar () Nonunique (qualName a) []
     arr_a s = Array () Nonunique s t_a
     uarr_a s = Array () Unique s t_a
     tp_a = TypeParamType Unlifted a mempty
 
-    t_b = TypeVar () Nonunique (typeName b) []
+    t_b = TypeVar () Nonunique (qualName b) []
     arr_b s = Array () Nonunique s t_b
     uarr_b s = Array () Unique s t_b
     tp_b = TypeParamType Unlifted b mempty
@@ -1173,7 +1171,7 @@ intrinsics =
     karr x y = Scalar $ Arrow mempty (Named k) x (RetType [] y)
 
     accType t =
-      TypeVar () Unique (typeName (fst intrinsicAcc)) [TypeArgType t mempty]
+      TypeVar () Unique (qualName (fst intrinsicAcc)) [TypeArgType t mempty]
 
     namify i (x, y) = (VName (nameFromString x) i, y)
 
@@ -1275,10 +1273,6 @@ qualName = QualName []
 -- | Add another qualifier (at the head) to a qualified name.
 qualify :: v -> QualName v -> QualName v
 qualify k (QualName ks v) = QualName (k : ks) v
-
--- | Create a type name name with no qualifiers from a 'VName'.
-typeName :: VName -> TypeName
-typeName = typeNameFromQualName . qualName
 
 -- | The modules imported by a Futhark program.
 progImports :: ProgBase f vn -> [(String, SrcLoc)]
