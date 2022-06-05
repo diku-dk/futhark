@@ -67,7 +67,7 @@ addAliasesFromType t1 t2 =
 -- Uniqueness is unified with @uf@.  Assumes sizes already match, and
 -- always picks the size of the leftmost type.
 unifyTypesU ::
-  (Monoid als, ArrayDim dim) =>
+  (Monoid als) =>
   (Uniqueness -> Uniqueness -> Maybe Uniqueness) ->
   TypeBase dim als ->
   TypeBase dim als ->
@@ -81,7 +81,7 @@ unifyTypesU uf (Scalar t1) (Scalar t2) = Scalar <$> unifyScalarTypes uf t1 t2
 unifyTypesU _ _ _ = Nothing
 
 unifyScalarTypes ::
-  (Monoid als, ArrayDim dim) =>
+  (Monoid als) =>
   (Uniqueness -> Uniqueness -> Maybe Uniqueness) ->
   ScalarTypeBase dim als ->
   ScalarTypeBase dim als ->

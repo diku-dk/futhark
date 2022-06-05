@@ -20,7 +20,6 @@ module Language.Futhark.Syntax
     IntType (..),
     FloatType (..),
     PrimType (..),
-    ArrayDim (..),
     Size (..),
     ShapeDecl (..),
     shapeRank,
@@ -219,15 +218,6 @@ data AttrInfo vn
   | AttrComp Name [AttrInfo vn] SrcLoc
   deriving (Eq, Ord, Show)
 
--- | A type class for things that can be array dimensions.
-class Eq dim => ArrayDim dim where
-  -- | @unifyDims x y@ combines @x@ and @y@ to contain their maximum
-  -- common information, and fails if they conflict.
-  unifyDims :: dim -> dim -> Maybe dim
-
-instance ArrayDim () where
-  unifyDims () () = Just ()
-
 -- | The elaborated size of a dimension.
 data Size
   = -- | The size of the dimension is this name, which
@@ -242,15 +232,6 @@ data Size
     -- defunctorisation and monomorphisation.
     AnySize (Maybe VName)
   deriving (Eq, Ord, Show)
-
--- Note that the notion of unifyDims here is intentionally not what we
--- use when we do real type unification in the type checker.
-instance ArrayDim Size where
-  unifyDims AnySize {} y = Just y
-  unifyDims x AnySize {} = Just x
-  unifyDims (NamedSize x) (NamedSize y) | x == y = Just $ NamedSize x
-  unifyDims (ConstSize x) (ConstSize y) | x == y = Just $ ConstSize x
-  unifyDims _ _ = Nothing
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.

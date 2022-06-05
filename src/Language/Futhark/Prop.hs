@@ -422,10 +422,10 @@ isSizeParam = not . isTypeParam
 -- expression. This is necessary since the original type may contain additional
 -- information (e.g., shape restrictions) from the user given annotation.
 combineTypeShapes ::
-  (Monoid as, ArrayDim dim) =>
-  TypeBase dim as ->
-  TypeBase dim as ->
-  TypeBase dim as
+  (Monoid as) =>
+  TypeBase Size as ->
+  TypeBase Size as ->
+  TypeBase Size as
 combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
   | M.keys ts1 == M.keys ts2 =
       Scalar $

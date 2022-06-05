@@ -45,7 +45,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Futhark.Util.Pretty hiding (empty)
-import Language.Futhark hiding (unifyDims)
+import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types
 
