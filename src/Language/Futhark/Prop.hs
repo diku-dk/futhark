@@ -26,6 +26,7 @@ module Language.Futhark.Prop
     identifierReference,
     prettyStacktrace,
     progHoles,
+    defaultEntryPoint,
 
     -- * Queries on expressions
     typeOf,
@@ -118,6 +119,10 @@ import Futhark.Util (maxinum)
 import Futhark.Util.Pretty
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals
+
+-- | The name of the default program entry point (@main@).
+defaultEntryPoint :: Name
+defaultEntryPoint = nameFromString "main"
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
