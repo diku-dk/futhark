@@ -230,6 +230,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y python3-jsonschema
 
+    - name: Install Nix
+      uses: cachix/install-nix-action@v12
+
     - uses: actions/download-artifact@v2
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
