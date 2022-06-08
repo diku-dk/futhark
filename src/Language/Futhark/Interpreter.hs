@@ -45,13 +45,13 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
-import Futhark.IR.Primitive (floatValue, intValue)
-import qualified Futhark.IR.Primitive as P
 import Futhark.Util (chunk, maybeHead, splitFromEnd)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply, bool)
-import Language.Futhark hiding (Value, matchDims)
+import Language.Futhark hiding (Shape, Value, matchDims)
 import qualified Language.Futhark as F
+import Language.Futhark.Primitive (floatValue, intValue)
+import qualified Language.Futhark.Primitive as P
 import qualified Language.Futhark.Semantic as T
 import Prelude hiding (break, mod)
 
@@ -140,7 +140,7 @@ prettyRecord m
     field (k, v) = ppr k <+> equals <+> ppr v
 
 valueStructType :: ValueType -> StructType
-valueStructType = first (ConstDim . fromIntegral)
+valueStructType = first (ConstSize . fromIntegral)
 
 -- | A shape is a tree to accomodate the case of records.  It is
 -- parameterised over the representation of dimensions.
@@ -177,7 +177,7 @@ typeShape shapes = go
       ShapeRecord $ M.map go fs
     go (Scalar (Sum cs)) =
       ShapeSum $ M.map (map go) cs
-    go (Scalar (TypeVar _ _ (TypeName [] v) []))
+    go (Scalar (TypeVar _ _ (QualName [] v) []))
       | Just shape <- M.lookup v shapes =
           shape
     go _ =
@@ -186,16 +186,16 @@ typeShape shapes = go
 structTypeShape :: M.Map VName ValueShape -> StructType -> Shape (Maybe Int64)
 structTypeShape shapes = fmap dim . typeShape shapes'
   where
-    dim (ConstDim d) = Just $ fromIntegral d
+    dim (ConstSize d) = Just $ fromIntegral d
     dim _ = Nothing
-    shapes' = M.map (fmap $ ConstDim . fromIntegral) shapes
+    shapes' = M.map (fmap $ ConstSize . fromIntegral) shapes
 
 resolveTypeParams :: [VName] -> StructType -> StructType -> Env
 resolveTypeParams names = match
   where
     match (Scalar (TypeVar _ _ tn _)) t
-      | typeLeaf tn `elem` names =
-          typeEnv $ M.singleton (typeLeaf tn) t
+      | qualLeaf tn `elem` names =
+          typeEnv $ M.singleton (qualLeaf tn) t
     match (Scalar (Record poly_fields)) (Scalar (Record fields)) =
       mconcat $
         M.elems $
@@ -215,7 +215,7 @@ resolveTypeParams names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) (stripArray 1 t)
     match _ _ = mempty
 
-    matchDims (NamedDim (QualName _ d1)) (ConstDim d2)
+    matchDims (NamedSize (QualName _ d1)) (ConstSize d2)
       | d1 `elem` names =
           i64Env $ M.singleton d1 $ fromIntegral d2
     matchDims _ _ = mempty
@@ -237,7 +237,7 @@ resolveExistentials names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) rowshape
     match _ _ = mempty
 
-    matchDims (NamedDim (QualName _ d1)) d2
+    matchDims (NamedSize (QualName _ d1)) d2
       | d1 `elem` names = M.singleton d1 d2
     matchDims _ _ = mempty
 
@@ -694,26 +694,26 @@ evalType env t@(Array _ u shape _) =
       shape' = fmap evalDim shape
    in arrayOf u shape' et'
   where
-    evalDim (NamedDim qn)
+    evalDim (NamedSize qn)
       | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
           lookupVar qn env =
-          ConstDim $ fromIntegral x
+          ConstSize $ fromIntegral x
     evalDim d = d
 evalType env t@(Scalar (TypeVar () _ tn args)) =
-  case lookupType (qualNameFromTypeName tn) env of
+  case lookupType tn env of
     Just (T.TypeAbbr _ ps (RetType _ t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (NamedDim v) = fromMaybe (NamedDim v) $ M.lookup (qualLeaf v) substs
+          onDim (NamedSize v) = fromMaybe (NamedSize v) $ M.lookup (qualLeaf v) substs
           onDim d = d
        in if null ps
             then first onDim t'
             else evalType (Env mempty types mempty <> env) $ first onDim t'
     Nothing -> t
   where
-    matchPtoA (TypeParamDim p _) (TypeArgDim (NamedDim qv) _) =
-      (M.singleton p $ NamedDim qv, mempty)
-    matchPtoA (TypeParamDim p _) (TypeArgDim (ConstDim k) _) =
-      (M.singleton p $ ConstDim k, mempty)
+    matchPtoA (TypeParamDim p _) (TypeArgDim (NamedSize qv) _) =
+      (M.singleton p $ NamedSize qv, mempty)
+    matchPtoA (TypeParamDim p _) (TypeArgDim (ConstSize k) _) =
+      (M.singleton p $ ConstSize k, mempty)
     matchPtoA (TypeParamType l p _) (TypeArgType t' _) =
       let t'' = evalType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
@@ -737,7 +737,7 @@ typeValueShape env t = do
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " ++ pretty t'
     Just shape -> pure shape
   where
-    dim (ConstDim x) = Just $ fromIntegral x
+    dim (ConstSize x) = Just $ fromIntegral x
     dim _ = Nothing
 
 evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
@@ -812,7 +812,7 @@ evalArg env e ext = do
     Nothing -> pure ()
   pure v
 
-returned :: Env -> TypeBase (DimDecl VName) als -> [VName] -> Value -> EvalM Value
+returned :: Env -> TypeBase Size als -> [VName] -> Value -> EvalM Value
 returned _ _ [] v = pure v
 returned env ret retext v = do
   mapM_ (uncurry putExtSize) $
@@ -1173,9 +1173,9 @@ substituteInModule substs = onModule
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
-    onDim (NamedDim v) = NamedDim $ replaceQ v
-    onDim (ConstDim x) = ConstDim x
-    onDim (AnyDim v) = AnyDim v
+    onDim (NamedSize v) = NamedSize $ replaceQ v
+    onDim (ConstSize x) = ConstSize x
+    onDim (AnySize v) = AnySize v
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =

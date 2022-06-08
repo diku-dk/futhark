@@ -2,6 +2,7 @@
 module Language.Futhark
   ( module Language.Futhark.Syntax,
     module Language.Futhark.Prop,
+    module Language.Futhark.FreeVars,
     module Language.Futhark.Pretty,
     Ident,
     DimIndex,
@@ -26,6 +27,7 @@ module Language.Futhark
   )
 where
 
+import Language.Futhark.FreeVars
 import Language.Futhark.Pretty
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
@@ -79,7 +81,7 @@ type Spec = SpecBase Info VName
 type Prog = ProgBase Info VName
 
 -- | A known type arg with shape annotations.
-type StructTypeArg = TypeArg (DimDecl VName)
+type StructTypeArg = TypeArg Size
 
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName

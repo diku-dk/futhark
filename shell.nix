@@ -4,38 +4,40 @@ let
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
-  buildInputs = [
-    pkgs.cabal-install
-    pkgs.cacert
-    pkgs.curl
-    pkgs.file
-    pkgs.git
-    pkgs.git-annex
-    pkgs.ghc
-    pkgs.parallel
-    pkgs.haskellPackages.weeder
-    pkgs.haskellPackages.graphmod
-    pkgs.haskellPackages.apply-refact
-    pkgs.xdot
-    pkgs.hlint
-    pkgs.pkgconfig
-    pkgs.zlib
-    pkgs.zlib.out
-    pkgs.cabal2nix
-    pkgs.ghcid
-    pkgs.haskell.packages.ghc922.ormolu_0_5_0_0
-    pkgs.niv
-    pkgs.python3Packages.numpy
-    pkgs.python3Packages.pyopencl
-    pkgs.python3Packages.jsonschema
-    pkgs.python3Packages.sphinx
-    pkgs.python3Packages.sphinxcontrib-bibtex
-    pkgs.imagemagick # needed for literate tests
-  ]
-  ++ pkgs.lib.optionals (pkgs.stdenv.isLinux)
-    [ pkgs.opencl-headers
-      pkgs.ocl-icd
-      pkgs.oclgrind
+  buildInputs =
+    with pkgs;
+    [
+      cabal-install
+      cacert
+      curl
+      file
+      git
+      git-annex
+      ghc
+      parallel
+      haskellPackages.weeder
+      haskellPackages.graphmod
+      haskellPackages.apply-refact
+      xdot
+      hlint
+      pkgconfig
+      zlib
+      zlib.out
+      cabal2nix
+      ghcid
+      haskell.packages.ghc923.ormolu_0_5_0_0
+      niv
+      python3Packages.numpy
+      python3Packages.pyopencl
+      python3Packages.jsonschema
+      python3Packages.sphinx
+      python3Packages.sphinxcontrib-bibtex
+      imagemagick # needed for literate tests
     ]
+    ++ lib.optionals (stdenv.isLinux)
+      [ opencl-headers
+        ocl-icd
+        oclgrind
+      ]
   ;
 }

@@ -446,10 +446,7 @@ extractShapeContext ts shapes =
 
 -- | The 'Ext' integers used for existential sizes in the given types.
 shapeContext :: [TypeBase ExtShape u] -> S.Set Int
-shapeContext = S.fromList . concatMap (mapMaybe ext . shapeDims . arrayShape)
-  where
-    ext (Ext x) = Just x
-    ext (Free _) = Nothing
+shapeContext = S.fromList . concatMap (mapMaybe isExt . shapeDims . arrayShape)
 
 -- | If all dimensions of the given 'ExtShape' are statically known,
 -- change to the corresponding t'Shape'.

@@ -45,7 +45,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     isInt64,
     maybeDimFromExp,
     dimFromExp,
-    dimFromArg,
+    sizeFromArg,
     noSizeEscape,
 
     -- * Control flow
@@ -438,7 +438,7 @@ data SizeSource
   = SourceArg FName (ExpBase NoInfo VName)
   | SourceBound (ExpBase NoInfo VName)
   | SourceSlice
-      (Maybe (DimDecl VName))
+      (Maybe Size)
       (Maybe (ExpBase NoInfo VName))
       (Maybe (ExpBase NoInfo VName))
       (Maybe (ExpBase NoInfo VName))
@@ -507,7 +507,7 @@ instance MonadUnify TermTypeM where
     i <- incCounter
     v <- newID $ mkTypeVarName desc i
     constrain v $ NoConstraint Lifted $ mkUsage' loc
-    pure $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+    pure $ Scalar $ TypeVar mempty Nonunique (qualName v) []
 
   curLevel = asks termLevel
 
@@ -582,11 +582,11 @@ instantiateTypeParam qn loc tparam = do
     TypeParamType x _ _ -> do
       constrain v . NoConstraint x . mkUsage loc $
         "instantiated type parameter of " <> quote (pretty qn) <> "."
-      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
+      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (qualName v) [])
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc $
         "instantiated size parameter of " <> quote (pretty qn) <> "."
-      pure (v, SizeSubst $ NamedDim $ qualName v)
+      pure (v, SizeSubst $ NamedSize $ qualName v)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -706,7 +706,7 @@ instance MonadTypeChecker TermTypeM where
           maybe (toStruct argtype) (Scalar . Prim) rt
         )
 
-  checkNamedDim loc v = do
+  checkNamedSize loc v = do
     (v', t) <- lookupVar loc v
     onFailure (CheckingRequired [Scalar $ Prim $ Signed Int64] (toStruct t)) $
       unify (mkUsage loc "use as array size") (toStruct t) $
@@ -726,7 +726,7 @@ instance MonadTypeChecker TermTypeM where
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}
 
-extSize :: SrcLoc -> SizeSource -> TermTypeM (DimDecl VName, Maybe VName)
+extSize :: SrcLoc -> SizeSource -> TermTypeM (Size, Maybe VName)
 extSize loc e = do
   prev <- gets $ M.lookup e . stateDimTable
   case prev of
@@ -741,12 +741,12 @@ extSize loc e = do
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
-        ( NamedDim $ qualName d,
+        ( NamedSize $ qualName d,
           Just d
         )
     Just d ->
       pure
-        ( NamedDim $ qualName d,
+        ( NamedSize $ qualName d,
           Just d
         )
 
@@ -771,9 +771,9 @@ newArrayType loc desc r = do
   v <- newTypeName desc
   constrain v $ NoConstraint Unlifted $ mkUsage' loc
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
-  let rowt = TypeVar () Nonunique (typeName v) []
+  let rowt = TypeVar () Nonunique (qualName v) []
   pure
-    ( Array () Nonunique (ShapeDecl $ map (NamedDim . qualName) dims) rowt,
+    ( Array () Nonunique (Shape $ map (NamedSize . qualName) dims) rowt,
       Scalar rowt
     )
 
@@ -782,15 +782,15 @@ allDimsFreshInType ::
   SrcLoc ->
   Rigidity ->
   Name ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als, M.Map VName (DimDecl VName))
+  TypeBase Size als ->
+  TermTypeM (TypeBase Size als, M.Map VName Size)
 allDimsFreshInType loc r desc t =
   runStateT (bitraverse onDim pure t) mempty
   where
     onDim d = do
       v <- lift $ newDimVar loc r desc
       modify $ M.insert v d
-      pure $ NamedDim $ qualName v
+      pure $ NamedSize $ qualName v
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: ASTMappable e => e -> TermTypeM e
@@ -800,7 +800,6 @@ updateTypes = astMap tv
       ASTMapper
         { mapOnExp = astMap tv,
           mapOnName = pure,
-          mapOnQualName = pure,
           mapOnStructType = normTypeFully,
           mapOnPatType = normTypeFully,
           mapOnStructRetType = normTypeFully,
@@ -833,12 +832,11 @@ termCheckTypeExp te = do
 
   -- Observe the sizes so we do not get any warnings about them not
   -- being used.
-  mapM_ observeDim $ nestedDims st
+  mapM_ observeDim $ freeInType st
   pure (te', svars, RetType dims st)
   where
-    observeDim (NamedDim v) =
-      observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int64) mempty
-    observeDim _ = pure ()
+    observeDim v =
+      observe $ Ident v (Info $ Scalar $ Prim $ Signed Int64) mempty
 
 checkTypeExpNonrigid :: TypeExp Name -> TermTypeM (TypeExp VName, StructType, [VName])
 checkTypeExpNonrigid te = do
@@ -865,13 +863,13 @@ isInt64 (IntLit k' _ _) = Just $ fromInteger k'
 isInt64 (Negate x _) = negate <$> isInt64 x
 isInt64 _ = Nothing
 
-maybeDimFromExp :: Exp -> Maybe (DimDecl VName)
-maybeDimFromExp (Var v _ _) = Just $ NamedDim v
+maybeDimFromExp :: Exp -> Maybe Size
+maybeDimFromExp (Var v _ _) = Just $ NamedSize v
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
+maybeDimFromExp e = ConstSize . fromIntegral <$> isInt64 e
 
-dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
+dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (Size, Maybe VName)
 dimFromExp rf (Attr _ e _) = dimFromExp rf e
 dimFromExp rf (Assert _ e _ _) = dimFromExp rf e
 dimFromExp rf (Parens e _) = dimFromExp rf e
@@ -882,8 +880,8 @@ dimFromExp rf e
   | otherwise =
       extSize (srclocOf e) $ rf e
 
-dimFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
-dimFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
+sizeFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (Size, Maybe VName)
+sizeFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
 
 -- | Any argument sizes created with 'extSize' inside the given action
 -- will be removed once the action finishes.  This is to ensure that

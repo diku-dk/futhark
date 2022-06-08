@@ -1017,7 +1017,7 @@ internaliseDimIndex ::
   E.DimIndex ->
   InternaliseM (I.DimIndex SubExp, SubExp, [ErrorMsgPart SubExp])
 internaliseDimIndex w (E.DimFix i) = do
-  (i', _) <- internaliseDimExp "i" i
+  (i', _) <- internaliseSizeExp "i" i
   let lowerBound =
         I.BasicOp $ I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) i'
       upperBound =
@@ -1045,7 +1045,7 @@ internaliseDimIndex
     where
       one = constant (1 :: Int64)
 internaliseDimIndex w (E.DimSlice i j s) = do
-  s' <- maybe (pure one) (fmap fst . internaliseDimExp "s") s
+  s' <- maybe (pure one) (fmap fst . internaliseSizeExp "s") s
   s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int64) s'
   backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int64) s_sign negone
   w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) w one
@@ -1063,8 +1063,8 @@ internaliseDimIndex w (E.DimSlice i j s) = do
             (resultBody [negone])
             (resultBody [w])
           $ ifCommon [I.Prim int64]
-  i' <- maybe i_def (fmap fst . internaliseDimExp "i") i
-  j' <- maybe j_def (fmap fst . internaliseDimExp "j") j
+  i' <- maybe i_def (fmap fst . internaliseSizeExp "i") i
+  j' <- maybe j_def (fmap fst . internaliseSizeExp "j") j
   j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) j' i'
   -- Something like a division-rounding-up, but accomodating negative
   -- operands.
@@ -1227,7 +1227,7 @@ internaliseHist dim desc rf hist op ne buckets img loc = do
         =<< bodyBind body
 
   -- get sizes of histogram and image arrays
-  shape_hist <- Shape . take dim . I.arrayDims <$> lookupType (head hist')
+  shape_hist <- I.Shape . take dim . I.arrayDims <$> lookupType (head hist')
   w_img <- I.arraySize 0 <$> lookupType (head img')
 
   letValExp' desc . I.Op $
@@ -1323,7 +1323,7 @@ internaliseStreamAcc desc dest op lam bs = do
   acc_cert_v <- newVName "acc_cert"
   dest_ts <- mapM lookupType dest'
   let dest_w = arraysSize 0 dest_ts
-      acc_t = Acc acc_cert_v (Shape [dest_w]) (map rowType dest_ts) NoUniqueness
+      acc_t = Acc acc_cert_v (I.Shape [dest_w]) (map rowType dest_ts) NoUniqueness
   acc_p <- newParam "acc_p" acc_t
   withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
     bs_ts <- mapM lookupType bs'
@@ -1349,7 +1349,7 @@ internaliseStreamAcc desc dest op lam bs = do
   destw <- arraysSize 0 <$> mapM lookupType dest'
   fmap (map I.Var) $
     letTupExp desc $
-      WithAcc [(Shape [destw], dest', op')] withacc_lam
+      WithAcc [(I.Shape [destw], dest', op')] withacc_lam
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1360,12 +1360,12 @@ internaliseExp1 desc e = do
 
 -- | Promote to dimension type as appropriate for the original type.
 -- Also return original type.
-internaliseDimExp :: String -> E.Exp -> InternaliseM (I.SubExp, IntType)
-internaliseDimExp s e = do
+internaliseSizeExp :: String -> E.Exp -> InternaliseM (I.SubExp, IntType)
+internaliseSizeExp s e = do
   e' <- internaliseExp1 s e
   case E.typeOf e of
     E.Scalar (E.Prim (Signed it)) -> (,it) <$> asIntS Int64 e'
-    _ -> error "internaliseDimExp: bad type"
+    _ -> error "internaliseSizeExp: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
@@ -1988,7 +1988,7 @@ isOverloadedFunction qname args loc = do
               }
           sivs = si' <> svs'
 
-      let sa_ws = map (Shape . take dim . arrayDims) sa_ts
+      let sa_ws = map (I.Shape . take dim . arrayDims) sa_ts
       letTupExp' desc $ I.Op $ I.Scatter si_w sivs lam $ zip3 sa_ws (repeat 1) sas
 
 flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
@@ -2244,7 +2244,7 @@ partitionWithSOACS k lam arrs = do
   results <-
     letTupExp "partition_res" . I.Op $
       I.Scatter w (classes : all_offsets ++ arrs) write_lam $
-        zip3 (repeat $ Shape [w]) (repeat 1) blanks
+        zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $
@@ -2322,16 +2322,16 @@ typeExpForError (E.TESum cs _) = do
       c' <- mapM typeExpForError c
       pure $ intercalate [" "] c'
 
-dimExpForError :: E.DimExp VName -> InternaliseM (ErrorMsgPart SubExp)
-dimExpForError (DimExpNamed d _) = do
+dimExpForError :: E.SizeExp VName -> InternaliseM (ErrorMsgPart SubExp)
+dimExpForError (SizeExpNamed d _) = do
   substs <- lookupSubst $ E.qualLeaf d
   d' <- case substs of
     Just [v] -> pure v
     _ -> pure $ I.Var $ E.qualLeaf d
   pure $ ErrorVal int64 d'
-dimExpForError (DimExpConst d _) =
+dimExpForError (SizeExpConst d _) =
   pure $ ErrorString $ pretty d
-dimExpForError DimExpAny = pure ""
+dimExpForError SizeExpAny = pure ""
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.

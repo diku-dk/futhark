@@ -93,7 +93,7 @@ module Futhark.CodeGen.ImpCode
     -- * Re-exports from other modules.
     pretty,
     module Language.Futhark.Core,
-    module Futhark.IR.Primitive,
+    module Language.Futhark.Primitive,
     module Futhark.Analysis.PrimExp,
     module Futhark.Analysis.PrimExp.Convert,
     module Futhark.IR.GPU.Sizes,
@@ -109,7 +109,6 @@ import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
-import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
   ( ErrorMsg (..),
@@ -121,6 +120,7 @@ import Futhark.IR.Syntax.Core
   )
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark.Core
+import Language.Futhark.Primitive
 
 -- | The size of a memory block.
 type MemSize = SubExp
@@ -347,7 +347,7 @@ instance Monoid (Code a) where
 -- to 'SetMem' a memory block declared outside it.
 lexicalMemoryUsage :: Function a -> M.Map VName Space
 lexicalMemoryUsage func =
-  M.filterWithKey (const . not . (`nameIn` nonlexical)) $
+  M.filterWithKey (const . (`notNameIn` nonlexical)) $
     declared $
       functionBody func
   where

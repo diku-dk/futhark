@@ -10,6 +10,9 @@
 -- the functor @f@, and all names are of type @vn@.  See
 -- https://futhark.readthedocs.org for a language reference, or this
 -- module may be a little hard to understand.
+--
+-- The system of primitive types is interesting in itself.  See
+-- "Language.Futhark.Primitive".
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
     pretty,
@@ -20,17 +23,13 @@ module Language.Futhark.Syntax
     IntType (..),
     FloatType (..),
     PrimType (..),
-    ArrayDim (..),
-    DimDecl (..),
-    ShapeDecl (..),
+    Size (..),
+    Shape (..),
     shapeRank,
     stripDims,
-    TypeName (..),
-    typeNameFromQualName,
-    qualNameFromTypeName,
     TypeBase (..),
     TypeArg (..),
-    DimExp (..),
+    SizeExp (..),
     TypeExp (..),
     TypeArgExp (..),
     PName (..),
@@ -112,15 +111,15 @@ import Data.Monoid hiding (Sum)
 import Data.Ord
 import qualified Data.Set as S
 import Data.Traversable
-import Futhark.IR.Primitive
+import Futhark.Util.Loc
+import Futhark.Util.Pretty
+import Language.Futhark.Core
+import Language.Futhark.Primitive
   ( FloatType (..),
     FloatValue (..),
     IntType (..),
     IntValue (..),
   )
-import Futhark.Util.Loc
-import Futhark.Util.Pretty
-import Language.Futhark.Core
 import Prelude
 
 -- | No information functor.  Usually used for placeholder type- or
@@ -219,104 +218,52 @@ data AttrInfo vn
   | AttrComp Name [AttrInfo vn] SrcLoc
   deriving (Eq, Ord, Show)
 
--- | A type class for things that can be array dimensions.
-class Eq dim => ArrayDim dim where
-  -- | @unifyDims x y@ combines @x@ and @y@ to contain their maximum
-  -- common information, and fails if they conflict.
-  unifyDims :: dim -> dim -> Maybe dim
-
-instance ArrayDim () where
-  unifyDims () () = Just ()
-
--- | Declaration of a dimension size.
-data DimDecl vn
+-- | The elaborated size of a dimension.
+data Size
   = -- | The size of the dimension is this name, which
     -- must be in scope.  In a return type, this will
     -- give rise to an assertion.
-    NamedDim (QualName vn)
+    NamedSize (QualName VName)
   | -- | The size is a constant.
-    ConstDim Int
+    ConstSize Int
   | -- | No known size.  If @Nothing@, then this is a name distinct
     -- from any other.  The type checker should _never_ produce these
     -- - they are a (hopefully temporary) thing introduced by
     -- defunctorisation and monomorphisation.
-    AnyDim (Maybe vn)
-  deriving (Show)
-
-deriving instance Eq (DimDecl VName)
-
-deriving instance Ord (DimDecl VName)
-
-instance Functor DimDecl where
-  fmap = fmapDefault
-
-instance Foldable DimDecl where
-  foldMap = foldMapDefault
-
-instance Traversable DimDecl where
-  traverse f (NamedDim qn) = NamedDim <$> traverse f qn
-  traverse _ (ConstDim x) = pure $ ConstDim x
-  traverse f (AnyDim v) = AnyDim <$> traverse f v
-
--- Note that the notion of unifyDims here is intentionally not what we
--- use when we do real type unification in the type checker.
-instance ArrayDim (DimDecl VName) where
-  unifyDims AnyDim {} y = Just y
-  unifyDims x AnyDim {} = Just x
-  unifyDims (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
-  unifyDims (ConstDim x) (ConstDim y) | x == y = Just $ ConstDim x
-  unifyDims _ _ = Nothing
+    AnySize (Maybe VName)
+  deriving (Eq, Ord, Show)
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-newtype ShapeDecl dim = ShapeDecl {shapeDims :: [dim]}
+newtype Shape dim = Shape {shapeDims :: [dim]}
   deriving (Eq, Ord, Show)
 
-instance Foldable ShapeDecl where
-  foldr f x (ShapeDecl ds) = foldr f x ds
+instance Foldable Shape where
+  foldr f x (Shape ds) = foldr f x ds
 
-instance Traversable ShapeDecl where
-  traverse f (ShapeDecl ds) = ShapeDecl <$> traverse f ds
+instance Traversable Shape where
+  traverse f (Shape ds) = Shape <$> traverse f ds
 
-instance Functor ShapeDecl where
-  fmap f (ShapeDecl ds) = ShapeDecl $ map f ds
+instance Functor Shape where
+  fmap f (Shape ds) = Shape $ map f ds
 
-instance Semigroup (ShapeDecl dim) where
-  ShapeDecl l1 <> ShapeDecl l2 = ShapeDecl $ l1 ++ l2
+instance Semigroup (Shape dim) where
+  Shape l1 <> Shape l2 = Shape $ l1 ++ l2
 
-instance Monoid (ShapeDecl dim) where
-  mempty = ShapeDecl []
+instance Monoid (Shape dim) where
+  mempty = Shape []
 
 -- | The number of dimensions contained in a shape.
-shapeRank :: ShapeDecl dim -> Int
+shapeRank :: Shape dim -> Int
 shapeRank = length . shapeDims
 
 -- | @stripDims n shape@ strips the outer @n@ dimensions from
 -- @shape@, returning 'Nothing' if this would result in zero or
 -- fewer dimensions.
-stripDims :: Int -> ShapeDecl dim -> Maybe (ShapeDecl dim)
-stripDims i (ShapeDecl l)
-  | i < length l = Just $ ShapeDecl $ drop i l
+stripDims :: Int -> Shape dim -> Maybe (Shape dim)
+stripDims i (Shape l)
+  | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
-
--- | A type name consists of qualifiers (for error messages) and a
--- 'VName' (for equality checking).
-data TypeName = TypeName {typeQuals :: [VName], typeLeaf :: VName}
-  deriving (Show)
-
-instance Eq TypeName where
-  TypeName _ x == TypeName _ y = x == y
-
-instance Ord TypeName where
-  TypeName _ x `compare` TypeName _ y = x `compare` y
-
--- | Convert a 'QualName' to a 'TypeName'.
-typeNameFromQualName :: QualName VName -> TypeName
-typeNameFromQualName (QualName qs x) = TypeName qs x
-
--- | Convert a 'TypeName' to a 'QualName'.
-qualNameFromTypeName :: TypeName -> QualName VName
-qualNameFromTypeName (TypeName qs x) = QualName qs x
 
 -- | The name (if any) of a function parameter.  The 'Eq' and 'Ord'
 -- instances always compare values of this type equal.
@@ -351,7 +298,7 @@ instance Bifoldable RetTypeBase where
 -- convolutes the code too much if we try to statically rule it out.
 data ScalarTypeBase dim as
   = Prim PrimType
-  | TypeVar as Uniqueness TypeName [TypeArg dim]
+  | TypeVar as Uniqueness (QualName VName) [TypeArg dim]
   | Record (M.Map Name (TypeBase dim as))
   | Sum (M.Map Name [TypeBase dim as])
   | -- | The aliasing corresponds to the lexical
@@ -381,7 +328,7 @@ instance Bifoldable ScalarTypeBase where
 -- out arrays-of-arrays.
 data TypeBase dim as
   = Scalar (ScalarTypeBase dim as)
-  | Array as Uniqueness (ShapeDecl dim) (ScalarTypeBase dim ())
+  | Array as Uniqueness (Shape dim) (ScalarTypeBase dim ())
   deriving (Eq, Ord, Show)
 
 instance Bitraversable TypeBase where
@@ -426,39 +373,39 @@ type Aliasing = S.Set Alias
 
 -- | A type with aliasing information and shape annotations, used for
 -- describing the type patterns and expressions.
-type PatType = TypeBase (DimDecl VName) Aliasing
+type PatType = TypeBase Size Aliasing
 
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
-type StructType = TypeBase (DimDecl VName) ()
+type StructType = TypeBase Size ()
 
 -- | A value type contains full, manifest size information.
 type ValueType = TypeBase Int64 ()
 
 -- | The return type version of 'StructType'.
-type StructRetType = RetTypeBase (DimDecl VName) ()
+type StructRetType = RetTypeBase Size ()
 
 -- | The return type version of 'PatType'.
-type PatRetType = RetTypeBase (DimDecl VName) Aliasing
+type PatRetType = RetTypeBase Size Aliasing
 
--- | A dimension declaration expression for use in a 'TypeExp'.
-data DimExp vn
+-- | A size expression for use in a 'TypeExp'.
+data SizeExp vn
   = -- | The size of the dimension is this name, which
     -- must be in scope.
-    DimExpNamed (QualName vn) SrcLoc
+    SizeExpNamed (QualName vn) SrcLoc
   | -- | The size is a constant.
-    DimExpConst Int SrcLoc
+    SizeExpConst Int SrcLoc
   | -- | No dimension declaration.
-    DimExpAny
+    SizeExpAny
   deriving (Show)
 
-deriving instance Eq (DimExp Name)
+deriving instance Eq (SizeExp Name)
 
-deriving instance Eq (DimExp VName)
+deriving instance Eq (SizeExp VName)
 
-deriving instance Ord (DimExp Name)
+deriving instance Ord (SizeExp Name)
 
-deriving instance Ord (DimExp VName)
+deriving instance Ord (SizeExp VName)
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -467,7 +414,7 @@ data TypeExp vn
   = TEVar (QualName vn) SrcLoc
   | TETuple [TypeExp vn] SrcLoc
   | TERecord [(Name, TypeExp vn)] SrcLoc
-  | TEArray (DimExp vn) (TypeExp vn) SrcLoc
+  | TEArray (SizeExp vn) (TypeExp vn) SrcLoc
   | TEUnique (TypeExp vn) SrcLoc
   | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
   | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc
@@ -496,7 +443,7 @@ instance Located (TypeExp vn) where
 
 -- | A type argument expression passed to a type constructor.
 data TypeArgExp vn
-  = TypeArgExpDim (DimExp vn) SrcLoc
+  = TypeArgExpDim (SizeExp vn) SrcLoc
   | TypeArgExpType (TypeExp vn)
   deriving (Show)
 
@@ -527,7 +474,7 @@ data Diet
   | -- | Only observes value in this position, does
     -- not consume.
     Observe
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 -- | Simple Futhark values.  Values are fully evaluated and their type
 -- is always unambiguous.
@@ -636,7 +583,11 @@ deriving instance Show vn => Show (DimIndexBase NoInfo vn)
 
 deriving instance Eq (DimIndexBase NoInfo VName)
 
+deriving instance Eq (DimIndexBase Info VName)
+
 deriving instance Ord (DimIndexBase NoInfo VName)
+
+deriving instance Ord (DimIndexBase Info VName)
 
 -- | A slicing of an array (potentially multiple dimensions).
 type SliceBase f vn = [DimIndexBase f vn]
@@ -749,7 +700,11 @@ deriving instance Show vn => Show (AppExpBase NoInfo vn)
 
 deriving instance Eq (AppExpBase NoInfo VName)
 
+deriving instance Eq (AppExpBase Info VName)
+
 deriving instance Ord (AppExpBase NoInfo VName)
+
+deriving instance Ord (AppExpBase Info VName)
 
 instance Located (AppExpBase f vn) where
   locOf (Range _ _ _ pos) = locOf pos
@@ -857,6 +812,10 @@ deriving instance Eq (ExpBase NoInfo VName)
 
 deriving instance Ord (ExpBase NoInfo VName)
 
+deriving instance Eq (ExpBase Info VName)
+
+deriving instance Ord (ExpBase Info VName)
+
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc) = locOf loc
   locOf (IntLit _ _ loc) = locOf loc
@@ -897,7 +856,11 @@ deriving instance Show vn => Show (FieldBase NoInfo vn)
 
 deriving instance Eq (FieldBase NoInfo VName)
 
+deriving instance Eq (FieldBase Info VName)
+
 deriving instance Ord (FieldBase NoInfo VName)
+
+deriving instance Ord (FieldBase Info VName)
 
 instance Located (FieldBase f vn) where
   locOf (RecordFieldExplicit _ _ loc) = locOf loc
@@ -912,7 +875,11 @@ deriving instance Show vn => Show (CaseBase NoInfo vn)
 
 deriving instance Eq (CaseBase NoInfo VName)
 
+deriving instance Eq (CaseBase Info VName)
+
 deriving instance Ord (CaseBase NoInfo VName)
+
+deriving instance Ord (CaseBase Info VName)
 
 instance Located (CaseBase f vn) where
   locOf (CasePat _ _ loc) = locOf loc
@@ -929,7 +896,11 @@ deriving instance Show vn => Show (LoopFormBase NoInfo vn)
 
 deriving instance Eq (LoopFormBase NoInfo VName)
 
+deriving instance Eq (LoopFormBase Info VName)
+
 deriving instance Ord (LoopFormBase NoInfo VName)
+
+deriving instance Ord (LoopFormBase Info VName)
 
 -- | A literal in a pattern.
 data PatLit
@@ -957,7 +928,11 @@ deriving instance Show vn => Show (PatBase NoInfo vn)
 
 deriving instance Eq (PatBase NoInfo VName)
 
+deriving instance Eq (PatBase Info VName)
+
 deriving instance Ord (PatBase NoInfo VName)
+
+deriving instance Ord (PatBase Info VName)
 
 instance Located (PatBase f vn) where
   locOf (TuplePat _ loc) = locOf loc

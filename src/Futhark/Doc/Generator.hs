@@ -490,7 +490,7 @@ synopsisValBindBind (name, BoundV tps t) = do
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
   Array _ u shape et -> do
-    shape' <- prettyShapeDecl shape
+    shape' <- prettyShape shape
     et' <- typeHtml $ Scalar et
     pure $ prettyU u <> shape' <> et'
   Scalar (Prim et) -> pure $ primTypeHtml et
@@ -505,7 +505,7 @@ typeHtml t = case t of
         pure $ toHtml (nameToString name) <> ": " <> tp'
   Scalar (TypeVar _ u et targs) -> do
     targs' <- mapM typeArgHtml targs
-    et' <- typeNameHtml et
+    et' <- qualNameHtml et
     pure $ prettyU u <> et' <> mconcat (map (" " <>) targs')
   Scalar (Arrow _ pname t1 t2) -> do
     t1' <- typeHtml t1
@@ -526,11 +526,11 @@ retTypeHtml (RetType dims t) = do
   t' <- typeHtml t
   pure $ "?" <> mconcat (map (brackets . vnameHtml) dims) <> "." <> t'
 
-prettyShapeDecl :: ShapeDecl (DimDecl VName) -> DocM Html
-prettyShapeDecl (ShapeDecl ds) =
+prettyShape :: Shape Size -> DocM Html
+prettyShape (Shape ds) =
   mconcat <$> mapM dimDeclHtml ds
 
-typeArgHtml :: TypeArg (DimDecl VName) -> DocM Html
+typeArgHtml :: TypeArg Size -> DocM Html
 typeArgHtml (TypeArgDim d _) = dimDeclHtml d
 typeArgHtml (TypeArgType t _) = typeHtml t
 
@@ -682,9 +682,6 @@ vnameLink' (VName _ tag) current file =
     then "#" ++ show tag
     else relativise file current ++ ".html#" ++ show tag
 
-typeNameHtml :: TypeName -> DocM Html
-typeNameHtml = qualNameHtml . qualNameFromTypeName
-
 patternHtml :: Pat -> DocM Html
 patternHtml pat = do
   let (pat_param, t) = patternParam pat
@@ -697,15 +694,15 @@ relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
-dimDeclHtml :: DimDecl VName -> DocM Html
-dimDeclHtml (NamedDim v) = brackets <$> qualNameHtml v
-dimDeclHtml (ConstDim n) = pure $ brackets $ toHtml (show n)
-dimDeclHtml AnyDim {} = pure $ brackets mempty
+dimDeclHtml :: Size -> DocM Html
+dimDeclHtml (NamedSize v) = brackets <$> qualNameHtml v
+dimDeclHtml (ConstSize n) = pure $ brackets $ toHtml (show n)
+dimDeclHtml AnySize {} = pure $ brackets mempty
 
-dimExpHtml :: DimExp VName -> DocM Html
-dimExpHtml DimExpAny = pure $ brackets mempty
-dimExpHtml (DimExpNamed v _) = brackets <$> qualNameHtml v
-dimExpHtml (DimExpConst n _) = pure $ brackets $ toHtml (show n)
+dimExpHtml :: SizeExp VName -> DocM Html
+dimExpHtml SizeExpAny = pure $ brackets mempty
+dimExpHtml (SizeExpNamed v _) = brackets <$> qualNameHtml v
+dimExpHtml (SizeExpConst n _) = pure $ brackets $ toHtml (show n)
 
 typeArgExpHtml :: TypeArgExp VName -> DocM Html
 typeArgExpHtml (TypeArgExpDim d _) = dimExpHtml d

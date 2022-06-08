@@ -182,7 +182,7 @@ data KernelHandling = TraverseKernels | OpaqueKernels
 -- | Like @lexicalMemoryUsage@, but traverses some inner multicore ops.
 lexicalMemoryUsageMC :: KernelHandling -> Function Multicore -> M.Map VName Space
 lexicalMemoryUsageMC gokernel func =
-  M.filterWithKey (const . not . (`nameIn` nonlexical)) $
+  M.filterWithKey (const . (`notNameIn` nonlexical)) $
     declared $
       functionBody func
   where

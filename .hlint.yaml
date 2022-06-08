@@ -5,3 +5,6 @@
 - error: {lhs: map subExpRes, rhs: subExpsRes}
 - error: {lhs: map varRes, rhs: varsRes}
 - error: {lhs: return, rhs: pure}
+- error: {lhs: nameIn x y, rhs: x `nameIn` y, side: not (isInfixApp original) && not (isParen result), name: Use infix}
+- error: {lhs: not (x `nameIn` y), rhs: x `notNameIn` y}
+- error: {lhs: not (any (`nameIn` x) y), rhs: all (`notNameIn` x) y}

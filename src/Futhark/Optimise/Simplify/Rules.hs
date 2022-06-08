@@ -268,7 +268,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
       namesFromList . concatMap (patNames . stmPat) $
         bodyStms tb <> bodyStms fb
     invariant Constant {} = True
-    invariant (Var v) = not $ v `nameIn` bound_in_branches
+    invariant (Var v) = v `notNameIn` bound_in_branches
 
     branchInvariant (i, pe, t, (tse, fse))
       -- Do both branches return the same value?
@@ -321,7 +321,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
 removeDeadBranchResult :: BuilderOps rep => BottomUpRuleIf rep
 removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
   | -- Only if there is no existential binding...
-    not $ any (`nameIn` foldMap freeIn (patElems pat)) (patNames pat),
+    all (`notNameIn` foldMap freeIn (patElems pat)) (patNames pat),
     -- Figure out which of the names in 'pat' are used...
     patused <- map (`UT.isUsedDirectly` used) $ patNames pat,
     -- If they are not all used, then this rule applies.

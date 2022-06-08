@@ -1,15 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Futhark.IR.PrimitiveTests
+module Language.Futhark.PrimitiveTests
   ( tests,
     arbitraryPrimValOfType,
   )
 where
 
 import Control.Applicative
-import Futhark.IR.Primitive
 import Futhark.Util (convFloat)
+import Language.Futhark.Primitive
 import Test.QuickCheck
 import Test.Tasty
 import Test.Tasty.HUnit

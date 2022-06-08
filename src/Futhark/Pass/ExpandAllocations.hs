@@ -163,7 +163,7 @@ transformExp (WithAcc inputs lam) = do
           lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
           (op_lam', lam_allocs) =
             extractLambdaAllocations (lvl, [0]) bound_outside mempty op_lam
-          variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
+          variantAlloc (_, Var v, _) = v `notNameIn` bound_outside
           variantAlloc _ = False
           (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
 
@@ -202,11 +202,11 @@ transformScanRed lvl space ops kbody = do
       (kbody', kbody_allocs) =
         extractKernelBodyAllocations user bound_outside bound_in_kernel kbody
       (ops', ops_allocs) = unzip $ map (extractLambdaAllocations user bound_outside mempty) ops
-      variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
+      variantAlloc (_, Var v, _) = v `notNameIn` bound_outside
       variantAlloc _ = False
       (variant_allocs, invariant_allocs) =
         M.partition variantAlloc $ kbody_allocs <> mconcat ops_allocs
-      badVariant (_, Var v, _) = not $ v `nameIn` bound_in_kernel
+      badVariant (_, Var v, _) = v `notNameIn` bound_in_kernel
       badVariant _ = False
 
   case find badVariant $ M.elems variant_allocs of

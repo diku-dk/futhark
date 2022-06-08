@@ -245,7 +245,7 @@ extractAllocOf bound needle stms = do
        in second (oneStm stm <>) <$> extractAllocOf bound' needle stms'
   where
     invariant Constant {} = True
-    invariant (Var v) = not $ v `nameIn` bound
+    invariant (Var v) = v `notNameIn` bound
 
 optimiseLoop :: Constraints rep inner => OptimiseLoop rep
 optimiseLoop pat merge body = do

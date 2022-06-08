@@ -16,7 +16,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Futhark.IR.Pretty ()
-import qualified Futhark.Internalise.FreeVars as FV
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -71,6 +70,10 @@ existentials e =
       m = identityMapper {mapOnExp = \e' -> modify (<> existentials e') >> pure e'}
    in execState (astMap m e) here
 
+freeSizes :: S.Set VName -> FV
+freeSizes vs =
+  FV $ M.fromList $ zip (S.toList vs) $ repeat $ Scalar $ Prim $ Signed Int64
+
 liftFunction :: VName -> [TypeParam] -> [Pat] -> StructRetType -> Exp -> LiftM Exp
 liftFunction fname tparams params (RetType dims ret) funbody = do
   -- Find free variables
@@ -82,21 +85,19 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
           <> S.fromList dims
 
       free =
-        let immediate_free = FV.freeVars funbody `FV.without` (bound <> existentials funbody)
+        let immediate_free = freeInExp funbody `freeWithout` (bound <> existentials funbody)
             sizes_in_free =
-              foldMap typeDimNames $
-                M.elems $
-                  FV.unNameSet immediate_free
+              foldMap freeInType $ M.elems $ unFV immediate_free
             sizes =
-              FV.sizes $
+              freeSizes $
                 sizes_in_free
-                  <> foldMap patternDimNames params
-                  <> typeDimNames ret
-         in M.toList $ FV.unNameSet $ immediate_free <> (sizes `FV.without` bound)
+                  <> foldMap freeInPat params
+                  <> freeInType ret
+         in M.toList $ unFV $ immediate_free <> (sizes `freeWithout` bound)
 
       -- Those parameters that correspond to sizes must come first.
       sizes_in_types =
-        foldMap typeDimNames (ret : map snd free ++ map patternStructType params)
+        foldMap freeInType (ret : map snd free ++ map patternStructType params)
       isSize (v, _) = v `S.member` sizes_in_types
       (free_dims, free_nondims) = partition isSize free
 

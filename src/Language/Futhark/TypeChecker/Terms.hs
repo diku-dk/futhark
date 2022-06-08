@@ -27,9 +27,9 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util.Pretty hiding (bool, group, space)
 import Language.Futhark
+import Language.Futhark.Primitive (intByteSize)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Match
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -66,13 +66,13 @@ unifyBranches loc e1 e2 = do
 sliceShape ::
   Maybe (SrcLoc, Rigidity) ->
   Slice ->
-  TypeBase (DimDecl VName) as ->
-  TermTypeM (TypeBase (DimDecl VName) as, [VName])
-sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
+  TypeBase Size as ->
+  TermTypeM (TypeBase Size as, [VName])
+sliceShape r slice t@(Array als u (Shape orig_dims) et) =
   runStateT (setDims <$> adjustDims slice orig_dims) []
   where
     setDims [] = stripArray (length orig_dims) t
-    setDims dims' = Array als u (ShapeDecl dims') et
+    setDims dims' = Array als u (Shape dims') et
 
     -- If the result is supposed to be a nonrigid size variable, then
     -- don't bother trying to create non-existential sizes.  This is
@@ -91,11 +91,11 @@ sliceShape r slice t@(Array als u (ShapeDecl orig_dims) et) =
           modify (maybeToList ext ++)
           pure d
         Just (loc, Nonrigid) ->
-          lift $ NamedDim . qualName <$> newDimVar loc Nonrigid "slice_dim"
+          lift $ NamedSize . qualName <$> newDimVar loc Nonrigid "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
           modify (v :)
-          pure $ NamedDim $ qualName v
+          pure $ NamedSize $ qualName v
       where
         -- The original size does not matter if the slice is fully specified.
         orig_d'
@@ -136,7 +136,7 @@ lexicalClosure params closure = do
 
 noAliasesIfOverloaded :: PatType -> TermTypeM PatType
 noAliasesIfOverloaded t@(Scalar (TypeVar _ u tn [])) = do
-  subst <- fmap snd . M.lookup (typeLeaf tn) <$> getConstraints
+  subst <- fmap snd . M.lookup (qualLeaf tn) <$> getConstraints
   case subst of
     Just Overloaded {} -> pure $ Scalar $ TypeVar mempty u tn []
     _ -> pure t
@@ -187,7 +187,7 @@ unscopeType tloc unscoped t = do
   (t', m) <- runStateT (traverseDims onDim t) mempty
   pure (t' `addAliases` S.map unAlias, M.elems m)
   where
-    onDim bound _ (NamedDim d)
+    onDim bound _ (NamedSize d)
       | Just loc <- srclocOf <$> M.lookup (qualLeaf d) unscoped,
         not $ qualLeaf d `S.member` bound =
           inst loc $ qualLeaf d
@@ -196,11 +196,11 @@ unscopeType tloc unscoped t = do
     inst loc d = do
       prev <- gets $ M.lookup d
       case prev of
-        Just d' -> pure $ NamedDim $ qualName d'
+        Just d' -> pure $ NamedSize $ qualName d'
         Nothing -> do
           d' <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope loc d) "d"
           modify $ M.insert d d'
-          pure $ NamedDim $ qualName d'
+          pure $ NamedSize $ qualName d'
 
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
@@ -302,14 +302,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do
       et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (ShapeDecl [ConstDim 0]) Unique
+      t <- arrayOfM loc et (Shape [ConstSize 0]) Unique
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (ShapeDecl [ConstDim $ length all_es]) Unique
+      t <- arrayOfM loc et' (Shape [ConstSize $ length all_es]) Unique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -347,9 +347,9 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
             dimFromBound end''
       _ -> do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
-        pure (NamedDim $ qualName d, Just d)
+        pure (NamedSize $ qualName d, Just d)
 
-  t <- arrayOfM loc start_t (ShapeDecl [dim]) Unique
+  t <- arrayOfM loc start_t (Shape [dim]) Unique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
@@ -651,7 +651,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
           named (Unnamed, _) = Nothing
           param_names = mapMaybe (named . patternParam) params'
           pos_sizes =
-            typeDimNamesPos . foldFunType (map patternStructType params') $
+            sizeNamesPos . foldFunType (map patternStructType params') $
               RetType [] ret
           hide k (lvl, _) =
             lvl >= cur_lvl && k `notElem` param_names && k `S.notMember` pos_sizes
@@ -659,11 +659,11 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
       hidden_sizes <-
         S.fromList . M.keys . M.filterWithKey hide <$> getConstraints
 
-      let onDim (NamedDim name)
-            | qualLeaf name `S.member` hidden_sizes = S.singleton $ qualLeaf name
+      let onDim name
+            | name `S.member` hidden_sizes = S.singleton name
           onDim _ = mempty
 
-      pure $ RetType (S.toList $ foldMap onDim $ nestedDims ret) ret
+      pure $ RetType (S.toList $ foldMap onDim $ freeInType ret) ret
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
   pure $ OpSection op' (Info ftype) loc
@@ -855,8 +855,8 @@ checkArg arg = do
 instantiateDimsInReturnType ::
   SrcLoc ->
   Maybe (QualName VName) ->
-  RetTypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als, [VName])
+  RetTypeBase Size als ->
+  TermTypeM (TypeBase Size als, [VName])
 instantiateDimsInReturnType tloc fname =
   instantiateEmptyArrayDims tloc $ Rigid $ RigidRet fname
 
@@ -866,7 +866,7 @@ instantiateDimsInReturnType tloc fname =
 type ApplyOp = (Maybe (QualName VName), Int)
 
 -- | Extract all those names that are bound inside the type.
-boundInsideType :: TypeBase (DimDecl VName) as -> S.Set VName
+boundInsideType :: TypeBase Size as -> S.Set VName
 boundInsideType (Array _ _ _ t) = boundInsideType (Scalar t)
 boundInsideType (Scalar Prim {}) = mempty
 boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
@@ -887,9 +887,9 @@ boundInsideType (Scalar (Arrow _ pn t1 (RetType dims t2))) =
 dimUses :: StructType -> (Names, Names)
 dimUses = flip execState mempty . traverseDims f
   where
-    f bound _ (NamedDim v) | qualLeaf v `S.member` bound = pure ()
-    f _ PosImmediate (NamedDim v) = modify ((S.singleton (qualLeaf v), mempty) <>)
-    f _ PosParam (NamedDim v) = modify ((mempty, S.singleton (qualLeaf v)) <>)
+    f bound _ (NamedSize v) | qualLeaf v `S.member` bound = pure ()
+    f _ PosImmediate (NamedSize v) = modify ((S.singleton (qualLeaf v), mempty) <>)
+    f _ PosParam (NamedSize v) = modify ((mempty, S.singleton (qualLeaf v)) <>)
     f _ _ _ = pure ()
 
 checkApply ::
@@ -944,7 +944,7 @@ checkApply
         case pname of
           Named pname'
             | (Scalar (Prim (Signed Int64))) <- tp1' -> do
-                (d, argext) <- dimFromArg fname argexp
+                (d, argext) <- sizeFromArg fname argexp
                 pure
                   ( argext,
                     (`M.lookup` M.singleton pname' (SizeSubst d))
@@ -1087,7 +1087,7 @@ causalityCheck binding_body = do
         | (d, dloc) : _ <-
             mapMaybe (unknown constraints known) $
               S.toList $
-                typeDimNames $
+                freeInType $
                   toStruct t =
             Just $ lift $ causality what (locOf loc) d dloc t
         | otherwise = Nothing
@@ -1287,14 +1287,14 @@ fixOverloadedTypes tyvars_at_toplevel =
   where
     fixOverloaded (v, Overloaded ots usage)
       | Signed Int32 `elem` ots = do
-          unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
+          unify usage (Scalar (TypeVar () Nonunique (qualName v) [])) $
             Scalar $
               Prim $
                 Signed Int32
           when (v `S.member` tyvars_at_toplevel) $
             warn usage "Defaulting ambiguous type to i32."
       | FloatType Float64 `elem` ots = do
-          unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
+          unify usage (Scalar (TypeVar () Nonunique (qualName v) [])) $
             Scalar $
               Prim $
                 FloatType Float64
@@ -1307,7 +1307,7 @@ fixOverloadedTypes tyvars_at_toplevel =
               </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
-      unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
+      unify usage (Scalar (TypeVar () Nonunique (qualName v) [])) $
         Scalar $
           tupleRecord []
       when (v `S.member` tyvars_at_toplevel) $
@@ -1448,18 +1448,18 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 
 -- | Extract all the shape names that occur in positive position
 -- (roughly, left side of an arrow) in a given type.
-typeDimNamesPos :: TypeBase (DimDecl VName) als -> S.Set VName
-typeDimNamesPos (Scalar (Arrow _ _ t1 (RetType _ t2))) = onParam t1 <> typeDimNamesPos t2
+sizeNamesPos :: TypeBase Size als -> S.Set VName
+sizeNamesPos (Scalar (Arrow _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesPos t2
   where
-    onParam :: TypeBase (DimDecl VName) als -> S.Set VName
+    onParam :: TypeBase Size als -> S.Set VName
     onParam (Scalar Arrow {}) = mempty
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs
-    onParam t = typeDimNames t
-    onTypeArg (TypeArgDim (NamedDim d) _) = S.singleton $ qualLeaf d
+    onParam t = freeInType t
+    onTypeArg (TypeArgDim (NamedSize d) _) = S.singleton $ qualLeaf d
     onTypeArg (TypeArgDim _ _) = mempty
     onTypeArg (TypeArgType t _) = onParam t
-typeDimNamesPos _ = mempty
+sizeNamesPos _ = mempty
 
 checkGlobalAliases :: [Pat] -> PatType -> SrcLoc -> TermTypeM ()
 checkGlobalAliases params body_t loc = do
@@ -1542,7 +1542,7 @@ verifyFunctionParams fname params =
     verifyParams (foldMap patNames params) =<< mapM updateTypes params
   where
     verifyParams forbidden (p : ps)
-      | d : _ <- S.toList $ patternDimNames p `S.intersection` forbidden =
+      | d : _ <- S.toList $ freeInPat p `S.intersection` forbidden =
           typeError p mempty . withIndexLink "inaccessible-size" $
             "Parameter"
               <+> pquote (ppr p)
@@ -1610,20 +1610,18 @@ closeOverTypes defname defloc tparams paramts ret substs = do
   (more_tparams, retext) <-
     partitionEithers . catMaybes
       <$> mapM closeOver (M.toList $ M.map snd to_close_over)
-  let mkExt (NamedDim v) =
-        case M.lookup (qualLeaf v) substs of
-          Just (_, UnknowableSize {}) -> Just $ qualLeaf v
+  let mkExt v =
+        case M.lookup v substs of
+          Just (_, UnknowableSize {}) -> Just v
           _ -> Nothing
-      mkExt ConstDim {} = Nothing
-      mkExt AnyDim {} = error "closeOverTypes: AnyDim"
   pure
     ( tparams ++ more_tparams,
-      injectExt (retext ++ mapMaybe mkExt (nestedDims ret)) ret
+      injectExt (retext ++ mapMaybe mkExt (S.toList $ freeInType ret)) ret
     )
   where
     t = foldFunType paramts $ RetType [] ret
     to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
-    visible = typeVars t <> typeDimNames t
+    visible = typeVars t <> freeInType t
 
     (produced_sizes, param_sizes) = dimUses t
 
@@ -1640,7 +1638,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, UnknowableSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
-          notes <- dimNotes defloc $ NamedDim $ qualName k
+          notes <- dimNotes defloc $ NamedSize $ qualName k
           typeError defloc notes . withIndexLink "unknowable-param-def" $
             "Unknowable size"
               <+> pquote (pprName k)
@@ -1696,7 +1694,7 @@ letGeneralise defname defloc tparams params rettype =
     rettype'' <- updateTypes rettype'
 
     let used_sizes =
-          foldMap typeDimNames $ rettype'' : map patternStructType params
+          foldMap freeInType $ rettype'' : map patternStructType params
     case filter ((`S.notMember` used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
       [] -> pure ()
@@ -1741,10 +1739,10 @@ checkFunBody params body maybe_rettype loc = do
   pure body'
 
 arrayOfM ::
-  (Pretty (ShapeDecl dim), Monoid as) =>
+  (Pretty (Shape dim), Monoid as) =>
   SrcLoc ->
   TypeBase dim as ->
-  ShapeDecl dim ->
+  Shape dim ->
   Uniqueness ->
   TermTypeM (TypeBase dim as)
 arrayOfM loc t shape u = do

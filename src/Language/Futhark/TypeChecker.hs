@@ -197,7 +197,7 @@ bindingTypeParams tparams = localEnv env
         { envTypeTable =
             M.singleton v $
               TypeAbbr l [] . RetType [] . Scalar $
-                TypeVar () Nonunique (typeName v) []
+                TypeVar () Nonunique (qualName v) []
         }
 
 checkTypeDecl ::
@@ -262,7 +262,7 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
                 envTypeTable =
                   M.singleton name' $
                     TypeAbbr l ps' . RetType [] . Scalar $
-                      TypeVar () Nonunique (typeName name') $
+                      TypeVar () Nonunique (qualName name') $
                         map typeParamToArg ps'
               }
       (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
@@ -553,7 +553,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
     (te', svars, RetType dims t, l') <- bindingTypeParams tps' $ checkTypeExp te
     let elab_t = RetType (svars ++ dims) t
 
-    let used_dims = typeDimNames t
+    let used_dims = freeInType t
     case filter ((`S.notMember` used_dims) . typeParamName) $
       filter isSizeParam tps' of
       [] -> pure ()
@@ -600,7 +600,7 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
 
     -- Since the entry point type is not a RetType but just a plain
     -- StructType, we have to remove any existentially bound sizes.
-    extToAny (NamedDim v) | qualLeaf v `elem` ret = AnyDim Nothing
+    extToAny (NamedSize v) | qualLeaf v `elem` ret = AnySize Nothing
     extToAny d = d
 
     patternEntry (PatParens p _) =
@@ -648,8 +648,8 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
           typeError loc mempty "Entry point functions may not be higher-order."
       | sizes_only_in_ret <-
           S.fromList (map typeParamName tparams')
-            `S.intersection` typeDimNames rettype'
-            `S.difference` foldMap typeDimNames (map patternStructType params' ++ rettype_params),
+            `S.intersection` freeInType rettype'
+            `S.difference` foldMap freeInType (map patternStructType params' ++ rettype_params),
         not $ S.null sizes_only_in_ret ->
           typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
       | p : _ <- filter nastyParameter params' ->

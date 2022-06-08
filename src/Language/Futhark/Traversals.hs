@@ -39,7 +39,6 @@ import Language.Futhark.Syntax
 data ASTMapper m = ASTMapper
   { mapOnExp :: ExpBase Info VName -> m (ExpBase Info VName),
     mapOnName :: VName -> m VName,
-    mapOnQualName :: QualName VName -> m (QualName VName),
     mapOnStructType :: StructType -> m StructType,
     mapOnPatType :: PatType -> m PatType,
     mapOnStructRetType :: StructRetType -> m StructRetType,
@@ -52,7 +51,6 @@ identityMapper =
   ASTMapper
     { mapOnExp = pure,
       mapOnName = pure,
-      mapOnQualName = pure,
       mapOnStructType = pure,
       mapOnPatType = pure,
       mapOnStructRetType = pure,
@@ -66,6 +64,9 @@ class ASTMappable x where
   -- the object itself, and the mapping does not descend recursively
   -- into subexpressions.  The mapping is done left-to-right.
   astMap :: Monad m => ASTMapper m -> x -> m x
+
+instance ASTMappable (QualName VName) where
+  astMap tv = traverse (mapOnName tv)
 
 instance ASTMappable (AppExpBase Info VName) where
   astMap tv (Range start next end loc) =
@@ -106,7 +107,7 @@ instance ASTMappable (AppExpBase Info VName) where
     Coerce <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
   astMap tv (BinOp (fname, fname_loc) t (x, Info (xt, xext)) (y, Info (yt, yext)) loc) =
     BinOp
-      <$> ((,) <$> mapOnQualName tv fname <*> pure fname_loc)
+      <$> ((,) <$> astMap tv fname <*> pure fname_loc)
       <*> traverse (mapOnPatType tv) t
       <*> ( (,)
               <$> mapOnExp tv x
@@ -131,7 +132,7 @@ instance ASTMappable (AppExpBase Info VName) where
 instance ASTMappable (ExpBase Info VName) where
   astMap tv (Var name t loc) =
     Var
-      <$> mapOnQualName tv name
+      <$> astMap tv name
       <*> traverse (mapOnPatType tv) t
       <*> pure loc
   astMap tv (Hole t loc) =
@@ -148,7 +149,7 @@ instance ASTMappable (ExpBase Info VName) where
     Parens <$> mapOnExp tv e <*> pure loc
   astMap tv (QualParens (name, nameloc) e loc) =
     QualParens
-      <$> ((,) <$> mapOnQualName tv name <*> pure nameloc)
+      <$> ((,) <$> astMap tv name <*> pure nameloc)
       <*> mapOnExp tv e
       <*> pure loc
   astMap tv (TupLit els loc) =
@@ -189,12 +190,12 @@ instance ASTMappable (ExpBase Info VName) where
       <*> pure loc
   astMap tv (OpSection name t loc) =
     OpSection
-      <$> mapOnQualName tv name
+      <$> astMap tv name
       <*> traverse (mapOnPatType tv) t
       <*> pure loc
   astMap tv (OpSectionLeft name t arg (Info (pa, t1a, argext), Info (pb, t1b)) (ret, retext) loc) =
     OpSectionLeft
-      <$> mapOnQualName tv name
+      <$> astMap tv name
       <*> traverse (mapOnPatType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
@@ -205,7 +206,7 @@ instance ASTMappable (ExpBase Info VName) where
       <*> pure loc
   astMap tv (OpSectionRight name t arg (Info (pa, t1a), Info (pb, t1b, argext)) t2 loc) =
     OpSectionRight
-      <$> mapOnQualName tv name
+      <$> astMap tv name
       <*> traverse (mapOnPatType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
@@ -234,7 +235,7 @@ instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (While e) = While <$> mapOnExp tv e
 
 instance ASTMappable (TypeExp VName) where
-  astMap tv (TEVar qn loc) = TEVar <$> mapOnQualName tv qn <*> pure loc
+  astMap tv (TEVar qn loc) = TEVar <$> astMap tv qn <*> pure loc
   astMap tv (TETuple ts loc) = TETuple <$> traverse (astMap tv) ts <*> pure loc
   astMap tv (TERecord ts loc) =
     TERecord <$> traverse (traverse $ astMap tv) ts <*> pure loc
@@ -256,16 +257,16 @@ instance ASTMappable (TypeArgExp VName) where
   astMap tv (TypeArgExpType te) =
     TypeArgExpType <$> astMap tv te
 
-instance ASTMappable (DimExp VName) where
-  astMap tv (DimExpNamed vn loc) =
-    DimExpNamed <$> mapOnQualName tv vn <*> pure loc
-  astMap _ (DimExpConst k loc) = pure $ DimExpConst k loc
-  astMap _ DimExpAny = pure DimExpAny
+instance ASTMappable (SizeExp VName) where
+  astMap tv (SizeExpNamed vn loc) =
+    SizeExpNamed <$> astMap tv vn <*> pure loc
+  astMap _ (SizeExpConst k loc) = pure $ SizeExpConst k loc
+  astMap _ SizeExpAny = pure SizeExpAny
 
-instance ASTMappable (DimDecl VName) where
-  astMap tv (NamedDim vn) = NamedDim <$> mapOnQualName tv vn
-  astMap _ (ConstDim k) = pure $ ConstDim k
-  astMap tv (AnyDim vn) = AnyDim <$> traverse (mapOnName tv) vn
+instance ASTMappable Size where
+  astMap tv (NamedSize vn) = NamedSize <$> astMap tv vn
+  astMap _ (ConstSize k) = pure $ ConstSize k
+  astMap tv (AnySize vn) = AnySize <$> traverse (mapOnName tv) vn
 
 instance ASTMappable (TypeParamBase VName) where
   astMap = traverse . mapOnName
@@ -290,7 +291,7 @@ instance ASTMappable AppRes where
     AppRes <$> mapOnPatType tv t <*> pure ext
 
 type TypeTraverser f t dim1 als1 dim2 als2 =
-  (TypeName -> f TypeName) ->
+  (QualName VName -> f (QualName VName)) ->
   (dim1 -> f dim2) ->
   (als1 -> f als2) ->
   t dim1 als1 ->
@@ -320,7 +321,7 @@ traverseType f g h (Scalar t) =
 
 traverseTypeArg ::
   Applicative f =>
-  (TypeName -> f TypeName) ->
+  (QualName VName -> f (QualName VName)) ->
   (dim1 -> f dim2) ->
   TypeArg dim1 ->
   f (TypeArg dim2)
@@ -330,14 +331,10 @@ traverseTypeArg f g (TypeArgType t loc) =
   TypeArgType <$> traverseType f g pure t <*> pure loc
 
 instance ASTMappable StructType where
-  astMap tv = traverseType f (astMap tv) pure
-    where
-      f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
+  astMap tv = traverseType (astMap tv) (astMap tv) pure
 
 instance ASTMappable PatType where
-  astMap tv = traverseType f (astMap tv) (astMap tv)
-    where
-      f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
+  astMap tv = traverseType (astMap tv) (astMap tv) (astMap tv)
 
 instance ASTMappable StructRetType where
   astMap tv (RetType ext t) = RetType ext <$> astMap tv t

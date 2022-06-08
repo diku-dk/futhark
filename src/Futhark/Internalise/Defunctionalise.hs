@@ -19,7 +19,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Futhark.IR.Pretty ()
-import qualified Futhark.Internalise.FreeVars as FV
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -77,15 +76,15 @@ areGlobal vs = local $ Arrow.first (S.fromList vs <>)
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
-  TypeBase (DimDecl VName) als ->
-  TypeBase (DimDecl VName) als
+  TypeBase Size als ->
+  TypeBase Size als
 replaceTypeSizes substs = first onDim
   where
-    onDim (NamedDim v) =
+    onDim (NamedSize v) =
       case M.lookup (qualLeaf v) substs of
-        Just (SubstNamed v') -> NamedDim v'
-        Just (SubstConst d) -> ConstDim d
-        Nothing -> NamedDim v
+        Just (SubstNamed v') -> NamedSize v'
+        Just (SubstConst d) -> ConstSize d
+        Nothing -> NamedSize v
     onDim d = d
 
 replaceStaticValSizes ::
@@ -145,12 +144,12 @@ replaceStaticValSizes globals orig_substs sv =
         te' = onTypeExp substs te
     onExp substs e = onAST substs e
 
-    onTypeExpDim substs d@(DimExpNamed v loc) =
+    onTypeExpDim substs d@(SizeExpNamed v loc) =
       case M.lookup (qualLeaf v) substs of
         Just (SubstNamed v') ->
-          DimExpNamed v' loc
+          SizeExpNamed v' loc
         Just (SubstConst x) ->
-          DimExpConst x loc
+          SizeExpConst x loc
         Nothing ->
           d
     onTypeExpDim _ d = d
@@ -203,8 +202,8 @@ replaceStaticValSizes globals orig_substs sv =
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names and types.
-restrictEnvTo :: FV.NameSet -> DefM Env
-restrictEnvTo (FV.NameSet m) = asks restrict
+restrictEnvTo :: FV -> DefM Env
+restrictEnvTo (FV m) = asks restrict
   where
     restrict (globals, env) = M.mapMaybeWithKey keep env
       where
@@ -272,7 +271,7 @@ lookupVar t x = do
           -- Anything not in scope is going to be an existential size.
           pure $ Dynamic $ Scalar $ Prim $ Signed Int64
 
--- Like patternDimNames, but ignores sizes that are only found in
+-- Like freeInPat, but ignores sizes that are only found in
 -- funtion types.
 arraySizes :: StructType -> S.Set VName
 arraySizes (Scalar Arrow {}) = mempty
@@ -281,15 +280,15 @@ arraySizes (Scalar (Sum cs)) = foldMap (foldMap arraySizes) cs
 arraySizes (Scalar (TypeVar _ _ _ targs)) =
   mconcat $ map f targs
   where
-    f (TypeArgDim (NamedDim d) _) = S.singleton $ qualLeaf d
+    f (TypeArgDim (NamedSize d) _) = S.singleton $ qualLeaf d
     f TypeArgDim {} = mempty
     f (TypeArgType t _) = arraySizes t
 arraySizes (Scalar Prim {}) = mempty
 arraySizes (Array _ _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
   where
-    dimName :: DimDecl VName -> S.Set VName
-    dimName (NamedDim qn) = S.singleton $ qualLeaf qn
+    dimName :: Size -> S.Set VName
+    dimName (NamedSize qn) = S.singleton $ qualLeaf qn
     dimName _ = mempty
 
 patternArraySizes :: Pat -> S.Set VName
@@ -302,25 +301,25 @@ data SizeSubst
 
 dimMapping ::
   Monoid a =>
-  TypeBase (DimDecl VName) a ->
-  TypeBase (DimDecl VName) a ->
+  TypeBase Size a ->
+  TypeBase Size a ->
   M.Map VName SizeSubst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where
-    f bound d1 (NamedDim d2)
+    f bound d1 (NamedSize d2)
       | qualLeaf d2 `elem` bound = pure d1
-    f _ (NamedDim d1) (NamedDim d2) = do
+    f _ (NamedSize d1) (NamedSize d2) = do
       modify $ M.insert (qualLeaf d1) $ SubstNamed d2
-      pure $ NamedDim d1
-    f _ (NamedDim d1) (ConstDim d2) = do
+      pure $ NamedSize d1
+    f _ (NamedSize d1) (ConstSize d2) = do
       modify $ M.insert (qualLeaf d1) $ SubstConst d2
-      pure $ NamedDim d1
+      pure $ NamedSize d1
     f _ d _ = pure d
 
 dimMapping' ::
   Monoid a =>
-  TypeBase (DimDecl VName) a ->
-  TypeBase (DimDecl VName) a ->
+  TypeBase Size a ->
+  TypeBase Size a ->
   M.Map VName VName
 dimMapping' t1 t2 = M.mapMaybe f $ dimMapping t1 t2
   where
@@ -339,7 +338,7 @@ sizesToRename (RecordSV fs) =
 sizesToRename (SumSV _ svs _) =
   foldMap sizesToRename svs
 sizesToRename (LambdaSV param _ _ _) =
-  patternDimNames param
+  freeInPat param
     <> S.map identName (S.filter couldBeSize $ patIdents param)
   where
     couldBeSize ident =
@@ -400,8 +399,8 @@ defuncFun tparams pats e0 ret loc = do
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   let used =
-        FV.freeVars (Lambda pats e0 Nothing (Info (mempty, ret)) loc)
-          `FV.without` S.fromList tparams
+        freeInExp (Lambda pats e0 Nothing (Info (mempty, ret)) loc)
+          `freeWithout` S.fromList tparams
   used_env <- restrictEnvTo used
 
   -- The closure parts that are sizes are proactively turned into size
@@ -529,7 +528,8 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   -- newly computed body type.
   let mapping = dimMapping' (typeOf e2) t
       subst v = fromMaybe v $ M.lookup v mapping
-      t' = first (fmap subst) $ typeOf e2'
+      mapper = identityMapper {mapOnName = pure . subst}
+      t' = first (runIdentity . astMap mapper) $ typeOf e2'
   pure (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
   error $ "defuncExp: Unexpected LetFun: " ++ prettyName vn
@@ -647,15 +647,15 @@ defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
   where
     defuncType ::
       Monoid als =>
-      TypeBase (DimDecl VName) als ->
-      TypeBase (DimDecl VName) als
+      TypeBase Size als ->
+      TypeBase Size als
     defuncType (Array as u shape t) = Array as u shape (defuncScalar t)
     defuncType (Scalar t) = Scalar $ defuncScalar t
 
     defuncScalar ::
       Monoid als =>
-      ScalarTypeBase (DimDecl VName) als ->
-      ScalarTypeBase (DimDecl VName) als
+      ScalarTypeBase Size als ->
+      ScalarTypeBase Size als
     defuncScalar (Record fs) = Record $ M.map defuncType fs
     defuncScalar Arrow {} = Record mempty
     defuncScalar (Sum fs) = Sum $ M.map (map defuncType) fs
@@ -761,7 +761,7 @@ defuncLet ::
   DefM ([VName], [Pat], Exp, StaticVal)
 defuncLet dims ps@(pat : pats) body (RetType ret_dims rettype)
   | patternOrderZero pat = do
-      let bound_by_pat = (`S.member` patternDimNames pat)
+      let bound_by_pat = (`S.member` freeInPat pat)
           -- Take care to not include more size parameters than necessary.
           (pat_dims, rest_dims) = partition bound_by_pat dims
           env = envFromPat pat <> envFromDimNames pat_dims
@@ -794,26 +794,26 @@ sizesForAll bound_sizes params = do
   where
     bound = bound_sizes <> foldMap patNames params
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
-    onDim (AnyDim (Just v)) = do
+    onDim (AnySize (Just v)) = do
       modify $ S.insert v
-      pure $ NamedDim $ qualName v
-    onDim (AnyDim Nothing) = do
+      pure $ NamedSize $ qualName v
+    onDim (AnySize Nothing) = do
       v <- lift $ newVName "size"
       modify $ S.insert v
-      pure $ NamedDim $ qualName v
-    onDim (NamedDim d) = do
+      pure $ NamedSize $ qualName v
+    onDim (NamedSize d) = do
       unless (qualLeaf d `S.member` bound) $
         modify $
           S.insert $
             qualLeaf d
-      pure $ NamedDim d
+      pure $ NamedSize d
     onDim d = pure d
 
 unRetType :: StructRetType -> StructType
 unRetType (RetType [] t) = t
 unRetType (RetType ext t) = first onDim t
   where
-    onDim (NamedDim d) | qualLeaf d `elem` ext = AnyDim Nothing
+    onDim (NamedSize d) | qualLeaf d `elem` ext = AnySize Nothing
     onDim d = d
 
 -- | Defunctionalize an application expression at a given depth of application.
@@ -868,7 +868,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             liftedName (i + 1) f
           liftedName _ _ = "defunc"
 
-      -- Ensure that no parameter sizes are AnyDim.  The internaliser
+      -- Ensure that no parameter sizes are AnySize.  The internaliser
       -- expects this.  This is easy, because they are all
       -- first-order.
       let bound_sizes = S.fromList (dims <> more_dims) <> globals
@@ -975,7 +975,7 @@ defuncApply depth e@(Var qn (Info t) loc) = do
               (argtypes', rettype) = dynamicFunType sv' argtypes
               dims' = mempty
 
-          -- Ensure that no parameter sizes are AnyDim.  The internaliser
+          -- Ensure that no parameter sizes are AnySize.  The internaliser
           -- expects this.  This is easy, because they are all
           -- first-order.
           globals <- asks fst
@@ -1054,7 +1054,7 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
     mkExt v
       | not $ v `S.member` bound_here = Just v
     mkExt _ = Nothing
-    rettype_st = RetType (mapMaybe mkExt (S.toList (typeDimNames ret)) ++ ret_dims) ret
+    rettype_st = RetType (mapMaybe mkExt (S.toList (freeInType ret)) ++ ret_dims) ret
 
     dec =
       ValBind
@@ -1164,7 +1164,7 @@ matchPatSV (Id vn (Info t) _) sv =
     else dim_env <> M.singleton vn (Binding Nothing sv)
   where
     dim_env =
-      M.fromList $ map (,i64) $ S.toList $ typeDimNames t
+      M.fromList $ map (,i64) $ S.toList $ freeInType t
     i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
 matchPatSV (Wildcard _ _) _ = mempty
 matchPatSV (PatAscription pat _ _) sv = matchPatSV pat sv
@@ -1285,7 +1285,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
         -- applications of lifted functions, we don't properly update
         -- the types in the return type annotation.
         combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
-      ret_dims' = filter (`S.member` typeDimNames rettype') ret_dims
+      ret_dims' = filter (`S.member` freeInType rettype') ret_dims
   (missing_dims, params'') <- sizesForAll bound_sizes params'
 
   pure
@@ -1307,8 +1307,8 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
           sv
     )
   where
-    anyDimIfNotBound bound_sizes (NamedDim v)
-      | qualLeaf v `S.notMember` bound_sizes = AnyDim $ Just $ qualLeaf v
+    anyDimIfNotBound bound_sizes (NamedSize v)
+      | qualLeaf v `S.notMember` bound_sizes = AnySize $ Just $ qualLeaf v
     anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.

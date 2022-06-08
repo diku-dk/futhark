@@ -36,14 +36,14 @@ someDimsFreshInType ::
   Rigidity ->
   Name ->
   S.Set VName ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als)
+  TypeBase Size als ->
+  TermTypeM (TypeBase Size als)
 someDimsFreshInType loc r desc sizes = bitraverse onDim pure
   where
-    onDim (NamedDim d)
+    onDim (NamedSize d)
       | qualLeaf d `S.member` sizes = do
           v <- newDimVar loc r desc
-          pure $ NamedDim $ qualName v
+          pure $ NamedSize $ qualName v
     onDim d = pure d
 
 -- | Replace the specified sizes with fresh size variables of the
@@ -53,20 +53,20 @@ freshDimsInType ::
   Rigidity ->
   Name ->
   S.Set VName ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als, [VName])
+  TypeBase Size als ->
+  TermTypeM (TypeBase Size als, [VName])
 freshDimsInType loc r desc sizes t =
   second M.elems <$> runStateT (bitraverse onDim pure t) mempty
   where
-    onDim (NamedDim d)
+    onDim (NamedSize d)
       | qualLeaf d `S.member` sizes = do
           prev_subst <- gets $ M.lookup $ qualLeaf d
           case prev_subst of
-            Just d' -> pure $ NamedDim $ qualName d'
+            Just d' -> pure $ NamedSize $ qualName d'
             Nothing -> do
               v <- lift $ newDimVar loc r desc
               modify $ M.insert (qualLeaf d) v
-              pure $ NamedDim $ qualName v
+              pure $ NamedSize $ qualName v
     onDim d = pure d
 
 -- | Mark bindings of names in "consumed" as Unique.
@@ -256,7 +256,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           -- new_dims in the pattern is unique and distinct.
           let onDims _ x y
                 | x == y = pure x
-              onDims _ (NamedDim v) d
+              onDims _ (NamedSize v) d
                 | qualLeaf v `elem` new_dims = do
                     case M.lookup (qualLeaf v) new_dims_to_initial_dim of
                       Just d'
@@ -264,7 +264,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                             modify $ first $ M.insert (qualLeaf v) (SizeSubst d)
                       _ ->
                         modify $ second (qualLeaf v :)
-                    pure $ NamedDim v
+                    pure $ NamedSize v
               onDims _ x _ = pure x
           loopbody_t' <- normTypeFully loopbody_t
           merge_t' <- normTypeFully merge_t

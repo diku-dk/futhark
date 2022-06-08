@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Parsers for primitive values and types.  Mostly useful for
--- "Futhark.IR.Parse", but can perhaps come in handy elsewhere too.
-module Futhark.IR.Primitive.Parse
+-- | Parsers for primitive values and types.
+module Language.Futhark.Primitive.Parse
   ( pPrimValue,
     pPrimType,
     pFloatType,
@@ -20,8 +19,8 @@ import Data.Char (isAlphaNum)
 import Data.Functor
 import qualified Data.Text as T
 import Data.Void
-import Futhark.IR.Primitive
 import Futhark.Util.Pretty hiding (empty)
+import Language.Futhark.Primitive
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L

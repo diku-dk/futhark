@@ -1288,7 +1288,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
 
       let rank = length shape
           maybeCopyDim (Var d) i
-            | not $ d `nameIn` arg_names =
+            | d `notNameIn` arg_names =
                 ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
                   [C.cexp|$id:d == $exp:src->shape[$int:i]|]
                 )

@@ -30,9 +30,6 @@ module Language.Futhark.Core
     quote,
     pquote,
 
-    -- * Special identifiers
-    defaultEntryPoint,
-
     -- * Number re-export
     Int8,
     Int16,
@@ -75,10 +72,6 @@ instance Monoid Uniqueness where
 instance Pretty Uniqueness where
   ppr Unique = star
   ppr Nonunique = empty
-
--- | The name of the default program entry point (main).
-defaultEntryPoint :: Name
-defaultEntryPoint = nameFromString "main"
 
 -- | The abstract (not really) type representing names in the Futhark
 -- compiler.  'String's, being lists of characters, are very slow,

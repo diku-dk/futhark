@@ -48,7 +48,7 @@ runInternaliseTypeM' :: [VName] -> InternaliseTypeM a -> InternaliseM a
 runInternaliseTypeM' exts (InternaliseTypeM m) = evalStateT m $ TypeState (length exts)
 
 internaliseParamTypes ::
-  [E.TypeBase (E.DimDecl VName) ()] ->
+  [E.TypeBase E.Size ()] ->
   InternaliseM [[I.TypeBase Shape Uniqueness]]
 internaliseParamTypes ts =
   runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM mempty) ts
@@ -66,7 +66,7 @@ fixupTypes = zipWith fixup
     fixup _ t = t
 
 internaliseLoopParamType ::
-  E.TypeBase (E.DimDecl VName) () ->
+  E.TypeBase E.Size () ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
@@ -82,7 +82,7 @@ internaliseReturnType (E.RetType dims et) ts =
     exts = M.fromList $ zip dims [0 ..]
 
 internaliseLambdaReturnType ::
-  E.TypeBase (E.DimDecl VName) () ->
+  E.TypeBase E.Size () ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape NoUniqueness]
 internaliseLambdaReturnType et ts =
@@ -102,7 +102,7 @@ internaliseEntryReturnType (E.RetType dims et) =
     exts = M.fromList $ zip dims [0 ..]
 
 internaliseType ::
-  E.TypeBase (E.DimDecl VName) () ->
+  E.TypeBase E.Size () ->
   InternaliseM [I.TypeBase I.ExtShape Uniqueness]
 internaliseType = runInternaliseTypeM . internaliseTypeM mempty
 
@@ -114,13 +114,13 @@ newId = do
 
 internaliseDim ::
   M.Map VName Int ->
-  E.DimDecl VName ->
+  E.Size ->
   InternaliseTypeM ExtSize
 internaliseDim exts d =
   case d of
-    E.AnyDim _ -> Ext <$> newId
-    E.ConstDim n -> pure $ Free $ intConst I.Int64 $ toInteger n
-    E.NamedDim name -> namedDim name
+    E.AnySize _ -> Ext <$> newId
+    E.ConstSize n -> pure $ Free $ intConst I.Int64 $ toInteger n
+    E.NamedSize name -> namedDim name
   where
     namedDim (E.QualName _ name)
       | Just x <- name `M.lookup` exts = pure $ I.Ext x
@@ -149,8 +149,8 @@ internaliseTypeM exts orig_t =
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
-      | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
-        baseString (E.typeLeaf tn) == "acc" -> do
+      | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
+        baseString (E.qualLeaf tn) == "acc" -> do
           ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
           acc_param <- liftInternaliseM $ newVName "acc_cert"
           let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
@@ -208,7 +208,7 @@ internaliseSumType cs =
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.TypeBase (E.DimDecl VName) als -> InternaliseM Int
+internalisedTypeSize :: E.TypeBase E.Size als -> InternaliseM Int
 -- A few special cases for performance.
 internalisedTypeSize (E.Scalar (E.Prim _)) = pure 1
 internalisedTypeSize (E.Array _ _ _ (E.Prim _)) = pure 1

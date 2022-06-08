@@ -382,7 +382,7 @@ maybeDistributeStm stm@(Let pat _ (Op (Screma w arrs form))) acc
         Nothing -> addStmToAcc stm acc
         Just acc' -> distribute =<< onInnerMap (MapLoop pat (stmAux stm) w lam arrs) acc'
 maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
-  | not $ any (`nameIn` freeIn pat) $ patNames pat,
+  | all (`notNameIn` freeIn pat) (patNames pat),
     bodyContainsParallelism body =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
@@ -414,7 +414,7 @@ maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
         _ ->
           addStmToAcc stm acc
 maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
-  | not $ any (`nameIn` freeIn pat) $ patNames pat,
+  | all (`notNameIn` freeIn pat) (patNames pat),
     bodyContainsParallelism tbranch
       || bodyContainsParallelism fbranch
       || not (all primType (ifReturns ret)) =
@@ -1132,7 +1132,7 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
             | kernelInputIndices inp == map Var indices ->
                 pure $ pure $ kernelInputArray inp
           Nothing
-            | not (arr `nameIn` bound_by_nest) ->
+            | arr `notNameIn` bound_by_nest ->
                 -- This input is something that is free inside
                 -- the loop nesting. We will have to replicate
                 -- it.

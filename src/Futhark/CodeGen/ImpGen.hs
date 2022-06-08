@@ -732,9 +732,7 @@ defCompileStms alive_after_stms all_stms m =
             compileExp pat e
       (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
       let dies_here v =
-            not (v `nameIn` live_after)
-              && v
-              `nameIn` freeIn e_code
+            (v `notNameIn` live_after) && (v `nameIn` freeIn e_code)
           to_free = S.filter (dies_here . fst) allocs
 
       emit e_code

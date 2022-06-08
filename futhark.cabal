@@ -194,8 +194,6 @@ library
       Futhark.IR.Mem.Simplify
       Futhark.IR.Parse
       Futhark.IR.Pretty
-      Futhark.IR.Primitive
-      Futhark.IR.Primitive.Parse
       Futhark.IR.Prop
       Futhark.IR.Prop.Aliases
       Futhark.IR.Prop.Constants
@@ -224,7 +222,6 @@ library
       Futhark.Internalise.Defunctionalise
       Futhark.Internalise.Defunctorise
       Futhark.Internalise.Exps
-      Futhark.Internalise.FreeVars
       Futhark.Internalise.Lambdas
       Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad
@@ -318,12 +315,15 @@ library
       Language.Futhark
       Language.Futhark.Core
       Language.Futhark.Interpreter
+      Language.Futhark.FreeVars
       Language.Futhark.Parser
       Language.Futhark.Parser.Monad
       Language.Futhark.Parser.Lexer.Tokens
       Language.Futhark.Parser.Lexer.Wrapper
       Language.Futhark.Prelude
       Language.Futhark.Pretty
+      Language.Futhark.Primitive
+      Language.Futhark.Primitive.Parse
       Language.Futhark.Prop
       Language.Futhark.Query
       Language.Futhark.Semantic
@@ -428,8 +428,8 @@ test-suite unit
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper
-      Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
+      Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeCheckerTests
       Language.Futhark.TypeChecker.TypesTests

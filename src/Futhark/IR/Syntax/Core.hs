@@ -11,7 +11,7 @@
 -- there should be no reason to include it explicitly.
 module Futhark.IR.Syntax.Core
   ( module Language.Futhark.Core,
-    module Futhark.IR.Primitive,
+    module Language.Futhark.Primitive,
 
     -- * Types
     Commutativity (..),
@@ -81,8 +81,8 @@ import Data.Maybe
 import qualified Data.Set as S
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
-import Futhark.IR.Primitive
 import Language.Futhark.Core
+import Language.Futhark.Primitive
 import Prelude hiding (id, (.))
 
 -- | Whether some operator is commutative or not.  The 'Monoid'

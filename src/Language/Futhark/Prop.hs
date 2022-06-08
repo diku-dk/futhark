@@ -17,7 +17,6 @@ module Language.Futhark.Prop
     namesToPrimTypes,
     qualName,
     qualify,
-    typeName,
     valueType,
     primValueType,
     leadingOperator,
@@ -27,6 +26,7 @@ module Language.Futhark.Prop
     identifierReference,
     prettyStacktrace,
     progHoles,
+    defaultEntryPoint,
 
     -- * Queries on expressions
     typeOf,
@@ -42,7 +42,6 @@ module Language.Futhark.Prop
     patternStructType,
     patternParam,
     patternOrderZero,
-    patternDimNames,
 
     -- * Queries on types
     uniqueness,
@@ -51,12 +50,10 @@ module Language.Futhark.Prop
     diet,
     arrayRank,
     arrayShape,
-    nestedDims,
     orderZero,
     unfoldFunType,
     foldFunType,
     typeVars,
-    typeDimNames,
 
     -- * Operations on types
     peelArray,
@@ -71,9 +68,6 @@ module Language.Futhark.Prop
     noSizes,
     traverseDims,
     DimPos (..),
-    mustBeExplicit,
-    mustBeExplicitInType,
-    determineSizeWitnesses,
     tupleRecord,
     isTupleRecord,
     areTupleFields,
@@ -120,11 +114,15 @@ import Data.Maybe
 import Data.Ord
 import qualified Data.Set as S
 import qualified Data.Text as T
-import qualified Futhark.IR.Primitive as Primitive
-import Futhark.Util (maxinum, nubOrd)
+import Futhark.Util (maxinum)
 import Futhark.Util.Pretty
+import qualified Language.Futhark.Primitive as Primitive
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals
+
+-- | The name of the default program entry point (@main@).
+defaultEntryPoint :: Name
+defaultEntryPoint = nameFromString "main"
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -133,38 +131,12 @@ arrayRank :: TypeBase dim as -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
-arrayShape :: TypeBase dim as -> ShapeDecl dim
+arrayShape :: TypeBase dim as -> Shape dim
 arrayShape (Array _ _ ds _) = ds
 arrayShape _ = mempty
 
--- | Return any free shape declarations in the type, with duplicates
--- removed.
-nestedDims :: TypeBase (DimDecl VName) as -> [DimDecl VName]
-nestedDims t =
-  case t of
-    Array _ _ ds a ->
-      nubOrd $ nestedDims (Scalar a) <> shapeDims ds
-    Scalar (Record fs) ->
-      nubOrd $ foldMap nestedDims fs
-    Scalar Prim {} ->
-      mempty
-    Scalar (Sum cs) ->
-      nubOrd $ foldMap (foldMap nestedDims) cs
-    Scalar (Arrow _ v t1 (RetType dims t2)) ->
-      filter (notV v) $ filter (`notElem` dims') $ nestedDims t1 <> nestedDims t2
-      where
-        dims' = map (NamedDim . qualName) dims
-    Scalar (TypeVar _ _ _ targs) ->
-      concatMap typeArgDims targs
-  where
-    typeArgDims (TypeArgDim d _) = [d]
-    typeArgDims (TypeArgType at _) = nestedDims at
-
-    notV Unnamed = const True
-    notV (Named v) = (/= NamedDim (qualName v))
-
 -- | Change the shape of a type to be just the rank.
-noSizes :: TypeBase (DimDecl vn) as -> TypeBase () as
+noSizes :: TypeBase Size as -> TypeBase () as
 noSizes = first $ const ()
 
 -- | Where does this dimension occur?
@@ -219,53 +191,6 @@ traverseDims f = go mempty PosImmediate
       TypeArgDim <$> f bound b d <*> pure loc
     onTypeArg bound b (TypeArgType t loc) =
       TypeArgType <$> go bound b t <*> pure loc
-
-mustBeExplicitAux :: StructType -> M.Map VName Bool
-mustBeExplicitAux t =
-  execState (traverseDims onDim t) mempty
-  where
-    onDim bound _ (NamedDim d)
-      | qualLeaf d `S.member` bound =
-          modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ PosImmediate (NamedDim d) =
-      modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ _ (NamedDim d) =
-      modify $ M.insertWith (&&) (qualLeaf d) True
-    onDim _ _ _ =
-      pure ()
-
--- | Determine which of the sizes in a type are used as sizes outside
--- of functions in the type, and which are not.  The former are said
--- to be "witnessed" by this type, while the latter are not.  In
--- practice, the latter means that the actual sizes must come from
--- somewhere else.
-determineSizeWitnesses :: StructType -> (S.Set VName, S.Set VName)
-determineSizeWitnesses t =
-  bimap (S.fromList . M.keys) (S.fromList . M.keys) $
-    M.partition not $
-      mustBeExplicitAux t
-
--- | Figure out which of the sizes in a parameter type must be passed
--- explicitly, because their first use is as something else than just
--- an array dimension.  'mustBeExplicit' is like this function, but
--- first decomposes into parameter types.
-mustBeExplicitInType :: StructType -> S.Set VName
-mustBeExplicitInType = snd . determineSizeWitnesses
-
--- | Figure out which of the sizes in a binding type must be passed
--- explicitly, because their first use is as something else than just
--- an array dimension.
-mustBeExplicit :: StructType -> S.Set VName
-mustBeExplicit bind_t =
-  let (ts, ret) = unfoldFunType bind_t
-      alsoRet =
-        M.unionWith (&&) $
-          M.fromList $
-            zip (S.toList $ typeDimNames ret) $
-              repeat True
-   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty ts
-  where
-    onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
@@ -335,7 +260,7 @@ peelArray _ _ = Nothing
 arrayOf ::
   Monoid as =>
   Uniqueness ->
-  ShapeDecl dim ->
+  Shape dim ->
   TypeBase dim as ->
   TypeBase dim as
 arrayOf u s t = arrayOfWithAliases mempty u s (t `setUniqueness` Nonunique)
@@ -344,7 +269,7 @@ arrayOfWithAliases ::
   Monoid as =>
   as ->
   Uniqueness ->
-  ShapeDecl dim ->
+  Shape dim ->
   TypeBase dim as ->
   TypeBase dim as
 arrayOfWithAliases as2 u shape2 (Array as1 _ shape1 et) =
@@ -422,10 +347,10 @@ isSizeParam = not . isTypeParam
 -- expression. This is necessary since the original type may contain additional
 -- information (e.g., shape restrictions) from the user given annotation.
 combineTypeShapes ::
-  (Monoid as, ArrayDim dim) =>
-  TypeBase dim as ->
-  TypeBase dim as ->
-  TypeBase dim as
+  (Monoid as) =>
+  TypeBase Size as ->
+  TypeBase Size as ->
+  TypeBase Size as
 combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
   | M.keys ts1 == M.keys ts2 =
       Scalar $
@@ -511,7 +436,7 @@ matchDims onDims = matchDims' mempty
     maybePName Unnamed = Nothing
 
     onShapes bound shape1 shape2 =
-      ShapeDecl <$> zipWithM (onDims bound) (shapeDims shape1) (shapeDims shape2)
+      Shape <$> zipWithM (onDims bound) (shapeDims shape1) (shapeDims shape2)
 
 -- | Set the uniqueness attribute of a type.  If the type is a record
 -- or sum type, the uniqueness of its components will be modified.
@@ -585,7 +510,7 @@ typeOf (StringLit vs _) =
   Array
     mempty
     Unique
-    (ShapeDecl [ConstDim $ genericLength vs])
+    (Shape [ConstSize $ genericLength vs])
     (Prim (Unsigned Int8))
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
@@ -600,9 +525,8 @@ typeOf (Lambda params _ _ (Info (als, t)) _) =
   let RetType [] t' = foldr (arrow . patternParam) t params
    in t' `setAliases` als
   where
-    arrow (Named v, x) (RetType dims y)
-      | v `S.member` typeDimNames y =
-          RetType [] $ Scalar $ Arrow () (Named v) x $ RetType (v : dims) y
+    arrow (Named v, x) (RetType dims y) =
+      RetType [] $ Scalar $ Arrow () (Named v) x $ RetType (v : dims) y
     arrow (pn, tx) y =
       RetType [] $ Scalar $ Arrow () pn tx y
 typeOf (OpSection _ (Info t) _) =
@@ -671,13 +595,12 @@ typeVars t =
   case t of
     Scalar Prim {} -> mempty
     Scalar (TypeVar _ _ tn targs) ->
-      mconcat $ typeVarFree tn : map typeArgFree targs
+      mconcat $ S.singleton (qualLeaf tn) : map typeArgFree targs
     Scalar (Arrow _ _ t1 (RetType _ t2)) -> typeVars t1 <> typeVars t2
     Scalar (Record fields) -> foldMap typeVars fields
     Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
     Array _ _ _ rt -> typeVars $ Scalar rt
   where
-    typeVarFree = S.singleton . typeLeaf
     typeArgFree (TypeArgType ta _) = typeVars ta
     typeArgFree TypeArgDim {} = mempty
 
@@ -691,25 +614,6 @@ orderZero (Scalar (Record fs)) = all orderZero $ M.elems fs
 orderZero (Scalar TypeVar {}) = True
 orderZero (Scalar Arrow {}) = False
 orderZero (Scalar (Sum cs)) = all (all orderZero) cs
-
--- | Extract all the shape names that occur in a given pattern.
-patternDimNames :: PatBase Info VName -> S.Set VName
-patternDimNames (TuplePat ps _) = foldMap patternDimNames ps
-patternDimNames (RecordPat fs _) = foldMap (patternDimNames . snd) fs
-patternDimNames (PatParens p _) = patternDimNames p
-patternDimNames (Id _ (Info tp) _) = typeDimNames tp
-patternDimNames (Wildcard (Info tp) _) = typeDimNames tp
-patternDimNames (PatAscription p _ _) = patternDimNames p
-patternDimNames (PatLit _ (Info tp) _) = typeDimNames tp
-patternDimNames (PatConstr _ _ ps _) = foldMap patternDimNames ps
-patternDimNames (PatAttr _ p _) = patternDimNames p
-
--- | Extract all the shape names that occur free in a given type.
-typeDimNames :: TypeBase (DimDecl VName) als -> S.Set VName
-typeDimNames = foldMap dimName . nestedDims
-  where
-    dimName (NamedDim qn) = S.singleton $ qualLeaf qn
-    dimName _ = mempty
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.
@@ -807,7 +711,7 @@ namesToPrimTypes =
 data Intrinsic
   = IntrinsicMonoFun [PrimType] PrimType
   | IntrinsicOverloadedFun [PrimType] [Maybe PrimType] (Maybe PrimType)
-  | IntrinsicPolyFun [TypeParamBase VName] [StructType] (RetTypeBase (DimDecl VName) ())
+  | IntrinsicPolyFun [TypeParamBase VName] [StructType] (RetTypeBase Size ())
   | IntrinsicType Liftedness [TypeParamBase VName] StructType
   | IntrinsicEquality -- Special cased.
 
@@ -816,12 +720,12 @@ intrinsicAcc =
   ( acc_v,
     IntrinsicType SizeLifted [TypeParamType Unlifted t_v mempty] $
       Scalar $
-        TypeVar () Nonunique (TypeName [] acc_v) [arg]
+        TypeVar () Nonunique (qualName acc_v) [arg]
   )
   where
     acc_v = VName "acc" 10
     t_v = VName "t" 11
-    arg = TypeArgType (Scalar (TypeVar () Nonunique (TypeName [] t_v) [])) mempty
+    arg = TypeArgType (Scalar (TypeVar () Nonunique (qualName t_v) [])) mempty
 
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
@@ -1242,19 +1146,19 @@ intrinsics =
   where
     [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
-    t_a = TypeVar () Nonunique (typeName a) []
+    t_a = TypeVar () Nonunique (qualName a) []
     arr_a s = Array () Nonunique s t_a
     uarr_a s = Array () Unique s t_a
     tp_a = TypeParamType Unlifted a mempty
 
-    t_b = TypeVar () Nonunique (typeName b) []
+    t_b = TypeVar () Nonunique (qualName b) []
     arr_b s = Array () Nonunique s t_b
     uarr_b s = Array () Unique s t_b
     tp_b = TypeParamType Unlifted b mempty
 
     [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 
-    shape = ShapeDecl . map (NamedDim . qualName)
+    shape = Shape . map (NamedSize . qualName)
 
     tuple_arr x y s =
       Array
@@ -1266,13 +1170,13 @@ intrinsics =
 
     arr x y = Scalar $ Arrow mempty Unnamed x (RetType [] y)
 
-    arr_ka = Array () Nonunique (ShapeDecl [NamedDim $ qualName k]) t_a
-    uarr_ka = Array () Unique (ShapeDecl [NamedDim $ qualName k]) t_a
-    arr_kb = Array () Nonunique (ShapeDecl [NamedDim $ qualName k]) t_b
+    arr_ka = Array () Nonunique (Shape [NamedSize $ qualName k]) t_a
+    uarr_ka = Array () Unique (Shape [NamedSize $ qualName k]) t_a
+    arr_kb = Array () Nonunique (Shape [NamedSize $ qualName k]) t_b
     karr x y = Scalar $ Arrow mempty (Named k) x (RetType [] y)
 
     accType t =
-      TypeVar () Unique (typeName (fst intrinsicAcc)) [TypeArgType t mempty]
+      TypeVar () Unique (qualName (fst intrinsicAcc)) [TypeArgType t mempty]
 
     namify i (x, y) = (VName (nameFromString x) i, y)
 
@@ -1374,10 +1278,6 @@ qualName = QualName []
 -- | Add another qualifier (at the head) to a qualified name.
 qualify :: v -> QualName v -> QualName v
 qualify k (QualName ks v) = QualName (k : ks) v
-
--- | Create a type name name with no qualifiers from a 'VName'.
-typeName :: VName -> TypeName
-typeName = typeNameFromQualName . qualName
 
 -- | The modules imported by a Futhark program.
 progImports :: ProgBase f vn -> [(String, SrcLoc)]
@@ -1518,7 +1418,7 @@ progHoles = foldMap holesInDec . progDecs
     onExp e = astMap (identityMapper {mapOnExp = onExp}) e
 
 -- | A type with no aliasing information but shape annotations.
-type UncheckedType = TypeBase (ShapeDecl Name) ()
+type UncheckedType = TypeBase (Shape Name) ()
 
 -- | An expression with no type annotations.
 type UncheckedTypeExp = TypeExp Name

@@ -283,8 +283,8 @@ class Monad m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
-  checkNamedDim :: SrcLoc -> QualName Name -> m (QualName VName)
-  checkNamedDim loc v = do
+  checkNamedSize :: SrcLoc -> QualName Name -> m (QualName VName)
+  checkNamedSize loc v = do
     (v', t) <- lookupVar loc v
     case t of
       Scalar (Prim (Signed Int64)) -> pure v'
@@ -410,24 +410,22 @@ qualifyTypeVars ::
   Env ->
   [VName] ->
   [VName] ->
-  TypeBase (DimDecl VName) as ->
-  TypeBase (DimDecl VName) as
+  TypeBase Size as ->
+  TypeBase Size as
 qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
   where
     onType ::
       S.Set VName ->
-      TypeBase (DimDecl VName) as ->
-      TypeBase (DimDecl VName) as
+      TypeBase Size as ->
+      TypeBase Size as
     onType except (Array as u shape et) =
       Array as u (fmap (onDim except) shape) (onScalar except et)
     onType except (Scalar t) =
       Scalar $ onScalar except t
 
     onScalar _ (Prim t) = Prim t
-    onScalar except (TypeVar as u tn targs) =
-      TypeVar as u tn' $ map (onTypeArg except) targs
-      where
-        tn' = typeNameFromQualName $ qual except $ qualNameFromTypeName tn
+    onScalar except (TypeVar as u qn targs) =
+      TypeVar as u (qual except qn) (map (onTypeArg except) targs)
     onScalar except (Record m) =
       Record $ M.map (onType except) m
     onScalar except (Sum m) =
@@ -444,7 +442,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
     onTypeArg except (TypeArgType t loc) =
       TypeArgType (onType except t) loc
 
-    onDim except (NamedDim qn) = NamedDim $ qual except qn
+    onDim except (NamedSize qn) = NamedSize $ qual except qn
     onDim _ d = d
 
     qual except (QualName orig_qs name)
@@ -463,7 +461,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       name `M.member` envVtable env
         || isJust (find matches $ M.elems (envTypeTable env))
       where
-        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ _ (TypeName x_qs name') _)))) =
+        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ _ (QualName x_qs name') _)))) =
           null x_qs && name == name'
         matches _ = False
     reachable (q : qs') name env

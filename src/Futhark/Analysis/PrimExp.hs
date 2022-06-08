@@ -27,7 +27,7 @@ module Futhark.Analysis.PrimExp
     constFoldPrimExp,
 
     -- * Construction
-    module Futhark.IR.Primitive,
+    module Language.Futhark.Primitive,
     NumExp (..),
     IntExp (..),
     FloatExp (..),
@@ -75,10 +75,10 @@ import Control.Monad
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable
-import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
+import Language.Futhark.Primitive
 import Prelude hiding (id, (.))
 
 -- | A primitive expression parametrised over the representation of

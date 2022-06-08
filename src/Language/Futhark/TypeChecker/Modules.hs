@@ -140,9 +140,9 @@ newNamesForMTy orig_mty = do
           TypeParamType l (substitute p) loc
 
         substituteInType :: StructType -> StructType
-        substituteInType (Scalar (TypeVar () u (TypeName qs v) targs)) =
+        substituteInType (Scalar (TypeVar () u (QualName qs v) targs)) =
           Scalar $
-            TypeVar () u (TypeName (map substitute qs) $ substitute v) $
+            TypeVar () u (QualName (map substitute qs) $ substitute v) $
               map substituteInTypeArg targs
         substituteInType (Scalar (Prim t)) =
           Scalar $ Prim t
@@ -155,18 +155,18 @@ newNamesForMTy orig_mty = do
         substituteInType (Scalar (Arrow als v t1 (RetType dims t2))) =
           Scalar $ Arrow als v (substituteInType t1) $ RetType dims $ substituteInType t2
 
-        substituteInShape (ShapeDecl ds) =
-          ShapeDecl $ map substituteInDim ds
-        substituteInDim (NamedDim (QualName qs v)) =
-          NamedDim $ QualName (map substitute qs) $ substitute v
+        substituteInShape (Shape ds) =
+          Shape $ map substituteInDim ds
+        substituteInDim (NamedSize (QualName qs v)) =
+          NamedSize $ QualName (map substitute qs) $ substitute v
         substituteInDim d = d
 
-        substituteInTypeArg (TypeArgDim (NamedDim (QualName qs v)) loc) =
-          TypeArgDim (NamedDim $ QualName (map substitute qs) $ substitute v) loc
-        substituteInTypeArg (TypeArgDim (ConstDim x) loc) =
-          TypeArgDim (ConstDim x) loc
-        substituteInTypeArg (TypeArgDim (AnyDim v) loc) =
-          TypeArgDim (AnyDim v) loc
+        substituteInTypeArg (TypeArgDim (NamedSize (QualName qs v)) loc) =
+          TypeArgDim (NamedSize $ QualName (map substitute qs) $ substitute v) loc
+        substituteInTypeArg (TypeArgDim (ConstSize x) loc) =
+          TypeArgDim (ConstSize x) loc
+        substituteInTypeArg (TypeArgDim (AnySize v) loc) =
+          TypeArgDim (AnySize v) loc
         substituteInTypeArg (TypeArgType t loc) =
           TypeArgType (substituteInType t) loc
 
@@ -194,7 +194,7 @@ refineEnv ::
   StructType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (TypeName qs v) _)))) <-
+  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (QualName qs v) _)))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
       if paramsMatch cur_ps ps
@@ -371,7 +371,7 @@ mismatchedType loc abs quals name spec_t env_t =
 
 ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetType) -> Doc
 ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
-  | typeLeaf tn `elem` abs,
+  | qualLeaf tn `elem` abs,
     map typeParamToArg ps == args =
       "type" <> ppr l
         <+> ppr name
@@ -394,7 +394,7 @@ matchMTys ::
   Either TypeError (M.Map VName VName)
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
-    (M.map (SizeSubst . NamedDim) $ resolveMTyNames orig_mty orig_mty_sig)
+    (M.map (SizeSubst . NamedSize) $ resolveMTyNames orig_mty orig_mty_sig)
     []
     orig_mty
     orig_mty_sig
@@ -612,7 +612,7 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   let a_abbrs = mtyTypeAbbrs a_mty
       isSub v = case M.lookup v a_abbrs of
         Just abbr -> Just $ substFromAbbr abbr
-        _ -> Just $ SizeSubst $ NamedDim $ qualName v
+        _ -> Just $ SizeSubst $ NamedSize $ qualName v
       type_subst = M.mapMaybe isSub p_subst
       body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'

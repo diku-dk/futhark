@@ -94,41 +94,41 @@ instance Pretty PrimValue where
   ppr (BoolValue False) = text "false"
   ppr (FloatValue v) = ppr v
 
-instance IsName vn => Pretty (DimDecl vn) where
-  ppr (AnyDim Nothing) = mempty
-  ppr (AnyDim (Just v)) = text "?" <> pprName v
-  ppr (NamedDim v) = ppr v
-  ppr (ConstDim n) = ppr n
+instance Pretty Size where
+  ppr (AnySize Nothing) = mempty
+  ppr (AnySize (Just v)) = text "?" <> pprName v
+  ppr (NamedSize v) = ppr v
+  ppr (ConstSize n) = ppr n
 
-instance IsName vn => Pretty (DimExp vn) where
-  ppr DimExpAny = mempty
-  ppr (DimExpNamed v _) = ppr v
-  ppr (DimExpConst n _) = ppr n
+instance IsName vn => Pretty (SizeExp vn) where
+  ppr SizeExpAny = mempty
+  ppr (SizeExpNamed v _) = ppr v
+  ppr (SizeExpConst n _) = ppr n
 
-instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
-  ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
+instance Pretty (Shape Size) where
+  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
 
-instance Pretty (ShapeDecl ()) where
-  ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
+instance Pretty (Shape ()) where
+  ppr (Shape ds) = mconcat $ replicate (length ds) $ text "[]"
 
-instance Pretty (ShapeDecl Int64) where
-  ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
+instance Pretty (Shape Int64) where
+  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
 
-instance Pretty (ShapeDecl Bool) where
-  ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
+instance Pretty (Shape Bool) where
+  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
 
-instance Pretty (ShapeDecl dim) => Pretty (RetTypeBase dim as) where
+instance Pretty (Shape dim) => Pretty (RetTypeBase dim as) where
   ppr = pprPrec 0
   pprPrec p (RetType [] t) = pprPrec p t
   pprPrec _ (RetType dims t) =
     text "?" <> mconcat (map (brackets . pprName) dims) <> text "." <> ppr t
 
-instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
+instance Pretty (Shape dim) => Pretty (ScalarTypeBase dim as) where
   ppr = pprPrec 0
   pprPrec _ (Prim et) = ppr et
-  pprPrec p (TypeVar _ u et targs) =
+  pprPrec p (TypeVar _ u v targs) =
     parensIf (not (null targs) && p > 3) $
-      ppr u <> ppr (qualNameFromTypeName et) <+> spread (map (pprPrec 3) targs)
+      ppr u <> ppr v <+> spread (map (pprPrec 3) targs)
   pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
         oneLine (parens $ commasep $ map ppr ts)
@@ -152,14 +152,14 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
       ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map (pprPrec 2) fs
       cs' = map ppConstr $ M.toList cs
 
-instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
+instance Pretty (Shape dim) => Pretty (TypeBase dim as) where
   ppr = pprPrec 0
   pprPrec _ (Array _ u shape at) = ppr u <> ppr shape <> align (pprPrec 1 at)
   pprPrec p (Scalar t) = pprPrec p t
 
-instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
+instance Pretty (Shape dim) => Pretty (TypeArg dim) where
   ppr = pprPrec 0
-  pprPrec _ (TypeArgDim d _) = ppr $ ShapeDecl [d]
+  pprPrec _ (TypeArgDim d _) = ppr $ Shape [d]
   pprPrec p (TypeArgType t _) = pprPrec p t
 
 instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
