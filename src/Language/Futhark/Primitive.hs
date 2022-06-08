@@ -6,9 +6,11 @@
 -- types, and operations on these values.  A primitive value can also
 -- be called a scalar.
 --
--- Essentially, this module describes the subset of the (internal)
--- Futhark language that operates on primitive types.
-module Futhark.IR.Primitive
+-- This module diverges from the actual Futhark language in that it
+-- does not distinguish signed and unsigned types.  Further, we allow
+-- a "unit" type that is only indirectly present in source Futhark in
+-- the form of empty tuples.
+module Language.Futhark.Primitive
   ( -- * Types
     IntType (..),
     allIntTypes,

@@ -15,8 +15,8 @@ import Data.Functor
 import qualified Data.Text as T
 import Data.Void
 import Futhark.Analysis.PrimExp
-import Futhark.IR.Primitive.Parse
 import Futhark.Util.Pretty (prettyText)
+import Language.Futhark.Primitive.Parse
 import Text.Megaparsec
 
 pBinOp :: Parsec Void T.Text BinOp

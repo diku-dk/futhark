@@ -22,7 +22,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SimpleRep (opaqueName)
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import Futhark.CodeGen.RTS.JavaScript
-import Futhark.IR.Primitive
+import Language.Futhark.Primitive
 import NeatInterpolation (text)
 
 extToString :: Imp.ExternalValue -> String

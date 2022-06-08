@@ -3,8 +3,8 @@
 
 module Language.Futhark.CoreTests () where
 
-import Futhark.IR.PrimitiveTests ()
 import Language.Futhark.Core
+import Language.Futhark.PrimitiveTests ()
 import Test.QuickCheck
 
 instance Arbitrary Name where

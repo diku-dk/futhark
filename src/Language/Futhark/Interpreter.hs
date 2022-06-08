@@ -45,13 +45,13 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
-import Futhark.IR.Primitive (floatValue, intValue)
-import qualified Futhark.IR.Primitive as P
 import Futhark.Util (chunk, maybeHead, splitFromEnd)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply, bool)
 import Language.Futhark hiding (Shape, Value, matchDims)
 import qualified Language.Futhark as F
+import Language.Futhark.Primitive (floatValue, intValue)
+import qualified Language.Futhark.Primitive as P
 import qualified Language.Futhark.Semantic as T
 import Prelude hiding (break, mod)
 

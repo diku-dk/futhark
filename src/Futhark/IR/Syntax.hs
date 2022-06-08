@@ -32,7 +32,7 @@
 -- curly braces.
 --
 -- The system of primitive types is interesting in itself.  See
--- "Futhark.IR.Primitive".
+-- "Language.Futhark.Primitive".
 --
 -- == Overall AST design
 --
