@@ -40,10 +40,10 @@ someDimsFreshInType ::
   TermTypeM (TypeBase Size als)
 someDimsFreshInType loc r desc sizes = bitraverse onDim pure
   where
-    onDim (NamedSize d)
-      | qualLeaf d `S.member` sizes = do
+    onDim (NamedSize e)
+      | any (`S.member` sizes) (fvSet (freeInExp e)) = do
           v <- newDimVar loc r desc
-          pure $ NamedSize $ qualName v
+          pure $ NamedSize $ varSize v
     onDim d = pure d
 
 -- | Replace the specified sizes with fresh size variables of the
@@ -58,15 +58,15 @@ freshDimsInType ::
 freshDimsInType loc r desc sizes t =
   second M.elems <$> runStateT (bitraverse onDim pure t) mempty
   where
-    onDim (NamedSize d)
+    onDim (NamedSize (Var d _ _))
       | qualLeaf d `S.member` sizes = do
           prev_subst <- gets $ M.lookup $ qualLeaf d
           case prev_subst of
-            Just d' -> pure $ NamedSize $ qualName d'
+            Just d' -> pure $ NamedSize $ varSize d'
             Nothing -> do
               v <- lift $ newDimVar loc r desc
               modify $ M.insert (qualLeaf d) v
-              pure $ NamedSize $ qualName v
+              pure $ NamedSize $ varSize v
     onDim d = pure d
 
 -- | Mark bindings of names in "consumed" as Unique.

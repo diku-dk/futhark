@@ -695,8 +695,7 @@ relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 dimDeclHtml :: Size -> DocM Html
-dimDeclHtml (NamedSize v) = brackets <$> qualNameHtml v
-dimDeclHtml (ConstSize n) = pure $ brackets $ toHtml (show n)
+dimDeclHtml (NamedSize e) = pure $ brackets $ toHtml $ pretty e
 dimDeclHtml AnySize {} = pure $ brackets mempty
 
 dimExpHtml :: SizeExp Info VName -> DocM Html

@@ -98,7 +98,6 @@ instance Pretty Size where
   ppr (AnySize Nothing) = mempty
   ppr (AnySize (Just v)) = text "?" <> pprName v
   ppr (NamedSize v) = ppr v
-  ppr (ConstSize n) = ppr n
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SizeExp f vn) where
   ppr SizeExpAny {} = brackets mempty

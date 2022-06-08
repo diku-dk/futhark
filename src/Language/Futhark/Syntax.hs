@@ -220,9 +220,7 @@ data Size
   = -- | The size of the dimension is this name, which
     -- must be in scope.  In a return type, this will
     -- give rise to an assertion.
-    NamedSize (QualName VName)
-  | -- | The size is a constant.
-    ConstSize Int
+    NamedSize (ExpBase Info VName)
   | -- | No known size.  If @Nothing@, then this is a name distinct
     -- from any other.  The type checker should _never_ produce these
     -- - they are a (hopefully temporary) thing introduced by

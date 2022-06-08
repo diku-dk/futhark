@@ -163,8 +163,8 @@ lookupSubst :: VName -> Constraints -> Maybe (Subst StructRetType)
 lookupSubst v constraints = case snd <$> M.lookup v constraints of
   Just (Constraint t _) -> Just $ Subst [] $ applySubst (`lookupSubst` constraints) t
   Just Overloaded {} -> Just PrimSubst
-  Just (Size (Just d) _) ->
-    Just $ SizeSubst $ applySubst (`lookupSubst` constraints) d
+  Just (Size (Just (NamedSize e)) _) ->
+    Just $ SizeSubst $ applySubst (`lookupSubst` constraints) e
   _ -> Nothing
 
 -- | The source of a rigid size.
@@ -256,7 +256,7 @@ prettySource ctx loc (RigidCond t1 t2) =
 -- 'Size'.  The location is used as the *current* location, for the
 -- purpose of reporting relative locations.
 dimNotes :: (Located a, MonadUnify m) => a -> Size -> m Notes
-dimNotes ctx (NamedSize d) = do
+dimNotes ctx (NamedSize (Var d _ _)) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
@@ -268,7 +268,7 @@ dimNotes _ _ = pure mempty
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
   fmap mconcat
-    . mapM (dimNotes ctx . NamedSize . qualName)
+    . mapM (dimNotes ctx . NamedSize . varSize)
     . S.toList
     . freeInType
 
@@ -366,8 +366,8 @@ instantiateEmptyArrayDims tloc r (RetType dims t) = do
   pure (first (onDim $ zip dims dims') t, dims')
   where
     new = newDimVar tloc r . nameFromString . takeWhile isAscii . baseString
-    onDim dims' (NamedSize d) =
-      NamedSize $ maybe d qualName (lookup (qualLeaf d) dims')
+    onDim dims' (NamedSize e@(Var d _ _)) =
+      NamedSize $ maybe e varSize (lookup (qualLeaf d) dims')
     onDim _ d = d
 
 -- | Is the given type variable the name of an abstract type or type
@@ -520,7 +520,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ SizeSubst $ NamedSize $ qualName p1'
+                          | v == p2' = Just $ SizeSubst $ varSize p1'
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -553,10 +553,10 @@ unifyWith onDims usage = subunify False
 unifyDims :: MonadUnify m => Usage -> UnifyDims m
 unifyDims _ _ _ _ d1 d2
   | d1 == d2 = pure ()
-unifyDims usage bcs _ nonrigid (NamedSize (QualName _ d1)) d2
+unifyDims usage bcs _ nonrigid (NamedSize (Var (QualName _ d1) _ _)) d2
   | Just lvl1 <- nonrigid d1 =
       linkVarToDim usage bcs d1 lvl1 d2
-unifyDims usage bcs _ nonrigid d1 (NamedSize (QualName _ d2))
+unifyDims usage bcs _ nonrigid d1 (NamedSize (Var (QualName _ d2) _ _))
   | Just lvl2 <- nonrigid d2 =
       linkVarToDim usage bcs d2 lvl2 d1
 unifyDims usage bcs _ _ d1 d2 = do
@@ -580,11 +580,11 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
       | d1 == d2 = pure ()
     -- We identify existentially bound names by them being nonrigid
     -- and yet bound.  It's OK to unify with those.
-    onDims bcs bound nonrigid (NamedSize (QualName _ d1)) d2
+    onDims bcs bound nonrigid (NamedSize (Var (QualName _ d1) _ _)) d2
       | Just lvl1 <- nonrigid d1,
         not (boundParam bound d2) || (d1 `elem` bound) =
           linkVarToDim usage bcs d1 lvl1 d2
-    onDims bcs bound nonrigid d1 (NamedSize (QualName _ d2))
+    onDims bcs bound nonrigid d1 (NamedSize (Var (QualName _ d2) _ _))
       | Just lvl2 <- nonrigid d2,
         not (boundParam bound d1) || (d2 `elem` bound) =
           linkVarToDim usage bcs d2 lvl2 d1
@@ -597,7 +597,7 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
           <+> pquote (ppr d2)
           <+> "do not match."
 
-    boundParam bound (NamedSize (QualName _ d)) = d `elem` bound
+    boundParam bound (NamedSize (Var (QualName _ d) _ _)) = d `elem` bound
     boundParam _ _ = False
 
 occursCheck ::
@@ -815,7 +815,7 @@ linkVarToDim usage bcs vn lvl dim = do
   constraints <- getConstraints
 
   case dim of
-    NamedSize dim'
+    NamedSize (Var dim' _ _)
       | Just (dim_lvl, c) <- qualLeaf dim' `M.lookup` constraints,
         dim_lvl > lvl ->
           case c of
@@ -1132,11 +1132,11 @@ newDimOnMismatch loc t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ NamedSize $ qualName d
+            Just d -> pure $ NamedSize $ varSize d
             Nothing -> do
               d <- lift $ newDimVar loc r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ NamedSize $ qualName d
+              pure $ NamedSize $ varSize d
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.

@@ -707,8 +707,6 @@ inferSizeArgs tparams bind_t t =
       case M.lookup (typeParamName tp) dinst of
         Just (NamedSize d) ->
           Just $ Var d (Info i64) mempty
-        Just (ConstSize x) ->
-          Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         _ ->
           Just $ Literal (SignedValue $ Int64Value 0) mempty
 

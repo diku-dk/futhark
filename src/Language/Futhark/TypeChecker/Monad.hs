@@ -442,7 +442,8 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
     onTypeArg except (TypeArgType t loc) =
       TypeArgType (onType except t) loc
 
-    onDim except (NamedSize qn) = NamedSize $ qual except qn
+    -- FIXME
+    -- onDim except (NamedSize qn) = NamedSize $ qual except qn
     onDim _ d = d
 
     qual except (QualName orig_qs name)

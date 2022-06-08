@@ -80,69 +80,21 @@ replaceTypeSizes ::
   TypeBase Size als
 replaceTypeSizes substs = first onDim
   where
-    onDim (NamedSize v) =
-      case M.lookup (qualLeaf v) substs of
-        Just (SubstNamed v') -> NamedSize v'
-        Just (SubstConst d) -> ConstSize d
-        Nothing -> NamedSize v
+    onDim (NamedSize e) = NamedSize $ replaceExpSizes substs e
     onDim d = d
 
-replaceStaticValSizes ::
-  S.Set VName ->
-  M.Map VName SizeSubst ->
-  StaticVal ->
-  StaticVal
-replaceStaticValSizes globals orig_substs sv =
-  case sv of
-    _ | M.null orig_substs -> sv
-    LambdaSV param (RetType t_dims t) e closure_env ->
-      let substs =
-            foldl' (flip M.delete) orig_substs $
-              S.fromList (M.keys closure_env)
-       in LambdaSV
-            (onAST substs param)
-            (RetType t_dims (replaceTypeSizes substs t))
-            (onExtExp substs e)
-            (onEnv orig_substs closure_env) -- intentional
-    Dynamic t ->
-      Dynamic $ replaceTypeSizes orig_substs t
-    RecordSV fs ->
-      RecordSV $ map (fmap (replaceStaticValSizes globals orig_substs)) fs
-    SumSV c svs ts ->
-      SumSV c (map (replaceStaticValSizes globals orig_substs) svs) $
-        map (fmap $ map $ replaceTypeSizes orig_substs) ts
-    DynamicFun (e, sv1) sv2 ->
-      DynamicFun (onExp orig_substs e, replaceStaticValSizes globals orig_substs sv1) $
-        replaceStaticValSizes globals orig_substs sv2
-    IntrinsicSV ->
-      IntrinsicSV
+replaceExpSizes substs (Var v t loc) =
+  case M.lookup (qualLeaf v) substs of
+    Just (SubstNamed v') ->
+      Var v' t loc
+    Just (SubstConst d) ->
+      Literal (SignedValue (Int64Value (fromIntegral d))) loc
+    Nothing ->
+      Var v (replaceTypeSizes substs <$> t) loc
+replaceExpSizes substs (AppExp (Coerce e te loc) (Info (AppRes t ext))) =
+  AppExp (Coerce (replaceExpSizes substs e) te' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
   where
-    tv substs =
-      identityMapper
-        { mapOnPatType = pure . replaceTypeSizes substs,
-          mapOnStructType = pure . replaceTypeSizes substs,
-          mapOnExp = pure . onExp substs,
-          mapOnName = pure . onName substs
-        }
-
-    onName substs v =
-      case M.lookup v substs of
-        Just (SubstNamed v') -> qualLeaf v'
-        _ -> v
-
-    onExp substs (Var v t loc) =
-      case M.lookup (qualLeaf v) substs of
-        Just (SubstNamed v') ->
-          Var v' t loc
-        Just (SubstConst d) ->
-          Literal (SignedValue (Int64Value (fromIntegral d))) loc
-        Nothing ->
-          Var v (replaceTypeSizes substs <$> t) loc
-    onExp substs (AppExp (Coerce e te loc) (Info (AppRes t ext))) =
-      AppExp (Coerce (onExp substs e) te' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
-      where
-        te' = onTypeExp substs te
-    onExp substs e = onAST substs e
+    te' = onTypeExp substs te
 
     onTypeExpDim _ d = d
 
@@ -169,13 +121,76 @@ replaceStaticValSizes globals orig_substs sv =
       TEDim dims (onTypeExp substs t) loc
     onTypeExp _ (TEVar v loc) =
       TEVar v loc
+replaceExpSizes substs e = onAST substs e
+  where
+    tv substs =
+      identityMapper
+        { mapOnPatType = pure . replaceTypeSizes substs,
+          mapOnStructType = pure . replaceTypeSizes substs,
+          mapOnExp = pure . replaceExpSizes substs,
+          mapOnName = pure . onName substs
+        }
+
+    onAST :: ASTMappable x => M.Map VName SizeSubst -> x -> x
+    onAST substs = runIdentity . astMap (tv substs)
+
+    onName substs v =
+      case M.lookup v substs of
+        Just (SubstNamed v') -> qualLeaf v'
+        _ -> v
+
+replaceStaticValSizes ::
+  S.Set VName ->
+  M.Map VName SizeSubst ->
+  StaticVal ->
+  StaticVal
+replaceStaticValSizes globals orig_substs sv =
+  case sv of
+    _ | M.null orig_substs -> sv
+    LambdaSV param (RetType t_dims t) e closure_env ->
+      let substs =
+            foldl' (flip M.delete) orig_substs $
+              S.fromList (M.keys closure_env)
+       in LambdaSV
+            (onAST substs param)
+            (RetType t_dims (replaceTypeSizes substs t))
+            (onExtExp substs e)
+            (onEnv orig_substs closure_env) -- intentional
+    Dynamic t ->
+      Dynamic $ replaceTypeSizes orig_substs t
+    RecordSV fs ->
+      RecordSV $ map (fmap (replaceStaticValSizes globals orig_substs)) fs
+    SumSV c svs ts ->
+      SumSV c (map (replaceStaticValSizes globals orig_substs) svs) $
+        map (fmap $ map $ replaceTypeSizes orig_substs) ts
+    DynamicFun (e, sv1) sv2 ->
+      DynamicFun (replaceExpSizes orig_substs e, replaceStaticValSizes globals orig_substs sv1) $
+        replaceStaticValSizes globals orig_substs sv2
+    IntrinsicSV ->
+      IntrinsicSV
+  where
+    tv substs =
+      identityMapper
+        { mapOnPatType = pure . replaceTypeSizes substs,
+          mapOnStructType = pure . replaceTypeSizes substs,
+          mapOnExp = pure . replaceExpSizes substs,
+          mapOnName = pure . onName substs
+        }
+
+    onAST :: ASTMappable x => M.Map VName SizeSubst -> x -> x
+    onAST substs = runIdentity . astMap (tv substs)
+
+    onName substs v =
+      case M.lookup v substs of
+        Just (SubstNamed v') -> qualLeaf v'
+        _ -> v
 
     onExtExp substs (ExtExp e) =
-      ExtExp $ onExp substs e
+      ExtExp $ replaceExpSizes substs e
     onExtExp substs (ExtLambda params e (RetType t_dims t) loc) =
       ExtLambda
         (map (onAST substs) params)
-        (onExp substs e)
+        (replaceExpSizes substs e)
         (RetType t_dims (replaceTypeSizes substs t))
         loc
 
@@ -188,9 +203,6 @@ replaceStaticValSizes globals orig_substs sv =
       Binding
         (second (replaceTypeSizes substs) <$> t)
         (replaceStaticValSizes globals substs bsv)
-
-    onAST :: ASTMappable x => M.Map VName SizeSubst -> x -> x
-    onAST substs = runIdentity . astMap (tv substs)
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names and types.
@@ -272,7 +284,7 @@ arraySizes (Scalar (Sum cs)) = foldMap (foldMap arraySizes) cs
 arraySizes (Scalar (TypeVar _ _ _ targs)) =
   mconcat $ map f targs
   where
-    f (TypeArgDim (NamedSize d) _) = S.singleton $ qualLeaf d
+    f (TypeArgDim (NamedSize (Var d _ _)) _) = S.singleton $ qualLeaf d
     f TypeArgDim {} = mempty
     f (TypeArgType t _) = arraySizes t
 arraySizes (Scalar Prim {}) = mempty
@@ -280,7 +292,7 @@ arraySizes (Array _ _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
   where
     dimName :: Size -> S.Set VName
-    dimName (NamedSize qn) = S.singleton $ qualLeaf qn
+    dimName (NamedSize (Var qn _ _)) = S.singleton $ qualLeaf qn
     dimName _ = mempty
 
 patternArraySizes :: Pat -> S.Set VName
@@ -291,6 +303,10 @@ data SizeSubst
   | SubstConst Int
   deriving (Eq, Ord, Show)
 
+isVarExp :: Exp -> Maybe VName
+isVarExp (Var v _ _) = Just $ qualLeaf v
+isVarExp _ = Nothing
+
 dimMapping ::
   Monoid a =>
   TypeBase Size a ->
@@ -298,14 +314,14 @@ dimMapping ::
   M.Map VName SizeSubst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where
-    f bound d1 (NamedSize d2)
-      | qualLeaf d2 `elem` bound = pure d1
-    f _ (NamedSize d1) (NamedSize d2) = do
-      modify $ M.insert (qualLeaf d1) $ SubstNamed d2
-      pure $ NamedSize d1
-    f _ (NamedSize d1) (ConstSize d2) = do
-      modify $ M.insert (qualLeaf d1) $ SubstConst d2
-      pure $ NamedSize d1
+    f bound d1 (NamedSize e2)
+      | Just d2 <- isVarExp e2,
+        d2 `elem` bound =
+          pure d1
+    f _ (NamedSize e1) (NamedSize e2)
+      | (Just d1, Just d2) <- (isVarExp e1, isVarExp e2) = do
+          modify $ M.insert d1 $ SubstNamed $ qualName d2
+          pure $ NamedSize e1
     f _ d _ = pure d
 
 dimMapping' ::
@@ -788,24 +804,21 @@ sizesForAll bound_sizes params = do
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim (AnySize (Just v)) = do
       modify $ S.insert v
-      pure $ NamedSize $ qualName v
+      pure $ NamedSize $ Var (qualName v) (Info (Scalar (Prim (Signed Int64)))) mempty
     onDim (AnySize Nothing) = do
       v <- lift $ newVName "size"
       modify $ S.insert v
-      pure $ NamedSize $ qualName v
-    onDim (NamedSize d) = do
-      unless (qualLeaf d `S.member` bound) $
-        modify $
-          S.insert $
-            qualLeaf d
-      pure $ NamedSize d
+      pure $ NamedSize $ Var (qualName v) (Info (Scalar (Prim (Signed Int64)))) mempty
+    onDim (NamedSize e) = do
+      modify $ S.union $ (`S.difference` bound) $ fvSet $ freeInExp e
+      pure $ NamedSize e
     onDim d = pure d
 
 unRetType :: StructRetType -> StructType
 unRetType (RetType [] t) = t
 unRetType (RetType ext t) = first onDim t
   where
-    onDim (NamedSize d) | qualLeaf d `elem` ext = AnySize Nothing
+    onDim (NamedSize e) | fvAny (`elem` ext) (freeInExp e) = AnySize Nothing
     onDim d = d
 
 -- | Defunctionalize an application expression at a given depth of application.
@@ -1299,8 +1312,9 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
           sv
     )
   where
-    anyDimIfNotBound bound_sizes (NamedSize v)
-      | qualLeaf v `S.notMember` bound_sizes = AnySize $ Just $ qualLeaf v
+    anyDimIfNotBound bound_sizes (NamedSize e)
+      | fvAny (`S.notMember` bound_sizes) (freeInExp e) =
+          AnySize Nothing
     anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.

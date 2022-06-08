@@ -586,7 +586,7 @@ instantiateTypeParam qn loc tparam = do
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc $
         "instantiated size parameter of " <> quote (pretty qn) <> "."
-      pure (v, SizeSubst $ NamedSize $ qualName v)
+      pure (v, SizeSubst $ varSize v)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -726,7 +726,7 @@ instance MonadTypeChecker TermTypeM where
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}
 
-extSize :: SrcLoc -> SizeSource -> TermTypeM (Size, Maybe VName)
+extSize :: SrcLoc -> SizeSource -> TermTypeM (Exp, Maybe VName)
 extSize loc e = do
   prev <- gets $ M.lookup e . stateDimTable
   case prev of
@@ -741,12 +741,12 @@ extSize loc e = do
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
-        ( NamedSize $ qualName d,
+        ( varSize d,
           Just d
         )
     Just d ->
       pure
-        ( NamedSize $ qualName d,
+        ( varSize d,
           Just d
         )
 
@@ -773,7 +773,7 @@ newArrayType loc desc r = do
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
   let rowt = TypeVar () Nonunique (qualName v) []
   pure
-    ( Array () Nonunique (Shape $ map (NamedSize . qualName) dims) rowt,
+    ( Array () Nonunique (Shape $ map (NamedSize . varSize) dims) rowt,
       Scalar rowt
     )
 
@@ -790,7 +790,7 @@ allDimsFreshInType loc r desc t =
     onDim d = do
       v <- lift $ newDimVar loc r desc
       modify $ M.insert v d
-      pure $ NamedSize $ qualName v
+      pure $ NamedSize $ varSize v
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: ASTMappable e => e -> TermTypeM e
@@ -865,13 +865,10 @@ isInt64 (IntLit k' _ _) = Just $ fromInteger k'
 isInt64 (Negate x _) = negate <$> isInt64 x
 isInt64 _ = Nothing
 
-maybeDimFromExp :: Exp -> Maybe Size
-maybeDimFromExp (Var v _ _) = Just $ NamedSize v
-maybeDimFromExp (Parens e _) = maybeDimFromExp e
-maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = ConstSize . fromIntegral <$> isInt64 e
+maybeDimFromExp :: Exp -> Maybe Exp
+maybeDimFromExp e = Just e
 
-dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (Size, Maybe VName)
+dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (Exp, Maybe VName)
 dimFromExp rf (Attr _ e _) = dimFromExp rf e
 dimFromExp rf (Assert _ e _ _) = dimFromExp rf e
 dimFromExp rf (Parens e _) = dimFromExp rf e
@@ -882,7 +879,7 @@ dimFromExp rf e
   | otherwise =
       extSize (srclocOf e) $ rf e
 
-sizeFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (Size, Maybe VName)
+sizeFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (Exp, Maybe VName)
 sizeFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
 
 -- | Any argument sizes created with 'extSize' inside the given action

@@ -186,7 +186,7 @@ typeShape shapes = go
 structTypeShape :: M.Map VName ValueShape -> StructType -> Shape (Maybe Int64)
 structTypeShape shapes = fmap dim . typeShape shapes'
   where
-    dim (ConstSize d) = Just $ fromIntegral d
+    dim (NamedSize (Literal (SignedValue (Int64Value d)) _)) = Just $ fromIntegral d
     dim _ = Nothing
     shapes' = M.map (fmap $ ConstSize . fromIntegral) shapes
 
@@ -215,7 +215,7 @@ resolveTypeParams names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) (stripArray 1 t)
     match _ _ = mempty
 
-    matchDims (NamedSize (QualName _ d1)) (ConstSize d2)
+    matchDims (NamedSize (QualName _ d1)) (NamedSize (Literal (SignedValue (Int64Value d2)) _))
       | d1 `elem` names =
           i64Env $ M.singleton d1 $ fromIntegral d2
     matchDims _ _ = mempty
@@ -712,8 +712,6 @@ evalType env t@(Scalar (TypeVar () _ tn args)) =
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim (NamedSize qv) _) =
       (M.singleton p $ NamedSize qv, mempty)
-    matchPtoA (TypeParamDim p _) (TypeArgDim (ConstSize k) _) =
-      (M.singleton p $ ConstSize k, mempty)
     matchPtoA (TypeParamType l p _) (TypeArgType t' _) =
       let t'' = evalType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
@@ -737,7 +735,7 @@ typeValueShape env t = do
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " ++ pretty t'
     Just shape -> pure shape
   where
-    dim (ConstSize x) = Just $ fromIntegral x
+    dim (NamedSize (Literal (SignedValue (Int64Value x)) _)) = Just $ fromIntegral x
     dim _ = Nothing
 
 evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
@@ -1174,7 +1172,6 @@ substituteInModule substs = onModule
     onTerm (TermModule m) = TermModule $ onModule m
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
     onDim (NamedSize v) = NamedSize $ replaceQ v
-    onDim (ConstSize x) = ConstSize x
     onDim (AnySize v) = AnySize v
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module

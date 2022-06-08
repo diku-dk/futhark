@@ -1,11 +1,14 @@
 -- | Facilities for computing free term variables in various syntactic
 -- constructs.
 module Language.Futhark.FreeVars
-  ( freeInExp,
+  ( FV (..),
+    freeInExp,
     freeInPat,
     freeInType,
     freeWithout,
-    FV (..),
+    fvIn,
+    fvAny,
+    fvSet,
   )
 where
 
@@ -30,6 +33,15 @@ freeWithout :: FV -> S.Set VName -> FV
 freeWithout (FV x) y = FV $ M.filterWithKey keep x
   where
     keep k _ = k `S.notMember` y
+
+fvIn :: VName -> FV -> Bool
+fvIn v (FV m) = v `M.member` m
+
+fvAny :: (VName -> Bool) -> FV -> Bool
+fvAny p (FV m) = any p (M.keys m)
+
+fvSet :: FV -> S.Set VName
+fvSet (FV m) = S.fromList (M.keys m)
 
 ident :: IdentBase Info VName -> FV
 ident v = FV $ M.singleton (identName v) (toStruct $ unInfo (identType v))
@@ -160,5 +172,5 @@ freeInType t =
     notV Unnamed = const True
     notV (Named v) = (/= v)
 
-    onSize (NamedSize qn) = S.singleton $ qualLeaf qn
+    onSize (NamedSize e) = S.fromList $ M.keys $ unFV $ freeInExp e -- FIXME
     onSize _ = mempty

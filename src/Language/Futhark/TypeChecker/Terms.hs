@@ -89,13 +89,13 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
             lift . extSize loc $
               SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
           modify (maybeToList ext ++)
-          pure d
+          pure $ NamedSize d
         Just (loc, Nonrigid) ->
-          lift $ NamedSize . qualName <$> newDimVar loc Nonrigid "slice_dim"
+          lift $ NamedSize . varSize <$> newDimVar loc Nonrigid "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
           modify (v :)
-          pure $ NamedSize $ qualName v
+          pure $ NamedSize $ varSize v
       where
         -- The original size does not matter if the slice is fully specified.
         orig_d'
@@ -110,7 +110,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         maybe True ((== Just 0) . isInt64) i,
         Just j' <- maybeDimFromExp =<< j,
         maybe True ((== Just 1) . isInt64) stride =
-          (j' :) <$> adjustDims idxes' dims
+          (NamedSize j' :) <$> adjustDims idxes' dims
     adjustDims (DimSlice Nothing Nothing stride : idxes') (d : dims)
       | refine_sizes,
         maybe True (maybe False ((== 1) . abs) . isInt64) stride =
@@ -187,7 +187,7 @@ unscopeType tloc unscoped t = do
   (t', m) <- runStateT (traverseDims onDim t) mempty
   pure (t' `addAliases` S.map unAlias, M.elems m)
   where
-    onDim bound _ (NamedSize d)
+    onDim bound _ (NamedSize (Var d _ _))
       | Just loc <- srclocOf <$> M.lookup (qualLeaf d) unscoped,
         not $ qualLeaf d `S.member` bound =
           inst loc $ qualLeaf d
@@ -196,11 +196,11 @@ unscopeType tloc unscoped t = do
     inst loc d = do
       prev <- gets $ M.lookup d
       case prev of
-        Just d' -> pure $ NamedSize $ qualName d'
+        Just d' -> pure $ NamedSize $ varSize d'
         Nothing -> do
           d' <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope loc d) "d"
           modify $ M.insert d d'
-          pure $ NamedSize $ qualName d'
+          pure $ NamedSize $ varSize d'
 
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
@@ -293,7 +293,8 @@ checkExp (RecordLit fs loc) = do
               <+> "previously defined at"
               <+> text (locStrRel rloc sloc) <> "."
         Nothing -> pure ()
-checkExp (ArrayLit all_es _ loc) =
+checkExp (ArrayLit all_es _ loc) = do
+  let shape = Shape [NamedSize $ constSize $ length all_es]
   -- Construct the result type and unify all elements with it.  We
   -- only create a type variable for empty arrays; otherwise we use
   -- the type of the first element.  This significantly cuts down on
@@ -302,14 +303,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do
       et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (Shape [ConstSize 0]) Unique
+      t <- arrayOfM loc et shape Unique
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (Shape [ConstSize $ length all_es]) Unique
+      t <- arrayOfM loc et' shape Unique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -347,9 +348,9 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
             dimFromBound end''
       _ -> do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
-        pure (NamedSize $ qualName d, Just d)
+        pure (varSize d, Just d)
 
-  t <- arrayOfM loc start_t (Shape [dim]) Unique
+  t <- arrayOfM loc start_t (Shape [NamedSize dim]) Unique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
@@ -887,9 +888,9 @@ boundInsideType (Scalar (Arrow _ pn t1 (RetType dims t2))) =
 dimUses :: StructType -> (Names, Names)
 dimUses = flip execState mempty . traverseDims f
   where
-    f bound _ (NamedSize v) | qualLeaf v `S.member` bound = pure ()
-    f _ PosImmediate (NamedSize v) = modify ((S.singleton (qualLeaf v), mempty) <>)
-    f _ PosParam (NamedSize v) = modify ((mempty, S.singleton (qualLeaf v)) <>)
+    f bound _ (NamedSize (Var v _ _)) | qualLeaf v `S.member` bound = pure ()
+    f _ PosImmediate (NamedSize (Var v _ _)) = modify ((S.singleton (qualLeaf v), mempty) <>)
+    f _ PosParam (NamedSize (Var v _ _)) = modify ((mempty, S.singleton (qualLeaf v)) <>)
     f _ _ _ = pure ()
 
 checkApply ::
@@ -1456,7 +1457,7 @@ sizeNamesPos (Scalar (Arrow _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesPos
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs
     onParam t = freeInType t
-    onTypeArg (TypeArgDim (NamedSize d) _) = S.singleton $ qualLeaf d
+    onTypeArg (TypeArgDim (NamedSize (Var v _ _)) _) = S.singleton $ qualLeaf v
     onTypeArg (TypeArgDim _ _) = mempty
     onTypeArg (TypeArgType t _) = onParam t
 sizeNamesPos _ = mempty
@@ -1638,7 +1639,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, UnknowableSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
-          notes <- dimNotes defloc $ NamedSize $ qualName k
+          notes <- dimNotes defloc $ NamedSize $ varSize k
           typeError defloc notes . withIndexLink "unknowable-param-def" $
             "Unknowable size"
               <+> pquote (pprName k)

@@ -505,7 +505,7 @@ typeOf (StringLit vs _) =
   Array
     mempty
     Unique
-    (Shape [ConstSize $ genericLength vs])
+    (Shape [NamedSize $ Literal (SignedValue (Int64Value (genericLength vs))) mempty])
     (Prim (Unsigned Int8))
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
@@ -1153,8 +1153,6 @@ intrinsics =
 
     [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 
-    shape = Shape . map (NamedSize . qualName)
-
     tuple_arr x y s =
       Array
         ()
@@ -1165,9 +1163,12 @@ intrinsics =
 
     arr x y = Scalar $ Arrow mempty Unnamed x (RetType [] y)
 
-    arr_ka = Array () Nonunique (Shape [NamedSize $ qualName k]) t_a
-    uarr_ka = Array () Unique (Shape [NamedSize $ qualName k]) t_a
-    arr_kb = Array () Nonunique (Shape [NamedSize $ qualName k]) t_b
+    varSize v = NamedSize $ Var (qualName v) (Info (Scalar (Prim (Signed Int64)))) mempty
+    shape = Shape . map varSize
+
+    arr_ka = Array () Nonunique (Shape [varSize k]) t_a
+    uarr_ka = Array () Unique (Shape [varSize k]) t_a
+    arr_kb = Array () Nonunique (Shape [varSize k]) t_b
     karr x y = Scalar $ Arrow mempty (Named k) x (RetType [] y)
 
     accType t =
