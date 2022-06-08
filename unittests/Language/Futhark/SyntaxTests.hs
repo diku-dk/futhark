@@ -12,10 +12,10 @@ import qualified Data.Map as M
 import Data.String
 import qualified Data.Text as T
 import Data.Void
-import Futhark.IR.Primitive.Parse (constituent, keyword, lexeme)
-import Futhark.IR.PrimitiveTests ()
 import Language.Futhark
 import Language.Futhark.Parser
+import Language.Futhark.Primitive.Parse (constituent, keyword, lexeme)
+import Language.Futhark.PrimitiveTests ()
 import Test.QuickCheck
 import Test.Tasty
 import Text.Megaparsec

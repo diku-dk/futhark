@@ -27,9 +27,9 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util.Pretty hiding (bool, group, space)
 import Language.Futhark
+import Language.Futhark.Primitive (intByteSize)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Match
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)

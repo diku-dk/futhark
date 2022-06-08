@@ -114,9 +114,9 @@ import Data.Maybe
 import Data.Ord
 import qualified Data.Set as S
 import qualified Data.Text as T
-import qualified Futhark.IR.Primitive as Primitive
 import Futhark.Util (maxinum)
 import Futhark.Util.Pretty
+import qualified Language.Futhark.Primitive as Primitive
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals
 

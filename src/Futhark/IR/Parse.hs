@@ -32,13 +32,13 @@ import qualified Futhark.IR.MC.Op as MC
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.IR.Primitive.Parse
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import qualified Futhark.IR.SegOp as SegOp
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util.Pretty (prettyText)
+import Language.Futhark.Primitive.Parse
 import Text.Megaparsec
 import Text.Megaparsec.Char hiding (space)
 import qualified Text.Megaparsec.Char.Lexer as L

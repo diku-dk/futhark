@@ -10,6 +10,9 @@
 -- the functor @f@, and all names are of type @vn@.  See
 -- https://futhark.readthedocs.org for a language reference, or this
 -- module may be a little hard to understand.
+--
+-- The system of primitive types is interesting in itself.  See
+-- "Language.Futhark.Primitive".
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
     pretty,
@@ -108,15 +111,15 @@ import Data.Monoid hiding (Sum)
 import Data.Ord
 import qualified Data.Set as S
 import Data.Traversable
-import Futhark.IR.Primitive
+import Futhark.Util.Loc
+import Futhark.Util.Pretty
+import Language.Futhark.Core
+import Language.Futhark.Primitive
   ( FloatType (..),
     FloatValue (..),
     IntType (..),
     IntValue (..),
   )
-import Futhark.Util.Loc
-import Futhark.Util.Pretty
-import Language.Futhark.Core
 import Prelude
 
 -- | No information functor.  Usually used for placeholder type- or
