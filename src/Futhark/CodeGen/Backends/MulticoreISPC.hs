@@ -1087,7 +1087,7 @@ analyzeVariability :: MCCode -> ISPCCompilerM a -> ISPCCompilerM a
 analyzeVariability code m = do
   let roots = findVarying code
   let deps = depsFixedPoint $ execVariabilityM $ findDeps code
-  let safelist = M.filter (\b -> not $ any (`nameIn` b) roots) deps
+  let safelist = M.filter (\b -> all (`notNameIn` b) roots) deps
   let safe = namesFromList $ M.keys safelist
   pre_state <- GC.getUserState
   GC.modifyUserState (\s -> s {sUniform = safe})
@@ -1100,7 +1100,7 @@ getVariability :: VName -> ISPCCompilerM Variability
 getVariability name = do
   uniforms <- sUniform <$> GC.getUserState
   pure $
-    if nameIn name uniforms
+    if name `nameIn` uniforms
       then Uniform
       else Varying
 
