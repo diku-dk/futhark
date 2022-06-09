@@ -205,25 +205,6 @@ unscopeType tloc unscoped t = do
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
 
--- When a function result is not immediately bound to a name, we need
--- to invent a name for it so we can track it during aliasing
--- (uniqueness-error54.fut, uniqueness-error55.fut).
-addResultAliases :: NameReason -> PatType -> TermTypeM PatType
-addResultAliases r (Scalar (Record fs)) =
-  Scalar . Record <$> traverse (addResultAliases r) fs
-addResultAliases r (Scalar (Sum fs)) =
-  Scalar . Sum <$> traverse (traverse (addResultAliases r)) fs
-addResultAliases r (Scalar (TypeVar as u tn targs)) = do
-  v <- newID "internal_app_result"
-  modify $ \s -> s {stateNames = M.insert v r $ stateNames s}
-  pure $ Scalar $ TypeVar (S.insert (AliasFree v) as) u tn targs
-addResultAliases _ (Scalar t@Prim {}) = pure (Scalar t)
-addResultAliases _ (Scalar t@Arrow {}) = pure (Scalar t)
-addResultAliases r (Array als u t shape) = do
-  v <- newID "internal_app_result"
-  modify $ \s -> s {stateNames = M.insert v r $ stateNames s}
-  pure $ Array (S.insert (AliasFree v) als) u t shape
-
 -- 'checkApplyExp' is like 'checkExp', but tries to find the "root
 -- function", for better error messages.
 checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
@@ -232,11 +213,10 @@ checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
   (e1', (fname, i)) <- checkApplyExp e1
   t <- expType e1'
   (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
-  rt' <- addResultAliases (NameAppRes fname loc) rt
   pure
     ( AppExp
         (Apply e1' (argExp arg) (Info (diet t1, argext)) loc)
-        (Info $ AppRes rt' exts),
+        (Info $ AppRes rt exts),
       (fname, i + 1)
     )
 checkApplyExp e = do
@@ -950,7 +930,15 @@ checkApply
                     (`M.lookup` M.singleton pname' (SizeSubst d))
                   )
           _ -> pure (Nothing, const Nothing)
-      let tp2'' = applySubst parsubst $ returnType tp2' (diet tp1') argtype'
+
+      -- In case a function result is not immediately bound to a name,
+      -- we need to invent a name for it so we can track it during
+      -- aliasing (uniqueness-error54.fut, uniqueness-error55.fut,
+      -- uniqueness-error60.fut).
+      v <- newID "internal_app_result"
+      modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
+      let appres = S.singleton $ AliasFree v
+      let tp2'' = applySubst parsubst $ returnType appres tp2' (diet tp1') argtype'
 
       pure (tp1', tp2'', argext, ext)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
@@ -989,37 +977,38 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
       | prev_applied == 1 = "argument"
       | otherwise = "arguments"
 
--- | @returnType ret_type arg_diet arg_type@ gives result of applying
+-- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
 -- type, consuming the argument with the given diet.
 returnType ::
+  Aliasing ->
   PatType ->
   Diet ->
   PatType ->
   PatType
-returnType (Array _ Unique et shape) _ _ =
+returnType _ (Array _ Unique et shape) _ _ =
   Array mempty Nonunique et shape -- Intentional!
-returnType (Array als Nonunique et shape) d arg =
-  Array (als <> arg_als) Nonunique et shape
+returnType appres (Array als Nonunique et shape) d arg =
+  Array (appres <> als <> arg_als) Nonunique et shape
   where
     arg_als = aliases $ maskAliases arg d
-returnType (Scalar (Record fs)) d arg =
-  Scalar $ Record $ fmap (\et -> returnType et d arg) fs
-returnType (Scalar (Prim t)) _ _ =
+returnType appres (Scalar (Record fs)) d arg =
+  Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
+returnType _ (Scalar (Prim t)) _ _ =
   Scalar $ Prim t
-returnType (Scalar (TypeVar _ Unique t targs)) _ _ =
+returnType _ (Scalar (TypeVar _ Unique t targs)) _ _ =
   Scalar $ TypeVar mempty Nonunique t targs -- Intentional!
-returnType (Scalar (TypeVar als Nonunique t targs)) d arg =
-  Scalar $ TypeVar (als <> arg_als) Unique t targs
+returnType appres (Scalar (TypeVar als Nonunique t targs)) d arg =
+  Scalar $ TypeVar (appres <> als <> arg_als) Unique t targs
   where
     arg_als = aliases $ maskAliases arg d
-returnType (Scalar (Arrow old_als v t1 (RetType dims t2))) d arg =
+returnType _ (Scalar (Arrow old_als v t1 (RetType dims t2))) d arg =
   Scalar $ Arrow als v (t1 `setAliases` mempty) $ RetType dims $ t2 `setAliases` als
   where
     -- Make sure to propagate the aliases of an existing closure.
     als = old_als <> aliases (maskAliases arg d)
-returnType (Scalar (Sum cs)) d arg =
-  Scalar $ Sum $ (fmap . fmap) (\et -> returnType et d arg) cs
+returnType appres (Scalar (Sum cs)) d arg =
+  Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
 
 -- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.

@@ -1,5 +1,5 @@
 -- ==
--- error: iota.*consumed
+-- error: "y".*consumed
 
 def main n =
   let (a,b) = let y = iota n
