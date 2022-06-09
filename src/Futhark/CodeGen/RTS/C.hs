@@ -18,6 +18,8 @@ module Futhark.CodeGen.RTS.C
     valuesH,
     errorsH,
     cacheH,
+    uniformH,
+    ispcUtilH,
   )
 where
 
@@ -31,6 +33,11 @@ import qualified Data.Text as T
 atomicsH :: T.Text
 atomicsH = $(embedStringFile "rts/c/atomics.h")
 {-# NOINLINE atomicsH #-}
+
+-- | @rts/c/uniform.h@
+uniformH :: T.Text
+uniformH = $(embedStringFile "rts/c/uniform.h")
+{-# NOINLINE uniformH #-}
 
 -- | @rts/c/cuda.h@
 cudaH :: T.Text
@@ -101,6 +108,11 @@ valuesH = $(embedStringFile "rts/c/values.h")
 errorsH :: T.Text
 errorsH = $(embedStringFile "rts/c/errors.h")
 {-# NOINLINE errorsH #-}
+
+-- | @rts/c/ispc_util.h@
+ispcUtilH :: T.Text
+ispcUtilH = $(embedStringFile "rts/c/ispc_util.h")
+{-# NOINLINE ispcUtilH #-}
 
 -- | @rts/c/cache.h@
 cacheH :: T.Text

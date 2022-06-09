@@ -8,6 +8,7 @@
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
   ( compileProg,
+    compileProg',
     CParts (..),
     asLibrary,
     asExecutable,
@@ -32,7 +33,8 @@ module Futhark.CodeGen.Backends.GenericC
 
     -- * Monadic compiler interface
     CompilerM,
-    CompilerState (compUserState, compNameSrc),
+    CompilerState (compUserState, compNameSrc, compDeclaredMem),
+    CompilerEnv (envCachedMem),
     getUserState,
     modifyUserState,
     contextContents,
@@ -77,6 +79,12 @@ module Futhark.CodeGen.Backends.GenericC
     primTypeToCType,
     intTypeToCType,
     copyMemoryDefaultSpace,
+    linearCode,
+    derefPointer,
+    fatMemAlloc,
+    fatMemSet,
+    fatMemUnRef,
+    errorMsgString,
   )
 where
 
@@ -264,7 +272,8 @@ defError msg stacktrace = do
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
-    [C.citems|ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
+    [C.citems|if (ctx->error == NULL)
+                ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
@@ -652,7 +661,7 @@ defineMemorySpace space = do
   free <- collect $ freeRawMem [C.cexp|block->mem|] space [C.cexp|desc|]
   ctx_ty <- contextType
   let unrefdef =
-        [C.cedecl|static int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
+        [C.cedecl|int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
@@ -678,7 +687,7 @@ defineMemorySpace space = do
     collect $
       allocRawMem [C.cexp|block->mem|] [C.cexp|size|] space [C.cexp|desc|]
   let allocdef =
-        [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
+        [C.cedecl|int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   if (size < 0) {
     futhark_panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
@@ -732,7 +741,7 @@ defineMemorySpace space = do
   -- Memory setting - unreference the destination and increase the
   -- count of the source by one.
   let setdef =
-        [C.cedecl|static int $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
+        [C.cedecl|int $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
   int ret = $id:(fatMemUnRef space)(ctx, lhs, lhs_desc);
   if (rhs->references != NULL) {
     (*(rhs->references))++;
@@ -1540,23 +1549,22 @@ asServer :: CParts -> T.Text
 asServer parts =
   gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
--- | Compile imperative program to a C program.  Always uses the
--- function named "main" as entry point, so make sure it is defined.
-compileProg ::
+compileProg' ::
   MonadFreshNames m =>
   T.Text ->
   T.Text ->
-  Operations op () ->
-  CompilerM op () () ->
+  Operations op s ->
+  s ->
+  CompilerM op s () ->
   T.Text ->
   [Space] ->
   [Option] ->
   Definitions op ->
-  m CParts
-compileProg backend version ops extra header_extra spaces options prog = do
+  m (CParts, CompilerState s)
+compileProg' backend version ops def extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
-        runCompilerM ops src () compileProg'
+        runCompilerM ops src def compileProgAction
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
       arraydecls = arrayDecls endstate
@@ -1652,18 +1660,20 @@ $entry_point_decls
   |]
 
   pure
-    CParts
-      { cHeader = headerdefs,
-        cUtils = utildefs,
-        cCLI = clidefs,
-        cServer = serverdefs,
-        cLib = libdefs,
-        cJsonManifest = Manifest.manifestToJSON manifest
-      }
+    ( CParts
+        { cHeader = headerdefs,
+          cUtils = utildefs,
+          cCLI = clidefs,
+          cServer = serverdefs,
+          cLib = libdefs,
+          cJsonManifest = Manifest.manifestToJSON manifest
+        },
+      endstate
+    )
   where
     Definitions consts (Functions funs) = prog
 
-    compileProg' = do
+    compileProgAction = do
       (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
 
       get_consts <- compileConstants consts
@@ -1695,6 +1705,22 @@ $entry_point_decls
         loc = case func of
           C.OldFunc _ _ _ _ _ _ l -> l
           C.Func _ _ _ _ _ l -> l
+
+-- | Compile imperative program to a C program.  Always uses the
+-- function named "main" as entry point, so make sure it is defined.
+compileProg ::
+  MonadFreshNames m =>
+  T.Text ->
+  T.Text ->
+  Operations op () ->
+  CompilerM op () () ->
+  T.Text ->
+  [Space] ->
+  [Option] ->
+  Definitions op ->
+  m CParts
+compileProg backend version ops extra header_extra spaces options prog =
+  fst <$> compileProg' backend version ops () extra header_extra spaces options prog
 
 commonLibFuns :: [C.BlockItem] -> CompilerM op s (M.Map T.Text Manifest.Type)
 commonLibFuns memreport = do
