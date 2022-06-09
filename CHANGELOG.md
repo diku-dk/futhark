@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect checking of whether a function parameter is consumable
   based on its type (#1687).
 
+* Missing aliases for functions that return multiple aliased values
+  (#1690).
+
 ## [0.21.12]
 
 ### Added
