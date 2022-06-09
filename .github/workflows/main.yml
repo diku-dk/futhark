@@ -245,8 +245,8 @@ jobs:
 
     - run: |
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-        nix-shell -p ispc --run 'futhark test -c --backend=ispc tests --no-tuning'
-        nix-shell -p ispc --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
+        nix-shell --run 'futhark test -c --backend=ispc tests --no-tuning'
+        nix-shell --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
   test-python:
     runs-on: ubuntu-20.04
