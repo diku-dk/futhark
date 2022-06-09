@@ -20,13 +20,13 @@ int main() {
   assert(err == 0);
 
   err = futhark_entry_fromM33(ctx,
-                              &xs[0], &xs[1], &xs[2],
-                              &xs[3], &xs[4], &xs[5],
-                              &xs[6], &xs[7], &xs[8],
+                              &ys[0], &ys[1], &ys[2],
+                              &ys[3], &ys[4], &ys[5],
+                              &ys[6], &ys[7], &ys[8],
                               m);
   assert(err == 0);
 
-  assert(memcmp(xs, ys, sizeof(xs)));
+  assert(memcmp(xs, ys, sizeof(xs)) == 0);
 
   err = futhark_free_opaque_m33(ctx, m);
   assert(err == 0);
