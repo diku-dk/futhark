@@ -495,6 +495,8 @@ static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 struct scheduler {
   struct worker *workers;
   int num_threads;
+  int minimum_chunk_size;
+
 
   // If there is work to steal => active_work > 0
   volatile int active_work;
@@ -534,12 +536,11 @@ static int random_other_worker(struct scheduler *scheduler, int my_id) {
   return i;
 }
 
-
-static inline int64_t compute_chunk_size(double kappa, struct subtask* subtask)
+static inline int64_t compute_chunk_size(int64_t minimum_chunk_size, double kappa, struct subtask* subtask)
 {
   double C = (double)*subtask->task_time / (double)*subtask->task_iter;
   if (C == 0.0F) C += DBL_EPSILON;
-  return smax64((int64_t)(kappa / C), 1);
+  return smax64((int64_t)(kappa / C), minimum_chunk_size);
 }
 
 /* Takes a chunk from subtask and enqueues the remaining iterations onto the worker's queue */
@@ -549,7 +550,9 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
   if (subtask->chunkable) {
     // Do we have information from previous runs avaliable
     if (*subtask->task_iter > 0) {
-      subtask->chunk_size = compute_chunk_size(worker->scheduler->kappa, subtask);
+      subtask->chunk_size = compute_chunk_size(worker->scheduler->minimum_chunk_size,
+                                               worker->scheduler->kappa,
+                                               subtask);
       assert(subtask->chunk_size > 0);
     }
     int64_t remaining_iter = subtask->end - subtask->start;
@@ -790,7 +793,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   enum scheduling sched = info.sched;
   /* If each subtasks should be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
-  int64_t chunk_size = 1; // The initial chunk size when no info is avaliable
+  int64_t chunk_size = scheduler->minimum_chunk_size; // The initial chunk size when no info is avaliable
 
 
   if (info.wake_up_threads || sched == DYNAMIC)
@@ -1076,6 +1079,13 @@ static int determine_kappa(double *kappa) {
 static int scheduler_init(struct scheduler *scheduler,
                           int num_workers,
                           double kappa) {
+#ifdef FUTHARK_BACKEND_ispc
+  int64_t get_gang_size();
+  scheduler->minimum_chunk_size = get_gang_size();
+#else
+  scheduler->minimum_chunk_size = 1;
+#endif
+
   assert(num_workers > 0);
 
   scheduler->kappa = kappa;

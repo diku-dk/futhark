@@ -20,7 +20,13 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     getIterationDomain,
     getReturnParams,
     segOpString,
+    ChunkLoopVectorization (..),
     generateChunkLoop,
+    generateUniformizeLoop,
+    extractVectorLane,
+    inISPC,
+    toParam,
+    sLoopNestVectorized,
   )
 where
 
@@ -164,6 +170,9 @@ isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While {} = False
 isLoadBalanced (Imp.Op (Imp.ParLoop _ code _)) = isLoadBalanced code
+isLoadBalanced (Imp.Op (Imp.ForEachActive _ a)) = isLoadBalanced a
+isLoadBalanced (Imp.Op (Imp.ForEach _ _ _ a)) = isLoadBalanced a
+isLoadBalanced (Imp.Op (Imp.ISPCKernel a _)) = isLoadBalanced a
 isLoadBalanced _ = True
 
 segBinOpComm' :: [SegBinOp rep] -> Commutativity
@@ -224,6 +233,11 @@ extractAllocations segop_code = f segop_code
     f code =
       (mempty, code)
 
+-- | Indicates whether to vectorize a chunk loop or keep it sequential.
+-- We use this to allow falling back to sequential chunk loops in cases
+-- we don't care about trying to vectorize.
+data ChunkLoopVectorization = Vectorized | Scalar
+
 -- | Emit code for the chunk loop, given an action that generates code
 -- for a single iteration.
 --
@@ -231,10 +245,10 @@ extractAllocations segop_code = f segop_code
 -- iteration.
 generateChunkLoop ::
   String ->
+  ChunkLoopVectorization ->
   (Imp.TExp Int64 -> MulticoreGen ()) ->
   MulticoreGen ()
-generateChunkLoop desc m = do
-  emit $ Imp.DebugPrint (desc <> " " <> "fbody") Nothing
+generateChunkLoop desc Scalar m = do
   (start, end) <- getLoopBounds
   n <- dPrimVE "n" $ end - start
   i <- newVName (desc <> "_i")
@@ -243,7 +257,98 @@ generateChunkLoop desc m = do
       addLoopVar i Int64
       m $ start + Imp.le64 i
   emit body_allocs
-  emit $ Imp.For i (untyped n) body
+  -- Emit either foreach or normal for loop
+  let bound = untyped n
+  emit $ Imp.For i bound body
+generateChunkLoop desc Vectorized m = do
+  (start, end) <- getLoopBounds
+  n <- dPrimVE "n" $ end - start
+  i <- newVName (desc <> "_i")
+  (body_allocs, body) <- fmap extractAllocations $
+    collect $ do
+      addLoopVar i Int64
+      m $ Imp.le64 i
+  emit body_allocs
+  -- Emit either foreach or normal for loop
+  let from = untyped start
+  let bound = untyped (start + n)
+  emit $ Imp.Op $ Imp.ForEach i from bound body
+
+-- | Emit code for a sequential loop over each vector lane, given
+-- and action that generates code for a single iteration. The action
+-- is called with the symbolic index of the current iteration.
+generateUniformizeLoop :: (Imp.TExp Int64 -> MulticoreGen ()) -> MulticoreGen ()
+generateUniformizeLoop m = do
+  i <- newVName "uni_i"
+  body <- collect $ do
+    addLoopVar i Int64
+    m $ Imp.le64 i
+  emit $ Imp.Op $ Imp.ForEachActive i body
+
+-- | Given a piece of code, if that code performs an assignment, turn
+-- that assignment into an extraction of element from a vector on the
+-- right hand side, using a passed index for the extraction. Other code
+-- is left as is.
+extractVectorLane :: Imp.TExp Int64 -> MulticoreGen Imp.MCCode -> MulticoreGen ()
+extractVectorLane j code = do
+  let ut_exp = untyped j
+  code' <- code
+  case code' of
+    Imp.SetScalar vname e -> do
+      typ <- lookupType vname
+      case typ of
+        -- ISPC v1.17 does not support extract on f16 yet..
+        -- Thus we do this stupid conversion to f32
+        Prim (FloatType Float16) -> do
+          tv <- dPrim "hack_extract_f16" (FloatType Float32)
+          emit $ Imp.SetScalar (tvVar tv) e
+          emit $ Imp.Op $ Imp.ExtractLane vname (untyped $ tvExp tv) ut_exp
+        _ -> emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp
+    _ ->
+      emit code'
+
+-- | Given an action that may generate some code, put that code
+-- into an ISPC kernel.
+inISPC :: MulticoreGen () -> MulticoreGen ()
+inISPC code = do
+  code' <- collect code
+  free <- freeParams code'
+  emit $ Imp.Op $ Imp.ISPCKernel code' free
+
+-------------------------------
+------- SegRed helpers  -------
+-------------------------------
+sForVectorized' :: VName -> Imp.Exp -> MulticoreGen () -> MulticoreGen ()
+sForVectorized' i bound body = do
+  let it = case primExpType bound of
+        IntType bound_t -> bound_t
+        t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
+  addLoopVar i it
+  body' <- collect body
+  emit $ Imp.Op $ Imp.ForEach i (Imp.ValueExp $ blankPrimValue $ Imp.IntType Imp.Int64) bound body'
+
+sForVectorized :: String -> Imp.TExp t -> (Imp.TExp t -> MulticoreGen ()) -> MulticoreGen ()
+sForVectorized i bound body = do
+  i' <- newVName i
+  sForVectorized' i' (untyped bound) $
+    body $
+      TPrimExp $
+        Imp.var i' $
+          primExpType $
+            untyped bound
+
+-- | Like sLoopNest, but puts a vectorized loop at the innermost layer.
+sLoopNestVectorized ::
+  Shape ->
+  ([Imp.TExp Int64] -> MulticoreGen ()) ->
+  MulticoreGen ()
+sLoopNestVectorized = sLoopNest' [] . shapeDims
+  where
+    sLoopNest' is [] f = f $ reverse is
+    sLoopNest' is [d] f =
+      sForVectorized "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) [] f
+    sLoopNest' is (d : ds) f =
+      sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
 
 -------------------------------
 ------- SegHist helpers -------

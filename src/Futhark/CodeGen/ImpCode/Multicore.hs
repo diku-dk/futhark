@@ -26,6 +26,15 @@ type Program = Functions Multicore
 data Multicore
   = SegOp String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String MCCode [Param]
+  | -- | A kernel of ISPC code, or a scoped block in regular C.
+    ISPCKernel MCCode [Param]
+  | -- | A foreach loop in ISPC, or a regular for loop in C.
+    ForEach VName Exp Exp MCCode
+  | -- | A foreach_active loop in ISPC, or a single execution in C.
+    ForEachActive VName MCCode
+  | -- | Extract a value from a given lane and assign it to a variable.
+    -- This is just a regular assignment in C.
+    ExtractLane VName Exp Exp
   | -- | Retrieve inclusive start and exclusive end indexes of the
     -- chunk we are supposed to be executing.  Only valid immediately
     -- inside a 'ParLoop' construct!
@@ -123,6 +132,22 @@ instance Pretty Multicore where
           ]
   ppr (Atomic _) =
     "AtomicOp"
+  ppr (ISPCKernel body _) =
+    "ispc" <+> nestedBlock "{" "}" (ppr body)
+  ppr (ForEach i from to body) =
+    "foreach"
+      <+> ppr i
+      <+> "="
+      <+> ppr from
+      <+> "to"
+      <+> ppr to
+      <+> nestedBlock "{" "}" (ppr body)
+  ppr (ForEachActive i body) =
+    "foreach_active"
+      <+> ppr i
+      <+> nestedBlock "{" "}" (ppr body)
+  ppr (ExtractLane dest tar lane) =
+    ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -143,6 +168,14 @@ instance FreeIn Multicore where
     freeIn' body
   freeIn' (Atomic aop) =
     freeIn' aop
+  freeIn' (ISPCKernel body _) =
+    freeIn' body
+  freeIn' (ForEach i from to body) =
+    fvBind (oneName i) (freeIn' body <> freeIn' from <> freeIn' to)
+  freeIn' (ForEachActive i body) =
+    fvBind (oneName i) (freeIn' body)
+  freeIn' (ExtractLane dest tar lane) =
+    freeIn' dest <> freeIn' tar <> freeIn' lane
 
 data KernelHandling = TraverseKernels | OpaqueKernels
 
@@ -162,7 +195,20 @@ lexicalMemoryUsageMC gokernel func =
     go f (For _ _ x) = f x
     go f (While _ x) = f x
     go f (Comment _ x) = f x
+    go f (Op op) = goOp f op
     go _ _ = mempty
+
+    -- We want SetMems and declarations to be visible through custom control flow
+    -- so we don't erroneously treat a memblock that could be lexical as needing
+    -- refcounting. Importantly, for ISPC, we do not look into kernels, since they
+    -- go into new functions. For the Multicore backend, we can do it, though.
+    goOp f (ForEach _ _ _ body) = go f body
+    goOp f (ForEachActive _ body) = go f body
+    goOp f (ISPCKernel body _) =
+      case gokernel of
+        TraverseKernels -> go f body
+        OpaqueKernels -> mempty
+    goOp _ _ = mempty
 
     declared (DeclareMem mem spc) =
       M.singleton mem spc

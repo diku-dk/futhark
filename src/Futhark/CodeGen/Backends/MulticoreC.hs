@@ -12,6 +12,20 @@ module Futhark.CodeGen.Backends.MulticoreC
     GC.asServer,
     operations,
     cliOptions,
+    compileOp,
+    ValueType (..),
+    paramToCType,
+    prepareTaskStruct,
+    closureFreeStructField,
+    generateParLoopFn,
+    addTimingFields,
+    functionTiming,
+    functionIterations,
+    multiCoreReport,
+    multicoreDef,
+    multicoreName,
+    DefSpecifier,
+    atomicOps,
   )
 where
 
@@ -45,7 +59,7 @@ compileProg version =
         [DefaultSpace]
         cliOptions
     )
-    <=< ImpGen.compileProg ImpGen.AllowDynamicScheduling
+    <=< ImpGen.compileProg
 
 -- | Generate the multicore context definitions.  This is exported
 -- because the WASM backend needs it.
@@ -304,7 +318,10 @@ compileSetRetvalStructValues ::
 compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
   where
     field name (ct, Prim _) =
-      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=(($ty:ct*)&$id:name);|]
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=(($ty:ct*)&$id:name);
+               $escstm:("#if ISPC")
+               $id:struct.$id:(closureRetvalStructField name)+= programIndex;
+               $escstm:("#endif")|]
     field name (_, MemBlock) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
     field name (_, RawMem) =
@@ -686,6 +703,29 @@ compileOp (ParLoop s' body free) = do
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
 compileOp (Atomic aop) =
   atomicOps aop (\ty _ -> pure [C.cty|$ty:ty*|])
+compileOp (ISPCKernel body _) =
+  scopedBlock body
+compileOp (ForEach i from bound body) = do
+  let i' = C.toIdent i
+      t = primTypeToCType $ primExpType bound
+  from' <- GC.compileExp from
+  bound' <- GC.compileExp bound
+  body' <- GC.collect $ GC.compileCode body
+  GC.stm
+    [C.cstm|for ($ty:t $id:i' = $exp:from'; $id:i' < $exp:bound'; $id:i'++) {
+            $items:body'
+          }|]
+compileOp (ForEachActive i body) = do
+  GC.decl [C.cdecl|typename int64_t $id:i = 0;|]
+  scopedBlock body
+compileOp (ExtractLane dest tar _) = do
+  tar' <- GC.compileExp tar
+  GC.stm [C.cstm|$id:dest = $exp:tar';|]
+
+scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
+scopedBlock code = do
+  inner <- GC.collect $ GC.compileCode code
+  GC.stm [C.cstm|{$items:inner}|]
 
 doAtomic ::
   (C.ToIdent a1) =>

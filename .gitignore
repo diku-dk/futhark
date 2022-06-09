@@ -20,6 +20,7 @@ dist-newstyle
 
 # Ignore IDE info
 .hie
+.vscode
 
 # Ignore side-effects of compilation.
 *.aux

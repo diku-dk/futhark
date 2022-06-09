@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   Most programs see no change.  This is mainly a robust foundation for
   further improvements.
 
+* New experimental backend: `ispc`.  By Louis Marott Normann,
+  Kristoffer August Kortbæk, William Pema Norbu Holmes Malling, and
+  Oliver Bak Kjersgaard Petersen.
+
 ### Removed
 
 ### Changed
