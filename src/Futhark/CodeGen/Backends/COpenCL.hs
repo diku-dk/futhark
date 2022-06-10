@@ -226,36 +226,42 @@ deallocateOpenCLBuffer mem tag "device" =
 deallocateOpenCLBuffer _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' space"
 
+syncArg :: GC.CopyBarrier -> C.Exp
+syncArg GC.CopyBarrier = [C.cexp|CL_TRUE|]
+syncArg GC.CopyNoBarrier = [C.cexp|CL_FALSE|]
+
 copyOpenCLMemory :: GC.Copy OpenCL ()
 -- The read/write/copy-buffer functions fail if the given offset is
 -- out of bounds, even if asked to read zero bytes.  We protect with a
 -- branch to avoid this.
-copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
+copyOpenCLMemory b destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
   GC.stm
     [C.cstm|
     if ($exp:nbytes > 0) {
+      typename cl_bool sync_call = $exp:(syncArg b);
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueReadBuffer(ctx->opencl.queue, $exp:srcmem,
-                            ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
+                            ctx->failure_is_an_option ? CL_FALSE : sync_call,
                             (size_t)$exp:srcidx, (size_t)$exp:nbytes,
                             $exp:destmem + $exp:destidx,
                             0, NULL, $exp:(profilingEvent copyHostToDev)));
-      if (ctx->failure_is_an_option &&
+      if (sync_call &&
+          ctx->failure_is_an_option &&
           futhark_context_sync(ctx) != 0) { return 1; }
    }
   |]
-copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
+copyOpenCLMemory b destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
   GC.stm
     [C.cstm|
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueWriteBuffer(ctx->opencl.queue, $exp:destmem, CL_TRUE,
+        clEnqueueWriteBuffer(ctx->opencl.queue, $exp:destmem, $exp:(syncArg b),
                              (size_t)$exp:destidx, (size_t)$exp:nbytes,
                              $exp:srcmem + $exp:srcidx,
                              0, NULL, $exp:(profilingEvent copyDevToHost)));
     }
   |]
-copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
+copyOpenCLMemory _ destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
   -- Be aware that OpenCL swaps the usual order of operands for
   -- memcpy()-like functions.  The order below is not a typo.
   GC.stm
@@ -272,9 +278,9 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
       }
     }
   }|]
-copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
+copyOpenCLMemory _ destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
   GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
-copyOpenCLMemory _ _ destspace _ _ srcspace _ =
+copyOpenCLMemory _ _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 openclMemoryType :: GC.MemoryType OpenCL ()

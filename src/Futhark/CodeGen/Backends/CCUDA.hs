@@ -213,24 +213,25 @@ deallocateCUDABuffer _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
 copyCUDAMemory :: GC.Copy OpenCL ()
-copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
-  let (fn, prof) = memcpyFun dstSpace srcSpace
+copyCUDAMemory b dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
+  let (copy, prof) = memcpyFun b dstSpace srcSpace
       (bef, aft) = profilingEnclosure prof
   GC.item
-    [C.citem|{
-                $items:bef
-                CUDA_SUCCEED_OR_RETURN(
-                  $id:fn($exp:dstmem + $exp:dstidx,
-                         $exp:srcmem + $exp:srcidx,
-                         $exp:nbytes));
-                $items:aft
-                }
-                |]
+    [C.citem|{$items:bef CUDA_SUCCEED_OR_RETURN($exp:copy); $items:aft}|]
   where
-    memcpyFun DefaultSpace (Space "device") = ("cuMemcpyDtoH" :: String, copyDevToHost)
-    memcpyFun (Space "device") DefaultSpace = ("cuMemcpyHtoD", copyHostToDev)
-    memcpyFun (Space "device") (Space "device") = ("cuMemcpy", copyDevToDev)
-    memcpyFun _ _ =
+    dst = [C.cexp|$exp:dstmem + $exp:dstidx|]
+    src = [C.cexp|$exp:srcmem + $exp:srcidx|]
+    memcpyFun GC.CopyBarrier DefaultSpace (Space "device") =
+      ([C.cexp|cuMemcpyDtoH($exp:dst, $exp:src, $exp:nbytes)|], copyDevToHost)
+    memcpyFun GC.CopyBarrier (Space "device") DefaultSpace =
+      ([C.cexp|cuMemcpyHtoD($exp:dst, $exp:src, $exp:nbytes)|], copyHostToDev)
+    memcpyFun _ (Space "device") (Space "device") =
+      ([C.cexp|cuMemcpy($exp:dst, $exp:src, $exp:nbytes)|], copyDevToDev)
+    memcpyFun GC.CopyNoBarrier DefaultSpace (Space "device") =
+      ([C.cexp|cuMemcpyDtoHAsync($exp:dst, $exp:src, $exp:nbytes, 0)|], copyDevToHost)
+    memcpyFun GC.CopyNoBarrier (Space "device") DefaultSpace =
+      ([C.cexp|cuMemcpyHtoDAsync($exp:dst, $exp:src, $exp:nbytes, 0)|], copyHostToDev)
+    memcpyFun _ _ _ =
       error $
         "Cannot copy to '"
           ++ show dstSpace

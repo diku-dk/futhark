@@ -695,6 +695,7 @@ int restore_array(const struct array_aux *aux, FILE *f,
   if (arr == NULL) {
     return 1;
   }
+  assert(futhark_context_sync(ctx) == 0);
 
   *(void**)p = arr;
   free(data);
