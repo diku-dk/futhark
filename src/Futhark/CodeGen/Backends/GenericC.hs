@@ -28,6 +28,7 @@ module Futhark.CodeGen.Backends.GenericC
     readScalarPointerWithQuals,
     Allocate,
     Deallocate,
+    CopyBarrier (..),
     Copy,
     StaticArray,
 
@@ -206,8 +207,20 @@ type Deallocate op s = C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
 -- | Create a static array of values - initialised at load time.
 type StaticArray op s = VName -> SpaceId -> PrimType -> ArrayContents -> CompilerM op s ()
 
+-- | Whether a copying operation should implicitly function as a
+-- barrier regarding further operations on the source.  This is a
+-- rather subtle detail and is mostly useful for letting some
+-- device/GPU copies be asynchronous (#1664).
+data CopyBarrier
+  = CopyBarrier
+  | -- | Explicit context synchronisation should be done
+    -- before the source or target is used.
+    CopyNoBarrier
+  deriving (Eq, Show)
+
 -- | Copy from one memory block to another.
 type Copy op s =
+  CopyBarrier ->
   C.Exp ->
   C.Exp ->
   Space ->
@@ -318,9 +331,9 @@ defaultOperations =
       error "Cannot allocate in non-default memory space"
     defDeallocate _ _ =
       error "Cannot deallocate in non-default memory space"
-    defCopy destmem destoffset DefaultSpace srcmem srcoffset DefaultSpace size =
+    defCopy _ destmem destoffset DefaultSpace srcmem srcoffset DefaultSpace size =
       copyMemoryDefaultSpace destmem destoffset srcmem srcoffset size
-    defCopy _ _ _ _ _ _ _ =
+    defCopy _ _ _ _ _ _ _ _ =
       error "Cannot copy to or from non-default memory space"
     defStaticArray _ _ _ _ =
       error "Cannot create static array in non-default memory space"
@@ -925,6 +938,7 @@ arrayLibraryFunctions pub space pt signed rank = do
   new_body <- collect $ do
     prepare_new
     copy
+      CopyNoBarrier
       [C.cexp|arr->mem.mem|]
       [C.cexp|0|]
       space
@@ -936,6 +950,7 @@ arrayLibraryFunctions pub space pt signed rank = do
   new_raw_body <- collect $ do
     prepare_new
     copy
+      CopyNoBarrier
       [C.cexp|arr->mem.mem|]
       [C.cexp|0|]
       space
@@ -949,6 +964,7 @@ arrayLibraryFunctions pub space pt signed rank = do
   values_body <-
     collect $
       copy
+        CopyNoBarrier
         [C.cexp|data|]
         [C.cexp|0|]
         DefaultSpace
@@ -2191,7 +2207,7 @@ compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) D
 compileCode (Copy _ dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
   join $
-    copy
+    copy CopyBarrier
       <$> rawMem dest
       <*> compileExp (untyped destoffset)
       <*> pure destspace
