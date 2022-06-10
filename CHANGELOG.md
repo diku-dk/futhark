@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Missing aliases for functions that return multiple aliased values
   (#1690).
 
+* `new`/`values` functions for GPU backends are now properly
+  asynchronous (#1664).  This may uncover bugs in application code.
+
 ## [0.21.12]
 
 ### Added

@@ -757,7 +757,7 @@ inKernelOperations mode body =
       error "Cannot deallocate memory in kernel"
 
     copyInKernel :: GC.Copy KernelOp KernelState
-    copyInKernel _ _ _ _ _ _ _ =
+    copyInKernel _ _ _ _ _ _ _ _ =
       error "Cannot bulk copy in kernel."
 
     noStaticArrays :: GC.StaticArray KernelOp KernelState
