@@ -16,6 +16,10 @@ int main() {
   struct futhark_i32_1d *is0_fut = futhark_new_i32_1d(ctx, is0, 1);
   struct futhark_i32_1d *is1_fut = futhark_new_i32_1d(ctx, is1, 1);
 
+  assert(xs_fut != NULL);
+  assert(is0_fut != NULL);
+  assert(is1_fut != NULL);
+
   float out[1];
   struct futhark_f32_1d *out_fut = NULL;
 
@@ -44,6 +48,9 @@ int main() {
   assert(err == 0);
 
   err = futhark_values_f32_1d(ctx, out_fut, out);
+  assert(err == 0);
+  err = futhark_context_sync(ctx);
+  assert(err == 0);
   assert(out[0] == xs[is1[0]]);
 
   err = futhark_free_f32_1d(ctx, xs_fut);
