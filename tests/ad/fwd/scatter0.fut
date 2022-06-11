@@ -1,6 +1,6 @@
 def f x =
   let vs = [x, x*x, x*x*x]
-  in permute 1 5 [0,1,2] vs
+  in spread 5 1 [0,1,2] vs
 
 -- ==
 -- entry: f_jvp

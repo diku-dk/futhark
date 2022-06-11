@@ -261,7 +261,7 @@ def all [n] 'a (f: a -> bool) (as: [n]a): bool =
 def any [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (||) false (map f as)
 
--- | `r = permute x k is vs` produces an array `r` such that `r[i] =
+-- | `r = spread x k is vs` produces an array `r` such that `r[i] =
 -- vs[j]` where `is[j] == i`, or `x` if no such `j` exists.
 -- Intuitively, `is` is an array indicating where the corresponding
 -- elements of `vs` should be located in the result.  Out-of-bounds
@@ -272,10 +272,10 @@ def any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- **Work:** *O(k + n)*
 --
 -- **Span:** *O(1)*
-def permute 't [n] (x: t) (k: i64) (is: [n]i64) (vs: [n]t): *[k]t =
+def spread 't [n] (k: i64) (x: t) (is: [n]i64) (vs: [n]t): *[k]t =
   intrinsics.scatter (map (\_ -> x) (0..1..<k), is, vs)
 
--- | Like `permute`, but takes an array indicating the initial values,
+-- | Like `spread`, but takes an array indicating the initial values,
 -- and has different work complexity.
 --
 -- **Work:** *O(n)*
