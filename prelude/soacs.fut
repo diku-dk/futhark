@@ -1,7 +1,7 @@
 -- | Various Second-Order Array Combinators that are operationally
 -- parallel in a way that can be exploited by the compiler.
 --
--- The functions here are all recognised specially by the compiler (or
+-- The functions here are recognised specially by the compiler (or
 -- built on those that are).  The asymptotic [work and
 -- span](https://en.wikipedia.org/wiki/Analysis_of_parallel_algorithms)
 -- is provided for each function, but note that this easily hides very
@@ -117,13 +117,25 @@ def reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
   intrinsics.reduce_comm (op, ne, as)
 
--- | `reduce_by_index dest f ne is as` returns `dest`, but with each
--- element given by the indices of `is` updated by applying `f` to the
--- current value in `dest` and the corresponding value in `as`.  The
--- `ne` value must be a neutral element for `f`.  If `is` has
--- duplicates, `f` may be applied multiple times, and hence must be
--- associative and commutative.  Out-of-bounds indices in `is` are
--- ignored.
+-- | `h = hist op ne k is as` computes a generalised `k`-bin histogram
+-- `h`, such that `h[i]` is the sum of those values `as[j]` for which
+-- `is[j]==i`.  The summation is done with `op`, which must be a
+-- commutative and associative function with neutral element `ne`.  If
+-- a bin has no elements, its value will be `ne`.
+--
+-- **Work:** *O(k + n ✕ W(op))*
+--
+-- **Span:** *O(n ✕ W(op))* in the worst case (all updates to same
+-- position), but *O(W(op))* in the best case.
+--
+-- In practice, the *O(n)* behaviour only occurs if *m* is also very
+-- large.
+def hist 'a [n] (op: a -> a -> a) (ne: a) (k: i64) (is: [n]i64) (as: [n]a) : *[k]a =
+  intrinsics.hist_1d (1, map (\_ -> ne) (0..1..<k), op, ne, is, as)
+
+-- | Like `hist`, but with initial contents of the histogram, and the
+-- complexity is proportional only to the number of input elements,
+-- not the total size of the histogram.
 --
 -- **Work:** *O(n ✕ W(op))*
 --
@@ -132,15 +144,15 @@ def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 --
 -- In practice, the *O(n)* behaviour only occurs if *m* is also very
 -- large.
-def reduce_by_index 'a [n] [m] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[m]a =
+def reduce_by_index 'a [k] [n] (dest : *[k]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[k]a =
   intrinsics.hist_1d (1, dest, f, ne, is, as)
 
 -- | As `reduce_by_index`, but with two-dimensional indexes.
-def reduce_by_index_2d 'a [n] [m] [k] (dest : *[m][k]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64)) (as : [n]a) : *[m][k]a =
+def reduce_by_index_2d 'a [k] [n] [m] (dest : *[k][m]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64)) (as : [n]a) : *[k][m]a =
   intrinsics.hist_2d (1, dest, f, ne, is, as)
 
 -- | As `reduce_by_index`, but with three-dimensional indexes.
-def reduce_by_index_3d 'a [n] [m] [k] [l] (dest : *[m][k][l]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64,i64)) (as : [n]a) : *[m][k][l]a =
+def reduce_by_index_3d 'a [k] [n] [m] [l] (dest : *[k][m][l]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64,i64)) (as : [n]a) : *[k][m][l]a =
   intrinsics.hist_3d (1, dest, f, ne, is, as)
 
 -- | Inclusive prefix scan.  Has the same caveats with respect to
@@ -249,35 +261,27 @@ def all [n] 'a (f: a -> bool) (as: [n]a): bool =
 def any [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (||) false (map f as)
 
--- | `scatter as is vs` calculates the equivalent of this imperative
--- code:
+-- | `r = permute x k is vs` produces an array `r` such that `r[i] =
+-- vs[j]` where `is[j] == i`, or `x` if no such `j` exists.
+-- Intuitively, `is` is an array indicating where the corresponding
+-- elements of `vs` should be located in the result.  Out-of-bounds
+-- elements of `is` are ignored.  In-bounds duplicates in `is` result
+-- in unspecified behaviour - see `hist`@term for a function that can
+-- handle this.
 --
--- ```
--- for j in 0...length is-1:
---   i = is[j]
---   v = vs[j]
---   if i >= 0 && i < length as:
---     as[i] = v
--- ```
+-- **Work:** *O(k + n)*
 --
--- The `is` and `vs` arrays must have the same outer size.  `scatter`
--- acts in-place and consumes the `as` array, returning a new array
--- that has the same type and elements as `as`, except for the indices
--- in `is`. Notice that writing outside the index domain of the target
--- array has no effect. If `is` contains duplicates for valid indexes
--- into the target array (i.e., several writes are performed to the
--- same location), the result is unspecified.  It is not guaranteed
--- that one of the duplicate writes will complete atomically - they
--- may be interleaved.  See `reduce_by_index`@term for a function that
--- can handle this case deterministically.
---
--- This is technically not a second-order operation, but it is defined
--- here because it is closely related to the SOACs.
+-- **Span:** *O(1)*
+def permute 't [n] (x: t) (k: i64) (is: [n]i64) (vs: [n]t): *[k]t =
+  intrinsics.scatter (map (\_ -> x) (0..1..<k), is, vs)
+
+-- | Like `permute`, but takes an array indicating the initial values,
+-- and has different work complexity.
 --
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-def scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
+def scatter 't [k] [n] (dest: *[k]t) (is: [n]i64) (vs: [n]t): *[k]t =
   intrinsics.scatter (dest, is, vs)
 
 -- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
@@ -286,7 +290,7 @@ def scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-def scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *[m][n]t =
+def scatter_2d 't [k] [n] [l] (dest: *[k][n]t) (is: [l](i64, i64)) (vs: [l]t): *[k][n]t =
   intrinsics.scatter_2d (dest, is, vs)
 
 -- | `scatter_3d as is vs` is the equivalent of a `scatter` on a 3-dimensional
@@ -295,5 +299,5 @@ def scatter_2d 't [m] [n] [l] (dest: *[m][n]t) (is: [l](i64, i64)) (vs: [l]t): *
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-def scatter_3d 't [m] [n] [o] [l] (dest: *[m][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[m][n][o]t =
+def scatter_3d 't [k] [n] [o] [l] (dest: *[k][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[k][n][o]t =
   intrinsics.scatter_3d (dest, is, vs)

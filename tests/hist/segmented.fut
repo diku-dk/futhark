@@ -7,6 +7,4 @@
 -- }
 
 def main (m: i64) =
-  map (\xs -> reduce_by_index (replicate m 0) (+) 0
-                              (map i64.i32 xs)
-                              (map (const 1) xs))
+  map (\xs -> hist (+) 0 m (map i64.i32 xs) (map (const 1) xs))
