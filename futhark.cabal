@@ -34,11 +34,47 @@ license:        ISC
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
-    rts/c/*.h
-    rts/futhark-doc/*.css
-    rts/javascript/*.js
-    rts/python/*.py
-    prelude/*.fut
+-- Cabal's recompilation tracking doesn't work when we use wildcards
+-- here, so for now we spell out every single file.
+    rts/c/
+    rts/c/atomics.h
+    rts/c/lock.h
+    rts/c/timing.h
+    rts/c/errors.h
+    rts/c/free_list.h
+    rts/c/tuning.h
+    rts/c/values.h
+    rts/c/half.h
+    rts/c/opencl.h
+    rts/c/cuda.h
+    rts/c/cache.h
+    rts/c/ispc_util.h
+    rts/c/scalar.h
+    rts/c/scalar_f16.h
+    rts/c/scheduler.h
+    rts/c/uniform.h
+    rts/c/util.h
+    rts/c/server.h
+    rts/futhark-doc/style.css
+    rts/javascript/
+    rts/javascript/server.js
+    rts/javascript/values.js
+    rts/javascript/wrapperclasses.js
+    rts/python/
+    rts/python/tuning.py
+    rts/python/panic.py
+    rts/python/memory.py
+    rts/python/server.py
+    rts/python/values.py
+    rts/python/opencl.py
+    rts/python/scalar.p
+    prelude/functional.fut
+    prelude/math.fut
+    prelude/soacs.fut
+    prelude/zip.fut
+    prelude/ad.fut
+    prelude/array.fut
+    prelude/prelude.fut
 -- Just enough of the docs to build the manpages.
     docs/**/*.rst
     docs/Makefile
