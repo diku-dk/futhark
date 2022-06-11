@@ -1,4 +1,4 @@
--- Test with i32.^.
+-- Test with i32.|.
 -- ==
 --
 -- input  {
@@ -16,7 +16,7 @@
 --   [6, 1, 4, 5, -1]
 -- }
 -- output {
---   [-7, 0, 0, 0, 0]
+--   [-1, 0, 0, 0, 0]
 -- }
 --
 -- input  {
@@ -29,4 +29,4 @@
 -- }
 
 def main [m] (n: i64) (is: [m]i32) (image: [m]i32) : [n]i32 =
-  reduce_by_index (replicate n 0) (i32.^) 0 (map i64.i32 is) image
+  hist (i32.|) 0 n (map i64.i32 is) image
