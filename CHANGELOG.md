@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   Kristoffer August Kortbæk, William Pema Norbu Holmes Malling, and
   Oliver Bak Kjersgaard Petersen.
 
-* New prelude functions: `hist`, `permute`.  These function as
+* New prelude functions: `hist`, `spread`.  These function as
   non-consuming variants of `reduce_by_index` and `scatter`.
 
 ### Removed
