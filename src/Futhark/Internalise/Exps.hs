@@ -137,37 +137,38 @@ entryPoint ::
 entryPoint name params (eret, crets) =
   ( name,
     map onParam params,
-    case ( isTupleRecord $ entryType eret,
-           entryAscribed eret
-         ) of
-      (Just ts, Just (E.TETuple e_ts _)) ->
-        zipWith
-          entryPointType
-          (zipWith E.EntryType ts (map Just e_ts))
-          crets
-      (Just ts, Nothing) ->
-        zipWith
-          entryPointType
-          (map (`E.EntryType` Nothing) ts)
-          crets
-      _ ->
-        [entryPointType eret $ concat crets]
+    map (uncurry EntryResult) $
+      case ( isTupleRecord $ entryType eret,
+             entryAscribed eret
+           ) of
+        (Just ts, Just (E.TETuple e_ts _)) ->
+          zipWith
+            entryPointType
+            (zipWith E.EntryType ts (map Just e_ts))
+            crets
+        (Just ts, Nothing) ->
+          zipWith
+            entryPointType
+            (map (`E.EntryType` Nothing) ts)
+            crets
+        _ ->
+          [entryPointType eret $ concat crets]
   )
   where
     onParam (E.EntryParam e_p e_t, ps) =
-      I.EntryParam e_p $ entryPointType e_t $ staticShapes $ map I.paramDeclType ps
+      uncurry (I.EntryParam e_p) $ entryPointType e_t $ staticShapes $ map I.paramDeclType ps
 
     entryPointType t ts
       | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-          I.TypeUnsigned u
+          (u, I.TypeUnsigned)
       | E.Array _ _ _ (E.Prim E.Unsigned {}) <- E.entryType t =
-          I.TypeUnsigned u
+          (u, I.TypeUnsigned)
       | E.Scalar E.Prim {} <- E.entryType t =
-          I.TypeDirect u
+          (u, I.TypeDirect)
       | E.Array _ _ _ E.Prim {} <- E.entryType t =
-          I.TypeDirect u
+          (u, I.TypeDirect)
       | otherwise =
-          I.TypeOpaque u desc $ length ts
+          (u, I.TypeOpaque desc $ length ts)
       where
         u = foldl max Nonunique $ map I.uniqueness ts
         desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t

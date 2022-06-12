@@ -331,13 +331,16 @@ executableOptions =
            }
        ]
 
-functionExternalValues :: Imp.Function a -> [Imp.ExternalValue]
-functionExternalValues fun = Imp.functionResult fun ++ map snd (Imp.functionArgs fun)
+functionExternalValues :: Imp.EntryPoint -> [Imp.ExternalValue]
+functionExternalValues entry = Imp.entryPointResults entry ++ map snd (Imp.entryPointArgs entry)
 
 opaqueDefs :: Imp.Functions a -> M.Map String [PyExp]
 opaqueDefs (Imp.Functions funs) =
-  mconcat . map evd . concatMap (functionExternalValues . snd) $
-    filter (isJust . Imp.functionEntry . snd) funs
+  mconcat
+    . map evd
+    . concatMap functionExternalValues
+    . mapMaybe (Imp.functionEntry . snd)
+    $ funs
   where
     evd Imp.TransparentValue {} = mempty
     evd (Imp.OpaqueValue _ name vds) =
@@ -504,7 +507,7 @@ compileConstants (Imp.Constants _ init_consts) = do
   mapM_ atInit =<< collect (compileCode init_consts)
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
-compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
+compileFunc (fname, Imp.Function _ outputs inputs body) = do
   body' <- collect $ compileCode body
   let inputs' = map (compileName . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
@@ -792,6 +795,7 @@ printValue = fmap concat . mapM (uncurry printValue')
         ]
 
 prepareEntry ::
+  Imp.EntryPoint ->
   (Name, Imp.Function op) ->
   CompilerM
     op
@@ -802,7 +806,7 @@ prepareEntry ::
       [PyStmt],
       [(Imp.ExternalValue, PyExp)]
     )
-prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
+prepareEntry (Imp.EntryPoint _ results args) (fname, Imp.Function _ outputs inputs _) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
@@ -859,9 +863,10 @@ compileEntryFun ::
   ReturnTiming ->
   (Name, Imp.Function op) ->
   CompilerM op s (Maybe (PyFunDef, (PyExp, PyExp)))
-compileEntryFun sync timing entry
-  | Just ename <- Imp.functionEntry $ snd entry = do
-      (params, prepareIn, body_lib, prepareOut, res) <- prepareEntry entry
+compileEntryFun sync timing fun
+  | Just entry <- Imp.functionEntry $ snd fun = do
+      let ename = Imp.entryPointName entry
+      (params, prepareIn, body_lib, prepareOut, res) <- prepareEntry entry fun
       let (maybe_sync, ret) =
             case timing of
               DoNotReturnTiming ->
@@ -876,7 +881,7 @@ compileEntryFun sync timing entry
                         tupleOrSingle $ map snd res
                       ]
                 )
-          (pts, rts) = entryTypes $ snd entry
+          (pts, rts) = entryTypes entry
 
           do_run =
             Assign (Var "time_start") (simpleCall "time.time" [])
@@ -897,11 +902,9 @@ compileEntryFun sync timing entry
           )
   | otherwise = pure Nothing
 
-entryTypes :: Imp.Function op -> ([String], [String])
-entryTypes func =
-  ( map (desc . snd) $ Imp.functionArgs func,
-    map desc $ Imp.functionResult func
-  )
+entryTypes :: Imp.EntryPoint -> ([String], [String])
+entryTypes (Imp.EntryPoint _ res args) =
+  (map (desc . snd) args, map desc res)
   where
     desc (Imp.OpaqueValue u d _) = pretty u <> d
     desc (Imp.TransparentValue u (Imp.ScalarValue pt s _)) = pretty u <> readTypeEnum pt s
@@ -912,9 +915,10 @@ callEntryFun ::
   [PyStmt] ->
   (Name, Imp.Function op) ->
   CompilerM op s (Maybe (PyFunDef, String, PyExp))
-callEntryFun _ (_, Imp.Function Nothing _ _ _ _ _) = pure Nothing
-callEntryFun pre_timing entry@(fname, Imp.Function (Just ename) _ _ _ _ decl_args) = do
-  (_, prepare_in, body_bin, _, res) <- prepareEntry entry
+callEntryFun _ (_, Imp.Function Nothing _ _ _) = pure Nothing
+callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _) = do
+  let Imp.EntryPoint ename _ decl_args = entry
+  (_, prepare_in, body_bin, _, res) <- prepareEntry entry fun
 
   let str_input = map (readInput . snd) decl_args
       end_of_input = [Exp $ simpleCall "end_of_input" [String $ pretty fname]]

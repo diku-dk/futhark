@@ -517,12 +517,10 @@ data ArrayDecl = ArrayDecl VName PrimType MemLoc
 compileInParams ::
   Mem rep inner =>
   [FParam rep] ->
-  [EntryParam] ->
-  ImpM rep r op ([Imp.Param], [ArrayDecl], [(Name, Imp.ExternalValue)])
+  Maybe [EntryParam] ->
+  ImpM rep r op ([Imp.Param], [ArrayDecl], Maybe [(Name, Imp.ExternalValue)])
 compileInParams params eparams = do
-  let (ctx_params, val_params) =
-        splitAt (length params - sum (map (entryPointSize . entryParamType) eparams)) params
-  (inparams, arrayds) <- partitionEithers <$> mapM compileInParam (ctx_params ++ val_params)
+  (inparams, arrayds) <- partitionEithers <$> mapM compileInParam params
   let findArray x = find (isArrayDecl x) arrayds
 
       summaries = M.fromList $ mapMaybe memSummary params
@@ -546,7 +544,7 @@ compileInParams params eparams = do
           _ ->
             Nothing
 
-      mkExts (EntryParam v (TypeOpaque u desc n) : epts) fparams =
+      mkExts (EntryParam v u (TypeOpaque desc n) : epts) fparams =
         let (fparams', rest) = splitAt n fparams
          in ( v,
               Imp.OpaqueValue
@@ -555,15 +553,24 @@ compileInParams params eparams = do
                 (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams')
             )
               : mkExts epts rest
-      mkExts (EntryParam v (TypeUnsigned u) : epts) (fparam : fparams) =
+      mkExts (EntryParam v u TypeUnsigned : epts) (fparam : fparams) =
         maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
           ++ mkExts epts fparams
-      mkExts (EntryParam v (TypeDirect u) : epts) (fparam : fparams) =
+      mkExts (EntryParam v u TypeDirect : epts) (fparam : fparams) =
         maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
           ++ mkExts epts fparams
       mkExts _ _ = []
 
-  pure (inparams, arrayds, mkExts eparams val_params)
+  pure
+    ( inparams,
+      arrayds,
+      case eparams of
+        Just eparams' ->
+          let num_val_params = sum (map (entryPointSize . entryParamType) eparams')
+              (_ctx_params, val_params) = splitAt (length params - num_val_params) params
+           in Just $ mkExts eparams' val_params
+        Nothing -> Nothing
+    )
   where
     isArrayDecl x (ArrayDecl y _ _) = x == y
 
@@ -583,12 +590,12 @@ compileOutParam MemAcc {} =
 compileExternalValues ::
   Mem rep inner =>
   [RetType rep] ->
-  [EntryPointType] ->
+  [EntryResult] ->
   [Maybe Imp.Param] ->
   ImpM rep r op [Imp.ExternalValue]
 compileExternalValues orig_rts orig_epts maybe_params = do
   let (ctx_rts, val_rts) =
-        splitAt (length orig_rts - sum (map entryPointSize orig_epts)) orig_rts
+        splitAt (length orig_rts - sum (map (entryPointSize . entryResultType) orig_epts)) orig_rts
 
   let nthOut i = case maybeNth i maybe_params of
         Just (Just p) -> Imp.paramName p
@@ -614,14 +621,14 @@ compileExternalValues orig_rts orig_epts maybe_params = do
       mkValueDesc _ _ MemMem {} =
         error "mkValueDesc: unexpected MemMem output."
 
-      mkExts i (TypeOpaque u desc n : epts) rets = do
+      mkExts i (EntryResult u (TypeOpaque desc n) : epts) rets = do
         let (rets', rest) = splitAt n rets
         vds <- zipWithM (`mkValueDesc` Imp.TypeDirect) [i ..] rets'
         (Imp.OpaqueValue u desc vds :) <$> mkExts (i + n) epts rest
-      mkExts i (TypeUnsigned u : epts) (ret : rets) = do
+      mkExts i (EntryResult u TypeUnsigned : epts) (ret : rets) = do
         vd <- mkValueDesc i Imp.TypeUnsigned ret
         (Imp.TransparentValue u vd :) <$> mkExts (i + 1) epts rets
-      mkExts i (TypeDirect u : epts) (ret : rets) = do
+      mkExts i (EntryResult u TypeDirect : epts) (ret : rets) = do
         vd <- mkValueDesc i Imp.TypeDirect ret
         (Imp.TransparentValue u vd :) <$> mkExts (i + 1) epts rets
       mkExts _ _ _ = pure []
@@ -631,13 +638,14 @@ compileExternalValues orig_rts orig_epts maybe_params = do
 compileOutParams ::
   Mem rep inner =>
   [RetType rep] ->
-  Maybe [EntryPointType] ->
-  ImpM rep r op ([Imp.ExternalValue], [Imp.Param], [ValueDestination])
+  Maybe [EntryResult] ->
+  ImpM rep r op (Maybe [Imp.ExternalValue], [Imp.Param], [ValueDestination])
 compileOutParams orig_rts maybe_orig_epts = do
   (maybe_params, dests) <- unzip <$> mapM compileOutParam orig_rts
   evs <- case maybe_orig_epts of
-    Just orig_epts -> compileExternalValues orig_rts orig_epts maybe_params
-    Nothing -> pure []
+    Just orig_epts ->
+      Just <$> compileExternalValues orig_rts orig_epts maybe_params
+    Nothing -> pure Nothing
   pure (evs, catMaybes maybe_params, dests)
 
 compileFunDef ::
@@ -647,15 +655,16 @@ compileFunDef ::
 compileFunDef (FunDef entry _ fname rettype params body) =
   local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
-    emitFunction fname $ Imp.Function name_entry outparams inparams body' results args
+    let entry' = case (name_entry, results, args) of
+          (Just name_entry', Just results', Just args') ->
+            Just $ Imp.EntryPoint name_entry' results' args'
+          _ ->
+            Nothing
+    emitFunction fname $ Imp.Function entry' outparams inparams body'
   where
     (name_entry, params_entry, ret_entry) = case entry of
-      Nothing ->
-        ( Nothing,
-          replicate (length params) (EntryParam "" $ TypeDirect mempty),
-          Nothing
-        )
-      Just (x, y, z) -> (Just x, y, Just z)
+      Nothing -> (Nothing, Nothing, Nothing)
+      Just (x, y, z) -> (Just x, Just y, Just z)
     compile = do
       (inparams, arrayds, args) <- compileInParams params params_entry
       (results, outparams, dests) <- compileOutParams rettype ret_entry
@@ -1900,7 +1909,7 @@ function fname outputs inputs m = local newFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
-  emitFunction fname $ Imp.Function Nothing outputs inputs body [] []
+  emitFunction fname $ Imp.Function Nothing outputs inputs body
   where
     addParam (Imp.MemParam name space) =
       addVar name $ MemVar Nothing $ MemEntry space

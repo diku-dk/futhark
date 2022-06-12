@@ -224,7 +224,7 @@ freeAllocatedMem = GC.collect $ mapM_ (uncurry unRefMem) =<< gets GC.compDeclare
 -- it in ISPC, both in a varying or uniform context. This involves handling
 -- for the fact that ISPC cannot pass structs by value to external functions.
 compileBuiltinFun :: (Name, Function op) -> ISPCCompilerM ()
-compileBuiltinFun (fname, func@(Function _ outputs inputs _ _ _))
+compileBuiltinFun (fname, func@(Function _ outputs inputs _))
   | isNothing $ functionEntry func = do
       let extra = [[C.cparam|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx|]]
           extra_c = [[C.cparam|struct futhark_context * ctx|]]
@@ -763,7 +763,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   e' <- compileExp e
 
-  let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params seq_code [] []
+  let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params seq_code
 
   fstruct <-
     MC.prepareTaskStruct sharedDef "task" free_args free_ctypes retval_args retval_ctypes
@@ -790,7 +790,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     -- Generate the nested segop function if available
     fnpar_task <- case par_task of
       Just (ParallelTask nested_code) -> do
-        let lexical_nested = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params nested_code [] []
+        let lexical_nested = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params nested_code
         fnpar_task <- MC.generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
         GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
         pure $ zip [fnpar_task] [True]
@@ -840,7 +840,7 @@ compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
 
-  let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] free body [] []
+  let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] free body
   -- Generate ISPC kernel
   fstruct <- MC.prepareTaskStruct sharedDef "param_struct" free_args free_ctypes [] []
   let fstruct' = fstruct <> "_"

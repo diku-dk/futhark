@@ -58,6 +58,7 @@ module Futhark.CodeGen.ImpCode
     Functions (..),
     Function,
     FunctionT (..),
+    EntryPoint (..),
     Constants (..),
     ValueDesc (..),
     Signedness (..),
@@ -203,17 +204,23 @@ data ExternalValue
   | TransparentValue Uniqueness ValueDesc
   deriving (Show)
 
+-- | Information about how this function can be called from the outside world.
+data EntryPoint = EntryPoint
+  { entryPointName :: Name,
+    entryPointResults :: [ExternalValue],
+    entryPointArgs :: [(Name, ExternalValue)]
+  }
+  deriving (Show)
+
 -- | A imperative function, containing the body as well as its
 -- low-level inputs and outputs, as well as its high-level arguments
--- and results.  The latter are only used if the function is an entry
+-- and results.  The latter are only present if the function is an entry
 -- point.
 data FunctionT a = Function
-  { functionEntry :: Maybe Name,
+  { functionEntry :: Maybe EntryPoint,
     functionOutput :: [Param],
     functionInput :: [Param],
-    functionBody :: Code a,
-    functionResult :: [ExternalValue],
-    functionArgs :: [(Name, ExternalValue)]
+    functionBody :: Code a
   }
   deriving (Show)
 
@@ -443,23 +450,27 @@ instance Pretty op => Pretty (Constants op) where
       </> "Initialisation:"
       </> indent 2 (ppr code)
 
-instance Pretty op => Pretty (FunctionT op) where
-  ppr (Function _ outs ins body results args) =
-    "Inputs:"
-      </> block ins
-      </> "Outputs:"
-      </> block outs
+instance Pretty EntryPoint where
+  ppr (EntryPoint name results args) =
+    "Name:"
+      </> indent 2 (pquote (ppr name))
       </> "Arguments:"
-      </> block (map ppArg args)
-      </> "Result:"
-      </> block results
+      </> indent 2 (stack $ map ppArg args)
+      </> "Results:"
+      </> indent 2 (stack $ map ppr results)
+    where
+      ppArg (p, t) = ppr p <+> ":" <+> ppr t
+
+instance Pretty op => Pretty (FunctionT op) where
+  ppr (Function entry outs ins body) =
+    "Inputs:"
+      </> indent 2 (stack $ map ppr ins)
+      </> "Outputs:"
+      </> indent 2 (stack $ map ppr outs)
+      </> "Entry:"
+      </> indent 2 (ppr entry)
       </> "Body:"
       </> indent 2 (ppr body)
-    where
-      ppArg (p, t) =
-        ppr p <+> ":" <+> ppr t
-      block :: Pretty a => [a] -> Doc
-      block = indent 2 . stack . map ppr
 
 instance Pretty Param where
   ppr (ScalarParam name ptype) = ppr ptype <+> ppr name
@@ -607,8 +618,8 @@ instance Foldable FunctionT where
   foldMap = foldMapDefault
 
 instance Traversable FunctionT where
-  traverse f (Function entry outs ins body results args) =
-    Function entry outs ins <$> traverse f body <*> pure results <*> pure args
+  traverse f (Function entry outs ins body) =
+    Function entry outs ins <$> traverse f body
 
 instance Functor Code where
   fmap = fmapDefault
@@ -673,12 +684,15 @@ declaredIn (While _ body) = declaredIn body
 declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
 
+instance FreeIn EntryPoint where
+  freeIn' (EntryPoint _ res args) =
+    freeIn' res <> freeIn' (map snd args)
+
 instance FreeIn a => FreeIn (Functions a) where
   freeIn' (Functions fs) = foldMap (onFun . snd) fs
     where
       onFun f =
-        fvBind pnames $
-          freeIn' (functionBody f) <> freeIn' (functionResult f <> map snd (functionArgs f))
+        fvBind pnames $ freeIn' (functionBody f) <> freeIn' (functionEntry f)
         where
           pnames =
             namesFromList $ map paramName $ functionInput f <> functionOutput f

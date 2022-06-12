@@ -51,8 +51,6 @@ mapTransposeFunction fname pt =
           If (le64 num_arrays .==. 1) doTranspose doMapTranspose
         ]
     )
-    []
-    []
   where
     params =
       [ memparam destmem,

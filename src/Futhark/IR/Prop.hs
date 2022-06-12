@@ -176,9 +176,9 @@ commutativeLambda lam =
 -- the parameters of the original function (they must all come at the
 -- end).
 entryPointSize :: EntryPointType -> Int
-entryPointSize (TypeOpaque _ _ x) = x
-entryPointSize (TypeUnsigned _) = 1
-entryPointSize (TypeDirect _) = 1
+entryPointSize (TypeOpaque _ x) = x
+entryPointSize TypeUnsigned = 1
+entryPointSize TypeDirect = 1
 
 -- | A 'StmAux' with empty 'Certs'.
 defAux :: dec -> StmAux dec
