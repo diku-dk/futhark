@@ -64,7 +64,7 @@ extra-source-files:
     rts/python/server.py
     rts/python/values.py
     rts/python/opencl.py
-    rts/python/scalar.p
+    rts/python/scalar.py
     prelude/functional.fut
     prelude/math.fut
     prelude/soacs.fut
