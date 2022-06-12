@@ -55,11 +55,9 @@ extra-source-files:
     rts/c/util.h
     rts/c/server.h
     rts/futhark-doc/style.css
-    rts/javascript/
     rts/javascript/server.js
     rts/javascript/values.js
     rts/javascript/wrapperclasses.js
-    rts/python/
     rts/python/tuning.py
     rts/python/panic.py
     rts/python/memory.py
