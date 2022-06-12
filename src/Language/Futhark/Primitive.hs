@@ -19,6 +19,7 @@ module Language.Futhark.Primitive
     PrimType (..),
     allPrimTypes,
     module Data.Int,
+    module Data.Word,
     Half,
 
     -- * Values
@@ -129,7 +130,7 @@ import Data.Bits
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
-import Data.Word
+import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CUShort (..))
 import Futhark.Util
   ( cbrt,

@@ -10,7 +10,7 @@ where
 
 import Data.Bifunctor (bimap)
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Syntax.Core
+import Futhark.IR.Syntax.Core (Name, VName)
 import Futhark.Util.IntegralExp
 import Prelude hiding (quot)
 
