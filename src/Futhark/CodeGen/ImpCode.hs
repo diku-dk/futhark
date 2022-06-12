@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -432,125 +433,127 @@ instance Pretty op => Pretty (Functions op) where
   ppr (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where
       ppFun (name, fun) =
-        text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
+        "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
 instance Pretty op => Pretty (Constants op) where
   ppr (Constants decls code) =
-    text "Constants:"
+    "Constants:"
       </> indent 2 (stack $ map ppr decls)
       </> mempty
-      </> text "Initialisation:"
+      </> "Initialisation:"
       </> indent 2 (ppr code)
 
 instance Pretty op => Pretty (FunctionT op) where
   ppr (Function _ outs ins body results args) =
-    text "Inputs:"
+    "Inputs:"
       </> block ins
-      </> text "Outputs:"
+      </> "Outputs:"
       </> block outs
-      </> text "Arguments:"
-      </> block args
-      </> text "Result:"
+      </> "Arguments:"
+      </> block (map ppArg args)
+      </> "Result:"
       </> block results
-      </> text "Body:"
+      </> "Body:"
       </> indent 2 (ppr body)
     where
+      ppArg (p, t) =
+        ppr p <+> ":" <+> ppr t
       block :: Pretty a => [a] -> Doc
       block = indent 2 . stack . map ppr
 
 instance Pretty Param where
   ppr (ScalarParam name ptype) = ppr ptype <+> ppr name
-  ppr (MemParam name space) = text "mem" <> ppr space <> text " " <> ppr name
+  ppr (MemParam name space) = "mem" <> ppr space <> " " <> ppr name
 
 instance Pretty ValueDesc where
   ppr (ScalarValue t ept name) =
     ppr t <+> ppr name <> ept'
     where
       ept' = case ept of
-        TypeUnsigned -> text " (unsigned)"
+        TypeUnsigned -> " (unsigned)"
         TypeDirect -> mempty
   ppr (ArrayValue mem space et ept shape) =
-    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> ppr space <+> ept'
+    foldr f (ppr et) shape <+> "at" <+> ppr mem <> ppr space <+> ept'
     where
       f e s = brackets $ s <> comma <> ppr e
       ept' = case ept of
-        TypeUnsigned -> text " (unsigned)"
+        TypeUnsigned -> " (unsigned)"
         TypeDirect -> mempty
 
 instance Pretty ExternalValue where
   ppr (TransparentValue u v) = ppr u <> ppr v
   ppr (OpaqueValue u desc vs) =
-    ppr u <> text "opaque"
-      <+> text desc
+    ppr u <> "opaque"
+      <+> pquote (ppr desc)
       <+> nestedBlock "{" "}" (stack $ map ppr vs)
 
 instance Pretty ArrayContents where
   ppr (ArrayValues vs) = braces (commasep $ map ppr vs)
-  ppr (ArrayZeros n) = braces (text "0") <+> text "*" <+> ppr n
+  ppr (ArrayZeros n) = braces "0" <+> "*" <+> ppr n
 
 instance Pretty op => Pretty (Code op) where
   ppr (Op op) = ppr op
-  ppr Skip = text "skip"
+  ppr Skip = "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
   ppr (For i limit body) =
-    text "for"
+    "for"
       <+> ppr i
       <+> langle
       <+> ppr limit
-      <+> text "{"
+      <+> "{"
       </> indent 2 (ppr body)
-      </> text "}"
+      </> "}"
   ppr (While cond body) =
-    text "while"
+    "while"
       <+> ppr cond
-      <+> text "{"
+      <+> "{"
       </> indent 2 (ppr body)
-      </> text "}"
+      </> "}"
   ppr (DeclareMem name space) =
-    text "var" <+> ppr name <> text ": mem" <> ppr space
+    "var" <+> ppr name <> ": mem" <> ppr space
   ppr (DeclareScalar name vol t) =
-    text "var" <+> ppr name <> text ":" <+> vol' <> ppr t
+    "var" <+> ppr name <> ":" <+> vol' <> ppr t
     where
       vol' = case vol of
-        Volatile -> text "volatile "
+        Volatile -> "volatile "
         Nonvolatile -> mempty
   ppr (DeclareArray name space t vs) =
-    text "array"
-      <+> ppr name <> text "@" <> ppr space
-      <+> text ":"
+    "array"
+      <+> ppr name <> "@" <> ppr space
+      <+> ":"
       <+> ppr t
       <+> equals
       <+> ppr vs
   ppr (Allocate name e space) =
-    ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
+    ppr name <+> "<-" <+> "malloc" <> parens (ppr e) <> ppr space
   ppr (Free name space) =
-    text "free" <> parens (ppr name) <> ppr space
+    "free" <> parens (ppr name) <> ppr space
   ppr (Write name i bt space vol val) =
     ppr name <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr i)
-      <+> text "<-"
+      <+> "<-"
       <+> ppr val
     where
       vol' = case vol of
-        Volatile -> text "volatile "
+        Volatile -> "volatile "
         Nonvolatile -> mempty
   ppr (Read name v is bt space vol) =
     ppr name
-      <+> text "<-"
+      <+> "<-"
       <+> ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
     where
       vol' = case vol of
-        Volatile -> text "volatile "
+        Volatile -> "volatile "
         Nonvolatile -> mempty
   ppr (SetScalar name val) =
-    ppr name <+> text "<-" <+> ppr val
+    ppr name <+> "<-" <+> ppr val
   ppr (SetMem dest from DefaultSpace) =
-    ppr dest <+> text "<-" <+> ppr from
+    ppr dest <+> "<-" <+> ppr from
   ppr (SetMem dest from space) =
-    ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
+    ppr dest <+> "<-" <+> ppr from <+> "@" <> ppr space
   ppr (Assert e msg _) =
-    text "assert" <> parens (commasep [ppr msg, ppr e])
+    "assert" <> parens (commasep [ppr msg, ppr e])
   ppr (Copy t dest destoffset destspace src srcoffset srcspace size) =
-    text "copy"
+    "copy"
       <> parens
         ( ppr t <> comma
             </> ppMemLoc dest destoffset <> ppr destspace <> comma
@@ -559,27 +562,27 @@ instance Pretty op => Pretty (Code op) where
         )
     where
       ppMemLoc base offset =
-        ppr base <+> text "+" <+> ppr offset
+        ppr base <+> "+" <+> ppr offset
   ppr (If cond tbranch fbranch) =
-    text "if"
+    "if"
       <+> ppr cond
-      <+> text "then {"
+      <+> "then {"
       </> indent 2 (ppr tbranch)
-      </> text "} else {"
+      </> "} else {"
       </> indent 2 (ppr fbranch)
-      </> text "}"
+      </> "}"
   ppr (Call dests fname args) =
     commasep (map ppr dests)
-      <+> text "<-"
+      <+> "<-"
       <+> ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
-    text "--" <+> text s </> ppr code
+    "--" <+> text s </> ppr code
   ppr (DebugPrint desc (Just e)) =
-    text "debug" <+> parens (commasep [text (show desc), ppr e])
+    "debug" <+> parens (commasep [text (show desc), ppr e])
   ppr (DebugPrint desc Nothing) =
-    text "debug" <+> parens (text (show desc))
+    "debug" <+> parens (text (show desc))
   ppr (TracePrint msg) =
-    text "trace" <+> parens (ppr msg)
+    "trace" <+> parens (ppr msg)
 
 instance Pretty Arg where
   ppr (MemArg m) = ppr m
