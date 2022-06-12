@@ -149,6 +149,7 @@ module Futhark.IR.Syntax
     FunDef (..),
     EntryPoint,
     EntryParam (..),
+    EntryResult (..),
     EntryPointType (..),
     Prog (..),
 
@@ -528,27 +529,33 @@ deriving instance RepTypes rep => Ord (FunDef rep)
 -- | Every entry point argument and return value has an annotation
 -- indicating how it maps to the original source program type.
 data EntryPointType
-  = -- | Is an unsigned integer or array of unsigned
-    -- integers.
-    TypeUnsigned Uniqueness
-  | -- | A black box type comprising this many core
-    -- values.  The string is a human-readable
-    -- description with no other semantics.
-    TypeOpaque Uniqueness String Int
+  = -- | Is an unsigned integer or array of unsigned integers.
+    TypeUnsigned
+  | -- | A black box type comprising this many core values.  The
+    -- string is a human-readable description with no other semantics.
+    TypeOpaque String Int
   | -- | Maps directly.
-    TypeDirect Uniqueness
+    TypeDirect
   deriving (Eq, Show, Ord)
 
 -- | An entry point parameter, comprising its name and original type.
 data EntryParam = EntryParam
   { entryParamName :: Name,
+    entryParamUniqueness :: Uniqueness,
     entryParamType :: EntryPointType
+  }
+  deriving (Eq, Show, Ord)
+
+-- | An entry point result type.
+data EntryResult = EntryResult
+  { entryResultUniqueness :: Uniqueness,
+    entryResultType :: EntryPointType
   }
   deriving (Eq, Show, Ord)
 
 -- | Information about the inputs and outputs (return value) of an entry
 -- point.
-type EntryPoint = (Name, [EntryParam], [EntryPointType])
+type EntryPoint = (Name, [EntryParam], [EntryResult])
 
 -- | An entire Futhark program.
 data Prog rep = Prog

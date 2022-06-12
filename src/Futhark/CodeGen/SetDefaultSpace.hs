@@ -27,12 +27,17 @@ setDefaultCodeSpace :: Space -> Code op -> Code op
 setDefaultCodeSpace = setCodeSpace
 
 setFunctionSpace :: Space -> Function op -> Function op
-setFunctionSpace space (Function entry outputs inputs body results args) =
+setFunctionSpace space (Function entry outputs inputs body) =
   Function
-    entry
+    (setEntrySpace space <$> entry)
     (map (setParamSpace space) outputs)
     (map (setParamSpace space) inputs)
     (setCodeSpace space body)
+
+setEntrySpace :: Space -> EntryPoint -> EntryPoint
+setEntrySpace space (EntryPoint name results args) =
+  EntryPoint
+    name
     (map (setExtValueSpace space) results)
     (map (fmap $ setExtValueSpace space) args)
 

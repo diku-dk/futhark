@@ -1380,8 +1380,8 @@ onEntryPoint ::
   Name ->
   Function op ->
   CompilerM op s (Maybe (C.Definition, (T.Text, Manifest.EntryPoint)))
-onEntryPoint _ _ (Function Nothing _ _ _ _ _) = pure Nothing
-onEntryPoint get_consts fname (Function (Just ename) outputs inputs _ results args) = inNewFunction $ do
+onEntryPoint _ _ (Function Nothing _ _ _) = pure Nothing
+onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) outputs inputs _) = inNewFunction $ do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -1940,7 +1940,7 @@ cachingMemory lexical f = do
   local lexMem $ f (concatMap declCached cached') (map freeCached cached')
 
 compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)) = inNewFunction $ do
+compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = inNewFunction $ do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
 
