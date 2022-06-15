@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * New prelude functions: `hist`, `spread`.  These function as
   non-consuming variants of `reduce_by_index` and `scatter`.
 
+* Using `==` to compare arrays is now deprecated.
+
 ### Removed
 
 ### Changed
