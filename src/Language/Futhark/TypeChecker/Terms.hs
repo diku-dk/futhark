@@ -782,20 +782,6 @@ instance Pretty (Unmatched (PatBase Info VName)) where
       ppr' (PatLit e _ _) = ppr e
       ppr' (PatConstr n _ ps _) = "#" <> ppr n <+> sep (map ppr' ps)
 
-checkUnmatched :: Exp -> TermTypeM ()
-checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
-  where
-    checkUnmatched' (AppExp (Match _ cs loc) _) = do
-      let ps = fmap (\(CasePat p _ _) -> p) cs
-      case unmatched $ NE.toList ps of
-        [] -> pure ()
-        ps' ->
-          typeError loc mempty . withIndexLink "unmatched-cases" $
-            "Unmatched cases in match expression:"
-              </> indent 2 (stack (map ppr ps'))
-    checkUnmatched' _ = pure ()
-    tv = identityMapper {mapOnExp = \e' -> checkUnmatched' e' >> astMap tv e'}
-
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
   (QualName _ name', vt) <- lookupVar loc (qualName name)
@@ -1060,10 +1046,24 @@ checkOneExp e = fmap fst . runTermTypeM $ do
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] t
   fixOverloadedTypes $ typeVars t
   e'' <- updateTypes e'
-  checkUnmatched e''
+  unmatchedCheck e''
   causalityCheck e''
   literalOverflowCheck e''
   pure (tparams, e'')
+
+unmatchedCheck :: Exp -> TermTypeM ()
+unmatchedCheck e = void $ unmatchedCheck' e >> astMap tv e
+  where
+    unmatchedCheck' (AppExp (Match _ cs loc) _) = do
+      let ps = fmap (\(CasePat p _ _) -> p) cs
+      case unmatched $ NE.toList ps of
+        [] -> pure ()
+        ps' ->
+          typeError loc mempty . withIndexLink "unmatched-cases" $
+            "Unmatched cases in match expression:"
+              </> indent 2 (stack (map ppr ps'))
+    unmatchedCheck' _ = pure ()
+    tv = identityMapper {mapOnExp = \e' -> unmatchedCheck' e' >> astMap tv e'}
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
@@ -1253,7 +1253,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
 
     -- Check if pattern matches are exhaustive and yield
     -- errors if not.
-    checkUnmatched body''
+    unmatchedCheck body''
 
     -- Check if the function body can actually be evaluated.
     causalityCheck body''
