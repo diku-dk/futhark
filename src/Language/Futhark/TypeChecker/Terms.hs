@@ -1175,7 +1175,7 @@ localChecks = void . check
     check e@(AppExp (Match _ cs loc) _) = do
       let ps = fmap (\(CasePat p _ _) -> p) cs
       case unmatched $ NE.toList ps of
-        [] -> pure e
+        [] -> recurse e
         ps' ->
           typeError loc mempty . withIndexLink "unmatched-cases" $
             "Unmatched cases in match expression:"
@@ -1192,7 +1192,15 @@ localChecks = void . check
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
-    check e = astMap identityMapper {mapOnExp = check} e
+    check e@(AppExp (BinOp (QualName [] v, _) _ (_, Info (Array {}, _)) _ loc) _)
+      | baseName v == "==",
+        baseTag v <= maxIntrinsicTag = do
+          warn loc $
+            textwrap
+              "Comparing arrays with \"==\" is deprecated and will stop working in a future revision of the language."
+          recurse e
+    check e = recurse e
+    recurse = astMap identityMapper {mapOnExp = check}
 
     bitWidth ty = 8 * intByteSize ty :: Int
 
