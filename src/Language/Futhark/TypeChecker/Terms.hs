@@ -1046,24 +1046,9 @@ checkOneExp e = fmap fst . runTermTypeM $ do
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] t
   fixOverloadedTypes $ typeVars t
   e'' <- updateTypes e'
-  unmatchedCheck e''
+  localChecks e''
   causalityCheck e''
-  literalOverflowCheck e''
   pure (tparams, e'')
-
-unmatchedCheck :: Exp -> TermTypeM ()
-unmatchedCheck e = void $ unmatchedCheck' e >> astMap tv e
-  where
-    unmatchedCheck' (AppExp (Match _ cs loc) _) = do
-      let ps = fmap (\(CasePat p _ _) -> p) cs
-      case unmatched $ NE.toList ps of
-        [] -> pure ()
-        ps' ->
-          typeError loc mempty . withIndexLink "unmatched-cases" $
-            "Unmatched cases in match expression:"
-              </> indent 2 (stack (map ppr ps'))
-    unmatchedCheck' _ = pure ()
-    tv = identityMapper {mapOnExp = \e' -> unmatchedCheck' e' >> astMap tv e'}
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
@@ -1177,27 +1162,40 @@ causalityCheck binding_body = do
                 <+> "with 'let' beforehand."
             )
 
--- | Traverse the expression, emitting warnings if any of the literals overflow
--- their inferred types
+-- | Traverse the expression, emitting warnings and errors for various
+-- problems:
 --
--- Note: currently unable to detect float underflow (such as 1e-400 -> 0)
-literalOverflowCheck :: Exp -> TermTypeM ()
-literalOverflowCheck = void . check
+-- * Unmatched cases.
+--
+-- * If any of the literals overflow their inferred types. Note:
+--  currently unable to detect float underflow (such as 1e-400 -> 0)
+localChecks :: Exp -> TermTypeM ()
+localChecks = void . check
   where
+    check e@(AppExp (Match _ cs loc) _) = do
+      let ps = fmap (\(CasePat p _ _) -> p) cs
+      case unmatched $ NE.toList ps of
+        [] -> pure e
+        ps' ->
+          typeError loc mempty . withIndexLink "unmatched-cases" $
+            "Unmatched cases in match expression:"
+              </> indent 2 (stack (map ppr ps'))
     check e@(IntLit x ty loc) =
       e <$ case ty of
-        Info (Scalar (Prim t)) -> warnBounds (inBoundsI x t) x t loc
+        Info (Scalar (Prim t)) -> errorBounds (inBoundsI x t) x t loc
         _ -> error "Inferred type of int literal is not a number"
     check e@(FloatLit x ty loc) =
       e <$ case ty of
-        Info (Scalar (Prim (FloatType t))) -> warnBounds (inBoundsF x t) x t loc
+        Info (Scalar (Prim (FloatType t))) -> errorBounds (inBoundsF x t) x t loc
         _ -> error "Inferred type of float literal is not a float"
     check e@(Negate (IntLit x ty loc1) loc2) =
       e <$ case ty of
-        Info (Scalar (Prim t)) -> warnBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
+        Info (Scalar (Prim t)) -> errorBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
     check e = astMap identityMapper {mapOnExp = check} e
+
     bitWidth ty = 8 * intByteSize ty :: Int
+
     inBoundsI x (Signed t) = x >= -2 ^ (bitWidth t - 1) && x < 2 ^ (bitWidth t - 1)
     inBoundsI x (Unsigned t) = x >= 0 && x < 2 ^ bitWidth t
     inBoundsI x (FloatType Float16) = not $ isInfinite (fromIntegral x :: Half)
@@ -1207,7 +1205,8 @@ literalOverflowCheck = void . check
     inBoundsF x Float16 = not $ isInfinite (realToFrac x :: Float)
     inBoundsF x Float32 = not $ isInfinite (realToFrac x :: Float)
     inBoundsF x Float64 = not $ isInfinite x
-    warnBounds inBounds x ty loc =
+
+    errorBounds inBounds x ty loc =
       unless inBounds $
         typeError loc mempty . withIndexLink "literal-out-of-bounds" $
           "Literal "
@@ -1251,14 +1250,11 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
     maybe_retdecl'' <- traverse updateTypes maybe_retdecl'
     rettype'' <- normTypeFully rettype'
 
-    -- Check if pattern matches are exhaustive and yield
-    -- errors if not.
-    unmatchedCheck body''
-
     -- Check if the function body can actually be evaluated.
     causalityCheck body''
 
-    literalOverflowCheck body''
+    -- Check for various problems.
+    localChecks body''
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
