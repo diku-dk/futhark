@@ -5,10 +5,9 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module provides various simple ways to query and manipulate
--- fundamental Futhark terms, such as types and values.  The intent is to
--- keep "Futhark.IRrsentation.AST.Syntax" simple, and put whatever
--- embellishments we need here.  This is an internal, desugared
--- representation.
+-- fundamental Futhark terms, such as types and values.  The intent is
+-- to keep "Futhark.IR.Syntax" simple, and put whatever embellishments
+-- we need here.  This is an internal, desugared representation.
 module Futhark.IR.Prop
   ( module Futhark.IR.Prop.Reshape,
     module Futhark.IR.Prop.Rearrange,
