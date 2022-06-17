@@ -564,15 +564,15 @@ the manifest contains:
   * A list of all *outputs*, including their type and whether they are
     *unique*.
 
-* A mapping from the name of each non-scalar types to:
+* A mapping from the name of each non-scalar type to:
 
-  * The C type of used to represent type type (which is practice
+  * The C type of used to represent the type (which is in practice
     always a pointer of some kind).
 
   * For arrays, the element type and rank.
 
-  * A mapping from names of *operations* to the name of the C function
-    that implements that operation for the type.  The type of the C
+  * A mapping from *operations* to the names of the C functions that
+    implement the operations for the type.  The types of the C
     functions are as documented above.  The following operations are
     listed:
 
