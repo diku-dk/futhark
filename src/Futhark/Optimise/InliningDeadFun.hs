@@ -59,10 +59,12 @@ inlineFunctions ::
   Prog SOACS ->
   m (Prog SOACS)
 inlineFunctions simplify_rate cg what_should_be_inlined prog = do
-  let Prog consts funs = prog
+  let consts = progConsts prog
+      funs = progFuns prog
       vtable = ST.fromScope (addScopeWisdom (scopeOf consts))
 
-  uncurry Prog <$> recurse (1, vtable) (consts, funs) what_should_be_inlined
+  (consts', funs') <- recurse (1, vtable) (consts, funs) what_should_be_inlined
+  pure $ prog {progConsts = consts', progFuns = funs'}
   where
     fdmap fds = M.fromList $ zip (map funDefName fds) fds
 

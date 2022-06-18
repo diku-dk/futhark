@@ -194,10 +194,14 @@ extractKernels =
     }
 
 transformProg :: Prog SOACS -> PassM (Prog GPU)
-transformProg (Prog consts funs) = do
-  consts' <- runDistribM $ transformStms mempty $ stmsToList consts
-  funs' <- mapM (transformFunDef $ scopeOf consts') funs
-  pure $ Prog consts' funs'
+transformProg prog = do
+  consts' <- runDistribM $ transformStms mempty $ stmsToList $ progConsts prog
+  funs' <- mapM (transformFunDef $ scopeOf consts') $ progFuns prog
+  pure $
+    prog
+      { progConsts = consts',
+        progFuns = funs'
+      }
 
 -- In order to generate more stable threshold names, we keep track of
 -- the numbers used for thresholds separately from the ordinary name

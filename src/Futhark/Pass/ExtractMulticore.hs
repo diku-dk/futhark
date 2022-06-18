@@ -401,13 +401,17 @@ transformSOAC pat _ (Stream w arrs _ nes lam) = do
   transformStms stream_stms
 
 transformProg :: Prog SOACS -> PassM (Prog MC)
-transformProg (Prog consts funs) =
+transformProg prog =
   modifyNameSource $ runState (runReaderT m mempty)
   where
     ExtractM m = do
-      consts' <- transformStms consts
-      funs' <- inScopeOf consts' $ mapM transformFunDef funs
-      pure $ Prog consts' funs'
+      consts' <- transformStms $ progConsts prog
+      funs' <- inScopeOf consts' $ mapM transformFunDef $ progFuns prog
+      pure $
+        prog
+          { progConsts = consts',
+            progFuns = funs'
+          }
 
 -- | Transform a program using SOACs to a program in the 'MC'
 -- representation, using some amount of flattening.
