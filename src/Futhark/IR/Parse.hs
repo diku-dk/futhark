@@ -46,7 +46,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 type Parser = Parsec Void T.Text
 
 pStringLiteral :: Parser String
-pStringLiteral = char '"' >> manyTill L.charLiteral (char '"')
+pStringLiteral = lexeme $ char '"' >> manyTill L.charLiteral (char '"')
 
 pName :: Parser Name
 pName =
@@ -140,6 +140,9 @@ pTypes = braces $ pType `sepBy` pComma
 pExtType :: Parser ExtType
 pExtType = pTypeBase pExtShape (pure NoUniqueness)
 
+pRank :: Parser Rank
+pRank = Rank . length <$> many "[]"
+
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [pAsterisk $> Unique, pure Nonunique]
 
@@ -153,6 +156,9 @@ pDeclType = pDeclBase pType
 
 pDeclExtType :: Parser DeclExtType
 pDeclExtType = pDeclBase pExtType
+
+pRankType :: Parser (TypeBase Rank Uniqueness)
+pRankType = pTypeBase pRank pUniqueness
 
 pSubExp :: Parser SubExp
 pSubExp = Var <$> pVName <|> Constant <$> pPrimValue
@@ -266,7 +272,7 @@ pBasicOp =
     [ keyword "opaque" $> Opaque OpaqueNil <*> parens pSubExp,
       keyword "trace"
         $> uncurry (Opaque . OpaqueTrace)
-        <*> parens ((,) <$> lexeme pStringLiteral <* pComma <*> pSubExp),
+        <*> parens ((,) <$> pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Copy <*> parens pVName,
       keyword "assert"
         *> parens
@@ -566,6 +572,17 @@ pBody pr =
       Body (pBodyDec pr) mempty <$> pResult
     ]
 
+pEntryPointType :: Parser EntryPointType
+pEntryPointType =
+  choice
+    [ keyword "direct" $> TypeDirect <*> pRankType,
+      keyword "unsigned" $> TypeUnsigned <*> pRankType,
+      keyword "opaque"
+        $> TypeOpaque
+        <*> pStringLiteral
+        <*> braces (pRankType `sepBy` pComma)
+    ]
+
 pEntry :: Parser EntryPoint
 pEntry =
   parens $
@@ -578,12 +595,6 @@ pEntry =
   where
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
     pEntryPointResults = braces (pEntryPointResult `sepBy` pComma)
-    pEntryPointType =
-      choice
-        [ "direct" $> TypeDirect,
-          "unsigned" $> TypeUnsigned,
-          "opaque" *> parens (TypeOpaque <$> pStringLiteral <* pComma <*> pInt)
-        ]
     pEntryPointInput =
       EntryParam <$> pName <* pColon <*> pUniqueness <*> pEntryPointType
     pEntryPointResult =

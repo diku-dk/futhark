@@ -98,7 +98,11 @@ generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info rettype) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
-    let entry' = entryPoint (baseName ofname) (zip e_params params') (e_rettype, entry_rettype)
+    let entry' =
+          entryPoint
+            (baseName ofname)
+            (zip e_params params')
+            (e_rettype, map (map I.rankShaped) entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     (entry_body, ctx_ts) <- buildBody $ do
@@ -131,7 +135,7 @@ entryPoint ::
   Name ->
   [(E.EntryParam, [I.FParam SOACS])] ->
   ( E.EntryType,
-    [[I.TypeBase ExtShape Uniqueness]]
+    [[I.TypeBase Rank Uniqueness]]
   ) ->
   I.EntryPoint
 entryPoint name params (eret, crets) =
@@ -156,19 +160,23 @@ entryPoint name params (eret, crets) =
   )
   where
     onParam (E.EntryParam e_p e_t, ps) =
-      uncurry (I.EntryParam e_p) $ entryPointType e_t $ staticShapes $ map I.paramDeclType ps
+      uncurry (I.EntryParam e_p) $ entryPointType e_t $ map (I.rankShaped . I.paramDeclType) ps
 
     entryPointType t ts
-      | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-          (u, I.TypeUnsigned)
-      | E.Array _ _ _ (E.Prim E.Unsigned {}) <- E.entryType t =
-          (u, I.TypeUnsigned)
-      | E.Scalar E.Prim {} <- E.entryType t =
-          (u, I.TypeDirect)
-      | E.Array _ _ _ E.Prim {} <- E.entryType t =
-          (u, I.TypeDirect)
+      | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t,
+        [ts0] <- ts =
+          (u, I.TypeUnsigned ts0)
+      | E.Array _ _ _ (E.Prim E.Unsigned {}) <- E.entryType t,
+        [ts0] <- ts =
+          (u, I.TypeUnsigned ts0)
+      | E.Scalar E.Prim {} <- E.entryType t,
+        [ts0] <- ts =
+          (u, I.TypeDirect ts0)
+      | E.Array _ _ _ E.Prim {} <- E.entryType t,
+        [ts0] <- ts =
+          (u, I.TypeDirect ts0)
       | otherwise =
-          (u, I.TypeOpaque desc $ length ts)
+          (u, I.TypeOpaque desc ts)
       where
         u = foldl max Nonunique $ map I.uniqueness ts
         desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t

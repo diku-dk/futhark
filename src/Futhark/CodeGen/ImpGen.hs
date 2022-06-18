@@ -496,6 +496,15 @@ compileConsts used_consts stms = do
     extract s =
       (mempty, s)
 
+-- | How many value parameters are accepted by this entry point?  This
+-- is used to determine which of the function parameters correspond to
+-- the parameters of the original function (they must all come at the
+-- end).
+entryPointSize :: EntryPointType -> Int
+entryPointSize (TypeOpaque _ ts) = length ts
+entryPointSize TypeUnsigned {} = 1
+entryPointSize TypeDirect {} = 1
+
 compileInParam ::
   Mem rep inner =>
   FParam rep ->
@@ -544,8 +553,9 @@ compileInParams params eparams = do
           _ ->
             Nothing
 
-      mkExts (EntryParam v u (TypeOpaque desc n) : epts) fparams =
-        let (fparams', rest) = splitAt n fparams
+      mkExts (EntryParam v u (TypeOpaque desc ts) : epts) fparams =
+        let n = length ts
+            (fparams', rest) = splitAt n fparams
          in ( v,
               Imp.OpaqueValue
                 u
@@ -553,10 +563,10 @@ compileInParams params eparams = do
                 (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams')
             )
               : mkExts epts rest
-      mkExts (EntryParam v u TypeUnsigned : epts) (fparam : fparams) =
+      mkExts (EntryParam v u TypeUnsigned {} : epts) (fparam : fparams) =
         maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
           ++ mkExts epts fparams
-      mkExts (EntryParam v u TypeDirect : epts) (fparam : fparams) =
+      mkExts (EntryParam v u TypeDirect {} : epts) (fparam : fparams) =
         maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
           ++ mkExts epts fparams
       mkExts _ _ = []
@@ -621,14 +631,15 @@ compileExternalValues orig_rts orig_epts maybe_params = do
       mkValueDesc _ _ MemMem {} =
         error "mkValueDesc: unexpected MemMem output."
 
-      mkExts i (EntryResult u (TypeOpaque desc n) : epts) rets = do
-        let (rets', rest) = splitAt n rets
+      mkExts i (EntryResult u (TypeOpaque desc ts) : epts) rets = do
+        let n = length ts
+            (rets', rest) = splitAt n rets
         vds <- zipWithM (`mkValueDesc` Imp.TypeDirect) [i ..] rets'
         (Imp.OpaqueValue u desc vds :) <$> mkExts (i + n) epts rest
-      mkExts i (EntryResult u TypeUnsigned : epts) (ret : rets) = do
+      mkExts i (EntryResult u TypeUnsigned {} : epts) (ret : rets) = do
         vd <- mkValueDesc i Imp.TypeUnsigned ret
         (Imp.TransparentValue u vd :) <$> mkExts (i + 1) epts rets
-      mkExts i (EntryResult u TypeDirect : epts) (ret : rets) = do
+      mkExts i (EntryResult u TypeDirect {} : epts) (ret : rets) = do
         vd <- mkValueDesc i Imp.TypeDirect ret
         (Imp.TransparentValue u vd :) <$> mkExts (i + 1) epts rets
       mkExts _ _ _ = pure []

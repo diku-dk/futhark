@@ -530,12 +530,11 @@ deriving instance RepTypes rep => Ord (FunDef rep)
 -- indicating how it maps to the original source program type.
 data EntryPointType
   = -- | Is an unsigned integer or array of unsigned integers.
-    TypeUnsigned
-  | -- | A black box type comprising this many core values.  The
-    -- string is a human-readable description with no other semantics.
-    TypeOpaque String Int
+    TypeUnsigned (TypeBase Rank Uniqueness)
+  | -- | An opaque type of this name comprising these types.
+    TypeOpaque String [TypeBase Rank Uniqueness]
   | -- | Maps directly.
-    TypeDirect
+    TypeDirect (TypeBase Rank Uniqueness)
   deriving (Eq, Show, Ord)
 
 -- | An entry point parameter, comprising its name and original type.
