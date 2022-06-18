@@ -29,8 +29,11 @@ aliasAnalysis ::
   (ASTRep rep, CanBeAliased (Op rep)) =>
   Prog rep ->
   Prog (Aliases rep)
-aliasAnalysis (Prog consts funs) =
-  Prog (fst (analyseStms mempty consts)) (map analyseFun funs)
+aliasAnalysis prog =
+  prog
+    { progConsts = fst (analyseStms mempty (progConsts prog)),
+      progFuns = map analyseFun (progFuns prog)
+    }
 
 -- | Perform alias analysis on function.
 analyseFun ::

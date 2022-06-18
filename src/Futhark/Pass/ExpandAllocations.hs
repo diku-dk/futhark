@@ -36,10 +36,13 @@ import Prelude hiding (quot)
 expandAllocations :: Pass GPUMem GPUMem
 expandAllocations =
   Pass "expand allocations" "Expand allocations" $
-    \(Prog consts funs) -> do
+    \prog -> do
       consts' <-
-        modifyNameSource $ limitationOnLeft . runStateT (runReaderT (transformStms consts) mempty)
-      Prog consts' <$> mapM (transformFunDef $ scopeOf consts') funs
+        modifyNameSource $
+          limitationOnLeft
+            . runStateT (runReaderT (transformStms (progConsts prog)) mempty)
+      funs' <- mapM (transformFunDef $ scopeOf consts') (progFuns prog)
+      pure $ prog {progConsts = consts', progFuns = funs'}
 
 -- Cannot use intraproceduralTransformation because it might create
 -- duplicate size keys (which are not fixed by renamer, and size

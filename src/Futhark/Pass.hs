@@ -89,10 +89,10 @@ intraproceduralTransformationWithConsts ::
   (Stms torep -> FunDef fromrep -> PassM (FunDef torep)) ->
   Prog fromrep ->
   PassM (Prog torep)
-intraproceduralTransformationWithConsts ct ft (Prog consts funs) = do
-  consts' <- ct consts
-  funs' <- parPass (ft consts') funs
-  pure $ Prog consts' funs'
+intraproceduralTransformationWithConsts ct ft prog = do
+  consts' <- ct (progConsts prog)
+  funs' <- parPass (ft consts') (progFuns prog)
+  pure $ prog {progConsts = consts', progFuns = funs'}
 
 -- | Like 'intraproceduralTransformationWithConsts', but do not change
 -- the top-level constants, and simply pass along their 'Scope'.
