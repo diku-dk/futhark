@@ -200,15 +200,15 @@ data ExternalValue
   = -- | The string is a human-readable description with no other
     -- semantics.
     -- not matter.
-    OpaqueValue Uniqueness String [ValueDesc]
-  | TransparentValue Uniqueness ValueDesc
+    OpaqueValue String [ValueDesc]
+  | TransparentValue ValueDesc
   deriving (Show)
 
 -- | Information about how this function can be called from the outside world.
 data EntryPoint = EntryPoint
   { entryPointName :: Name,
-    entryPointResults :: [ExternalValue],
-    entryPointArgs :: [(Name, ExternalValue)]
+    entryPointResults :: [(Uniqueness, ExternalValue)],
+    entryPointArgs :: [((Name, Uniqueness), ExternalValue)]
   }
   deriving (Show)
 
@@ -457,9 +457,10 @@ instance Pretty EntryPoint where
       </> "Arguments:"
       </> indent 2 (stack $ map ppArg args)
       </> "Results:"
-      </> indent 2 (stack $ map ppr results)
+      </> indent 2 (stack $ map ppRes results)
     where
-      ppArg (p, t) = ppr p <+> ":" <+> ppr t
+      ppArg ((p, u), t) = ppr p <+> ":" <+> ppRes (u, t)
+      ppRes (u, t) = ppr u <> ppr t
 
 instance Pretty op => Pretty (FunctionT op) where
   ppr (Function entry outs ins body) =
@@ -492,9 +493,9 @@ instance Pretty ValueDesc where
         TypeDirect -> mempty
 
 instance Pretty ExternalValue where
-  ppr (TransparentValue u v) = ppr u <> ppr v
-  ppr (OpaqueValue u desc vs) =
-    ppr u <> "opaque"
+  ppr (TransparentValue v) = ppr v
+  ppr (OpaqueValue desc vs) =
+    "opaque"
       <+> pquote (ppr desc)
       <+> nestedBlock "{" "}" (stack $ map ppr vs)
 
@@ -686,7 +687,7 @@ declaredIn _ = mempty
 
 instance FreeIn EntryPoint where
   freeIn' (EntryPoint _ res args) =
-    freeIn' res <> freeIn' (map snd args)
+    freeIn' (map snd res) <> freeIn' (map snd args)
 
 instance FreeIn a => FreeIn (Functions a) where
   freeIn' (Functions fs) = foldMap (onFun . snd) fs
@@ -702,8 +703,8 @@ instance FreeIn ValueDesc where
   freeIn' ScalarValue {} = mempty
 
 instance FreeIn ExternalValue where
-  freeIn' (TransparentValue _ vd) = freeIn' vd
-  freeIn' (OpaqueValue _ _ vds) = foldMap freeIn' vds
+  freeIn' (TransparentValue vd) = freeIn' vd
+  freeIn' (OpaqueValue _ vds) = foldMap freeIn' vds
 
 instance FreeIn a => FreeIn (Code a) where
   freeIn' (x :>>: y) =

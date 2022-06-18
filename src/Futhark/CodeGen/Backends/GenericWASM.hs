@@ -26,22 +26,22 @@ import Language.Futhark.Primitive
 import NeatInterpolation (text)
 
 extToString :: Imp.ExternalValue -> String
-extToString (Imp.TransparentValue u (Imp.ArrayValue vn _ pt s dimSize)) =
-  concat (replicate (length dimSize) "[]") ++ extToString (Imp.TransparentValue u (Imp.ScalarValue pt s vn))
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (FloatType Float16) _ _)) = "f16"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (FloatType Float32) _ _)) = "f32"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (FloatType Float64) _ _)) = "f64"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int8) Imp.TypeDirect _)) = "i8"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int16) Imp.TypeDirect _)) = "i16"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int32) Imp.TypeDirect _)) = "i32"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int64) Imp.TypeDirect _)) = "i64"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int8) Imp.TypeUnsigned _)) = "u8"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int16) Imp.TypeUnsigned _)) = "u16"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned _)) = "u32"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned _)) = "u64"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue Bool _ _)) = "bool"
-extToString (Imp.TransparentValue _ (Imp.ScalarValue Unit _ _)) = error "extToString: Unit"
-extToString (Imp.OpaqueValue _ oname vds) = opaqueName oname vds
+extToString (Imp.TransparentValue (Imp.ArrayValue vn _ pt s dimSize)) =
+  concat (replicate (length dimSize) "[]") ++ extToString (Imp.TransparentValue (Imp.ScalarValue pt s vn))
+extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float16) _ _)) = "f16"
+extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float32) _ _)) = "f32"
+extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float64) _ _)) = "f64"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8) Imp.TypeDirect _)) = "i8"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeDirect _)) = "i16"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeDirect _)) = "i32"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeDirect _)) = "i64"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8) Imp.TypeUnsigned _)) = "u8"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.TypeUnsigned _)) = "u16"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.TypeUnsigned _)) = "u32"
+extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.TypeUnsigned _)) = "u64"
+extToString (Imp.TransparentValue (Imp.ScalarValue Bool _ _)) = "bool"
+extToString (Imp.TransparentValue (Imp.ScalarValue Unit _ _)) = error "extToString: Unit"
+extToString (Imp.OpaqueValue oname vds) = opaqueName oname vds
 
 type EntryPointType = String
 

@@ -527,7 +527,7 @@ compileInParams ::
   Mem rep inner =>
   [FParam rep] ->
   Maybe [EntryParam] ->
-  ImpM rep r op ([Imp.Param], [ArrayDecl], Maybe [(Name, Imp.ExternalValue)])
+  ImpM rep r op ([Imp.Param], [ArrayDecl], Maybe [((Name, Uniqueness), Imp.ExternalValue)])
 compileInParams params eparams = do
   (inparams, arrayds) <- partitionEithers <$> mapM compileInParam params
   let findArray x = find (isArrayDecl x) arrayds
@@ -556,18 +556,17 @@ compileInParams params eparams = do
       mkExts (EntryParam v u (TypeOpaque desc ts) : epts) fparams =
         let n = length ts
             (fparams', rest) = splitAt n fparams
-         in ( v,
+         in ( (v, u),
               Imp.OpaqueValue
-                u
                 desc
                 (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams')
             )
               : mkExts epts rest
       mkExts (EntryParam v u TypeUnsigned {} : epts) (fparam : fparams) =
-        maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
+        maybeToList (((v, u),) . Imp.TransparentValue <$> mkValueDesc fparam Imp.TypeUnsigned)
           ++ mkExts epts fparams
       mkExts (EntryParam v u TypeDirect {} : epts) (fparam : fparams) =
-        maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
+        maybeToList (((v, u),) . Imp.TransparentValue <$> mkValueDesc fparam Imp.TypeDirect)
           ++ mkExts epts fparams
       mkExts _ _ = []
 
@@ -602,7 +601,7 @@ compileExternalValues ::
   [RetType rep] ->
   [EntryResult] ->
   [Maybe Imp.Param] ->
-  ImpM rep r op [Imp.ExternalValue]
+  ImpM rep r op [(Uniqueness, Imp.ExternalValue)]
 compileExternalValues orig_rts orig_epts maybe_params = do
   let (ctx_rts, val_rts) =
         splitAt (length orig_rts - sum (map (entryPointSize . entryResultType) orig_epts)) orig_rts
@@ -635,13 +634,13 @@ compileExternalValues orig_rts orig_epts maybe_params = do
         let n = length ts
             (rets', rest) = splitAt n rets
         vds <- zipWithM (`mkValueDesc` Imp.TypeDirect) [i ..] rets'
-        (Imp.OpaqueValue u desc vds :) <$> mkExts (i + n) epts rest
+        ((u, Imp.OpaqueValue desc vds) :) <$> mkExts (i + n) epts rest
       mkExts i (EntryResult u TypeUnsigned {} : epts) (ret : rets) = do
         vd <- mkValueDesc i Imp.TypeUnsigned ret
-        (Imp.TransparentValue u vd :) <$> mkExts (i + 1) epts rets
+        ((u, Imp.TransparentValue vd) :) <$> mkExts (i + 1) epts rets
       mkExts i (EntryResult u TypeDirect {} : epts) (ret : rets) = do
         vd <- mkValueDesc i Imp.TypeDirect ret
-        (Imp.TransparentValue u vd :) <$> mkExts (i + 1) epts rets
+        ((u, Imp.TransparentValue vd) :) <$> mkExts (i + 1) epts rets
       mkExts _ _ _ = pure []
 
   mkExts (length ctx_rts) orig_epts val_rts
@@ -650,7 +649,7 @@ compileOutParams ::
   Mem rep inner =>
   [RetType rep] ->
   Maybe [EntryResult] ->
-  ImpM rep r op (Maybe [Imp.ExternalValue], [Imp.Param], [ValueDestination])
+  ImpM rep r op (Maybe [(Uniqueness, Imp.ExternalValue)], [Imp.Param], [ValueDestination])
 compileOutParams orig_rts maybe_orig_epts = do
   (maybe_params, dests) <- unzip <$> mapM compileOutParam orig_rts
   evs <- case maybe_orig_epts of

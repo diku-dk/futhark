@@ -1267,19 +1267,19 @@ prepareEntryInputs ::
 prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
   where
     arg_names = namesFromList $ concatMap evNames args
-    evNames (OpaqueValue _ _ vds) = map vdName vds
-    evNames (TransparentValue _ vd) = [vdName vd]
+    evNames (OpaqueValue _ vds) = map vdName vds
+    evNames (TransparentValue vd) = [vdName vd]
     vdName (ArrayValue v _ _ _ _) = v
     vdName (ScalarValue _ _ v) = v
 
-    prepare pno (TransparentValue _ vd) = do
+    prepare pno (TransparentValue vd) = do
       let pname = "in" ++ show pno
       (ty, check) <- prepareValue Public [C.cexp|$id:pname|] vd
       pure
         ( [C.cparam|const $ty:ty $id:pname|],
           if null check then Nothing else Just $ allTrue check
         )
-    prepare pno (OpaqueValue _ desc vds) = do
+    prepare pno (OpaqueValue desc vds) = do
       ty <- opaqueToCType desc vds
       let pname = "in" ++ show pno
           field i ScalarValue {} = [C.cexp|$id:pname->$id:(tupleField i)|]
@@ -1322,7 +1322,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
 prepareEntryOutputs :: [ExternalValue] -> CompilerM op s ([C.Param], [C.BlockItem])
 prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
   where
-    prepare pno (TransparentValue _ vd) = do
+    prepare pno (TransparentValue vd) = do
       let pname = "out" ++ show pno
       ty <- valueDescToCType Public vd
 
@@ -1334,7 +1334,7 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
         ScalarValue {} -> do
           prepareValue [C.cexp|*$id:pname|] vd
           pure [C.cparam|$ty:ty *$id:pname|]
-    prepare pno (OpaqueValue _ desc vds) = do
+    prepare pno (OpaqueValue desc vds) = do
       let pname = "out" ++ show pno
       ty <- opaqueToCType desc vds
       vd_ts <- mapM (valueDescToCType Private) vds
@@ -1395,7 +1395,7 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
 
   (entry_point_output_params, pack_entry_outputs) <-
-    prepareEntryOutputs results
+    prepareEntryOutputs $ map snd results
 
   ctx_ty <- contextType
 
@@ -1470,32 +1470,26 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
       let ty' = primTypeToCType ty
       decl [C.cdecl|$ty:ty' $id:name;|]
 
-    vdTypeAndUnique (TransparentValue _ (ScalarValue pt signed _)) =
-      ( T.pack $ prettySigned (signed == TypeUnsigned) pt,
-        False
-      )
-    vdTypeAndUnique (TransparentValue u (ArrayValue _ _ pt signed shape)) =
-      ( T.pack $
-          mconcat (replicate (length shape) "[]")
-            <> prettySigned (signed == TypeUnsigned) pt,
-        u == Unique
-      )
-    vdTypeAndUnique (OpaqueValue u name _) =
-      (T.pack name, u == Unique)
+    vdType (TransparentValue (ScalarValue pt signed _)) =
+      T.pack $ prettySigned (signed == TypeUnsigned) pt
+    vdType (TransparentValue (ArrayValue _ _ pt signed shape)) =
+      T.pack $
+        mconcat (replicate (length shape) "[]")
+          <> prettySigned (signed == TypeUnsigned) pt
+    vdType (OpaqueValue name _) =
+      T.pack name
 
-    outputManifest vd =
-      let (t, u) = vdTypeAndUnique vd
-       in Manifest.Output
-            { Manifest.outputType = t,
-              Manifest.outputUnique = u
-            }
-    inputManifest (v, vd) =
-      let (t, u) = vdTypeAndUnique vd
-       in Manifest.Input
-            { Manifest.inputName = nameToText v,
-              Manifest.inputType = t,
-              Manifest.inputUnique = u
-            }
+    outputManifest (u, vd) =
+      Manifest.Output
+        { Manifest.outputType = vdType vd,
+          Manifest.outputUnique = u == Unique
+        }
+    inputManifest ((v, u), vd) =
+      Manifest.Input
+        { Manifest.inputName = nameToText v,
+          Manifest.inputType = vdType vd,
+          Manifest.inputUnique = u == Unique
+        }
 
 -- | The result of compilation to C is multiple parts, which can be
 -- put together in various ways.  The obvious way is to concatenate
