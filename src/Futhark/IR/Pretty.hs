@@ -320,9 +320,9 @@ instance PrettyRep rep => Pretty (Lambda rep) where
       </> indent 2 (ppr body)
 
 instance Pretty EntryPointType where
-  ppr TypeDirect = "direct"
-  ppr TypeUnsigned = "unsigned"
-  ppr (TypeOpaque desc n) = "opaque" <> apply [ppr (show desc), ppr n]
+  ppr (TypeDirect t) = "direct" <+> ppr t
+  ppr (TypeUnsigned t) = "unsigned" <+> ppr t
+  ppr (TypeOpaque desc ts) = "opaque" <+> pquote (text desc) <+> ppTupleLines' ts
 
 instance Pretty EntryParam where
   ppr (EntryParam name u t) = ppr name <> colon <+> ppr u <> ppr t

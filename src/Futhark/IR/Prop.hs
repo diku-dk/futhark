@@ -28,7 +28,6 @@ module Futhark.IR.Prop
     subExpVars,
     subExpVar,
     commutativeLambda,
-    entryPointSize,
     defAux,
     stmCerts,
     certify,
@@ -169,15 +168,6 @@ commutativeLambda lam =
    in n2 * 2 == length (lambdaParams lam)
         && n2 == length (bodyResult body)
         && all okComponent (zip3 xps yps $ bodyResult body)
-
--- | How many value parameters are accepted by this entry point?  This
--- is used to determine which of the function parameters correspond to
--- the parameters of the original function (they must all come at the
--- end).
-entryPointSize :: EntryPointType -> Int
-entryPointSize (TypeOpaque _ x) = x
-entryPointSize TypeUnsigned = 1
-entryPointSize TypeDirect = 1
 
 -- | A 'StmAux' with empty 'Certs'.
 defAux :: dec -> StmAux dec
