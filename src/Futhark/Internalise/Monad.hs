@@ -20,7 +20,6 @@ module Futhark.Internalise.Monad
     lookupConst,
     bindFunction,
     bindConstant,
-    localConstsScope,
     assert,
 
     -- * Convenient reexports
@@ -60,7 +59,6 @@ data InternaliseState = InternaliseState
   { stateNameSource :: VNameSource,
     stateFunTable :: FunTable,
     stateConstSubsts :: VarSubsts,
-    stateConstScope :: Scope SOACS,
     stateFuns :: [FunDef SOACS]
   }
 
@@ -74,9 +72,19 @@ newtype InternaliseM a
       MonadReader InternaliseEnv,
       MonadState InternaliseState,
       MonadFreshNames,
-      HasScope SOACS,
-      LocalScope SOACS
+      HasScope SOACS
     )
+
+-- Internalisation has to deal with the risk of multiple binding of
+-- the same variable (although always of the same type) in the
+-- program; in particular this might imply shadowing a constant.  The
+-- LocalScope instance for BuilderT does not handle this properly (and
+-- doing so would make it slower).  So we remove already-known
+-- variables before passing the scope on.
+instance LocalScope SOACS InternaliseM where
+  localScope scope (InternaliseM m) = do
+    old_scope <- askScope
+    InternaliseM $ localScope (scope `M.difference` old_scope) m
 
 instance MonadFreshNames (State InternaliseState) where
   getNameSource = gets stateNameSource
@@ -114,7 +122,6 @@ runInternaliseM safe (InternaliseM m) =
         { stateNameSource = src,
           stateFunTable = mempty,
           stateConstSubsts = mempty,
-          stateConstScope = mempty,
           stateFuns = mempty
         }
 
@@ -149,23 +156,15 @@ bindFunction fname fd info = do
 
 bindConstant :: VName -> FunDef SOACS -> InternaliseM ()
 bindConstant cname fd = do
-  let stms = bodyStms $ funDefBody fd
-      substs =
+  let substs =
         drop (length (shapeContext (funDefRetType fd))) $
-          map resSubExp $
-            bodyResult $
-              funDefBody fd
-  addStms stms
+          map resSubExp . bodyResult . funDefBody $
+            fd
+  addStms $ bodyStms $ funDefBody fd
   modify $ \s ->
     s
-      { stateConstSubsts = M.insert cname substs $ stateConstSubsts s,
-        stateConstScope = scopeOf stms <> stateConstScope s
+      { stateConstSubsts = M.insert cname substs $ stateConstSubsts s
       }
-
-localConstsScope :: InternaliseM a -> InternaliseM a
-localConstsScope m = do
-  scope <- gets stateConstScope
-  localScope scope m
 
 -- | Construct an 'Assert' statement, but taking attributes into
 -- account.  Always use this function, and never construct 'Assert'
