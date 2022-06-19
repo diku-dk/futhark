@@ -105,7 +105,13 @@ instance (ASTRep rep, Monad m) => HasScope rep (BuilderT rep m) where
   lookupType name = do
     t <- BuilderT $ gets $ M.lookup name . snd
     case t of
-      Nothing -> error $ "BuilderT.lookupType: unknown variable " ++ pretty name
+      Nothing -> do
+        known <- BuilderT $ gets $ M.keys . snd
+        error . unlines $
+          [ "BuilderT.lookupType: unknown variable " ++ pretty name,
+            "Known variables: ",
+            unwords $ map pretty known
+          ]
       Just t' -> pure $ typeOf t'
   askScope = BuilderT $ gets snd
 
