@@ -31,7 +31,6 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
