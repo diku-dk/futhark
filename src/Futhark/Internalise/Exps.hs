@@ -41,7 +41,7 @@ internaliseFunName = nameFromString . pretty
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
-  localConstsScope . bindingFParams tparams params $ \shapeparams params' -> do
+  bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
 
     msg <- case retdecl of
@@ -94,7 +94,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
     zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
+generateEntryPoint (E.EntryPoint e_params e_rettype) vb = do
   let (E.ValBind _ ofname _ (Info rettype) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType rettype
