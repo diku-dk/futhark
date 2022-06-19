@@ -54,7 +54,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
       rettype' <-
-        fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
+        zeroExts . internaliseReturnType rettype <$> mapM subExpType body_res
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
       pure
@@ -97,8 +97,8 @@ generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_params e_rettype) vb = do
   let (E.ValBind _ ofname _ (Info rettype) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
-    entry_rettype <- internaliseEntryReturnType rettype
-    let entry' =
+    let entry_rettype = internaliseEntryReturnType rettype
+        entry' =
           entryPoint
             (baseName ofname)
             (zip e_params params')
@@ -392,7 +392,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
   pure [se]
 internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
   ses <- internaliseExp desc e
-  ts <- internaliseReturnType (E.RetType ext (E.toStruct et)) =<< mapM subExpType ses
+  ts <- internaliseReturnType (E.RetType ext (E.toStruct et)) <$> mapM subExpType ses
   dt' <- typeExpForError dt
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
@@ -628,8 +628,8 @@ internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 internaliseExp desc (E.Hole (Info t) loc) = do
   let msg = pretty $ "Reached hole of type: " <> align (ppr t)
+      ts = internaliseType (E.toStruct t)
   c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
-  ts <- internaliseType (E.toStruct t)
   case mapM hasStaticShape ts of
     Nothing ->
       error $ "Hole at " <> locStr loc <> " has existential type:\n" <> show ts
@@ -694,7 +694,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
-      arr_t_ext <- internaliseType $ E.toStruct arr_t
+      let arr_t_ext = internaliseType $ E.toStruct arr_t
 
       rowtypes <-
         case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -782,13 +782,12 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
   where
     replace (E.Scalar (E.Record m)) (f : fs) ve' src'
       | Just t <- M.lookup f m = do
-          i <-
-            fmap sum $
-              mapM (internalisedTypeSize . snd) $
-                takeWhile ((/= f) . fst) $
-                  sortFields m
-          k <- internalisedTypeSize t
-          let (bef, to_update, aft) = splitAt3 i k src'
+          let i =
+                sum . map (internalisedTypeSize . snd) $
+                  takeWhile ((/= f) . fst) . sortFields $
+                    m
+              k = internalisedTypeSize t
+              (bef, to_update, aft) = splitAt3 i k src'
           src'' <- replace t fs ve' to_update
           pure $ bef ++ src'' ++ aft
     replace _ _ ve' _ = pure ve'
@@ -867,14 +866,13 @@ internaliseExp _ (E.FloatLit v (Info t) _) =
 -- Builtin operators are handled specially because they are
 -- overloaded.
 internaliseExp desc (E.Project k e (Info rt) _) = do
-  n <- internalisedTypeSize $ rt `setAliases` ()
-  i' <- fmap sum $
-    mapM internalisedTypeSize $
-      case E.typeOf e `setAliases` () of
-        E.Scalar (Record fs) ->
-          map snd $ takeWhile ((/= k) . fst) $ sortFields fs
-        t -> [t]
-  take n . drop i' <$> internaliseExp desc e
+  let i' = sum . map internalisedTypeSize $
+        case E.typeOf e `setAliases` () of
+          E.Scalar (Record fs) ->
+            map snd $ takeWhile ((/= k) . fst) $ sortFields fs
+          t -> [t]
+  take (internalisedTypeSize $ rt `setAliases` ()) . drop i'
+    <$> internaliseExp desc e
 internaliseExp _ e@E.Lambda {} =
   error $ "internaliseExp: Unexpected lambda at " ++ locStr (srclocOf e)
 internaliseExp _ e@E.OpSection {} =
@@ -935,8 +933,7 @@ generateCond orig_p orig_ses = do
     compares (E.Id _ t loc) ses =
       compares (E.Wildcard t loc) ses
     compares (E.Wildcard (Info t) _) ses = do
-      n <- internalisedTypeSize $ E.toStruct t
-      let (id_ses, rest_ses) = splitAt n ses
+      let (id_ses, rest_ses) = splitAt (internalisedTypeSize $ E.toStruct t) ses
       pure ([], id_ses, rest_ses)
     compares (E.PatParens pat _) ses =
       compares pat ses
@@ -2149,7 +2146,7 @@ funcall desc (QualName _ fname) args loc = do
 -- language.
 bindExtSizes :: AppRes -> [SubExp] -> InternaliseM ()
 bindExtSizes (AppRes ret retext) ses = do
-  ts <- internaliseType $ E.toStruct ret
+  let ts = internaliseType $ E.toStruct ret
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =

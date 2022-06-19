@@ -118,10 +118,9 @@ processFlatPat x y = processFlatPat' [] x y
     internaliseBindee :: E.Ident -> InternaliseM [VName]
     internaliseBindee bindee = do
       let name = E.identName bindee
-      n <- internalisedTypeSize $ E.unInfo $ E.identType bindee
-      case n of
+      case internalisedTypeSize $ E.unInfo $ E.identType bindee of
         1 -> pure [name]
-        _ -> replicateM n $ newVName $ baseString name
+        n -> replicateM n $ newVName $ baseString name
 
 bindingFlatPat ::
   Show t =>
