@@ -19,7 +19,6 @@ module Futhark.Internalise.TypesValues
   )
 where
 
-import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bitraversable (bitraverse)
 import Data.List (delete, find, foldl')
@@ -36,20 +35,20 @@ internaliseUniqueness E.Unique = I.Unique
 newtype TypeState = TypeState {typeCounter :: Int}
 
 newtype InternaliseTypeM a
-  = InternaliseTypeM (StateT TypeState InternaliseM a)
+  = InternaliseTypeM (State TypeState a)
   deriving (Functor, Applicative, Monad, MonadState TypeState)
 
-runInternaliseTypeM :: InternaliseTypeM a -> InternaliseM a
+runInternaliseTypeM :: InternaliseTypeM a -> a
 runInternaliseTypeM = runInternaliseTypeM' mempty
 
-runInternaliseTypeM' :: [VName] -> InternaliseTypeM a -> InternaliseM a
-runInternaliseTypeM' exts (InternaliseTypeM m) = evalStateT m $ TypeState (length exts)
+runInternaliseTypeM' :: [VName] -> InternaliseTypeM a -> a
+runInternaliseTypeM' exts (InternaliseTypeM m) = evalState m $ TypeState (length exts)
 
 internaliseParamTypes ::
   [E.TypeBase E.Size ()] ->
   InternaliseM [[I.TypeBase Shape Uniqueness]]
 internaliseParamTypes ts =
-  mapM (mapM mkAccCerts) <=< runInternaliseTypeM $
+  mapM (mapM mkAccCerts) . runInternaliseTypeM $
     mapM (fmap (map onType) . internaliseTypeM mempty) ts
   where
     onType = fromMaybe bad . hasStaticShape
@@ -88,9 +87,9 @@ internaliseLoopParamType et ts =
 internaliseReturnType ::
   E.StructRetType ->
   [TypeBase shape u] ->
-  InternaliseM [I.TypeBase ExtShape Uniqueness]
+  [I.TypeBase ExtShape Uniqueness]
 internaliseReturnType (E.RetType dims et) ts =
-  fixupKnownTypes ts <$> runInternaliseTypeM' dims (internaliseTypeM exts et)
+  fixupKnownTypes ts $ runInternaliseTypeM' dims (internaliseTypeM exts et)
   where
     exts = M.fromList $ zip dims [0 ..]
 
@@ -105,7 +104,7 @@ internaliseLambdaReturnType et ts =
 -- tuple type piecemeal.
 internaliseEntryReturnType ::
   E.StructRetType ->
-  InternaliseM [[I.TypeBase ExtShape Uniqueness]]
+  [[I.TypeBase ExtShape Uniqueness]]
 internaliseEntryReturnType (E.RetType dims et) =
   runInternaliseTypeM' dims . mapM (internaliseTypeM exts) $
     case E.isTupleRecord et of
@@ -116,7 +115,7 @@ internaliseEntryReturnType (E.RetType dims et) =
 
 internaliseType ::
   E.TypeBase E.Size () ->
-  InternaliseM [I.TypeBase I.ExtShape Uniqueness]
+  [I.TypeBase I.ExtShape Uniqueness]
 internaliseType = runInternaliseTypeM . internaliseTypeM mempty
 
 newId :: InternaliseTypeM Int
@@ -211,18 +210,17 @@ internaliseSumType ::
       M.Map Name (Int, [Int])
     )
 internaliseSumType cs =
-  bitraverse (mapM mkAccCerts) pure
-    <=< runInternaliseTypeM
-    $ internaliseConstructors
+  bitraverse (mapM mkAccCerts) pure . runInternaliseTypeM $
+    internaliseConstructors
       <$> traverse (fmap concat . mapM (internaliseTypeM mempty)) cs
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.TypeBase E.Size als -> InternaliseM Int
+internalisedTypeSize :: E.TypeBase E.Size als -> Int
 -- A few special cases for performance.
-internalisedTypeSize (E.Scalar (E.Prim _)) = pure 1
-internalisedTypeSize (E.Array _ _ _ (E.Prim _)) = pure 1
-internalisedTypeSize t = length <$> internaliseType (t `E.setAliases` ())
+internalisedTypeSize (E.Scalar (E.Prim _)) = 1
+internalisedTypeSize (E.Array _ _ _ (E.Prim _)) = 1
+internalisedTypeSize t = length $ internaliseType (t `E.setAliases` ())
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType
