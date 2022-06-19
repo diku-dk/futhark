@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Futhark.Internalise.TypesValues
   ( -- * Internalising types
@@ -21,6 +21,7 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bitraversable (bitraverse)
 import Data.List (delete, find, foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -38,9 +39,6 @@ newtype InternaliseTypeM a
   = InternaliseTypeM (StateT TypeState InternaliseM a)
   deriving (Functor, Applicative, Monad, MonadState TypeState)
 
-liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
-liftInternaliseM = InternaliseTypeM . lift
-
 runInternaliseTypeM :: InternaliseTypeM a -> InternaliseM a
 runInternaliseTypeM = runInternaliseTypeM' mempty
 
@@ -51,7 +49,8 @@ internaliseParamTypes ::
   [E.TypeBase E.Size ()] ->
   InternaliseM [[I.TypeBase Shape Uniqueness]]
 internaliseParamTypes ts =
-  runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM mempty) ts
+  mapM (mapM mkAccCerts) <=< runInternaliseTypeM $
+    mapM (fmap (map onType) . internaliseTypeM mempty) ts
   where
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ pretty ts
@@ -59,25 +58,39 @@ internaliseParamTypes ts =
 -- We need to fix up the arrays for any Acc return values or loop
 -- parameters.  We look at the concrete types for this, since the Acc
 -- parameter name in the second list will just be something we made up.
-fixupTypes :: [TypeBase shape1 u1] -> [TypeBase shape2 u2] -> [TypeBase shape2 u2]
-fixupTypes = zipWith fixup
+fixupKnownTypes :: [TypeBase shape1 u1] -> [TypeBase shape2 u2] -> [TypeBase shape2 u2]
+fixupKnownTypes = zipWith fixup
   where
     fixup (Acc acc ispace ts _) (Acc _ _ _ u2) = Acc acc ispace ts u2
     fixup _ t = t
+
+-- Generate proper certificates for the placeholder accumulator
+-- certificates produced by internaliseType (identified with tag 0).
+-- Only needed when we cannot use 'fixupKnownTypes'.
+mkAccCerts :: TypeBase shape u -> InternaliseM (TypeBase shape u)
+mkAccCerts (Array pt shape u) =
+  pure $ Array pt shape u
+mkAccCerts (Acc c shape ts u) =
+  Acc <$> c' <*> pure shape <*> pure ts <*> pure u
+  where
+    c'
+      | baseTag c == 0 = newVName "acc_cert"
+      | otherwise = pure c
+mkAccCerts t = pure t
 
 internaliseLoopParamType ::
   E.TypeBase E.Size () ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
-  fixupTypes ts . concat <$> internaliseParamTypes [et]
+  fixupKnownTypes ts . concat <$> internaliseParamTypes [et]
 
 internaliseReturnType ::
   E.StructRetType ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase ExtShape Uniqueness]
 internaliseReturnType (E.RetType dims et) ts =
-  fixupTypes ts <$> runInternaliseTypeM' dims (internaliseTypeM exts et)
+  fixupKnownTypes ts <$> runInternaliseTypeM' dims (internaliseTypeM exts et)
   where
     exts = M.fromList $ zip dims [0 ..]
 
@@ -148,8 +161,8 @@ internaliseTypeM exts orig_t =
       | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.qualLeaf tn) == "acc" -> do
           ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
-          acc_param <- liftInternaliseM $ newVName "acc_cert"
-          let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
+          let acc_param = VName "PLACEHOLDER" 0 -- See mkAccCerts.
+              acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
           pure [acc_t]
     E.Scalar E.TypeVar {} ->
       error "internaliseTypeM: cannot handle type variable."
@@ -198,8 +211,9 @@ internaliseSumType ::
       M.Map Name (Int, [Int])
     )
 internaliseSumType cs =
-  runInternaliseTypeM $
-    internaliseConstructors
+  bitraverse (mapM mkAccCerts) pure
+    <=< runInternaliseTypeM
+    $ internaliseConstructors
       <$> traverse (fmap concat . mapM (internaliseTypeM mempty)) cs
 
 -- | How many core language values are needed to represent one source
