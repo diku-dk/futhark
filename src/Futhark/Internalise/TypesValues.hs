@@ -120,15 +120,11 @@ internaliseDim exts d =
   case d of
     E.AnySize _ -> Ext <$> newId
     E.ConstSize n -> pure $ Free $ intConst I.Int64 $ toInteger n
-    E.NamedSize name -> namedDim name
+    E.NamedSize name -> pure $ namedDim name
   where
     namedDim (E.QualName _ name)
-      | Just x <- name `M.lookup` exts = pure $ I.Ext x
-      | otherwise = do
-          subst <- liftInternaliseM $ lookupSubst name
-          case subst of
-            Just [v] -> pure $ I.Free v
-            _ -> pure $ I.Free $ I.Var name
+      | Just x <- name `M.lookup` exts = I.Ext x
+      | otherwise = I.Free $ I.Var name
 
 internaliseTypeM ::
   M.Map VName Int ->

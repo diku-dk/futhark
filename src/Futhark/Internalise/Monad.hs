@@ -31,6 +31,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -147,7 +148,13 @@ lookupFunction fname = maybe bad pure =<< lookupFunction' fname
     bad = error $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
 lookupConst :: VName -> InternaliseM (Maybe [SubExp])
-lookupConst fname = gets $ M.lookup fname . stateConstSubsts
+lookupConst fname = do
+  is_var <- asksScope (fname `M.member`)
+  fname_subst <- lookupSubst fname
+  case (is_var, fname_subst) of
+    (_, Just ses) -> pure $ Just ses
+    (True, _) -> pure $ Just [Var fname]
+    _ -> pure Nothing
 
 bindFunction :: VName -> FunDef SOACS -> FunInfo -> InternaliseM ()
 bindFunction fname fd info = do
@@ -156,15 +163,18 @@ bindFunction fname fd info = do
 
 bindConstant :: VName -> FunDef SOACS -> InternaliseM ()
 bindConstant cname fd = do
-  let substs =
-        drop (length (shapeContext (funDefRetType fd))) $
-          map resSubExp . bodyResult . funDefBody $
-            fd
   addStms $ bodyStms $ funDefBody fd
-  modify $ \s ->
-    s
-      { stateConstSubsts = M.insert cname substs $ stateConstSubsts s
-      }
+
+  case map resSubExp . bodyResult . funDefBody $ fd of
+    [se] -> do
+      letBindNames [cname] $ BasicOp $ SubExp se
+    ses -> do
+      let substs =
+            drop (length (shapeContext (funDefRetType fd))) ses
+      modify $ \s ->
+        s
+          { stateConstSubsts = M.insert cname substs $ stateConstSubsts s
+          }
 
 -- | Construct an 'Assert' statement, but taking attributes into
 -- account.  Always use this function, and never construct 'Assert'
