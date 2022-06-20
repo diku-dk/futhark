@@ -335,7 +335,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
             [C.cinit|&ctx->failure_is_an_option|],
             [C.cinit|&ctx->global_failure_args|]
           ]
-      args'' = [[C.cinit|&device_id|], [C.cinit|&device_count|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
+      args'' = [[C.cinit|&group_offset|]] ++ perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
       (bef, aft) = profilingEnclosureKernel kernel_name
 
   GC.stm
@@ -363,17 +363,15 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       $items:bef
 
       size_t x_blocks_per_device = (grid[0] + ctx->cuda.device_count - 1) / ctx->cuda.device_count;
+      size_t group_offset = 0;
       for (int device_id = 0; device_id < ctx->cuda.device_count; device_id++) {
          CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
 
-         size_t device_x_blocks = x_blocks_per_device;
-         /* This causes an off by 1 one error since it may not spawn sufficient blocks
          size_t device_x_blocks = grid[0] - device_id * x_blocks_per_device;
 
          if (device_x_blocks > x_blocks_per_device) {
            device_x_blocks = x_blocks_per_device;
          }
-         */
 
         if (device_x_blocks * grid[1] * grid[2] != 0) {
           if (ctx->debugging) {
@@ -390,6 +388,8 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
                                             $exp:block_x, $exp:block_y, $exp:block_z,
                                             $exp:shared_tot, NULL,
                                             $id:args_arr, NULL));
+          // Update the number of blocks spawned
+          group_offset += device_x_blocks;
         }
         CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.contexts[device_id]));
     }

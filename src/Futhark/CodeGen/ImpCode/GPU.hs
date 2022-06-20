@@ -145,8 +145,6 @@ data KernelOp
   | GetLocalId VName Int
   | GetLocalSize VName Int
   | GetLockstepWidth VName
-  | GetDeviceId VName
-  | GetDeviceCount VName
   | Atomic Space AtomicOp
   | Barrier Fence
   | MemFence Fence
@@ -200,12 +198,6 @@ instance Pretty KernelOp where
   ppr (GetLocalSize dest i) =
     ppr dest <+> "<-"
       <+> "get_local_size" <> parens (ppr i)
-  ppr (GetDeviceId dest) =
-    ppr dest <+> "<-"
-      <+> "device_id"
-  ppr (GetDeviceCount dest) =
-    ppr dest <+> "<-"
-      <+> "device_count"
   ppr (GetLockstepWidth dest) =
     ppr dest <+> "<-"
       <+> "get_lockstep_width()"

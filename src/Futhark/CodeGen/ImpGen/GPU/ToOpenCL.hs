@@ -273,10 +273,7 @@ onKernel target kernel = do
             ( mempty,
               [ [C.citem|const int block_dim0 = 0;|],
                 [C.citem|const int block_dim1 = 1;|],
-                [C.citem|const int block_dim2 = 2;|],
-                -- Dummy definitions.
-                [C.citem|const int device_id = 0;|],
-                [C.citem|const int device_count = 0;|]
+                [C.citem|const int block_dim2 = 2;|]
               ]
             )
           (TargetCUDA, _) ->
@@ -336,9 +333,7 @@ onKernel target kernel = do
       params =
         ( if target == TargetCUDA
             then
-              [ [C.cparam|const int device_id|],
-                [C.cparam|const int device_count|]
-              ]
+              [ [C.cparam|const size_t group_offset|]]
             else []
         )
           ++ perm_params
@@ -521,7 +516,7 @@ typedef uint64_t ulong;
 #define __write_only
 #define __read_only
 
-static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int device_id, int d) {
+static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
   switch (d) {
     case 0: d = block_dim0; break;
     case 1: d = block_dim1; break;
@@ -534,7 +529,7 @@ static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2
     default: return 0;
   }
 }
-#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, device_id, d)
+#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, d)
 
 static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
   switch (d) {
@@ -653,17 +648,13 @@ inKernelOperations mode body =
 
     kernelOps :: GC.OpCompiler KernelOp KernelState
     kernelOps (GetGroupId v i) =
-      GC.stm [C.cstm|$id:v = get_group_id($int:i) + device_id * get_num_groups($int:i);|]
+      GC.stm [C.cstm|$id:v = get_group_id($int:i) + group_offset;|]
     kernelOps (GetLocalId v i) =
       GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
     kernelOps (GetLocalSize v i) =
       GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
     kernelOps (GetLockstepWidth v) =
       GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
-    kernelOps (GetDeviceId v) =
-      GC.stm [C.cstm|$id:v = device_id;|]
-    kernelOps (GetDeviceCount v) =
-      GC.stm [C.cstm|$id:v = device_count;|]
     kernelOps (Barrier f) = do
       GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}

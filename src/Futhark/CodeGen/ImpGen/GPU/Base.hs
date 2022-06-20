@@ -101,9 +101,7 @@ data KernelConstants = KernelConstants
     kernelLocalIdMap :: M.Map [SubExp] [Imp.TExp Int32],
     -- | Mapping from dimensions of nested SegOps to how many
     -- iterations the virtualisation loop needs.
-    kernelChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32),
-    kernelDeviceId :: Imp.TExp Int32,
-    kernelDeviceCount :: Imp.TExp Int32
+    kernelChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32)
   }
 
 -- | The sizes of nested iteration spaces in the kernel.
@@ -1135,8 +1133,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
   group_id <- newVName "group_tid"
   wave_size <- newVName "wave_size"
   inner_group_size <- newVName "group_size"
-  device_id <- newVName "device_id"
-  device_count <- newVName "device_count"
+
   let constants =
         KernelConstants
           (Imp.le32 global_tid)
@@ -1152,23 +1149,17 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
           true
           mempty
           mempty
-          (Imp.le32 device_id)
-          (Imp.le32 device_count)
 
   let set_constants = do
         dPrim_ local_tid int32
         dPrim_ inner_group_size int64
         dPrim_ wave_size int32
         dPrim_ group_id int32
-        dPrim_ device_id int32
-        dPrim_ device_count int32
 
         sOp (Imp.GetLocalId local_tid 0)
         sOp (Imp.GetLocalSize inner_group_size 0)
         sOp (Imp.GetLockstepWidth wave_size)
         sOp (Imp.GetGroupId group_id 0)
-        sOp (Imp.GetDeviceId device_id)
-        sOp (Imp.GetDeviceCount device_count)
         dPrimV_ global_tid $ le32 group_id * le32 inner_group_size + le32 local_tid
 
   pure (constants, set_constants)
@@ -1560,20 +1551,14 @@ simpleKernelConstants kernel_size desc = do
   thread_gtid <- newVName $ desc ++ "_gtid"
   thread_ltid <- newVName $ desc ++ "_ltid"
   group_id <- newVName $ desc ++ "_gid"
-  device_id <- newVName $ desc ++ "_device_id"
-  device_count <- newVName $ desc ++ "_device_count"
   inner_group_size <- newVName "group_size"
   (num_groups, group_size) <- computeMapKernelGroups kernel_size
   let set_constants = do
         dPrim_ thread_ltid int32
         dPrim_ inner_group_size int64
         dPrim_ group_id int32
-        dPrim_ device_id int32
-        dPrim_ device_count int32
         sOp (Imp.GetLocalId thread_ltid 0)
         sOp (Imp.GetGroupId group_id 0)
-        sOp (Imp.GetDeviceId device_id)
-        sOp (Imp.GetDeviceCount device_count)
         sOp (Imp.GetLocalId thread_ltid 0)
         sOp (Imp.GetLocalSize inner_group_size 0)
         sOp (Imp.GetGroupId group_id 0)
@@ -1593,9 +1578,7 @@ simpleKernelConstants kernel_size desc = do
         0
         (Imp.le64 thread_gtid .<. kernel_size)
         mempty
-        mempty
-        (Imp.le32 device_id)
-        (Imp.le32 device_count),
+        mempty,
       set_constants
     )
 
