@@ -367,14 +367,11 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       for (int device_id = 0; device_id < ctx->cuda.device_count; device_id++) {
          CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.contexts[device_id]));
 
-         size_t device_x_blocks = x_blocks_per_device;
-         /*
          size_t device_x_blocks = grid[0] - device_id * x_blocks_per_device;
 
          if (device_x_blocks > x_blocks_per_device) {
            device_x_blocks = x_blocks_per_device;
          }
-        */
 
         if (device_x_blocks * grid[1] * grid[2] != 0) {
           if (ctx->debugging) {
