@@ -7,6 +7,7 @@ module Futhark.CLI.Misc
     mainDataget,
     mainCheckSyntax,
     mainThanks,
+    mainTokens,
   )
 where
 
@@ -14,12 +15,14 @@ import Control.Monad.State
 import qualified Data.ByteString.Lazy as BS
 import Data.Function (on)
 import Data.List (isInfixOf, nubBy)
+import Data.Loc (L (..), startPos)
 import qualified Data.Text.IO as T
 import Futhark.Compiler
 import Futhark.Test
-import Futhark.Util (hashText)
+import Futhark.Util (hashText, interactWithFileSafely)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyTextOneLine)
+import Language.Futhark.Parser.Lexer (scanTokens)
 import Language.Futhark.Prop (isBuiltin)
 import System.Environment (getExecutablePath)
 import System.Exit
@@ -105,3 +108,26 @@ mainThanks = mainWithOptions () [] "" $ \args () ->
         "Likewise!",
         "And thank you in return for trying the language!"
       ]
+
+-- | @futhark tokens@
+mainTokens :: String -> [String] -> IO ()
+mainTokens = mainWithOptions () [] "program" $ \args () ->
+  case args of
+    [file] -> Just $ do
+      res <- interactWithFileSafely (scanTokens (startPos file) <$> BS.readFile file)
+      case res of
+        Nothing -> do
+          hPutStrLn stderr $ file <> ": file not found."
+          exitWith $ ExitFailure 2
+        Just (Left e) -> do
+          hPrint stderr e
+          exitWith $ ExitFailure 2
+        Just (Right (Left e)) -> do
+          hPrint stderr e
+          exitWith $ ExitFailure 2
+        Just (Right (Right (tokens, _))) ->
+          mapM_ printToken tokens
+    _ -> Nothing
+  where
+    printToken (L _ token) =
+      print token

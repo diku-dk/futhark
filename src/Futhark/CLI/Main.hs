@@ -77,7 +77,8 @@ commands =
       ("query", (Query.main, "Query semantic information about program.")),
       ("literate", (Literate.main, "Process a literate Futhark program.")),
       ("lsp", (LSP.main, "Run LSP server.")),
-      ("thanks", (Misc.mainThanks, "Express gratitude."))
+      ("thanks", (Misc.mainThanks, "Express gratitude.")),
+      ("tokens", (Misc.mainTokens, "Express gratitude."))
     ]
 
 msg :: String

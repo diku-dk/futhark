@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Using `==` to compare arrays is now deprecated.
 
+* New command: `futhark tokens`.  You probably don't care about this one.
+
 ### Removed
 
 ### Changed

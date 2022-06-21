@@ -95,6 +95,11 @@ futhark thanks
 
 Expresses gratitude.
 
+futhark tokens FILE
+-------------------
+
+Print the tokens the given Futhark source file; one per line.
+
 SEE ALSO
 ========
 
