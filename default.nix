@@ -28,6 +28,12 @@ let
           futhark-manifest =
             haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
 
+          lsp =
+            haskellPackagesOld.lsp_1_5_0_0;
+
+          lsp-types =
+            haskellPackagesOld.lsp-types_1_5_0_0;
+
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes
