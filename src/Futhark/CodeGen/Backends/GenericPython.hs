@@ -393,7 +393,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
          ]
       ++ prog'
   where
-    Imp.Definitions consts (Imp.Functions funs) = prog
+    Imp.Definitions _types consts (Imp.Functions funs) = prog
     compileProg' = withConstantSubsts consts $ do
       compileConstants consts
 
@@ -666,7 +666,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ScalarValue bt s name), e) = do
       [Assign vname' npcall]
       [ Catch
           (Tuple [Var "TypeError", Var "AssertionError"])
-          [badInput i e $ prettySigned (s == Imp.TypeUnsigned) bt]
+          [badInput i e $ prettySigned (s == Imp.Unsigned) bt]
       ]
 entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
   unpack_input <- asks envEntryInput
@@ -679,7 +679,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt 
           (Tuple [Var "TypeError", Var "AssertionError"])
           [ badInput i e $
               concat (replicate (length dims) "[]")
-                ++ prettySigned (ept == Imp.TypeUnsigned) bt
+                ++ prettySigned (ept == Imp.Unsigned) bt
           ]
       ]
 entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = do
@@ -691,7 +691,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = d
       type_is_wrong
       [ badInput i e $
           concat (replicate (length dims) "[]")
-            ++ prettySigned (s == Imp.TypeUnsigned) t
+            ++ prettySigned (s == Imp.Unsigned) t
       ]
       []
   stm $
@@ -700,7 +700,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = d
       [ badInputType
           i
           e
-          (concat (replicate (length dims) "[]") ++ prettySigned (s == Imp.TypeUnsigned) t)
+          (concat (replicate (length dims) "[]") ++ prettySigned (s == Imp.Unsigned) t)
           (simpleCall "np.dtype" [Var (compilePrimToExtNp t s)])
           (Field e "dtype")
       ]
@@ -708,7 +708,7 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = d
   stm $
     If
       dim_is_wrong
-      [badInputDim i e (prettySigned (s == Imp.TypeUnsigned) t) (length dims)]
+      [badInputDim i e (prettySigned (s == Imp.Unsigned) t) (length dims)]
       []
 
   zipWithM_ (unpackDim e) dims [0 ..]
@@ -735,14 +735,14 @@ valueDescVName (Imp.ArrayValue vname _ _ _ _) = vname
 
 -- Key into the FUTHARK_PRIMTYPES dict.
 readTypeEnum :: PrimType -> Imp.Signedness -> String
-readTypeEnum (IntType Int8) Imp.TypeUnsigned = "u8"
-readTypeEnum (IntType Int16) Imp.TypeUnsigned = "u16"
-readTypeEnum (IntType Int32) Imp.TypeUnsigned = "u32"
-readTypeEnum (IntType Int64) Imp.TypeUnsigned = "u64"
-readTypeEnum (IntType Int8) Imp.TypeDirect = "i8"
-readTypeEnum (IntType Int16) Imp.TypeDirect = "i16"
-readTypeEnum (IntType Int32) Imp.TypeDirect = "i32"
-readTypeEnum (IntType Int64) Imp.TypeDirect = "i64"
+readTypeEnum (IntType Int8) Imp.Unsigned = "u8"
+readTypeEnum (IntType Int16) Imp.Unsigned = "u16"
+readTypeEnum (IntType Int32) Imp.Unsigned = "u32"
+readTypeEnum (IntType Int64) Imp.Unsigned = "u64"
+readTypeEnum (IntType Int8) Imp.Signed = "i8"
+readTypeEnum (IntType Int16) Imp.Signed = "i16"
+readTypeEnum (IntType Int32) Imp.Signed = "i32"
+readTypeEnum (IntType Int64) Imp.Signed = "i64"
 readTypeEnum (FloatType Float16) _ = "f16"
 readTypeEnum (FloatType Float32) _ = "f32"
 readTypeEnum (FloatType Float64) _ = "f64"
@@ -1026,10 +1026,10 @@ compilePrimType t =
 compilePrimTypeExt :: PrimType -> Imp.Signedness -> String
 compilePrimTypeExt t ept =
   case (t, ept) of
-    (IntType Int8, Imp.TypeUnsigned) -> "ct.c_uint8"
-    (IntType Int16, Imp.TypeUnsigned) -> "ct.c_uint16"
-    (IntType Int32, Imp.TypeUnsigned) -> "ct.c_uint32"
-    (IntType Int64, Imp.TypeUnsigned) -> "ct.c_uint64"
+    (IntType Int8, Imp.Unsigned) -> "ct.c_uint8"
+    (IntType Int16, Imp.Unsigned) -> "ct.c_uint16"
+    (IntType Int32, Imp.Unsigned) -> "ct.c_uint32"
+    (IntType Int64, Imp.Unsigned) -> "ct.c_uint64"
     (IntType Int8, _) -> "ct.c_int8"
     (IntType Int16, _) -> "ct.c_int16"
     (IntType Int32, _) -> "ct.c_int32"
@@ -1058,10 +1058,10 @@ compilePrimToNp bt =
 compilePrimToExtNp :: Imp.PrimType -> Imp.Signedness -> String
 compilePrimToExtNp bt ept =
   case (bt, ept) of
-    (IntType Int8, Imp.TypeUnsigned) -> "np.uint8"
-    (IntType Int16, Imp.TypeUnsigned) -> "np.uint16"
-    (IntType Int32, Imp.TypeUnsigned) -> "np.uint32"
-    (IntType Int64, Imp.TypeUnsigned) -> "np.uint64"
+    (IntType Int8, Imp.Unsigned) -> "np.uint8"
+    (IntType Int16, Imp.Unsigned) -> "np.uint16"
+    (IntType Int32, Imp.Unsigned) -> "np.uint32"
+    (IntType Int64, Imp.Unsigned) -> "np.uint64"
     (IntType Int8, _) -> "np.int8"
     (IntType Int16, _) -> "np.int16"
     (IntType Int32, _) -> "np.int32"

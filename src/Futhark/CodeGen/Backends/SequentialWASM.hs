@@ -48,7 +48,7 @@ compileProg version prog = do
       operations
       generateBoilerplate
       ""
-      [DefaultSpace]
+      (DefaultSpace, [DefaultSpace])
       []
       prog'
   pure (ws, (prog'', javascriptWrapper (fRepMyRep prog'), emccExportNames (fRepMyRep prog')))

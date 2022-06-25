@@ -294,12 +294,7 @@ data TState = TState
 
 -- | The type checker runs in this monad.
 newtype TypeM rep a
-  = TypeM
-      ( ReaderT
-          (Env rep)
-          (StateT TState (Either (TypeError rep)))
-          a
-      )
+  = TypeM (ReaderT (Env rep) (StateT TState (Either (TypeError rep))) a)
   deriving
     ( Monad,
       Functor,
@@ -566,6 +561,23 @@ checkAccIdent v = do
           ++ " should be an accumulator but is of type "
           ++ pretty t
 
+checkOpaques :: OpaqueTypes -> Either (TypeError rep) ()
+checkOpaques (OpaqueTypes types) = descend [] types
+  where
+    descend _ [] = pure ()
+    descend known ((name, t) : ts) = do
+      check known t
+      descend (name : known) ts
+    check known (OpaqueRecord fs) =
+      mapM_ (checkEntryPointType known . snd) fs
+    check _ (OpaqueType _) =
+      pure ()
+    checkEntryPointType known (TypeOpaque s) =
+      when (s `notElem` known) $
+        Left . Error [] . TypeError $
+          "Opaque not defined before first use: " <> s
+    checkEntryPointType _ (TypeTransparent _) = pure ()
+
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
 -- information.
@@ -573,7 +585,8 @@ checkProg ::
   Checkable rep =>
   Prog (Aliases rep) ->
   Either (TypeError rep) ()
-checkProg (Prog consts funs) = do
+checkProg (Prog opaques consts funs) = do
+  checkOpaques opaques
   let typeenv =
         Env
           { envVtable = M.empty,

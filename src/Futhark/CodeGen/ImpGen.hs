@@ -441,7 +441,7 @@ compileProg ::
   Imp.Space ->
   Prog rep ->
   m (Warnings, Imp.Definitions op)
-compileProg r ops space (Prog consts funs) =
+compileProg r ops space (Prog types consts funs) =
   modifyNameSource $ \src ->
     let (_, ss) =
           unzip $ parMap rpar (compileFunDef' src) funs
@@ -451,14 +451,14 @@ compileProg r ops space (Prog consts funs) =
           runImpM (compileConsts free_in_funs consts) r ops space $
             combineStates ss
      in ( ( stateWarnings s',
-            Imp.Definitions consts' (stateFunctions s')
+            Imp.Definitions types consts' (stateFunctions s')
           ),
           stateNameSource s'
         )
   where
     compileFunDef' src fdef =
       runImpM
-        (compileFunDef fdef)
+        (compileFunDef types fdef)
         r
         ops
         space
@@ -496,14 +496,32 @@ compileConsts used_consts stms = do
     extract s =
       (mempty, s)
 
+lookupOpaqueType :: String -> OpaqueTypes -> OpaqueType
+lookupOpaqueType v (OpaqueTypes types) =
+  case lookup v types of
+    Just t -> t
+    Nothing -> error $ "Unknown opaque type: " ++ show v
+
+valueTypeSign :: ValueType -> Signedness
+valueTypeSign (ValueType sign _ _) = sign
+
+entryPointSignedness :: OpaqueTypes -> EntryPointType -> [Signedness]
+entryPointSignedness _ (TypeTransparent vt) = [valueTypeSign vt]
+entryPointSignedness types (TypeOpaque desc) =
+  case lookupOpaqueType desc types of
+    OpaqueType vts -> map valueTypeSign vts
+    OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
+
 -- | How many value parameters are accepted by this entry point?  This
 -- is used to determine which of the function parameters correspond to
 -- the parameters of the original function (they must all come at the
 -- end).
-entryPointSize :: EntryPointType -> Int
-entryPointSize (TypeOpaque _ ts) = length ts
-entryPointSize TypeUnsigned {} = 1
-entryPointSize TypeDirect {} = 1
+entryPointSize :: OpaqueTypes -> EntryPointType -> Int
+entryPointSize _ (TypeTransparent _) = 1
+entryPointSize types (TypeOpaque desc) =
+  case lookupOpaqueType desc types of
+    OpaqueType vts -> length vts
+    OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
 
 compileInParam ::
   Mem rep inner =>
@@ -525,10 +543,11 @@ data ArrayDecl = ArrayDecl VName PrimType MemLoc
 
 compileInParams ::
   Mem rep inner =>
+  OpaqueTypes ->
   [FParam rep] ->
   Maybe [EntryParam] ->
   ImpM rep r op ([Imp.Param], [ArrayDecl], Maybe [((Name, Uniqueness), Imp.ExternalValue)])
-compileInParams params eparams = do
+compileInParams types params eparams = do
   (inparams, arrayds) <- partitionEithers <$> mapM compileInParam params
   let findArray x = find (isArrayDecl x) arrayds
 
@@ -553,20 +572,18 @@ compileInParams params eparams = do
           _ ->
             Nothing
 
-      mkExts (EntryParam v u (TypeOpaque desc ts) : epts) fparams =
-        let n = length ts
+      mkExts (EntryParam v u et@(TypeOpaque desc) : epts) fparams =
+        let signs = entryPointSignedness types et
+            n = entryPointSize types et
             (fparams', rest) = splitAt n fparams
          in ( (v, u),
               Imp.OpaqueValue
                 desc
-                (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams')
+                (catMaybes $ zipWith mkValueDesc fparams' signs)
             )
               : mkExts epts rest
-      mkExts (EntryParam v u TypeUnsigned {} : epts) (fparam : fparams) =
-        maybeToList (((v, u),) . Imp.TransparentValue <$> mkValueDesc fparam Imp.TypeUnsigned)
-          ++ mkExts epts fparams
-      mkExts (EntryParam v u TypeDirect {} : epts) (fparam : fparams) =
-        maybeToList (((v, u),) . Imp.TransparentValue <$> mkValueDesc fparam Imp.TypeDirect)
+      mkExts (EntryParam v u (TypeTransparent (ValueType s _ _)) : epts) (fparam : fparams) =
+        maybeToList (((v, u),) . Imp.TransparentValue <$> mkValueDesc fparam s)
           ++ mkExts epts fparams
       mkExts _ _ = []
 
@@ -575,7 +592,7 @@ compileInParams params eparams = do
       arrayds,
       case eparams of
         Just eparams' ->
-          let num_val_params = sum (map (entryPointSize . entryParamType) eparams')
+          let num_val_params = sum (map (entryPointSize types . entryParamType) eparams')
               (_ctx_params, val_params) = splitAt (length params - num_val_params) params
            in Just $ mkExts eparams' val_params
         Nothing -> Nothing
@@ -598,13 +615,16 @@ compileOutParam MemAcc {} =
 
 compileExternalValues ::
   Mem rep inner =>
+  OpaqueTypes ->
   [RetType rep] ->
   [EntryResult] ->
   [Maybe Imp.Param] ->
   ImpM rep r op [(Uniqueness, Imp.ExternalValue)]
-compileExternalValues orig_rts orig_epts maybe_params = do
+compileExternalValues types orig_rts orig_epts maybe_params = do
   let (ctx_rts, val_rts) =
-        splitAt (length orig_rts - sum (map (entryPointSize . entryResultType) orig_epts)) orig_rts
+        splitAt
+          (length orig_rts - sum (map (entryPointSize types . entryResultType) orig_epts))
+          orig_rts
 
   let nthOut i = case maybeNth i maybe_params of
         Just (Just p) -> Imp.paramName p
@@ -630,16 +650,14 @@ compileExternalValues orig_rts orig_epts maybe_params = do
       mkValueDesc _ _ MemMem {} =
         error "mkValueDesc: unexpected MemMem output."
 
-      mkExts i (EntryResult u (TypeOpaque desc ts) : epts) rets = do
-        let n = length ts
+      mkExts i (EntryResult u et@(TypeOpaque desc) : epts) rets = do
+        let signs = entryPointSignedness types et
+            n = entryPointSize types et
             (rets', rest) = splitAt n rets
-        vds <- zipWithM (`mkValueDesc` Imp.TypeDirect) [i ..] rets'
+        vds <- forM (zip3 [i ..] signs rets') $ \(j, s, r) -> mkValueDesc j s r
         ((u, Imp.OpaqueValue desc vds) :) <$> mkExts (i + n) epts rest
-      mkExts i (EntryResult u TypeUnsigned {} : epts) (ret : rets) = do
-        vd <- mkValueDesc i Imp.TypeUnsigned ret
-        ((u, Imp.TransparentValue vd) :) <$> mkExts (i + 1) epts rets
-      mkExts i (EntryResult u TypeDirect {} : epts) (ret : rets) = do
-        vd <- mkValueDesc i Imp.TypeDirect ret
+      mkExts i (EntryResult u (TypeTransparent (ValueType s _ _)) : epts) (ret : rets) = do
+        vd <- mkValueDesc i s ret
         ((u, Imp.TransparentValue vd) :) <$> mkExts (i + 1) epts rets
       mkExts _ _ _ = pure []
 
@@ -647,22 +665,24 @@ compileExternalValues orig_rts orig_epts maybe_params = do
 
 compileOutParams ::
   Mem rep inner =>
+  OpaqueTypes ->
   [RetType rep] ->
   Maybe [EntryResult] ->
   ImpM rep r op (Maybe [(Uniqueness, Imp.ExternalValue)], [Imp.Param], [ValueDestination])
-compileOutParams orig_rts maybe_orig_epts = do
+compileOutParams types orig_rts maybe_orig_epts = do
   (maybe_params, dests) <- unzip <$> mapM compileOutParam orig_rts
   evs <- case maybe_orig_epts of
     Just orig_epts ->
-      Just <$> compileExternalValues orig_rts orig_epts maybe_params
+      Just <$> compileExternalValues types orig_rts orig_epts maybe_params
     Nothing -> pure Nothing
   pure (evs, catMaybes maybe_params, dests)
 
 compileFunDef ::
   Mem rep inner =>
+  OpaqueTypes ->
   FunDef rep ->
   ImpM rep r op ()
-compileFunDef (FunDef entry _ fname rettype params body) =
+compileFunDef types (FunDef entry _ fname rettype params body) =
   local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
     let entry' = case (name_entry, results, args) of
@@ -676,8 +696,8 @@ compileFunDef (FunDef entry _ fname rettype params body) =
       Nothing -> (Nothing, Nothing, Nothing)
       Just (x, y, z) -> (Just x, Just y, Just z)
     compile = do
-      (inparams, arrayds, args) <- compileInParams params params_entry
-      (results, outparams, dests) <- compileOutParams rettype ret_entry
+      (inparams, arrayds, args) <- compileInParams types params params_entry
+      (results, outparams, dests) <- compileOutParams types rettype ret_entry
       addFParams params
       addArrays arrayds
 

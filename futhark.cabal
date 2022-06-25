@@ -254,6 +254,7 @@ library
       Futhark.Internalise.Bindings
       Futhark.Internalise.Defunctionalise
       Futhark.Internalise.Defunctorise
+      Futhark.Internalise.Entry
       Futhark.Internalise.Exps
       Futhark.Internalise.Lambdas
       Futhark.Internalise.LiftLambdas

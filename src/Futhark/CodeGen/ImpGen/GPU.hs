@@ -83,12 +83,11 @@ compileProg ::
   Prog GPUMem ->
   m (Warnings, Imp.Program)
 compileProg env prog =
-  second (fmap setOpSpace . setDefsSpace)
+  second (fmap setOpSpace . setDefaultSpace device_space)
     <$> Futhark.CodeGen.ImpGen.compileProg env callKernelOperations device_space prog
   where
     device_space = Imp.Space "device"
     global_space = Imp.Space "global"
-    setDefsSpace = setDefaultSpace device_space
     setOpSpace (Imp.CallKernel kernel) =
       Imp.CallKernel
         kernel

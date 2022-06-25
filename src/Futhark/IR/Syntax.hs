@@ -147,10 +147,9 @@ module Futhark.IR.Syntax
     FParam,
     LParam,
     FunDef (..),
-    EntryPoint,
     EntryParam (..),
     EntryResult (..),
-    EntryPointType (..),
+    EntryPoint,
     Prog (..),
 
     -- * Utils
@@ -526,17 +525,6 @@ deriving instance RepTypes rep => Show (FunDef rep)
 
 deriving instance RepTypes rep => Ord (FunDef rep)
 
--- | Every entry point argument and return value has an annotation
--- indicating how it maps to the original source program type.
-data EntryPointType
-  = -- | Is an unsigned integer or array of unsigned integers.
-    TypeUnsigned (TypeBase Rank Uniqueness)
-  | -- | An opaque type of this name comprising these types.
-    TypeOpaque String [TypeBase Rank Uniqueness]
-  | -- | Maps directly.
-    TypeDirect (TypeBase Rank Uniqueness)
-  deriving (Eq, Show, Ord)
-
 -- | An entry point parameter, comprising its name and original type.
 data EntryParam = EntryParam
   { entryParamName :: Name,
@@ -558,10 +546,14 @@ type EntryPoint = (Name, [EntryParam], [EntryResult])
 
 -- | An entire Futhark program.
 data Prog rep = Prog
-  { -- | Top-level constants that are computed at program startup, and
+  { -- | The opaque types used in entry points.  This information is
+    -- used to generate extra API functions for
+    -- construction and deconstruction of values of these types.
+    progTypes :: OpaqueTypes,
+    -- | Top-level constants that are computed at program startup, and
     -- which are in scope inside all functions.
     progConsts :: Stms rep,
-    -- | The functions comprising the program.  All funtions are also
+    -- | The functions comprising the program.  All functions are also
     -- available in scope in the definitions of the constants, so be
     -- careful not to introduce circular dependencies (not currently
     -- checked).

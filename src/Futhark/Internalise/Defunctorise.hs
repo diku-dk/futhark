@@ -279,15 +279,25 @@ transformStructType = transformNames
 transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
 
+transformEntry :: EntryPoint -> TransformM EntryPoint
+transformEntry (EntryPoint params ret) =
+  EntryPoint <$> mapM onEntryParam params <*> onEntryType ret
+  where
+    onEntryParam (EntryParam v t) =
+      EntryParam v <$> onEntryType t
+    onEntryType (EntryType t te) =
+      EntryType <$> transformStructType t <*> pure te
+
 transformValBind :: ValBind -> TransformM ()
 transformValBind (ValBind entry name tdecl (Info (RetType dims t)) tparams params e doc attrs loc) = do
+  entry' <- traverse (traverse transformEntry) entry
   name' <- transformName name
   tdecl' <- traverse transformTypeExp tdecl
   t' <- transformStructType t
   e' <- transformExp e
   tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params
-  emit $ ValDec $ ValBind entry name' tdecl' (Info (RetType dims t')) tparams' params' e' doc attrs loc
+  emit $ ValDec $ ValBind entry' name' tdecl' (Info (RetType dims t')) tparams' params' e' doc attrs loc
 
 transformTypeBind :: TypeBind -> TransformM ()
 transformTypeBind (TypeBind name l tparams te (Info (RetType dims t)) doc loc) = do

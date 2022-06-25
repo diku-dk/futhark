@@ -79,7 +79,7 @@ compileProg version prog = do
               mapM_ compileBuiltinFun funs
           )
           mempty
-          [DefaultSpace]
+          (DefaultSpace, [DefaultSpace])
           MC.cliOptions
       )
       (ws, defs)

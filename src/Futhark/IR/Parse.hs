@@ -157,9 +157,6 @@ pDeclType = pDeclBase pType
 pDeclExtType :: Parser DeclExtType
 pDeclExtType = pDeclBase pExtType
 
-pRankType :: Parser (TypeBase Rank Uniqueness)
-pRankType = pTypeBase pRank pUniqueness
-
 pSubExp :: Parser SubExp
 pSubExp = Var <$> pVName <|> Constant <$> pPrimValue
 
@@ -572,15 +569,21 @@ pBody pr =
       Body (pBodyDec pr) mempty <$> pResult
     ]
 
+pSignedness :: Parser Signedness
+pSignedness =
+  choice
+    [ keyword "signed" $> Signed,
+      keyword "unsigned" $> Unsigned
+    ]
+
+pValueType :: Parser ValueType
+pValueType = ValueType <$> pSignedness <*> pRank <*> pPrimType
+
 pEntryPointType :: Parser EntryPointType
 pEntryPointType =
   choice
-    [ keyword "direct" $> TypeDirect <*> pRankType,
-      keyword "unsigned" $> TypeUnsigned <*> pRankType,
-      keyword "opaque"
-        $> TypeOpaque
-        <*> pStringLiteral
-        <*> braces (pRankType `sepBy` pComma)
+    [ keyword "opaque" $> TypeOpaque <*> pStringLiteral,
+      TypeTransparent <$> pValueType
     ]
 
 pEntry :: Parser EntryPoint
@@ -614,8 +617,22 @@ pFunDef pr = do
   FunDef entry attrs fname ret fparams
     <$> (pEqual *> braces (pBody pr))
 
+pOpaqueType :: Parser (String, OpaqueType)
+pOpaqueType =
+  (,)
+    <$> (keyword "type" *> pStringLiteral <* pEqual)
+    <*> choice [pRecord, pOpaque]
+  where
+    pFieldName = choice [pName, nameFromString . show <$> pInt]
+    pField = (,) <$> pFieldName <* pColon <*> pEntryPointType
+    pRecord = keyword "record" $> OpaqueRecord <*> braces (many pField)
+    pOpaque = keyword "opaque" $> OpaqueType <*> braces (many pValueType)
+
+pOpaqueTypes :: Parser OpaqueTypes
+pOpaqueTypes = keyword "types" $> OpaqueTypes <*> braces (many pOpaqueType)
+
 pProg :: PR rep -> Parser (Prog rep)
-pProg pr = Prog <$> pStms pr <*> many (pFunDef pr)
+pProg pr = Prog <$> pOpaqueTypes <*> pStms pr <*> many (pFunDef pr)
 
 pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =

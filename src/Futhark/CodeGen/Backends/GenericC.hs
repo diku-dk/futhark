@@ -109,7 +109,7 @@ import Futhark.CodeGen.RTS.C (cacheH, errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
-import Futhark.Util (zEncodeString)
+import Futhark.Util (chunks, zEncodeString)
 import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
@@ -121,11 +121,10 @@ import NeatInterpolation (untrimming)
 data Publicness = Private | Public
   deriving (Eq, Ord, Show)
 
-type ArrayType = (Space, Signedness, PrimType, Int)
+type ArrayType = (Signedness, PrimType, Int)
 
 data CompilerState s = CompilerState
   { compArrayTypes :: M.Map ArrayType Publicness,
-    compOpaqueTypes :: M.Map String [ValueDesc],
     compEarlyDecls :: DL.DList C.Definition,
     compInit :: [C.Stm],
     compNameSrc :: VNameSource,
@@ -143,7 +142,6 @@ newCompilerState :: VNameSource -> s -> CompilerState s
 newCompilerState src s =
   CompilerState
     { compArrayTypes = mempty,
-      compOpaqueTypes = mempty,
       compEarlyDecls = mempty,
       compInit = [],
       compNameSrc = src,
@@ -1049,23 +1047,122 @@ arrayLibraryFunctions pub space pt signed rank = do
         Manifest.arrayNew = T.pack new_array
       }
 
-opaqueLibraryFunctions ::
+lookupOpaqueType :: String -> OpaqueTypes -> OpaqueType
+lookupOpaqueType v (OpaqueTypes types) =
+  case lookup v types of
+    Just t -> t
+    Nothing -> error $ "Unknown opaque type: " ++ show v
+
+opaquePayload :: OpaqueTypes -> OpaqueType -> [ValueType]
+opaquePayload _ (OpaqueType ts) = ts
+opaquePayload types (OpaqueRecord fs) = concatMap f fs
+  where
+    f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
+    f (_, TypeTransparent v) = [v]
+
+opaqueToCType :: String -> CompilerM op s C.Type
+opaqueToCType desc = do
+  name <- publicName $ opaqueName desc
+  pure [C.cty|struct $id:name|]
+
+valueTypeToCType :: Publicness -> ValueType -> CompilerM op s C.Type
+valueTypeToCType _ (ValueType signed (Rank 0) pt) =
+  pure $ primAPIType signed pt
+valueTypeToCType pub (ValueType signed (Rank rank) pt) = do
+  name <- publicName $ arrayName pt signed rank
+  let add = M.insertWith max (signed, pt, rank) pub
+  modify $ \s -> s {compArrayTypes = add $ compArrayTypes s}
+  pure [C.cty|struct $id:name|]
+
+entryPointTypeToCType :: Publicness -> EntryPointType -> CompilerM op s C.Type
+entryPointTypeToCType _ (TypeOpaque desc) = opaqueToCType desc
+entryPointTypeToCType pub (TypeTransparent vt) = valueTypeToCType pub vt
+
+-- | Figure out which of the members of an opaque type corresponds to
+-- which fields.
+recordFieldPayloads :: OpaqueTypes -> [EntryPointType] -> [a] -> [[a]]
+recordFieldPayloads types = chunks . map typeLength
+  where
+    typeLength (TypeTransparent _) = 1
+    typeLength (TypeOpaque desc) =
+      length $ opaquePayload types $ lookupOpaqueType desc types
+
+opaqueProjectFunctions ::
+  OpaqueTypes ->
   String ->
-  [ValueDesc] ->
+  OpaqueType ->
+  [ValueType] ->
+  CompilerM op s ()
+opaqueProjectFunctions _ _ (OpaqueType _) _ = pure ()
+opaqueProjectFunctions types desc (OpaqueRecord fs) vds = do
+  opaque_type <- opaqueToCType desc
+  ctx_ty <- contextType
+  ops <- asks envOperations
+  let mkProject (TypeTransparent (ValueType sign (Rank 0) pt)) [(i, _)] = do
+        let e = toStorage pt [C.cexp|obj->$id:(tupleField i)|]
+        pure
+          ( primAPIType sign pt,
+            [C.citems|v = $exp:e;|]
+          )
+      mkProject (TypeTransparent vt) [(i, _)] = do
+        ct <- valueTypeToCType Public vt
+        pure
+          ( [C.cty|$ty:ct *|],
+            criticalSection
+              ops
+              [C.citems|v = malloc(sizeof($ty:ct));
+                        memcpy(v, obj->$id:(tupleField i), sizeof($ty:ct));
+                        (void)(*(v->mem.references))++;|]
+          )
+      mkProject (TypeTransparent _) rep =
+        error $ "mkProject: invalid representation of transparent type: " ++ show rep
+      mkProject (TypeOpaque f_desc) components = do
+        ct <- opaqueToCType f_desc
+        let setField j (i, ValueType _ (Rank r) _) =
+              if r == 0
+                then [C.citems|v->$id:(tupleField j) = obj->$id:(tupleField i);|]
+                else
+                  [C.citems|v->$id:(tupleField j) = malloc(sizeof(*v->$id:(tupleField j)));
+                            *v->$id:(tupleField j) = *obj->$id:(tupleField i);
+                            (void)(*(v->$id:(tupleField j)->mem.references))++;|]
+        pure
+          ( [C.cty|$ty:ct *|],
+            criticalSection
+              ops
+              [C.citems|v = malloc(sizeof($ty:ct));
+                        $items:(concat (zipWith setField [0..] components))|]
+          )
+  let onField ((f, et), elems) = do
+        project <- publicName $ "project_" ++ opaqueName desc ++ "_" ++ nameToString f
+        (et_ty, project_items) <- mkProject et elems
+        headerDecl
+          (OpaqueDecl desc)
+          [C.cedecl|$ty:et_ty $id:project($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
+        libDecl
+          [C.cedecl|$ty:et_ty $id:project($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
+                      (void)ctx;
+                      $ty:et_ty v;
+                      $items:project_items
+                      return v;
+                    }|]
+
+  mapM_ onField $ zip fs $ recordFieldPayloads types (map snd fs) $ zip [0 ..] vds
+
+opaqueLibraryFunctions ::
+  OpaqueTypes ->
+  String ->
+  OpaqueType ->
   CompilerM op s Manifest.OpaqueOps
-opaqueLibraryFunctions desc vds = do
-  name <- publicName $ opaqueName desc vds
-  free_opaque <- publicName $ "free_" ++ opaqueName desc vds
-  store_opaque <- publicName $ "store_" ++ opaqueName desc vds
-  restore_opaque <- publicName $ "restore_" ++ opaqueName desc vds
+opaqueLibraryFunctions types desc ot = do
+  name <- publicName $ opaqueName desc
+  free_opaque <- publicName $ "free_" ++ opaqueName desc
+  store_opaque <- publicName $ "store_" ++ opaqueName desc
+  restore_opaque <- publicName $ "restore_" ++ opaqueName desc
 
   let opaque_type = [C.cty|struct $id:name|]
 
-      freeComponent _ ScalarValue {} =
-        pure ()
-      freeComponent i (ArrayValue _ _ pt signed shape) = do
-        let rank = length shape
-            field = tupleField i
+      freeComponent i (ValueType signed (Rank rank) pt) = unless (rank == 0) $ do
+        let field = tupleField i
         free_array <- publicName $ "free_" ++ arrayName pt signed rank
         -- Protect against NULL here, because we also want to use this
         -- to free partially loaded opaques.
@@ -1074,16 +1171,15 @@ opaqueLibraryFunctions desc vds = do
                 ret = tmp;
              }|]
 
-      storeComponent i (ScalarValue pt sign _) =
+      storeComponent i (ValueType sign (Rank 0) pt) =
         let field = tupleField i
          in ( storageSize pt 0 [C.cexp|NULL|],
               storeValueHeader sign pt 0 [C.cexp|NULL|] [C.cexp|out|]
                 ++ [C.cstms|memcpy(out, &obj->$id:field, sizeof(obj->$id:field));
                             out += sizeof(obj->$id:field);|]
             )
-      storeComponent i (ArrayValue _ _ pt sign shape) =
-        let rank = length shape
-            arr_name = arrayName pt sign rank
+      storeComponent i (ValueType sign (Rank rank) pt) =
+        let arr_name = arrayName pt sign rank
             field = tupleField i
             shape_array = "futhark_shape_" ++ arr_name
             values_array = "futhark_values_" ++ arr_name
@@ -1097,6 +1193,7 @@ opaqueLibraryFunctions desc vds = do
 
   ctx_ty <- contextType
 
+  let vds = opaquePayload types ot
   free_body <- collect $ zipWithM_ freeComponent [0 ..] vds
 
   store_body <- collect $ do
@@ -1109,16 +1206,15 @@ opaqueLibraryFunctions desc vds = do
     stm [C.cstm|if (p != NULL && *p == NULL) { *p = malloc(*n); }|]
     stm [C.cstm|if (p != NULL) { unsigned char *out = *p; $stms:(concat stores) }|]
 
-  let restoreComponent i (ScalarValue pt sign _) = do
+  let restoreComponent i (ValueType sign (Rank 0) pt) = do
         let field = tupleField i
             dataptr = "data_" ++ show i
         stms $ loadValueHeader sign pt 0 [C.cexp|NULL|] [C.cexp|src|]
         item [C.citem|const void* $id:dataptr = src;|]
         stm [C.cstm|src += sizeof(obj->$id:field);|]
         pure [C.cstms|memcpy(&obj->$id:field, $id:dataptr, sizeof(obj->$id:field));|]
-      restoreComponent i (ArrayValue _ _ pt sign shape) = do
+      restoreComponent i (ValueType sign (Rank rank) pt) = do
         let field = tupleField i
-            rank = length shape
             arr_name = arrayName pt sign rank
             new_array = "futhark_new_" ++ arr_name
             dataptr = "data_" ++ show i
@@ -1136,7 +1232,7 @@ opaqueLibraryFunctions desc vds = do
              if (obj->$id:field == NULL) { err = 1; }|]
 
   load_body <- collect $ do
-    loads <- concat <$> zipWithM restoreComponent [0 ..] vds
+    loads <- concat <$> zipWithM restoreComponent [0 ..] (opaquePayload types ot)
     stm
       [C.cstm|if (err == 0) {
                 $stms:loads
@@ -1155,13 +1251,17 @@ opaqueLibraryFunctions desc vds = do
     (OpaqueDecl desc)
     [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
 
-  -- We do not need to enclose the body in a critical section, because
-  -- when we operate on the components of the opaque, we are calling
-  -- public API functions that do their own locking.
+  opaqueProjectFunctions types desc ot vds
+
+  -- We do not need to enclose most bodies in a critical section,
+  -- because when we operate on the components of the opaque, we are
+  -- calling public API functions that do their own locking.  The
+  -- exception is projection, where we fiddle with reference counts.
   mapM_
     libDecl
     [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
+            (void)ctx;
             int ret = 0, tmp;
             $items:free_body
             free(obj);
@@ -1170,6 +1270,7 @@ opaqueLibraryFunctions desc vds = do
 
           int $id:store_opaque($ty:ctx_ty *ctx,
                                const $ty:opaque_type *obj, void **p, size_t *n) {
+            (void)ctx;
             int ret = 0;
             $items:store_body
             return ret;
@@ -1198,63 +1299,68 @@ opaqueLibraryFunctions desc vds = do
         Manifest.opaqueRestore = T.pack restore_opaque
       }
 
-valueDescToCType :: Publicness -> ValueDesc -> CompilerM op s C.Type
-valueDescToCType _ (ScalarValue pt signed _) =
-  pure $ primAPIType signed pt
-valueDescToCType pub (ArrayValue _ space pt signed shape) = do
-  let rank = length shape
+valueDescToType :: ValueDesc -> ValueType
+valueDescToType (ScalarValue pt signed _) =
+  ValueType signed (Rank 0) pt
+valueDescToType (ArrayValue _ _ pt signed shape) =
+  ValueType signed (Rank (length shape)) pt
+
+generateArray ::
+  Space ->
+  ((Signedness, PrimType, Int), Publicness) ->
+  CompilerM op s (Maybe (T.Text, Manifest.Type))
+generateArray space ((signed, pt, rank), pub) = do
   name <- publicName $ arrayName pt signed rank
-  let add = M.insertWith max (space, signed, pt, rank) pub
-  modify $ \s -> s {compArrayTypes = add $ compArrayTypes s}
-  pure [C.cty|struct $id:name|]
+  let memty = fatMemType space
+  libDecl [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
+  ops <- arrayLibraryFunctions pub space pt signed rank
+  let pt_name = T.pack $ prettySigned (signed == Unsigned) pt
+      pretty_name = mconcat (replicate rank "[]") <> pt_name
+      arr_type = [C.cty|struct $id:name*|]
+  case pub of
+    Public ->
+      pure $
+        Just
+          ( pretty_name,
+            Manifest.TypeArray (prettyText arr_type) pt_name rank ops
+          )
+    Private ->
+      pure Nothing
 
-opaqueToCType :: String -> [ValueDesc] -> CompilerM op s C.Type
-opaqueToCType desc vds = do
-  name <- publicName $ opaqueName desc vds
-  let add = M.insert desc vds
-  modify $ \s -> s {compOpaqueTypes = add $ compOpaqueTypes s}
-  -- Now ensure that the constituent array types will exist.
-  mapM_ (valueDescToCType Private) vds
-  pure [C.cty|struct $id:name|]
+generateOpaque ::
+  OpaqueTypes ->
+  (String, OpaqueType) ->
+  CompilerM op s (T.Text, Manifest.Type)
+generateOpaque types (desc, ot) = do
+  name <- publicName $ opaqueName desc
+  members <- zipWithM field (opaquePayload types ot) [(0 :: Int) ..]
+  libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
+  ops <- opaqueLibraryFunctions types desc ot
+  let opaque_type = [C.cty|struct $id:name*|]
+  pure (T.pack desc, Manifest.TypeOpaque (prettyText opaque_type) ops)
+  where
+    field vt@(ValueType _ (Rank r) _) i = do
+      ct <- valueTypeToCType Private vt
+      pure $
+        if r == 0
+          then [C.csdecl|$ty:ct $id:(tupleField i);|]
+          else [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
-generateAPITypes :: CompilerM op s (M.Map T.Text Manifest.Type)
-generateAPITypes = do
-  array_ts <- mapM generateArray . M.toList =<< gets compArrayTypes
-  opaque_ts <- mapM generateOpaque . M.toList =<< gets compOpaqueTypes
+generateAPITypes :: Space -> OpaqueTypes -> CompilerM op s (M.Map T.Text Manifest.Type)
+generateAPITypes arr_space types@(OpaqueTypes opaques) = do
+  mapM_ (findNecessaryArrays . snd) opaques
+  array_ts <- mapM (generateArray arr_space) . M.toList =<< gets compArrayTypes
+  opaque_ts <- mapM (generateOpaque types) opaques
   pure $ M.fromList $ catMaybes array_ts <> opaque_ts
   where
-    generateArray ((space, signed, pt, rank), pub) = do
-      name <- publicName $ arrayName pt signed rank
-      let memty = fatMemType space
-      libDecl [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
-      ops <- arrayLibraryFunctions pub space pt signed rank
-      let pt_name = T.pack $ prettySigned (signed == TypeUnsigned) pt
-          pretty_name = mconcat (replicate rank "[]") <> pt_name
-          arr_type = [C.cty|struct $id:name*|]
-      case pub of
-        Public ->
-          pure $
-            Just
-              ( pretty_name,
-                Manifest.TypeArray (prettyText arr_type) pt_name rank ops
-              )
-        Private ->
-          pure Nothing
-
-    generateOpaque (desc, vds) = do
-      name <- publicName $ opaqueName desc vds
-      members <- zipWithM field vds [(0 :: Int) ..]
-      libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
-      ops <- opaqueLibraryFunctions desc vds
-      let opaque_type = [C.cty|struct $id:name*|]
-      pure (T.pack desc, Manifest.TypeOpaque (prettyText opaque_type) ops)
-
-    field vd@ScalarValue {} i = do
-      ct <- valueDescToCType Private vd
-      pure [C.csdecl|$ty:ct $id:(tupleField i);|]
-    field vd i = do
-      ct <- valueDescToCType Private vd
-      pure [C.csdecl|$ty:ct *$id:(tupleField i);|]
+    -- Ensure that array types will be generated before the opaque
+    -- records that allow projection of them.  This is because the
+    -- projection functions somewhat uglily directly poke around in
+    -- the innards to increment reference counts.
+    findNecessaryArrays (OpaqueType _) =
+      pure ()
+    findNecessaryArrays (OpaqueRecord fs) =
+      mapM_ (entryPointTypeToCType Public . snd) fs
 
 allTrue :: [C.Exp] -> C.Exp
 allTrue [] = [C.cexp|true|]
@@ -1280,7 +1386,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
           if null check then Nothing else Just $ allTrue check
         )
     prepare pno (OpaqueValue desc vds) = do
-      ty <- opaqueToCType desc vds
+      ty <- opaqueToCType desc
       let pname = "in" ++ show pno
           field i ScalarValue {} = [C.cexp|$id:pname->$id:(tupleField i)|]
           field i ArrayValue {} = [C.cexp|$id:pname->$id:(tupleField i)|]
@@ -1298,7 +1404,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
       stm [C.cstm|$id:name = $exp:src';|]
       pure (pt', [])
     prepareValue pub src vd@(ArrayValue mem _ _ _ shape) = do
-      ty <- valueDescToCType pub vd
+      ty <- valueTypeToCType pub $ valueDescToType vd
 
       stm [C.cstm|$exp:mem = $exp:src->mem;|]
 
@@ -1324,7 +1430,7 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
   where
     prepare pno (TransparentValue vd) = do
       let pname = "out" ++ show pno
-      ty <- valueDescToCType Public vd
+      ty <- valueTypeToCType Public $ valueDescToType vd
 
       case vd of
         ArrayValue {} -> do
@@ -1336,16 +1442,17 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
           pure [C.cparam|$ty:ty *$id:pname|]
     prepare pno (OpaqueValue desc vds) = do
       let pname = "out" ++ show pno
-      ty <- opaqueToCType desc vds
-      vd_ts <- mapM (valueDescToCType Private) vds
+      ty <- opaqueToCType desc
+      vd_ts <- mapM (valueTypeToCType Private . valueDescToType) vds
 
       stm [C.cstm|assert((*$id:pname = ($ty:ty*) malloc(sizeof($ty:ty))) != NULL);|]
 
       forM_ (zip3 [0 ..] vd_ts vds) $ \(i, ct, vd) -> do
-        let field = [C.cexp|(*$id:pname)->$id:(tupleField i)|]
+        let field = [C.cexp|((*$id:pname)->$id:(tupleField i))|]
         case vd of
           ScalarValue {} -> pure ()
-          _ -> stm [C.cstm|assert(($exp:field = ($ty:ct*) malloc(sizeof($ty:ct))) != NULL);|]
+          ArrayValue {} -> do
+            stm [C.cstm|assert(($exp:field = ($ty:ct*) malloc(sizeof($ty:ct))) != NULL);|]
         prepareValue field vd
 
       pure [C.cparam|$ty:ty **$id:pname|]
@@ -1471,11 +1578,11 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
       decl [C.cdecl|$ty:ty' $id:name;|]
 
     vdType (TransparentValue (ScalarValue pt signed _)) =
-      T.pack $ prettySigned (signed == TypeUnsigned) pt
+      T.pack $ prettySigned (signed == Unsigned) pt
     vdType (TransparentValue (ArrayValue _ _ pt signed shape)) =
       T.pack $
         mconcat (replicate (length shape) "[]")
-          <> prettySigned (signed == TypeUnsigned) pt
+          <> prettySigned (signed == Unsigned) pt
     vdType (OpaqueValue name _) =
       T.pack name
 
@@ -1567,11 +1674,11 @@ compileProg' ::
   s ->
   CompilerM op s () ->
   T.Text ->
-  [Space] ->
+  (Space, [Space]) ->
   [Option] ->
   Definitions op ->
   m (CParts, CompilerState s)
-compileProg' backend version ops def extra header_extra spaces options prog = do
+compileProg' backend version ops def extra header_extra (arr_space, spaces) options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
         runCompilerM ops src def compileProgAction
@@ -1681,7 +1788,7 @@ $entry_point_decls
       endstate
     )
   where
-    Definitions consts (Functions funs) = prog
+    Definitions types consts (Functions funs) = prog
 
     compileProgAction = do
       (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
@@ -1701,13 +1808,14 @@ $entry_point_decls
 
       mapM_ earlyDecl $ concat memfuns
 
-      types <- commonLibFuns memreport
+      type_funs <- generateAPITypes arr_space types
+      generateCommonLibFuns memreport
 
       pure
         ( T.unlines $ map prettyText prototypes,
           T.unlines $ map (prettyText . funcToDef) functions,
           T.unlines $ map prettyText entry_points,
-          Manifest.Manifest (M.fromList entry_points_manifest) types backend version
+          Manifest.Manifest (M.fromList entry_points_manifest) type_funs backend version
         )
 
     funcToDef func = C.FuncDef func loc
@@ -1725,16 +1833,15 @@ compileProg ::
   Operations op () ->
   CompilerM op () () ->
   T.Text ->
-  [Space] ->
+  (Space, [Space]) ->
   [Option] ->
   Definitions op ->
   m CParts
-compileProg backend version ops extra header_extra spaces options prog =
-  fst <$> compileProg' backend version ops () extra header_extra spaces options prog
+compileProg backend version ops extra header_extra (arr_space, spaces) options prog =
+  fst <$> compileProg' backend version ops () extra header_extra (arr_space, spaces) options prog
 
-commonLibFuns :: [C.BlockItem] -> CompilerM op s (M.Map T.Text Manifest.Type)
-commonLibFuns memreport = do
-  types <- generateAPITypes
+generateCommonLibFuns :: [C.BlockItem] -> CompilerM op s ()
+generateCommonLibFuns memreport = do
   ctx <- contextType
   cfg <- configType
   ops <- asks envOperations
@@ -1824,8 +1931,6 @@ commonLibFuns memreport = do
                          return ctx->error != NULL;
                        }|]
     )
-
-  pure types
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do
