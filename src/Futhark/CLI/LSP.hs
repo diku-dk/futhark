@@ -1,6 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitNamespaces #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 -- | @futhark lsp@
 module Futhark.CLI.LSP (main) where
@@ -9,7 +8,6 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.IORef (newIORef)
 import Futhark.LSP.Handlers (handlers)
 import Futhark.LSP.State (emptyState)
-import Futhark.Util (debug)
 import Language.LSP.Server
 import Language.LSP.Types
   ( SaveOptions (SaveOptions),
@@ -17,14 +15,11 @@ import Language.LSP.Types
     TextDocumentSyncOptions (..),
     type (|?) (InR),
   )
-import System.Log.Logger (Priority (DEBUG))
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
 main _prog _args = do
   state_mvar <- newIORef emptyState
-  debug "Init with emptyState"
-  setupLogger Nothing ["futhark"] DEBUG
   _ <-
     runServer $
       ServerDefinition
