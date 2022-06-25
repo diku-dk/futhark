@@ -4,6 +4,8 @@
 -- the old state around.
 module Futhark.LSP.Compile (tryTakeStateFromIORef, tryReCompile) where
 
+import Colog.Core (logStringStderr, (<&))
+import Control.Lens.Getter (view)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.IORef (IORef, readIORef, writeIORef)
 import qualified Data.Map as M
@@ -13,7 +15,6 @@ import Futhark.Compiler.Program (LoadedProg, lpFilePaths, lpWarnings, noLoadedPr
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
 import Futhark.LSP.State (State (..), emptyState, updateStaleContent, updateStaleMapping)
 import Futhark.LSP.Tool (computeMapping)
-import Futhark.Util (debug)
 import Language.Futhark.Warnings (listWarnings)
 import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
 import Language.LSP.Types
@@ -22,7 +23,7 @@ import Language.LSP.Types
     toNormalizedUri,
     uriToNormalizedFilePath,
   )
-import Language.LSP.VFS (VFS (vfsMap), virtualFileText)
+import Language.LSP.VFS (VFS, vfsMap, virtualFileText)
 
 -- | Try to take state from IORef, if it's empty, try to compile.
 tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State
@@ -40,8 +41,8 @@ tryTakeStateFromIORef state_mvar file_path = do
       state <- case file_path of
         Just file_path'
           | file_path' `notElem` files -> do
-              debug $ "File not part of program: " <> show file_path'
-              debug $ "Program contains: " <> show files
+              logStringStderr <& ("File not part of program: " <> show file_path')
+              logStringStderr <& ("Program contains: " <> show files)
               tryCompile old_state file_path noLoadedProg
         _ -> pure old_state
       liftIO $ writeIORef state_mvar state
@@ -50,18 +51,18 @@ tryTakeStateFromIORef state_mvar file_path = do
 -- | Try to (re)-compile, replace old state if successful.
 tryReCompile :: IORef State -> Maybe FilePath -> LspT () IO ()
 tryReCompile state_mvar file_path = do
-  debug "(Re)-compiling ..."
+  logStringStderr <& "(Re)-compiling ..."
   old_state <- liftIO $ readIORef state_mvar
   let loaded_prog = getLoadedProg old_state
   new_state <- tryCompile old_state file_path loaded_prog
   case stateProgram new_state of
     Nothing -> do
-      debug "Failed to (re)-compile, using old state or Nothing"
-      debug $ "Computing PositionMapping for: " <> show file_path
+      logStringStderr <& "Failed to (re)-compile, using old state or Nothing"
+      logStringStderr <& "Computing PositionMapping for: " <> show file_path
       mapping <- computeMapping old_state file_path
       liftIO $ writeIORef state_mvar $ updateStaleMapping file_path mapping old_state
     Just _ -> do
-      debug "(Re)-compile successful"
+      logStringStderr <& "(Re)-compile successful"
       liftIO $ writeIORef state_mvar new_state
 
 -- | Try to compile, publish diagnostics on warnings and errors, return newly compiled state.
@@ -69,7 +70,7 @@ tryReCompile state_mvar file_path = do
 tryCompile :: State -> Maybe FilePath -> LoadedProg -> LspT () IO State
 tryCompile _ Nothing _ = pure emptyState
 tryCompile state (Just path) old_loaded_prog = do
-  debug $ "Reloading program from " <> show path
+  logStringStderr <& "Reloading program from " <> show path
   vfs <- getVirtualFiles
   res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs) -- NOTE: vfs only keeps track of current opened files
   flushDiagnosticsBySource maxDiagnostic diagnosticSource
@@ -85,7 +86,7 @@ tryCompile state (Just path) old_loaded_prog = do
     -- But still might need an update on re-compile logic, don't discard all state afterwards,
     -- try to compile from root file, if there is a depencency relatetion, improve performance and provide more dignostic.
     Left prog_error -> do
-      debug "Compilation failed, publishing diagnostics"
+      logStringStderr <& "Compilation failed, publishing diagnostics"
       publishErrorDiagnostics prog_error
       pure emptyState
 
@@ -101,7 +102,7 @@ transformVFS vfs =
             M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
     )
     M.empty
-    (vfsMap vfs)
+    (view vfsMap vfs)
 
 getLoadedProg :: State -> LoadedProg
 getLoadedProg state = fromMaybe noLoadedProg (stateProgram state)

@@ -393,6 +393,7 @@ library
     , bytestring >=0.10.8
     , bytestring-to-vector >=0.3.0.1
     , bmp >=1.2.6.3
+    , co-log-core
     , containers >=0.6.2.1
     , cryptohash-md5
     , Diff >=0.4.1
@@ -410,10 +411,9 @@ library
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
-    , hslogger
     , language-c-quote >= 0.12
     , lens
-    , lsp >= 1.4
+    , lsp == 1.5.*
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
     , megaparsec >=9.0.0
