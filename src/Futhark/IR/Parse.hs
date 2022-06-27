@@ -569,15 +569,18 @@ pBody pr =
       Body (pBodyDec pr) mempty <$> pResult
     ]
 
-pSignedness :: Parser Signedness
-pSignedness =
-  choice
-    [ keyword "signed" $> Signed,
-      keyword "unsigned" $> Unsigned
-    ]
-
 pValueType :: Parser ValueType
-pValueType = ValueType <$> pSignedness <*> pRank <*> pPrimType
+pValueType = comb <$> pRank <*> pSignedType
+  where
+    comb r (s, t) = ValueType s r t
+    pSignedType =
+      choice
+        [ "u8" $> (Unsigned, IntType Int8),
+          "u16" $> (Unsigned, IntType Int16),
+          "u32" $> (Unsigned, IntType Int32),
+          "u64" $> (Unsigned, IntType Int64),
+          (Signed,) <$> pPrimType
+        ]
 
 pEntryPointType :: Parser EntryPointType
 pEntryPointType =
