@@ -93,7 +93,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
-import Data.Char (isAlpha, isAlphaNum)
+import Data.Char (isAlpha, isAlphaNum, isDigit)
 import qualified Data.DList as DL
 import Data.List (unzip4)
 import Data.Loc
@@ -109,7 +109,7 @@ import Futhark.CodeGen.RTS.C (cacheH, errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
-import Futhark.Util (chunks, zEncodeString)
+import Futhark.Util (chunks, mapAccumLM, zEncodeString)
 import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
@@ -1146,7 +1146,82 @@ opaqueProjectFunctions types desc (OpaqueRecord fs) vds = do
                       return v;
                     }|]
 
-  mapM_ onField $ zip fs $ recordFieldPayloads types (map snd fs) $ zip [0 ..] vds
+  mapM_ onField . zip fs . recordFieldPayloads types (map snd fs) $
+    zip [0 ..] vds
+
+opaqueNewFunctions ::
+  OpaqueTypes ->
+  String ->
+  OpaqueType ->
+  [ValueType] ->
+  CompilerM op s ()
+opaqueNewFunctions _ _ (OpaqueType _) _ = pure ()
+opaqueNewFunctions types desc (OpaqueRecord fs) vds = do
+  opaque_type <- opaqueToCType desc
+  ctx_ty <- contextType
+  ops <- asks envOperations
+  new <- publicName $ "new_" ++ opaqueName desc
+
+  (params, new_stms) <-
+    fmap (unzip . snd)
+      . mapAccumLM onField 0
+      . zip fs
+      . recordFieldPayloads types (map snd fs)
+      $ vds
+
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|$ty:opaque_type* $id:new($ty:ctx_ty *ctx, $params:params);|]
+  libDecl
+    [C.cedecl|$ty:opaque_type* $id:new($ty:ctx_ty *ctx, $params:params) {
+                $ty:opaque_type* v = malloc(sizeof($ty:opaque_type));
+                $items:(criticalSection ops new_stms)
+                return v;
+              }|]
+  where
+    onField offset ((f, et), f_vts) = do
+      let param_name =
+            if all isDigit (nameToString f)
+              then C.toIdent ("v" <> f) mempty
+              else C.toIdent f mempty
+      case et of
+        TypeTransparent (ValueType sign (Rank 0) pt) -> do
+          let ct = primAPIType sign pt
+          pure
+            ( offset + 1,
+              ( [C.cparam|$ty:ct $id:param_name|],
+                [C.citem|v->$id:(tupleField offset) = $id:param_name;|]
+              )
+            )
+        TypeTransparent vt -> do
+          ct <- valueTypeToCType Public vt
+          pure
+            ( offset + 1,
+              ( [C.cparam|$ty:ct* $id:param_name|],
+                [C.citem|{v->$id:(tupleField offset) = malloc(sizeof($ty:ct));
+                          *v->$id:(tupleField offset) = *$id:param_name;
+                          (void)(*(v->$id:(tupleField offset)->mem.references))++;}|]
+              )
+            )
+        TypeOpaque f_desc -> do
+          ct <- opaqueToCType f_desc
+          let param_fields = do
+                i <- [0 ..]
+                pure [C.cexp|$id:param_name->$id:(tupleField i)|]
+          pure
+            ( offset + length f_vts,
+              ( [C.cparam|$ty:ct* $id:param_name|],
+                [C.citem|{$stms:(zipWith3 setFieldField [offset ..] param_fields f_vts)}|]
+              )
+            )
+
+    setFieldField i e (ValueType _ (Rank r) _)
+      | r == 0 =
+          [C.cstm|v->$id:(tupleField i) = $exp:e;|]
+      | otherwise =
+          [C.cstm|{v->$id:(tupleField i) = malloc(sizeof(*$exp:e));
+                   *v->$id:(tupleField i) = *$exp:e;
+                   (void)(*(v->$id:(tupleField i)->mem.references))++;}|]
 
 opaqueLibraryFunctions ::
   OpaqueTypes ->
@@ -1252,6 +1327,7 @@ opaqueLibraryFunctions types desc ot = do
     [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
 
   opaqueProjectFunctions types desc ot vds
+  opaqueNewFunctions types desc ot vds
 
   -- We do not need to enclose most bodies in a critical section,
   -- because when we operate on the components of the opaque, we are
