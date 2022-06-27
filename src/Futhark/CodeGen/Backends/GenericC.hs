@@ -1078,6 +1078,10 @@ entryPointTypeToCType :: Publicness -> EntryPointType -> CompilerM op s C.Type
 entryPointTypeToCType _ (TypeOpaque desc) = opaqueToCType desc
 entryPointTypeToCType pub (TypeTransparent vt) = valueTypeToCType pub vt
 
+entryTypeName :: EntryPointType -> Manifest.TypeName
+entryTypeName (TypeOpaque desc) = T.pack desc
+entryTypeName (TypeTransparent vt) = prettyText vt
+
 -- | Figure out which of the members of an opaque type corresponds to
 -- which fields.
 recordFieldPayloads :: OpaqueTypes -> [EntryPointType] -> [a] -> [[a]]
@@ -1090,11 +1094,10 @@ recordFieldPayloads types = chunks . map typeLength
 opaqueProjectFunctions ::
   OpaqueTypes ->
   String ->
-  OpaqueType ->
+  [(Name, EntryPointType)] ->
   [ValueType] ->
-  CompilerM op s ()
-opaqueProjectFunctions _ _ (OpaqueType _) _ = pure ()
-opaqueProjectFunctions types desc (OpaqueRecord fs) vds = do
+  CompilerM op s [Manifest.RecordField]
+opaqueProjectFunctions types desc fs vds = do
   opaque_type <- opaqueToCType desc
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -1145,18 +1148,18 @@ opaqueProjectFunctions types desc (OpaqueRecord fs) vds = do
                       $items:project_items
                       return v;
                     }|]
+        pure $ Manifest.RecordField (nameToText f) (entryTypeName et) (T.pack project)
 
-  mapM_ onField . zip fs . recordFieldPayloads types (map snd fs) $
+  mapM onField . zip fs . recordFieldPayloads types (map snd fs) $
     zip [0 ..] vds
 
 opaqueNewFunctions ::
   OpaqueTypes ->
   String ->
-  OpaqueType ->
+  [(Name, EntryPointType)] ->
   [ValueType] ->
-  CompilerM op s ()
-opaqueNewFunctions _ _ (OpaqueType _) _ = pure ()
-opaqueNewFunctions types desc (OpaqueRecord fs) vds = do
+  CompilerM op s Manifest.CFuncName
+opaqueNewFunctions types desc fs vds = do
   opaque_type <- opaqueToCType desc
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -1178,6 +1181,7 @@ opaqueNewFunctions types desc (OpaqueRecord fs) vds = do
                 $items:(criticalSection ops new_stms)
                 return v;
               }|]
+  pure $ T.pack new
   where
     onField offset ((f, et), f_vts) = do
       let param_name =
@@ -1223,11 +1227,25 @@ opaqueNewFunctions types desc (OpaqueRecord fs) vds = do
                    *v->$id:(tupleField i) = *$exp:e;
                    (void)(*(v->$id:(tupleField i)->mem.references))++;}|]
 
+processOpaqueRecord ::
+  OpaqueTypes ->
+  String ->
+  OpaqueType ->
+  [ValueType] ->
+  CompilerM op s (Maybe Manifest.RecordOps)
+processOpaqueRecord _ _ (OpaqueType _) _ = pure Nothing
+processOpaqueRecord types desc (OpaqueRecord fs) vds =
+  Just
+    <$> ( Manifest.RecordOps
+            <$> opaqueProjectFunctions types desc fs vds
+            <*> opaqueNewFunctions types desc fs vds
+        )
+
 opaqueLibraryFunctions ::
   OpaqueTypes ->
   String ->
   OpaqueType ->
-  CompilerM op s Manifest.OpaqueOps
+  CompilerM op s (Manifest.OpaqueOps, Maybe Manifest.RecordOps)
 opaqueLibraryFunctions types desc ot = do
   name <- publicName $ opaqueName desc
   free_opaque <- publicName $ "free_" ++ opaqueName desc
@@ -1326,8 +1344,7 @@ opaqueLibraryFunctions types desc ot = do
     (OpaqueDecl desc)
     [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
 
-  opaqueProjectFunctions types desc ot vds
-  opaqueNewFunctions types desc ot vds
+  record <- processOpaqueRecord types desc ot vds
 
   -- We do not need to enclose most bodies in a critical section,
   -- because when we operate on the components of the opaque, we are
@@ -1368,12 +1385,14 @@ opaqueLibraryFunctions types desc ot = do
           }
     |]
 
-  pure $
-    Manifest.OpaqueOps
-      { Manifest.opaqueFree = T.pack free_opaque,
-        Manifest.opaqueStore = T.pack store_opaque,
-        Manifest.opaqueRestore = T.pack restore_opaque
-      }
+  pure
+    ( Manifest.OpaqueOps
+        { Manifest.opaqueFree = T.pack free_opaque,
+          Manifest.opaqueStore = T.pack store_opaque,
+          Manifest.opaqueRestore = T.pack restore_opaque
+        },
+      record
+    )
 
 valueDescToType :: ValueDesc -> ValueType
 valueDescToType (ScalarValue pt signed _) =
@@ -1411,9 +1430,9 @@ generateOpaque types (desc, ot) = do
   name <- publicName $ opaqueName desc
   members <- zipWithM field (opaquePayload types ot) [(0 :: Int) ..]
   libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
-  ops <- opaqueLibraryFunctions types desc ot
+  (ops, record) <- opaqueLibraryFunctions types desc ot
   let opaque_type = [C.cty|struct $id:name*|]
-  pure (T.pack desc, Manifest.TypeOpaque (prettyText opaque_type) ops)
+  pure (T.pack desc, Manifest.TypeOpaque (prettyText opaque_type) ops record)
   where
     field vt@(ValueType _ (Rank r) _) i = do
       ct <- valueTypeToCType Private vt
