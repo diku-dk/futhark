@@ -37,7 +37,7 @@ import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
-import Futhark.CodeGen.ImpCode.Multicore
+import Futhark.CodeGen.ImpCode.Multicore hiding (ValueType)
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
 import Futhark.IR.MCMem (MCMem, Prog)
@@ -56,7 +56,7 @@ compileProg version =
         operations
         generateContext
         ""
-        [DefaultSpace]
+        (DefaultSpace, [DefaultSpace])
         cliOptions
     )
     <=< ImpGen.compileProg

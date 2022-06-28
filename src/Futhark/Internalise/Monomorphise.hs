@@ -926,22 +926,34 @@ removeTypeVariablesInType t = do
   subs <- asks $ M.map substFromAbbr . envTypeBindings
   pure $ applySubst (`M.lookup` subs) t
 
+transformEntryPoint :: EntryPoint -> MonoM EntryPoint
+transformEntryPoint (EntryPoint params ret) =
+  EntryPoint <$> mapM onEntryParam params <*> onEntryType ret
+  where
+    onEntryParam (EntryParam v t) =
+      EntryParam v <$> onEntryType t
+    onEntryType (EntryType t te) =
+      EntryType <$> removeTypeVariablesInType t <*> pure te
+
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   valbind' <-
     toPolyBinding
       <$> removeTypeVariables (isJust (valBindEntryPoint valbind)) valbind
 
-  when (isJust $ valBindEntryPoint valbind) $ do
-    t <-
-      removeTypeVariablesInType
-        $ foldFunType
-          (map patternStructType (valBindParams valbind))
-        $ unInfo
-        $ valBindRetType valbind
-    (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
-    tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = valBindEntryPoint valbind})
-    addLifted (valBindName valbind) (monoType t) (name, infer)
+  case valBindEntryPoint valbind of
+    Nothing -> pure ()
+    Just (Info entry) -> do
+      t <-
+        removeTypeVariablesInType
+          $ foldFunType
+            (map patternStructType (valBindParams valbind))
+          $ unInfo
+          $ valBindRetType valbind
+      (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
+      entry' <- transformEntryPoint entry
+      tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = Just $ Info entry'})
+      addLifted (valBindName valbind) (monoType t) (name, infer)
 
   pure mempty {envPolyBindings = M.singleton (valBindName valbind) valbind'}
 

@@ -59,7 +59,7 @@ compileProg version prog = do
       operations
       extra
       cuda_includes
-      [Space "device", DefaultSpace]
+      (Space "device", [Space "device", DefaultSpace])
       cliOptions
       prog'
   where

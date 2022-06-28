@@ -13,8 +13,9 @@ import Futhark.CodeGen.ImpCode
 -- | Set all uses of 'DefaultSpace' in the given definitions to another
 -- memory space.
 setDefaultSpace :: Space -> Definitions op -> Definitions op
-setDefaultSpace space (Definitions (Constants ps consts) (Functions fundecs)) =
+setDefaultSpace space (Definitions types (Constants ps consts) (Functions fundecs)) =
   Definitions
+    types
     (Constants (map (setParamSpace space) ps) (setCodeSpace space consts))
     ( Functions
         [ (fname, setFunctionSpace space func)

@@ -68,7 +68,7 @@ compileProg version prog = do
           failures
       )
       include_opencl_h
-      [Space "device", DefaultSpace]
+      (Space "device", [Space "device", DefaultSpace])
       cliOptions
       prog'
   where

@@ -52,7 +52,7 @@ compileProg version prog = do
       MC.operations
       MC.generateContext
       ""
-      [DefaultSpace]
+      (DefaultSpace, [DefaultSpace])
       MC.cliOptions
       prog'
 

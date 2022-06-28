@@ -14,6 +14,7 @@ module Futhark.Internalise.Monad
     FunInfo,
     substitutingVars,
     lookupSubst,
+    addOpaques,
     addFunDef,
     lookupFunction,
     lookupFunction',
@@ -59,7 +60,8 @@ data InternaliseState = InternaliseState
   { stateNameSource :: VNameSource,
     stateFunTable :: FunTable,
     stateConstSubsts :: VarSubsts,
-    stateFuns :: [FunDef SOACS]
+    stateFuns :: [FunDef SOACS],
+    stateTypes :: OpaqueTypes
   }
 
 newtype InternaliseM a
@@ -103,12 +105,14 @@ runInternaliseM ::
   MonadFreshNames m =>
   Bool ->
   InternaliseM () ->
-  m (Stms SOACS, [FunDef SOACS])
+  m (OpaqueTypes, Stms SOACS, [FunDef SOACS])
 runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src ->
     let ((_, consts), s) =
           runState (runReaderT (runBuilderT m mempty) newEnv) (newState src)
-     in ((consts, reverse $ stateFuns s), stateNameSource s)
+     in ( (stateTypes s, consts, reverse $ stateFuns s),
+          stateNameSource s
+        )
   where
     newEnv =
       InternaliseEnv
@@ -122,7 +126,8 @@ runInternaliseM safe (InternaliseM m) =
         { stateNameSource = src,
           stateFunTable = mempty,
           stateConstSubsts = mempty,
-          stateFuns = mempty
+          stateFuns = mempty,
+          stateTypes = mempty
         }
 
 substitutingVars :: VarSubsts -> InternaliseM a -> InternaliseM a
@@ -133,6 +138,12 @@ lookupSubst v = do
   env_substs <- asks $ M.lookup v . envSubsts
   const_substs <- gets $ M.lookup v . stateConstSubsts
   pure $ env_substs `mplus` const_substs
+
+-- | Add opaque types.  If the types are already known, they will not
+-- be added.
+addOpaques :: OpaqueTypes -> InternaliseM ()
+addOpaques ts = modify $ \s ->
+  s {stateTypes = stateTypes s <> ts}
 
 -- | Add a function definition to the program being constructed.
 addFunDef :: FunDef SOACS -> InternaliseM ()

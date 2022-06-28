@@ -61,15 +61,11 @@ module Futhark.CodeGen.ImpCode
     EntryPoint (..),
     Constants (..),
     ValueDesc (..),
-    Signedness (..),
     ExternalValue (..),
     Param (..),
     paramName,
-    SubExp (..),
     MemSize,
     DimSize,
-    Space (..),
-    SpaceId,
     Code (..),
     PrimValue (..),
     Exp,
@@ -77,9 +73,6 @@ module Futhark.CodeGen.ImpCode
     Volatility (..),
     Arg (..),
     var,
-    ErrorMsg (..),
-    ErrorMsgPart (..),
-    errorMsgArgTypes,
     ArrayContents (..),
     declaredIn,
     lexicalMemoryUsage,
@@ -94,6 +87,7 @@ module Futhark.CodeGen.ImpCode
 
     -- * Re-exports from other modules.
     pretty,
+    module Futhark.IR.Syntax.Core,
     module Language.Futhark.Core,
     module Language.Futhark.Primitive,
     module Futhark.Analysis.PrimExp,
@@ -113,11 +107,17 @@ import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
-  ( ErrorMsg (..),
+  ( EntryPointType (..),
+    ErrorMsg (..),
     ErrorMsgPart (..),
+    OpaqueType (..),
+    OpaqueTypes (..),
+    Rank (..),
+    Signedness (..),
     Space (..),
     SpaceId,
     SubExp (..),
+    ValueType (..),
     errorMsgArgTypes,
   )
 import Futhark.Util.Pretty hiding (space)
@@ -143,13 +143,15 @@ paramName (ScalarParam name _) = name
 
 -- | A collection of imperative functions and constants.
 data Definitions a = Definitions
-  { defConsts :: Constants a,
+  { defTypes :: OpaqueTypes,
+    defConsts :: Constants a,
     defFuns :: Functions a
   }
   deriving (Show)
 
 instance Functor Definitions where
-  fmap f (Definitions consts funs) = Definitions (fmap f consts) (fmap f funs)
+  fmap f (Definitions types consts funs) =
+    Definitions types (fmap f consts) (fmap f funs)
 
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
@@ -174,15 +176,6 @@ data Constants a = Constants
 instance Functor Constants where
   fmap f (Constants params code) = Constants params (fmap f code)
 
--- | Since the core language does not care for signedness, but the
--- source language does, entry point input/output information has
--- metadata for integer types (and arrays containing these) that
--- indicate whether they are really unsigned integers.
-data Signedness
-  = TypeUnsigned
-  | TypeDirect
-  deriving (Eq, Ord, Show)
-
 -- | A description of an externally meaningful value.
 data ValueDesc
   = -- | An array with memory block memory space, element type,
@@ -199,7 +192,6 @@ data ValueDesc
 data ExternalValue
   = -- | The string is a human-readable description with no other
     -- semantics.
-    -- not matter.
     OpaqueValue String [ValueDesc]
   | TransparentValue ValueDesc
   deriving (Show)
@@ -433,8 +425,8 @@ var = LeafExp
 -- Prettyprinting definitions.
 
 instance Pretty op => Pretty (Definitions op) where
-  ppr (Definitions consts funs) =
-    ppr consts </> ppr funs
+  ppr (Definitions types consts funs) =
+    ppr types </> ppr consts </> ppr funs
 
 instance Pretty op => Pretty (Functions op) where
   ppr (Functions funs) = stack $ intersperse mempty $ map ppFun funs
@@ -482,15 +474,15 @@ instance Pretty ValueDesc where
     ppr t <+> ppr name <> ept'
     where
       ept' = case ept of
-        TypeUnsigned -> " (unsigned)"
-        TypeDirect -> mempty
+        Unsigned -> " (unsigned)"
+        Signed -> mempty
   ppr (ArrayValue mem space et ept shape) =
     foldr f (ppr et) shape <+> "at" <+> ppr mem <> ppr space <+> ept'
     where
       f e s = brackets $ s <> comma <> ppr e
       ept' = case ept of
-        TypeUnsigned -> " (unsigned)"
-        TypeDirect -> mempty
+        Unsigned -> " (unsigned)"
+        Signed -> mempty
 
 instance Pretty ExternalValue where
   ppr (TransparentValue v) = ppr v

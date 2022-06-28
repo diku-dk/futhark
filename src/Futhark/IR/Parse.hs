@@ -157,9 +157,6 @@ pDeclType = pDeclBase pType
 pDeclExtType :: Parser DeclExtType
 pDeclExtType = pDeclBase pExtType
 
-pRankType :: Parser (TypeBase Rank Uniqueness)
-pRankType = pTypeBase pRank pUniqueness
-
 pSubExp :: Parser SubExp
 pSubExp = Var <$> pVName <|> Constant <$> pPrimValue
 
@@ -572,15 +569,24 @@ pBody pr =
       Body (pBodyDec pr) mempty <$> pResult
     ]
 
+pValueType :: Parser ValueType
+pValueType = comb <$> pRank <*> pSignedType
+  where
+    comb r (s, t) = ValueType s r t
+    pSignedType =
+      choice
+        [ keyword "u8" $> (Unsigned, IntType Int8),
+          keyword "u16" $> (Unsigned, IntType Int16),
+          keyword "u32" $> (Unsigned, IntType Int32),
+          keyword "u64" $> (Unsigned, IntType Int64),
+          (Signed,) <$> pPrimType
+        ]
+
 pEntryPointType :: Parser EntryPointType
 pEntryPointType =
   choice
-    [ keyword "direct" $> TypeDirect <*> pRankType,
-      keyword "unsigned" $> TypeUnsigned <*> pRankType,
-      keyword "opaque"
-        $> TypeOpaque
-        <*> pStringLiteral
-        <*> braces (pRankType `sepBy` pComma)
+    [ keyword "opaque" $> TypeOpaque <*> pStringLiteral,
+      TypeTransparent <$> pValueType
     ]
 
 pEntry :: Parser EntryPoint
@@ -614,8 +620,22 @@ pFunDef pr = do
   FunDef entry attrs fname ret fparams
     <$> (pEqual *> braces (pBody pr))
 
+pOpaqueType :: Parser (String, OpaqueType)
+pOpaqueType =
+  (,)
+    <$> (keyword "type" *> pStringLiteral <* pEqual)
+    <*> choice [pRecord, pOpaque]
+  where
+    pFieldName = choice [pName, nameFromString . show <$> pInt]
+    pField = (,) <$> pFieldName <* pColon <*> pEntryPointType
+    pRecord = keyword "record" $> OpaqueRecord <*> braces (many pField)
+    pOpaque = keyword "opaque" $> OpaqueType <*> braces (many pValueType)
+
+pOpaqueTypes :: Parser OpaqueTypes
+pOpaqueTypes = keyword "types" $> OpaqueTypes <*> braces (many pOpaqueType)
+
 pProg :: PR rep -> Parser (Prog rep)
-pProg pr = Prog <$> pStms pr <*> many (pFunDef pr)
+pProg pr = Prog <$> pOpaqueTypes <*> pStms pr <*> many (pFunDef pr)
 
 pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =

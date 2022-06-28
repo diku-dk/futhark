@@ -37,6 +37,13 @@ module Futhark.IR.Syntax.Core
     ErrorMsgPart (..),
     errorMsgArgTypes,
 
+    -- * Entry point information
+    ValueType (..),
+    OpaqueType (..),
+    OpaqueTypes (..),
+    Signedness (..),
+    EntryPointType (..),
+
     -- * Attributes
     Attr (..),
     Attrs (..),
@@ -558,3 +565,48 @@ withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 -- | Map a function over an attribute set.
 mapAttrs :: (Attr -> a) -> Attrs -> [a]
 mapAttrs f (Attrs attrs) = map f $ S.toList attrs
+
+-- | Since the core language does not care for signedness, but the
+-- source language does, entry point input/output information has
+-- metadata for integer types (and arrays containing these) that
+-- indicate whether they are really unsigned integers.  This doesn't
+-- matter for non-integer types.
+data Signedness
+  = Unsigned
+  | Signed
+  deriving (Eq, Ord, Show)
+
+-- | An actual non-opaque type that can be passed to and from Futhark
+-- programs, or serve as the contents of opaque types.  Scalars are
+-- represented with zero rank.
+data ValueType
+  = ValueType Signedness Rank PrimType
+  deriving (Eq, Ord, Show)
+
+-- | Every entry point argument and return value has an annotation
+-- indicating how it maps to the original source program type.
+data EntryPointType
+  = -- | An opaque type of this name.
+    TypeOpaque String
+  | -- | A transparent type, which is scalar if the rank is zero.
+    TypeTransparent ValueType
+  deriving (Eq, Show, Ord)
+
+-- | The representation of an opaque type.
+data OpaqueType
+  = OpaqueType [ValueType]
+  | -- | Note that the field ordering here denote the actual
+    -- representation - make sure it is preserved.
+    OpaqueRecord [(Name, EntryPointType)]
+  deriving (Eq, Ord, Show)
+
+-- | Names of opaque types and their representation.
+newtype OpaqueTypes = OpaqueTypes [(String, OpaqueType)]
+  deriving (Eq, Ord, Show)
+
+instance Monoid OpaqueTypes where
+  mempty = OpaqueTypes mempty
+
+instance Semigroup OpaqueTypes where
+  OpaqueTypes x <> OpaqueTypes y =
+    OpaqueTypes $ x <> filter ((`notElem` map fst x) . fst) y

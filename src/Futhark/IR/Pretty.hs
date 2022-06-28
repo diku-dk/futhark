@@ -51,6 +51,9 @@ instance Pretty NoUniqueness where
 instance Pretty Shape where
   ppr = mconcat . map (brackets . ppr) . shapeDims
 
+instance Pretty Rank where
+  ppr (Rank r) = mconcat $ replicate r "[]"
+
 instance Pretty a => Pretty (Ext a) where
   ppr (Free e) = ppr e
   ppr (Ext x) = text "?" <> text (show x)
@@ -319,10 +322,17 @@ instance PrettyRep rep => Pretty (Lambda rep) where
       </> indent 2 (colon <+> ppTupleLines' rettype <+> text "->")
       </> indent 2 (ppr body)
 
+instance Pretty Signedness where
+  ppr Signed = "signed"
+  ppr Unsigned = "unsigned"
+
+instance Pretty ValueType where
+  ppr (ValueType s (Rank r) t) =
+    mconcat (replicate r "[]") <> text (prettySigned (s == Signed) t)
+
 instance Pretty EntryPointType where
-  ppr (TypeDirect t) = "direct" <+> ppr t
-  ppr (TypeUnsigned t) = "unsigned" <+> ppr t
-  ppr (TypeOpaque desc ts) = "opaque" <+> pquote (text desc) <+> ppTupleLines' ts
+  ppr (TypeTransparent t) = ppr t
+  ppr (TypeOpaque desc) = "opaque" <+> pquote (text desc)
 
 instance Pretty EntryParam where
   ppr (EntryParam name u t) = ppr name <> colon <+> ppr u <> ppr t
@@ -346,13 +356,26 @@ instance PrettyRep rep => Pretty (FunDef rep) where
           "entry"
             <> parens
               ( "\"" <> ppr p_name <> "\"" <> comma
-                  </> ppTuple' p_entry <> comma
-                  </> ppTuple' ret_entry
+                  </> ppTupleLines' p_entry <> comma
+                  </> ppTupleLines' ret_entry
               )
 
+instance Pretty OpaqueType where
+  ppr (OpaqueType ts) =
+    "opaque" <+> nestedBlock "{" "}" (stack $ map ppr ts)
+  ppr (OpaqueRecord fs) =
+    "record" <+> nestedBlock "{" "}" (stack $ map p fs)
+    where
+      p (f, et) = ppr f <> ":" <+> ppr et
+
+instance Pretty OpaqueTypes where
+  ppr (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)
+    where
+      p (name, t) = "type" <+> pquote (ppr name) <+> equals <+> ppr t
+
 instance PrettyRep rep => Pretty (Prog rep) where
-  ppr (Prog consts funs) =
-    stack $ punctuate line $ ppr consts : map ppr funs
+  ppr (Prog types consts funs) =
+    stack $ punctuate line $ ppr types : ppr consts : map ppr funs
 
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se
