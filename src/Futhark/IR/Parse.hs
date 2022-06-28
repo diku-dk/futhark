@@ -575,10 +575,10 @@ pValueType = comb <$> pRank <*> pSignedType
     comb r (s, t) = ValueType s r t
     pSignedType =
       choice
-        [ "u8" $> (Unsigned, IntType Int8),
-          "u16" $> (Unsigned, IntType Int16),
-          "u32" $> (Unsigned, IntType Int32),
-          "u64" $> (Unsigned, IntType Int64),
+        [ keyword "u8" $> (Unsigned, IntType Int8),
+          keyword "u16" $> (Unsigned, IntType Int16),
+          keyword "u32" $> (Unsigned, IntType Int32),
+          keyword "u64" $> (Unsigned, IntType Int64),
           (Signed,) <$> pPrimType
         ]
 
