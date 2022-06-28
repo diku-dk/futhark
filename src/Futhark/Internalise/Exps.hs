@@ -17,30 +17,31 @@ import qualified Data.Set as S
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
+import Futhark.Internalise.Entry
 import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
-import Futhark.Util.Pretty (align, ppr, prettyOneLine)
+import Futhark.Util.Pretty (align, ppr)
 import Language.Futhark as E hiding (TypeArg)
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
-transformProg :: MonadFreshNames m => Bool -> [E.ValBind] -> m (I.Prog SOACS)
-transformProg always_safe vbinds = do
-  (consts, funs) <-
-    runInternaliseM always_safe (internaliseValBinds vbinds)
-  I.renameProg $ I.Prog consts funs
+transformProg :: MonadFreshNames m => Bool -> VisibleTypes -> [E.ValBind] -> m (I.Prog SOACS)
+transformProg always_safe types vbinds = do
+  (opaques, consts, funs) <-
+    runInternaliseM always_safe (internaliseValBinds types vbinds)
+  I.renameProg $ I.Prog opaques consts funs
 
-internaliseValBinds :: [E.ValBind] -> InternaliseM ()
-internaliseValBinds = mapM_ internaliseValBind
+internaliseValBinds :: VisibleTypes -> [E.ValBind] -> InternaliseM ()
+internaliseValBinds types = mapM_ $ internaliseValBind types
 
 internaliseFunName :: VName -> Name
 internaliseFunName = nameFromString . pretty
 
-internaliseValBind :: E.ValBind -> InternaliseM ()
-internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
+internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
+internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
   bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
 
@@ -88,22 +89,25 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
           )
 
   case entry of
-    Just (Info entry') -> generateEntryPoint entry' fb
+    Just (Info entry') -> generateEntryPoint types entry' fb
     Nothing -> pure ()
   where
     zeroExts ts = generaliseExtTypes ts ts
 
-generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint (E.EntryPoint e_params e_rettype) vb = do
+generateEntryPoint :: VisibleTypes -> E.EntryPoint -> E.ValBind -> InternaliseM ()
+generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
   let (E.ValBind _ ofname _ (Info rettype) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     let entry_rettype = internaliseEntryReturnType rettype
-        entry' =
+        (entry', opaques) =
           entryPoint
+            types
             (baseName ofname)
             (zip e_params params')
             (e_rettype, map (map I.rankShaped) entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
+
+    addOpaques opaques
 
     (entry_body, ctx_ts) <- buildBody $ do
       -- Special case the (rare) situation where the entry point is
@@ -130,73 +134,6 @@ generateEntryPoint (E.EntryPoint e_params e_rettype) vb = do
         entry_body
   where
     zeroExts ts = generaliseExtTypes ts ts
-
-entryPoint ::
-  Name ->
-  [(E.EntryParam, [I.FParam SOACS])] ->
-  ( E.EntryType,
-    [[I.TypeBase Rank Uniqueness]]
-  ) ->
-  I.EntryPoint
-entryPoint name params (eret, crets) =
-  ( name,
-    map onParam params,
-    map (uncurry EntryResult) $
-      case ( isTupleRecord $ entryType eret,
-             entryAscribed eret
-           ) of
-        (Just ts, Just (E.TETuple e_ts _)) ->
-          zipWith
-            entryPointType
-            (zipWith E.EntryType ts (map Just e_ts))
-            crets
-        (Just ts, Nothing) ->
-          zipWith
-            entryPointType
-            (map (`E.EntryType` Nothing) ts)
-            crets
-        _ ->
-          [entryPointType eret $ concat crets]
-  )
-  where
-    onParam (E.EntryParam e_p e_t, ps) =
-      uncurry (I.EntryParam e_p) $ entryPointType e_t $ map (I.rankShaped . I.paramDeclType) ps
-
-    entryPointType t ts
-      | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t,
-        [ts0] <- ts =
-          (u, I.TypeUnsigned ts0)
-      | E.Array _ _ _ (E.Prim E.Unsigned {}) <- E.entryType t,
-        [ts0] <- ts =
-          (u, I.TypeUnsigned ts0)
-      | E.Scalar E.Prim {} <- E.entryType t,
-        [ts0] <- ts =
-          (u, I.TypeDirect ts0)
-      | E.Array _ _ _ E.Prim {} <- E.entryType t,
-        [ts0] <- ts =
-          (u, I.TypeDirect ts0)
-      | otherwise =
-          (u, I.TypeOpaque desc ts)
-      where
-        u = foldl max Nonunique $ map I.uniqueness ts
-        desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
-        t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
-    typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
-      typeExpOpaqueName te
-    typeExpOpaqueName (TEArray _ te _) =
-      let (d, te') = withoutDims te
-       in "arr_"
-            ++ typeExpOpaqueName te'
-            ++ "_"
-            ++ show (1 + d)
-            ++ "d"
-    typeExpOpaqueName (TEUnique te _) = prettyOneLine te
-    typeExpOpaqueName te = prettyOneLine te
-
-    withoutDims (TEArray _ te _) =
-      let (d, te') = withoutDims te
-       in (d + 1, te')
-    withoutDims te = (0 :: Int, te)
 
 internaliseBody :: String -> E.Exp -> InternaliseM (Body SOACS)
 internaliseBody desc e =
@@ -1370,7 +1307,7 @@ internaliseSizeExp :: String -> E.Exp -> InternaliseM (I.SubExp, IntType)
 internaliseSizeExp s e = do
   e' <- internaliseExp1 s e
   case E.typeOf e of
-    E.Scalar (E.Prim (Signed it)) -> (,it) <$> asIntS Int64 e'
+    E.Scalar (E.Prim (E.Signed it)) -> (,it) <$> asIntS Int64 e'
     _ -> error "internaliseSizeExp: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
@@ -1748,7 +1685,7 @@ isOverloadedFunction qname args loc = do
         uncurry (++) <$> partitionWithSOACS (fromIntegral k') lam' arrs
       where
         fromInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
-        fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
+        fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (E.Signed Int32)))) _) = Just $ fromInteger k'
         fromInt32 _ = Nothing
     handleSOACs [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)

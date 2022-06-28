@@ -144,7 +144,7 @@ typeBoilerplate (tname, TypeArray _ et rank ops) =
                 .aux = &$id:aux_name
               };|]
       )
-typeBoilerplate (tname, TypeOpaque _ ops) =
+typeBoilerplate (tname, TypeOpaque _ ops _) =
   let type_name = typeStructName tname
       aux_name = type_name ++ "_aux"
    in ( [C.cinit|&$id:type_name|],
@@ -222,7 +222,7 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
     cType tname =
       case M.lookup tname $ manifestTypes manifest of
         Just (TypeArray ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
-        Just (TypeOpaque ctype _) -> [C.cty|typename $id:(T.unpack ctype)|]
+        Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
         Nothing -> uncurry primAPIType $ scalarToPrim tname
 
     loadOut i tname =

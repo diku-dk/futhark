@@ -164,7 +164,7 @@ internaliseTypeM exts orig_t =
               acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
           pure [acc_t]
     E.Scalar E.TypeVar {} ->
-      error "internaliseTypeM: cannot handle type variable."
+      error $ "internaliseTypeM: cannot handle type variable: " ++ pretty orig_t
     E.Scalar E.Arrow {} ->
       error $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
     E.Scalar (E.Sum cs) -> do

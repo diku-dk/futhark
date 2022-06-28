@@ -51,6 +51,7 @@ translateGPU target prog =
         ) =
           (`runState` initialOpenCL) . (`runReaderT` defFuns prog) $ do
             let ImpGPU.Definitions
+                  types
                   (ImpGPU.Constants ps consts)
                   (ImpGPU.Functions funs) = prog
             consts' <- traverse (onHostOp target) consts
@@ -59,6 +60,7 @@ translateGPU target prog =
 
             pure $
               ImpOpenCL.Definitions
+                types
                 (ImpOpenCL.Constants ps consts')
                 (ImpOpenCL.Functions funs')
 

@@ -78,8 +78,8 @@ primStorageType t = primTypeToCType t
 -- | The C API corresponding to a primitive type.  Integers are
 -- assumed to have the specified sign.
 primAPIType :: Signedness -> PrimType -> C.Type
-primAPIType TypeUnsigned (IntType t) = uintTypeToCType t
-primAPIType TypeDirect (IntType t) = intTypeToCType t
+primAPIType Unsigned (IntType t) = uintTypeToCType t
+primAPIType Signed (IntType t) = intTypeToCType t
 primAPIType _ t = primStorageType t
 
 -- | Convert from scalar to storage representation for the given type.
@@ -108,11 +108,12 @@ defaultMemBlockType = [C.cty|unsigned char*|]
 -- | The name of exposed array type structs.
 arrayName :: PrimType -> Signedness -> Int -> String
 arrayName pt signed rank =
-  prettySigned (signed == TypeUnsigned) pt ++ "_" ++ show rank ++ "d"
+  prettySigned (signed == Unsigned) pt ++ "_" ++ show rank ++ "d"
 
 -- | The name of exposed opaque types.
-opaqueName :: String -> [ValueDesc] -> String
-opaqueName s _
+opaqueName :: String -> String
+opaqueName "()" = "opaque_unit" -- Hopefully this ad-hoc convenience won't bite us.
+opaqueName s
   | valid = "opaque_" ++ s
   where
     valid =
@@ -120,13 +121,8 @@ opaqueName s _
         && not (isDigit $ head s)
         && all ok s
     ok c = isAlphaNum c || c == '_'
-opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatMap p vds))
+opaqueName s = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord s)
   where
-    p (ScalarValue pt signed _) =
-      show (pt, signed)
-    p (ArrayValue _ space pt signed dims) =
-      show (space, pt, signed, length dims)
-
     -- FIXME: a stupid hash algorithm; may have collisions.
     hash =
       printf "%x"
@@ -144,18 +140,18 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
 -- | The 'PrimType' (and sign) correspond to a human-readable scalar
 -- type name (e.g. @f64@).  Beware: partial!
 scalarToPrim :: T.Text -> (Signedness, PrimType)
-scalarToPrim "bool" = (TypeDirect, Bool)
-scalarToPrim "i8" = (TypeDirect, IntType Int8)
-scalarToPrim "i16" = (TypeDirect, IntType Int16)
-scalarToPrim "i32" = (TypeDirect, IntType Int32)
-scalarToPrim "i64" = (TypeDirect, IntType Int64)
-scalarToPrim "u8" = (TypeUnsigned, IntType Int8)
-scalarToPrim "u16" = (TypeUnsigned, IntType Int16)
-scalarToPrim "u32" = (TypeUnsigned, IntType Int32)
-scalarToPrim "u64" = (TypeUnsigned, IntType Int64)
-scalarToPrim "f16" = (TypeDirect, FloatType Float16)
-scalarToPrim "f32" = (TypeDirect, FloatType Float32)
-scalarToPrim "f64" = (TypeDirect, FloatType Float64)
+scalarToPrim "bool" = (Signed, Bool)
+scalarToPrim "i8" = (Signed, IntType Int8)
+scalarToPrim "i16" = (Signed, IntType Int16)
+scalarToPrim "i32" = (Signed, IntType Int32)
+scalarToPrim "i64" = (Signed, IntType Int64)
+scalarToPrim "u8" = (Unsigned, IntType Int8)
+scalarToPrim "u16" = (Unsigned, IntType Int16)
+scalarToPrim "u32" = (Unsigned, IntType Int32)
+scalarToPrim "u64" = (Unsigned, IntType Int64)
+scalarToPrim "f16" = (Signed, FloatType Float16)
+scalarToPrim "f32" = (Signed, FloatType Float32)
+scalarToPrim "f64" = (Signed, FloatType Float64)
 scalarToPrim tname = error $ "scalarToPrim: " <> T.unpack tname
 
 -- | Return an expression multiplying together the given expressions.
@@ -253,14 +249,14 @@ typeStr sign pt =
     (_, FloatType Float16) -> " f16"
     (_, FloatType Float32) -> " f32"
     (_, FloatType Float64) -> " f64"
-    (TypeDirect, IntType Int8) -> "  i8"
-    (TypeDirect, IntType Int16) -> " i16"
-    (TypeDirect, IntType Int32) -> " i32"
-    (TypeDirect, IntType Int64) -> " i64"
-    (TypeUnsigned, IntType Int8) -> "  u8"
-    (TypeUnsigned, IntType Int16) -> " u16"
-    (TypeUnsigned, IntType Int32) -> " u32"
-    (TypeUnsigned, IntType Int64) -> " u64"
+    (Signed, IntType Int8) -> "  i8"
+    (Signed, IntType Int16) -> " i16"
+    (Signed, IntType Int32) -> " i32"
+    (Signed, IntType Int64) -> " i64"
+    (Unsigned, IntType Int8) -> "  u8"
+    (Unsigned, IntType Int16) -> " u16"
+    (Unsigned, IntType Int32) -> " u32"
+    (Unsigned, IntType Int64) -> " u64"
 
 -- | Produce code for storing the header (everything besides the
 -- actual payload) for a value of this type.
