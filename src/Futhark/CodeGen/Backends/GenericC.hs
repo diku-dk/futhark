@@ -159,6 +159,7 @@ newCompilerState src s =
 -- to ensure that the header file remains structured and readable.
 data HeaderSection
   = ArrayDecl String
+  | OpaqueTypeDecl String
   | OpaqueDecl String
   | EntryDecl
   | MiscDecl
@@ -387,12 +388,16 @@ declsCode p =
     . M.toList
     . compHeaderDecls
 
-initDecls, arrayDecls, opaqueDecls, entryDecls, miscDecls :: CompilerState s -> T.Text
+initDecls, arrayDecls, opaqueDecls, opaqueTypeDecls, entryDecls, miscDecls :: CompilerState s -> T.Text
 initDecls = declsCode (== InitDecl)
 arrayDecls = declsCode isArrayDecl
   where
     isArrayDecl ArrayDecl {} = True
     isArrayDecl _ = False
+opaqueTypeDecls = declsCode isOpaqueTypeDecl
+  where
+    isOpaqueTypeDecl OpaqueTypeDecl {} = True
+    isOpaqueTypeDecl _ = False
 opaqueDecls = declsCode isOpaqueDecl
   where
     isOpaqueDecl OpaqueDecl {} = True
@@ -1333,7 +1338,7 @@ opaqueLibraryFunctions types desc ot = do
               }|]
 
   headerDecl
-    (OpaqueDecl desc)
+    (OpaqueTypeDecl desc)
     [C.cedecl|struct $id:name;|]
   headerDecl
     (OpaqueDecl desc)
@@ -1781,6 +1786,7 @@ compileProg' backend version ops def extra header_extra (arr_space, spaces) opti
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
       arraydecls = arrayDecls endstate
+      opaquetypedecls = opaqueTypeDecls endstate
       opaquedecls = opaqueDecls endstate
       miscdecls = miscDecls endstate
 
@@ -1804,6 +1810,7 @@ $initdecls
 $arraydecls
 
 // Opaque values
+$opaquetypedecls
 $opaquedecls
 
 // Entry points

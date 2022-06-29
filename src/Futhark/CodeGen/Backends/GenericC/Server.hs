@@ -120,14 +120,17 @@ cType manifest tname =
     Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
     Nothing -> uncurry primAPIType $ scalarToPrim tname
 
-typeBoilerplate :: Manifest -> (T.Text, Type) -> (C.Initializer, [C.Definition])
+-- First component is forward declaration so we don't have to worry
+-- about ordering.
+typeBoilerplate :: Manifest -> (T.Text, Type) -> (C.Definition, C.Initializer, [C.Definition])
 typeBoilerplate _ (tname, TypeArray _ et rank ops) =
   let type_name = typeStructName tname
       aux_name = type_name ++ "_aux"
       info_name = T.unpack et ++ "_info"
       shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       array_new_wrap = arrayNew ops <> "_wrap"
-   in ( [C.cinit|&$id:type_name|],
+   in ( [C.cedecl|const struct type $id:type_name;|],
+        [C.cinit|&$id:type_name|],
         [C.cunit|
               void* $id:array_new_wrap(struct futhark_context *ctx,
                                        const void* p,
@@ -155,7 +158,8 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record) =
   let type_name = typeStructName tname
       aux_name = type_name <> "_aux"
       (record_edecls, record_init) = recordDefs type_name record
-   in ( [C.cinit|&$id:type_name|],
+   in ( [C.cedecl|const struct type $id:type_name;|],
+        [C.cinit|&$id:type_name|],
         record_edecls
           ++ [C.cunit|
               const struct opaque_aux $id:aux_name = {
@@ -207,9 +211,9 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record) =
             [C.cinit|&$id:record_name|]
           )
 
-entryTypeBoilerplate :: Manifest -> ([C.Initializer], [C.Definition])
+entryTypeBoilerplate :: Manifest -> ([C.Definition], [C.Initializer], [C.Definition])
 entryTypeBoilerplate manifest =
-  second concat . unzip . map (typeBoilerplate manifest) . M.toList . manifestTypes $
+  second concat . unzip3 . map (typeBoilerplate manifest) . M.toList . manifestTypes $
     manifest
 
 oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
@@ -287,10 +291,10 @@ mkBoilerplate ::
   Manifest ->
   ([C.Definition], [C.Initializer], [C.Initializer])
 mkBoilerplate manifest =
-  let (type_inits, type_defs) = entryTypeBoilerplate manifest
+  let (type_decls, type_inits, type_defs) = entryTypeBoilerplate manifest
       (entry_defs, entry_inits) = entryBoilerplate manifest
       scalar_type_inits = map scalarTypeInit scalar_types
-   in (type_defs ++ entry_defs, scalar_type_inits ++ type_inits, entry_inits)
+   in (type_decls ++ type_defs ++ entry_defs, scalar_type_inits ++ type_inits, entry_inits)
   where
     scalarTypeInit tname = [C.cinit|&$id:(typeStructName tname)|]
     scalar_types =
