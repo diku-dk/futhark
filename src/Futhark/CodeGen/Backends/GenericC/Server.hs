@@ -113,8 +113,15 @@ genericOptions =
 typeStructName :: T.Text -> String
 typeStructName tname = "type_" <> zEncodeString (T.unpack tname)
 
-typeBoilerplate :: (T.Text, Type) -> (C.Initializer, [C.Definition])
-typeBoilerplate (tname, TypeArray _ et rank ops) =
+cType :: Manifest -> TypeName -> C.Type
+cType manifest tname =
+  case M.lookup tname $ manifestTypes manifest of
+    Just (TypeArray ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
+    Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
+    Nothing -> uncurry primAPIType $ scalarToPrim tname
+
+typeBoilerplate :: Manifest -> (T.Text, Type) -> (C.Initializer, [C.Definition])
+typeBoilerplate _ (tname, TypeArray _ et rank ops) =
   let type_name = typeStructName tname
       aux_name = type_name ++ "_aux"
       info_name = T.unpack et ++ "_info"
@@ -127,7 +134,7 @@ typeBoilerplate (tname, TypeArray _ et rank ops) =
                                        const typename int64_t* shape) {
                 return $id:(arrayNew ops)(ctx, p, $args:shape_args);
               }
-              struct array_aux $id:aux_name = {
+              const struct array_aux $id:aux_name = {
                 .name = $string:(T.unpack tname),
                 .rank = $int:rank,
                 .info = &$id:info_name,
@@ -136,7 +143,7 @@ typeBoilerplate (tname, TypeArray _ et rank ops) =
                 .shape = (typename array_shape_fn)$id:(arrayShape ops),
                 .values = (typename array_values_fn)$id:(arrayValues ops)
               };
-              struct type $id:type_name = {
+              const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
                 .restore = (typename restore_fn)restore_array,
                 .store = (typename store_fn)store_array,
@@ -144,28 +151,66 @@ typeBoilerplate (tname, TypeArray _ et rank ops) =
                 .aux = &$id:aux_name
               };|]
       )
-typeBoilerplate (tname, TypeOpaque _ ops _) =
+typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record) =
   let type_name = typeStructName tname
-      aux_name = type_name ++ "_aux"
+      aux_name = type_name <> "_aux"
+      (record_edecls, record_init) = recordDefs type_name record
    in ( [C.cinit|&$id:type_name|],
-        [C.cunit|
-              struct opaque_aux $id:aux_name = {
+        record_edecls
+          ++ [C.cunit|
+              const struct opaque_aux $id:aux_name = {
                 .store = (typename opaque_store_fn)$id:(opaqueStore ops),
                 .restore = (typename opaque_restore_fn)$id:(opaqueRestore ops),
                 .free = (typename opaque_free_fn)$id:(opaqueFree ops)
               };
-              struct type $id:type_name = {
+              const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
                 .restore = (typename restore_fn)restore_opaque,
                 .store = (typename store_fn)store_opaque,
                 .free = (typename free_fn)free_opaque,
-                .aux = &$id:aux_name
+                .aux = &$id:aux_name,
+                .record = $init:record_init
               };|]
       )
+  where
+    recordDefs _ Nothing = ([], [C.cinit|NULL|])
+    recordDefs type_name (Just (RecordOps fields new)) =
+      let new_wrap = new <> "_wrap"
+          record_name = type_name <> "_record"
+          fields_name = type_name <> "_fields"
+          onField i (RecordField name field_tname project) =
+            let field_c_type = cType manifest field_tname
+                field_v = "v" <> show (i :: Int)
+             in ( [C.cinit|{.name = $string:(T.unpack name),
+                            .type = &$id:(typeStructName field_tname),
+                            .project = (typename project_fn)$id:project
+                           }|],
+                  [C.citem|const $ty:field_c_type $id:field_v =
+                            *(const $ty:field_c_type*)fields[$int:i];|],
+                  [C.cexp|$id:field_v|]
+                )
+          (field_inits, get_fields, field_args) = unzip3 $ zipWith onField [0 ..] fields
+       in ( [C.cunit|
+             const struct field $id:fields_name[] = {
+               $inits:field_inits
+             };
+             int $id:new_wrap(struct futhark_context* ctx, void** outp, const void* fields[]) {
+               typename $id:c_type_name *out = (typename $id:c_type_name*) outp;
+               $items:get_fields
+               return $id:new(ctx, out, $args:field_args);
+             }
+             const struct record $id:record_name = {
+               .num_fields = $int:(length fields),
+               .fields = $id:fields_name,
+               .new = $id:new_wrap
+             };|],
+            [C.cinit|&$id:record_name|]
+          )
 
 entryTypeBoilerplate :: Manifest -> ([C.Initializer], [C.Definition])
-entryTypeBoilerplate =
-  second concat . unzip . map typeBoilerplate . M.toList . manifestTypes
+entryTypeBoilerplate manifest =
+  second concat . unzip . map (typeBoilerplate manifest) . M.toList . manifestTypes $
+    manifest
 
 oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
 oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
@@ -183,14 +228,14 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
         | null in_types = ([C.citems|(void)ins;|], mempty)
         | otherwise = unzip $ zipWith loadIn [0 ..] in_types
    in ( [C.cunit|
-                struct type* $id:out_types_name[] = {
+                const struct type* $id:out_types_name[] = {
                   $inits:(map typeStructInit out_types),
                   NULL
                 };
                 bool $id:out_unique_name[] = {
                   $inits:(map outputUniqueInit outputs)
                 };
-                struct type* $id:in_types_name[] = {
+                const struct type* $id:in_types_name[] = {
                   $inits:(map typeStructInit in_types),
                   NULL
                 };
@@ -219,20 +264,14 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
     uniqueInit True = [C.cinit|true|]
     uniqueInit False = [C.cinit|false|]
 
-    cType tname =
-      case M.lookup tname $ manifestTypes manifest of
-        Just (TypeArray ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
-        Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
-        Nothing -> uncurry primAPIType $ scalarToPrim tname
-
     loadOut i tname =
       let v = "out" ++ show (i :: Int)
-       in ( [C.citem|$ty:(cType tname) *$id:v = outs[$int:i];|],
+       in ( [C.citem|$ty:(cType manifest tname) *$id:v = outs[$int:i];|],
             [C.cexp|$id:v|]
           )
     loadIn i tname =
       let v = "in" ++ show (i :: Int)
-       in ( [C.citem|$ty:(cType tname) $id:v = *($ty:(cType tname)*)ins[$int:i];|],
+       in ( [C.citem|$ty:(cType manifest tname) $id:v = *($ty:(cType manifest tname)*)ins[$int:i];|],
             [C.cexp|$id:v|]
           )
 
@@ -293,7 +332,7 @@ $esc:(T.unpack tuningH)
 
 $edecls:boilerplate_defs
 
-struct type* types[] = {
+const struct type* types[] = {
   $inits:type_inits,
   NULL
 };
