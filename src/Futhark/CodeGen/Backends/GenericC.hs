@@ -1102,10 +1102,9 @@ opaqueProjectFunctions types desc fs vds = do
   ctx_ty <- contextType
   ops <- asks envOperations
   let mkProject (TypeTransparent (ValueType sign (Rank 0) pt)) [(i, _)] = do
-        let e = toStorage pt [C.cexp|obj->$id:(tupleField i)|]
         pure
           ( primAPIType sign pt,
-            [C.citems|v = $exp:e;|]
+            [C.citems|v = obj->$id:(tupleField i);|]
           )
       mkProject (TypeTransparent vt) [(i, _)] = do
         ct <- valueTypeToCType Public vt
@@ -1140,13 +1139,14 @@ opaqueProjectFunctions types desc fs vds = do
         (et_ty, project_items) <- mkProject et elems
         headerDecl
           (OpaqueDecl desc)
-          [C.cedecl|$ty:et_ty $id:project($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
+          [C.cedecl|int $id:project($ty:ctx_ty *ctx, $ty:et_ty *out, const $ty:opaque_type *obj);|]
         libDecl
-          [C.cedecl|$ty:et_ty $id:project($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
+          [C.cedecl|int $id:project($ty:ctx_ty *ctx, $ty:et_ty *out, const $ty:opaque_type *obj) {
                       (void)ctx;
                       $ty:et_ty v;
                       $items:project_items
-                      return v;
+                      *out = v;
+                      return 0;
                     }|]
         pure $ Manifest.RecordField (nameToText f) (entryTypeName et) (T.pack project)
 
@@ -1174,12 +1174,13 @@ opaqueNewFunctions types desc fs vds = do
 
   headerDecl
     (OpaqueDecl desc)
-    [C.cedecl|$ty:opaque_type* $id:new($ty:ctx_ty *ctx, $params:params);|]
+    [C.cedecl|int $id:new($ty:ctx_ty *ctx, $ty:opaque_type** out, $params:params);|]
   libDecl
-    [C.cedecl|$ty:opaque_type* $id:new($ty:ctx_ty *ctx, $params:params) {
+    [C.cedecl|int $id:new($ty:ctx_ty *ctx, $ty:opaque_type** out, $params:params) {
                 $ty:opaque_type* v = malloc(sizeof($ty:opaque_type));
                 $items:(criticalSection ops new_stms)
-                return v;
+                *out = v;
+                return 0;
               }|]
   pure $ T.pack new
   where
@@ -1193,7 +1194,7 @@ opaqueNewFunctions types desc fs vds = do
           let ct = primAPIType sign pt
           pure
             ( offset + 1,
-              ( [C.cparam|$ty:ct $id:param_name|],
+              ( [C.cparam|const $ty:ct $id:param_name|],
                 [C.citem|v->$id:(tupleField offset) = $id:param_name;|]
               )
             )
@@ -1201,7 +1202,7 @@ opaqueNewFunctions types desc fs vds = do
           ct <- valueTypeToCType Public vt
           pure
             ( offset + 1,
-              ( [C.cparam|$ty:ct* $id:param_name|],
+              ( [C.cparam|const $ty:ct* $id:param_name|],
                 [C.citem|{v->$id:(tupleField offset) = malloc(sizeof($ty:ct));
                           *v->$id:(tupleField offset) = *$id:param_name;
                           (void)(*(v->$id:(tupleField offset)->mem.references))++;}|]
@@ -1214,7 +1215,7 @@ opaqueNewFunctions types desc fs vds = do
                 pure [C.cexp|$id:param_name->$id:(tupleField i)|]
           pure
             ( offset + length f_vts,
-              ( [C.cparam|$ty:ct* $id:param_name|],
+              ( [C.cparam|const $ty:ct* $id:param_name|],
                 [C.citem|{$stms:(zipWith3 setFieldField [offset ..] param_fields f_vts)}|]
               )
             )

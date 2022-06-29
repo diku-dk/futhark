@@ -21,15 +21,17 @@ int main() {
   struct futhark_f32_1d* f32_arr = futhark_new_f32_1d(ctx, f32_data, 3);
   assert(f32_arr != NULL);
 
-  struct futhark_opaque_t0 *t0= futhark_new_opaque_t0(ctx, u32_arr, 10, sum);
-  assert(t0 != NULL);
+  struct futhark_opaque_t0 *t0;
+  err = futhark_new_opaque_t0(ctx, &t0, u32_arr, 10, sum);
+  assert(err == 0);
 
   err = futhark_free_u32_1d(ctx, u32_arr);
   assert(err == 0);
 
   for (int i = 0; i < 2; i++) {
-    struct futhark_u32_1d* u32_arr_projected = futhark_project_opaque_t0_0(ctx, t0);
-    assert(u32_arr_projected != NULL);
+    struct futhark_u32_1d* u32_arr_projected;
+    err = futhark_project_opaque_t0_0(ctx, &u32_arr_projected, t0);
+    assert(err == 0);
     uint32_t u32_data_projected[3];
     err = futhark_values_u32_1d(ctx, u32_arr_projected, u32_data_projected);
     assert(err == 0);
@@ -40,14 +42,17 @@ int main() {
     assert(err == 0);
   }
 
-  struct futhark_opaque_t1 *t1 = futhark_new_opaque_t1(ctx, t0, f32_arr);
-  assert(t1 != NULL);
+  struct futhark_opaque_t1 *t1;
+  err = futhark_new_opaque_t1(ctx, &t1, t0, f32_arr);
+  assert(err == 0);
 
   for (int i = 0; i < 2; i++) {
-    struct futhark_opaque_t0* t0 = futhark_project_opaque_t1_0(ctx, t1);
-    assert(t0 != NULL);
-    struct futhark_u32_1d* u32_arr_projected = futhark_project_opaque_t0_0(ctx, t0);
-    assert(u32_arr_projected != NULL);
+    struct futhark_opaque_t0* t0;
+    err = futhark_project_opaque_t1_0(ctx, &t0, t1);
+    assert(err == 0);
+    struct futhark_u32_1d* u32_arr_projected;
+    err = futhark_project_opaque_t0_0(ctx, &u32_arr_projected, t0);
+    assert(err == 0);
     uint32_t u32_data_projected[3];
     err = futhark_values_u32_1d(ctx, u32_arr_projected, u32_data_projected);
     assert(err == 0);
