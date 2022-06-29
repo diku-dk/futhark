@@ -328,7 +328,7 @@ instance Pretty Signedness where
 
 instance Pretty ValueType where
   ppr (ValueType s (Rank r) t) =
-    mconcat (replicate r "[]") <> text (prettySigned (s == Signed) t)
+    mconcat (replicate r "[]") <> text (prettySigned (s == Unsigned) t)
 
 instance Pretty EntryPointType where
   ppr (TypeTransparent t) = ppr t
