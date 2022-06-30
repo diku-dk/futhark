@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   now have their elements inspected and be created from elements
   (#1568).
 
+* New server protocol commands: `types`, `entry_points`.
+
 ### Removed
 
 ### Changed
