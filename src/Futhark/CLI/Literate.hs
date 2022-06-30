@@ -760,7 +760,6 @@ processDirective env (DirectiveVideo e params) = do
               onWebM videofile =<< bmpsToVideo dir
       ValueTuple [stepfun, initial, num_frames]
         | ValueAtom (SFun stepfun' _ [_, _] closure) <- stepfun,
-          ValueAtom (SValue _ _) <- initial,
           ValueAtom (SValue "i64" _) <- num_frames -> do
             Just (ValueAtom num_frames') <-
               mapM getValue <$> getExpValue (envServer env) num_frames
