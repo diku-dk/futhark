@@ -239,6 +239,12 @@ as running a shell script you downloaded off the Internet.  Before
 running a program from an unknown source, you should always give it a
 quick read to see if anything looks fishy.
 
+BUGS
+====
+
+FutharkScript expressions can only refer to names defined in the file
+passed to ``futhark literate``, not any names in imported files.
+
 SEE ALSO
 ========
 
