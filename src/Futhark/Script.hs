@@ -372,7 +372,7 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
             <> "\nBut called with arguments of types:\n"
             <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
 
-        ins <- mapM (interValToVar <=< evalExp' vtable) es
+        ins <- mapM interValToVar es'
 
         if length in_types == length ins
           then do
