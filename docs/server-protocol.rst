@@ -74,6 +74,16 @@ The following commands are supported.
 General Commands
 ~~~~~~~~~~~~~~~~
 
+``types``
+.........
+
+Print the names of available types, one per line.
+
+``entry_points``
+................
+
+Print the names of available entry points.
+
 ``call`` *entry* *o1* ... *oN* *i1* ... *iM*
 ............................................
 

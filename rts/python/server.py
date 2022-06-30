@@ -151,6 +151,14 @@ class Server:
             if reader.get_char() != b'':
                 raise self.Failure('Expected EOF after reading values')
 
+    def _cmd_types(self, args):
+        for k in self._ctx.opaques.keys():
+            print(k)
+
+    def _cmd_entry_points(self, args):
+        for k in self._ctx.entry_points.keys():
+            print(k)
+
     _commands = { 'inputs': _cmd_inputs,
                   'outputs': _cmd_outputs,
                   'call': _cmd_call,
@@ -161,7 +169,9 @@ class Server:
                   'clear': _cmd_dummy,
                   'pause_profiling': _cmd_dummy,
                   'unpause_profiling': _cmd_dummy,
-                  'report': _cmd_dummy
+                  'report': _cmd_dummy,
+                  'types': _cmd_types,
+                  'entry_points': _cmd_entry_points,
                  }
 
     def _process_line(self, line):

@@ -677,6 +677,20 @@ void cmd_new(struct server_state *s, const char *args[]) {
   r->new(s->ctx, value_ptr(&to->value), value_ptrs);
 }
 
+void cmd_entry_points(struct server_state *s, const char *args[]) {
+  (void)args;
+  for (int i = 0; s->prog.entry_points[i].name; i++) {
+    puts(s->prog.entry_points[i].name);
+  }
+}
+
+void cmd_types(struct server_state *s, const char *args[]) {
+  (void)args;
+  for (int i = 0; s->prog.types[i] != NULL; i++) {
+    puts(s->prog.types[i]->name);
+  }
+}
+
 char *next_word(char **line) {
   char *p = *line;
 
@@ -769,6 +783,10 @@ void process_line(struct server_state *s, char *line) {
     cmd_new(s, tokens+1);
   } else if (strcmp(command, "project") == 0) {
     cmd_project(s, tokens+1);
+  } else if (strcmp(command, "entry_points") == 0) {
+    cmd_entry_points(s, tokens+1);
+  } else if (strcmp(command, "types") == 0) {
+    cmd_types(s, tokens+1);
   } else {
     futhark_panic(1, "Unknown command: %s\n", command);
   }
