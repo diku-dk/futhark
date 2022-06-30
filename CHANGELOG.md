@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New server protocol commands: `types`, `entry_points`.
 
+* Tuples and records can now be passed from FutharkScript to Futhark
+  entry points (#1684).
+
 ### Removed
 
 ### Changed
