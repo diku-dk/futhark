@@ -62,12 +62,11 @@ type TypeMap = M.Map TypeName (Maybe [(Name, TypeName)])
 
 typeMap :: MonadIO m => Server -> m TypeMap
 typeMap server = do
-  liftIO $ either (pure mempty) onTypes =<< sendCommand server "types" []
+  liftIO $ either (pure mempty) onTypes =<< cmdTypes server
   where
     onTypes types = M.fromList . zip types <$> mapM onType types
     onType t =
-      either (const Nothing) (Just . map onField)
-        <$> sendCommand server "fields" [t]
+      either (const Nothing) (Just . map onField) <$> cmdFields server t
     onField = bimap nameFromText (T.drop 1) . T.breakOn " "
 
 isRecord :: TypeName -> TypeMap -> Maybe [(Name, TypeName)]
@@ -322,10 +321,8 @@ evalExp builtin sserver top_level_e = do
 
       mkRecord t vs = do
         v <- newVar "record"
-        r <- liftIO $ sendCommand server "new" $ v : t : vs
-        case r of
-          Left err -> throwError $ T.unlines $ failureMsg err
-          Right _ -> pure v
+        cmdMaybe $ cmdNew server v t vs
+        pure v
 
       toVal :: ValOrVar -> m V.Value
       toVal (VVal v) = pure v
