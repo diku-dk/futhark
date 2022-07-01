@@ -739,7 +739,7 @@ mkTileMemSizes height_A width_B common_dim = do
 
   (ty, ry) <- getParTiles ("Ty", "Ry") (ty_name, ry_name) height_A
   (tx, rx) <- getParTiles ("Tx", "Rx") (tx_name, rx_name) width_B
-  tk <- getSeqTile "Tk" tk_name common_dim ty tx
+  tk <- getSeqTile "Tk" tk_name common_dim tx ty
 
   tk_div_tx <- letSubExp "tk_div_tx" =<< ceilDiv tk tx
   tk_div_ty <- letSubExp "tk_div_ty" =<< ceilDiv tk ty
@@ -918,7 +918,7 @@ getParTiles (t_str, r_str) (t_name, r_name) len_dim =
       pure (t, r)
 
 getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Builder GPU SubExp
-getSeqTile tk_str tk_name len_dim ty tx =
+getSeqTile tk_str tk_name len_dim tx ty =
   case (tx, ty) of
     (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) ->
       letSubExp tk_str . BasicOp . SubExp . constant $
