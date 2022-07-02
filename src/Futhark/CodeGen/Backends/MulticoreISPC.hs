@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.MulticoreISPC
     GC.asExecutable,
     GC.asServer,
     operations,
+    ISPCState,
   )
 where
 
@@ -41,6 +42,7 @@ import NeatInterpolation (untrimming)
 
 type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a
 
+-- | Transient state tracked by the ISPC backend.
 data ISPCState = ISPCState
   { sDefs :: DL.DList C.Definition,
     sUniform :: Names

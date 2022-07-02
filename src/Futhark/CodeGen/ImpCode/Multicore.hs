@@ -177,6 +177,8 @@ instance FreeIn Multicore where
   freeIn' (ExtractLane dest tar lane) =
     freeIn' dest <> freeIn' tar <> freeIn' lane
 
+-- | Whether 'lexicalMemoryUsageMC' should look inside nested kernels
+-- or not.
 data KernelHandling = TraverseKernels | OpaqueKernels
 
 -- | Like @lexicalMemoryUsage@, but traverses some inner multicore ops.

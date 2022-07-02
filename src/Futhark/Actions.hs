@@ -372,6 +372,7 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
+-- | The @futhark ispc@ action.
 compileMulticoreToISPCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
 compileMulticoreToISPCAction fcfg mode outpath =
   Action

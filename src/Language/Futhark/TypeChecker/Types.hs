@@ -83,11 +83,13 @@ mustBeExplicitInBinding bind_t =
 
 -- | Figure out which of the sizes in a parameter type must be passed
 -- explicitly, because their first use is as something else than just
--- an array dimension.  'mustBeExplicit' is like this function, but
--- first decomposes into parameter types.
+-- an array dimension.
 mustBeExplicitInType :: StructType -> S.Set VName
 mustBeExplicitInType = snd . determineSizeWitnesses
 
+-- | The two types are assumed to be structurally equal, but not
+-- necessarily regarding sizes.  Adds aliases from the latter to the
+-- former.
 addAliasesFromType :: StructType -> PatType -> PatType
 addAliasesFromType (Array _ u1 et1 shape1) (Array als _ _ _) =
   Array als u1 et1 shape1

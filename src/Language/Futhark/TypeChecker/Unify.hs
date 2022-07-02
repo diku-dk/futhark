@@ -253,7 +253,7 @@ prettySource ctx loc (RigidCond t1 t2) =
       <> align (ppr t2)
 
 -- | Retrieve notes describing the purpose or origin of the given
--- 'Size'.  The location is used as the *current* location, for the
+-- t'Size'.  The location is used as the *current* location, for the
 -- purpose of reporting relative locations.
 dimNotes :: (Located a, MonadUnify m) => a -> Size -> m Notes
 dimNotes ctx (NamedSize d) = do
