@@ -2,17 +2,22 @@
 
 The Futhark compiler is a significant body of code with a not entirely
 straightforward design. The main source of documentation is the
-Haddock comments in the source code itself.  You can generate
-hyperlinked reference documentation by running `make docs` (see
-below).  To build the compiler, you need a recent version of
+Haddock comments in the source code itself.
+
+To build the compiler, you need a recent version of
 [GHC](http://ghc.haskell.org/), which can be installed via
-[ghcup](https://www.haskell.org/ghcup/).
+[ghcup](https://www.haskell.org/ghcup/).  Alternatively, if you
+[install Nix](https://nixos.org/download.html#download-nix) then you
+can run `nix-shell` to get a shell environment in which all necessary
+tools are installed.
 
-If you [install Nix](https://nixos.org/download.html#download-nix)
-then you can run `nix-shell` to get a shell environment in which all
-necessary tools are installed.
+After that, run `make docs` to generate internal compiler
+documentation in HTML format.  The last few lines of output will tell
+you the name of an `index.html` file which you should then open.  Go
+to the documentation for the module named `Futhark`, which contains an
+introduction to the compiler architecture.
 
-Make sure to see the [Haskell style guide](STYLE.md).
+For contributing code, see the [Haskell style guide](STYLE.md).
 
 If you feel that the documentation is incomplete, or something lacks
 an explanation, then feel free to [report it as an
