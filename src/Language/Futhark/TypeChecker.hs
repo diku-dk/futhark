@@ -11,6 +11,7 @@ module Language.Futhark.TypeChecker
     checkExp,
     checkDec,
     checkModExp,
+    Notes,
     TypeError (..),
     Warnings,
     initialEnv,

@@ -134,6 +134,7 @@ reportingIOErrors =
           exitWith $ ExitFailure 1
       | otherwise = throw e
 
+-- | The @futhark@ executable.
 main :: IO ()
 main = reportingIOErrors $ do
   hSetEncoding stdout utf8
