@@ -3,4 +3,3 @@ index-state: 2022-07-01T07:12:32Z
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
-  haddock-options: --show-all
