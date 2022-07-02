@@ -996,7 +996,7 @@ returnType _ (Scalar (Arrow old_als v t1 (RetType dims t2))) d arg =
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
 
--- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
+-- @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.
 maskAliases ::
   Monoid as =>

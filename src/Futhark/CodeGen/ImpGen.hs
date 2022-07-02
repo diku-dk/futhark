@@ -55,6 +55,7 @@ module Futhark.CodeGen.ImpGen
     lookupArray,
     lookupMemory,
     lookupAcc,
+    askAttrs,
 
     -- * Building Blocks
     TV,
@@ -1188,7 +1189,6 @@ dArray name pt shape mem ixfun =
 everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
 
--- | Remove the array targets.
 funcallTargets :: [ValueDestination] -> ImpM rep r op [VName]
 funcallTargets dests =
   concat <$> mapM funcallTarget dests
@@ -1611,8 +1611,8 @@ copyArrayDWIM
               then pure mempty -- Copy would be no-op.
               else collect $ copy bt destlocation' srclocation'
 
--- | Like 'copyDWIM', but the target is a 'ValueDestination'
--- instead of a variable name.
+-- Like 'copyDWIM', but the target is a 'ValueDestination' instead of
+-- a variable name.
 copyDWIMDest ::
   ValueDestination ->
   [DimIndex (Imp.TExp Int64)] ->

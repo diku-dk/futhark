@@ -541,7 +541,7 @@ applyLambda lam dests args = do
     forM_ (zip dests res) $ \((dest, dest_slice), se) ->
       copyDWIM dest dest_slice se []
 
--- | As 'applyLambda', but first rename the names in the lambda.  This
+-- | As applyLambda, but first rename the names in the lambda.  This
 -- makes it safe to apply it in multiple places.  (It might be safe
 -- anyway, but you have to be more careful - use this if you are in
 -- doubt.)

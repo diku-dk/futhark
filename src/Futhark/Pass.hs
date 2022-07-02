@@ -43,6 +43,7 @@ runPassM ::
   m (a, Log)
 runPassM (PassM m) = modifyNameSource $ runState (runWriterT m)
 
+-- | A compiler pass transforming a 'Prog' of a given rep to a 'Prog'
 -- of another rep.
 data Pass fromrep torep = Pass
   { -- | Name of the pass.  Keep this short and simple.  It will
