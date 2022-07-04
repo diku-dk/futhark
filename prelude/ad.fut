@@ -21,3 +21,6 @@ let jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
 -- | Vector-Jacobian Product ("reverse mode").
 let vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
   (vjp2 f x y').1
+
+let jvp2_vec [n] 'a 'b (f: a -> b) (x: a) (xs': [n]a) : (b, [n]b) =
+  intrinsics.jvp2_vec (f, x, xs')

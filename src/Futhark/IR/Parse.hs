@@ -758,14 +758,16 @@ pSOAC pr =
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
-    pJVP =
-      parens $
-        SOAC.JVP
-          <$> pLambda pr
-          <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
+    pJVP = undefined
+
+-- pJVP =
+--  parens $
+--    SOAC.JVP
+--      <$> pLambda pr
+--      <* pComma
+--      <*> braces (pSubExp `sepBy` pComma)
+--      <* pComma
+--      <*> braces (pSubExp `sepBy` pComma)
 
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =

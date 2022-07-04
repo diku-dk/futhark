@@ -1009,6 +1009,17 @@ intrinsics =
                    $ Scalar
                    $ tupleRecord [Scalar t_b, Scalar t_b]
                ),
+               ( "jvp2_vec",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n]
+                   [ Scalar t_a `arr` Scalar t_b,
+                     Scalar t_a,
+                     arr_a $ shape [n]
+                   ]
+                   $ RetType []
+                   $ Scalar
+                   $ tupleRecord [Scalar t_b, arr_b $ shape [n]]
+               ),
                ( "vjp2",
                  IntrinsicPolyFun
                    [tp_a, tp_b]

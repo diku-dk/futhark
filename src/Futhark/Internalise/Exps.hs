@@ -14,6 +14,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import Debug.Trace
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -1732,13 +1733,15 @@ isOverloadedFunction qname args loc = do
     handleAccs _ _ = Nothing
 
     handleAD [TupLit [f, x, v] _] fname
-      | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
+      | fname `elem` ["jvp2", "jvp2_vec", "vjp2"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
+          outer_size <- arraysSize 0 <$> mapM subExpType v'
           lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
-              "jvp2" -> JVP lam x' v'
+              "jvp2" -> JVP lam x' (I.Shape mempty) v'
+              "jvp2_vec" -> JVP lam x' (I.Shape [outer_size]) v'
               _ -> VJP lam x' v'
     handleAD _ _ = Nothing
 

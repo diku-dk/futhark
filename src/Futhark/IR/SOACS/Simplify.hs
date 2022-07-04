@@ -91,11 +91,11 @@ simplifySOAC (VJP lam arr vec) = do
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
   pure (VJP lam' arr' vec', hoisted)
-simplifySOAC (JVP lam arr vec) = do
+simplifySOAC (JVP lam arr n vecs) = do
   (lam', hoisted) <- Engine.simplifyLambda lam
   arr' <- mapM Engine.simplify arr
-  vec' <- mapM Engine.simplify vec
-  pure (JVP lam' arr' vec', hoisted)
+  vecs' <- mapM Engine.simplify vecs
+  pure (JVP lam' arr' n vecs', hoisted)
 simplifySOAC (Stream outerdim arr form nes lam) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form

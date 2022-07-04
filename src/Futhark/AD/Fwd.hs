@@ -16,6 +16,7 @@ import qualified Data.Kind
 import Data.List (transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map as M
+import Data.Maybe
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
@@ -33,11 +34,19 @@ zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ show t
 
-tanType :: TypeBase s u -> ADM (TypeBase s u)
+-- tanType :: s -> u -> TypeBase s u -> ADM (TypeBase s u)
+-- tanType s u (Acc acc ispace ts _) = do
+--  ts_tan <- mapM (. fromDecl . tanType s u) ts
+--  pure $ Acc acc ispace (ts ++ ts_tan) u
+-- tanType s u t = pure $ arrayOf t s u
+
+tanType :: Type -> ADM Type
 tanType (Acc acc ispace ts u) = do
   ts_tan <- mapM tanType ts
   pure $ Acc acc ispace (ts ++ ts_tan) u
-tanType t = pure t
+tanType t = do
+  s <- gets stateShape
+  pure $ arrayOf t s NoUniqueness
 
 slocal' :: ADM a -> ADM a
 slocal' = slocal id
@@ -52,7 +61,8 @@ slocal f m = do
 
 data RState = RState
   { stateTans :: M.Map VName VName,
-    stateNameSource :: VNameSource
+    stateNameSource :: VNameSource,
+    stateShape :: Shape
   }
 
 newtype ADM a = ADM (BuilderT SOACS (State RState) a)
@@ -79,13 +89,13 @@ instance MonadFreshNames (State RState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
-runADM :: MonadFreshNames m => ADM a -> m a
-runADM (ADM m) =
+runADM :: MonadFreshNames m => Shape -> ADM a -> m a
+runADM s (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
       runState
         (fst <$> runBuilderT m mempty)
-        (RState mempty vn)
+        (RState mempty vn s)
 
 tanVName :: VName -> ADM VName
 tanVName v = newVName (baseString v <> "_tan")
@@ -105,16 +115,16 @@ instance (Monoid (Bundled a), TanBuilder a) => TanBuilder [a] where
   newTan = mapM newTan
   bundleNew = fmap mconcat . mapM bundleNew
 
-instance TanBuilder (PatElem (TypeBase s u)) where
+instance Tangent (TypeBase s u) => TanBuilder (PatElem (TypeBase s u)) where
   newTan (PatElem p t)
     | isAcc t = do
         insertTan p p
-        t' <- tanType t
+        t' <- tangent t
         pure $ PatElem p t'
     | otherwise = do
         p' <- tanVName p
         insertTan p p'
-        t' <- tanType t
+        t' <- tangent t
         pure $ PatElem p' t'
   bundleNew pe@(PatElem _ t) = do
     pe' <- newTan pe
@@ -122,12 +132,12 @@ instance TanBuilder (PatElem (TypeBase s u)) where
       then pure [pe']
       else pure [pe, pe']
 
-instance TanBuilder (Pat (TypeBase s u)) where
+instance Tangent (TypeBase s u) => TanBuilder (Pat (TypeBase s u)) where
   type Bundled (Pat (TypeBase s u)) = Pat (TypeBase s u)
   newTan (Pat pes) = Pat <$> newTan pes
   bundleNew (Pat pes) = Pat <$> bundleNew pes
 
-instance TanBuilder (Param (TypeBase s u)) where
+instance Tangent (TypeBase s u) => TanBuilder (Param (TypeBase s u)) where
   newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     pure $ Param mempty p' t'
@@ -139,7 +149,7 @@ instance TanBuilder (Param (TypeBase s u)) where
       then pure [param']
       else pure [param, param']
 
-instance Tangent a => TanBuilder (Param (TypeBase s u), a) where
+instance (Tangent (TypeBase s u), Tangent a) => TanBuilder (Param (TypeBase s u), a) where
   newTan (p, x) = (,) <$> newTan p <*> tangent x
   bundleNew (p, x) = do
     b <- bundleNew p
@@ -152,8 +162,38 @@ class Tangent a where
   tangent :: a -> ADM a
   bundleTan :: a -> ADM (BundledTan a)
 
-instance Tangent (TypeBase s u) where
+instance Tangent Type where
   tangent = tanType
+  bundleTan t
+    | isAcc t = do
+        t' <- tangent t
+        pure [t']
+    | otherwise = do
+        t' <- tangent t
+        pure [t, t']
+
+instance Tangent (TypeBase ExtShape NoUniqueness) where
+  tangent t = staticShapes1 <$> (tanType $ fromMaybe (error "") $ hasStaticShape t)
+  bundleTan t
+    | isAcc t = do
+        t' <- tangent t
+        pure [t']
+    | otherwise = do
+        t' <- tangent t
+        pure [t, t']
+
+instance Tangent (TypeBase Shape Uniqueness) where
+  tangent t = (flip toDecl $ uniqueness t) <$> (tangent $ fromDecl t)
+  bundleTan t
+    | isAcc t = do
+        t' <- tangent t
+        pure [t']
+    | otherwise = do
+        t' <- tangent t
+        pure [t, t']
+
+instance Tangent (TypeBase ExtShape Uniqueness) where
+  tangent t = (flip toDecl (uniqueness t) . staticShapes1) <$> (tanType $ fromDecl $ fromMaybe (error "") $ hasStaticShape t)
   bundleTan t
     | isAcc t = do
         t' <- tangent t
@@ -477,9 +517,9 @@ fwdBodyTansLast (Body _ stms res) = buildBody_ $ do
   mapM_ fwdStm stms
   (res <>) <$> tangent res
 
-fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
-fwdJVP scope l@(Lambda params body ret) =
-  runADM . localScope scope . inScopeOf l $ do
+fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> Shape -> m (Lambda SOACS)
+fwdJVP scope l@(Lambda params body ret) s =
+  runADM s . localScope scope . inScopeOf l $ do
     params_tan <- newTan params
     body_tan <- fwdBodyTansLast body
     ret_tan <- tangent ret

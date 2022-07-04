@@ -43,13 +43,13 @@ onStm mode scope (Let pat aux (Op (VJP lam args vec))) = do
       lam'' <- (`runReaderT` scope) . simplifyLambda =<< revVJP scope lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
     else pure $ oneStm $ Let pat aux $ Op $ VJP lam' args vec
-onStm mode scope (Let pat aux (Op (JVP lam args vec))) = do
+onStm mode scope (Let pat aux (Op (JVP lam args s vecs))) = do
   lam' <- onLambda mode scope lam
   if mode == All || lam == lam'
     then do
-      lam'' <- fwdJVP scope lam'
-      runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
-    else pure $ oneStm $ Let pat aux $ Op $ JVP lam' args vec
+      lam'' <- fwdJVP scope lam' s
+      runBuilderT_ (bindLambda pat aux lam'' $ args ++ vecs) scope
+    else pure $ oneStm $ Let pat aux $ Op $ JVP lam' args s vecs
 onStm mode scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
   where
     mapper =
