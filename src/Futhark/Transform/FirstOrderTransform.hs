@@ -263,10 +263,8 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
 
   let loop_form = ForLoop i Int64 w []
 
-  letBindNames [paramName chunk_size_param] $
-    BasicOp $
-      SubExp $
-        intConst Int64 1
+  letBindNames [paramName chunk_size_param] . BasicOp . SubExp $
+    intConst Int64 1
 
   loop_body <- runBodyBuilder $
     localScope (scopeOf loop_form <> scopeOfFParams merge_params) $ do
@@ -277,11 +275,13 @@ transformSOAC pat (Stream w arrs _ nes lam) = do
 
       (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
+      res' <- mapM (copyIfArray . resSubExp) res
+
       mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, SubExpRes cs se) ->
         certifying cs . letSubExp "mapout_res" . BasicOp $
           Update Unsafe (paramName p) (fullSlice (paramType p) slice) se
 
-      mkBodyM mempty $ res ++ subExpsRes mapout_res'
+      mkBodyM mempty $ subExpsRes $ res' ++ mapout_res'
 
   letBind pat $ DoLoop merge loop_form loop_body
 transformSOAC pat (Scatter len ivs lam as) = do
