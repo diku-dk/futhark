@@ -1830,10 +1830,7 @@ replicateForType bt = do
         shape = Shape [Var num_elems]
     function fname [] params $ do
       arr <-
-        sArray "arr" bt shape mem $
-          IxFun.iota $
-            map pe64 $
-              shapeDims shape
+        sArray "arr" bt shape mem $ IxFun.iota $ map pe64 $ shapeDims shape
       sReplicateKernel arr $ Var val
 
   pure fname
