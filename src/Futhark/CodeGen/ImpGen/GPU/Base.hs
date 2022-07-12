@@ -97,7 +97,6 @@ data KernelConstants = KernelConstants
     kernelGroupSize :: Imp.TExp Int64,
     kernelNumThreads :: Imp.TExp Int32,
     kernelWaveSize :: Imp.TExp Int32,
-    kernelThreadActive :: Imp.TExp Bool,
     -- | A mapping from dimensions of nested SegOps to already
     -- computed local thread IDs.  Only valid in non-virtualised case.
     kernelLocalIdMap :: M.Map [SubExp] [Imp.TExp Int32],
@@ -1160,7 +1159,6 @@ kernelInitialisationSimple num_groups group_size = do
             kernelGroupSize = group_size',
             kernelNumThreads = sExt32 (group_size' * num_groups'),
             kernelWaveSize = Imp.le32 wave_size,
-            kernelThreadActive = true,
             kernelLocalIdMap = mempty,
             kernelChunkItersMap = mempty
           }
@@ -1603,7 +1601,6 @@ simpleKernelConstants kernel_size desc = do
             kernelGroupSize = group_size',
             kernelNumThreads = sExt32 (group_size' * num_groups'),
             kernelWaveSize = 0,
-            kernelThreadActive = Imp.le64 thread_gtid .<. kernel_size,
             kernelLocalIdMap = mempty,
             kernelChunkItersMap = mempty
           }
@@ -2114,11 +2111,10 @@ compileThreadResult _ pe (ConcatReturns _ (SplitStrided stride) _ _ what) = do
   n <- toInt64Exp . arraySize 0 <$> lookupType what
   copyDWIM (patElemName pe) [DimSlice offset n $ toInt64Exp stride] (Var what) []
 compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
-  constants <- kernelConstants <$> askEnv
   let rws' = map toInt64Exp rws
   forM_ dests $ \(slice, e) -> do
     let slice' = fmap toInt64Exp slice
-        write = kernelThreadActive constants .&&. inBounds slice' rws'
+        write = inBounds slice' rws'
     sWhen write $ copyDWIM (patElemName pe) (unSlice slice') e []
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
