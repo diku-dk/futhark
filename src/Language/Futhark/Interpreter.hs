@@ -37,6 +37,7 @@ import Data.List
   ( find,
     foldl',
     genericLength,
+    genericTake,
     intercalate,
     isPrefixOf,
     transpose,
@@ -1917,8 +1918,9 @@ initialCtx =
         pure $
           toArray (ShapeDim m (ShapeDim n shape)) $
             map (toArray (ShapeDim n shape)) $
-              transpose $
-                map (snd . fromArray) xs'
+              -- Slight hack to work around empty dimensions.
+              genericTake m $
+                transpose (map (snd . fromArray) xs') ++ repeat []
     def "rotate" = Just $
       fun2t $ \i xs -> do
         let (shape, xs') = fromArray xs
