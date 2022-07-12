@@ -105,8 +105,8 @@ data InBounds
     OutOfBounds
   deriving (Eq, Ord, Show)
 
--- | A symbolic representation of an array that is all zeroes, except at one
--- index.
+-- | A symbolic representation of an array that is all zeroes, except
+-- at certain indexes.
 data Sparse = Sparse
   { -- | The shape of the array.
     sparseShape :: Shape,
