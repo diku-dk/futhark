@@ -1561,7 +1561,7 @@ simpleKernelGroups max_num_groups kernel_size = do
   let group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty $ tvVar group_size
   sOp $ Imp.GetSize (tvVar group_size) group_size_key Imp.SizeGroup
   virt_num_groups <- dPrimVE "virt_num_groups" $ kernel_size `divUp` tvExp group_size
-  num_groups <- dPrimV "num_groups" $ virt_num_groups `sMax64` max_num_groups
+  num_groups <- dPrimV "num_groups" $ virt_num_groups `sMin64` max_num_groups
   pure (sExt32 virt_num_groups, Count $ tvSize num_groups, Count $ tvSize group_size)
 
 simpleKernelConstants ::
