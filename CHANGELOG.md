@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `replicate` was broken for sizes that didn't fit in `i32`.
 
+* Transposition of empty arrays in interpreter (#1700).
+
 ## [0.21.13]
 
 ### Added
