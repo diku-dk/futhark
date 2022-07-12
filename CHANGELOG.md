@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `replicate` was broken for sizes that didn't fit in `i32`.
+
 ## [0.21.13]
 
 ### Added

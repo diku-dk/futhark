@@ -1824,7 +1824,7 @@ replicateForType bt = do
 
     let params =
           [ Imp.MemParam mem (Space "device"),
-            Imp.ScalarParam num_elems int32,
+            Imp.ScalarParam num_elems int64,
             Imp.ScalarParam val bt
           ]
         shape = Shape [Var num_elems]
