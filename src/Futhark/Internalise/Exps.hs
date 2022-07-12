@@ -279,18 +279,16 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
       bounds_invalid <-
         letSubExp "bounds_invalid"
-          $ I.If
-            downwards
-            (resultBody [bounds_invalid_downwards])
-            (resultBody [bounds_invalid_upwards])
-          $ ifCommon [I.Prim I.Bool]
+          =<< eIf
+            (eSubExp downwards)
+            (resultBodyM [bounds_invalid_downwards])
+            (resultBodyM [bounds_invalid_upwards])
       distance_exclusive <-
         letSubExp "distance_exclusive"
-          $ I.If
-            downwards
-            (resultBody [distance_downwards_exclusive])
-            (resultBody [distance_upwards_exclusive])
-          $ ifCommon [I.Prim $ IntType it]
+          =<< eIf
+            (eSubExp downwards)
+            (resultBodyM [distance_downwards_exclusive])
+            (resultBodyM [distance_upwards_exclusive])
       distance_exclusive_i64 <- asIntS Int64 distance_exclusive
       distance <-
         letSubExp "distance" $
@@ -994,18 +992,16 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) w one
   let i_def =
         letSubExp "i_def"
-          $ I.If
-            backwards
-            (resultBody [w_minus_1])
-            (resultBody [zero])
-          $ ifCommon [I.Prim int64]
+          =<< eIf
+            (eSubExp backwards)
+            (resultBodyM [w_minus_1])
+            (resultBodyM [zero])
       j_def =
         letSubExp "j_def"
-          $ I.If
-            backwards
-            (resultBody [negone])
-            (resultBody [w])
-          $ ifCommon [I.Prim int64]
+          =<< eIf
+            (eSubExp backwards)
+            (resultBodyM [negone])
+            (resultBodyM [w])
   i' <- maybe i_def (fmap fst . internaliseSizeExp "i") i
   j' <- maybe j_def (fmap fst . internaliseSizeExp "j") j
   j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) j' i'
@@ -1062,11 +1058,10 @@ internaliseDimIndex w (E.DimSlice i j s) = do
 
   slice_ok <-
     letSubExp "slice_ok"
-      $ I.If
-        backwards
-        (resultBody [backwards_ok])
-        (resultBody [forwards_ok])
-      $ ifCommon [I.Prim I.Bool]
+      =<< eIf
+        (eSubExp backwards)
+        (resultBodyM [backwards_ok])
+        (resultBodyM [forwards_ok])
 
   ok_or_empty <-
     letSubExp "ok_or_empty" $
@@ -1634,32 +1629,31 @@ isOverloadedFunction qname args loc = do
               dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
                 letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int64) x_dim y_dim
               shapes_match <- letSubExp "shapes_match" =<< eAll dims_match
-              compare_elems_body <- runBodyBuilder $ do
-                -- Flatten both x and y.
-                x_num_elems <-
-                  letSubExp "x_num_elems"
-                    =<< foldBinOp (I.Mul Int64 I.OverflowUndef) (constant (1 :: Int64)) x_dims
-                x' <- letExp "x" $ I.BasicOp $ I.SubExp x
-                y' <- letExp "x" $ I.BasicOp $ I.SubExp y
-                x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] x'
-                y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
+              let compare_elems_body = runBodyBuilder $ do
+                    -- Flatten both x and y.
+                    x_num_elems <-
+                      letSubExp "x_num_elems"
+                        =<< foldBinOp (I.Mul Int64 I.OverflowUndef) (constant (1 :: Int64)) x_dims
+                    x' <- letExp "x" $ I.BasicOp $ I.SubExp x
+                    y' <- letExp "x" $ I.BasicOp $ I.SubExp y
+                    x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] x'
+                    y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
 
-                -- Compare the elements.
-                cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
-                cmps <-
-                  letExp "cmps" $
-                    I.Op $
-                      I.Screma x_num_elems [x_flat, y_flat] (I.mapSOAC cmp_lam)
+                    -- Compare the elements.
+                    cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
+                    cmps <-
+                      letExp "cmps" $
+                        I.Op $
+                          I.Screma x_num_elems [x_flat, y_flat] (I.mapSOAC cmp_lam)
 
-                -- Check that all were equal.
-                and_lam <- binOpLambda I.LogAnd I.Bool
-                reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
-                all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems [cmps] reduce
-                pure $ resultBody [all_equal]
+                    -- Check that all were equal.
+                    and_lam <- binOpLambda I.LogAnd I.Bool
+                    reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
+                    all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems [cmps] reduce
+                    pure $ resultBody [all_equal]
 
-              letSubExp "arrays_equal" $
-                I.If shapes_match compare_elems_body (resultBody [constant False]) $
-                  ifCommon [I.Prim I.Bool]
+              letSubExp "arrays_equal"
+                =<< eIf (eSubExp shapes_match) compare_elems_body (resultBodyM [constant False])
     handleOps [x, y] name
       | Just bop <- find ((name ==) . pretty) [minBound .. maxBound :: E.BinOp] =
           Just $ \desc -> do
@@ -1841,11 +1835,10 @@ isOverloadedFunction qname args loc = do
       case E.typeOf e of
         E.Scalar (E.Prim E.Bool) ->
           letTupExp' desc
-            $ I.If
-              e'
-              (resultBody [intConst int_to 1])
-              (resultBody [intConst int_to 0])
-            $ ifCommon [I.Prim $ I.IntType int_to]
+            =<< eIf
+              (eSubExp e')
+              (resultBodyM [intConst int_to 1])
+              (resultBodyM [intConst int_to 0])
         E.Scalar (E.Prim (E.Signed int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
         E.Scalar (E.Prim (E.Unsigned int_from)) ->
@@ -1859,11 +1852,10 @@ isOverloadedFunction qname args loc = do
       case E.typeOf e of
         E.Scalar (E.Prim E.Bool) ->
           letTupExp' desc
-            $ I.If
-              e'
-              (resultBody [intConst int_to 1])
-              (resultBody [intConst int_to 0])
-            $ ifCommon [I.Prim $ I.IntType int_to]
+            =<< eIf
+              (eSubExp e')
+              (resultBodyM [intConst int_to 1])
+              (resultBodyM [intConst int_to 0])
         E.Scalar (E.Prim (E.Signed int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
         E.Scalar (E.Prim (E.Unsigned int_from)) ->
@@ -2139,18 +2131,14 @@ partitionWithSOACS k lam arrs = do
   -- the total sizes, which are the last elements in the offests.  We
   -- just have to be careful in case the array is empty.
   last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int64 OverflowUndef) w $ constant (1 :: Int64)
-  nonempty_body <- runBodyBuilder $
-    fmap resultBody $
-      forM all_offsets $ \offset_array ->
-        letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
-  let empty_body = resultBody $ replicate k $ constant (0 :: Int64)
+  let nonempty_body = runBodyBuilder $
+        fmap resultBody $
+          forM all_offsets $ \offset_array ->
+            letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
+      empty_body = resultBodyM $ replicate k $ constant (0 :: Int64)
   is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int64) w $ constant (0 :: Int64)
   sizes <-
-    letTupExp "partition_size" $
-      I.If is_empty empty_body nonempty_body $
-        ifCommon $
-          replicate k $
-            I.Prim int64
+    letTupExp "partition_size" =<< eIf (eSubExp is_empty) empty_body nonempty_body
 
   -- The total size of all partitions must necessarily be equal to the
   -- size of the input array.
@@ -2218,11 +2206,10 @@ partitionWithSOACS k lam arrs = do
             (constant (-1 :: Int64))
             (I.Var (I.paramName p) : take i sizes)
       letSubExp "total_res"
-        $ I.If
-          is_this_one
-          (resultBody [this_one])
-          (resultBody [next_one])
-        $ ifCommon [I.Prim int64]
+        =<< eIf
+          (eSubExp is_this_one)
+          (resultBodyM [this_one])
+          (resultBodyM [next_one])
 
 typeExpForError :: E.TypeExp VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =
