@@ -49,7 +49,6 @@ onDocumentFocusHandler state_mvar = notificationHandler (SCustomMethod "custom/o
   logStringStderr <& "Got custom request: onFocusTextDocument"
   let NotificationMessage _ _ (Array vector_param) = msg
       String focused_uri = V.head vector_param -- only one parameter passed from the client
-  logStringStderr <& show focused_uri
   tryReCompile state_mvar (uriToFilePath (Uri focused_uri))
 
 goToDefinitionHandler :: IORef State -> Handlers (LspM ())
