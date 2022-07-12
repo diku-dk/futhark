@@ -430,28 +430,28 @@ commandLineOptions =
       "Run this compiler backend on pipeline result.",
     Option
       []
-      ["compile-imperative"]
+      ["compile-imp-seq"]
       ( NoArg $
           Right $ \opts ->
             opts {futharkAction = SeqMemAction $ \_ _ _ -> impCodeGenAction}
       )
-      "Translate program into the imperative IL and write it on standard output.",
+      "Translate pipeline result to ImpSequential and write it on stdout.",
     Option
       []
-      ["compile-imperative-kernels"]
+      ["compile-imp-gpu"]
       ( NoArg $
           Right $ \opts ->
             opts {futharkAction = GPUMemAction $ \_ _ _ -> kernelImpCodeGenAction}
       )
-      "Translate program into the imperative IL with kernels and write it on standard output.",
+      "Translate pipeline result to ImpGPU and write it on stdout.",
     Option
       []
-      ["compile-imperative-multicore"]
+      ["compile-imp-multicore"]
       ( NoArg $
           Right $ \opts ->
             opts {futharkAction = MCMemAction $ \_ _ _ -> multicoreImpCodeGenAction}
       )
-      "Translate program into the imperative IL with kernels and write it on standard output.",
+      "Translate pipeline result to ImpMC write it on stdout.",
     Option
       "p"
       ["print"]
