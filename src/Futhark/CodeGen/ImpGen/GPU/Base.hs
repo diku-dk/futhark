@@ -1553,28 +1553,62 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
       | otherwise =
           copyDWIM (paramName y) [] (Var $ paramName x) []
 
-computeMapKernelGroups ::
+simpleKernelGroups ::
   Imp.TExp Int64 ->
-  CallKernelGen (Count NumGroups SubExp, Count GroupSize SubExp)
-computeMapKernelGroups kernel_size = do
+  Imp.TExp Int64 ->
+  CallKernelGen (Imp.TExp Int32, Count NumGroups SubExp, Count GroupSize SubExp)
+simpleKernelGroups max_num_groups kernel_size = do
   group_size <- dPrim "group_size" int64
   fname <- askFunction
   let group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty $ tvVar group_size
   sOp $ Imp.GetSize (tvVar group_size) group_size_key Imp.SizeGroup
-  num_groups <- dPrimV "num_groups" $ kernel_size `divUp` tvExp group_size
-  pure (Count $ tvSize num_groups, Count $ tvSize group_size)
+  virt_num_groups <- dPrimVE "virt_num_groups" $ kernel_size `divUp` tvExp group_size
+  num_groups <- dPrimV "num_groups" $ virt_num_groups `sMax64` max_num_groups
+  pure (sExt32 virt_num_groups, Count $ tvSize num_groups, Count $ tvSize group_size)
 
 simpleKernelConstants ::
   Imp.TExp Int64 ->
   String ->
-  CallKernelGen (KernelConstants, InKernelGen ())
+  CallKernelGen
+    ( (Imp.TExp Int64 -> InKernelGen ()) -> InKernelGen (),
+      KernelConstants
+    )
 simpleKernelConstants kernel_size desc = do
+  -- For performance reasons, codegen assumes that the thread count is
+  -- never more than will fit in an i32.  This means we need to cap
+  -- the number of groups here.  The cap is set much higher than any
+  -- GPU will possibly need.  Feel free to come back and laugh at me
+  -- in the future.
+  let max_num_groups = 1024 * 1024
   thread_gtid <- newVName $ desc ++ "_gtid"
   thread_ltid <- newVName $ desc ++ "_ltid"
   group_id <- newVName $ desc ++ "_gid"
   inner_group_size <- newVName "group_size"
-  (num_groups, group_size) <- computeMapKernelGroups kernel_size
-  let set_constants = do
+  (virt_num_groups, num_groups, group_size) <-
+    simpleKernelGroups max_num_groups kernel_size
+  let group_size' = Imp.pe64 $ unCount group_size
+      num_groups' = Imp.pe64 $ unCount num_groups
+
+      constants =
+        KernelConstants
+          { kernelGlobalThreadId = Imp.le32 thread_gtid,
+            kernelLocalThreadId = Imp.le32 thread_ltid,
+            kernelGroupId = Imp.le32 group_id,
+            kernelGlobalThreadIdVar = thread_gtid,
+            kernelLocalThreadIdVar = thread_ltid,
+            kernelGroupIdVar = group_id,
+            kernelNumGroupsCount = num_groups,
+            kernelGroupSizeCount = group_size,
+            kernelNumGroups = num_groups',
+            kernelGroupSize = group_size',
+            kernelNumThreads = sExt32 (group_size' * num_groups'),
+            kernelWaveSize = 0,
+            kernelThreadActive = Imp.le64 thread_gtid .<. kernel_size,
+            kernelLocalIdMap = mempty,
+            kernelChunkItersMap = mempty
+          }
+
+      wrapKernel m = do
         dPrim_ thread_ltid int32
         dPrim_ inner_group_size int64
         dPrim_ group_id int32
@@ -1582,29 +1616,14 @@ simpleKernelConstants kernel_size desc = do
         sOp (Imp.GetLocalSize inner_group_size 0)
         sOp (Imp.GetGroupId group_id 0)
         dPrimV_ thread_gtid $ le32 group_id * le32 inner_group_size + le32 thread_ltid
-      group_size' = Imp.pe64 $ unCount group_size
-      num_groups' = Imp.pe64 $ unCount num_groups
+        virtualiseGroups SegVirt virt_num_groups $ \virt_group_id -> do
+          global_tid <-
+            dPrimVE "global_tid" $
+              sExt64 virt_group_id * sExt64 (le32 inner_group_size)
+                + sExt64 (kernelLocalThreadId constants)
+          m global_tid
 
-  pure
-    ( KernelConstants
-        { kernelGlobalThreadId = Imp.le32 thread_gtid,
-          kernelLocalThreadId = Imp.le32 thread_ltid,
-          kernelGroupId = Imp.le32 group_id,
-          kernelGlobalThreadIdVar = thread_gtid,
-          kernelLocalThreadIdVar = thread_ltid,
-          kernelGroupIdVar = group_id,
-          kernelNumGroupsCount = num_groups,
-          kernelGroupSizeCount = group_size,
-          kernelNumGroups = num_groups',
-          kernelGroupSize = group_size',
-          kernelNumThreads = sExt32 (group_size' * num_groups'),
-          kernelWaveSize = 0,
-          kernelThreadActive = Imp.le64 thread_gtid .<. kernel_size,
-          kernelLocalIdMap = mempty,
-          kernelChunkItersMap = mempty
-        },
-      set_constants
-    )
+  pure (wrapKernel, constants)
 
 -- | For many kernels, we may not have enough physical groups to cover
 -- the logical iteration space.  Some groups thus have to perform
@@ -1793,8 +1812,8 @@ sReplicateKernel arr se = do
   ds <- dropLast (arrayRank t) . arrayDims <$> lookupType arr
 
   let dims = map toInt64Exp $ ds ++ arrayDims t
-  (constants, set_constants) <-
-    simpleKernelConstants (product $ map sExt64 dims) "replicate"
+  n <- dPrimVE "replicate_n" $ product $ map sExt64 dims
+  (virtualise, constants) <- simpleKernelConstants n "replicate"
 
   fname <- askFunction
   let name =
@@ -1802,12 +1821,12 @@ sReplicateKernel arr se = do
           nameFromString $
             "replicate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
 
-  sKernelFailureTolerant True threadOperations constants name $ do
-    set_constants
-    is' <- dIndexSpace' "rep_i" dims $ sExt64 $ kernelGlobalThreadId constants
-    sWhen (kernelThreadActive constants) $
-      copyDWIMFix arr is' se $
-        drop (length ds) is'
+  sKernelFailureTolerant True threadOperations constants name $
+    virtualise $ \gtid -> do
+      is' <- dIndexSpace' "rep_i" dims gtid
+      sWhen (gtid .<. n) $
+        copyDWIMFix arr is' se $
+          drop (length ds) is'
 
 replicateName :: PrimType -> String
 replicateName bt = "replicate_" ++ pretty bt
@@ -1875,7 +1894,7 @@ sIotaKernel ::
   CallKernelGen ()
 sIotaKernel arr n x s et = do
   destloc <- entryArrayLoc <$> lookupArray arr
-  (constants, set_constants) <- simpleKernelConstants n "iota"
+  (virtualise, constants) <- simpleKernelConstants n "iota"
 
   fname <- askFunction
   let name =
@@ -1886,18 +1905,17 @@ sIotaKernel arr n x s et = do
               ++ "_"
               ++ show (baseTag $ kernelGlobalThreadIdVar constants)
 
-  sKernelFailureTolerant True threadOperations constants name $ do
-    set_constants
-    let gtid = sExt64 $ kernelGlobalThreadId constants
-    sWhen (kernelThreadActive constants) $ do
-      (destmem, destspace, destidx) <- fullyIndexArray' destloc [gtid]
+  sKernelFailureTolerant True threadOperations constants name $
+    virtualise $ \gtid ->
+      sWhen (gtid .<. n) $ do
+        (destmem, destspace, destidx) <- fullyIndexArray' destloc [gtid]
 
-      emit $
-        Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
-          BinOpExp
-            (Add et OverflowWrap)
-            (BinOpExp (Mul et OverflowWrap) (Imp.sExt et $ untyped gtid) s)
-            x
+        emit $
+          Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
+            BinOpExp
+              (Add et OverflowWrap)
+              (BinOpExp (Mul et OverflowWrap) (Imp.sExt et $ untyped gtid) s)
+              x
 
 iotaName :: IntType -> String
 iotaName bt = "iota_" ++ pretty bt
@@ -1961,7 +1979,7 @@ sCopy pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
   let shape = map toInt64Exp srcdims
       kernel_size = product shape
 
-  (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
+  (virtualise, constants) <- simpleKernelConstants kernel_size "copy"
 
   fname <- askFunction
   let name =
@@ -1969,19 +1987,17 @@ sCopy pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
           nameFromString $
             "copy_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
 
-  sKernelFailureTolerant True threadOperations constants name $ do
-    set_constants
+  sKernelFailureTolerant True threadOperations constants name $
+    virtualise $ \gtid -> do
+      is <- dIndexSpace' "copy_i" shape gtid
 
-    let gtid = sExt64 $ kernelGlobalThreadId constants
-    is <- dIndexSpace' "copy_i" shape gtid
+      (_, destspace, destidx) <- fullyIndexArray' destloc is
+      (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
 
-    (_, destspace, destidx) <- fullyIndexArray' destloc is
-    (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
-
-    sWhen (gtid .<. kernel_size) $ do
-      tmp <- tvVar <$> dPrim "tmp" pt
-      emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
-      emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
+      sWhen (gtid .<. kernel_size) $ do
+        tmp <- tvVar <$> dPrim "tmp" pt
+        emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
+        emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
 
 compileGroupResult ::
   SegSpace ->
