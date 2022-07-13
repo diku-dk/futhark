@@ -606,12 +606,10 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange perm stm_arr))) acc =
         [ Let (Pat [PatElem arr' arr_t]) aux $ BasicOp $ Copy arr,
           Let outerpat aux $ BasicOp $ Rearrange perm' arr'
         ]
-maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape reshape stm_arr))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape k reshape stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
-    let reshape' =
-          map DimNew (kernelNestWidths nest)
-            ++ map DimNew (newDims reshape)
-    pure $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
+    let reshape' = Shape (kernelNestWidths nest) <> reshape
+    pure $ oneStm $ Let outerpat aux $ BasicOp $ Reshape k reshape' arr
 maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let rots' = map (const $ intConst Int64 0) (kernelNestWidths nest) ++ rots
