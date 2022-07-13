@@ -634,21 +634,12 @@ loopInvariantStm :: ASTRep rep => ST.SymbolTable rep -> Stm rep -> Bool
 loopInvariantStm vtable =
   all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
 
-hoistCommon ::
-  SimplifiableRep rep =>
-  UT.UsageTable ->
-  [UT.Usages] ->
-  SubExp ->
-  IfDec (BranchType rep) ->
-  Body (Wise rep) ->
-  Body (Wise rep) ->
-  SimpleM
-    rep
-    ( Body (Wise rep),
-      Body (Wise rep),
-      Stms (Wise rep)
-    )
-hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
+matchBlocker ::
+  (ASTRep rep, CanBeWise (Op rep), FreeIn a) =>
+  a ->
+  IfDec rt ->
+  SimpleM rep (BlockPred (Wise rep))
+matchBlocker cond (IfDec _ ifsort) = do
   is_alloc_fun <- asksEngineEnv $ isAllocation . envHoistBlockers
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   vtable <- askVtable
@@ -702,14 +693,7 @@ hoistCommon res_usage res_usages cond (IfDec _ ifsort) body1 body2 = do
                      `andAlso` notDesirableToHoist
                  )
           `orIf` isConsuming
-
-  (hoisted1, body1') <-
-    protectIfHoisted cond True $
-      simplifyBody block res_usage res_usages body1
-  (hoisted2, body2') <-
-    protectIfHoisted cond False $
-      simplifyBody block res_usage res_usages body2
-  pure (body1', body2', hoisted1 <> hoisted2)
+  pure block
 
 -- | Simplify a single body.
 simplifyBody ::
@@ -798,15 +782,17 @@ simplifyExp ::
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
 simplifyExp usage (Pat pes) (If cond tbranch fbranch ifdec@(IfDec ts ifsort)) = do
-  -- Here, we have to check whether 'cond' puts a bound on some free
-  -- variable, and if so, chomp it.  We should also try to do CSE
-  -- across branches.
   let pes_usages = map (fromMaybe mempty . (`UT.lookup` usage) . patElemName) pes
   cond' <- simplify cond
   ts' <- mapM simplify ts
-  (tbranch', fbranch', hoisted) <-
-    hoistCommon usage pes_usages cond' ifdec tbranch fbranch
-  pure (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted)
+  block <- matchBlocker cond ifdec
+  (hoisted1, tbranch') <-
+    protectIfHoisted cond' True $
+      simplifyBody block usage pes_usages tbranch
+  (hoisted2, fbranch') <-
+    protectIfHoisted cond' False $
+      simplifyBody block usage pes_usages fbranch
+  pure (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted1 <> hoisted2)
 simplifyExp _ _ (DoLoop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params
