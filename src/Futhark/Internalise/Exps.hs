@@ -538,20 +538,20 @@ internaliseAppExp desc _ (E.Match e orig_cs _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
   cs <- mapM (onCase ses) orig_cs
   case NE.uncons cs of
-    (MatchCase (CasePat pCase eCase _) _ pertinent, Nothing) -> do
-      internalisePat' [] pCase pertinent (internaliseExp desc eCase)
+    (MatchCase _ body, Nothing) ->
+      map resSubExp <$> bodyBind body
     (c, Just cs') -> do
-      let MatchCase (CasePat pLast eLast _) _ pertinent = NE.last cs'
+      let MatchCase _ last_body = NE.last cs'
       bFalse <- do
-        eLast' <- internalisePat' [] pLast pertinent (internaliseBody desc eLast)
-        foldM (\bf c' -> eValBody $ pure $ generateCaseIf c' bf) eLast' $
+        foldM (\bf c' -> eValBody $ pure $ generateCaseIf c' bf) last_body $
           reverse $
             NE.init cs'
       letValExp' desc =<< generateCaseIf c bFalse
   where
-    onCase ses ecase@(E.CasePat p _ _) = do
+    onCase ses (E.CasePat p case_e _) = do
       (cmps, pertinent) <- generateCond p ses
-      pure $ MatchCase ecase cmps pertinent
+      body <- internalisePat' [] p pertinent $ internaliseBody "case" case_e
+      pure $ MatchCase cmps body
 internaliseAppExp desc _ (E.If ce te fe _) =
   letValExp' desc
     =<< eIf
@@ -908,16 +908,15 @@ generateCond orig_p orig_ses = do
           ses''
         )
 
-data MatchCase = MatchCase E.Case [(I.SubExp, I.PrimValue)] [I.SubExp]
+data MatchCase = MatchCase [(I.SubExp, I.PrimValue)] (I.Body SOACS)
 
 generateCaseIf :: MatchCase -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
-generateCaseIf (MatchCase (E.CasePat p eCase _) cmps pertinent) bFail = do
+generateCaseIf (MatchCase cmps body) bFail = do
   let mkCmp (x, y) =
         letSubExp "match" . I.BasicOp $
           I.CmpOp (I.CmpEq (I.primValueType y)) x (Constant y)
   cond <- letSubExp "matches" =<< eAll =<< mapM mkCmp cmps
-  eCase' <- internalisePat' [] p pertinent (internaliseBody "case" eCase)
-  eIf (eSubExp cond) (pure eCase') (pure bFail)
+  eIf (eSubExp cond) (pure body) (pure bFail)
 
 internalisePat ::
   String ->
