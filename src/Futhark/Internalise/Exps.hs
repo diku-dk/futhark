@@ -834,33 +834,40 @@ internaliseArg desc (arg, argdim) = do
         _ -> pure ()
       pure arg'
 
-subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
-subExpPrimType = fmap I.elemType . subExpType
+internalisePatLit :: E.PatLit -> E.PatType -> I.PrimValue
+internalisePatLit (E.PatLitPrim v) _ =
+  internalisePrimValue v
+internalisePatLit (E.PatLitInt x) (E.Scalar (E.Prim (E.Signed it))) =
+  I.IntValue $ intValue it x
+internalisePatLit (E.PatLitInt x) (E.Scalar (E.Prim (E.Unsigned it))) =
+  I.IntValue $ intValue it x
+internalisePatLit (E.PatLitFloat x) (E.Scalar (E.Prim (E.FloatType ft))) =
+  I.FloatValue $ floatValue ft x
+internalisePatLit l t =
+  error $ "Nonsensical pattern and type: " ++ show (l, t)
 
-generateCond :: E.Pat -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
+generateCond ::
+  E.Pat ->
+  [I.SubExp] ->
+  InternaliseM ([(I.SubExp, I.PrimValue)], [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
-  cmp <- letSubExp "matches" =<< eAll cmps
-  pure (cmp, pertinent)
+  pure (cmps, pertinent)
   where
-    -- Literals are always primitive values.
-    compares (E.PatLit l t _) (se : ses) = do
-      e' <- case l of
-        PatLitPrim v -> pure $ constant $ internalisePrimValue v
-        PatLitInt x -> internaliseExp1 "constant" $ E.IntLit x t mempty
-        PatLitFloat x -> internaliseExp1 "constant" $ E.FloatLit x t mempty
-      t' <- subExpPrimType se
-      cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
-      pure ([cmp], [se], ses)
+    compares (E.PatLit l (Info t) _) (se : ses) =
+      pure ([(se, internalisePatLit l t)], [se], ses)
     compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se : ses) = do
       (payload_ts, m) <- internaliseSumType $ M.map (map toStruct) fs
       case M.lookup c m of
         Just (i, payload_is) -> do
-          let i' = intConst Int8 $ toInteger i
           let (payload_ses, ses') = splitAt (length payload_ts) ses
-          cmp <- letSubExp "match_constr" $ I.BasicOp $ I.CmpOp (I.CmpEq int8) i' se
-          (cmps, pertinent, _) <- comparesMany pats $ map (payload_ses !!) payload_is
-          pure (cmp : cmps, pertinent, ses')
+          (cmps, pertinent, _) <-
+            comparesMany pats $ map (payload_ses !!) payload_is
+          pure
+            ( (se, I.IntValue $ intValue Int8 $ toInteger i) : cmps,
+              pertinent,
+              ses'
+            )
         Nothing ->
           error "generateCond: missing constructor"
     compares (E.PatConstr _ (Info t) _ _) _ =
@@ -898,9 +905,13 @@ generateCond orig_p orig_ses = do
           ses''
         )
 
-generateCaseIf :: [I.SubExp] -> Case -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
+generateCaseIf :: [I.SubExp] -> E.Case -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
 generateCaseIf ses (CasePat p eCase _) bFail = do
-  (cond, pertinent) <- generateCond p ses
+  (cmps, pertinent) <- generateCond p ses
+  let mkCmp (x, y) =
+        letSubExp "match" . I.BasicOp $
+          I.CmpOp (I.CmpEq (I.primValueType y)) x (Constant y)
+  cond <- letSubExp "matches" =<< eAll =<< mapM mkCmp cmps
   eCase' <- internalisePat' [] p pertinent (internaliseBody "case" eCase)
   eIf (eSubExp cond) (pure eCase') (pure bFail)
 
