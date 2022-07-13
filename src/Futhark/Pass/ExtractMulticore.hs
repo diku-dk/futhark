@@ -124,6 +124,11 @@ transformStm (Let pat aux (DoLoop merge form body)) = do
 transformStm (Let pat aux (If cond tbranch fbranch ret)) =
   oneStm . Let pat aux
     <$> (If cond <$> transformBody tbranch <*> transformBody fbranch <*> pure ret)
+transformStm (Let pat aux (Match ses cases def_body ret)) =
+  oneStm . Let pat aux
+    <$> (Match ses <$> mapM transformCase cases <*> transformBody def_body <*> pure ret)
+  where
+    transformCase (Case vs body) = Case vs <$> transformBody body
 transformStm (Let pat aux (WithAcc inputs lam)) =
   oneStm . Let pat aux
     <$> (WithAcc <$> mapM transformInput inputs <*> transformLambda lam)

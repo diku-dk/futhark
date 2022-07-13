@@ -72,7 +72,7 @@ where
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
-import Data.List (find, foldl', mapAccumL)
+import Data.List (find, foldl', inits, mapAccumL)
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -262,66 +262,39 @@ bindLoopVar :: SimplifiableRep rep => VName -> IntType -> SubExp -> SimpleM rep 
 bindLoopVar var it bound =
   localVtable $ ST.insertLoopVar var it bound
 
--- | We are willing to hoist potentially unsafe statements out of
--- branches, but they most be protected by adding a branch on top of
--- them.  (This means such hoisting is not worth it unless they are in
--- turn hoisted out of a loop somewhere.)
-protectIfHoisted ::
-  SimplifiableRep rep =>
-  -- | Branch condition.
-  SubExp ->
-  -- | Which side of the branch are we
-  -- protecting here?
-  Bool ->
-  SimpleM rep (Stms (Wise rep), a) ->
-  SimpleM rep (Stms (Wise rep), a)
-protectIfHoisted cond side m = do
-  (hoisted, x) <- m
-  ops <- asks $ protectHoistedOpS . fst
-  hoisted' <- runBuilder_ $ do
-    if not $ all (safeExp . stmExp) hoisted
-      then do
-        cond' <-
-          if side
-            then pure cond
-            else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
-        mapM_ (protectIf ops unsafeOrCostly cond') hoisted
-      else addStms hoisted
-  pure (hoisted', x)
-  where
-    unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
+makeSafe :: Exp rep -> Maybe (Exp rep)
+makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
+  Just $ BasicOp (BinOp (SDiv t Safe) x y)
+makeSafe (BasicOp (BinOp (SDivUp t _) x y)) =
+  Just $ BasicOp (BinOp (SDivUp t Safe) x y)
+makeSafe (BasicOp (BinOp (SQuot t _) x y)) =
+  Just $ BasicOp (BinOp (SQuot t Safe) x y)
+makeSafe (BasicOp (BinOp (UDiv t _) x y)) =
+  Just $ BasicOp (BinOp (UDiv t Safe) x y)
+makeSafe (BasicOp (BinOp (UDivUp t _) x y)) =
+  Just $ BasicOp (BinOp (UDivUp t Safe) x y)
+makeSafe (BasicOp (BinOp (SMod t _) x y)) =
+  Just $ BasicOp (BinOp (SMod t Safe) x y)
+makeSafe (BasicOp (BinOp (SRem t _) x y)) =
+  Just $ BasicOp (BinOp (SRem t Safe) x y)
+makeSafe (BasicOp (BinOp (UMod t _) x y)) =
+  Just $ BasicOp (BinOp (UMod t Safe) x y)
+makeSafe _ =
+  Nothing
 
--- | We are willing to hoist potentially unsafe statements out of
--- loops, but they most be protected by adding a branch on top of
--- them.
-protectLoopHoisted ::
-  SimplifiableRep rep =>
-  [(FParam (Wise rep), SubExp)] ->
-  LoopForm (Wise rep) ->
-  SimpleM rep (a, b, Stms (Wise rep)) ->
-  SimpleM rep (a, b, Stms (Wise rep))
-protectLoopHoisted merge form m = do
-  (x, y, stms) <- m
-  ops <- asks $ protectHoistedOpS . fst
-  stms' <- runBuilder_ $ do
-    if not $ all (safeExp . stmExp) stms
-      then do
-        is_nonempty <- checkIfNonEmpty
-        mapM_ (protectIf ops (not . safeExp) is_nonempty) stms
-      else addStms stms
-  pure (x, y, stms')
+emptyOfType :: MonadBuilder m => [VName] -> Type -> m (Exp (Rep m))
+emptyOfType _ Mem {} =
+  error "emptyOfType: Cannot hoist non-existential memory."
+emptyOfType _ Acc {} =
+  error "emptyOfType: Cannot hoist accumulator."
+emptyOfType _ (Prim pt) =
+  pure $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
+emptyOfType ctx_names (Array et shape _) = do
+  let dims = map zeroIfContext $ shapeDims shape
+  pure $ BasicOp $ Scratch et dims
   where
-    checkIfNonEmpty =
-      case form of
-        WhileLoop cond
-          | Just (_, cond_init) <-
-              find ((== cond) . paramName . fst) merge ->
-              pure cond_init
-          | otherwise -> pure $ constant True -- infinite loop
-        ForLoop _ it bound _ ->
-          letSubExp "loop_nonempty" $
-            BasicOp $
-              CmpOp (CmpSlt it) (intConst it 0) bound
+    zeroIfContext (Var v) | v `elem` ctx_names = intConst Int64 0
+    zeroIfContext se = se
 
 protectIf ::
   MonadBuilder m =>
@@ -358,39 +331,122 @@ protectIf _ f taken (Let pat aux e)
 protectIf _ _ _ stm =
   addStm stm
 
-makeSafe :: Exp rep -> Maybe (Exp rep)
-makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
-  Just $ BasicOp (BinOp (SDiv t Safe) x y)
-makeSafe (BasicOp (BinOp (SDivUp t _) x y)) =
-  Just $ BasicOp (BinOp (SDivUp t Safe) x y)
-makeSafe (BasicOp (BinOp (SQuot t _) x y)) =
-  Just $ BasicOp (BinOp (SQuot t Safe) x y)
-makeSafe (BasicOp (BinOp (UDiv t _) x y)) =
-  Just $ BasicOp (BinOp (UDiv t Safe) x y)
-makeSafe (BasicOp (BinOp (UDivUp t _) x y)) =
-  Just $ BasicOp (BinOp (UDivUp t Safe) x y)
-makeSafe (BasicOp (BinOp (SMod t _) x y)) =
-  Just $ BasicOp (BinOp (SMod t Safe) x y)
-makeSafe (BasicOp (BinOp (SRem t _) x y)) =
-  Just $ BasicOp (BinOp (SRem t Safe) x y)
-makeSafe (BasicOp (BinOp (UMod t _) x y)) =
-  Just $ BasicOp (BinOp (UMod t Safe) x y)
-makeSafe _ =
-  Nothing
-
-emptyOfType :: MonadBuilder m => [VName] -> Type -> m (Exp (Rep m))
-emptyOfType _ Mem {} =
-  error "emptyOfType: Cannot hoist non-existential memory."
-emptyOfType _ Acc {} =
-  error "emptyOfType: Cannot hoist accumulator."
-emptyOfType _ (Prim pt) =
-  pure $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
-emptyOfType ctx_names (Array et shape _) = do
-  let dims = map zeroIfContext $ shapeDims shape
-  pure $ BasicOp $ Scratch et dims
+-- | We are willing to hoist potentially unsafe statements out of
+-- branches, but they must be protected by adding a branch on top of
+-- them.  (This means such hoisting is not worth it unless they are in
+-- turn hoisted out of a loop somewhere.)
+protectIfHoisted ::
+  SimplifiableRep rep =>
+  -- | Branch condition.
+  SubExp ->
+  -- | Which side of the branch are we
+  -- protecting here?
+  Bool ->
+  SimpleM rep (Stms (Wise rep), a) ->
+  SimpleM rep (Stms (Wise rep), a)
+protectIfHoisted cond side m = do
+  (hoisted, x) <- m
+  ops <- asks $ protectHoistedOpS . fst
+  hoisted' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) hoisted
+      then do
+        cond' <-
+          if side
+            then pure cond
+            else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
+        mapM_ (protectIf ops unsafeOrCostly cond') hoisted
+      else addStms hoisted
+  pure (hoisted', x)
   where
-    zeroIfContext (Var v) | v `elem` ctx_names = intConst Int64 0
-    zeroIfContext se = se
+    unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
+
+-- | We are willing to hoist potentially unsafe statements out of
+-- loops, but they must be protected by adding a branch on top of
+-- them.
+protectLoopHoisted ::
+  SimplifiableRep rep =>
+  [(FParam (Wise rep), SubExp)] ->
+  LoopForm (Wise rep) ->
+  SimpleM rep (a, b, Stms (Wise rep)) ->
+  SimpleM rep (a, b, Stms (Wise rep))
+protectLoopHoisted merge form m = do
+  (x, y, stms) <- m
+  ops <- asks $ protectHoistedOpS . fst
+  stms' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) stms
+      then do
+        is_nonempty <- checkIfNonEmpty
+        mapM_ (protectIf ops (not . safeExp) is_nonempty) stms
+      else addStms stms
+  pure (x, y, stms')
+  where
+    checkIfNonEmpty =
+      case form of
+        WhileLoop cond
+          | Just (_, cond_init) <-
+              find ((== cond) . paramName . fst) merge ->
+              pure cond_init
+          | otherwise -> pure $ constant True -- infinite loop
+        ForLoop _ it bound _ ->
+          letSubExp "loop_nonempty" $
+            BasicOp $
+              CmpOp (CmpSlt it) (intConst it 0) bound
+
+-- Produces a true subexpression if the pattern (as in a 'Case')
+-- matches the subexpression.
+matching ::
+  BuilderOps rep =>
+  [(SubExp, Maybe PrimValue)] ->
+  Builder rep SubExp
+matching = letSubExp "match" <=< eAll <=< sequence . mapMaybe cmp
+  where
+    cmp (se, Just (BoolValue True)) =
+      Just $ pure se
+    cmp (se, Just v) =
+      Just . letSubExp "match_val" . BasicOp $
+        CmpOp (CmpEq (primValueType v)) se (Constant v)
+    cmp (_, Nothing) = Nothing
+
+matchingExactlyThis ::
+  BuilderOps rep =>
+  [SubExp] ->
+  [[Maybe PrimValue]] ->
+  [Maybe PrimValue] ->
+  Builder rep SubExp
+matchingExactlyThis ses prior this = do
+  prior_matches <- mapM (matching . zip ses) prior
+  letSubExp "matching_just_this"
+    =<< eBinOp
+      LogAnd
+      (eUnOp Not (eAny prior_matches))
+      (eSubExp =<< matching (zip ses this))
+
+-- | We are willing to hoist potentially unsafe statements out of
+-- matches, but they must be protected by adding a branch on top of
+-- them.  (This means such hoisting is not worth it unless they are in
+-- turn hoisted out of a loop somewhere.)
+protectCaseHoisted ::
+  SimplifiableRep rep =>
+  -- | Scrutinee.
+  [SubExp] ->
+  -- | Pattern of previosu cases.
+  [[Maybe PrimValue]] ->
+  -- | Pattern of this case.
+  [Maybe PrimValue] ->
+  SimpleM rep (Stms (Wise rep), a) ->
+  SimpleM rep (Stms (Wise rep), a)
+protectCaseHoisted ses prior vs m = do
+  (hoisted, x) <- m
+  ops <- asks $ protectHoistedOpS . fst
+  hoisted' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) hoisted
+      then do
+        cond' <- matchingExactlyThis ses prior vs
+        mapM_ (protectIf ops unsafeOrCostly cond') hoisted
+      else addStms hoisted
+  pure (hoisted', x)
+  where
+    unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
 
 -- | Statements that are not worth hoisting out of loops, because they
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
@@ -781,6 +837,27 @@ simplifyExp ::
   Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
+simplifyExp usage (Pat pes) (Match ses cases def_body ifdec@(IfDec ts ifsort)) = do
+  let pes_usages = map (fromMaybe mempty . (`UT.lookup` usage) . patElemName) pes
+  ses' <- mapM simplify ses
+  ts' <- mapM simplify ts
+  let pats = map casePat cases
+  block <- matchBlocker ses ifdec
+  (cases_hoisted, cases') <-
+    unzip <$> zipWithM (simplifyCase block ses' pes_usages) (inits pats) cases
+  (def_body_hoisted, def_body') <-
+    protectCaseHoisted ses' pats [] $
+      simplifyBody block usage pes_usages def_body
+  pure
+    ( Match ses' cases' def_body' $ IfDec ts' ifsort,
+      mconcat $ def_body_hoisted : cases_hoisted
+    )
+  where
+    simplifyCase block ses' pes_usages prior (Case vs body) = do
+      (hoisted, body') <-
+        protectCaseHoisted ses' prior vs $
+          simplifyBody block usage pes_usages body
+      pure (hoisted, Case vs body')
 simplifyExp usage (Pat pes) (If cond tbranch fbranch ifdec@(IfDec ts ifsort)) = do
   let pes_usages = map (fromMaybe mempty . (`UT.lookup` usage) . patElemName) pes
   cond' <- simplify cond

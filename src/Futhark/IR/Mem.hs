@@ -1076,6 +1076,8 @@ expReturns (Apply _ _ ret _) =
   pure $ map funReturnsToExpReturns ret
 expReturns (If _ _ _ (IfDec ret _)) =
   pure $ map bodyReturnsToExpReturns ret
+expReturns (Match _ _ _ (IfDec ret _)) =
+  pure $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =
   opReturns op
 expReturns (WithAcc inputs lam) =

@@ -161,11 +161,6 @@ letValExp' :: String -> I.Exp SOACS -> InternaliseM [SubExp]
 letValExp' _ (BasicOp (SubExp se)) = pure [se]
 letValExp' name ses = map I.Var <$> letValExp name ses
 
-eValBody :: [InternaliseM (I.Exp SOACS)] -> InternaliseM (I.Body SOACS)
-eValBody es = buildBody_ $ do
-  es' <- sequence es
-  varsRes . concat <$> mapM (letValExp "x") es'
-
 internaliseAppExp :: String -> E.AppRes -> E.AppExp -> InternaliseM [I.SubExp]
 internaliseAppExp desc _ (E.Index e idxs loc) = do
   vs <- internaliseExpToVars "indexed" e
@@ -539,20 +534,15 @@ internaliseAppExp desc _ (E.Match e orig_cs _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
   cs <- mapM (onCase ses) orig_cs
   case NE.uncons cs of
-    (MatchCase _ body, Nothing) ->
+    ((_, body), Nothing) ->
       map resSubExp <$> bodyBind body
-    (c, Just cs') -> do
-      let MatchCase _ last_body = NE.last cs'
-      bFalse <- do
-        foldM (\bf c' -> eValBody $ pure $ generateCaseIf ses c' bf) last_body $
-          reverse $
-            NE.init cs'
-      letValExp' desc =<< generateCaseIf ses c bFalse
+    _ -> do
+      letValExp' desc =<< eMatch ses (NE.init cs) (snd $ NE.last cs)
   where
     onCase ses (E.CasePat p case_e _) = do
       (cmps, pertinent) <- generateCond p ses
       body <- internalisePat' [] p pertinent $ internaliseBody "case" case_e
-      pure $ MatchCase cmps body
+      pure (cmps, body)
 internaliseAppExp desc _ (E.If ce te fe _) =
   letValExp' desc
     =<< eIf
@@ -913,21 +903,6 @@ generateCond orig_p orig_ses = do
           pertinent1 <> pertinent2,
           ses''
         )
-
-data MatchCase = MatchCase [Maybe I.PrimValue] (I.Body SOACS)
-
-generateCaseIf ::
-  [SubExp] ->
-  MatchCase ->
-  I.Body SOACS ->
-  InternaliseM (I.Exp SOACS)
-generateCaseIf ses (MatchCase cmps body) bFail = do
-  let mkCmp (x, Just y) =
-        Just . letSubExp "match" . I.BasicOp $
-          I.CmpOp (I.CmpEq (I.primValueType y)) x (Constant y)
-      mkCmp _ = Nothing
-  cond <- letSubExp "matches" =<< eAll =<< sequence (mapMaybe mkCmp (zip ses cmps))
-  eIf (eSubExp cond) (pure body) (pure bFail)
 
 internalisePat ::
   String ->

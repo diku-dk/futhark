@@ -1014,6 +1014,22 @@ checkExp ::
   Exp (Aliases rep) ->
   TypeM rep ()
 checkExp (BasicOp op) = checkBasicOp op
+checkExp (Match ses cases def_case info) = do
+  ses_ts <- mapM checkSubExp ses
+  mapM_ (checkCase ses_ts) cases
+  checkCaseBody def_case
+  where
+    checkVal t (Just v) = Prim (primValueType v) == t
+    checkVal _ Nothing = True
+    checkCase ses_ts (Case vs body) = do
+      let ok = length vs == length ses_ts && and (zipWith checkVal ses_ts vs)
+      unless ok . bad . TypeError . pretty $
+        "Scrutinee"
+          </> indent 2 (ppTuple' ses)
+          </> "cannot match pattern"
+          </> indent 2 (ppTuple' vs)
+      context ("in body of case " <> prettyTuple vs) $ checkCaseBody body
+    checkCaseBody = matchBranchType (ifReturns info)
 checkExp (If e1 e2 e3 info) = do
   require [Prim Bool] e1
   _ <-

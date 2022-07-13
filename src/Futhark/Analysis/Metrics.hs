@@ -111,6 +111,11 @@ expMetrics (If _ tb fb _) =
   inside "If" $ do
     inside "True" $ bodyMetrics tb
     inside "False" $ bodyMetrics fb
+expMetrics (Match _ cases def_body _) =
+  inside "Match" $ do
+    forM_ (zip [0 ..] cases) $ \(i, c) ->
+      inside (T.pack (show (i :: Int))) $ bodyMetrics $ caseBody c
+    inside "default" $ bodyMetrics def_body
 expMetrics Apply {} =
   seen "Apply"
 expMetrics (WithAcc _ lam) =

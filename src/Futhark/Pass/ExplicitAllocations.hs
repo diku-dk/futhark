@@ -45,7 +45,9 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (foldl', zip5)
+import Data.Foldable (toList)
+import Data.List (foldl', zip4, zip5)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -552,6 +554,28 @@ ensureDirectArray space_ok v = do
       -- binding for the size of the memory block.
       allocLinearArray space (baseString v) v
 
+allocPermArray ::
+  (Allocable fromrep torep inner) =>
+  Space ->
+  [Int] ->
+  String ->
+  VName ->
+  AllocM fromrep torep (VName, VName)
+allocPermArray space perm s v = do
+  t <- lookupType v
+  case t of
+    Array pt shape u -> do
+      mem <- allocForArray t space
+      v' <- newVName $ s <> "_linear"
+      let info =
+            MemArray pt shape u . ArrayIn mem $
+              IxFun.permute (IxFun.iota $ map pe64 $ arrayDims t) perm
+          pat = Pat [PatElem v' info]
+      addStm $ Let pat (defAux ()) $ BasicOp $ Copy v
+      pure (mem, v')
+    _ ->
+      error $ "allocLinearArray: " ++ pretty t
+
 allocLinearArray ::
   (Allocable fromrep torep inner) =>
   Space ->
@@ -560,16 +584,8 @@ allocLinearArray ::
   AllocM fromrep torep (VName, VName)
 allocLinearArray space s v = do
   t <- lookupType v
-  case t of
-    Array pt shape u -> do
-      mem <- allocForArray t space
-      v' <- newVName $ s <> "_linear"
-      let ixfun = directIxFun pt shape u mem t
-          pat = Pat [PatElem v' ixfun]
-      addStm $ Let pat (defAux ()) $ BasicOp $ Copy v
-      pure (mem, v')
-    _ ->
-      error $ "allocLinearArray: " ++ pretty t
+  let perm = [0 .. arrayRank t - 1]
+  allocPermArray space perm s v
 
 funcallArgs ::
   (Allocable fromrep torep inner) =>
@@ -754,6 +770,112 @@ generalize (Just sp1, Just ixf1) (Just sp2, Just ixf2) =
       Nothing -> (Just sp1, Nothing)
 generalize (mbsp1, _) _ = (mbsp1, Nothing)
 
+numLMADs :: IxFun -> Int
+numLMADs = length . IxFun.ixfunLMADs
+
+ixFunPerm :: IxFun -> [Int]
+ixFunPerm = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
+
+ensureSpaceAndSingleLMAD ::
+  (Allocable fromrep torep inner) =>
+  Maybe (Space, [Int]) ->
+  SubExpRes ->
+  AllocM fromrep torep (SubExpRes, Space, [Int])
+ensureSpaceAndSingleLMAD desired r@(SubExpRes cs (Var v)) = do
+  v_info <- lookupMemInfo v
+  case v_info of
+    MemArray _ _ _ (ArrayIn mem ixfun) -> do
+      mem_info <- lookupMemInfo mem
+      let v_perm = ixFunPerm ixfun
+      case mem_info of
+        MemMem mem_space ->
+          if numLMADs ixfun > 1
+            || maybe False (/= mem_space) desired_space
+            || maybe False (/= v_perm) desired_perm
+            || not (IxFun.contiguous ixfun)
+            then do
+              let perm = fromMaybe v_perm desired_perm
+              (,mem_space,perm) . SubExpRes cs . Var . snd
+                <$> allocPermArray mem_space perm (baseString v) v
+            else pure (r, mem_space, v_perm)
+        _ -> error "ensureSpaceAndSingleLMAD: no memory info"
+    _ -> pure (r, DefaultSpace, [])
+  where
+    desired_space = fst <$> desired
+    desired_perm = snd <$> desired
+ensureSpaceAndSingleLMAD _ r = pure (r, DefaultSpace, [])
+
+caseBodyMemCtx ::
+  (Allocable fromrep torep inner) =>
+  SubExpRes ->
+  AllocM fromrep torep [(SubExpRes, MemInfo ExtSize u MemReturn)]
+caseBodyMemCtx (SubExpRes _ Constant {}) =
+  pure []
+caseBodyMemCtx (SubExpRes _ (Var v)) = do
+  info <- lookupMemInfo v
+  case info of
+    MemPrim {} -> pure []
+    MemAcc {} -> pure []
+    MemMem {} -> pure [] -- should not happen
+    MemArray _ _ _ (ArrayIn mem ixfun) -> do
+      mem_info <- lookupMemInfo mem
+      case mem_info of
+        MemMem space -> do
+          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ toList ixfun
+          pure $
+            (subExpRes $ Var mem, MemMem space)
+              : zip (subExpsRes ixfun_exts) (repeat $ MemPrim int64)
+        _ -> error $ "bodyMemCtx: not a memory block: " ++ pretty mem
+
+allocInCaseBody ::
+  (Allocable fromrep torep inner) =>
+  [ExtType] ->
+  [Maybe (Space, [Int])] ->
+  Body fromrep ->
+  AllocM fromrep torep (Body torep, ([BranchTypeMem], [(Space, [Int])]))
+allocInCaseBody rets spaces (Body _ stms res) = buildBody . allocInStms stms $ do
+  let offsets = scanl (+) 0 $ map numCtxNeeded rets
+      num_new_ctx = last offsets
+  (ctx, ctx_rets, res', res_rets, spaces') <-
+    foldM (helper num_new_ctx) ([], [], [], [], []) $
+      zip4 rets res spaces offsets
+  pure (ctx <> res', (ctx_rets <> res_rets, spaces'))
+  where
+    numCtxNeeded (Array _ shape _) =
+      -- Memory + offset + (basis,stride,rotate,size)*rank.
+      2 + 4 * shapeRank shape
+    numCtxNeeded _ = 0
+
+    helper
+      num_new_ctx
+      (ctx_acc, ctx_rets_acc, res_acc, res_rets_acc, spaces_acc)
+      (ifr, r, space_and_perm, ctx_offset) = do
+        (r', space, perm) <- ensureSpaceAndSingleLMAD space_and_perm r
+        (mem_ctx_ses, mem_ctx_rets) <- unzip <$> caseBodyMemCtx r'
+        let body_ret = inspect num_new_ctx ctx_offset ifr space perm
+        pure
+          ( ctx_acc ++ mem_ctx_ses,
+            ctx_rets_acc ++ mem_ctx_rets,
+            res_acc ++ [r'],
+            res_rets_acc ++ [body_ret],
+            spaces_acc ++ [(space, perm)]
+          )
+
+    inspect num_new_ctx k (Array pt shape u) space perm =
+      let shape' = fmap (adjustExt num_new_ctx) shape
+       in MemArray pt shape' u . ReturnsNewBlock space k $
+            convert <$> IxFun.existentialOfShape (shapeDims shape') perm (k + 1)
+    inspect _ _ (Acc acc ispace ts u) _ _ = MemAcc acc ispace ts u
+    inspect _ _ (Prim pt) _ _ = MemPrim pt
+    inspect _ _ (Mem space) _ _ = MemMem space
+
+    convert (Ext i) = le64 (Ext i)
+    convert (Free v) = Free <$> pe64 v
+
+    adjustExt :: Int -> Ext a -> Ext a
+    adjustExt _ (Free v) = Free v
+    adjustExt k (Ext i) = Ext (k + i)
+
 allocInExp ::
   (Allocable fromrep torep inner) =>
   Exp fromrep ->
@@ -774,6 +896,14 @@ allocInExp (Apply fname args rettype loc) = do
   where
     mems = replicate num_arrays (MemMem DefaultSpace)
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf) rettype
+allocInExp (Match ses cases def_body (IfDec rets ifsort)) = do
+  (def_body', (rets', spaces)) <-
+    allocInCaseBody rets (map (const Nothing) rets) def_body
+  cases' <- mapM (onCase spaces) cases
+  pure $ Match ses cases' def_body' $ IfDec rets' ifsort
+  where
+    onCase spaces (Case vs body) =
+      Case vs . fst <$> allocInCaseBody rets (map Just spaces) body
 allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
   -- switch to the explicit-mem rep, but do nothing about results
   (tbranch, tm_ixfs) <- allocInIfBody tbranch0

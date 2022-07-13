@@ -129,6 +129,9 @@ safeExp (Apply fname _ _ _) =
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . stmExp) (bodyStms tbranch)
     && all (safeExp . stmExp) (bodyStms fbranch)
+safeExp (Match _ cases def_case _) =
+  all (all (safeExp . stmExp) . bodyStms . caseBody) cases
+    && all (safeExp . stmExp) (bodyStms def_case)
 safeExp WithAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 

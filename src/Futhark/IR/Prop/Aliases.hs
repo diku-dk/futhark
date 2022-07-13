@@ -33,7 +33,7 @@ where
 
 import Data.Bifunctor (first, second)
 import qualified Data.Kind
-import Data.List (find)
+import Data.List (find, transpose)
 import qualified Data.Map as M
 import Futhark.IR.Prop (IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
@@ -81,11 +81,15 @@ basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
 
+matchAliases :: [([Names], Names)] -> [Names]
+matchAliases l =
+  map ((`namesSubtract` mconcat conses) . mconcat) $ transpose alses
+  where
+    (alses, conses) = unzip l
+
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1, cons1) (als2, cons2) =
-  map (`namesSubtract` cons) $ zipWith mappend als1 als2
-  where
-    cons = cons1 <> cons2
+  matchAliases [(als1, cons1), (als2, cons2)]
 
 funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
 funcallAliases args t =
@@ -101,6 +105,10 @@ expAliases (If _ tb fb dec) =
       ifAliases
         (bodyAliases tb, consumedInBody tb)
         (bodyAliases fb, consumedInBody fb)
+expAliases (Match _ cases def_body _) =
+  matchAliases $ onBody def_body : map (onBody . caseBody) cases
+  where
+    onBody body = (bodyAliases body, consumedInBody body)
 expAliases (BasicOp op) = basicOpAliases op
 expAliases (DoLoop merge _ loopbody) = do
   (p, als) <-
@@ -162,6 +170,8 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
+consumedInExp (Match _ cases def_body _) =
+  foldMap (consumedInBody . caseBody) cases <> consumedInBody def_body
 consumedInExp (DoLoop merge form body) =
   mconcat
     ( map (subExpAliases . snd) $

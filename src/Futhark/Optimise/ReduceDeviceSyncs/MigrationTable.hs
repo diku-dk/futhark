@@ -1019,6 +1019,10 @@ graphedScalarOperands e =
       mapM_ (collectSubExp . fst) params
     collect (If cond tbranch fbranch _) =
       collectSubExp cond >> collectBody tbranch >> collectBody fbranch
+    collect (Match ses cases def_body _) = do
+      mapM_ collectSubExp ses
+      mapM_ (collectBody . caseBody) cases
+      collectBody def_body
     collect (DoLoop params lform body) = do
       mapM_ (collectSubExp . snd) params
       collectLForm lform

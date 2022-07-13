@@ -293,6 +293,11 @@ unbalancedLambda orig_lam =
       cond
         `subExpBound` bound
         && (unbalancedBody bound tbranch || unbalancedBody bound fbranch)
+    unbalancedStm bound (Match ses cases def_body _) =
+      any (`subExpBound` bound) ses
+        && ( any (unbalancedBody bound . caseBody) cases
+               || unbalancedBody bound def_body
+           )
     unbalancedStm _ (BasicOp _) =
       False
     unbalancedStm _ (Apply fname _ _ _) =
@@ -364,6 +369,15 @@ transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb
   pure $ oneStm $ Let pat aux $ If c tb' fb' rt
+transformStm path (Let pat aux (Match ses cases def_body ret)) =
+  oneStm . Let pat aux
+    <$> ( Match ses
+            <$> mapM transformCase cases
+            <*> transformBody path def_body
+            <*> pure ret
+        )
+  where
+    transformCase (Case vs body) = Case vs <$> transformBody path body
 transformStm path (Let pat aux (WithAcc inputs lam)) =
   oneStm . Let pat aux
     <$> (WithAcc (map transformInput inputs) <$> transformLambda path lam)
