@@ -372,7 +372,7 @@ internaliseAppExp desc _ e@E.Apply {} =
               args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
               fst <$> funcall desc qfname args' loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
-  internalisePat desc sizes pat e body (internaliseExp desc)
+  internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
   error $ "Unexpected LetFun " ++ pretty ofname
 internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) = do
@@ -539,12 +539,12 @@ internaliseAppExp desc _ (E.Match e cs _) = do
   case NE.uncons cs of
     (CasePat pCase eCase _, Nothing) -> do
       (_, pertinent) <- generateCond pCase ses
-      internalisePat' [] pCase pertinent eCase (internaliseExp desc)
+      internalisePat' [] pCase pertinent (internaliseExp desc eCase)
     (c, Just cs') -> do
       let CasePat pLast eLast _ = NE.last cs'
       bFalse <- do
         (_, pertinent) <- generateCond pLast ses
-        eLast' <- internalisePat' [] pLast pertinent eLast (internaliseBody desc)
+        eLast' <- internalisePat' [] pLast pertinent (internaliseBody desc eLast)
         foldM (\bf c' -> eValBody $ pure $ generateCaseIf ses c' bf) eLast' $
           reverse $
             NE.init cs'
@@ -901,7 +901,7 @@ generateCond orig_p orig_ses = do
 generateCaseIf :: [I.SubExp] -> Case -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
 generateCaseIf ses (CasePat p eCase _) bFail = do
   (cond, pertinent) <- generateCond p ses
-  eCase' <- internalisePat' [] p pertinent eCase (internaliseBody "case")
+  eCase' <- internalisePat' [] p pertinent (internaliseBody "case" eCase)
   eIf (eSubExp cond) (pure eCase') (pure bFail)
 
 internalisePat ::
@@ -909,12 +909,11 @@ internalisePat ::
   [E.SizeBinder VName] ->
   E.Pat ->
   E.Exp ->
-  E.Exp ->
-  (E.Exp -> InternaliseM a) ->
+  InternaliseM a ->
   InternaliseM a
-internalisePat desc sizes p e body m = do
+internalisePat desc sizes p e m = do
   ses <- internaliseExp desc' e
-  internalisePat' sizes p ses body m
+  internalisePat' sizes p ses m
   where
     desc' = case S.toList $ E.patIdents p of
       [v] -> baseString $ E.identName v
@@ -924,16 +923,15 @@ internalisePat' ::
   [E.SizeBinder VName] ->
   E.Pat ->
   [I.SubExp] ->
-  E.Exp ->
-  (E.Exp -> InternaliseM a) ->
+  InternaliseM a ->
   InternaliseM a
-internalisePat' sizes p ses body m = do
+internalisePat' sizes p ses m = do
   ses_ts <- mapM subExpType ses
   stmPat p ses_ts $ \pat_names -> do
     bindExtSizes (AppRes (E.patternType p) (map E.sizeName sizes)) ses
     forM_ (zip pat_names ses) $ \(v, se) ->
       letBindNames [v] $ I.BasicOp $ I.SubExp se
-    m body
+    m
 
 internaliseSlice ::
   SrcLoc ->
