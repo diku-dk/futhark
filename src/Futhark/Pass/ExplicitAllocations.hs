@@ -45,7 +45,7 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (foldl', partition, zip5)
+import Data.List (foldl', zip5)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -789,25 +789,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
   (fbranch', frets) <- addResCtxInIfBody rets fbranch spaces fsubs
   if frets /= trets
     then error "In allocInExp, IF case: antiunification of then/else produce different ExtInFn!"
-    else do
-      -- above is a sanity check; implementation continues on else branch
-      let res_then = bodyResult tbranch'
-          res_else = bodyResult fbranch'
-          size_ext = length res_then - length trets
-          (ind_ses0, r_then_else) =
-            partition (\(r_then, r_else, _) -> r_then == r_else) $
-              zip3 res_then res_else [0 .. size_ext - 1]
-          (r_then_ext, r_else_ext, _) = unzip3 r_then_else
-          ind_ses =
-            zipWith
-              (\(se, _, i) k -> (i - k, se))
-              ind_ses0
-              [0 .. length ind_ses0 - 1]
-          rets'' = foldl (\acc (i, SubExpRes _ se) -> fixExt i se acc) trets ind_ses
-          tbranch'' = tbranch' {bodyResult = r_then_ext ++ drop size_ext res_then}
-          fbranch'' = fbranch' {bodyResult = r_else_ext ++ drop size_ext res_else}
-          res_if_expr = If cond tbranch'' fbranch'' $ IfDec rets'' ifsort
-      pure res_if_expr
+    else pure $ If cond tbranch' fbranch' $ IfDec trets ifsort
   where
     selectSub ::
       ((a, a) -> a) ->
