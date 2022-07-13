@@ -534,21 +534,24 @@ internaliseAppExp desc _ (E.LetWith name src idxs ve body loc) = do
     E.AppExp
       (E.LetPat [] pat e body loc)
       (Info (AppRes (E.typeOf body) mempty))
-internaliseAppExp desc _ (E.Match e cs _) = do
+internaliseAppExp desc _ (E.Match e orig_cs _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
+  cs <- mapM (onCase ses) orig_cs
   case NE.uncons cs of
-    (CasePat pCase eCase _, Nothing) -> do
-      (_, pertinent) <- generateCond pCase ses
+    (MatchCase (CasePat pCase eCase _) _ pertinent, Nothing) -> do
       internalisePat' [] pCase pertinent (internaliseExp desc eCase)
     (c, Just cs') -> do
-      let CasePat pLast eLast _ = NE.last cs'
+      let MatchCase (CasePat pLast eLast _) _ pertinent = NE.last cs'
       bFalse <- do
-        (_, pertinent) <- generateCond pLast ses
         eLast' <- internalisePat' [] pLast pertinent (internaliseBody desc eLast)
-        foldM (\bf c' -> eValBody $ pure $ generateCaseIf ses c' bf) eLast' $
+        foldM (\bf c' -> eValBody $ pure $ generateCaseIf c' bf) eLast' $
           reverse $
             NE.init cs'
-      letValExp' desc =<< generateCaseIf ses c bFalse
+      letValExp' desc =<< generateCaseIf c bFalse
+  where
+    onCase ses ecase@(E.CasePat p _ _) = do
+      (cmps, pertinent) <- generateCond p ses
+      pure $ MatchCase ecase cmps pertinent
 internaliseAppExp desc _ (E.If ce te fe _) =
   letValExp' desc
     =<< eIf
@@ -905,9 +908,10 @@ generateCond orig_p orig_ses = do
           ses''
         )
 
-generateCaseIf :: [I.SubExp] -> E.Case -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
-generateCaseIf ses (CasePat p eCase _) bFail = do
-  (cmps, pertinent) <- generateCond p ses
+data MatchCase = MatchCase E.Case [(I.SubExp, I.PrimValue)] [I.SubExp]
+
+generateCaseIf :: MatchCase -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
+generateCaseIf (MatchCase (E.CasePat p eCase _) cmps pertinent) bFail = do
   let mkCmp (x, y) =
         letSubExp "match" . I.BasicOp $
           I.CmpOp (I.CmpEq (I.primValueType y)) x (Constant y)
