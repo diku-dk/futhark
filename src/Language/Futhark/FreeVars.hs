@@ -11,7 +11,6 @@ where
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Futhark.IR.Pretty ()
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
 
