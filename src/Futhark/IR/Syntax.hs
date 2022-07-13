@@ -401,9 +401,7 @@ data BasicOp
     Replicate Shape SubExp
   | -- | Create array of given type and shape, with undefined elements.
     Scratch PrimType [SubExp]
-  | -- Array index space transformation.
-
-    -- | 1st arg is the new shape, 2nd arg is the input array.
+  | -- | 1st arg is the new shape, 2nd arg is the input array.
     Reshape (ShapeChange SubExp) VName
   | -- | Permute the dimensions of the input array.  The list
     -- of integers is a list of dimensions (0-indexed), which
