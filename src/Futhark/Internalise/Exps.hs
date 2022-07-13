@@ -9,10 +9,11 @@
 module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad.Reader
-import Data.List (find, intercalate, intersperse, transpose)
+import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
@@ -543,10 +544,10 @@ internaliseAppExp desc _ (E.Match e orig_cs _) = do
     (c, Just cs') -> do
       let MatchCase _ last_body = NE.last cs'
       bFalse <- do
-        foldM (\bf c' -> eValBody $ pure $ generateCaseIf c' bf) last_body $
+        foldM (\bf c' -> eValBody $ pure $ generateCaseIf ses c' bf) last_body $
           reverse $
             NE.init cs'
-      letValExp' desc =<< generateCaseIf c bFalse
+      letValExp' desc =<< generateCaseIf ses c bFalse
   where
     onCase ses (E.CasePat p case_e _) = do
       (cmps, pertinent) <- generateCond p ses
@@ -852,22 +853,27 @@ internalisePatLit l t =
 generateCond ::
   E.Pat ->
   [I.SubExp] ->
-  InternaliseM ([(I.SubExp, I.PrimValue)], [I.SubExp])
+  InternaliseM ([Maybe I.PrimValue], [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
   pure (cmps, pertinent)
   where
     compares (E.PatLit l (Info t) _) (se : ses) =
-      pure ([(se, internalisePatLit l t)], [se], ses)
-    compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se : ses) = do
+      pure ([Just $ internalisePatLit l t], [se], ses)
+    compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (_ : ses) = do
       (payload_ts, m) <- internaliseSumType $ M.map (map toStruct) fs
       case M.lookup c m of
-        Just (i, payload_is) -> do
+        Just (tag, payload_is) -> do
           let (payload_ses, ses') = splitAt (length payload_ts) ses
           (cmps, pertinent, _) <-
             comparesMany pats $ map (payload_ses !!) payload_is
+          let missingCmps i _ =
+                case i `elemIndex` payload_is of
+                  Just j -> cmps !! j
+                  Nothing -> Nothing
           pure
-            ( (se, I.IntValue $ intValue Int8 $ toInteger i) : cmps,
+            ( Just (I.IntValue $ intValue Int8 $ toInteger tag)
+                : zipWith missingCmps [0 ..] payload_ses,
               pertinent,
               ses'
             )
@@ -879,7 +885,7 @@ generateCond orig_p orig_ses = do
       compares (E.Wildcard t loc) ses
     compares (E.Wildcard (Info t) _) ses = do
       let (id_ses, rest_ses) = splitAt (internalisedTypeSize $ E.toStruct t) ses
-      pure ([], id_ses, rest_ses)
+      pure (map (const Nothing) id_ses, id_ses, rest_ses)
     compares (E.PatParens pat _) ses =
       compares pat ses
     compares (E.PatAttr _ pat _) ses =
@@ -908,14 +914,19 @@ generateCond orig_p orig_ses = do
           ses''
         )
 
-data MatchCase = MatchCase [(I.SubExp, I.PrimValue)] (I.Body SOACS)
+data MatchCase = MatchCase [Maybe I.PrimValue] (I.Body SOACS)
 
-generateCaseIf :: MatchCase -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
-generateCaseIf (MatchCase cmps body) bFail = do
-  let mkCmp (x, y) =
-        letSubExp "match" . I.BasicOp $
+generateCaseIf ::
+  [SubExp] ->
+  MatchCase ->
+  I.Body SOACS ->
+  InternaliseM (I.Exp SOACS)
+generateCaseIf ses (MatchCase cmps body) bFail = do
+  let mkCmp (x, Just y) =
+        Just . letSubExp "match" . I.BasicOp $
           I.CmpOp (I.CmpEq (I.primValueType y)) x (Constant y)
-  cond <- letSubExp "matches" =<< eAll =<< mapM mkCmp cmps
+      mkCmp _ = Nothing
+  cond <- letSubExp "matches" =<< eAll =<< sequence (mapMaybe mkCmp (zip ses cmps))
   eIf (eSubExp cond) (pure body) (pure bFail)
 
 internalisePat ::
