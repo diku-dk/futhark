@@ -194,8 +194,8 @@ maybeDivide dividend divisor
       Just $
         Prod
           (signum (dividend_scale `div` divisor_scale) < 0)
-          ( ValueExp (IntValue $ Int64Value $ dividend_scale `div` divisor_scale) :
-            (dividend_rest \\ divisor_rest)
+          ( ValueExp (IntValue $ Int64Value $ dividend_scale `div` divisor_scale)
+              : (dividend_rest \\ divisor_rest)
           )
   | otherwise = Nothing
 
@@ -242,8 +242,8 @@ removeLessThans =
     ( \sofp (i, bound) ->
         let to_remove =
               simplifySofP $
-                Prod True [primExpFromSubExp (IntType Int64) i] :
-                simplify0 bound
+                Prod True [primExpFromSubExp (IntType Int64) i]
+                  : simplify0 bound
          in case to_remove `intersect` sofp of
               to_remove' | to_remove' == to_remove -> sofp \\ to_remove
               _ -> sofp

@@ -119,7 +119,10 @@ benchResultJSON (BenchResult prog r) =
 benchResultJSON' :: BenchResult -> JSON.Series
 benchResultJSON' (BenchResult prog r) =
   JSON.pair (JSON.fromString prog) $
-    JSON.pairs $ JSON.pair "datasets" $ JSON.toEncoding $ DataResults r
+    JSON.pairs $
+      JSON.pair "datasets" $
+        JSON.toEncoding $
+          DataResults r
 
 instance JSON.ToJSON BenchResults where
   toJSON (BenchResults rs) =

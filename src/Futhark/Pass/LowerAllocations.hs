@@ -88,7 +88,8 @@ lowerAllocationsInStms (stm :<| stms) alloc acc = do
 
 insertLoweredAllocs :: Names -> M.Map VName (Stm rep) -> Stms rep -> (M.Map VName (Stm rep), Stms rep)
 insertLoweredAllocs frees alloc acc =
-  frees `namesIntersection` namesFromList (M.keys alloc)
+  frees
+    `namesIntersection` namesFromList (M.keys alloc)
     & namesToList
     & foldl
       ( \(alloc', acc') name ->

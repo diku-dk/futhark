@@ -1925,8 +1925,8 @@ sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
     else the_copy
   where
     the_copy =
-      emit $
-        Imp.Copy
+      emit
+        $ Imp.Copy
           pt
           destmem
           (bytes destoffset)
@@ -1934,7 +1934,7 @@ sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
           srcmem
           (bytes srcoffset)
           srcspace
-          $ num_elems `withElemType` pt
+        $ num_elems `withElemType` pt
 
 -- | Untyped assignment.
 (<~~) :: VName -> Imp.Exp -> ImpM rep r op ()

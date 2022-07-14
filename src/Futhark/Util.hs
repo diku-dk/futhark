@@ -599,4 +599,3 @@ partitionM f = helper ([], [])
       if res
         then helper (x : acct, accf) xs
         else helper (acct, x : accf) xs
-

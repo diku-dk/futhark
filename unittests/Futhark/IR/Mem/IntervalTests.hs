@@ -64,5 +64,5 @@ testDistributeOffset =
              Interval 0 32 1
            ]
         @? "Failed. Got "
-        <> pretty res
+          <> pretty res
   ]

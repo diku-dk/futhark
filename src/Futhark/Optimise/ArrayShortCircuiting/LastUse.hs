@@ -86,7 +86,8 @@ lastUseBody bdy@(Body _ stms result) (lutab, used_nms) = do
   (lutab', _) <-
     lastUseStms stms (lutab, used_nms) $
       namesToList $
-        freeIn $ map resSubExp result
+        freeIn $
+          map resSubExp result
   -- Clean up the used names by recomputing the aliasing transitive-closure
   -- of the free names in body based on the current alias table @alstab@.
   used_in_body <- aliasTransitiveClosure $ freeIn bdy
@@ -257,7 +258,6 @@ lastUseGPUOp (Inner (GPUBody tps body)) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
   pure (body_lutab, lu_vars, used_nms' <> used_nms'')
-
 
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do

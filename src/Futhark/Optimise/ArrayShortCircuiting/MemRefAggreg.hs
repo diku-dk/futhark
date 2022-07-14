@@ -229,15 +229,16 @@ recordMemRefUses td_env bu_env stm =
           -- the others must be recorded in @inhibit_tab@ because
           -- they violate the 3rd safety condition.
           let active_tab1 =
-                M.fromList $
-                  map
+                M.fromList
+                  $ map
                     ( \(wrts, (uses, prev_use, (k, etry))) ->
                         let mrefs' = (memrefs etry) {dstrefs = prev_use}
                             etry' = etry {memrefs = mrefs'}
                          in (k, addLmads wrts uses etry')
                     )
-                    $ filter (isJust . fst) $
-                      zip mb_wrts $ zip3 mb_lmads prev_uses active_etries
+                  $ filter (isJust . fst)
+                  $ zip mb_wrts
+                  $ zip3 mb_lmads prev_uses active_etries
               failed_tab =
                 M.fromList $
                   map snd $

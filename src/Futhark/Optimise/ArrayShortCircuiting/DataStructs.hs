@@ -225,11 +225,17 @@ instance Pretty Coalesced where
 
 instance Pretty CoalsEntry where
   ppr etry =
-    "{" <+/> "Dstmem:" <+> ppr (dstmem etry)
-      <> ", AliasMems:" <+> ppr (alsmem etry)
-      <+/> ", optdeps:" <+> ppr (optdeps etry)
-      <+/> ", memrefs:" <+> ppr (memrefs etry)
-      <+/> ", vartab:" <+> ppr (vartab etry)
+    "{"
+      <+/> "Dstmem:"
+      <+> ppr (dstmem etry)
+        <> ", AliasMems:"
+      <+> ppr (alsmem etry)
+      <+/> ", optdeps:"
+      <+> ppr (optdeps etry)
+      <+/> ", memrefs:"
+      <+> ppr (memrefs etry)
+      <+/> ", vartab:"
+      <+> ppr (vartab etry)
       <+/> "}"
       <+/> "\n"
 

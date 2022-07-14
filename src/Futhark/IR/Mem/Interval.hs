@@ -226,11 +226,13 @@ primExpToZ3 _ (ValueExp (FloatValue v)) = mkRealNum $ valueRational v
 primExpToZ3 _ (ValueExp (BoolValue b)) = mkBool b
 primExpToZ3 var_table (BinOpExp bop e1 e2) =
   join $
-    binOpToZ3 bop <$> primExpToZ3 var_table e1
+    binOpToZ3 bop
+      <$> primExpToZ3 var_table e1
       <*> primExpToZ3 var_table e2
 primExpToZ3 var_table (CmpOpExp cop e1 e2) =
   join $
-    cmpOpToZ3 cop <$> primExpToZ3 var_table e1
+    cmpOpToZ3 cop
+      <$> primExpToZ3 var_table e1
       <*> primExpToZ3 var_table e2
 primExpToZ3 var_table (ConvOpExp c e) = convOpToZ3 c =<< primExpToZ3 var_table e
 primExpToZ3 var_table (UnOpExp u e) = unOpToZ3 u =<< primExpToZ3 var_table e

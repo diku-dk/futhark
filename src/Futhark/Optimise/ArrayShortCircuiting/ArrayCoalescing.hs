@@ -205,8 +205,8 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_b
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
   bu_env'' <- shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env'
-  pure $
-    foldl
+  pure
+    $ foldl
       ( \acc (PatElem p _, hist_dest) ->
           case ( getScopeMemInfo p $ scope td_env,
                  getScopeMemInfo hist_dest $ scope td_env
@@ -224,12 +224,12 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_b
             _ -> acc
       )
       bu_env''
-      $ zip (patElems pat) $ concatMap histDest histops
+    $ zip (patElems pat)
+    $ concatMap histDest histops
 shortCircuitGPUMem lutab _ (Inner (GPUBody _ body)) td_env bu_env = do
   mkCoalsTabStms lutab (bodyStms body) td_env bu_env
 shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = pure bu_env
 shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = pure bu_env
-
 
 dropLastSegSpace :: SegSpace -> SegSpace
 dropLastSegSpace space = space {unSegSpace = init $ unSegSpace space}
@@ -257,17 +257,17 @@ threadSlice space (RegTileReturns _ dims _) =
 
   -- O[x*(Ty_6278*Ry_6279):(x+1)*(Ty_6278*Ry_6279),
   --   y*(Tx_6280 * Rx_6281):(y+1)*(Tx_6280 * Rx_6281)]
-  Just $
-    Slice $
-      zipWith
-        ( \(_, block_tile_size0, reg_tile_size0) (x0, _) ->
-            let x = pe64 $ Var x0
-                block_tile_size = pe64 block_tile_size0
-                reg_tile_size = pe64 reg_tile_size0
-             in DimSlice (x * block_tile_size * reg_tile_size) (block_tile_size * reg_tile_size) 1
-        )
-        dims
-        $ unSegSpace space
+  Just
+    $ Slice
+    $ zipWith
+      ( \(_, block_tile_size0, reg_tile_size0) (x0, _) ->
+          let x = pe64 $ Var x0
+              block_tile_size = pe64 block_tile_size0
+              reg_tile_size = pe64 reg_tile_size0
+           in DimSlice (x * block_tile_size * reg_tile_size) (block_tile_size * reg_tile_size) 1
+      )
+      dims
+    $ unSegSpace space
 threadSlice _ _ = Nothing
 
 -- | A helper for all the different kinds of 'SegOp'.
@@ -742,7 +742,8 @@ mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
                   info
                     { optdeps =
                         M.insert r2 mr2 $
-                          M.insert r1 mr1 $ optdeps info
+                          M.insert r1 mr1 $
+                            optdeps info
                     }
                 (act', succc') = markSuccessCoal (act, succc) m_b info'
              in ((act', inhb), succc')
@@ -1039,7 +1040,8 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       let wrt_i = (srcwrts . memrefs) etry
       use_p <-
         aggSummaryLoopPartial (scope td_env) scope_loop (scal_tab <> scalarTable td_env) idx $
-          dstrefs $ memrefs etry
+          dstrefs $
+            memrefs etry
       liftIO $ noMemOverlap td_env' wrt_i use_p
     loopSoundness2Entry :: CoalsTab -> VName -> CoalsEntry -> IO Bool
     loopSoundness2Entry old_actv m_b etry =
@@ -1556,8 +1558,11 @@ computeScalarTableGPUMem scope_table (Inner (SegOp segop)) = do
       (stmsToList $ kernelBodyStms $ segBody segop)
 computeScalarTableGPUMem _ (Inner (SizeOp _)) = pure mempty
 computeScalarTableGPUMem _ (Inner (OtherOp ())) = pure mempty
-computeScalarTableGPUMem scope_table (Inner (GPUBody _ body)) = mconcat <$> mapM (computeScalarTable $ scope_table <> scopeOf (bodyStms body))
-  (stmsToList $ bodyStms body)
+computeScalarTableGPUMem scope_table (Inner (GPUBody _ body)) =
+  mconcat
+    <$> mapM
+      (computeScalarTable $ scope_table <> scopeOf (bodyStms body))
+      (stmsToList $ bodyStms body)
 
 filterMapM1 :: (Eq k, Monad m) => (v -> m Bool) -> M.Map k v -> m (M.Map k v)
 filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
