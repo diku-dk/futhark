@@ -750,8 +750,9 @@ tileReturns dims_on_top dims arr = do
     if null dims_on_top || null (arrayDims arr_t) -- Second check is for accumulators.
       then pure arr
       else do
-        let new_shape = unit_dims ++ arrayDims arr_t
-        letExp (baseString arr) $ BasicOp $ Reshape (map DimNew new_shape) arr
+        let new_shape = Shape $ unit_dims ++ arrayDims arr_t
+        letExp (baseString arr) . BasicOp $
+          Reshape ReshapeArbitrary new_shape arr
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
   pure $ TileReturns mempty tile_dims arr'
 

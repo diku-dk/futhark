@@ -132,8 +132,7 @@ module Futhark.IR.Syntax
     CmpOp (..),
     ConvOp (..),
     OpaqueOp (..),
-    DimChange (..),
-    ShapeChange,
+    ReshapeKind (..),
     WithAccInput,
     Exp (..),
     LoopForm (..),
@@ -298,46 +297,20 @@ deriving instance RepTypes rep => Show (Body rep)
 
 deriving instance RepTypes rep => Eq (Body rep)
 
--- | The new dimension in a 'Reshape'-like operation.  This allows us to
--- disambiguate "real" reshapes, that change the actual shape of the
--- array, from type coercions that are just present to make the types
--- work out.  The two constructors are considered equal for purposes of 'Eq'.
-data DimChange d
-  = -- | The new dimension is guaranteed to be numerically
-    -- equal to the old one.
-    DimCoercion d
-  | -- | The new dimension is not necessarily numerically
-    -- equal to the old one.
-    DimNew d
-  deriving (Ord, Show)
-
-instance Eq d => Eq (DimChange d) where
-  DimCoercion x == DimNew y = x == y
-  DimCoercion x == DimCoercion y = x == y
-  DimNew x == DimCoercion y = x == y
-  DimNew x == DimNew y = x == y
-
-instance Functor DimChange where
-  fmap f (DimCoercion d) = DimCoercion $ f d
-  fmap f (DimNew d) = DimNew $ f d
-
-instance Foldable DimChange where
-  foldMap f (DimCoercion d) = f d
-  foldMap f (DimNew d) = f d
-
-instance Traversable DimChange where
-  traverse f (DimCoercion d) = DimCoercion <$> f d
-  traverse f (DimNew d) = DimNew <$> f d
-
--- | A list of 'DimChange's, indicating the new dimensions of an array.
-type ShapeChange d = [DimChange d]
-
 -- | Apart from being Opaque, what else is going on here?
 data OpaqueOp
   = -- | No special operation.
     OpaqueNil
   | -- | Print the argument, prefixed by this string.
     OpaqueTrace String
+  deriving (Eq, Ord, Show)
+
+-- | Which kind of reshape is this?
+data ReshapeKind
+  = -- | Any kind of reshaping.
+    ReshapeCoerce
+  | -- | New shape is dynamically same as original.
+    ReshapeArbitrary
   deriving (Eq, Ord, Show)
 
 -- | A primitive operation that returns something of known size and
@@ -402,7 +375,7 @@ data BasicOp
   | -- | Create array of given type and shape, with undefined elements.
     Scratch PrimType [SubExp]
   | -- | 1st arg is the new shape, 2nd arg is the input array.
-    Reshape (ShapeChange SubExp) VName
+    Reshape ReshapeKind Shape VName
   | -- | Permute the dimensions of the input array.  The list
     -- of integers is a list of dimensions (0-indexed), which
     -- must be a permutation of @[0,n-1]@, where @n@ is the

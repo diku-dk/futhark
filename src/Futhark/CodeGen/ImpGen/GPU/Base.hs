@@ -511,7 +511,7 @@ flattenArray k flat arr = do
   let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
   sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
     IxFun.reshape (memLocIxFun arr_loc) $
-      map (DimNew . pe64) $
+      map pe64 $
         shapeDims flat_shape
 
 -- | @applyLambda lam dests args@ emits code that:

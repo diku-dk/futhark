@@ -531,11 +531,9 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
           offset_ixfun =
             IxFun.slice root_ixfun . Slice $
               [DimSlice 0 num_threads' 1, DimFix gtid]
-          shapechange =
-            if length old_shape == 1
-              then map DimCoercion old_shape
-              else map DimNew old_shape
-       in IxFun.reshape offset_ixfun shapechange
+       in if length old_shape == 1
+            then IxFun.coerce offset_ixfun old_shape
+            else IxFun.reshape offset_ixfun old_shape
 
 -- | A map from memory block names to new index function bases.
 type RebaseMap = M.Map VName (([TPrimExp Int64 VName], PrimType) -> IxFun)

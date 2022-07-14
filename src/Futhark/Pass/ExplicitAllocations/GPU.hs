@@ -126,7 +126,7 @@ mapResultHint lvl space = hint
     hint Prim {} (ConcatReturns _ SplitContiguous w elems_per_thread _) = do
       let ixfun_base = IxFun.iota [sExt64 num_threads, pe64 elems_per_thread]
           ixfun_tr = IxFun.permute ixfun_base [1, 0]
-          ixfun = IxFun.reshape ixfun_tr $ map (DimNew . pe64) [w]
+          ixfun = IxFun.reshape ixfun_tr [pe64 w]
       pure $ Hint ixfun DefaultSpace
     hint _ _ = pure NoHint
 

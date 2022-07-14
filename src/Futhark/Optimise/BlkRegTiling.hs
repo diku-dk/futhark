@@ -634,8 +634,9 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
               epilogue_t <- lookupType epilogue_res
               let (block_dims, rest_dims) = splitAt 2 $ arrayDims epilogue_t
                   ones = map (const $ intConst Int64 1) rem_outer_dims
-                  new_shape = concat [ones, block_dims, ones, rest_dims]
-              letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) epilogue_res
+                  new_shape = Shape $ concat [ones, block_dims, ones, rest_dims]
+              letExp "res_reshaped" . BasicOp $
+                Reshape ReshapeArbitrary new_shape epilogue_res
         pure [RegTileReturns mempty regtile_ret_dims epilogue_res']
 mmBlkRegTilingNrm _ _ = pure Nothing
 
@@ -1279,8 +1280,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                 res_tp' <- lookupType res
                 let (block_dims, rest_dims) = splitAt 2 $ arrayDims res_tp'
                     ones = map (const se1) rem_outer_dims
-                    new_shape = concat [ones, block_dims, ones, rest_dims]
-                letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res
+                    new_shape = Shape $ concat [ones, block_dims, ones, rest_dims]
+                letExp "res_reshaped" . BasicOp $
+                  Reshape ReshapeArbitrary new_shape res
 
           pure $ map (RegTileReturns mempty regtile_ret_dims) epilogue_res'
         -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do

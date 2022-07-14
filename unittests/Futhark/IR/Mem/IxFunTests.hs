@@ -149,7 +149,7 @@ test_reshape_slice_iota1 =
       compareOps $
         reshape
           (slice (iota [n, n, n]) slice3)
-          [DimNew (n `P.div` 2), DimNew (n `P.div` 3)]
+          [n `P.div` 2, n `P.div` 3]
 
 test_permute_slice_iota :: [TestTree]
 test_permute_slice_iota =
@@ -256,7 +256,7 @@ test_reshape_rotate_iota =
   singleton $
     testCase "reshape . rotate . iota" $
       compareOps $
-        let newdims = [DimNew (n * n), DimCoercion n]
+        let newdims = [n * n, n]
          in reshape (rotate (iota [n, n, n]) [1, 0, 0]) newdims
 
 test_reshape_permute_iota :: [TestTree]
@@ -265,7 +265,7 @@ test_reshape_permute_iota =
   singleton $
     testCase "reshape . permute . iota" $
       compareOps $
-        let newdims = [DimNew (n * n), DimCoercion n]
+        let newdims = [n * n, n]
          in reshape (permute (iota [n, n, n]) [1, 2, 0]) newdims
 
 test_reshape_slice_iota2 :: [TestTree]
@@ -274,7 +274,7 @@ test_reshape_slice_iota2 =
   singleton $
     testCase "reshape . slice . iota 2" $
       compareOps $
-        let newdims = [DimNew (n * n), DimCoercion n]
+        let newdims = [n * n, n]
             slc =
               Slice
                 [ DimFix (n `P.div` 2),
@@ -290,7 +290,7 @@ test_reshape_slice_iota3 =
   singleton $
     testCase "reshape . slice . iota 3" $
       compareOps $
-        let newdims = [DimNew (n * n), DimCoercion n]
+        let newdims = [n * n, n]
             slc =
               Slice
                 [ DimFix (n `P.div` 2),
@@ -306,10 +306,10 @@ test_complex1 =
     testCase "reshape . permute . rotate . slice . permute . slice . iota 1" $
       compareOps $
         let newdims =
-              [ DimCoercion n,
-                DimCoercion n,
-                DimNew n,
-                DimCoercion ((n `P.div` 3) - 2)
+              [ n,
+                n,
+                n,
+                (n `P.div` 3) - 2
               ]
             slice33 =
               Slice
@@ -336,9 +336,9 @@ test_complex2 =
     testCase "reshape . permute . rotate . slice . permute . slice . iota 2" $
       compareOps $
         let newdims =
-              [ DimCoercion n,
-                DimNew (n * n),
-                DimCoercion ((n `P.div` 3) - 2)
+              [ n,
+                n * n,
+                (n `P.div` 3) - 2
               ]
             slc2 =
               Slice

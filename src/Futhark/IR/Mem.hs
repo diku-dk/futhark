@@ -1006,16 +1006,18 @@ expReturns (BasicOp (SubExp se)) =
   pure <$> subExpReturns se
 expReturns (BasicOp (Opaque _ (Var v))) =
   pure <$> varReturns v
-expReturns (BasicOp (Reshape newshape v)) = do
+expReturns (BasicOp (Reshape k newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   pure
-    [ MemArray et (Shape $ map (Free . newDim) newshape) NoUniqueness $
-        Just $
-          ReturnsInBlock mem $
-            existentialiseIxFun [] $
-              IxFun.reshape ixfun $
-                map (fmap pe64) newshape
+    [ MemArray et (fmap Free newshape) NoUniqueness $
+        Just . ReturnsInBlock mem . existentialiseIxFun [] $
+          reshaper ixfun $
+            map pe64 (shapeDims newshape)
     ]
+  where
+    reshaper = case k of
+      ReshapeArbitrary -> IxFun.reshape
+      ReshapeCoerce -> IxFun.coerce
 expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm

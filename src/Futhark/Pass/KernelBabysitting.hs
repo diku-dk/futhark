@@ -65,7 +65,7 @@ nonlinearInMemory name m =
   case M.lookup name m of
     Just (Let _ _ (BasicOp (Opaque _ (Var arr)))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just $ rearrangeInverse perm
-    Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
+    Just (Let _ _ (BasicOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
     Just (Let pat _ (Op (SegOp (SegMap _ _ ts _)))) ->
       nonlinear
@@ -474,12 +474,10 @@ rearrangeSlice d w num_chunks arr = do
       let arr_shape = arrayShape arr_t
           padding_shape = setDim d arr_shape padding
       arr_padding <-
-        letExp (baseString arr <> "_padding") $
-          BasicOp $
-            Scratch (elemType arr_t) (shapeDims padding_shape)
-      letExp (baseString arr <> "_padded") $
-        BasicOp $
-          Concat d (arr :| [arr_padding]) w_padded
+        letExp (baseString arr <> "_padding") . BasicOp $
+          Scratch (elemType arr_t) (shapeDims padding_shape)
+      letExp (baseString arr <> "_padded") . BasicOp $
+        Concat d (arr :| [arr_padding]) w_padded
 
     rearrange num_chunks' w_padded per_chunk arr_name arr_padded arr_t = do
       let arr_dims = arrayDims arr_t
@@ -488,19 +486,17 @@ rearrangeSlice d w num_chunks arr = do
           extradim_shape = Shape $ pre_dims ++ [num_chunks', per_chunk] ++ post_dims
           tr_perm = [0 .. d - 1] ++ map (+ d) ([1] ++ [2 .. shapeRank extradim_shape - 1 - d] ++ [0])
       arr_extradim <-
-        letExp (arr_name <> "_extradim") $
-          BasicOp $
-            Reshape (map DimNew $ shapeDims extradim_shape) arr_padded
+        letExp (arr_name <> "_extradim") . BasicOp $
+          Reshape ReshapeArbitrary extradim_shape arr_padded
       arr_extradim_tr <-
-        letExp (arr_name <> "_extradim_tr") $
-          BasicOp $
-            Manifest tr_perm arr_extradim
+        letExp (arr_name <> "_extradim_tr") . BasicOp $
+          Manifest tr_perm arr_extradim
       arr_inv_tr <-
-        letExp (arr_name <> "_inv_tr") $
-          BasicOp $
-            Reshape
-              (map DimCoercion pre_dims ++ map DimNew (w_padded : post_dims))
-              arr_extradim_tr
+        letExp (arr_name <> "_inv_tr") . BasicOp $
+          Reshape
+            ReshapeArbitrary
+            (Shape $ pre_dims ++ w_padded : post_dims)
+            arr_extradim_tr
       letExp (arr_name <> "_inv_tr_init")
         =<< eSliceArray d arr_inv_tr (eSubExp $ constant (0 :: Int64)) (eSubExp w)
 

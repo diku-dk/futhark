@@ -484,15 +484,12 @@ removeDuplicateMapOutput _ _ _ _ = Skip
 -- Mapping some operations becomes an extension of that operation.
 mapOpToOp :: BottomUpRuleOp (Wise SOACS)
 mapOpToOp (_, used) pat aux1 e
-  | Just (map_pe, cs, w, BasicOp (Reshape newshape reshape_arr), [p], [arr]) <-
+  | Just (map_pe, cs, w, BasicOp (Reshape k newshape reshape_arr), [p], [arr]) <-
       isMapWithOp pat e,
     paramName p == reshape_arr,
     not $ UT.isConsumed (patElemName map_pe) used = Simplify $ do
-      let redim
-            | isJust $ shapeCoercion newshape = DimCoercion w
-            | otherwise = DimNew w
       certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
-        Reshape (redim : newshape) arr
+        Reshape k (Shape [w] <> newshape) arr
   | Just (_, cs, _, BasicOp (Concat d (arr :| arrs) dw), ps, outer_arr : outer_arrs) <-
       isMapWithOp pat e,
     (arr : arrs) == map paramName ps =
@@ -628,8 +625,7 @@ fuseConcatScatter vtable pat _ (Scatter _ arrs fun dests)
         y_ws <- mapM sizeOf ys
         guard $ all (x_w ==) y_ws
         pure (x_w, x : ys, cs)
-      Just (BasicOp (Reshape reshape arr), cs) -> do
-        guard $ isJust $ shapeCoercion reshape
+      Just (BasicOp (Reshape ReshapeCoerce _ arr), cs) -> do
         (a, b, cs') <- isConcat arr
         pure (a, b, cs <> cs')
       _ -> Nothing
@@ -710,7 +706,7 @@ data ArrayOp
   = ArrayIndexing Certs VName (Slice SubExp)
   | ArrayRearrange Certs VName [Int]
   | ArrayRotate Certs VName [SubExp]
-  | ArrayReshape Certs VName (ShapeChange SubExp)
+  | ArrayReshape Certs VName ReshapeKind Shape
   | ArrayCopy Certs VName
   | -- | Never constructed.
     ArrayVar Certs VName
@@ -720,7 +716,7 @@ arrayOpArr :: ArrayOp -> VName
 arrayOpArr (ArrayIndexing _ arr _) = arr
 arrayOpArr (ArrayRearrange _ arr _) = arr
 arrayOpArr (ArrayRotate _ arr _) = arr
-arrayOpArr (ArrayReshape _ arr _) = arr
+arrayOpArr (ArrayReshape _ arr _ _) = arr
 arrayOpArr (ArrayCopy _ arr) = arr
 arrayOpArr (ArrayVar _ arr) = arr
 
@@ -728,7 +724,7 @@ arrayOpCerts :: ArrayOp -> Certs
 arrayOpCerts (ArrayIndexing cs _ _) = cs
 arrayOpCerts (ArrayRearrange cs _ _) = cs
 arrayOpCerts (ArrayRotate cs _ _) = cs
-arrayOpCerts (ArrayReshape cs _ _) = cs
+arrayOpCerts (ArrayReshape cs _ _ _) = cs
 arrayOpCerts (ArrayCopy cs _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
@@ -739,8 +735,8 @@ isArrayOp cs (BasicOp (Rearrange perm arr)) =
   Just $ ArrayRearrange cs arr perm
 isArrayOp cs (BasicOp (Rotate rots arr)) =
   Just $ ArrayRotate cs arr rots
-isArrayOp cs (BasicOp (Reshape new_shape arr)) =
-  Just $ ArrayReshape cs arr new_shape
+isArrayOp cs (BasicOp (Reshape k new_shape arr)) =
+  Just $ ArrayReshape cs arr k new_shape
 isArrayOp cs (BasicOp (Copy arr)) =
   Just $ ArrayCopy cs arr
 isArrayOp _ _ =
@@ -750,7 +746,7 @@ fromArrayOp :: ArrayOp -> (Certs, Exp rep)
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
-fromArrayOp (ArrayReshape cs arr new_shape) = (cs, BasicOp $ Reshape new_shape arr)
+fromArrayOp (ArrayReshape cs arr k new_shape) = (cs, BasicOp $ Reshape k new_shape arr)
 fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Copy arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
@@ -949,7 +945,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
     arrayIsMapParam (_, ArrayRotate cs arr rots) =
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn rots)
-    arrayIsMapParam (_, ArrayReshape cs arr new_shape) =
+    arrayIsMapParam (_, ArrayReshape cs arr _ new_shape) =
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn new_shape)
     arrayIsMapParam (_, ArrayCopy cs arr) =
@@ -972,8 +968,8 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
                   BasicOp $ Rearrange (0 : map (+ 1) perm) arr
                 ArrayRotate _ _ rots ->
                   BasicOp $ Rotate (intConst Int64 0 : rots) arr
-                ArrayReshape _ _ new_shape ->
-                  BasicOp $ Reshape (DimCoercion w : new_shape) arr
+                ArrayReshape _ _ k new_shape ->
+                  BasicOp $ Reshape k (Shape [w] <> new_shape) arr
                 ArrayCopy {} ->
                   BasicOp $ Copy arr
                 ArrayVar {} ->

@@ -183,9 +183,6 @@ instance Substitute Ident where
         identType = substituteNames substs $ identType v
       }
 
-instance Substitute d => Substitute (DimChange d) where
-  substituteNames substs = fmap $ substituteNames substs
-
 instance Substitute d => Substitute (DimIndex d) where
   substituteNames substs = fmap $ substituteNames substs
 

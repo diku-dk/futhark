@@ -746,16 +746,16 @@ fixupInputs inpIds inps =
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pullReshape (SOAC.Screma _ form inps) ots
   | Just maplam <- Futhark.isMapSOAC form,
-    SOAC.Reshape cs shape SOAC.:< ots' <- SOAC.viewf ots,
+    SOAC.Reshape cs k shape SOAC.:< ots' <- SOAC.viewf ots,
     all primType $ lambdaReturnType maplam = do
-      let mapw' = case reverse $ newDims shape of
+      let mapw' = case reverse $ shapeDims shape of
             [] -> intConst Int64 0
             d : _ -> d
           trInput inp
             | arrayRank (SOAC.inputType inp) == 1 =
-                SOAC.addTransform (SOAC.Reshape cs shape) inp
+                SOAC.addTransform (SOAC.Reshape cs k shape) inp
             | otherwise =
-                SOAC.addTransform (SOAC.ReshapeOuter cs shape) inp
+                SOAC.addTransform (SOAC.ReshapeOuter cs k shape) inp
           inputs' = map trInput inps
           inputTypes = map SOAC.inputType inputs'
 
@@ -784,12 +784,9 @@ pullReshape (SOAC.Screma _ form inps) ots
 
       op' <-
         foldM outersoac (SOAC.Screma mapw' $ Futhark.mapSOAC maplam) $
-          zip (drop 1 $ reverse $ newDims shape) $
-            drop 1 $
-              reverse $
-                drop 1 $
-                  tails $
-                    newDims shape
+          zip (drop 1 $ reverse $ shapeDims shape) $
+            drop 1 . reverse . drop 1 . tails $
+              shapeDims shape
       pure (op' inputs', ots')
 pullReshape _ _ = fail "Cannot pull reshape"
 
