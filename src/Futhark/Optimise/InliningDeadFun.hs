@@ -59,10 +59,12 @@ inlineFunctions ::
   Prog SOACS ->
   m (Prog SOACS)
 inlineFunctions simplify_rate cg what_should_be_inlined prog = do
-  let Prog consts funs = prog
+  let consts = progConsts prog
+      funs = progFuns prog
       vtable = ST.fromScope (addScopeWisdom (scopeOf consts))
 
-  uncurry Prog <$> recurse (1, vtable) (consts, funs) what_should_be_inlined
+  (consts', funs') <- recurse (1, vtable) (consts, funs) what_should_be_inlined
+  pure $ prog {progConsts = consts', progFuns = funs'}
   where
     fdmap fds = M.fromList $ zip (map funDefName fds) fds
 
@@ -112,8 +114,10 @@ inlineBecauseTiny :: Prog SOACS -> S.Set Name
 inlineBecauseTiny = foldMap onFunDef . progFuns
   where
     onFunDef fd
-      | length (bodyStms (funDefBody fd)) < 2
-          || "inline" `inAttrs` funDefAttrs fd =
+      | length (bodyStms (funDefBody fd))
+          < 2
+          || "inline"
+          `inAttrs` funDefAttrs fd =
           S.singleton (funDefName fd)
       | otherwise = mempty
 
@@ -164,7 +168,8 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
 
     body_stms =
       addLocations (stmAuxAttrs aux) safety (filter notmempty (loc : locs)) $
-        bodyStms $ funDefBody fun
+        bodyStms $
+          funDefBody fun
 
     -- Note that the sizes of arrays may not be correct at this
     -- point - it is crucial that we run copy propagation before

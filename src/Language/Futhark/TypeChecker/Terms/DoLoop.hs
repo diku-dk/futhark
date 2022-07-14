@@ -36,14 +36,14 @@ someDimsFreshInType ::
   Rigidity ->
   Name ->
   S.Set VName ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als)
+  TypeBase Size als ->
+  TermTypeM (TypeBase Size als)
 someDimsFreshInType loc r desc sizes = bitraverse onDim pure
   where
-    onDim (NamedDim d)
+    onDim (NamedSize d)
       | qualLeaf d `S.member` sizes = do
           v <- newDimVar loc r desc
-          pure $ NamedDim $ qualName v
+          pure $ NamedSize $ qualName v
     onDim d = pure d
 
 -- | Replace the specified sizes with fresh size variables of the
@@ -53,20 +53,20 @@ freshDimsInType ::
   Rigidity ->
   Name ->
   S.Set VName ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als, [VName])
+  TypeBase Size als ->
+  TermTypeM (TypeBase Size als, [VName])
 freshDimsInType loc r desc sizes t =
   second M.elems <$> runStateT (bitraverse onDim pure t) mempty
   where
-    onDim (NamedDim d)
+    onDim (NamedSize d)
       | qualLeaf d `S.member` sizes = do
           prev_subst <- gets $ M.lookup $ qualLeaf d
           case prev_subst of
-            Just d' -> pure $ NamedDim $ qualName d'
+            Just d' -> pure $ NamedSize $ qualName d'
             Nothing -> do
               v <- lift $ newDimVar loc r desc
               modify $ M.insert (qualLeaf d) v
-              pure $ NamedDim $ qualName v
+              pure $ NamedSize $ qualName v
     onDim d = pure d
 
 -- | Mark bindings of names in "consumed" as Unique.
@@ -101,10 +101,6 @@ convergePat loop_loc pat body_cons body_t body_loc = do
   let -- Make the pattern unique where needed.
       pat' = uniquePat (patNames pat `S.intersection` body_cons) pat
 
-  pat_t <- normTypeFully $ patternType pat'
-  unless (toStructural body_t `subtypeOf` toStructural pat_t) $
-    unexpectedType (srclocOf body_loc) (toStruct body_t) [toStruct pat_t]
-
   -- Check that the new values of consumed merge parameters do not
   -- alias something bound outside the loop, AND that anything
   -- returned for a unique merge parameter does not alias anything
@@ -124,7 +120,7 @@ convergePat loop_loc pat body_cons body_t body_loc = do
               "Return value for loop parameter"
                 <+> pquote (pprName pat_v)
                 <+> "aliases"
-                <+> pprName v <> "."
+                <+> pquote (pprName v) <> "."
         | otherwise = do
             (cons, obs) <- get
             unless (S.null $ aliases t `S.intersection` cons) $
@@ -136,10 +132,10 @@ convergePat loop_loc pat body_cons body_t body_loc = do
               ( unique pat_v_t
                   && not (S.null (aliases t `S.intersection` (cons <> obs)))
               )
-              $ lift . typeError loop_loc mempty $
-                "Return value for consuming loop parameter"
-                  <+> pquote (pprName pat_v)
-                  <+> "aliases previously returned value."
+              $ lift . typeError loop_loc mempty
+              $ "Return value for consuming loop parameter"
+                <+> pquote (pprName pat_v)
+                <+> "aliases previously returned value."
             if unique pat_v_t
               then put (cons <> aliases t, obs)
               else put (cons, obs <> aliases t)
@@ -175,7 +171,8 @@ wellTypedLoopArg :: ArgSource -> [VName] -> Pat -> Exp -> TermTypeM ()
 wellTypedLoopArg src sparams pat arg = do
   (merge_t, _) <-
     freshDimsInType (srclocOf arg) Nonrigid "loop" (S.fromList sparams) $
-      toStruct $ patternType pat
+      toStruct $
+        patternType pat
   arg_t <- toStruct <$> expTypeFully arg
   onFailure (checking merge_t arg_t) $
     unify
@@ -259,7 +256,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           -- new_dims in the pattern is unique and distinct.
           let onDims _ x y
                 | x == y = pure x
-              onDims _ (NamedDim v) d
+              onDims _ (NamedSize v) d
                 | qualLeaf v `elem` new_dims = do
                     case M.lookup (qualLeaf v) new_dims_to_initial_dim of
                       Just d'
@@ -267,7 +264,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                             modify $ first $ M.insert (qualLeaf v) (SizeSubst d)
                       _ ->
                         modify $ second (qualLeaf v :)
-                    pure $ NamedDim v
+                    pure $ NamedSize v
               onDims _ x _ = pure x
           loopbody_t' <- normTypeFully loopbody_t
           merge_t' <- normTypeFully merge_t
@@ -349,7 +346,8 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                       <+> ppr t
         While cond ->
           noUnique . bindingPat [] mergepat (Ascribed merge_t) $ \mergepat' ->
-            onlySelfAliasing . tapOccurrences
+            onlySelfAliasing
+              . tapOccurrences
               . sequentially
                 ( checkExp cond
                     >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)

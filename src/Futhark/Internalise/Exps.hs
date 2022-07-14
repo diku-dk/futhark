@@ -9,39 +9,41 @@
 module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad.Reader
-import Data.List (find, intercalate, intersperse, transpose)
+import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
+import Futhark.Internalise.Entry
 import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
-import Futhark.Util.Pretty (align, ppr, prettyOneLine)
+import Futhark.Util.Pretty (align, ppr)
 import Language.Futhark as E hiding (TypeArg)
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
-transformProg :: MonadFreshNames m => Bool -> [E.ValBind] -> m (I.Prog SOACS)
-transformProg always_safe vbinds = do
-  (consts, funs) <-
-    runInternaliseM always_safe (internaliseValBinds vbinds)
-  I.renameProg $ I.Prog consts funs
+transformProg :: MonadFreshNames m => Bool -> VisibleTypes -> [E.ValBind] -> m (I.Prog SOACS)
+transformProg always_safe types vbinds = do
+  (opaques, consts, funs) <-
+    runInternaliseM always_safe (internaliseValBinds types vbinds)
+  I.renameProg $ I.Prog opaques consts funs
 
-internaliseValBinds :: [E.ValBind] -> InternaliseM ()
-internaliseValBinds = mapM_ internaliseValBind
+internaliseValBinds :: VisibleTypes -> [E.ValBind] -> InternaliseM ()
+internaliseValBinds types = mapM_ $ internaliseValBind types
 
 internaliseFunName :: VName -> Name
 internaliseFunName = nameFromString . pretty
 
-internaliseValBind :: E.ValBind -> InternaliseM ()
-internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
-  localConstsScope . bindingFParams tparams params $ \shapeparams params' -> do
+internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
+internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
+  bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
 
     msg <- case retdecl of
@@ -54,7 +56,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
       rettype' <-
-        fmap zeroExts . internaliseReturnType rettype =<< mapM subExpType body_res
+        zeroExts . internaliseReturnType rettype <$> mapM subExpType body_res
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
       pure
@@ -88,18 +90,25 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info rettype) tparams para
           )
 
   case entry of
-    Just (Info entry') -> generateEntryPoint entry' fb
+    Just (Info entry') -> generateEntryPoint types entry' fb
     Nothing -> pure ()
   where
     zeroExts ts = generaliseExtTypes ts ts
 
-generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
+generateEntryPoint :: VisibleTypes -> E.EntryPoint -> E.ValBind -> InternaliseM ()
+generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
   let (E.ValBind _ ofname _ (Info rettype) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
-    entry_rettype <- internaliseEntryReturnType rettype
-    let entry' = entryPoint (baseName ofname) (zip e_params params') (e_rettype, entry_rettype)
+    let entry_rettype = internaliseEntryReturnType rettype
+        (entry', opaques) =
+          entryPoint
+            types
+            (baseName ofname)
+            (zip e_params params')
+            (e_rettype, map (map I.rankShaped) entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
+
+    addOpaques opaques
 
     (entry_body, ctx_ts) <- buildBody $ do
       -- Special case the (rare) situation where the entry point is
@@ -126,67 +135,6 @@ generateEntryPoint (E.EntryPoint e_params e_rettype) vb = localConstsScope $ do
         entry_body
   where
     zeroExts ts = generaliseExtTypes ts ts
-
-entryPoint ::
-  Name ->
-  [(E.EntryParam, [I.FParam SOACS])] ->
-  ( E.EntryType,
-    [[I.TypeBase ExtShape Uniqueness]]
-  ) ->
-  I.EntryPoint
-entryPoint name params (eret, crets) =
-  ( name,
-    map onParam params,
-    case ( isTupleRecord $ entryType eret,
-           entryAscribed eret
-         ) of
-      (Just ts, Just (E.TETuple e_ts _)) ->
-        zipWith
-          entryPointType
-          (zipWith E.EntryType ts (map Just e_ts))
-          crets
-      (Just ts, Nothing) ->
-        zipWith
-          entryPointType
-          (map (`E.EntryType` Nothing) ts)
-          crets
-      _ ->
-        [entryPointType eret $ concat crets]
-  )
-  where
-    onParam (E.EntryParam e_p e_t, ps) =
-      I.EntryParam e_p $ entryPointType e_t $ staticShapes $ map I.paramDeclType ps
-
-    entryPointType t ts
-      | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-          I.TypeUnsigned u
-      | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
-          I.TypeUnsigned u
-      | E.Scalar E.Prim {} <- E.entryType t =
-          I.TypeDirect u
-      | E.Array _ _ E.Prim {} _ <- E.entryType t =
-          I.TypeDirect u
-      | otherwise =
-          I.TypeOpaque u desc $ length ts
-      where
-        u = foldl max Nonunique $ map I.uniqueness ts
-        desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
-        t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
-    typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
-      typeExpOpaqueName te
-    typeExpOpaqueName (TEArray te _ _) =
-      let (d, te') = withoutDims te
-       in "arr_" ++ typeExpOpaqueName te'
-            ++ "_"
-            ++ show (1 + d)
-            ++ "d"
-    typeExpOpaqueName (TEUnique te _) = prettyOneLine te
-    typeExpOpaqueName te = prettyOneLine te
-
-    withoutDims (TEArray te _ _) =
-      let (d, te') = withoutDims te
-       in (d + 1, te')
-    withoutDims te = (0 :: Int, te)
 
 internaliseBody :: String -> E.Exp -> InternaliseM (Body SOACS)
 internaliseBody desc e =
@@ -218,7 +166,7 @@ eValBody es = buildBody_ $ do
   es' <- sequence es
   varsRes . concat <$> mapM (letValExp "x") es'
 
-internaliseAppExp :: String -> [VName] -> E.AppExp -> InternaliseM [I.SubExp]
+internaliseAppExp :: String -> E.AppRes -> E.AppExp -> InternaliseM [I.SubExp]
 internaliseAppExp desc _ (E.Index e idxs loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
@@ -277,7 +225,8 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
     Just second' -> do
       subtracted_step <-
         letSubExp "subtracted_step" $
-          I.BasicOp $ I.BinOp (I.Sub it I.OverflowWrap) second' start'
+          I.BasicOp $
+            I.BinOp (I.Sub it I.OverflowWrap) second' start'
       step_zero <- letSubExp "step_zero" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
       pure (subtracted_step, step_zero)
     Nothing ->
@@ -288,53 +237,59 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   bounds_invalid_downwards <-
     letSubExp "bounds_invalid_downwards" $
-      I.BasicOp $ I.CmpOp le_op start' end'
+      I.BasicOp $
+        I.CmpOp le_op start' end'
   bounds_invalid_upwards <-
     letSubExp "bounds_invalid_upwards" $
-      I.BasicOp $ I.CmpOp lt_op end' start'
+      I.BasicOp $
+        I.CmpOp lt_op end' start'
 
   (distance, step_wrong_dir, bounds_invalid) <- case end of
     DownToExclusive {} -> do
       step_wrong_dir <-
         letSubExp "step_wrong_dir" $
-          I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign one
+          I.BasicOp $
+            I.CmpOp (I.CmpEq $ IntType it) step_sign one
       distance <-
         letSubExp "distance" $
-          I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) start' end'
+          I.BasicOp $
+            I.BinOp (Sub it I.OverflowWrap) start' end'
       distance_i64 <- asIntS Int64 distance
       pure (distance_i64, step_wrong_dir, bounds_invalid_downwards)
     UpToExclusive {} -> do
       step_wrong_dir <-
         letSubExp "step_wrong_dir" $
-          I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+          I.BasicOp $
+            I.CmpOp (I.CmpEq $ IntType it) step_sign negone
       distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) end' start'
       distance_i64 <- asIntS Int64 distance
       pure (distance_i64, step_wrong_dir, bounds_invalid_upwards)
     ToInclusive {} -> do
       downwards <-
         letSubExp "downwards" $
-          I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+          I.BasicOp $
+            I.CmpOp (I.CmpEq $ IntType it) step_sign negone
       distance_downwards_exclusive <-
         letSubExp "distance_downwards_exclusive" $
-          I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) start' end'
+          I.BasicOp $
+            I.BinOp (Sub it I.OverflowWrap) start' end'
       distance_upwards_exclusive <-
         letSubExp "distance_upwards_exclusive" $
-          I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) end' start'
+          I.BasicOp $
+            I.BinOp (Sub it I.OverflowWrap) end' start'
 
       bounds_invalid <-
-        letSubExp "bounds_invalid" $
-          I.If
-            downwards
-            (resultBody [bounds_invalid_downwards])
-            (resultBody [bounds_invalid_upwards])
-            $ ifCommon [I.Prim I.Bool]
+        letSubExp "bounds_invalid"
+          =<< eIf
+            (eSubExp downwards)
+            (resultBodyM [bounds_invalid_downwards])
+            (resultBodyM [bounds_invalid_upwards])
       distance_exclusive <-
-        letSubExp "distance_exclusive" $
-          I.If
-            downwards
-            (resultBody [distance_downwards_exclusive])
-            (resultBody [distance_upwards_exclusive])
-            $ ifCommon [I.Prim $ IntType it]
+        letSubExp "distance_exclusive"
+          =<< eIf
+            (eSubExp downwards)
+            (resultBodyM [distance_downwards_exclusive])
+            (resultBodyM [distance_upwards_exclusive])
       distance_exclusive_i64 <- asIntS Int64 distance_exclusive
       distance <-
         letSubExp "distance" $
@@ -347,29 +302,33 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   step_invalid <-
     letSubExp "step_invalid" $
-      I.BasicOp $ I.BinOp I.LogOr step_wrong_dir step_zero
+      I.BasicOp $
+        I.BinOp I.LogOr step_wrong_dir step_zero
 
   invalid <-
     letSubExp "range_invalid" $
-      I.BasicOp $ I.BinOp I.LogOr step_invalid bounds_invalid
+      I.BasicOp $
+        I.BinOp I.LogOr step_invalid bounds_invalid
   valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp I.Not invalid
   cs <- assert "range_valid_c" valid errmsg loc
 
   step_i64 <- asIntS Int64 step
   pos_step <-
     letSubExp "pos_step" $
-      I.BasicOp $ I.BinOp (Mul Int64 I.OverflowWrap) step_i64 step_sign_i64
+      I.BasicOp $
+        I.BinOp (Mul Int64 I.OverflowWrap) step_i64 step_sign_i64
 
   num_elems <-
     certifying cs $
       letSubExp "num_elems" $
-        I.BasicOp $ I.BinOp (SDivUp Int64 I.Unsafe) distance pos_step
+        I.BasicOp $
+          I.BinOp (SDivUp Int64 I.Unsafe) distance pos_step
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]
-internaliseAppExp desc ext (E.Coerce e (TypeDecl dt (Info et)) loc) = do
+internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
   ses <- internaliseExp desc e
-  ts <- internaliseReturnType (E.RetType ext et) =<< mapM subExpType ses
+  ts <- internaliseReturnType (E.RetType ext (E.toStruct et)) <$> mapM subExpType ses
   dt' <- typeExpForError dt
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
@@ -388,7 +347,7 @@ internaliseAppExp desc _ e@E.Apply {} =
       -- easy way to do this is to just ignore the arguments and
       -- create a hole whose type is the type of the entire
       -- application.
-      internaliseExp desc (E.Hole (Info (snd $ E.unfoldFunType t)) loc)
+      internaliseExp desc (E.Hole (Info (fromStruct $ snd $ E.unfoldFunType t)) loc)
     (FunctionName qfname, args) -> do
       -- Argument evaluation is outermost-in so that any existential sizes
       -- created by function applications can be brought into scope.
@@ -414,7 +373,7 @@ internaliseAppExp desc _ e@E.Apply {} =
               args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
               fst <$> funcall desc qfname args' loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
-  internalisePat desc sizes pat e body (internaliseExp desc)
+  internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
   error $ "Unexpected LetFun " ++ pretty ofname
 internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) = do
@@ -545,7 +504,9 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
           loop_end_cond_body <- renameBody <=< buildBody_ $ do
             forM_ (zip shapepat shapeargs) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
-                letBindNames [paramName p] $ BasicOp $ SubExp se
+                letBindNames [paramName p] $
+                  BasicOp $
+                    SubExp se
             forM_ (zip mergepat' ses) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
                 letBindNames [paramName p] $
@@ -574,20 +535,24 @@ internaliseAppExp desc _ (E.LetWith name src idxs ve body loc) = do
     E.AppExp
       (E.LetPat [] pat e body loc)
       (Info (AppRes (E.typeOf body) mempty))
-internaliseAppExp desc _ (E.Match e cs _) = do
+internaliseAppExp desc _ (E.Match e orig_cs _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
+  cs <- mapM (onCase ses) orig_cs
   case NE.uncons cs of
-    (CasePat pCase eCase _, Nothing) -> do
-      (_, pertinent) <- generateCond pCase ses
-      internalisePat' [] pCase pertinent eCase (internaliseExp desc)
+    (MatchCase _ body, Nothing) ->
+      map resSubExp <$> bodyBind body
     (c, Just cs') -> do
-      let CasePat pLast eLast _ = NE.last cs'
+      let MatchCase _ last_body = NE.last cs'
       bFalse <- do
-        (_, pertinent) <- generateCond pLast ses
-        eLast' <- internalisePat' [] pLast pertinent eLast (internaliseBody desc)
-        foldM (\bf c' -> eValBody $ pure $ generateCaseIf ses c' bf) eLast' $
-          reverse $ NE.init cs'
+        foldM (\bf c' -> eValBody $ pure $ generateCaseIf ses c' bf) last_body $
+          reverse $
+            NE.init cs'
       letValExp' desc =<< generateCaseIf ses c bFalse
+  where
+    onCase ses (E.CasePat p case_e _) = do
+      (cmps, pertinent) <- generateCond p ses
+      body <- internalisePat' [] p pertinent $ internaliseBody "case" case_e
+      pure $ MatchCase cmps body
 internaliseAppExp desc _ (E.If ce te fe _) =
   letValExp' desc
     =<< eIf
@@ -602,8 +567,8 @@ internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 internaliseExp desc (E.Hole (Info t) loc) = do
   let msg = pretty $ "Reached hole of type: " <> align (ppr t)
+      ts = internaliseType (E.toStruct t)
   c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
-  ts <- internaliseType (E.toStruct t)
   case mapM hasStaticShape ts of
     Nothing ->
       error $ "Hole at " <> locStr loc <> " has existential type:\n" <> show ts
@@ -614,14 +579,16 @@ internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 internaliseExp desc (E.StringLit vs _) =
   fmap pure . letSubExp desc $
-    I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
+    I.BasicOp $
+      I.ArrayLit (map constant vs) $
+        I.Prim int8
 internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
   subst <- lookupSubst name
   case subst of
     Just substs -> pure substs
     Nothing -> pure [I.Var name]
 internaliseExp desc (E.AppExp e (Info appres)) = do
-  ses <- internaliseAppExp desc (appResExt appres) e
+  ses <- internaliseAppExp desc appres e
   bindExtSizes appres ses
   pure ses
 
@@ -666,7 +633,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
-      arr_t_ext <- internaliseType $ E.toStruct arr_t
+      let arr_t_ext = internaliseType $ E.toStruct arr_t
 
       rowtypes <-
         case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -754,12 +721,12 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
   where
     replace (E.Scalar (E.Record m)) (f : fs) ve' src'
       | Just t <- M.lookup f m = do
-          i <-
-            fmap sum $
-              mapM (internalisedTypeSize . snd) $
-                takeWhile ((/= f) . fst) $ sortFields m
-          k <- internalisedTypeSize t
-          let (bef, to_update, aft) = splitAt3 i k src'
+          let i =
+                sum . map (internalisedTypeSize . snd) $
+                  takeWhile ((/= f) . fst) . sortFields $
+                    m
+              k = internalisedTypeSize t
+              (bef, to_update, aft) = splitAt3 i k src'
           src'' <- replace t fs ve' to_update
           pure $ bef ++ src'' ++ aft
     replace _ _ ve' _ = pure ve'
@@ -838,14 +805,13 @@ internaliseExp _ (E.FloatLit v (Info t) _) =
 -- Builtin operators are handled specially because they are
 -- overloaded.
 internaliseExp desc (E.Project k e (Info rt) _) = do
-  n <- internalisedTypeSize $ rt `setAliases` ()
-  i' <- fmap sum $
-    mapM internalisedTypeSize $
-      case E.typeOf e `setAliases` () of
-        E.Scalar (Record fs) ->
-          map snd $ takeWhile ((/= k) . fst) $ sortFields fs
-        t -> [t]
-  take n . drop i' <$> internaliseExp desc e
+  let i' = sum . map internalisedTypeSize $
+        case E.typeOf e `setAliases` () of
+          E.Scalar (Record fs) ->
+            map snd $ takeWhile ((/= k) . fst) $ sortFields fs
+          t -> [t]
+  take (internalisedTypeSize $ rt `setAliases` ()) . drop i'
+    <$> internaliseExp desc e
 internaliseExp _ e@E.Lambda {} =
   error $ "internaliseExp: Unexpected lambda at " ++ locStr (srclocOf e)
 internaliseExp _ e@E.OpSection {} =
@@ -872,33 +838,45 @@ internaliseArg desc (arg, argdim) = do
         _ -> pure ()
       pure arg'
 
-subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
-subExpPrimType = fmap I.elemType . subExpType
+internalisePatLit :: E.PatLit -> E.PatType -> I.PrimValue
+internalisePatLit (E.PatLitPrim v) _ =
+  internalisePrimValue v
+internalisePatLit (E.PatLitInt x) (E.Scalar (E.Prim (E.Signed it))) =
+  I.IntValue $ intValue it x
+internalisePatLit (E.PatLitInt x) (E.Scalar (E.Prim (E.Unsigned it))) =
+  I.IntValue $ intValue it x
+internalisePatLit (E.PatLitFloat x) (E.Scalar (E.Prim (E.FloatType ft))) =
+  I.FloatValue $ floatValue ft x
+internalisePatLit l t =
+  error $ "Nonsensical pattern and type: " ++ show (l, t)
 
-generateCond :: E.Pat -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
+generateCond ::
+  E.Pat ->
+  [I.SubExp] ->
+  InternaliseM ([Maybe I.PrimValue], [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
-  cmp <- letSubExp "matches" =<< eAll cmps
-  pure (cmp, pertinent)
+  pure (cmps, pertinent)
   where
-    -- Literals are always primitive values.
-    compares (E.PatLit l t _) (se : ses) = do
-      e' <- case l of
-        PatLitPrim v -> pure $ constant $ internalisePrimValue v
-        PatLitInt x -> internaliseExp1 "constant" $ E.IntLit x t mempty
-        PatLitFloat x -> internaliseExp1 "constant" $ E.FloatLit x t mempty
-      t' <- subExpPrimType se
-      cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
-      pure ([cmp], [se], ses)
-    compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (se : ses) = do
+    compares (E.PatLit l (Info t) _) (se : ses) =
+      pure ([Just $ internalisePatLit l t], [se], ses)
+    compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (_ : ses) = do
       (payload_ts, m) <- internaliseSumType $ M.map (map toStruct) fs
       case M.lookup c m of
-        Just (i, payload_is) -> do
-          let i' = intConst Int8 $ toInteger i
+        Just (tag, payload_is) -> do
           let (payload_ses, ses') = splitAt (length payload_ts) ses
-          cmp <- letSubExp "match_constr" $ I.BasicOp $ I.CmpOp (I.CmpEq int8) i' se
-          (cmps, pertinent, _) <- comparesMany pats $ map (payload_ses !!) payload_is
-          pure (cmp : cmps, pertinent, ses')
+          (cmps, pertinent, _) <-
+            comparesMany pats $ map (payload_ses !!) payload_is
+          let missingCmps i _ =
+                case i `elemIndex` payload_is of
+                  Just j -> cmps !! j
+                  Nothing -> Nothing
+          pure
+            ( Just (I.IntValue $ intValue Int8 $ toInteger tag)
+                : zipWith missingCmps [0 ..] payload_ses,
+              pertinent,
+              ses'
+            )
         Nothing ->
           error "generateCond: missing constructor"
     compares (E.PatConstr _ (Info t) _ _) _ =
@@ -906,9 +884,8 @@ generateCond orig_p orig_ses = do
     compares (E.Id _ t loc) ses =
       compares (E.Wildcard t loc) ses
     compares (E.Wildcard (Info t) _) ses = do
-      n <- internalisedTypeSize $ E.toStruct t
-      let (id_ses, rest_ses) = splitAt n ses
-      pure ([], id_ses, rest_ses)
+      let (id_ses, rest_ses) = splitAt (internalisedTypeSize $ E.toStruct t) ses
+      pure (map (const Nothing) id_ses, id_ses, rest_ses)
     compares (E.PatParens pat _) ses =
       compares pat ses
     compares (E.PatAttr _ pat _) ses =
@@ -937,23 +914,31 @@ generateCond orig_p orig_ses = do
           ses''
         )
 
-generateCaseIf :: [I.SubExp] -> Case -> I.Body SOACS -> InternaliseM (I.Exp SOACS)
-generateCaseIf ses (CasePat p eCase _) bFail = do
-  (cond, pertinent) <- generateCond p ses
-  eCase' <- internalisePat' [] p pertinent eCase (internaliseBody "case")
-  eIf (eSubExp cond) (pure eCase') (pure bFail)
+data MatchCase = MatchCase [Maybe I.PrimValue] (I.Body SOACS)
+
+generateCaseIf ::
+  [SubExp] ->
+  MatchCase ->
+  I.Body SOACS ->
+  InternaliseM (I.Exp SOACS)
+generateCaseIf ses (MatchCase cmps body) bFail = do
+  let mkCmp (x, Just y) =
+        Just . letSubExp "match" . I.BasicOp $
+          I.CmpOp (I.CmpEq (I.primValueType y)) x (Constant y)
+      mkCmp _ = Nothing
+  cond <- letSubExp "matches" =<< eAll =<< sequence (mapMaybe mkCmp (zip ses cmps))
+  eIf (eSubExp cond) (pure body) (pure bFail)
 
 internalisePat ::
   String ->
   [E.SizeBinder VName] ->
   E.Pat ->
   E.Exp ->
-  E.Exp ->
-  (E.Exp -> InternaliseM a) ->
+  InternaliseM a ->
   InternaliseM a
-internalisePat desc sizes p e body m = do
+internalisePat desc sizes p e m = do
   ses <- internaliseExp desc' e
-  internalisePat' sizes p ses body m
+  internalisePat' sizes p ses m
   where
     desc' = case S.toList $ E.patIdents p of
       [v] -> baseString $ E.identName v
@@ -963,16 +948,15 @@ internalisePat' ::
   [E.SizeBinder VName] ->
   E.Pat ->
   [I.SubExp] ->
-  E.Exp ->
-  (E.Exp -> InternaliseM a) ->
+  InternaliseM a ->
   InternaliseM a
-internalisePat' sizes p ses body m = do
+internalisePat' sizes p ses m = do
   ses_ts <- mapM subExpType ses
   stmPat p ses_ts $ \pat_names -> do
     bindExtSizes (AppRes (E.patternType p) (map E.sizeName sizes)) ses
     forM_ (zip pat_names ses) $ \(v, se) ->
       letBindNames [v] $ I.BasicOp $ I.SubExp se
-    m body
+    m
 
 internaliseSlice ::
   SrcLoc ->
@@ -984,7 +968,8 @@ internaliseSlice loc dims idxs = do
   ok <- letSubExp "index_ok" =<< eAll oks
   let msg =
         errorMsg $
-          ["Index ["] ++ intercalate [", "] parts
+          ["Index ["]
+            ++ intercalate [", "] parts
             ++ ["] out of bounds for array of shape ["]
             ++ intersperse "][" (map (ErrorVal int64) $ take (length idxs) dims)
             ++ ["]."]
@@ -996,7 +981,7 @@ internaliseDimIndex ::
   E.DimIndex ->
   InternaliseM (I.DimIndex SubExp, SubExp, [ErrorMsgPart SubExp])
 internaliseDimIndex w (E.DimFix i) = do
-  (i', _) <- internaliseDimExp "i" i
+  (i', _) <- internaliseSizeExp "i" i
   let lowerBound =
         I.BasicOp $ I.CmpOp (I.CmpSle I.Int64) (I.constant (0 :: I.Int64)) i'
       upperBound =
@@ -1014,7 +999,8 @@ internaliseDimIndex
     ) = do
     w_minus_1 <-
       letSubExp "w_minus_1" $
-        BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) w one
+        BasicOp $
+          I.BinOp (Sub Int64 I.OverflowWrap) w one
     pure
       ( I.DimSlice w_minus_1 w $ intConst Int64 (-1),
         constant True,
@@ -1023,26 +1009,24 @@ internaliseDimIndex
     where
       one = constant (1 :: Int64)
 internaliseDimIndex w (E.DimSlice i j s) = do
-  s' <- maybe (pure one) (fmap fst . internaliseDimExp "s") s
+  s' <- maybe (pure one) (fmap fst . internaliseSizeExp "s") s
   s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int64) s'
   backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int64) s_sign negone
   w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) w one
   let i_def =
-        letSubExp "i_def" $
-          I.If
-            backwards
-            (resultBody [w_minus_1])
-            (resultBody [zero])
-            $ ifCommon [I.Prim int64]
+        letSubExp "i_def"
+          =<< eIf
+            (eSubExp backwards)
+            (resultBodyM [w_minus_1])
+            (resultBodyM [zero])
       j_def =
-        letSubExp "j_def" $
-          I.If
-            backwards
-            (resultBody [negone])
-            (resultBody [w])
-            $ ifCommon [I.Prim int64]
-  i' <- maybe i_def (fmap fst . internaliseDimExp "i") i
-  j' <- maybe j_def (fmap fst . internaliseDimExp "j") j
+        letSubExp "j_def"
+          =<< eIf
+            (eSubExp backwards)
+            (resultBodyM [negone])
+            (resultBodyM [w])
+  i' <- maybe i_def (fmap fst . internaliseSizeExp "i") i
+  j' <- maybe j_def (fmap fst . internaliseSizeExp "j") j
   j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int64 I.OverflowWrap) j' i'
   -- Something like a division-rounding-up, but accomodating negative
   -- operands.
@@ -1071,13 +1055,16 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   i_p_m_t_s <- letSubExp "i_p_m_t_s" $ I.BasicOp $ I.BinOp (Add Int64 I.OverflowWrap) i' m_t_s
   zero_leq_i_p_m_t_s <-
     letSubExp "zero_leq_i_p_m_t_s" $
-      I.BasicOp $ I.CmpOp (I.CmpSle Int64) zero i_p_m_t_s
+      I.BasicOp $
+        I.CmpOp (I.CmpSle Int64) zero i_p_m_t_s
   i_p_m_t_s_leq_w <-
     letSubExp "i_p_m_t_s_leq_w" $
-      I.BasicOp $ I.CmpOp (I.CmpSle Int64) i_p_m_t_s w
+      I.BasicOp $
+        I.CmpOp (I.CmpSle Int64) i_p_m_t_s w
   i_p_m_t_s_lth_w <-
     letSubExp "i_p_m_t_s_leq_w" $
-      I.BasicOp $ I.CmpOp (I.CmpSlt Int64) i_p_m_t_s w
+      I.BasicOp $
+        I.CmpOp (I.CmpSlt Int64) i_p_m_t_s w
 
   zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) zero i'
   i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) i' j'
@@ -1093,20 +1080,21 @@ internaliseDimIndex w (E.DimSlice i j s) = do
         [negone_lte_j, negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
 
   slice_ok <-
-    letSubExp "slice_ok" $
-      I.If
-        backwards
-        (resultBody [backwards_ok])
-        (resultBody [forwards_ok])
-        $ ifCommon [I.Prim I.Bool]
+    letSubExp "slice_ok"
+      =<< eIf
+        (eSubExp backwards)
+        (resultBodyM [backwards_ok])
+        (resultBodyM [forwards_ok])
 
   ok_or_empty <-
     letSubExp "ok_or_empty" $
-      I.BasicOp $ I.BinOp I.LogOr empty_slice slice_ok
+      I.BasicOp $
+        I.BinOp I.LogOr empty_slice slice_ok
 
   acceptable <-
     letSubExp "slice_acceptable" $
-      I.BasicOp $ I.BinOp I.LogAnd nonzero_stride ok_or_empty
+      I.BasicOp $
+        I.BinOp I.LogAnd nonzero_stride ok_or_empty
 
   let parts = case (i, j, s) of
         (_, _, Just {}) ->
@@ -1200,7 +1188,7 @@ internaliseHist dim desc rf hist op ne buckets img loc = do
         =<< bodyBind body
 
   -- get sizes of histogram and image arrays
-  shape_hist <- Shape . take dim . I.arrayDims <$> lookupType (head hist')
+  shape_hist <- I.Shape . take dim . I.arrayDims <$> lookupType (head hist')
   w_img <- I.arraySize 0 <$> lookupType (head img')
 
   letValExp' desc . I.Op $
@@ -1238,11 +1226,14 @@ internaliseStreamRed desc o comm lam0 lam arr = do
   -- Synthesize neutral elements by applying the fold function
   -- to an empty chunk.
   letBindNames [I.paramName chunk_param] $
-    I.BasicOp $ I.SubExp $ constant (0 :: Int64)
+    I.BasicOp $
+      I.SubExp $
+        constant (0 :: Int64)
   forM_ lam_val_params $ \p ->
     letBindNames [I.paramName p] $
       I.BasicOp . I.Scratch (I.elemType $ I.paramType p) $
-        I.arrayDims $ I.paramType p
+        I.arrayDims $
+          I.paramType p
   nes <- bodyBind =<< renameBody lam_body
 
   nes_ts <- mapM I.subExpResType nes
@@ -1293,15 +1284,15 @@ internaliseStreamAcc desc dest op lam bs = do
   acc_cert_v <- newVName "acc_cert"
   dest_ts <- mapM lookupType dest'
   let dest_w = arraysSize 0 dest_ts
-      acc_t = Acc acc_cert_v (Shape [dest_w]) (map rowType dest_ts) NoUniqueness
+      acc_t = Acc acc_cert_v (I.Shape [dest_w]) (map rowType dest_ts) NoUniqueness
   acc_p <- newParam "acc_p" acc_t
   withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
-    lam' <-
-      internaliseMapLambda internaliseLambda lam $
-        map I.Var $ paramName acc_p : bs'
-    w <- arraysSize 0 <$> mapM lookupType bs'
+    bs_ts <- mapM lookupType bs'
+    lam' <- internaliseLambdaCoerce lam $ map rowType $ paramType acc_p : bs_ts
+    let w = arraysSize 0 bs_ts
     fmap subExpsRes . letValExp' "acc_res" $
-      I.Op $ I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
+      I.Op $
+        I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
 
   op' <-
     case op of
@@ -1318,7 +1309,8 @@ internaliseStreamAcc desc dest op lam bs = do
 
   destw <- arraysSize 0 <$> mapM lookupType dest'
   fmap (map I.Var) $
-    letTupExp desc $ WithAcc [(Shape [destw], dest', op')] withacc_lam
+    letTupExp desc $
+      WithAcc [(I.Shape [destw], dest', op')] withacc_lam
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1329,12 +1321,12 @@ internaliseExp1 desc e = do
 
 -- | Promote to dimension type as appropriate for the original type.
 -- Also return original type.
-internaliseDimExp :: String -> E.Exp -> InternaliseM (I.SubExp, IntType)
-internaliseDimExp s e = do
+internaliseSizeExp :: String -> E.Exp -> InternaliseM (I.SubExp, IntType)
+internaliseSizeExp s e = do
   e' <- internaliseExp1 s e
   case E.typeOf e of
-    E.Scalar (E.Prim (Signed it)) -> (,it) <$> asIntS Int64 e'
-    _ -> error "internaliseDimExp: bad type"
+    E.Scalar (E.Prim (E.Signed it)) -> (,it) <$> asIntS Int64 e'
+    _ -> error "internaliseSizeExp: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
@@ -1503,7 +1495,8 @@ internaliseBinOp _ desc E.Geq x y E.Bool _ =
   simpleCmpOp desc I.CmpLle y x -- Note the swapped x and y
 internaliseBinOp _ _ op _ _ t1 t2 =
   error $
-    "Invalid binary operator " ++ pretty op
+    "Invalid binary operator "
+      ++ pretty op
       ++ " with operand types "
       ++ pretty t1
       ++ ", "
@@ -1563,6 +1556,16 @@ internaliseLambda (E.Lambda params body _ (Info (_, RetType _ rettype)) _) rowty
     pure (params', body', rettype')
 internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
 
+internaliseLambdaCoerce :: E.Exp -> [Type] -> InternaliseM (I.Lambda SOACS)
+internaliseLambdaCoerce lam argtypes = do
+  (params, body, rettype) <- internaliseLambda lam argtypes
+  mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "unexpected lambda result size"])
+      (srclocOf lam)
+      rettype
+      =<< bodyBind body
+
 -- | Some operators and functions are overloaded or otherwise special
 -- - we detect and treat them here.
 isOverloadedFunction ::
@@ -1578,6 +1581,7 @@ isOverloadedFunction qname args loc = do
           handleOps,
           handleSOACs,
           handleAccs,
+          handleAD,
           handleRest
         ]
   msum [h args $ baseString $ qualLeaf qname | h <- handlers]
@@ -1648,32 +1652,31 @@ isOverloadedFunction qname args loc = do
               dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
                 letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int64) x_dim y_dim
               shapes_match <- letSubExp "shapes_match" =<< eAll dims_match
-              compare_elems_body <- runBodyBuilder $ do
-                -- Flatten both x and y.
-                x_num_elems <-
-                  letSubExp "x_num_elems"
-                    =<< foldBinOp (I.Mul Int64 I.OverflowUndef) (constant (1 :: Int64)) x_dims
-                x' <- letExp "x" $ I.BasicOp $ I.SubExp x
-                y' <- letExp "x" $ I.BasicOp $ I.SubExp y
-                x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] x'
-                y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
+              let compare_elems_body = runBodyBuilder $ do
+                    -- Flatten both x and y.
+                    x_num_elems <-
+                      letSubExp "x_num_elems"
+                        =<< foldBinOp (I.Mul Int64 I.OverflowUndef) (constant (1 :: Int64)) x_dims
+                    x' <- letExp "x" $ I.BasicOp $ I.SubExp x
+                    y' <- letExp "x" $ I.BasicOp $ I.SubExp y
+                    x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] x'
+                    y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
 
-                -- Compare the elements.
-                cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
-                cmps <-
-                  letExp "cmps" $
-                    I.Op $
-                      I.Screma x_num_elems [x_flat, y_flat] (I.mapSOAC cmp_lam)
+                    -- Compare the elements.
+                    cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
+                    cmps <-
+                      letExp "cmps" $
+                        I.Op $
+                          I.Screma x_num_elems [x_flat, y_flat] (I.mapSOAC cmp_lam)
 
-                -- Check that all were equal.
-                and_lam <- binOpLambda I.LogAnd I.Bool
-                reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
-                all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems [cmps] reduce
-                pure $ resultBody [all_equal]
+                    -- Check that all were equal.
+                    and_lam <- binOpLambda I.LogAnd I.Bool
+                    reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
+                    all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems [cmps] reduce
+                    pure $ resultBody [all_equal]
 
-              letSubExp "arrays_equal" $
-                I.If shapes_match compare_elems_body (resultBody [constant False]) $
-                  ifCommon [I.Prim I.Bool]
+              letSubExp "arrays_equal"
+                =<< eIf (eSubExp shapes_match) compare_elems_body (resultBodyM [constant False])
     handleOps [x, y] name
       | Just bop <- find ((name ==) . pretty) [minBound .. maxBound :: E.BinOp] =
           Just $ \desc -> do
@@ -1687,11 +1690,10 @@ isOverloadedFunction qname args loc = do
 
     handleSOACs [TupLit [lam, arr] _] "map" = Just $ \desc -> do
       arr' <- internaliseExpToVars "map_arr" arr
-      lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
-      w <- arraysSize 0 <$> mapM lookupType arr'
-      letTupExp' desc $
-        I.Op $
-          I.Screma w arr' (I.mapSOAC lam')
+      arr_ts <- mapM lookupType arr'
+      lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
+      let w = arraysSize 0 arr_ts
+      letTupExp' desc $ I.Op $ I.Screma w arr' (I.mapSOAC lam')
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
@@ -1700,7 +1702,7 @@ isOverloadedFunction qname args loc = do
         uncurry (++) <$> partitionWithSOACS (fromIntegral k') lam' arrs
       where
         fromInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
-        fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
+        fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (E.Signed Int32)))) _) = Just $ fromInteger k'
         fromInt32 _ = Nothing
     handleSOACs [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
@@ -1745,6 +1747,17 @@ isOverloadedFunction qname args loc = do
       vs <- internaliseExp "acc_v" v
       fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
     handleAccs _ _ = Nothing
+
+    handleAD [TupLit [f, x, v] _] fname
+      | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
+          x' <- internaliseExp "ad_x" x
+          v' <- internaliseExp "ad_v" v
+          lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
+          fmap (map I.Var) . letTupExp desc . Op $
+            case fname of
+              "jvp2" -> JVP lam x' v'
+              _ -> VJP lam x' v'
+    handleAD _ _ = Nothing
 
     handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
     handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v
@@ -1844,12 +1857,11 @@ isOverloadedFunction qname args loc = do
       e' <- internaliseExp1 "trunc_arg" e
       case E.typeOf e of
         E.Scalar (E.Prim E.Bool) ->
-          letTupExp' desc $
-            I.If
-              e'
-              (resultBody [intConst int_to 1])
-              (resultBody [intConst int_to 0])
-              $ ifCommon [I.Prim $ I.IntType int_to]
+          letTupExp' desc
+            =<< eIf
+              (eSubExp e')
+              (resultBodyM [intConst int_to 1])
+              (resultBodyM [intConst int_to 0])
         E.Scalar (E.Prim (E.Signed int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
         E.Scalar (E.Prim (E.Unsigned int_from)) ->
@@ -1862,12 +1874,11 @@ isOverloadedFunction qname args loc = do
       e' <- internaliseExp1 "trunc_arg" e
       case E.typeOf e of
         E.Scalar (E.Prim E.Bool) ->
-          letTupExp' desc $
-            I.If
-              e'
-              (resultBody [intConst int_to 1])
-              (resultBody [intConst int_to 0])
-              $ ifCommon [I.Prim $ I.IntType int_to]
+          letTupExp' desc
+            =<< eIf
+              (eSubExp e')
+              (resultBodyM [intConst int_to 1])
+              (resultBodyM [intConst int_to 0])
         E.Scalar (E.Prim (E.Signed int_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
         E.Scalar (E.Prim (E.Unsigned int_from)) ->
@@ -1902,7 +1913,8 @@ isOverloadedFunction qname args loc = do
             loc
         certifying c $
           letExp (baseString sv ++ "_write_sv") $
-            I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
+            I.BasicOp $
+              I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
       indexType <- fmap rowType <$> mapM lookupType si'
       indexName <- mapM (\_ -> newVName "write_index") indexType
@@ -1934,7 +1946,7 @@ isOverloadedFunction qname args loc = do
               }
           sivs = si' <> svs'
 
-      let sa_ws = map (Shape . take dim . arrayDims) sa_ts
+      let sa_ws = map (I.Shape . take dim . arrayDims) sa_ts
       letTupExp' desc $ I.Op $ I.Scatter si_w sivs lam $ zip3 sa_ws (repeat 1) sas
 
 flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
@@ -2086,7 +2098,7 @@ funcall desc (QualName _ fname) args loc = do
 -- language.
 bindExtSizes :: AppRes -> [SubExp] -> InternaliseM ()
 bindExtSizes (AppRes ret retext) ses = do
-  ts <- internaliseType $ E.toStruct ret
+  let ts = internaliseType $ E.toStruct ret
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =
@@ -2142,16 +2154,14 @@ partitionWithSOACS k lam arrs = do
   -- the total sizes, which are the last elements in the offests.  We
   -- just have to be careful in case the array is empty.
   last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int64 OverflowUndef) w $ constant (1 :: Int64)
-  nonempty_body <- runBodyBuilder $
-    fmap resultBody $
-      forM all_offsets $ \offset_array ->
-        letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
-  let empty_body = resultBody $ replicate k $ constant (0 :: Int64)
+  let nonempty_body = runBodyBuilder $
+        fmap resultBody $
+          forM all_offsets $ \offset_array ->
+            letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
+      empty_body = resultBodyM $ replicate k $ constant (0 :: Int64)
   is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int64) w $ constant (0 :: Int64)
   sizes <-
-    letTupExp "partition_size" $
-      I.If is_empty empty_body nonempty_body $
-        ifCommon $ replicate k $ I.Prim int64
+    letTupExp "partition_size" =<< eIf (eSubExp is_empty) empty_body nonempty_body
 
   -- The total size of all partitions must necessarily be equal to the
   -- size of the input array.
@@ -2159,7 +2169,8 @@ partitionWithSOACS k lam arrs = do
   -- Create scratch arrays for the result.
   blanks <- forM arr_ts $ \arr_t ->
     letExp "partition_dest" $
-      I.BasicOp $ Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
+      I.BasicOp $
+        Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
 
   -- Now write into the result.
   write_lam <- do
@@ -2187,11 +2198,12 @@ partitionWithSOACS k lam arrs = do
   results <-
     letTupExp "partition_res" . I.Op $
       I.Scatter w (classes : all_offsets ++ arrs) write_lam $
-        zip3 (repeat $ Shape [w]) (repeat 1) blanks
+        zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $
-        I.ArrayLit (map I.Var sizes) $ I.Prim int64
+        I.ArrayLit (map I.Var sizes) $
+          I.Prim int64
   pure (map I.Var results, [sizes'])
   where
     mkOffsetLambdaBody ::
@@ -2207,7 +2219,8 @@ partitionWithSOACS k lam arrs = do
         letSubExp "is_this_one" $
           I.BasicOp $
             I.CmpOp (CmpEq int64) c $
-              intConst Int64 $ toInteger i
+              intConst Int64 $
+                toInteger i
       next_one <- mkOffsetLambdaBody sizes c (i + 1) ps
       this_one <-
         letSubExp "this_offset"
@@ -2215,12 +2228,11 @@ partitionWithSOACS k lam arrs = do
             (Add Int64 OverflowUndef)
             (constant (-1 :: Int64))
             (I.Var (I.paramName p) : take i sizes)
-      letSubExp "total_res" $
-        I.If
-          is_this_one
-          (resultBody [this_one])
-          (resultBody [next_one])
-          $ ifCommon [I.Prim int64]
+      letSubExp "total_res"
+        =<< eIf
+          (eSubExp is_this_one)
+          (resultBodyM [this_one])
+          (resultBodyM [next_one])
 
 typeExpForError :: E.TypeExp VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =
@@ -2232,7 +2244,7 @@ typeExpForError (E.TEDim dims te _) =
   where
     dims' = mconcat (map onDim dims)
     onDim d = "[" <> pretty d <> "]"
-typeExpForError (E.TEArray te d _) = do
+typeExpForError (E.TEArray d te _) = do
   d' <- dimExpForError d
   te' <- typeExpForError te
   pure $ ["[", d', "]"] ++ te'
@@ -2263,16 +2275,16 @@ typeExpForError (E.TESum cs _) = do
       c' <- mapM typeExpForError c
       pure $ intercalate [" "] c'
 
-dimExpForError :: E.DimExp VName -> InternaliseM (ErrorMsgPart SubExp)
-dimExpForError (DimExpNamed d _) = do
+dimExpForError :: E.SizeExp VName -> InternaliseM (ErrorMsgPart SubExp)
+dimExpForError (SizeExpNamed d _) = do
   substs <- lookupSubst $ E.qualLeaf d
   d' <- case substs of
     Just [v] -> pure v
     _ -> pure $ I.Var $ E.qualLeaf d
   pure $ ErrorVal int64 d'
-dimExpForError (DimExpConst d _) =
+dimExpForError (SizeExpConst d _) =
   pure $ ErrorString $ pretty d
-dimExpForError DimExpAny = pure ""
+dimExpForError SizeExpAny = pure ""
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.

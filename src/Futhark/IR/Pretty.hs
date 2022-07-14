@@ -51,6 +51,9 @@ instance Pretty NoUniqueness where
 instance Pretty Shape where
   ppr = mconcat . map (brackets . ppr) . shapeDims
 
+instance Pretty Rank where
+  ppr (Rank r) = mconcat $ replicate r "[]"
+
 instance Pretty a => Pretty (Ext a) where
   ppr (Free e) = ppr e
   ppr (Ext x) = text "?" <> text (show x)
@@ -109,7 +112,8 @@ instance PrettyRep rep => Pretty (Body rep) where
     | null stms = braces (commasep $ map ppr res)
     | otherwise =
         stack (map ppr $ stmsToList stms)
-          </> text "in" <+> braces (commasep $ map ppr res)
+          </> text "in"
+          <+> braces (commasep $ map ppr res)
 
 instance Pretty Attr where
   ppr (AttrName v) = ppr v
@@ -148,7 +152,8 @@ instance Pretty t => Pretty (Param t) where
 instance PrettyRep rep => Pretty (Stm rep) where
   ppr stm@(Let pat aux e) =
     align . hang 2 $
-      text "let" <+> align (ppr pat)
+      text "let"
+        <+> align (ppr pat)
         <+> case (linebreak, stmannot) of
           (True, []) -> equals </> ppr e
           (False, []) -> equals <+/> ppr e
@@ -235,7 +240,9 @@ instance Pretty a => Pretty (ErrorMsg a) where
 
 instance PrettyRep rep => Pretty (Exp rep) where
   ppr (If c t f (IfDec ret ifsort)) =
-    text "if" <+> info' <+> ppr c
+    text "if"
+      <+> info'
+      <+> ppr c
       </> text "then"
       <+> maybeNest t
       <+> text "else"
@@ -254,7 +261,7 @@ instance PrettyRep rep => Pretty (Exp rep) where
   ppr (Apply fname args ret (safety, _, _)) =
     applykw
       <+> text (nameToString fname)
-      <> apply (map (align . pprArg) args)
+        <> apply (map (align . pprArg) args)
       </> colon
       <+> braces (commasep $ map ppr ret)
     where
@@ -265,7 +272,8 @@ instance PrettyRep rep => Pretty (Exp rep) where
         Safe -> text "apply"
   ppr (Op op) = ppr op
   ppr (DoLoop merge form loopbody) =
-    text "loop" <+> braces (commastack $ map ppr params)
+    text "loop"
+      <+> braces (commastack $ map ppr params)
       <+> equals
       <+> ppTuple' args
       </> ( case form of
@@ -298,27 +306,39 @@ instance PrettyRep rep => Pretty (Exp rep) where
     where
       ppInput (shape, arrs, op) =
         parens
-          ( ppr shape <> comma <+> ppTuple' arrs
-              <> case op of
-                Nothing -> mempty
-                Just (op', nes) ->
-                  comma </> parens (ppr op' <> comma </> ppTuple' (map ppr nes))
+          ( ppr shape <> comma
+              <+> ppTuple' arrs
+                <> case op of
+                  Nothing -> mempty
+                  Just (op', nes) ->
+                    comma </> parens (ppr op' <> comma </> ppTuple' (map ppr nes))
           )
 
 instance PrettyRep rep => Pretty (Lambda rep) where
   ppr (Lambda [] (Body _ stms []) []) | stms == mempty = text "nilFn"
   ppr (Lambda params body rettype) =
-    text "\\" <+> ppTuple' params
+    text "\\"
+      <+> ppTuple' params
       </> indent 2 (colon <+> ppTupleLines' rettype <+> text "->")
       </> indent 2 (ppr body)
 
+instance Pretty Signedness where
+  ppr Signed = "signed"
+  ppr Unsigned = "unsigned"
+
+instance Pretty ValueType where
+  ppr (ValueType s (Rank r) t) =
+    mconcat (replicate r "[]") <> text (prettySigned (s == Unsigned) t)
+
 instance Pretty EntryPointType where
-  ppr (TypeDirect u) = ppr u <> "direct"
-  ppr (TypeUnsigned u) = ppr u <> "unsigned"
-  ppr (TypeOpaque u desc n) = ppr u <> "opaque" <> apply [ppr (show desc), ppr n]
+  ppr (TypeTransparent t) = ppr t
+  ppr (TypeOpaque desc) = "opaque" <+> pquote (text desc)
 
 instance Pretty EntryParam where
-  ppr (EntryParam name t) = ppr name <> colon <+> ppr t
+  ppr (EntryParam name u t) = ppr name <> colon <+> ppr u <> ppr t
+
+instance Pretty EntryResult where
+  ppr (EntryResult u t) = ppr u <> ppr t
 
 instance PrettyRep rep => Pretty (FunDef rep) where
   ppr (FunDef entry attrs name rettype fparams body) =
@@ -336,13 +356,26 @@ instance PrettyRep rep => Pretty (FunDef rep) where
           "entry"
             <> parens
               ( "\"" <> ppr p_name <> "\"" <> comma
-                  </> ppTuple' p_entry <> comma
-                  </> ppTuple' ret_entry
+                  </> ppTupleLines' p_entry <> comma
+                  </> ppTupleLines' ret_entry
               )
 
+instance Pretty OpaqueType where
+  ppr (OpaqueType ts) =
+    "opaque" <+> nestedBlock "{" "}" (stack $ map ppr ts)
+  ppr (OpaqueRecord fs) =
+    "record" <+> nestedBlock "{" "}" (stack $ map p fs)
+    where
+      p (f, et) = ppr f <> ":" <+> ppr et
+
+instance Pretty OpaqueTypes where
+  ppr (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)
+    where
+      p (name, t) = "type" <+> pquote (ppr name) <+> equals <+> ppr t
+
 instance PrettyRep rep => Pretty (Prog rep) where
-  ppr (Prog consts funs) =
-    stack $ punctuate line $ ppr consts : map ppr funs
+  ppr (Prog types consts funs) =
+    stack $ punctuate line $ ppr types : ppr consts : map ppr funs
 
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se

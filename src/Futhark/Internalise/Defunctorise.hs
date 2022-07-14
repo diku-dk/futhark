@@ -129,9 +129,17 @@ lookupImport name = maybe bad pure =<< asks (M.lookup name . envImports)
 lookupMod' :: QualName VName -> Scope -> Either String Mod
 lookupMod' mname scope =
   let (mname', scope') = lookupSubstInScope mname scope
-   in maybe (Left $ bad mname') Right $ M.lookup (qualLeaf mname') $ scopeMods scope'
+   in maybe (Left $ bad mname') (Right . extend) $ M.lookup (qualLeaf mname') $ scopeMods scope'
   where
     bad mname' = "Unknown module: " ++ pretty mname ++ " (" ++ pretty mname' ++ ")"
+    extend (ModMod (Scope inner_scope inner_mods)) =
+      -- XXX: perhaps hacky fix for #1653.  We need to impose the
+      -- substitutions of abstract types from outside, because the
+      -- inner module may have some incorrect substitutions in some
+      -- cases.  Our treatment of abstract types is completely whack
+      -- and should be fixed.
+      ModMod $ Scope (scopeSubsts scope <> inner_scope) inner_mods
+    extend m = m
 
 lookupMod :: QualName VName -> TransformM Mod
 lookupMod mname = either error pure . lookupMod' mname =<< askScope
@@ -247,8 +255,6 @@ transformNames x = do
         { mapOnExp = onExp scope,
           mapOnName = \v ->
             pure $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
-          mapOnQualName = \v ->
-            pure $ fst $ lookupSubstInScope v scope,
           mapOnStructType = astMap (substituter scope),
           mapOnPatType = astMap (substituter scope),
           mapOnStructRetType = astMap (substituter scope),
@@ -273,21 +279,32 @@ transformStructType = transformNames
 transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
 
+transformEntry :: EntryPoint -> TransformM EntryPoint
+transformEntry (EntryPoint params ret) =
+  EntryPoint <$> mapM onEntryParam params <*> onEntryType ret
+  where
+    onEntryParam (EntryParam v t) =
+      EntryParam v <$> onEntryType t
+    onEntryType (EntryType t te) =
+      EntryType <$> transformStructType t <*> pure te
+
 transformValBind :: ValBind -> TransformM ()
 transformValBind (ValBind entry name tdecl (Info (RetType dims t)) tparams params e doc attrs loc) = do
+  entry' <- traverse (traverse transformEntry) entry
   name' <- transformName name
   tdecl' <- traverse transformTypeExp tdecl
   t' <- transformStructType t
   e' <- transformExp e
   tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params
-  emit $ ValDec $ ValBind entry name' tdecl' (Info (RetType dims t')) tparams' params' e' doc attrs loc
+  emit $ ValDec $ ValBind entry' name' tdecl' (Info (RetType dims t')) tparams' params' e' doc attrs loc
 
 transformTypeBind :: TypeBind -> TransformM ()
 transformTypeBind (TypeBind name l tparams te (Info (RetType dims t)) doc loc) = do
   name' <- transformName name
   emit . TypeDec
-    =<< ( TypeBind name' l <$> traverse transformNames tparams
+    =<< ( TypeBind name' l
+            <$> traverse transformNames tparams
             <*> transformTypeExp te
             <*> (Info . RetType dims <$> transformStructType t)
             <*> pure doc
@@ -298,11 +315,11 @@ transformModBind :: ModBind -> TransformM Scope
 transformModBind mb = do
   let addParam p me = ModLambda p Nothing me $ srclocOf me
   mod <-
-    evalModExp $
-      foldr
+    evalModExp
+      $ foldr
         addParam
         (maybeAscript (srclocOf mb) (modSignature mb) $ modExp mb)
-        $ modParams mb
+      $ modParams mb
   mname <- transformName $ modName mb
   pure $ Scope (scopeSubsts $ modScope mod) $ M.singleton mname mod
 
@@ -340,7 +357,10 @@ transformImports ((name, imp) : imps) = do
   let abs = S.fromList $ map qualLeaf $ M.keys $ fileAbs imp
   scope <-
     censor (fmap maybeHideEntryPoint) $
-      bindingAbs abs $ transformDecs $ progDecs $ fileProg imp
+      bindingAbs abs $
+        transformDecs $
+          progDecs $
+            fileProg imp
   bindingAbs abs $ bindingImport name scope $ transformImports imps
   where
     -- Only the "main" file (last import) is allowed to have entry points.

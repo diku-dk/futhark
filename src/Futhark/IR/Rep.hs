@@ -12,7 +12,7 @@ where
 import qualified Data.Kind
 import Futhark.IR.Prop.Types
 import Futhark.IR.RetType
-import Futhark.IR.Syntax.Core
+import Futhark.IR.Syntax.Core (DeclExtType, DeclType, ExtType, Type)
 
 -- | A collection of type families giving various common types for a
 -- representation, along with constraints specifying that the types

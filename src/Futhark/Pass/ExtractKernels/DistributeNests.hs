@@ -251,7 +251,8 @@ leavingNesting acc =
                   }
           stms <-
             runBuilder_ . auxing aux . FOT.transformSOAC pat $
-              Screma w used_arrs $ mapSOAC lam'
+              Screma w used_arrs $
+                mapSOAC lam'
 
           pure $ acc {distTargets = newtargets, distStms = stms}
       | otherwise -> do
@@ -381,7 +382,7 @@ maybeDistributeStm stm@(Let pat _ (Op (Screma w arrs form))) acc
         Nothing -> addStmToAcc stm acc
         Just acc' -> distribute =<< onInnerMap (MapLoop pat (stmAux stm) w lam arrs) acc'
 maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
-  | not $ any (`nameIn` freeIn pat) $ patNames pat,
+  | all (`notNameIn` freeIn pat) (patNames pat),
     bodyContainsParallelism body =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
@@ -413,8 +414,9 @@ maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
         _ ->
           addStmToAcc stm acc
 maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
-  | not $ any (`nameIn` freeIn pat) $ patNames pat,
-    bodyContainsParallelism tbranch || bodyContainsParallelism fbranch
+  | all (`notNameIn` freeIn pat) (patNames pat),
+    bodyContainsParallelism tbranch
+      || bodyContainsParallelism fbranch
       || not (all primType (ifReturns ret)) =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
@@ -657,7 +659,8 @@ distributeSingleUnaryStm acc stm stm_arr f =
       | map resSubExp res == map Var (patNames $ stmPat stm),
         (outer, _) <- nest,
         [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
-        boundInKernelNest nest `namesIntersection` freeIn stm
+        boundInKernelNest nest
+          `namesIntersection` freeIn stm
           == oneName (paramName arr_p),
         perfectlyMapped arr nest -> do
           addPostStms kernels
@@ -783,7 +786,8 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   let rts =
         concatMap (take 1) $
           chunks as_ns $
-            drop (sum indexes) $ lambdaReturnType lam
+            drop (sum indexes) $
+              lambdaReturnType lam
       (is, vs) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam
 
   (is', k_body_stms) <- runBuilder $ do
@@ -806,7 +810,9 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
     let pat =
           Pat . rearrangeShape perm $
-            patElems $ loopNestingPat $ fst nest
+            patElems $
+              loopNestingPat $
+                fst nest
 
     letBind pat $ Op $ segOp k
   where
@@ -847,10 +853,15 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     -- Compute indexes into full array.
     v' <-
       certifying cs $
-        letSubExp "v" $ BasicOp $ Index v $ Slice $ map (DimFix . Var) slice_gtids
+        letSubExp "v" $
+          BasicOp $
+            Index v $
+              Slice $
+                map (DimFix . Var) slice_gtids
     slice_is <-
       traverse (toSubExp "index") $
-        fixSlice (fmap pe64 slice) $ map (pe64 . Var) slice_gtids
+        fixSlice (fmap pe64 slice) $
+          map (pe64 . Var) slice_gtids
 
     let write_is = map (Var . fst) base_ispace ++ slice_is
         arr' =
@@ -878,7 +889,9 @@ segmentedUpdateKernel nest perm cs arr slice v = do
 
     let pat =
           Pat . rearrangeShape perm $
-            patElems $ loopNestingPat $ fst nest
+            patElems $
+              loopNestingPat $
+                fst nest
 
     letBind pat $ Op $ segOp k
 
@@ -900,7 +913,9 @@ segmentedGatherKernel nest cs arr slice = do
     -- Compute indexes into full array.
     slice'' <-
       subExpSlice . sliceSlice (primExpSlice slice) $
-        primExpSlice $ Slice $ map (DimFix . Var) slice_gtids
+        primExpSlice $
+          Slice $
+            map (DimFix . Var) slice_gtids
     v' <- certifying cs $ letSubExp "v" $ BasicOp $ Index arr slice''
     v_t <- subExpType v'
     pure (v_t, Returns ResultMaySimplify mempty v')
@@ -934,7 +949,9 @@ segmentedHistKernel nest perm cs hist_w ops lam arrs = do
   (ispace, inputs) <- flatKernel nest
   let orig_pat =
         Pat . rearrangeShape perm $
-          patElems $ loopNestingPat $ fst nest
+          patElems $
+            loopNestingPat $
+              fst nest
 
   -- The input/output arrays _must_ correspond to some kernel input,
   -- or else the original nested Hist would have been ill-typed.
@@ -984,7 +1001,8 @@ histKernel onLambda lvl orig_pat ispace inputs cs hist_w ops lam arrs = runBuild
       inputs' = filter (not . isDest . kernelInputArray) inputs
 
   certifying cs $
-    addStms =<< traverse renameStm
+    addStms
+      =<< traverse renameStm
       =<< segHist lvl orig_pat hist_w ispace inputs' ops' lam arrs
 
 determineReduceOp ::
@@ -1004,7 +1022,9 @@ determineReduceOp lam nes =
           BasicOp $
             Index ne_v $
               fullSlice ne_v_t $
-                replicate (shapeRank shape) $ DimFix $ intConst Int64 0
+                replicate (shapeRank shape) $
+                  DimFix $
+                    intConst Int64 0
       pure (lam', nes', shape)
     Nothing ->
       pure (lam, nes, mempty)
@@ -1041,7 +1061,8 @@ segmentedScanomapKernel nest perm cs segment_size lam map_lam nes arrs = do
       lam'' <- onLambda' lam'
       let scan_op = SegBinOp Noncommutative lam'' nes'' shape
       lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
-      addStms =<< traverse renameStm
+      addStms
+        =<< traverse renameStm
         =<< segScan lvl pat cs segment_size [scan_op] map_lam arrs ispace inps
 
 regularSegmentedRedomapKernel ::
@@ -1062,7 +1083,8 @@ regularSegmentedRedomapKernel nest perm cs segment_size comm lam map_lam nes arr
     \pat ispace inps nes' _ -> do
       let red_op = SegBinOp comm lam nes' mempty
       lvl <- mk_lvl (segment_size : map snd ispace) "segred" $ NoRecommendation SegNoVirt
-      addStms =<< traverse renameStm
+      addStms
+        =<< traverse renameStm
         =<< segRed lvl pat cs segment_size [red_op] map_lam arrs ispace inps
 
 isSegmentedOp ::
@@ -1110,7 +1132,7 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
             | kernelInputIndices inp == map Var indices ->
                 pure $ pure $ kernelInputArray inp
           Nothing
-            | not (arr `nameIn` bound_by_nest) ->
+            | arr `notNameIn` bound_by_nest ->
                 -- This input is something that is free inside
                 -- the loop nesting. We will have to replicate
                 -- it.
@@ -1132,7 +1154,9 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
 
         let pat =
               Pat . rearrangeShape perm $
-                patElems $ loopNestingPat $ fst nest
+                patElems $
+                  loopNestingPat $
+                    fst nest
 
         m pat ispace kernel_inps nes' nested_arrs
 
@@ -1150,8 +1174,8 @@ expandKernelNest ::
   MonadFreshNames m => [PatElem Type] -> KernelNest -> m KernelNest
 expandKernelNest pes (outer_nest, inner_nests) = do
   let outer_size =
-        loopNestingWidth outer_nest :
-        map loopNestingWidth inner_nests
+        loopNestingWidth outer_nest
+          : map loopNestingWidth inner_nests
       inner_sizes = tails $ map loopNestingWidth inner_nests
   outer_nest' <- expandWith outer_nest outer_size
   inner_nests' <- zipWithM expandWith inner_nests inner_sizes

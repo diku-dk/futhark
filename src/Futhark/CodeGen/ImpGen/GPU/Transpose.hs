@@ -67,22 +67,26 @@ mapTranspose block_dim args t kind =
       mkTranspose $
         lowDimBody
           (le32 get_group_id_0 * block_dim + (le32 get_local_id_0 `quot` muly))
-          ( le32 get_group_id_1 * block_dim * muly + le32 get_local_id_1
+          ( le32 get_group_id_1 * block_dim * muly
+              + le32 get_local_id_1
               + (le32 get_local_id_0 `rem` muly) * block_dim
           )
-          ( le32 get_group_id_1 * block_dim * muly + le32 get_local_id_0
+          ( le32 get_group_id_1 * block_dim * muly
+              + le32 get_local_id_0
               + (le32 get_local_id_1 `rem` muly) * block_dim
           )
           (le32 get_group_id_0 * block_dim + (le32 get_local_id_1 `quot` muly))
     TransposeLowHeight ->
       mkTranspose $
         lowDimBody
-          ( le32 get_group_id_0 * block_dim * mulx + le32 get_local_id_0
+          ( le32 get_group_id_0 * block_dim * mulx
+              + le32 get_local_id_0
               + (le32 get_local_id_1 `rem` mulx) * block_dim
           )
           (le32 get_group_id_1 * block_dim + (le32 get_local_id_1 `quot` mulx))
           (le32 get_group_id_1 * block_dim + (le32 get_local_id_0 `quot` mulx))
-          ( le32 get_group_id_0 * block_dim * mulx + le32 get_local_id_1
+          ( le32 get_group_id_0 * block_dim * mulx
+              + le32 get_local_id_1
               + (le32 get_local_id_0 `rem` mulx) * block_dim
           )
     TransposeNormal ->
@@ -182,6 +186,7 @@ mapTranspose block_dim args t kind =
       get_global_id_0,
       get_local_id_0,
       get_local_id_1,
+      get_local_size_0,
       get_group_id_0,
       get_group_id_1,
       get_group_id_2,
@@ -201,6 +206,7 @@ mapTranspose block_dim args t kind =
               "get_global_id_0",
               "get_local_id_0",
               "get_local_id_1",
+              "get_local_size_0",
               "get_group_id_0",
               "get_group_id_1",
               "get_group_id_2",
@@ -210,9 +216,7 @@ mapTranspose block_dim args t kind =
 
     get_ids =
       mconcat
-        [ DeclareScalar get_global_id_0 Nonvolatile int32,
-          Op $ GetGlobalId get_global_id_0 0,
-          DeclareScalar get_local_id_0 Nonvolatile int32,
+        [ DeclareScalar get_local_id_0 Nonvolatile int32,
           Op $ GetLocalId get_local_id_0 0,
           DeclareScalar get_local_id_1 Nonvolatile int32,
           Op $ GetLocalId get_local_id_1 1,
@@ -221,7 +225,11 @@ mapTranspose block_dim args t kind =
           DeclareScalar get_group_id_1 Nonvolatile int32,
           Op $ GetGroupId get_group_id_1 1,
           DeclareScalar get_group_id_2 Nonvolatile int32,
-          Op $ GetGroupId get_group_id_2 2
+          Op $ GetGroupId get_group_id_2 2,
+          DeclareScalar get_local_size_0 Nonvolatile int32,
+          Op $ GetLocalSize get_local_size_0 0,
+          DeclareScalar get_global_id_0 Nonvolatile int32,
+          SetScalar get_global_id_0 $ untyped $ le32 get_group_id_0 * le32 get_local_size_0 + le32 get_local_id_0
         ]
 
     mkTranspose body =

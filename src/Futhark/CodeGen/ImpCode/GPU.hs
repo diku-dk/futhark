@@ -95,12 +95,14 @@ instance Pretty KernelUse where
 
 instance Pretty HostOp where
   ppr (GetSize dest key size_class) =
-    ppr dest <+> text "<-"
+    ppr dest
+      <+> text "<-"
       <+> text "get_size" <> parens (commasep [ppr key, ppr size_class])
   ppr (GetSizeMax dest size_class) =
     ppr dest <+> text "<-" <+> text "get_size_max" <> parens (ppr size_class)
   ppr (CmpSizeLe dest name size_class x) =
-    ppr dest <+> text "<-"
+    ppr dest
+      <+> text "<-"
       <+> text "get_size" <> parens (commasep [ppr name, ppr size_class])
       <+> text "<"
       <+> ppr x
@@ -126,12 +128,18 @@ instance Pretty Kernel where
   ppr kernel =
     text "kernel"
       <+> brace
-        ( text "groups" <+> brace (ppr $ kernelNumGroups kernel)
-            </> text "group_size" <+> brace (ppr $ kernelGroupSize kernel)
-            </> text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel)
-            </> text "failure_tolerant" <+> brace (ppr $ kernelFailureTolerant kernel)
-            </> text "check_local_memory" <+> brace (ppr $ kernelCheckLocalMemory kernel)
-            </> text "body" <+> brace (ppr $ kernelBody kernel)
+        ( text "groups"
+            <+> brace (ppr $ kernelNumGroups kernel)
+            </> text "group_size"
+            <+> brace (ppr $ kernelGroupSize kernel)
+            </> text "uses"
+            <+> brace (commasep $ map ppr $ kernelUses kernel)
+            </> text "failure_tolerant"
+            <+> brace (ppr $ kernelFailureTolerant kernel)
+            </> text "check_local_memory"
+            <+> brace (ppr $ kernelCheckLocalMemory kernel)
+            </> text "body"
+            <+> brace (ppr $ kernelBody kernel)
         )
 
 -- | When we do a barrier or fence, is it at the local or global
@@ -144,8 +152,6 @@ data KernelOp
   = GetGroupId VName Int
   | GetLocalId VName Int
   | GetLocalSize VName Int
-  | GetGlobalSize VName Int
-  | GetGlobalId VName Int
   | GetLockstepWidth VName
   | Atomic Space AtomicOp
   | Barrier Fence
@@ -192,22 +198,20 @@ instance FreeIn AtomicOp where
 
 instance Pretty KernelOp where
   ppr (GetGroupId dest i) =
-    ppr dest <+> "<-"
+    ppr dest
+      <+> "<-"
       <+> "get_group_id" <> parens (ppr i)
   ppr (GetLocalId dest i) =
-    ppr dest <+> "<-"
+    ppr dest
+      <+> "<-"
       <+> "get_local_id" <> parens (ppr i)
   ppr (GetLocalSize dest i) =
-    ppr dest <+> "<-"
+    ppr dest
+      <+> "<-"
       <+> "get_local_size" <> parens (ppr i)
-  ppr (GetGlobalSize dest i) =
-    ppr dest <+> "<-"
-      <+> "get_global_size" <> parens (ppr i)
-  ppr (GetGlobalId dest i) =
-    ppr dest <+> "<-"
-      <+> "get_global_id" <> parens (ppr i)
   ppr (GetLockstepWidth dest) =
-    ppr dest <+> "<-"
+    ppr dest
+      <+> "<-"
       <+> "get_lockstep_width()"
   ppr (Barrier FenceLocal) =
     "local_barrier()"
@@ -224,38 +228,71 @@ instance Pretty KernelOp where
   ppr (ErrorSync FenceGlobal) =
     "error_sync_global()"
   ppr (Atomic _ (AtomicAdd t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_add_" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_add_"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicFAdd t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_fadd_" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_fadd_"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicSMax t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_smax" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_smax"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicSMin t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_smin" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_smin"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicUMax t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_umax" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_umax"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicUMin t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_umin" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_umin"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicAnd t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_and" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_and"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicOr t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_or" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_or"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicXor t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_xor" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_xor"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicCmpXchg t old arr ind x y)) =
-    ppr old <+> "<-" <+> "atomic_cmp_xchg" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x, ppr y])
+    ppr old
+      <+> "<-"
+      <+> "atomic_cmp_xchg"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x, ppr y])
   ppr (Atomic _ (AtomicXchg t old arr ind x)) =
-    ppr old <+> "<-" <+> "atomic_xchg" <> ppr t
-      <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+    ppr old
+      <+> "<-"
+      <+> "atomic_xchg"
+        <> ppr t
+        <> parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
 
 instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op

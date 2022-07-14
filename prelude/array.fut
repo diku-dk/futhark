@@ -49,12 +49,12 @@ def drop [n] 't (i: i64) (x: [n]t) = x[i:]
 --
 -- **Complexity:** O(1).
 def split [n] 't (i: i64) (xs: [n]t): ([i]t, []t) =
-  (xs[:i] :> [i]t, xs[i:])
+  (xs[0:i], xs[i:])
 
 -- | Return the elements of the array in reverse order.
 --
 -- **Complexity:** O(1).
-def reverse [n] 't (x: [n]t): [n]t = x[::-1] :> [n]t
+def reverse [n] 't (x: [n]t): [n]t = x[::-1]
 
 -- | Concatenate two arrays.  Warning: never try to perform a reduction
 -- with this operator; it will not work.
@@ -70,7 +70,7 @@ def concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = xs ++ ys
 -- | Concatenation where the result has a predetermined size.  If the
 -- provided size is wrong, the function will fail with a run-time
 -- error.
-def concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> *[k]t
+def concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]t
 
 -- | Rotate an array some number of elements to the left.  A negative
 -- rotation amount is also supported.
@@ -78,7 +78,7 @@ def concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> *[k
 -- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
 --
 -- **Complexity:** O(1).
-def rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> *[n]t
+def rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate (r, xs)
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
@@ -152,7 +152,7 @@ def unflatten_4d [p] 't (n: i64) (m: i64) (l: i64) (k: i64) (xs: [p]t): [n][m][l
 --
 -- **Complexity:** O(1).
 def transpose [n] [m] 't (a: [n][m]t): [m][n]t =
-  intrinsics.transpose a :> [m][n]t
+  intrinsics.transpose a
 
 -- | True if all of the input elements are true.  Produces true on an
 -- empty array.

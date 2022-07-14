@@ -76,6 +76,8 @@ handleHostOp (OtherOp op) =
   error $ "Cannot allocate memory in SOAC: " ++ pretty op
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
+handleHostOp (GPUBody ts (Body _ stms res)) =
+  fmap (Inner . GPUBody ts) . buildBody_ . allocInStms stms $ pure res
 
 kernelExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
 kernelExpHints (BasicOp (Manifest perm v)) = do
@@ -159,9 +161,11 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
                   nilSlice d = DimSlice 0 d 0
                in Hint
                     ( IxFun.slice (IxFun.iota dims) $
-                        fullSliceNum dims $ map nilSlice seg_dims
+                        fullSliceNum dims $
+                          map nilSlice seg_dims
                     )
-                    $ ScalarSpace (arrayDims t) $ elemType t
+                    $ ScalarSpace (arrayDims t)
+                    $ elemType t
             else NoHint
   where
     private (Returns ResultPrivate _ _) = True

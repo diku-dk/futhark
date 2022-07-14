@@ -8,7 +8,7 @@
 -- blocks.
 module Language.Futhark.TypeChecker.Unify
   ( Constraint (..),
-    Usage,
+    Usage (..),
     mkUsage,
     mkUsage',
     Level,
@@ -45,7 +45,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Futhark.Util.Pretty hiding (empty)
-import Language.Futhark hiding (unifyDims)
+import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types
 
@@ -60,7 +60,8 @@ data BreadCrumb
 
 instance Pretty BreadCrumb where
   ppr (MatchingTypes t1 t2) =
-    "When matching type" </> indent 2 (ppr t1)
+    "When matching type"
+      </> indent 2 (ppr t1)
       </> "with"
       </> indent 2 (ppr t2)
   ppr (MatchingFields fields) =
@@ -132,7 +133,7 @@ data Constraint
   | ParamSize SrcLoc
   | -- | Is not actually a type, but a term-level size,
     -- possibly already set to something specific.
-    Size (Maybe (DimDecl VName)) Usage
+    Size (Maybe Size) Usage
   | -- | A size that does not unify with anything -
     -- created from the result of applying a function
     -- whose return size is existential, or otherwise
@@ -174,7 +175,7 @@ data RigidSource
     RigidRet (Maybe (QualName VName))
   | RigidLoop
   | -- | Produced by a complicated slice expression.
-    RigidSlice (Maybe (DimDecl VName)) String
+    RigidSlice (Maybe Size) String
   | -- | Produced by a complicated range expression.
     RigidRange
   | -- | Produced by a range expression with this bound.
@@ -198,19 +199,24 @@ prettySource ctx loc (RigidRet Nothing) =
   "is unknown size returned by function at"
     <+> text (locStrRel ctx loc) <> "."
 prettySource ctx loc (RigidRet (Just fname)) =
-  "is unknown size returned by" <+> pquote (ppr fname)
+  "is unknown size returned by"
+    <+> pquote (ppr fname)
     <+> "at"
     <+> text (locStrRel ctx loc) <> "."
 prettySource ctx loc (RigidArg fname arg) =
   "is value of argument"
     </> indent 2 (shorten arg)
-    </> "passed to" <+> fname' <+> "at" <+> text (locStrRel ctx loc) <> "."
+    </> "passed to"
+    <+> fname'
+    <+> "at"
+    <+> text (locStrRel ctx loc) <> "."
   where
     fname' = maybe "function" (pquote . ppr) fname
 prettySource ctx loc (RigidSlice d slice) =
   "is size produced by slice"
     </> indent 2 (shorten slice)
-    </> d_desc <> "at" <+> text (locStrRel ctx loc) <> "."
+    </> d_desc <> "at"
+    <+> text (locStrRel ctx loc) <> "."
   where
     d_desc = case d of
       Just d' -> "of dimension of size " <> pquote (ppr d') <> " "
@@ -224,13 +230,14 @@ prettySource ctx loc (RigidBound bound) =
     </> indent 2 (shorten bound)
     </> "used in range at " <> text (locStrRel ctx loc) <> "."
 prettySource ctx loc (RigidOutOfScope boundloc v) =
-  "is an unknown size arising from " <> pquote (pprName v)
+  "is an unknown size arising from "
+    <> pquote (pprName v)
     <> " going out of scope at "
     <> text (locStrRel ctx loc)
     <> "."
     </> "Originally bound at "
-    <> text (locStrRel ctx boundloc)
-    <> "."
+      <> text (locStrRel ctx boundloc)
+      <> "."
 prettySource ctx loc RigidCoerce =
   "is an unknown size arising from empty dimension in coercion at"
     <+> text (locStrRel ctx loc) <> "."
@@ -241,42 +248,43 @@ prettySource ctx loc (RigidCond t1 t2) =
     <> text (locStrRel ctx loc)
     <> "."
     </> "One branch returns array of type: "
-    <> align (ppr t1)
+      <> align (ppr t1)
     </> "The other an array of type:       "
-    <> align (ppr t2)
+      <> align (ppr t2)
 
 -- | Retrieve notes describing the purpose or origin of the given
--- 'DimDecl'.  The location is used as the *current* location, for the
+-- t'Size'.  The location is used as the *current* location, for the
 -- purpose of reporting relative locations.
-dimNotes :: (Located a, MonadUnify m) => a -> DimDecl VName -> m Notes
-dimNotes ctx (NamedDim d) = do
+dimNotes :: (Located a, MonadUnify m) => a -> Size -> m Notes
+dimNotes ctx (NamedSize d) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
-      pure $
-        aNote $
-          pretty $
-            pquote (ppr d) <+> prettySource (srclocOf ctx) loc rsrc
+      pure . aNote . pretty $
+        pquote (ppr d) <+> prettySource (srclocOf ctx) loc rsrc
     _ -> pure mempty
 dimNotes _ _ = pure mempty
 
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
-  fmap mconcat . mapM (dimNotes ctx . NamedDim . qualName)
+  fmap mconcat
+    . mapM (dimNotes ctx . NamedSize . qualName)
     . S.toList
-    . typeDimNames
+    . freeInType
 
 typeVarNotes :: MonadUnify m => VName -> m Notes
 typeVarNotes v = maybe mempty (aNote . note . snd) . M.lookup v <$> getConstraints
   where
     note (HasConstrs cs _) =
-      pprName v <+> "="
+      pprName v
+        <+> "="
         <+> mconcat (map ppConstr (M.toList cs))
         <+> "..."
     note (Overloaded ts _) =
       pprName v <+> "must be one of" <+> mconcat (punctuate ", " (map ppr ts))
     note (HasFields fs _) =
-      pprName v <+> "="
+      pprName v
+        <+> "="
         <+> braces (mconcat (punctuate ", " (map ppField (M.toList fs))))
     note _ = mempty
 
@@ -323,7 +331,7 @@ normTypeFully t = do
 
 -- | Replace any top-level type variable with its substitution.
 normType :: MonadUnify m => StructType -> m StructType
-normType t@(Scalar (TypeVar _ _ (TypeName [] v) [])) = do
+normType t@(Scalar (TypeVar _ _ (QualName [] v) [])) = do
   constraints <- getConstraints
   case snd <$> M.lookup v constraints of
     Just (Constraint (RetType [] t') _) -> normType t'
@@ -332,7 +340,7 @@ normType t = pure t
 
 -- | Replace any top-level type variable with its substitution.
 normPatType :: MonadUnify m => PatType -> m PatType
-normPatType t@(Scalar (TypeVar als u (TypeName [] v) [])) = do
+normPatType t@(Scalar (TypeVar als u (QualName [] v) [])) = do
   constraints <- getConstraints
   case snd <$> M.lookup v constraints of
     Just (Constraint (RetType [] t') _) ->
@@ -351,15 +359,15 @@ instantiateEmptyArrayDims ::
   MonadUnify m =>
   SrcLoc ->
   Rigidity ->
-  RetTypeBase (DimDecl VName) als ->
-  m (TypeBase (DimDecl VName) als, [VName])
+  RetTypeBase Size als ->
+  m (TypeBase Size als, [VName])
 instantiateEmptyArrayDims tloc r (RetType dims t) = do
   dims' <- mapM new dims
   pure (first (onDim $ zip dims dims') t, dims')
   where
     new = newDimVar tloc r . nameFromString . takeWhile isAscii . baseString
-    onDim dims' (NamedDim d) =
-      NamedDim $ maybe d qualName (lookup (qualLeaf d) dims')
+    onDim dims' (NamedSize d) =
+      NamedSize $ maybe d qualName (lookup (qualLeaf d) dims')
     onDim _ d = d
 
 -- | Is the given type variable the name of an abstract type or type
@@ -376,7 +384,7 @@ isNonRigid v constraints = do
   pure lvl
 
 type UnifyDims m =
-  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> DimDecl VName -> DimDecl VName -> m ()
+  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> Size -> Size -> m ()
 
 flipUnifyDims :: UnifyDims m -> UnifyDims m
 flipUnifyDims onDims bcs bound nonrigid t1 t2 =
@@ -448,15 +456,15 @@ unifyWith onDims usage = subunify False
                         ++ filter (`notElem` M.keys fs) (M.keys arg_fs)
                 unifyError usage mempty bcs $
                   "Unshared fields:" <+> commasep (map ppr missing) <> "."
-        ( Scalar (TypeVar _ _ (TypeName _ tn) targs),
-          Scalar (TypeVar _ _ (TypeName _ arg_tn) arg_targs)
+        ( Scalar (TypeVar _ _ (QualName _ tn) targs),
+          Scalar (TypeVar _ _ (QualName _ arg_tn) arg_targs)
           )
             | tn == arg_tn,
               length targs == length arg_targs -> do
                 let bcs' = breadCrumb (Matching "When matching type arguments.") bcs
                 zipWithM_ (unifyTypeArg bcs') targs arg_targs
-        ( Scalar (TypeVar _ _ (TypeName [] v1) []),
-          Scalar (TypeVar _ _ (TypeName [] v2) [])
+        ( Scalar (TypeVar _ _ (QualName [] v1) []),
+          Scalar (TypeVar _ _ (QualName [] v2) [])
           ) ->
             case (nonrigid v1, nonrigid v2) of
               (Nothing, Nothing) -> failure
@@ -465,10 +473,10 @@ unifyWith onDims usage = subunify False
               (Just lvl1, Just lvl2)
                 | lvl1 <= lvl2 -> link ord v1 lvl1 t2'
                 | otherwise -> link (not ord) v2 lvl2 t1'
-        (Scalar (TypeVar _ _ (TypeName [] v1) []), _)
+        (Scalar (TypeVar _ _ (QualName [] v1) []), _)
           | Just lvl <- nonrigid v1 ->
               link ord v1 lvl t2'
-        (_, Scalar (TypeVar _ _ (TypeName [] v2) []))
+        (_, Scalar (TypeVar _ _ (QualName [] v2) []))
           | Just lvl <- nonrigid v2 ->
               link (not ord) v2 lvl t1'
         ( Scalar (Arrow _ p1 a1 (RetType b1_dims b1)),
@@ -512,7 +520,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ SizeSubst $ NamedDim $ qualName p1'
+                          | v == p2' = Just $ SizeSubst $ NamedSize $ qualName p1'
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -521,8 +529,8 @@ unifyWith onDims usage = subunify False
               pname (Named x) = Just x
               pname Unnamed = Nothing
         (Array {}, Array {})
-          | ShapeDecl (t1_d : _) <- arrayShape t1',
-            ShapeDecl (t2_d : _) <- arrayShape t2',
+          | Shape (t1_d : _) <- arrayShape t1',
+            Shape (t2_d : _) <- arrayShape t2',
             Just t1'' <- peelArray 1 t1',
             Just t2'' <- peelArray 1 t2' -> do
               onDims' bcs (swap ord t1_d t2_d)
@@ -545,16 +553,17 @@ unifyWith onDims usage = subunify False
 unifyDims :: MonadUnify m => Usage -> UnifyDims m
 unifyDims _ _ _ _ d1 d2
   | d1 == d2 = pure ()
-unifyDims usage bcs _ nonrigid (NamedDim (QualName _ d1)) d2
+unifyDims usage bcs _ nonrigid (NamedSize (QualName _ d1)) d2
   | Just lvl1 <- nonrigid d1 =
       linkVarToDim usage bcs d1 lvl1 d2
-unifyDims usage bcs _ nonrigid d1 (NamedDim (QualName _ d2))
+unifyDims usage bcs _ nonrigid d1 (NamedSize (QualName _ d2))
   | Just lvl2 <- nonrigid d2 =
       linkVarToDim usage bcs d2 lvl2 d1
 unifyDims usage bcs _ _ d1 d2 = do
   notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
   unifyError usage notes bcs $
-    "Dimensions" <+> pquote (ppr d1)
+    "Dimensions"
+      <+> pquote (ppr d1)
       <+> "and"
       <+> pquote (ppr d2)
       <+> "do not match."
@@ -571,23 +580,24 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
       | d1 == d2 = pure ()
     -- We identify existentially bound names by them being nonrigid
     -- and yet bound.  It's OK to unify with those.
-    onDims bcs bound nonrigid (NamedDim (QualName _ d1)) d2
+    onDims bcs bound nonrigid (NamedSize (QualName _ d1)) d2
       | Just lvl1 <- nonrigid d1,
         not (boundParam bound d2) || (d1 `elem` bound) =
           linkVarToDim usage bcs d1 lvl1 d2
-    onDims bcs bound nonrigid d1 (NamedDim (QualName _ d2))
+    onDims bcs bound nonrigid d1 (NamedSize (QualName _ d2))
       | Just lvl2 <- nonrigid d2,
         not (boundParam bound d1) || (d2 `elem` bound) =
           linkVarToDim usage bcs d2 lvl2 d1
     onDims bcs _ _ d1 d2 = do
       notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
       unifyError usage notes bcs $
-        "Dimensions" <+> pquote (ppr d1)
+        "Dimensions"
+          <+> pquote (ppr d1)
           <+> "and"
           <+> pquote (ppr d2)
           <+> "do not match."
 
-    boundParam bound (NamedDim (QualName _ d)) = d `elem` bound
+    boundParam bound (NamedSize (QualName _ d)) = d `elem` bound
     boundParam _ _ = False
 
 occursCheck ::
@@ -618,7 +628,7 @@ scopeCheck usage bcs vn max_lvl tp = do
   checkType constraints tp
   where
     checkType constraints t =
-      mapM_ (check constraints) $ typeVars t <> typeDimNames t
+      mapM_ (check constraints) $ typeVars t <> freeInType t
 
     check constraints v
       | Just (lvl, c) <- M.lookup v constraints,
@@ -659,17 +669,27 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
   scopeCheck usage bcs vn lvl tp
 
   constraints <- getConstraints
-  let link =
-        let ext = filter (`S.member` typeDimNames tp) bound
-         in modifyConstraints $
+  let link = do
+        let (witnessed, not_witnessed) = determineSizeWitnesses tp
+            used v = v `S.member` witnessed || v `S.member` not_witnessed
+            ext = filter used bound
+        case filter (`notElem` witnessed) ext of
+          [] ->
+            modifyConstraints $
               M.insert vn (lvl, Constraint (RetType ext tp) usage)
+          problems ->
+            unifyError usage mempty bcs . withIndexLink "unify-param-existential" $
+              "Parameter(s) "
+                <> commasep (map (pquote . pprName) problems)
+                <> " used as size(s) would go out of scope."
 
   case snd <$> M.lookup vn constraints of
     Just (NoConstraint Unlifted unlift_usage) -> do
       let bcs' =
             breadCrumb
               ( Matching $
-                  "When verifying that" <+> pquote (pprName vn)
+                  "When verifying that"
+                    <+> pquote (pprName vn)
                     <+> textwrap "is not instantiated with a function type, due to"
                     <+> ppr unlift_usage
               )
@@ -678,9 +698,10 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       link
 
       arrayElemTypeWith usage bcs' tp
-      when (any (`elem` bound) (typeDimNames tp)) $
+      when (any (`elem` bound) (freeInType tp)) $
         unifyError usage mempty bcs $
-          "Type variable" <+> pprName vn
+          "Type variable"
+            <+> pprName vn
             <+> "cannot be instantiated with type containing anonymous sizes:"
             </> indent 2 (ppr tp)
             </> textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size being a value parameter.  Add type annotation to clarify."
@@ -691,13 +712,16 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       | tp `notElem` map (Scalar . Prim) ts -> do
           link
           case tp of
-            Scalar (TypeVar _ _ (TypeName [] v) [])
+            Scalar (TypeVar _ _ (QualName [] v) [])
               | not $ isRigid v constraints ->
                   linkVarToTypes usage v ts
             _ ->
               unifyError usage mempty bcs $
-                "Cannot instantiate" <+> pquote (pprName vn)
-                  <+> "with type" </> indent 2 (ppr tp) </> "as"
+                "Cannot instantiate"
+                  <+> pquote (pprName vn)
+                  <+> "with type"
+                  </> indent 2 (ppr tp)
+                  </> "as"
                   <+> pquote (pprName vn)
                   <+> "must be one of"
                   <+> commasep (map ppr ts)
@@ -722,7 +746,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
               mapM_ (uncurry $ unifyWith onDims usage bound bcs') $
                 M.elems $
                   M.intersectionWith (,) required_fields tp_fields
-        Scalar (TypeVar _ _ (TypeName [] v) [])
+        Scalar (TypeVar _ _ (QualName [] v) [])
           | not $ isRigid v constraints ->
               modifyConstraints $
                 M.insert
@@ -730,22 +754,27 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   (lvl, HasFields required_fields old_usage)
         _ ->
           unifyError usage mempty bcs $
-            "Cannot instantiate" <+> pquote (pprName vn) <+> "with type"
+            "Cannot instantiate"
+              <+> pquote (pprName vn)
+              <+> "with type"
               </> indent 2 (ppr tp)
-              </> "as" <+> pquote (pprName vn) <+> "must be a record with fields"
+              </> "as"
+              <+> pquote (pprName vn)
+              <+> "must be a record with fields"
               </> indent 2 (ppr (Record required_fields))
-              </> "due to" <+> ppr old_usage <> "."
+              </> "due to"
+              <+> ppr old_usage <> "."
     -- See Note [Linking variables to sum types]
     Just (HasConstrs required_cs old_usage) ->
       case tp of
         Scalar (Sum ts)
           | all (`M.member` ts) $ M.keys required_cs -> do
               let tp' = Scalar $ Sum $ required_cs <> ts -- Crucially left-biased.
-                  ext = filter (`S.member` typeDimNames tp') bound
+                  ext = filter (`S.member` freeInType tp') bound
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedConstructors onDims usage bound bcs required_cs ts
-        Scalar (TypeVar _ _ (TypeName [] v) []) -> do
+        Scalar (TypeVar _ _ (QualName [] v) []) -> do
           case M.lookup v constraints of
             Just (_, HasConstrs v_cs _) -> do
               unifySharedConstructors onDims usage bound bcs required_cs v_cs
@@ -780,20 +809,21 @@ linkVarToDim ::
   BreadCrumbs ->
   VName ->
   Level ->
-  DimDecl VName ->
+  Size ->
   m ()
 linkVarToDim usage bcs vn lvl dim = do
   constraints <- getConstraints
 
   case dim of
-    NamedDim dim'
+    NamedSize dim'
       | Just (dim_lvl, c) <- qualLeaf dim' `M.lookup` constraints,
         dim_lvl > lvl ->
           case c of
             ParamSize {} -> do
               notes <- dimNotes usage dim
               unifyError usage notes bcs $
-                "Cannot unify size variable" <+> pquote (ppr dim')
+                "Cannot unify size variable"
+                  <+> pquote (ppr dim')
                   <+> "with"
                   <+> pquote (pprName vn)
                   <+> "(scope violation)."
@@ -814,14 +844,15 @@ mustBeOneOf ts usage t = do
   let isRigid' v = isRigid v constraints
 
   case t' of
-    Scalar (TypeVar _ _ (TypeName [] v) [])
+    Scalar (TypeVar _ _ (QualName [] v) [])
       | not $ isRigid' v -> linkVarToTypes usage v ts
     Scalar (Prim pt) | pt `elem` ts -> pure ()
     _ -> failure
   where
     failure =
       unifyError usage mempty noBreadCrumbs $
-        text "Cannot unify type" <+> pquote (ppr t)
+        text "Cannot unify type"
+          <+> pquote (ppr t)
           <+> "with any of " <> commasep (map ppr ts) <> "."
 
 linkVarToTypes :: MonadUnify m => Usage -> VName -> [PrimType] -> m ()
@@ -841,14 +872,18 @@ linkVarToTypes usage vn ts = do
         ts' -> modifyConstraints $ M.insert vn (lvl, Overloaded ts' usage)
     Just (_, HasConstrs _ vn_usage) ->
       unifyError usage mempty noBreadCrumbs $
-        "Type constrained to one of" <+> commasep (map ppr ts)
-          <> ", but also inferred to be sum type due to" <+> ppr vn_usage
-          <> "."
+        "Type constrained to one of"
+          <+> commasep (map ppr ts)
+            <> ", but also inferred to be sum type due to"
+          <+> ppr vn_usage
+            <> "."
     Just (_, HasFields _ vn_usage) ->
       unifyError usage mempty noBreadCrumbs $
-        "Type constrained to one of" <+> commasep (map ppr ts)
-          <> ", but also inferred to be record due to" <+> ppr vn_usage
-          <> "."
+        "Type constrained to one of"
+          <+> commasep (map ppr ts)
+            <> ", but also inferred to be record due to"
+          <+> ppr vn_usage
+            <> "."
     Just (lvl, _) -> modifyConstraints $ M.insert vn (lvl, Overloaded ts usage)
     Nothing ->
       unifyError usage mempty noBreadCrumbs $
@@ -856,7 +891,7 @@ linkVarToTypes usage vn ts = do
 
 -- | Assert that this type must support equality.
 equalityType ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   TypeBase dim as ->
   m ()
@@ -869,13 +904,17 @@ equalityType usage t = do
     mustBeEquality vn = do
       constraints <- getConstraints
       case M.lookup vn constraints of
-        Just (_, Constraint (RetType [] (Scalar (TypeVar _ _ (TypeName [] vn') []))) _) ->
+        Just (_, Constraint (RetType [] (Scalar (TypeVar _ _ (QualName [] vn') []))) _) ->
           mustBeEquality vn'
         Just (_, Constraint (RetType _ vn_t) cusage)
           | not $ orderZero vn_t ->
               unifyError usage mempty noBreadCrumbs $
-                "Type" <+> pquote (ppr t) <+> "does not support equality."
-                  </> "Constrained to be higher-order due to" <+> ppr cusage <+> "."
+                "Type"
+                  <+> pquote (ppr t)
+                  <+> "does not support equality."
+                  </> "Constrained to be higher-order due to"
+                  <+> ppr cusage
+                  <+> "."
           | otherwise -> pure ()
         Just (lvl, NoConstraint _ _) ->
           modifyConstraints $ M.insert vn (lvl, Equality usage)
@@ -890,7 +929,7 @@ equalityType usage t = do
             "Type" <+> pprName vn <+> "does not support equality."
 
 zeroOrderTypeWith ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   BreadCrumbs ->
   TypeBase dim as ->
@@ -917,7 +956,7 @@ zeroOrderTypeWith usage bcs t = do
 
 -- | Assert that this type must be zero-order.
 zeroOrderType ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   String ->
   TypeBase dim as ->
@@ -928,7 +967,7 @@ zeroOrderType usage desc =
     bc = Matching $ "When checking" <+> textwrap desc
 
 arrayElemTypeWith ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   BreadCrumbs ->
   TypeBase dim as ->
@@ -956,7 +995,7 @@ arrayElemTypeWith usage bcs t = do
 
 -- | Assert that this type must be valid as an array element.
 arrayElemType ::
-  (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
+  (MonadUnify m, Pretty (Shape dim), Monoid as) =>
   Usage ->
   String ->
   TypeBase dim as ->
@@ -999,7 +1038,7 @@ mustHaveConstr ::
 mustHaveConstr usage c t fs = do
   constraints <- getConstraints
   case t of
-    Scalar (TypeVar _ _ (TypeName _ tn) [])
+    Scalar (TypeVar _ _ (QualName _ tn) [])
       | Just (lvl, NoConstraint {}) <- M.lookup tn constraints -> do
           mapM_ (scopeCheck usage noBreadCrumbs tn lvl) fs
           modifyConstraints $ M.insert tn (lvl, HasConstrs (M.singleton c fs) usage)
@@ -1036,33 +1075,35 @@ mustHaveFieldWith ::
 mustHaveFieldWith onDims usage bound bcs l t = do
   constraints <- getConstraints
   l_type <- newTypeVar (srclocOf usage) "t"
-  let l_type' = toStruct l_type
+  let l_type' = l_type `setAliases` aliases t
   case t of
-    Scalar (TypeVar _ _ (TypeName _ tn) [])
+    Scalar (TypeVar _ _ (QualName _ tn) [])
       | Just (lvl, NoConstraint {}) <- M.lookup tn constraints -> do
-          scopeCheck usage bcs tn lvl l_type'
-          modifyConstraints $ M.insert tn (lvl, HasFields (M.singleton l l_type') usage)
-          pure l_type
+          scopeCheck usage bcs tn lvl l_type
+          modifyConstraints $ M.insert tn (lvl, HasFields (M.singleton l l_type) usage)
+          pure l_type'
       | Just (lvl, HasFields fields _) <- M.lookup tn constraints -> do
           case M.lookup l fields of
-            Just t' -> unifyWith onDims usage bound bcs l_type' t'
+            Just t' -> unifyWith onDims usage bound bcs l_type t'
             Nothing ->
               modifyConstraints $
                 M.insert
                   tn
-                  (lvl, HasFields (M.insert l l_type' fields) usage)
-          pure l_type
+                  (lvl, HasFields (M.insert l l_type fields) usage)
+          pure l_type'
     Scalar (Record fields)
       | Just t' <- M.lookup l fields -> do
-          unify usage l_type' $ toStruct t'
+          unify usage l_type $ toStruct t'
           pure t'
       | otherwise ->
           unifyError usage mempty bcs $
-            "Attempt to access field" <+> pquote (ppr l) <+> " of value of type"
+            "Attempt to access field"
+              <+> pquote (ppr l)
+              <+> " of value of type"
               <+> ppr (toStructural t) <> "."
     _ -> do
-      unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type'
-      pure l_type
+      unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type
+      pure l_type'
 
 -- | Assert that some type must have a field with this name and type.
 mustHaveField ::
@@ -1076,9 +1117,9 @@ mustHaveField usage = mustHaveFieldWith (unifyDims usage) usage mempty noBreadCr
 newDimOnMismatch ::
   (Monoid as, MonadUnify m) =>
   SrcLoc ->
-  TypeBase (DimDecl VName) as ->
-  TypeBase (DimDecl VName) as ->
-  m (TypeBase (DimDecl VName) as, [VName])
+  TypeBase Size as ->
+  TypeBase Size as ->
+  m (TypeBase Size as, [VName])
 newDimOnMismatch loc t1 t2 = do
   (t, seen) <- runStateT (matchDims onDims t1 t2) mempty
   pure (t, M.elems seen)
@@ -1091,11 +1132,11 @@ newDimOnMismatch loc t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ NamedDim $ qualName d
+            Just d -> pure $ NamedSize $ qualName d
             Nothing -> do
               d <- lift $ newDimVar loc r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ NamedDim $ qualName d
+              pure $ NamedSize $ qualName d
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.
@@ -1140,7 +1181,7 @@ instance MonadUnify UnifyM where
   newTypeVar loc name = do
     v <- newVar name
     modifyConstraints $ M.insert v (0, NoConstraint Lifted $ Usage Nothing loc)
-    pure $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+    pure $ Scalar $ TypeVar mempty Nonunique (qualName v) []
 
   newDimVar loc rigidity name = do
     dim <- newVar name

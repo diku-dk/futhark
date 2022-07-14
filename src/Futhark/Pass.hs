@@ -7,8 +7,6 @@
 module Futhark.Pass
   ( PassM,
     runPassM,
-    liftEither,
-    liftEitherM,
     Pass (..),
     passLongOption,
     parPass,
@@ -22,8 +20,6 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer.Strict
 import Control.Parallel.Strategies
 import Data.Char
-import Data.Either
-import Futhark.Error
 import Futhark.IR
 import Futhark.MonadFreshNames
 import Futhark.Util.Log
@@ -48,17 +44,6 @@ runPassM ::
   m (a, Log)
 -- runPassM (PassM m) =  modifyNameSource $ runStateT (runWriterT m)
 runPassM (PassM m) = modifyNameSourceIO $ runStateT (runWriterT m)
-
--- | Turn an 'Either' computation into a 'PassM'.  If the 'Either' is
--- 'Left', the result is a 'CompilerBug'.
-liftEither :: Show err => Either err a -> PassM a
-liftEither (Left e) = compilerBugS $ show e
-liftEither (Right v) = pure v
-
--- | Turn an 'Either' monadic computation into a 'PassM'.  If the 'Either' is
--- 'Left', the result is an exception.
-liftEitherM :: Show err => PassM (Either err a) -> PassM a
-liftEitherM m = liftEither =<< m
 
 -- | A compiler pass transforming a 'Prog' of a given rep to a 'Prog'
 -- of another rep.
@@ -97,9 +82,9 @@ parPass f as = do
       ((x', log), src') <- runStateT (runPassM (f a)) src
       pure (x', log, src')
 
--- | Apply some operation to the top-level constants.  Then applies an
--- operation to all the function function definitions, which are also
--- given the transformed constants so they can be brought into scope.
+-- | Apply some operation to the top-level constants. Then applies an
+-- operation to all the function definitions, which are also given the
+-- transformed constants so they can be brought into scope.
 -- The function definition transformations are run in parallel (with
 -- 'parPass'), since they cannot affect each other.
 intraproceduralTransformationWithConsts ::
@@ -107,10 +92,10 @@ intraproceduralTransformationWithConsts ::
   (Stms torep -> FunDef fromrep -> PassM (FunDef torep)) ->
   Prog fromrep ->
   PassM (Prog torep)
-intraproceduralTransformationWithConsts ct ft (Prog consts funs) = do
-  consts' <- ct consts
-  funs' <- parPass (ft consts') funs
-  pure $ Prog consts' funs'
+intraproceduralTransformationWithConsts ct ft prog = do
+  consts' <- ct (progConsts prog)
+  funs' <- parPass (ft consts') (progFuns prog)
+  pure $ prog {progConsts = consts', progFuns = funs'}
 
 -- | Like 'intraproceduralTransformationWithConsts', but do not change
 -- the top-level constants, and simply pass along their 'Scope'.

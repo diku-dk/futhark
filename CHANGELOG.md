@@ -15,6 +15,108 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `replicate` was broken for sizes that didn't fit in `i32`.
+
+* Transposition of empty arrays in interpreter (#1700).
+
+## [0.21.13]
+
+### Added
+
+* New fusion engine by Amar Topalovic and Walter Restelli-Nielsen.
+  Fuses more, which is good for some programs and bad for others.
+  Most programs see no change.  This is mainly a robust foundation for
+  further improvements.
+
+* New experimental backend: `ispc`.  By Louis Marott Normann,
+  Kristoffer August Kortbæk, William Pema Norbu Holmes Malling, and
+  Oliver Bak Kjersgaard Petersen.
+
+* New prelude functions: `hist`, `spread`.  These function as
+  non-consuming variants of `reduce_by_index` and `scatter`.
+
+* Using `==` to compare arrays is now deprecated.
+
+* New command: `futhark tokens`.  You probably don't care about this one.
+
+* In the C API, opaque types that correspond to tuples or records can
+  now have their elements inspected and be created from elements
+  (#1568).
+
+* New server protocol commands: `types`, `fields`, `entry_points`.
+
+* Tuples and records can now be passed from FutharkScript to Futhark
+  entry points (#1684).
+
+### Fixed
+
+* Sometimes missing cases in `match` expressions were not detected.
+
+* A defective simplification rule could in very rare cases lead to
+  infinite recursion in the compiler (#1685).
+
+* Some broken links in `futhark doc` output (#1686).
+
+* Incorrect checking of whether a function parameter is consumable
+  based on its type (#1687).
+
+* Missing aliases for functions that return multiple aliased values
+  (#1690).
+
+* `new`/`values` functions for GPU backends are now properly
+  asynchronous (#1664).  This may uncover bugs in application code.
+
+## [0.21.12]
+
+### Added
+
+* Somewhat simplified the handling of "uniqueness types" (which is a
+  term we are moving away from).  You should never see `*` in
+  non-function types, and they are better thought of as effect
+  indicators.
+
+* `futhark literate`: prints tracing output (and other logging
+  messages that may occur) when run with `-v` (#1678).
+
+* Entry points can now be any valid Futhark identifier.
+
+### Fixed
+
+* `futhark test -C` was broken.
+
+* `futhark_context_free()` for the GPU backends neglected to free some
+  memory used for internal bookkeeping, which could lead to memory
+  leaks for processes that repeatedly create and destroy contexts
+  (#1676).
+
+* FutharkScript now allows `'` in names.
+
+* `futhark lsp` now handles warnings in programs that also have errors.
+
+## [0.21.11]
+
+### Added
+
+* The CUDA backend now supports compute capability 8.6 and 8.7.
+
+* Philip Børgesen has implemented a new optimisation for GPU backends
+  that migrates scalar work to the GPU, in order to reduce
+  synchronisation.  This results in major speedup for some programs.
+
+* String literals are now allowed in `input` blocks.
+
+* Experimental and undocumented support for automatic differentiation,
+  available on the secret menu.
+
+* Assertions and attributes are now ignored when used as size
+  expressions.  E.g. `iota (assert p n) 0` now has size `n`.
+
+* `futhark test` only runs the interpreter if passed `-i`.
+
+* `futhark literate` now shows progress bars when run with `-v`.
+
+### Fixed
+
 * `futhark lsp` is now better at handling multiple files (#1647).
 
 * Incorrect handling of local quantification when determining type
@@ -22,6 +124,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect checking of liftedness when instantiating polymorphic
   functions during module type ascription.
+
+* Tightened some restrictions on the use of existential sizes that
+  could otherwise lead to compiler crashes (#1650).  This restriction
+  is perhaps a bit *too* might and it may be possible to loosen it in
+  the future.
+
+* Another defunctorisation bug (#1653).  Somehow we find these every
+  time Martin Elsman writes a nontrivial Futhark program.
+
+* `futhark bench`: convergence phase now does at least `--runs` runs.
+
+* Errors and warnings no longer awkwardly mixed together in console output.
+
+* Slightly better type errors for ambiguous sizes (#1661).
+
+* Better type errors for module ascription involving nested modules
+  (#1660).
+
+* `futhark doc`: some formatting bugs.
+
+* `futhark doc` didn't notice all `local` module types (#1666).
+
+* Missing consumption check in optimisation could lead to ICE (#1669).
 
 ## [0.21.10]
 

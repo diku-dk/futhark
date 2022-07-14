@@ -11,7 +11,7 @@
 -- there should be no reason to include it explicitly.
 module Futhark.IR.Syntax.Core
   ( module Language.Futhark.Core,
-    module Futhark.IR.Primitive,
+    module Language.Futhark.Primitive,
 
     -- * Types
     Commutativity (..),
@@ -37,12 +37,20 @@ module Futhark.IR.Syntax.Core
     ErrorMsgPart (..),
     errorMsgArgTypes,
 
+    -- * Entry point information
+    ValueType (..),
+    OpaqueType (..),
+    OpaqueTypes (..),
+    Signedness (..),
+    EntryPointType (..),
+
     -- * Attributes
     Attr (..),
     Attrs (..),
     oneAttr,
     inAttrs,
     withoutAttrs,
+    mapAttrs,
 
     -- * Values
     PrimValue (..),
@@ -80,8 +88,8 @@ import Data.Maybe
 import qualified Data.Set as S
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
-import Futhark.IR.Primitive
 import Language.Futhark.Core
+import Language.Futhark.Primitive
 import Prelude hiding (id, (.))
 
 -- | Whether some operator is commutative or not.  The 'Monoid'
@@ -553,3 +561,52 @@ inAttrs attr (Attrs attrs) = attr `S.member` attrs
 -- | @x `withoutAttrs` y@ gives @x@ except for any attributes also in @y@.
 withoutAttrs :: Attrs -> Attrs -> Attrs
 withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
+
+-- | Map a function over an attribute set.
+mapAttrs :: (Attr -> a) -> Attrs -> [a]
+mapAttrs f (Attrs attrs) = map f $ S.toList attrs
+
+-- | Since the core language does not care for signedness, but the
+-- source language does, entry point input/output information has
+-- metadata for integer types (and arrays containing these) that
+-- indicate whether they are really unsigned integers.  This doesn't
+-- matter for non-integer types.
+data Signedness
+  = Unsigned
+  | Signed
+  deriving (Eq, Ord, Show)
+
+-- | An actual non-opaque type that can be passed to and from Futhark
+-- programs, or serve as the contents of opaque types.  Scalars are
+-- represented with zero rank.
+data ValueType
+  = ValueType Signedness Rank PrimType
+  deriving (Eq, Ord, Show)
+
+-- | Every entry point argument and return value has an annotation
+-- indicating how it maps to the original source program type.
+data EntryPointType
+  = -- | An opaque type of this name.
+    TypeOpaque String
+  | -- | A transparent type, which is scalar if the rank is zero.
+    TypeTransparent ValueType
+  deriving (Eq, Show, Ord)
+
+-- | The representation of an opaque type.
+data OpaqueType
+  = OpaqueType [ValueType]
+  | -- | Note that the field ordering here denote the actual
+    -- representation - make sure it is preserved.
+    OpaqueRecord [(Name, EntryPointType)]
+  deriving (Eq, Ord, Show)
+
+-- | Names of opaque types and their representation.
+newtype OpaqueTypes = OpaqueTypes [(String, OpaqueType)]
+  deriving (Eq, Ord, Show)
+
+instance Monoid OpaqueTypes where
+  mempty = OpaqueTypes mempty
+
+instance Semigroup OpaqueTypes where
+  OpaqueTypes x <> OpaqueTypes y =
+    OpaqueTypes $ x <> filter ((`notElem` map fst x) . fst) y

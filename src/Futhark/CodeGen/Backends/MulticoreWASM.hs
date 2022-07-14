@@ -52,7 +52,7 @@ compileProg version prog = do
       MC.operations
       MC.generateContext
       ""
-      [DefaultSpace]
+      (DefaultSpace, [DefaultSpace])
       MC.cliOptions
       prog'
 
@@ -67,12 +67,12 @@ compileProg version prog = do
 fRepMyRep :: Imp.Definitions Imp.Multicore -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Functions fs = Imp.defFuns prog
-      function (Imp.Function entry _ _ _ res args) = do
-        n <- entry
+      function (Imp.Function entry _ _ _) = do
+        Imp.EntryPoint n res args <- entry
         Just $
           JSEntryPoint
             { name = nameToString n,
               parameters = map (extToString . snd) args,
-              ret = map extToString res
+              ret = map (extToString . snd) res
             }
    in mapMaybe (function . snd) fs

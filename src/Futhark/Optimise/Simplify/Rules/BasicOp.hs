@@ -21,7 +21,6 @@ import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.Loop
 import Futhark.Optimise.Simplify.Rules.Simple
-import Futhark.Util
 
 isCt1 :: SubExp -> Bool
 isCt1 (Constant v) = oneIsh v
@@ -89,7 +88,9 @@ simplifyConcat (vtable, _) pat _ (Concat i (x :| xs) new_d)
     Just (xs', xs_cs) <- unzip <$> mapM (transposedBy perm) xs = Simplify $ do
       concat_rearrange <-
         certifying (x_cs <> mconcat xs_cs) $
-          letExp "concat_rearrange" $ BasicOp $ Concat 0 (x' :| xs') new_d
+          letExp "concat_rearrange" $
+            BasicOp $
+              Concat 0 (x' :| xs') new_d
       letBind pat $ BasicOp $ Rearrange perm concat_rearrange
   where
     transposedBy perm1 v =
@@ -103,7 +104,10 @@ simplifyConcat (vtable, _) pat _ (Concat i (x :| xs) new_d)
 simplifyConcat _ pat aux (Concat _ (x :| []) _) =
   Simplify $
     -- Still need a copy because Concat produces a fresh array.
-    auxing aux $ letBind pat $ BasicOp $ Copy x
+    auxing aux $
+      letBind pat $
+        BasicOp $
+          Copy x
 -- concat xs (concat ys zs) == concat xs ys zs
 simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i (x :| xs) new_d)
   | x' /= x || concat xs' /= xs =
@@ -111,7 +115,8 @@ simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i (x :| xs) new_d)
         certifying (cs <> x_cs <> mconcat xs_cs) $
           attributing attrs $
             letBind pat $
-              BasicOp $ Concat i (x' :| zs ++ concat xs') new_d
+              BasicOp $
+                Concat i (x' :| zs ++ concat xs') new_d
   where
     (x' : zs, x_cs) = isConcat x
     (xs', xs_cs) = unzip $ map isConcat xs
@@ -128,7 +133,8 @@ simplifyConcat (vtable, _) pat aux (Concat 0 (x :| xs) outer_w)
       forSingleArray $
         reverse $
           foldl' fuseConcatArg mempty $
-            map (toConcatArg vtable) $ x : xs,
+            map (toConcatArg vtable) $
+              x : xs,
     length xs /= length ys =
       Simplify $ do
         elem_type <- lookupType x
@@ -164,7 +170,9 @@ ruleBasicOp vtable pat aux (Update safety src (Slice [DimSlice i n s]) (Var v))
       Simplify $ do
         e' <- toSubExp "update_elem" e
         auxing aux . certifying cs $
-          letBind pat $ BasicOp $ Update safety src (Slice [DimFix i]) e'
+          letBind pat $
+            BasicOp $
+              Update safety src (Slice [DimFix i]) e'
 ruleBasicOp vtable pat _ (Update _ dest destis (Var v))
   | Just (e, _) <- ST.lookupExp v vtable,
     arrayFrom e =
@@ -189,7 +197,8 @@ ruleBasicOp vtable pat _ (Update _ dest is se)
         Var v | not $ null $ sliceDims is -> do
           v_reshaped <-
             letExp (baseString v ++ "_reshaped") $
-              BasicOp $ Reshape (map DimNew $ arrayDims dest_t) v
+              BasicOp $
+                Reshape (map DimNew $ arrayDims dest_t) v
           letBind pat $ BasicOp $ Copy v_reshaped
         _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
 ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update safety1 dest1 is1 (Var v1))
@@ -224,7 +233,8 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
           not_p_and_eq_x_z <-
             letSubExp "p_and_eq_x_y" $ BasicOp $ BinOp LogAnd not_p eq_x_z
           letBind pat $
-            BasicOp $ BinOp LogOr p_and_eq_x_y not_p_and_eq_x_z
+            BasicOp $
+              BinOp LogOr p_and_eq_x_y not_p_and_eq_x_z
     simplifyWith _ _ =
       Nothing
 
@@ -261,7 +271,9 @@ ruleBasicOp vtable pat aux (Index idd slice)
           Just _ ->
             certifying idd_cs $
               auxing aux $
-                letBind pat $ BasicOp $ Index idd2 slice
+                letBind pat $
+                  BasicOp $
+                    Index idd2 slice
           Nothing -> do
             -- Linearise indices and map to old index space.
             oldshape <- arrayDims <$> lookupType idd2
@@ -273,13 +285,19 @@ ruleBasicOp vtable pat aux (Index idd slice)
             new_inds' <-
               mapM (toSubExp "new_index") new_inds
             certifying idd_cs . auxing aux $
-              letBind pat $ BasicOp $ Index idd2 $ Slice $ map DimFix new_inds'
+              letBind pat $
+                BasicOp $
+                  Index idd2 $
+                    Slice $
+                      map DimFix new_inds'
 
 -- Copying an iota is pointless; just make it an iota instead.
 ruleBasicOp vtable pat aux (Copy v)
   | Just (Iota n x s it, v_cs) <- ST.lookupBasicOp v vtable =
       Simplify . certifying v_cs . auxing aux $
-        letBind pat $ BasicOp $ Iota n x s it
+        letBind pat $
+          BasicOp $
+            Iota n x s it
 -- Handle identity permutation.
 ruleBasicOp _ pat _ (Rearrange perm v)
   | sort perm == perm =
@@ -288,7 +306,9 @@ ruleBasicOp vtable pat aux (Rearrange perm v)
   | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
       -- Rearranging a rearranging: compose the permutations.
       Simplify . certifying v_cs . auxing aux $
-        letBind pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
+        letBind pat $
+          BasicOp $
+            Rearrange (perm `rearrangeCompose` perm2) e
 ruleBasicOp vtable pat aux (Rearrange perm v)
   | Just (BasicOp (Rotate offsets v2), v_cs) <- ST.lookupExp v vtable,
     Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable = Simplify $ do
@@ -296,7 +316,9 @@ ruleBasicOp vtable pat aux (Rearrange perm v)
       rearrange_rotate <- letExp "rearrange_rotate" $ BasicOp $ Rotate offsets' v3
       certifying (v_cs <> v2_cs) $
         auxing aux $
-          letBind pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm3) rearrange_rotate
+          letBind pat $
+            BasicOp $
+              Rearrange (perm `rearrangeCompose` perm3) rearrange_rotate
 
 -- Rearranging a replicate where the outer dimension is left untouched.
 ruleBasicOp vtable pat aux (Rearrange perm v1)
@@ -310,7 +332,8 @@ ruleBasicOp vtable pat aux (Rearrange perm v1)
           auxing aux $ do
             v <-
               letSubExp "rearrange_replicate" $
-                BasicOp $ Rearrange (map (subtract num_dims) rest_perm) v2
+                BasicOp $
+                  Rearrange (map (subtract num_dims) rest_perm) v2
             letBind pat $ BasicOp $ Replicate dims v
 
 -- A zero-rotation is identity.
@@ -325,7 +348,9 @@ ruleBasicOp vtable pat aux (Rotate offsets v)
       rotate_rearrange <-
         auxing aux $ letExp "rotate_rearrange" $ BasicOp $ Rearrange perm v3
       certifying (v_cs <> v2_cs) $
-        letBind pat $ BasicOp $ Rotate offsets' rotate_rearrange
+        letBind pat $
+          BasicOp $
+            Rotate offsets' rotate_rearrange
 
 -- Combining Rotates.
 ruleBasicOp vtable pat aux (Rotate offsets1 v)
@@ -333,27 +358,11 @@ ruleBasicOp vtable pat aux (Rotate offsets1 v)
       offsets <- zipWithM add offsets1 offsets2
       certifying v_cs $
         auxing aux $
-          letBind pat $ BasicOp $ Rotate offsets v2
+          letBind pat $
+            BasicOp $
+              Rotate offsets v2
   where
     add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int64 OverflowWrap) x y
-
--- If we see an Update with a scalar where the value to be written is
--- the result of indexing some other array, then we convert it into an
--- Update with a slice of that array.  This matters when the arrays
--- are far away (on the GPU, say), because it avoids a copy of the
--- scalar to and from the host.
-ruleBasicOp vtable pat aux (Update safety arr_x (Slice slice_x) (Var v))
-  | Just _ <- sliceIndices (Slice slice_x),
-    Just (Index arr_y (Slice slice_y), cs_y) <- ST.lookupBasicOp v vtable,
-    ST.available arr_y vtable,
-    not $ ST.aliases arr_x arr_y vtable,
-    Just (slice_x_bef, DimFix i, []) <- focusNth (length slice_x - 1) slice_x,
-    Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = Simplify $ do
-      let slice_x' = Slice $ slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]
-          slice_y' = Slice $ slice_y_bef ++ [DimSlice j (intConst Int64 1) (intConst Int64 1)]
-      v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
-      certifying cs_y . auxing aux $
-        letBind pat $ BasicOp $ Update safety arr_x slice_x' $ Var v'
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)
@@ -381,7 +390,10 @@ ruleBasicOp vtable pat aux (SubExp (Var v))
     cs' <- filter (`notElem` v_cs) cs,
     cs' /= cs =
       Simplify . certifying (Certs cs') $
-        letBind pat $ BasicOp $ SubExp $ Var v
+        letBind pat $
+          BasicOp $
+            SubExp $
+              Var v
 -- Remove UpdateAccs that contribute the neutral value, which is
 -- always a no-op.
 ruleBasicOp vtable pat aux (UpdateAcc acc _ vs)
@@ -396,7 +408,9 @@ ruleBasicOp vtable pat aux (Manifest perm v1)
   | Just (Copy v2, cs) <- ST.lookupBasicOp v1 vtable,
     ST.available v2 vtable =
       Simplify . auxing aux . certifying cs $
-        letBind pat $ BasicOp $ Manifest perm v2
+        letBind pat $
+          BasicOp $
+            Manifest perm v2
 ruleBasicOp _ _ _ _ =
   Skip
 

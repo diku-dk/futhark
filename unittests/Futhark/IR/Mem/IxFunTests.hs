@@ -28,6 +28,7 @@ instance IE.IntegralExp Int where
   rem = P.rem
   div = P.div
   mod = P.mod
+  pow = (P.^)
   sgn = Just . P.signum
 
 allPoints :: [Int] -> [[Int]]
@@ -54,7 +55,9 @@ compareIxFuns ixfunLMAD ixfunAlg =
       resLMAD = map (IxFunLMAD.index ixfunLMAD) points
       resAlg = map (IxFunAlg.index ixfunAlg) points
       errorMessage =
-        "lmad ixfun:  " ++ PR.pretty ixfunLMAD ++ "\n"
+        "lmad ixfun:  "
+          ++ PR.pretty ixfunLMAD
+          ++ "\n"
           ++ "alg ixfun:   "
           ++ PR.pretty ixfunAlg
           ++ "\n"

@@ -32,13 +32,13 @@ import qualified Futhark.IR.MC.Op as MC
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.IR.Primitive.Parse
 import Futhark.IR.SOACS (SOACS)
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import qualified Futhark.IR.SegOp as SegOp
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util.Pretty (prettyText)
+import Language.Futhark.Primitive.Parse
 import Text.Megaparsec
 import Text.Megaparsec.Char hiding (space)
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -46,7 +46,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 type Parser = Parsec Void T.Text
 
 pStringLiteral :: Parser String
-pStringLiteral = char '"' >> manyTill L.charLiteral (char '"')
+pStringLiteral = lexeme $ char '"' >> manyTill L.charLiteral (char '"')
 
 pName :: Parser Name
 pName =
@@ -58,7 +58,8 @@ pName =
 pVName :: Parser VName
 pVName = lexeme $ do
   (s, tag) <-
-    satisfy constituent `manyTill_` try pTag
+    satisfy constituent
+      `manyTill_` try pTag
       <?> "variable name"
   pure $ VName (nameFromString s) tag
   where
@@ -95,8 +96,10 @@ pNonArray =
       "acc"
         *> parens
           ( Acc
-              <$> pVName <* pComma
-              <*> pShape <* pComma
+              <$> pVName
+              <* pComma
+              <*> pShape
+              <* pComma
               <*> pTypes
               <*> pure NoUniqueness
           )
@@ -136,6 +139,9 @@ pTypes = braces $ pType `sepBy` pComma
 
 pExtType :: Parser ExtType
 pExtType = pTypeBase pExtShape (pure NoUniqueness)
+
+pRank :: Parser Rank
+pRank = Rank . length <$> many "[]"
 
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [pAsterisk $> Unique, pure Nonunique]
@@ -190,8 +196,11 @@ pDimIndex :: Parser (DimIndex SubExp)
 pDimIndex =
   choice
     [ try $
-        DimSlice <$> pSubExp <* lexeme ":+"
-          <*> pSubExp <* lexeme "*"
+        DimSlice
+          <$> pSubExp
+          <* lexeme ":+"
+          <*> pSubExp
+          <* lexeme "*"
           <*> pSubExp,
       DimFix <$> pSubExp
     ]
@@ -246,8 +255,10 @@ pIota =
       keyword ("iota" <> prettyText (primBitSize (IntType t)))
         *> parens
           ( Iota
-              <$> pSubExp <* pComma
-              <*> pSubExp <* pComma
+              <$> pSubExp
+              <* pComma
+              <*> pSubExp
+              <* pComma
               <*> pSubExp
               <*> pure t
           )
@@ -256,13 +267,17 @@ pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
     [ keyword "opaque" $> Opaque OpaqueNil <*> parens pSubExp,
-      keyword "trace" $> uncurry (Opaque . OpaqueTrace)
-        <*> parens ((,) <$> lexeme pStringLiteral <* pComma <*> pSubExp),
+      keyword "trace"
+        $> uncurry (Opaque . OpaqueTrace)
+        <*> parens ((,) <$> pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Copy <*> parens pVName,
       keyword "assert"
         *> parens
-          ( Assert <$> pSubExp <* pComma
-              <*> pErrorMsg <* pComma
+          ( Assert
+              <$> pSubExp
+              <* pComma
+              <*> pErrorMsg
+              <* pComma
               <*> pErrorLoc
           ),
       keyword "rotate"
@@ -290,14 +305,18 @@ pBasicOp =
       pIota,
       try $
         flip Update
-          <$> pVName <* keyword "with"
+          <$> pVName
+          <* keyword "with"
           <*> choice [lexeme "?" $> Safe, pure Unsafe]
-          <*> pSlice <* lexeme "="
+          <*> pSlice
+          <* lexeme "="
           <*> pSubExp,
       try $
         FlatUpdate
-          <$> pVName <* keyword "with"
-          <*> pFlatSlice <* lexeme "="
+          <$> pVName
+          <* keyword "with"
+          <*> pFlatSlice
+          <* lexeme "="
           <*> pVName,
       ArrayLit
         <$> brackets (pSubExp `sepBy` pComma)
@@ -398,7 +417,10 @@ pResult = braces $ pSubExpRes `sepBy` pComma
 
 pIf :: PR rep -> Parser (Exp rep)
 pIf pr =
-  keyword "if" $> f <*> pSort <*> pSubExp
+  keyword "if"
+    $> f
+    <*> pSort
+    <*> pSubExp
     <*> (keyword "then" *> pBranchBody)
     <*> (keyword "else" *> pBranchBody)
     <*> (lexeme ":" *> pBranchTypes pr)
@@ -424,7 +446,8 @@ pApply pr =
     p safety =
       Apply
         <$> pName
-        <*> parens (pArg `sepBy` pComma) <* pColon
+        <*> parens (pArg `sepBy` pComma)
+        <* pColon
         <*> pRetTypes pr
         <*> pure (safety, mempty, mempty)
 
@@ -436,9 +459,11 @@ pApply pr =
 
 pLoop :: PR rep -> Parser (Exp rep)
 pLoop pr =
-  keyword "loop" $> DoLoop
+  keyword "loop"
+    $> DoLoop
     <*> pLoopParams
-    <*> pLoopForm <* keyword "do"
+    <*> pLoopForm
+    <* keyword "do"
     <*> braces (pBody pr)
   where
     pLoopParams = do
@@ -449,9 +474,12 @@ pLoop pr =
 
     pLoopForm =
       choice
-        [ keyword "for" $> ForLoop
-            <*> pVName <* lexeme ":"
-            <*> pIntType <* lexeme "<"
+        [ keyword "for"
+            $> ForLoop
+            <*> pVName
+            <* lexeme ":"
+            <*> pIntType
+            <* lexeme "<"
             <*> pSubExp
             <*> many ((,) <$> pLParam pr <* keyword "in" <*> pVName),
           keyword "while" $> WhileLoop <*> pVName
@@ -462,8 +490,10 @@ pLambda pr =
   choice
     [ lexeme "\\"
         $> lam
-        <*> pLParams pr <* pColon
-        <*> pTypes <* pArrow
+        <*> pLParams pr
+        <* pColon
+        <*> pTypes
+        <* pArrow
         <*> pBody pr,
       keyword "nilFn" $> Lambda mempty (Body (pBodyDec pr) mempty []) []
     ]
@@ -474,13 +504,15 @@ pReduce :: PR rep -> Parser (SOAC.Reduce rep)
 pReduce pr =
   SOAC.Reduce
     <$> pComm
-    <*> pLambda pr <* pComma
+    <*> pLambda pr
+    <* pComma
     <*> braces (pSubExp `sepBy` pComma)
 
 pScan :: PR rep -> Parser (SOAC.Scan rep)
 pScan pr =
   SOAC.Scan
-    <$> pLambda pr <* pComma
+    <$> pLambda pr
+    <* pComma
     <*> braces (pSubExp `sepBy` pComma)
 
 pWithAcc :: PR rep -> Parser (Exp rep)
@@ -491,7 +523,8 @@ pWithAcc pr =
     pInput =
       parens
         ( (,,)
-            <$> pShape <* pComma
+            <$> pShape
+            <* pComma
             <*> pVNames
             <*> optional (pComma *> pCombFun)
         )
@@ -511,7 +544,8 @@ pExp pr =
 pCerts :: Parser Certs
 pCerts =
   choice
-    [ lexeme "#" *> braces (Certs <$> pVName `sepBy` pComma)
+    [ lexeme "#"
+        *> braces (Certs <$> pVName `sepBy` pComma)
         <?> "certificates",
       pure mempty
     ]
@@ -535,24 +569,42 @@ pBody pr =
       Body (pBodyDec pr) mempty <$> pResult
     ]
 
+pValueType :: Parser ValueType
+pValueType = comb <$> pRank <*> pSignedType
+  where
+    comb r (s, t) = ValueType s r t
+    pSignedType =
+      choice
+        [ keyword "u8" $> (Unsigned, IntType Int8),
+          keyword "u16" $> (Unsigned, IntType Int16),
+          keyword "u32" $> (Unsigned, IntType Int32),
+          keyword "u64" $> (Unsigned, IntType Int64),
+          (Signed,) <$> pPrimType
+        ]
+
+pEntryPointType :: Parser EntryPointType
+pEntryPointType =
+  choice
+    [ keyword "opaque" $> TypeOpaque <*> pStringLiteral,
+      TypeTransparent <$> pValueType
+    ]
+
 pEntry :: Parser EntryPoint
 pEntry =
   parens $
-    (,,) <$> (nameFromString <$> pStringLiteral)
-      <* pComma <*> pEntryPointInputs
-      <* pComma <*> pEntryPointTypes
+    (,,)
+      <$> (nameFromString <$> pStringLiteral)
+      <* pComma
+      <*> pEntryPointInputs
+      <* pComma
+      <*> pEntryPointResults
   where
-    pEntryPointTypes = braces (pEntryPointType `sepBy` pComma)
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
-    pEntryPointType = do
-      u <- pUniqueness
-      choice
-        [ "direct" $> TypeDirect u,
-          "unsigned" $> TypeUnsigned u,
-          "opaque" *> parens (TypeOpaque u <$> pStringLiteral <* pComma <*> pInt)
-        ]
+    pEntryPointResults = braces (pEntryPointResult `sepBy` pComma)
     pEntryPointInput =
-      EntryParam <$> pName <* pColon <*> pEntryPointType
+      EntryParam <$> pName <* pColon <*> pUniqueness <*> pEntryPointType
+    pEntryPointResult =
+      EntryResult <$> pUniqueness <*> pEntryPointType
 
 pFunDef :: PR rep -> Parser (FunDef rep)
 pFunDef pr = do
@@ -568,8 +620,22 @@ pFunDef pr = do
   FunDef entry attrs fname ret fparams
     <$> (pEqual *> braces (pBody pr))
 
+pOpaqueType :: Parser (String, OpaqueType)
+pOpaqueType =
+  (,)
+    <$> (keyword "type" *> pStringLiteral <* pEqual)
+    <*> choice [pRecord, pOpaque]
+  where
+    pFieldName = choice [pName, nameFromString . show <$> pInt]
+    pField = (,) <$> pFieldName <* pColon <*> pEntryPointType
+    pRecord = keyword "record" $> OpaqueRecord <*> braces (many pField)
+    pOpaque = keyword "opaque" $> OpaqueType <*> braces (many pValueType)
+
+pOpaqueTypes :: Parser OpaqueTypes
+pOpaqueTypes = keyword "types" $> OpaqueTypes <*> braces (many pOpaqueType)
+
 pProg :: PR rep -> Parser (Prog rep)
-pProg pr = Prog <$> pStms pr <*> many (pFunDef pr)
+pProg pr = Prog <$> pOpaqueTypes <*> pStms pr <*> many (pFunDef pr)
 
 pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =
@@ -578,6 +644,8 @@ pSOAC pr =
       keyword "redomap" *> pScrema pRedomapForm,
       keyword "scanomap" *> pScrema pScanomapForm,
       keyword "screma" *> pScrema pScremaForm,
+      keyword "vjp" *> pVJP,
+      keyword "jvp" *> pJVP,
       pScatter,
       pHist,
       pStream
@@ -586,21 +654,27 @@ pSOAC pr =
     pScrema p =
       parens $
         SOAC.Screma
-          <$> pSubExp <* pComma
-          <*> braces (pVName `sepBy` pComma) <* pComma
+          <$> pSubExp
+          <* pComma
+          <*> braces (pVName `sepBy` pComma)
+          <* pComma
           <*> p
     pScremaForm =
       SOAC.ScremaForm
-        <$> braces (pScan pr `sepBy` pComma) <* pComma
-        <*> braces (pReduce pr `sepBy` pComma) <* pComma
+        <$> braces (pScan pr `sepBy` pComma)
+        <* pComma
+        <*> braces (pReduce pr `sepBy` pComma)
+        <* pComma
         <*> pLambda pr
     pRedomapForm =
       SOAC.ScremaForm mempty
-        <$> braces (pReduce pr `sepBy` pComma) <* pComma
+        <$> braces (pReduce pr `sepBy` pComma)
+        <* pComma
         <*> pLambda pr
     pScanomapForm =
       SOAC.ScremaForm
-        <$> braces (pScan pr `sepBy` pComma) <* pComma
+        <$> braces (pScan pr `sepBy` pComma)
+        <* pComma
         <*> pure mempty
         <*> pLambda pr
     pMapForm =
@@ -608,8 +682,11 @@ pSOAC pr =
     pScatter =
       keyword "scatter"
         *> parens
-          ( SOAC.Scatter <$> pSubExp <* pComma
-              <*> braces (pVName `sepBy` pComma) <* pComma
+          ( SOAC.Scatter
+              <$> pSubExp
+              <* pComma
+              <*> braces (pVName `sepBy` pComma)
+              <* pComma
               <*> pLambda pr
               <*> many (pComma *> pDest)
           )
@@ -620,18 +697,25 @@ pSOAC pr =
       keyword "hist"
         *> parens
           ( SOAC.Hist
-              <$> pSubExp <* pComma
-              <*> braces (pVName `sepBy` pComma) <* pComma
-              <*> braces (pHistOp `sepBy` pComma) <* pComma
+              <$> pSubExp
+              <* pComma
+              <*> braces (pVName `sepBy` pComma)
+              <* pComma
+              <*> braces (pHistOp `sepBy` pComma)
+              <* pComma
               <*> pLambda pr
           )
       where
         pHistOp =
           SOAC.HistOp
-            <$> pShape <* pComma
-            <*> pSubExp <* pComma
-            <*> braces (pVName `sepBy` pComma) <* pComma
-            <*> braces (pSubExp `sepBy` pComma) <* pComma
+            <$> pShape
+            <* pComma
+            <*> pSubExp
+            <* pComma
+            <*> braces (pVName `sepBy` pComma)
+            <* pComma
+            <*> braces (pSubExp `sepBy` pComma)
+            <* pComma
             <*> pLambda pr
     pStream =
       choice
@@ -644,21 +728,44 @@ pSOAC pr =
     pStreamPar order comm =
       parens $
         SOAC.Stream
-          <$> pSubExp <* pComma
-          <*> braces (pVName `sepBy` pComma) <* pComma
-          <*> pParForm order comm <* pComma
-          <*> braces (pSubExp `sepBy` pComma) <* pComma
+          <$> pSubExp
+          <* pComma
+          <*> braces (pVName `sepBy` pComma)
+          <* pComma
+          <*> pParForm order comm
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
+          <* pComma
           <*> pLambda pr
     pParForm order comm =
       SOAC.Parallel order comm <$> pLambda pr
     pStreamSeq =
       parens $
         SOAC.Stream
-          <$> pSubExp <* pComma
-          <*> braces (pVName `sepBy` pComma) <* pComma
+          <$> pSubExp
+          <* pComma
+          <*> braces (pVName `sepBy` pComma)
+          <* pComma
           <*> pure SOAC.Sequential
-          <*> braces (pSubExp `sepBy` pComma) <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
+          <* pComma
           <*> pLambda pr
+    pVJP =
+      parens $
+        SOAC.VJP
+          <$> pLambda pr
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
+    pJVP =
+      parens $
+        SOAC.JVP
+          <$> pLambda pr
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
 
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
@@ -672,7 +779,8 @@ pSizeClass =
       keyword "threshold"
         *> parens
           ( flip GPU.SizeThreshold
-              <$> choice [Just <$> pInt64, "def" $> Nothing] <* pComma
+              <$> choice [Just <$> pInt64, "def" $> Nothing]
+              <* pComma
               <*> pKernelPath
           ),
       keyword "bespoke"
@@ -700,21 +808,30 @@ pSizeOp =
       keyword "calc_num_groups"
         *> parens
           ( GPU.CalcNumGroups
-              <$> pSubExp <* pComma <*> pName <* pComma <*> pSubExp
+              <$> pSubExp
+              <* pComma
+              <*> pName
+              <* pComma
+              <*> pSubExp
           ),
       keyword "split_space"
         *> parens
           ( GPU.SplitSpace GPU.SplitContiguous
-              <$> pSubExp <* pComma
-              <*> pSubExp <* pComma
+              <$> pSubExp
+              <* pComma
+              <*> pSubExp
+              <* pComma
               <*> pSubExp
           ),
       keyword "split_space_strided"
         *> parens
           ( GPU.SplitSpace
-              <$> (GPU.SplitStrided <$> pSubExp) <* pComma
-              <*> pSubExp <* pComma
-              <*> pSubExp <* pComma
+              <$> (GPU.SplitStrided <$> pSubExp)
+              <* pComma
+              <*> pSubExp
+              <* pComma
+              <*> pSubExp
+              <* pComma
               <*> pSubExp
           )
     ]
@@ -731,7 +848,8 @@ pKernelResult :: Parser SegOp.KernelResult
 pKernelResult = do
   cs <- pCerts
   choice
-    [ keyword "returns" $> SegOp.Returns
+    [ keyword "returns"
+        $> SegOp.Returns
         <*> choice
           [ keyword "(manifest)" $> SegOp.ResultNoSimplify,
             keyword "(private)" $> SegOp.ResultPrivate,
@@ -741,25 +859,32 @@ pKernelResult = do
         <*> pSubExp,
       try $
         flip (SegOp.WriteReturns cs)
-          <$> pVName <* pColon
-          <*> pShape <* keyword "with"
+          <$> pVName
+          <* pColon
+          <*> pShape
+          <* keyword "with"
           <*> parens (pWrite `sepBy` pComma),
       try "tile"
-        *> parens (SegOp.TileReturns cs <$> (pTile `sepBy` pComma)) <*> pVName,
+        *> parens (SegOp.TileReturns cs <$> (pTile `sepBy` pComma))
+        <*> pVName,
       try "blkreg_tile"
-        *> parens (SegOp.RegTileReturns cs <$> (pRegTile `sepBy` pComma)) <*> pVName,
+        *> parens (SegOp.RegTileReturns cs <$> (pRegTile `sepBy` pComma))
+        <*> pVName,
       keyword "concat"
         *> parens
           ( SegOp.ConcatReturns cs SegOp.SplitContiguous
-              <$> pSubExp <* pComma
+              <$> pSubExp
+              <* pComma
               <*> pSubExp
           )
         <*> pVName,
       keyword "concat_strided"
         *> parens
           ( SegOp.ConcatReturns cs
-              <$> (SegOp.SplitStrided <$> pSubExp) <* pComma
-              <*> pSubExp <* pComma
+              <$> (SegOp.SplitStrided <$> pSubExp)
+              <* pComma
+              <*> pSubExp
+              <* pComma
               <*> pSubExp
           )
         <*> pVName
@@ -777,7 +902,8 @@ pKernelResult = do
 pKernelBody :: PR rep -> Parser (SegOp.KernelBody rep)
 pKernelBody pr =
   SegOp.KernelBody (pBodyDec pr)
-    <$> pStms pr <* keyword "return"
+    <$> pStms pr
+    <* keyword "return"
     <*> braces (pKernelResult `sepBy` pComma)
 
 pSegOp :: PR rep -> Parser lvl -> Parser (SegOp.SegOp lvl rep)
@@ -792,13 +918,16 @@ pSegOp pr pLvl =
     pSegMap =
       SegOp.SegMap
         <$> pLvl
-        <*> pSegSpace <* pColon
+        <*> pSegSpace
+        <* pColon
         <*> pTypes
         <*> braces (pKernelBody pr)
     pSegOp' f p =
-      f <$> pLvl
+      f
+        <$> pLvl
         <*> pSegSpace
-        <*> parens (p `sepBy` pComma) <* pColon
+        <*> parens (p `sepBy` pComma)
+        <* pColon
         <*> pTypes
         <*> braces (pKernelBody pr)
     pSegBinOp = do
@@ -809,11 +938,16 @@ pSegOp pr pLvl =
       pure $ SegOp.SegBinOp comm lam nes shape
     pHistOp =
       SegOp.HistOp
-        <$> pShape <* pComma
-        <*> pSubExp <* pComma
-        <*> braces (pVName `sepBy` pComma) <* pComma
-        <*> braces (pSubExp `sepBy` pComma) <* pComma
-        <*> pShape <* pComma
+        <$> pShape
+        <* pComma
+        <*> pSubExp
+        <* pComma
+        <*> braces (pVName `sepBy` pComma)
+        <* pComma
+        <*> braces (pSubExp `sepBy` pComma)
+        <* pComma
+        <*> pShape
+        <* pComma
         <*> pLambda pr
     pSegRed = pSegOp' SegOp.SegRed pSegBinOp
     pSegScan = pSegOp' SegOp.SegScan pSegBinOp
@@ -831,7 +965,8 @@ pSegLevel =
       <*> choice
         [ pSemi
             *> choice
-              [ keyword "full" $> SegOp.SegNoVirtFull
+              [ keyword "full"
+                  $> SegOp.SegNoVirtFull
                   <*> (SegOp.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
                 keyword "virtualise" $> SegOp.SegVirt
               ],
@@ -843,7 +978,8 @@ pHostOp pr pOther =
   choice
     [ GPU.SegOp <$> pSegOp pr pSegLevel,
       GPU.SizeOp <$> pSizeOp,
-      GPU.OtherOp <$> pOther
+      GPU.OtherOp <$> pOther,
+      keyword "gpu" $> GPU.GPUBody <*> (pColon *> pTypes) <*> braces (pBody pr)
     ]
 
 pMCOp :: PR rep -> Parser op -> Parser (MC.MCOp rep op)
@@ -912,8 +1048,11 @@ pMemInfo pd pu pret =
     pAcc u =
       keyword "acc"
         *> parens
-          ( MemAcc <$> pVName <* pComma
-              <*> pShape <* pComma
+          ( MemAcc
+              <$> pVName
+              <* pComma
+              <*> pShape
+              <* pComma
               <*> pTypes
               <*> pure u
           )

@@ -512,7 +512,8 @@ sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) (Slice is) = do
       let (dims', slc') =
             unzip $
               filter ((/= 0) . ldStride . fst) $
-                zip dims $ map normIndex slc
+                zip dims $
+                  map normIndex slc
           -- Check that:
           -- 1. a clean split point exists between Fixed and Sliced dims
           -- 2. the outermost sliced dim has +/- 1 stride AND is unrotated or full.
@@ -701,7 +702,8 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape
                 _ -> error "reshape: reached impossible case"
           )
           ([], [])
-          $ reverse $ zip3 iota_shape newshape perm'
+          $ reverse
+          $ zip3 iota_shape newshape perm'
 
       (sup_inds, support) = unzip $ sortBy (compare `on` fst) support_inds
       (rpt_inds, repeats) = unzip repeat_inds
@@ -1097,7 +1099,7 @@ closeEnough ixf1 ixf2 =
     closeEnoughLMADs (lmad1, lmad2) =
       length (lmadDims lmad1) == length (lmadDims lmad2)
         && map ldPerm (lmadDims lmad1)
-        == map ldPerm (lmadDims lmad2)
+          == map ldPerm (lmadDims lmad2)
 
 -- | Returns true if two 'IxFun's are equivalent.
 --
@@ -1111,13 +1113,13 @@ equivalent ixf1 ixf2 =
     equivalentLMADs (lmad1, lmad2) =
       length (lmadDims lmad1) == length (lmadDims lmad2)
         && map ldPerm (lmadDims lmad1)
-        == map ldPerm (lmadDims lmad2)
+          == map ldPerm (lmadDims lmad2)
         && lmadOffset lmad1
-        == lmadOffset lmad2
+          == lmadOffset lmad2
         && map ldStride (lmadDims lmad1)
-        == map ldStride (lmadDims lmad2)
+          == map ldStride (lmadDims lmad2)
         && map ldRotate (lmadDims lmad1)
-        == map ldRotate (lmadDims lmad2)
+          == map ldRotate (lmadDims lmad2)
 
 -- | Computes the maximum span of an 'LMAD'. The result is the lowest and
 -- highest flat values representable by that 'LMAD'.

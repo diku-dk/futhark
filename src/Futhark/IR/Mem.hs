@@ -548,7 +548,9 @@ bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 varInfoToExpReturns :: MemInfo SubExp NoUniqueness MemBind -> ExpReturns
 varInfoToExpReturns (MemArray et shape u (ArrayIn mem ixfun)) =
   MemArray et (fmap Free shape) u $
-    Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
+    Just $
+      ReturnsInBlock mem $
+        existentialiseIxFun [] ixfun
 varInfoToExpReturns (MemPrim pt) = MemPrim pt
 varInfoToExpReturns (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
 varInfoToExpReturns (MemMem space) = MemMem space
@@ -586,7 +588,8 @@ matchFunctionReturnType rettype result = do
           | otherwise ->
               TC.bad $
                 TC.TypeError $
-                  "Array " ++ pretty v
+                  "Array "
+                    ++ pretty v
                     ++ " returned by function, but has nontrivial index function "
                     ++ pretty ixfun
 
@@ -775,11 +778,12 @@ matchPatToExp pat e = do
     ( length val_ts == length rt
         && and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)
     )
-    $ TC.bad $
-      TC.TypeError $
-        "Expression type:\n  " ++ prettyTuple rt
-          ++ "\ncannot match pattern type:\n  "
-          ++ prettyTuple val_ts
+    $ TC.bad
+    $ TC.TypeError
+    $ "Expression type:\n  "
+      ++ prettyTuple rt
+      ++ "\ncannot match pattern type:\n  "
+      ++ prettyTuple val_ts
   where
     matches _ _ (MemPrim x) (MemPrim y) = x == y
     matches _ _ (MemMem x_space) (MemMem y_space) =
@@ -787,7 +791,8 @@ matchPatToExp pat e = do
     matches _ _ (MemAcc x_accs x_ispace x_ts _) (MemAcc y_accs y_ispace y_ts _) =
       (x_accs, x_ispace, x_ts) == (y_accs, y_ispace, y_ts)
     matches ctxids ctxexts (MemArray x_pt x_shape _ x_ret) (MemArray y_pt y_shape _ y_ret) =
-      x_pt == y_pt && x_shape == y_shape
+      x_pt == y_pt
+        && x_shape == y_shape
         && case (x_ret, y_ret) of
           (ReturnsInBlock _ x_ixfun, Just (ReturnsInBlock _ y_ixfun)) ->
             let x_ixfun' = IxFun.substituteInIxFun ctxids x_ixfun
@@ -854,7 +859,9 @@ lookupArraySummary name = do
       pure (mem, ixfun)
     _ ->
       error $
-        "Expected " ++ pretty name ++ " to be array but bound to:\n"
+        "Expected "
+          ++ pretty name
+          ++ " to be array but bound to:\n"
           ++ pretty summary
 
 checkMemInfo ::
@@ -875,7 +882,8 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
     _ ->
       TC.bad $
         TC.TypeError $
-          "Variable " ++ pretty v
+          "Variable "
+            ++ pretty v
             ++ " used as memory block, but is of type "
             ++ pretty t
             ++ "."
@@ -887,7 +895,8 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
     unless (ixfun_rank == ident_rank) $
       TC.bad $
         TC.TypeError $
-          "Arity of index function (" ++ pretty ixfun_rank
+          "Arity of index function ("
+            ++ pretty ixfun_rank
             ++ ") does not match rank of array "
             ++ pretty name
             ++ " ("
@@ -936,7 +945,9 @@ extReturns ets =
             MemArray bt shape u $
               Just $
                 ReturnsNewBlock DefaultSpace i $
-                  IxFun.iota $ map convert $ shapeDims shape
+                  IxFun.iota $
+                    map convert $
+                      shapeDims shape
       | otherwise =
           pure $ MemArray bt shape u Nothing
     addDec (Acc acc ispace ts u) =
@@ -968,7 +979,9 @@ varReturns v = do
     MemArray et shape _ (ArrayIn mem ixfun) ->
       pure $
         MemArray et (fmap Free shape) NoUniqueness $
-          Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
+          Just $
+            ReturnsInBlock mem $
+              existentialiseIxFun [] ixfun
     MemMem space ->
       pure $ MemMem space
     MemAcc acc ispace ts u ->
@@ -1000,7 +1013,8 @@ expReturns (BasicOp (Reshape newshape v)) = do
         Just $
           ReturnsInBlock mem $
             existentialiseIxFun [] $
-              IxFun.reshape ixfun $ map (fmap pe64) newshape
+              IxFun.reshape ixfun $
+                map (fmap pe64) newshape
     ]
 expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
@@ -1008,7 +1022,9 @@ expReturns (BasicOp (Rearrange perm v)) = do
       dims' = rearrangeShape perm dims
   pure
     [ MemArray et (Shape $ map Free dims') NoUniqueness $
-        Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
+        Just $
+          ReturnsInBlock mem $
+            existentialiseIxFun [] ixfun'
     ]
 expReturns (BasicOp (Rotate offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
@@ -1016,7 +1032,9 @@ expReturns (BasicOp (Rotate offsets v)) = do
       ixfun' = IxFun.rotate ixfun offsets'
   pure
     [ MemArray et (Shape $ map Free dims) NoUniqueness $
-        Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun'
+        Just $
+          ReturnsInBlock mem $
+            existentialiseIxFun [] ixfun'
     ]
 expReturns (BasicOp (Index v slice)) = do
   pure . varInfoToExpReturns <$> sliceInfo v slice

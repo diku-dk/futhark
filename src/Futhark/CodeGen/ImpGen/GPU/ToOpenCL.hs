@@ -51,6 +51,7 @@ translateGPU target prog =
         ) =
           (`runState` initialOpenCL) . (`runReaderT` defFuns prog) $ do
             let ImpGPU.Definitions
+                  types
                   (ImpGPU.Constants ps consts)
                   (ImpGPU.Functions funs) = prog
             consts' <- traverse (onHostOp target) consts
@@ -59,6 +60,7 @@ translateGPU target prog =
 
             pure $
               ImpOpenCL.Definitions
+                types
                 (ImpOpenCL.Constants ps consts')
                 (ImpOpenCL.Functions funs')
 
@@ -248,7 +250,8 @@ onKernel target kernel = do
 
       (local_memory_args, local_memory_params, local_memory_init) =
         unzip3 . flip evalState (blankNameSource :: VNameSource) $
-          mapM (prepareLocalMemory target) $ kernelLocalMemory kstate
+          mapM (prepareLocalMemory target) $
+            kernelLocalMemory kstate
 
       -- CUDA has very strict restrictions on the number of blocks
       -- permitted along the 'y' and 'z' dimensions of the grid
@@ -552,15 +555,6 @@ static inline int get_local_size(int d) {
   }
 }
 
-static inline int get_global_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_group_id(d) * get_local_size(d) + get_local_id(d);
-}
-#define get_global_id(d) get_global_id_fn(block_dim0, block_dim1, block_dim2, d)
-
-static inline int get_global_size(int block_dim0, int block_dim1, int block_dim2, int d) {
-  return get_num_groups(d) * get_local_size(d);
-}
-
 #define CLK_LOCAL_MEM_FENCE 1
 #define CLK_GLOBAL_MEM_FENCE 2
 static inline void barrier(int x) {
@@ -650,10 +644,6 @@ inKernelOperations mode body =
       GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
     kernelOps (GetLocalSize v i) =
       GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
-    kernelOps (GetGlobalId v i) =
-      GC.stm [C.cstm|$id:v = get_global_id($int:i);|]
-    kernelOps (GetGlobalSize v i) =
-      GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
     kernelOps (GetLockstepWidth v) =
       GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
     kernelOps (Barrier f) = do
@@ -769,7 +759,7 @@ inKernelOperations mode body =
       error "Cannot deallocate memory in kernel"
 
     copyInKernel :: GC.Copy KernelOp KernelState
-    copyInKernel _ _ _ _ _ _ _ =
+    copyInKernel _ _ _ _ _ _ _ _ =
       error "Cannot bulk copy in kernel."
 
     noStaticArrays :: GC.StaticArray KernelOp KernelState
@@ -803,9 +793,10 @@ inKernelOperations mode body =
       | otherwise = do
           let out_args = [[C.cexp|&$id:d|] | d <- dests]
               args' =
-                [C.cexp|global_failure|] :
-                [C.cexp|global_failure_args|] :
-                out_args ++ args
+                [C.cexp|global_failure|]
+                  : [C.cexp|global_failure_args|]
+                  : out_args
+                  ++ args
 
           what_next <- whatNext
 
@@ -847,17 +838,8 @@ typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode
-  ( Copy
-      _
-      (Count (TPrimExp e1))
-      _
-      _
-      (Count (TPrimExp e2))
-      _
-      (Count (TPrimExp e3))
-    ) =
-    typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode (Copy _ _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _ (Count (TPrimExp e3))) =
+  typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (Read _ _ (Count (TPrimExp e1)) t _ _) =

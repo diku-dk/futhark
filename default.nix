@@ -46,6 +46,12 @@ let
           z3 =
             haskellPackagesNew.callPackage ./nix/z3.nix { };
 
+          lsp =
+            haskellPackagesOld.lsp_1_5_0_0;
+
+          lsp-types =
+            haskellPackagesOld.lsp-types_1_5_0_0;
+
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes
@@ -76,6 +82,7 @@ let
                   enableSharedLibraries = false;
                   enableLibraryProfiling = false;
                   configureFlags = [
+                    "--ghc-option=-Werror"
                     "--ghc-option=-optl=-static"
                     "--ghc-option=-optl=-lstdc++"
                     "--ghc-option=-split-sections"

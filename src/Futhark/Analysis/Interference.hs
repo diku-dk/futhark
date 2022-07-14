@@ -276,10 +276,11 @@ memSizes stms =
     memSizesExp :: LocalScope GPUMem m => Exp GPUMem -> m (Map VName Int)
     memSizesExp (Op (Inner (SegOp segop))) =
       let body = segBody segop
-       in inScopeOf (kernelBodyStms body) $
-            fmap mconcat
+       in inScopeOf (kernelBodyStms body)
+            $ fmap mconcat
               <$> mapM memSizesStm
-              $ stmsToList $ kernelBodyStms body
+            $ stmsToList
+            $ kernelBodyStms body
     memSizesExp (If _ then_body else_body _) = do
       then_res <- memSizes $ bodyStms then_body
       else_res <- memSizes $ bodyStms else_body
@@ -327,7 +328,8 @@ analyseGPU' lumap stms =
         pure (res1 <> res2)
     helper stm@Let {stmExp = DoLoop merge _ body} =
       fmap (analyseLoopParams merge) . inScopeOf stm $
-        analyseGPU' lumap $ bodyStms body
+        analyseGPU' lumap $
+          bodyStms body
     helper stm =
       inScopeOf stm $ pure mempty
 

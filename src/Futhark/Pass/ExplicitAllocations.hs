@@ -45,7 +45,7 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (foldl', partition, zip5)
+import Data.List (foldl', zip5)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -58,7 +58,7 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rep (mkWiseBody)
 import Futhark.Pass
 import Futhark.Tools
-import Futhark.Util (maybeNth, splitAt3, splitFromEnd, takeLast)
+import Futhark.Util (maybeNth, splitAt3)
 
 -- | The subexpression giving the number of elements we should
 -- allocate space for.  See 'ChunkMap' comment.
@@ -178,7 +178,8 @@ arraySizeInBytesExpM chunkmap t = do
       elm_size_i64 = elemSize t
   pure $
     BinOpExp (SMax Int64) (ValueExp $ IntValue $ Int64Value 0) $
-      untyped $ dim_prod_i64 * elm_size_i64
+      untyped $
+        dim_prod_i64 * elm_size_i64
 
 arraySizeInBytes :: MonadBuilder m => ChunkMap -> Type -> m SubExp
 arraySizeInBytes chunkmap = letSubExp "bytes" <=< toExp <=< arraySizeInBytesExpM chunkmap
@@ -628,7 +629,10 @@ explicitAllocationsInStmsGeneric ::
 explicitAllocationsInStmsGeneric handleOp hints stms = do
   scope <- askScope
   runAllocM handleOp hints $
-    localScope scope $ collectStms_ $ allocInStms stms $ pure ()
+    localScope scope $
+      collectStms_ $
+        allocInStms stms $
+          pure ()
 
 memoryInDeclExtType :: Int -> [DeclExtType] -> [FunReturns]
 memoryInDeclExtType k dets = evalState (mapM addMem dets) 0
@@ -639,7 +643,9 @@ memoryInDeclExtType k dets = evalState (mapM addMem dets) 0
       i <- get <* modify (+ 1)
       let shape' = fmap shift shape
       pure . MemArray pt shape' u . ReturnsNewBlock DefaultSpace i $
-        IxFun.iota $ map convert $ shapeDims shape'
+        IxFun.iota $
+          map convert $
+            shapeDims shape'
     addMem (Acc acc ispace ts u) = pure $ MemAcc acc ispace ts u
 
     convert (Ext i) = le64 $ Ext i
@@ -730,6 +736,24 @@ allocInLambda ::
 allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
+generalize ::
+  (Maybe Space, Maybe IxFun) ->
+  (Maybe Space, Maybe IxFun) ->
+  (Maybe Space, Maybe (ExtIxFun, [(TPrimExp Int64 VName, TPrimExp Int64 VName)]))
+generalize (Just sp1, Just ixf1) (Just sp2, Just ixf2) =
+  if sp1 /= sp2
+    then (Just sp1, Nothing)
+    else case IxFun.leastGeneralGeneralization (fmap untyped ixf1) (fmap untyped ixf2) of
+      Just (ixf, m) ->
+        ( Just sp1,
+          Just
+            ( fmap TPrimExp ixf,
+              zip (map (TPrimExp . fst) m) (map (TPrimExp . snd) m)
+            )
+        )
+      Nothing -> (Just sp1, Nothing)
+generalize (mbsp1, _) _ = (mbsp1, Nothing)
+
 allocInExp ::
   (Allocable fromrep torep inner) =>
   Exp fromrep ->
@@ -751,12 +775,11 @@ allocInExp (Apply fname args rettype loc) = do
     mems = replicate num_arrays (MemMem DefaultSpace)
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf) rettype
 allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
-  let num_rets = length rets
   -- switch to the explicit-mem rep, but do nothing about results
-  (tbranch, tm_ixfs) <- allocInIfBody num_rets tbranch0
-  (fbranch, fm_ixfs) <- allocInIfBody num_rets fbranch0
-  tspaces <- mkSpaceOks num_rets tbranch
-  fspaces <- mkSpaceOks num_rets fbranch
+  (tbranch, tm_ixfs) <- allocInIfBody tbranch0
+  (fbranch, fm_ixfs) <- allocInIfBody fbranch0
+  tspaces <- bodyResultSpaces tbranch
+  fspaces <- bodyResultSpaces fbranch
   -- try to generalize (antiunify) the index functions of the then and else bodies
   let sp_substs = zipWith generalize (zip tspaces tm_ixfs) (zip fspaces fm_ixfs)
       (spaces, subs) = unzip sp_substs
@@ -766,44 +789,8 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
   (fbranch', frets) <- addResCtxInIfBody rets fbranch spaces fsubs
   if frets /= trets
     then error "In allocInExp, IF case: antiunification of then/else produce different ExtInFn!"
-    else do
-      -- above is a sanity check; implementation continues on else branch
-      let res_then = bodyResult tbranch'
-          res_else = bodyResult fbranch'
-          size_ext = length res_then - length trets
-          (ind_ses0, r_then_else) =
-            partition (\(r_then, r_else, _) -> r_then == r_else) $
-              zip3 res_then res_else [0 .. size_ext - 1]
-          (r_then_ext, r_else_ext, _) = unzip3 r_then_else
-          ind_ses =
-            zipWith
-              (\(se, _, i) k -> (i - k, se))
-              ind_ses0
-              [0 .. length ind_ses0 - 1]
-          rets'' = foldl (\acc (i, SubExpRes _ se) -> fixExt i se acc) trets ind_ses
-          tbranch'' = tbranch' {bodyResult = r_then_ext ++ drop size_ext res_then}
-          fbranch'' = fbranch' {bodyResult = r_else_ext ++ drop size_ext res_else}
-          res_if_expr = If cond tbranch'' fbranch'' $ IfDec rets'' ifsort
-      pure res_if_expr
+    else pure $ If cond tbranch' fbranch' $ IfDec trets ifsort
   where
-    generalize ::
-      (Maybe Space, Maybe IxFun) ->
-      (Maybe Space, Maybe IxFun) ->
-      (Maybe Space, Maybe (ExtIxFun, [(TPrimExp Int64 VName, TPrimExp Int64 VName)]))
-    generalize (Just sp1, Just ixf1) (Just sp2, Just ixf2) =
-      if sp1 /= sp2
-        then (Just sp1, Nothing)
-        else case IxFun.leastGeneralGeneralization (fmap untyped ixf1) (fmap untyped ixf2) of
-          Just (ixf, m) ->
-            ( Just sp1,
-              Just
-                ( fmap TPrimExp ixf,
-                  zip (map (TPrimExp . fst) m) (map (TPrimExp . snd) m)
-                )
-            )
-          Nothing -> (Just sp1, Nothing)
-    generalize (mbsp1, _) _ = (mbsp1, Nothing)
-
     selectSub ::
       ((a, a) -> a) ->
       Maybe (ExtIxFun, [(a, a)]) ->
@@ -812,13 +799,11 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
     selectSub _ Nothing = Nothing
     allocInIfBody ::
       (Allocable fromrep torep inner) =>
-      Int ->
       Body fromrep ->
       AllocM fromrep torep (Body torep, [Maybe IxFun])
-    allocInIfBody num_vals (Body _ stms res) =
+    allocInIfBody (Body _ stms res) =
       buildBody . allocInStms stms $ do
-        let (_, val_res) = splitFromEnd num_vals res
-        mem_ixfs <- mapM (subExpIxFun . resSubExp) val_res
+        mem_ixfs <- mapM (subExpIxFun . resSubExp) res
         pure (res, mem_ixfs)
 allocInExp (WithAcc inputs bodylam) =
   WithAcc <$> mapM onInput inputs <*> onLambda bodylam
@@ -851,7 +836,9 @@ allocInExp (WithAcc inputs bodylam) =
 
     mkP attrs p pt shape u mem ixfun is =
       Param attrs p . MemArray pt shape u . ArrayIn mem . IxFun.slice ixfun $
-        fmap pe64 $ Slice $ is ++ map sliceDim (shapeDims shape)
+        fmap pe64 $
+          Slice $
+            is ++ map sliceDim (shapeDims shape)
 
     onXParam _ (Param attrs p (Prim t)) _ =
       pure $ Param attrs p (MemPrim t)
@@ -962,7 +949,9 @@ addResCtxInIfBody ifrets (Body _ stms res) spaces substs = buildBody $ do
           shape' = fmap (adjustExt num_new_ctx) shape
           bodyret =
             MemArray pt shape' u . ReturnsNewBlock space' k $
-              IxFun.iota $ map convert $ shapeDims shape'
+              IxFun.iota $
+                map convert $
+                  shapeDims shape'
        in bodyret
     inspect _ _ (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
     inspect _ _ (Prim pt) _ = MemPrim pt
@@ -978,13 +967,12 @@ addResCtxInIfBody ifrets (Body _ stms res) spaces substs = buildBody $ do
     adjustExtPE :: Int -> TPrimExp t (Ext VName) -> TPrimExp t (Ext VName)
     adjustExtPE k = fmap (adjustExt k)
 
-mkSpaceOks ::
+bodyResultSpaces ::
   (Mem torep inner, LocalScope torep m) =>
-  Int ->
   Body torep ->
   m [Maybe Space]
-mkSpaceOks num_vals (Body _ stms res) =
-  inScopeOf stms $ mapM (mkSpaceOK . resSubExp) $ takeLast num_vals res
+bodyResultSpaces (Body _ stms res) =
+  inScopeOf stms $ mapM (mkSpaceOK . resSubExp) res
   where
     mkSpaceOK (Var v) = do
       v_info <- lookupMemInfo v
@@ -1105,7 +1093,8 @@ simplifiable innerUsage simplifyInnerOp =
       fbody <- resultBodyM [intConst Int64 0]
       size' <-
         letSubExp "hoisted_alloc_size" $
-          If taken tbody fbody $ IfDec [MemPrim int64] IfFallback
+          If taken tbody fbody $
+            IfDec [MemPrim int64] IfFallback
       letBind pat $ Op $ Alloc size' space
     protectOp _ _ _ = Nothing
 

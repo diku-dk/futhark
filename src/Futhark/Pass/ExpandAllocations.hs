@@ -36,10 +36,13 @@ import Prelude hiding (quot)
 expandAllocations :: Pass GPUMem GPUMem
 expandAllocations =
   Pass "expand allocations" "Expand allocations" $
-    \(Prog consts funs) -> do
+    \prog -> do
       consts' <-
-        modifyNameSource $ limitationOnLeft . runStateT (runReaderT (transformStms consts) mempty)
-      Prog consts' <$> mapM (transformFunDef $ scopeOf consts') funs
+        modifyNameSource $
+          limitationOnLeft
+            . runStateT (runReaderT (transformStms (progConsts prog)) mempty)
+      funs' <- mapM (transformFunDef $ scopeOf consts') (progFuns prog)
+      pure $ prog {progConsts = consts', progFuns = funs'}
 
 -- Cannot use intraproceduralTransformation because it might create
 -- duplicate size keys (which are not fixed by renamer, and size
@@ -64,7 +67,8 @@ transformFunDef scope fundec = do
     m =
       localScope scope $
         inScopeOf fundec $
-          transformBody $ funDefBody fundec
+          transformBody $
+            funDefBody fundec
 
 transformBody :: Body GPUMem -> ExpandM (Body GPUMem)
 transformBody (Body () stms res) = Body () <$> transformStms stms <*> pure res
@@ -162,14 +166,15 @@ transformExp (WithAcc inputs lam) = do
           lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
           (op_lam', lam_allocs) =
             extractLambdaAllocations (lvl, [0]) bound_outside mempty op_lam
-          variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
+          variantAlloc (_, Var v, _) = v `notNameIn` bound_outside
           variantAlloc _ = False
           (variant_allocs, invariant_allocs) = M.partition variantAlloc lam_allocs
 
       case M.elems variant_allocs of
         (_, v, _) : _ ->
           throwError $
-            "Cannot handle un-sliceable allocation size: " ++ pretty v
+            "Cannot handle un-sliceable allocation size: "
+              ++ pretty v
               ++ "\nLikely cause: irregular nested operations inside accumulator update operator."
         [] ->
           pure ()
@@ -200,17 +205,18 @@ transformScanRed lvl space ops kbody = do
       (kbody', kbody_allocs) =
         extractKernelBodyAllocations user bound_outside bound_in_kernel kbody
       (ops', ops_allocs) = unzip $ map (extractLambdaAllocations user bound_outside mempty) ops
-      variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
+      variantAlloc (_, Var v, _) = v `notNameIn` bound_outside
       variantAlloc _ = False
       (variant_allocs, invariant_allocs) =
         M.partition variantAlloc $ kbody_allocs <> mconcat ops_allocs
-      badVariant (_, Var v, _) = not $ v `nameIn` bound_in_kernel
+      badVariant (_, Var v, _) = v `notNameIn` bound_in_kernel
       badVariant _ = False
 
   case find badVariant $ M.elems variant_allocs of
     Just v ->
       throwError $
-        "Cannot handle un-sliceable allocation size: " ++ pretty v
+        "Cannot handle un-sliceable allocation size: "
+          ++ pretty v
           ++ "\nLikely cause: irregular nested operations inside parallel constructs."
     Nothing ->
       pure ()
@@ -350,7 +356,8 @@ extractGenericBodyAllocations user bound_outside bound_kernel get_stms set_stms 
         runWriter $
           fmap catMaybes $
             mapM (extractStmAllocations user bound_outside bound_kernel') $
-              stmsToList $ get_stms body
+              stmsToList $
+                get_stms body
    in (set_stms (stmsFromList stms) body, allocs)
 
 expandable, notScalar :: Space -> Bool
@@ -445,7 +452,8 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
           permuted_ixfun = IxFun.permute root_ixfun perm
           offset_ixfun =
             IxFun.slice permuted_ixfun $
-              Slice $ map DimFix user_ids ++ map untouched old_shape
+              Slice $
+                map DimFix user_ids ++ map untouched old_shape
        in offset_ixfun
     newBase user@(SegGroup {}, _) (old_shape, _) =
       let (users_shape, user_ids) = getNumUsers user
@@ -735,6 +743,7 @@ unAllocGPUStms = unAllocStms False
 
     unAllocOp Alloc {} = Left "unAllocOp: unhandled Alloc"
     unAllocOp (Inner OtherOp {}) = Left "unAllocOp: unhandled OtherOp"
+    unAllocOp (Inner GPUBody {}) = Left "unAllocOp: unhandled GPUBody"
     unAllocOp (Inner (SizeOp op)) = pure $ SizeOp op
     unAllocOp (Inner (SegOp op)) = SegOp <$> mapSegOpM mapper op
       where
@@ -808,7 +817,8 @@ sliceKernelSizes num_threads sizes space kstms = do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)
     (zs, stms) <- localScope
       (scopeOfLParams params <> scopeOfLParams [flat_gtid_lparam])
-      $ collectStms $ do
+      $ collectStms
+      $ do
         -- Even though this SegRed is one-dimensional, we need to
         -- provide indexes corresponding to the original potentially
         -- multi-dimensional construct.
@@ -835,7 +845,8 @@ sliceKernelSizes num_threads sizes space kstms = do
 
     thread_space_iota <-
       letExp "thread_space_iota" $
-        BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+        BasicOp $
+          Iota w (intConst Int64 0) (intConst Int64 1) Int64
     let red_op =
           SegBinOp
             Commutative
@@ -844,12 +855,14 @@ sliceKernelSizes num_threads sizes space kstms = do
             mempty
     lvl <- segThread "segred"
 
-    addStms =<< mapM renameStm
+    addStms
+      =<< mapM renameStm
       =<< nonSegRed lvl pat w [red_op] size_lam' [thread_space_iota]
 
     size_sums <- forM (patNames pat) $ \threads_max ->
       letExp "size_sum" $
-        BasicOp $ BinOp (Mul Int64 OverflowUndef) (Var threads_max) num_threads
+        BasicOp $
+          BinOp (Mul Int64 OverflowUndef) (Var threads_max) num_threads
 
     pure (patNames pat, size_sums)
 

@@ -34,6 +34,7 @@ import Futhark.Test
 import Futhark.Test.Values
 import Futhark.Util
   ( directoryContents,
+    fancyTerminal,
     hashText,
     nubOrd,
     runProgramWithExitCode,
@@ -41,6 +42,7 @@ import Futhark.Util
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.ProgressBar
 import System.Directory
   ( copyFile,
     createDirectoryIfMissing,
@@ -112,7 +114,8 @@ pprDirective _ (DirectiveBrief f) =
 pprDirective _ (DirectiveCovert f) =
   pprDirective False f
 pprDirective _ (DirectiveImg e params) =
-  "> :img " <> PP.align (PP.ppr e)
+  "> :img "
+    <> PP.align (PP.ppr e)
     <> if null params' then mempty else PP.stack $ ";" : params'
   where
     params' =
@@ -131,14 +134,15 @@ pprDirective _ (DirectivePlot e _) =
   "> :plot2d " <> PP.align (PP.ppr e)
 pprDirective True (DirectiveGnuplot e script) =
   PP.stack $
-    "> :gnuplot " <> PP.align (PP.ppr e) <> ";" :
-    map PP.strictText (T.lines script)
+    "> :gnuplot " <> PP.align (PP.ppr e) <> ";"
+      : map PP.strictText (T.lines script)
 pprDirective False (DirectiveGnuplot e _) =
   "> :gnuplot " <> PP.align (PP.ppr e)
 pprDirective False (DirectiveVideo e _) =
   "> :video " <> PP.align (PP.ppr e)
 pprDirective True (DirectiveVideo e params) =
-  "> :video " <> PP.ppr e
+  "> :video "
+    <> PP.ppr e
     <> if null params' then mempty else PP.stack $ ";" : params'
   where
     params' =
@@ -208,9 +212,13 @@ parseBlockCode = T.unlines . noblanks <$> some line
 parsePlotParams :: Parser (Maybe (Int, Int))
 parsePlotParams =
   optional $
-    ";" *> hspace *> eol *> token "-- size:"
+    ";"
+      *> hspace
+      *> eol
+      *> token "-- size:"
       *> token "("
-      *> ((,) <$> parseInt <* token "," <*> parseInt) <* token ")"
+      *> ((,) <$> parseInt <* token "," <*> parseInt)
+      <* token ")"
 
 withPredicate :: (a -> Bool) -> String -> Parser a -> Parser a
 withPredicate f msg p = do
@@ -227,7 +235,8 @@ parseFilePath =
 parseImgParams :: Parser ImgParams
 parseImgParams =
   fmap (fromMaybe defaultImgParams) $
-    optional $ ";" *> hspace *> eol *> "-- " *> parseParams defaultImgParams
+    optional $
+      ";" *> hspace *> eol *> "-- " *> parseParams defaultImgParams
   where
     parseParams params =
       choice
@@ -244,7 +253,8 @@ parseImgParams =
 parseVideoParams :: Parser VideoParams
 parseVideoParams =
   fmap (fromMaybe defaultVideoParams) $
-    optional $ ";" *> hspace *> eol *> "-- " *> parseParams defaultVideoParams
+    optional $
+      ";" *> hspace *> eol *> "-- " *> parseParams defaultVideoParams
   where
     parseParams params =
       choice
@@ -291,22 +301,31 @@ parseBlock =
     parseDirective =
       choice
         [ DirectiveRes <$> parseExp postlexeme <* afterExp,
-          directiveName "covert" $> DirectiveCovert
+          directiveName "covert"
+            $> DirectiveCovert
             <*> parseDirective,
-          directiveName "brief" $> DirectiveBrief
+          directiveName "brief"
+            $> DirectiveBrief
             <*> parseDirective,
-          directiveName "img" $> DirectiveImg
+          directiveName "img"
+            $> DirectiveImg
             <*> parseExp postlexeme
-            <*> parseImgParams <* eol,
-          directiveName "plot2d" $> DirectivePlot
+            <*> parseImgParams
+            <* eol,
+          directiveName "plot2d"
+            $> DirectivePlot
             <*> parseExp postlexeme
-            <*> parsePlotParams <* eol,
-          directiveName "gnuplot" $> DirectiveGnuplot
+            <*> parsePlotParams
+            <* eol,
+          directiveName "gnuplot"
+            $> DirectiveGnuplot
             <*> parseExp postlexeme
             <*> (";" *> hspace *> eol *> parseBlockComment),
-          (directiveName "video" <|> directiveName "video") $> DirectiveVideo
+          (directiveName "video" <|> directiveName "video")
+            $> DirectiveVideo
             <*> parseExp postlexeme
-            <*> parseVideoParams <* eol
+            <*> parseVideoParams
+            <* eol
         ]
     directiveName s = try $ token (":" <> s)
 
@@ -435,7 +454,8 @@ system prog options input = do
       pure $ T.pack stdout_t
     Right (ExitFailure code', _, stderr_t) ->
       throwError $
-        prog' <> " failed with exit code "
+        prog'
+          <> " failed with exit code "
           <> T.pack (show code')
           <> " and stderr:\n"
           <> T.pack stderr_t
@@ -592,10 +612,14 @@ newFileWorker env (fname_desired, template) m = do
   exists <- liftIO $ doesFileExist fname
   liftIO $ createDirectoryIfMissing True $ envImgDir env
   when (exists && scriptVerbose (envOpts env) > 0) $
-    liftIO $ T.hPutStrLn stderr $ "Using existing file: " <> T.pack fname
+    liftIO $
+      T.hPutStrLn stderr $
+        "Using existing file: " <> T.pack fname
   unless exists $ do
     when (scriptVerbose (envOpts env) > 0) $
-      liftIO $ T.hPutStrLn stderr $ "Generating new file: " <> T.pack fname
+      liftIO $
+        T.hPutStrLn stderr $
+          "Generating new file: " <> T.pack fname
     m fname
   modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
   pure (fname, fname_rel)
@@ -716,7 +740,8 @@ processDirective env (DirectiveGnuplot e script) = do
 --
 processDirective env (DirectiveVideo e params) = do
   when (format `notElem` ["webm", "gif"]) $
-    throwError $ "Unknown video format: " <> format
+    throwError $
+      "Unknown video format: " <> format
 
   let file = (videoFile params, "video" <.> T.unpack format)
   fmap (videoBlock params) . newFile env file $ \videofile -> do
@@ -735,7 +760,6 @@ processDirective env (DirectiveVideo e params) = do
               onWebM videofile =<< bmpsToVideo dir
       ValueTuple [stepfun, initial, num_frames]
         | ValueAtom (SFun stepfun' _ [_, _] closure) <- stepfun,
-          ValueAtom (SValue _ _) <- initial,
           ValueAtom (SValue "i64" _) <- num_frames -> do
             Just (ValueAtom num_frames') <-
               mapM getValue <$> getExpValue (envServer env) num_frames
@@ -750,10 +774,32 @@ processDirective env (DirectiveVideo e params) = do
     format = fromMaybe "webm" $ videoFormat params
     bmpfile dir j = dir </> printf "frame%010d.bmp" (j :: Int)
 
-    renderFrames dir (stepfun, closure) initial num_frames =
+    (progressStep, progressDone)
+      | fancyTerminal,
+        scriptVerbose (envOpts env) > 0 =
+          ( \j num_frames -> do
+              liftIO . T.putStr $
+                "\r"
+                  <> progressBar
+                    (ProgressBar 40 (fromIntegral num_frames - 1) (fromIntegral j))
+                  <> "generating frame "
+                  <> prettyText (j + 1)
+                  <> "/"
+                  <> prettyText num_frames
+                  <> " "
+              liftIO $ hFlush stdout,
+            liftIO $ do
+              T.putStrLn ""
+          )
+      | otherwise =
+          (\_ _ -> pure (), pure ())
+
+    renderFrames dir (stepfun, closure) initial num_frames = do
       foldM_ frame initial [0 .. num_frames - 1]
+      progressDone
       where
         frame old_state j = do
+          progressStep j num_frames
           v <-
             evalExp literateBuiltin (envServer env)
               . Call (FuncFut stepfun)
@@ -854,7 +900,8 @@ cleanupImgDir env keep_files =
       | otherwise = throwError e
     toRemove f = do
       when (scriptVerbose (envOpts env) > 0) $
-        T.hPutStrLn stderr $ "Deleting unused file: " <> T.pack f
+        T.hPutStrLn stderr $
+          "Deleting unused file: " <> T.pack f
       removePathForcibly f
 
 processScript :: Env -> [Block] -> IO (Failure, T.Text)
@@ -938,13 +985,16 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       unless (scriptSkipCompilation opts) $ do
         let entryOpt v = "--entry-point=" ++ T.unpack v
             compile_options =
-              "--server" :
-              map entryOpt (S.toList (varsInScripts script))
+              "--server"
+                : map entryOpt (S.toList (varsInScripts script))
                 ++ scriptCompilerOptions opts
         when (scriptVerbose opts > 0) $
-          T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
+          T.hPutStrLn stderr $
+            "Compiling " <> T.pack prog <> "..."
         when (scriptVerbose opts > 1) $
-          T.hPutStrLn stderr $ T.pack $ unwords compile_options
+          T.hPutStrLn stderr $
+            T.pack $
+              unwords compile_options
 
         let onError err = do
               mapM_ (T.hPutStrLn stderr) err
@@ -964,7 +1014,15 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
           imgdir_rel = dropExtension (takeFileName mdfile) <> "-img"
           imgdir = takeDirectory mdfile </> imgdir_rel
           run_options = scriptExtraOptions opts
-          cfg = futharkServerCfg ("." </> dropExtension prog) run_options
+          onLine "call" l = T.putStrLn l
+          onLine _ _ = pure ()
+          cfg =
+            (futharkServerCfg ("." </> dropExtension prog) run_options)
+              { cfgOnLine =
+                  if scriptVerbose opts > 0
+                    then onLine
+                    else const . const $ pure ()
+              }
 
       withScriptServer cfg $ \server -> do
         let env =

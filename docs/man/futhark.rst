@@ -19,7 +19,7 @@ subcommands, the ``futhark`` tool provides facilities for compiling,
 developing, or analysing Futhark programs.  Most subcommands are
 documented in their own manpage.  For example, ``futhark opencl`` is
 documented as :ref:`futhark-opencl(1)`.  The remaining subcommands are
-documented in this page.
+documented below.
 
 COMMANDS
 ========
@@ -57,7 +57,7 @@ futhark defs PROGRAM
 
 Print names and locations of every top-level definition in the program
 (including top levels of modules), one per line.  The program need not
-be type-correct, but it must be contain syntax errors.
+be type-correct, but it must not contain syntax errors.
 
 futhark dev options... PROGRAM
 ------------------------------
@@ -95,7 +95,12 @@ futhark thanks
 
 Expresses gratitude.
 
+futhark tokens FILE
+-------------------
+
+Print the tokens the given Futhark source file; one per line.
+
 SEE ALSO
 ========
 
-:ref:`futhark-opencl(1)`, :ref:`futhark-c(1)`, :ref:`futhark-py(1)`, :ref:`futhark-pyopencl(1)`, :ref:`futhark-wasm(1)`, :ref:`futhark-wasm-multicore(1)`, :ref:`futhark-dataset(1)`, :ref:`futhark-doc(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`, :ref:`futhark-run(1)`, :ref:`futhark-repl(1)`, :ref:`futhark-literate(1)`
+:ref:`futhark-opencl(1)`, :ref:`futhark-c(1)`, :ref:`futhark-py(1)`, :ref:`futhark-pyopencl(1)`, :ref:`futhark-wasm(1)`, :ref:`futhark-wasm-multicore(1)`, :ref:`futhark-ispc(1)`, :ref:`futhark-dataset(1)`, :ref:`futhark-doc(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`, :ref:`futhark-run(1)`, :ref:`futhark-repl(1)`, :ref:`futhark-literate(1)`

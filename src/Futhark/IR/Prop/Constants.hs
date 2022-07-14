@@ -7,7 +7,8 @@ module Futhark.IR.Prop.Constants
   )
 where
 
-import Futhark.IR.Syntax.Core
+import Futhark.IR.Syntax.Core (SubExp (..))
+import Language.Futhark.Primitive
 
 -- | If a Haskell type is an instance of 'IsValue', it means that a
 -- value of that type can be converted to a Futhark 'PrimValue'.

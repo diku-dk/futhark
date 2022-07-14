@@ -287,7 +287,7 @@ ensureCoalescedAccess
           not $ tooSmallSlice (primByteSize pt) rem_slice,
           is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
           not (null thread_gids || null is),
-          not (last thread_gids `nameIn` (freeIn is <> freeIn rem_slice)) ->
+          last thread_gids `notNameIn` (freeIn is <> freeIn rem_slice) ->
             pure Nothing
         -- We are not fully indexing the array, and the indices are not
         -- a proper prefix of the thread indices, and some indices are
@@ -439,7 +439,8 @@ rearrangeInput manifest perm arr = do
   -- will hopefully be removed by the simplifier.
   manifested <- if isJust manifest then rowMajorArray arr else pure arr
   letExp (baseString arr ++ "_coalesced") $
-    BasicOp $ Manifest perm manifested
+    BasicOp $
+      Manifest perm manifested
 
 rowMajorArray ::
   MonadBuilder m =>
@@ -463,7 +464,8 @@ rearrangeSlice d w num_chunks arr = do
 
   per_chunk <-
     letSubExp "per_chunk" $
-      BasicOp $ BinOp (SQuot Int64 Unsafe) w_padded num_chunks'
+      BasicOp $
+        BinOp (SQuot Int64 Unsafe) w_padded num_chunks'
   arr_t <- lookupType arr
   arr_padded <- padArray w_padded padding arr_t
   rearrange num_chunks' w_padded per_chunk (baseString arr) arr_padded arr_t
@@ -473,9 +475,11 @@ rearrangeSlice d w num_chunks arr = do
           padding_shape = setDim d arr_shape padding
       arr_padding <-
         letExp (baseString arr <> "_padding") $
-          BasicOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
+          BasicOp $
+            Scratch (elemType arr_t) (shapeDims padding_shape)
       letExp (baseString arr <> "_padded") $
-        BasicOp $ Concat d (arr :| [arr_padding]) w_padded
+        BasicOp $
+          Concat d (arr :| [arr_padding]) w_padded
 
     rearrange num_chunks' w_padded per_chunk arr_name arr_padded arr_t = do
       let arr_dims = arrayDims arr_t
@@ -485,10 +489,12 @@ rearrangeSlice d w num_chunks arr = do
           tr_perm = [0 .. d - 1] ++ map (+ d) ([1] ++ [2 .. shapeRank extradim_shape - 1 - d] ++ [0])
       arr_extradim <-
         letExp (arr_name <> "_extradim") $
-          BasicOp $ Reshape (map DimNew $ shapeDims extradim_shape) arr_padded
+          BasicOp $
+            Reshape (map DimNew $ shapeDims extradim_shape) arr_padded
       arr_extradim_tr <-
         letExp (arr_name <> "_extradim_tr") $
-          BasicOp $ Manifest tr_perm arr_extradim
+          BasicOp $
+            Manifest tr_perm arr_extradim
       arr_inv_tr <-
         letExp (arr_name <> "_inv_tr") $
           BasicOp $

@@ -5,10 +5,9 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module provides various simple ways to query and manipulate
--- fundamental Futhark terms, such as types and values.  The intent is to
--- keep "Futhark.IRrsentation.AST.Syntax" simple, and put whatever
--- embellishments we need here.  This is an internal, desugared
--- representation.
+-- fundamental Futhark terms, such as types and values.  The intent is
+-- to keep "Futhark.IR.Syntax" simple, and put whatever embellishments
+-- we need here.  This is an internal, desugared representation.
 module Futhark.IR.Prop
   ( module Futhark.IR.Prop.Reshape,
     module Futhark.IR.Prop.Rearrange,
@@ -29,7 +28,6 @@ module Futhark.IR.Prop
     subExpVars,
     subExpVar,
     commutativeLambda,
-    entryPointSize,
     defAux,
     stmCerts,
     certify,
@@ -171,15 +169,6 @@ commutativeLambda lam =
         && n2 == length (bodyResult body)
         && all okComponent (zip3 xps yps $ bodyResult body)
 
--- | How many value parameters are accepted by this entry point?  This
--- is used to determine which of the function parameters correspond to
--- the parameters of the original function (they must all come at the
--- end).
-entryPointSize :: EntryPointType -> Int
-entryPointSize (TypeOpaque _ _ x) = x
-entryPointSize (TypeUnsigned _) = 1
-entryPointSize (TypeDirect _) = 1
-
 -- | A 'StmAux' with empty 'Certs'.
 defAux :: dec -> StmAux dec
 defAux = StmAux mempty mempty
@@ -240,7 +229,9 @@ class
 expExtTypesFromPat :: Typed dec => Pat dec -> [ExtType]
 expExtTypesFromPat pat =
   existentialiseExtTypes (patNames pat) $
-    staticShapes $ map patElemType $ patElems pat
+    staticShapes $
+      map patElemType $
+        patElems pat
 
 -- | Keep only those attributes that are relevant for 'Assert'
 -- expressions.
@@ -259,7 +250,9 @@ lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
       guard $ cs == mempty
       Let (Pat [pe]) _ (BasicOp (BinOp op (Var x) (Var y))) <-
         find (([res] ==) . patNames . stmPat) $
-          stmsToList $ bodyStms $ lambdaBody lam
+          stmsToList $
+            bodyStms $
+              lambdaBody lam
       i <- Var res `elemIndex` map resSubExp (bodyResult (lambdaBody lam))
       xp <- maybeNth i $ lambdaParams lam
       yp <- maybeNth (n + i) $ lambdaParams lam

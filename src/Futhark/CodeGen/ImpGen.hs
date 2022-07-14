@@ -55,6 +55,7 @@ module Futhark.CodeGen.ImpGen
     lookupArray,
     lookupMemory,
     lookupAcc,
+    askAttrs,
 
     -- * Building Blocks
     TV,
@@ -442,7 +443,7 @@ compileProg ::
   Imp.Space ->
   Prog rep ->
   m (Warnings, Imp.Definitions op)
-compileProg r ops space (Prog consts funs) =
+compileProg r ops space (Prog types consts funs) =
   modifyNameSource $ \src ->
     let (_, ss) =
           unzip $ parMap rpar (compileFunDef' src) funs
@@ -452,14 +453,14 @@ compileProg r ops space (Prog consts funs) =
           runImpM (compileConsts free_in_funs consts) r ops space $
             combineStates ss
      in ( ( stateWarnings s',
-            Imp.Definitions consts' (stateFunctions s')
+            Imp.Definitions types consts' (stateFunctions s')
           ),
           stateNameSource s'
         )
   where
     compileFunDef' src fdef =
       runImpM
-        (compileFunDef fdef)
+        (compileFunDef types fdef)
         r
         ops
         space
@@ -497,6 +498,33 @@ compileConsts used_consts stms = do
     extract s =
       (mempty, s)
 
+lookupOpaqueType :: String -> OpaqueTypes -> OpaqueType
+lookupOpaqueType v (OpaqueTypes types) =
+  case lookup v types of
+    Just t -> t
+    Nothing -> error $ "Unknown opaque type: " ++ show v
+
+valueTypeSign :: ValueType -> Signedness
+valueTypeSign (ValueType sign _ _) = sign
+
+entryPointSignedness :: OpaqueTypes -> EntryPointType -> [Signedness]
+entryPointSignedness _ (TypeTransparent vt) = [valueTypeSign vt]
+entryPointSignedness types (TypeOpaque desc) =
+  case lookupOpaqueType desc types of
+    OpaqueType vts -> map valueTypeSign vts
+    OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
+
+-- | How many value parameters are accepted by this entry point?  This
+-- is used to determine which of the function parameters correspond to
+-- the parameters of the original function (they must all come at the
+-- end).
+entryPointSize :: OpaqueTypes -> EntryPointType -> Int
+entryPointSize _ (TypeTransparent _) = 1
+entryPointSize types (TypeOpaque desc) =
+  case lookupOpaqueType desc types of
+    OpaqueType vts -> length vts
+    OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
+
 compileInParam ::
   Mem rep inner =>
   FParam rep ->
@@ -517,13 +545,12 @@ data ArrayDecl = ArrayDecl VName PrimType MemLoc
 
 compileInParams ::
   Mem rep inner =>
+  OpaqueTypes ->
   [FParam rep] ->
-  [EntryParam] ->
-  ImpM rep r op ([Imp.Param], [ArrayDecl], [(Name, Imp.ExternalValue)])
-compileInParams params eparams = do
-  let (ctx_params, val_params) =
-        splitAt (length params - sum (map (entryPointSize . entryParamType) eparams)) params
-  (inparams, arrayds) <- partitionEithers <$> mapM compileInParam (ctx_params ++ val_params)
+  Maybe [EntryParam] ->
+  ImpM rep r op ([Imp.Param], [ArrayDecl], Maybe [((Name, Uniqueness), Imp.ExternalValue)])
+compileInParams types params eparams = do
+  (inparams, arrayds) <- partitionEithers <$> mapM compileInParam params
   let findArray x = find (isArrayDecl x) arrayds
 
       summaries = M.fromList $ mapMaybe memSummary params
@@ -547,24 +574,31 @@ compileInParams params eparams = do
           _ ->
             Nothing
 
-      mkExts (EntryParam v (TypeOpaque u desc n) : epts) fparams =
-        let (fparams', rest) = splitAt n fparams
-         in ( v,
+      mkExts (EntryParam v u et@(TypeOpaque desc) : epts) fparams =
+        let signs = entryPointSignedness types et
+            n = entryPointSize types et
+            (fparams', rest) = splitAt n fparams
+         in ( (v, u),
               Imp.OpaqueValue
-                u
                 desc
-                (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams')
-            ) :
-            mkExts epts rest
-      mkExts (EntryParam v (TypeUnsigned u) : epts) (fparam : fparams) =
-        maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeUnsigned)
-          ++ mkExts epts fparams
-      mkExts (EntryParam v (TypeDirect u) : epts) (fparam : fparams) =
-        maybeToList ((v,) . Imp.TransparentValue u <$> mkValueDesc fparam Imp.TypeDirect)
+                (catMaybes $ zipWith mkValueDesc fparams' signs)
+            )
+              : mkExts epts rest
+      mkExts (EntryParam v u (TypeTransparent (ValueType s _ _)) : epts) (fparam : fparams) =
+        maybeToList (((v, u),) . Imp.TransparentValue <$> mkValueDesc fparam s)
           ++ mkExts epts fparams
       mkExts _ _ = []
 
-  pure (inparams, arrayds, mkExts eparams val_params)
+  pure
+    ( inparams,
+      arrayds,
+      case eparams of
+        Just eparams' ->
+          let num_val_params = sum (map (entryPointSize types . entryParamType) eparams')
+              (_ctx_params, val_params) = splitAt (length params - num_val_params) params
+           in Just $ mkExts eparams' val_params
+        Nothing -> Nothing
+    )
   where
     isArrayDecl x (ArrayDecl y _ _) = x == y
 
@@ -583,13 +617,16 @@ compileOutParam MemAcc {} =
 
 compileExternalValues ::
   Mem rep inner =>
+  OpaqueTypes ->
   [RetType rep] ->
-  [EntryPointType] ->
+  [EntryResult] ->
   [Maybe Imp.Param] ->
-  ImpM rep r op [Imp.ExternalValue]
-compileExternalValues orig_rts orig_epts maybe_params = do
+  ImpM rep r op [(Uniqueness, Imp.ExternalValue)]
+compileExternalValues types orig_rts orig_epts maybe_params = do
   let (ctx_rts, val_rts) =
-        splitAt (length orig_rts - sum (map entryPointSize orig_epts)) orig_rts
+        splitAt
+          (length orig_rts - sum (map (entryPointSize types . entryResultType) orig_epts))
+          orig_rts
 
   let nthOut i = case maybeNth i maybe_params of
         Just (Just p) -> Imp.paramName p
@@ -615,57 +652,61 @@ compileExternalValues orig_rts orig_epts maybe_params = do
       mkValueDesc _ _ MemMem {} =
         error "mkValueDesc: unexpected MemMem output."
 
-      mkExts i (TypeOpaque u desc n : epts) rets = do
-        let (rets', rest) = splitAt n rets
-        vds <- zipWithM (`mkValueDesc` Imp.TypeDirect) [i ..] rets'
-        (Imp.OpaqueValue u desc vds :) <$> mkExts (i + n) epts rest
-      mkExts i (TypeUnsigned u : epts) (ret : rets) = do
-        vd <- mkValueDesc i Imp.TypeUnsigned ret
-        (Imp.TransparentValue u vd :) <$> mkExts (i + 1) epts rets
-      mkExts i (TypeDirect u : epts) (ret : rets) = do
-        vd <- mkValueDesc i Imp.TypeDirect ret
-        (Imp.TransparentValue u vd :) <$> mkExts (i + 1) epts rets
+      mkExts i (EntryResult u et@(TypeOpaque desc) : epts) rets = do
+        let signs = entryPointSignedness types et
+            n = entryPointSize types et
+            (rets', rest) = splitAt n rets
+        vds <- forM (zip3 [i ..] signs rets') $ \(j, s, r) -> mkValueDesc j s r
+        ((u, Imp.OpaqueValue desc vds) :) <$> mkExts (i + n) epts rest
+      mkExts i (EntryResult u (TypeTransparent (ValueType s _ _)) : epts) (ret : rets) = do
+        vd <- mkValueDesc i s ret
+        ((u, Imp.TransparentValue vd) :) <$> mkExts (i + 1) epts rets
       mkExts _ _ _ = pure []
 
   mkExts (length ctx_rts) orig_epts val_rts
 
 compileOutParams ::
   Mem rep inner =>
+  OpaqueTypes ->
   [RetType rep] ->
-  Maybe [EntryPointType] ->
-  ImpM rep r op ([Imp.ExternalValue], [Imp.Param], [ValueDestination])
-compileOutParams orig_rts maybe_orig_epts = do
+  Maybe [EntryResult] ->
+  ImpM rep r op (Maybe [(Uniqueness, Imp.ExternalValue)], [Imp.Param], [ValueDestination])
+compileOutParams types orig_rts maybe_orig_epts = do
   (maybe_params, dests) <- unzip <$> mapM compileOutParam orig_rts
   evs <- case maybe_orig_epts of
-    Just orig_epts -> compileExternalValues orig_rts orig_epts maybe_params
-    Nothing -> pure []
+    Just orig_epts ->
+      Just <$> compileExternalValues types orig_rts orig_epts maybe_params
+    Nothing -> pure Nothing
   pure (evs, catMaybes maybe_params, dests)
 
 compileFunDef ::
   Mem rep inner =>
+  OpaqueTypes ->
   FunDef rep ->
   ImpM rep r op ()
-compileFunDef (FunDef entry _ fname rettype params body) =
+compileFunDef types (FunDef entry _ fname rettype params body) =
   local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
-    emitFunction fname $ Imp.Function name_entry outparams inparams body' results args
+    let entry' = case (name_entry, results, args) of
+          (Just name_entry', Just results', Just args') ->
+            Just $ Imp.EntryPoint name_entry' results' args'
+          _ ->
+            Nothing
+    emitFunction fname $ Imp.Function entry' outparams inparams body'
   where
     (name_entry, params_entry, ret_entry) = case entry of
-      Nothing ->
-        ( Nothing,
-          replicate (length params) (EntryParam "" $ TypeDirect mempty),
-          Nothing
-        )
-      Just (x, y, z) -> (Just x, y, Just z)
+      Nothing -> (Nothing, Nothing, Nothing)
+      Just (x, y, z) -> (Just x, Just y, Just z)
     compile = do
-      (inparams, arrayds, args) <- compileInParams params params_entry
-      (results, outparams, dests) <- compileOutParams rettype ret_entry
+      (inparams, arrayds, args) <- compileInParams types params params_entry
+      (results, outparams, dests) <- compileOutParams types rettype ret_entry
       addFParams params
       addArrays arrayds
 
       let Body _ stms ses = body
       compileStms (freeIn ses) stms $
-        forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
+        forM_ (zip dests ses) $
+          \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
       pure (outparams, inparams, results, args)
 
@@ -673,12 +714,14 @@ compileBody :: Pat (LetDec rep) -> Body rep -> ImpM rep r op ()
 compileBody pat (Body _ stms ses) = do
   dests <- destinationFromPat pat
   compileStms (freeIn ses) stms $
-    forM_ (zip dests ses) $ \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
+    forM_ (zip dests ses) $
+      \(d, SubExpRes _ se) -> copyDWIMDest d [] se []
 
 compileBody' :: [Param dec] -> Body rep -> ImpM rep r op ()
 compileBody' params (Body _ stms ses) =
   compileStms (freeIn ses) stms $
-    forM_ (zip params ses) $ \(param, SubExpRes _ se) -> copyDWIM (paramName param) [] se []
+    forM_ (zip params ses) $
+      \(param, SubExpRes _ se) -> copyDWIM (paramName param) [] se []
 
 compileLoopBody :: Typed dec => [Param dec] -> Body rep -> ImpM rep r op ()
 compileLoopBody mergeparams (Body _ stms ses) = do
@@ -726,11 +769,11 @@ defCompileStms alive_after_stms all_stms m =
 
       e_code <-
         localAttrs (stmAuxAttrs aux) $
-          collect $ compileExp pat e
+          collect $
+            compileExp pat e
       (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
       let dies_here v =
-            not (v `nameIn` live_after)
-              && v `nameIn` freeIn e_code
+            (v `notNameIn` live_after) && (v `nameIn` freeIn e_code)
           to_free = S.filter (dies_here . fst) allocs
 
       emit e_code
@@ -1019,7 +1062,9 @@ addFParams = mapM_ addFParam
   where
     addFParam fparam =
       addVar (paramName fparam) $
-        memBoundToVarEntry Nothing $ noUniquenessReturns $ paramDec fparam
+        memBoundToVarEntry Nothing $
+          noUniquenessReturns $
+            paramDec fparam
 
 -- | Another hack.
 addLoopVar :: VName -> IntType -> ImpM rep r op ()
@@ -1145,7 +1190,6 @@ dArray name pt shape mem ixfun =
 everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
 
--- | Remove the array targets.
 funcallTargets :: [ValueDestination] -> ImpM rep r op [VName]
 funcallTargets dests =
   concat <$> mapM funcallTarget dests
@@ -1380,17 +1424,18 @@ copy
   src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmads@(src_lmad :| _) _ _)) = do
     -- If we can statically determine that the two index-functions
     -- are equivalent, don't do anything
-    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn) $
+    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn)
+      $
       -- It's also possible that we can dynamically determine that the two
       -- index-functions are equivalent.
       sUnless
         ( fromBool (dst_name == src_name && length dst_lmads == 1 && length src_lmads == 1)
             .&&. IxFun.dynamicEqualsLMAD dst_lmad src_lmad
         )
-        $ do
-          -- If none of the above is true, actually do the copy
-          cc <- asks envCopyCompiler
-          cc bt dst src
+      $ do
+        -- If none of the above is true, actually do the copy
+        cc <- asks envCopyCompiler
+        cc bt dst src
 
 -- | Is this copy really a mapping with transpose?
 isMapTransposeCopy ::
@@ -1454,19 +1499,19 @@ defaultCopy pt dest src
   | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
       isMapTransposeCopy pt dest src = do
       fname <- mapTransposeForType pt
-      emit $
-        Imp.Call
+      emit
+        $ Imp.Call
           []
           fname
-          $ transposeArgs
-            pt
-            destmem
-            (bytes destoffset)
-            srcmem
-            (bytes srcoffset)
-            num_arrays
-            size_x
-            size_y
+        $ transposeArgs
+          pt
+          destmem
+          (bytes destoffset)
+          srcmem
+          (bytes srcoffset)
+          num_arrays
+          size_x
+          size_y
   | Just destoffset <-
       IxFun.linearWithOffset dest_ixfun pt_size,
     Just srcoffset <-
@@ -1557,8 +1602,8 @@ copyArrayDWIM
               then pure mempty -- Copy would be no-op.
               else collect $ copy bt destlocation' srclocation'
 
--- | Like 'copyDWIM', but the target is a 'ValueDestination'
--- instead of a variable name.
+-- Like 'copyDWIM', but the target is a 'ValueDestination' instead of
+-- a variable name.
 copyDWIMDest ::
   ValueDestination ->
   [DimIndex (Imp.TExp Int64)] ->
@@ -1735,7 +1780,11 @@ sFor :: String -> Imp.TExp t -> (Imp.TExp t -> ImpM rep r op ()) -> ImpM rep r o
 sFor i bound body = do
   i' <- newVName i
   sFor' i' (untyped bound) $
-    body $ TPrimExp $ Imp.var i' $ primExpType $ untyped bound
+    body $
+      TPrimExp $
+        Imp.var i' $
+          primExpType $
+            untyped bound
 
 sWhile :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op ()
 sWhile cond body = do
@@ -1799,7 +1848,9 @@ sArray name bt shape mem ixfun = do
 sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
 sArrayInMem name pt shape mem =
   sArray name pt shape mem $
-    IxFun.iota $ map (isInt64 . primExpFromSubExp int64) $ shapeDims shape
+    IxFun.iota $
+      map (isInt64 . primExpFromSubExp int64) $
+        shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
@@ -1808,7 +1859,8 @@ sAllocArrayPerm name pt shape space perm = do
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
   let iota_ixfun = IxFun.iota $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
-    IxFun.permute iota_ixfun $ rearrangeInverse perm
+    IxFun.permute iota_ixfun $
+      rearrangeInverse perm
 
 -- | Uses linear/iota index function.
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM rep r op VName
@@ -1875,6 +1927,7 @@ sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
     the_copy =
       emit $
         Imp.Copy
+          pt
           destmem
           (bytes destoffset)
           destspace
@@ -1907,7 +1960,7 @@ function fname outputs inputs m = local newFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
-  emitFunction fname $ Imp.Function Nothing outputs inputs body [] []
+  emitFunction fname $ Imp.Function Nothing outputs inputs body
   where
     addParam (Imp.MemParam name space) =
       addVar name $ MemVar Nothing $ MemEntry space

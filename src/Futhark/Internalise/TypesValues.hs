@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Futhark.Internalise.TypesValues
   ( -- * Internalising types
@@ -19,8 +19,8 @@ module Futhark.Internalise.TypesValues
   )
 where
 
-import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bitraversable (bitraverse)
 import Data.List (delete, find, foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -35,23 +35,21 @@ internaliseUniqueness E.Unique = I.Unique
 newtype TypeState = TypeState {typeCounter :: Int}
 
 newtype InternaliseTypeM a
-  = InternaliseTypeM (StateT TypeState InternaliseM a)
+  = InternaliseTypeM (State TypeState a)
   deriving (Functor, Applicative, Monad, MonadState TypeState)
 
-liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
-liftInternaliseM = InternaliseTypeM . lift
-
-runInternaliseTypeM :: InternaliseTypeM a -> InternaliseM a
+runInternaliseTypeM :: InternaliseTypeM a -> a
 runInternaliseTypeM = runInternaliseTypeM' mempty
 
-runInternaliseTypeM' :: [VName] -> InternaliseTypeM a -> InternaliseM a
-runInternaliseTypeM' exts (InternaliseTypeM m) = evalStateT m $ TypeState (length exts)
+runInternaliseTypeM' :: [VName] -> InternaliseTypeM a -> a
+runInternaliseTypeM' exts (InternaliseTypeM m) = evalState m $ TypeState (length exts)
 
 internaliseParamTypes ::
-  [E.TypeBase (E.DimDecl VName) ()] ->
+  [E.TypeBase E.Size ()] ->
   InternaliseM [[I.TypeBase Shape Uniqueness]]
 internaliseParamTypes ts =
-  runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM mempty) ts
+  mapM (mapM mkAccCerts) . runInternaliseTypeM $
+    mapM (fmap (map onType) . internaliseTypeM mempty) ts
   where
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ pretty ts
@@ -59,30 +57,44 @@ internaliseParamTypes ts =
 -- We need to fix up the arrays for any Acc return values or loop
 -- parameters.  We look at the concrete types for this, since the Acc
 -- parameter name in the second list will just be something we made up.
-fixupTypes :: [TypeBase shape1 u1] -> [TypeBase shape2 u2] -> [TypeBase shape2 u2]
-fixupTypes = zipWith fixup
+fixupKnownTypes :: [TypeBase shape1 u1] -> [TypeBase shape2 u2] -> [TypeBase shape2 u2]
+fixupKnownTypes = zipWith fixup
   where
     fixup (Acc acc ispace ts _) (Acc _ _ _ u2) = Acc acc ispace ts u2
     fixup _ t = t
 
+-- Generate proper certificates for the placeholder accumulator
+-- certificates produced by internaliseType (identified with tag 0).
+-- Only needed when we cannot use 'fixupKnownTypes'.
+mkAccCerts :: TypeBase shape u -> InternaliseM (TypeBase shape u)
+mkAccCerts (Array pt shape u) =
+  pure $ Array pt shape u
+mkAccCerts (Acc c shape ts u) =
+  Acc <$> c' <*> pure shape <*> pure ts <*> pure u
+  where
+    c'
+      | baseTag c == 0 = newVName "acc_cert"
+      | otherwise = pure c
+mkAccCerts t = pure t
+
 internaliseLoopParamType ::
-  E.TypeBase (E.DimDecl VName) () ->
+  E.TypeBase E.Size () ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
-  fixupTypes ts . concat <$> internaliseParamTypes [et]
+  fixupKnownTypes ts . concat <$> internaliseParamTypes [et]
 
 internaliseReturnType ::
   E.StructRetType ->
   [TypeBase shape u] ->
-  InternaliseM [I.TypeBase ExtShape Uniqueness]
+  [I.TypeBase ExtShape Uniqueness]
 internaliseReturnType (E.RetType dims et) ts =
-  fixupTypes ts <$> runInternaliseTypeM' dims (internaliseTypeM exts et)
+  fixupKnownTypes ts $ runInternaliseTypeM' dims (internaliseTypeM exts et)
   where
     exts = M.fromList $ zip dims [0 ..]
 
 internaliseLambdaReturnType ::
-  E.TypeBase (E.DimDecl VName) () ->
+  E.TypeBase E.Size () ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape NoUniqueness]
 internaliseLambdaReturnType et ts =
@@ -92,7 +104,7 @@ internaliseLambdaReturnType et ts =
 -- tuple type piecemeal.
 internaliseEntryReturnType ::
   E.StructRetType ->
-  InternaliseM [[I.TypeBase ExtShape Uniqueness]]
+  [[I.TypeBase ExtShape Uniqueness]]
 internaliseEntryReturnType (E.RetType dims et) =
   runInternaliseTypeM' dims . mapM (internaliseTypeM exts) $
     case E.isTupleRecord et of
@@ -102,8 +114,8 @@ internaliseEntryReturnType (E.RetType dims et) =
     exts = M.fromList $ zip dims [0 ..]
 
 internaliseType ::
-  E.TypeBase (E.DimDecl VName) () ->
-  InternaliseM [I.TypeBase I.ExtShape Uniqueness]
+  E.TypeBase E.Size () ->
+  [I.TypeBase I.ExtShape Uniqueness]
 internaliseType = runInternaliseTypeM . internaliseTypeM mempty
 
 newId :: InternaliseTypeM Int
@@ -114,21 +126,17 @@ newId = do
 
 internaliseDim ::
   M.Map VName Int ->
-  E.DimDecl VName ->
+  E.Size ->
   InternaliseTypeM ExtSize
 internaliseDim exts d =
   case d of
-    E.AnyDim _ -> Ext <$> newId
-    E.ConstDim n -> pure $ Free $ intConst I.Int64 $ toInteger n
-    E.NamedDim name -> namedDim name
+    E.AnySize _ -> Ext <$> newId
+    E.ConstSize n -> pure $ Free $ intConst I.Int64 $ toInteger n
+    E.NamedSize name -> pure $ namedDim name
   where
     namedDim (E.QualName _ name)
-      | Just x <- name `M.lookup` exts = pure $ I.Ext x
-      | otherwise = do
-          subst <- liftInternaliseM $ lookupSubst name
-          case subst of
-            Just [v] -> pure $ I.Free v
-            _ -> pure $ I.Free $ I.Var name
+      | Just x <- name `M.lookup` exts = I.Ext x
+      | otherwise = I.Free $ I.Var name
 
 internaliseTypeM ::
   M.Map VName Int ->
@@ -136,7 +144,7 @@ internaliseTypeM ::
   InternaliseTypeM [I.TypeBase ExtShape Uniqueness]
 internaliseTypeM exts orig_t =
   case orig_t of
-    E.Array _ u et shape -> do
+    E.Array _ u shape et -> do
       dims <- internaliseShape shape
       ets <- internaliseTypeM exts $ E.Scalar et
       pure [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets]
@@ -149,14 +157,14 @@ internaliseTypeM exts orig_t =
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
-      | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
-        baseString (E.typeLeaf tn) == "acc" -> do
+      | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
+        baseString (E.qualLeaf tn) == "acc" -> do
           ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
-          acc_param <- liftInternaliseM $ newVName "acc_cert"
-          let acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
+          let acc_param = VName "PLACEHOLDER" 0 -- See mkAccCerts.
+              acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
           pure [acc_t]
     E.Scalar E.TypeVar {} ->
-      error "internaliseTypeM: cannot handle type variable."
+      error $ "internaliseTypeM: cannot handle type variable: " ++ pretty orig_t
     E.Scalar E.Arrow {} ->
       error $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
     E.Scalar (E.Sum cs) -> do
@@ -202,17 +210,17 @@ internaliseSumType ::
       M.Map Name (Int, [Int])
     )
 internaliseSumType cs =
-  runInternaliseTypeM $
+  bitraverse (mapM mkAccCerts) pure . runInternaliseTypeM $
     internaliseConstructors
       <$> traverse (fmap concat . mapM (internaliseTypeM mempty)) cs
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.TypeBase (E.DimDecl VName) als -> InternaliseM Int
+internalisedTypeSize :: E.TypeBase E.Size als -> Int
 -- A few special cases for performance.
-internalisedTypeSize (E.Scalar (E.Prim _)) = pure 1
-internalisedTypeSize (E.Array _ _ (E.Prim _) _) = pure 1
-internalisedTypeSize t = length <$> internaliseType (t `E.setAliases` ())
+internalisedTypeSize (E.Scalar (E.Prim _)) = 1
+internalisedTypeSize (E.Array _ _ _ (E.Prim _)) = 1
+internalisedTypeSize t = length $ internaliseType (t `E.setAliases` ())
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType

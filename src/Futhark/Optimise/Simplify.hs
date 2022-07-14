@@ -39,19 +39,25 @@ simplifyProg ::
   Engine.HoistBlockers rep ->
   Prog rep ->
   PassM (Prog rep)
-simplifyProg simpl rules blockers (Prog consts funs) = do
+simplifyProg simpl rules blockers prog = do
+  let consts = progConsts prog
+      funs = progFuns prog
   (consts_vtable, consts') <-
     simplifyConsts (UT.usages $ foldMap freeIn funs) (mempty, informStms consts)
 
   -- We deepen the vtable so it will look like the constants are in an
   -- "outer loop"; this communicates useful information to some
-  -- simplification rules (e.g. seee issue #1302).
+  -- simplification rules (e.g. see issue #1302).
   funs' <- parPass (simplifyFun' (ST.deepen consts_vtable) . informFunDef) funs
   let funs_uses = UT.usages $ foldMap freeIn funs'
 
   (_, consts'') <- simplifyConsts funs_uses (mempty, consts')
 
-  pure $ Prog (fmap removeStmWisdom consts'') (fmap removeFunDefWisdom funs')
+  pure $
+    prog
+      { progConsts = fmap removeStmWisdom consts'',
+        progFuns = fmap removeFunDefWisdom funs'
+      }
   where
     simplifyFun' consts_vtable =
       simplifySomething

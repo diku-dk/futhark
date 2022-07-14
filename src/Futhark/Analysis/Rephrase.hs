@@ -35,10 +35,10 @@ data Rephraser m from to = Rephraser
 
 -- | Rephrase an entire program.
 rephraseProg :: Monad m => Rephraser m from to -> Prog from -> m (Prog to)
-rephraseProg rephraser (Prog consts funs) =
-  Prog
-    <$> mapM (rephraseStm rephraser) consts
-    <*> mapM (rephraseFunDef rephraser) funs
+rephraseProg rephraser prog = do
+  consts <- mapM (rephraseStm rephraser) (progConsts prog)
+  funs <- mapM (rephraseFunDef rephraser) (progFuns prog)
+  pure $ prog {progConsts = consts, progFuns = funs}
 
 -- | Rephrase a function definition.
 rephraseFunDef :: Monad m => Rephraser m from to -> FunDef from -> m (FunDef to)

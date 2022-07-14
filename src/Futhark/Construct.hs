@@ -85,6 +85,7 @@ module Futhark.Construct
     eSliceArray,
     eBlank,
     eAll,
+    eDimInBounds,
     eOutOfBounds,
 
     -- * Other building blocks
@@ -375,6 +376,14 @@ eSliceArray d arr i n = do
   where
     slice j m = DimSlice j m (constant (1 :: Int64))
 
+-- | @eInBoundsForDim w i@ produces @0 <= i < w@.
+eDimInBounds :: MonadBuilder m => m (Exp (Rep m)) -> m (Exp (Rep m)) -> m (Exp (Rep m))
+eDimInBounds w i =
+  eBinOp
+    LogAnd
+    (eCmpOp (CmpSle Int64) (eSubExp (intConst Int64 0)) i)
+    (eCmpOp (CmpSlt Int64) i w)
+
 -- | Are these indexes out-of-bounds for the array?
 eOutOfBounds ::
   MonadBuilder m =>
@@ -388,12 +397,15 @@ eOutOfBounds arr is = do
   let checkDim w i = do
         less_than_zero <-
           letSubExp "less_than_zero" $
-            BasicOp $ CmpOp (CmpSlt Int64) i (constant (0 :: Int64))
+            BasicOp $
+              CmpOp (CmpSlt Int64) i (constant (0 :: Int64))
         greater_than_size <-
           letSubExp "greater_than_size" $
-            BasicOp $ CmpOp (CmpSle Int64) w i
+            BasicOp $
+              CmpOp (CmpSle Int64) w i
         letSubExp "outside_bounds_dim" $
-          BasicOp $ BinOp LogOr less_than_zero greater_than_size
+          BasicOp $
+            BinOp LogOr less_than_zero greater_than_size
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
 
 -- | Construct an unspecified value of the given type.
@@ -475,7 +487,9 @@ binLambda bop arg_t ret_t = do
   y <- newVName "y"
   body <-
     buildBody_ . fmap (pure . subExpRes) $
-      letSubExp "binlam_res" $ BasicOp $ bop (Var x) (Var y)
+      letSubExp "binlam_res" $
+        BasicOp $
+          bop (Var x) (Var y)
   pure
     Lambda
       { lambdaParams =

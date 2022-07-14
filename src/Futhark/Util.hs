@@ -15,10 +15,11 @@ module Futhark.Util
     maxinum,
     chunk,
     chunks,
+    pairs,
+    unpairs,
     dropAt,
     takeLast,
     dropLast,
-    debug,
     mapEither,
     partitionMaybe,
     maybeNth,
@@ -57,7 +58,6 @@ module Futhark.Util
     trim,
     pmapIO,
     interactWithFileSafely,
-    readFileSafely,
     convFloat,
     UserString,
     EncodedString,
@@ -65,6 +65,7 @@ module Futhark.Util
     atMostChars,
     invertMap,
     cartesian,
+    traverseFold,
     fixPoint,
     ifM,
     (||^),
@@ -78,13 +79,12 @@ import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
-import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash.MD5 as MD5
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import Data.Char
 import Data.Either
-import Data.Foldable (toList)
+import Data.Foldable (fold, toList)
 import Data.Function ((&))
 import Data.List (findIndex, foldl', genericDrop, genericSplitAt, sortBy)
 import qualified Data.List.NonEmpty as NE
@@ -94,7 +94,6 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
-import qualified Data.Text.IO as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Numeric
@@ -106,7 +105,6 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
-import System.Log.Logger (debugM)
 import System.Process.ByteString
 import Text.Read (readMaybe)
 
@@ -150,6 +148,18 @@ chunks [] _ = []
 chunks (n : ns) xs =
   let (bef, aft) = splitAt n xs
    in bef : chunks ns aft
+
+-- | @pairs l@ chunks the list into pairs of consecutive elements,
+-- ignoring any excess element.  Example: @pairs [a,b,c,d] ==
+-- [(a,b),(c,d)]@.
+pairs :: [a] -> [(a, a)]
+pairs (a : b : l) = (a, b) : pairs l
+pairs _ = []
+
+-- | The opposite of 'pairs': @unpairs [(a,b),(c,d)] = [a,b,c,d]@.
+unpairs :: [(a, a)] -> [a]
+unpairs [] = []
+unpairs ((a, b) : l) = a : b : unpairs l
 
 -- | Like 'maximum', but returns zero for an empty list.
 maxinum :: (Num a, Ord a, Foldable f) => f a -> a
@@ -450,12 +460,6 @@ interactWithFileSafely m =
       | otherwise =
           pure $ Just $ Left $ show e
 
--- | Read a file, returning 'Nothing' if the file does not exist, and
--- 'Left' if some other error occurs.
-readFileSafely :: FilePath -> IO (Maybe (Either String T.Text))
-readFileSafely filepath =
-  interactWithFileSafely $ T.readFile filepath
-
 -- | Convert between different floating-point types, preserving
 -- infinities and NaNs.
 convFloat :: (RealFloat from, RealFloat to) => from -> to
@@ -535,10 +539,10 @@ encodeChar c = encodeAsUnicodeCharar c
 
 encodeAsUnicodeCharar :: Char -> EncodedString
 encodeAsUnicodeCharar c =
-  'z' :
-  if isDigit (head hex_str)
-    then hex_str
-    else '0' : hex_str
+  'z'
+    : if isDigit (head hex_str)
+      then hex_str
+      else '0' : hex_str
   where
     hex_str = showHex (ord c) "U"
 
@@ -563,6 +567,10 @@ cartesian :: (Monoid m, Foldable t) => (a -> a -> m) -> t a -> t a -> m
 cartesian f xs ys =
   [(x, y) | x <- toList xs, y <- toList ys]
     & foldMap (uncurry f)
+
+-- | Applicatively fold a traversable.
+traverseFold :: (Monoid m, Traversable t, Applicative f) => (a -> f m) -> t a -> f m
+traverseFold f = fmap fold . traverse f
 
 -- | Perform fixpoint iteration.
 fixPoint :: Eq a => (a -> a) -> a -> a
@@ -592,6 +600,3 @@ partitionM f = helper ([], [])
         then helper (x : acct, accf) xs
         else helper (acct, x : accf) xs
 
--- | Issue a debugging statement to the log.
-debug :: MonadIO m => String -> m ()
-debug msg = liftIO $ debugM "futhark" msg

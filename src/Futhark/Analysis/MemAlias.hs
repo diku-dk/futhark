@@ -1,10 +1,10 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Analysis.MemAlias
   ( analyzeSeqMem,
     analyzeGPUMem,
-    canBeSameMemory,
     aliasesOf,
     MemAliases,
   )
@@ -45,7 +45,9 @@ instance Monoid MemAliases where
   mempty = MemAliases mempty
 
 instance Pretty MemAliases where
-  ppr (MemAliases m) = ppr m
+  ppr (MemAliases m) = stack $ map f $ M.toList m
+    where
+      f (v, vs) = ppr v <+> "aliases:" </> indent 2 (oneLine $ ppr vs)
 
 addAlias :: VName -> VName -> MemAliases -> MemAliases
 addAlias v1 v2 m =
@@ -53,15 +55,6 @@ addAlias v1 v2 m =
 
 singleton :: VName -> Names -> MemAliases
 singleton v ns = MemAliases $ M.singleton v ns
-
-canBeSameMemory :: MemAliases -> VName -> VName -> Bool
-canBeSameMemory (MemAliases m) v1 v2 =
-  case fmap (v2 `nameIn`) (M.lookup v1 m) of
-    Just True -> True
-    Just False -> case fmap (v1 `nameIn`) (M.lookup v2 m) of
-      Just b -> b
-      Nothing -> error $ "VName not found in MemAliases: " <> pretty v2
-    Nothing -> error $ "VName not found in MemAliases: " <> pretty v1
 
 aliasesOf :: MemAliases -> VName -> Names
 aliasesOf (MemAliases m) v = fromMaybe mempty $ M.lookup v m
@@ -82,7 +75,9 @@ analyzeHostOp m (SegOp (SegScan _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m (SegOp (SegHist _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
-analyzeHostOp _ _ = pure mempty
+analyzeHostOp m SizeOp {} = pure m
+analyzeHostOp m GPUBody {} = pure m
+analyzeHostOp m (OtherOp ()) = pure m
 
 analyzeStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => MemAliases -> Stm rep -> MemAliasesM inner MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =

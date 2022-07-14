@@ -5,7 +5,14 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Provides last-use analysis for Futhark programs.
-module Futhark.Analysis.LastUse (LastUseMap, Used, analyseGPUMem, analyseSeqMem) where
+module Futhark.Analysis.LastUse
+  ( LastUseMap,
+    LastUse,
+    Used,
+    analyseGPUMem,
+    analyseSeqMem,
+  )
+where
 
 import Control.Monad.Reader
 import Data.Bifunctor (first)
@@ -19,17 +26,17 @@ import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 
--- | `LastUseMap` tells which names were last used in a given statement.
--- Statements are uniquely identified by the `VName` of the first value
--- parameter in the statement pattern. `Names` is the set of names last used.
+-- | 'LastUseMap' tells which names were last used in a given statement.
+-- Statements are uniquely identified by the 'VName' of the first value
+-- parameter in the statement pattern. 'Names' is the set of names last used.
 type LastUseMap = Map VName Names
 
--- | `LastUse` is a mapping from a `VName` to the statement identifying it's
--- last use. `LastUseMap` is the inverse of `LastUse`.
+-- | 'LastUse' is a mapping from a 'VName' to the statement identifying it's
+-- last use. 'LastUseMap' is the inverse of 'LastUse'.
 type LastUse = Map VName VName
 
--- | `Used` is the set of `VName` that were used somewhere in a statement, body
--- or otherwise.
+-- | 'Used' is the set of 'VName' that were used somewhere in a
+-- statement, body or otherwise.
 type Used = Names
 
 type LastUseOp rep =
@@ -67,6 +74,10 @@ analyseGPUOp pat_name (lumap, used) (Inner (SegOp (SegHist lvl _ binops tps body
   (lumap'', used'') <- analyseKernelBody (lumap', used') body
   let nms = (freeIn lvl <> freeIn tps) `namesSubtract` used''
   pure (insertNames pat_name nms lumap'', used'' <> nms)
+analyseGPUOp pat_name (lumap, used) (Inner (GPUBody ts body)) = do
+  (lumap', used') <- analyseBody lumap used body
+  let nms = freeIn ts
+  pure (insertNames pat_name nms lumap', used' <> nms)
 
 segOpHelper ::
   (FreeIn (OpWithAliases (Op rep)), ASTRep rep) =>
@@ -201,7 +212,10 @@ analyseHistOp ::
 analyseHistOp (lumap, used) (HistOp width race dest neutral shp lambda) = do
   (lumap', used') <- analyseLambda (lumap, used) lambda
   let nms =
-        ( freeIn width <> freeIn race <> freeIn dest <> freeIn neutral
+        ( freeIn width
+            <> freeIn race
+            <> freeIn dest
+            <> freeIn neutral
             <> freeIn shp
         )
           `namesSubtract` used'

@@ -12,10 +12,10 @@ import qualified Data.Map as M
 import Data.String
 import qualified Data.Text as T
 import Data.Void
-import Futhark.IR.Primitive.Parse (constituent, keyword, lexeme)
-import Futhark.IR.PrimitiveTests ()
 import Language.Futhark
 import Language.Futhark.Parser
+import Language.Futhark.Primitive.Parse (constituent, keyword, lexeme)
+import Language.Futhark.PrimitiveTests ()
 import Test.QuickCheck
 import Test.Tasty
 import Text.Megaparsec
@@ -78,7 +78,8 @@ pName =
 pVName :: Parser VName
 pVName = lexeme $ do
   (s, tag) <-
-    satisfy constituent `manyTill_` try pTag
+    satisfy constituent
+      `manyTill_` try pTag
       <?> "variable name"
   pure $ VName (nameFromString s) tag
   where
@@ -87,9 +88,6 @@ pVName = lexeme $ do
 
 pQualName :: Parser (QualName VName)
 pQualName = QualName [] <$> pVName
-
-pTypeName :: Parser TypeName
-pTypeName = TypeName [] <$> pVName
 
 pPrimType :: Parser PrimType
 pPrimType =
@@ -114,15 +112,15 @@ pPrimType =
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [lexeme "*" $> Unique, pure Nonunique]
 
-pDimDecl :: Parser (DimDecl VName)
-pDimDecl =
+pSize :: Parser Size
+pSize =
   brackets $
     choice
-      [ ConstDim <$> lexeme L.decimal,
-        NamedDim <$> pQualName
+      [ ConstSize <$> lexeme L.decimal,
+        NamedSize <$> pQualName
       ]
 
-pScalarNonFun :: Parser (ScalarTypeBase (DimDecl VName) ())
+pScalarNonFun :: Parser (ScalarTypeBase Size ())
 pScalarNonFun =
   choice
     [ Prim <$> pPrimType,
@@ -132,10 +130,10 @@ pScalarNonFun =
     ]
   where
     pField = (,) <$> pName <* lexeme ":" <*> pStructType
-    pTypeVar = TypeVar () <$> pUniqueness <*> pTypeName <*> many pTypeArg
+    pTypeVar = TypeVar () <$> pUniqueness <*> pQualName <*> many pTypeArg
     pTypeArg =
       choice
-        [ TypeArgDim <$> pDimDecl <*> pure mempty,
+        [ TypeArgDim <$> pSize <*> pure mempty,
           TypeArgType <$> pTypeArgType <*> pure mempty
         ]
     pTypeArgType =
@@ -145,19 +143,14 @@ pScalarNonFun =
         ]
 
 pArrayType :: Parser StructType
-pArrayType = do
-  u <- pUniqueness
-  shape <- pShape
-  t <- pScalarNonFun
-  pure $ Array () u t shape
-  where
-    pShape = ShapeDecl <$> some pDimDecl
+pArrayType =
+  Array () <$> pUniqueness <*> (Shape <$> some pSize) <*> pScalarNonFun
 
 pNonFunType :: Parser StructType
 pNonFunType =
   choice [try pArrayType, try $ parens pStructType, Scalar <$> pScalarNonFun]
 
-pScalarType :: Parser (ScalarTypeBase (DimDecl VName) ())
+pScalarType :: Parser (ScalarTypeBase Size ())
 pScalarType = choice [try pFun, pScalarNonFun]
   where
     pFun =
@@ -185,7 +178,7 @@ fromStringParse p what s =
     onError e =
       error $ "not a " <> what <> ": " <> s <> "\n" <> errorBundlePretty e
 
-instance IsString (ScalarTypeBase (DimDecl VName) ()) where
+instance IsString (ScalarTypeBase Size ()) where
   fromString = fromStringParse pScalarType "ScalarType"
 
 instance IsString StructType where

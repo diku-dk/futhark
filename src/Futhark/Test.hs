@@ -163,11 +163,15 @@ scriptValueAsVars server names_and_types val = do
     note (_, t)
       | "(" `T.isPrefixOf` t =
           Just $
-            "\nNote: expected type " <> prettyText t <> " is an opaque tuple that cannot be constructed\n"
+            "\nNote: expected type "
+              <> prettyText t
+              <> " is an opaque tuple that cannot be constructed\n"
               <> "in FutharkScript.  Consider using type annotations to give it a proper name."
       | "{" `T.isPrefixOf` t =
           Just $
-            "\nNote: expected type " <> prettyText t <> " is an opaque record that cannot be constructed\n"
+            "\nNote: expected type "
+              <> prettyText t
+              <> " is an opaque record that cannot be constructed\n"
               <> "in FutharkScript.  Consider using type annotations to give it a proper name."
       | otherwise =
           Nothing
@@ -268,7 +272,9 @@ genValues (FutharkExe futhark) gens = do
       pure stdout
     ExitFailure e ->
       fail $
-        "'futhark dataset' failed with exit code " ++ show e ++ " and stderr:\n"
+        "'futhark dataset' failed with exit code "
+          ++ show e
+          ++ " and stderr:\n"
           ++ map (chr . fromIntegral) (SBS.unpack stderr)
   where
     args = "-b" : concatMap argForGen gens
@@ -285,7 +291,8 @@ genFileSize = genSize
     header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
     genSize (GenValue (V.ValueType ds t)) =
       toInteger $
-        header_size + length ds * 8
+        header_size
+          + length ds * 8
           + product ds * V.primTypeBytes t
     genSize (GenPrim v) =
       toInteger $ header_size + product (V.valueShape v) * V.primTypeBytes (V.valueElemType v)
@@ -296,11 +303,11 @@ testRunReferenceOutput :: FilePath -> T.Text -> TestRun -> FilePath
 testRunReferenceOutput prog entry tr =
   "data"
     </> takeBaseName prog
-    <> ":"
-    <> T.unpack entry
-    <> "-"
-    <> map clean (runDescription tr)
-    <.> "out"
+      <> ":"
+      <> T.unpack entry
+      <> "-"
+      <> map clean (runDescription tr)
+        <.> "out"
   where
     clean '/' = '_' -- Would this ever happen?
     clean ' ' = '_'
@@ -488,7 +495,9 @@ checkResult program expected_vs actual_vs =
       liftIO $ BS.writeFile actualf $ mconcat $ map Bin.encode actual_vs
       liftIO $ BS.writeFile expectedf $ mconcat $ map Bin.encode expected_vs
       throwError $
-        T.pack actualf <> " and " <> T.pack expectedf
+        T.pack actualf
+          <> " and "
+          <> T.pack expectedf
           <> " do not match:\n"
           <> T.pack (show mismatch)
           <> if null mismatches

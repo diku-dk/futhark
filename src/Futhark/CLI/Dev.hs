@@ -34,13 +34,16 @@ import qualified Futhark.Optimise.ArrayShortCircuiting as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
+import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
+import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.GPU as GPU
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
@@ -199,7 +202,8 @@ kernelsMemProg _ (GPUMem prog) =
   pure prog
 kernelsMemProg name rep =
   externalErrorS $
-    "Pass " ++ name
+    "Pass "
+      ++ name
       ++ " expects GPUMem representation, but got "
       ++ representation rep
 
@@ -208,7 +212,8 @@ soacsProg _ (SOACS prog) =
   pure prog
 soacsProg name rep =
   externalErrorS $
-    "Pass " ++ name
+    "Pass "
+      ++ name
       ++ " expects SOACS representation, but got "
       ++ representation rep
 
@@ -363,7 +368,9 @@ pipelineOption getprog repdesc repf desc pipeline =
           repf <$> runPipeline pipeline config prog
         Nothing ->
           externalErrorS $
-            "Expected " ++ repdesc ++ " representation, but got "
+            "Expected "
+              ++ repdesc
+              ++ " representation, but got "
               ++ representation rep
 
 soacsPipelineOption ::
@@ -403,7 +410,9 @@ commandLineOptions =
       []
       ["no-check"]
       ( NoArg $
-          Right $ changeFutharkConfig $ \opts -> opts {futharkTypeCheck = False}
+          Right $
+            changeFutharkConfig $
+              \opts -> opts {futharkTypeCheck = False}
       )
       "Disable type-checking.",
     Option
@@ -426,6 +435,7 @@ commandLineOptions =
                 "cuda" -> Right $ GPUMemAction compileCUDAAction
                 "wasm" -> Right $ SeqMemAction compileCtoWASMAction
                 "wasm-multicore" -> Right $ MCMemAction compileMulticoreToWASMAction
+                "ispc" -> Right $ MCMemAction compileMulticoreToISPCAction
                 "python" -> Right $ SeqMemAction compilePythonAction
                 "pyopencl" -> Right $ GPUMemAction compilePyOpenCLAction
                 _ -> Left $ error $ "Invalid backend: " <> arg
@@ -437,28 +447,28 @@ commandLineOptions =
       "Run this compiler backend on pipeline result.",
     Option
       []
-      ["compile-imperative"]
+      ["compile-imp-seq"]
       ( NoArg $
           Right $ \opts ->
             opts {futharkAction = SeqMemAction $ \_ _ _ -> impCodeGenAction}
       )
-      "Translate program into the imperative IL and write it on standard output.",
+      "Translate pipeline result to ImpSequential and write it on stdout.",
     Option
       []
-      ["compile-imperative-kernels"]
+      ["compile-imp-gpu"]
       ( NoArg $
           Right $ \opts ->
             opts {futharkAction = GPUMemAction $ \_ _ _ -> kernelImpCodeGenAction}
       )
-      "Translate program into the imperative IL with kernels and write it on standard output.",
+      "Translate pipeline result to ImpGPU and write it on stdout.",
     Option
       []
-      ["compile-imperative-multicore"]
+      ["compile-imp-multicore"]
       ( NoArg $
           Right $ \opts ->
             opts {futharkAction = MCMemAction $ \_ _ _ -> multicoreImpCodeGenAction}
       )
-      "Translate program into the imperative IL with kernels and write it on standard output.",
+      "Translate pipeline result to ImpMC write it on stdout.",
     Option
       "p"
       ["print"]
@@ -566,10 +576,14 @@ commandLineOptions =
     soacsPassOption inlineAggressively [],
     soacsPassOption inlineConservatively [],
     soacsPassOption removeDeadFunctions [],
+    soacsPassOption applyAD [],
+    soacsPassOption applyADInnermost [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
+    kernelsPassOption histAccsGPU [],
     kernelsPassOption unstreamGPU [],
     kernelsPassOption sinkGPU [],
+    kernelsPassOption reduceDeviceSyncs [],
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
     iplOption [],
@@ -650,7 +664,9 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
       Just $ do
         res <-
           runFutharkM (m file config) $
-            fst $ futharkVerbose $ futharkConfig config
+            fst $
+              futharkVerbose $
+                futharkConfig config
         case res of
           Left err -> do
             dumpError (futharkConfig config) err

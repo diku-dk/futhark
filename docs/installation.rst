@@ -36,14 +36,13 @@ See the documentation for the respective compiler backends.
 Compiling from source
 ---------------------
 
-The recommended way to compile Futhark is with the `Haskell Tool
-Stack`_, which handles dependencies and compilation of the Futhark
-compiler.  You will therefore need to install the ``stack`` tool.
-Fortunately, the ``stack`` developers provide ample documentation
-about `installing Stack`_ on a multitude of operating systems.  If
-you're lucky, it may even be in your local package repository.
+To compile Futhark you must first install an appropriate version of
+GHC, either with `ghcup <https://www.haskell.org/ghcup>`_ or a package
+manager.  Any version since GHC 8.10 should work.  You also need the
+``cabal`` command line program, which ghcup will install for you as
+well.
 
-You can either retrieve a `source release tarball
+You then either retrieve a `source release tarball
 <https://github.com/diku-dk/futhark/releases>`_ or perform a checkout
 of our Git repository::
 
@@ -53,48 +52,27 @@ This will create a directory ``futhark``, which you must enter::
 
   $ cd futhark
 
-To get all the prerequisites for building the Futhark compiler
-(including, if necessary, the appropriate version of the Haskell
-compiler), run::
+First you must run the following command to download metadata about
+Futhark's dependencies::
 
-  $ stack setup
+  $ make configure
 
-Note that this will not install anything system-wide and will have no
-effect outside the Futhark build directory. Now you can run the
-following command to build the Futhark compiler, including all
-dependencies::
+To build the Futhark compiler and all of its dependencies, run::
 
-  $ stack build
+  $ make build
 
-The Futhark compiler and its tools will now be built.  This step
-typically requires at least 8GiB of memory.  You may be able to build
-it on a smaller machine by adding the ``--fast`` option, although the
-resulting Futhark compiler binary will run slower.
+This step typically requires at least 8GiB of memory.  This will
+create files in your ``~/.cabal`` and ``~/.ghc`` directories.
 
 After building, you can copy the binaries to your ``$HOME/.local/bin``
 directory by running::
 
-  $ stack install
+  $ make install
 
-Note that this does not install the Futhark manual pages.
-
-Compiling with ``cabal``
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-You can also compile Futhark with ``cabal``.  If so, you must install
-an appropriate version of GHC (usually the newest) and ``cabal``
-yourself, for example through your favourite package manager.  On
-Linux, you can always use `ghcup
-<https://gitlab.haskell.org/haskell/ghcup>`_.  Then clone the
-repository as listed above and run::
-
-  $ cabal update
-  $ cabal build
-
-To install the Futhark binaries to a specific location, for example
-``$HOME/.local/bin``, run::
-
-  $ cabal install --install-method=copy  --overwrite-policy=always --installdir=$HOME/.local/bin/
+You can set the ``PREFIX`` environment variable to indicate a
+different installation path.  Note that this does not install the
+Futhark manual pages.  You can delete ``~/.cabal`` and ``~/.ghc``
+after this if you wish - the ``futhark`` binary will still work.
 
 Installing from a precompiled snapshot
 --------------------------------------
@@ -119,9 +97,6 @@ We build such binary snapshots for the following operating systems:
   `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
   You will still likely need to make a C compiler (such as GCC) available on your own.
-
-.. _`Haskell tool stack`: http://docs.haskellstack.org/
-.. _`installing Stack`: http://docs.haskellstack.org/#how-to-install
 
 .. _linux-installation:
 

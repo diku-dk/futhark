@@ -32,6 +32,7 @@ class (Num e, Eq e) => IntegralExp e where
   div :: e -> e -> e
   mod :: e -> e -> e
   sgn :: e -> Maybe Int
+  pow :: e -> e -> e
 
   -- | Like 'Futhark.Util.IntegralExp.div', but rounds towards
   -- positive infinity.
@@ -79,3 +80,4 @@ instance Integral a => IntegralExp (Wrapped a) where
   div = liftOp2 Prelude.div
   mod = liftOp2 Prelude.mod
   sgn = Just . fromIntegral . signum . toInteger . wrappedValue
+  pow = liftOp2 (Prelude.^)

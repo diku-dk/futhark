@@ -71,6 +71,19 @@ Commands
 
 The following commands are supported.
 
+General Commands
+~~~~~~~~~~~~~~~~
+
+``types``
+.........
+
+Print the names of available types, one per line.
+
+``entry_points``
+................
+
+Print the names of available entry points.
+
 ``call`` *entry* *o1* ... *oN* *i1* ... *iM*
 ............................................
 
@@ -138,10 +151,36 @@ Corresponds to :c:func:`futhark_context_report`.
 
 Corresponds to :c:func:`futhark_context_config_set_tuning_param`.
 
+Record Commands
+~~~~~~~~~~~~~~~
+
+``fields`` *type*
+.................
+
+If the given type is a record, print a line for each field of the
+record.  The line will contain the name of the field, followed by a
+space, followed by the type of the field.  Note that the type name can
+contain spaces.  The order of fields is significant, as it is the one
+expected by the ``new_record`` command.
+
+``new`` *v0* *type* *v1* ... *vN*
+.................................
+
+Create a new variable *v0* of type *type*, which must be a record type
+with *N* fields, where *v1* to *vN* are variables with the
+corresponding field types (the expected order is given by the
+``fields`` command).
+
+``project`` *to* *from* *field*
+...............................
+
+Create a new variable *to* whose value is the field *field* of the
+record-typed variable *from*.
+
 Environment Variables
 ---------------------
 
 ``FUTHARK_COMPILER_DEBUGGING``
-..............................
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Turns on debugging output for the server when set to 1.

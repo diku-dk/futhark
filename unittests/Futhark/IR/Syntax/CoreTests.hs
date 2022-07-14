@@ -5,9 +5,9 @@ module Futhark.IR.Syntax.CoreTests (tests) where
 
 import Control.Applicative
 import Futhark.IR.Pretty (pretty)
-import Futhark.IR.PrimitiveTests ()
 import Futhark.IR.Syntax.Core
 import Language.Futhark.CoreTests ()
+import Language.Futhark.PrimitiveTests ()
 import Test.QuickCheck
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -40,7 +40,9 @@ subShapeTests =
     subShapeTest :: ExtShape -> ExtShape -> Bool -> TestTree
     subShapeTest shape1 shape2 expected =
       testCase
-        ( "subshapeOf " ++ pretty shape1 ++ " "
+        ( "subshapeOf "
+            ++ pretty shape1
+            ++ " "
             ++ pretty shape2
             ++ " == "
             ++ show expected

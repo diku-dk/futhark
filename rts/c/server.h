@@ -14,6 +14,20 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
 typedef int (*restore_fn)(const void*, FILE *, struct futhark_context*, void*);
 typedef void (*store_fn)(const void*, FILE *, struct futhark_context*, void*);
 typedef int (*free_fn)(const void*, struct futhark_context*, void*);
+typedef int (*project_fn)(struct futhark_context*, void*, const void*);
+typedef int (*new_fn)(struct futhark_context*, void**, const void*[]);
+
+struct field {
+  const char *name;
+  const struct type *type;
+  project_fn project;
+};
+
+struct record {
+  int num_fields;
+  const struct field* fields;
+  new_fn new;
+};
 
 struct type {
   const char *name;
@@ -21,6 +35,7 @@ struct type {
   store_fn store;
   free_fn free;
   const void *aux;
+  const struct record *record;
 };
 
 int free_scalar(const void *aux, struct futhark_context *ctx, void *p) {
@@ -31,27 +46,27 @@ int free_scalar(const void *aux, struct futhark_context *ctx, void *p) {
   return 0;
 }
 
-#define DEF_SCALAR_TYPE(T)                                              \
-  int restore_##T(const void *aux, FILE *f,                             \
-                  struct futhark_context *ctx, void *p) {               \
-    (void)aux;                                                          \
-    (void)ctx;                                                          \
-    return read_scalar(f, &T##_info, p);                                \
-  }                                                                     \
-                                                                        \
-  void store_##T(const void *aux, FILE *f,                              \
-                 struct futhark_context *ctx, void *p) {                \
-    (void)aux;                                                          \
-    (void)ctx;                                                          \
-    write_scalar(f, 1, &T##_info, p);                                   \
-  }                                                                     \
-                                                                        \
-  struct type type_##T =                                                \
-    { .name = #T,                                                       \
-      .restore = restore_##T,                                           \
-      .store = store_##T,                                               \
-      .free = free_scalar                                               \
-    }                                                                   \
+#define DEF_SCALAR_TYPE(T)                                      \
+  int restore_##T(const void *aux, FILE *f,                     \
+                  struct futhark_context *ctx, void *p) {       \
+    (void)aux;                                                  \
+    (void)ctx;                                                  \
+    return read_scalar(f, &T##_info, p);                        \
+  }                                                             \
+                                                                \
+  void store_##T(const void *aux, FILE *f,                      \
+                 struct futhark_context *ctx, void *p) {        \
+    (void)aux;                                                  \
+    (void)ctx;                                                  \
+    write_scalar(f, 1, &T##_info, p);                           \
+  }                                                             \
+                                                                \
+  struct type type_##T =                                        \
+    { .name = #T,                                               \
+      .restore = restore_##T,                                   \
+      .store = store_##T,                                       \
+      .free = free_scalar                                       \
+    }                                                           \
 
 DEF_SCALAR_TYPE(i8);
 DEF_SCALAR_TYPE(i16);
@@ -67,7 +82,7 @@ DEF_SCALAR_TYPE(f64);
 DEF_SCALAR_TYPE(bool);
 
 struct value {
-  struct type *type;
+  const struct type *type;
   union {
     void *v_ptr;
     int8_t  v_i8;
@@ -139,9 +154,9 @@ typedef int (*entry_point_fn)(struct futhark_context*, void**, void**);
 struct entry_point {
   const char *name;
   entry_point_fn f;
-  struct type **out_types;
+  const struct type **out_types;
   bool *out_unique;
-  struct type **in_types;
+  const struct type **in_types;
   bool *in_unique;
 };
 
@@ -165,7 +180,7 @@ struct futhark_prog {
   // Last entry point identified by NULL name.
   struct entry_point *entry_points;
   // Last type identified by NULL name.
-  struct type **types;
+  const struct type **types;
 };
 
 struct server_state {
@@ -190,7 +205,7 @@ struct variable* get_variable(struct server_state *s,
 
 struct variable* create_variable(struct server_state *s,
                                  const char *name,
-                                 struct type *type) {
+                                 const struct type *type) {
   int found = -1;
   for (int i = 0; i < s->variables_capacity; i++) {
     if (found == -1 && s->variables[i].name == NULL) {
@@ -240,7 +255,7 @@ const char* get_arg(const char *args[], int i) {
   return args[i];
 }
 
-struct type* get_type(struct server_state *s, const char *name) {
+const struct type* get_type(struct server_state *s, const char *name) {
   for (int i = 0; s->prog.types[i]; i++) {
     if (strcmp(s->prog.types[i]->name, name) == 0) {
       return s->prog.types[i];
@@ -364,7 +379,7 @@ void cmd_restore(struct server_state *s, const char *args[]) {
       const char *vname = get_arg(args, i);
       const char *type = get_arg(args, i+1);
 
-      struct type *t = get_type(s, type);
+      const struct type *t = get_type(s, type);
       struct variable *v = create_variable(s, vname, t);
 
       if (v == NULL) {
@@ -414,7 +429,7 @@ void cmd_store(struct server_state *s, const char *args[]) {
         return;
       }
 
-      struct type *t = v->value.type;
+      const struct type *t = v->value.type;
       t->store(t->aux, f, s->ctx, value_ptr(&v->value));
     }
     fclose(f);
@@ -432,7 +447,7 @@ void cmd_free(struct server_state *s, const char *args[]) {
       return;
     }
 
-    struct type *t = v->value.type;
+    const struct type *t = v->value.type;
 
     int err = t->free(t->aux, s->ctx, value_ptr(&v->value));
     error_check(s, err);
@@ -544,6 +559,138 @@ void cmd_set_tuning_param(struct server_state *s, const char *args[]) {
   }
 }
 
+void cmd_fields(struct server_state *s, const char *args[]) {
+  const char *type = get_arg(args, 0);
+  const struct type *t = get_type(s, type);
+  const struct record *r = t->record;
+
+  if (r == NULL) {
+    failure();
+    printf("Not a record type\n");
+    return;
+  }
+
+  for (int i = 0; i < r->num_fields; i++) {
+    const struct field f = r->fields[i];
+    printf("%s %s\n", f.name, f.type->name);
+  }
+}
+
+void cmd_project(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *from_name = get_arg(args, 1);
+  const char *field_name = get_arg(args, 2);
+
+  struct variable *from = get_variable(s, from_name);
+
+  if (from == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", from_name);
+    return;
+  }
+
+  const struct type *from_type = from->value.type;
+  const struct record *r = from_type->record;
+
+  if (r == NULL) {
+    failure();
+    printf("Not a record type\n");
+    return;
+  }
+
+  const struct field *field = NULL;
+  for (int i = 0; i < r->num_fields; i++) {
+    if (strcmp(r->fields[i].name, field_name) == 0) {
+      field = &r->fields[i];
+      break;
+    }
+  }
+
+  if (field == NULL) {
+    failure();
+    printf("No such field\n");
+  }
+
+  struct variable *to = create_variable(s, to_name, field->type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  field->project(s->ctx, value_ptr(&to->value), from->value.value.v_ptr);
+}
+
+void cmd_new(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *type_name = get_arg(args, 1);
+  const struct type *type = get_type(s, type_name);
+  struct variable *to = create_variable(s, to_name, type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  const struct record* r = type->record;
+
+  if (r == NULL) {
+    failure();
+    printf("Not a record type\n");
+    return;
+  }
+
+  int num_args = 0;
+  for (int i = 2; arg_exists(args, i); i++) {
+    num_args++;
+  }
+
+  if (num_args != r->num_fields) {
+    failure();
+    printf("%d fields expected byt %d values provided.\n", num_args, r->num_fields);
+    return;
+  }
+
+  const void** value_ptrs = alloca(num_args * sizeof(void*));
+
+  for (int i = 0; i < num_args; i++) {
+    struct variable* v = get_variable(s, args[2+i]);
+
+    if (v == NULL) {
+      failure();
+      printf("Unknown variable: %s\n", args[2+i]);
+      return;
+    }
+
+    if (strcmp(v->value.type->name, r->fields[i].type->name) != 0) {
+      failure();
+      printf("Field %s mismatch: expected type %s, got %s\n",
+             r->fields[i].name, r->fields[i].type->name, v->value.type->name);
+      return;
+    }
+
+    value_ptrs[i] = value_ptr(&v->value);
+  }
+
+  r->new(s->ctx, value_ptr(&to->value), value_ptrs);
+}
+
+void cmd_entry_points(struct server_state *s, const char *args[]) {
+  (void)args;
+  for (int i = 0; s->prog.entry_points[i].name; i++) {
+    puts(s->prog.entry_points[i].name);
+  }
+}
+
+void cmd_types(struct server_state *s, const char *args[]) {
+  (void)args;
+  for (int i = 0; s->prog.types[i] != NULL; i++) {
+    puts(s->prog.types[i]->name);
+  }
+}
+
 char *next_word(char **line) {
   char *p = *line;
 
@@ -630,6 +777,16 @@ void process_line(struct server_state *s, char *line) {
     cmd_report(s, tokens+1);
   } else if (strcmp(command, "set_tuning_param") == 0) {
     cmd_set_tuning_param(s, tokens+1);
+  } else if (strcmp(command, "fields") == 0) {
+    cmd_fields(s, tokens+1);
+  } else if (strcmp(command, "new") == 0) {
+    cmd_new(s, tokens+1);
+  } else if (strcmp(command, "project") == 0) {
+    cmd_project(s, tokens+1);
+  } else if (strcmp(command, "entry_points") == 0) {
+    cmd_entry_points(s, tokens+1);
+  } else if (strcmp(command, "types") == 0) {
+    cmd_types(s, tokens+1);
   } else {
     futhark_panic(1, "Unknown command: %s\n", command);
   }
@@ -695,6 +852,7 @@ int restore_array(const struct array_aux *aux, FILE *f,
   if (arr == NULL) {
     return 1;
   }
+  assert(futhark_context_sync(ctx) == 0);
 
   *(void**)p = arr;
   free(data);
@@ -717,7 +875,7 @@ void store_array(const struct array_aux *aux, FILE *f,
 }
 
 int free_array(const struct array_aux *aux,
-                struct futhark_context *ctx, void *p) {
+               struct futhark_context *ctx, void *p) {
   void *arr = *(void**)p;
   return aux->free(ctx, arr);
 }
@@ -769,7 +927,7 @@ void store_opaque(const struct opaque_aux *aux, FILE *f,
 }
 
 int free_opaque(const struct opaque_aux *aux,
-                 struct futhark_context *ctx, void *p) {
+                struct futhark_context *ctx, void *p) {
   void *obj = *(void**)p;
   return aux->free(ctx, obj);
 }

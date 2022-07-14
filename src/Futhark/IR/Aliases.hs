@@ -38,6 +38,7 @@ module Futhark.IR.Aliases
     removeFunDefAliases,
     removeExpAliases,
     removeStmAliases,
+    removeBodyAliases,
     removeLambdaAliases,
     removePatAliases,
     removeScopeAliases,
@@ -46,6 +47,7 @@ module Futhark.IR.Aliases
     AliasesAndConsumed,
     trackAliases,
     mkStmsAliases,
+    consumedInStms,
   )
 where
 
@@ -173,7 +175,9 @@ resultAliasComment name als =
     als' ->
       Just $
         PP.oneLine $
-          PP.text "-- Result for " <> PP.ppr name <> PP.text " aliases "
+          PP.text "-- Result for "
+            <> PP.ppr name
+            <> PP.text " aliases "
             <> PP.commasep (map PP.ppr als')
 
 removeAliases :: CanBeAliased (Op rep) => Rephraser Identity (Aliases rep) rep
@@ -225,6 +229,13 @@ removeStmAliases ::
   Stm (Aliases rep) ->
   Stm rep
 removeStmAliases = runIdentity . rephraseStm removeAliases
+
+-- | Remove alias information from body.
+removeBodyAliases ::
+  CanBeAliased (Op rep) =>
+  Body (Aliases rep) ->
+  Body rep
+removeBodyAliases = runIdentity . rephraseBody removeAliases
 
 -- | Remove alias information from lambda.
 removeLambdaAliases ::
@@ -319,6 +330,10 @@ type AliasesAndConsumed =
   ( M.Map VName Names,
     Names
   )
+
+-- | The variables consumed in these statements.
+consumedInStms :: Aliased rep => Stms rep -> Names
+consumedInStms = snd . flip mkStmsAliases []
 
 -- | A helper function for computing the aliases of a sequence of
 -- statements.  You'd use this while recursing down the statements

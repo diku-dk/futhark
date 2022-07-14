@@ -225,8 +225,11 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_b
       )
       bu_env''
       $ zip (patElems pat) $ concatMap histDest histops
+shortCircuitGPUMem lutab _ (Inner (GPUBody _ body)) td_env bu_env = do
+  mkCoalsTabStms lutab (bodyStms body) td_env bu_env
 shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = pure bu_env
 shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = pure bu_env
+
 
 dropLastSegSpace :: SegSpace -> SegSpace
 dropLastSegSpace space = space {unSegSpace = init $ unSegSpace space}
@@ -1553,6 +1556,8 @@ computeScalarTableGPUMem scope_table (Inner (SegOp segop)) = do
       (stmsToList $ kernelBodyStms $ segBody segop)
 computeScalarTableGPUMem _ (Inner (SizeOp _)) = pure mempty
 computeScalarTableGPUMem _ (Inner (OtherOp ())) = pure mempty
+computeScalarTableGPUMem scope_table (Inner (GPUBody _ body)) = mconcat <$> mapM (computeScalarTable $ scope_table <> scopeOf (bodyStms body))
+  (stmsToList $ bodyStms body)
 
 filterMapM1 :: (Eq k, Monad m) => (v -> m Bool) -> M.Map k v -> m (M.Map k v)
 filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m

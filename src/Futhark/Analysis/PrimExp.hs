@@ -28,7 +28,7 @@ module Futhark.Analysis.PrimExp
     constFoldPrimExp,
 
     -- * Construction
-    module Futhark.IR.Primitive,
+    module Language.Futhark.Primitive,
     NumExp (..),
     IntExp (..),
     FloatExp (..),
@@ -56,8 +56,18 @@ module Futhark.Analysis.PrimExp
     zExt32,
     zExt64,
     sExtAs,
+    fMin16,
+    fMin32,
     fMin64,
+    fMax16,
+    fMax32,
     fMax64,
+
+    -- * Untyped construction
+    (~*~),
+    (~/~),
+    (~+~),
+    (~-~),
   )
 where
 
@@ -66,10 +76,10 @@ import Control.Monad
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable
-import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
+import Language.Futhark.Primitive
 import Prelude hiding (id, (.))
 
 -- | A primitive expression parametrised over the representation of
@@ -448,6 +458,15 @@ instance (IntExp t, Pretty v, Eq v) => IntegralExp (TPrimExp t v) where
         TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "divRoundingUp" (x, y)
 
+  TPrimExp x `pow` TPrimExp y
+    | Just z <-
+        msum
+          [ asIntOp Pow x y,
+            asFloatOp FPow x y
+          ] =
+        TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "pow" (x, y)
+
   sgn (TPrimExp (ValueExp (IntValue i))) = Just $ signum $ valueIntegral i
   sgn _ = Nothing
 
@@ -656,13 +675,29 @@ zExt32 = isInt32 . zExt Int32 . untyped
 zExt64 :: IntExp t => TPrimExp t v -> TPrimExp Int64 v
 zExt64 = isInt64 . zExt Int64 . untyped
 
+-- | 16-bit float minimum.
+fMin16 :: TPrimExp Half v -> TPrimExp Half v -> TPrimExp Half v
+fMin16 x y = isF16 $ BinOpExp (FMin Float16) (untyped x) (untyped y)
+
+-- | 32-bit float minimum.
+fMin32 :: TPrimExp Float v -> TPrimExp Float v -> TPrimExp Float v
+fMin32 x y = isF32 $ BinOpExp (FMin Float32) (untyped x) (untyped y)
+
 -- | 64-bit float minimum.
 fMin64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
-fMin64 x y = TPrimExp $ BinOpExp (FMin Float64) (untyped x) (untyped y)
+fMin64 x y = isF64 $ BinOpExp (FMin Float64) (untyped x) (untyped y)
+
+-- | 16-bit float maximum.
+fMax16 :: TPrimExp Half v -> TPrimExp Half v -> TPrimExp Half v
+fMax16 x y = isF16 $ BinOpExp (FMax Float16) (untyped x) (untyped y)
+
+-- | 32-bit float maximum.
+fMax32 :: TPrimExp Float v -> TPrimExp Float v -> TPrimExp Float v
+fMax32 x y = isF32 $ BinOpExp (FMax Float32) (untyped x) (untyped y)
 
 -- | 64-bit float maximum.
 fMax64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
-fMax64 x y = TPrimExp $ BinOpExp (FMax Float64) (untyped x) (untyped y)
+fMax64 x y = isF64 $ BinOpExp (FMax Float64) (untyped x) (untyped y)
 
 -- | Convert result of some integer expression to have the same type
 -- as another, using sign extension.
@@ -700,3 +735,53 @@ leafExpTypes (CmpOpExp _ e1 e2) =
   S.union (leafExpTypes e1) (leafExpTypes e2)
 leafExpTypes (FunExp _ pes _) =
   S.unions $ map leafExpTypes pes
+
+-- | Multiplication of untyped 'PrimExp's, which must have the same
+-- type.
+(~*~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~*~ y = BinOpExp op x y
+  where
+    t = primExpType x
+    op = case t of
+      IntType it -> Mul it OverflowUndef
+      FloatType ft -> FMul ft
+      Bool -> LogAnd
+      Unit -> LogAnd
+
+-- | Division of untyped 'PrimExp's, which must have the same
+-- type.  For integers, this is unsafe signed division.
+(~/~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~/~ y = BinOpExp op x y
+  where
+    t = primExpType x
+    op = case t of
+      IntType it -> SDiv it Unsafe
+      FloatType ft -> FDiv ft
+      Bool -> LogAnd
+      Unit -> LogAnd
+
+-- | Addition of untyped 'PrimExp's, which must have the same type.
+(~+~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~+~ y = BinOpExp op x y
+  where
+    t = primExpType x
+    op = case t of
+      IntType it -> Add it OverflowUndef
+      FloatType ft -> FAdd ft
+      Bool -> LogOr
+      Unit -> LogOr
+
+-- | Subtraction of untyped 'PrimExp's, which must have the same type.
+(~-~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~-~ y = BinOpExp op x y
+  where
+    t = primExpType x
+    op = case t of
+      IntType it -> Sub it OverflowUndef
+      FloatType ft -> FSub ft
+      Bool -> LogOr
+      Unit -> LogOr
+
+infix 7 ~*~, ~/~
+
+infix 6 ~+~, ~-~

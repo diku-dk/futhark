@@ -10,6 +10,7 @@ module Futhark.IR.Prop.Names
   ( -- * Free names
     Names,
     namesIntMap,
+    namesIntSet,
     nameIn,
     notNameIn,
     oneName,
@@ -46,6 +47,7 @@ import Control.Category
 import Control.Monad.State.Strict
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Futhark.IR.Prop.Patterns
@@ -63,6 +65,10 @@ newtype Names = Names (IM.IntMap VName)
 -- | Retrieve the data structure underlying the names representation.
 namesIntMap :: Names -> IM.IntMap VName
 namesIntMap (Names m) = m
+
+-- | Retrieve the set of tags in the names set.
+namesIntSet :: Names -> IS.IntSet
+namesIntSet (Names m) = IM.keysSet m
 
 instance Ord Names where
   x `compare` y = if x == y then EQ else LT
@@ -297,7 +303,8 @@ instance
   FreeIn (Stm rep)
   where
   freeIn' (Let pat (StmAux cs attrs dec) e) =
-    freeIn' cs <> freeIn' attrs
+    freeIn' cs
+      <> freeIn' attrs
       <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
 
 instance FreeIn (Stm rep) => FreeIn (Stms rep) where

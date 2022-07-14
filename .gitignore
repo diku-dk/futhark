@@ -8,15 +8,16 @@
 .#*
 *~
 
+# Ignore IntelliJ configuration files
+.idea/
+
 # Ignore cabal build directory.
 dist
 dist-newstyle
 
-# Ignore Stack junk
-.stack-work
-
 # Ignore IDE info
 .hie
+.vscode
 
 # Ignore side-effects of compilation.
 *.aux
@@ -46,3 +47,6 @@ core.*
 data/
 lib/
 testparser/
+
+# Ignore macOS system files.
+.DS_Store

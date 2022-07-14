@@ -246,9 +246,9 @@ SigExp :: { UncheckedSigExp }
                                 in SigArrow (Just name) $4 $7 (srcspan $1 $>) }
         | SigExp '->' SigExp  { SigArrow Nothing $1 $3 (srcspan $1 $>) }
 
-TypeRef :: { TypeRefBase NoInfo Name }
+TypeRef :: { TypeRefBase Name }
          : QualName TypeParams '=' TypeExpTerm
-           { TypeRef (fst $1) $2 (TypeDecl $4 NoInfo) (srcspan (snd $1) $>) }
+           { TypeRef (fst $1) $2 $4 (srcspan (snd $1) $>) }
 
 SigBind :: { SigBindBase NoInfo Name }
          : module type id '=' SigExp
@@ -304,11 +304,11 @@ Liftedness :: { Liftedness }
             | '^' { Lifted }
 
 Spec :: { SpecBase NoInfo Name }
-      : val id TypeParams ':' TypeExpDecl
+      : val id TypeParams ':' TypeExp
         { let L loc (ID name) = $2
-          in ValSpec name $3 $5 Nothing (srcspan $1 $>) }
-      | val BindingBinOp TypeParams ':' TypeExpDecl
-        { ValSpec $2 $3 $5 Nothing (srcspan $1 $>) }
+          in ValSpec name $3 $5 NoInfo Nothing (srcspan $1 $>) }
+      | val BindingBinOp TypeParams ':' TypeExp
+        { ValSpec $2 $3 $5 NoInfo Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
 
@@ -394,30 +394,30 @@ BindingId :: { (Name, Loc) }
      | '(' BindingBinOp ')' { ($2, $1) }
 
 Val    :: { ValBindBase NoInfo Name }
-Val     : def BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+Val     : def BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
           { let (name, _) = $2
-            in ValBind Nothing name (fmap declaredType $5) NoInfo
+            in ValBind Nothing name $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
-        | entry BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+        | entry BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
           { let (name, loc) = $2
-            in ValBind (Just NoInfo) name (fmap declaredType $5) NoInfo
+            in ValBind (Just NoInfo) name $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>) }
 
-        | def FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
-          { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
+        | def FunParam BindingBinOp FunParam maybeAscription(TypeExp) '=' Exp
+          { ValBind Nothing $3 $5 NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
           }
 
         -- The next two for backwards compatibility.
-        | let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
+        | let BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
           { let (name, _) = $2
-            in ValBind Nothing name (fmap declaredType $5) NoInfo
+            in ValBind Nothing name $5 NoInfo
                $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
-        | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
-          { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
+        | let FunParam BindingBinOp FunParam maybeAscription(TypeExp) '=' Exp
+          { ValBind Nothing $3 $5 NoInfo [] [$2,$4] $7
             Nothing mempty (srcspan $1 $>)
           }
 
@@ -433,9 +433,6 @@ Val     : def BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Ex
              unlines ["Cannot bind patterns at top level.",
                       "Bind a single name instead."]
           }
-
-TypeExpDecl :: { TypeDeclBase NoInfo Name }
-             : TypeExp %prec bottom { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
 TypeAbbr : type Liftedness id TypeParams '=' TypeExp
@@ -460,12 +457,12 @@ TypeExpDims :: { [Name] }
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
            { TEUnique $2 (srcspan $1 $>) }
-         | '[' DimExp ']' TypeExpTerm %prec indexprec
-           { TEArray $4 $2 (srcspan $1 $>) }
+         | '[' SizeExp ']' TypeExpTerm %prec indexprec
+           { TEArray $2 $4 (srcspan $1 $>) }
          | TypeExpApply %prec sumprec { $1 }
 
          -- Errors
-         | '[' DimExp ']' %prec bottom
+         | '[' SizeExp ']' %prec bottom
            {% parseErrorAt (srcspan $1 $>) $ Just $
                 unlines ["missing array row type.",
                          "Did you mean []"  ++ pretty $2 ++ "?"]
@@ -490,12 +487,12 @@ SumClause :: { (Name, [UncheckedTypeExp], Loc) }
 TypeExpApply :: { UncheckedTypeExp }
               : TypeExpApply TypeArg
                 { TEApply $1 $2 (srcspan $1 $>) }
-              | 'id[' DimExp ']'
+              | 'id[' SizeExp ']'
                 { let L loc (INDEXING v) = $1
                   in TEApply (TEVar (qualName v) (srclocOf (backOneCol loc)))
                              (TypeArgExpDim $2 (srclocOf loc))
                              (srcspan $1 $>) }
-              | 'qid[' DimExp ']'
+              | 'qid[' SizeExp ']'
                 { let L loc (QUALINDEXING qs v) = $1
                   in TEApply (TEVar (QualName qs v) (srclocOf (backOneCol loc)))
                              (TypeArgExpDim $2 (srclocOf loc))
@@ -516,7 +513,7 @@ Constr :: { (Name, Loc) }
         : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, locOf $1) }
 
 TypeArg :: { TypeArgExp Name }
-         : '[' DimExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
+         : '[' SizeExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
          | TypeExpAtom     { TypeArgExpType $1 }
 
 FieldType :: { (Name, UncheckedTypeExp) }
@@ -530,14 +527,14 @@ TupleTypes :: { [UncheckedTypeExp] }
             : TypeExp                { [$1] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
-DimExp :: { DimExp Name }
+SizeExp :: { SizeExp Name }
         : QualName
-          { DimExpNamed (fst $1) (srclocOf (snd $1)) }
+          { SizeExpNamed (fst $1) (srclocOf (snd $1)) }
         | intlit
           { let L loc (INTLIT n) = $1
-            in DimExpConst (fromIntegral n) (srclocOf loc) }
+            in SizeExpConst (fromIntegral n) (srclocOf loc) }
         |
-          { DimExpAny }
+          { SizeExpAny }
 
 FunParam :: { PatBase NoInfo Name }
 FunParam : InnerPat { $1 }
@@ -562,9 +559,9 @@ QualName :: { (QualName Name, Loc) }
 -- permit inside array indices operations (there is an ambiguity with
 -- array slices).
 Exp :: { UncheckedExp }
-     : Exp ':' TypeExpDecl { Ascript $1 $3 (srcspan $1 $>) }
-     | Exp ':>' TypeExpDecl { AppExp (Coerce $1 $3 (srcspan $1 $>)) NoInfo }
-     | Exp2 %prec ':'      { $1 }
+     : Exp ':' TypeExp  { Ascript $1 $3 (srcspan $1 $>) }
+     | Exp ':>' TypeExp { AppExp (Coerce $1 $3 (srcspan $1 $>)) NoInfo }
+     | Exp2 %prec ':'   { $1 }
 
 Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
@@ -758,9 +755,9 @@ LetExp :: { UncheckedExp }
      | let Pat '=' Exp LetBody
        { AppExp (LetPat [] $2 $4 $5 (srcspan $1 $>)) NoInfo }
 
-     | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
+     | let id TypeParams FunParams1 maybeAscription(TypeExp) '=' Exp LetBody
        { let L _ (ID name) = $2
-         in AppExp (LetFun name ($3, fst $4 : snd $4, (fmap declaredType $5), NoInfo, $7)
+         in AppExp (LetFun name ($3, fst $4 : snd $4, $5, NoInfo, $7)
                     $8 (srcspan $1 $>))
                    NoInfo}
 
@@ -790,7 +787,7 @@ Case :: { CaseBase NoInfo Name }
 
 CPat :: { PatBase NoInfo Name }
           : '#[' AttrInfo ']' CPat    { PatAttr $2 $4 (srcspan $1 $>) }
-          | CInnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
+          | CInnerPat ':' TypeExp     { PatAscription $1 $3 (srcspan $1 $>) }
           | CInnerPat                 { $1 }
           | Constr ConstrFields       { let (n, loc) = $1;
                                             loc' = srcspan loc $>
@@ -819,7 +816,7 @@ ConstrFields :: { [PatBase NoInfo Name] }
 CFieldPat :: { (Name, PatBase NoInfo Name) }
                : FieldId '=' CPat
                { (fst $1, $3) }
-               | FieldId ':' TypeExpDecl
+               | FieldId ':' TypeExp
                { (fst $1, PatAscription (Id (fst $1) NoInfo (srclocOf (snd $1))) $3 (srcspan (snd $1) $>)) }
                | FieldId
                { (fst $1, Id (fst $1) NoInfo (srclocOf (snd $1))) }
@@ -890,8 +887,8 @@ FieldId :: { (Name, Loc) }
 
 Pat :: { PatBase NoInfo Name }
      : '#[' AttrInfo ']' Pat  { PatAttr $2 $4 (srcspan $1 $>) }
-     | InnerPat ':' TypeExpDecl { PatAscription $1 $3 (srcspan $1 $>) }
-     | InnerPat                 { $1 }
+     | InnerPat ':' TypeExp   { PatAscription $1 $3 (srcspan $1 $>) }
+     | InnerPat               { $1 }
 
 Pats1 :: { [PatBase NoInfo Name] }
        : Pat                    { [$1] }
@@ -909,7 +906,7 @@ InnerPat : id                               { let L loc (ID name) = $1 in Id nam
 FieldPat :: { (Name, PatBase NoInfo Name) }
               : FieldId '=' Pat
                 { (fst $1, $3) }
-              | FieldId ':' TypeExpDecl
+              | FieldId ':' TypeExp
                 { (fst $1, PatAscription (Id (fst $1) NoInfo (srclocOf (snd $1))) $3 (srcspan (snd $1) $>)) }
               | FieldId
                 { (fst $1, Id (fst $1) NoInfo (srclocOf (snd $1))) }
@@ -1003,13 +1000,13 @@ FloatLit :: { (FloatValue, Loc) }
 ArrayValue :: { Value }
 ArrayValue :  '[' Value ']'
              {% pure $ ArrayValue (arrayFromList [$2]) $
-                arrayOf (valueType $2) (ShapeDecl [1]) Unique
+                arrayOf Unique (Shape [1]) (valueType $2)
              }
            |  '[' Value ',' Values ']'
              {% case combArrayElements $2 $4 of
                   Left e -> throwError e
                   Right v -> pure $ ArrayValue (arrayFromList $ $2:$4) $
-                             arrayOf (valueType v) (ShapeDecl [1+fromIntegral (length $4)]) Unique
+                             arrayOf Unique (Shape [1+fromIntegral (length $4)]) (valueType v)
              }
            | id '(' ValueType ')'
              {% ($1 `mustBe` "empty") >> mustBeEmpty (srcspan $2 $4) $3 >> pure (ArrayValue (listArray (0,-1) []) $3) }
@@ -1022,8 +1019,8 @@ Dim :: { Int64 }
 Dim : intlit { let L _ (INTLIT num) = $1 in fromInteger num }
 
 ValueType :: { ValueType }
-ValueType : '[' Dim ']' ValueType  { arrayOf $4 (ShapeDecl [$2]) Nonunique }
-          | '[' Dim ']' PrimType { arrayOf (Scalar (Prim $4)) (ShapeDecl [$2]) Nonunique }
+ValueType : '[' Dim ']' ValueType  { arrayOf Nonunique (Shape [$2]) $4 }
+          | '[' Dim ']' PrimType { arrayOf Nonunique (Shape [$2]) (Scalar (Prim $4)) }
 
 Values :: { [Value] }
 Values : Value ',' Values { $1 : $3 }

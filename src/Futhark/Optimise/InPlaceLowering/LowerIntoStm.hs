@@ -58,7 +58,8 @@ lowerUpdate scope (Let pat aux (DoLoop merge form body)) updates = do
     pure $
       prestms
         ++ [ certify (stmAuxCerts aux) $
-               mkLet pat' $ DoLoop merge' form body'
+               mkLet pat' $
+                 DoLoop merge' form body'
            ]
         ++ poststms
 lowerUpdate
@@ -70,7 +71,9 @@ lowerUpdate
          in Just . pure $
               [ certify (stmAuxCerts aux <> cs) $
                   mkLet [Ident bindee_nm $ typeOf bindee_dec] $
-                    BasicOp $ Update Unsafe v is' $ Var val
+                    BasicOp $
+                      Update Unsafe v is' $
+                        Var val
               ]
 lowerUpdate _ _ _ =
   Nothing
@@ -87,8 +90,8 @@ lowerUpdateGPU
           (pat', kbody', poststms) <- mk
           let cs = stmAuxCerts aux <> foldMap updateCerts updates
           pure $
-            certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
-            stmsToList poststms
+            certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody')
+              : stmsToList poststms
     where
       -- This check is a bit more conservative than ideal.  In a perfect
       -- world, we would allow indexing a[i,j] if the update is also
@@ -148,7 +151,8 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
             (slice', bodystms) <-
               flip runBuilderT scope $
                 traverse (toSubExp "index") $
-                  fixSlice (fmap pe64 slice) $ map (pe64 . Var) gtids
+                  fixSlice (fmap pe64 slice) $
+                    map (pe64 . Var) gtids
 
             let res_dims = take (length slice') $ arrayDims $ snd bindee_dec
                 ret' = WriteReturns cs (Shape res_dims) src [(Slice $ map DimFix slice', se)]
@@ -218,7 +222,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
 
   -- Safety condition (8).
   forM_ (zip val $ bodyAliases body) $ \((p, _), als) ->
-    guard $ not $ paramName p `nameIn` als
+    guard $ paramName p `notNameIn` als
 
   mk_in_place_map <- summariseLoop scope updates usedInBody resmap val
 
@@ -252,12 +256,13 @@ lowerUpdateIntoLoop scope updates pat val form body = do
           let source_t = snd $ updateType update
               elm_t = source_t `setArrayDims` sliceDims (updateIndices update)
           tell
-            ( [ mkLet [Ident source source_t] . BasicOp $
-                  Update
+            ( [ mkLet [Ident source source_t] . BasicOp
+                  $ Update
                     Unsafe
                     (updateSource update)
                     (fullSlice source_t $ unSlice $ updateIndices update)
-                    $ snd $ mergeParam summary
+                  $ snd
+                  $ mergeParam summary
               ],
               [ mkLet [Ident precopy elm_t] . BasicOp $
                   Index

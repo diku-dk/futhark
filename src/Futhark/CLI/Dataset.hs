@@ -195,13 +195,13 @@ toValueType TEArrow {} = Left "Cannot generate functions."
 toValueType TESum {} = Left "Cannot handle sumtypes yet."
 toValueType TEDim {} = Left "Cannot handle existential sizes."
 toValueType (TEUnique t _) = toValueType t
-toValueType (TEArray t d _) = do
+toValueType (TEArray d t _) = do
   d' <- constantDim d
   V.ValueType ds t' <- toValueType t
   pure $ V.ValueType (d' : ds) t'
   where
-    constantDim (DimExpConst k _) = Right k
-    constantDim _ = Left "Array has non-constant dimension declaration."
+    constantDim (SizeExpConst k _) = Right k
+    constantDim _ = Left "Array has non-constant size."
 toValueType (TEVar (QualName [] v) _)
   | Just t <- lookup v m = Right $ V.ValueType [] t
   where

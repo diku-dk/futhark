@@ -26,6 +26,7 @@ int main() {
   assert(n0 == n1);
   bytes1 = malloc(n1);
   err = futhark_store_opaque_whatever(ctx, whatever, &bytes1, &n1);
+  err = futhark_context_sync(ctx);
   assert(err == 0);
 
   assert(memcmp(bytes0, bytes1, n0) == 0);

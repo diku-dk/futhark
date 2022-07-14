@@ -53,6 +53,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-doc.rst
    man/futhark-literate.rst
    man/futhark-multicore.rst
+   man/futhark-ispc.rst
    man/futhark-opencl.rst
    man/futhark-pkg.rst
    man/futhark-pyopencl.rst

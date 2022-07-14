@@ -49,8 +49,12 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl')
 import qualified Data.Map as M
+import Data.Sequence ((<|))
+import qualified Data.Sequence as SQ
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Builder.Class
+import Futhark.Construct (sliceDim)
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
@@ -67,6 +71,7 @@ type Sinker rep a = SymbolTable rep -> Sinking rep -> a -> (a, Sunk)
 type Constraints rep =
   ( ASTRep rep,
     Aliased rep,
+    Buildable rep,
     ST.IndexOp (Op rep)
   )
 
@@ -99,9 +104,43 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     (sinking_here, sinking') = M.partitionWithKey sunkHere sinking
     sunk_stms = stmsFromList $ M.elems sinking_here
     sunkHere v stm =
-      v `nameIn` free_in_stms
+      v
+        `nameIn` free_in_stms
         && all (`ST.available` vtable) (namesToList (freeIn stm))
     sunk = namesFromList $ foldMap (patNames . stmPat) sunk_stms
+
+optimiseLoop ::
+  Constraints rep =>
+  Sinker rep (Op rep) ->
+  Sinker rep ([(FParam rep, SubExp)], LoopForm rep, Body rep)
+optimiseLoop onOp vtable sinking (merge, form, body0)
+  | WhileLoop {} <- form =
+      let (body1, sunk) = optimiseBody onOp vtable' sinking body0
+       in ((merge, form, body1), sunk)
+  | ForLoop i it bound loop_vars <- form =
+      let stms' = foldr (inline i) (bodyStms body0) loop_vars
+          body1 = body0 {bodyStms = stms'}
+          (body2, sunk) = optimiseBody onOp vtable' sinking body1
+          notSunk (x, _) = paramName x `notNameIn` sunk
+          loop_vars' = filter notSunk loop_vars
+          form' = ForLoop i it bound loop_vars'
+          body3 = body2 {bodyStms = SQ.drop (length loop_vars') (bodyStms body2)}
+       in ((merge, form', body3), sunk)
+  where
+    (params, _) = unzip merge
+    scope = case form of
+      WhileLoop {} -> scopeOfFParams params
+      ForLoop i it _ _ -> M.insert i (IndexName it) $ scopeOfFParams params
+    vtable' = ST.fromScope scope <> vtable
+
+    inline i (x, arr) stms =
+      let pt = typeOf x
+          slice = Slice $ DimFix (Var i) : map sliceDim (arrayDims pt)
+          e = BasicOp (Index arr slice)
+          pat = mkExpPat [Ident (paramName x) pt] e
+          aux = StmAux mempty mempty (mkExpDec pat e)
+          stm = Let pat aux e
+       in stm <| stms
 
 optimiseStms ::
   Constraints rep =>
@@ -139,6 +178,15 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
               (stms', sunk) = optimiseStms' vtable' sinking stms
            in ( stm {stmExp = If cond tbranch' fbranch' ret} : stms',
                 tsunk <> fsunk <> sunk
+              )
+      | DoLoop merge lform body <- stmExp stm =
+          let comps = (merge, lform, body)
+              (comps', loop_sunk) = optimiseLoop onOp vtable sinking comps
+              (merge', lform', body') = comps'
+
+              (stms', stms_sunk) = optimiseStms' vtable' sinking stms
+           in ( stm {stmExp = DoLoop merge' lform' body'} : stms',
+                stms_sunk <> loop_sunk
               )
       | Op op <- stmExp stm =
           let (op', op_sunk) = onOp vtable sinking op
@@ -211,7 +259,7 @@ optimiseSegOp onOp vtable sinking op =
 type SinkRep rep = Aliases rep
 
 sink ::
-  ( ASTRep rep,
+  ( Buildable rep,
     CanBeAliased (Op rep),
     ST.IndexOp (OpWithAliases (Op rep))
   ) =>
@@ -232,7 +280,9 @@ sink onOp =
       pure $
         fst $
           optimiseStms onOp mempty mempty consts $
-            namesFromList $ M.keys $ scopeOf consts
+            namesFromList $
+              M.keys $
+                scopeOf consts
 
 -- | Sinking in GPU kernels.
 sinkGPU :: Pass GPU GPU
@@ -241,6 +291,8 @@ sinkGPU = sink onHostOp
     onHostOp :: Sinker (SinkRep GPU) (Op (SinkRep GPU))
     onHostOp vtable sinking (SegOp op) =
       first SegOp $ optimiseSegOp onHostOp vtable sinking op
+    onHostOp vtable sinking (GPUBody types body) =
+      first (GPUBody types) $ optimiseBody onHostOp vtable sinking body
     onHostOp _ _ op = (op, mempty)
 
 -- | Sinking for multicore.

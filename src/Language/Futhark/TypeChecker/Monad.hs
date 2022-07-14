@@ -145,8 +145,9 @@ underscoreUse ::
   m a
 underscoreUse loc name =
   typeError loc mempty $
-    "Use of" <+> pquote (ppr name)
-      <> ": variables prefixed with underscore may not be accessed."
+    "Use of"
+      <+> pquote (ppr name)
+        <> ": variables prefixed with underscore may not be accessed."
 
 -- | A mapping from import strings to 'Env's.  This is used to resolve
 -- @import@ declarations.
@@ -244,8 +245,10 @@ lookupImport loc file = do
   case M.lookup canonical_import imports of
     Nothing ->
       typeError loc mempty $
-        "Unknown import" <+> dquotes (text canonical_import)
-          </> "Known:" <+> commasep (map text (M.keys imports))
+        "Unknown import"
+          <+> dquotes (text canonical_import)
+          </> "Known:"
+          <+> commasep (map text (M.keys imports))
     Just scope -> pure (canonical_import, scope)
 
 -- | Evaluate a 'TypeM' computation within an extended (/not/
@@ -280,14 +283,17 @@ class Monad m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
-  checkNamedDim :: SrcLoc -> QualName Name -> m (QualName VName)
-  checkNamedDim loc v = do
+  checkNamedSize :: SrcLoc -> QualName Name -> m (QualName VName)
+  checkNamedSize loc v = do
     (v', t) <- lookupVar loc v
     case t of
       Scalar (Prim (Signed Int64)) -> pure v'
       _ ->
         typeError loc mempty $
-          "Dimension declaration" <+> ppr v <+> "should be of type i64."
+          "Sizes must have type i64, but"
+            <+> pquote (ppr v)
+            <+> "has type:"
+            </> ppr t
 
   typeError :: Located loc => loc -> Notes -> Doc -> m a
 
@@ -404,24 +410,22 @@ qualifyTypeVars ::
   Env ->
   [VName] ->
   [VName] ->
-  TypeBase (DimDecl VName) as ->
-  TypeBase (DimDecl VName) as
+  TypeBase Size as ->
+  TypeBase Size as
 qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
   where
     onType ::
       S.Set VName ->
-      TypeBase (DimDecl VName) as ->
-      TypeBase (DimDecl VName) as
-    onType except (Array as u et shape) =
-      Array as u (onScalar except et) (fmap (onDim except) shape)
+      TypeBase Size as ->
+      TypeBase Size as
+    onType except (Array as u shape et) =
+      Array as u (fmap (onDim except) shape) (onScalar except et)
     onType except (Scalar t) =
       Scalar $ onScalar except t
 
     onScalar _ (Prim t) = Prim t
-    onScalar except (TypeVar as u tn targs) =
-      TypeVar as u tn' $ map (onTypeArg except) targs
-      where
-        tn' = typeNameFromQualName $ qual except $ qualNameFromTypeName tn
+    onScalar except (TypeVar as u qn targs) =
+      TypeVar as u (qual except qn) (map (onTypeArg except) targs)
     onScalar except (Record m) =
       Record $ M.map (onType except) m
     onScalar except (Sum m) =
@@ -438,7 +442,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
     onTypeArg except (TypeArgType t loc) =
       TypeArgType (onType except t) loc
 
-    onDim except (NamedDim qn) = NamedDim $ qual except qn
+    onDim except (NamedSize qn) = NamedSize $ qual except qn
     onDim _ d = d
 
     qual except (QualName orig_qs name)
@@ -457,7 +461,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       name `M.member` envVtable env
         || isJust (find matches $ M.elems (envTypeTable env))
       where
-        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ _ (TypeName x_qs name') _)))) =
+        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ _ (QualName x_qs name') _)))) =
           null x_qs && name == name'
         matches _ = False
     reachable (q : qs') name env

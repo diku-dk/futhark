@@ -19,6 +19,7 @@ module Futhark.Actions
     compileOpenCLAction,
     compileCUDAAction,
     compileMulticoreAction,
+    compileMulticoreToISPCAction,
     compileMulticoreToWASMAction,
     compilePythonAction,
     compilePyOpenCLAction,
@@ -40,6 +41,7 @@ import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
 import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
+import qualified Futhark.CodeGen.Backends.MulticoreISPC as MulticoreISPC
 import qualified Futhark.CodeGen.Backends.MulticoreWASM as MulticoreWASM
 import qualified Futhark.CodeGen.Backends.PyOpenCL as PyOpenCL
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
@@ -174,6 +176,9 @@ cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
 cmdCFLAGS :: [String] -> [String]
 cmdCFLAGS def = maybe def words $ lookup "CFLAGS" unixEnvironment
 
+cmdISPCFLAGS :: [String] -> [String]
+cmdISPCFLAGS def = maybe def words $ lookup "ISPCFLAGS" unixEnvironment
+
 runCC :: String -> String -> [String] -> [String] -> FutharkM ()
 runCC cpath outpath cflags_def ldflags = do
   ret <-
@@ -192,12 +197,57 @@ runCC cpath outpath cflags_def ldflags = do
       externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
     Right (ExitFailure code, _, gccerr) ->
       externalErrorS $
-        cmdCC ++ " failed with code "
+        cmdCC
+          ++ " failed with code "
           ++ show code
           ++ ":\n"
           ++ gccerr
     Right (ExitSuccess, _, _) ->
       pure ()
+
+runISPC :: String -> String -> String -> String -> [String] -> [String] -> [String] -> FutharkM ()
+runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
+  ret_ispc <-
+    liftIO $
+      runProgramWithExitCode
+        "ispc"
+        ( [ispcpath, "-o", ispcbase `addExtension` "o"]
+            ++ ["--addressing=64", "--pic"]
+            ++ cmdISPCFLAGS ispc_flags -- These flags are always needed
+        )
+        mempty
+  ret <-
+    liftIO $
+      runProgramWithExitCode
+        cmdCC
+        ( [ispcbase `addExtension` "o"]
+            ++ [cpath, "-o", outpath]
+            ++ cmdCFLAGS cflags_def
+            ++
+            -- The default LDFLAGS are always added.
+            ldflags
+        )
+        mempty
+  case ret_ispc of
+    Left err ->
+      externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
+    Right (ExitFailure code, _, gccerr) -> throwError code gccerr
+    Right (ExitSuccess, _, _) ->
+      case ret of
+        Left err ->
+          externalErrorS $ "Failed to run ispc: " ++ show err
+        Right (ExitFailure code, _, gccerr) -> throwError code gccerr
+        Right (ExitSuccess, _, _) ->
+          pure ()
+  where
+    ispcbase = outpath <> ispcextension
+    throwError code gccerr =
+      externalErrorS $
+        cmdCC
+          ++ " failed with code "
+          ++ show code
+          ++ ":\n"
+          ++ gccerr
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
@@ -321,6 +371,38 @@ compileMulticoreAction fcfg mode outpath =
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm", "-pthread"]
+
+-- | The @futhark ispc@ action.
+compileMulticoreToISPCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
+compileMulticoreToISPCAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to multicore ISPC",
+      actionDescription = "Compile to multicore ISPC",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+          jsonpath = outpath `addExtension` "json"
+          ispcpath = outpath `addExtension` "kernels.ispc"
+          ispcextension = "_ispc"
+      (cprog, ispc) <- handleWarnings fcfg $ MulticoreISPC.compileProg (T.pack versionString) prog
+      case mode of
+        ToLibrary -> do
+          let (header, impl, manifest) = MulticoreC.asLibrary cprog
+          liftIO $ T.writeFile hpath $ cPrependHeader header
+          liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile ispcpath ispc
+          liftIO $ T.writeFile jsonpath manifest
+        ToExecutable -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asExecutable cprog
+          liftIO $ T.writeFile ispcpath ispc
+          runISPC ispcpath outpath cpath ispcextension ["-O3", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
+        ToServer -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ MulticoreC.asServer cprog
+          liftIO $ T.writeFile ispcpath ispc
+          runISPC ispcpath outpath cpath ispcextension ["-O3", "--woff"] ["-O3", "-std=c99"] ["-lm", "-pthread"]
 
 pythonCommon ::
   (CompilerMode -> String -> prog -> FutharkM (Warnings, T.Text)) ->

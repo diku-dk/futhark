@@ -32,7 +32,7 @@
 -- curly braces.
 --
 -- The system of primitive types is interesting in itself.  See
--- "Futhark.IR.Primitive".
+-- "Language.Futhark.Primitive".
 --
 -- == Overall AST design
 --
@@ -147,9 +147,9 @@ module Futhark.IR.Syntax
     FParam,
     LParam,
     FunDef (..),
-    EntryPoint,
     EntryParam (..),
-    EntryPointType (..),
+    EntryResult (..),
+    EntryPoint,
     Prog (..),
 
     -- * Utils
@@ -157,10 +157,12 @@ module Futhark.IR.Syntax
     stmsFromList,
     stmsToList,
     stmsHead,
+    stmsLast,
     subExpRes,
     subExpsRes,
     varRes,
     varsRes,
+    subExpResVName,
   )
 where
 
@@ -245,6 +247,12 @@ stmsHead stms = case Seq.viewl stms of
   stm Seq.:< stms' -> Just (stm, stms')
   Seq.EmptyL -> Nothing
 
+-- | The last statement in the sequence, if any.
+stmsLast :: Stms lore -> Maybe (Stms lore, Stm lore)
+stmsLast stms = case Seq.viewr stms of
+  stms' Seq.:> stm -> Just (stms', stm)
+  Seq.EmptyR -> Nothing
+
 -- | A pairing of a subexpression and some certificates.
 data SubExpRes = SubExpRes
   { resCerts :: Certs,
@@ -267,6 +275,11 @@ subExpsRes = map subExpRes
 -- | Construct a 'Result' from variable names.
 varsRes :: [VName] -> Result
 varsRes = map varRes
+
+-- | The 'VName' of a 'SubExpRes', if it exists.
+subExpResVName :: SubExpRes -> Maybe VName
+subExpResVName (SubExpRes _ (Var v)) = Just v
+subExpResVName _ = Nothing
 
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
@@ -363,18 +376,14 @@ data BasicOp
     Update Safety VName (Slice SubExp) SubExp
   | FlatIndex VName (FlatSlice SubExp)
   | FlatUpdate VName (FlatSlice SubExp) VName
-  | -- | @
-    -- concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@.
-    -- @
+  | -- | @concat(0, [1] :| [[2, 3, 4], [5, 6]], 6) = [1, 2, 3, 4, 5, 6]@
     --
     -- Concatenates the non-empty list of 'VName' resulting in an
     -- array of length t'SubExp'. The 'Int' argument is used to
     -- specify the dimension along which the arrays are
     -- concatenated. For instance:
     --
-    -- @
-    -- concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]
-    -- @
+    -- @concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]@
     Concat Int (NonEmpty VName) SubExp
   | -- | Copy the given array.  The result will not alias anything.
     Copy VName
@@ -523,37 +532,35 @@ deriving instance RepTypes rep => Show (FunDef rep)
 
 deriving instance RepTypes rep => Ord (FunDef rep)
 
--- | Every entry point argument and return value has an annotation
--- indicating how it maps to the original source program type.
-data EntryPointType
-  = -- | Is an unsigned integer or array of unsigned
-    -- integers.
-    TypeUnsigned Uniqueness
-  | -- | A black box type comprising this many core
-    -- values.  The string is a human-readable
-    -- description with no other semantics.
-    TypeOpaque Uniqueness String Int
-  | -- | Maps directly.
-    TypeDirect Uniqueness
-  deriving (Eq, Show, Ord)
-
 -- | An entry point parameter, comprising its name and original type.
 data EntryParam = EntryParam
   { entryParamName :: Name,
+    entryParamUniqueness :: Uniqueness,
     entryParamType :: EntryPointType
+  }
+  deriving (Eq, Show, Ord)
+
+-- | An entry point result type.
+data EntryResult = EntryResult
+  { entryResultUniqueness :: Uniqueness,
+    entryResultType :: EntryPointType
   }
   deriving (Eq, Show, Ord)
 
 -- | Information about the inputs and outputs (return value) of an entry
 -- point.
-type EntryPoint = (Name, [EntryParam], [EntryPointType])
+type EntryPoint = (Name, [EntryParam], [EntryResult])
 
 -- | An entire Futhark program.
 data Prog rep = Prog
-  { -- | Top-level constants that are computed at program startup, and
+  { -- | The opaque types used in entry points.  This information is
+    -- used to generate extra API functions for
+    -- construction and deconstruction of values of these types.
+    progTypes :: OpaqueTypes,
+    -- | Top-level constants that are computed at program startup, and
     -- which are in scope inside all functions.
     progConsts :: Stms rep,
-    -- | The functions comprising the program.  All funtions are also
+    -- | The functions comprising the program.  All functions are also
     -- available in scope in the definitions of the constants, so be
     -- careful not to introduce circular dependencies (not currently
     -- checked).

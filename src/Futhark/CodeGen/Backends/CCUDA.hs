@@ -29,6 +29,7 @@ import Futhark.IR.GPUMem hiding
   )
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
+import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to CUDA.
@@ -58,7 +59,7 @@ compileProg version prog = do
       operations
       extra
       cuda_includes
-      [Space "device", DefaultSpace]
+      (Space "device", [Space "device", DefaultSpace])
       cliOptions
       prog'
   where
@@ -137,7 +138,26 @@ cliOptions =
            }
        ]
 
+-- We detect the special case of writing a constant and turn it into a
+-- non-blocking write.  This may be slightly faster, as it prevents
+-- unnecessary synchronisation of the context, and writing a constant
+-- is fairly common.  This is only possible because we can give the
+-- constant infinite lifetime (with 'static'), which is not the case
+-- for ordinary variables.
 writeCUDAScalar :: GC.WriteScalar OpenCL ()
+writeCUDAScalar mem idx t "device" _ val@C.Const {} = do
+  val' <- newVName "write_static"
+  let (bef, aft) = profilingEnclosure copyScalarToDev
+  GC.item
+    [C.citem|{static $ty:t $id:val' = $exp:val;
+              $items:bef
+              CUDA_SUCCEED_OR_RETURN(
+                cuMemcpyHtoDAsync($exp:mem + $exp:idx * sizeof($ty:t),
+                                  &$id:val',
+                                  sizeof($ty:t),
+                                  0));
+              $items:aft
+             }|]
 writeCUDAScalar mem idx t "device" _ val = do
   val' <- newVName "write_tmp"
   let (bef, aft) = profilingEnclosure copyScalarToDev
@@ -167,10 +187,12 @@ readCUDAScalar mem idx t "device" _ = do
           cuMemcpyDtoH(&$id:val,
                        $exp:mem + $exp:idx * sizeof($ty:t),
                        sizeof($ty:t)));
-        $items:aft
+       $items:aft
        }
        |]
-  GC.stm [C.cstm|if (futhark_context_sync(ctx) != 0) { return 1; }|]
+  GC.stm
+    [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
+            { return 1; }|]
   pure [C.cexp|$id:val|]
 readCUDAScalar _ _ _ space _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
@@ -191,26 +213,28 @@ deallocateCUDABuffer _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
 copyCUDAMemory :: GC.Copy OpenCL ()
-copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
-  let (fn, prof) = memcpyFun dstSpace srcSpace
+copyCUDAMemory b dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
+  let (copy, prof) = memcpyFun b dstSpace srcSpace
       (bef, aft) = profilingEnclosure prof
   GC.item
-    [C.citem|{
-                $items:bef
-                CUDA_SUCCEED_OR_RETURN(
-                  $id:fn($exp:dstmem + $exp:dstidx,
-                         $exp:srcmem + $exp:srcidx,
-                         $exp:nbytes));
-                $items:aft
-                }
-                |]
+    [C.citem|{$items:bef CUDA_SUCCEED_OR_RETURN($exp:copy); $items:aft}|]
   where
-    memcpyFun DefaultSpace (Space "device") = ("cuMemcpyDtoH" :: String, copyDevToHost)
-    memcpyFun (Space "device") DefaultSpace = ("cuMemcpyHtoD", copyHostToDev)
-    memcpyFun (Space "device") (Space "device") = ("cuMemcpy", copyDevToDev)
-    memcpyFun _ _ =
+    dst = [C.cexp|$exp:dstmem + $exp:dstidx|]
+    src = [C.cexp|$exp:srcmem + $exp:srcidx|]
+    memcpyFun GC.CopyBarrier DefaultSpace (Space "device") =
+      ([C.cexp|cuMemcpyDtoH($exp:dst, $exp:src, $exp:nbytes)|], copyDevToHost)
+    memcpyFun GC.CopyBarrier (Space "device") DefaultSpace =
+      ([C.cexp|cuMemcpyHtoD($exp:dst, $exp:src, $exp:nbytes)|], copyHostToDev)
+    memcpyFun _ (Space "device") (Space "device") =
+      ([C.cexp|cuMemcpy($exp:dst, $exp:src, $exp:nbytes)|], copyDevToDev)
+    memcpyFun GC.CopyNoBarrier DefaultSpace (Space "device") =
+      ([C.cexp|cuMemcpyDtoHAsync($exp:dst, $exp:src, $exp:nbytes, 0)|], copyDevToHost)
+    memcpyFun GC.CopyNoBarrier (Space "device") DefaultSpace =
+      ([C.cexp|cuMemcpyHtoDAsync($exp:dst, $exp:src, $exp:nbytes, 0)|], copyHostToDev)
+    memcpyFun _ _ _ =
       error $
-        "Cannot copy to '" ++ show dstSpace
+        "Cannot copy to '"
+          ++ show dstSpace
           ++ "' from '"
           ++ show srcSpace
           ++ "'."
@@ -228,7 +252,11 @@ staticCUDAArray name "device" t vs = do
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
       pure n
   -- Fake a memory block.
-  GC.contextField (C.toIdent name mempty) [C.cty|struct memblock_device|] Nothing
+  GC.contextFieldDyn
+    (C.toIdent name mempty)
+    [C.cty|struct memblock_device|]
+    Nothing
+    [C.cstm|cuMemFree(ctx->$id:name.mem);|]
   -- During startup, copy the data to where we need it.
   GC.atInit
     [C.cstm|{
@@ -244,7 +272,8 @@ staticCUDAArray name "device" t vs = do
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
 staticCUDAArray _ space _ _ =
   error $
-    "CUDA backend cannot create static array in '" ++ space
+    "CUDA backend cannot create static array in '"
+      ++ space
       ++ "' memory space"
 
 cudaMemoryType :: GC.MemoryType OpenCL ()

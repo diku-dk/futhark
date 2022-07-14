@@ -45,7 +45,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     isInt64,
     maybeDimFromExp,
     dimFromExp,
-    dimFromArg,
+    sizeFromArg,
     noSizeEscape,
 
     -- * Control flow
@@ -77,7 +77,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     useAfterConsume,
     unusedSize,
     notConsumable,
-    unexpectedType,
     uniqueReturnAliased,
     returnAliased,
     badLetWithValue,
@@ -210,9 +209,15 @@ altOccurrences occurs1 occurs2 =
     cons1 = allConsumed occurs1
     cons2 = allConsumed occurs2
 
--- | Whether something is a global or a local variable.
-data Locality = Local | Global
-  deriving (Show)
+-- | How something was bound.
+data Locality
+  = -- | In the current function
+    Local
+  | -- | In an enclosing function, but not the current one.
+    Nonlocal
+  | -- | At global scope.
+    Global
+  deriving (Show, Eq, Ord)
 
 data ValBinding
   = -- | Aliases in parameters indicate the lexical
@@ -236,7 +241,8 @@ useAfterConsume :: VName -> SrcLoc -> SrcLoc -> TermTypeM a
 useAfterConsume name rloc wloc = do
   name' <- describeVar rloc name
   typeError rloc mempty . withIndexLink "use-after-consume" $
-    "Using" <+> name' <> ", but this was consumed at"
+    "Using"
+      <+> name' <> ", but this was consumed at"
       <+> text (locStrRel rloc wloc) <> ".  (Possibly through aliasing.)"
 
 badLetWithValue :: (Pretty arr, Pretty src) => arr -> src -> SrcLoc -> TermTypeM a
@@ -246,7 +252,9 @@ badLetWithValue arre vale loc =
       </> indent 2 (ppr arre)
       </> "might alias update value"
       </> indent 2 (ppr vale)
-      </> "Hint: use" <+> pquote "copy" <+> "to remove aliases from the value."
+      </> "Hint: use"
+      <+> pquote "copy"
+      <+> "to remove aliases from the value."
 
 returnAliased :: Name -> SrcLoc -> TermTypeM ()
 returnAliased name loc =
@@ -258,17 +266,6 @@ uniqueReturnAliased :: SrcLoc -> TermTypeM a
 uniqueReturnAliased loc =
   typeError loc mempty . withIndexLink "unique-return-aliased" $
     "A unique-typed component of the return value is aliased to some other component."
-
-unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
-unexpectedType loc _ [] =
-  typeError loc mempty $
-    "Type of expression at" <+> text (locStr loc)
-      <+> "cannot have any type - possibly a bug in the type checker."
-unexpectedType loc t ts =
-  typeError loc mempty $
-    "Type of expression at" <+> text (locStr loc) <+> "must be one of"
-      <+> commasep (map ppr ts) <> ", but is"
-      <+> ppr t <> "."
 
 notConsumable :: MonadTypeChecker m => SrcLoc -> Doc -> m b
 notConsumable loc v =
@@ -302,8 +299,10 @@ data Checking
 instance Pretty Checking where
   ppr (CheckingApply f e expected actual) =
     header
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
     where
       header =
         case f of
@@ -311,16 +310,22 @@ instance Pretty Checking where
             "Cannot apply function to"
               <+> pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
           Just fname ->
-            "Cannot apply" <+> pquote (ppr fname) <+> "to"
+            "Cannot apply"
+              <+> pquote (ppr fname)
+              <+> "to"
               <+> pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
   ppr (CheckingReturn expected actual) =
     "Function body does not have expected type."
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
   ppr (CheckingAscription expected actual) =
     "Expression does not have expected type from explicit ascription."
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
   ppr (CheckingLetGeneralise fname) =
     "Cannot generalise type of" <+> pquote (ppr fname) <> "."
   ppr (CheckingParams fname) =
@@ -330,35 +335,49 @@ instance Pretty Checking where
   ppr (CheckingPat pat NoneInferred) =
     "Invalid pattern" <+> pquote (ppr pat) <> "."
   ppr (CheckingPat pat (Ascribed t)) =
-    "Pat" <+> pquote (ppr pat)
+    "Pat"
+      <+> pquote (ppr pat)
       <+> "cannot match value of type"
       </> indent 2 (ppr t)
   ppr (CheckingLoopBody expected actual) =
     "Loop body does not have expected type."
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
   ppr (CheckingLoopInitial expected actual) =
     "Initial loop values do not have expected type."
-      </> "Expected:" <+> align (ppr expected)
-      </> "Actual:  " <+> align (ppr actual)
+      </> "Expected:"
+      <+> align (ppr expected)
+      </> "Actual:  "
+      <+> align (ppr actual)
   ppr (CheckingRecordUpdate fs expected actual) =
-    "Type mismatch when updating record field" <+> pquote fs' <> "."
-      </> "Existing:" <+> align (ppr expected)
-      </> "New:     " <+> align (ppr actual)
+    "Type mismatch when updating record field"
+      <+> pquote fs' <> "."
+      </> "Existing:"
+      <+> align (ppr expected)
+      </> "New:     "
+      <+> align (ppr actual)
     where
       fs' = mconcat $ punctuate "." $ map ppr fs
   ppr (CheckingRequired [expected] actual) =
-    "Expression must must have type" <+> ppr expected <> "."
-      </> "Actual type:" <+> align (ppr actual)
+    "Expression must must have type"
+      <+> ppr expected <> "."
+      </> "Actual type:"
+      <+> align (ppr actual)
   ppr (CheckingRequired expected actual) =
-    "Type of expression must must be one of " <+> expected' <> "."
-      </> "Actual type:" <+> align (ppr actual)
+    "Type of expression must must be one of "
+      <+> expected' <> "."
+      </> "Actual type:"
+      <+> align (ppr actual)
     where
       expected' = commasep (map ppr expected)
   ppr (CheckingBranches t1 t2) =
     "Branches differ in type."
-      </> "Former:" <+> ppr t1
-      </> "Latter:" <+> ppr t2
+      </> "Former:"
+      <+> ppr t1
+      </> "Latter:"
+      <+> ppr t2
 
 -- | Type checking happens with access to this environment.  The
 -- 'TermScope' will be extended during type-checking as bindings come into
@@ -392,9 +411,12 @@ envToTermScope env =
   where
     vtable = M.mapWithKey valBinding $ envVtable env
     valBinding k (TypeM.BoundV tps v) =
-      BoundV Global tps $
-        v
-          `setAliases` (if arrayRank v > 0 then S.singleton (AliasBound k) else mempty)
+      BoundV Global tps $ selfAliasing (S.singleton (AliasBound k)) v
+    -- FIXME: hack, #1675
+    selfAliasing als (Scalar (Record ts)) =
+      Scalar $ Record $ M.map (selfAliasing als) ts
+    selfAliasing als t =
+      t `setAliases` (if arrayRank t > 0 then als else mempty)
 
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
@@ -416,7 +438,7 @@ data SizeSource
   = SourceArg FName (ExpBase NoInfo VName)
   | SourceBound (ExpBase NoInfo VName)
   | SourceSlice
-      (Maybe (DimDecl VName))
+      (Maybe Size)
       (Maybe (ExpBase NoInfo VName))
       (Maybe (ExpBase NoInfo VName))
       (Maybe (ExpBase NoInfo VName))
@@ -432,7 +454,8 @@ nameReason :: SrcLoc -> NameReason -> Doc
 nameReason loc (NameAppRes Nothing apploc) =
   "result of application at" <+> text (locStrRel loc apploc)
 nameReason loc (NameAppRes fname apploc) =
-  "result of applying" <+> pquote (ppr fname)
+  "result of applying"
+    <+> pquote (ppr fname)
     <+> parens ("at" <+> text (locStrRel loc apploc))
 
 -- | The state is a set of constraints and a counter for generating
@@ -484,7 +507,7 @@ instance MonadUnify TermTypeM where
     i <- incCounter
     v <- newID $ mkTypeVarName desc i
     constrain v $ NoConstraint Lifted $ mkUsage' loc
-    pure $ Scalar $ TypeVar mempty Nonunique (typeName v) []
+    pure $ Scalar $ TypeVar mempty Nonunique (qualName v) []
 
   curLevel = asks termLevel
 
@@ -531,13 +554,14 @@ instance MonadUnify TermTypeM where
 -- parameters. Returns the names of the fresh type variables, the
 -- instance list, and the instantiated type.
 instantiateTypeScheme ::
+  QualName VName ->
   SrcLoc ->
   [TypeParam] ->
   PatType ->
   TermTypeM ([VName], PatType)
-instantiateTypeScheme loc tparams t = do
+instantiateTypeScheme qn loc tparams t = do
   let tnames = map typeParamName tparams
-  (tparam_names, tparam_substs) <- unzip <$> mapM (instantiateTypeParam loc) tparams
+  (tparam_names, tparam_substs) <- unzip <$> mapM (instantiateTypeParam qn loc) tparams
   let substs = M.fromList $ zip tnames tparam_substs
       t' = applySubst (`M.lookup` substs) t
   pure (tparam_names, t')
@@ -546,20 +570,23 @@ instantiateTypeScheme loc tparams t = do
 -- substitution map.
 instantiateTypeParam ::
   Monoid as =>
+  QualName VName ->
   SrcLoc ->
   TypeParam ->
   TermTypeM (VName, Subst (RetTypeBase dim as))
-instantiateTypeParam loc tparam = do
+instantiateTypeParam qn loc tparam = do
   i <- incCounter
   let name = nameFromString (takeWhile isAscii (baseString (typeParamName tparam)))
   v <- newID $ mkTypeVarName name i
   case tparam of
     TypeParamType x _ _ -> do
-      constrain v $ NoConstraint x $ mkUsage' loc
-      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (typeName v) [])
+      constrain v . NoConstraint x . mkUsage loc $
+        "instantiated type parameter of " <> quote (pretty qn) <> "."
+      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (qualName v) [])
     TypeParamDim {} -> do
-      constrain v $ Size Nothing $ mkUsage' loc
-      pure (v, SizeSubst $ NamedDim $ qualName v)
+      constrain v . Size Nothing . mkUsage loc $
+        "instantiated size parameter of " <> quote (pretty qn) <> "."
+      pure (v, SizeSubst $ NamedSize $ qualName v)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -652,14 +679,18 @@ instance MonadTypeChecker TermTypeM where
       Just (BoundV _ tparams t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
-            (tnames, t') <- instantiateTypeScheme loc tparams t
+            (tnames, t') <- instantiateTypeScheme qn' loc tparams t
             pure $ qualifyTypeVars outer_env tnames qs t'
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
         equalityType usage argtype
         pure $
           Scalar . Arrow mempty Unnamed argtype . RetType [] $
-            Scalar $ Arrow mempty Unnamed argtype $ RetType [] $ Scalar $ Prim Bool
+            Scalar $
+              Arrow mempty Unnamed argtype $
+                RetType [] $
+                  Scalar $
+                    Prim Bool
       Just (OverloadedF ts pts rt) -> do
         argtype <- newTypeVar loc "t"
         mustBeOneOf ts usage argtype
@@ -675,11 +706,13 @@ instance MonadTypeChecker TermTypeM where
           maybe (toStruct argtype) (Scalar . Prim) rt
         )
 
-  checkNamedDim loc v = do
+  checkNamedSize loc v = do
     (v', t) <- lookupVar loc v
     onFailure (CheckingRequired [Scalar $ Prim $ Signed Int64] (toStruct t)) $
       unify (mkUsage loc "use as array size") (toStruct t) $
-        Scalar $ Prim $ Signed Int64
+        Scalar $
+          Prim $
+            Signed Int64
     pure v'
 
   typeError loc notes s = do
@@ -693,7 +726,7 @@ instance MonadTypeChecker TermTypeM where
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}
 
-extSize :: SrcLoc -> SizeSource -> TermTypeM (DimDecl VName, Maybe VName)
+extSize :: SrcLoc -> SizeSource -> TermTypeM (Size, Maybe VName)
 extSize loc e = do
   prev <- gets $ M.lookup e . stateDimTable
   case prev of
@@ -708,12 +741,12 @@ extSize loc e = do
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
-        ( NamedDim $ qualName d,
+        ( NamedSize $ qualName d,
           Just d
         )
     Just d ->
       pure
-        ( NamedDim $ qualName d,
+        ( NamedSize $ qualName d,
           Just d
         )
 
@@ -738,9 +771,9 @@ newArrayType loc desc r = do
   v <- newTypeName desc
   constrain v $ NoConstraint Unlifted $ mkUsage' loc
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
-  let rowt = TypeVar () Nonunique (typeName v) []
+  let rowt = TypeVar () Nonunique (qualName v) []
   pure
-    ( Array () Nonunique rowt (ShapeDecl $ map (NamedDim . qualName) dims),
+    ( Array () Nonunique (Shape $ map (NamedSize . qualName) dims) rowt,
       Scalar rowt
     )
 
@@ -749,15 +782,15 @@ allDimsFreshInType ::
   SrcLoc ->
   Rigidity ->
   Name ->
-  TypeBase (DimDecl VName) als ->
-  TermTypeM (TypeBase (DimDecl VName) als, M.Map VName (DimDecl VName))
+  TypeBase Size als ->
+  TermTypeM (TypeBase Size als, M.Map VName Size)
 allDimsFreshInType loc r desc t =
   runStateT (bitraverse onDim pure t) mempty
   where
     onDim d = do
       v <- lift $ newDimVar loc r desc
       modify $ M.insert v d
-      pure $ NamedDim $ qualName v
+      pure $ NamedSize $ qualName v
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: ASTMappable e => e -> TermTypeM e
@@ -767,7 +800,6 @@ updateTypes = astMap tv
       ASTMapper
         { mapOnExp = astMap tv,
           mapOnName = pure,
-          mapOnQualName = pure,
           mapOnStructType = normTypeFully,
           mapOnPatType = normTypeFully,
           mapOnStructRetType = normTypeFully,
@@ -800,18 +832,17 @@ termCheckTypeExp te = do
 
   -- Observe the sizes so we do not get any warnings about them not
   -- being used.
-  mapM_ observeDim $ nestedDims st
+  mapM_ observeDim $ freeInType st
   pure (te', svars, RetType dims st)
   where
-    observeDim (NamedDim v) =
-      observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int64) mempty
-    observeDim _ = pure ()
+    observeDim v =
+      observe $ Ident v (Info $ Scalar $ Prim $ Signed Int64) mempty
 
 checkTypeExpNonrigid :: TypeExp Name -> TermTypeM (TypeExp VName, StructType, [VName])
 checkTypeExpNonrigid te = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
-    constrain v $ Size Nothing $ mkUsage' $ srclocOf te
+    constrain v $ Size Nothing $ mkUsage (srclocOf te) "anonymous size in type expression"
   pure (te', st, svars ++ dims)
 
 checkTypeExpRigid ::
@@ -832,13 +863,15 @@ isInt64 (IntLit k' _ _) = Just $ fromInteger k'
 isInt64 (Negate x _) = negate <$> isInt64 x
 isInt64 _ = Nothing
 
-maybeDimFromExp :: Exp -> Maybe (DimDecl VName)
-maybeDimFromExp (Var v _ _) = Just $ NamedDim v
+maybeDimFromExp :: Exp -> Maybe Size
+maybeDimFromExp (Var v _ _) = Just $ NamedSize v
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
+maybeDimFromExp e = ConstSize . fromIntegral <$> isInt64 e
 
-dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
+dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (Size, Maybe VName)
+dimFromExp rf (Attr _ e _) = dimFromExp rf e
+dimFromExp rf (Assert _ e _ _) = dimFromExp rf e
 dimFromExp rf (Parens e _) = dimFromExp rf e
 dimFromExp rf (QualParens _ e _) = dimFromExp rf e
 dimFromExp rf e
@@ -847,8 +880,8 @@ dimFromExp rf e
   | otherwise =
       extSize (srclocOf e) $ rf e
 
-dimFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
-dimFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
+sizeFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (Size, Maybe VName)
+sizeFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
 
 -- | Any argument sizes created with 'extSize' inside the given action
 -- will be removed once the action finishes.  This is to ensure that
@@ -927,7 +960,7 @@ noUnique m = do
   where
     f scope = scope {scopeVtable = M.map set $ scopeVtable scope}
 
-    set (BoundV l tparams t) = BoundV l tparams $ t `setUniqueness` Nonunique
+    set (BoundV l tparams t) = BoundV (max l Nonlocal) tparams t
     set (OverloadedF ts pts rt) = OverloadedF ts pts rt
     set EqualityF = EqualityF
     set (WasConsumed loc) = WasConsumed loc
@@ -945,11 +978,9 @@ checkIfConsumable loc als = do
   vtable <- asks $ scopeVtable . termScope
   let consumable v = case M.lookup v vtable of
         Just (BoundV Local _ t)
-          | arrayRank t > 0 -> unique t
-          | Scalar TypeVar {} <- t -> unique t
           | Scalar Arrow {} <- t -> False
           | otherwise -> True
-        Just (BoundV Global _ _) -> False
+        Just (BoundV l _ _) -> l == Local
         _ -> True
   -- The sort ensures that AliasBound vars are shown before AliasFree.
   case map aliasVar $ sort $ filter (not . consumable . aliasVar) $ S.toList als of
@@ -1002,7 +1033,9 @@ initialTermScope =
       Just
         ( name,
           BoundV Global tvs $
-            fromStruct $ Scalar $ Arrow mempty Unnamed pts' rt
+            fromStruct $
+              Scalar $
+                Arrow mempty Unnamed pts' rt
         )
       where
         pts' = case pts of

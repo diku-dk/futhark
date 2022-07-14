@@ -1,47 +1,51 @@
 # Hacking on the Futhark Compiler
 
 The Futhark compiler is a significant body of code with a not entirely
-straightforward design. The main source of documentation is the Haddock
-comments in the source code itself. You can generate hyperlinked
-reference documentation by running `stack haddock` or `cabal haddock`,
-depending on your preference of build system.
+straightforward design. The main source of documentation is the
+Haddock comments in the source code itself.
 
-* [Reference documentation for the latest
-  release](http://hackage.haskell.org/package/futhark)
+To build the compiler, you need a recent version of
+[GHC](http://ghc.haskell.org/), which can be installed via
+[ghcup](https://www.haskell.org/ghcup/).  Alternatively, if you
+[install Nix](https://nixos.org/download.html#download-nix) then you
+can run `nix-shell` to get a shell environment in which all necessary
+tools are installed.
 
-* [Haskell style guide](STYLE.md)
+After that, run `make docs` to generate internal compiler
+documentation in HTML format.  The last few lines of output will tell
+you the name of an `index.html` file which you should then open.  Go
+to the documentation for the module named `Futhark`, which contains an
+introduction to the compiler architecture.
+
+For contributing code, see the [Haskell style guide](STYLE.md).
 
 If you feel that the documentation is incomplete, or something lacks
 an explanation, then feel free to [report it as an
 issue](https://github.com/diku-dk/futhark/issues). Documentation bugs
 are bugs too.
 
-## Compiling with Stack
+## Building
 
-The Futhark compiler is often built using
-[Stack](https://docs.haskellstack.org/en/stable/README/). It\'s a good
-idea to familiarise yourself with how it works. As a starting point,
-here are a few hints:
+We include a `Makefile` with the following targets.
 
--   When testing, pass `--fast` to `stack` to disable the GHC
-    optimiser. This speeds up builds considerably (although it still
-    takes a while). The resulting Futhark compiler will run slower,
-    but it is not something you will notice for small test programs.
--   When debugging, pass `--profile` to `stack`. This will build the
-    Futhark compiler with debugging information (not just profiling).
-    In particular, hard crashes will print a stack trace. You can also
-    get actual profiling information by passing `+RTS -pprof-all -RTS`
-    to the Futhark compiler. This asks the Haskell runtime to print
-    profiling information to a file. For more information, see the
-    [Profiling](https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/profiling.html)
-    chapter in the GHC User Guide.
--   You may wish to set the environment variable
-    `FUTHARK_COMPILER_DEBUGGING=1`. This has the following effects:
-    -   The frontend prints internal names. (This may affect code
-        generation in some cases, so turn it off when actually
-        generating code.)
-    -   Tools that talk to server-mode executables will print the
-        messages sent back and worth on the standard error stream.
+* `make build` (or just `make`) builds the compiler.
+
+* `make install` builds the compiler and copies the resulting binaries
+  to `$HOME/.local/bin`, or `$PREFIX/bin` if the `PREFIX` environment
+  variable is set.
+
+* `make docs` builds internal compiler documentation.  For the user
+  documentation, see the `docs/` subdirectory.
+
+* `make check` style-checks all code.  Requires [GNU
+  Parallel](https://www.gnu.org/software/parallel/).
+
+* `make check-commit` style-checks all code staged for a commit.
+  Requires [GNU Parallel](https://www.gnu.org/software/parallel/).
+
+You can also use `cabal` directly if you are familiar with it.  In
+particular, `cabal run futhark -- args...` is useful for running the
+Futhark compiler with the provided args.
 
 ## Debugging Internal Type Errors
 
@@ -86,6 +90,15 @@ For debugging specific compiler passes, the `futhark dev` subcommand
 allows you to tailor your own compilation pipeline using command line
 options. It is also useful for seeing what the AST looks like after
 specific passes.
+
+You may wish to set the environment variable
+`FUTHARK_COMPILER_DEBUGGING=1`. This has the following effects:
+
+- The frontend prints internal names. (This may affect code
+  generation in some cases, so turn it off when actually
+  generating code.)
+- Tools that talk to server-mode executables will print the messages
+  sent back and worth on the standard error stream.
 
 ## Running compiler pipelines
 

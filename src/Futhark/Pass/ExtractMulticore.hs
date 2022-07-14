@@ -173,14 +173,17 @@ unstreamLambda attrs nes lam = do
   body <- runBodyBuilder $
     localScope (scopeOfLParams inp_params) $ do
       letBindNames [paramName chunk_param] $
-        BasicOp $ SubExp $ intConst Int64 1
+        BasicOp $
+          SubExp $
+            intConst Int64 1
 
       forM_ (zip acc_params nes) $ \(p, ne) ->
         letBindNames [paramName p] $ BasicOp $ SubExp ne
 
       forM_ (zip slice_params inp_params) $ \(slice, v) ->
         letBindNames [paramName slice] $
-          BasicOp $ ArrayLit [Var $ paramName v] (paramType v)
+          BasicOp $
+            ArrayLit [Var $ paramName v] (paramType v)
 
       (red_res, map_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
@@ -188,7 +191,8 @@ unstreamLambda attrs nes lam = do
         v <- letExp "map_res" $ BasicOp $ SubExp se
         v_t <- lookupType v
         certifying cs . letSubExp "chunk" . BasicOp $
-          Index v $ fullSlice v_t [DimFix $ intConst Int64 0]
+          Index v $
+            fullSlice v_t [DimFix $ intConst Int64 0]
 
       pure $ mkBody mempty $ red_res <> subExpsRes map_res'
 
@@ -284,6 +288,10 @@ transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
   pure (red_stms, op)
 
 transformSOAC :: Pat Type -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
+transformSOAC _ _ JVP {} =
+  error "transformSOAC: unhandled JVP"
+transformSOAC _ _ VJP {} =
+  error "transformSOAC: unhandled VJP"
 transformSOAC pat _ (Screma w arrs form)
   | Just lam <- isMapSOAC form = do
       seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs
@@ -377,7 +385,8 @@ transformSOAC pat attrs (Stream w arrs (Parallel _ comm red_lam) red_nes fold_la
           (par_red_stms, par_op) <-
             transformParStream DoRename transformBody w comm red_lam red_nes map_lam arrs
           pure $
-            seq_red_stms <> par_red_stms
+            seq_red_stms
+              <> par_red_stms
               <> oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
         else
           pure $
@@ -392,13 +401,17 @@ transformSOAC pat _ (Stream w arrs _ nes lam) = do
   transformStms stream_stms
 
 transformProg :: Prog SOACS -> PassM (Prog MC)
-transformProg (Prog consts funs) =
+transformProg prog =
   modifyNameSource $ runState (runReaderT m mempty)
   where
     ExtractM m = do
-      consts' <- transformStms consts
-      funs' <- inScopeOf consts' $ mapM transformFunDef funs
-      pure $ Prog consts' funs'
+      consts' <- transformStms $ progConsts prog
+      funs' <- inScopeOf consts' $ mapM transformFunDef $ progFuns prog
+      pure $
+        prog
+          { progConsts = consts',
+            progFuns = funs'
+          }
 
 -- | Transform a program using SOACs to a program in the 'MC'
 -- representation, using some amount of flattening.

@@ -2,6 +2,7 @@
 module Language.Futhark
   ( module Language.Futhark.Syntax,
     module Language.Futhark.Prop,
+    module Language.Futhark.FreeVars,
     module Language.Futhark.Pretty,
     Ident,
     DimIndex,
@@ -19,7 +20,6 @@ module Language.Futhark
     Spec,
     Prog,
     TypeBind,
-    TypeDecl,
     StructTypeArg,
     ScalarType,
     TypeParam,
@@ -27,6 +27,7 @@ module Language.Futhark
   )
 where
 
+import Language.Futhark.FreeVars
 import Language.Futhark.Pretty
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
@@ -51,9 +52,6 @@ type Pat = PatBase Info VName
 
 -- | An constant declaration with type information.
 type ValBind = ValBindBase Info VName
-
--- | A type declaration with type information
-type TypeDecl = TypeDeclBase Info VName
 
 -- | A type binding with type information.
 type TypeBind = TypeBindBase Info VName
@@ -83,7 +81,7 @@ type Spec = SpecBase Info VName
 type Prog = ProgBase Info VName
 
 -- | A known type arg with shape annotations.
-type StructTypeArg = TypeArg (DimDecl VName)
+type StructTypeArg = TypeArg Size
 
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName

@@ -82,7 +82,7 @@ OPTIONS
 -v, --verbose
 
   Print verbose information on stderr about directives as they are
-  executing.
+  executing.  This is also needed to see ``#[trace]`` output.
 
 DIRECTIVES
 ==========
@@ -238,6 +238,12 @@ files.  Running an untrusted literate Futhark program is as dangerous
 as running a shell script you downloaded off the Internet.  Before
 running a program from an unknown source, you should always give it a
 quick read to see if anything looks fishy.
+
+BUGS
+====
+
+FutharkScript expressions can only refer to names defined in the file
+passed to ``futhark literate``, not any names in imported files.
 
 SEE ALSO
 ========

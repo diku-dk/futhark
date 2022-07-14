@@ -119,7 +119,8 @@ fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
     originputmap = lam1inputmap `M.union` lam2inputmap'
     outins =
       uncurry (outParams $ map fst out1) $
-        unzip $ M.toList lam2inputmap'
+        unzip $
+          M.toList lam2inputmap'
     outstms = filterOutParams out1 outins
     (inputmap, makeCopies) =
       removeDuplicateInputs $ originputmap `M.difference` outins
@@ -259,7 +260,8 @@ fuseRedomap
         res_body' =
           res_body
             { bodyResult =
-                p_lam_scan_res ++ res_lam_scan_res
+                p_lam_scan_res
+                  ++ res_lam_scan_res
                   ++ p_lam_red_res
                   ++ res_lam_red_res
                   ++ res_lam_map_res
@@ -269,7 +271,8 @@ fuseRedomap
             { lambdaParams = accpars ++ lambdaParams res_lam,
               lambdaBody = res_body',
               lambdaReturnType =
-                p_lam_scan_ts ++ res_lam_scan_ts
+                p_lam_scan_ts
+                  ++ res_lam_scan_ts
                   ++ p_lam_red_ts
                   ++ res_lam_red_ts
                   ++ res_lam_map_ts

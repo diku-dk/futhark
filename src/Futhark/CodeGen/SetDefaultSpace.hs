@@ -13,8 +13,9 @@ import Futhark.CodeGen.ImpCode
 -- | Set all uses of 'DefaultSpace' in the given definitions to another
 -- memory space.
 setDefaultSpace :: Space -> Definitions op -> Definitions op
-setDefaultSpace space (Definitions (Constants ps consts) (Functions fundecs)) =
+setDefaultSpace space (Definitions types (Constants ps consts) (Functions fundecs)) =
   Definitions
+    types
     (Constants (map (setParamSpace space) ps) (setCodeSpace space consts))
     ( Functions
         [ (fname, setFunctionSpace space func)
@@ -27,13 +28,18 @@ setDefaultCodeSpace :: Space -> Code op -> Code op
 setDefaultCodeSpace = setCodeSpace
 
 setFunctionSpace :: Space -> Function op -> Function op
-setFunctionSpace space (Function entry outputs inputs body results args) =
+setFunctionSpace space (Function entry outputs inputs body) =
   Function
-    entry
+    (setEntrySpace space <$> entry)
     (map (setParamSpace space) outputs)
     (map (setParamSpace space) inputs)
     (setCodeSpace space body)
-    (map (setExtValueSpace space) results)
+
+setEntrySpace :: Space -> EntryPoint -> EntryPoint
+setEntrySpace space (EntryPoint name results args) =
+  EntryPoint
+    name
+    (map (fmap $ setExtValueSpace space) results)
     (map (fmap $ setExtValueSpace space) args)
 
 setParamSpace :: Space -> Param -> Param
@@ -43,10 +49,10 @@ setParamSpace _ param =
   param
 
 setExtValueSpace :: Space -> ExternalValue -> ExternalValue
-setExtValueSpace space (OpaqueValue u desc vs) =
-  OpaqueValue u desc $ map (setValueSpace space) vs
-setExtValueSpace space (TransparentValue u v) =
-  TransparentValue u $ setValueSpace space v
+setExtValueSpace space (OpaqueValue desc vs) =
+  OpaqueValue desc $ map (setValueSpace space) vs
+setExtValueSpace space (TransparentValue v) =
+  TransparentValue $ setValueSpace space v
 
 setValueSpace :: Space -> ValueDesc -> ValueDesc
 setValueSpace space (ArrayValue mem _ bt ept shape) =
@@ -63,8 +69,8 @@ setCodeSpace space (DeclareMem name old_space) =
   DeclareMem name $ setSpace space old_space
 setCodeSpace space (DeclareArray name _ t vs) =
   DeclareArray name space t vs
-setCodeSpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
-  Copy dest dest_offset dest_space' src src_offset src_space' n
+setCodeSpace space (Copy t dest dest_offset dest_space src src_offset src_space n) =
+  Copy t dest dest_offset dest_space' src src_offset src_space' n
   where
     dest_space' = setSpace space dest_space
     src_space' = setSpace space src_space

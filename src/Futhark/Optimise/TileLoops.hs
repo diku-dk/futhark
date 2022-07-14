@@ -31,35 +31,45 @@ tileLoops =
     onStms scope stms =
       modifyNameSource $
         runState $
-          runReaderT (optimiseStms stms) scope
+          runReaderT (optimiseStms (M.empty, M.empty) stms) scope
 
-optimiseBody :: Body GPU -> TileM (Body GPU)
-optimiseBody (Body () stms res) =
-  Body () <$> optimiseStms stms <*> pure res
+optimiseBody :: Env -> Body GPU -> TileM (Body GPU)
+optimiseBody env (Body () stms res) =
+  Body () <$> optimiseStms env stms <*> pure res
 
-optimiseStms :: Stms GPU -> TileM (Stms GPU)
-optimiseStms stms =
-  localScope (scopeOf stms) $
-    mconcat <$> mapM optimiseStm (stmsToList stms)
+optimiseStms :: Env -> Stms GPU -> TileM (Stms GPU)
+optimiseStms env stms =
+  localScope (scopeOf stms) $ do
+    (_, stms') <- foldM foldfun (env, mempty) $ stmsToList stms
+    pure stms'
+  where
+    foldfun :: (Env, Stms GPU) -> Stm GPU -> TileM (Env, Stms GPU)
+    foldfun (e, ss) s = do
+      (e', s') <- optimiseStm e s
+      pure (e', ss <> s')
 
-optimiseStm :: Stm GPU -> TileM (Stms GPU)
-optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
-  res3dtiling <- doRegTiling3D stm
-  case res3dtiling of
-    Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
-    Nothing -> do
-      blkRegTiling_res <- mmBlkRegTiling stm
-      case blkRegTiling_res of
-        Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
-        Nothing -> localScope (scopeOfSegSpace space) $ do
-          (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
-          pure $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+optimiseStm :: Env -> Stm GPU -> TileM (Env, Stms GPU)
+optimiseStm env stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
+  res3dtiling <- localScope (scopeOfSegSpace space) $ doRegTiling3D stm
+  stms' <-
+    case res3dtiling of
+      Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
+      Nothing -> do
+        blkRegTiling_res <- mmBlkRegTiling env stm
+        case blkRegTiling_res of
+          Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
+          Nothing -> localScope (scopeOfSegSpace space) $ do
+            (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
+            pure $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+  pure (env, stms')
   where
     initial_variance = M.map mempty $ scopeOfSegSpace space
-optimiseStm (Let pat aux e) =
-  pure <$> (Let pat aux <$> mapExpM optimise e)
+optimiseStm env (Let pat aux e) = do
+  env' <- changeEnv env (head $ patNames pat) e
+  e' <- mapExpM (optimise env') e
+  pure (env', oneStm $ Let pat aux e')
   where
-    optimise = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody}
+    optimise env' = identityMapper {mapOnBody = \scope -> localScope scope . optimiseBody env'}
 
 tileInKernelBody ::
   Names ->
@@ -138,7 +148,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
         Just (w, arrs, form) <- tileable stm_to_tile,
         inputs <- map (is1DTileable gtid variance) arrs,
         not $ null $ tiledInputs inputs,
-        not $ gtid `nameIn` branch_variant,
+        gtid `notNameIn` branch_variant,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
         used <- freeIn stm_to_tile <> freeIn poststms' <> freeIn stms_res =
@@ -170,14 +180,14 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
               merge_params = map fst merge
 
           maybe_tiled <-
-            localScope (M.insert i (IndexName it) $ scopeOfFParams merge_params) $
-              tileInBody
+            localScope (M.insert i (IndexName it) $ scopeOfFParams merge_params)
+              $ tileInBody
                 branch_variant'
                 variance
                 initial_lvl
                 initial_space
                 (map paramType merge_params)
-                $ mkBody (bodyStms loopbody) (bodyResult loopbody)
+              $ mkBody (bodyStms loopbody) (bodyResult loopbody)
 
           case maybe_tiled of
             Nothing -> next
@@ -225,7 +235,8 @@ preludeToPostlude variance prelude stm_to_tile postlude =
 
     used stm =
       any (`nameIn` used_in_stm_variant) $
-        patNames $ stmPat stm
+        patNames $
+          stmPat stm
 
     (prelude_used, prelude_not_used) =
       Seq.partition used prelude
@@ -258,7 +269,7 @@ partitionPrelude variance prestms private used_after =
     invariantTo names stm =
       case patNames (stmPat stm) of
         [] -> True -- Does not matter.
-        v : _ -> not $ any (`nameIn` names) $ namesToList $ M.findWithDefault mempty v variance
+        v : _ -> all (`notNameIn` names) (namesToList $ M.findWithDefault mempty v variance)
 
     consumed v = v `nameIn` consumed_in_prestms
     consumedStm stm = any consumed (patNames (stmPat stm))
@@ -266,11 +277,12 @@ partitionPrelude variance prestms private used_after =
     later_consumed =
       namesFromList $
         concatMap (patNames . stmPat) $
-          stmsToList $ Seq.filter consumedStm prestms
+          stmsToList $
+            Seq.filter consumedStm prestms
 
     groupInvariant stm =
       invariantTo private stm
-        && not (any (`nameIn` later_consumed) (patNames (stmPat stm)))
+        && all (`notNameIn` later_consumed) (patNames (stmPat stm))
         && invariantTo later_consumed stm
     (invariant_prestms, variant_prestms) =
       Seq.partition groupInvariant prestms
@@ -291,7 +303,8 @@ partitionPrelude variance prestms private used_after =
     must_be_inlined =
       namesFromList $
         concatMap (patNames . stmPat) $
-          stmsToList $ Seq.filter mustBeInlined variant_prestms
+          stmsToList $
+            Seq.filter mustBeInlined variant_prestms
     recompute stm =
       any (`nameIn` must_be_inlined) (patNames (stmPat stm))
         || not (invariantTo must_be_inlined stm)
@@ -509,7 +522,9 @@ sliceUntiled arr tile_id full_tile_size this_tile_size = do
     letSubExp "slice_offset" =<< toExp (pe64 tile_id * pe64 full_tile_size)
   let slice = DimSlice slice_offset this_tile_size (intConst Int64 1)
   letExp "untiled_slice" $
-    BasicOp $ Index arr $ fullSlice arr_t [slice]
+    BasicOp $
+      Index arr $
+        fullSlice arr_t [slice]
 
 -- | Statements that we insert directly into every thread-private
 -- SegMaps.  This is for things that cannot efficiently be computed
@@ -618,9 +633,6 @@ protectOutOfBounds desc in_bounds ts m = do
       <$> (zip <$> mapM lookupType m_body_free <*> pure m_body_free)
   let blank t = maybe (eBlank t) (pure . BasicOp . SubExp . Var) $ lookup t t_to_v
   letTupExp desc =<< eIf (toExp in_bounds) (pure m_body) (eBody $ map blank ts)
-  where
-    isAcc Acc {} = True
-    isAcc _ = False
 
 postludeGeneric ::
   Tiling ->
@@ -861,7 +873,8 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
   -- the whole tiles.
   residual_input <-
     letSubExp "residual_input" $
-      BasicOp $ BinOp (SRem Int64 Unsafe) w tile_size
+      BasicOp $
+        BinOp (SRem Int64 Unsafe) w tile_size
 
   letTupExp "acc_after_residual"
     =<< eIf
@@ -925,12 +938,14 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
       else do
         group_size <-
           letSubExp "computed_group_size" $
-            BasicOp $ BinOp (SMin Int64) (unCount (segGroupSize initial_lvl)) kdim
+            BasicOp $
+              BinOp (SMin Int64) (unCount (segGroupSize initial_lvl)) kdim
 
         -- How many groups we need to exhaust the innermost dimension.
         ldim <-
           letSubExp "ldim" $
-            BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim group_size
+            BasicOp $
+              BinOp (SDivUp Int64 Unsafe) kdim group_size
 
         num_groups <-
           letSubExp "computed_num_groups"
@@ -958,7 +973,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
         tilingTileShape = Shape [tile_size],
         tilingNumWholeTiles =
           letSubExp "num_whole_tiles" $
-            BasicOp $ BinOp (SQuot Int64 Unsafe) w tile_size,
+            BasicOp $
+              BinOp (SQuot Int64 Unsafe) w tile_size,
         tilingLevel = lvl,
         tilingSpace = space
       }
@@ -973,10 +989,10 @@ invariantToOneOfTwoInnerDims branch_variant variance dims arr = do
   j : i : _ <- Just $ reverse dims
   let variant_to = M.findWithDefault mempty arr variance
       branch_invariant = not $ nameIn j branch_variant || nameIn i branch_variant
-  if branch_invariant && i `nameIn` variant_to && not (j `nameIn` variant_to)
+  if branch_invariant && i `nameIn` variant_to && j `notNameIn` variant_to
     then Just $ InputTile [0, 1] arr
     else
-      if branch_invariant && j `nameIn` variant_to && not (i `nameIn` variant_to)
+      if branch_invariant && j `nameIn` variant_to && i `notNameIn` variant_to
         then Just $ InputTile [1, 0] arr
         else Just $ InputDontTile arr
 
@@ -1111,7 +1127,9 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
             tile_t <- lookupType tile
             let idx = DimFix $ Var $ head $ rearrangeShape perm [ltid_x, ltid_y]
             letExp "tile" $
-              BasicOp $ Index tile $ sliceAt tile_t (head perm) [idx]
+              BasicOp $
+                Index tile $
+                  sliceAt tile_t (head perm) [idx]
 
       tiles' <- mapM sliceTile tiles
 
@@ -1144,7 +1162,8 @@ processResidualTile2D
     -- the whole tiles.
     residual_input <-
       letSubExp "residual_input" $
-        BasicOp $ BinOp (SRem Int64 Unsafe) w tile_size
+        BasicOp $
+          BinOp (SRem Int64 Unsafe) w tile_size
 
     letTupExp "acc_after_residual"
       =<< eIf
@@ -1212,10 +1231,12 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
 
   num_groups_x <-
     letSubExp "num_groups_x" $
-      BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim_x tile_size
+      BasicOp $
+        BinOp (SDivUp Int64 Unsafe) kdim_x tile_size
   num_groups_y <-
     letSubExp "num_groups_y" $
-      BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim_y tile_size
+      BasicOp $
+        BinOp (SDivUp Int64 Unsafe) kdim_y tile_size
 
   num_groups <-
     letSubExp "num_groups_top"
@@ -1247,7 +1268,8 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
         tilingTileShape = Shape [tile_size, tile_size],
         tilingNumWholeTiles =
           letSubExp "num_whole_tiles" $
-            BasicOp $ BinOp (SQuot Int64 Unsafe) w tile_size,
+            BasicOp $
+              BinOp (SQuot Int64 Unsafe) w tile_size,
         tilingLevel = lvl,
         tilingSpace = space
       }

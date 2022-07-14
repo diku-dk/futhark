@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -57,17 +58,14 @@ module Futhark.CodeGen.ImpCode
     Functions (..),
     Function,
     FunctionT (..),
+    EntryPoint (..),
     Constants (..),
     ValueDesc (..),
-    Signedness (..),
     ExternalValue (..),
     Param (..),
     paramName,
-    SubExp (..),
     MemSize,
     DimSize,
-    Space (..),
-    SpaceId,
     Code (..),
     PrimValue (..),
     Exp,
@@ -75,9 +73,6 @@ module Futhark.CodeGen.ImpCode
     Volatility (..),
     Arg (..),
     var,
-    ErrorMsg (..),
-    ErrorMsgPart (..),
-    errorMsgArgTypes,
     ArrayContents (..),
     declaredIn,
     lexicalMemoryUsage,
@@ -92,8 +87,9 @@ module Futhark.CodeGen.ImpCode
 
     -- * Re-exports from other modules.
     pretty,
+    module Futhark.IR.Syntax.Core,
     module Language.Futhark.Core,
-    module Futhark.IR.Primitive,
+    module Language.Futhark.Primitive,
     module Futhark.Analysis.PrimExp,
     module Futhark.Analysis.PrimExp.Convert,
     module Futhark.IR.GPU.Sizes,
@@ -109,18 +105,24 @@ import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.GPU.Sizes (Count (..))
 import Futhark.IR.Pretty ()
-import Futhark.IR.Primitive
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
-  ( ErrorMsg (..),
+  ( EntryPointType (..),
+    ErrorMsg (..),
     ErrorMsgPart (..),
+    OpaqueType (..),
+    OpaqueTypes (..),
+    Rank (..),
+    Signedness (..),
     Space (..),
     SpaceId,
     SubExp (..),
+    ValueType (..),
     errorMsgArgTypes,
   )
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark.Core
+import Language.Futhark.Primitive
 
 -- | The size of a memory block.
 type MemSize = SubExp
@@ -141,13 +143,15 @@ paramName (ScalarParam name _) = name
 
 -- | A collection of imperative functions and constants.
 data Definitions a = Definitions
-  { defConsts :: Constants a,
+  { defTypes :: OpaqueTypes,
+    defConsts :: Constants a,
     defFuns :: Functions a
   }
   deriving (Show)
 
 instance Functor Definitions where
-  fmap f (Definitions consts funs) = Definitions (fmap f consts) (fmap f funs)
+  fmap f (Definitions types consts funs) =
+    Definitions types (fmap f consts) (fmap f funs)
 
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
@@ -172,15 +176,6 @@ data Constants a = Constants
 instance Functor Constants where
   fmap f (Constants params code) = Constants params (fmap f code)
 
--- | Since the core language does not care for signedness, but the
--- source language does, entry point input/output information has
--- metadata for integer types (and arrays containing these) that
--- indicate whether they are really unsigned integers.
-data Signedness
-  = TypeUnsigned
-  | TypeDirect
-  deriving (Eq, Ord, Show)
-
 -- | A description of an externally meaningful value.
 data ValueDesc
   = -- | An array with memory block memory space, element type,
@@ -197,22 +192,27 @@ data ValueDesc
 data ExternalValue
   = -- | The string is a human-readable description with no other
     -- semantics.
-    -- not matter.
-    OpaqueValue Uniqueness String [ValueDesc]
-  | TransparentValue Uniqueness ValueDesc
+    OpaqueValue String [ValueDesc]
+  | TransparentValue ValueDesc
+  deriving (Show)
+
+-- | Information about how this function can be called from the outside world.
+data EntryPoint = EntryPoint
+  { entryPointName :: Name,
+    entryPointResults :: [(Uniqueness, ExternalValue)],
+    entryPointArgs :: [((Name, Uniqueness), ExternalValue)]
+  }
   deriving (Show)
 
 -- | A imperative function, containing the body as well as its
 -- low-level inputs and outputs, as well as its high-level arguments
--- and results.  The latter are only used if the function is an entry
+-- and results.  The latter are only present if the function is an entry
 -- point.
 data FunctionT a = Function
-  { functionEntry :: Maybe Name,
+  { functionEntry :: Maybe EntryPoint,
     functionOutput :: [Param],
     functionInput :: [Param],
-    functionBody :: Code a,
-    functionResult :: [ExternalValue],
-    functionArgs :: [(Name, ExternalValue)]
+    functionBody :: Code a
   }
   deriving (Show)
 
@@ -270,10 +270,11 @@ data Code a
     -- all memory blocks will be freed with this statement.
     -- Backends are free to ignore it entirely.
     Free VName Space
-  | -- | Destination, offset in destination, destination
-    -- space, source, offset in source, offset space, number
-    -- of bytes.
+  | -- | Element type being copied, destination, offset in
+    -- destination, destination space, source, offset in source,
+    -- offset space, number of bytes.
     Copy
+      PrimType
       VName
       (Count Bytes (TExp Int64))
       Space
@@ -346,8 +347,9 @@ instance Monoid (Code a) where
 -- to 'SetMem' a memory block declared outside it.
 lexicalMemoryUsage :: Function a -> M.Map VName Space
 lexicalMemoryUsage func =
-  M.filterWithKey (const . not . (`nameIn` nonlexical)) $
-    declared $ functionBody func
+  M.filterWithKey (const . (`notNameIn` nonlexical)) $
+    declared $
+      functionBody func
   where
     nonlexical =
       set (functionBody func)
@@ -365,7 +367,9 @@ lexicalMemoryUsage func =
     declared x = go declared x
 
     set (SetMem x y _) = namesFromList [x, y]
-    set (Call _ _ args) = foldMap onArg args
+    set (Call dests _ args) =
+      -- Some of the dests might not be memory, but it does not matter.
+      namesFromList dests <> foldMap onArg args
       where
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
@@ -421,144 +425,168 @@ var = LeafExp
 -- Prettyprinting definitions.
 
 instance Pretty op => Pretty (Definitions op) where
-  ppr (Definitions consts funs) =
-    ppr consts </> ppr funs
+  ppr (Definitions types consts funs) =
+    ppr types </> ppr consts </> ppr funs
 
 instance Pretty op => Pretty (Functions op) where
   ppr (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where
       ppFun (name, fun) =
-        text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
+        "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
 instance Pretty op => Pretty (Constants op) where
   ppr (Constants decls code) =
-    text "Constants:" </> indent 2 (stack $ map ppr decls)
+    "Constants:"
+      </> indent 2 (stack $ map ppr decls)
       </> mempty
-      </> text "Initialisation:"
+      </> "Initialisation:"
       </> indent 2 (ppr code)
 
-instance Pretty op => Pretty (FunctionT op) where
-  ppr (Function _ outs ins body results args) =
-    text "Inputs:" </> block ins
-      </> text "Outputs:"
-      </> block outs
-      </> text "Arguments:"
-      </> block args
-      </> text "Result:"
-      </> block results
-      </> text "Body:"
-      </> indent 2 (ppr body)
+instance Pretty EntryPoint where
+  ppr (EntryPoint name results args) =
+    "Name:"
+      </> indent 2 (pquote (ppr name))
+      </> "Arguments:"
+      </> indent 2 (stack $ map ppArg args)
+      </> "Results:"
+      </> indent 2 (stack $ map ppRes results)
     where
-      block :: Pretty a => [a] -> Doc
-      block = indent 2 . stack . map ppr
+      ppArg ((p, u), t) = ppr p <+> ":" <+> ppRes (u, t)
+      ppRes (u, t) = ppr u <> ppr t
+
+instance Pretty op => Pretty (FunctionT op) where
+  ppr (Function entry outs ins body) =
+    "Inputs:"
+      </> indent 2 (stack $ map ppr ins)
+      </> "Outputs:"
+      </> indent 2 (stack $ map ppr outs)
+      </> "Entry:"
+      </> indent 2 (ppr entry)
+      </> "Body:"
+      </> indent 2 (ppr body)
 
 instance Pretty Param where
   ppr (ScalarParam name ptype) = ppr ptype <+> ppr name
-  ppr (MemParam name space) = text "mem" <> ppr space <> text " " <> ppr name
+  ppr (MemParam name space) = "mem" <> ppr space <> " " <> ppr name
 
 instance Pretty ValueDesc where
   ppr (ScalarValue t ept name) =
     ppr t <+> ppr name <> ept'
     where
       ept' = case ept of
-        TypeUnsigned -> text " (unsigned)"
-        TypeDirect -> mempty
+        Unsigned -> " (unsigned)"
+        Signed -> mempty
   ppr (ArrayValue mem space et ept shape) =
-    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> ppr space <+> ept'
+    foldr f (ppr et) shape <+> "at" <+> ppr mem <> ppr space <+> ept'
     where
       f e s = brackets $ s <> comma <> ppr e
       ept' = case ept of
-        TypeUnsigned -> text " (unsigned)"
-        TypeDirect -> mempty
+        Unsigned -> " (unsigned)"
+        Signed -> mempty
 
 instance Pretty ExternalValue where
-  ppr (TransparentValue u v) = ppr u <> ppr v
-  ppr (OpaqueValue u desc vs) =
-    ppr u <> text "opaque" <+> text desc
+  ppr (TransparentValue v) = ppr v
+  ppr (OpaqueValue desc vs) =
+    "opaque"
+      <+> pquote (ppr desc)
       <+> nestedBlock "{" "}" (stack $ map ppr vs)
 
 instance Pretty ArrayContents where
   ppr (ArrayValues vs) = braces (commasep $ map ppr vs)
-  ppr (ArrayZeros n) = braces (text "0") <+> text "*" <+> ppr n
+  ppr (ArrayZeros n) = braces "0" <+> "*" <+> ppr n
 
 instance Pretty op => Pretty (Code op) where
   ppr (Op op) = ppr op
-  ppr Skip = text "skip"
+  ppr Skip = "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
   ppr (For i limit body) =
-    text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{"
+    "for"
+      <+> ppr i
+      <+> langle
+      <+> ppr limit
+      <+> "{"
       </> indent 2 (ppr body)
-      </> text "}"
+      </> "}"
   ppr (While cond body) =
-    text "while" <+> ppr cond <+> text "{"
+    "while"
+      <+> ppr cond
+      <+> "{"
       </> indent 2 (ppr body)
-      </> text "}"
+      </> "}"
   ppr (DeclareMem name space) =
-    text "var" <+> ppr name <> text ": mem" <> ppr space
+    "var" <+> ppr name <> ": mem" <> ppr space
   ppr (DeclareScalar name vol t) =
-    text "var" <+> ppr name <> text ":" <+> vol' <> ppr t
+    "var" <+> ppr name <> ":" <+> vol' <> ppr t
     where
       vol' = case vol of
-        Volatile -> text "volatile "
+        Volatile -> "volatile "
         Nonvolatile -> mempty
   ppr (DeclareArray name space t vs) =
-    text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t
+    "array"
+      <+> ppr name <> "@" <> ppr space
+      <+> ":"
+      <+> ppr t
       <+> equals
       <+> ppr vs
   ppr (Allocate name e space) =
-    ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
+    ppr name <+> "<-" <+> "malloc" <> parens (ppr e) <> ppr space
   ppr (Free name space) =
-    text "free" <> parens (ppr name) <> ppr space
+    "free" <> parens (ppr name) <> ppr space
   ppr (Write name i bt space vol val) =
     ppr name <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr i)
-      <+> text "<-"
+      <+> "<-"
       <+> ppr val
     where
       vol' = case vol of
-        Volatile -> text "volatile "
+        Volatile -> "volatile "
         Nonvolatile -> mempty
   ppr (Read name v is bt space vol) =
-    ppr name <+> text "<-"
+    ppr name
+      <+> "<-"
       <+> ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
     where
       vol' = case vol of
-        Volatile -> text "volatile "
+        Volatile -> "volatile "
         Nonvolatile -> mempty
   ppr (SetScalar name val) =
-    ppr name <+> text "<-" <+> ppr val
+    ppr name <+> "<-" <+> ppr val
   ppr (SetMem dest from DefaultSpace) =
-    ppr dest <+> text "<-" <+> ppr from
+    ppr dest <+> "<-" <+> ppr from
   ppr (SetMem dest from space) =
-    ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
+    ppr dest <+> "<-" <+> ppr from <+> "@" <> ppr space
   ppr (Assert e msg _) =
-    text "assert" <> parens (commasep [ppr msg, ppr e])
-  ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
-    text "memcpy"
+    "assert" <> parens (commasep [ppr msg, ppr e])
+  ppr (Copy t dest destoffset destspace src srcoffset srcspace size) =
+    "copy"
       <> parens
-        ( ppMemLoc dest destoffset <> ppr destspace <> comma
+        ( ppr t <> comma
+            </> ppMemLoc dest destoffset <> ppr destspace <> comma
             </> ppMemLoc src srcoffset <> ppr srcspace <> comma
             </> ppr size
         )
     where
       ppMemLoc base offset =
-        ppr base <+> text "+" <+> ppr offset
+        ppr base <+> "+" <+> ppr offset
   ppr (If cond tbranch fbranch) =
-    text "if" <+> ppr cond <+> text "then {"
+    "if"
+      <+> ppr cond
+      <+> "then {"
       </> indent 2 (ppr tbranch)
-      </> text "} else {"
+      </> "} else {"
       </> indent 2 (ppr fbranch)
-      </> text "}"
+      </> "}"
   ppr (Call dests fname args) =
-    commasep (map ppr dests) <+> text "<-"
+    commasep (map ppr dests)
+      <+> "<-"
       <+> ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
-    text "--" <+> text s </> ppr code
+    "--" <+> text s </> ppr code
   ppr (DebugPrint desc (Just e)) =
-    text "debug" <+> parens (commasep [text (show desc), ppr e])
+    "debug" <+> parens (commasep [text (show desc), ppr e])
   ppr (DebugPrint desc Nothing) =
-    text "debug" <+> parens (text (show desc))
+    "debug" <+> parens (text (show desc))
   ppr (TracePrint msg) =
-    text "trace" <+> parens (ppr msg)
+    "trace" <+> parens (ppr msg)
 
 instance Pretty Arg where
   ppr (MemArg m) = ppr m
@@ -583,8 +611,8 @@ instance Foldable FunctionT where
   foldMap = foldMapDefault
 
 instance Traversable FunctionT where
-  traverse f (Function entry outs ins body results args) =
-    Function entry outs ins <$> traverse f body <*> pure results <*> pure args
+  traverse f (Function entry outs ins body) =
+    Function entry outs ins <$> traverse f body
 
 instance Functor Code where
   fmap = fmapDefault
@@ -615,8 +643,8 @@ instance Traversable Code where
     pure $ Allocate name size s
   traverse _ (Free name space) =
     pure $ Free name space
-  traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
-    pure $ Copy dest destoffset destspace src srcoffset srcspace size
+  traverse _ (Copy dest pt destoffset destspace src srcoffset srcspace size) =
+    pure $ Copy dest pt destoffset destspace src srcoffset srcspace size
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (Read x name i bt space vol) =
@@ -649,12 +677,15 @@ declaredIn (While _ body) = declaredIn body
 declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
 
+instance FreeIn EntryPoint where
+  freeIn' (EntryPoint _ res args) =
+    freeIn' (map snd res) <> freeIn' (map snd args)
+
 instance FreeIn a => FreeIn (Functions a) where
   freeIn' (Functions fs) = foldMap (onFun . snd) fs
     where
       onFun f =
-        fvBind pnames $
-          freeIn' (functionBody f) <> freeIn' (functionResult f <> map snd (functionArgs f))
+        fvBind pnames $ freeIn' (functionBody f) <> freeIn' (functionEntry f)
         where
           pnames =
             namesFromList $ map paramName $ functionInput f <> functionOutput f
@@ -664,8 +695,8 @@ instance FreeIn ValueDesc where
   freeIn' ScalarValue {} = mempty
 
 instance FreeIn ExternalValue where
-  freeIn' (TransparentValue _ vd) = freeIn' vd
-  freeIn' (OpaqueValue _ _ vds) = foldMap freeIn' vds
+  freeIn' (TransparentValue vd) = freeIn' vd
+  freeIn' (OpaqueValue _ vds) = foldMap freeIn' vds
 
 instance FreeIn a => FreeIn (Code a) where
   freeIn' (x :>>: y) =
@@ -686,7 +717,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
-  freeIn' (Copy dest x _ src y _ n) =
+  freeIn' (Copy _ dest x _ src y _ n) =
     freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y

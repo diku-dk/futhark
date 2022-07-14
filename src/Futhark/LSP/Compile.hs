@@ -4,18 +4,26 @@
 -- the old state around.
 module Futhark.LSP.Compile (tryTakeStateFromIORef, tryReCompile) where
 
+import Colog.Core (logStringStderr, (<&))
+import Control.Lens.Getter (view)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.IORef (IORef, readIORef, writeIORef)
 import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Futhark.Compiler.Program (LoadedProg, lpFilePaths, lpWarnings, noLoadedProg, reloadProg)
 import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
-import Futhark.LSP.State (State (..), emptyState)
-import Futhark.Util (debug)
+import Futhark.LSP.State (State (..), emptyState, updateStaleContent, updateStaleMapping)
+import Futhark.LSP.Tool (computeMapping)
 import Language.Futhark.Warnings (listWarnings)
-import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFiles)
-import Language.LSP.Types (fromNormalizedFilePath, uriToNormalizedFilePath)
-import Language.LSP.VFS (VFS (vfsMap), virtualFileText)
+import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
+import Language.LSP.Types
+  ( filePathToUri,
+    fromNormalizedFilePath,
+    toNormalizedUri,
+    uriToNormalizedFilePath,
+  )
+import Language.LSP.VFS (VFS, vfsMap, virtualFileText)
 
 -- | Try to take state from IORef, if it's empty, try to compile.
 tryTakeStateFromIORef :: IORef State -> Maybe FilePath -> LspT () IO State
@@ -23,7 +31,7 @@ tryTakeStateFromIORef state_mvar file_path = do
   old_state <- liftIO $ readIORef state_mvar
   case stateProgram old_state of
     Nothing -> do
-      new_state <- tryCompile file_path (State $ Just noLoadedProg)
+      new_state <- tryCompile old_state file_path noLoadedProg
       liftIO $ writeIORef state_mvar new_state
       pure new_state
     Just prog -> do
@@ -33,9 +41,9 @@ tryTakeStateFromIORef state_mvar file_path = do
       state <- case file_path of
         Just file_path'
           | file_path' `notElem` files -> do
-              debug $ "File not part of program: " <> show file_path'
-              debug $ "Program contains: " <> show files
-              tryCompile file_path (State $ Just noLoadedProg)
+              logStringStderr <& ("File not part of program: " <> show file_path')
+              logStringStderr <& ("Program contains: " <> show files)
+              tryCompile old_state file_path noLoadedProg
         _ -> pure old_state
       liftIO $ writeIORef state_mvar state
       pure state
@@ -43,33 +51,42 @@ tryTakeStateFromIORef state_mvar file_path = do
 -- | Try to (re)-compile, replace old state if successful.
 tryReCompile :: IORef State -> Maybe FilePath -> LspT () IO ()
 tryReCompile state_mvar file_path = do
-  debug "(Re)-compiling ..."
+  logStringStderr <& "(Re)-compiling ..."
   old_state <- liftIO $ readIORef state_mvar
-  new_state <- tryCompile file_path old_state
+  let loaded_prog = getLoadedProg old_state
+  new_state <- tryCompile old_state file_path loaded_prog
   case stateProgram new_state of
     Nothing -> do
-      debug "Failed to (re)-compile, using old state or Nothing"
-      liftIO $ writeIORef state_mvar old_state
+      logStringStderr <& "Failed to (re)-compile, using old state or Nothing"
+      logStringStderr <& "Computing PositionMapping for: " <> show file_path
+      mapping <- computeMapping old_state file_path
+      liftIO $ writeIORef state_mvar $ updateStaleMapping file_path mapping old_state
     Just _ -> do
-      debug "(Re)-compile successful"
+      logStringStderr <& "(Re)-compile successful"
       liftIO $ writeIORef state_mvar new_state
 
 -- | Try to compile, publish diagnostics on warnings and errors, return newly compiled state.
 --  Single point where the compilation is done, and shouldn't be exported.
-tryCompile :: Maybe FilePath -> State -> LspT () IO State
-tryCompile Nothing _ = pure emptyState
-tryCompile (Just path) state = do
-  debug $ "Reloading program from " <> show path
-  let old_loaded_prog = getLoadedProg state
+tryCompile :: State -> Maybe FilePath -> LoadedProg -> LspT () IO State
+tryCompile _ Nothing _ = pure emptyState
+tryCompile state (Just path) old_loaded_prog = do
+  logStringStderr <& "Reloading program from " <> show path
   vfs <- getVirtualFiles
-  res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs)
+  res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs) -- NOTE: vfs only keeps track of current opened files
   flushDiagnosticsBySource maxDiagnostic diagnosticSource
   case res of
     Right new_loaded_prog -> do
       publishWarningDiagnostics $ listWarnings $ lpWarnings new_loaded_prog
-      pure $ State (Just new_loaded_prog)
+      maybe_virtual_file <- getVirtualFile $ toNormalizedUri $ filePathToUri path
+      case maybe_virtual_file of
+        Nothing -> pure $ State (Just new_loaded_prog) (staleData state) -- should never happen
+        Just virtual_file ->
+          pure $ updateStaleContent path virtual_file new_loaded_prog state
+    -- Preserve files that have been opened should be enoguth.
+    -- But still might need an update on re-compile logic, don't discard all state afterwards,
+    -- try to compile from root file, if there is a depencency relatetion, improve performance and provide more dignostic.
     Left prog_error -> do
-      debug "Compilation failed, publishing diagnostics"
+      logStringStderr <& "Compilation failed, publishing diagnostics"
       publishErrorDiagnostics prog_error
       pure emptyState
 
@@ -85,8 +102,7 @@ transformVFS vfs =
             M.insert (fromNormalizedFilePath file_path) (virtualFileText virtual_file) acc
     )
     M.empty
-    (vfsMap vfs)
+    (view vfsMap vfs)
 
 getLoadedProg :: State -> LoadedProg
-getLoadedProg (State (Just loaded_prog)) = loaded_prog
-getLoadedProg (State Nothing) = noLoadedProg
+getLoadedProg state = fromMaybe noLoadedProg (stateProgram state)

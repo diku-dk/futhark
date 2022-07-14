@@ -148,7 +148,7 @@ optimiseStms (stm : stms) m = do
   -- XXX: unfortunate that we cannot handle duplicate update values.
   -- Would be good to improve this.  See inplacelowering6.fut.
   case nubByOrd (comparing updateValue)
-    . filter (not . (`nameIn` bottomUpSeen bup) . updateSource) -- (9)
+    . filter ((`notNameIn` bottomUpSeen bup) . updateSource) -- (9)
     . filter ((`elem` boundHere) . updateValue)
     $ forwardThese bup of
     [] -> do
@@ -213,7 +213,10 @@ onSegOp op =
           stms <-
             deepen $
               optimiseStms (stmsToList (kernelBodyStms kbody)) $
-                mapM_ seenVar $ namesToList $ freeIn $ kernelBodyResult kbody
+                mapM_ seenVar $
+                  namesToList $
+                    freeIn $
+                      kernelBodyResult kbody
           pure kbody {kernelBodyStms = stmsFromList stms}
     mapSegOpM mapper op
 

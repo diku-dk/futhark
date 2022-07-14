@@ -55,8 +55,27 @@
                                   "restore": {"type": "string"}
                               },
                               "additionalProperties": false
+                          },
+                          "record": {
+                              "type": "object",
+                              "properties": {
+                                  "new": {"type": "string"},
+                                  "fields": {
+                                      "type": "array",
+                                      "items": {
+                                          "type": "object",
+                                          "properties": {
+                                              "name": {"type": "string"},
+                                              "type": {"type": "string"},
+                                              "project": {"type": "string"}
+                                          }
+                                      }
+                                  }
+                              },
+                              "additionalProperties": false
                           }
-                      }
+                      },
+                      "required": [ "kind", "ctype", "ops" ]
                     },
                     { "type": "object",
                       "properties": {

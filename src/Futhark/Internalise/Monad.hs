@@ -14,13 +14,13 @@ module Futhark.Internalise.Monad
     FunInfo,
     substitutingVars,
     lookupSubst,
+    addOpaques,
     addFunDef,
     lookupFunction,
     lookupFunction',
     lookupConst,
     bindFunction,
     bindConstant,
-    localConstsScope,
     assert,
 
     -- * Convenient reexports
@@ -60,8 +60,8 @@ data InternaliseState = InternaliseState
   { stateNameSource :: VNameSource,
     stateFunTable :: FunTable,
     stateConstSubsts :: VarSubsts,
-    stateConstScope :: Scope SOACS,
-    stateFuns :: [FunDef SOACS]
+    stateFuns :: [FunDef SOACS],
+    stateTypes :: OpaqueTypes
   }
 
 newtype InternaliseM a
@@ -74,9 +74,19 @@ newtype InternaliseM a
       MonadReader InternaliseEnv,
       MonadState InternaliseState,
       MonadFreshNames,
-      HasScope SOACS,
-      LocalScope SOACS
+      HasScope SOACS
     )
+
+-- Internalisation has to deal with the risk of multiple binding of
+-- the same variable (although always of the same type) in the
+-- program; in particular this might imply shadowing a constant.  The
+-- LocalScope instance for BuilderT does not handle this properly (and
+-- doing so would make it slower).  So we remove already-known
+-- variables before passing the scope on.
+instance LocalScope SOACS InternaliseM where
+  localScope scope (InternaliseM m) = do
+    old_scope <- askScope
+    InternaliseM $ localScope (scope `M.difference` old_scope) m
 
 instance MonadFreshNames (State InternaliseState) where
   getNameSource = gets stateNameSource
@@ -95,12 +105,14 @@ runInternaliseM ::
   MonadFreshNames m =>
   Bool ->
   InternaliseM () ->
-  m (Stms SOACS, [FunDef SOACS])
+  m (OpaqueTypes, Stms SOACS, [FunDef SOACS])
 runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src ->
     let ((_, consts), s) =
           runState (runReaderT (runBuilderT m mempty) newEnv) (newState src)
-     in ((consts, reverse $ stateFuns s), stateNameSource s)
+     in ( (stateTypes s, consts, reverse $ stateFuns s),
+          stateNameSource s
+        )
   where
     newEnv =
       InternaliseEnv
@@ -114,8 +126,8 @@ runInternaliseM safe (InternaliseM m) =
         { stateNameSource = src,
           stateFunTable = mempty,
           stateConstSubsts = mempty,
-          stateConstScope = mempty,
-          stateFuns = mempty
+          stateFuns = mempty,
+          stateTypes = mempty
         }
 
 substitutingVars :: VarSubsts -> InternaliseM a -> InternaliseM a
@@ -126,6 +138,12 @@ lookupSubst v = do
   env_substs <- asks $ M.lookup v . envSubsts
   const_substs <- gets $ M.lookup v . stateConstSubsts
   pure $ env_substs `mplus` const_substs
+
+-- | Add opaque types.  If the types are already known, they will not
+-- be added.
+addOpaques :: OpaqueTypes -> InternaliseM ()
+addOpaques ts = modify $ \s ->
+  s {stateTypes = stateTypes s <> ts}
 
 -- | Add a function definition to the program being constructed.
 addFunDef :: FunDef SOACS -> InternaliseM ()
@@ -140,7 +158,13 @@ lookupFunction fname = maybe bad pure =<< lookupFunction' fname
     bad = error $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
 lookupConst :: VName -> InternaliseM (Maybe [SubExp])
-lookupConst fname = gets $ M.lookup fname . stateConstSubsts
+lookupConst fname = do
+  is_var <- asksScope (fname `M.member`)
+  fname_subst <- lookupSubst fname
+  case (is_var, fname_subst) of
+    (_, Just ses) -> pure $ Just ses
+    (True, _) -> pure $ Just [Var fname]
+    _ -> pure Nothing
 
 bindFunction :: VName -> FunDef SOACS -> FunInfo -> InternaliseM ()
 bindFunction fname fd info = do
@@ -149,21 +173,18 @@ bindFunction fname fd info = do
 
 bindConstant :: VName -> FunDef SOACS -> InternaliseM ()
 bindConstant cname fd = do
-  let stms = bodyStms $ funDefBody fd
-      substs =
-        drop (length (shapeContext (funDefRetType fd))) $
-          map resSubExp $ bodyResult $ funDefBody fd
-  addStms stms
-  modify $ \s ->
-    s
-      { stateConstSubsts = M.insert cname substs $ stateConstSubsts s,
-        stateConstScope = scopeOf stms <> stateConstScope s
-      }
+  addStms $ bodyStms $ funDefBody fd
 
-localConstsScope :: InternaliseM a -> InternaliseM a
-localConstsScope m = do
-  scope <- gets stateConstScope
-  localScope scope m
+  case map resSubExp . bodyResult . funDefBody $ fd of
+    [se] -> do
+      letBindNames [cname] $ BasicOp $ SubExp se
+    ses -> do
+      let substs =
+            drop (length (shapeContext (funDefRetType fd))) ses
+      modify $ \s ->
+        s
+          { stateConstSubsts = M.insert cname substs $ stateConstSubsts s
+          }
 
 -- | Construct an 'Assert' statement, but taking attributes into
 -- account.  Always use this function, and never construct 'Assert'
@@ -178,7 +199,8 @@ assert desc se msg loc = assertingOne $ do
   attrs <- asks $ attrsForAssert . envAttrs
   attributing attrs $
     letExp desc $
-      BasicOp $ Assert se msg (loc, mempty)
+      BasicOp $
+        Assert se msg (loc, mempty)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

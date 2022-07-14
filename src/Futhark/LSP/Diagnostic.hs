@@ -10,14 +10,14 @@ module Futhark.LSP.Diagnostic
   )
 where
 
+import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
 import Data.Foldable (for_)
 import qualified Data.List.NonEmpty as NE
-import Data.Map (assocs, empty, insertWith)
+import qualified Data.Map as M
 import qualified Data.Text as T
-import Futhark.Compiler.Program (ProgError (ProgError))
+import Futhark.Compiler.Program (ProgError (..))
 import Futhark.LSP.Tool (posToUri, rangeFromLoc, rangeFromSrcLoc)
-import Futhark.Util (debug)
 import Futhark.Util.Loc (Loc (..), SrcLoc, locOf)
 import Futhark.Util.Pretty (Doc, prettyText)
 import Language.LSP.Diagnostics (partitionBySource)
@@ -39,38 +39,36 @@ mkDiagnostic range severity msg = Diagnostic range (Just severity) Nothing diagn
 publish :: [(Uri, [Diagnostic])] -> LspT () IO ()
 publish uri_diags_map = for_ uri_diags_map $ \(uri, diags) -> do
   doc <- getVersionedTextDoc $ TextDocumentIdentifier uri
-  debug $ "Publishing diagnostics for " ++ show uri ++ " Verion: " ++ show (doc ^. version)
+  logStringStderr
+    <& ("Publishing diagnostics for " ++ show uri ++ " Version: " ++ show (doc ^. version))
   publishDiagnostics maxDiagnostic (toNormalizedUri uri) (doc ^. version) (partitionBySource diags)
 
 -- | Send warning diagnostics to the client.
 publishWarningDiagnostics :: [(SrcLoc, Doc)] -> LspT () IO ()
 publishWarningDiagnostics warnings = do
-  let diags_map =
-        foldr
-          ( \(srcloc, msg) acc ->
-              let diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (prettyText msg)
-               in case locOf srcloc of
-                    NoLoc -> acc
-                    Loc pos _ -> insertWith (++) (posToUri pos) [diag] acc
-          )
-          empty
-          warnings
-  publish $ assocs diags_map
+  publish $ M.assocs $ M.unionsWith (++) $ map onWarn warnings
+  where
+    onWarn (srcloc, msg) =
+      let diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (prettyText msg)
+       in case locOf srcloc of
+            NoLoc -> mempty
+            Loc pos _ -> M.singleton (posToUri pos) [diag]
 
 -- | Send error diagnostics to the client.
 publishErrorDiagnostics :: NE.NonEmpty ProgError -> LspT () IO ()
-publishErrorDiagnostics errors = do
-  let diags_map =
-        foldr
-          ( \(ProgError loc msg) acc ->
-              let diag = mkDiagnostic (rangeFromLoc loc) DsError (prettyText msg)
-               in case loc of
-                    NoLoc -> acc
-                    Loc pos _ -> insertWith (++) (posToUri pos) [diag] acc
-          )
-          empty
-          errors
-  publish $ assocs diags_map
+publishErrorDiagnostics errors =
+  publish $ M.assocs $ M.unionsWith (++) $ map onDiag $ NE.toList errors
+  where
+    onDiag (ProgError loc msg) =
+      let diag = mkDiagnostic (rangeFromLoc loc) DsError (prettyText msg)
+       in case loc of
+            NoLoc -> mempty
+            Loc pos _ -> M.singleton (posToUri pos) [diag]
+    onDiag (ProgWarning loc msg) =
+      let diag = mkDiagnostic (rangeFromLoc loc) DsError (prettyText msg)
+       in case loc of
+            NoLoc -> mempty
+            Loc pos _ -> M.singleton (posToUri pos) [diag]
 
 -- | The maximum number of diagnostics to report.
 maxDiagnostic :: Int

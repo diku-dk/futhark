@@ -37,13 +37,16 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
 
           resIsNecessary ((v, _), _) =
             usedAfterLoop v
-              || paramName v `nameIn` necessaryForReturned
+              || paramName v
+              `nameIn` necessaryForReturned
               || referencedInPat v
               || referencedInForm v
 
           (keep_valpart, discard_valpart) =
             partition (resIsNecessary . snd) $
-              zip (patElems pat) $ zip merge $ bodyResult body
+              zip (patElems pat) $
+                zip merge $
+                  bodyResult body
 
           (keep_valpatelems, keep_val) = unzip keep_valpart
           (_discard_valpatelems, discard_val) = unzip discard_valpart
@@ -119,7 +122,7 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
       (invariant, explpat', merge', resExps)
         | isInvariant,
           -- Also do not remove the condition in a while-loop.
-          not $ paramName mergeParam `nameIn` freeIn form =
+          paramName mergeParam `notNameIn` freeIn form =
             let (stm, explpat'') =
                   removeFromResult (mergeParam, mergeInit) explpat'
              in ( maybe id (:) stm $ (paramIdent mergeParam, mergeInit) : invariant,
@@ -163,8 +166,8 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
         namesToList $
           freeIn mergeParam `namesSubtract` oneName (paramName mergeParam)
     invariantOrNotMergeParam namesOfInvariant name =
-      not (name `nameIn` namesOfMergeParams)
-        || name `nameIn` namesOfInvariant
+      (name `notNameIn` namesOfMergeParams)
+        || (name `nameIn` namesOfInvariant)
 
 simplifyClosedFormLoop :: BuilderOps rep => TopDownRuleDoLoop rep
 simplifyClosedFormLoop _ pat _ (val, ForLoop i it bound [], body) =
@@ -216,7 +219,7 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
           | not $ any ((i `nameIn`) . freeIn) x_stms,
             DimFix (Var j) : slice' <- slice,
             j == i,
-            not $ i `nameIn` freeIn slice -> do
+            i `notNameIn` freeIn slice -> do
               addStms x_stms
               w <- arraySize 0 <$> lookupType arr'
               for_in_partial <-
