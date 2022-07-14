@@ -904,27 +904,15 @@ checkBasicOp (Replicate (Shape dims) valexp) = do
   void $ checkSubExp valexp
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
-checkBasicOp (Reshape newshape arrexp) = do
+checkBasicOp (Reshape k newshape arrexp) = do
   rank <- shapeRank . fst <$> checkArrIdent arrexp
-  mapM_ (require [Prim int64] . newDim) newshape
-  zipWithM_ (checkDimChange rank) newshape [0 ..]
-  where
-    checkDimChange _ (DimNew _) _ =
+  mapM_ (require [Prim int64]) $ shapeDims newshape
+  case k of
+    ReshapeCoerce ->
+      when (shapeRank newshape /= rank) . bad $
+        TypeError "Coercion changes rank of array."
+    ReshapeArbitrary ->
       pure ()
-    checkDimChange rank (DimCoercion se) i
-      | i >= rank =
-          bad . TypeError $
-            "Asked to coerce dimension "
-              ++ show i
-              ++ " to "
-              ++ pretty se
-              ++ ", but array "
-              ++ pretty arrexp
-              ++ " has only "
-              ++ pretty rank
-              ++ " dimensions"
-      | otherwise =
-          pure ()
 checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt

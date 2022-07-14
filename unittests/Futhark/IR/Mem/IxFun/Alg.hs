@@ -7,6 +7,7 @@ module Futhark.IR.Mem.IxFun.Alg
     permute,
     rotate,
     reshape,
+    coerce,
     slice,
     flatSlice,
     rebase,
@@ -21,11 +22,9 @@ import qualified Data.Set as S
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
-  ( DimChange (..),
-    DimIndex (..),
+  ( DimIndex (..),
     FlatDimIndex (..),
     FlatSlice (..),
-    ShapeChange,
     Slice (..),
     flatSliceDims,
     sliceDims,
@@ -47,7 +46,8 @@ data IxFun num
   | Rotate (IxFun num) (Indices num)
   | Index (IxFun num) (Slice num)
   | FlatIndex (IxFun num) (FlatSlice num)
-  | Reshape (IxFun num) (ShapeChange num)
+  | Reshape (IxFun num) (Shape num)
+  | Coerce (IxFun num) (Shape num)
   | OffsetIndex (IxFun num) num
   | Rebase (IxFun num) (IxFun num)
   deriving (Eq, Show)
@@ -62,7 +62,11 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Reshape fun oldshape) =
     ppr fun
       <> text "->reshape"
-      <> parens (commasep (map ppr oldshape))
+      <> parens (ppr oldshape)
+  ppr (Coerce fun oldshape) =
+    ppr fun
+      <> text "->coerce"
+      <> parens (ppr oldshape)
   ppr (OffsetIndex fun i) =
     ppr fun <> text "->offset_index" <> parens (ppr i)
   ppr (Rebase new_base fun) =
@@ -89,8 +93,11 @@ flatSlice = FlatIndex
 rebase :: IxFun num -> IxFun num -> IxFun num
 rebase = Rebase
 
-reshape :: IxFun num -> ShapeChange num -> IxFun num
+reshape :: IxFun num -> Shape num -> IxFun num
 reshape = Reshape
+
+coerce :: IxFun num -> Shape num -> IxFun num
+coerce = Reshape
 
 shape ::
   IntegralExp num =>
@@ -107,7 +114,9 @@ shape (Index _ how) =
 shape (FlatIndex ixfun how) =
   flatSliceDims how <> tail (shape ixfun)
 shape (Reshape _ dims) =
-  map newDim dims
+  dims
+shape (Coerce _ dims) =
+  dims
 shape (OffsetIndex ixfun _) =
   shape ixfun
 shape (Rebase _ ixfun) =
@@ -141,8 +150,10 @@ index (FlatIndex fun (FlatSlice offset js)) is =
   where
     f i (FlatDimIndex _ s) = i * s
 index (Reshape fun newshape) is =
-  let new_indices = reshapeIndex (shape fun) (newDims newshape) is
+  let new_indices = reshapeIndex (shape fun) newshape is
    in index fun new_indices
+index (Coerce fun _) is =
+  index fun is
 index (OffsetIndex fun i) is =
   case shape fun of
     d : ds ->
@@ -153,7 +164,7 @@ index (Rebase new_base fun) is =
         Direct old_shape ->
           if old_shape == shape new_base
             then new_base
-            else reshape new_base $ map DimCoercion old_shape
+            else reshape new_base old_shape
         Permute ixfun perm ->
           permute (rebase new_base ixfun) perm
         Rotate ixfun offsets ->
@@ -164,6 +175,8 @@ index (Rebase new_base fun) is =
           flatSlice (rebase new_base ixfun) iis
         Reshape ixfun new_shape ->
           reshape (rebase new_base ixfun) new_shape
+        Coerce ixfun new_shape ->
+          coerce (rebase new_base ixfun) new_shape
         OffsetIndex ixfun s ->
           offsetIndex (rebase new_base ixfun) s
         r@Rebase {} ->

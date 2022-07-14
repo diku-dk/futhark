@@ -101,11 +101,11 @@ data ArrayTransform
   = -- | A permutation of an otherwise valid input.
     Rearrange Certs [Int]
   | -- | A reshaping of an otherwise valid input.
-    Reshape Certs (ShapeChange SubExp)
+    Reshape Certs ReshapeKind Shape
   | -- | A reshaping of the outer dimension.
-    ReshapeOuter Certs (ShapeChange SubExp)
+    ReshapeOuter Certs ReshapeKind Shape
   | -- | A reshaping of everything but the outer dimension.
-    ReshapeInner Certs (ShapeChange SubExp)
+    ReshapeInner Certs ReshapeKind Shape
   | -- | Replicate the rows of the array a number of times.
     Replicate Certs Shape
   deriving (Show, Eq, Ord)
@@ -113,12 +113,12 @@ data ArrayTransform
 instance Substitute ArrayTransform where
   substituteNames substs (Rearrange cs xs) =
     Rearrange (substituteNames substs cs) xs
-  substituteNames substs (Reshape cs ses) =
-    Reshape (substituteNames substs cs) (substituteNames substs ses)
-  substituteNames substs (ReshapeOuter cs ses) =
-    ReshapeOuter (substituteNames substs cs) (substituteNames substs ses)
-  substituteNames substs (ReshapeInner cs ses) =
-    ReshapeInner (substituteNames substs cs) (substituteNames substs ses)
+  substituteNames substs (Reshape cs k ses) =
+    Reshape (substituteNames substs cs) k (substituteNames substs ses)
+  substituteNames substs (ReshapeOuter cs k ses) =
+    ReshapeOuter (substituteNames substs cs) k (substituteNames substs ses)
+  substituteNames substs (ReshapeInner cs k ses) =
+    ReshapeInner (substituteNames substs cs) k (substituteNames substs ses)
   substituteNames substs (Replicate cs se) =
     Replicate (substituteNames substs cs) (substituteNames substs se)
 
@@ -229,8 +229,8 @@ combineTransforms _ _ = Nothing
 transformFromExp :: Certs -> Exp rep -> Maybe (VName, ArrayTransform)
 transformFromExp cs (BasicOp (Futhark.Rearrange perm v)) =
   Just (v, Rearrange cs perm)
-transformFromExp cs (BasicOp (Futhark.Reshape shape v)) =
-  Just (v, Reshape cs shape)
+transformFromExp cs (BasicOp (Futhark.Reshape k shape v)) =
+  Just (v, Reshape cs k shape)
 transformFromExp cs (BasicOp (Futhark.Replicate shape (Var v))) =
   Just (v, Replicate cs shape)
 transformFromExp _ _ = Nothing
@@ -266,12 +266,12 @@ isVarInput :: Input -> Maybe VName
 isVarInput (Input ts v _) | nullTransforms ts = Just v
 isVarInput _ = Nothing
 
--- | If the given input is a plain variable input, with no non-vacuous transforms,
--- return the variable.
+-- | If the given input is a plain variable input, with no non-vacuous
+-- transforms, return the variable.
 isVarishInput :: Input -> Maybe VName
 isVarishInput (Input ts v t)
   | nullTransforms ts = Just v
-  | Reshape cs [DimCoercion _] :< ts' <- viewf ts,
+  | Reshape cs ReshapeCoerce (Shape [_]) :< ts' <- viewf ts,
     cs == mempty =
       isVarishInput $ Input ts' v t
 isVarishInput _ = Nothing
@@ -294,17 +294,17 @@ applyTransform (Rearrange cs perm) ia = do
   r <- arrayRank <$> lookupType ia
   certifying cs . letExp "rearrange" . BasicOp $
     Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia
-applyTransform (Reshape cs shape) ia =
+applyTransform (Reshape cs k shape) ia =
   certifying cs . letExp "reshape" . BasicOp $
-    Futhark.Reshape shape ia
-applyTransform (ReshapeOuter cs shape) ia = do
+    Futhark.Reshape k shape ia
+applyTransform (ReshapeOuter cs k shape) ia = do
   shape' <- reshapeOuter shape 1 . arrayShape <$> lookupType ia
   certifying cs . letExp "reshape_outer" . BasicOp $
-    Futhark.Reshape shape' ia
-applyTransform (ReshapeInner cs shape) ia = do
+    Futhark.Reshape k shape' ia
+applyTransform (ReshapeInner cs k shape) ia = do
   shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
   certifying cs . letExp "reshape_inner" . BasicOp $
-    Futhark.Reshape shape' ia
+    Futhark.Reshape k shape' ia
 
 applyTransforms :: MonadBuilder m => ArrayTransforms -> VName -> m VName
 applyTransforms (ArrayTransforms ts) a = foldlM (flip applyTransform) a ts
@@ -335,14 +335,14 @@ inputType (Input (ArrayTransforms ts) _ at) =
       arrayOfShape t shape
     transformType t (Rearrange _ perm) =
       rearrangeType perm t
-    transformType t (Reshape _ shape) =
-      t `setArrayShape` newShape shape
-    transformType t (ReshapeOuter _ shape) =
+    transformType t (Reshape _ _ shape) =
+      t `setArrayShape` shape
+    transformType t (ReshapeOuter _ _ shape) =
       let Shape oldshape = arrayShape t
-       in t `setArrayShape` Shape (newDims shape ++ drop 1 oldshape)
-    transformType t (ReshapeInner _ shape) =
+       in t `setArrayShape` Shape (shapeDims shape ++ drop 1 oldshape)
+    transformType t (ReshapeInner _ _ shape) =
       let Shape oldshape = arrayShape t
-       in t `setArrayShape` Shape (take 1 oldshape ++ newDims shape)
+       in t `setArrayShape` Shape (take 1 oldshape ++ shapeDims shape)
 
 -- | Return the row type of an input.  Just a convenient alias.
 inputRowType :: Input -> Type
@@ -360,8 +360,8 @@ transformRows (ArrayTransforms ts) =
   where
     transformRows' inp (Rearrange cs perm) =
       addTransform (Rearrange cs (0 : map (+ 1) perm)) inp
-    transformRows' inp (Reshape cs shape) =
-      addTransform (ReshapeInner cs shape) inp
+    transformRows' inp (Reshape cs k shape) =
+      addTransform (ReshapeInner cs k shape) inp
     transformRows' inp (Replicate cs n)
       | inputRank inp == 1 =
           Rearrange mempty [1, 0]
@@ -394,12 +394,18 @@ instance PP.Pretty Input where
     where
       f e (Rearrange cs perm) =
         text "rearrange" <> ppr cs <> PP.apply [PP.apply (map ppr perm), e]
-      f e (Reshape cs shape) =
-        text "reshape" <> ppr cs <> PP.apply [PP.apply (map ppr shape), e]
-      f e (ReshapeOuter cs shape) =
-        text "reshape_outer" <> ppr cs <> PP.apply [PP.apply (map ppr shape), e]
-      f e (ReshapeInner cs shape) =
-        text "reshape_inner" <> ppr cs <> PP.apply [PP.apply (map ppr shape), e]
+      f e (Reshape cs ReshapeArbitrary shape) =
+        text "reshape" <> ppr cs <> PP.apply [ppr shape, e]
+      f e (ReshapeOuter cs ReshapeArbitrary shape) =
+        text "reshape_outer" <> ppr cs <> PP.apply [ppr shape, e]
+      f e (ReshapeInner cs ReshapeArbitrary shape) =
+        text "reshape_inner" <> ppr cs <> PP.apply [ppr shape, e]
+      f e (Reshape cs ReshapeCoerce shape) =
+        text "coerce" <> ppr cs <> PP.apply [ppr shape, e]
+      f e (ReshapeOuter cs ReshapeCoerce shape) =
+        text "coerce_outer" <> ppr cs <> PP.apply [ppr shape, e]
+      f e (ReshapeInner cs ReshapeCoerce shape) =
+        text "coerce_inner" <> ppr cs <> PP.apply [ppr shape, e]
       f e (Replicate cs ne) =
         text "replicate" <> ppr cs <> PP.apply [ppr ne, e]
 

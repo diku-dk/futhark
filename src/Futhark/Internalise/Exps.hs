@@ -488,7 +488,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
                   case se of
                     I.Var v
                       | not $ primType $ paramType p ->
-                          Reshape (map DimCoercion $ arrayDims $ paramType p) v
+                          Reshape I.ReshapeCoerce (I.arrayShape $ paramType p) v
                     _ -> SubExp se
           internaliseExp1 "loop_cond" cond
 
@@ -514,7 +514,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
                     case se of
                       I.Var v
                         | not $ primType $ paramType p ->
-                            Reshape (map DimCoercion $ arrayDims $ paramType p) v
+                            Reshape I.ReshapeCoerce (I.arrayShape $ paramType p) v
                       _ -> SubExp se
             subExpsRes <$> internaliseExp "loop_cond" cond
           loop_end_cond <- bodyBind loop_end_cond_body
@@ -627,10 +627,10 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         flat_arr_t <- lookupType flat_arr
         let new_shape' =
               reshapeOuter
-                (map (DimNew . intConst Int64 . toInteger) new_shape)
+                (I.Shape $ map (intConst Int64 . toInteger) new_shape)
                 1
                 $ I.arrayShape flat_arr_t
-        letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
+        letSubExp desc $ I.BasicOp $ I.Reshape I.ReshapeArbitrary new_shape' flat_arr
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
       let arr_t_ext = internaliseType $ E.toStruct arr_t
@@ -1659,8 +1659,10 @@ isOverloadedFunction qname args loc = do
                         =<< foldBinOp (I.Mul Int64 I.OverflowUndef) (constant (1 :: Int64)) x_dims
                     x' <- letExp "x" $ I.BasicOp $ I.SubExp x
                     y' <- letExp "x" $ I.BasicOp $ I.SubExp y
-                    x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] x'
-                    y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
+                    x_flat <-
+                      letExp "x_flat" $ I.BasicOp $ I.Reshape I.ReshapeArbitrary (I.Shape [x_num_elems]) x'
+                    y_flat <-
+                      letExp "y_flat" $ I.BasicOp $ I.Reshape I.ReshapeArbitrary (I.Shape [x_num_elems]) y'
 
                     -- Compare the elements.
                     cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
@@ -1793,9 +1795,11 @@ isOverloadedFunction qname args loc = do
       certifying dim_ok_cert $
         forM arrs $ \arr' -> do
           arr_t <- lookupType arr'
-          letSubExp desc $
-            I.BasicOp $
-              I.Reshape (reshapeOuter [DimNew n', DimNew m'] 1 $ I.arrayShape arr_t) arr'
+          letSubExp desc . I.BasicOp $
+            I.Reshape
+              I.ReshapeArbitrary
+              (reshapeOuter (I.Shape [n', m']) 1 $ I.arrayShape arr_t)
+              arr'
     handleRest [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do
@@ -1803,9 +1807,11 @@ isOverloadedFunction qname args loc = do
         let n = arraySize 0 arr_t
             m = arraySize 1 arr_t
         k <- letSubExp "flat_dim" $ I.BasicOp $ I.BinOp (Mul Int64 I.OverflowUndef) n m
-        letSubExp desc $
-          I.BasicOp $
-            I.Reshape (reshapeOuter [DimNew k] 2 $ I.arrayShape arr_t) arr'
+        letSubExp desc . I.BasicOp $
+          I.Reshape
+            I.ReshapeArbitrary
+            (reshapeOuter (I.Shape [k]) 2 $ I.arrayShape arr_t)
+            arr'
     handleRest [TupLit [x, y] _] "concat" = Just $ \desc -> do
       xs <- internaliseExpToVars "concat_x" x
       ys <- internaliseExpToVars "concat_y" y
@@ -1912,9 +1918,8 @@ isOverloadedFunction qname args loc = do
             "length of index and value array does not match"
             loc
         certifying c $
-          letExp (baseString sv ++ "_write_sv") $
-            I.BasicOp $
-              I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
+          letExp (baseString sv ++ "_write_sv") . I.BasicOp $
+            I.Reshape I.ReshapeCoerce (reshapeOuter (I.Shape [si_w]) 1 sv_shape) sv
 
       indexType <- fmap rowType <$> mapM lookupType si'
       indexName <- mapM (\_ -> newVName "write_index") indexType

@@ -311,8 +311,10 @@ composeIxfuns env y x ixf_fun =
         _ -> pure env
 
 changeIxFnEnv :: IxFnEnv -> VName -> Exp GPU -> TileM IxFnEnv
-changeIxFnEnv env y (BasicOp (Reshape shp_chg x)) =
-  composeIxfuns env y x (`IxFun.reshape` map (fmap ExpMem.pe64) shp_chg)
+changeIxFnEnv env y (BasicOp (Reshape ReshapeArbitrary shp_chg x)) =
+  composeIxfuns env y x (`IxFun.reshape` fmap ExpMem.pe64 (shapeDims shp_chg))
+changeIxFnEnv env y (BasicOp (Reshape ReshapeCoerce shp_chg x)) =
+  composeIxfuns env y x (`IxFun.coerce` fmap ExpMem.pe64 (shapeDims shp_chg))
 changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
   tp <- lookupType x
   case tp of

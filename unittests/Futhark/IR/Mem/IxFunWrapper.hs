@@ -6,6 +6,7 @@ module Futhark.IR.Mem.IxFunWrapper
     permute,
     rotate,
     reshape,
+    coerce,
     slice,
     flatSlice,
     rebase,
@@ -14,7 +15,7 @@ where
 
 import qualified Futhark.IR.Mem.IxFun as I
 import qualified Futhark.IR.Mem.IxFun.Alg as IA
-import Futhark.IR.Syntax (FlatSlice, ShapeChange, Slice)
+import Futhark.IR.Syntax (FlatSlice, Slice)
 import Futhark.Util.IntegralExp
 
 type Shape num = [num]
@@ -48,9 +49,16 @@ rotate (l, a) x = (I.rotate l x, IA.rotate a x)
 reshape ::
   IntegralExp num =>
   IxFun num ->
-  ShapeChange num ->
+  Shape num ->
   IxFun num
 reshape (l, a) x = (I.reshape l x, IA.reshape a x)
+
+coerce ::
+  (Eq num, IntegralExp num) =>
+  IxFun num ->
+  Shape num ->
+  IxFun num
+coerce (l, a) x = (I.coerce l x, IA.coerce a x)
 
 slice ::
   IntegralExp num =>
