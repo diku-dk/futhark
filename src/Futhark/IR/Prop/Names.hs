@@ -356,9 +356,6 @@ instance FreeIn (LParamInfo rep) => FreeIn (LoopForm rep) where
   freeIn' (ForLoop _ _ bound loop_vars) = freeIn' bound <> freeIn' loop_vars
   freeIn' (WhileLoop cond) = freeIn' cond
 
-instance FreeIn d => FreeIn (DimChange d) where
-  freeIn' = Data.Foldable.foldMap freeIn'
-
 instance FreeIn d => FreeIn (DimIndex d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
