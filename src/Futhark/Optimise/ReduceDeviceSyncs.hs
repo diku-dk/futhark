@@ -15,11 +15,11 @@ import Control.Monad.State hiding (State)
 import Data.Bifunctor (second)
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
-import Data.List (unzip4, zip4)
+import Data.List (transpose, unzip4, zip4)
 import qualified Data.Map.Strict as M
 import Data.Sequence ((<|), (><), (|>))
 import qualified Data.Text as T
-import Futhark.Construct (fullSlice, sliceDim)
+import Futhark.Construct (fullSlice, mkBody, sliceDim)
 import Futhark.Error
 import Futhark.IR.GPU
 import Futhark.MonadFreshNames
@@ -149,6 +149,53 @@ optimizeStm out stm = do
         pure (out |> stm)
       Apply {} ->
         pure (out |> stm)
+      Match ses cases defbody (IfDec btypes sort) -> do
+        -- Rewrite branches.
+        cases_stms <- mapM (optimizeStms . bodyStms . caseBody) cases
+        let cases_res = map (bodyResult . caseBody) cases
+        defbody_stms <- optimizeStms $ bodyStms defbody
+        let defbody_res = bodyResult defbody
+
+        -- Ensure return values and types match if one or both branches
+        -- return a result that now reside on device.
+        let bmerge (acc, all_stms) (pe, reses, bt) = do
+              let onHost (Var v) = (v ==) <$> resolveName v
+                  onHost _ = pure True
+
+              on_host <- and <$> mapM (onHost . resSubExp) reses
+
+              if on_host
+                then -- No result resides on device ==> nothing to do.
+                  pure ((pe, reses, bt) : acc, all_stms)
+                else do
+                  -- Otherwise, ensure all results are migrated.
+                  (all_stms', arrs) <-
+                    fmap unzip $ forM (zip all_stms reses) $ \(stms, res) ->
+                      storeScalar stms (resSubExp res) (patElemType pe)
+
+                  pe' <- arrayizePatElem pe
+                  let bt' = staticShapes1 (patElemType pe')
+                      reses' = zipWith SubExpRes (map resCerts reses) (map Var arrs)
+                  pure ((pe', reses', bt') : acc, all_stms')
+
+            pes = patElems (stmPat stm)
+        (acc, ~(defbody_stms' : cases_stms')) <-
+          foldM bmerge ([], defbody_stms : cases_stms) $
+            zip3 pes (transpose $ defbody_res : cases_res) btypes
+        let (pes', reses, btypes') = unzip3 (reverse acc)
+
+        -- Rewrite statement.
+        let cases' =
+              zipWith Case (map casePat cases) $
+                zipWith mkBody cases_stms' $
+                  drop 1 $
+                    transpose reses
+            defbody' = mkBody defbody_stms' $ map head reses
+            e' = Match ses cases' defbody' (IfDec btypes' sort)
+            stm' = Let (Pat pes') (stmAux stm) e'
+
+        -- Read migrated scalars that are used on host.
+        foldM addRead (out |> stm') (zip pes pes')
       If cond (Body _ tstms0 tres) (Body _ fstms0 fres) (IfDec btypes sort) ->
         do
           -- Rewrite branches.
