@@ -62,6 +62,7 @@ import Data.Bifunctor (first, second)
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
+import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
 import qualified Data.Sequence as SQ
@@ -515,6 +516,8 @@ graphStm stm = do
       graphUpdateAcc (one bs) e
     Apply fn _ _ _ ->
       graphApply fn bs e
+    Match ses cases defbody _ ->
+      graphMatch bs ses cases defbody
     If cond tbody fbody _ ->
       graphIf bs cond tbody fbody
     DoLoop params lform body ->
@@ -609,6 +612,64 @@ graphApply fn bs e = do
     then graphHostOnly e
     else graphSimple bs e
 
+-- | Graph a Match statement.
+graphMatch :: [Binding] -> [SubExp] -> [Case GPU] -> Body GPU -> Grapher ()
+graphMatch bs ses cases defbody = do
+  body_host_only <-
+    incForkDepthFor $
+      any bodyHostOnly
+        <$> mapM (captureBodyStats . graphBody) (defbody : map caseBody cases)
+
+  let branch_results = results defbody : map (results . caseBody) cases
+
+  -- Record aliases for copyable memory backing returned arrays.
+  may_copy_results <- reusesBranches bs branch_results
+  let may_migrate = not body_host_only && may_copy_results
+
+  cond_id <-
+    if may_migrate
+      then onlyGraphedScalars $ subExpVars ses
+      else do
+        -- The migration status of the condition is what determines
+        -- whether the statement may be migrated as a whole or
+        -- not. See 'shouldMoveStm'.
+        mapM_ (connectToSink . nameToId) (subExpVars ses)
+        pure IS.empty
+
+  tellOperands cond_id
+
+  -- Connect branch results to bound variables to allow delaying reads out of
+  -- branches. It might also be beneficial to move the whole statement to
+  -- device, to avoid reading the branch condition value. This must be balanced
+  -- against the need to read the values bound by the if statement.
+  --
+  -- By connecting the branch condition to each variable bound by the statement
+  -- the condition will only stay on device if
+  --
+  --   (1) the if statement is not required on host, based on the statements
+  --       within its body.
+  --
+  --   (2) no additional reads will be required to use the if statement bound
+  --       variables should the whole statement be migrated.
+  --
+  -- If the condition is migrated to device and stays there, then the if
+  -- statement must necessarily execute on device.
+  --
+  -- While the graph model built by this module generally migrates no more
+  -- statements than necessary to obtain a minimum vertex cut, the branches
+  -- of if statements are subject to an inaccuracy. Specifically model is not
+  -- strong enough to capture their mutual exclusivity and thus encodes that
+  -- both branches are taken. While this does not affect the resulting number
+  -- of host-device reads it means that some reads may needlessly be delayed
+  -- out of branches. The overhead as measured on futhark-benchmarks appears
+  -- to be neglible though.
+  ret <- mapM (comb cond_id) $ L.transpose branch_results
+  mapM_ (uncurry createNode) (zip bs ret)
+  where
+    results = map resSubExp . bodyResult
+
+    comb ci a = (ci <>) <$> onlyGraphedScalars (S.fromList $ subExpVars a)
+
 -- | Graph an if statement.
 graphIf :: [Binding] -> SubExp -> Body GPU -> Body GPU -> Grapher ()
 graphIf bs cond tbody fbody = do
@@ -621,7 +682,7 @@ graphIf bs cond tbody fbody = do
       )
 
   -- Record aliases for copyable memory backing returned arrays.
-  may_copy_results <- reusesBranches bs (results tbody) (results fbody)
+  may_copy_results <- reusesBranches bs [results tbody, results fbody]
   let may_migrate = not body_host_only && may_copy_results
 
   cond_id <- case (may_migrate, cond) of
@@ -702,7 +763,7 @@ graphLoop (b : bs) params lform body = do
   -- Does the loop return any arrays which prevent it from being migrated?
   let args = map snd params
   let results = map resSubExp (bodyResult body)
-  may_copy_results <- reusesBranches (b : bs) args results
+  may_copy_results <- reusesBranches (b : bs) [args, results]
 
   -- Connect loop condition to a sink if the loop cannot be migrated.
   -- The migration status of the condition is what determines whether the
@@ -1261,19 +1322,21 @@ reusesReturn bs res = do
       | otherwise =
           pure onlyCopyable
 
--- @reusesBranches bs b1 b2@ records each array binding in @bs@ as reusing
--- copyable memory if each corresponding return value in the lists @b1@ and @b2@
--- are backed by copyable memory.
+-- @reusesBranches bs seses@ records each array binding in @bs@ as
+-- reusing copyable memory if each corresponding return value in the
+-- lists in @ses@ are backed by copyable memory.  Each list is the
+-- result of a branch body (i.e. for 'if' the list has two elements).
 --
--- If every array binding is registered as being backed by copyable memory then
--- the function returns @True@, otherwise it returns @False@.
-reusesBranches :: [Binding] -> [SubExp] -> [SubExp] -> Grapher Bool
-reusesBranches bs b1 b2 = do
+-- If every array binding is registered as being backed by copyable
+-- memory then the function returns @True@, otherwise it returns
+-- @False@.
+reusesBranches :: [Binding] -> [[SubExp]] -> Grapher Bool
+reusesBranches bs seses = do
   body_depth <- metaBodyDepth <$> getMeta
-  foldM (reuse body_depth) True $ zip3 bs b1 b2
+  foldM (reuse body_depth) True $ zip bs $ L.transpose seses
   where
-    reuse :: Int -> Bool -> (Binding, SubExp, SubExp) -> Grapher Bool
-    reuse body_depth onlyCopyable (b, se1, se2)
+    reuse :: Int -> Bool -> (Binding, [SubExp]) -> Grapher Bool
+    reuse body_depth onlyCopyable (b, ses)
       | all (== intConst Int64 1) (arrayDims $ snd b) =
           -- Single element arrays are immediately recognizable as copyable so
           -- don't bother recording those. Note that this case also matches
@@ -1281,19 +1344,16 @@ reusesBranches bs b1 b2 = do
           pure onlyCopyable
       | (i, t) <- b,
         isArray t,
-        Var n1 <- se1,
-        Var n2 <- se2 =
-          do
-            body_depth_1 <- outermostCopyableArray n1
-            body_depth_2 <- outermostCopyableArray n2
-            case (body_depth_1, body_depth_2) of
-              (Just bd1, Just bd2) -> do
-                let inner = min bd1 bd2
-                recordCopyableMemory i (min body_depth inner)
-                let returns_free_var = inner <= body_depth
-                pure (onlyCopyable && not returns_free_var)
-              _ ->
-                pure False
+        Just ns <- mapM subExpVar ses = do
+          body_depths <- mapM outermostCopyableArray ns
+          case sequence body_depths of
+            Just bds -> do
+              let inner = minimum bds
+              recordCopyableMemory i (min body_depth inner)
+              let returns_free_var = inner <= body_depth
+              pure (onlyCopyable && not returns_free_var)
+            _ ->
+              pure False
       | otherwise =
           pure onlyCopyable
 
