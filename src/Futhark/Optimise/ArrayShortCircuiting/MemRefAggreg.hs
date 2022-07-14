@@ -188,7 +188,7 @@ recordMemRefUses td_env bu_env stm =
                 mapM
                   ( \(m_b, etry) -> do
                       let alias_m_b = getAliases mempty m_b
-                          stm_uses' = filter (not . (`nameIn` alias_m_b) . tupFst) stm_uses
+                          stm_uses' = filter (`notNameIn` alias_m_b . tupFst) stm_uses
                           all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
                           ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
                           lmads' = mapMaybe mbLmad ixfns
@@ -433,7 +433,7 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
   | iterator_var `nameIn` freeIn dims0 = pure Undeterminable
-  | not $ iterator_var `nameIn` freeIn offset0 = pure $ Set $ S.singleton lmad
+  | iterator_var `notNameIn` freeIn offset0 = pure $ Set $ S.singleton lmad
   | otherwise = do
       new_var <- newVName "k"
       let offset = replaceIteratorWith (typedLeafExp new_var) offset0

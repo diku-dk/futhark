@@ -811,7 +811,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       (actv1, inhibit1) =
         foldl
           ( \(act, inhb) (b, MemBlock _ _ m_b _) ->
-              if nameIn b coal_pat_names
+              if b `nameIn` coal_pat_names
                 then (act, inhb) -- ok
                 else markFailedCoal (act, inhb) m_b -- remove from active
           )
@@ -953,7 +953,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
         Just (MemBlock _ _ m_a0 _) <- getScopeMemInfo a0 (scope td_env_allocs),
         Just (MemBlock _ _ m_r _) <- getScopeMemInfo r (scope td_env_allocs),
         Just nms <- M.lookup a lutab,
-        nameIn a0 nms,
+        a0 `nameIn` nms,
         m_r `elem` M.keys (alloc td_env_allocs) =
           Just ((b, m_b), (a, m_a), (a0, m_a0), (r, m_r))
     mapmbFun _ (_patel, (_arg, _ini), _bdyres) = Nothing
@@ -1331,7 +1331,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                   mvtab = addInvAliassesVarTab td_env vtab b
 
                   is_inhibited = case M.lookup m_b inhibit_tab of
-                    Just nms -> nameIn m_yx nms
+                    Just nms -> m_yx `nameIn` nms
                     Nothing -> False
                in case (is_inhibited, mvtab) of
                     (True, _) -> acc -- fail due to inhibited
@@ -1363,7 +1363,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Copy b))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
       case (M.lookup x lutab, getScopeMemInfo b scopetab) of
         (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
-          if not (nameIn b last_uses)
+          if b `notNameIn` last_uses
             then Nothing
             else Just [(CopyCoal, id, x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
         _ -> Nothing
@@ -1372,7 +1372,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Update _ x slice_x (Var b)))
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
       case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
         (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
-          if not (nameIn b last_uses)
+          if b `notNameIn` last_uses
             then Nothing
             else Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
         _ -> Nothing
@@ -1385,7 +1385,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (FlatUpdate x slice_x b))
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
       case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
         (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
-          if not (nameIn b last_uses)
+          if b `notNameIn` last_uses
             then Nothing
             else Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
         _ -> Nothing
@@ -1410,7 +1410,7 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Concat concat_dim (b0 :| bs) _))
                           Just (MemBlock tpb shpb@(Shape dims@(_ : _)) m_b ind_b)
                             | Just d <- maybeNth concat_dim dims ->
                                 let offs' = offs + pe64 d
-                                 in if nameIn b last_uses
+                                 in if b `nameIn` last_uses
                                       then
                                         let slc =
                                               Slice $

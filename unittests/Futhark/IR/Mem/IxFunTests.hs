@@ -578,7 +578,7 @@ test_rotate_flatSlice_transpose_slice_iota =
 
 test_disjoint3 :: [TestTree]
 test_disjoint3 =
-  let foo s i = VName (nameFromString s) i
+  let foo s = VName (nameFromString s)
       add_nw64 = (+)
       add64 = (+)
       mul_nw64 = (*)
