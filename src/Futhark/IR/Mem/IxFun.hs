@@ -6,6 +6,7 @@
 -- linear-memory accessor descriptors; see Zhu, Hoeflinger and David work.
 module Futhark.IR.Mem.IxFun
   ( IxFun (..),
+    Shape,
     LMAD (..),
     LMADDim (..),
     Monotonicity (..),
@@ -16,6 +17,7 @@ module Futhark.IR.Mem.IxFun
     permute,
     rotate,
     reshape,
+    coerce,
     slice,
     flatSlice,
     rebase,
@@ -49,11 +51,9 @@ import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
-  ( DimChange (..),
-    DimIndex (..),
+  ( DimIndex (..),
     FlatDimIndex (..),
     FlatSlice (..),
-    ShapeChange,
     Slice (..),
     dimFix,
     flatSliceDims,
@@ -564,30 +564,6 @@ flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _) =
     new_strides = map (* base_stride) $ flatSliceStrides s
     new_dims = zipWith5 LMADDim new_strides (repeat 0) new_shapes [0 ..] (repeat Inc)
 
--- | Handle the simple case where all reshape dimensions are coercions.
-reshapeCoercion ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  ShapeChange num ->
-  Maybe (IxFun num)
-reshapeCoercion (IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape = do
-  let perm = lmadPermutation lmad
-  (head_coercions, reshapes, tail_coercions) <- splitCoercions newshape
-  let hd_len = length head_coercions
-      num_coercions = hd_len + length tail_coercions
-      dims' = permuteFwd perm dims
-      mid_dims = take (length dims - num_coercions) $ drop hd_len dims'
-      num_rshps = length reshapes
-  guard (num_rshps == 0 || (num_rshps == 1 && length mid_dims == 1))
-  let dims'' =
-        permuteInv perm $
-          zipWith
-            (\ld n -> ld {ldShape = n})
-            dims'
-            (newDims newshape)
-      lmad' = LMAD off dims''
-  pure $ IxFun (lmad' :| lmads) oldbase cg
-
 -- | Handle the case where a reshape operation can stay inside a single LMAD.
 --
 -- There are four conditions that all must hold for the result of a reshape
@@ -607,15 +583,12 @@ reshapeCoercion (IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape = do
 reshapeOneLMAD ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
-  ShapeChange num ->
+  Shape num ->
   Maybe (IxFun num)
 reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape = do
   let perm = lmadPermutation lmad
-  (head_coercions, reshapes, tail_coercions) <- splitCoercions newshape
-  let hd_len = length head_coercions
-      num_coercions = hd_len + length tail_coercions
       dims_perm = permuteFwd perm dims
-      mid_dims = take (length dims - num_coercions) $ drop hd_len dims_perm
+      mid_dims = take (length dims) dims_perm
       -- Ignore rotates, as we only care about not having rotates in the
       -- dimensions that aren't coercions (@mid_dims@), which we check
       -- separately.
@@ -626,7 +599,7 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape
     all (\(LMADDim s r _ _ _) -> s /= 0 && r == 0) mid_dims
       &&
       -- checking condition (1)
-      consecutive hd_len (map ldPerm mid_dims)
+      consecutive 0 (map ldPerm mid_dims)
       &&
       -- checking condition (4)
       hasContiguousPerm ixfun
@@ -634,47 +607,25 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape
       && (mon == Inc || mon == Dec)
 
   -- make new permutation
-  let rsh_len = length reshapes
+  let rsh_len = length newshape
       diff = length newshape - length dims
       iota_shape = [0 .. length newshape - 1]
       perm' =
         map
           ( \i ->
-              let ind =
-                    if i < hd_len
-                      then i
-                      else i - diff
-               in if (i >= hd_len) && (i < hd_len + rsh_len)
+              let ind = i - diff
+               in if (i >= 0) && (i < rsh_len)
                     then i -- already checked mid_dims not affected
-                    else
-                      let p = ldPerm (dims !! ind)
-                       in if p < hd_len
-                            then p
-                            else p + diff
+                    else ldPerm (dims !! ind) + diff
           )
           iota_shape
       -- split the dimensions
       (support_inds, repeat_inds) =
         foldl
-          ( \(sup, rpt) (i, shpdim, ip) ->
-              case (i < hd_len, i >= hd_len + rsh_len, shpdim) of
-                (True, _, DimCoercion n) ->
-                  case dims_perm !! i of
-                    (LMADDim 0 _ _ _ _) -> (sup, (ip, n) : rpt)
-                    (LMADDim _ r _ _ _) -> ((ip, (r, n)) : sup, rpt)
-                (_, True, DimCoercion n) ->
-                  case dims_perm !! (i - diff) of
-                    (LMADDim 0 _ _ _ _) -> (sup, (ip, n) : rpt)
-                    (LMADDim _ r _ _ _) -> ((ip, (r, n)) : sup, rpt)
-                (False, False, _) ->
-                  ((ip, (0, newDim shpdim)) : sup, rpt)
-                -- already checked that the reshaped
-                -- dims cannot be rotates
-                _ -> error "reshape: reached impossible case"
-          )
+          (\(sup, rpt) (shpdim, ip) -> ((ip, (0, shpdim)) : sup, rpt))
           ([], [])
           $ reverse
-          $ zip3 iota_shape newshape perm'
+          $ zip newshape perm'
 
       (sup_inds, support) = unzip $ sortBy (compare `on` fst) support_inds
       (rpt_inds, repeats) = unzip repeat_inds
@@ -691,32 +642,31 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape
     consecutive i [p] = i == p
     consecutive i ps = and $ zipWith (==) ps [i, i + 1 ..]
 
-splitCoercions ::
-  (Eq num, IntegralExp num) =>
-  ShapeChange num ->
-  Maybe (ShapeChange num, ShapeChange num, ShapeChange num)
-splitCoercions newshape' = do
-  let (head_coercions, newshape'') = span isCoercion newshape'
-      (reshapes, tail_coercions) = break isCoercion newshape''
-  guard (all isCoercion tail_coercions)
-  pure (head_coercions, reshapes, tail_coercions)
-  where
-    isCoercion DimCoercion {} = True
-    isCoercion _ = False
-
 -- | Reshape an index function.
 reshape ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
-  ShapeChange num ->
+  Shape num ->
   IxFun num
 reshape ixfun new_shape
-  | Just ixfun' <- reshapeCoercion ixfun new_shape = ixfun'
   | Just ixfun' <- reshapeOneLMAD ixfun new_shape = ixfun'
 reshape (IxFun (lmad0 :| lmad0s) oshp cg) new_shape =
-  case iota (newDims new_shape) of
+  case iota new_shape of
     IxFun (lmad :| []) _ _ -> IxFun (lmad :| lmad0 : lmad0s) oshp cg
     _ -> error "reshape: reached impossible case"
+
+-- | Coerce an index function to look like it has a new shape.
+-- Dynamically the shape must be the same.
+coerce ::
+  (Eq num, IntegralExp num) =>
+  IxFun num ->
+  Shape num ->
+  IxFun num
+coerce (IxFun (lmad :| lmads) oshp cg) new_shape =
+  IxFun (onLMAD lmad :| lmads) oshp cg
+  where
+    onLMAD (LMAD offset dims) = LMAD offset $ zipWith onDim dims new_shape
+    onDim ld d = ld {ldShape = d}
 
 -- | The number of dimensions in the domain of the input function.
 rank ::
@@ -849,7 +799,7 @@ rebase new_base@(IxFun lmads_base shp_base cg_base) ixfun@(IxFun lmads shp cg)
             if base ixfun == shape new_base
               then (lmads_base, shp_base)
               else
-                let IxFun lmads' shp_base'' _ = reshape new_base $ map DimCoercion shp
+                let IxFun lmads' shp_base'' _ = reshape new_base shp
                  in (lmads', shp_base'')
        in IxFun (lmads @++@ lmads_base') shp_base' (cg && cg_base)
 

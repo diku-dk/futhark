@@ -217,8 +217,10 @@ instance Pretty BasicOp where
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   ppr (Scratch t shape) =
     text "scratch" <> apply (ppr t : map ppr shape)
-  ppr (Reshape shape e) =
-    text "reshape" <> apply [apply (map ppr shape), ppr e]
+  ppr (Reshape ReshapeArbitrary shape e) =
+    text "reshape" <> apply [ppr shape, ppr e]
+  ppr (Reshape ReshapeCoerce shape e) =
+    text "coerce" <> apply [ppr shape, ppr e]
   ppr (Rearrange perm e) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Rotate es e) =
@@ -395,10 +397,6 @@ instance Pretty OpaqueTypes where
 instance PrettyRep rep => Pretty (Prog rep) where
   ppr (Prog types consts funs) =
     stack $ punctuate line $ ppr types : ppr consts : map ppr funs
-
-instance Pretty d => Pretty (DimChange d) where
-  ppr (DimCoercion se) = text "~" <> ppr se
-  ppr (DimNew se) = ppr se
 
 instance Pretty d => Pretty (DimIndex d) where
   ppr (DimFix i) = ppr i

@@ -238,15 +238,6 @@ pSrcLoc = pStringLiteral $> mempty -- FIXME
 pErrorLoc :: Parser (SrcLoc, [SrcLoc])
 pErrorLoc = (,mempty) <$> pSrcLoc
 
-pShapeChange :: Parser (ShapeChange SubExp)
-pShapeChange = parens $ pDimChange `sepBy` pComma
-  where
-    pDimChange =
-      choice
-        [ "~" $> DimCoercion <*> pSubExp,
-          DimNew <$> pSubExp
-        ]
-
 pIota :: Parser BasicOp
 pIota =
   choice $ map p allIntTypes
@@ -286,7 +277,9 @@ pBasicOp =
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"
-        *> parens (Reshape <$> pShapeChange <* pComma <*> pVName),
+        *> parens (Reshape ReshapeArbitrary <$> pShape <* pComma <*> pVName),
+      keyword "coerce"
+        *> parens (Reshape ReshapeCoerce <$> pShape <* pComma <*> pVName),
       keyword "scratch"
         *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"

@@ -467,8 +467,8 @@ graphStm stm = do
       -- Can be replaced with 'graphHostOnly e' to disable migration.
       -- A fix can be verified by enabling tests/migration/reuse4_scratch.fut
       graphInefficientReturn s e
-    BasicOp (Reshape s arr) -> do
-      graphInefficientReturn (newDims s) e
+    BasicOp (Reshape _ s arr) -> do
+      graphInefficientReturn (shapeDims s) e
       one bs `reuses` arr
     BasicOp (Rearrange _ arr) -> do
       graphInefficientReturn [] e
