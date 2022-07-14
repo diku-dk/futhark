@@ -802,6 +802,16 @@ defCompileExp ::
   ImpM rep r op ()
 defCompileExp pat (If cond tbranch fbranch _) =
   sIf (toBoolExp cond) (compileBody pat tbranch) (compileBody pat fbranch)
+defCompileExp pat (Match ses cases def_body _) = do
+  ses' <- mapM toExp ses
+  foldl (f ses') (compileBody pat def_body) cases
+  where
+    cmp se (Just v) = isBool $ se ~==~ v
+    cmp _ Nothing = true
+    match ses' vs =
+      foldl (.&&.) true (zipWith cmp ses' (map (fmap ValueExp) vs))
+    f ses' rest (Case vs body) =
+      sIf (match ses' vs) (compileBody pat body) rest
 defCompileExp pat (Apply fname args _ _) = do
   dest <- destinationFromPat pat
   targets <- funcallTargets dest
