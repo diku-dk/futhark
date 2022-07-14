@@ -356,7 +356,12 @@ existentialOfShape dims perm start =
   where
     lmad = LMAD (Ext start) $ take (length dims) $ zipWith onDim perm [0 ..]
     onDim p i =
-      LMADDim (Ext (i * 3 + 1)) (Ext (i * 3 + 2)) (Ext (i * 3 + 3)) p Unknown
+      LMADDim
+        (Ext (start + 1 + i * 3))
+        (Ext (start + 2 + i * 3))
+        (Ext (start + 3 + i * 3))
+        p
+        Unknown
 
 -- | Permute dimensions.
 permute ::
