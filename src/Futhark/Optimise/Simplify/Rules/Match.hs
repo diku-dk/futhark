@@ -95,7 +95,7 @@ ruleMatch _ pat _ (_, [Case _ tbranch], _, IfDec _ IfFallback)
         [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
           | (p, SubExpRes cs se) <- zip (patElems pat) ses
         ]
-ruleMatch _ pat _ ([cond], [Case _ tb], fb, _)
+ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, _)
   | Body _ _ [SubExpRes tcs (Constant (IntValue t))] <- tb,
     Body _ _ [SubExpRes fcs (Constant (IntValue f))] <- fb =
       if oneIshInt t && zeroIshInt f && tcs == mempty && fcs == mempty
