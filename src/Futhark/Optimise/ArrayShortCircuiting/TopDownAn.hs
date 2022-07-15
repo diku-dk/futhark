@@ -80,8 +80,10 @@ isInScope td_env m =
 getDirAliasFromExp :: Exp (Aliases rep) -> Maybe (VName, DirAlias)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, id)
-getDirAliasFromExp (BasicOp (Reshape _ shp_chg x)) =
-  Just (x, (`IxFun.reshape` map (fmap pe64) shp_chg))
+getDirAliasFromExp (BasicOp (Reshape ReshapeCoerce shp x)) =
+  Just (x, (`IxFun.coerce` shapeDims (fmap pe64 shp)))
+getDirAliasFromExp (BasicOp (Reshape ReshapeArbitrary shp x)) =
+  Just (x, (`IxFun.reshape` shapeDims (fmap pe64 shp)))
 getDirAliasFromExp (BasicOp (Rearrange _ _)) =
   Nothing
 getDirAliasFromExp (BasicOp (Rotate rs x)) =
