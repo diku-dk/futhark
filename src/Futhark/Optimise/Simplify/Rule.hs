@@ -24,7 +24,6 @@ module Futhark.Optimise.Simplify.Rule
     SimplificationRule (..),
     RuleGeneric,
     RuleBasicOp,
-    RuleIf,
     RuleMatch,
     RuleDoLoop,
 
@@ -33,7 +32,6 @@ module Futhark.Optimise.Simplify.Rule
     TopDownRule,
     TopDownRuleGeneric,
     TopDownRuleBasicOp,
-    TopDownRuleIf,
     TopDownRuleMatch,
     TopDownRuleDoLoop,
     TopDownRuleOp,
@@ -43,7 +41,6 @@ module Futhark.Optimise.Simplify.Rule
     BottomUpRule,
     BottomUpRuleGeneric,
     BottomUpRuleBasicOp,
-    BottomUpRuleIf,
     BottomUpRuleMatch,
     BottomUpRuleDoLoop,
     BottomUpRuleOp,
@@ -119,17 +116,6 @@ type RuleBasicOp rep a =
     Rule rep
   )
 
-type RuleIf rep a =
-  a ->
-  Pat (LetDec rep) ->
-  StmAux (ExpDec rep) ->
-  ( SubExp,
-    Body rep,
-    Body rep,
-    IfDec (BranchType rep)
-  ) ->
-  Rule rep
-
 type RuleMatch rep a =
   a ->
   Pat (LetDec rep) ->
@@ -163,7 +149,6 @@ type RuleOp rep a =
 data SimplificationRule rep a
   = RuleGeneric (RuleGeneric rep a)
   | RuleBasicOp (RuleBasicOp rep a)
-  | RuleIf (RuleIf rep a)
   | RuleMatch (RuleMatch rep a)
   | RuleDoLoop (RuleDoLoop rep a)
   | RuleOp (RuleOp rep a)
@@ -173,18 +158,17 @@ data SimplificationRule rep a
 data Rules rep a = Rules
   { rulesAny :: [SimplificationRule rep a],
     rulesBasicOp :: [SimplificationRule rep a],
-    rulesIf :: [SimplificationRule rep a],
     rulesMatch :: [SimplificationRule rep a],
     rulesDoLoop :: [SimplificationRule rep a],
     rulesOp :: [SimplificationRule rep a]
   }
 
 instance Semigroup (Rules rep a) where
-  Rules as1 bs1 cs1 ds1 es1 fs1 <> Rules as2 bs2 cs2 ds2 es2 fs2 =
-    Rules (as1 <> as2) (bs1 <> bs2) (cs1 <> cs2) (ds1 <> ds2) (es1 <> es2) (fs1 <> fs2)
+  Rules as1 bs1 cs1 ds1 es1 <> Rules as2 bs2 cs2 ds2 es2 =
+    Rules (as1 <> as2) (bs1 <> bs2) (cs1 <> cs2) (ds1 <> ds2) (es1 <> es2)
 
 instance Monoid (Rules rep a) where
-  mempty = Rules mempty mempty mempty mempty mempty mempty
+  mempty = Rules mempty mempty mempty mempty mempty
 
 -- | Context for a rule applied during top-down traversal of the
 -- program.  Takes a symbol table as argument.
@@ -193,8 +177,6 @@ type TopDown rep = ST.SymbolTable rep
 type TopDownRuleGeneric rep = RuleGeneric rep (TopDown rep)
 
 type TopDownRuleBasicOp rep = RuleBasicOp rep (TopDown rep)
-
-type TopDownRuleIf rep = RuleIf rep (TopDown rep)
 
 type TopDownRuleMatch rep = RuleMatch rep (TopDown rep)
 
@@ -211,8 +193,6 @@ type BottomUp rep = (ST.SymbolTable rep, UT.UsageTable)
 type BottomUpRuleGeneric rep = RuleGeneric rep (BottomUp rep)
 
 type BottomUpRuleBasicOp rep = RuleBasicOp rep (BottomUp rep)
-
-type BottomUpRuleIf rep = RuleIf rep (BottomUp rep)
 
 type BottomUpRuleMatch rep = RuleMatch rep (BottomUp rep)
 
@@ -251,20 +231,16 @@ ruleBook topdowns bottomups =
     groupRules :: [SimplificationRule m a] -> Rules m a
     groupRules rs =
       Rules
-        rs
-        (filter forBasicOp rs)
-        (filter forIf rs)
-        (filter forMatch rs)
-        (filter forDoLoop rs)
-        (filter forOp rs)
+        { rulesAny = rs,
+          rulesBasicOp = filter forBasicOp rs,
+          rulesMatch = filter forMatch rs,
+          rulesDoLoop = filter forDoLoop rs,
+          rulesOp = filter forOp rs
+        }
 
     forBasicOp RuleBasicOp {} = True
     forBasicOp RuleGeneric {} = True
     forBasicOp _ = False
-
-    forIf RuleIf {} = True
-    forIf RuleGeneric {} = True
-    forIf _ = False
 
     forMatch RuleMatch {} = True
     forMatch RuleGeneric {} = True
@@ -308,7 +284,6 @@ rulesForStm stm = case stmExp stm of
   BasicOp {} -> rulesBasicOp
   DoLoop {} -> rulesDoLoop
   Op {} -> rulesOp
-  If {} -> rulesIf
   Match {} -> rulesMatch
   _ -> rulesAny
 
@@ -317,8 +292,6 @@ applyRule (RuleGeneric f) a stm = f a stm
 applyRule (RuleBasicOp f) a (Let pat aux (BasicOp e)) = f a pat aux e
 applyRule (RuleDoLoop f) a (Let pat aux (DoLoop merge form body)) =
   f a pat aux (merge, form, body)
-applyRule (RuleIf f) a (Let pat aux (If cond tbody fbody ifsort)) =
-  f a pat aux (cond, tbody, fbody, ifsort)
 applyRule (RuleMatch f) a (Let pat aux (Match cond cases defbody ifsort)) =
   f a pat aux (cond, cases, defbody, ifsort)
 applyRule (RuleOp f) a (Let pat aux (Op op)) =
