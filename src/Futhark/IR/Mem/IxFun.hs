@@ -350,16 +350,18 @@ iota = iotaOffset 0
 -- | Create a contiguous single-LMAD index function that is
 -- existential in everything (starting at the given index), and with
 -- the provided shape and permutation.
-existentialOfShape :: Shape (Ext a) -> [Int] -> Int -> IxFun (Ext a)
-existentialOfShape dims perm start =
-  IxFun (NE.singleton lmad) dims False
+existentialOfShape :: Shape (Ext a) -> Int -> [Int] -> Int -> IxFun (Ext a)
+existentialOfShape dims basis_rank perm start =
+  IxFun (NE.singleton lmad) basis False
   where
-    lmad = LMAD (Ext start) $ take (length dims) $ zipWith onDim perm [0 ..]
-    onDim p i =
+    basis = take basis_rank $ map Ext [dims_rank * 3 ..]
+    dims_rank = length dims
+    lmad = LMAD (Ext start) $ zipWith onDim perm (zip dims [0 ..])
+    onDim p (d, i) =
       LMADDim
-        (Ext (start + 1 + i * 3))
-        (Ext (start + 2 + i * 3))
-        (Ext (start + 3 + i * 3))
+        (Ext (start + 1 + i * 2))
+        (Ext (start + 2 + i * 2))
+        d
         p
         Unknown
 

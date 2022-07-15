@@ -46,7 +46,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Foldable (toList)
-import Data.List (foldl', zip4, zip5)
+import Data.List (foldl', zip4)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -758,11 +758,13 @@ numLMADs = length . IxFun.ixfunLMADs
 ixFunPerm :: IxFun -> [Int]
 ixFunPerm = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
 
+type Reqs = (Space, [Int], Int)
+
 ensureSpaceAndSingleLMAD ::
   (Allocable fromrep torep inner) =>
-  Maybe (Space, [Int]) ->
+  Maybe Reqs ->
   SubExpRes ->
-  AllocM fromrep torep (SubExpRes, Space, [Int])
+  AllocM fromrep torep (SubExpRes, Reqs)
 ensureSpaceAndSingleLMAD desired r@(SubExpRes cs (Var v)) = do
   v_info <- lookupMemInfo v
   case v_info of
@@ -774,18 +776,21 @@ ensureSpaceAndSingleLMAD desired r@(SubExpRes cs (Var v)) = do
           if numLMADs ixfun > 1
             || maybe False (/= mem_space) desired_space
             || maybe False (/= v_perm) desired_perm
-            || not (IxFun.contiguous ixfun)
+            || maybe False (/= length (IxFun.base ixfun)) desired_base_rank
             then do
               let perm = fromMaybe v_perm desired_perm
-              (,mem_space,perm) . SubExpRes cs . Var . snd
+                  reqs = (mem_space, perm, length (IxFun.base ixfun))
+              (,reqs) . SubExpRes cs . Var . snd
                 <$> allocPermArray mem_space perm (baseString v) v
-            else pure (r, mem_space, v_perm)
+            else pure (r, (mem_space, v_perm, length $ IxFun.base ixfun))
         _ -> error "ensureSpaceAndSingleLMAD: no memory info"
-    _ -> pure (r, DefaultSpace, [])
+    _ -> pure (r, (DefaultSpace, [], 0))
   where
-    desired_space = fst <$> desired
-    desired_perm = snd <$> desired
-ensureSpaceAndSingleLMAD _ r = pure (r, DefaultSpace, [])
+    (desired_space, desired_perm, desired_base_rank) = do
+      case desired of
+        Just (x, y, z) -> (Just x, Just y, Just z)
+        Nothing -> (Nothing, Nothing, Nothing)
+ensureSpaceAndSingleLMAD _ r = pure (r, (DefaultSpace, [], 0))
 
 caseBodyMemCtx ::
   (Allocable fromrep torep inner) =>
@@ -812,16 +817,17 @@ caseBodyMemCtx (SubExpRes _ (Var v)) = do
 allocInCaseBody ::
   (Allocable fromrep torep inner) =>
   [ExtType] ->
-  [Maybe (Space, [Int])] ->
+  [Maybe Reqs] ->
   Body fromrep ->
-  AllocM fromrep torep (Body torep, ([BranchTypeMem], [(Space, [Int])]))
-allocInCaseBody rets spaces (Body _ stms res) = buildBody . allocInStms stms $ do
-  let offsets = scanl (+) 0 $ map numCtxNeeded rets
-      num_new_ctx = last offsets
-  (ctx, ctx_rets, res', res_rets, spaces') <-
-    foldM (helper num_new_ctx) ([], [], [], [], []) $
-      zip4 rets res spaces offsets
-  pure (ctx <> res', (ctx_rets <> res_rets, spaces'))
+  AllocM fromrep torep (Body torep, ([BranchTypeMem], [Reqs]))
+allocInCaseBody rets spaces (Body _ stms res) =
+  buildBody . allocInStms stms $ do
+    let offsets = scanl (+) 0 $ map numCtxNeeded rets
+        num_new_ctx = last offsets
+    (ctx, ctx_rets, res', res_rets, spaces') <-
+      foldM (helper num_new_ctx) ([], [], [], [], []) $
+        zip4 rets res spaces offsets
+    pure (ctx <> res', (ctx_rets <> res_rets, spaces'))
   where
     numCtxNeeded (Array _ shape _) =
       -- Memory + offset + (basis,stride,rotate,size)*rank.
@@ -832,24 +838,24 @@ allocInCaseBody rets spaces (Body _ stms res) = buildBody . allocInStms stms $ d
       num_new_ctx
       (ctx_acc, ctx_rets_acc, res_acc, res_rets_acc, spaces_acc)
       (ifr, r, space_and_perm, ctx_offset) = do
-        (r', space, perm) <- ensureSpaceAndSingleLMAD space_and_perm r
+        (r', reqs) <- ensureSpaceAndSingleLMAD space_and_perm r
         (mem_ctx_ses, mem_ctx_rets) <- unzip <$> caseBodyMemCtx r'
-        let body_ret = inspect num_new_ctx ctx_offset ifr space perm
+        let body_ret = inspect num_new_ctx ctx_offset ifr reqs
         pure
           ( ctx_acc ++ mem_ctx_ses,
             ctx_rets_acc ++ mem_ctx_rets,
             res_acc ++ [r'],
             res_rets_acc ++ [body_ret],
-            spaces_acc ++ [(space, perm)]
+            spaces_acc ++ [reqs]
           )
 
-    inspect num_new_ctx k (Array pt shape u) space perm =
+    inspect num_new_ctx k (Array pt shape u) (space, perm, base_rank) =
       let shape' = fmap (adjustExt num_new_ctx) shape
        in MemArray pt shape' u . ReturnsNewBlock space k $
-            convert <$> IxFun.existentialOfShape (shapeDims shape') perm (k + 1)
-    inspect _ _ (Acc acc ispace ts u) _ _ = MemAcc acc ispace ts u
-    inspect _ _ (Prim pt) _ _ = MemPrim pt
-    inspect _ _ (Mem space) _ _ = MemMem space
+            convert <$> IxFun.existentialOfShape (shapeDims shape') base_rank perm (k + 1)
+    inspect _ _ (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
+    inspect _ _ (Prim pt) _ = MemPrim pt
+    inspect _ _ (Mem space) _ = MemMem space
 
     convert (Ext i) = le64 (Ext i)
     convert (Free v) = Free <$> pe64 v
