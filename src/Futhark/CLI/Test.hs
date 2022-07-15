@@ -497,19 +497,6 @@ reportTable ts = do
 moveCursorToTableTop :: IO ()
 moveCursorToTableTop = cursorUpLine tableLines
 
-reportText :: TestStatus -> IO ()
-reportText ts =
-  putStr $
-    "("
-      ++ show (testStatusFail ts)
-      ++ " failed, "
-      ++ show (testStatusPass ts)
-      ++ " passed, "
-      ++ show num_remain
-      ++ " to go).\n"
-  where
-    num_remain = length $ testStatusRemain ts
-
 runTests :: TestConfig -> [FilePath] -> IO ()
 runTests config paths = do
   -- We force line buffering to ensure that we produce running output.
@@ -533,10 +520,10 @@ runTests config paths = do
 
       report
         | fancy = reportTable
-        | otherwise = reportText
+        | otherwise = const (pure ())
       clear
         | fancy = clearFromCursorToScreenEnd
-        | otherwise = putStr "\n"
+        | otherwise = pure ()
 
       numTestCases tc =
         case testAction $ testCaseTest tc of
