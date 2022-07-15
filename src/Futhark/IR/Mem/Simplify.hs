@@ -109,7 +109,7 @@ callKernelRules =
   standardRules
     <> ruleBook
       [ RuleBasicOp copyCopyToCopy,
-        RuleIf unExistentialiseMemory,
+        RuleMatch unExistentialiseMemory,
         RuleOp decertifySafeAlloc
       ]
       []
@@ -118,8 +118,8 @@ callKernelRules =
 -- the array is not existential, and the index function of the array
 -- does not refer to any names in the pattern, then we can create a
 -- block of the proper size and always return there.
-unExistentialiseMemory :: SimplifyMemory rep inner => TopDownRuleIf (Wise rep)
-unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
+unExistentialiseMemory :: SimplifyMemory rep inner => TopDownRuleMatch (Wise rep)
+unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
   | ST.simplifyMemory vtable,
     fixable <- foldl hasConcretisableMemory mempty $ patElems pat,
     not $ null fixable = Simplify $ do
@@ -149,9 +149,9 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
                 pure $ SubExpRes cs $ Var mem
           updateResult _ se =
             pure se
-      tbranch' <- updateBody tbranch
-      fbranch' <- updateBody fbranch
-      letBind pat $ If cond tbranch' fbranch' ifdec
+      cases' <- mapM (traverse updateBody) cases
+      defbody' <- updateBody defbody
+      letBind pat $ Match cond cases' defbody' ifdec
   where
     onlyUsedIn name here =
       not . any ((name `nameIn`) . freeIn) . filter ((/= here) . patElemName) $
@@ -167,13 +167,13 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
             <$> find
               ((mem ==) . patElemName . snd)
               (zip [(0 :: Int) ..] $ patElems pat),
-        Just tse <- maybeNth j $ bodyResult tbranch,
-        Just fse <- maybeNth j $ bodyResult fbranch,
+        Just cases_ses <- mapM (maybeNth j . bodyResult . caseBody) cases,
+        Just defbody_se <- maybeNth j $ bodyResult defbody,
         mem `onlyUsedIn` patElemName pat_elem,
         length (IxFun.base ixfun) == shapeRank shape, -- See #1325
         all knownSize (shapeDims shape),
         not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
-        fse /= tse =
+        any (defbody_se /=) cases_ses =
           let mem_size =
                 untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
            in (pat_elem, mem_size, mem, space) : fixable
