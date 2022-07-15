@@ -296,6 +296,7 @@ library
       Futhark.Optimise.Simplify.Rules.ClosedForm
       Futhark.Optimise.Simplify.Rules.Index
       Futhark.Optimise.Simplify.Rules.Loop
+      Futhark.Optimise.Simplify.Rules.Match
       Futhark.Optimise.Simplify.Rules.Simple
       Futhark.Optimise.Sink
       Futhark.Optimise.TileLoops
