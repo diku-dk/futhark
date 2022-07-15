@@ -188,7 +188,7 @@ recordMemRefUses td_env bu_env stm =
                 mapM
                   ( \(m_b, etry) -> do
                       let alias_m_b = getAliases mempty m_b
-                          stm_uses' = filter (`notNameIn` alias_m_b . tupFst) stm_uses
+                          stm_uses' = filter ((`notNameIn` alias_m_b) . tupFst) stm_uses
                           all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
                           ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
                           lmads' = mapMaybe mbLmad ixfns
