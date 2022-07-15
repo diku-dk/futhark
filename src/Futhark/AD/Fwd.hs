@@ -428,6 +428,12 @@ fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
   pat' <- bundleNew pat
   ret' <- bundleTan ret
   addStm $ Let pat' aux $ If cond t' f' $ IfDec ret' ifsort
+fwdStm (Let pat aux (Match ses cases defbody (IfDec ret ifsort))) = do
+  cases' <- slocal' $ mapM (traverse fwdBody) cases
+  defbody' <- slocal' $ fwdBody defbody
+  pat' <- bundleNew pat
+  ret' <- bundleTan ret
+  addStm $ Let pat' aux $ Match ses cases' defbody' $ IfDec ret' ifsort
 fwdStm (Let pat aux (DoLoop val_pats loop@(WhileLoop v) body)) = do
   val_pats' <- bundleNew val_pats
   pat' <- bundleNew pat

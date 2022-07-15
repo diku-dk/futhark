@@ -218,19 +218,21 @@ eParam = eSubExp . Var . paramName
 eMatch ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   [SubExp] ->
-  [([Maybe PrimValue], Body (Rep m))] ->
-  Body (Rep m) ->
+  [([Maybe PrimValue], m (Body (Rep m)))] ->
+  m (Body (Rep m)) ->
   m (Exp (Rep m))
-eMatch ses cases def_case = do
+eMatch ses cases_m defbody_m = do
+  cases <- mapM (traverse insertStmsM) cases_m
+  defbody <- insertStmsM defbody_m
   ts <-
     foldl' generaliseExtTypes
-      <$> bodyExtType def_case
+      <$> bodyExtType defbody
       <*> mapM (bodyExtType . snd) cases
   cases' <- forM cases $ \(vs, body) ->
     Case vs <$> addContextForBranch ts body
-  def_case' <- addContextForBranch ts def_case
+  defbody' <- addContextForBranch ts defbody
   let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
-  pure $ Match ses cases' def_case' $ IfDec ts' IfNormal
+  pure $ Match ses cases' defbody' $ IfDec ts' IfNormal
   where
     addContextForBranch ts (Body _ stms val_res) = do
       body_ts <- extendedScope (traverse subExpResType val_res) stmsscope

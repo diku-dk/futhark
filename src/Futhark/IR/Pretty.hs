@@ -245,7 +245,7 @@ maybeNest b
   | null $ bodyStms b = ppr b
   | otherwise = nestedBlock "{" "}" $ ppr b
 
-instance PrettyRep rep => Pretty (Case rep) where
+instance PrettyRep rep => Pretty (Case (Body rep)) where
   ppr (Case vs b) =
     "case" <+> ppTuple' (map (maybe "_" ppr) vs) <+> "->" <+> maybeNest b
 

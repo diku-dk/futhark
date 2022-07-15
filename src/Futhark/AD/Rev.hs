@@ -283,6 +283,26 @@ diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
           (diffBody adjs branches_free tbody)
           (diffBody adjs branches_free fbody)
     zipWithM_ insAdj branches_free branches_free_adj
+diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
+  addStm stm
+  m
+  returnSweepCode $ do
+    let cases_free = map freeIn cases
+        defbody_free = freeIn defbody
+        branches_free = namesToList $ mconcat $ defbody_free : cases_free
+
+    adjs <- mapM lookupAdj $ patNames pat
+
+    branches_free_adj <-
+      ( pure . takeLast (length branches_free)
+          <=< letTupExp "branch_adj"
+          <=< renameExp
+        )
+        =<< eMatch
+          ses
+          (map (fmap $ diffBody adjs branches_free) cases)
+          (diffBody adjs branches_free defbody)
+    zipWithM_ insAdj branches_free branches_free_adj
 diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
 diffStm (Let pat aux loop@DoLoop {}) m =

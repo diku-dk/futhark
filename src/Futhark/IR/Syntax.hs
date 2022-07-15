@@ -401,13 +401,17 @@ type WithAccInput rep =
 -- elements in the pattern must match the number of scrutinees.  A
 -- 'Nothing' value indicates that we don't care about it (i.e. a
 -- wildcard).
-data Case rep = Case {casePat :: [Maybe PrimValue], caseBody :: Body rep}
+data Case body = Case {casePat :: [Maybe PrimValue], caseBody :: body}
+  deriving (Eq, Ord, Show)
 
-deriving instance RepTypes rep => Eq (Case rep)
+instance Functor Case where
+  fmap = fmapDefault
 
-deriving instance RepTypes rep => Show (Case rep)
+instance Foldable Case where
+  foldMap = foldMapDefault
 
-deriving instance RepTypes rep => Ord (Case rep)
+instance Traversable Case where
+  traverse f (Case vs b) = Case vs <$> f b
 
 -- | The root Futhark expression type.  The v'Op' constructor contains
 -- a rep-specific operation.  Do-loops, branches and function calls
@@ -417,7 +421,7 @@ data Exp rep
     BasicOp BasicOp
   | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
   | If SubExp (Body rep) (Body rep) (IfDec (BranchType rep))
-  | Match [SubExp] [Case rep] (Body rep) (IfDec (BranchType rep))
+  | Match [SubExp] [Case (Body rep)] (Body rep) (IfDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
     DoLoop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
   | -- | Create accumulators backed by the given arrays (which are

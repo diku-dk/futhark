@@ -613,7 +613,7 @@ graphApply fn bs e = do
     else graphSimple bs e
 
 -- | Graph a Match statement.
-graphMatch :: [Binding] -> [SubExp] -> [Case GPU] -> Body GPU -> Grapher ()
+graphMatch :: [Binding] -> [SubExp] -> [Case (Body GPU)] -> Body GPU -> Grapher ()
 graphMatch bs ses cases defbody = do
   body_host_only <-
     incForkDepthFor $
