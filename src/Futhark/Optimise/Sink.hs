@@ -177,8 +177,8 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
                 else (stm : stms', sunk)
       | Match cond cases defbody ret <- stmExp stm =
           let onCase (Case vs body) =
-                let (body', sunk) = optimiseBranch onOp vtable sinking body
-                 in (Case vs body', sunk)
+                let (body', body_sunk) = optimiseBranch onOp vtable sinking body
+                 in (Case vs body', body_sunk)
               (cases', cases_sunk) = unzip $ map onCase cases
               (defbody', defbody_sunk) = optimiseBranch onOp vtable sinking defbody
               (stms', sunk) = optimiseStms' vtable' sinking stms
