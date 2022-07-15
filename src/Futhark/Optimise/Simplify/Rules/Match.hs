@@ -28,8 +28,8 @@ caseMatches ses = and . zipWith match ses . casePat
 caseNeverMatches :: [SubExp] -> Case a -> Bool
 caseNeverMatches ses = or . zipWith impossible ses . casePat
   where
-    impossible se (Just v) = se /= Constant v
-    impossible _ Nothing = False
+    impossible (Constant v1) (Just v2) = v1 /= v2
+    impossible _ _ = False
 
 ruleMatch :: BuilderOps rep => TopDownRuleMatch rep
 -- Remove impossible cases.
