@@ -552,10 +552,7 @@ runTests config paths = do
             report ts
             msg <- takeMVar reportmvar
             case msg of
-              TestStarted test -> do
-                unless fancy $
-                  putStr $
-                    "Started testing " <> testCaseProgram test <> " "
+              TestStarted test ->
                 getResults $ ts {testStatusRun = test : testStatusRun ts}
               TestDone test res -> do
                 let ts' =
@@ -573,9 +570,6 @@ runTests config paths = do
                             { testStatusRunPass =
                                 testStatusRunPass ts' + numTestCases test
                             }
-                    unless fancy $
-                      putStr $
-                        "Finished testing " <> testCaseProgram test <> " "
                     getResults $ ts'' {testStatusPass = testStatusPass ts + 1}
                   Failure s -> do
                     when fancy moveCursorToTableTop
