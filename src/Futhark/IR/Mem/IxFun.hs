@@ -352,7 +352,7 @@ iota = iotaOffset 0
 -- the provided shape and permutation.
 existentialOfShape :: Shape (Ext a) -> [Int] -> Int -> IxFun (Ext a)
 existentialOfShape dims perm start =
-  IxFun (NE.singleton lmad) dims True
+  IxFun (NE.singleton lmad) dims False
   where
     lmad = LMAD (Ext start) $ take (length dims) $ zipWith onDim perm [0 ..]
     onDim p i =
