@@ -125,7 +125,7 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.State
-import Data.List (foldl', sortOn)
+import Data.List (foldl', sortOn, transpose)
 import qualified Data.Map.Strict as M
 import Futhark.Builder
 import Futhark.IR
@@ -212,13 +212,21 @@ eParam ::
   m (Exp (Rep m))
 eParam = eSubExp . Var . paramName
 
+removeRedundantScrutinees :: [SubExp] -> [Case b] -> ([SubExp], [Case b])
+removeRedundantScrutinees ses cases =
+  let (ses', vs) =
+        unzip $ filter interesting $ zip ses $ transpose (map casePat cases)
+   in (ses', zipWith Case (transpose vs) $ map caseBody cases)
+  where
+    interesting = any (/= Nothing) . snd
+
 -- | Construct a 'Match' expression.  The main convenience here is
 -- that the existential context of the return type is automatically
 -- deduced, and the necessary elements added to the branches.
 eMatch ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   [SubExp] ->
-  [([Maybe PrimValue], m (Body (Rep m)))] ->
+  [Case (m (Body (Rep m)))] ->
   m (Body (Rep m)) ->
   m (Exp (Rep m))
 eMatch ses cases_m defbody_m = do
@@ -227,12 +235,12 @@ eMatch ses cases_m defbody_m = do
   ts <-
     foldl' generaliseExtTypes
       <$> bodyExtType defbody
-      <*> mapM (bodyExtType . snd) cases
-  cases' <- forM cases $ \(vs, body) ->
-    Case vs <$> addContextForBranch ts body
+      <*> mapM (bodyExtType . caseBody) cases
+  cases' <- mapM (traverse $ addContextForBranch ts) cases
   defbody' <- addContextForBranch ts defbody
   let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
-  pure $ Match ses cases' defbody' $ IfDec ts' IfNormal
+      (ses', cases'') = removeRedundantScrutinees ses cases'
+  pure $ Match ses' cases'' defbody' $ IfDec ts' IfNormal
   where
     addContextForBranch ts (Body _ stms val_res) = do
       body_ts <- extendedScope (traverse subExpResType val_res) stmsscope

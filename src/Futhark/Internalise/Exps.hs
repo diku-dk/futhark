@@ -533,17 +533,16 @@ internaliseAppExp desc _ (E.Match e orig_cs _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
   cs <- mapM (onCase ses) orig_cs
   case NE.uncons cs of
-    ((_, body), Nothing) ->
+    (I.Case _ body, Nothing) ->
       fmap (map resSubExp) $ bodyBind =<< body
     _ -> do
-      letValExp' desc =<< eMatch ses (NE.init cs) (snd $ NE.last cs)
+      letValExp' desc =<< eMatch ses (NE.init cs) (I.caseBody $ NE.last cs)
   where
     onCase ses (E.CasePat p case_e _) = do
       (cmps, pertinent) <- generateCond p ses
-      pure
-        ( cmps,
-          internalisePat' [] p pertinent $ internaliseBody "case" case_e
-        )
+      pure . I.Case cmps $
+        internalisePat' [] p pertinent $
+          internaliseBody "case" case_e
 internaliseAppExp desc _ (E.If ce te fe _) =
   letValExp' desc
     =<< eIf
