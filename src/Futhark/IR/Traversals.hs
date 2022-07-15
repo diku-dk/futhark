@@ -103,12 +103,6 @@ mapExpM tv (BasicOp (ConvOp conv x)) =
   BasicOp <$> (ConvOp conv <$> mapOnSubExp tv x)
 mapExpM tv (BasicOp (UnOp op x)) =
   BasicOp <$> (UnOp op <$> mapOnSubExp tv x)
-mapExpM tv (If c texp fexp (IfDec ts s)) =
-  If
-    <$> mapOnSubExp tv c
-    <*> mapOnBody tv mempty texp
-    <*> mapOnBody tv mempty fexp
-    <*> (IfDec <$> mapM (mapOnBranchType tv) ts <*> pure s)
 mapExpM tv (Match ses cases def_body (IfDec ts s)) =
   Match
     <$> mapM (mapOnSubExp tv) ses
@@ -309,11 +303,6 @@ walkExpM tv (BasicOp (ConvOp _ x)) =
   walkOnSubExp tv x
 walkExpM tv (BasicOp (UnOp _ x)) =
   walkOnSubExp tv x
-walkExpM tv (If c texp fexp (IfDec ts _)) = do
-  walkOnSubExp tv c
-  walkOnBody tv mempty texp
-  walkOnBody tv mempty fexp
-  mapM_ (walkOnBranchType tv) ts
 walkExpM tv (Match ses cases def_body (IfDec ts _)) = do
   mapM_ (walkOnSubExp tv) ses
   mapM_ (walkOnBody tv mempty . caseBody) cases

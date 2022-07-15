@@ -752,24 +752,6 @@ allocInLambda ::
 allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
-generalize ::
-  (Maybe Space, Maybe IxFun) ->
-  (Maybe Space, Maybe IxFun) ->
-  (Maybe Space, Maybe (ExtIxFun, [(TPrimExp Int64 VName, TPrimExp Int64 VName)]))
-generalize (Just sp1, Just ixf1) (Just sp2, Just ixf2) =
-  if sp1 /= sp2
-    then (Just sp1, Nothing)
-    else case IxFun.leastGeneralGeneralization (fmap untyped ixf1) (fmap untyped ixf2) of
-      Just (ixf, m) ->
-        ( Just sp1,
-          Just
-            ( fmap TPrimExp ixf,
-              zip (map (TPrimExp . fst) m) (map (TPrimExp . snd) m)
-            )
-        )
-      Nothing -> (Just sp1, Nothing)
-generalize (mbsp1, _) _ = (mbsp1, Nothing)
-
 numLMADs :: IxFun -> Int
 numLMADs = length . IxFun.ixfunLMADs
 
@@ -904,37 +886,6 @@ allocInExp (Match ses cases def_body (IfDec rets ifsort)) = do
   where
     onCase spaces (Case vs body) =
       Case vs . fst <$> allocInCaseBody rets (map Just spaces) body
-allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
-  -- switch to the explicit-mem rep, but do nothing about results
-  (tbranch, tm_ixfs) <- allocInIfBody tbranch0
-  (fbranch, fm_ixfs) <- allocInIfBody fbranch0
-  tspaces <- bodyResultSpaces tbranch
-  fspaces <- bodyResultSpaces fbranch
-  -- try to generalize (antiunify) the index functions of the then and else bodies
-  let sp_substs = zipWith generalize (zip tspaces tm_ixfs) (zip fspaces fm_ixfs)
-      (spaces, subs) = unzip sp_substs
-      tsubs = map (selectSub fst) subs
-      fsubs = map (selectSub snd) subs
-  (tbranch', trets) <- addResCtxInIfBody rets tbranch spaces tsubs
-  (fbranch', frets) <- addResCtxInIfBody rets fbranch spaces fsubs
-  if frets /= trets
-    then error "In allocInExp, IF case: antiunification of then/else produce different ExtInFn!"
-    else pure $ If cond tbranch' fbranch' $ IfDec trets ifsort
-  where
-    selectSub ::
-      ((a, a) -> a) ->
-      Maybe (ExtIxFun, [(a, a)]) ->
-      Maybe (ExtIxFun, [a])
-    selectSub f (Just (ixfn, m)) = Just (ixfn, map f m)
-    selectSub _ Nothing = Nothing
-    allocInIfBody ::
-      (Allocable fromrep torep inner) =>
-      Body fromrep ->
-      AllocM fromrep torep (Body torep, [Maybe IxFun])
-    allocInIfBody (Body _ stms res) =
-      buildBody . allocInStms stms $ do
-        mem_ixfs <- mapM (subExpIxFun . resSubExp) res
-        pure (res, mem_ixfs)
 allocInExp (WithAcc inputs bodylam) =
   WithAcc <$> mapM onInput inputs <*> onLambda bodylam
   where
@@ -1011,109 +962,6 @@ lookupIxFun v = do
   case info of
     MemArray _ptp _shp _u (ArrayIn _ ixf) -> pure $ Just ixf
     _ -> pure Nothing
-
-subExpIxFun ::
-  (Allocable fromrep torep inner) =>
-  SubExp ->
-  AllocM fromrep torep (Maybe IxFun)
-subExpIxFun Constant {} = pure Nothing
-subExpIxFun (Var v) = lookupIxFun v
-
-addResCtxInIfBody ::
-  (Allocable fromrep torep inner) =>
-  [ExtType] ->
-  Body torep ->
-  [Maybe Space] ->
-  [Maybe (ExtIxFun, [TPrimExp Int64 VName])] ->
-  AllocM fromrep torep (Body torep, [BodyReturns])
-addResCtxInIfBody ifrets (Body _ stms res) spaces substs = buildBody $ do
-  mapM_ addStm stms
-  let offsets = scanl (+) 0 $ zipWith numCtxNeeded ifrets substs
-      num_new_ctx = last offsets
-  (ctx, ctx_rets, res', res_rets) <-
-    foldM (helper num_new_ctx) ([], [], [], []) $
-      zip5 ifrets res substs spaces offsets
-  pure (ctx <> res', ctx_rets ++ res_rets)
-  where
-    numCtxNeeded Array {} Nothing = 1
-    numCtxNeeded Array {} (Just (_, m)) = length m + 1
-    numCtxNeeded _ _ = 0
-
-    helper
-      num_new_ctx
-      (ctx_acc, ctx_rets_acc, res_acc, res_rets_acc)
-      (ifr, r, mbixfsub, sp, ctx_offset) =
-        case mbixfsub of
-          Nothing -> do
-            -- does NOT generalize/antiunify; ensure direct
-            r' <- ensureDirect sp r
-            (mem_ctx_ses, mem_ctx_rets) <- unzip <$> bodyReturnMemCtx r'
-            let body_ret = inspect num_new_ctx ctx_offset ifr sp
-            pure
-              ( ctx_acc ++ mem_ctx_ses,
-                ctx_rets_acc ++ mem_ctx_rets,
-                res_acc ++ [r'],
-                res_rets_acc ++ [body_ret]
-              )
-          Just (ixfn, m) -> do
-            -- generalizes
-            let i = length m
-            ext_ses <- mapM (toSubExp "ixfn_exist") m
-            (mem_ctx_ses, mem_ctx_rets) <- unzip <$> bodyReturnMemCtx r
-            let sp' = fromMaybe DefaultSpace sp
-                ixfn' = fmap (adjustExtPE ctx_offset) ixfn
-                exttp = case ifr of
-                  Array pt shape u ->
-                    MemArray pt (fmap (adjustExt num_new_ctx) shape) u $
-                      ReturnsNewBlock sp' (ctx_offset + i) ixfn'
-                  _ -> error "Impossible case reached in addResCtxInIfBody"
-            pure
-              ( ctx_acc ++ subExpsRes ext_ses ++ mem_ctx_ses,
-                ctx_rets_acc ++ map (const (MemPrim int64)) ext_ses ++ mem_ctx_rets,
-                res_acc ++ [r],
-                res_rets_acc ++ [exttp]
-              )
-
-    inspect num_new_ctx k (Array pt shape u) space =
-      let space' = fromMaybe DefaultSpace space
-          shape' = fmap (adjustExt num_new_ctx) shape
-          bodyret =
-            MemArray pt shape' u . ReturnsNewBlock space' k $
-              IxFun.iota $
-                map convert $
-                  shapeDims shape'
-       in bodyret
-    inspect _ _ (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
-    inspect _ _ (Prim pt) _ = MemPrim pt
-    inspect _ _ (Mem space) _ = MemMem space
-
-    convert (Ext i) = le64 (Ext i)
-    convert (Free v) = Free <$> pe64 v
-
-    adjustExt :: Int -> Ext a -> Ext a
-    adjustExt _ (Free v) = Free v
-    adjustExt k (Ext i) = Ext (k + i)
-
-    adjustExtPE :: Int -> TPrimExp t (Ext VName) -> TPrimExp t (Ext VName)
-    adjustExtPE k = fmap (adjustExt k)
-
-bodyResultSpaces ::
-  (Mem torep inner, LocalScope torep m) =>
-  Body torep ->
-  m [Maybe Space]
-bodyResultSpaces (Body _ stms res) =
-  inScopeOf stms $ mapM (mkSpaceOK . resSubExp) res
-  where
-    mkSpaceOK (Var v) = do
-      v_info <- lookupMemInfo v
-      case v_info of
-        MemArray _ _ _ (ArrayIn mem _) -> do
-          mem_info <- lookupMemInfo mem
-          case mem_info of
-            MemMem space -> pure $ Just space
-            _ -> pure Nothing
-        _ -> pure Nothing
-    mkSpaceOK _ = pure Nothing
 
 allocInLoopForm ::
   (Allocable fromrep torep inner) =>
@@ -1223,7 +1071,7 @@ simplifiable innerUsage simplifyInnerOp =
       fbody <- resultBodyM [intConst Int64 0]
       size' <-
         letSubExp "hoisted_alloc_size" $
-          If taken tbody fbody $
+          Match [taken] [Case [Just $ BoolValue True] tbody] fbody $
             IfDec [MemPrim int64] IfFallback
       letBind pat $ Op $ Alloc size' space
     protectOp _ _ _ = Nothing

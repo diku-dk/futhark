@@ -15,7 +15,7 @@ import Control.Monad.State hiding (State)
 import Data.Bifunctor (second)
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
-import Data.List (transpose, unzip4, zip4)
+import Data.List (transpose)
 import qualified Data.Map.Strict as M
 import Data.Sequence ((<|), (><), (|>))
 import qualified Data.Text as T
@@ -196,50 +196,6 @@ optimizeStm out stm = do
 
         -- Read migrated scalars that are used on host.
         foldM addRead (out |> stm') (zip pes pes')
-      If cond (Body _ tstms0 tres) (Body _ fstms0 fres) (IfDec btypes sort) ->
-        do
-          -- Rewrite branches.
-          tstms1 <- optimizeStms tstms0
-          fstms1 <- optimizeStms fstms0
-
-          -- Ensure return values and types match if one or both branches
-          -- return a result that now reside on device.
-          let bmerge (res, tstms, fstms) (pe, tr, fr, bt) =
-                do
-                  let onHost (Var v) = (v ==) <$> resolveName v
-                      onHost _ = pure True
-
-                  tr_on_host <- onHost (resSubExp tr)
-                  fr_on_host <- onHost (resSubExp fr)
-
-                  if tr_on_host && fr_on_host
-                    then -- No result resides on device ==> nothing to do.
-                      pure ((pe, tr, fr, bt) : res, tstms, fstms)
-                    else -- Otherwise, ensure both results are migrated.
-                    do
-                      let t = patElemType pe
-                      (tstms', tarr) <- storeScalar tstms (resSubExp tr) t
-                      (fstms', farr) <- storeScalar fstms (resSubExp fr) t
-
-                      pe' <- arrayizePatElem pe
-                      let bt' = staticShapes1 (patElemType pe')
-                      let tr' = tr {resSubExp = Var tarr}
-                      let fr' = fr {resSubExp = Var farr}
-                      pure ((pe', tr', fr', bt') : res, tstms', fstms')
-
-          let pes = patElems (stmPat stm)
-          let zipped = zip4 pes tres fres btypes
-          (zipped', tstms2, fstms2) <- foldM bmerge ([], tstms1, fstms1) zipped
-          let (pes', tres', fres', btypes') = unzip4 (reverse zipped')
-
-          -- Rewrite statement.
-          let tbranch' = Body () tstms2 tres'
-          let fbranch' = Body () fstms2 fres'
-          let e' = If cond tbranch' fbranch' (IfDec btypes' sort)
-          let stm' = Let (Pat pes') (stmAux stm) e'
-
-          -- Read migrated scalars that are used on host.
-          foldM addRead (out |> stm') (zip pes pes')
       DoLoop ps lf b -> do
         -- Enable the migration of for-in loop variables.
         (params, lform, body) <- rewriteForIn (ps, lf, b)

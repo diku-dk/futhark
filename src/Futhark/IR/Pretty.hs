@@ -250,7 +250,7 @@ instance PrettyRep rep => Pretty (Case (Body rep)) where
     "case" <+> ppTuple' (map (maybe "_" ppr) vs) <+> "->" <+> maybeNest b
 
 instance PrettyRep rep => Pretty (Exp rep) where
-  ppr (If c t f (IfDec ret ifsort)) =
+  ppr (Match [c] [Case [Just (BoolValue True)] t] f (IfDec ret ifsort)) =
     text "if"
       <+> info'
       <+> ppr c

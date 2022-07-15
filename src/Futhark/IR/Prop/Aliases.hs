@@ -87,24 +87,12 @@ matchAliases l =
   where
     (alses, conses) = unzip l
 
-ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
-ifAliases (als1, cons1) (als2, cons2) =
-  matchAliases [(als1, cons1), (als2, cons2)]
-
 funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
 funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se, d) <- args]
 
 -- | The aliases of an expression, one per non-context value returned.
 expAliases :: (Aliased rep) => Exp rep -> [Names]
-expAliases (If _ tb fb dec) =
-  drop (length all_aliases - length ts) all_aliases
-  where
-    ts = ifReturns dec
-    all_aliases =
-      ifAliases
-        (bodyAliases tb, consumedInBody tb)
-        (bodyAliases fb, consumedInBody fb)
 expAliases (Match _ cases def_body _) =
   matchAliases $ onBody def_body : map (onBody . caseBody) cases
   where
@@ -168,10 +156,8 @@ consumedInExp (Apply _ args _ _) =
   where
     consumeArg (als, Consume) = als
     consumeArg _ = mempty
-consumedInExp (If _ tb fb _) =
-  consumedInBody tb <> consumedInBody fb
-consumedInExp (Match _ cases def_body _) =
-  foldMap (consumedInBody . caseBody) cases <> consumedInBody def_body
+consumedInExp (Match _ cases defbody _) =
+  foldMap (consumedInBody . caseBody) cases <> consumedInBody defbody
 consumedInExp (DoLoop merge form body) =
   mconcat
     ( map (subExpAliases . snd) $

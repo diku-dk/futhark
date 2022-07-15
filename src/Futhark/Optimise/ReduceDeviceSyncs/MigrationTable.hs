@@ -125,8 +125,6 @@ shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ (BasicOp _)) mt =
   statusOf n mt /= StayOnHost
 shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
   statusOf n mt /= StayOnHost
-shouldMoveStm (Let _ _ (If (Var n) _ _ _)) mt =
-  statusOf n mt == MoveToDevice
 shouldMoveStm (Let _ _ (DoLoop _ (ForLoop _ _ (Var n) _) _)) mt =
   statusOf n mt == MoveToDevice
 shouldMoveStm (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
@@ -214,10 +212,6 @@ checkFunDef fun = do
     checkExp (WithAcc _ _) = hostOnly
     checkExp (Op _) = hostOnly
     checkExp (Apply fn _ _ _) = Just (S.singleton fn)
-    checkExp (If _ tbranch fbranch _) = do
-      calls1 <- checkBody tbranch
-      calls2 <- checkBody fbranch
-      pure (calls1 <> calls2)
     checkExp (DoLoop params lform body) = do
       checkLParams params
       checkLoopForm lform
@@ -518,8 +512,6 @@ graphStm stm = do
       graphApply fn bs e
     Match ses cases defbody _ ->
       graphMatch bs ses cases defbody
-    If cond tbody fbody _ ->
-      graphIf bs cond tbody fbody
     DoLoop params lform body ->
       graphLoop bs params lform body
     WithAcc inputs f ->
@@ -669,66 +661,6 @@ graphMatch bs ses cases defbody = do
     results = map resSubExp . bodyResult
 
     comb ci a = (ci <>) <$> onlyGraphedScalars (S.fromList $ subExpVars a)
-
--- | Graph an if statement.
-graphIf :: [Binding] -> SubExp -> Body GPU -> Body GPU -> Grapher ()
-graphIf bs cond tbody fbody = do
-  body_host_only <-
-    incForkDepthFor
-      ( do
-          tstats <- captureBodyStats (graphBody tbody)
-          fstats <- captureBodyStats (graphBody fbody)
-          pure $ bodyHostOnly tstats || bodyHostOnly fstats
-      )
-
-  -- Record aliases for copyable memory backing returned arrays.
-  may_copy_results <- reusesBranches bs [results tbody, results fbody]
-  let may_migrate = not body_host_only && may_copy_results
-
-  cond_id <- case (may_migrate, cond) of
-    (False, Var n) ->
-      -- The migration status of the condition is what determines whether the
-      -- statement may be migrated as a whole or not. See 'shouldMoveStm'.
-      connectToSink (nameToId n) >> pure IS.empty
-    (True, Var n) -> onlyGraphedScalar n
-    (_, _) -> pure IS.empty
-
-  tellOperands cond_id
-
-  -- Connect branch results to bound variables to allow delaying reads out of
-  -- branches. It might also be beneficial to move the whole statement to
-  -- device, to avoid reading the branch condition value. This must be balanced
-  -- against the need to read the values bound by the if statement.
-  --
-  -- By connecting the branch condition to each variable bound by the statement
-  -- the condition will only stay on device if
-  --
-  --   (1) the if statement is not required on host, based on the statements
-  --       within its body.
-  --
-  --   (2) no additional reads will be required to use the if statement bound
-  --       variables should the whole statement be migrated.
-  --
-  -- If the condition is migrated to device and stays there, then the if
-  -- statement must necessarily execute on device.
-  --
-  -- While the graph model built by this module generally migrates no more
-  -- statements than necessary to obtain a minimum vertex cut, the branches
-  -- of if statements are subject to an inaccuracy. Specifically model is not
-  -- strong enough to capture their mutual exclusivity and thus encodes that
-  -- both branches are taken. While this does not affect the resulting number
-  -- of host-device reads it means that some reads may needlessly be delayed
-  -- out of branches. The overhead as measured on futhark-benchmarks appears
-  -- to be neglible though.
-  ret <- zipWithM (comb cond_id) (bodyResult tbody) (bodyResult fbody)
-  mapM_ (uncurry createNode) (zip bs ret)
-  where
-    results = map resSubExp . bodyResult
-
-    comb ci a b = (ci <>) <$> onlyGraphedScalars (toSet a <> toSet b)
-
-    toSet (SubExpRes _ (Var n)) = S.singleton n
-    toSet _ = S.empty
 
 -----------------------------------------------------
 -- These type aliases are only used by 'graphLoop' --
@@ -1078,8 +1010,6 @@ graphedScalarOperands e =
       collectBasic b
     collect (Apply _ params _ _) =
       mapM_ (collectSubExp . fst) params
-    collect (If cond tbranch fbranch _) =
-      collectSubExp cond >> collectBody tbranch >> collectBody fbranch
     collect (Match ses cases def_body _) = do
       mapM_ collectSubExp ses
       mapM_ (collectBody . caseBody) cases

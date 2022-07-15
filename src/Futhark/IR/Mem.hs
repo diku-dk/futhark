@@ -1076,8 +1076,6 @@ expReturns e@(DoLoop merge _ _) = do
     mergevars = map fst merge
 expReturns (Apply _ _ ret _) =
   pure $ map funReturnsToExpReturns ret
-expReturns (If _ _ _ (IfDec ret _)) =
-  pure $ map bodyReturnsToExpReturns ret
 expReturns (Match _ _ _ (IfDec ret _)) =
   pure $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =

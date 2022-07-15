@@ -181,11 +181,6 @@ transformExp aliases e =
       (defbody', defbody_deps) <- transformBody aliases defbody
       let deps = depsOf ses <> mconcat cases_deps <> defbody_deps <> depsOf dec
       pure (Match ses cases' defbody' dec, deps)
-    If c tbody fbody dec -> do
-      (tbody', t_deps) <- transformBody aliases tbody
-      (fbody', f_deps) <- transformBody aliases fbody
-      let deps = depsOf c <> t_deps <> f_deps <> depsOf dec
-      pure (If c tbody' fbody' dec, deps)
     DoLoop merge lform body -> do
       -- What merge and lform aliases outside the loop is irrelevant as those
       -- cannot be consumed within the loop.

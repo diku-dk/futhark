@@ -1018,13 +1018,6 @@ checkExp (Match ses cases def_case info) = do
           </> indent 2 (ppTuple' vs)
       context ("in body of case " <> prettyTuple vs) $ checkCaseBody body
     checkCaseBody = matchBranchType (ifReturns info)
-checkExp (If e1 e2 e3 info) = do
-  require [Prim Bool] e1
-  _ <-
-    context "in true branch" (checkBody e2)
-      `alternative` context "in false branch" (checkBody e3)
-  context "in true branch" $ matchBranchType (ifReturns info) e2
-  context "in false branch" $ matchBranchType (ifReturns info) e3
 checkExp (Apply fname args rettype_annot _) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args

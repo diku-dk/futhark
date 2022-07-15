@@ -57,9 +57,9 @@ diffBasicOp pat aux e m =
         case t of
           FloatType ft ->
             update <=< letExp "contrib" $
-              If
-                (Var pat_adj)
-                (resultBody [constant (floatValue ft (1 :: Int))])
+              Match
+                [Var pat_adj]
+                [Case [Just $ BoolValue True] $ resultBody [constant (floatValue ft (1 :: Int))]]
                 (resultBody [constant (floatValue ft (0 :: Int))])
                 (IfDec [Prim (FloatType ft)] IfNormal)
           IntType it ->
@@ -263,26 +263,6 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
               letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
 
       zipWithM_ updateSubExpAdj (map fst args) contribs
-diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
-  addStm stm
-  m
-  returnSweepCode $ do
-    let tbody_free = freeIn tbody
-        fbody_free = freeIn fbody
-        branches_free = namesToList $ tbody_free <> fbody_free
-
-    adjs <- mapM lookupAdj $ patNames pat
-
-    branches_free_adj <-
-      ( pure . takeLast (length branches_free)
-          <=< letTupExp "branch_adj"
-          <=< renameExp
-        )
-        =<< eIf
-          (eSubExp cond)
-          (diffBody adjs branches_free tbody)
-          (diffBody adjs branches_free fbody)
-    zipWithM_ insAdj branches_free branches_free_adj
 diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
   addStm stm
   m

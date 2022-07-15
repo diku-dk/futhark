@@ -420,7 +420,6 @@ data Exp rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
   | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
-  | If SubExp (Body rep) (Body rep) (IfDec (BranchType rep))
   | Match [SubExp] [Case (Body rep)] (Body rep) (IfDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
     DoLoop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)

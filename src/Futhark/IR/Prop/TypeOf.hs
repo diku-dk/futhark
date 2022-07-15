@@ -134,7 +134,6 @@ expExtType ::
   Exp rep ->
   m [ExtType]
 expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf) rt
-expExtType (If _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
 expExtType (Match _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
 expExtType (DoLoop merge _ _) =
   pure $ loopExtType $ map fst merge

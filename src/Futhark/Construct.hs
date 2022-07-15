@@ -261,9 +261,9 @@ eMatch ::
   m (Exp (Rep m))
 eMatch ses cases_m defbody_m = eMatch' ses cases_m defbody_m IfNormal
 
--- | Construct an 'If' expression from a monadic condition and monadic
--- branches.  'eBody' might be convenient for constructing the
--- branches.
+-- | Construct a 'Match' modelling an if-expression from a monadic
+-- condition and monadic branches.  'eBody' might be convenient for
+-- constructing the branches.
 eIf ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   m (Exp (Rep m)) ->

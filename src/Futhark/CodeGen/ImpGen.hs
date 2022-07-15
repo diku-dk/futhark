@@ -82,6 +82,7 @@ module Futhark.CodeGen.ImpGen
     typeSize,
     inBounds,
     isMapTransposeCopy,
+    caseMatch,
 
     -- * Constructing code.
     dLParams,
@@ -795,20 +796,23 @@ compileExp pat e = do
   ec <- asks envExpCompiler
   ec pat e
 
+-- | Generate an expression that is true if the subexpressions match
+-- the case pasttern.
+caseMatch :: [SubExp] -> [Maybe PrimValue] -> Imp.TExp Bool
+caseMatch ses vs = foldl (.&&.) true (zipWith cmp ses vs)
+  where
+    cmp se (Just v) = isBool $ toExp' (primValueType v) se ~==~ ValueExp v
+    cmp _ Nothing = true
+
 defCompileExp ::
   (Mem rep inner) =>
   Pat (LetDec rep) ->
   Exp rep ->
   ImpM rep r op ()
-defCompileExp pat (If cond tbranch fbranch _) =
-  sIf (toBoolExp cond) (compileBody pat tbranch) (compileBody pat fbranch)
 defCompileExp pat (Match ses cases def_body _) =
   foldl f (compileBody pat def_body) cases
   where
-    cmp se (Just v) = isBool $ toExp' (primValueType v) se ~==~ ValueExp v
-    cmp _ Nothing = true
-    match vs = foldl (.&&.) true (zipWith cmp ses vs)
-    f rest (Case vs body) = sIf (match vs) (compileBody pat body) rest
+    f rest (Case vs body) = sIf (caseMatch ses vs) (compileBody pat body) rest
 defCompileExp pat (Apply fname args _ _) = do
   dest <- destinationFromPat pat
   targets <- funcallTargets dest

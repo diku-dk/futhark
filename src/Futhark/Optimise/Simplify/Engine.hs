@@ -117,7 +117,7 @@ emptyEnv rules blockers =
     }
 
 -- | A function that protects a hoisted operation (if possible).  The
--- first operand is the condition of the 'If' we have hoisted out of
+-- first operand is the condition of the 'Case' we have hoisted out of
 -- (or equivalently, a boolean indicating whether a loop has nonzero
 -- trip count).
 type Protect m = SubExp -> Pat (LetDec (Rep m)) -> Op (Rep m) -> Maybe (m ())
@@ -303,10 +303,10 @@ protectIf ::
   SubExp ->
   Stm (Rep m) ->
   m ()
-protectIf _ _ taken (Let pat aux (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
+protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] taken_body] untaken_body (IfDec if_ts IfFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
   auxing aux . letBind pat $
-    If cond' taken_body untaken_body $
+    Match [cond'] [Case [Just (BoolValue True)] taken_body] untaken_body $
       IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
@@ -325,40 +325,14 @@ protectIf _ f taken (Let pat aux e)
           untaken_body <-
             eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
           if_ts <- expTypesFromPat pat
-          auxing aux . letBind pat $
-            If taken taken_body untaken_body $
-              IfDec if_ts IfFallback
+          auxing aux . letBind pat
+            $ Match
+              [taken]
+              [Case [Just $ BoolValue True] taken_body]
+              untaken_body
+            $ IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
-
--- | We are willing to hoist potentially unsafe statements out of
--- branches, but they must be protected by adding a branch on top of
--- them.  (This means such hoisting is not worth it unless they are in
--- turn hoisted out of a loop somewhere.)
-protectIfHoisted ::
-  SimplifiableRep rep =>
-  -- | Branch condition.
-  SubExp ->
-  -- | Which side of the branch are we
-  -- protecting here?
-  Bool ->
-  SimpleM rep (Stms (Wise rep), a) ->
-  SimpleM rep (Stms (Wise rep), a)
-protectIfHoisted cond side m = do
-  (hoisted, x) <- m
-  ops <- asks $ protectHoistedOpS . fst
-  hoisted' <- runBuilder_ $ do
-    if not $ all (safeExp . stmExp) hoisted
-      then do
-        cond' <-
-          if side
-            then pure cond
-            else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
-        mapM_ (protectIf ops unsafeOrCostly cond') hoisted
-      else addStms hoisted
-  pure (hoisted', x)
-  where
-    unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
 
 -- | We are willing to hoist potentially unsafe statements out of
 -- loops, but they must be protected by adding a branch on top of
@@ -679,9 +653,9 @@ cheapExp (BasicOp Replicate {}) = False
 cheapExp (BasicOp Concat {}) = False
 cheapExp (BasicOp Manifest {}) = False
 cheapExp DoLoop {} = False
-cheapExp (If _ tbranch fbranch _) =
-  all cheapStm (bodyStms tbranch)
-    && all cheapStm (bodyStms fbranch)
+cheapExp (Match _ cases defbranch _) =
+  all (all cheapStm . bodyStms . caseBody) cases
+    && all cheapStm (bodyStms defbranch)
 cheapExp (Op op) = cheapOp op
 cheapExp _ = True -- Used to be False, but
 -- let's try it out.
@@ -858,18 +832,6 @@ simplifyExp usage (Pat pes) (Match ses cases def_body ifdec@(IfDec ts ifsort)) =
         protectCaseHoisted ses' prior vs $
           simplifyBody block usage pes_usages body
       pure (hoisted, Case vs body')
-simplifyExp usage (Pat pes) (If cond tbranch fbranch ifdec@(IfDec ts ifsort)) = do
-  let pes_usages = map (fromMaybe mempty . (`UT.lookup` usage) . patElemName) pes
-  cond' <- simplify cond
-  ts' <- mapM simplify ts
-  block <- matchBlocker cond ifdec
-  (hoisted1, tbranch') <-
-    protectIfHoisted cond' True $
-      simplifyBody block usage pes_usages tbranch
-  (hoisted2, fbranch') <-
-    protectIfHoisted cond' False $
-      simplifyBody block usage pes_usages fbranch
-  pure (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted1 <> hoisted2)
 simplifyExp _ _ (DoLoop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params

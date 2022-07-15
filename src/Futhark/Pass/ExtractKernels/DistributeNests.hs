@@ -322,7 +322,7 @@ bodyContainsParallelism = any isParallelStm . bodyStms
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
     isMap BasicOp {} = False
     isMap Apply {} = False
-    isMap If {} = False
+    isMap Match {} = False
     isMap (DoLoop _ ForLoop {} body) = bodyContainsParallelism body
     isMap (DoLoop _ WhileLoop {} _) = False
     isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
@@ -413,10 +413,9 @@ maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
                 pure acc'
         _ ->
           addStmToAcc stm acc
-maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
+maybeDistributeStm stm@(Let pat _ (Match cond cases defbody ret)) acc
   | all (`notNameIn` freeIn pat) (patNames pat),
-    bodyContainsParallelism tbranch
-      || bodyContainsParallelism fbranch
+    any bodyContainsParallelism (defbody : map caseBody cases)
       || not (all primType (ifReturns ret)) =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
@@ -429,7 +428,7 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
                 nest' <- expandKernelNest pat_unused nest
                 addPostStms kernels
                 types <- asksScope scopeForSOACs
-                let branch = Branch perm pat cond tbranch fbranch ret
+                let branch = Branch perm pat cond cases defbody ret
                 stms <-
                   (`runReaderT` types) $
                     simplifyStms . oneStm =<< interchangeBranch nest' branch
