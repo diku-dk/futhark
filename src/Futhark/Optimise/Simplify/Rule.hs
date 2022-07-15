@@ -25,6 +25,7 @@ module Futhark.Optimise.Simplify.Rule
     RuleGeneric,
     RuleBasicOp,
     RuleIf,
+    RuleMatch,
     RuleDoLoop,
 
     -- * Top-down rules
@@ -33,6 +34,7 @@ module Futhark.Optimise.Simplify.Rule
     TopDownRuleGeneric,
     TopDownRuleBasicOp,
     TopDownRuleIf,
+    TopDownRuleMatch,
     TopDownRuleDoLoop,
     TopDownRuleOp,
 
@@ -42,6 +44,7 @@ module Futhark.Optimise.Simplify.Rule
     BottomUpRuleGeneric,
     BottomUpRuleBasicOp,
     BottomUpRuleIf,
+    BottomUpRuleMatch,
     BottomUpRuleDoLoop,
     BottomUpRuleOp,
 
@@ -127,6 +130,17 @@ type RuleIf rep a =
   ) ->
   Rule rep
 
+type RuleMatch rep a =
+  a ->
+  Pat (LetDec rep) ->
+  StmAux (ExpDec rep) ->
+  ( [SubExp],
+    [Case (Body rep)],
+    Body rep,
+    IfDec (BranchType rep)
+  ) ->
+  Rule rep
+
 type RuleDoLoop rep a =
   a ->
   Pat (LetDec rep) ->
@@ -150,6 +164,7 @@ data SimplificationRule rep a
   = RuleGeneric (RuleGeneric rep a)
   | RuleBasicOp (RuleBasicOp rep a)
   | RuleIf (RuleIf rep a)
+  | RuleMatch (RuleMatch rep a)
   | RuleDoLoop (RuleDoLoop rep a)
   | RuleOp (RuleOp rep a)
 
@@ -159,16 +174,17 @@ data Rules rep a = Rules
   { rulesAny :: [SimplificationRule rep a],
     rulesBasicOp :: [SimplificationRule rep a],
     rulesIf :: [SimplificationRule rep a],
+    rulesMatch :: [SimplificationRule rep a],
     rulesDoLoop :: [SimplificationRule rep a],
     rulesOp :: [SimplificationRule rep a]
   }
 
 instance Semigroup (Rules rep a) where
-  Rules as1 bs1 cs1 ds1 es1 <> Rules as2 bs2 cs2 ds2 es2 =
-    Rules (as1 <> as2) (bs1 <> bs2) (cs1 <> cs2) (ds1 <> ds2) (es1 <> es2)
+  Rules as1 bs1 cs1 ds1 es1 fs1 <> Rules as2 bs2 cs2 ds2 es2 fs2 =
+    Rules (as1 <> as2) (bs1 <> bs2) (cs1 <> cs2) (ds1 <> ds2) (es1 <> es2) (fs1 <> fs2)
 
 instance Monoid (Rules rep a) where
-  mempty = Rules mempty mempty mempty mempty mempty
+  mempty = Rules mempty mempty mempty mempty mempty mempty
 
 -- | Context for a rule applied during top-down traversal of the
 -- program.  Takes a symbol table as argument.
@@ -179,6 +195,8 @@ type TopDownRuleGeneric rep = RuleGeneric rep (TopDown rep)
 type TopDownRuleBasicOp rep = RuleBasicOp rep (TopDown rep)
 
 type TopDownRuleIf rep = RuleIf rep (TopDown rep)
+
+type TopDownRuleMatch rep = RuleMatch rep (TopDown rep)
 
 type TopDownRuleDoLoop rep = RuleDoLoop rep (TopDown rep)
 
@@ -195,6 +213,8 @@ type BottomUpRuleGeneric rep = RuleGeneric rep (BottomUp rep)
 type BottomUpRuleBasicOp rep = RuleBasicOp rep (BottomUp rep)
 
 type BottomUpRuleIf rep = RuleIf rep (BottomUp rep)
+
+type BottomUpRuleMatch rep = RuleMatch rep (BottomUp rep)
 
 type BottomUpRuleDoLoop rep = RuleDoLoop rep (BottomUp rep)
 
@@ -234,6 +254,7 @@ ruleBook topdowns bottomups =
         rs
         (filter forBasicOp rs)
         (filter forIf rs)
+        (filter forMatch rs)
         (filter forDoLoop rs)
         (filter forOp rs)
 
@@ -244,6 +265,10 @@ ruleBook topdowns bottomups =
     forIf RuleIf {} = True
     forIf RuleGeneric {} = True
     forIf _ = False
+
+    forMatch RuleMatch {} = True
+    forMatch RuleGeneric {} = True
+    forMatch _ = False
 
     forDoLoop RuleDoLoop {} = True
     forDoLoop RuleGeneric {} = True
@@ -284,6 +309,7 @@ rulesForStm stm = case stmExp stm of
   DoLoop {} -> rulesDoLoop
   Op {} -> rulesOp
   If {} -> rulesIf
+  Match {} -> rulesMatch
   _ -> rulesAny
 
 applyRule :: SimplificationRule rep a -> a -> Stm rep -> Rule rep
@@ -293,6 +319,8 @@ applyRule (RuleDoLoop f) a (Let pat aux (DoLoop merge form body)) =
   f a pat aux (merge, form, body)
 applyRule (RuleIf f) a (Let pat aux (If cond tbody fbody ifsort)) =
   f a pat aux (cond, tbody, fbody, ifsort)
+applyRule (RuleMatch f) a (Let pat aux (Match cond cases defbody ifsort)) =
+  f a pat aux (cond, cases, defbody, ifsort)
 applyRule (RuleOp f) a (Let pat aux (Op op)) =
   f a pat aux op
 applyRule _ _ _ =

@@ -72,6 +72,7 @@ module Futhark.Construct
     -- * Monadic expression builders
     eSubExp,
     eParam,
+    eMatch',
     eMatch,
     eIf,
     eIf',
@@ -220,16 +221,15 @@ removeRedundantScrutinees ses cases =
   where
     interesting = any (/= Nothing) . snd
 
--- | Construct a 'Match' expression.  The main convenience here is
--- that the existential context of the return type is automatically
--- deduced, and the necessary elements added to the branches.
-eMatch ::
+-- | As 'eMatch', but an 'IfSort' can be given.
+eMatch' ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   [SubExp] ->
   [Case (m (Body (Rep m)))] ->
   m (Body (Rep m)) ->
+  IfSort ->
   m (Exp (Rep m))
-eMatch ses cases_m defbody_m = do
+eMatch' ses cases_m defbody_m sort = do
   cases <- mapM (traverse insertStmsM) cases_m
   defbody <- insertStmsM defbody_m
   ts <-
@@ -240,7 +240,7 @@ eMatch ses cases_m defbody_m = do
   defbody' <- addContextForBranch ts defbody
   let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
       (ses', cases'') = removeRedundantScrutinees ses cases'
-  pure $ Match ses' cases'' defbody' $ IfDec ts' IfNormal
+  pure $ Match ses' cases'' defbody' $ IfDec ts' sort
   where
     addContextForBranch ts (Body _ stms val_res) = do
       body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
@@ -249,6 +249,17 @@ eMatch ses cases_m defbody_m = do
       mkBodyM stms $ subExpsRes ctx_res ++ val_res
       where
         stmsscope = scopeOf stms
+
+-- | Construct a 'Match' expression.  The main convenience here is
+-- that the existential context of the return type is automatically
+-- deduced, and the necessary elements added to the branches.
+eMatch ::
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  [SubExp] ->
+  [Case (m (Body (Rep m)))] ->
+  m (Body (Rep m)) ->
+  m (Exp (Rep m))
+eMatch ses cases_m defbody_m = eMatch' ses cases_m defbody_m IfNormal
 
 -- | Construct an 'If' expression from a monadic condition and monadic
 -- branches.  'eBody' might be convenient for constructing the
@@ -271,22 +282,7 @@ eIf' ::
   m (Exp (Rep m))
 eIf' ce te fe if_sort = do
   ce' <- letSubExp "cond" =<< ce
-  te' <- insertStmsM te
-  fe' <- insertStmsM fe
-  -- We need to construct the context.
-  ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
-  te'' <- addContextForBranch ts te'
-  fe'' <- addContextForBranch ts fe'
-  let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
-  pure $ If ce' te'' fe'' $ IfDec ts' if_sort
-  where
-    addContextForBranch ts (Body _ stms val_res) = do
-      body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
-      let ctx_res =
-            map snd $ sortOn fst $ M.toList $ shapeExtMapping ts body_ts
-      mkBodyM stms $ subExpsRes ctx_res ++ val_res
-      where
-        stmsscope = scopeOf stms
+  eMatch' [ce'] [Case [Just $ BoolValue True] te] fe if_sort
 
 -- The type of a body.  Watch out: this only works for the degenerate
 -- case where the body does not already return its context.
