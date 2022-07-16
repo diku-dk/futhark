@@ -125,6 +125,8 @@ shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ (BasicOp _)) mt =
   statusOf n mt /= StayOnHost
 shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
   statusOf n mt /= StayOnHost
+shouldMoveStm (Let _ _ (Match cond _ _ _)) mt =
+  all ((== MoveToDevice) . (`statusOf` mt)) $ subExpVars cond
 shouldMoveStm (Let _ _ (DoLoop _ (ForLoop _ _ (Var n) _) _)) mt =
   statusOf n mt == MoveToDevice
 shouldMoveStm (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
