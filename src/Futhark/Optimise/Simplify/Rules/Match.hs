@@ -18,8 +18,8 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Util
 
 -- Does this case always match the scrutinees?
-caseMatches :: [SubExp] -> Case a -> Bool
-caseMatches ses = and . zipWith match ses . casePat
+caseAlwaysMatches :: [SubExp] -> Case a -> Bool
+caseAlwaysMatches ses = and . zipWith match ses . casePat
   where
     match se (Just v) = se == Constant v
     match _ Nothing = True
@@ -39,7 +39,7 @@ ruleMatch _ pat _ (cond, cases, defbody, ifdec)
       Simplify $ letBind pat $ Match cond cases' defbody ifdec
 -- Find new default case.
 ruleMatch _ pat _ (cond, cases, _, ifdec)
-  | (always_matches, cases') <- partition (caseMatches cond) cases,
+  | (always_matches, cases') <- partition (caseAlwaysMatches cond) cases,
     new_default : _ <- reverse always_matches =
       Simplify $ letBind pat $ Match cond cases' (caseBody new_default) ifdec
 -- Remove caseless match.
@@ -162,10 +162,11 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) = Simplify
     bound_in_branches =
       namesFromList . concatMap (patNames . stmPat) $
         foldMap (bodyStms . caseBody) cases <> bodyStms defbody
-    invariant Constant {} = True
-    invariant (Var v) = v `notNameIn` bound_in_branches
 
     branchInvariant (i, pe, t, case_reses, defres)
+      -- If just one branch has a variant result, then we give up.
+      | namesIntersect bound_in_branches $ freeIn $ defres : case_reses =
+          noHoisting
       -- Do all branches return the same value?
       | all ((== resSubExp defres) . resSubExp) case_reses = do
           certifying (foldMap resCerts case_reses <> resCerts defres) $
@@ -173,11 +174,10 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) = Simplify
               resSubExp defres
           hoisted i pe
 
-      -- Do both branches return values that are free in the
+      -- Do all branches return values that are free in the
       -- branch, and are we not the only pattern element?  The
       -- latter is to avoid infinite application of this rule.
-      | all (invariant . resSubExp) case_reses,
-        invariant $ resSubExp defres,
+      | not $ namesIntersect bound_in_branches $ freeIn $ defres : case_reses,
         patSize pat > 1,
         Prim _ <- patElemType pe = do
           bt <- expTypesFromPat $ Pat [pe]
@@ -190,8 +190,9 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) = Simplify
                     <*> pure (IfDec bt ifsort)
                 )
           hoisted i pe
-      | otherwise =
-          pure $ Right (pe, t, case_reses, defres)
+      | otherwise = noHoisting
+      where
+        noHoisting = pure $ Right (pe, t, case_reses, defres)
 
     hoisted i pe = pure $ Left $ Just (i, Var $ patElemName pe)
 
