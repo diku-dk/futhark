@@ -107,6 +107,10 @@ expMetrics (DoLoop _ ForLoop {} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
 expMetrics (DoLoop _ WhileLoop {} body) =
   inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
+expMetrics (Match _ [Case [Just (BoolValue True)] tb] fb _) =
+  inside "If" $ do
+    inside "True" $ bodyMetrics tb
+    inside "False" $ bodyMetrics fb
 expMetrics (Match _ cases defbody _) =
   inside "Match" $ do
     forM_ (zip [0 ..] cases) $ \(i, c) ->
