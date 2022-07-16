@@ -214,11 +214,13 @@ checkFunDef fun = do
     checkExp (WithAcc _ _) = hostOnly
     checkExp (Op _) = hostOnly
     checkExp (Apply fn _ _ _) = Just (S.singleton fn)
+    checkExp (Match _ cases defbody _) =
+      mconcat <$> mapM checkBody (defbody : map caseBody cases)
     checkExp (DoLoop params lform body) = do
       checkLParams params
       checkLoopForm lform
       checkBody body
-    checkExp _ = Just S.empty
+    checkExp BasicOp {} = Just S.empty
 
 --------------------------------------------------------------------------------
 --                             MIGRATION ANALYSIS                             --
