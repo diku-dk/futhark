@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Transposition of empty arrays in interpreter (#1700).
 
+* Exotic simplification error (#1309).
+
 ## [0.21.13]
 
 ### Added
