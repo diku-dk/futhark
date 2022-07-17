@@ -373,21 +373,19 @@ allocInMergeParams ::
   ) ->
   AllocM fromrep torep a
 allocInMergeParams merge m = do
-  ((valparams, valargs, handle_loop_subexps), (ctx_params, mem_params)) <-
+  ((valparams, valargs, handle_loop_subexps), (mem_params, ctx_params)) <-
     runWriterT $ unzip3 <$> mapM allocInMergeParam merge
-  let mergeparams' = ctx_params <> mem_params <> valparams
+  let mergeparams' = mem_params <> ctx_params <> valparams
       summary = scopeOfFParams mergeparams'
 
       mk_loop_res ses = do
-        (ses', (ctxargs, memargs)) <-
+        (ses', (memargs, ctxargs)) <-
           runWriterT $ zipWithM ($) handle_loop_subexps ses
-        pure (ctxargs <> memargs, ses')
+        pure (memargs <> ctxargs, ses')
 
   (valctx_args, valargs') <- mk_loop_res valargs
   let merge' =
-        zip
-          (ctx_params <> mem_params <> valparams)
-          (valctx_args <> valargs')
+        zip (mem_params <> ctx_params <> valparams) (valctx_args <> valargs')
   localScope summary $ m merge' mk_loop_res
   where
     param_names = namesFromList $ map (paramName . fst) merge
@@ -435,7 +433,7 @@ allocInMergeParams merge m = do
                   allocInMergeParam (mergeparam, Var v')
                 else do
                   p <- newParam "mem_param" $ MemMem v_mem_space
-                  tell ([], [p])
+                  tell ([p], [])
 
                   pure
                     ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName p) v_ixfun},
@@ -452,7 +450,7 @@ allocInMergeParams merge m = do
                   p <- newParam "ctx_param_ext" $ MemPrim $ primExpType $ untyped e
                   pure (p, fmap Free $ le64 $ paramName p)
 
-              tell (ctx_params, [])
+              tell ([], ctx_params)
 
               param_ixfun <-
                 instantiateIxFun $
@@ -461,7 +459,7 @@ allocInMergeParams merge m = do
                     ext_ixfun
 
               mem_param <- newParam "mem_param" $ MemMem v_mem_space'
-              tell ([], [mem_param])
+              tell ([mem_param], [])
               pure
                 ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName mem_param) param_ixfun},
                   v',
@@ -526,7 +524,7 @@ ensureArrayIn space (Var v) = do
         )
         substs
 
-  tell (ctx_vals, [Var mem])
+  tell ([Var mem], ctx_vals)
 
   pure sub_exp
 
@@ -756,14 +754,14 @@ ixFunMon :: IxFun -> [IxFun.Monotonicity]
 ixFunMon = map IxFun.ldMon . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
 
 data MemReq
-  = MemReq Space [Int] [IxFun.Monotonicity] Rank
+  = MemReq Space [Int] [IxFun.Monotonicity] Rank Bool
   | NeedsLinearisation Space
   deriving (Eq, Show)
 
 combMemReqs :: MemReq -> MemReq -> MemReq
 combMemReqs x@NeedsLinearisation {} _ = x
 combMemReqs _ y@NeedsLinearisation {} = y
-combMemReqs x@(MemReq x_space _ _ _) y@MemReq {} =
+combMemReqs x@(MemReq x_space _ _ _ _) y@MemReq {} =
   if x == y then x else NeedsLinearisation x_space
 
 type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
@@ -774,7 +772,7 @@ combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
 combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
-contextRets (MemArray _ shape _ (MemReq space _ _ (Rank base_rank))) =
+contextRets (MemArray _ shape _ (MemReq space _ _ (Rank base_rank) _)) =
   -- Memory + offset + base_rank + (stride,rotate,size)*rank.
   MemMem space
     : MemPrim int64
@@ -814,6 +812,7 @@ allocInMatchBody rets (Body _ stms res) =
                   (ixFunPerm ixfun)
                   (ixFunMon ixfun)
                   (Rank $ length $ IxFun.base ixfun)
+                  (IxFun.contiguous ixfun)
               else NeedsLinearisation space
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
@@ -836,16 +835,16 @@ mkBranchRet reqs =
       )
 
     arrayInfo rank (NeedsLinearisation space) =
-      (space, [0 .. rank - 1], repeat IxFun.Inc, rank)
-    arrayInfo _ (MemReq space perm mon (Rank base_rank)) =
-      (space, perm, mon, base_rank)
+      (space, [0 .. rank - 1], repeat IxFun.Inc, rank, True)
+    arrayInfo _ (MemReq space perm mon (Rank base_rank) contig) =
+      (space, perm, mon, base_rank, contig)
 
     inspect k (MemArray pt shape u req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
-          (space, perm, mon, base_rank) = arrayInfo (shapeRank shape) req
+          (space, perm, mon, base_rank, contig) = arrayInfo (shapeRank shape) req
        in MemArray pt shape' u . ReturnsNewBlock space k $
             convert
-              <$> IxFun.mkExistential base_rank (zip perm mon) (k + 1)
+              <$> IxFun.mkExistential base_rank (zip perm mon) contig (k + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
@@ -894,8 +893,8 @@ allocInExp (DoLoop merge form (Body () bodystms bodyres)) =
     localScope (scopeOf form') $ do
       body' <-
         buildBody_ . allocInStms bodystms $ do
-          (val_ses, valres') <- mk_loop_val $ map resSubExp bodyres
-          pure $ subExpsRes val_ses <> zipWith SubExpRes (map resCerts bodyres) valres'
+          (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
+          pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
       pure $ DoLoop merge' form' body'
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args

@@ -348,11 +348,11 @@ iota :: IntegralExp num => Shape num -> IxFun num
 iota = iotaOffset 0
 
 -- | Create a contiguous single-LMAD index function that is
--- existential in everything, with the provided permutation and
--- monotonicity.
-mkExistential :: Int -> [(Int, Monotonicity)] -> Int -> IxFun (Ext a)
-mkExistential basis_rank perm start =
-  IxFun (NE.singleton lmad) basis False
+-- existential in everything, with the provided permutation,
+-- monotonicity, and contiguousness.
+mkExistential :: Int -> [(Int, Monotonicity)] -> Bool -> Int -> IxFun (Ext a)
+mkExistential basis_rank perm contig start =
+  IxFun (NE.singleton lmad) basis contig
   where
     basis = take basis_rank $ map Ext [1 + dims_rank * 3 ..]
     dims_rank = length perm
@@ -986,13 +986,12 @@ existentialize ::
   IxFun (TPrimExp t v) ->
   State [TPrimExp t v] (Maybe (IxFun (TPrimExp t (Ext v))))
 existentialize (IxFun (lmad :| []) oshp True)
-  | all ((== 0) . ldRotate) (lmadDims lmad),
-    length (lmadShape lmad) == length oshp,
+  | length (lmadShape lmad) == length oshp,
     isSequential (map ldPerm $ lmadDims lmad) = do
-      oshp' <- mapM existentializeExp oshp
       lmadOffset' <- existentializeExp $ lmadOffset lmad
       lmadDims' <- mapM existentializeLMADDim $ lmadDims lmad
       let lmad' = LMAD lmadOffset' lmadDims'
+      oshp' <- mapM existentializeExp oshp
       pure $ Just $ IxFun (lmad' :| []) oshp' True
   where
     existentializeLMADDim ::
@@ -1000,8 +999,9 @@ existentialize (IxFun (lmad :| []) oshp True)
       State [TPrimExp t v] (LMADDim (TPrimExp t (Ext v)))
     existentializeLMADDim (LMADDim str rot shp perm mon) = do
       stride' <- existentializeExp str
+      rot' <- existentializeExp rot
       shape' <- existentializeExp shp
-      pure $ LMADDim stride' (fmap Free rot) shape' perm mon
+      pure $ LMADDim stride' rot' shape' perm mon
 existentialize _ = pure Nothing
 
 -- | When comparing index functions as part of the type check in KernelsMem,
