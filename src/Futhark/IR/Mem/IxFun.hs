@@ -11,7 +11,7 @@ module Futhark.IR.Mem.IxFun
     LMADDim (..),
     Monotonicity (..),
     index,
-    existentialOfShape,
+    mkExistential,
     iota,
     iotaOffset,
     permute,
@@ -206,7 +206,7 @@ instance Traversable LMAD where
         LMADDim <$> f s <*> f r <*> f n <*> pure p <*> pure m
 
 -- It is important that the traversal order here is the same as in
--- existentialOfShape.
+-- mkExistential.
 instance Traversable IxFun where
   traverse f (IxFun lmads oshp cg) =
     IxFun <$> traverse (traverse f) lmads <*> traverse f oshp <*> pure cg
@@ -348,22 +348,21 @@ iota :: IntegralExp num => Shape num -> IxFun num
 iota = iotaOffset 0
 
 -- | Create a contiguous single-LMAD index function that is
--- existential in everything (starting at the given index), and with
--- the provided shape and permutation.
-existentialOfShape :: Shape (Ext a) -> Int -> [Int] -> Int -> IxFun (Ext a)
-existentialOfShape dims basis_rank perm start =
+-- existential in everything, with the permutation and monotonicity.
+mkExistential :: Int -> [(Int, Monotonicity)] -> Int -> IxFun (Ext a)
+mkExistential basis_rank perm start =
   IxFun (NE.singleton lmad) basis False
   where
-    basis = take basis_rank $ map Ext [dims_rank * 3 ..]
-    dims_rank = length dims
-    lmad = LMAD (Ext start) $ zipWith onDim perm (zip dims [0 ..])
-    onDim p (d, i) =
+    basis = take basis_rank $ map Ext [1 + dims_rank * 3 ..]
+    dims_rank = length perm
+    lmad = LMAD (Ext start) $ zipWith onDim perm [0 ..]
+    onDim (p, mon) i =
       LMADDim
-        (Ext (start + 1 + i * 2))
-        (Ext (start + 2 + i * 2))
-        d
+        (Ext (start + 1 + i * 3))
+        (Ext (start + 2 + i * 3))
+        (Ext (start + 2 + i * 3))
         p
-        Unknown
+        mon
 
 -- | Permute dimensions.
 permute ::
