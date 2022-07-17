@@ -1075,13 +1075,15 @@ simplifiable ::
   ( Engine.SimplifiableRep rep,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
+    LetDec rep ~ LetDecMem,
+    OpReturns (Engine.OpWithWisdom inner),
     Mem rep inner
   ) =>
   (Engine.OpWithWisdom inner -> UT.UsageTable) ->
   (Engine.OpWithWisdom inner -> Engine.SimpleM rep (Engine.OpWithWisdom inner, Stms (Engine.Wise rep))) ->
   SimpleOps rep
 simplifiable innerUsage simplifyInnerOp =
-  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyOp
+  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyPat simplifyOp
   where
     mkExpDecS' _ pat e =
       pure $ Engine.mkWiseExpDec pat () e
@@ -1110,6 +1112,26 @@ simplifiable innerUsage simplifyInnerOp =
     simplifyOp (Inner k) = do
       (k', hoisted) <- simplifyInnerOp k
       pure (Inner k', hoisted)
+
+    simplifyPat (Pat pes) e = do
+      rets <- expReturns e
+      Pat <$> zipWithM update pes rets
+      where
+        names = map patElemName pes
+        update
+          (PatElem pe_v (MemArray pt shape u (ArrayIn mem _)))
+          (MemArray _ _ _ (Just (ReturnsInBlock _ ixfun)))
+            | Just ixfun' <- traverse (traverse inst) ixfun =
+                PatElem pe_v
+                  <$> ( MemArray pt
+                          <$> Engine.simplify shape
+                          <*> pure u
+                          <*> (ArrayIn <$> Engine.simplify mem <*> pure ixfun')
+                      )
+            where
+              inst (Ext i) = maybeNth i names
+              inst (Free v) = Just v
+        update pe _ = traverse Engine.simplify pe
 
 data ExpHint
   = NoHint
