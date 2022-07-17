@@ -101,6 +101,7 @@ type SimplifyMemory rep inner =
     BodyDec rep ~ (),
     CanBeWise (Op rep),
     BuilderOps (Wise rep),
+    OpReturns (OpWithWisdom inner),
     Mem rep inner
   )
 
