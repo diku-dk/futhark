@@ -348,7 +348,8 @@ iota :: IntegralExp num => Shape num -> IxFun num
 iota = iotaOffset 0
 
 -- | Create a contiguous single-LMAD index function that is
--- existential in everything, with the permutation and monotonicity.
+-- existential in everything, with the provided permutation and
+-- monotonicity.
 mkExistential :: Int -> [(Int, Monotonicity)] -> Int -> IxFun (Ext a)
 mkExistential basis_rank perm start =
   IxFun (NE.singleton lmad) basis False
