@@ -361,7 +361,7 @@ mkExistential basis_rank perm start =
       LMADDim
         (Ext (start + 1 + i * 3))
         (Ext (start + 2 + i * 3))
-        (Ext (start + 2 + i * 3))
+        (Ext (start + 3 + i * 3))
         p
         mon
 
