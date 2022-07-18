@@ -839,12 +839,12 @@ mkBranchRet reqs =
     arrayInfo _ (MemReq space perm mon (Rank base_rank) contig) =
       (space, perm, mon, base_rank, contig)
 
-    inspect k (MemArray pt shape u req) =
+    inspect ctx_offset (MemArray pt shape u req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
           (space, perm, mon, base_rank, contig) = arrayInfo (shapeRank shape) req
-       in MemArray pt shape' u . ReturnsNewBlock space k $
+       in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
             convert
-              <$> IxFun.mkExistential base_rank (zip perm mon) contig (k + 1)
+              <$> IxFun.mkExistential base_rank (zip perm mon) contig (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space

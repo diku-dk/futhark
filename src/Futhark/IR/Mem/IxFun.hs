@@ -345,7 +345,7 @@ mkExistential :: Int -> [(Int, Monotonicity)] -> Bool -> Int -> IxFun (Ext a)
 mkExistential basis_rank perm contig start =
   IxFun (NE.singleton lmad) basis contig
   where
-    basis = take basis_rank $ map Ext [1 + dims_rank * 2 ..]
+    basis = take basis_rank $ map Ext [start + 1 + dims_rank * 2 ..]
     dims_rank = length perm
     lmad = LMAD (Ext start) $ zipWith onDim perm [0 ..]
     onDim (p, mon) i =
