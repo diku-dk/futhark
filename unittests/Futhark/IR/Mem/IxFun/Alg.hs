@@ -5,7 +5,6 @@ module Futhark.IR.Mem.IxFun.Alg
     iota,
     offsetIndex,
     permute,
-    rotate,
     reshape,
     coerce,
     slice,
@@ -39,7 +38,6 @@ type Permutation = [Int]
 data IxFun num
   = Direct (Shape num)
   | Permute (IxFun num) Permutation
-  | Rotate (IxFun num) (Indices num)
   | Index (IxFun num) (Slice num)
   | FlatIndex (IxFun num) (FlatSlice num)
   | Reshape (IxFun num) (Shape num)
@@ -52,7 +50,6 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Direct dims) =
     text "Direct" <> parens (commasep $ map ppr dims)
   ppr (Permute fun perm) = ppr fun <> ppr perm
-  ppr (Rotate fun offsets) = ppr fun <> brackets (commasep $ map ((text "+" <>) . ppr) offsets)
   ppr (Index fun is) = ppr fun <> ppr is
   ppr (FlatIndex fun is) = ppr fun <> ppr is
   ppr (Reshape fun oldshape) =
@@ -77,9 +74,6 @@ offsetIndex = OffsetIndex
 permute :: IxFun num -> Permutation -> IxFun num
 permute = Permute
 
-rotate :: IxFun num -> Indices num -> IxFun num
-rotate = Rotate
-
 slice :: IxFun num -> Slice num -> IxFun num
 slice = Index
 
@@ -103,8 +97,6 @@ shape (Direct dims) =
   dims
 shape (Permute ixfun perm) =
   rearrangeShape perm $ shape ixfun
-shape (Rotate ixfun _) =
-  shape ixfun
 shape (Index _ how) =
   sliceDims how
 shape (FlatIndex ixfun how) =
@@ -131,10 +123,6 @@ index (Permute fun perm) is_new =
   index fun is_old
   where
     is_old = rearrangeShape (rearrangeInverse perm) is_new
-index (Rotate fun offsets) is =
-  index fun $ zipWith mod (zipWith (+) is offsets) dims
-  where
-    dims = shape fun
 index (Index fun (Slice js)) is =
   index fun (adjust js is)
   where
@@ -163,8 +151,6 @@ index (Rebase new_base fun) is =
             else reshape new_base old_shape
         Permute ixfun perm ->
           permute (rebase new_base ixfun) perm
-        Rotate ixfun offsets ->
-          rotate (rebase new_base ixfun) offsets
         Index ixfun iis ->
           slice (rebase new_base ixfun) iis
         FlatIndex ixfun iis ->
