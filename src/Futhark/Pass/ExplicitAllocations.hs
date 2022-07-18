@@ -401,7 +401,7 @@ allocInMergeParams merge m = do
         if (res_mem_space, res_ixfun) == (v_mem_space, v_ixfun)
           then pure (res_mem, res)
           else lift $ arrayWithIxFun chunkmap v_mem_space v_ixfun (fromDecl param_t) res
-      tell ([], [Var res_mem'])
+      tell ([Var res_mem'], [])
       pure $ Var res'
     scalarRes _ _ _ se = pure se
 
