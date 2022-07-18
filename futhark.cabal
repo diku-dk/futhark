@@ -116,7 +116,6 @@ library
       Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
-      Futhark.Analysis.PrimExp.Generalize
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.Rephrase
