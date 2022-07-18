@@ -97,6 +97,7 @@ module Futhark.CodeGen.ImpGen
     dPrimVE,
     dIndexSpace,
     dIndexSpace',
+    rotateIndex,
     sFor,
     sWhile,
     sComment,
@@ -155,7 +156,7 @@ import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
 import Language.Futhark.Warnings
-import Prelude hiding (quot)
+import Prelude hiding (mod, quot)
 
 -- | How to compile an t'Op'.
 type OpCompiler rep r op = Pat (LetDec rep) -> Op rep -> ImpM rep r op ()
@@ -997,8 +998,13 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
     isLiteral _ = Nothing
 defCompileBasicOp _ Rearrange {} =
   pure ()
-defCompileBasicOp _ Rotate {} =
-  pure ()
+defCompileBasicOp (Pat [pe]) (Rotate rs arr) = do
+  shape <- arrayShape <$> lookupType arr
+  sLoopNest shape $ \is -> do
+    is' <- sequence $ zipWith3 rotate (shapeDims shape) rs is
+    copyDWIMFix (patElemName pe) is (Var arr) is'
+  where
+    rotate d r i = dPrimVE "rot_i" $ rotateIndex (pe64 d) (pe64 r) i
 defCompileBasicOp _ Reshape {} =
   pure ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
@@ -1775,6 +1781,13 @@ inBounds (Slice slice) dims =
    in foldl1 (.&&.) $ zipWith condInBounds slice dims
 
 --- Building blocks for constructing code.
+
+rotateIndex ::
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64
+rotateIndex d r i = (i + r) `mod` d
 
 sFor' :: VName -> Imp.Exp -> ImpM rep r op () -> ImpM rep r op ()
 sFor' i bound body = do

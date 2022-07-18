@@ -4,7 +4,6 @@ module Futhark.IR.Mem.IxFunWrapper
   ( IxFun,
     iota,
     permute,
-    rotate,
     reshape,
     coerce,
     slice,
@@ -19,8 +18,6 @@ import Futhark.IR.Syntax (FlatSlice, Slice)
 import Futhark.Util.IntegralExp
 
 type Shape num = [num]
-
-type Indices num = [num]
 
 type Permutation = [Int]
 
@@ -38,13 +35,6 @@ permute ::
   Permutation ->
   IxFun num
 permute (l, a) x = (I.permute l x, IA.permute a x)
-
-rotate ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  Indices num ->
-  IxFun num
-rotate (l, a) x = (I.rotate l x, IA.rotate a x)
 
 reshape ::
   (Eq num, IntegralExp num) =>

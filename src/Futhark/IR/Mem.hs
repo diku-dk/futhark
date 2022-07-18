@@ -1028,16 +1028,6 @@ expReturns (BasicOp (Rearrange perm v)) = do
           ReturnsInBlock mem $
             existentialiseIxFun [] ixfun'
     ]
-expReturns (BasicOp (Rotate offsets v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let offsets' = map pe64 offsets
-      ixfun' = IxFun.rotate ixfun offsets'
-  pure
-    [ MemArray et (Shape $ map Free dims) NoUniqueness $
-        Just $
-          ReturnsInBlock mem $
-            existentialiseIxFun [] ixfun'
-    ]
 expReturns (BasicOp (Index v slice)) = do
   pure . varInfoToExpReturns <$> sliceInfo v slice
 expReturns (BasicOp (Update _ v _ _)) =

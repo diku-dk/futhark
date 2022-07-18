@@ -16,7 +16,7 @@ where
 
 import Data.Char (isAlpha)
 import Data.Functor
-import Data.List (zipWith5)
+import Data.List (zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as S
@@ -1005,11 +1005,10 @@ pIxFunBase pNum =
     pLMAD = braces $ do
       offset <- pLab "offset" pNum <* pSemi
       strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
-      rotates <- pLab "rotates" $ brackets (pNum `sepBy` pComma) <* pSemi
       shape <- pLab "shape" $ brackets (pNum `sepBy` pComma) <* pSemi
       perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma) <* pSemi
       mon <- pLab "monotonicity" $ brackets (pMon `sepBy` pComma)
-      pure $ IxFun.LMAD offset $ zipWith5 IxFun.LMADDim strides rotates shape perm mon
+      pure $ IxFun.LMAD offset $ zipWith4 IxFun.LMADDim strides shape perm mon
 
 pPrimExpLeaf :: Parser VName
 pPrimExpLeaf = pVName
