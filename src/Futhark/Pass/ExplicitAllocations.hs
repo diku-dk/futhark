@@ -335,9 +335,9 @@ allocInFParams ::
   ([FParam torep] -> AllocM fromrep torep a) ->
   AllocM fromrep torep a
 allocInFParams params m = do
-  (valparams, (ctxparams, memparams)) <-
+  (valparams, (memparams, ctxparams)) <-
     runWriterT $ mapM (uncurry allocInFParam) params
-  let params' = ctxparams <> memparams <> valparams
+  let params' = memparams <> ctxparams <> valparams
       summary = scopeOfFParams params'
   localScope summary $ m params'
 
@@ -355,7 +355,7 @@ allocInFParam param pspace =
       let memname = baseString (paramName param) <> "_mem"
           ixfun = IxFun.iota $ map pe64 $ shapeDims shape
       mem <- lift $ newVName memname
-      tell ([], [Param (paramAttrs param) mem $ MemMem pspace])
+      tell ([Param (paramAttrs param) mem $ MemMem pspace], [])
       pure param {paramDec = MemArray pt shape u $ ArrayIn mem ixfun}
     Prim pt ->
       pure param {paramDec = MemPrim pt}
@@ -600,7 +600,7 @@ linearFuncallArg ::
   WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
 linearFuncallArg Array {} space (Var v) = do
   (mem, arg') <- lift $ ensureDirectArray (Just space) v
-  tell ([], [Var mem])
+  tell ([Var mem], [])
   pure $ Var arg'
 linearFuncallArg _ _ arg =
   pure arg
