@@ -46,8 +46,9 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor (first)
+import Data.Either (partitionEithers)
 import Data.Foldable (toList)
-import Data.List (foldl', transpose)
+import Data.List (foldl', transpose, zip4)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -904,6 +905,52 @@ addCtxToMatchBody reqs body = buildBody_ $ do
           ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ toList ixfun
           pure $ subExpRes (Var mem) : subExpsRes ixfun_exts
 
+-- Do a a simple form of invariance analysis to simplify a Match.  It
+-- is unfortunate that we have to do it here, but functions such as
+-- scalarRes will look carefully at the index functions before the
+-- simplifier has a chance to run.  In a perfect world we would
+-- simplify away those copies afterwards. XXX; this should be fixed by
+-- a more general copy-removal pass. See
+-- Futhark.Optimise.EntryPointMem for a very specialised version of
+-- the idea, but which could perhaps be generalised.
+simplifyMatch ::
+  Mem rep inner =>
+  [Case (Body rep)] ->
+  Body rep ->
+  [BranchTypeMem] ->
+  ( [Case (Body rep)],
+    Body rep,
+    [BranchTypeMem]
+  )
+simplifyMatch cases defbody ts =
+  let case_reses = map (bodyResult . caseBody) cases
+      defbody_res = bodyResult defbody
+      (ctx_fixes, variant) =
+        partitionEithers . map branchInvariant $
+          zip4 [0 ..] (transpose case_reses) defbody_res ts
+      (cases_reses, defbody_reses, ts') = unzip3 variant
+   in ( zipWith onCase cases (transpose cases_reses),
+        onBody defbody defbody_reses,
+        foldr (uncurry fixExt) ts' ctx_fixes
+      )
+  where
+    bound_in_branches =
+      namesFromList . concatMap (patNames . stmPat) $
+        foldMap (bodyStms . caseBody) cases <> bodyStms defbody
+
+    onCase c res = fmap (`onBody` res) c
+    onBody body res = body {bodyResult = res}
+
+    branchInvariant (i, case_reses, defres, t)
+      -- If even one branch has a variant result, then we give up.
+      | namesIntersect bound_in_branches $ freeIn $ defres : case_reses =
+          Right (case_reses, defres, t)
+      -- Do all branches return the same value?
+      | all ((== resSubExp defres) . resSubExp) case_reses =
+          Left (i, resSubExp defres)
+      | otherwise =
+          Right (case_reses, defres, t)
+
 allocInExp ::
   (Allocable fromrep torep inner) =>
   Exp fromrep ->
@@ -930,7 +977,9 @@ allocInExp (Match ses cases def_body (IfDec rets ifsort)) = do
   let reqs = zipWith (foldl combMemReqTypes) def_reqs (transpose cases_reqs)
   def_body'' <- addCtxToMatchBody reqs def_body'
   cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
-  pure . Match ses cases'' def_body'' $ IfDec (mkBranchRet reqs) ifsort
+  let (cases''', def_body''', rets') =
+        simplifyMatch cases'' def_body'' $ mkBranchRet reqs
+  pure $ Match ses cases''' def_body''' $ IfDec rets' ifsort
   where
     onCase (Case vs body) = first (Case vs) <$> allocInMatchBody rets body
 allocInExp (WithAcc inputs bodylam) =
