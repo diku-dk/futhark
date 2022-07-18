@@ -443,7 +443,7 @@ pMatch pr =
     <*> pIfSort
     <*> braces (pSubExp `sepBy` pComma)
     <*> many pCase
-    <*> (keyword "default" *> pBranchBody pr)
+    <*> (keyword "default" *> lexeme "->" *> pBranchBody pr)
     <*> (lexeme ":" *> pBranchTypes pr)
   where
     f sort cond cases defbody t =
@@ -452,6 +452,7 @@ pMatch pr =
       keyword "case"
         $> Case
         <*> braces (pMaybeValue `sepBy` pComma)
+        <* lexeme "->"
         <*> pBranchBody pr
     pMaybeValue =
       choice [lexeme "_" $> Nothing, Just <$> pPrimValue]
