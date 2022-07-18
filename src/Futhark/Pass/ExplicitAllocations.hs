@@ -557,6 +557,7 @@ ensureRowMajorArray space_ok v = do
   default_space <- askDefaultSpace
   if numLMADs ixfun == 1
     && ixFunPerm ixfun == [0 .. IxFun.rank ixfun - 1]
+    && length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
     then pure (mem, v)
     else needCopy (fromMaybe default_space space_ok)
