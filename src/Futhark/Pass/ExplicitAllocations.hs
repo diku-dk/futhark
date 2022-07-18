@@ -546,6 +546,26 @@ ensureDirectArray space_ok v = do
       -- binding for the size of the memory block.
       allocLinearArray space (baseString v) v
 
+ensureRowMajorArray ::
+  (Allocable fromrep torep inner) =>
+  Maybe Space ->
+  VName ->
+  AllocM fromrep torep (VName, VName)
+ensureRowMajorArray space_ok v = do
+  (mem, ixfun) <- lookupArraySummary v
+  mem_space <- lookupMemSpace mem
+  default_space <- askDefaultSpace
+  if numLMADs ixfun == 1
+    && ixFunPerm ixfun == [0 .. IxFun.rank ixfun - 1]
+    && maybe True (== mem_space) space_ok
+    then pure (mem, v)
+    else needCopy (fromMaybe default_space space_ok)
+  where
+    needCopy space =
+      -- We need to do a new allocation, copy 'v', and make a new
+      -- binding for the size of the memory block.
+      allocLinearArray space (baseString v) v
+
 allocPermArray ::
   (Allocable fromrep torep inner) =>
   Space ->
@@ -867,7 +887,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
   pure $ ctx ++ res
   where
     linearIfNeeded (MemArray _ _ _ (NeedsLinearisation space)) (SubExpRes cs (Var v)) =
-      SubExpRes cs . Var . snd <$> ensureDirectArray (Just space) v
+      SubExpRes cs . Var . snd <$> ensureRowMajorArray (Just space) v
     linearIfNeeded _ res =
       pure res
 
@@ -909,7 +929,7 @@ allocInExp (Match ses cases def_body (IfDec rets ifsort)) = do
   let reqs = zipWith (foldl combMemReqTypes) def_reqs (transpose cases_reqs)
   def_body'' <- addCtxToMatchBody reqs def_body'
   cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
-  pure $ Match ses cases'' def_body'' $ IfDec (mkBranchRet reqs) ifsort
+  pure . Match ses cases'' def_body'' $ IfDec (mkBranchRet reqs) ifsort
   where
     onCase (Case vs body) = first (Case vs) <$> allocInMatchBody rets body
 allocInExp (WithAcc inputs bodylam) =
