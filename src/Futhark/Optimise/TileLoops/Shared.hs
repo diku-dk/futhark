@@ -325,8 +325,6 @@ changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
     _ -> error "In TileLoops/Shared.hs, changeIxFnEnv: manifest applied to a non-array!"
 changeIxFnEnv env y (BasicOp (Rearrange perm x)) =
   composeIxfuns env y x (`IxFun.permute` perm)
-changeIxFnEnv env y (BasicOp (Rotate rs x)) =
-  composeIxfuns env y x (`IxFun.rotate` fmap ExpMem.pe64 rs)
 changeIxFnEnv env y (BasicOp (Index x slc)) =
   composeIxfuns env y x (`IxFun.slice` (Slice $ map (fmap ExpMem.pe64) $ unSlice slc))
 changeIxFnEnv env y (BasicOp (Opaque _ (Var x))) =
