@@ -22,6 +22,7 @@ import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
+import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
@@ -125,6 +126,8 @@ sequentialCpuPipeline =
     >>> onePass Seq.explicitAllocations
     >>> passes
       [ performCSE False,
+        simplifySeqMem,
+        entryPointMemSeq,
         simplifySeqMem
       ]
 
@@ -138,6 +141,7 @@ gpuPipeline =
       [ simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,
+        entryPointMemGPU,
         doubleBufferGPU,
         simplifyGPUMem,
         MemoryBlockMerging.optimise,
@@ -170,6 +174,7 @@ multicorePipeline =
       [ simplifyMCMem,
         performCSE False,
         simplifyMCMem,
+        entryPointMemMC,
         doubleBufferMC,
         simplifyMCMem
       ]

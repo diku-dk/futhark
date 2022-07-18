@@ -584,7 +584,7 @@ allocPermArray space perm s v = do
             MemArray pt shape u . ArrayIn mem $
               IxFun.permute (IxFun.iota $ map pe64 $ arrayDims t) perm
           pat = Pat [PatElem v' info]
-      addStm $ Let pat (defAux ()) $ BasicOp $ Copy v
+      addStm $ Let pat (defAux ()) $ BasicOp $ Manifest perm v
       pure (mem, v')
     _ ->
       error $ "allocPermArray: " ++ pretty t
