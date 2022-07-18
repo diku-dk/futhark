@@ -867,7 +867,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
   pure $ ctx ++ res
   where
     linearIfNeeded (MemArray _ _ _ (NeedsLinearisation space)) (SubExpRes cs (Var v)) =
-      SubExpRes cs . Var . snd <$> allocLinearArray space (baseString v) v
+      SubExpRes cs . Var . snd <$> ensureDirectArray (Just space) v
     linearIfNeeded _ res =
       pure res
 
