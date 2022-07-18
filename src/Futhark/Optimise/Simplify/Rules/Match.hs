@@ -8,7 +8,6 @@ module Futhark.Optimise.Simplify.Rules.Match (matchRules) where
 import Control.Monad
 import Data.Either
 import Data.List (partition, transpose, unzip4, zip5)
-import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -139,25 +138,25 @@ ruleMatch _ _ _ _ = Skip
 -- either invariant to the branches (only done for results used for
 -- existentials), or the same in both branches.
 hoistBranchInvariant :: BuilderOps rep => TopDownRuleMatch rep
-hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) = Simplify $ do
+hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) =
   let case_reses = map (bodyResult . caseBody) cases
       defbody_res = bodyResult defbody
-  (hoistings, (pes, ts, case_reses_tr, defbody_res')) <-
-    fmap (fmap unzip4 . partitionEithers) . mapM branchInvariant $
-      zip5 [0 ..] (patElems pat) ret (transpose case_reses) defbody_res
-  let ctx_fixes = catMaybes hoistings
-      onCase (Case vs body) case_res = Case vs $ body {bodyResult = case_res}
-      cases' = zipWith onCase cases $ transpose case_reses_tr
-      defbody' = defbody {bodyResult = defbody_res'}
-      ret' = foldr (uncurry fixExt) ts ctx_fixes
-  if not $ null hoistings -- Was something hoisted?
-    then do
-      -- We may have to add some reshapes if we made the type
-      -- less existential.
-      cases'' <- mapM (traverse $ reshapeBodyResults $ map extTypeOf ret') cases'
-      defbody'' <- reshapeBodyResults (map extTypeOf ret') defbody'
-      letBind (Pat pes) $ Match cond cases'' defbody'' (IfDec ret' ifsort)
-    else cannotSimplify
+      (hoistings, (pes, ts, case_reses_tr, defbody_res')) =
+        (fmap unzip4 . partitionEithers) . map branchInvariant $
+          zip5 [0 ..] (patElems pat) ret (transpose case_reses) defbody_res
+   in if null hoistings
+        then Skip
+        else Simplify $ do
+          ctx_fixes <- sequence hoistings
+          let onCase (Case vs body) case_res = Case vs $ body {bodyResult = case_res}
+              cases' = zipWith onCase cases $ transpose case_reses_tr
+              defbody' = defbody {bodyResult = defbody_res'}
+              ret' = foldr (uncurry fixExt) ts ctx_fixes
+          -- We may have to add some reshapes if we made the type
+          -- less existential.
+          cases'' <- mapM (traverse $ reshapeBodyResults $ map extTypeOf ret') cases'
+          defbody'' <- reshapeBodyResults (map extTypeOf ret') defbody'
+          letBind (Pat pes) $ Match cond cases'' defbody'' (IfDec ret' ifsort)
   where
     bound_in_branches =
       namesFromList . concatMap (patNames . stmPat) $
@@ -168,7 +167,7 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) = Simplify
       | namesIntersect bound_in_branches $ freeIn $ defres : case_reses =
           noHoisting
       -- Do all branches return the same value?
-      | all ((== resSubExp defres) . resSubExp) case_reses = do
+      | all ((== resSubExp defres) . resSubExp) case_reses = Left $ do
           certifying (foldMap resCerts case_reses <> resCerts defres) $
             letBindNames [patElemName pe] . BasicOp . SubExp $
               resSubExp defres
@@ -179,7 +178,7 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) = Simplify
       -- latter is to avoid infinite application of this rule.
       | not $ namesIntersect bound_in_branches $ freeIn $ defres : case_reses,
         patSize pat > 1,
-        Prim _ <- patElemType pe = do
+        Prim _ <- patElemType pe = Left $ do
           bt <- expTypesFromPat $ Pat [pe]
           letBindNames [patElemName pe]
             =<< ( Match cond
@@ -192,9 +191,9 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) = Simplify
           hoisted i pe
       | otherwise = noHoisting
       where
-        noHoisting = pure $ Right (pe, t, case_reses, defres)
+        noHoisting = Right (pe, t, case_reses, defres)
 
-    hoisted i pe = pure $ Left $ Just (i, Var $ patElemName pe)
+    hoisted i pe = pure (i, Var $ patElemName pe)
 
     reshapeBodyResults rets body = buildBody_ $ do
       ses <- bodyBind body
