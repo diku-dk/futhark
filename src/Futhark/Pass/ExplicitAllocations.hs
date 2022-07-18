@@ -773,16 +773,16 @@ combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
 contextRets (MemArray _ shape _ (MemReq space _ _ (Rank base_rank) _)) =
-  -- Memory + offset + base_rank + (stride,rotate,size)*rank.
+  -- Memory + offset + base_rank + (stride,size)*rank.
   MemMem space
     : MemPrim int64
     : replicate base_rank (MemPrim int64)
-    ++ replicate (3 * shapeRank shape) (MemPrim int64)
+    ++ replicate (2 * shapeRank shape) (MemPrim int64)
 contextRets (MemArray _ shape _ (NeedsLinearisation space)) =
-  -- Memory + offset + (base,stride,rotate,size)*rank.
+  -- Memory + offset + (base,stride,size)*rank.
   MemMem space
     : MemPrim int64
-    : replicate (4 * shapeRank shape) (MemPrim int64)
+    : replicate (3 * shapeRank shape) (MemPrim int64)
 contextRets _ = []
 
 -- Add memory information to the body, but do not return memory/ixfun

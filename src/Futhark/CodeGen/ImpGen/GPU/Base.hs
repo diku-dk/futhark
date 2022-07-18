@@ -21,6 +21,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     defKernelAttrs,
     sReplicate,
     sIota,
+    sRotateKernel,
     sCopy,
     compileThreadResult,
     compileGroupResult,
@@ -373,6 +374,14 @@ compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) = do
   groupCoverSegSpace SegVirt (SegSpace flat $ zip is $ shapeDims ds) $
     copyDWIMFix (patElemName dest) is' se []
   sOp $ Imp.Barrier Imp.FenceLocal
+compileGroupExp (Pat [dest]) (BasicOp (Rotate rs arr)) = do
+  ds <- map pe64 . arrayDims <$> lookupType arr
+  groupCoverSpace ds $ \is -> do
+    is' <- sequence $ zipWith3 rotate ds rs is
+    copyDWIMFix (patElemName dest) is (Var arr) is'
+  sOp $ Imp.Barrier Imp.FenceLocal
+  where
+    rotate d r i = dPrimVE "rot_i" $ rotateIndex d (pe64 r) i
 compileGroupExp (Pat [dest]) (BasicOp (Iota n e s it)) = do
   n' <- toExp n
   e' <- toExp e
@@ -1995,6 +2004,28 @@ sCopy pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
         tmp <- tvVar <$> dPrim "tmp" pt
         emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
         emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
+
+-- | Perform a Rotate with a kernel.
+sRotateKernel :: VName -> [Imp.TExp Int64] -> VName -> CallKernelGen ()
+sRotateKernel dest rs src = do
+  t <- lookupType src
+  let ds = map pe64 $ arrayDims t
+  n <- dPrimVE "rotate_n" $ product ds
+  (virtualise, constants) <- simpleKernelConstants n "rotate"
+
+  fname <- askFunction
+  let name =
+        keyWithEntryPoint fname $
+          nameFromString $
+            "rotate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+
+  sKernelFailureTolerant True threadOperations constants name $
+    virtualise $ \gtid -> sWhen (gtid .<. n) $ do
+      is' <- dIndexSpace' "rep_i" ds gtid
+      is'' <- sequence $ zipWith3 rotate ds rs is'
+      copyDWIMFix dest is' (Var src) is''
+  where
+    rotate d r i = dPrimVE "rot_i" $ rotateIndex d r i
 
 compileGroupResult ::
   SegSpace ->

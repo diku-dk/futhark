@@ -252,6 +252,10 @@ expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
   | Acc {} <- patElemType pe = pure ()
   | otherwise =
       sReplicate (patElemName pe) se
+expCompiler (Pat [pe]) (BasicOp (Rotate rs arr))
+  | Acc {} <- patElemType pe = pure ()
+  | otherwise =
+      sRotateKernel (patElemName pe) (map pe64 rs) arr
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   pure ()
