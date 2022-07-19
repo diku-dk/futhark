@@ -23,8 +23,7 @@ import Futhark.IR.Syntax
 import Futhark.Util.IntegralExp
 import Prelude hiding (product, quot, sum)
 
--- | Construct a 'Reshape' where all dimension changes are
--- 'DimCoercion's.
+-- | Construct a 'Reshape' that is a 'ReshapeCoerce'.
 shapeCoerce :: [SubExp] -> VName -> Exp rep
 shapeCoerce newdims arr =
   BasicOp $ Reshape ReshapeCoerce (Shape newdims) arr
