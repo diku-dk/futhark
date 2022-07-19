@@ -393,4 +393,9 @@ instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
     let Body bodyrep _ _ = mkBody (fmap removeStmAliases stms) res
      in mkAliasedBody bodyrep stms res
 
-instance (ASTRep (Aliases rep), Buildable (Aliases rep)) => BuilderOps (Aliases rep)
+instance
+  ( ASTRep rep,
+    CanBeAliased (Op rep),
+    Buildable (Aliases rep)
+  ) =>
+  BuilderOps (Aliases rep)

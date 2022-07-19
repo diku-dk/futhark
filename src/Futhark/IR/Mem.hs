@@ -1014,10 +1014,7 @@ subExpReturns (Constant v) =
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
 expReturns ::
-  ( Monad m,
-    LocalScope rep m,
-    Mem rep inner
-  ) =>
+  (LocalScope rep m, Mem rep inner) =>
   Exp rep ->
   m [ExpReturns]
 expReturns (BasicOp (SubExp se)) =

@@ -402,7 +402,7 @@ identitySOACMapper =
 -- SOAC.  The mapping does not descend recursively into subexpressions
 -- and is done left-to-right.
 mapSOACM ::
-  (Applicative m, Monad m) =>
+  Monad m =>
   SOACMapper frep trep m ->
   SOAC frep ->
   m (SOAC trep)

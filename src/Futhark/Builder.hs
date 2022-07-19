@@ -123,7 +123,7 @@ instance (ASTRep rep, Monad m) => LocalScope rep (BuilderT rep m) where
     pure x
 
 instance
-  (ASTRep rep, MonadFreshNames m, BuilderOps rep) =>
+  (MonadFreshNames m, BuilderOps rep) =>
   MonadBuilder (BuilderT rep m)
   where
   type Rep (BuilderT rep m) = rep

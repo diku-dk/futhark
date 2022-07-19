@@ -51,11 +51,11 @@ class (Applicative m, Monad m) => MonadLogger m where
   -- | Append an entire log.
   addLog :: Log -> m ()
 
-instance (Applicative m, Monad m) => MonadLogger (WriterT Log m) where
+instance Monad m => MonadLogger (WriterT Log m) where
   addLog = tell
 
-instance (Applicative m, Monad m) => MonadLogger (Control.Monad.RWS.Lazy.RWST r Log s m) where
+instance Monad m => MonadLogger (Control.Monad.RWS.Lazy.RWST r Log s m) where
   addLog = tell
 
-instance (Applicative m, Monad m) => MonadLogger (Control.Monad.RWS.Strict.RWST r Log s m) where
+instance Monad m => MonadLogger (Control.Monad.RWS.Strict.RWST r Log s m) where
   addLog = tell

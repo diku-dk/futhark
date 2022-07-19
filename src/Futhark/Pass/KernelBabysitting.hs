@@ -150,7 +150,7 @@ type ArrayIndexTransform m =
   m (Maybe (VName, Slice SubExp))
 
 traverseKernelBodyArrayIndexes ::
-  (Applicative f, Monad f) =>
+  Monad f =>
   Names ->
   Names ->
   Scope GPU ->

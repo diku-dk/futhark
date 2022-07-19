@@ -41,27 +41,27 @@ import Futhark.IR.Syntax
 --    getNameSource = get
 --    putNameSource = put
 -- @
-class (Applicative m, Monad m) => MonadFreshNames m where
+class Monad m => MonadFreshNames m where
   getNameSource :: m VNameSource
   putNameSource :: VNameSource -> m ()
 
-instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Lazy.StateT VNameSource im) where
+instance Monad im => MonadFreshNames (Control.Monad.State.Lazy.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Lazy.get
   putNameSource = Control.Monad.State.Lazy.put
 
-instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
+instance Monad im => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
 
 instance
-  (Applicative im, Monad im, Monoid w) =>
+  (Monad im, Monoid w) =>
   MonadFreshNames (Control.Monad.RWS.Lazy.RWST r w VNameSource im)
   where
   getNameSource = Control.Monad.RWS.Lazy.get
   putNameSource = Control.Monad.RWS.Lazy.put
 
 instance
-  (Applicative im, Monad im, Monoid w) =>
+  (Monad im, Monoid w) =>
   MonadFreshNames (Control.Monad.RWS.Strict.RWST r w VNameSource im)
   where
   getNameSource = Control.Monad.RWS.Strict.get

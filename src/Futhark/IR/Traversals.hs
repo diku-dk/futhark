@@ -83,7 +83,7 @@ identityMapper =
 -- expression.  Importantly, the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
 mapExpM ::
-  (Applicative m, Monad m) =>
+  Monad m =>
   Mapper frep trep m ->
   Exp frep ->
   m (Exp trep)
