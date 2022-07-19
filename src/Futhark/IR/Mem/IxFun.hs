@@ -892,6 +892,8 @@ closeEnough ixf1 ixf2 =
   (length (base ixf1) == length (base ixf2))
     && (NE.length (ixfunLMADs ixf1) == NE.length (ixfunLMADs ixf2))
     && all closeEnoughLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
+    -- This treats ixf1 as the "declared type" that we are matching against.
+    && (contiguous ixf1 <= contiguous ixf2)
   where
     closeEnoughLMADs :: (LMAD num, LMAD num) -> Bool
     closeEnoughLMADs (lmad1, lmad2) =
