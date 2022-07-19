@@ -129,7 +129,7 @@ segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
         SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim ::
-  (MonadFreshNames m, MonadBuilder m) =>
+  MonadBuilder m =>
   Pat Type ->
   m (Pat Type, [(VName, SubExp)], m ())
 dummyDim pat = do

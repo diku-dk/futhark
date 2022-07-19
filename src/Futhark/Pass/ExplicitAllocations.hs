@@ -1125,8 +1125,7 @@ mkLetNamesB' dec names e = do
     nohints = map (const NoHint) names
 
 mkLetNamesB'' ::
-  ( BuilderOps rep,
-    Mem rep inner,
+  ( Mem rep inner,
     LetDec rep ~ LetDecMem,
     OpReturns (Engine.OpWithWisdom inner),
     ExpDec rep ~ (),

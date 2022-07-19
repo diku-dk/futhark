@@ -102,7 +102,7 @@ class (Applicative m, RepTypes rep) => HasScope rep m | m -> rep where
   asksScope f = f <$> askScope
 
 instance
-  (Applicative m, Monad m, RepTypes rep) =>
+  (Monad m, RepTypes rep) =>
   HasScope rep (ReaderT (Scope rep) m)
   where
   askScope = ask
@@ -111,13 +111,13 @@ instance (Monad m, HasScope rep m) => HasScope rep (ExceptT e m) where
   askScope = lift askScope
 
 instance
-  (Applicative m, Monad m, Monoid w, RepTypes rep) =>
+  (Monad m, Monoid w, RepTypes rep) =>
   HasScope rep (Control.Monad.RWS.Strict.RWST (Scope rep) w s m)
   where
   askScope = ask
 
 instance
-  (Applicative m, Monad m, Monoid w, RepTypes rep) =>
+  (Monad m, Monoid w, RepTypes rep) =>
   HasScope rep (Control.Monad.RWS.Lazy.RWST (Scope rep) w s m)
   where
   askScope = ask
@@ -131,23 +131,23 @@ class (HasScope rep m, Monad m) => LocalScope rep m where
   -- does not replace it.
   localScope :: Scope rep -> m a -> m a
 
-instance (Monad m, LocalScope rep m) => LocalScope rep (ExceptT e m) where
+instance (LocalScope rep m) => LocalScope rep (ExceptT e m) where
   localScope = mapExceptT . localScope
 
 instance
-  (Applicative m, Monad m, RepTypes rep) =>
+  (Monad m, RepTypes rep) =>
   LocalScope rep (ReaderT (Scope rep) m)
   where
   localScope = local . M.union
 
 instance
-  (Applicative m, Monad m, Monoid w, RepTypes rep) =>
+  (Monad m, Monoid w, RepTypes rep) =>
   LocalScope rep (Control.Monad.RWS.Strict.RWST (Scope rep) w s m)
   where
   localScope = local . M.union
 
 instance
-  (Applicative m, Monad m, Monoid w, RepTypes rep) =>
+  (Monad m, Monoid w, RepTypes rep) =>
   LocalScope rep (Control.Monad.RWS.Lazy.RWST (Scope rep) w s m)
   where
   localScope = local . M.union

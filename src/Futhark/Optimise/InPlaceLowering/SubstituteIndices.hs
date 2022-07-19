@@ -37,8 +37,7 @@ substituteIndices ::
   ( MonadFreshNames m,
     BuilderOps rep,
     Buildable rep,
-    Aliased rep,
-    LParamInfo rep ~ Type
+    Aliased rep
   ) =>
   IndexSubstitutions ->
   Stms rep ->

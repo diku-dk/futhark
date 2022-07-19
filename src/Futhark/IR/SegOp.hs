@@ -830,7 +830,7 @@ mapSegBinOp tv (SegBinOp comm red_op nes shape) =
 
 -- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM ::
-  (Applicative m, Monad m) =>
+  Monad m =>
   SegOpMapper lvl frep trep m ->
   SegOp lvl frep ->
   m (SegOp lvl trep)
@@ -922,10 +922,7 @@ instance (ASTRep rep, ASTConstraints lvl) => Rename (SegOp lvl rep) where
     where
       renamer = SegOpMapper rename rename rename rename rename
 
-instance
-  (ASTRep rep, FreeIn (LParamInfo rep), FreeIn lvl) =>
-  FreeIn (SegOp lvl rep)
-  where
+instance (ASTRep rep, FreeIn lvl) => FreeIn (SegOp lvl rep) where
   freeIn' e =
     fvBind (namesFromList $ M.keys $ scopeOfSegSpace (segSpace e)) $
       flip execState mempty $

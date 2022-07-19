@@ -72,7 +72,7 @@ newtype RuleM rep a = RuleM (BuilderT rep (StateT VNameSource Maybe) a)
       LocalScope rep
     )
 
-instance (ASTRep rep, BuilderOps rep) => MonadBuilder (RuleM rep) where
+instance (BuilderOps rep) => MonadBuilder (RuleM rep) where
   type Rep (RuleM rep) = rep
   mkExpDecM pat e = RuleM $ mkExpDecM pat e
   mkBodyM stms res = RuleM $ mkBodyM stms res

@@ -39,7 +39,7 @@ Motivation:
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm ::
-  (ASTRep rep, BuilderOps rep) =>
+  (BuilderOps rep) =>
   VarLookup rep ->
   Pat (LetDec rep) ->
   Lambda rep ->
@@ -79,7 +79,7 @@ foldClosedForm look pat lam accs arrs = do
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm ::
-  (ASTRep rep, BuilderOps rep) =>
+  (BuilderOps rep) =>
   Pat (LetDec rep) ->
   [(FParam rep, SubExp)] ->
   Names ->
