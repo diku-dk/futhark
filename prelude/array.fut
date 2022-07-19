@@ -77,7 +77,12 @@ def concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]
 --
 -- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
 --
--- **Complexity:** O(1).
+-- **Work:** O(n).
+--
+-- **Span:** O(1).
+--
+-- Note: In most cases, `rotate` will be fused with subsequent
+-- operations such as `map`, in which case it is free.
 def rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate (r, xs)
 
 -- | Construct an array of consecutive integers of the given length,
