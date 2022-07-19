@@ -560,6 +560,7 @@ ensureRowMajorArray space_ok v = do
     && ixFunPerm ixfun == [0 .. IxFun.rank ixfun - 1]
     && length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
+    && IxFun.contiguous ixfun
     then pure (mem, v)
     else needCopy (fromMaybe default_space space_ok)
   where
