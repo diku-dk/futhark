@@ -61,7 +61,7 @@ diffBasicOp pat aux e m =
                 [Var pat_adj]
                 [Case [Just $ BoolValue True] $ resultBody [constant (floatValue ft (1 :: Int))]]
                 (resultBody [constant (floatValue ft (0 :: Int))])
-                (IfDec [Prim (FloatType ft)] IfNormal)
+                (MatchDec [Prim (FloatType ft)] MatchNormal)
           IntType it ->
             update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_adj)
           Bool ->

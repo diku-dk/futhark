@@ -149,7 +149,7 @@ optimizeStm out stm = do
         pure (out |> stm)
       Apply {} ->
         pure (out |> stm)
-      Match ses cases defbody (IfDec btypes sort) -> do
+      Match ses cases defbody (MatchDec btypes sort) -> do
         -- Rewrite branches.
         cases_stms <- mapM (optimizeStms . bodyStms . caseBody) cases
         let cases_res = map (bodyResult . caseBody) cases
@@ -191,7 +191,7 @@ optimizeStm out stm = do
                   drop 1 $
                     transpose reses
             defbody' = mkBody defbody_stms' $ map head reses
-            e' = Match ses cases' defbody' (IfDec btypes' sort)
+            e' = Match ses cases' defbody' (MatchDec btypes' sort)
             stm' = Let (Pat pes') (stmAux stm) e'
 
         -- Read migrated scalars that are used on host.

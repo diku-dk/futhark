@@ -308,11 +308,11 @@ protectIf ::
   SubExp ->
   Stm (Rep m) ->
   m ()
-protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] taken_body] untaken_body (IfDec if_ts IfFallback))) = do
+protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] taken_body] untaken_body (MatchDec if_ts MatchFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
   auxing aux . letBind pat $
     Match [cond'] [Case [Just (BoolValue True)] taken_body] untaken_body $
-      IfDec if_ts IfFallback
+      MatchDec if_ts MatchFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
@@ -335,7 +335,7 @@ protectIf _ f taken (Let pat aux e)
               [taken]
               [Case [Just $ BoolValue True] taken_body]
               untaken_body
-            $ IfDec if_ts IfFallback
+            $ MatchDec if_ts MatchFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -674,9 +674,9 @@ loopInvariantStm vtable =
 matchBlocker ::
   (ASTRep rep, CanBeWise (Op rep), FreeIn a) =>
   a ->
-  IfDec rt ->
+  MatchDec rt ->
   SimpleM rep (BlockPred (Wise rep))
-matchBlocker cond (IfDec _ ifsort) = do
+matchBlocker cond (MatchDec _ ifsort) = do
   is_alloc_fun <- asksEngineEnv $ isAllocation . envHoistBlockers
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   vtable <- askVtable
@@ -695,13 +695,13 @@ matchBlocker cond (IfDec _ ifsort) = do
         is_alloc_fun stm
           || ( ST.loopDepth vtable > 0
                  && cond_loop_invariant
-                 && ifsort /= IfFallback
+                 && ifsort /= MatchFallback
                  && loopInvariantStm vtable stm
                  -- Avoid hoisting out something that might change the
                  -- asymptotics of the program.
                  && all primType (patTypes (stmPat stm))
              )
-          || ( ifsort /= IfFallback
+          || ( ifsort /= MatchFallback
                  && any (`UT.isSize` usage) (patNames (stmPat stm))
                  && all primType (patTypes (stmPat stm))
              )
@@ -722,7 +722,7 @@ matchBlocker cond (IfDec _ ifsort) = do
         | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
         -- Hoist aggressively out of versioning branches.
-        ifsort /= IfEquiv
+        ifsort /= MatchEquiv
 
       block =
         branch_blocker
@@ -818,7 +818,7 @@ simplifyExp ::
   Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
-simplifyExp usage (Pat pes) (Match ses cases def_body ifdec@(IfDec ts ifsort)) = do
+simplifyExp usage (Pat pes) (Match ses cases defbody ifdec@(MatchDec ts ifsort)) = do
   let pes_usages = map (fromMaybe mempty . (`UT.lookup` usage) . patElemName) pes
   ses' <- mapM simplify ses
   ts' <- mapM simplify ts
@@ -826,12 +826,12 @@ simplifyExp usage (Pat pes) (Match ses cases def_body ifdec@(IfDec ts ifsort)) =
   block <- matchBlocker ses ifdec
   (cases_hoisted, cases') <-
     unzip <$> zipWithM (simplifyCase block ses' pes_usages) (inits pats) cases
-  (def_body_hoisted, def_body') <-
+  (defbody_hoisted, defbody') <-
     protectCaseHoisted ses' pats [] $
-      simplifyBody block usage pes_usages def_body
+      simplifyBody block usage pes_usages defbody
   pure
-    ( Match ses' cases' def_body' $ IfDec ts' ifsort,
-      mconcat $ def_body_hoisted : cases_hoisted
+    ( Match ses' cases' defbody' $ MatchDec ts' ifsort,
+      mconcat $ defbody_hoisted : cases_hoisted
     )
   where
     simplifyCase block ses' pes_usages prior (Case vs body) = do

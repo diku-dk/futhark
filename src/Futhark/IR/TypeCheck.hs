@@ -1017,7 +1017,7 @@ checkExp (Match ses cases def_case info) = do
           </> "cannot match pattern"
           </> indent 2 (ppTuple' vs)
       context ("in body of case " <> prettyTuple vs) $ checkCaseBody body
-    checkCaseBody = matchBranchType (ifReturns info)
+    checkCaseBody = matchBranchType (matchReturns info)
 checkExp (Apply fname args rettype_annot _) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args

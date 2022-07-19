@@ -221,13 +221,13 @@ removeRedundantScrutinees ses cases =
   where
     interesting = any (/= Nothing) . snd
 
--- | As 'eMatch', but an 'IfSort' can be given.
+-- | As 'eMatch', but an 'MatchSort' can be given.
 eMatch' ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   [SubExp] ->
   [Case (m (Body (Rep m)))] ->
   m (Body (Rep m)) ->
-  IfSort ->
+  MatchSort ->
   m (Exp (Rep m))
 eMatch' ses cases_m defbody_m sort = do
   cases <- mapM (traverse insertStmsM) cases_m
@@ -240,7 +240,7 @@ eMatch' ses cases_m defbody_m sort = do
   defbody' <- addContextForBranch ts defbody
   let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
       (ses', cases'') = removeRedundantScrutinees ses cases'
-  pure $ Match ses' cases'' defbody' $ IfDec ts' sort
+  pure $ Match ses' cases'' defbody' $ MatchDec ts' sort
   where
     addContextForBranch ts (Body _ stms val_res) = do
       body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
@@ -259,7 +259,7 @@ eMatch ::
   [Case (m (Body (Rep m)))] ->
   m (Body (Rep m)) ->
   m (Exp (Rep m))
-eMatch ses cases_m defbody_m = eMatch' ses cases_m defbody_m IfNormal
+eMatch ses cases_m defbody_m = eMatch' ses cases_m defbody_m MatchNormal
 
 -- | Construct a 'Match' modelling an if-expression from a monadic
 -- condition and monadic branches.  'eBody' might be convenient for
@@ -270,15 +270,15 @@ eIf ::
   m (Body (Rep m)) ->
   m (Body (Rep m)) ->
   m (Exp (Rep m))
-eIf ce te fe = eIf' ce te fe IfNormal
+eIf ce te fe = eIf' ce te fe MatchNormal
 
--- | As 'eIf', but an 'IfSort' can be given.
+-- | As 'eIf', but an 'MatchSort' can be given.
 eIf' ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   m (Exp (Rep m)) ->
   m (Body (Rep m)) ->
   m (Body (Rep m)) ->
-  IfSort ->
+  MatchSort ->
   m (Exp (Rep m))
 eIf' ce te fe if_sort = do
   ce' <- letSubExp "cond" =<< ce
@@ -600,9 +600,9 @@ isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) (unSlice slice
     allOfIt d (DimSlice _ n _) = d == n
     allOfIt _ _ = False
 
--- | Produce the common case of an 'IfDec'.
-ifCommon :: [Type] -> IfDec ExtType
-ifCommon ts = IfDec (staticShapes ts) IfNormal
+-- | Produce the common case of an 'MatchDec'.
+ifCommon :: [Type] -> MatchDec ExtType
+ifCommon ts = MatchDec (staticShapes ts) MatchNormal
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Buildable rep => [SubExp] -> Body rep

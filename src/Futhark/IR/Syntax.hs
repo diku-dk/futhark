@@ -137,8 +137,8 @@ module Futhark.IR.Syntax
     Exp (..),
     Case (..),
     LoopForm (..),
-    IfDec (..),
-    IfSort (..),
+    MatchDec (..),
+    MatchSort (..),
     Safety (..),
     Lambda (..),
 
@@ -420,7 +420,11 @@ data Exp rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
   | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
-  | Match [SubExp] [Case (Body rep)] (Body rep) (IfDec (BranchType rep))
+  | -- | A match statement picks a branch by comparing the given
+    -- subexpressions (called the /scrutinee/) with the pattern in
+    -- each of the cases.  If none of the cases match, the /default
+    -- body/ is picked.
+    Match [SubExp] [Case (Body rep)] (Body rep) (MatchDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
     DoLoop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
   | -- | Create accumulators backed by the given arrays (which are
@@ -451,29 +455,29 @@ deriving instance RepTypes rep => Show (LoopForm rep)
 deriving instance RepTypes rep => Ord (LoopForm rep)
 
 -- | Data associated with a branch.
-data IfDec rt = IfDec
-  { ifReturns :: [rt],
-    ifSort :: IfSort
+data MatchDec rt = MatchDec
+  { matchReturns :: [rt],
+    matchSort :: MatchSort
   }
   deriving (Eq, Show, Ord)
 
 -- | What kind of branch is this?  This has no semantic meaning, but
 -- provides hints to simplifications.
-data IfSort
+data MatchSort
   = -- | An ordinary branch.
-    IfNormal
+    MatchNormal
   | -- | A branch where the "true" case is what we are
     -- actually interested in, and the "false" case is only
     -- present as a fallback for when the true case cannot
     -- be safely evaluated.  The compiler is permitted to
     -- optimise away the branch if the true case contains
     -- only safe statements.
-    IfFallback
+    MatchFallback
   | -- | Both of these branches are semantically equivalent,
     -- and it is fine to eliminate one if it turns out to
     -- have problems (e.g. contain things we cannot generate
     -- code for).
-    IfEquiv
+    MatchEquiv
   deriving (Eq, Show, Ord)
 
 -- | Anonymous function for use in a SOAC.

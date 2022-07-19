@@ -408,12 +408,12 @@ pPat pr = Pat <$> braces (pPatElem pr `sepBy` pComma)
 pResult :: Parser Result
 pResult = braces $ pSubExpRes `sepBy` pComma
 
-pIfSort :: Parser IfSort
-pIfSort =
+pMatchSort :: Parser MatchSort
+pMatchSort =
   choice
-    [ lexeme "<fallback>" $> IfFallback,
-      lexeme "<equiv>" $> IfEquiv,
-      pure IfNormal
+    [ lexeme "<fallback>" $> MatchFallback,
+      lexeme "<equiv>" $> MatchEquiv,
+      pure MatchNormal
     ]
 
 pBranchBody :: PR rep -> Parser (Body rep)
@@ -427,27 +427,27 @@ pIf :: PR rep -> Parser (Exp rep)
 pIf pr =
   keyword "if"
     $> f
-    <*> pIfSort
+    <*> pMatchSort
     <*> pSubExp
     <*> (keyword "then" *> pBranchBody pr)
     <*> (keyword "else" *> pBranchBody pr)
     <*> (lexeme ":" *> pBranchTypes pr)
   where
     f sort cond tbranch fbranch t =
-      Match [cond] [Case [Just $ BoolValue True] tbranch] fbranch $ IfDec t sort
+      Match [cond] [Case [Just $ BoolValue True] tbranch] fbranch $ MatchDec t sort
 
 pMatch :: PR rep -> Parser (Exp rep)
 pMatch pr =
   keyword "match"
     $> f
-    <*> pIfSort
+    <*> pMatchSort
     <*> braces (pSubExp `sepBy` pComma)
     <*> many pCase
     <*> (keyword "default" *> lexeme "->" *> pBranchBody pr)
     <*> (lexeme ":" *> pBranchTypes pr)
   where
     f sort cond cases defbody t =
-      Match cond cases defbody $ IfDec t sort
+      Match cond cases defbody $ MatchDec t sort
     pCase =
       keyword "case"
         $> Case

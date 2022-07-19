@@ -971,15 +971,15 @@ allocInExp (Apply fname args rettype loc) = do
   where
     mems = replicate num_arrays (MemMem DefaultSpace)
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf) rettype
-allocInExp (Match ses cases def_body (IfDec rets ifsort)) = do
-  (def_body', def_reqs) <- allocInMatchBody rets def_body
+allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
+  (defbody', def_reqs) <- allocInMatchBody rets defbody
   (cases', cases_reqs) <- unzip <$> mapM onCase cases
   let reqs = zipWith (foldl combMemReqTypes) def_reqs (transpose cases_reqs)
-  def_body'' <- addCtxToMatchBody reqs def_body'
+  defbody'' <- addCtxToMatchBody reqs defbody'
   cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
-  let (cases''', def_body''', rets') =
-        simplifyMatch cases'' def_body'' $ mkBranchRet reqs
-  pure $ Match ses cases''' def_body''' $ IfDec rets' ifsort
+  let (cases''', defbody''', rets') =
+        simplifyMatch cases'' defbody'' $ mkBranchRet reqs
+  pure $ Match ses cases''' defbody''' $ MatchDec rets' ifsort
   where
     onCase (Case vs body) = first (Case vs) <$> allocInMatchBody rets body
 allocInExp (WithAcc inputs bodylam) =
@@ -1170,7 +1170,7 @@ simplifiable innerUsage simplifyInnerOp =
       size' <-
         letSubExp "hoisted_alloc_size" $
           Match [taken] [Case [Just $ BoolValue True] tbody] fbody $
-            IfDec [MemPrim int64] IfFallback
+            MatchDec [MemPrim int64] MatchFallback
       letBind pat $ Op $ Alloc size' space
     protectOp _ _ _ = Nothing
 

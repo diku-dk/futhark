@@ -422,12 +422,12 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
                   e_t = primExpType e
           zipWithM_ (letBindNames . pure) (patNames pat_tan)
             =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
-fwdStm (Let pat aux (Match ses cases defbody (IfDec ret ifsort))) = do
+fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
   cases' <- slocal' $ mapM (traverse fwdBody) cases
   defbody' <- slocal' $ fwdBody defbody
   pat' <- bundleNew pat
   ret' <- bundleTan ret
-  addStm $ Let pat' aux $ Match ses cases' defbody' $ IfDec ret' ifsort
+  addStm $ Let pat' aux $ Match ses cases' defbody' $ MatchDec ret' ifsort
 fwdStm (Let pat aux (DoLoop val_pats loop@(WhileLoop v) body)) = do
   val_pats' <- bundleNew val_pats
   pat' <- bundleNew pat

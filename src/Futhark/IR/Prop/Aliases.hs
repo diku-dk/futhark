@@ -93,8 +93,8 @@ funcallAliases args t =
 
 -- | The aliases of an expression, one per non-context value returned.
 expAliases :: (Aliased rep) => Exp rep -> [Names]
-expAliases (Match _ cases def_body _) =
-  matchAliases $ onBody def_body : map (onBody . caseBody) cases
+expAliases (Match _ cases defbody _) =
+  matchAliases $ onBody defbody : map (onBody . caseBody) cases
   where
     onBody body = (bodyAliases body, consumedInBody body)
 expAliases (BasicOp op) = basicOpAliases op

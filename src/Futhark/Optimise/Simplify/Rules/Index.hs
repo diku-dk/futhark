@@ -201,7 +201,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
                 altbody <- mkBodyM altstms [subExpRes altres]
                 letSubExp "index_concat_branch" $
                   Match [cmp] [Case [Just $ BoolValue True] thisbody] altbody $
-                    IfDec [primBodyType res_t] IfNormal
+                    MatchDec [primBodyType res_t] MatchNormal
           SubExpResult cs <$> mkBranch xs_and_starts
     Just (ArrayLit ses _, cs)
       | DimFix (Constant (IntValue (Int64Value i))) : inds' <- inds,

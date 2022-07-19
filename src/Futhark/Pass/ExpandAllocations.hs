@@ -89,7 +89,7 @@ transformStm :: Stm GPUMem -> ExpandM (Stms GPUMem)
 -- code versions.  If so, we can remove the offending branch.  Only if
 -- all versions fail do we propagate the error.
 -- FIXME: this can remove safety checks if the default branch fails!
-transformStm (Let pat aux (Match cond cases defbody (IfDec ts IfEquiv))) = do
+transformStm (Let pat aux (Match cond cases defbody (MatchDec ts MatchEquiv))) = do
   let onCase (Case vs body) =
         (Right . Case vs <$> transformBody body) `catchError` (pure . Left)
   cases' <- rights <$> mapM onCase cases
@@ -98,9 +98,9 @@ transformStm (Let pat aux (Match cond cases defbody (IfDec ts IfEquiv))) = do
     ([], Left e) ->
       throwError e
     (_ : _, Left _) ->
-      pure $ oneStm $ Let pat aux $ Match cond (init cases') (caseBody $ last cases') (IfDec ts IfEquiv)
+      pure $ oneStm $ Let pat aux $ Match cond (init cases') (caseBody $ last cases') (MatchDec ts MatchEquiv)
     (_, Right defbody'') ->
-      pure $ oneStm $ Let pat aux $ Match cond cases' defbody'' (IfDec ts IfEquiv)
+      pure $ oneStm $ Let pat aux $ Match cond cases' defbody'' (MatchDec ts MatchEquiv)
 transformStm (Let pat aux e) = do
   (stms, e') <- transformExp =<< mapExpM transform e
   pure $ stms <> oneStm (Let pat aux e')

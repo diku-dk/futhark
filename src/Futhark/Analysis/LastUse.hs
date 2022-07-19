@@ -148,15 +148,15 @@ analyseStm (lumap0, used0) (Let pat _ e) = do
     analyseExp (lumap, used) (Apply _ args _ _) = do
       let nms = freeIn $ map fst args
       pure (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (Match ses cases def_body dec) = do
+    analyseExp (lumap, used) (Match ses cases defbody dec) = do
       (lumap_cases, used_cases) <-
         bimap mconcat mconcat . unzip
           <$> mapM (analyseBody lumap used . caseBody) cases
-      (lumap_def_body, used_def_body) <- analyseBody lumap used def_body
-      let used' = used_cases <> used_def_body
+      (lumap_defbody, used_defbody) <- analyseBody lumap used defbody
+      let used' = used_cases <> used_defbody
           nms = (freeIn ses <> freeIn dec) `namesSubtract` used'
       pure
-        ( insertNames pat_name nms (lumap_cases <> lumap_def_body),
+        ( insertNames pat_name nms (lumap_cases <> lumap_defbody),
           used' <> nms
         )
     analyseExp (lumap, used) (DoLoop merge form body) = do
