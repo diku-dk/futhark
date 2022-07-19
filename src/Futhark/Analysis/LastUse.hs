@@ -15,7 +15,7 @@ module Futhark.Analysis.LastUse
 where
 
 import Control.Monad.Reader
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap, first)
 import Data.Foldable
 import Data.Function ((&))
 import Data.Map (Map)
@@ -148,12 +148,17 @@ analyseStm (lumap0, used0) (Let pat _ e) = do
     analyseExp (lumap, used) (Apply _ args _ _) = do
       let nms = freeIn $ map fst args
       pure (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (If cse then_body else_body dec) = do
-      (lumap_then, used_then) <- analyseBody lumap used then_body
-      (lumap_else, used_else) <- analyseBody lumap used else_body
-      let used' = used_then <> used_else
-          nms = (freeIn cse <> freeIn dec) `namesSubtract` used'
-      pure (insertNames pat_name nms (lumap_then <> lumap_else), used' <> nms)
+    analyseExp (lumap, used) (Match ses cases def_body dec) = do
+      (lumap_cases, used_cases) <-
+        bimap mconcat mconcat . unzip
+          <$> mapM (analyseBody lumap used . caseBody) cases
+      (lumap_def_body, used_def_body) <- analyseBody lumap used def_body
+      let used' = used_cases <> used_def_body
+          nms = (freeIn ses <> freeIn dec) `namesSubtract` used'
+      pure
+        ( insertNames pat_name nms (lumap_cases <> lumap_def_body),
+          used' <> nms
+        )
     analyseExp (lumap, used) (DoLoop merge form body) = do
       (lumap', used') <- analyseBody lumap used body
       let nms = (freeIn merge <> freeIn form) `namesSubtract` used'

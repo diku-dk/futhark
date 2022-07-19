@@ -240,8 +240,17 @@ instance Pretty a => Pretty (ErrorMsg a) where
       p (ErrorString s) = text $ show s
       p (ErrorVal t x) = ppr x <+> colon <+> ppr t
 
+maybeNest :: PrettyRep rep => Body rep -> Doc
+maybeNest b
+  | null $ bodyStms b = ppr b
+  | otherwise = nestedBlock "{" "}" $ ppr b
+
+instance PrettyRep rep => Pretty (Case (Body rep)) where
+  ppr (Case vs b) =
+    "case" <+> ppTuple' (map (maybe "_" ppr) vs) <+> "->" <+> maybeNest b
+
 instance PrettyRep rep => Pretty (Exp rep) where
-  ppr (If c t f (IfDec ret ifsort)) =
+  ppr (Match [c] [Case [Just (BoolValue True)] t] f (IfDec ret ifsort)) =
     text "if"
       <+> info'
       <+> ppr c
@@ -256,9 +265,19 @@ instance PrettyRep rep => Pretty (Exp rep) where
         IfNormal -> mempty
         IfFallback -> text "<fallback>"
         IfEquiv -> text "<equiv>"
-      maybeNest b
-        | null $ bodyStms b = ppr b
-        | otherwise = nestedBlock "{" "}" $ ppr b
+  ppr (Match ses cs defb (IfDec ret ifsort)) =
+    ("match" <+> info' <+> ppTuple' ses)
+      </> stack (map ppr cs)
+      </> "default"
+      <+> "->"
+      <+> maybeNest defb
+      </> colon
+      <+> ppTuple' ret
+    where
+      info' = case ifsort of
+        IfNormal -> mempty
+        IfFallback -> text "<fallback>"
+        IfEquiv -> text "<equiv>"
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args ret (safety, _, _)) =
     applykw

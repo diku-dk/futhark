@@ -135,6 +135,7 @@ module Futhark.IR.Syntax
     ReshapeKind (..),
     WithAccInput,
     Exp (..),
+    Case (..),
     LoopForm (..),
     IfDec (..),
     IfSort (..),
@@ -396,6 +397,22 @@ data BasicOp
 type WithAccInput rep =
   (Shape, [VName], Maybe (Lambda rep, [SubExp]))
 
+-- | A non-default case in a 'Match' statement.  The number of
+-- elements in the pattern must match the number of scrutinees.  A
+-- 'Nothing' value indicates that we don't care about it (i.e. a
+-- wildcard).
+data Case body = Case {casePat :: [Maybe PrimValue], caseBody :: body}
+  deriving (Eq, Ord, Show)
+
+instance Functor Case where
+  fmap = fmapDefault
+
+instance Foldable Case where
+  foldMap = foldMapDefault
+
+instance Traversable Case where
+  traverse f (Case vs b) = Case vs <$> f b
+
 -- | The root Futhark expression type.  The v'Op' constructor contains
 -- a rep-specific operation.  Do-loops, branches and function calls
 -- are special.  Everything else is a simple t'BasicOp'.
@@ -403,7 +420,7 @@ data Exp rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
   | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
-  | If SubExp (Body rep) (Body rep) (IfDec (BranchType rep))
+  | Match [SubExp] [Case (Body rep)] (Body rep) (IfDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
     DoLoop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
   | -- | Create accumulators backed by the given arrays (which are

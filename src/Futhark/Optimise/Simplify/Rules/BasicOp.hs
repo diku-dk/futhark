@@ -216,7 +216,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   where
     simplifyWith (Var v) x
       | Just stm <- ST.lookupStm v vtable,
-        If p tbranch fbranch _ <- stmExp stm,
+        Match [p] [Case [Just (BoolValue True)] tbranch] fbranch _ <- stmExp stm,
         Just (y, z) <-
           returns v (stmPat stm) tbranch fbranch,
         not $ boundInBody tbranch `namesIntersect` freeIn y,

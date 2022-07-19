@@ -315,8 +315,8 @@ informLambda (Lambda ps body ret) = Lambda ps (informBody body) ret
 
 -- | Construct a 'Wise' expression.
 informExp :: Informing rep => Exp rep -> Exp (Wise rep)
-informExp (If cond tbranch fbranch (IfDec ts ifsort)) =
-  If cond (informBody tbranch) (informBody fbranch) (IfDec ts ifsort)
+informExp (Match cond cases defbody (IfDec ts ifsort)) =
+  Match cond (map (fmap informBody) cases) (informBody defbody) (IfDec ts ifsort)
 informExp (DoLoop merge form loopbody) =
   let form' = case form of
         ForLoop i it bound params -> ForLoop i it bound params

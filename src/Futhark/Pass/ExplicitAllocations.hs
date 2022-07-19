@@ -45,7 +45,11 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (foldl', zip5)
+import Data.Bifunctor (first)
+import Data.Either (partitionEithers)
+import Data.Foldable (toList)
+import Data.List (foldl', transpose, zip4)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -321,13 +325,6 @@ summaryForBindage _ _ t@(Array pt _ _) (Hint ixfun space) = do
   m <- letExp "mem" $ Op $ Alloc bytes space
   pure $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
 
-lookupMemSpace :: (HasScope rep m, Monad m) => VName -> m Space
-lookupMemSpace v = do
-  t <- lookupType v
-  case t of
-    Mem space -> pure space
-    _ -> error $ "lookupMemSpace: " ++ pretty v ++ " is not a memory block."
-
 directIxFun :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
 directIxFun bt shape u mem t =
   let ixf = IxFun.iota $ map pe64 $ arrayDims t
@@ -339,9 +336,9 @@ allocInFParams ::
   ([FParam torep] -> AllocM fromrep torep a) ->
   AllocM fromrep torep a
 allocInFParams params m = do
-  (valparams, (ctxparams, memparams)) <-
+  (valparams, (memparams, ctxparams)) <-
     runWriterT $ mapM (uncurry allocInFParam) params
-  let params' = ctxparams <> memparams <> valparams
+  let params' = memparams <> ctxparams <> valparams
       summary = scopeOfFParams params'
   localScope summary $ m params'
 
@@ -359,7 +356,7 @@ allocInFParam param pspace =
       let memname = baseString (paramName param) <> "_mem"
           ixfun = IxFun.iota $ map pe64 $ shapeDims shape
       mem <- lift $ newVName memname
-      tell ([], [Param (paramAttrs param) mem $ MemMem pspace])
+      tell ([Param (paramAttrs param) mem $ MemMem pspace], [])
       pure param {paramDec = MemArray pt shape u $ ArrayIn mem ixfun}
     Prim pt ->
       pure param {paramDec = MemPrim pt}
@@ -377,21 +374,19 @@ allocInMergeParams ::
   ) ->
   AllocM fromrep torep a
 allocInMergeParams merge m = do
-  ((valparams, valargs, handle_loop_subexps), (ctx_params, mem_params)) <-
+  ((valparams, valargs, handle_loop_subexps), (mem_params, ctx_params)) <-
     runWriterT $ unzip3 <$> mapM allocInMergeParam merge
-  let mergeparams' = ctx_params <> mem_params <> valparams
+  let mergeparams' = mem_params <> ctx_params <> valparams
       summary = scopeOfFParams mergeparams'
 
       mk_loop_res ses = do
-        (ses', (ctxargs, memargs)) <-
+        (ses', (memargs, ctxargs)) <-
           runWriterT $ zipWithM ($) handle_loop_subexps ses
-        pure (ctxargs <> memargs, ses')
+        pure (memargs <> ctxargs, ses')
 
   (valctx_args, valargs') <- mk_loop_res valargs
   let merge' =
-        zip
-          (ctx_params <> mem_params <> valparams)
-          (valctx_args <> valargs')
+        zip (mem_params <> ctx_params <> valparams) (valctx_args <> valargs')
   localScope summary $ m merge' mk_loop_res
   where
     param_names = namesFromList $ map (paramName . fst) merge
@@ -407,7 +402,7 @@ allocInMergeParams merge m = do
         if (res_mem_space, res_ixfun) == (v_mem_space, v_ixfun)
           then pure (res_mem, res)
           else lift $ arrayWithIxFun chunkmap v_mem_space v_ixfun (fromDecl param_t) res
-      tell ([], [Var res_mem'])
+      tell ([Var res_mem'], [])
       pure $ Var res'
     scalarRes _ _ _ se = pure se
 
@@ -439,7 +434,7 @@ allocInMergeParams merge m = do
                   allocInMergeParam (mergeparam, Var v')
                 else do
                   p <- newParam "mem_param" $ MemMem v_mem_space
-                  tell ([], [p])
+                  tell ([p], [])
 
                   pure
                     ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName p) v_ixfun},
@@ -456,7 +451,7 @@ allocInMergeParams merge m = do
                   p <- newParam "ctx_param_ext" $ MemPrim $ primExpType $ untyped e
                   pure (p, fmap Free $ le64 $ paramName p)
 
-              tell (ctx_params, [])
+              tell ([], ctx_params)
 
               param_ixfun <-
                 instantiateIxFun $
@@ -465,7 +460,7 @@ allocInMergeParams merge m = do
                     ext_ixfun
 
               mem_param <- newParam "mem_param" $ MemMem v_mem_space'
-              tell ([], [mem_param])
+              tell ([mem_param], [])
               pure
                 ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName mem_param) param_ixfun},
                   v',
@@ -530,7 +525,7 @@ ensureArrayIn space (Var v) = do
         )
         substs
 
-  tell (ctx_vals, [Var mem])
+  tell ([Var mem], ctx_vals)
 
   pure sub_exp
 
@@ -552,6 +547,49 @@ ensureDirectArray space_ok v = do
       -- binding for the size of the memory block.
       allocLinearArray space (baseString v) v
 
+ensureRowMajorArray ::
+  (Allocable fromrep torep inner) =>
+  Maybe Space ->
+  VName ->
+  AllocM fromrep torep (VName, VName)
+ensureRowMajorArray space_ok v = do
+  (mem, ixfun) <- lookupArraySummary v
+  mem_space <- lookupMemSpace mem
+  default_space <- askDefaultSpace
+  if numLMADs ixfun == 1
+    && ixFunPerm ixfun == [0 .. IxFun.rank ixfun - 1]
+    && length (IxFun.base ixfun) == IxFun.rank ixfun
+    && maybe True (== mem_space) space_ok
+    then pure (mem, v)
+    else needCopy (fromMaybe default_space space_ok)
+  where
+    needCopy space =
+      -- We need to do a new allocation, copy 'v', and make a new
+      -- binding for the size of the memory block.
+      allocLinearArray space (baseString v) v
+
+allocPermArray ::
+  (Allocable fromrep torep inner) =>
+  Space ->
+  [Int] ->
+  String ->
+  VName ->
+  AllocM fromrep torep (VName, VName)
+allocPermArray space perm s v = do
+  t <- lookupType v
+  case t of
+    Array pt shape u -> do
+      mem <- allocForArray t space
+      v' <- newVName $ s <> "_desired_form"
+      let info =
+            MemArray pt shape u . ArrayIn mem $
+              IxFun.permute (IxFun.iota $ map pe64 $ arrayDims t) perm
+          pat = Pat [PatElem v' info]
+      addStm $ Let pat (defAux ()) $ BasicOp $ Manifest perm v
+      pure (mem, v')
+    _ ->
+      error $ "allocPermArray: " ++ pretty t
+
 allocLinearArray ::
   (Allocable fromrep torep inner) =>
   Space ->
@@ -560,16 +598,8 @@ allocLinearArray ::
   AllocM fromrep torep (VName, VName)
 allocLinearArray space s v = do
   t <- lookupType v
-  case t of
-    Array pt shape u -> do
-      mem <- allocForArray t space
-      v' <- newVName $ s <> "_linear"
-      let ixfun = directIxFun pt shape u mem t
-          pat = Pat [PatElem v' ixfun]
-      addStm $ Let pat (defAux ()) $ BasicOp $ Copy v
-      pure (mem, v')
-    _ ->
-      error $ "allocLinearArray: " ++ pretty t
+  let perm = [0 .. arrayRank t - 1]
+  allocPermArray space perm s v
 
 funcallArgs ::
   (Allocable fromrep torep inner) =>
@@ -592,7 +622,7 @@ linearFuncallArg ::
   WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
 linearFuncallArg Array {} space (Var v) = do
   (mem, arg') <- lift $ ensureDirectArray (Just space) v
-  tell ([], [Var mem])
+  tell ([Var mem], [])
   pure $ Var arg'
 linearFuncallArg _ _ arg =
   pure arg
@@ -736,23 +766,190 @@ allocInLambda ::
 allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
-generalize ::
-  (Maybe Space, Maybe IxFun) ->
-  (Maybe Space, Maybe IxFun) ->
-  (Maybe Space, Maybe (ExtIxFun, [(TPrimExp Int64 VName, TPrimExp Int64 VName)]))
-generalize (Just sp1, Just ixf1) (Just sp2, Just ixf2) =
-  if sp1 /= sp2
-    then (Just sp1, Nothing)
-    else case IxFun.leastGeneralGeneralization (fmap untyped ixf1) (fmap untyped ixf2) of
-      Just (ixf, m) ->
-        ( Just sp1,
-          Just
-            ( fmap TPrimExp ixf,
-              zip (map (TPrimExp . fst) m) (map (TPrimExp . snd) m)
-            )
-        )
-      Nothing -> (Just sp1, Nothing)
-generalize (mbsp1, _) _ = (mbsp1, Nothing)
+numLMADs :: IxFun -> Int
+numLMADs = length . IxFun.ixfunLMADs
+
+ixFunPerm :: IxFun -> [Int]
+ixFunPerm = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
+
+ixFunMon :: IxFun -> [IxFun.Monotonicity]
+ixFunMon = map IxFun.ldMon . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
+
+data MemReq
+  = MemReq Space [Int] [IxFun.Monotonicity] Rank Bool
+  | NeedsLinearisation Space
+  deriving (Eq, Show)
+
+combMemReqs :: MemReq -> MemReq -> MemReq
+combMemReqs x@NeedsLinearisation {} _ = x
+combMemReqs _ y@NeedsLinearisation {} = y
+combMemReqs x@(MemReq x_space _ _ _ _) y@MemReq {} =
+  if x == y then x else NeedsLinearisation x_space
+
+type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
+
+combMemReqTypes :: MemReqType -> MemReqType -> MemReqType
+combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
+  MemArray pt shape u $ combMemReqs x y
+combMemReqTypes x _ = x
+
+contextRets :: MemReqType -> [MemInfo d u r]
+contextRets (MemArray _ shape _ (MemReq space _ _ (Rank base_rank) _)) =
+  -- Memory + offset + base_rank + (stride,size)*rank.
+  MemMem space
+    : MemPrim int64
+    : replicate base_rank (MemPrim int64)
+    ++ replicate (2 * shapeRank shape) (MemPrim int64)
+contextRets (MemArray _ shape _ (NeedsLinearisation space)) =
+  -- Memory + offset + (base,stride,size)*rank.
+  MemMem space
+    : MemPrim int64
+    : replicate (3 * shapeRank shape) (MemPrim int64)
+contextRets _ = []
+
+-- Add memory information to the body, but do not return memory/ixfun
+-- information.  Instead, return restrictions on what the index
+-- function should look like.  We will then (crudely) unify these
+-- restrictions across all bodies.
+allocInMatchBody ::
+  (Allocable fromrep torep inner) =>
+  [ExtType] ->
+  Body fromrep ->
+  AllocM fromrep torep (Body torep, [MemReqType])
+allocInMatchBody rets (Body _ stms res) =
+  buildBody . allocInStms stms $ do
+    restrictions <- zipWithM restriction rets (map resSubExp res)
+    pure (res, restrictions)
+  where
+    restriction t se = do
+      v_info <- subExpMemInfo se
+      case (t, v_info) of
+        (Array pt shape u, MemArray _ _ _ (ArrayIn mem ixfun)) -> do
+          space <- lookupMemSpace mem
+          pure . MemArray pt shape u $
+            if numLMADs ixfun == 1
+              then
+                MemReq
+                  space
+                  (ixFunPerm ixfun)
+                  (ixFunMon ixfun)
+                  (Rank $ length $ IxFun.base ixfun)
+                  (IxFun.contiguous ixfun)
+              else NeedsLinearisation space
+        (_, MemMem space) -> pure $ MemMem space
+        (_, MemPrim pt) -> pure $ MemPrim pt
+        (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
+        _ -> error $ "allocInMatchBody: mismatch: " ++ show (t, v_info)
+
+mkBranchRet :: [MemReqType] -> [BranchTypeMem]
+mkBranchRet reqs =
+  let (ctx_rets, res_rets) = foldl helper ([], []) $ zip reqs offsets
+   in ctx_rets ++ res_rets
+  where
+    numCtxNeeded = length . contextRets
+
+    offsets = scanl (+) 0 $ map numCtxNeeded reqs
+    num_new_ctx = last offsets
+
+    helper (ctx_rets_acc, res_rets_acc) (req, ctx_offset) =
+      ( ctx_rets_acc ++ contextRets req,
+        res_rets_acc ++ [inspect ctx_offset req]
+      )
+
+    arrayInfo rank (NeedsLinearisation space) =
+      (space, [0 .. rank - 1], repeat IxFun.Inc, rank, True)
+    arrayInfo _ (MemReq space perm mon (Rank base_rank) contig) =
+      (space, perm, mon, base_rank, contig)
+
+    inspect ctx_offset (MemArray pt shape u req) =
+      let shape' = fmap (adjustExt num_new_ctx) shape
+          (space, perm, mon, base_rank, contig) = arrayInfo (shapeRank shape) req
+       in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
+            convert
+              <$> IxFun.mkExistential base_rank (zip perm mon) contig (ctx_offset + 1)
+    inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+    inspect _ (MemPrim pt) = MemPrim pt
+    inspect _ (MemMem space) = MemMem space
+
+    convert (Ext i) = le64 (Ext i)
+    convert (Free v) = Free <$> pe64 v
+
+    adjustExt :: Int -> Ext a -> Ext a
+    adjustExt _ (Free v) = Free v
+    adjustExt k (Ext i) = Ext (k + i)
+
+addCtxToMatchBody ::
+  (Allocable fromrep torep inner) =>
+  [MemReqType] ->
+  Body torep ->
+  AllocM fromrep torep (Body torep)
+addCtxToMatchBody reqs body = buildBody_ $ do
+  res <- zipWithM linearIfNeeded reqs =<< bodyBind body
+  ctx <- concat <$> mapM resCtx res
+  pure $ ctx ++ res
+  where
+    linearIfNeeded (MemArray _ _ _ (NeedsLinearisation space)) (SubExpRes cs (Var v)) =
+      SubExpRes cs . Var . snd <$> ensureRowMajorArray (Just space) v
+    linearIfNeeded _ res =
+      pure res
+
+    resCtx (SubExpRes _ Constant {}) =
+      pure []
+    resCtx (SubExpRes _ (Var v)) = do
+      info <- lookupMemInfo v
+      case info of
+        MemPrim {} -> pure []
+        MemAcc {} -> pure []
+        MemMem {} -> pure [] -- should not happen
+        MemArray _ _ _ (ArrayIn mem ixfun) -> do
+          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ toList ixfun
+          pure $ subExpRes (Var mem) : subExpsRes ixfun_exts
+
+-- Do a a simple form of invariance analysis to simplify a Match.  It
+-- is unfortunate that we have to do it here, but functions such as
+-- scalarRes will look carefully at the index functions before the
+-- simplifier has a chance to run.  In a perfect world we would
+-- simplify away those copies afterwards. XXX; this should be fixed by
+-- a more general copy-removal pass. See
+-- Futhark.Optimise.EntryPointMem for a very specialised version of
+-- the idea, but which could perhaps be generalised.
+simplifyMatch ::
+  Mem rep inner =>
+  [Case (Body rep)] ->
+  Body rep ->
+  [BranchTypeMem] ->
+  ( [Case (Body rep)],
+    Body rep,
+    [BranchTypeMem]
+  )
+simplifyMatch cases defbody ts =
+  let case_reses = map (bodyResult . caseBody) cases
+      defbody_res = bodyResult defbody
+      (ctx_fixes, variant) =
+        partitionEithers . map branchInvariant $
+          zip4 [0 ..] (transpose case_reses) defbody_res ts
+      (cases_reses, defbody_reses, ts') = unzip3 variant
+   in ( zipWith onCase cases (transpose cases_reses),
+        onBody defbody defbody_reses,
+        foldr (uncurry fixExt) ts' ctx_fixes
+      )
+  where
+    bound_in_branches =
+      namesFromList . concatMap (patNames . stmPat) $
+        foldMap (bodyStms . caseBody) cases <> bodyStms defbody
+
+    onCase c res = fmap (`onBody` res) c
+    onBody body res = body {bodyResult = res}
+
+    branchInvariant (i, case_reses, defres, t)
+      -- If even one branch has a variant result, then we give up.
+      | namesIntersect bound_in_branches $ freeIn $ defres : case_reses =
+          Right (case_reses, defres, t)
+      -- Do all branches return the same value?
+      | all ((== resSubExp defres) . resSubExp) case_reses =
+          Left (i, resSubExp defres)
+      | otherwise =
+          Right (case_reses, defres, t)
 
 allocInExp ::
   (Allocable fromrep torep inner) =>
@@ -764,8 +961,8 @@ allocInExp (DoLoop merge form (Body () bodystms bodyres)) =
     localScope (scopeOf form') $ do
       body' <-
         buildBody_ . allocInStms bodystms $ do
-          (val_ses, valres') <- mk_loop_val $ map resSubExp bodyres
-          pure $ subExpsRes val_ses <> zipWith SubExpRes (map resCerts bodyres) valres'
+          (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
+          pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
       pure $ DoLoop merge' form' body'
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
@@ -774,37 +971,17 @@ allocInExp (Apply fname args rettype loc) = do
   where
     mems = replicate num_arrays (MemMem DefaultSpace)
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf) rettype
-allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
-  -- switch to the explicit-mem rep, but do nothing about results
-  (tbranch, tm_ixfs) <- allocInIfBody tbranch0
-  (fbranch, fm_ixfs) <- allocInIfBody fbranch0
-  tspaces <- bodyResultSpaces tbranch
-  fspaces <- bodyResultSpaces fbranch
-  -- try to generalize (antiunify) the index functions of the then and else bodies
-  let sp_substs = zipWith generalize (zip tspaces tm_ixfs) (zip fspaces fm_ixfs)
-      (spaces, subs) = unzip sp_substs
-      tsubs = map (selectSub fst) subs
-      fsubs = map (selectSub snd) subs
-  (tbranch', trets) <- addResCtxInIfBody rets tbranch spaces tsubs
-  (fbranch', frets) <- addResCtxInIfBody rets fbranch spaces fsubs
-  if frets /= trets
-    then error "In allocInExp, IF case: antiunification of then/else produce different ExtInFn!"
-    else pure $ If cond tbranch' fbranch' $ IfDec trets ifsort
+allocInExp (Match ses cases def_body (IfDec rets ifsort)) = do
+  (def_body', def_reqs) <- allocInMatchBody rets def_body
+  (cases', cases_reqs) <- unzip <$> mapM onCase cases
+  let reqs = zipWith (foldl combMemReqTypes) def_reqs (transpose cases_reqs)
+  def_body'' <- addCtxToMatchBody reqs def_body'
+  cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
+  let (cases''', def_body''', rets') =
+        simplifyMatch cases'' def_body'' $ mkBranchRet reqs
+  pure $ Match ses cases''' def_body''' $ IfDec rets' ifsort
   where
-    selectSub ::
-      ((a, a) -> a) ->
-      Maybe (ExtIxFun, [(a, a)]) ->
-      Maybe (ExtIxFun, [a])
-    selectSub f (Just (ixfn, m)) = Just (ixfn, map f m)
-    selectSub _ Nothing = Nothing
-    allocInIfBody ::
-      (Allocable fromrep torep inner) =>
-      Body fromrep ->
-      AllocM fromrep torep (Body torep, [Maybe IxFun])
-    allocInIfBody (Body _ stms res) =
-      buildBody . allocInStms stms $ do
-        mem_ixfs <- mapM (subExpIxFun . resSubExp) res
-        pure (res, mem_ixfs)
+    onCase (Case vs body) = first (Case vs) <$> allocInMatchBody rets body
 allocInExp (WithAcc inputs bodylam) =
   WithAcc <$> mapM onInput inputs <*> onLambda bodylam
   where
@@ -881,109 +1058,6 @@ lookupIxFun v = do
   case info of
     MemArray _ptp _shp _u (ArrayIn _ ixf) -> pure $ Just ixf
     _ -> pure Nothing
-
-subExpIxFun ::
-  (Allocable fromrep torep inner) =>
-  SubExp ->
-  AllocM fromrep torep (Maybe IxFun)
-subExpIxFun Constant {} = pure Nothing
-subExpIxFun (Var v) = lookupIxFun v
-
-addResCtxInIfBody ::
-  (Allocable fromrep torep inner) =>
-  [ExtType] ->
-  Body torep ->
-  [Maybe Space] ->
-  [Maybe (ExtIxFun, [TPrimExp Int64 VName])] ->
-  AllocM fromrep torep (Body torep, [BodyReturns])
-addResCtxInIfBody ifrets (Body _ stms res) spaces substs = buildBody $ do
-  mapM_ addStm stms
-  let offsets = scanl (+) 0 $ zipWith numCtxNeeded ifrets substs
-      num_new_ctx = last offsets
-  (ctx, ctx_rets, res', res_rets) <-
-    foldM (helper num_new_ctx) ([], [], [], []) $
-      zip5 ifrets res substs spaces offsets
-  pure (ctx <> res', ctx_rets ++ res_rets)
-  where
-    numCtxNeeded Array {} Nothing = 1
-    numCtxNeeded Array {} (Just (_, m)) = length m + 1
-    numCtxNeeded _ _ = 0
-
-    helper
-      num_new_ctx
-      (ctx_acc, ctx_rets_acc, res_acc, res_rets_acc)
-      (ifr, r, mbixfsub, sp, ctx_offset) =
-        case mbixfsub of
-          Nothing -> do
-            -- does NOT generalize/antiunify; ensure direct
-            r' <- ensureDirect sp r
-            (mem_ctx_ses, mem_ctx_rets) <- unzip <$> bodyReturnMemCtx r'
-            let body_ret = inspect num_new_ctx ctx_offset ifr sp
-            pure
-              ( ctx_acc ++ mem_ctx_ses,
-                ctx_rets_acc ++ mem_ctx_rets,
-                res_acc ++ [r'],
-                res_rets_acc ++ [body_ret]
-              )
-          Just (ixfn, m) -> do
-            -- generalizes
-            let i = length m
-            ext_ses <- mapM (toSubExp "ixfn_exist") m
-            (mem_ctx_ses, mem_ctx_rets) <- unzip <$> bodyReturnMemCtx r
-            let sp' = fromMaybe DefaultSpace sp
-                ixfn' = fmap (adjustExtPE ctx_offset) ixfn
-                exttp = case ifr of
-                  Array pt shape u ->
-                    MemArray pt (fmap (adjustExt num_new_ctx) shape) u $
-                      ReturnsNewBlock sp' (ctx_offset + i) ixfn'
-                  _ -> error "Impossible case reached in addResCtxInIfBody"
-            pure
-              ( ctx_acc ++ subExpsRes ext_ses ++ mem_ctx_ses,
-                ctx_rets_acc ++ map (const (MemPrim int64)) ext_ses ++ mem_ctx_rets,
-                res_acc ++ [r],
-                res_rets_acc ++ [exttp]
-              )
-
-    inspect num_new_ctx k (Array pt shape u) space =
-      let space' = fromMaybe DefaultSpace space
-          shape' = fmap (adjustExt num_new_ctx) shape
-          bodyret =
-            MemArray pt shape' u . ReturnsNewBlock space' k $
-              IxFun.iota $
-                map convert $
-                  shapeDims shape'
-       in bodyret
-    inspect _ _ (Acc acc ispace ts u) _ = MemAcc acc ispace ts u
-    inspect _ _ (Prim pt) _ = MemPrim pt
-    inspect _ _ (Mem space) _ = MemMem space
-
-    convert (Ext i) = le64 (Ext i)
-    convert (Free v) = Free <$> pe64 v
-
-    adjustExt :: Int -> Ext a -> Ext a
-    adjustExt _ (Free v) = Free v
-    adjustExt k (Ext i) = Ext (k + i)
-
-    adjustExtPE :: Int -> TPrimExp t (Ext VName) -> TPrimExp t (Ext VName)
-    adjustExtPE k = fmap (adjustExt k)
-
-bodyResultSpaces ::
-  (Mem torep inner, LocalScope torep m) =>
-  Body torep ->
-  m [Maybe Space]
-bodyResultSpaces (Body _ stms res) =
-  inScopeOf stms $ mapM (mkSpaceOK . resSubExp) res
-  where
-    mkSpaceOK (Var v) = do
-      v_info <- lookupMemInfo v
-      case v_info of
-        MemArray _ _ _ (ArrayIn mem _) -> do
-          mem_info <- lookupMemInfo mem
-          case mem_info of
-            MemMem space -> pure $ Just space
-            _ -> pure Nothing
-        _ -> pure Nothing
-    mkSpaceOK _ = pure Nothing
 
 allocInLoopForm ::
   (Allocable fromrep torep inner) =>
@@ -1095,7 +1169,7 @@ simplifiable innerUsage simplifyInnerOp =
       fbody <- resultBodyM [intConst Int64 0]
       size' <-
         letSubExp "hoisted_alloc_size" $
-          If taken tbody fbody $
+          Match [taken] [Case [Just $ BoolValue True] tbody] fbody $
             IfDec [MemPrim int64] IfFallback
       letBind pat $ Op $ Alloc size' space
     protectOp _ _ _ = Nothing

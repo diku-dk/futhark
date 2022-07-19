@@ -414,8 +414,8 @@ costRedundantStmt (Let _ _ (Op _)) = Big
 costRedundantStmt (Let _ _ DoLoop {}) = Big
 costRedundantStmt (Let _ _ Apply {}) = Big
 costRedundantStmt (Let _ _ WithAcc {}) = Big
-costRedundantStmt (Let _ _ (If _cond b_then b_else _)) =
-  maxCost (costBody b_then) (costBody b_else)
+costRedundantStmt (Let _ _ (Match _ cases def_body _)) =
+  L.foldl' maxCost (costBody def_body) $ map (costBody . caseBody) cases
 costRedundantStmt (Let _ _ (BasicOp (ArrayLit _ Array {}))) = Big
 costRedundantStmt (Let _ _ (BasicOp (ArrayLit _ _))) = Small 1
 costRedundantStmt (Let _ _ (BasicOp (Index _ slc))) =

@@ -572,9 +572,11 @@ instance Pretty op => Pretty (Code op) where
       <+> ppr cond
       <+> "then {"
       </> indent 2 (ppr tbranch)
-      </> "} else {"
-      </> indent 2 (ppr fbranch)
-      </> "}"
+      </> "} else"
+      <+> case fbranch of
+        If {} -> ppr fbranch
+        _ ->
+          "{" </> indent 2 (ppr fbranch) </> "}"
   ppr (Call dests fname args) =
     commasep (map ppr dests)
       <+> "<-"

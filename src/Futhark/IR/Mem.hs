@@ -84,6 +84,7 @@ module Futhark.IR.Mem
     lookupMemInfo,
     subExpMemInfo,
     lookupArraySummary,
+    lookupMemSpace,
     existentialiseIxFun,
 
     -- * Type checking parts
@@ -778,12 +779,13 @@ matchPatToExp pat e = do
     ( length val_ts == length rt
         && and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)
     )
-    $ TC.bad
-    $ TC.TypeError
-    $ "Expression type:\n  "
-      ++ prettyTuple rt
-      ++ "\ncannot match pattern type:\n  "
-      ++ prettyTuple val_ts
+    . TC.bad
+    . TC.TypeError
+    . pretty
+    $ "Expression type:"
+      </> indent 2 (ppTuple' rt)
+      </> "cannot match pattern type:"
+      </> indent 2 (ppTuple' val_ts)
   where
     matches _ _ (MemPrim x) (MemPrim y) = x == y
     matches _ _ (MemMem x_space) (MemMem y_space) =
@@ -862,6 +864,22 @@ lookupArraySummary name = do
         "Expected "
           ++ pretty name
           ++ " to be array but bound to:\n"
+          ++ pretty summary
+
+lookupMemSpace ::
+  (Mem rep inner, HasScope rep m, Monad m) =>
+  VName ->
+  m Space
+lookupMemSpace name = do
+  summary <- lookupMemInfo name
+  case summary of
+    MemMem space ->
+      pure space
+    _ ->
+      error $
+        "Expected "
+          ++ pretty name
+          ++ " to be memory but bound to:\n"
           ++ pretty summary
 
 checkMemInfo ::
@@ -1066,7 +1084,7 @@ expReturns e@(DoLoop merge _ _) = do
     mergevars = map fst merge
 expReturns (Apply _ _ ret _) =
   pure $ map funReturnsToExpReturns ret
-expReturns (If _ _ _ (IfDec ret _)) =
+expReturns (Match _ _ _ (IfDec ret _)) =
   pure $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =
   opReturns op

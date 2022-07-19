@@ -13,7 +13,6 @@ import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
-import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
@@ -160,11 +159,6 @@ letValExp name e = do
 letValExp' :: String -> I.Exp SOACS -> InternaliseM [SubExp]
 letValExp' _ (BasicOp (SubExp se)) = pure [se]
 letValExp' name ses = map I.Var <$> letValExp name ses
-
-eValBody :: [InternaliseM (I.Exp SOACS)] -> InternaliseM (I.Body SOACS)
-eValBody es = buildBody_ $ do
-  es' <- sequence es
-  varsRes . concat <$> mapM (letValExp "x") es'
 
 internaliseAppExp :: String -> E.AppRes -> E.AppExp -> InternaliseM [I.SubExp]
 internaliseAppExp desc _ (E.Index e idxs loc) = do
@@ -539,20 +533,16 @@ internaliseAppExp desc _ (E.Match e orig_cs _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
   cs <- mapM (onCase ses) orig_cs
   case NE.uncons cs of
-    (MatchCase _ body, Nothing) ->
-      map resSubExp <$> bodyBind body
-    (c, Just cs') -> do
-      let MatchCase _ last_body = NE.last cs'
-      bFalse <- do
-        foldM (\bf c' -> eValBody $ pure $ generateCaseIf ses c' bf) last_body $
-          reverse $
-            NE.init cs'
-      letValExp' desc =<< generateCaseIf ses c bFalse
+    (I.Case _ body, Nothing) ->
+      fmap (map resSubExp) $ bodyBind =<< body
+    _ -> do
+      letValExp' desc =<< eMatch ses (NE.init cs) (I.caseBody $ NE.last cs)
   where
     onCase ses (E.CasePat p case_e _) = do
       (cmps, pertinent) <- generateCond p ses
-      body <- internalisePat' [] p pertinent $ internaliseBody "case" case_e
-      pure $ MatchCase cmps body
+      pure . I.Case cmps $
+        internalisePat' [] p pertinent $
+          internaliseBody "case" case_e
 internaliseAppExp desc _ (E.If ce te fe _) =
   letValExp' desc
     =<< eIf
@@ -913,21 +903,6 @@ generateCond orig_p orig_ses = do
           pertinent1 <> pertinent2,
           ses''
         )
-
-data MatchCase = MatchCase [Maybe I.PrimValue] (I.Body SOACS)
-
-generateCaseIf ::
-  [SubExp] ->
-  MatchCase ->
-  I.Body SOACS ->
-  InternaliseM (I.Exp SOACS)
-generateCaseIf ses (MatchCase cmps body) bFail = do
-  let mkCmp (x, Just y) =
-        Just . letSubExp "match" . I.BasicOp $
-          I.CmpOp (I.CmpEq (I.primValueType y)) x (Constant y)
-      mkCmp _ = Nothing
-  cond <- letSubExp "matches" =<< eAll =<< sequence (mapMaybe mkCmp (zip ses cmps))
-  eIf (eSubExp cond) (pure body) (pure bFail)
 
 internalisePat ::
   String ->

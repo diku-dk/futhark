@@ -3,7 +3,8 @@
 -- | A graph representation of a sequence of Futhark statements
 -- (i.e. a 'Body'), built to handle fusion.  Could perhaps be made
 -- more general.  An important property is that it does not handle
--- "nested bodies" (e.g. 'If'); these are represented as single nodes.
+-- "nested bodies" (e.g. 'Match'); these are represented as single
+-- nodes.
 --
 -- This is all implemented on top of the graph representation provided
 -- by the @fgl@ package ("Data.Graph.Inductive").  The graph provided
@@ -83,7 +84,7 @@ data NodeT
     -- Unclear whether we actually need these.
     FreeNode VName
   | FinalNode (Stms SOACS) NodeT (Stms SOACS)
-  | IfNode (Stm SOACS) [(NodeT, [EdgeT])]
+  | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
   deriving (Eq)
 
@@ -101,7 +102,7 @@ instance Show NodeT where
   show (FinalNode _ nt _) = show nt
   show (ResNode name) = pretty $ "Res: " ++ pretty name
   show (FreeNode name) = pretty $ "Input: " ++ pretty name
-  show (IfNode stm _) = "If: " ++ L.intercalate ", " (map pretty $ stmNames stm)
+  show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map pretty $ stmNames stm)
   show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map pretty $ stmNames stm)
 
 -- | The name that this edge depends on.
@@ -290,8 +291,8 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
       Left H.NotSOAC -> pure n
   DoLoop {} ->
     pure $ DoNode s []
-  If {} ->
-    pure $ IfNode s []
+  Match {} ->
+    pure $ MatchNode s []
   _ -> pure n
 nodeToSoacNode n = pure n
 
@@ -375,8 +376,10 @@ bodyInputs :: Body SOACS -> Classifications
 bodyInputs (Body _ stms res) = foldMap stmInputs stms <> freeClassifications res
 
 expInputs :: Exp SOACS -> Classifications
-expInputs (If cond b1 b2 attr) =
-  bodyInputs b1 <> bodyInputs b2 <> freeClassifications (cond, attr)
+expInputs (Match cond cases defbody attr) =
+  foldMap (bodyInputs . caseBody) cases
+    <> bodyInputs defbody
+    <> freeClassifications (cond, attr)
 expInputs (DoLoop params form b1) =
   freeClassifications (params, form) <> bodyInputs b1
 expInputs (Op soac) = case soac of
@@ -407,7 +410,7 @@ getOutputs node = case node of
   (StmNode stm) -> stmNames stm
   (ResNode _) -> []
   (FreeNode name) -> [name]
-  (IfNode stm _) -> stmNames stm
+  (MatchNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
   FinalNode {} -> error "Final nodes cannot generate edges"
   (SoacNode _ pat _ _) -> patNames pat

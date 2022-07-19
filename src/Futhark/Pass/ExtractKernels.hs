@@ -289,10 +289,11 @@ unbalancedLambda orig_lam =
     unbalancedStm _ DoLoop {} = False
     unbalancedStm bound (WithAcc _ lam) =
       unbalancedBody bound (lambdaBody lam)
-    unbalancedStm bound (If cond tbranch fbranch _) =
-      cond
-        `subExpBound` bound
-        && (unbalancedBody bound tbranch || unbalancedBody bound fbranch)
+    unbalancedStm bound (Match ses cases def_body _) =
+      any (`subExpBound` bound) ses
+        && ( any (unbalancedBody bound . caseBody) cases
+               || unbalancedBody bound def_body
+           )
     unbalancedStm _ (BasicOp _) =
       False
     unbalancedStm _ (Apply fname _ _ _) =
@@ -342,9 +343,8 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   alt_stms <- kernelAlternatives alts_pat default_body alts
   let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
 
-  letBind pat $
-    If cond alt alt_body $
-      IfDec (staticShapes (patTypes pat)) IfEquiv
+  letBind pat . Match [cond] [Case [Just $ BoolValue True] alt] alt_body $
+    IfDec (staticShapes (patTypes pat)) IfEquiv
 
 transformLambda :: KernelPath -> Lambda SOACS -> DistribM (Lambda GPU)
 transformLambda path (Lambda params body ret) =
@@ -360,10 +360,10 @@ transformStm path (Let pat aux (Op soac))
   | "sequential_outer" `inAttrs` stmAuxAttrs aux =
       transformStms path . stmsToList . fmap (certify (stmAuxCerts aux))
         =<< runBuilder_ (FOT.transformSOAC pat soac)
-transformStm path (Let pat aux (If c tb fb rt)) = do
-  tb' <- transformBody path tb
-  fb' <- transformBody path fb
-  pure $ oneStm $ Let pat aux $ If c tb' fb' rt
+transformStm path (Let pat aux (Match c cases defbody rt)) = do
+  cases' <- mapM (traverse $ transformBody path) cases
+  defbody' <- transformBody path defbody
+  pure $ oneStm $ Let pat aux $ Match c cases' defbody' rt
 transformStm path (Let pat aux (WithAcc inputs lam)) =
   oneStm . Let pat aux
     <$> (WithAcc (map transformInput inputs) <$> transformLambda path lam)
@@ -611,8 +611,11 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
           mapLike w lam'
       | DoLoop _ _ body <- stmExp stm =
           bodyInterest body * 10
-      | If _ tbody fbody _ <- stmExp stm =
-          max (bodyInterest tbody) (bodyInterest fbody)
+      | Match _ cases defbody _ <- stmExp stm =
+          foldl
+            max
+            (bodyInterest defbody)
+            (map (bodyInterest . caseBody) cases)
       | Op (Screma w _ (ScremaForm _ _ lam')) <- stmExp stm =
           zeroIfTooSmall w + bodyInterest (lambdaBody lam')
       | Op (Stream _ _ Sequential _ lam') <- stmExp stm =
