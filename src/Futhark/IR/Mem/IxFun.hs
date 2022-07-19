@@ -64,6 +64,7 @@ import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (id, mod, (.))
 
+-- | The shape of an index function.
 type Shape num = [num]
 
 type Indices num = [num]
