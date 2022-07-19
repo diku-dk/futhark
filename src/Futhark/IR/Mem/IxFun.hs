@@ -842,41 +842,16 @@ ixfunMonotonicity (IxFun (lmad :| lmads) _ _) =
     isMonDim mon (LMADDim s _ _ ldmon) =
       s == 0 || mon == ldmon
 
-isSequential :: [Int] -> Bool
-isSequential xs =
-  all (uncurry (==)) $ zip xs [0 ..]
-
-existentializeExp :: TPrimExp t v -> State [TPrimExp t v] (TPrimExp t (Ext v))
-existentializeExp e = do
-  i <- gets length
-  modify (++ [e])
-  let t = primExpType $ untyped e
-  pure $ TPrimExp $ LeafExp (Ext i) t
-
--- | Try to turn all the leaves of the index function into 'Ext's.  We
---  require that there's only one LMAD, that the index function is
---  contiguous, and the base shape has only one dimension.
+-- | Turn all the leaves of the index function into 'Ext's.
 existentialize ::
-  (IntExp t, Eq v, Pretty v) =>
-  IxFun (TPrimExp t v) ->
-  State [TPrimExp t v] (Maybe (IxFun (TPrimExp t (Ext v))))
-existentialize (IxFun (lmad :| []) oshp True)
-  | length (lmadShape lmad) == length oshp,
-    isSequential (map ldPerm $ lmadDims lmad) = do
-      lmadOffset' <- existentializeExp $ lmadOffset lmad
-      lmadDims' <- mapM existentializeLMADDim $ lmadDims lmad
-      let lmad' = LMAD lmadOffset' lmadDims'
-      oshp' <- mapM existentializeExp oshp
-      pure $ Just $ IxFun (lmad' :| []) oshp' True
+  IxFun (TPrimExp Int64 a) ->
+  IxFun (TPrimExp Int64 (Ext b))
+existentialize ixfun = evalState (traverse (const mkExt) ixfun) 0
   where
-    existentializeLMADDim ::
-      LMADDim (TPrimExp t v) ->
-      State [TPrimExp t v] (LMADDim (TPrimExp t (Ext v)))
-    existentializeLMADDim (LMADDim str shp perm mon) = do
-      stride' <- existentializeExp str
-      shape' <- existentializeExp shp
-      pure $ LMADDim stride' shape' perm mon
-existentialize _ = pure Nothing
+    mkExt = do
+      i <- get
+      put $ i + 1
+      pure $ TPrimExp $ LeafExp (Ext i) int64
 
 -- | When comparing index functions as part of the type check in KernelsMem,
 -- we may run into problems caused by the simplifier. As index functions can be
