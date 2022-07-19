@@ -110,7 +110,6 @@ module Futhark.Construct
     fullSliceNum,
     isFullSlice,
     sliceAt,
-    ifCommon,
 
     -- * Result types
     instantiateShapes,
@@ -599,10 +598,6 @@ isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) (unSlice slice
     allOfIt (Constant v) DimFix {} = oneIsh v
     allOfIt d (DimSlice _ n _) = d == n
     allOfIt _ _ = False
-
--- | Produce the common case of an 'MatchDec'.
-ifCommon :: [Type] -> MatchDec ExtType
-ifCommon ts = MatchDec (staticShapes ts) MatchNormal
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Buildable rep => [SubExp] -> Body rep
