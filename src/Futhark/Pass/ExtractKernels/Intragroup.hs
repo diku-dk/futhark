@@ -209,12 +209,11 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         form' = case form of
           ForLoop i it bound inps -> ForLoop i it bound inps
           WhileLoop cond -> WhileLoop cond
-    If cond tbody fbody ifdec -> do
-      tbody' <- intraGroupBody lvl tbody
-      fbody' <- intraGroupBody lvl fbody
-      certifying (stmAuxCerts aux) $
-        letBind pat $
-          If cond tbody' fbody' ifdec
+    Match cond cases defbody ifdec -> do
+      cases' <- mapM (traverse $ intraGroupBody lvl) cases
+      defbody' <- intraGroupBody lvl defbody
+      certifying (stmAuxCerts aux) . letBind pat $
+        Match cond cases' defbody' ifdec
     Op soac
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
           intraGroupStms lvl . fmap (certify (stmAuxCerts aux))

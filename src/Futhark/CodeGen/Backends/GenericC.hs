@@ -2396,6 +2396,8 @@ compileCode (If cond tbranch fbranch) = do
       [C.cstm|if ($exp:cond') { $items:tbranch' }|]
     ([], _) ->
       [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
+    (_, [C.BlockStm x@C.If {}]) ->
+      [C.cstm|if ($exp:cond') { $items:tbranch' } else $stm:x|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =

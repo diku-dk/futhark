@@ -189,11 +189,11 @@ interchangeLoops full_nest = recurse (kernelNestLoops full_nest)
 
 -- | An encoding of a branch with alongside its result pattern.
 data Branch
-  = Branch [Int] (Pat Type) SubExp (Body SOACS) (Body SOACS) (IfDec (BranchType SOACS))
+  = Branch [Int] (Pat Type) [SubExp] [Case (Body SOACS)] (Body SOACS) (IfDec (BranchType SOACS))
 
 branchStm :: Branch -> Stm SOACS
-branchStm (Branch _ pat cond tbranch fbranch ret) =
-  Let pat (defAux ()) $ If cond tbranch fbranch ret
+branchStm (Branch _ pat cond cases defbody ret) =
+  Let pat (defAux ()) $ Match cond cases defbody ret
 
 interchangeBranch1 ::
   (MonadFreshNames m, HasScope SOACS m) =>
@@ -201,7 +201,7 @@ interchangeBranch1 ::
   LoopNesting ->
   m Branch
 interchangeBranch1
-  (Branch perm branch_pat cond tbranch fbranch (IfDec ret if_sort))
+  (Branch perm branch_pat cond cases defbody (IfDec ret if_sort))
   (MapNesting pat aux w params_and_arrs) = do
     let ret' = map (`arrayOfRow` Free w) ret
         pat' = Pat $ rearrangeShape perm $ patElems pat
@@ -218,11 +218,10 @@ interchangeBranch1
               map_stm = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
           pure $ mkBody (oneStm map_stm) res
 
-    tbranch' <- runBodyBuilder $ mkBranch tbranch
-    fbranch' <- runBodyBuilder $ mkBranch fbranch
-    pure $
-      Branch [0 .. patSize pat - 1] pat' cond tbranch' fbranch' $
-        IfDec ret' if_sort
+    cases' <- mapM (traverse $ runBodyBuilder . mkBranch) cases
+    defbody' <- runBodyBuilder $ mkBranch defbody
+    pure . Branch [0 .. patSize pat - 1] pat' cond cases' defbody' $
+      IfDec ret' if_sort
 
 -- | Given a (parallel) map nesting and an inner branch, move the maps
 -- inside the branch.  The result is the resulting branch expression,

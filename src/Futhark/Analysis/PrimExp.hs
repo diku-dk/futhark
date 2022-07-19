@@ -67,6 +67,7 @@ module Futhark.Analysis.PrimExp
     (~/~),
     (~+~),
     (~-~),
+    (~==~),
   )
 where
 
@@ -754,6 +755,14 @@ x ~-~ y = BinOpExp op x y
       Bool -> LogOr
       Unit -> LogOr
 
+-- | Equality of untyped 'PrimExp's, which must have the same type.
+(~==~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~==~ y = CmpOpExp (CmpEq t) x y
+  where
+    t = primExpType x
+
 infix 7 ~*~, ~/~
 
 infix 6 ~+~, ~-~
+
+infix 4 ~==~

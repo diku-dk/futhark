@@ -66,7 +66,8 @@ usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
       lamUsesAD lam || any (lamUsesAD . histOp) ops
     expUsesAD (Op (Scatter _ _ lam _)) =
       lamUsesAD lam
-    expUsesAD (If _ tbody fbody _) = bodyUsesAD tbody || bodyUsesAD fbody
+    expUsesAD (Match _ cases def_case _) =
+      any (bodyUsesAD . caseBody) cases || bodyUsesAD def_case
     expUsesAD (DoLoop _ _ body) = bodyUsesAD body
     expUsesAD (WithAcc _ lam) = lamUsesAD lam
     expUsesAD BasicOp {} = False

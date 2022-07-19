@@ -72,9 +72,12 @@ module Futhark.Construct
     -- * Monadic expression builders
     eSubExp,
     eParam,
+    eMatch',
+    eMatch,
     eIf,
     eIf',
     eBinOp,
+    eUnOp,
     eCmpOp,
     eConvOp,
     eSignum,
@@ -85,6 +88,7 @@ module Futhark.Construct
     eSliceArray,
     eBlank,
     eAll,
+    eAny,
     eDimInBounds,
     eOutOfBounds,
 
@@ -122,7 +126,7 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.State
-import Data.List (sortOn)
+import Data.List (foldl', sortOn, transpose)
 import qualified Data.Map.Strict as M
 import Futhark.Builder
 import Futhark.IR
@@ -209,9 +213,57 @@ eParam ::
   m (Exp (Rep m))
 eParam = eSubExp . Var . paramName
 
--- | Construct an 'If' expression from a monadic condition and monadic
--- branches.  'eBody' might be convenient for constructing the
--- branches.
+removeRedundantScrutinees :: [SubExp] -> [Case b] -> ([SubExp], [Case b])
+removeRedundantScrutinees ses cases =
+  let (ses', vs) =
+        unzip $ filter interesting $ zip ses $ transpose (map casePat cases)
+   in (ses', zipWith Case (transpose vs) $ map caseBody cases)
+  where
+    interesting = any (/= Nothing) . snd
+
+-- | As 'eMatch', but an 'IfSort' can be given.
+eMatch' ::
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  [SubExp] ->
+  [Case (m (Body (Rep m)))] ->
+  m (Body (Rep m)) ->
+  IfSort ->
+  m (Exp (Rep m))
+eMatch' ses cases_m defbody_m sort = do
+  cases <- mapM (traverse insertStmsM) cases_m
+  defbody <- insertStmsM defbody_m
+  ts <-
+    foldl' generaliseExtTypes
+      <$> bodyExtType defbody
+      <*> mapM (bodyExtType . caseBody) cases
+  cases' <- mapM (traverse $ addContextForBranch ts) cases
+  defbody' <- addContextForBranch ts defbody
+  let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
+      (ses', cases'') = removeRedundantScrutinees ses cases'
+  pure $ Match ses' cases'' defbody' $ IfDec ts' sort
+  where
+    addContextForBranch ts (Body _ stms val_res) = do
+      body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
+      let ctx_res =
+            map snd $ sortOn fst $ M.toList $ shapeExtMapping ts body_ts
+      mkBodyM stms $ subExpsRes ctx_res ++ val_res
+      where
+        stmsscope = scopeOf stms
+
+-- | Construct a 'Match' expression.  The main convenience here is
+-- that the existential context of the return type is automatically
+-- deduced, and the necessary elements added to the branches.
+eMatch ::
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  [SubExp] ->
+  [Case (m (Body (Rep m)))] ->
+  m (Body (Rep m)) ->
+  m (Exp (Rep m))
+eMatch ses cases_m defbody_m = eMatch' ses cases_m defbody_m IfNormal
+
+-- | Construct a 'Match' modelling an if-expression from a monadic
+-- condition and monadic branches.  'eBody' might be convenient for
+-- constructing the branches.
 eIf ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
   m (Exp (Rep m)) ->
@@ -230,22 +282,7 @@ eIf' ::
   m (Exp (Rep m))
 eIf' ce te fe if_sort = do
   ce' <- letSubExp "cond" =<< ce
-  te' <- insertStmsM te
-  fe' <- insertStmsM fe
-  -- We need to construct the context.
-  ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
-  te'' <- addContextForBranch ts te'
-  fe'' <- addContextForBranch ts fe'
-  let ts' = replicate (length (shapeContext ts)) (Prim int64) ++ ts
-  pure $ If ce' te'' fe'' $ IfDec ts' if_sort
-  where
-    addContextForBranch ts (Body _ stms val_res) = do
-      body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
-      let ctx_res =
-            map snd $ sortOn fst $ M.toList $ shapeExtMapping ts body_ts
-      mkBodyM stms $ subExpsRes ctx_res ++ val_res
-      where
-        stmsscope = scopeOf stms
+  eMatch' [ce'] [Case [Just $ BoolValue True] te] fe if_sort
 
 -- The type of a body.  Watch out: this only works for the degenerate
 -- case where the body does not already return its context.
@@ -267,6 +304,14 @@ eBinOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
   pure $ BasicOp $ BinOp op x' y'
+
+-- | Construct a v'UnOp' expression with the given operator.
+eUnOp ::
+  MonadBuilder m =>
+  UnOp ->
+  m (Exp (Rep m)) ->
+  m (Exp (Rep m))
+eUnOp op x = BasicOp . UnOp op <$> (letSubExp "x" =<< x)
 
 -- | Construct a v'CmpOp' expression with the given comparison.
 eCmpOp ::
@@ -456,7 +501,14 @@ foldBinOp bop ne (e : es) =
 -- | True if all operands are true.
 eAll :: MonadBuilder m => [SubExp] -> m (Exp (Rep m))
 eAll [] = pure $ BasicOp $ SubExp $ constant True
+eAll [x] = eSubExp x
 eAll (x : xs) = foldBinOp LogAnd x xs
+
+-- | True if any operand is true.
+eAny :: MonadBuilder m => [SubExp] -> m (Exp (Rep m))
+eAny [] = pure $ BasicOp $ SubExp $ constant False
+eAny [x] = eSubExp x
+eAny (x : xs) = foldBinOp LogOr x xs
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and

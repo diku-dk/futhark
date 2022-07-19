@@ -195,13 +195,12 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
                 (thisres, thisstms) <- collectStms $ do
                   i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int64 OverflowWrap) i start
                   letSubExp "index_concat" . BasicOp . Index x' $
-                    Slice $
-                      ibef ++ DimFix i' : iaft
+                    Slice (ibef ++ DimFix i' : iaft)
                 thisbody <- mkBodyM thisstms [subExpRes thisres]
                 (altres, altstms) <- collectStms $ mkBranch xs_and_starts'
                 altbody <- mkBodyM altstms [subExpRes altres]
                 letSubExp "index_concat_branch" $
-                  If cmp thisbody altbody $
+                  Match [cmp] [Case [Just $ BoolValue True] thisbody] altbody $
                     IfDec [primBodyType res_t] IfNormal
           SubExpResult cs <$> mkBranch xs_and_starts
     Just (ArrayLit ses _, cs)

@@ -306,6 +306,9 @@ instance
 instance FreeIn (Stm rep) => FreeIn (Stms rep) where
   freeIn' = foldMap freeIn'
 
+instance FreeIn body => FreeIn (Case body) where
+  freeIn' = freeIn' . caseBody
+
 instance FreeIn Names where
   freeIn' = fvNames
 

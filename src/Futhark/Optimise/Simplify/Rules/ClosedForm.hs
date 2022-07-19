@@ -68,8 +68,8 @@ foldClosedForm look pat lam accs arrs = do
     BasicOp $
       CmpOp (CmpEq int64) inputsize (intConst Int64 0)
   letBind pat
-    =<< ( If (Var isEmpty)
-            <$> resultBodyM accs
+    =<< ( Match [Var isEmpty]
+            <$> (pure . Case [Just $ BoolValue True] <$> resultBodyM accs)
             <*> renameBody closedBody
             <*> pure (IfDec [primBodyType t] IfNormal)
         )
@@ -108,8 +108,8 @@ loopClosedForm pat merge i it bound body = do
       CmpOp (CmpSlt it) bound (intConst it 0)
 
   letBind pat
-    =<< ( If (Var isEmpty)
-            <$> resultBodyM mergeexp
+    =<< ( Match [Var isEmpty]
+            <$> (pure . Case [Just (BoolValue True)] <$> resultBodyM mergeexp)
             <*> renameBody closedBody
             <*> pure (IfDec [primBodyType t] IfNormal)
         )

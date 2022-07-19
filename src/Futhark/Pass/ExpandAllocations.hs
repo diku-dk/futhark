@@ -9,6 +9,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Either (rights)
 import Data.List (find, foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -86,26 +87,20 @@ transformStms stms =
 transformStm :: Stm GPUMem -> ExpandM (Stms GPUMem)
 -- It is possible that we are unable to expand allocations in some
 -- code versions.  If so, we can remove the offending branch.  Only if
--- both versions fail do we propagate the error.
-transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
-  tbranch' <- (Right <$> transformBody tbranch) `catchError` (pure . Left)
-  fbranch' <- (Right <$> transformBody fbranch) `catchError` (pure . Left)
-  case (tbranch', fbranch') of
-    (Left _, Right fbranch'') ->
-      pure $ useBranch fbranch''
-    (Right tbranch'', Left _) ->
-      pure $ useBranch tbranch''
-    (Right tbranch'', Right fbranch'') ->
-      pure $ oneStm $ Let pat aux $ If cond tbranch'' fbranch'' (IfDec ts IfEquiv)
-    (Left e, _) ->
+-- all versions fail do we propagate the error.
+-- FIXME: this can remove safety checks if the default branch fails!
+transformStm (Let pat aux (Match cond cases defbody (IfDec ts IfEquiv))) = do
+  let onCase (Case vs body) =
+        (Right . Case vs <$> transformBody body) `catchError` (pure . Left)
+  cases' <- rights <$> mapM onCase cases
+  defbody' <- (Right <$> transformBody defbody) `catchError` (pure . Left)
+  case (cases', defbody') of
+    ([], Left e) ->
       throwError e
-  where
-    bindRes pe (SubExpRes cs se) =
-      certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ SubExp se
-
-    useBranch b =
-      bodyStms b
-        <> stmsFromList (zipWith bindRes (patElems pat) (bodyResult b))
+    (_ : _, Left _) ->
+      pure $ oneStm $ Let pat aux $ Match cond (init cases') (caseBody $ last cases') (IfDec ts IfEquiv)
+    (_, Right defbody'') ->
+      pure $ oneStm $ Let pat aux $ Match cond cases' defbody'' (IfDec ts IfEquiv)
 transformStm (Let pat aux e) = do
   (stms, e') <- transformExp =<< mapExpM transform e
   pure $ stms <> oneStm (Let pat aux e')

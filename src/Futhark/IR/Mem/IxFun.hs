@@ -11,6 +11,7 @@ module Futhark.IR.Mem.IxFun
     LMADDim (..),
     Monotonicity (..),
     index,
+    mkExistential,
     iota,
     iotaOffset,
     permute,
@@ -26,7 +27,6 @@ module Futhark.IR.Mem.IxFun
     isDirect,
     isLinear,
     substituteInIxFun,
-    leastGeneralGeneralization,
     existentialize,
     closeEnough,
     equivalent,
@@ -46,7 +46,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)
-import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimIndex (..),
@@ -135,7 +134,7 @@ data IxFun num = IxFun
   { ixfunLMADs :: NonEmpty (LMAD num),
     base :: Shape num,
     -- | ignoring permutations, is the index function contiguous?
-    ixfunContig :: Bool
+    contiguous :: Bool
   }
   deriving (Show, Eq)
 
@@ -200,6 +199,8 @@ instance Traversable LMAD where
     where
       f' (LMADDim s n p m) = LMADDim <$> f s <*> f n <*> pure p <*> pure m
 
+-- It is important that the traversal order here is the same as in
+-- mkExistential.
 instance Traversable IxFun where
   traverse f (IxFun lmads oshp cg) =
     IxFun <$> traverse (traverse f) lmads <*> traverse f oshp <*> pure cg
@@ -334,6 +335,19 @@ iotaOffset o ns = IxFun (makeRotIota Inc o ns :| []) ns True
 -- | iota.
 iota :: IntegralExp num => Shape num -> IxFun num
 iota = iotaOffset 0
+
+-- | Create a contiguous single-LMAD index function that is
+-- existential in everything, with the provided permutation,
+-- monotonicity, and contiguousness.
+mkExistential :: Int -> [(Int, Monotonicity)] -> Bool -> Int -> IxFun (Ext a)
+mkExistential basis_rank perm contig start =
+  IxFun (NE.singleton lmad) basis contig
+  where
+    basis = take basis_rank $ map Ext [start + 1 + dims_rank * 2 ..]
+    dims_rank = length perm
+    lmad = LMAD (Ext start) $ zipWith onDim perm [0 ..]
+    onDim (p, mon) i =
+      LMADDim (Ext (start + 1 + i * 2)) (Ext (start + 2 + i * 2)) p mon
 
 -- | Permute dimensions.
 permute ::
@@ -827,50 +841,6 @@ ixfunMonotonicity (IxFun (lmad :| lmads) _ _) =
     isMonDim mon (LMADDim s _ _ ldmon) =
       s == 0 || mon == ldmon
 
--- | Generalization (anti-unification)
---
--- Anti-unification of two index functions is supported under the following conditions:
---   0. Both index functions are represented by ONE lmad (assumed common case!)
---   1. The support array of the two indexfuns have the same dimensionality
---      (we can relax this condition if we use a 1D support, as we probably should!)
---   2. The contiguous property and the per-dimension monotonicity are the same
---      (otherwise we might loose important information; this can be relaxed!)
---   3. Most importantly, both index functions correspond to the same permutation
---      (since the permutation is represented by INTs, this restriction cannot
---       be relaxed, unless we move to a gated-LMAD representation!)
-leastGeneralGeneralization ::
-  Eq v =>
-  IxFun (PrimExp v) ->
-  IxFun (PrimExp v) ->
-  Maybe (IxFun (PrimExp (Ext v)), [(PrimExp v, PrimExp v)])
-leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| []) oshp2 ctg2) = do
-  guard $
-    length oshp1 == length oshp2
-      && ctg1 == ctg2
-      && map ldPerm (lmadDims lmad1) == map ldPerm (lmadDims lmad2)
-      && lmadDMon lmad1 == lmadDMon lmad2
-  let (ctg, dperm, dmon) = (ctg1, lmadPermutation lmad1, lmadDMon lmad1)
-  (dshp, m1) <- generalize [] (lmadDShp lmad1) (lmadDShp lmad2)
-  (oshp, m2) <- generalize m1 oshp1 oshp2
-  (dstd, m3) <- generalize m2 (lmadDSrd lmad1) (lmadDSrd lmad2)
-  let (offt, m5) = PEG.leastGeneralGeneralization m3 (lmadOffset lmad1) (lmadOffset lmad2)
-  let lmad_dims = zipWith4 LMADDim dstd dshp dperm dmon
-      lmad = LMAD offt lmad_dims
-  pure (IxFun (lmad :| []) oshp ctg, m5)
-  where
-    lmadDMon = map ldMon . lmadDims
-    lmadDSrd = map ldStride . lmadDims
-    lmadDShp = map ldShape . lmadDims
-    generalize m l1 l2 =
-      foldM
-        ( \(l_acc, m') (pe1, pe2) -> do
-            let (e, m'') = PEG.leastGeneralGeneralization m' pe1 pe2
-            pure (l_acc ++ [e], m'')
-        )
-        ([], m)
-        (zip l1 l2)
-leastGeneralGeneralization _ _ = Nothing
-
 isSequential :: [Int] -> Bool
 isSequential xs =
   all (uncurry (==)) $ zip xs [0 ..]
@@ -892,10 +862,10 @@ existentialize ::
 existentialize (IxFun (lmad :| []) oshp True)
   | length (lmadShape lmad) == length oshp,
     isSequential (map ldPerm $ lmadDims lmad) = do
-      oshp' <- mapM existentializeExp oshp
       lmadOffset' <- existentializeExp $ lmadOffset lmad
       lmadDims' <- mapM existentializeLMADDim $ lmadDims lmad
       let lmad' = LMAD lmadOffset' lmadDims'
+      oshp' <- mapM existentializeExp oshp
       pure $ Just $ IxFun (lmad' :| []) oshp' True
   where
     existentializeLMADDim ::

@@ -85,12 +85,10 @@ analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
 analyzeStm m (Let _ _ (Op (Inner inner))) = do
   on_inner <- asks onInner
   on_inner m inner
-analyzeStm m (Let pat _ (If _ then_body else_body _)) = do
-  m' <-
-    analyzeStms (bodyStms then_body) m
-      >>= analyzeStms (bodyStms else_body)
-  zip (patNames pat) (map resSubExp $ bodyResult then_body)
-    <> zip (patNames pat) (map resSubExp $ bodyResult else_body)
+analyzeStm m (Let pat _ (Match _ cases defbody _)) = do
+  let bodies = defbody : map caseBody cases
+  m' <- foldM (flip analyzeStms) m $ map bodyStms bodies
+  foldMap (zip (patNames pat) . map resSubExp . bodyResult) bodies
     & mapMaybe (filterFun m')
     & foldr (uncurry addAlias) m'
     & pure

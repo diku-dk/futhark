@@ -261,19 +261,20 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
   pure ()
 expCompiler pat (WithAcc inputs lam) =
   withAcc pat inputs lam
--- This is a multi-versioning If created by incremental flattening.
+-- This is a multi-versioning Match created by incremental flattening.
 -- We need to augment the conditional with a check that any local
 -- memory requirements in tbranch are compatible with the hardware.
--- We do not check anything for fbranch, as we assume that it will
+-- We do not check anything for defbody, as we assume that it will
 -- always be safe (and what would we do if none of the branches would
 -- work?).
-expCompiler dest (If cond tbranch fbranch (IfDec _ IfEquiv)) = do
-  tcode <- collect $ compileBody dest tbranch
-  fcode <- collect $ compileBody dest fbranch
+expCompiler dest (Match cond (first_case : cases) defbranch sort@(IfDec _ IfEquiv)) = do
+  tcode <- collect $ compileBody dest $ caseBody first_case
+  fcode <- collect $ expCompiler dest $ Match cond cases defbranch sort
   check <- checkLocalMemoryReqs tcode
+  let matches = caseMatch cond (casePat first_case)
   emit $ case check of
     Nothing -> fcode
-    Just ok -> Imp.If (ok .&&. toBoolExp cond) tcode fcode
+    Just ok -> Imp.If (matches .&&. ok) tcode fcode
 expCompiler dest e =
   defCompileExp dest e
 

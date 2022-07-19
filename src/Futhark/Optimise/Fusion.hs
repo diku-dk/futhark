@@ -98,7 +98,7 @@ finalizeNode nt = case nt of
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm
-  IfNode stm lst -> do
+  MatchNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm
   FinalNode stms1 nt' stms2 -> do
@@ -253,10 +253,10 @@ okToFuseProducer _ = pure True
 
 -- First node is producer, second is consumer.
 vFuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT], [EdgeT]) -> (NodeT, [EdgeT]) -> FusionM (Maybe NodeT)
-vFuseNodeT _ infusible (s1, _, e1s) (IfNode stm2 dfused, _)
+vFuseNodeT _ infusible (s1, _, e1s) (MatchNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
-      pure $ Just $ IfNode stm2 $ (s1, e1s) : dfused
+      pure $ Just $ MatchNode stm2 $ (s1, e1s) : dfused
 vFuseNodeT _ infusible (StmNode stm1, _, _) (SoacNode ots2 pats2 soac2 aux2, _)
   | null infusible,
     [stm1_out] <- patNames $ stmPat stm1,
@@ -398,11 +398,10 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     doFuseScans . localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
       b <- doFusionWithDelayed body to_fuse
       pure (incoming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
-  IfNode (Let pat aux (If sz b1 b2 dec)) to_fuse -> doFuseScans $ do
-    b1' <- doFusionWithDelayed b1 to_fuse
-    b2' <- doFusionWithDelayed b2 to_fuse
-    rb2' <- renameBody b2'
-    pure (incoming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
+  MatchNode (Let pat aux (Match cond cases defbody dec)) to_fuse -> doFuseScans $ do
+    cases' <- mapM (traverse $ renameBody <=< (`doFusionWithDelayed` to_fuse)) cases
+    defbody' <- doFusionWithDelayed defbody to_fuse
+    pure (incoming, node, MatchNode (Let pat aux (Match cond cases' defbody' dec)) [], outgoing)
   StmNode (Let pat aux (Op (Futhark.VJP lam args vec))) -> doFuseScans $ do
     lam' <- doFusionLambda lam
     pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP lam' args vec))), outgoing)
