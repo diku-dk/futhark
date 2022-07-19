@@ -179,8 +179,8 @@ usageInExp (Apply _ args _ _) =
     ]
 usageInExp e@DoLoop {} =
   foldMap consumedUsage $ namesToList $ consumedInExp e
-usageInExp (Match _ cases def_body _) =
-  foldMap (usageInBody . caseBody) cases <> usageInBody def_body
+usageInExp (Match _ cases defbody _) =
+  foldMap (usageInBody . caseBody) cases <> usageInBody defbody
 usageInExp (WithAcc inputs lam) =
   foldMap inputUsage inputs <> usageInBody (lambdaBody lam)
   where

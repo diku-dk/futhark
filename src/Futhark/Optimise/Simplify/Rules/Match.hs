@@ -62,14 +62,14 @@ ruleMatch
         (Body _ tstms [SubExpRes tcs (Constant (BoolValue True))])
       ],
     Body _ fstms [SubExpRes fcs se],
-    IfDec ts _
+    MatchDec ts _
     )
     | null tstms,
       null fstms,
       [Prim Bool] <- map extTypeOf ts =
         Simplify $ certifying (tcs <> fcs) $ letBind pat $ BasicOp $ BinOp LogOr cond se
 -- When type(x)==bool, if c then x else y == (c && x) || (!c && y)
-ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, IfDec ts _)
+ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, MatchDec ts _)
   | Body _ tstms [SubExpRes tcs tres] <- tb,
     Body _ fstms [SubExpRes fcs fres] <- fb,
     all (safeExp . stmExp) $ tstms <> fstms,
@@ -86,7 +86,7 @@ ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, IfDec ts _)
               (pure $ BasicOp $ SubExp fres)
           )
       certifying (tcs <> fcs) $ letBind pat e
-ruleMatch _ pat _ (_, [Case _ tbranch], _, IfDec _ IfFallback)
+ruleMatch _ pat _ (_, [Case _ tbranch], _, MatchDec _ MatchFallback)
   | all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
       let ses = bodyResult tbranch
       addStms $ bodyStms tbranch
@@ -118,7 +118,7 @@ ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, _)
 -- in the case where 'x' is a loop parameter with initial value 'y'
 -- and the new value of the loop parameter is 'z'.  ('x' and 'y' can
 -- be flipped.)
-ruleMatch vtable (Pat [pe]) aux (_c, [Case _ tb], fb, IfDec [_] _)
+ruleMatch vtable (Pat [pe]) aux (_c, [Case _ tb], fb, MatchDec [_] _)
   | Body _ tstms [SubExpRes xcs x] <- tb,
     null tstms,
     Body _ fstms [SubExpRes ycs y] <- fb,
@@ -138,7 +138,7 @@ ruleMatch _ _ _ _ = Skip
 -- either invariant to the branches (only done for results used for
 -- existentials), or the same in both branches.
 hoistBranchInvariant :: BuilderOps rep => TopDownRuleMatch rep
-hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) =
+hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
   let case_reses = map (bodyResult . caseBody) cases
       defbody_res = bodyResult defbody
       (hoistings, (pes, ts, case_reses_tr, defbody_res')) =
@@ -156,7 +156,7 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) =
           -- less existential.
           cases'' <- mapM (traverse $ reshapeBodyResults $ map extTypeOf ret') cases'
           defbody'' <- reshapeBodyResults (map extTypeOf ret') defbody'
-          letBind (Pat pes) $ Match cond cases'' defbody'' (IfDec ret' ifsort)
+          letBind (Pat pes) $ Match cond cases'' defbody'' (MatchDec ret' ifsort)
   where
     bound_in_branches =
       namesFromList . concatMap (patNames . stmPat) $
@@ -186,7 +186,7 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) =
                             <$> mapM (resultBodyM . pure . resSubExp) case_reses
                         )
                     <*> resultBodyM [resSubExp defres]
-                    <*> pure (IfDec bt ifsort)
+                    <*> pure (MatchDec bt ifsort)
                 )
           hoisted i pe
       | otherwise = noHoisting
@@ -214,7 +214,7 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, IfDec ret ifsort) =
 -- if *none* of the return values are used, but this rule is more
 -- precise.
 removeDeadBranchResult :: BuilderOps rep => BottomUpRuleMatch rep
-removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, IfDec rettype ifsort)
+removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, MatchDec rettype ifsort)
   | -- Only if there is no existential binding...
     all (`notNameIn` foldMap freeIn (patElems pat)) (patNames pat),
     -- Figure out which of the names in 'pat' are used...
@@ -231,7 +231,7 @@ removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, IfDec rettype ifso
       Simplify $ do
         cases' <- mapM (traverse $ onBody pick) cases
         defbody' <- onBody pick defbody
-        letBind (Pat pat') $ Match cond cases' defbody' $ IfDec rettype' ifsort
+        letBind (Pat pat') $ Match cond cases' defbody' $ MatchDec rettype' ifsort
   | otherwise = Skip
   where
     onBody pick (Body _ stms res) = mkBodyM stms $ pick res

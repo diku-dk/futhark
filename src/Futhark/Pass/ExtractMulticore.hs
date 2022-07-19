@@ -121,9 +121,9 @@ transformStm (Let pat aux (DoLoop merge form body)) = do
     localScope (scopeOfFParams (map fst merge) <> scopeOf form') $
       transformBody body
   pure $ oneStm $ Let pat aux $ DoLoop merge form' body'
-transformStm (Let pat aux (Match ses cases def_body ret)) =
+transformStm (Let pat aux (Match ses cases defbody ret)) =
   oneStm . Let pat aux
-    <$> (Match ses <$> mapM transformCase cases <*> transformBody def_body <*> pure ret)
+    <$> (Match ses <$> mapM transformCase cases <*> transformBody defbody <*> pure ret)
   where
     transformCase (Case vs body) = Case vs <$> transformBody body
 transformStm (Let pat aux (WithAcc inputs lam)) =

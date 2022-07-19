@@ -289,10 +289,10 @@ unbalancedLambda orig_lam =
     unbalancedStm _ DoLoop {} = False
     unbalancedStm bound (WithAcc _ lam) =
       unbalancedBody bound (lambdaBody lam)
-    unbalancedStm bound (Match ses cases def_body _) =
+    unbalancedStm bound (Match ses cases defbody _) =
       any (`subExpBound` bound) ses
         && ( any (unbalancedBody bound . caseBody) cases
-               || unbalancedBody bound def_body
+               || unbalancedBody bound defbody
            )
     unbalancedStm _ (BasicOp _) =
       False
@@ -344,7 +344,7 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
   let alt_body = mkBody alt_stms $ varsRes $ patNames alts_pat
 
   letBind pat . Match [cond] [Case [Just $ BoolValue True] alt] alt_body $
-    IfDec (staticShapes (patTypes pat)) IfEquiv
+    MatchDec (staticShapes (patTypes pat)) MatchEquiv
 
 transformLambda :: KernelPath -> Lambda SOACS -> DistribM (Lambda GPU)
 transformLambda path (Lambda params body ret) =

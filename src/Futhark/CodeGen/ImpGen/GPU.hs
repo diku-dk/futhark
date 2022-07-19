@@ -267,7 +267,7 @@ expCompiler pat (WithAcc inputs lam) =
 -- We do not check anything for defbody, as we assume that it will
 -- always be safe (and what would we do if none of the branches would
 -- work?).
-expCompiler dest (Match cond (first_case : cases) defbranch sort@(IfDec _ IfEquiv)) = do
+expCompiler dest (Match cond (first_case : cases) defbranch sort@(MatchDec _ MatchEquiv)) = do
   tcode <- collect $ compileBody dest $ caseBody first_case
   fcode <- collect $ expCompiler dest $ Match cond cases defbranch sort
   check <- checkLocalMemoryReqs tcode

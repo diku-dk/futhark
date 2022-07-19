@@ -123,7 +123,7 @@ type RuleMatch rep a =
   ( [SubExp],
     [Case (Body rep)],
     Body rep,
-    IfDec (BranchType rep)
+    MatchDec (BranchType rep)
   ) ->
   Rule rep
 

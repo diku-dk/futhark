@@ -389,8 +389,8 @@ instance FreeIn Attrs where
 instance FreeIn dec => FreeIn (StmAux dec) where
   freeIn' (StmAux cs attrs dec) = freeIn' cs <> freeIn' attrs <> freeIn' dec
 
-instance FreeIn a => FreeIn (IfDec a) where
-  freeIn' (IfDec r _) = freeIn' r
+instance FreeIn a => FreeIn (MatchDec a) where
+  freeIn' (MatchDec r _) = freeIn' r
 
 -- | Either return precomputed free names stored in the attribute, or
 -- the freshly computed names.  Relies on lazy evaluation to avoid the

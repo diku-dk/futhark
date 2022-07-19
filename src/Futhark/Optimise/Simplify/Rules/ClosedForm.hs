@@ -71,7 +71,7 @@ foldClosedForm look pat lam accs arrs = do
     =<< ( Match [Var isEmpty]
             <$> (pure . Case [Just $ BoolValue True] <$> resultBodyM accs)
             <*> renameBody closedBody
-            <*> pure (IfDec [primBodyType t] IfNormal)
+            <*> pure (MatchDec [primBodyType t] MatchNormal)
         )
   where
     knownBnds = determineKnownBindings look lam accs arrs
@@ -111,7 +111,7 @@ loopClosedForm pat merge i it bound body = do
     =<< ( Match [Var isEmpty]
             <$> (pure . Case [Just (BoolValue True)] <$> resultBodyM mergeexp)
             <*> renameBody closedBody
-            <*> pure (IfDec [primBodyType t] IfNormal)
+            <*> pure (MatchDec [primBodyType t] MatchNormal)
         )
   where
     (mergepat, mergeexp) = unzip merge

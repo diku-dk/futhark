@@ -416,7 +416,7 @@ maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
 maybeDistributeStm stm@(Let pat _ (Match cond cases defbody ret)) acc
   | all (`notNameIn` freeIn pat) (patNames pat),
     any bodyContainsParallelism (defbody : map caseBody cases)
-      || not (all primType (ifReturns ret)) =
+      || not (all primType (matchReturns ret)) =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
           | not $

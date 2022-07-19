@@ -250,7 +250,7 @@ instance PrettyRep rep => Pretty (Case (Body rep)) where
     "case" <+> ppTuple' (map (maybe "_" ppr) vs) <+> "->" <+> maybeNest b
 
 instance PrettyRep rep => Pretty (Exp rep) where
-  ppr (Match [c] [Case [Just (BoolValue True)] t] f (IfDec ret ifsort)) =
+  ppr (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =
     text "if"
       <+> info'
       <+> ppr c
@@ -262,10 +262,10 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> ppTuple' ret
     where
       info' = case ifsort of
-        IfNormal -> mempty
-        IfFallback -> text "<fallback>"
-        IfEquiv -> text "<equiv>"
-  ppr (Match ses cs defb (IfDec ret ifsort)) =
+        MatchNormal -> mempty
+        MatchFallback -> text "<fallback>"
+        MatchEquiv -> text "<equiv>"
+  ppr (Match ses cs defb (MatchDec ret ifsort)) =
     ("match" <+> info' <+> ppTuple' ses)
       </> stack (map ppr cs)
       </> "default"
@@ -275,9 +275,9 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> ppTuple' ret
     where
       info' = case ifsort of
-        IfNormal -> mempty
-        IfFallback -> text "<fallback>"
-        IfEquiv -> text "<equiv>"
+        MatchNormal -> mempty
+        MatchFallback -> text "<fallback>"
+        MatchEquiv -> text "<equiv>"
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args ret (safety, _, _)) =
     applykw
