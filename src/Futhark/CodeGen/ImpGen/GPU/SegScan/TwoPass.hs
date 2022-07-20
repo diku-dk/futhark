@@ -156,12 +156,12 @@ scanStage1 ::
   KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
 scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
-  let num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
+  let num_groups' = fmap pe64 num_groups
+      group_size' = fmap pe64 group_size
   num_threads <- dPrimV "num_threads" $ sExt32 $ unCount num_groups' * unCount group_size'
 
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
   let num_elements = product dims'
       elems_per_thread = num_elements `divUp` sExt64 (tvExp num_threads)
       elems_per_group = unCount group_size' * elems_per_thread
@@ -332,7 +332,7 @@ scanStage2 ::
   CallKernelGen ()
 scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
 
   -- Our group size is the number of groups for the stage 1 kernel.
   let group_size = Count $ unCount num_groups
@@ -407,9 +407,9 @@ scanStage3 ::
   [SegBinOp GPUMem] ->
   CallKernelGen ()
 scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
-  let group_size' = fmap toInt64Exp group_size
+  let group_size' = fmap pe64 group_size
       (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
   required_groups <-
     dPrimVE "required_groups" $
       sExt32 $
@@ -502,7 +502,7 @@ compileSegScan pat lvl space scans kbody = do
     fmap (Imp.Count . tvSize) $
       dPrimV "stage1_num_groups" $
         sMin64 (tvExp stage1_max_num_groups) $
-          toInt64Exp $
+          pe64 $
             Imp.unCount $
               segNumGroups lvl
 

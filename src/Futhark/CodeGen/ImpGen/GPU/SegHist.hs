@@ -76,7 +76,7 @@ histSpaceUsage op =
       histOp op
 
 histSize :: HistOp GPUMem -> Imp.TExp Int64
-histSize = product . map toInt64Exp . shapeDims . histShape
+histSize = product . map pe64 . shapeDims . histShape
 
 histRank :: HistOp GPUMem -> Int
 histRank = shapeRank . histShape
@@ -127,7 +127,7 @@ computeHistoUsage space op = do
                   Space "device"
 
             multiHistoCase = do
-              let num_elems = product $ map toInt64Exp $ shapeDims subhistos_shape
+              let num_elems = product $ map pe64 $ shapeDims subhistos_shape
                   subhistos_mem_size =
                     Imp.bytes $
                       Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
@@ -136,15 +136,15 @@ computeHistoUsage space op = do
               sReplicate subhistos ne
               subhistos_t <- lookupType subhistos
               let slice =
-                    fullSliceNum (map toInt64Exp $ arrayDims subhistos_t) $
-                      map (unitSlice 0 . toInt64Exp . snd) segment_dims
+                    fullSliceNum (map pe64 $ arrayDims subhistos_t) $
+                      map (unitSlice 0 . pe64 . snd) segment_dims
                         ++ [DimFix 0]
               sUpdate subhistos slice $ Var dest
 
         sIf (tvExp num_subhistos .==. 1) unitHistoCase multiHistoCase
 
   let h = histSpaceUsage op
-      segmented_h = h * product (map (Imp.bytes . toInt64Exp) $ init $ segSpaceDims space)
+      segmented_h = h * product (map (Imp.bytes . pe64) $ init $ segSpaceDims space)
 
   atomics <- hostAtomics <$> askEnv
 
@@ -181,7 +181,7 @@ prepareAtomicUpdateGlobal l dests slug =
       -- algorithm to ensure good distribution of locks.
       let num_locks = 100151
           dims =
-            map toInt64Exp $
+            map pe64 $
               shapeDims (histOpShape (slugOp slug))
                 ++ [tvSize (slugNumSubhistos slug)]
                 ++ shapeDims (histShape (slugOp slug))
@@ -225,7 +225,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
   hist_RF <-
     dPrimVE "hist_RF" $
-      sum (map (r64 . toInt64Exp . histRaceFactor . slugOp) slugs)
+      sum (map (r64 . pe64 . histRaceFactor . slugOp) slugs)
         / genericLength slugs
 
   hist_el_size <- dPrimVE "hist_el_size" $ sum $ map slugElAvgSize slugs
@@ -399,7 +399,7 @@ histKernelGlobalPass ::
   CallKernelGen ()
 histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms hist_S chk_i = do
   let (space_is, space_sizes) = unzip $ unSegSpace space
-      space_sizes_64 = map (sExt64 . toInt64Exp) space_sizes
+      space_sizes_64 = map (sExt64 . pe64) space_sizes
       total_w_64 = product space_sizes_64
 
   hist_H_chks <- forM (map (histSize . slugOp) slugs) $ \w ->
@@ -456,8 +456,8 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
                  hist_H_chk
                  ) -> do
                   let chk_beg = sExt64 chk_i * hist_H_chk
-                      bucket' = map toInt64Exp bucket
-                      dest_shape' = map toInt64Exp $ shapeDims dest_shape
+                      bucket' = map pe64 bucket
+                      dest_shape' = map pe64 $ shapeDims dest_shape
                       flat_bucket = flattenIndex dest_shape' bucket'
                       bucket_in_bounds =
                         chk_beg .<=. flat_bucket
@@ -485,8 +485,8 @@ histKernelGlobal ::
   KernelBody GPUMem ->
   CallKernelGen ()
 histKernelGlobal map_pes num_groups group_size space slugs kbody = do
-  let num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
+  let num_groups' = fmap pe64 num_groups
+      group_size' = fmap pe64 group_size
   let (_space_is, space_sizes) = unzip $ unSegSpace space
       num_threads = sExt32 $ unCount num_groups' * unCount group_size'
 
@@ -496,7 +496,7 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
     prepareIntermediateArraysGlobal
       (bodyPassage kbody)
       num_threads
-      (toInt64Exp $ last space_sizes)
+      (pe64 $ last space_sizes)
       slugs
 
   sFor "chk_i" hist_S $ \chk_i ->
@@ -549,7 +549,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
                       : shapeDims (histOpShape op)
                       ++ [hist_H_chk]
 
-            let dims = map toInt64Exp $ shapeDims lock_shape
+            let dims = map pe64 $ shapeDims lock_shape
 
             locks <- sAllocArray "locks" int32 lock_shape $ Space "local"
 
@@ -614,12 +614,12 @@ histKernelLocalPass
         segment_dims = init space_sizes
         (i_in_segment, segment_size) = last $ unSegSpace space
         num_subhistos_per_group = tvExp num_subhistos_per_group_var
-        segment_size' = toInt64Exp segment_size
+        segment_size' = pe64 segment_size
 
     num_segments <-
       dPrimVE "num_segments" $
         product $
-          map toInt64Exp segment_dims
+          map pe64 segment_dims
 
     hist_H_chks <- forM (map slugOp slugs) $ \op ->
       dPrimV "hist_H_chk" $ histSize op `divUp` sExt64 hist_S
@@ -627,7 +627,7 @@ histKernelLocalPass
     histo_sizes <- forM (zip slugs hist_H_chks) $ \(slug, hist_H_chk) -> do
       let histo_dims =
             tvExp hist_H_chk
-              : map toInt64Exp (shapeDims (histOpShape (slugOp slug)))
+              : map pe64 (shapeDims (histOpShape (slugOp slug)))
       histo_size <-
         dPrimVE "histo_size" $ product histo_dims
       let group_hists_size =
@@ -656,7 +656,7 @@ histKernelLocalPass
 
         -- Set segment indices.
         zipWithM_ dPrimV_ segment_is $
-          unflattenIndex (map toInt64Exp segment_dims) $
+          unflattenIndex (map pe64 segment_dims) $
             sExt64 flat_segment_id
 
         histograms <- forM (zip init_histograms hist_H_chks) $
@@ -694,7 +694,7 @@ histKernelLocalPass
                       local_subhisto_i <- dPrimVE "local_subhisto_i" $ j `quot` sExt32 histo_size
                       let local_bucket_is = unflattenIndex histo_dims $ sExt64 $ j `rem` sExt32 histo_size
                           nested_hist_size =
-                            map toInt64Exp $ shapeDims $ histShape $ slugOp slug
+                            map pe64 $ shapeDims $ histShape $ slugOp slug
 
                           global_bucket_is =
                             unflattenIndex
@@ -757,8 +757,8 @@ histKernelLocalPass
                  (bucket, vs')
                  ) -> do
                   let chk_beg = sExt64 chk_i * tvExp hist_H_chk
-                      bucket' = map toInt64Exp bucket
-                      dest_shape' = map toInt64Exp $ shapeDims dest_shape
+                      bucket' = map pe64 bucket
+                      dest_shape' = map pe64 $ shapeDims dest_shape
                       flat_bucket = flattenIndex dest_shape' bucket'
                       bucket_in_bounds =
                         inBounds (Slice (map DimFix bucket')) dest_shape'
@@ -785,7 +785,7 @@ histKernelLocalPass
                 histSize (slugOp slug) - sExt64 chk_i * head histo_dims
             let trunc_histo_dims =
                   tvExp trunc_H
-                    : map toInt64Exp (shapeDims (histOpShape (slugOp slug)))
+                    : map pe64 (shapeDims (histOpShape (slugOp slug)))
             trunc_histo_size <- dPrimVE "histo_size" $ sExt32 $ product trunc_histo_dims
 
             sFor "local_i" bins_per_thread $ \i -> do
@@ -798,7 +798,7 @@ histKernelLocalPass
                 -- we immediately unflatten.
                 let local_bucket_is = unflattenIndex histo_dims $ sExt64 j
                     nested_hist_size =
-                      map toInt64Exp $ shapeDims $ histShape $ slugOp slug
+                      map pe64 $ shapeDims $ histShape $ slugOp slug
                     global_bucket_is =
                       unflattenIndex
                         nested_hist_size
@@ -908,9 +908,9 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   num_groups <-
     fmap (Imp.Count . tvSize) $
       dPrimV "num_groups" $
-        sExt64 hist_T `divUp` toInt64Exp (unCount group_size)
-  let num_groups' = toInt64Exp <$> num_groups
-      group_size' = toInt64Exp <$> group_size
+        sExt64 hist_T `divUp` pe64 (unCount group_size)
+  let num_groups' = pe64 <$> num_groups
+      group_size' = pe64 <$> group_size
 
   let r64 = isF64 . ConvOpExp (SIToFP Int64 Float64) . untyped
       t64 = isInt64 . ConvOpExp (FPToSI Float64 Int64) . untyped
@@ -937,9 +937,9 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   let q_small = 2
 
   -- The number of segments/histograms produced..
-  hist_Nout <- dPrimVE "hist_Nout" $ product $ map toInt64Exp segment_dims
+  hist_Nout <- dPrimVE "hist_Nout" $ product $ map pe64 segment_dims
 
-  hist_Nin <- dPrimVE "hist_Nin" $ toInt64Exp $ last space_sizes
+  hist_Nin <- dPrimVE "hist_Nin" $ pe64 $ last space_sizes
 
   -- Maximum M for work efficiency.
   work_asymp_M_max <-
@@ -1059,9 +1059,9 @@ compileSegHist (Pat pes) num_groups group_size space ops kbody = do
   -- rather figuring out whether to use a local or global memory
   -- strategy, as well as collapsing the subhistograms produced (which
   -- are always in global memory, but their number may vary).
-  let num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
-      dims = map toInt64Exp $ segSpaceDims space
+  let num_groups' = fmap pe64 num_groups
+      group_size' = fmap pe64 group_size
+      dims = map pe64 $ segSpaceDims space
 
       num_red_res = length ops + sum (map (length . histNeutral) ops)
       (all_red_pes, map_pes) = splitAt num_red_res pes
@@ -1097,7 +1097,7 @@ compileSegHist (Pat pes) num_groups group_size space ops kbody = do
     hist_RF <-
       dPrimVE "hist_RF" $
         sExt32 $
-          sum (map (toInt64Exp . histRaceFactor . slugOp) slugs)
+          sum (map (pe64 . histRaceFactor . slugOp) slugs)
             `quot` genericLength slugs
 
     let hist_T = sExt32 $ unCount num_groups' * unCount group_size'
@@ -1111,7 +1111,7 @@ compileSegHist (Pat pes) num_groups group_size space ops kbody = do
         Just $
           untyped $
             product $
-              map (toInt64Exp . snd) segment_dims
+              map (pe64 . snd) segment_dims
     emit $ Imp.DebugPrint "Histogram element size (el_size)" $ Just $ untyped hist_el_size
     emit $ Imp.DebugPrint "Race factor (RF)" $ Just $ untyped hist_RF
     emit $ Imp.DebugPrint "Memory per set of subhistograms per segment" $ Just $ untyped h

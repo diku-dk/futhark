@@ -34,8 +34,8 @@ createLocalArrays ::
   [PrimType] ->
   InKernelGen (VName, [VName], [VName], VName, [VName])
 createLocalArrays (Count groupSize) m types = do
-  let groupSizeE = toInt64Exp groupSize
-      workSize = toInt64Exp m * groupSizeE
+  let groupSizeE = pe64 groupSize
+      workSize = pe64 m * groupSizeE
       prefixArraysSize =
         foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $
           map primByteSize types
@@ -55,7 +55,7 @@ createLocalArrays (Count groupSize) m types = do
 
   byteOffsets <-
     mapM (fmap varTE . dPrimV "byte_offsets") $
-      scanl (\off tySize -> alignTo off tySize + toInt64Exp groupSize * tySize) 0 $
+      scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $
         map primByteSize types
 
   warpByteOffsets <-
@@ -245,7 +245,7 @@ compileSegScan pat lvl space scanOp kbody = do
     dPrimVE "num_threads" $ num_groups' * group_size'
 
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
       segmented = length dims' > 1
       not_segmented_e = if segmented then false else true
       segment_size = last dims'

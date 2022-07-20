@@ -932,7 +932,7 @@ defCompileBasicOp _ (Assert e msg loc) = do
     uncurry warn loc "Safety check required at run-time."
 defCompileBasicOp (Pat [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
-      copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
+      copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . pe64) idxs
 defCompileBasicOp _ Index {} =
   pure ()
 defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
@@ -940,8 +940,8 @@ defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
     Unsafe -> write
     Safe -> sWhen (inBounds slice' dims) write
   where
-    slice' = fmap toInt64Exp slice
-    dims = map toInt64Exp $ arrayDims $ patElemType pe
+    slice' = fmap pe64 slice
+    dims = map pe64 $ arrayDims $ patElemType pe
     write = sUpdate (patElemName pe) slice' se
 defCompileBasicOp _ FlatIndex {} =
   pure ()
@@ -950,7 +950,7 @@ defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   v_loc <- entryArrayLoc <$> lookupArray v
   copy (elemType (patElemType pe)) (flatSliceMemLoc pe_loc slice') v_loc
   where
-    slice' = fmap toInt64Exp slice
+    slice' = fmap pe64 slice
 defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se)
   | Acc {} <- patElemType pe = pure ()
   | otherwise = do
@@ -963,7 +963,7 @@ defCompileBasicOp _ Scratch {} =
 defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
   e' <- toExp e
   s' <- toExp s
-  sFor "i" (toInt64Exp n) $ \i -> do
+  sFor "i" (pe64 n) $ \i -> do
     let i' = sExt it $ untyped i
     x <-
       dPrimV "x" . TPrimExp $
@@ -981,10 +981,10 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
     y_dims <- arrayDims <$> lookupType y
     let rows = case drop i y_dims of
           [] -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
-          r : _ -> toInt64Exp r
+          r : _ -> pe64 r
         skip_dims = take i y_dims
         sliceAllDim d = DimSlice 0 d 1
-        skip_slices = map (sliceAllDim . toInt64Exp) skip_dims
+        skip_slices = map (sliceAllDim . pe64) skip_dims
         destslice = skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
     copyDWIM (patElemName pe) destslice (Var y) []
     offs_glb <-- tvExp offs_glb + rows
@@ -1024,7 +1024,7 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
   -- we might otherwise end up declaring lambda parameters (if any)
   -- multiple times, as they are duplicated every time we do an
   -- UpdateAcc for the same accumulator.
-  let is' = map toInt64Exp is
+  let is' = map pe64 is
 
   -- We need to figure out whether we are updating a scatter-like
   -- accumulator or a generalised reduction.  This also binds the
@@ -1244,18 +1244,12 @@ tvVar (TV v _) = v
 
 -- | Compile things to 'Imp.Exp'.
 class ToExp a where
-  -- | Compile to an 'Imp.Exp', where the type (must must still be a
+  -- | Compile to an 'Imp.Exp', where the type (which must still be a
   -- primitive) is deduced monadically.
   toExp :: a -> ImpM rep r op Imp.Exp
 
   -- | Compile where we know the type in advance.
   toExp' :: PrimType -> a -> Imp.Exp
-
-  toInt64Exp :: a -> Imp.TExp Int64
-  toInt64Exp = TPrimExp . toExp' int64
-
-  toBoolExp :: a -> Imp.TExp Bool
-  toBoolExp = TPrimExp . toExp' Bool
 
 instance ToExp SubExp where
   toExp (Constant v) =
@@ -1385,12 +1379,12 @@ lookupAcc name is = do
             ( acc,
               space,
               arrs,
-              map toInt64Exp (shapeDims ispace),
+              map pe64 (shapeDims ispace),
               Just op {lambdaParams = ps}
             )
         Just (arrs@(arr : _), Nothing) -> do
           space <- lookupArraySpace arr
-          pure (acc, space, arrs, map toInt64Exp (shapeDims ispace), Nothing)
+          pure (acc, space, arrs, map pe64 (shapeDims ispace), Nothing)
         Nothing ->
           error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
@@ -1605,8 +1599,8 @@ copyArrayDWIM
           emit $ Imp.Read tmp srcmem srcoffset bt srcspace vol
           emit $ Imp.Write targetmem targetoffset bt destspace vol $ Imp.var tmp bt
     | otherwise = do
-        let destslice' = fullSliceNum (map toInt64Exp destshape) destslice
-            srcslice' = fullSliceNum (map toInt64Exp srcshape) srcslice
+        let destslice' = fullSliceNum (map pe64 destshape) destslice
+            srcslice' = fullSliceNum (map pe64 srcshape) srcslice
             destrank = length $ sliceDims destslice'
             srcrank = length $ sliceDims srcslice'
             destlocation' = sliceMemLoc destlocation destslice'
@@ -1766,7 +1760,7 @@ copyDWIMFix dest dest_is src src_is =
 compileAlloc ::
   Mem rep inner => Pat (LetDec rep) -> SubExp -> Space -> ImpM rep r op ()
 compileAlloc (Pat [mem]) e space = do
-  let e' = Imp.bytes $ toInt64Exp e
+  let e' = Imp.bytes $ pe64 e
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of
     Nothing -> emit $ Imp.Allocate (patElemName mem) e' space
@@ -1778,7 +1772,7 @@ compileAlloc pat _ _ =
 -- straightforward contiguous format, as an t'Int64' expression.
 typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
-  Imp.bytes $ primByteSize (elemType t) * product (map toInt64Exp (arrayDims t))
+  Imp.bytes $ primByteSize (elemType t) * product (map pe64 (arrayDims t))
 
 -- | Is this indexing in-bounds for an array of the given shape?  This
 -- is useful for things like scatter, which ignores out-of-bounds
@@ -1937,7 +1931,7 @@ sLoopNest ::
   Shape ->
   ([Imp.TExp Int64] -> ImpM rep r op ()) ->
   ImpM rep r op ()
-sLoopNest = sLoopSpace . map toInt64Exp . shapeDims
+sLoopNest = sLoopSpace . map pe64 . shapeDims
 
 -- | Untyped assignment.
 (<~~) :: VName -> Imp.Exp -> ImpM rep r op ()
