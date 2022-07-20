@@ -142,7 +142,7 @@ genScanLoop typ pat space kbody scan_ops local_accs i = do
       per_scan_res = segBinOpChunks scan_ops all_scan_res
       per_scan_pes = segBinOpChunks scan_ops $ patElems pat
   let (is, ns) = unzip $ unSegSpace space
-      ns' = map toInt64Exp ns
+      ns' = map pe64 ns
 
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
   compileStms mempty (kernelBodyStms kbody) $ do
@@ -242,7 +242,7 @@ scanStage2 ::
 scanStage2 pat nsubtasks space scan_ops kbody = do
   emit $ Imp.DebugPrint "nonsegmentedScan stage 2" Nothing
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
       per_scan_pes = segBinOpChunks scan_ops $ patElems pat
       nsubtasks' = tvExp nsubtasks
 
@@ -401,7 +401,7 @@ compileSegScanBody ::
   MulticoreGen Imp.MCCode
 compileSegScanBody pat space scan_ops kbody = collect $ do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
 
   dPrim_ (segFlat space) int64
   sOp $ Imp.GetTaskId (segFlat space)

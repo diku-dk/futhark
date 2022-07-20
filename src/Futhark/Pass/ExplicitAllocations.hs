@@ -314,7 +314,7 @@ summaryForBindage _ _ (Acc acc ispace ts u) _ =
   pure $ MemAcc acc ispace ts u
 summaryForBindage def_space chunkmap t@(Array pt shape u) NoHint = do
   m <- allocForArray' chunkmap t def_space
-  pure $ directIxFun pt shape u m t
+  pure $ MemArray pt shape u $ ArrayIn m $ IxFun.iota $ map pe64 $ arrayDims t
 summaryForBindage _ _ t@(Array pt _ _) (Hint ixfun space) = do
   bytes <-
     letSubExp "bytes" <=< toExp . untyped $
@@ -324,11 +324,6 @@ summaryForBindage _ _ t@(Array pt _ _) (Hint ixfun space) = do
         ]
   m <- letExp "mem" $ Op $ Alloc bytes space
   pure $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
-
-directIxFun :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
-directIxFun bt shape u mem t =
-  let ixf = IxFun.iota $ map pe64 $ arrayDims t
-   in MemArray bt shape u $ ArrayIn mem ixf
 
 allocInFParams ::
   (Allocable fromrep torep inner) =>

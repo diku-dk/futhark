@@ -109,8 +109,8 @@ compileSegRed' pat lvl space reds body
   | [(_, Constant (IntValue (Int64Value 1))), _] <- unSegSpace space =
       nonsegmentedReduction pat num_groups group_size space reds body
   | otherwise = do
-      let group_size' = toInt64Exp $ unCount group_size
-          segment_size = toInt64Exp $ last $ segSpaceDims space
+      let group_size' = pe64 $ unCount group_size
+          segment_size = pe64 $ last $ segSpaceDims space
           use_small_segments = segment_size * 2 .<. group_size'
       sIf
         use_small_segments
@@ -182,9 +182,9 @@ nonsegmentedReduction ::
   CallKernelGen ()
 nonsegmentedReduction segred_pat num_groups group_size space reds body = do
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
-      num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
+      dims' = map pe64 dims
+      num_groups' = fmap pe64 num_groups
+      group_size' = fmap pe64 group_size
       global_tid = Imp.le64 $ segFlat space
       w = last dims'
 
@@ -266,15 +266,15 @@ smallSegmentsReduction ::
   CallKernelGen ()
 smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = do
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
       segment_size = last dims'
 
   -- Careful to avoid division by zero now.
   segment_size_nonzero <-
     dPrimVE "segment_size_nonzero" $ sMax64 1 segment_size
 
-  let num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
+  let num_groups' = fmap pe64 num_groups
+      group_size' = fmap pe64 group_size
   num_threads <- dPrimV "num_threads" $ unCount num_groups' * unCount group_size'
   let num_segments = product $ init dims'
       segments_per_group = unCount group_size' `quot` segment_size_nonzero
@@ -383,11 +383,11 @@ largeSegmentsReduction ::
   CallKernelGen ()
 largeSegmentsReduction segred_pat num_groups group_size space reds body = do
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
       num_segments = product $ init dims'
       segment_size = last dims'
-      num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
+      num_groups' = fmap pe64 num_groups
+      group_size' = fmap pe64 group_size
 
   (groups_per_segment, elems_per_thread) <-
     groupsPerSegmentAndElementsPerThread
@@ -458,7 +458,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
       let first_group_for_segment = sExt64 flat_segment_id * groups_per_segment
       dIndexSpace (zip segment_gtids (init dims')) $ sExt64 flat_segment_id
       dPrim_ (last gtids) int64
-      let num_elements = Imp.elements $ toInt64Exp w
+      let num_elements = Imp.elements $ pe64 w
 
       slugs <-
         mapM (segBinOpSlug local_tid group_id) $

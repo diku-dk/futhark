@@ -57,7 +57,7 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
 updateAcc acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
-  let is' = map toInt64Exp is
+  let is' = map pe64 is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
   sWhen (inBounds (Slice (map DimFix is')) dims) $
     case op of

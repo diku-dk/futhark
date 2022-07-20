@@ -135,7 +135,7 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
   let num_groups_maybe_zero =
-        sMin64 (toInt64Exp w64 `divUp` toInt64Exp group_size) $
+        sMin64 (pe64 w64 `divUp` pe64 group_size) $
           sExt64 (tvExp max_num_groups)
   -- We also don't want zero groups.
   let num_groups = sMax64 1 num_groups_maybe_zero
@@ -247,7 +247,7 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
 
-  sIota (patElemName pe) (toInt64Exp n) x' s' et
+  sIota (patElemName pe) (pe64 n) x' s' et
 expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
   | Acc {} <- patElemType pe = pure ()
   | otherwise =
@@ -298,7 +298,7 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
   | bt_size <- primByteSize bt,
     Just destoffset <- IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset <- IxFun.linearWithOffset srcIxFun bt_size = do
-      let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
+      let num_elems = Imp.elements $ product $ map pe64 srcshape
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit

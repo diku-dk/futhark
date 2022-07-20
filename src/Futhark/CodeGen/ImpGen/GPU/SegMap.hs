@@ -24,8 +24,8 @@ compileSegMap ::
   CallKernelGen ()
 compileSegMap pat lvl space kbody = do
   let (is, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
-      group_size' = toInt64Exp <$> segGroupSize lvl
+      dims' = map pe64 dims
+      group_size' = pe64 <$> segGroupSize lvl
       attrs = defKernelAttrs (segNumGroups lvl) (segGroupSize lvl)
 
   emit $ Imp.DebugPrint "\n# SegMap" Nothing

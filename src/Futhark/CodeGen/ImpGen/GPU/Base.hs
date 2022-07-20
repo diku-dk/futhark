@@ -161,7 +161,7 @@ precomputedConstants pre m = do
   localEnv f m
   where
     mkMap ltid dims = do
-      let dims' = map toInt64Exp dims
+      let dims' = map pe64 dims
       ids' <- dIndexSpace' "ltid_pre" dims' (sExt64 ltid)
       pure (dims, map sExt32 ids')
 
@@ -183,23 +183,22 @@ kernelAlloc (Pat [_]) _ ScalarSpace {} =
   -- translated to an actual scalar variable during C code generation.
   pure ()
 kernelAlloc (Pat [mem]) size (Space "local") =
-  allocLocal (patElemName mem) $ Imp.bytes $ toInt64Exp size
+  allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
 kernelAlloc (Pat [mem]) _ _ =
   compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
 kernelAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
 splitSpace ::
-  (ToExp w, ToExp i, ToExp elems_per_thread) =>
   Pat LetDecMem ->
   SplitOrdering ->
-  w ->
-  i ->
-  elems_per_thread ->
+  SubExp ->
+  SubExp ->
+  SubExp ->
   ImpM rep r op ()
 splitSpace (Pat [size]) o w i elems_per_thread = do
   num_elements <- Imp.elements . TPrimExp <$> toExp w
-  let i' = toInt64Exp i
+  let i' = pe64 i
   elems_per_thread' <- Imp.elements . TPrimExp <$> toExp elems_per_thread
   computeThreadChunkSize o i' elems_per_thread' num_elements (mkTV (patElemName size) int64)
 splitSpace pat _ _ _ _ =
@@ -208,7 +207,7 @@ splitSpace pat _ _ _ _ =
 updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
 updateAcc acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
-  let is' = map toInt64Exp is
+  let is' = map pe64 is
   (c, space, arrs, dims, op) <- lookupAcc acc is'
   sWhen (inBounds (Slice (map DimFix is')) dims) $
     case op of
@@ -308,7 +307,7 @@ groupCoverSpace ds f = do
 localThreadIDs :: [SubExp] -> InKernelGen [Imp.TExp Int64]
 localThreadIDs dims = do
   ltid <- sExt64 . kernelLocalThreadId . kernelConstants <$> askEnv
-  let dims' = map toInt64Exp dims
+  let dims' = map pe64 dims
   maybe (dIndexSpace' "ltid" dims' ltid) (pure . map sExt64)
     . M.lookup dims
     . kernelLocalIdMap
@@ -409,8 +408,8 @@ compileGroupExp (Pat [pe]) (BasicOp (Update safety _ slice se))
           Safe -> sWhen (inBounds slice' dims) write
       sOp $ Imp.Barrier Imp.FenceLocal
   where
-    slice' = fmap toInt64Exp slice
-    dims = map toInt64Exp $ arrayDims $ patElemType pe
+    slice' = fmap pe64 slice
+    dims = map pe64 $ arrayDims $ patElemType pe
     write = copyDWIM (patElemName pe) (unSlice slice') se []
 compileGroupExp dest e =
   defCompileExp dest e
@@ -447,8 +446,8 @@ prepareIntraGroupSegHist group_size =
         (Nothing, AtomicLocking f) -> do
           locks <- newVName "locks"
 
-          let num_locks = toInt64Exp $ unCount group_size
-              dims = map toInt64Exp $ shapeDims (histOpShape op <> histShape op)
+          let num_locks = pe64 $ unCount group_size
+              dims = map pe64 $ shapeDims (histOpShape op <> histShape op)
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
@@ -616,7 +615,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   compileFlatId lvl space
 
   let (ltids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
 
   groupCoverSegSpace (segVirt lvl) space $
     compileStms mempty (kernelBodyStms body) $
@@ -662,7 +661,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
 compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   compileFlatId lvl space
 
-  let dims' = map toInt64Exp dims
+  let dims' = map pe64 dims
       mkTempArr t =
         sAllocArray "red_arr" (elemType t) (Shape dims <> arrayShape t) $ Space "local"
 
@@ -800,8 +799,8 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
 
       forM_ (zip4 red_is vs_per_op ops' ops) $
         \(bin, op_vs, do_op, HistOp dest_shape _ _ _ shape lam) -> do
-          let bin' = toInt64Exp bin
-              dest_shape' = map toInt64Exp $ shapeDims dest_shape
+          let bin' = pe64 bin
+              dest_shape' = map pe64 $ shapeDims dest_shape
               bin_in_bounds = inBounds (Slice (map DimFix [bin'])) dest_shape'
               bin_is = map Imp.le64 (init ltids) ++ [bin']
               vs_params = takeLast (length op_vs) $ lambdaParams lam
@@ -1114,7 +1113,7 @@ computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread nu
   chunk_var
     <-- sMin64
       (Imp.unCount elements_per_thread)
-      ((Imp.unCount num_elements - thread_index) `divUp` toInt64Exp stride)
+      ((Imp.unCount num_elements - thread_index) `divUp` pe64 stride)
 computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elements chunk_var = do
   starting_point <-
     dPrimV "starting_point" $
@@ -1192,7 +1191,7 @@ isActive limit = case actives of
   x : xs -> foldl (.&&.) x xs
   where
     (is, ws) = unzip limit
-    actives = zipWith active is $ map toInt64Exp ws
+    actives = zipWith active is $ map pe64 ws
     active i = (Imp.le64 i .<.)
 
 -- | Change every memory block to be in the global address space,
@@ -1817,7 +1816,7 @@ sReplicateKernel arr se = do
   t <- subExpType se
   ds <- dropLast (arrayRank t) . arrayDims <$> lookupType arr
 
-  let dims = map toInt64Exp $ ds ++ arrayDims t
+  let dims = map pe64 $ ds ++ arrayDims t
   n <- dPrimVE "replicate_n" $ product $ map sExt64 dims
   (virtualise, constants) <- simpleKernelConstants n "replicate"
 
@@ -1874,7 +1873,7 @@ replicateIsFill arr v = do
                 []
                 fname
                 [ Imp.MemArg arr_mem,
-                  Imp.ExpArg $ untyped $ product $ map toInt64Exp arr_shape,
+                  Imp.ExpArg $ untyped $ product $ map pe64 arr_shape,
                   Imp.ExpArg $ toExp' v_t' v
                 ]
     _ -> pure Nothing
@@ -1982,7 +1981,7 @@ sCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
 sCopy pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
-  let shape = map toInt64Exp srcdims
+  let shape = map pe64 srcdims
       kernel_size = product shape
 
   (virtualise, constants) <- simpleKernelConstants kernel_size "copy"
@@ -2033,28 +2032,28 @@ compileGroupResult ::
   KernelResult ->
   InKernelGen ()
 compileGroupResult _ pe (TileReturns _ [(w, per_group_elems)] what) = do
-  n <- toInt64Exp . arraySize 0 <$> lookupType what
+  n <- pe64 . arraySize 0 <$> lookupType what
 
   constants <- kernelConstants <$> askEnv
   let ltid = sExt64 $ kernelLocalThreadId constants
       offset =
-        toInt64Exp per_group_elems
+        pe64 per_group_elems
           * sExt64 (kernelGroupId constants)
 
   -- Avoid loop for the common case where each thread is statically
   -- known to write at most one element.
   localOps threadOperations $
-    if toInt64Exp per_group_elems == kernelGroupSize constants
+    if pe64 per_group_elems == kernelGroupSize constants
       then
-        sWhen (ltid + offset .<. toInt64Exp w) $
+        sWhen (ltid + offset .<. pe64 w) $
           copyDWIMFix (patElemName pe) [ltid + offset] (Var what) [ltid]
       else sFor "i" (n `divUp` kernelGroupSize constants) $ \i -> do
         j <- dPrimVE "j" $ kernelGroupSize constants * i + ltid
-        sWhen (j + offset .<. toInt64Exp w) $
+        sWhen (j + offset .<. pe64 w) $
           copyDWIMFix (patElemName pe) [j + offset] (Var what) [j]
 compileGroupResult space pe (TileReturns _ dims what) = do
   let gids = map fst $ unSegSpace space
-      out_tile_sizes = map (toInt64Exp . snd) dims
+      out_tile_sizes = map (pe64 . snd) dims
       group_is = zipWith (*) (map Imp.le64 gids) out_tile_sizes
   local_is <- localThreadIDs $ map snd dims
   is_for_thread <-
@@ -2069,8 +2068,8 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
 
   let gids = map fst $ unSegSpace space
       (dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
-      group_tiles' = map toInt64Exp group_tiles
-      reg_tiles' = map toInt64Exp reg_tiles
+      group_tiles' = map pe64 group_tiles
+      reg_tiles' = map pe64 reg_tiles
 
   -- Which group tile is this group responsible for?
   let group_tile_is = map Imp.le64 gids
@@ -2098,7 +2097,7 @@ compileGroupResult space pe (RegTileReturns _ dims_n_tiles what) = do
     sLoopNest (Shape reg_tiles) $ \is_in_reg_tile -> do
       let dest_is = fixSlice reg_tile_slices is_in_reg_tile
           src_is = reg_tile_is ++ is_in_reg_tile
-      sWhen (foldl1 (.&&.) $ zipWith (.<.) dest_is $ map toInt64Exp dims) $
+      sWhen (foldl1 (.&&.) $ zipWith (.<.) dest_is $ map pe64 dims) $
         copyDWIMFix (patElemName pe) dest_is (Var what) src_is
 compileGroupResult space pe (Returns _ _ what) = do
   constants <- kernelConstants <$> askEnv
@@ -2133,18 +2132,18 @@ compileThreadResult space pe (Returns _ _ what) = do
 compileThreadResult _ pe (ConcatReturns _ SplitContiguous _ per_thread_elems what) = do
   constants <- kernelConstants <$> askEnv
   let offset =
-        toInt64Exp per_thread_elems
+        pe64 per_thread_elems
           * sExt64 (kernelGlobalThreadId constants)
-  n <- toInt64Exp . arraySize 0 <$> lookupType what
+  n <- pe64 . arraySize 0 <$> lookupType what
   copyDWIM (patElemName pe) [DimSlice offset n 1] (Var what) []
 compileThreadResult _ pe (ConcatReturns _ (SplitStrided stride) _ _ what) = do
   offset <- sExt64 . kernelGlobalThreadId . kernelConstants <$> askEnv
-  n <- toInt64Exp . arraySize 0 <$> lookupType what
-  copyDWIM (patElemName pe) [DimSlice offset n $ toInt64Exp stride] (Var what) []
+  n <- pe64 . arraySize 0 <$> lookupType what
+  copyDWIM (patElemName pe) [DimSlice offset n $ pe64 stride] (Var what) []
 compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
-  let rws' = map toInt64Exp rws
+  let rws' = map pe64 rws
   forM_ dests $ \(slice, e) -> do
-    let slice' = fmap toInt64Exp slice
+    let slice' = fmap pe64 slice
         write = inBounds slice' rws'
     sWhen write $ copyDWIM (patElemName pe) (unSlice slice') e []
 compileThreadResult _ _ TileReturns {} =

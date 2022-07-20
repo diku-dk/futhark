@@ -64,4 +64,4 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           SinglePass.compileSegScan pat lvl space scan' kbody
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
   where
-    n = product $ map toInt64Exp $ segSpaceDims space
+    n = product $ map pe64 $ segSpaceDims space

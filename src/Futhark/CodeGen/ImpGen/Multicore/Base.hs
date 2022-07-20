@@ -96,11 +96,11 @@ getLoopBounds = do
 getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64)
 getIterationDomain SegMap {} space = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
   pure $ product ns_64
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
   case unSegSpace space of
     [_] -> pure $ product ns_64
     -- A segmented SegOp is over the segments
@@ -346,9 +346,9 @@ sLoopNestVectorized = sLoopNest' [] . shapeDims
   where
     sLoopNest' is [] f = f $ reverse is
     sLoopNest' is [d] f =
-      sForVectorized "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) [] f
+      sForVectorized "nest_i" (pe64 d) $ \i -> sLoopNest' (i : is) [] f
     sLoopNest' is (d : ds) f =
-      sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
+      sFor "nest_i" (pe64 d) $ \i -> sLoopNest' (i : is) ds f
 
 -------------------------------
 ------- SegHist helpers -------
