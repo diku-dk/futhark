@@ -164,16 +164,15 @@ static inline void free(void* uniform ptr) {
 }
 
 extern "C" unmasked uniform unsigned char * uniform realloc(uniform unsigned char * uniform ptr, uniform int64_t new_size);
-extern "C" unmasked uniform char * uniform lexical_realloc_error(uniform int64_t new_size);
-extern "C" unmasked uniform char * uniform * uniform futhark_get_error_ref(uniform struct futhark_context * uniform ctx);
+extern "C" unmasked uniform char * uniform lexical_realloc_error(uniform struct futhark_context * uniform ctx, uniform int64_t new_size);
 
-static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+static inline uniform int lexical_realloc(uniform struct futhark_context * uniform ctx,
                                           unsigned char uniform * uniform * uniform ptr,
                                           int64_t uniform * uniform old_size,
                                           uniform int64_t new_size) {
   uniform unsigned char * uniform memptr = realloc(*ptr, new_size);
   if (memptr == NULL) {
-    *error = lexical_realloc_error(new_size);
+    lexical_realloc_error(ctx, new_size);
     return FUTHARK_OUT_OF_MEMORY;
   } else {
     *ptr = memptr;
@@ -183,14 +182,14 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
 }
 
 
-static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+static inline uniform int lexical_realloc(uniform struct futhark_context *ctx,
                                           unsigned char uniform * uniform * uniform ptr,
                                           int64_t uniform * uniform old_size,
                                           varying int64_t new_size) {
-  return lexical_realloc(error, ptr, old_size, reduce_max(new_size));
+  return lexical_realloc(ctx, ptr, old_size, reduce_max(new_size));
 }
 
-static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+static inline uniform int lexical_realloc(uniform struct futhark_context * uniform ctx,
                                           unsigned char uniform * varying * uniform ptr,
                                           int64_t uniform * varying old_size,
                                           varying int64_t new_size) {
@@ -198,7 +197,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
   foreach_active(i){
     uniform unsigned char * uniform memptr = realloc(extract(*ptr,i), extract(new_size,i));
     if (memptr == NULL) {
-      *error = lexical_realloc_error(extract(new_size,i));
+      lexical_realloc_error(ctx, extract(new_size,i));
       err = FUTHARK_OUT_OF_MEMORY;
     } else {
       *ptr = (uniform unsigned char * varying)insert((int64_t)*ptr, i, (uniform int64_t) memptr);
@@ -208,7 +207,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
   return err;
 }
 
-static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+static inline uniform int lexical_realloc(uniform struct futhark_context * uniform ctx,
                                           unsigned char uniform * varying * uniform ptr,
                                           int64_t varying * uniform old_size,
                                           varying int64_t new_size) {
@@ -216,7 +215,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
   foreach_active(i){
     uniform unsigned char * uniform memptr = realloc(extract(*ptr,i), extract(new_size,i));
     if (memptr == NULL) {
-      *error = lexical_realloc_error(extract(new_size,i));
+      lexical_realloc_error(ctx, extract(new_size,i));
       err = FUTHARK_OUT_OF_MEMORY;
     } else {
       *ptr = (uniform unsigned char * varying)insert((int64_t)*ptr, i, (uniform int64_t) memptr);
@@ -226,14 +225,14 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
   return err;
 }
 
-static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+static inline uniform int lexical_realloc(uniform struct futhark_context * uniform ctx,
                                           unsigned char uniform * varying * uniform ptr,
                                           size_t varying * uniform old_size,
                                           varying int64_t new_size) {
-  return lexical_realloc(error, ptr, (varying int64_t * uniform)old_size, new_size);
+  return lexical_realloc(ctx, ptr, (varying int64_t * uniform)old_size, new_size);
 }
 
-static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+static inline uniform int lexical_realloc(uniform struct futhark_context * uniform ctx,
                                           unsigned char varying * uniform * uniform ptr,
                                           size_t varying * uniform old_size,
                                           uniform int64_t new_size) {
@@ -241,7 +240,7 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
   uniform unsigned char * uniform memptr = realloc((uniform unsigned char * uniform )*ptr,
                                                         new_size*programCount);
   if (memptr == NULL) {
-    *error = lexical_realloc_error(new_size);
+    lexical_realloc_error(ctx, new_size);
     err = FUTHARK_OUT_OF_MEMORY;
   } else {
     *ptr = (varying unsigned char * uniform)memptr;
@@ -251,11 +250,11 @@ static inline uniform int lexical_realloc(uniform char * uniform * uniform error
   return err;
 }
 
-static inline uniform int lexical_realloc(uniform char * uniform * uniform error,
+static inline uniform int lexical_realloc(uniform struct futhark_context * uniform ctx,
                                           unsigned char varying * uniform * uniform ptr,
                                           size_t varying * uniform old_size,
                                           varying int64_t new_size) {
-  return lexical_realloc(error, ptr, old_size, reduce_max(new_size));
+  return lexical_realloc(ctx, ptr, old_size, reduce_max(new_size));
 }
 
 extern "C" unmasked uniform int memblock_unref(uniform struct futhark_context * uniform ctx,

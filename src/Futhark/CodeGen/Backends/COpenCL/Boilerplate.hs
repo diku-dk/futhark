@@ -319,6 +319,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          int logging;
                          typename lock_t lock;
                          char *error;
+                         typename lock_t error_lock;
                          typename FILE *log;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
@@ -342,6 +343,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      ctx->profiling_paused = 0;
                      ctx->logging = cfg->opencl.logging;
                      ctx->error = NULL;
+                     create_lock(&ctx->error_lock);
                      ctx->log = stderr;
                      ctx->opencl.profiling_records_capacity = 200;
                      ctx->opencl.profiling_records_used = 0;

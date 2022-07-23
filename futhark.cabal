@@ -37,6 +37,8 @@ extra-source-files:
 -- Cabal's recompilation tracking doesn't work when we use wildcards
 -- here, so for now we spell out every single file.
     rts/c/atomics.h
+    rts/c/context.h
+    rts/c/context_prototypes.h
     rts/c/lock.h
     rts/c/timing.h
     rts/c/errors.h
