@@ -76,7 +76,6 @@ compileProg version prog = do
           operations
           (ISPCState mempty mempty)
           ( do
-              GC.libDecl [C.cedecl|char** futhark_get_error_ref(struct futhark_context* ctx) { return &ctx->error; }|]
               MC.generateContext
               mapM_ compileBuiltinFun funs
           )
@@ -379,8 +378,7 @@ handleError msg stacktrace = do
   shim <- MC.multicoreDef "assert_shim" $ \s -> do
     pure
       [C.cedecl|void $id:s(struct futhark_context* ctx, $params:params) {
-        if (ctx->error == NULL)
-          ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
+          set_error(ctx, msgprintf($string:formatstr', $args:formatargs', $string:stacktrace));
       }|]
   ispcDecl
     [C.cedecl|extern "C" $tyqual:unmasked void $id:shim($tyqual:uniform struct futhark_context* $tyqual:uniform, $params:params_uni);|]
@@ -544,7 +542,7 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
     Just cur_size ->
       GC.stm
         [C.cstm|if ($exp:cur_size < $exp:size) {
-                  err = lexical_realloc(futhark_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
+                  err = lexical_realloc(ctx, &$exp:name, &$exp:cur_size, $exp:size);
                   if (err != FUTHARK_SUCCESS) {
                     $escstm:("unmasked { return err; }")
                   }

@@ -135,22 +135,4 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
   b->used += needed;
 }
 
-char * lexical_realloc_error(size_t new_size) {
-  return msgprintf("Failed to allocate memory.\nAttempted allocation: %12lld bytes\n",
-                       (long long) new_size);
-}
-
-static int lexical_realloc(char **error, unsigned char **ptr, int64_t *old_size, int64_t new_size) {
-  unsigned char *new = realloc(*ptr, (size_t)new_size);
-  if (new == NULL) {
-    *error = msgprintf("Failed to allocate memory.\nAttempted allocation: %12lld bytes\n",
-                       (long long) new_size);
-    return FUTHARK_OUT_OF_MEMORY;
-  } else {
-    *ptr = new;
-    *old_size = new_size;
-    return FUTHARK_SUCCESS;
-  }
-}
-
 // End of util.h.
