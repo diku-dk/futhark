@@ -105,7 +105,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (cacheH, errorsH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, halfH, lockH, timingH, utilH)
 import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
@@ -284,8 +284,7 @@ defError msg stacktrace = do
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   items
-    [C.citems|if (ctx->error == NULL)
-                ctx->error = msgprintf($string:formatstr', $args:formatargs, $string:stacktrace);
+    [C.citems|set_error(ctx, msgprintf($string:formatstr', $args:formatargs, $string:stacktrace));
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
@@ -744,11 +743,11 @@ defineMemorySpace space = do
     // glory despite our naiveté.
 
     char *old_error = ctx->error;
-    ctx->error = msgprintf("Failed to allocate memory in %s.\nAttempted allocation: %12lld bytes\nCurrently allocated:  %12lld bytes\n%s",
-                           $string:spacedesc,
-                           (long long) size,
-                           (long long) ctx->$id:usagename,
-                           old_error);
+    set_error(ctx, msgprintf("Failed to allocate memory in %s.\nAttempted allocation: %12lld bytes\nCurrently allocated:  %12lld bytes\n%s",
+                             $string:spacedesc,
+                             (long long) size,
+                             (long long) ctx->$id:usagename,
+                             old_error));
     free(old_error);
     return FUTHARK_OUT_OF_MEMORY;
   }
@@ -1622,9 +1621,7 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
             [C.citems|
          if (!($exp:(allTrue (catMaybes entry_point_input_checks)))) {
            ret = 1;
-           if (!ctx->error) {
-             ctx->error = msgprintf("Error: entry point arguments have invalid sizes.\n");
-           }
+           set_error(ctx, msgprintf("Error: entry point arguments have invalid sizes.\n"));
          }|]
 
       critical =
@@ -1868,7 +1865,11 @@ $lockH
 
 $cScalarDefs
 
+$contextPrototypesH
+
 $early_decls
+
+$contextH
 
 $prototypes
 

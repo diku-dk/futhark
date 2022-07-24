@@ -144,6 +144,7 @@ generateContext = do
                       int logging;
                       typename lock_t lock;
                       char *error;
+                      typename lock_t error_lock;
                       typename FILE *log;
                       int total_runs;
                       long int total_runtime;
@@ -174,6 +175,7 @@ generateContext = do
              ctx->profiling_paused = 0;
              ctx->logging = 0;
              ctx->error = NULL;
+             create_lock(&ctx->error_lock);
              ctx->log = stderr;
              create_lock(&ctx->lock);
 

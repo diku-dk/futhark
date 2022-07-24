@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Exotic simplification error (#1309).
 
+* Rare race condition could lead to leaking of error message memory in
+  `multicore` and `ispc` backends (#1709).
+
 ## [0.21.13]
 
 ### Added
