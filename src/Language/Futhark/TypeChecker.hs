@@ -158,7 +158,8 @@ dupDefinitionError space name loc1 loc2 =
   typeError loc1 mempty $
     "Duplicate definition of"
       <+> ppr space
-      <+> pprName name <> ".  Previously defined at"
+      <+> pprName name <> "."
+      </> "Previously defined at"
       <+> text (locStr loc2) <> "."
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
