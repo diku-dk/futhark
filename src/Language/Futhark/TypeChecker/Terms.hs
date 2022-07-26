@@ -130,7 +130,12 @@ lexicalClosure params closure = do
   vtable <- asks $ scopeVtable . termScope
   let isGlobal v = case v `M.lookup` vtable of
         Just (BoundV Global _ _) -> True
-        _ -> False
+        Just EqualityF {} -> True
+        Just OverloadedF {} -> True
+        Just (BoundV Local _ _) -> False
+        Just (BoundV Nonlocal _ _) -> False
+        Just WasConsumed {} -> False
+        Nothing -> False
   pure . S.map AliasBound . S.filter (not . isGlobal) $
     allOccurring closure S.\\ mconcat (map patNames params)
 
