@@ -1,3 +1,3 @@
 #!/bin/sh
 
-node --experimental-wasm-threads --experimental-wasm-simd $*
+node --experimental-wasm-threads --experimental-wasm-simd "$@"

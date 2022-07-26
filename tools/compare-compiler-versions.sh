@@ -17,4 +17,4 @@ b_url=$RESULTS_URL/$3-$4.json
 echo "Fetching $a_url"
 echo "     and $b_url"
 
-tools/cmp-bench-json.py <(curl $a_url) <(curl $b_url)
+tools/cmp-bench-json.py <(curl "$a_url") <(curl "$b_url")

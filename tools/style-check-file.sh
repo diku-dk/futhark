@@ -17,7 +17,6 @@
 # This script can be called on directories (in which case it applies
 # to every file inside), or on files.
 
-RED=$(printf '%b' "\033[1;31m")
 cyan=$(printf '%b' "\033[0;36m")
 NC=$(printf '%b' "\033[0m")
 
@@ -29,7 +28,7 @@ fi
 exit=0
 
 hlintable() {
-    (echo "$1" | egrep -q ".l?hs$")
+    (echo "$1" | grep -E -q ".l?hs$")
 }
 
 hlint_check() {
@@ -43,24 +42,21 @@ no_trailing_blank_lines() {
 
 file="$1"
 
-output=$(egrep -n " +$" "$file")
-if [ $? = 0 ]; then
+if grep -E -n " +$" "$file"; then
     echo
     echo "${cyan}Trailing whitespace in $file:${NC}"
     echo "$output"
     exit=1
 fi
 
-output=$(egrep -n "$(printf '\t')" "$file")
-if [ $? = 0 ]; then
+if grep -E -n "$(printf '\t')" "$file"; then
     echo
     echo "${cyan}Tab characters found in $file:${NC}"
     echo "$output"
     exit=1
 fi
 
-output=$(file "$file" | grep -q 'CRLF line terminators')
-if [ $? = 0 ]; then
+if file "$file" | grep -q 'CRLF line terminators'; then
     echo
     echo "${cyan}CRLF line terminators in $file.${NC}"
     exit=1
@@ -83,8 +79,7 @@ if ! no_trailing_blank_lines "$file"; then
 fi
 
 if hlintable "$file"; then
-    output=$(LC_ALL=C.UTF-8 ormolu --mode check "$file")
-    if [ $? != 0 ]; then
+    if ! LC_ALL=C.UTF-8 ormolu --mode check "$file"; then
         echo
         echo "${cyan}$file:${NC} is not formatted correctly with Ormolu"
         echo "$output"

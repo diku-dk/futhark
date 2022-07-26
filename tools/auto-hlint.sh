@@ -6,6 +6,6 @@
 # some rewrites only do partial improvements, and the resulting code
 # may still violate other rules.
 
-for d in $*; do
-    find $d -name \*.hs | parallel hlint --refactor --refactor-options=-i
+for d in "$@"; do
+    find "$d" -name \*.hs | parallel hlint --refactor --refactor-options=-i
 done

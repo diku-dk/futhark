@@ -5,7 +5,7 @@
 set -e
 set -o pipefail
 
-check="$(dirname $0)"/style-check-file.sh
+check="$(dirname "$0")"/style-check-file.sh
 if [ $# -ne 0 ]; then
     # Running a style checker will not contribute to a scientific
     # publication.

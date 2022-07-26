@@ -13,12 +13,12 @@ trap 'rm -f "$log"' EXIT
 # running this as part of the test suite, where parallelism comes from
 # the large number of test programs.
 
-oclgrind --log $log --num-threads 1 "$@"
+oclgrind --log "$log" --num-threads 1 "$@"
 
 if [ "$(stat -c%s "$log")" -ne 0 ]; then
-    cat $log >&2
-    rm -f $log
+    cat "$log" >&2
+    rm -f "$log"
     exit 1
 else
-    rm -f $log
+    rm -f "$log"
 fi

@@ -1,3 +1,3 @@
 #!/bin/sh
 
-node --experimental-wasm-simd $*
+node --experimental-wasm-simd "$@"
