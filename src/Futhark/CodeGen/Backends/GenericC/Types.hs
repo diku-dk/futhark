@@ -8,6 +8,8 @@
 -- | Code generation for public API types.
 module Futhark.CodeGen.Backends.GenericC.Types
   ( generateAPITypes,
+    valueTypeToCType,
+    opaqueToCType,
   )
 where
 
