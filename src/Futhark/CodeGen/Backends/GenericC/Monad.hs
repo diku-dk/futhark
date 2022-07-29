@@ -68,7 +68,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     rawMemCType,
     freeRawMem,
     allocRawMem,
-    cproduct,
     fatMemType,
     declAllocatedMem,
     freeAllocatedMem,
@@ -78,8 +77,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     configType,
 
     -- * Building Blocks
-    primTypeToCType,
-    intTypeToCType,
     copyMemoryDefaultSpace,
     derefPointer,
     setMem,
