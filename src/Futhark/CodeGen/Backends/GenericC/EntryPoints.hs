@@ -12,31 +12,16 @@ module Futhark.CodeGen.Backends.GenericC.EntryPoints
 where
 
 import Control.Monad.Reader
-import Control.Monad.State
 import Data.Char (isAlpha, isAlphaNum)
-import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Monad
+import Futhark.CodeGen.Backends.GenericC.Types (opaqueToCType, valueTypeToCType)
 import Futhark.CodeGen.ImpCode
 import qualified Futhark.Manifest as Manifest
 import Futhark.Util (zEncodeString)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
-
-opaqueToCType :: String -> CompilerM op s C.Type
-opaqueToCType desc = do
-  name <- publicName $ opaqueName desc
-  pure [C.cty|struct $id:name|]
-
-valueTypeToCType :: Publicness -> ValueType -> CompilerM op s C.Type
-valueTypeToCType _ (ValueType signed (Rank 0) pt) =
-  pure $ primAPIType signed pt
-valueTypeToCType pub (ValueType signed (Rank rank) pt) = do
-  name <- publicName $ arrayName pt signed rank
-  let add = M.insertWith max (signed, pt, rank) pub
-  modify $ \s -> s {compArrayTypes = add $ compArrayTypes s}
-  pure [C.cty|struct $id:name|]
 
 valueDescToType :: ValueDesc -> ValueType
 valueDescToType (ScalarValue pt signed _) =
