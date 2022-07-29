@@ -136,7 +136,7 @@ assignmentOperator _ = Nothing
 
 compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
-  join $ asks envOpCompiler <*> pure op
+  join $ asks (opsCompiler . envOperations) <*> pure op
 compileCode Skip = pure ()
 compileCode (Comment s code) = do
   xs <- collect $ compileCode code
@@ -244,7 +244,7 @@ compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) D
       <*> compileExp (untyped srcoffset)
       <*> compileExp (untyped size)
 compileCode (Copy _ dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
-  copy <- asks envCopy
+  copy <- asks $ opsCopy . envOperations
   join $
     copy CopyBarrier
       <$> rawMem dest
@@ -269,7 +269,7 @@ compileCode (Write dest (Count idx) _ ScalarSpace {} _ elemexp) = do
   stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $
-    asks envWriteScalar
+    asks (opsWriteScalar . envOperations)
       <*> rawMem dest
       <*> compileExp (untyped idx)
       <*> pure (primStorageType elemtype)
@@ -289,7 +289,7 @@ compileCode (Read x src (Count iexp) restype DefaultSpace vol) = do
 compileCode (Read x src (Count iexp) restype (Space space) vol) = do
   e <-
     fmap (fromStorage restype) . join $
-      asks envReadScalar
+      asks (opsReadScalar . envOperations)
         <*> rawMem src
         <*> compileExp (untyped iexp)
         <*> pure (primStorageType restype)
@@ -327,7 +327,7 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
   item [C.citem|struct memblock $id:name = ctx->$id:name;|]
 compileCode (DeclareArray name (Space space) t vs) =
   join $
-    asks envStaticArray
+    asks (opsStaticArray . envOperations)
       <*> pure name
       <*> pure space
       <*> pure t

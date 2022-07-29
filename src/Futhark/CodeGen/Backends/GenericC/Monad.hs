@@ -36,13 +36,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     runCompilerM,
     inNewFunction,
     cachingMemory,
-    envAllocate,
-    envDeallocate,
-    envStaticArray,
-    envReadScalar,
-    envWriteScalar,
-    envOpCompiler,
-    envCopy,
     volQuals,
     rawMem,
     item,
@@ -264,33 +257,6 @@ data CompilerEnv op s = CompilerEnv
     envCachedMem :: M.Map C.Exp VName
   }
 
-envOpCompiler :: CompilerEnv op s -> OpCompiler op s
-envOpCompiler = opsCompiler . envOperations
-
-envMemoryType :: CompilerEnv op s -> MemoryType op s
-envMemoryType = opsMemoryType . envOperations
-
-envReadScalar :: CompilerEnv op s -> ReadScalar op s
-envReadScalar = opsReadScalar . envOperations
-
-envWriteScalar :: CompilerEnv op s -> WriteScalar op s
-envWriteScalar = opsWriteScalar . envOperations
-
-envAllocate :: CompilerEnv op s -> Allocate op s
-envAllocate = opsAllocate . envOperations
-
-envDeallocate :: CompilerEnv op s -> Deallocate op s
-envDeallocate = opsDeallocate . envOperations
-
-envCopy :: CompilerEnv op s -> Copy op s
-envCopy = opsCopy . envOperations
-
-envStaticArray :: CompilerEnv op s -> StaticArray op s
-envStaticArray = opsStaticArray . envOperations
-
-envFatMemory :: CompilerEnv op s -> Bool
-envFatMemory = opsFatMemory . envOperations
-
 contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm], [C.Stm])
 contextContents = do
   (field_names, field_types, field_values, field_frees) <-
@@ -378,7 +344,7 @@ items xs = modify $ \s -> s {compItems = DL.append (compItems s) (DL.fromList xs
 
 fatMemory :: Space -> CompilerM op s Bool
 fatMemory ScalarSpace {} = pure False
-fatMemory _ = asks envFatMemory
+fatMemory _ = asks $ opsFatMemory . envOperations
 
 cacheMem :: C.ToExp a => a -> CompilerM op s (Maybe VName)
 cacheMem a = asks $ M.lookup (C.toExp a noLoc) . envCachedMem
@@ -464,7 +430,7 @@ memToCType v space = do
 
 rawMemCType :: Space -> CompilerM op s C.Type
 rawMemCType DefaultSpace = pure defaultMemBlockType
-rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
+rawMemCType (Space sid) = join $ asks (opsMemoryType . envOperations) <*> pure sid
 rawMemCType (ScalarSpace [] t) =
   pure [C.cty|$ty:(primTypeToCType t)[1]|]
 rawMemCType (ScalarSpace ds t) =
@@ -495,7 +461,7 @@ fatMemUnRef _ = "memblock_unref"
 rawMem :: VName -> CompilerM op s C.Exp
 rawMem v = rawMem' <$> fat <*> pure v
   where
-    fat = asks ((&&) . envFatMemory) <*> (isNothing <$> cacheMem v)
+    fat = asks ((&&) . opsFatMemory . envOperations) <*> (isNothing <$> cacheMem v)
 
 rawMem' :: C.ToExp a => Bool -> a -> C.Exp
 rawMem' True e = [C.cexp|$exp:e.mem|]
@@ -511,7 +477,7 @@ allocRawMem ::
 allocRawMem dest size space desc = case space of
   Space sid ->
     join $
-      asks envAllocate
+      asks (opsAllocate . envOperations)
         <*> pure [C.cexp|$exp:dest|]
         <*> pure [C.cexp|$exp:size|]
         <*> pure [C.cexp|$exp:desc|]
@@ -528,7 +494,7 @@ freeRawMem ::
 freeRawMem mem space desc =
   case space of
     Space sid -> do
-      free_mem <- asks envDeallocate
+      free_mem <- asks (opsDeallocate . envOperations)
       free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:desc|] sid
     _ -> item [C.citem|free($exp:mem);|]
 

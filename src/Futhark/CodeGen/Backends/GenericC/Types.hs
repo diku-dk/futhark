@@ -27,6 +27,20 @@ import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
+opaqueToCType :: String -> CompilerM op s C.Type
+opaqueToCType desc = do
+  name <- publicName $ opaqueName desc
+  pure [C.cty|struct $id:name|]
+
+valueTypeToCType :: Publicness -> ValueType -> CompilerM op s C.Type
+valueTypeToCType _ (ValueType signed (Rank 0) pt) =
+  pure $ primAPIType signed pt
+valueTypeToCType pub (ValueType signed (Rank rank) pt) = do
+  name <- publicName $ arrayName pt signed rank
+  let add = M.insertWith max (signed, pt, rank) pub
+  modify $ \s -> s {compArrayTypes = add $ compArrayTypes s}
+  pure [C.cty|struct $id:name|]
+
 arrayLibraryFunctions ::
   Publicness ->
   Space ->
@@ -51,7 +65,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       shape_params = [[C.cparam|typename int64_t $id:k|] | k <- shape_names]
       arr_size = cproduct [[C.cexp|$id:k|] | k <- shape_names]
       arr_size_array = cproduct [[C.cexp|arr->shape[$int:i]|] | i <- [0 .. rank - 1]]
-  copy <- asks envCopy
+  copy <- asks $ opsCopy . envOperations
 
   memty <- rawMemCType space
 
@@ -192,20 +206,6 @@ opaquePayload types (OpaqueRecord fs) = concatMap f fs
   where
     f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
     f (_, TypeTransparent v) = [v]
-
-opaqueToCType :: String -> CompilerM op s C.Type
-opaqueToCType desc = do
-  name <- publicName $ opaqueName desc
-  pure [C.cty|struct $id:name|]
-
-valueTypeToCType :: Publicness -> ValueType -> CompilerM op s C.Type
-valueTypeToCType _ (ValueType signed (Rank 0) pt) =
-  pure $ primAPIType signed pt
-valueTypeToCType pub (ValueType signed (Rank rank) pt) = do
-  name <- publicName $ arrayName pt signed rank
-  let add = M.insertWith max (signed, pt, rank) pub
-  modify $ \s -> s {compArrayTypes = add $ compArrayTypes s}
-  pure [C.cty|struct $id:name|]
 
 entryPointTypeToCType :: Publicness -> EntryPointType -> CompilerM op s C.Type
 entryPointTypeToCType _ (TypeOpaque desc) = opaqueToCType desc
