@@ -340,9 +340,7 @@ data BasicOp
   | -- | Turn a boolean into a certificate, halting the program with the
     -- given error message if the boolean is false.
     Assert SubExp (ErrorMsg SubExp) (SrcLoc, [SrcLoc])
-  | -- Primitive array operations
-
-    -- | The certificates for bounds-checking are part of the 'Stm'.
+  | -- | The certificates for bounds-checking are part of the 'Stm'.
     Index VName (Slice SubExp)
   | -- | An in-place update of the given array at the given position.
     -- Consumes the array.  If 'Safe', perform a run-time bounds check
