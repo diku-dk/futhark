@@ -1778,7 +1778,7 @@ compileProg' ::
   m (CParts, CompilerState s)
 compileProg' backend version ops def extra header_extra (arr_space, spaces) options prog = do
   src <- getNameSource
-  let ((prototypes, definitions, entry_points, manifest), endstate) =
+  let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
         runCompilerM ops src def compileProgAction
       initdecls = initDecls endstate
       entrydecls = entryDecls endstate
@@ -1856,11 +1856,12 @@ $timingH
 #include <errno.h>
 #include <assert.h>
 #include <ctype.h>
+
 $header_extra
 
-#define FUTHARK_F64_ENABLED
-
 $lockH
+
+#define FUTHARK_F64_ENABLED
 
 $cScalarDefs
 
@@ -1870,13 +1871,13 @@ $early_decls
 
 $contextH
 
-$lib_decls
-
 $prototypes
+
+$lib_decls
 
 $definitions
 
-$entry_points
+$entry_point_decls
   |]
 
   pure
