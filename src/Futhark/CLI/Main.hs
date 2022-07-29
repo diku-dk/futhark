@@ -78,7 +78,7 @@ commands =
       ("literate", (Literate.main, "Process a literate Futhark program.")),
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
-      ("tokens", (Misc.mainTokens, "Express gratitude."))
+      ("tokens", (Misc.mainTokens, "Print tokens from Futhark file."))
     ]
 
 msg :: String
