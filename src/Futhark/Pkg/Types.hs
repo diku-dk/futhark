@@ -76,7 +76,7 @@ isCommitVersion _ = Nothing
 -- | @commitVersion timestamp commit@ constructs a commit version.
 commitVersion :: T.Text -> T.Text -> SemVer
 commitVersion time commit =
-  SemVer 0 0 0 [Str time NE.:| []] (Just commit)
+  SemVer 0 0 0 [NE.singleton (Str time)] (Just commit)
 
 -- | Unfortunately, Data.Versions has a buggy semver parser that
 -- collapses consecutive zeroes in the metadata field.  So, we define
