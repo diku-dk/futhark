@@ -99,10 +99,6 @@ type ReaderState = MVar (M.Map ImportName (Maybe (MVar UncheckedImport)))
 newState :: [ImportName] -> IO ReaderState
 newState known = newMVar $ M.fromList $ zip known $ repeat Nothing
 
--- Since we need to work with base 4.14 that does not have NE.singleton.
-singleError :: ProgError -> NE.NonEmpty ProgError
-singleError = (NE.:| [])
-
 orderedImports ::
   [(ImportName, MVar UncheckedImport)] ->
   IO [(ImportName, WithErrors (LoadedFile E.UncheckedProg))]
@@ -116,7 +112,7 @@ orderedImports = fmap reverse . flip execStateT [] . mapM_ (spelunk [])
                     <> intercalate
                       " -> "
                       (map includeToString $ reverse $ include : steps)
-          modify ((include, Left (singleError problem)) :)
+          modify ((include, Left (NE.singleton problem)) :)
       | otherwise = do
           prev <- gets $ lookup include
           case prev of
@@ -189,7 +185,7 @@ handleFile :: ReaderState -> VFS -> LoadedFile T.Text -> IO UncheckedImport
 handleFile state_mvar vfs (LoadedFile file_name import_name file_contents mod_time) = do
   case parseFuthark file_name file_contents of
     Left (SyntaxError loc err) ->
-      pure . UncheckedImport . Left . singleError $ ProgError loc $ text err
+      pure . UncheckedImport . Left . NE.singleton $ ProgError loc $ text err
     Right prog -> do
       let imports = map (uncurry (mkImportFrom import_name)) $ E.progImports prog
       mvars <-
@@ -212,7 +208,7 @@ readImport state_mvar vfs include =
       Nothing -> do
         prog_mvar <- newImportMVar $ do
           readImportFile include vfs >>= \case
-            Left e -> pure $ UncheckedImport $ Left $ singleError e
+            Left e -> pure $ UncheckedImport $ Left $ NE.singleton e
             Right file -> handleFile state_mvar vfs file
         pure (M.insert include prog_mvar state, prog_mvar)
 
@@ -247,12 +243,12 @@ readUntypedLibraryExceptKnown known vfs fps = do
                         lfPath = fp
                       }
                 Just (Left e) ->
-                  pure . UncheckedImport . Left . singleError $
+                  pure . UncheckedImport . Left . NE.singleton $
                     ProgError NoLoc $
                       text $
                         show e
                 Nothing ->
-                  pure . UncheckedImport . Left . singleError $
+                  pure . UncheckedImport . Left . NE.singleton $
                     ProgError NoLoc $
                       text $
                         fp <> ": file not found."

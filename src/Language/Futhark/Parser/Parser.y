@@ -778,7 +778,7 @@ MatchExp :: { UncheckedExp }
               in AppExp (Match $2 $> loc) NoInfo }
 
 Cases :: { NE.NonEmpty (CaseBase NoInfo Name) }
-       : Case  %prec caseprec { $1 NE.:| [] }
+       : Case  %prec caseprec { NE.singleton $1 }
        | Case Cases           { NE.cons $1 $2 }
 
 Case :: { CaseBase NoInfo Name }

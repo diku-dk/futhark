@@ -738,7 +738,7 @@ checkCases mt rest_cs =
   case NE.uncons rest_cs of
     (c, Nothing) -> do
       (c', t, retext) <- checkCase mt c
-      pure (c' NE.:| [], t, retext)
+      pure (NE.singleton c', t, retext)
     (c, Just cs) -> do
       (((c', c_t, _), (cs', cs_t, _)), dflow) <-
         tapOccurrences $ checkCase mt c `alternative` checkCases mt cs
