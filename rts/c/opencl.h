@@ -1023,14 +1023,6 @@ static int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) 
   size_t size;
   cl_mem existing_mem;
 
-  // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, -1, tag, &size, &existing_mem) == 0) {
-    int error = clReleaseMemObject(existing_mem);
-    if (error != CL_SUCCESS) {
-      return error;
-    }
-  }
-
   int error = clGetMemObjectInfo(mem, CL_MEM_SIZE, sizeof(size_t), &size, NULL);
 
   if (error == CL_SUCCESS) {

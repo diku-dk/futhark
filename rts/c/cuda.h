@@ -743,14 +743,6 @@ static CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
   size_t size;
   CUdeviceptr existing_mem;
 
-  // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, -1, tag, &size, &existing_mem) == 0) {
-    CUresult res = cuMemFree(existing_mem);
-    if (res != CUDA_SUCCESS) {
-      return res;
-    }
-  }
-
   CUresult res = cuMemGetAddressRange(NULL, &size, mem);
   if (res == CUDA_SUCCESS) {
     free_list_insert(&ctx->free_list, size, mem, tag);
