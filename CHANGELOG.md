@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Corrupted OOM error messages.
 
+* Excessive internal fragmentation for some programs (#1715).
+
 ## [0.21.14]
 
 ### Fixed
