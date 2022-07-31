@@ -85,16 +85,56 @@ static void free_list_insert(struct free_list *l, size_t size, fl_mem_t mem, con
   l->used++;
 }
 
+// Determine whether this entry in the free list is acceptable for
+// satisfying the request.
+static bool free_list_acceptable(size_t size, const char* tag, struct free_list_entry *entry) {
+  // We check not just the hard requirement (is the entry acceptable
+  // and big enough?) but also put a cap on how much wasted space
+  // (internal fragmentation) we allow.  This is necessarily a
+  // heuristic, and a crude one.
+
+  if (!entry->valid) {
+    return false;
+  }
+
+  if (size > entry->size) {
+    return false;
+  }
+
+  // We know the block fits.  Now the question is whether it is too
+  // big.  Our policy is as follows:
+  //
+  // 1) We don't care about wasted space below 4096 bytes (to avoid
+  // churn in tiny allocations).
+  //
+  // 2) If the tag matches, we allow _any_ amount of wasted space.
+  //
+  // 3) Otherwise we allow up to 50% wasted space.
+
+  if (entry->size < 4096) {
+    return true;
+  }
+
+  if (entry->tag == tag) {
+    return true;
+  }
+
+  if (entry->size < size * 2) {
+    return true;
+  }
+
+  return false;
+}
+
 // Find and remove a memory block of the indicated tag, or if that
 // does not exist, another memory block with exactly the desired size.
 // Returns 0 on success.
-static int free_list_find(struct free_list *l, size_t size,
+static int free_list_find(struct free_list *l, size_t size, const char *tag,
                           size_t *size_out, fl_mem_t *mem_out) {
   int size_match = -1;
   int i;
   for (i = 0; i < l->capacity; i++) {
-    if (l->entries[i].valid &&
-        size <= l->entries[i].size &&
+    if (free_list_acceptable(size, tag, &l->entries[i]) &&
         (size_match < 0 || l->entries[i].size < l->entries[size_match].size)) {
       // If this entry is valid, has sufficient size, and is smaller than the
       // best entry found so far, use this entry.
