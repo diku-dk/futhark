@@ -594,10 +594,9 @@ runTests config paths = do
   -- Removes "Now testing" output.
   when fancy $ cursorUpLine 1 >> clearLine
 
-  let excluded_str
-        | null excluded = ""
-        | otherwise = " (" ++ show (length excluded) ++ " program(s) excluded).\n"
-  putStr excluded_str
+  unless (null excluded) . putStrLn $
+    show (length excluded) ++ " program(s) excluded."
+
   exitWith $ case testStatusFail ts of
     0 -> ExitSuccess
     _ -> ExitFailure 1
