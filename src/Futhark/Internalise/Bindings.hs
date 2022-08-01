@@ -146,7 +146,6 @@ flattenPat = flattenPat'
       flattenPat' $ E.Id name t loc
     flattenPat' (E.Id v (Info t) loc) =
       pure [(E.Ident v (Info t) loc, mempty)]
-    -- XXX: treat empty tuples and records as unit.
     flattenPat' (E.TuplePat [] loc) =
       flattenPat' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
     flattenPat' (E.RecordPat [] loc) =

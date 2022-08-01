@@ -581,9 +581,6 @@ internaliseExp desc (E.AppExp e (Info appres)) = do
   ses <- internaliseAppExp desc appres e
   bindExtSizes appres ses
   pure ses
-
--- XXX: we map empty records and tuples to units, because otherwise
--- arrays of unit will lose their sizes.
 internaliseExp _ (E.TupLit [] _) =
   pure [constant UnitValue]
 internaliseExp _ (E.RecordLit [] _) =
@@ -880,11 +877,10 @@ generateCond orig_p orig_ses = do
       compares pat ses
     compares (E.PatAttr _ pat _) ses =
       compares pat ses
-    -- XXX: treat empty tuples and records as bool.
     compares (E.TuplePat [] loc) ses =
-      compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
+      compares (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc) ses
     compares (E.RecordPat [] loc) ses =
-      compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
+      compares (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc) ses
     compares (E.TuplePat pats _) ses =
       comparesMany pats ses
     compares (E.RecordPat fs _) ses =
