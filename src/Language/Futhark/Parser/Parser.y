@@ -564,65 +564,21 @@ Exp :: { UncheckedExp }
      | Exp2 %prec ':'   { $1 }
 
 Exp2 :: { UncheckedExp }
-     : if Exp then Exp else Exp %prec ifprec
-                      { AppExp (If $2 $4 $6 (srcspan $1 $>)) NoInfo }
-
-     | loop Pat LoopForm do Exp %prec ifprec
-         {% fmap (\t -> AppExp (DoLoop [] $2 t $3 $5 (srcspan $1 $>)) NoInfo) (patternExp $2) }
-
-     | loop Pat '=' Exp LoopForm do Exp %prec ifprec
-         { AppExp (DoLoop [] $2 $4 $5 $7 (srcspan $1 $>)) NoInfo }
-
+     : IfExp                { $1 }
+     | LoopExp              { $1 }
      | LetExp %prec letprec { $1 }
-
-     | MatchExp { $1 }
+     | MatchExp             { $1 }
 
      | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
      | '#[' AttrInfo ']' Exp %prec bottom
                            { Attr $2 $4 (srcspan $1 $>) }
 
-     | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '-...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '-' Exp2       { binOp $1 (L $2 (SYMBOL Minus [] (nameFromString "-"))) $3 }
-     | Exp2 '*...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '*' Exp2       { binOp $1 (L $2 (SYMBOL Times [] (nameFromString "*"))) $3 }
-     | Exp2 '/...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '%...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '//...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '%%...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '**...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '>>...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '<<...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '&...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '|...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '|' Exp2       { binOp $1 (L $2 (SYMBOL Bor [] (nameFromString "|"))) $3 }
-     | Exp2 '&&...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '||...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '^...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '^' Exp2       { binOp $1 (L $2 (SYMBOL Xor [] (nameFromString "^"))) $3 }
-     | Exp2 '==...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '!=...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '<...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '<=...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '>...' Exp2    { binOp $1 $2 $3 }
-     | Exp2 '>=...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '|>...' Exp2   { binOp $1 $2 $3 }
-     | Exp2 '<|...' Exp2   { binOp $1 $2 $3 }
-
-     | Exp2 '<' Exp2              { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
-     | Exp2 '`' QualName '`' Exp2 { AppExp (BinOp (second srclocOf $3) NoInfo ($1, NoInfo) ($5, NoInfo) (srcspan $1 $>)) NoInfo }
-
-     | Exp2 '...' Exp2           { AppExp (Range $1 Nothing (ToInclusive $3) (srcspan $1 $>)) NoInfo }
-     | Exp2 '..<' Exp2           { AppExp (Range $1 Nothing (UpToExclusive $3) (srcspan $1 $>)) NoInfo }
-     | Exp2 '..>' Exp2           { AppExp (Range $1 Nothing (DownToExclusive $3)  (srcspan $1 $>)) NoInfo }
-     | Exp2 '..' Exp2 '...' Exp2 { AppExp (Range $1 (Just $3) (ToInclusive $5) (srcspan $1 $>)) NoInfo }
-     | Exp2 '..' Exp2 '..<' Exp2 { AppExp (Range $1 (Just $3) (UpToExclusive $5) (srcspan $1 $>)) NoInfo }
-     | Exp2 '..' Exp2 '..>' Exp2 { AppExp (Range $1 (Just $3) (DownToExclusive $5) (srcspan $1 $>)) NoInfo }
+     | BinOpExp                  { $1 }
+     | RangeExp                  { $1 }
      | Exp2 '..' Atom            {% twoDotsRange $2 }
      | Atom '..' Exp2            {% twoDotsRange $2 }
      | '-' Exp2  %prec juxtprec  { Negate $2 (srcspan $1 $>) }
      | '!' Exp2 %prec juxtprec   { Not $2 (srcspan $1 $>) }
-
 
      | Exp2 with '[' DimIndices ']' '=' Exp2
        { Update $1 $4 $7 (srcspan $1 $>) }
@@ -633,10 +589,7 @@ Exp2 :: { UncheckedExp }
      | '\\' FunParams1 maybeAscription(TypeExpTerm) '->' Exp %prec letprec
        { Lambda (fst $2 : snd $2) $5 $3 NoInfo (srcspan $1 $>) }
 
-     | Apply_ { $1 }
-
-Apply_ :: { UncheckedExp }
-       : ApplyList {% applyExp $1 }
+     | ApplyList {% applyExp $1 }
 
 ApplyList :: { [UncheckedExp] }
           : ApplyList Atom %prec juxtprec
@@ -676,25 +629,7 @@ Atom : PrimLit        { Literal (fst $1) (srclocOf (snd $1)) }
        { let L loc (QUALPAREN qs name) = $1 in
          QualParens (QualName qs name, srclocOf loc) $2 (srcspan $1 $>) }
 
-     -- Operator sections.
-     | '(' '-' ')'
-        { OpSection (qualName (nameFromString "-")) NoInfo (srcspan $1 $>) }
-     | '(' Exp2 '-' ')'
-       { OpSectionLeft (qualName (nameFromString "-"))
-         NoInfo $2 (NoInfo, NoInfo) (NoInfo, NoInfo) (srcspan $1 $>) }
-     | '(' BinOp Exp2 ')'
-       { OpSectionRight (fst $2) NoInfo $3 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
-     | '(' Exp2 BinOp ')'
-       { OpSectionLeft (fst $3) NoInfo $2 (NoInfo, NoInfo) (NoInfo, NoInfo) (srcspan $1 $>) }
-     | '(' BinOp ')'
-       { OpSection (fst $2) NoInfo (srcspan $1 $>) }
-
-     | '(' FieldAccess FieldAccesses ')'
-       { ProjectSection (map fst ($2:$3)) NoInfo (srcspan $1 $>) }
-
-     | '(' '.' '[' DimIndices ']' ')'
-       { IndexSection $4 NoInfo (srcspan $1 $>) }
-
+     | SectionExp { $1 }
 
 NumLit :: { (PrimValue, Loc) }
         : i8lit   { let L loc (I8LIT num)  = $1 in (SignedValue $ Int8Value num, loc) }
@@ -771,6 +706,74 @@ LetBody :: { UncheckedExp }
     | def {% parseErrorAt $1 (Just "Unexpected \"def\" - missing \"in\"?") }
     | type {% parseErrorAt $1 (Just "Unexpected \"type\" - missing \"in\"?") }
     | module {% parseErrorAt $1 (Just "Unexpected \"module\" - missing \"in\"?") }
+
+BinOpExp :: { UncheckedExp }
+  : Exp2 '+...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '-...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '-' Exp2       { binOp $1 (L $2 (SYMBOL Minus [] (nameFromString "-"))) $3 }
+  | Exp2 '*...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '*' Exp2       { binOp $1 (L $2 (SYMBOL Times [] (nameFromString "*"))) $3 }
+  | Exp2 '/...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '%...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '//...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '%%...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '**...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '>>...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '<<...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '&...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '|...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '|' Exp2       { binOp $1 (L $2 (SYMBOL Bor [] (nameFromString "|"))) $3 }
+  | Exp2 '&&...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '||...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '^...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '^' Exp2       { binOp $1 (L $2 (SYMBOL Xor [] (nameFromString "^"))) $3 }
+  | Exp2 '==...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '!=...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '<...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '<=...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '>...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '>=...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '|>...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '<|...' Exp2   { binOp $1 $2 $3 }
+  | Exp2 '<' Exp2              { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
+  | Exp2 '`' QualName '`' Exp2 { AppExp (BinOp (second srclocOf $3) NoInfo ($1, NoInfo) ($5, NoInfo) (srcspan $1 $>)) NoInfo }
+
+SectionExp :: { UncheckedExp }
+  : '(' '-' ')'
+     { OpSection (qualName (nameFromString "-")) NoInfo (srcspan $1 $>) }
+  | '(' Exp2 '-' ')'
+    { OpSectionLeft (qualName (nameFromString "-"))
+      NoInfo $2 (NoInfo, NoInfo) (NoInfo, NoInfo) (srcspan $1 $>) }
+  | '(' BinOp Exp2 ')'
+    { OpSectionRight (fst $2) NoInfo $3 (NoInfo, NoInfo) NoInfo (srcspan $1 $>) }
+  | '(' Exp2 BinOp ')'
+    { OpSectionLeft (fst $3) NoInfo $2 (NoInfo, NoInfo) (NoInfo, NoInfo) (srcspan $1 $>) }
+  | '(' BinOp ')'
+    { OpSection (fst $2) NoInfo (srcspan $1 $>) }
+
+  | '(' FieldAccess FieldAccesses ')'
+    { ProjectSection (map fst ($2:$3)) NoInfo (srcspan $1 $>) }
+
+  | '(' '.' '[' DimIndices ']' ')'
+    { IndexSection $4 NoInfo (srcspan $1 $>) }
+
+RangeExp :: { UncheckedExp }
+  : Exp2 '...' Exp2           { AppExp (Range $1 Nothing (ToInclusive $3) (srcspan $1 $>)) NoInfo }
+  | Exp2 '..<' Exp2           { AppExp (Range $1 Nothing (UpToExclusive $3) (srcspan $1 $>)) NoInfo }
+  | Exp2 '..>' Exp2           { AppExp (Range $1 Nothing (DownToExclusive $3)  (srcspan $1 $>)) NoInfo }
+  | Exp2 '..' Exp2 '...' Exp2 { AppExp (Range $1 (Just $3) (ToInclusive $5) (srcspan $1 $>)) NoInfo }
+  | Exp2 '..' Exp2 '..<' Exp2 { AppExp (Range $1 (Just $3) (UpToExclusive $5) (srcspan $1 $>)) NoInfo }
+  | Exp2 '..' Exp2 '..>' Exp2 { AppExp (Range $1 (Just $3) (DownToExclusive $5) (srcspan $1 $>)) NoInfo }
+
+IfExp :: { UncheckedExp }
+       : if Exp then Exp else Exp %prec ifprec
+         { AppExp (If $2 $4 $6 (srcspan $1 $>)) NoInfo }
+
+LoopExp :: { UncheckedExp }
+         : loop Pat LoopForm do Exp %prec ifprec
+           {% fmap (\t -> AppExp (DoLoop [] $2 t $3 $5 (srcspan $1 $>)) NoInfo) (patternExp $2) }
+         | loop Pat '=' Exp LoopForm do Exp %prec ifprec
+           { AppExp (DoLoop [] $2 $4 $5 $7 (srcspan $1 $>)) NoInfo }
 
 MatchExp :: { UncheckedExp }
           : match Exp Cases
