@@ -339,7 +339,7 @@ distributeMapBodyStms ::
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
   where
     onStms acc [] = pure acc
-    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w arrs Sequential accs lam)) : stms) = do
+    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w arrs accs lam)) : stms) = do
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types

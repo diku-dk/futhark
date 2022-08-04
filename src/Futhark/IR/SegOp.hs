@@ -227,13 +227,6 @@ data KernelResult
       Shape -- Size of array.  Must match number of dims.
       VName -- Which array
       [(Slice SubExp, SubExp)]
-  | -- Arbitrary number of index/value pairs.
-    ConcatReturns
-      Certs
-      SplitOrdering -- Permuted?
-      SubExp -- The final size.
-      SubExp -- Per-thread/group (max) chunk size.
-      VName -- Chunk by this worker.
   | TileReturns
       Certs
       [(SubExp, SubExp)] -- Total/tile for each dimension
@@ -255,7 +248,6 @@ data KernelResult
 kernelResultCerts :: KernelResult -> Certs
 kernelResultCerts (Returns _ cs _) = cs
 kernelResultCerts (WriteReturns cs _ _ _) = cs
-kernelResultCerts (ConcatReturns cs _ _ _ _) = cs
 kernelResultCerts (TileReturns cs _ _) = cs
 kernelResultCerts (RegTileReturns cs _ _) = cs
 
@@ -263,15 +255,12 @@ kernelResultCerts (RegTileReturns cs _ _) = cs
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (Returns _ _ se) = se
 kernelResultSubExp (WriteReturns _ _ arr _) = Var arr
-kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
 kernelResultSubExp (TileReturns _ _ v) = Var v
 kernelResultSubExp (RegTileReturns _ _ v) = Var v
 
 instance FreeIn KernelResult where
   freeIn' (Returns _ cs what) = freeIn' cs <> freeIn' what
   freeIn' (WriteReturns cs rws arr res) = freeIn' cs <> freeIn' rws <> freeIn' arr <> freeIn' res
-  freeIn' (ConcatReturns cs o w per_thread_elems v) =
-    freeIn' cs <> freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
   freeIn' (TileReturns cs dims v) =
     freeIn' cs <> freeIn' dims <> freeIn' v
   freeIn' (RegTileReturns cs dims_n_tiles v) =
@@ -299,13 +288,6 @@ instance Substitute KernelResult where
       (substituteNames subst rws)
       (substituteNames subst arr)
       (substituteNames subst res)
-  substituteNames subst (ConcatReturns cs o w per_thread_elems v) =
-    ConcatReturns
-      (substituteNames subst cs)
-      (substituteNames subst o)
-      (substituteNames subst w)
-      (substituteNames subst per_thread_elems)
-      (substituteNames subst v)
   substituteNames subst (TileReturns cs dims v) =
     TileReturns
       (substituteNames subst cs)
@@ -412,18 +394,6 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
                 ++ pretty shape
                 ++ ", but destination array has type "
                 ++ pretty arr_t
-    checkKernelResult (ConcatReturns cs o w per_thread_elems v) t = do
-      TC.checkCerts cs
-      case o of
-        SplitContiguous -> pure ()
-        SplitStrided stride -> TC.require [Prim int64] stride
-      TC.require [Prim int64] w
-      TC.require [Prim int64] per_thread_elems
-      vt <- lookupType v
-      unless (vt == t `arrayOfRow` arraySize 0 vt) $
-        TC.bad $
-          TC.TypeError $
-            "Invalid type for ConcatReturns " ++ pretty v
     checkKernelResult (TileReturns cs dims v) t = do
       TC.checkCerts cs
       forM_ dims $ \(dim, tile) -> do
@@ -484,20 +454,6 @@ instance Pretty KernelResult where
            ]
     where
       ppRes (slice, e) = ppr slice <+> text "=" <+> ppr e
-  ppr (ConcatReturns cs SplitContiguous w per_thread_elems v) =
-    PP.spread $
-      certAnnots cs
-        ++ [ "concat"
-               <> parens (commasep [ppr w, ppr per_thread_elems])
-               <+> ppr v
-           ]
-  ppr (ConcatReturns cs (SplitStrided stride) w per_thread_elems v) =
-    PP.spread $
-      certAnnots cs
-        ++ [ "concat_strided"
-               <> parens (commasep [ppr stride, ppr w, ppr per_thread_elems])
-               <+> ppr v
-           ]
   ppr (TileReturns cs dims v) =
     PP.spread $ certAnnots cs ++ ["tile" <> parens (commasep $ map onDim dims) <+> ppr v]
     where
@@ -613,8 +569,6 @@ segResultShape _ t (WriteReturns _ shape _ _) =
   t `arrayOfShape` shape
 segResultShape space t Returns {} =
   foldr (flip arrayOfRow) t $ segSpaceDims space
-segResultShape _ t (ConcatReturns _ _ w _ _) =
-  t `arrayOfRow` w
 segResultShape _ t (TileReturns _ dims _) =
   t `arrayOfShape` Shape (map fst dims)
 segResultShape _ t (RegTileReturns _ dims_n_tiles _) =
@@ -1142,13 +1096,6 @@ instance Engine.Simplifiable KernelResult where
       <*> Engine.simplify ws
       <*> Engine.simplify a
       <*> Engine.simplify res
-  simplify (ConcatReturns cs o w pte what) =
-    ConcatReturns
-      <$> Engine.simplify cs
-      <*> Engine.simplify o
-      <*> Engine.simplify w
-      <*> Engine.simplify pte
-      <*> Engine.simplify what
   simplify (TileReturns cs dims what) =
     TileReturns <$> Engine.simplify cs <*> Engine.simplify dims <*> Engine.simplify what
   simplify (RegTileReturns cs dims_n_tiles what) =

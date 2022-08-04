@@ -85,8 +85,6 @@ import qualified Futhark.IR as Futhark
 import Futhark.IR.SOACS.SOAC
   ( HistOp (..),
     ScremaForm (..),
-    StreamForm (..),
-    StreamOrd (..),
     scremaType,
   )
 import qualified Futhark.IR.SOACS.SOAC as Futhark
@@ -383,7 +381,7 @@ transposeInput k n inp =
 
 -- | A definite representation of a SOAC expression.
 data SOAC rep
-  = Stream SubExp (StreamForm rep) (Lambda rep) [SubExp] [Input]
+  = Stream SubExp (Lambda rep) [SubExp] [Input]
   | Scatter SubExp (Lambda rep) [Input] [(Shape, Int, VName)]
   | Screma SubExp (ScremaForm rep) [Input]
   | Hist SubExp [HistOp rep] (Lambda rep) [Input]
@@ -412,20 +410,20 @@ instance PP.Pretty Input where
 instance PrettyRep rep => PP.Pretty (SOAC rep) where
   ppr (Screma w form arrs) = Futhark.ppScrema w arrs form
   ppr (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
-  ppr (Stream w form lam nes arrs) = Futhark.ppStream w arrs form nes lam
+  ppr (Stream w lam nes arrs) = Futhark.ppStream w arrs nes lam
   ppr (Scatter w lam arrs dests) = Futhark.ppScatter w arrs lam dests
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC rep -> [Input]
-inputs (Stream _ _ _ _ arrs) = arrs
+inputs (Stream _ _ _ arrs) = arrs
 inputs (Scatter _len _lam ivs _as) = ivs
 inputs (Screma _ _ arrs) = arrs
 inputs (Hist _ _ _ inps) = inps
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC rep -> SOAC rep
-setInputs arrs (Stream w form lam nes _) =
-  Stream (newWidth arrs w) form lam nes arrs
+setInputs arrs (Stream w lam nes _) =
+  Stream (newWidth arrs w) lam nes arrs
 setInputs arrs (Scatter w lam _ivs as) =
   Scatter (newWidth arrs w) lam arrs as
 setInputs arrs (Screma w form _) =
@@ -439,15 +437,15 @@ newWidth (inp : _) _ = arraySize 0 $ inputType inp
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC rep -> Lambda rep
-lambda (Stream _ _ lam _ _) = lam
+lambda (Stream _ lam _ _) = lam
 lambda (Scatter _len lam _ivs _as) = lam
 lambda (Screma _ (ScremaForm _ _ lam) _) = lam
 lambda (Hist _ _ lam _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda rep -> SOAC rep -> SOAC rep
-setLambda lam (Stream w form _ nes arrs) =
-  Stream w form lam nes arrs
+setLambda lam (Stream w _ nes arrs) =
+  Stream w lam nes arrs
 setLambda lam (Scatter len _lam ivs as) =
   Scatter len lam ivs as
 setLambda lam (Screma w (ScremaForm scan red _) arrs) =
@@ -457,7 +455,7 @@ setLambda lam (Hist w ops _ inps) =
 
 -- | The return type of a SOAC.
 typeOf :: SOAC rep -> [Type]
-typeOf (Stream w _ lam nes _) =
+typeOf (Stream w lam nes _) =
   let accrtps = take (length nes) $ lambdaReturnType lam
       arrtps =
         [ arrayOf (stripArray 1 t) (Shape [w]) NoUniqueness
@@ -479,7 +477,7 @@ typeOf (Hist _ ops _ _) = do
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.
 width :: SOAC rep -> SubExp
-width (Stream w _ _ _ _) = w
+width (Stream w _ _ _) = w
 width (Scatter len _lam _ivs _as) = len
 width (Screma w _ _) = w
 width (Hist w _ _ _) = w
@@ -493,8 +491,8 @@ toExp soac = Op <$> toSOAC soac
 
 -- | Convert a SOAC to a Futhark-level SOAC.
 toSOAC :: MonadBuilder m => SOAC (Rep m) -> m (Futhark.SOAC (Rep m))
-toSOAC (Stream w form lam nes inps) =
-  Futhark.Stream w <$> inputsToSubExps inps <*> pure form <*> pure nes <*> pure lam
+toSOAC (Stream w lam nes inps) =
+  Futhark.Stream w <$> inputsToSubExps inps <*> pure nes <*> pure lam
 toSOAC (Scatter w lam ivs dests) =
   Futhark.Scatter w <$> inputsToSubExps ivs <*> pure lam <*> pure dests
 toSOAC (Screma w form arrs) =
@@ -516,8 +514,8 @@ fromExp ::
   (Op rep ~ Futhark.SOAC rep, HasScope rep m) =>
   Exp rep ->
   m (Either NotSOAC (SOAC rep))
-fromExp (Op (Futhark.Stream w as form nes lam)) =
-  Right . Stream w form lam nes <$> traverse varInput as
+fromExp (Op (Futhark.Stream w as nes lam)) =
+  Right . Stream w lam nes <$> traverse varInput as
 fromExp (Op (Futhark.Scatter w ivs lam as)) =
   Right <$> (Scatter w lam <$> traverse varInput ivs <*> pure as)
 fromExp (Op (Futhark.Screma w arrs form)) =
@@ -566,9 +564,8 @@ soacToStream soac = do
               strmbdy = mkBody (oneStm insstm) $ map (subExpRes . Var . identName) strm_resids
               strmpar = chunk_param : strm_inpids
               strmlam = Lambda strmpar strmbdy loutps
-              empty_lam = Lambda [] (mkBody mempty []) []
           -- map(f,a) creates a stream with NO accumulators
-          pure (Stream w (Parallel Disorder Commutative empty_lam) strmlam [] inps, [])
+          pure (Stream w strmlam [] inps, [])
       | Just (scans, _) <- Futhark.isScanomapSOAC form,
         Futhark.Scan scan_lam nes <- Futhark.singleScan scans -> do
           -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
@@ -628,7 +625,7 @@ soacToStream soac = do
             addStms addlelstm
             pure $ addlelres ++ map (subExpRes . Var) (strm_resids ++ map_resids)
           pure
-            ( Stream w Sequential strmlam nes inps,
+            ( Stream w strmlam nes inps,
               map paramIdent inpacc_ids
             )
       | Just (reds, _) <- Futhark.isRedomapSOAC form,
@@ -666,8 +663,7 @@ soacToStream soac = do
                   addaccres ++ map (subExpRes . Var . identName) strm_resids
               strmpar = chunk_param : inpacc_ids ++ strm_inpids
               strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
-          lam0 <- renameLambda lamin
-          pure (Stream w (Parallel InOrder comm lam0) strmlam nes inps, [])
+          pure (Stream w strmlam nes inps, [])
 
     -- Otherwise it cannot become a stream.
     _ -> pure (soac, [])
