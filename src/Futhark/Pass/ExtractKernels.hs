@@ -280,7 +280,7 @@ unbalancedLambda orig_lam =
         bodyStms body
 
     -- XXX - our notion of balancing is probably still too naive.
-    unbalancedStm bound (Op (Stream w _ _ _ _)) =
+    unbalancedStm bound (Op (Stream w _ _ _)) =
       w `subExpBound` bound
     unbalancedStm bound (Op (Screma w _ _)) =
       w `subExpBound` bound
@@ -449,96 +449,13 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
           inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
 
           (suff_stms <>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
-
--- Streams can be handled in two different ways - either we
--- sequentialise the body or we keep it parallel and distribute.
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs Parallel {} [] map_fun)))
-  | not ("sequential_inner" `inAttrs` stmAuxAttrs aux) = do
-      -- No reduction part.  Remove the stream and leave the body
-      -- parallel.  It will be distributed.
-      types <- asksScope scopeForSOACs
-      transformStms path . stmsToList . snd
-        =<< runBuilderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w arrs (Parallel o comm red_fun) nes fold_fun)))
-  | "sequential_inner" `inAttrs` stmAuxAttrs aux =
-      paralleliseOuter path
-  | otherwise = do
-      ((outer_suff, outer_suff_key), suff_stms) <-
-        sufficientParallelism "suff_outer_stream" [w] path Nothing
-
-      outer_stms <- outerParallelBody ((outer_suff_key, True) : path)
-      inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
-
-      (suff_stms <>)
-        <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
-  where
-    paralleliseOuter path'
-      | not $ all primType $ lambdaReturnType red_fun = do
-          -- Split into a chunked map and a reduction, with the latter
-          -- further transformed.
-          let fold_fun' = soacsLambdaToGPU fold_fun
-
-          let (red_pat_elems, concat_pat_elems) =
-                splitAt (length nes) $ patElems pat
-              red_pat = Pat red_pat_elems
-
-          ((num_threads, red_results), stms) <-
-            streamMap
-              segThreadCapped
-              (map (baseString . patElemName) red_pat_elems)
-              concat_pat_elems
-              w
-              Noncommutative
-              fold_fun'
-              nes
-              arrs
-
-          reduce_soac <- reduceSOAC [Reduce comm' red_fun nes]
-
-          (stms <>)
-            <$> inScopeOf
-              stms
-              ( transformStm path' $
-                  Let red_pat aux {stmAuxAttrs = mempty} $
-                    Op (Screma num_threads red_results reduce_soac)
-              )
-      | otherwise = do
-          let red_fun_sequential = soacsLambdaToGPU red_fun
-              fold_fun_sequential = soacsLambdaToGPU fold_fun
-          fmap (certify cs)
-            <$> streamRed
-              segThreadCapped
-              pat
-              w
-              comm'
-              red_fun_sequential
-              fold_fun_sequential
-              nes
-              arrs
-
-    outerParallelBody path' =
-      renameBody
-        =<< (mkBody <$> paralleliseOuter path' <*> pure (varsRes (patNames pat)))
-
-    paralleliseInner path' = do
-      types <- asksScope scopeForSOACs
-      transformStms path' . fmap (certify cs) . stmsToList . snd
-        =<< runBuilderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
-
-    innerParallelBody path' =
-      renameBody
-        =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
-
-    comm'
-      | commutativeLambda red_fun, o /= InOrder = Commutative
-      | otherwise = comm
 transformStm path (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) = do
   -- This screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
   transformStms path . map (certify cs) . stmsToList . snd
     =<< runBuilderT (dissectScrema pat w form arrs) scope
-transformStm path (Let pat _ (Op (Stream w arrs Sequential nes fold_fun))) = do
+transformStm path (Let pat _ (Op (Stream w arrs nes fold_fun))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   types <- asksScope scopeForSOACs
@@ -618,7 +535,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
             (map (bodyInterest . caseBody) cases)
       | Op (Screma w _ (ScremaForm _ _ lam')) <- stmExp stm =
           zeroIfTooSmall w + bodyInterest (lambdaBody lam')
-      | Op (Stream _ _ Sequential _ lam') <- stmExp stm =
+      | Op (Stream _ _ _ lam') <- stmExp stm =
           bodyInterest $ lambdaBody lam'
       | otherwise =
           0

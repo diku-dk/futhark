@@ -57,7 +57,7 @@ usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
     lamUsesAD = bodyUsesAD . lambdaBody
     expUsesAD (Op JVP {}) = True
     expUsesAD (Op VJP {}) = True
-    expUsesAD (Op (Stream _ _ _ _ lam)) = lamUsesAD lam
+    expUsesAD (Op (Stream _ _ _ lam)) = lamUsesAD lam
     expUsesAD (Op (Screma _ _ (ScremaForm scans reds lam))) =
       lamUsesAD lam
         || any (lamUsesAD . scanLambda) scans

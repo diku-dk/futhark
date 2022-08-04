@@ -736,28 +736,7 @@ pSOAC pr =
             <*> braces (pSubExp `sepBy` pComma)
             <* pComma
             <*> pLambda pr
-    pStream =
-      choice
-        [ keyword "streamParComm" *> pStreamPar SOAC.InOrder Commutative,
-          keyword "streamPar" *> pStreamPar SOAC.InOrder Noncommutative,
-          keyword "streamParPerComm" *> pStreamPar SOAC.Disorder Commutative,
-          keyword "streamParPer" *> pStreamPar SOAC.Disorder Noncommutative,
-          keyword "streamSeq" *> pStreamSeq
-        ]
-    pStreamPar order comm =
-      parens $
-        SOAC.Stream
-          <$> pSubExp
-          <* pComma
-          <*> braces (pVName `sepBy` pComma)
-          <* pComma
-          <*> pParForm order comm
-          <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <* pComma
-          <*> pLambda pr
-    pParForm order comm =
-      SOAC.Parallel order comm <$> pLambda pr
+    pStream = keyword "streamSeq" *> pStreamSeq
     pStreamSeq =
       parens $
         SOAC.Stream
@@ -765,7 +744,6 @@ pSOAC pr =
           <* pComma
           <*> braces (pVName `sepBy` pComma)
           <* pComma
-          <*> pure SOAC.Sequential
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> pLambda pr
@@ -888,24 +866,6 @@ pKernelResult = do
         <*> pVName,
       try "blkreg_tile"
         *> parens (SegOp.RegTileReturns cs <$> (pRegTile `sepBy` pComma))
-        <*> pVName,
-      keyword "concat"
-        *> parens
-          ( SegOp.ConcatReturns cs SegOp.SplitContiguous
-              <$> pSubExp
-              <* pComma
-              <*> pSubExp
-          )
-        <*> pVName,
-      keyword "concat_strided"
-        *> parens
-          ( SegOp.ConcatReturns cs
-              <$> (SegOp.SplitStrided <$> pSubExp)
-              <* pComma
-              <*> pSubExp
-              <* pComma
-              <*> pSubExp
-          )
         <*> pVName
     ]
   where

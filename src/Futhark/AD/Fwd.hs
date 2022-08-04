@@ -311,19 +311,13 @@ fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
             redLambda = op',
             redNeutral = redNeutral red `interleave` map Var neutral_tans
           }
-fwdSOAC pat aux (Stream size xs form nes lam) = do
+fwdSOAC pat aux (Stream size xs nes lam) = do
   pat' <- bundleNew pat
   lam' <- fwdStreamLambda lam
   xs' <- bundleTan xs
   nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
   let nes' = interleave nes nes_tan
-  case form of
-    Sequential ->
-      addStm $ Let pat' aux $ Op $ Stream size xs' Sequential nes' lam'
-    Parallel o comm lam0 -> do
-      lam0' <- fwdLambda lam0
-      let form' = Parallel o comm lam0'
-      addStm $ Let pat' aux $ Op $ Stream size xs' form' nes' lam'
+  addStm $ Let pat' aux $ Op $ Stream size xs' nes' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
   pat' <- bundleNew pat
   ops' <- mapM fwdHist ops

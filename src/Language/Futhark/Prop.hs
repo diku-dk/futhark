@@ -919,46 +919,6 @@ intrinsics =
                          ]
                    )
                ),
-               ( "map_stream",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_n]
-                   [ Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb),
-                     arr_a $ shape [n]
-                   ]
-                   $ RetType []
-                   $ uarr_b
-                   $ shape [n]
-               ),
-               ( "map_stream_per",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_n]
-                   [ Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb),
-                     arr_a $ shape [n]
-                   ]
-                   $ RetType []
-                   $ uarr_b
-                   $ shape [n]
-               ),
-               ( "reduce_stream",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_n]
-                   [ Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
-                     Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
-                     arr_a $ shape [n]
-                   ]
-                   $ RetType []
-                   $ Scalar t_b
-               ),
-               ( "reduce_stream_per",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_n]
-                   [ Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
-                     Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
-                     arr_a $ shape [n]
-                   ]
-                   $ RetType []
-                   $ Scalar t_b
-               ),
                ( "acc_write",
                  IntrinsicPolyFun
                    [sp_k, tp_a]
@@ -1143,8 +1103,6 @@ intrinsics =
 
     arr_ka = Array () Nonunique (Shape [NamedSize $ qualName k]) t_a
     uarr_ka = Array () Unique (Shape [NamedSize $ qualName k]) t_a
-    arr_kb = Array () Nonunique (Shape [NamedSize $ qualName k]) t_b
-    karr x y = Scalar $ Arrow mempty (Named k) x (RetType [] y)
 
     accType t =
       TypeVar () Unique (qualName (fst intrinsicAcc)) [TypeArgType t mempty]

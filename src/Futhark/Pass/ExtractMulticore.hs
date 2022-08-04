@@ -25,12 +25,10 @@ import Futhark.IR.SOACS hiding
     Stm,
   )
 import qualified Futhark.IR.SOACS as SOACS
-import qualified Futhark.IR.SOACS.Simplify as SOACS
 import Futhark.Pass
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.ToGPU (injectSOACS)
 import Futhark.Tools
-import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Transform.Rename (Rename, renameSomething)
 import Futhark.Util (takeLast)
 import Futhark.Util.Log
@@ -163,56 +161,6 @@ transformFunDef (FunDef entry attrs name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $ transformBody body
   pure $ FunDef entry attrs name rettype params body'
 
--- Sets the chunk size to one.
-unstreamLambda :: Attrs -> [SubExp] -> Lambda SOACS -> ExtractM (Lambda SOACS)
-unstreamLambda attrs nes lam = do
-  let (chunk_param, acc_params, slice_params) =
-        partitionChunkedFoldParameters (length nes) (lambdaParams lam)
-
-  inp_params <- forM slice_params $ \(Param _ p t) ->
-    newParam (baseString p) (rowType t)
-
-  body <- runBodyBuilder $
-    localScope (scopeOfLParams inp_params) $ do
-      letBindNames [paramName chunk_param] $
-        BasicOp $
-          SubExp $
-            intConst Int64 1
-
-      forM_ (zip acc_params nes) $ \(p, ne) ->
-        letBindNames [paramName p] $ BasicOp $ SubExp ne
-
-      forM_ (zip slice_params inp_params) $ \(slice, v) ->
-        letBindNames [paramName slice] $
-          BasicOp $
-            ArrayLit [Var $ paramName v] (paramType v)
-
-      (red_res, map_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
-
-      map_res' <- forM map_res $ \(SubExpRes cs se) -> do
-        v <- letExp "map_res" $ BasicOp $ SubExp se
-        v_t <- lookupType v
-        certifying cs . letSubExp "chunk" . BasicOp $
-          Index v $
-            fullSlice v_t [DimFix $ intConst Int64 0]
-
-      pure $ mkBody mempty $ red_res <> subExpsRes map_res'
-
-  let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType lam
-      map_lam =
-        Lambda
-          { lambdaReturnType = red_ts ++ map rowType map_ts,
-            lambdaParams = inp_params,
-            lambdaBody = body
-          }
-
-  soacs_scope <- castScope <$> askScope
-  map_lam' <- runReaderT (SOACS.simplifyLambda map_lam) soacs_scope
-
-  if "sequential_inner" `inAttrs` attrs
-    then FOT.transformLambda map_lam'
-    else pure map_lam'
-
 -- Code generation for each parallel basic block is parameterised over
 -- how we handle parallelism in the body (whether it's sequentialised
 -- by keeping it as SOACs, or turned into SegOps).
@@ -269,25 +217,6 @@ transformHist rename onBody w hists map_lam arrs = do
     renameIfNeeded rename $
       SegHist () space hists' (lambdaReturnType map_lam) kbody
   pure (hists_stms, op')
-
-transformParStream ::
-  NeedsRename ->
-  (Body SOACS -> ExtractM (Body MC)) ->
-  SubExp ->
-  Commutativity ->
-  Lambda SOACS ->
-  [SubExp] ->
-  Lambda SOACS ->
-  [VName] ->
-  ExtractM (Stms MC, SegOp () MC)
-transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
-  (gtid, space) <- mkSegSpace w
-  kbody <- mapLambdaToKernelBody onBody gtid map_lam arrs
-  (red_stms, red) <- reduceToSegBinOp $ Reduce comm red_lam red_nes
-  op <-
-    renameIfNeeded rename $
-      SegRed () space [red] (lambdaReturnType map_lam) kbody
-  pure (red_stms, op)
 
 transformSOAC :: Pat Type -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
 transformSOAC _ _ JVP {} =
@@ -368,33 +297,7 @@ transformSOAC pat _ (Hist w arrs hists map_lam) = do
       pure $
         mconcat seq_hist_stms
           <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-transformSOAC pat attrs (Stream w arrs (Parallel _ comm red_lam) red_nes fold_lam)
-  | not $ null red_nes = do
-      map_lam <- unstreamLambda attrs red_nes fold_lam
-      (seq_red_stms, seq_op) <-
-        transformParStream
-          DoNotRename
-          sequentialiseBody
-          w
-          comm
-          red_lam
-          red_nes
-          map_lam
-          arrs
-
-      if lambdaContainsParallelism map_lam
-        then do
-          (par_red_stms, par_op) <-
-            transformParStream DoRename transformBody w comm red_lam red_nes map_lam arrs
-          pure $
-            seq_red_stms
-              <> par_red_stms
-              <> oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
-        else
-          pure $
-            seq_red_stms
-              <> oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
-transformSOAC pat _ (Stream w arrs _ nes lam) = do
+transformSOAC pat _ (Stream w arrs nes lam) = do
   -- Just remove the stream and transform the resulting stms.
   soacs_scope <- castScope <$> askScope
   stream_stms <-
