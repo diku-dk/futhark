@@ -1165,82 +1165,6 @@ internaliseHist dim desc rf hist op ne buckets img loc = do
   letValExp' desc . I.Op $
     I.Hist w_img (buckets' ++ img') [HistOp shape_hist rf' hist' ne_shp op'] lam'
 
-internaliseStreamMap ::
-  String ->
-  StreamOrd ->
-  E.Exp ->
-  E.Exp ->
-  InternaliseM [SubExp]
-internaliseStreamMap desc o lam arr = do
-  arrs <- internaliseExpToVars "stream_input" arr
-  lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) [])
-  letValExp' desc $ I.Op $ I.Stream w arrs form [] lam'
-
-internaliseStreamRed ::
-  String ->
-  StreamOrd ->
-  Commutativity ->
-  E.Exp ->
-  E.Exp ->
-  E.Exp ->
-  InternaliseM [SubExp]
-internaliseStreamRed desc o comm lam0 lam arr = do
-  arrs <- internaliseExpToVars "stream_input" arr
-  rowts <- mapM (fmap I.rowType . lookupType) arrs
-  (lam_params, lam_body) <-
-    internaliseStreamLambda internaliseLambda lam rowts
-  let (chunk_param, _, lam_val_params) =
-        partitionChunkedFoldParameters 0 lam_params
-
-  -- Synthesize neutral elements by applying the fold function
-  -- to an empty chunk.
-  letBindNames [I.paramName chunk_param] $
-    I.BasicOp $
-      I.SubExp $
-        constant (0 :: Int64)
-  forM_ lam_val_params $ \p ->
-    letBindNames [I.paramName p] $
-      I.BasicOp . I.Scratch (I.elemType $ I.paramType p) $
-        I.arrayDims $
-          I.paramType p
-  nes <- bodyBind =<< renameBody lam_body
-
-  nes_ts <- mapM I.subExpResType nes
-  outsz <- arraysSize 0 <$> mapM lookupType arrs
-  let acc_arr_tps = [I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- nes_ts]
-  lam0' <- internaliseFoldLambda internaliseLambda lam0 nes_ts acc_arr_tps
-
-  let lam0_acc_params = take (length nes) $ I.lambdaParams lam0'
-  lam_acc_params <- forM lam0_acc_params $ \p -> do
-    name <- newVName $ baseString $ I.paramName p
-    pure p {I.paramName = name}
-
-  -- Make sure the chunk size parameter comes first.
-  let lam_params' = chunk_param : lam_acc_params ++ lam_val_params
-
-  lam' <- mkLambda lam_params' $ do
-    lam_res <- bodyBind lam_body
-    lam_res' <-
-      ensureArgShapes
-        "shape of chunk function result does not match shape of initial value"
-        (srclocOf lam)
-        []
-        (map I.typeOf $ I.lambdaParams lam0')
-        (map resSubExp lam_res)
-    ensureResultShape
-      "shape of result does not match shape of initial value"
-      (srclocOf lam0)
-      nes_ts
-      =<< ( eLambda lam0' . map eSubExp $
-              map (I.Var . paramName) lam_acc_params ++ lam_res'
-          )
-
-  let form = I.Parallel o comm lam0'
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  letValExp' desc $ I.Op $ I.Stream w arrs form (map resSubExp nes) lam'
-
 internaliseStreamAcc ::
   String ->
   E.Exp ->
@@ -1694,14 +1618,6 @@ isOverloadedFunction qname args loc = do
       where
         reduce w scan_lam nes arrs =
           I.Screma w arrs <$> I.scanSOAC [Scan scan_lam nes]
-    handleSOACs [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
-      internaliseStreamRed desc InOrder Noncommutative op f arr
-    handleSOACs [TupLit [op, f, arr] _] "reduce_stream_per" = Just $ \desc ->
-      internaliseStreamRed desc Disorder Commutative op f arr
-    handleSOACs [TupLit [f, arr] _] "map_stream" = Just $ \desc ->
-      internaliseStreamMap desc InOrder f arr
-    handleSOACs [TupLit [f, arr] _] "map_stream_per" = Just $ \desc ->
-      internaliseStreamMap desc Disorder f arr
     handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist_1d" = Just $ \desc ->
       internaliseHist 1 desc rf dest op ne buckets img loc
     handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist_2d" = Just $ \desc ->

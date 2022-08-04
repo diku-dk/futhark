@@ -389,12 +389,8 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
-    (SOAC.Stream _ Sequential _ _ _, SOAC.Stream _ Sequential _ _ _) -> do
-      -- fuse two SEQUENTIAL streams
-      (res_nms, res_stream) <- fuseStreamHelper (fsOutNames ker) unfus_set outVars outPairs soac_c soac_p
-      success res_nms res_stream
     (SOAC.Stream {}, SOAC.Stream {}) -> do
-      -- fuse two PARALLEL streams
+      -- fuse two SEQUENTIAL streams
       (res_nms, res_stream) <- fuseStreamHelper (fsOutNames ker) unfus_set outVars outPairs soac_c soac_p
       success res_nms res_stream
     -------------------------------------------------------------------
@@ -406,23 +402,17 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
     ---   we could run in an infinite recursion, i.e., repeatedly   ---
     ---   fusing map o scan into an infinity of Stream levels!      ---
     -------------------------------------------------------------------
-    (SOAC.Stream _ form2 _ _ _, _) -> do
+    (SOAC.Stream {}, _) -> do
       -- If this rule is matched then soac_p is NOT a stream.
       -- To fuse a stream kernel, we transform soac_p to a stream, which
       -- borrows the sequential/parallel property of the soac_c Stream,
       -- and recursively perform stream-stream fusion.
       (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
-      soac_p'' <- case form2 of
-        Sequential {} -> maybe (fail "not a stream") pure (toSeqStream soac_p')
-        _ -> pure soac_p'
-      if soac_p' == soac_p
-        then fail "SOAC could not be turned into stream."
-        else
-          fuseSOACwithKer
-            (namesFromList (map identName newacc_ids) <> unfus_set)
-            (map identName newacc_ids ++ outVars)
-            soac_p''
-            ker
+      fuseSOACwithKer
+        (namesFromList (map identName newacc_ids) <> unfus_set)
+        (map identName newacc_ids ++ outVars)
+        soac_p'
+        ker
     (_, SOAC.Screma _ form _) | Just _ <- Futhark.isScanomapSOAC form -> do
       -- A Scan soac can be currently only fused as a (sequential) stream,
       -- hence it is first translated to a (sequential) Stream and then
@@ -436,32 +426,26 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
             soac_p'
             ker
         else fail "SOAC could not be turned into stream."
-    (_, SOAC.Stream _ form_p _ _ _) -> do
+    (_, SOAC.Stream {}) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
       -- stream-stream fusion recursivelly.
       -- The newly created stream corresponding to soac_c borrows the
       -- sequential/parallel property of the soac_p stream.
       (soac_c', newacc_ids) <- SOAC.soacToStream soac_c
-      when (soac_c' == soac_c) $ fail "SOAC could not be turned into stream."
-      soac_c'' <- case form_p of
-        Sequential -> maybe (fail "not a stream") pure (toSeqStream soac_c')
-        _ -> pure soac_c'
-
-      fuseSOACwithKer
-        (namesFromList (map identName newacc_ids) <> unfus_set)
-        outVars
-        soac_p
-        $ ker {fsSOAC = soac_c'', fsOutNames = map identName newacc_ids ++ fsOutNames ker}
+      if soac_c' /= soac_c
+        then
+          fuseSOACwithKer
+            (namesFromList (map identName newacc_ids) <> unfus_set)
+            outVars
+            soac_p
+            $ ker {fsSOAC = soac_c', fsOutNames = map identName newacc_ids ++ fsOutNames ker}
+        else fail "SOAC could not be turned into stream."
 
     ---------------------------------
     --- DEFAULT, CANNOT FUSE CASE ---
     ---------------------------------
     _ -> fail "Cannot fuse"
-
-getStreamOrder :: StreamForm rep -> StreamOrd
-getStreamOrder (Parallel o _ _) = o
-getStreamOrder Sequential = InOrder
 
 fuseStreamHelper ::
   [VName] ->
@@ -476,56 +460,38 @@ fuseStreamHelper
   unfus_set
   outVars
   outPairs
-  (SOAC.Stream w2 form2 lam2 nes2 inp2_arr)
-  (SOAC.Stream _ form1 lam1 nes1 inp1_arr) =
-    if getStreamOrder form2 /= getStreamOrder form1
-      then fail "fusion conditions not met!"
-      else do
-        -- very similar to redomap o redomap composition, but need
-        -- to remove first the `chunk' parameters of streams'
-        -- lambdas and put them in the resulting stream lambda.
-        let chunk1 = head $ lambdaParams lam1
-            chunk2 = head $ lambdaParams lam2
-            hmnms = M.fromList [(paramName chunk2, paramName chunk1)]
-            lam20 = substituteNames hmnms lam2
-            lam1' = lam1 {lambdaParams = tail $ lambdaParams lam1}
-            lam2' = lam20 {lambdaParams = tail $ lambdaParams lam20}
-            (res_lam', new_inp) =
-              fuseRedomap
-                unfus_set
-                outVars
-                lam1'
-                []
-                nes1
-                inp1_arr
-                outPairs
-                lam2'
-                []
-                nes2
-                inp2_arr
-            res_lam'' = res_lam' {lambdaParams = chunk1 : lambdaParams res_lam'}
-            unfus_accs = take (length nes1) outVars
-            unfus_arrs = filter (`notElem` unfus_accs) $ filter (`nameIn` unfus_set) outVars
-        let res_form = mergeForms form2 form1
-        pure
-          ( unfus_accs ++ out_kernms ++ unfus_arrs,
-            SOAC.Stream w2 res_form res_lam'' (nes1 ++ nes2) new_inp
-          )
+  (SOAC.Stream w2 lam2 nes2 inp2_arr)
+  (SOAC.Stream _ lam1 nes1 inp1_arr) = do
+    -- very similar to redomap o redomap composition, but need
+    -- to remove first the `chunk' parameters of streams'
+    -- lambdas and put them in the resulting stream lambda.
+    let chunk1 = head $ lambdaParams lam1
+        chunk2 = head $ lambdaParams lam2
+        hmnms = M.fromList [(paramName chunk2, paramName chunk1)]
+        lam20 = substituteNames hmnms lam2
+        lam1' = lam1 {lambdaParams = tail $ lambdaParams lam1}
+        lam2' = lam20 {lambdaParams = tail $ lambdaParams lam20}
+        (res_lam', new_inp) =
+          fuseRedomap
+            unfus_set
+            outVars
+            lam1'
+            []
+            nes1
+            inp1_arr
+            outPairs
+            lam2'
+            []
+            nes2
+            inp2_arr
+        res_lam'' = res_lam' {lambdaParams = chunk1 : lambdaParams res_lam'}
+        unfus_accs = take (length nes1) outVars
+        unfus_arrs = filter (`notElem` unfus_accs) $ filter (`nameIn` unfus_set) outVars
+    pure
+      ( unfus_accs ++ out_kernms ++ unfus_arrs,
+        SOAC.Stream w2 res_lam'' (nes1 ++ nes2) new_inp
+      )
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
-
-mergeForms :: StreamForm SOACS -> StreamForm SOACS -> StreamForm SOACS
-mergeForms Sequential Sequential = Sequential
-mergeForms (Parallel _ comm2 lam2r) (Parallel o1 comm1 lam1r) =
-  Parallel o1 (comm1 <> comm2) (mergeReduceOps lam1r lam2r)
-mergeForms _ _ = error "Fusing sequential to parallel stream disallowed!"
-
--- | If a Stream is passed as argument then it converts it to a
---   Sequential Stream.
-toSeqStream :: SOAC -> Maybe SOAC
-toSeqStream s@(SOAC.Stream _ Sequential _ _ _) = Just s
-toSeqStream (SOAC.Stream w Parallel {} l acc inps) =
-  Just $ SOAC.Stream w Sequential l acc inps
-toSeqStream _ = Nothing
 
 -- Here follows optimizations and transforms to expose fusability.
 

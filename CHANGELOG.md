@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+* Removed prelude functions `reduce_stream`, `map_stream`,
+  `reduce_stream_per`, and `reduce_map_per`.
+
 ### Changed
 
 ### Fixed

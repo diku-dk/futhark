@@ -414,7 +414,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   SoacNode ots pat soac aux -> do
     let lam = H.lambda soac
     lam' <- localScope (scopeOf lam) $ case soac of
-      H.Stream _ Sequential {} _ _ _ ->
+      H.Stream {} ->
         dontFuseScans $ doFusionLambda lam
       _ ->
         doFuseScans $ doFusionLambda lam
