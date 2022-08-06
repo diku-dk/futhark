@@ -3,7 +3,7 @@
 -- ==
 -- structure gpu {
 --   /GPUBody 1
---   /Loop/GPUBody 1
+--   /DoLoop/GPUBody 1
 -- }
 
 #[noinline]
