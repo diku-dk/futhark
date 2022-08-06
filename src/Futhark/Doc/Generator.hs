@@ -80,7 +80,7 @@ type FileMap = M.Map VName (FilePath, Namespace)
 
 type DocM = ReaderT Context (WriterT Documented (Writer Warnings))
 
-data IndexWhat = IndexValue | IxFun | IndexModule | IndexModuleType | IndexType
+data IndexWhat = IndexValue | IndexFunction | IndexModule | IndexModuleType | IndexType
 
 -- | We keep a mapping of the names we have actually documented, so we
 -- can generate an index.
@@ -302,7 +302,7 @@ indexPage important_imports imports documented fm =
                 baseString name
           what' = case what of
             IndexValue -> "value"
-            IxFun -> "function"
+            IndexFunction -> "function"
             IndexType -> "type"
             IndexModuleType -> "module type"
             IndexModule -> "module"
@@ -849,7 +849,7 @@ valBindWhat vb
     orderZero t =
       IndexValue
   | otherwise =
-      IxFun
+      IndexFunction
 
 describeSpecs :: [Spec] -> DocM Html
 describeSpecs specs =
@@ -864,7 +864,7 @@ describeSpec (ValSpec name tparams t _ doc _) =
   where
     what =
       case t of
-        TEArrow {} -> IxFun
+        TEArrow {} -> IndexFunction
         _ -> IndexValue
 describeSpec (TypeAbbrSpec vb) =
   describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)

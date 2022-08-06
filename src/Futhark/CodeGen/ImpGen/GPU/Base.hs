@@ -2116,8 +2116,6 @@ compileGroupResult space pe (Returns _ _ what) = do
       copyDWIMFix (patElemName pe) gids what []
 compileGroupResult _ _ WriteReturns {} =
   compilerLimitationS "compileGroupResult: WriteReturns not handled yet."
-compileGroupResult _ _ ConcatReturns {} =
-  compilerLimitationS "compileGroupResult: ConcatReturns not handled yet."
 
 compileThreadResult ::
   SegSpace ->
@@ -2129,17 +2127,6 @@ compileThreadResult _ _ RegTileReturns {} =
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (ConcatReturns _ SplitContiguous _ per_thread_elems what) = do
-  constants <- kernelConstants <$> askEnv
-  let offset =
-        pe64 per_thread_elems
-          * sExt64 (kernelGlobalThreadId constants)
-  n <- pe64 . arraySize 0 <$> lookupType what
-  copyDWIM (patElemName pe) [DimSlice offset n 1] (Var what) []
-compileThreadResult _ pe (ConcatReturns _ (SplitStrided stride) _ _ what) = do
-  offset <- sExt64 . kernelGlobalThreadId . kernelConstants <$> askEnv
-  n <- pe64 . arraySize 0 <$> lookupType what
-  copyDWIM (patElemName pe) [DimSlice offset n $ pe64 stride] (Var what) []
 compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
   let rws' = map pe64 rws
   forM_ dests $ \(slice, e) -> do

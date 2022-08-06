@@ -102,11 +102,8 @@ mapResultHint ::
   Type ->
   KernelResult ->
   AllocM GPU GPUMem ExpHint
-mapResultHint lvl space = hint
+mapResultHint _lvl space = hint
   where
-    num_threads =
-      pe64 (unCount $ segNumGroups lvl) * pe64 (unCount $ segGroupSize lvl)
-
     -- Heuristic: do not rearrange for returned arrays that are
     -- sufficiently small.
     coalesceReturnOfShape _ [] = False
@@ -119,15 +116,6 @@ mapResultHint lvl space = hint
           let space_dims = segSpaceDims space
               t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
           pure $ Hint (innermost space_dims t_dims) DefaultSpace
-    hint t (ConcatReturns _ SplitStrided {} w _ _) = do
-      chunkmap <- asks chunkMap
-      let t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
-      pure $ Hint (innermost [w] t_dims) DefaultSpace
-    hint Prim {} (ConcatReturns _ SplitContiguous w elems_per_thread _) = do
-      let ixfun_base = IxFun.iota [sExt64 num_threads, pe64 elems_per_thread]
-          ixfun_tr = IxFun.permute ixfun_base [1, 0]
-          ixfun = IxFun.reshape ixfun_tr [pe64 w]
-      pure $ Hint ixfun DefaultSpace
     hint _ _ = pure NoHint
 
 innermost :: [SubExp] -> [SubExp] -> IxFun
