@@ -443,9 +443,10 @@ graphStm stm = do
     BasicOp (Index arr s) -> do
       graphInefficientReturn (sliceDims s) e
       one bs `reuses` arr
-    BasicOp (Update _ arr _ _) -> do
-      graphInefficientReturn [] e
-      one bs `reuses` arr
+    BasicOp (Update _ arr slice _)
+      | isFixed slice -> do
+          graphInefficientReturn [] e
+          one bs `reuses` arr
     BasicOp (FlatIndex arr s) -> do
       -- Migrating a FlatIndex leads to a memory allocation error.
       --
@@ -493,6 +494,8 @@ graphStm stm = do
       -- array and thus behave like a 'Copy'.
       -- Whether the rows are primitive constants or arrays, without any scalar
       -- variable operands such ArrayLit cannot directly prevent a scalar read.
+      graphHostOnly e
+    BasicOp Update {} ->
       graphHostOnly e
     BasicOp Concat {} ->
       -- Is unlikely to prevent a scalar read as the only SubExp operand in
