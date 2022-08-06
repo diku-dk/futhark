@@ -1,18 +1,15 @@
 -- Reads can be delayed through loops.
 -- ==
 -- structure gpu {
---   /Index 0
---   /DoLoop/If/True/GPUBody/BinOp 1
---   /DoLoop/If/False/GPUBody/BinOp 1
+--   /Index 1
+--   /DoLoop/GPUBody/BinOp 2
 -- }
 
-def main (A: *[10]i64) : *[10]i64 =
-  let (x, A) =
-    loop (x, A) = (A[0], A) for i < 10 do
-      if i%4 == 0
-         then (x-1, A)
-         else (x+1, A with [i] = 42)
-   in A with [6] = x
+def main (A: [10]i64) : i64 =
+  let x = A[0]
+  let y = A[1]
+  in loop z = 0 for i < 10 do
+       (x+z)+y
 
 
 

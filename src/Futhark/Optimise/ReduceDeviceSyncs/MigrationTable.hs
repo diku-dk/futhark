@@ -695,7 +695,7 @@ graphLoop [] _ _ _ =
   compilerBugS "Loop statement bound no variable; should have been eliminated."
 graphLoop (b : bs) params lform body = do
   -- Graph loop params and body while capturing statistics.
-  g0 <- getGraph
+  g <- getGraph
   stats <- captureBodyStats (subgraphId `graphIdFor` graphTheLoop)
 
   -- Record aliases for copyable memory backing returned arrays.
@@ -704,18 +704,23 @@ graphLoop (b : bs) params lform body = do
   let results = map resSubExp (bodyResult body)
   may_copy_results <- reusesBranches (b : bs) [args, results]
 
-  -- Connect loop condition to a sink if the loop cannot be migrated.
-  -- The migration status of the condition is what determines whether the
-  -- loop may be migrated as a whole or not. See 'shouldMoveStm'.
+  -- Connect the loop condition to a sink if the loop cannot be migrated,
+  -- ensuring that it will be available to the host. The migration status
+  -- of the condition is what determines whether the loop may be migrated
+  -- as a whole or not. See 'shouldMoveStm'.
   let may_migrate = not (bodyHostOnly stats) && may_copy_results
   unless may_migrate $ case lform of
     ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
-    WhileLoop n -> connectToSink (nameToId n)
+    WhileLoop n
+      | (_, p, _, res) <- loopValueFor n -> do
+          connectToSink p
+          case res of
+            Var v -> connectToSink (nameToId v)
+            _ -> pure ()
     _ -> pure ()
 
   -- Connect graphed return values to their loop parameters.
-  g1 <- getGraph
-  mapM_ (mergeLoopParam g1) loopValues
+  mapM_ mergeLoopParam loopValues
 
   -- Route the sources within the loop body in isolation.
   -- The loop graph must not be altered after this point.
@@ -727,8 +732,8 @@ graphLoop (b : bs) params lform body = do
   -- If a device read is delayed from one iteration to the next the
   -- corresponding variables bound by the statement must be treated as
   -- sources.
-  g2 <- getGraph
-  let (dbs, rbc) = foldl' (deviceBindings g2) (IS.empty, MG.none) srcs
+  g' <- getGraph
+  let (dbs, rbc) = foldl' (deviceBindings g') (IS.empty, MG.none) srcs
   modifySources $ second (IS.toList dbs <>)
 
   -- Connect operands to sinks if they can reach a sink within the loop.
@@ -736,7 +741,7 @@ graphLoop (b : bs) params lform body = do
   -- reach and exhaust their normal entry edges into the loop.
   -- This means a read can be delayed through a loop but not into it if
   -- that would increase the number of reads done by any given iteration.
-  let ops = IS.filter (`MG.member` g0) (bodyOperands stats)
+  let ops = IS.filter (`MG.member` g) (bodyOperands stats)
   foldM_ connectOperand rbc (IS.elems ops)
 
   -- It might be beneficial to move the whole loop to device, to avoid
@@ -810,14 +815,12 @@ graphLoop (b : bs) params lform body = do
             ops <- onlyGraphedScalarSubExp arg
             addEdges (MG.oneEdge p) ops
 
-    mergeLoopParam :: Graph -> LoopValue -> Grapher ()
-    mergeLoopParam g (_, p, _, res)
+    mergeLoopParam :: LoopValue -> Grapher ()
+    mergeLoopParam (_, p, _, res)
       | Var n <- res,
         ret <- nameToId n,
         ret /= p =
-          if MG.isSinkConnected p g
-            then connectToSink ret
-            else addEdges (MG.oneEdge p) (IS.singleton ret)
+          addEdges (MG.oneEdge p) (IS.singleton ret)
       | otherwise =
           pure ()
     deviceBindings ::
