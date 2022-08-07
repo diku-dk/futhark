@@ -15,7 +15,7 @@ import Control.Monad.State hiding (State)
 import Data.Bifunctor (second)
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
-import Data.List (transpose)
+import Data.List (transpose, zip4)
 import qualified Data.Map.Strict as M
 import Data.Sequence ((<|), (><), (|>))
 import qualified Data.Text as T
@@ -170,8 +170,9 @@ optimizeStm out stm = do
                 else do
                   -- Otherwise, ensure all results are migrated.
                   (all_stms', arrs) <-
-                    fmap unzip $ forM (zip all_stms reses) $ \(stms, res) ->
-                      storeScalar stms (resSubExp res) (patElemType pe)
+                    fmap unzip $
+                      forM (zip all_stms reses) $ \(stms, res) ->
+                        storeScalar stms (resSubExp res) (patElemType pe)
 
                   pe' <- arrayizePatElem pe
                   let bt' = staticShapes1 (patElemType pe')
@@ -202,40 +203,55 @@ optimizeStm out stm = do
 
         -- Update statement bound variables and parameters if their values
         -- have been migrated to device.
-        let lmerge (res, stms) (pe, (Param _ pn pt, pval), MoveToDevice) = do
-              -- Rewrite the bound variable.
+        let lmerge (res, stms, rebinds) (pe, param, StayOnHost) =
+              pure ((pe, param) : res, stms, rebinds)
+            lmerge (res, stms, rebinds) (pe, (Param _ pn pt, pval), _) = do
+              -- Migrate the bound variable.
               pe' <- arrayizePatElem pe
 
-              -- Move the initial value to device if not already there.
+              -- Move the initial value to device if not already there to
+              -- ensure that the parameter argument and loop return value
+              -- converge.
               (stms', arr) <- storeScalar stms pval (fromDecl pt)
 
-              -- Rewrite the parameter.
+              -- Migrate the parameter.
               pn' <- newName pn
               let pt' = toDecl (patElemType pe') Nonunique
               let pval' = Var arr
               let param' = (Param mempty pn' pt', pval')
 
-              -- Record the migration.
-              Ident pn (fromDecl pt) `movedTo` pn'
+              -- Record the migration and rebind the parameter inside the
+              -- loop body if necessary.
+              rebinds' <- (pe {patElemName = pn}) `migratedTo` (pn', rebinds)
 
-              pure ((pe', param') : res, stms')
-            lmerge _ (_, _, UsedOnHost) =
-              -- Initial loop parameter value and loop result should have
-              -- been made available on host instead.
-              compilerBugS "optimizeStm: unhandled host usage of loop param"
-            lmerge (res, stms) (pe, param, StayOnHost) =
-              pure ((pe, param) : res, stms)
+              pure ((pe', param') : res, stms', rebinds')
 
         mt <- ask
-
         let pes = patElems (stmPat stm)
         let mss = map (\(Param _ n _, _) -> statusOf n mt) params
-        (zipped', out') <- foldM lmerge ([], out) (zip3 pes params mss)
+        (zipped', out', rebinds) <-
+          foldM lmerge ([], out, mempty) (zip3 pes params mss)
         let (pes', params') = unzip (reverse zipped')
 
+        -- Rewrite body.
+        let body1 = body {bodyStms = rebinds >< bodyStms body}
+        body2 <- optimizeBody body1
+        let zipped =
+              zip4
+                mss
+                (bodyResult body2)
+                (map resSubExp $ bodyResult body)
+                (map patElemType pes)
+        let rstore (bstms, res) (StayOnHost, r, _, _) =
+              pure (bstms, r : res)
+            rstore (bstms, res) (_, SubExpRes certs _, se, t) = do
+              (bstms', dev) <- storeScalar bstms se t
+              pure (bstms', SubExpRes certs (Var dev) : res)
+        (bstms, res) <- foldM rstore (bodyStms body2, []) zipped
+        let body3 = body2 {bodyStms = bstms, bodyResult = reverse res}
+
         -- Rewrite statement.
-        body' <- optimizeBody body
-        let e' = DoLoop params' lform body'
+        let e' = DoLoop params' lform body3
         let stm' = Let (Pat pes') (stmAux stm) e'
 
         -- Read migrated scalars that are used on host.
