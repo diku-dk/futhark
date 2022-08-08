@@ -13,7 +13,7 @@ pkgs.stdenv.mkDerivation {
       file
       git
       git-annex
-      ghc
+      haskell.compiler.ghc924
       parallel
       haskellPackages.weeder
       haskellPackages.graphmod
@@ -25,7 +25,7 @@ pkgs.stdenv.mkDerivation {
       zlib.out
       cabal2nix
       ghcid
-      haskell.packages.ghc923.ormolu_0_5_0_0
+      haskell.packages.ghc924.ormolu_0_5_0_1
       niv
       ispc
       python3Packages.numpy
