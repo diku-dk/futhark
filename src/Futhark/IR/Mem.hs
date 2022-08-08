@@ -1124,7 +1124,7 @@ flatSliceInfo v slice@(FlatSlice offset idxs) = do
     & MemArray et (Shape (flatSliceDims slice)) NoUniqueness
     & pure
 
-class TypedOp op => OpReturns op where
+class IsOp op => OpReturns op where
   opReturns :: (Mem rep inner, Monad m, HasScope rep m) => op -> m [ExpReturns]
   opReturns op = extReturns <$> opType op
 
