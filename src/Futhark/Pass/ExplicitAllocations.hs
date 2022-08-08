@@ -53,9 +53,11 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import Futhark.Analysis.SymbolTable (IndexOp)
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
 import qualified Futhark.Optimise.Simplify.Engine as Engine
@@ -1097,10 +1099,12 @@ mkLetNamesB'' names e = do
 
 simplifiable ::
   ( Engine.SimplifiableRep rep,
+    LetDec rep ~ LetDecMem,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    LetDec rep ~ LetDecMem,
     OpReturns (Engine.OpWithWisdom inner),
+    AliasedOp (Engine.OpWithWisdom inner),
+    IndexOp (Engine.OpWithWisdom inner),
     Mem rep inner
   ) =>
   (Engine.OpWithWisdom inner -> UT.UsageTable) ->

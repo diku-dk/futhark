@@ -46,7 +46,7 @@ seqLoopStm (SeqLoop _ pat merge form body) =
   Let pat (defAux ()) $ DoLoop merge form body
 
 interchangeLoop ::
-  (MonadBuilder m, LocalScope SOACS m) =>
+  (MonadBuilder m, Rep m ~ SOACS) =>
   (VName -> Maybe VName) ->
   SeqLoop ->
   LoopNesting ->

@@ -19,6 +19,7 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Construct
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Prop.Aliases (AliasedOp)
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Rep
@@ -27,6 +28,20 @@ import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (simplifiable)
 import Futhark.Util
+
+-- | Some constraints that must hold for the simplification rules to work.
+type SimplifyMemory rep inner =
+  ( Simplify.SimplifiableRep rep,
+    LetDec rep ~ LetDecMem,
+    ExpDec rep ~ (),
+    BodyDec rep ~ (),
+    CanBeWise (Op rep),
+    BuilderOps (Wise rep),
+    OpReturns (OpWithWisdom inner),
+    ST.IndexOp (OpWithWisdom inner),
+    AliasedOp (OpWithWisdom inner),
+    Mem rep inner
+  )
 
 simpleGeneric ::
   (SimplifyMemory rep inner) =>
@@ -92,18 +107,6 @@ blockers =
       Engine.blockHoistSeq = isResultAlloc,
       Engine.isAllocation = isAlloc mempty mempty
     }
-
--- | Some constraints that must hold for the simplification rules to work.
-type SimplifyMemory rep inner =
-  ( Simplify.SimplifiableRep rep,
-    LetDec rep ~ LetDecMem,
-    ExpDec rep ~ (),
-    BodyDec rep ~ (),
-    CanBeWise (Op rep),
-    BuilderOps (Wise rep),
-    OpReturns (OpWithWisdom inner),
-    Mem rep inner
-  )
 
 callKernelRules :: SimplifyMemory rep inner => RuleBook (Wise rep)
 callKernelRules =
