@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Various fixes to scalar migration (#1721).
+
 ## [0.21.15]
 
 ### Fixed
