@@ -45,6 +45,7 @@ import Futhark.Util (directoryContents)
 import Futhark.Util.Pretty (prettyOneLine)
 import System.Exit
 import System.FilePath
+import System.IO
 import System.IO.Error
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
@@ -407,7 +408,7 @@ testSpecFromProgramOrDie prog = do
   spec_or_err <- testSpecFromProgram prog
   case spec_or_err of
     Left err -> do
-      putStrLn err
+      hPutStrLn stderr err
       exitFailure
     Right spec -> pure spec
 
@@ -443,7 +444,7 @@ testSpecsFromPathsOrDie dirs = do
   specs_or_err <- testSpecsFromPaths dirs
   case specs_or_err of
     Left err -> do
-      putStrLn err
+      hPutStrLn stderr err
       exitFailure
     Right specs -> pure specs
 
@@ -462,6 +463,6 @@ testSpecFromFileOrDie dirs = do
   spec_or_err <- testSpecFromFile dirs
   case spec_or_err of
     Left err -> do
-      putStrLn err
+      hPutStrLn stderr err
       exitFailure
     Right spec -> pure spec
