@@ -10,7 +10,6 @@ module Futhark.Pass.ExplicitAllocations.GPU
   )
 where
 
-import qualified Data.Map as M
 import qualified Data.Set as S
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
@@ -19,10 +18,6 @@ import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
 instance SizeSubst (HostOp rep op) where
-  opSizeSubst (Pat [size]) (SizeOp (SplitSpace _ _ _ elems_per_thread)) =
-    M.singleton (patElemName size) elems_per_thread
-  opSizeSubst _ _ = mempty
-
   opIsConst (SizeOp GetSize {}) = True
   opIsConst (SizeOp GetSizeMax {}) = True
   opIsConst _ = False
@@ -112,10 +107,8 @@ mapResultHint _lvl space = hint
 
     hint t Returns {}
       | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
-          chunkmap <- asks chunkMap
           let space_dims = segSpaceDims space
-              t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
-          pure $ Hint (innermost space_dims t_dims) DefaultSpace
+          pure $ Hint (innermost space_dims (arrayDims t)) DefaultSpace
     hint _ _ = pure NoHint
 
 innermost :: [SubExp] -> [SubExp] -> IxFun
