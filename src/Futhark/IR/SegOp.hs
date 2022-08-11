@@ -36,7 +36,6 @@ module Futhark.IR.SegOp
     KernelResult (..),
     kernelResultCerts,
     kernelResultSubExp,
-    SplitOrdering (..),
 
     -- ** Generic traversal
     SegOpMapper (..),
@@ -104,28 +103,6 @@ import Futhark.Util.Pretty
   )
 import qualified Futhark.Util.Pretty as PP
 import Prelude hiding (id, (.))
-
--- | How an array is split into chunks.
-data SplitOrdering
-  = SplitContiguous
-  | SplitStrided SubExp
-  deriving (Eq, Ord, Show)
-
-instance FreeIn SplitOrdering where
-  freeIn' SplitContiguous = mempty
-  freeIn' (SplitStrided stride) = freeIn' stride
-
-instance Substitute SplitOrdering where
-  substituteNames _ SplitContiguous =
-    SplitContiguous
-  substituteNames subst (SplitStrided stride) =
-    SplitStrided $ substituteNames subst stride
-
-instance Rename SplitOrdering where
-  rename SplitContiguous =
-    pure SplitContiguous
-  rename (SplitStrided stride) =
-    SplitStrided <$> rename stride
 
 -- | An operator for 'SegHist'.
 data HistOp rep = HistOp
@@ -1076,12 +1053,6 @@ instance
   safeOp _ = True
 
 --- Simplification
-
-instance Engine.Simplifiable SplitOrdering where
-  simplify SplitContiguous =
-    pure SplitContiguous
-  simplify (SplitStrided stride) =
-    SplitStrided <$> Engine.simplify stride
 
 instance Engine.Simplifiable SegSpace where
   simplify (SegSpace phys dims) =

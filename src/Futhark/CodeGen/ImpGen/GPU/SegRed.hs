@@ -224,7 +224,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
         num_elements
         global_tid
         elems_per_thread
-        (tvVar num_threads)
+        (tvExp num_threads)
         slugs
         body
 
@@ -470,7 +470,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
           num_elements
           global_tid
           elems_per_thread
-          (tvVar threads_per_segment)
+          (tvExp threads_per_segment)
           slugs
           body
 
@@ -576,13 +576,53 @@ segBinOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
       | otherwise =
           pure (param_arr, [sExt64 local_tid, sExt64 group_id])
 
+computeThreadChunkSize ::
+  Commutativity ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
+  Imp.Count Imp.Elements (Imp.TExp Int64) ->
+  Imp.Count Imp.Elements (Imp.TExp Int64) ->
+  TV Int64 ->
+  ImpM rep r op ()
+computeThreadChunkSize Commutative threads_per_segment thread_index elements_per_thread num_elements chunk_var =
+  chunk_var
+    <-- sMin64
+      (Imp.unCount elements_per_thread)
+      ((Imp.unCount num_elements - thread_index) `divUp` threads_per_segment)
+computeThreadChunkSize Noncommutative _ thread_index elements_per_thread num_elements chunk_var = do
+  starting_point <-
+    dPrimV "starting_point" $
+      thread_index * Imp.unCount elements_per_thread
+  remaining_elements <-
+    dPrimV "remaining_elements" $
+      Imp.unCount num_elements - tvExp starting_point
+
+  let no_remaining_elements = tvExp remaining_elements .<=. 0
+      beyond_bounds = Imp.unCount num_elements .<=. tvExp starting_point
+
+  sIf
+    (no_remaining_elements .||. beyond_bounds)
+    (chunk_var <-- 0)
+    ( sIf
+        is_last_thread
+        (chunk_var <-- Imp.unCount last_thread_elements)
+        (chunk_var <-- Imp.unCount elements_per_thread)
+    )
+  where
+    last_thread_elements =
+      num_elements - Imp.elements thread_index * elements_per_thread
+    is_last_thread =
+      Imp.unCount num_elements
+        .<. (thread_index + 1)
+          * Imp.unCount elements_per_thread
+
 reductionStageZero ::
   KernelConstants ->
   [(VName, Imp.TExp Int64)] ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
   Imp.TExp Int64 ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  VName ->
+  Imp.TExp Int64 ->
   [SegBinOpSlug] ->
   DoSegBody ->
   InKernelGen ([Lambda GPUMem], InKernelGen ())
@@ -593,10 +633,13 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
 
   -- Figure out how many elements this thread should process.
   chunk_size <- dPrim "chunk_size" int64
-  let ordering = case slugsComm slugs of
-        Commutative -> SplitStrided $ Var threads_per_segment
-        Noncommutative -> SplitContiguous
-  computeThreadChunkSize ordering (sExt64 global_tid) elems_per_thread num_elements chunk_size
+  computeThreadChunkSize
+    (slugsComm slugs)
+    threads_per_segment
+    (sExt64 global_tid)
+    elems_per_thread
+    num_elements
+    chunk_size
 
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
@@ -645,7 +688,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
     gtid
       <-- case comm of
         Commutative ->
-          global_tid + Imp.le64 threads_per_segment * i
+          global_tid + threads_per_segment * i
         Noncommutative ->
           let index_in_segment = global_tid `quot` kernelGroupSize constants
            in sExt64 local_tid
@@ -696,7 +739,7 @@ reductionStageOne ::
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
   Imp.TExp Int64 ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  VName ->
+  Imp.TExp Int64 ->
   [SegBinOpSlug] ->
   DoSegBody ->
   InKernelGen [Lambda GPUMem]
