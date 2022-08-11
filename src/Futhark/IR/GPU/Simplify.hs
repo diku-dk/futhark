@@ -56,17 +56,6 @@ simplifyKernelOp f (OtherOp op) = do
 simplifyKernelOp _ (SegOp op) = do
   (op', hoisted) <- simplifySegOp op
   pure (SegOp op', hoisted)
-simplifyKernelOp _ (SizeOp (SplitSpace o w i elems_per_thread)) =
-  (,)
-    <$> ( SizeOp
-            <$> ( SplitSpace
-                    <$> Engine.simplify o
-                    <*> Engine.simplify w
-                    <*> Engine.simplify i
-                    <*> Engine.simplify elems_per_thread
-                )
-        )
-    <*> pure mempty
 simplifyKernelOp _ (SizeOp (GetSize key size_class)) =
   pure (SizeOp $ GetSize key size_class, mempty)
 simplifyKernelOp _ (SizeOp (GetSizeMax size_class)) =

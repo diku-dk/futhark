@@ -114,29 +114,7 @@ instance FreeIn SegLevel where
 
 -- | A simple size-level query or computation.
 data SizeOp
-  = -- | @SplitSpace o w i elems_per_thread@.
-    --
-    -- Computes how to divide array elements to
-    -- threads in a kernel.  Returns the number of
-    -- elements in the chunk that the current thread
-    -- should take.
-    --
-    -- @w@ is the length of the outer dimension in
-    -- the array. @i@ is the current thread
-    -- index. Each thread takes at most
-    -- @elems_per_thread@ elements.
-    --
-    -- If the order @o@ is 'SplitContiguous', thread with index @i@
-    -- should receive elements
-    -- @i*elems_per_tread, i*elems_per_thread + 1,
-    -- ..., i*elems_per_thread + (elems_per_thread-1)@.
-    --
-    -- If the order @o@ is @'SplitStrided' stride@,
-    -- the thread will receive elements @i,
-    -- i+stride, i+2*stride, ...,
-    -- i+(elems_per_thread-1)*stride@.
-    SplitSpace SplitOrdering SubExp SubExp SubExp
-  | -- | Produce some runtime-configurable size.
+  = -- | Produce some runtime-configurable size.
     GetSize Name SizeClass
   | -- | The maximum size of some class.
     GetSizeMax SizeClass
@@ -150,12 +128,6 @@ data SizeOp
   deriving (Eq, Ord, Show)
 
 instance Substitute SizeOp where
-  substituteNames subst (SplitSpace o w i elems_per_thread) =
-    SplitSpace
-      (substituteNames subst o)
-      (substituteNames subst w)
-      (substituteNames subst i)
-      (substituteNames subst elems_per_thread)
   substituteNames substs (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass (substituteNames substs x)
   substituteNames substs (CalcNumGroups w max_num_groups group_size) =
@@ -166,12 +138,6 @@ instance Substitute SizeOp where
   substituteNames _ op = op
 
 instance Rename SizeOp where
-  rename (SplitSpace o w i elems_per_thread) =
-    SplitSpace
-      <$> rename o
-      <*> rename w
-      <*> rename i
-      <*> rename elems_per_thread
   rename (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass <$> rename x
   rename (CalcNumGroups w max_num_groups group_size) =
@@ -183,7 +149,6 @@ instance IsOp SizeOp where
   cheapOp _ = True
 
 instance TypedOp SizeOp where
-  opType SplitSpace {} = pure [Prim int64]
   opType (GetSize _ _) = pure [Prim int64]
   opType (GetSizeMax _) = pure [Prim int64]
   opType CmpSizeLe {} = pure [Prim Bool]
@@ -194,19 +159,11 @@ instance AliasedOp SizeOp where
   consumedInOp _ = mempty
 
 instance FreeIn SizeOp where
-  freeIn' (SplitSpace o w i elems_per_thread) =
-    freeIn' o <> freeIn' [w, i, elems_per_thread]
   freeIn' (CmpSizeLe _ _ x) = freeIn' x
   freeIn' (CalcNumGroups w _ group_size) = freeIn' w <> freeIn' group_size
   freeIn' _ = mempty
 
 instance PP.Pretty SizeOp where
-  ppr (SplitSpace SplitContiguous w i elems_per_thread) =
-    text "split_space"
-      <> parens (commasep [ppr w, ppr i, ppr elems_per_thread])
-  ppr (SplitSpace (SplitStrided stride) w i elems_per_thread) =
-    text "split_space_strided"
-      <> parens (commasep [ppr stride, ppr w, ppr i, ppr elems_per_thread])
   ppr (GetSize name size_class) =
     text "get_size" <> parens (commasep [ppr name, ppr size_class])
   ppr (GetSizeMax size_class) =
@@ -219,18 +176,12 @@ instance PP.Pretty SizeOp where
     text "calc_num_groups" <> parens (commasep [ppr w, ppr max_num_groups, ppr group_size])
 
 instance OpMetrics SizeOp where
-  opMetrics SplitSpace {} = seen "SplitSpace"
   opMetrics GetSize {} = seen "GetSize"
   opMetrics GetSizeMax {} = seen "GetSizeMax"
   opMetrics CmpSizeLe {} = seen "CmpSizeLe"
   opMetrics CalcNumGroups {} = seen "CalcNumGroups"
 
 typeCheckSizeOp :: TC.Checkable rep => SizeOp -> TC.TypeM rep ()
-typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
-  case o of
-    SplitContiguous -> pure ()
-    SplitStrided stride -> TC.require [Prim int64] stride
-  mapM_ (TC.require [Prim int64]) [w, i, elems_per_thread]
 typeCheckSizeOp GetSize {} = pure ()
 typeCheckSizeOp GetSizeMax {} = pure ()
 typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int64] x

@@ -810,26 +810,6 @@ pSizeOp =
               <*> pName
               <* pComma
               <*> pSubExp
-          ),
-      keyword "split_space"
-        *> parens
-          ( GPU.SplitSpace GPU.SplitContiguous
-              <$> pSubExp
-              <* pComma
-              <*> pSubExp
-              <* pComma
-              <*> pSubExp
-          ),
-      keyword "split_space_strided"
-        *> parens
-          ( GPU.SplitSpace
-              <$> (GPU.SplitStrided <$> pSubExp)
-              <* pComma
-              <*> pSubExp
-              <* pComma
-              <*> pSubExp
-              <* pComma
-              <*> pSubExp
           )
     ]
 

@@ -11,8 +11,7 @@ import Futhark.IR.MCMem
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
-instance SizeSubst (MCOp rep op) where
-  opSizeSubst _ _ = mempty
+instance SizeSubst (MCOp rep op)
 
 handleSegOp :: SegOp () MC -> AllocM MC MCMem (SegOp () MCMem)
 handleSegOp op = do

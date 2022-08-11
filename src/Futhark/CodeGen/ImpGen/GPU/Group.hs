@@ -342,8 +342,6 @@ compileGroupExp dest e =
 compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
   kernelAlloc pat size space
-compileGroupOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
-  splitSpace pat o w i elems_per_thread
 compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   compileFlatId lvl space
 
