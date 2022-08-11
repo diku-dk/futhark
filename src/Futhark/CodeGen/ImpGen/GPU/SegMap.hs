@@ -11,6 +11,7 @@ import Control.Monad.Except
 import qualified Futhark.CodeGen.ImpCode.GPU as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.CodeGen.ImpGen.GPU.Group
 import Futhark.IR.GPUMem
 import Futhark.Util.IntegralExp (divUp)
 import Prelude hiding (quot, rem)
