@@ -562,6 +562,257 @@ applyRenamedLambda lam dests args = do
   lam_renamed <- renameLambda lam
   applyLambda lam_renamed dests args
 
+inBlockScan ::
+  KernelConstants ->
+  Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int32 ->
+  Imp.TExp Int32 ->
+  Imp.TExp Bool ->
+  [VName] ->
+  InKernelGen () ->
+  Lambda GPUMem ->
+  InKernelGen ()
+inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
+  skip_threads <- dPrim "skip_threads" int32
+  let actual_params = lambdaParams scan_lam
+      (x_params, y_params) =
+        splitAt (length actual_params `div` 2) actual_params
+      y_to_x =
+        forM_ (zip x_params y_params) $ \(x, y) ->
+          when (primType (paramType x)) $
+            copyDWIM (paramName x) [] (Var (paramName y)) []
+
+  -- Set initial y values
+  sComment "read input for in-block scan" $
+    sWhen active $ do
+      zipWithM_ readInitial y_params arrs
+      -- Since the final result is expected to be in x_params, we may
+      -- need to copy it there for the first thread in the block.
+      sWhen (in_block_id .==. 0) y_to_x
+
+  when array_scan barrier
+
+  let op_to_x in_block_thread_active
+        | Nothing <- seg_flag =
+            sWhen in_block_thread_active $
+              compileBody' x_params $
+                lambdaBody scan_lam
+        | Just flag_true <- seg_flag = do
+            inactive <-
+              dPrimVE "inactive" $ flag_true (ltid32 - tvExp skip_threads) ltid32
+            sWhen (in_block_thread_active .&&. inactive) $
+              forM_ (zip x_params y_params) $ \(x, y) ->
+                copyDWIM (paramName x) [] (Var (paramName y)) []
+            -- The convoluted control flow is to ensure all threads
+            -- hit this barrier (if applicable).
+            when array_scan barrier
+            sWhen in_block_thread_active . sUnless inactive $
+              compileBody' x_params $
+                lambdaBody scan_lam
+
+      maybeBarrier =
+        sWhen
+          (lockstep_width .<=. tvExp skip_threads)
+          barrier
+
+  sComment "in-block scan (hopefully no barriers needed)" $ do
+    skip_threads <-- 1
+    sWhile (tvExp skip_threads .<. block_size) $ do
+      thread_active <-
+        dPrimVE "thread_active" $ tvExp skip_threads .<=. in_block_id .&&. active
+
+      sWhen thread_active . sComment "read operands" $
+        zipWithM_ (readParam (sExt64 $ tvExp skip_threads)) x_params arrs
+      sComment "perform operation" $ op_to_x thread_active
+
+      maybeBarrier
+
+      sWhen thread_active . sComment "write result" $
+        sequence_ $
+          zipWith3 writeResult x_params y_params arrs
+
+      maybeBarrier
+
+      skip_threads <-- tvExp skip_threads * 2
+  where
+    block_id = ltid32 `quot` block_size
+    in_block_id = ltid32 - block_id * block_size
+    ltid32 = kernelLocalThreadId constants
+    ltid = sExt64 ltid32
+    gtid = sExt64 $ kernelGlobalThreadId constants
+    array_scan = not $ all primType $ lambdaReturnType scan_lam
+
+    readInitial p arr
+      | primType $ paramType p =
+          copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+      | otherwise =
+          copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+
+    readParam behind p arr
+      | primType $ paramType p =
+          copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+      | otherwise =
+          copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+
+    writeResult x y arr
+      | primType $ paramType x = do
+          copyDWIM arr [DimFix ltid] (Var $ paramName x) []
+          copyDWIM (paramName y) [] (Var $ paramName x) []
+      | otherwise =
+          copyDWIM (paramName y) [] (Var $ paramName x) []
+
+groupScan ::
+  Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
+  Lambda GPUMem ->
+  [VName] ->
+  InKernelGen ()
+groupScan seg_flag arrs_full_size w lam arrs = do
+  constants <- kernelConstants <$> askEnv
+  renamed_lam <- renameLambda lam
+
+  let ltid32 = kernelLocalThreadId constants
+      ltid = sExt64 ltid32
+      (x_params, y_params) = splitAt (length arrs) $ lambdaParams lam
+
+  dLParams (lambdaParams lam ++ lambdaParams renamed_lam)
+
+  ltid_in_bounds <- dPrimVE "ltid_in_bounds" $ ltid .<. w
+
+  fence <- fenceForArrays arrs
+
+  -- The scan works by splitting the group into blocks, which are
+  -- scanned separately.  Typically, these blocks are smaller than
+  -- the lockstep width, which enables barrier-free execution inside
+  -- them.
+  --
+  -- We hardcode the block size here.  The only requirement is that
+  -- it should not be less than the square root of the group size.
+  -- With 32, we will work on groups of size 1024 or smaller, which
+  -- fits every device Troels has seen.  Still, it would be nicer if
+  -- it were a runtime parameter.  Some day.
+  let block_size = 32
+      simd_width = kernelWaveSize constants
+      block_id = ltid32 `quot` block_size
+      in_block_id = ltid32 - block_id * block_size
+      doInBlockScan seg_flag' active =
+        inBlockScan
+          constants
+          seg_flag'
+          arrs_full_size
+          simd_width
+          block_size
+          active
+          arrs
+          barrier
+      array_scan = not $ all primType $ lambdaReturnType lam
+      barrier
+        | array_scan =
+            sOp $ Imp.Barrier Imp.FenceGlobal
+        | otherwise =
+            sOp $ Imp.Barrier fence
+
+      group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
+
+      writeBlockResult p arr
+        | primType $ paramType p =
+            copyDWIM arr [DimFix $ sExt64 block_id] (Var $ paramName p) []
+        | otherwise =
+            copyDWIM arr [DimFix $ group_offset + sExt64 block_id] (Var $ paramName p) []
+
+      readPrevBlockResult p arr
+        | primType $ paramType p =
+            copyDWIM (paramName p) [] (Var arr) [DimFix $ sExt64 block_id - 1]
+        | otherwise =
+            copyDWIM (paramName p) [] (Var arr) [DimFix $ group_offset + sExt64 block_id - 1]
+
+  doInBlockScan seg_flag ltid_in_bounds lam
+  barrier
+
+  let is_first_block = block_id .==. 0
+  when array_scan $ do
+    sComment "save correct values for first block" $
+      sWhen is_first_block $
+        forM_ (zip x_params arrs) $ \(x, arr) ->
+          unless (primType $ paramType x) $
+            copyDWIM arr [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid] (Var $ paramName x) []
+
+    barrier
+
+  let last_in_block = in_block_id .==. block_size - 1
+  sComment "last thread of block 'i' writes its result to offset 'i'" $
+    sWhen (last_in_block .&&. ltid_in_bounds) $
+      everythingVolatile $
+        zipWithM_ writeBlockResult x_params arrs
+
+  barrier
+
+  let first_block_seg_flag = do
+        flag_true <- seg_flag
+        Just $ \from to ->
+          flag_true (from * block_size + block_size - 1) (to * block_size + block_size - 1)
+  comment
+    "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
+    $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
+
+  barrier
+
+  when array_scan $ do
+    sComment "move correct values for first block back a block" $
+      sWhen is_first_block $
+        forM_ (zip x_params arrs) $ \(x, arr) ->
+          unless (primType $ paramType x) $
+            copyDWIM
+              arr
+              [DimFix $ arrs_full_size + group_offset + ltid]
+              (Var arr)
+              [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid]
+
+    barrier
+
+  no_carry_in <- dPrimVE "no_carry_in" $ is_first_block .||. bNot ltid_in_bounds
+
+  let read_carry_in = sUnless no_carry_in $ do
+        forM_ (zip x_params y_params) $ \(x, y) ->
+          copyDWIM (paramName y) [] (Var (paramName x)) []
+        zipWithM_ readPrevBlockResult x_params arrs
+
+      op_to_x
+        | Nothing <- seg_flag =
+            sUnless no_carry_in $ compileBody' x_params $ lambdaBody lam
+        | Just flag_true <- seg_flag = do
+            inactive <-
+              dPrimVE "inactive" $ flag_true (block_id * block_size - 1) ltid32
+            sUnless no_carry_in . sWhen inactive . forM_ (zip x_params y_params) $ \(x, y) ->
+              copyDWIM (paramName x) [] (Var (paramName y)) []
+            -- The convoluted control flow is to ensure all threads
+            -- hit this barrier (if applicable).
+            when array_scan barrier
+            sUnless no_carry_in $ sUnless inactive $ compileBody' x_params $ lambdaBody lam
+
+      write_final_result =
+        forM_ (zip x_params arrs) $ \(p, arr) ->
+          when (primType $ paramType p) $
+            copyDWIM arr [DimFix ltid] (Var $ paramName p) []
+
+  sComment "carry-in for every block except the first" $ do
+    sComment "read operands" read_carry_in
+    sComment "perform operation" op_to_x
+    sComment "write final result" $ sUnless no_carry_in write_final_result
+
+  barrier
+
+  sComment "restore correct values for first block" $
+    sWhen (is_first_block .&&. ltid_in_bounds) $
+      forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
+        if primType (paramType y)
+          then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
+          else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
+
+  barrier
+
 virtualisedGroupScan ::
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
   Imp.TExp Int32 ->
@@ -591,12 +842,106 @@ virtualisedGroupScan seg_flag w lam arrs = do
 
     sOp $ Imp.ErrorSync Imp.FenceLocal
 
-    groupScan
-      seg_flag
-      (sExt64 w)
-      (tvExp chunk_size)
-      lam
-      arrs_chunks
+    groupScan seg_flag (sExt64 w) (tvExp chunk_size) lam arrs_chunks
+
+groupReduce ::
+  Imp.TExp Int32 ->
+  Lambda GPUMem ->
+  [VName] ->
+  InKernelGen ()
+groupReduce w lam arrs = do
+  offset <- dPrim "offset" int32
+  groupReduceWithOffset offset w lam arrs
+
+groupReduceWithOffset ::
+  TV Int32 ->
+  Imp.TExp Int32 ->
+  Lambda GPUMem ->
+  [VName] ->
+  InKernelGen ()
+groupReduceWithOffset offset w lam arrs = do
+  constants <- kernelConstants <$> askEnv
+
+  let local_tid = kernelLocalThreadId constants
+      global_tid = kernelGlobalThreadId constants
+
+      barrier
+        | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
+        | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
+
+      readReduceArgument param arr
+        | Prim _ <- paramType param = do
+            let i = local_tid + tvExp offset
+            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
+        | otherwise = do
+            let i = global_tid + tvExp offset
+            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
+
+      writeReduceOpResult param arr
+        | Prim _ <- paramType param =
+            copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
+        | otherwise =
+            pure ()
+
+  let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
+
+  skip_waves <- dPrimV "skip_waves" (1 :: Imp.TExp Int32)
+  dLParams $ lambdaParams lam
+
+  offset <-- (0 :: Imp.TExp Int32)
+
+  comment "participating threads read initial accumulator" $
+    sWhen (local_tid .<. w) $
+      zipWithM_ readReduceArgument reduce_acc_params arrs
+
+  let do_reduce = do
+        comment "read array element" $
+          zipWithM_ readReduceArgument reduce_arr_params arrs
+        comment "apply reduction operation" $
+          compileBody' reduce_acc_params $
+            lambdaBody lam
+        comment "write result of operation" $
+          zipWithM_ writeReduceOpResult reduce_acc_params arrs
+      in_wave_reduce = everythingVolatile do_reduce
+
+      wave_size = kernelWaveSize constants
+      group_size = kernelGroupSize constants
+      wave_id = local_tid `quot` wave_size
+      in_wave_id = local_tid - wave_id * wave_size
+      num_waves = (sExt32 group_size + wave_size - 1) `quot` wave_size
+      arg_in_bounds = local_tid + tvExp offset .<. w
+
+      doing_in_wave_reductions =
+        tvExp offset .<. wave_size
+      apply_in_in_wave_iteration =
+        (in_wave_id .&. (2 * tvExp offset - 1)) .==. 0
+      in_wave_reductions = do
+        offset <-- (1 :: Imp.TExp Int32)
+        sWhile doing_in_wave_reductions $ do
+          sWhen
+            (arg_in_bounds .&&. apply_in_in_wave_iteration)
+            in_wave_reduce
+          offset <-- tvExp offset * 2
+
+      doing_cross_wave_reductions =
+        tvExp skip_waves .<. num_waves
+      is_first_thread_in_wave =
+        in_wave_id .==. 0
+      wave_not_skipped =
+        (wave_id .&. (2 * tvExp skip_waves - 1)) .==. 0
+      apply_in_cross_wave_iteration =
+        arg_in_bounds .&&. is_first_thread_in_wave .&&. wave_not_skipped
+      cross_wave_reductions =
+        sWhile doing_cross_wave_reductions $ do
+          barrier
+          offset <-- tvExp skip_waves * wave_size
+          sWhen
+            apply_in_cross_wave_iteration
+            do_reduce
+          skip_waves <-- tvExp skip_waves * 2
+
+  in_wave_reductions
+  cross_wave_reductions
 
 compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
@@ -1208,356 +1553,6 @@ makeAllMemoryGlobal =
           MemVar Nothing entry {entryMemSpace = Imp.Space "global"}
     globalMemory entry =
       entry
-
-groupReduce ::
-  Imp.TExp Int32 ->
-  Lambda GPUMem ->
-  [VName] ->
-  InKernelGen ()
-groupReduce w lam arrs = do
-  offset <- dPrim "offset" int32
-  groupReduceWithOffset offset w lam arrs
-
-groupReduceWithOffset ::
-  TV Int32 ->
-  Imp.TExp Int32 ->
-  Lambda GPUMem ->
-  [VName] ->
-  InKernelGen ()
-groupReduceWithOffset offset w lam arrs = do
-  constants <- kernelConstants <$> askEnv
-
-  let local_tid = kernelLocalThreadId constants
-      global_tid = kernelGlobalThreadId constants
-
-      barrier
-        | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
-        | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
-
-      readReduceArgument param arr
-        | Prim _ <- paramType param = do
-            let i = local_tid + tvExp offset
-            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
-        | otherwise = do
-            let i = global_tid + tvExp offset
-            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
-
-      writeReduceOpResult param arr
-        | Prim _ <- paramType param =
-            copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
-        | otherwise =
-            pure ()
-
-  let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
-
-  skip_waves <- dPrimV "skip_waves" (1 :: Imp.TExp Int32)
-  dLParams $ lambdaParams lam
-
-  offset <-- (0 :: Imp.TExp Int32)
-
-  comment "participating threads read initial accumulator" $
-    sWhen (local_tid .<. w) $
-      zipWithM_ readReduceArgument reduce_acc_params arrs
-
-  let do_reduce = do
-        comment "read array element" $
-          zipWithM_ readReduceArgument reduce_arr_params arrs
-        comment "apply reduction operation" $
-          compileBody' reduce_acc_params $
-            lambdaBody lam
-        comment "write result of operation" $
-          zipWithM_ writeReduceOpResult reduce_acc_params arrs
-      in_wave_reduce = everythingVolatile do_reduce
-
-      wave_size = kernelWaveSize constants
-      group_size = kernelGroupSize constants
-      wave_id = local_tid `quot` wave_size
-      in_wave_id = local_tid - wave_id * wave_size
-      num_waves = (sExt32 group_size + wave_size - 1) `quot` wave_size
-      arg_in_bounds = local_tid + tvExp offset .<. w
-
-      doing_in_wave_reductions =
-        tvExp offset .<. wave_size
-      apply_in_in_wave_iteration =
-        (in_wave_id .&. (2 * tvExp offset - 1)) .==. 0
-      in_wave_reductions = do
-        offset <-- (1 :: Imp.TExp Int32)
-        sWhile doing_in_wave_reductions $ do
-          sWhen
-            (arg_in_bounds .&&. apply_in_in_wave_iteration)
-            in_wave_reduce
-          offset <-- tvExp offset * 2
-
-      doing_cross_wave_reductions =
-        tvExp skip_waves .<. num_waves
-      is_first_thread_in_wave =
-        in_wave_id .==. 0
-      wave_not_skipped =
-        (wave_id .&. (2 * tvExp skip_waves - 1)) .==. 0
-      apply_in_cross_wave_iteration =
-        arg_in_bounds .&&. is_first_thread_in_wave .&&. wave_not_skipped
-      cross_wave_reductions =
-        sWhile doing_cross_wave_reductions $ do
-          barrier
-          offset <-- tvExp skip_waves * wave_size
-          sWhen
-            apply_in_cross_wave_iteration
-            do_reduce
-          skip_waves <-- tvExp skip_waves * 2
-
-  in_wave_reductions
-  cross_wave_reductions
-
-groupScan ::
-  Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  Lambda GPUMem ->
-  [VName] ->
-  InKernelGen ()
-groupScan seg_flag arrs_full_size w lam arrs = do
-  constants <- kernelConstants <$> askEnv
-  renamed_lam <- renameLambda lam
-
-  let ltid32 = kernelLocalThreadId constants
-      ltid = sExt64 ltid32
-      (x_params, y_params) = splitAt (length arrs) $ lambdaParams lam
-
-  dLParams (lambdaParams lam ++ lambdaParams renamed_lam)
-
-  ltid_in_bounds <- dPrimVE "ltid_in_bounds" $ ltid .<. w
-
-  fence <- fenceForArrays arrs
-
-  -- The scan works by splitting the group into blocks, which are
-  -- scanned separately.  Typically, these blocks are smaller than
-  -- the lockstep width, which enables barrier-free execution inside
-  -- them.
-  --
-  -- We hardcode the block size here.  The only requirement is that
-  -- it should not be less than the square root of the group size.
-  -- With 32, we will work on groups of size 1024 or smaller, which
-  -- fits every device Troels has seen.  Still, it would be nicer if
-  -- it were a runtime parameter.  Some day.
-  let block_size = 32
-      simd_width = kernelWaveSize constants
-      block_id = ltid32 `quot` block_size
-      in_block_id = ltid32 - block_id * block_size
-      doInBlockScan seg_flag' active =
-        inBlockScan
-          constants
-          seg_flag'
-          arrs_full_size
-          simd_width
-          block_size
-          active
-          arrs
-          barrier
-      array_scan = not $ all primType $ lambdaReturnType lam
-      barrier
-        | array_scan =
-            sOp $ Imp.Barrier Imp.FenceGlobal
-        | otherwise =
-            sOp $ Imp.Barrier fence
-
-      group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
-
-      writeBlockResult p arr
-        | primType $ paramType p =
-            copyDWIM arr [DimFix $ sExt64 block_id] (Var $ paramName p) []
-        | otherwise =
-            copyDWIM arr [DimFix $ group_offset + sExt64 block_id] (Var $ paramName p) []
-
-      readPrevBlockResult p arr
-        | primType $ paramType p =
-            copyDWIM (paramName p) [] (Var arr) [DimFix $ sExt64 block_id - 1]
-        | otherwise =
-            copyDWIM (paramName p) [] (Var arr) [DimFix $ group_offset + sExt64 block_id - 1]
-
-  doInBlockScan seg_flag ltid_in_bounds lam
-  barrier
-
-  let is_first_block = block_id .==. 0
-  when array_scan $ do
-    sComment "save correct values for first block" $
-      sWhen is_first_block $
-        forM_ (zip x_params arrs) $ \(x, arr) ->
-          unless (primType $ paramType x) $
-            copyDWIM arr [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid] (Var $ paramName x) []
-
-    barrier
-
-  let last_in_block = in_block_id .==. block_size - 1
-  sComment "last thread of block 'i' writes its result to offset 'i'" $
-    sWhen (last_in_block .&&. ltid_in_bounds) $
-      everythingVolatile $
-        zipWithM_ writeBlockResult x_params arrs
-
-  barrier
-
-  let first_block_seg_flag = do
-        flag_true <- seg_flag
-        Just $ \from to ->
-          flag_true (from * block_size + block_size - 1) (to * block_size + block_size - 1)
-  comment
-    "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
-    $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
-
-  barrier
-
-  when array_scan $ do
-    sComment "move correct values for first block back a block" $
-      sWhen is_first_block $
-        forM_ (zip x_params arrs) $ \(x, arr) ->
-          unless (primType $ paramType x) $
-            copyDWIM
-              arr
-              [DimFix $ arrs_full_size + group_offset + ltid]
-              (Var arr)
-              [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid]
-
-    barrier
-
-  no_carry_in <- dPrimVE "no_carry_in" $ is_first_block .||. bNot ltid_in_bounds
-
-  let read_carry_in = sUnless no_carry_in $ do
-        forM_ (zip x_params y_params) $ \(x, y) ->
-          copyDWIM (paramName y) [] (Var (paramName x)) []
-        zipWithM_ readPrevBlockResult x_params arrs
-
-      op_to_x
-        | Nothing <- seg_flag =
-            sUnless no_carry_in $ compileBody' x_params $ lambdaBody lam
-        | Just flag_true <- seg_flag = do
-            inactive <-
-              dPrimVE "inactive" $ flag_true (block_id * block_size - 1) ltid32
-            sUnless no_carry_in . sWhen inactive . forM_ (zip x_params y_params) $ \(x, y) ->
-              copyDWIM (paramName x) [] (Var (paramName y)) []
-            -- The convoluted control flow is to ensure all threads
-            -- hit this barrier (if applicable).
-            when array_scan barrier
-            sUnless no_carry_in $ sUnless inactive $ compileBody' x_params $ lambdaBody lam
-
-      write_final_result =
-        forM_ (zip x_params arrs) $ \(p, arr) ->
-          when (primType $ paramType p) $
-            copyDWIM arr [DimFix ltid] (Var $ paramName p) []
-
-  sComment "carry-in for every block except the first" $ do
-    sComment "read operands" read_carry_in
-    sComment "perform operation" op_to_x
-    sComment "write final result" $ sUnless no_carry_in write_final_result
-
-  barrier
-
-  sComment "restore correct values for first block" $
-    sWhen (is_first_block .&&. ltid_in_bounds) $
-      forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
-        if primType (paramType y)
-          then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
-          else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
-
-  barrier
-
-inBlockScan ::
-  KernelConstants ->
-  Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int32 ->
-  Imp.TExp Int32 ->
-  Imp.TExp Bool ->
-  [VName] ->
-  InKernelGen () ->
-  Lambda GPUMem ->
-  InKernelGen ()
-inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
-  skip_threads <- dPrim "skip_threads" int32
-  let actual_params = lambdaParams scan_lam
-      (x_params, y_params) =
-        splitAt (length actual_params `div` 2) actual_params
-      y_to_x =
-        forM_ (zip x_params y_params) $ \(x, y) ->
-          when (primType (paramType x)) $
-            copyDWIM (paramName x) [] (Var (paramName y)) []
-
-  -- Set initial y values
-  sComment "read input for in-block scan" $
-    sWhen active $ do
-      zipWithM_ readInitial y_params arrs
-      -- Since the final result is expected to be in x_params, we may
-      -- need to copy it there for the first thread in the block.
-      sWhen (in_block_id .==. 0) y_to_x
-
-  when array_scan barrier
-
-  let op_to_x in_block_thread_active
-        | Nothing <- seg_flag =
-            sWhen in_block_thread_active $
-              compileBody' x_params $
-                lambdaBody scan_lam
-        | Just flag_true <- seg_flag = do
-            inactive <-
-              dPrimVE "inactive" $ flag_true (ltid32 - tvExp skip_threads) ltid32
-            sWhen (in_block_thread_active .&&. inactive) $
-              forM_ (zip x_params y_params) $ \(x, y) ->
-                copyDWIM (paramName x) [] (Var (paramName y)) []
-            -- The convoluted control flow is to ensure all threads
-            -- hit this barrier (if applicable).
-            when array_scan barrier
-            sWhen in_block_thread_active . sUnless inactive $
-              compileBody' x_params $
-                lambdaBody scan_lam
-
-      maybeBarrier =
-        sWhen
-          (lockstep_width .<=. tvExp skip_threads)
-          barrier
-
-  sComment "in-block scan (hopefully no barriers needed)" $ do
-    skip_threads <-- 1
-    sWhile (tvExp skip_threads .<. block_size) $ do
-      thread_active <-
-        dPrimVE "thread_active" $ tvExp skip_threads .<=. in_block_id .&&. active
-
-      sWhen thread_active . sComment "read operands" $
-        zipWithM_ (readParam (sExt64 $ tvExp skip_threads)) x_params arrs
-      sComment "perform operation" $ op_to_x thread_active
-
-      maybeBarrier
-
-      sWhen thread_active . sComment "write result" $
-        sequence_ $
-          zipWith3 writeResult x_params y_params arrs
-
-      maybeBarrier
-
-      skip_threads <-- tvExp skip_threads * 2
-  where
-    block_id = ltid32 `quot` block_size
-    in_block_id = ltid32 - block_id * block_size
-    ltid32 = kernelLocalThreadId constants
-    ltid = sExt64 ltid32
-    gtid = sExt64 $ kernelGlobalThreadId constants
-    array_scan = not $ all primType $ lambdaReturnType scan_lam
-
-    readInitial p arr
-      | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
-      | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
-
-    readParam behind p arr
-      | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
-      | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
-
-    writeResult x y arr
-      | primType $ paramType x = do
-          copyDWIM arr [DimFix ltid] (Var $ paramName x) []
-          copyDWIM (paramName y) [] (Var $ paramName x) []
-      | otherwise =
-          copyDWIM (paramName y) [] (Var $ paramName x) []
 
 simpleKernelGroups ::
   Imp.TExp Int64 ->
