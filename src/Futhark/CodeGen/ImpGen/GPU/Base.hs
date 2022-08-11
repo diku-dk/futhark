@@ -28,7 +28,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     kernelLoop,
     groupCoverSpace,
     fenceForArrays,
-    splitSpace,
     updateAcc,
 
     -- * Host-level bulk operations
@@ -133,21 +132,6 @@ kernelAlloc (Pat [mem]) _ _ =
   compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
 kernelAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
-
-splitSpace ::
-  Pat LetDecMem ->
-  SplitOrdering ->
-  SubExp ->
-  SubExp ->
-  SubExp ->
-  ImpM rep r op ()
-splitSpace (Pat [size]) o w i elems_per_thread = do
-  num_elements <- Imp.elements . TPrimExp <$> toExp w
-  let i' = pe64 i
-  elems_per_thread' <- Imp.elements . TPrimExp <$> toExp elems_per_thread
-  computeThreadChunkSize o i' elems_per_thread' num_elements (mkTV (patElemName size) int64)
-splitSpace pat _ _ _ _ =
-  error $ "Invalid target for splitSpace: " ++ pretty pat
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
 updateAcc acc is vs = sComment "UpdateAcc" $ do
@@ -618,8 +602,6 @@ groupReduceWithOffset offset w lam arrs = do
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
   kernelAlloc pat size space
-compileThreadOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
-  splitSpace pat o w i elems_per_thread
 compileThreadOp pat _ =
   compilerBugS $ "compileThreadOp: cannot compile rhs of binding " ++ pretty pat
 

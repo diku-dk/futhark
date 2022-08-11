@@ -13,8 +13,7 @@ import Futhark.IR.GPUMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations
 
-instance SizeSubst (SegOp lvl rep) where
-  opSizeSubst _ _ = mempty
+instance SizeSubst (SegOp lvl rep)
 
 allocInKernelBody ::
   Allocable fromrep torep inner =>
