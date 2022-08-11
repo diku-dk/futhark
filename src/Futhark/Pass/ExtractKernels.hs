@@ -672,9 +672,11 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
 
   types <- askScope
 
+  let only_intra = onlyExploitIntra (stmAuxAttrs aux)
+      may_intra = worthIntraGroup lam && mayExploitIntra attrs
+
   intra <-
-    if onlyExploitIntra (stmAuxAttrs aux)
-      || (worthIntraGroup lam && mayExploitIntra attrs)
+    if only_intra || may_intra
       then flip runReaderT types $ intraGroupParallelise loopnest lam
       else pure Nothing
 
@@ -684,7 +686,8 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
       kernelAlternatives pat seq_body []
     --
     Nothing
-      | Just m <- mkSeqAlts -> do
+      | not only_intra,
+        Just m <- mkSeqAlts -> do
           (outer_suff, outer_suff_key, outer_suff_stms, seq_body) <- m
           par_body <-
             renameBody
@@ -698,7 +701,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
           kernelAlternatives pat par_body []
     --
     Just intra'@(_, _, log, intra_prelude, intra_stms)
-      | onlyExploitIntra attrs -> do
+      | only_intra -> do
           addLog log
           group_par_body <- renameBody $ mkBody intra_stms res
           (intra_prelude <>) <$> kernelAlternatives pat group_par_body []
