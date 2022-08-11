@@ -12,7 +12,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     HostEnv (..),
     Target (..),
     KernelEnv (..),
-    computeThreadChunkSize,
     groupReduce,
     groupScan,
     groupLoop,
@@ -881,45 +880,6 @@ isConstExp vtable size = do
     hasExp (AccVar e _) = e
     hasExp (ScalarVar e _) = e
     hasExp (MemVar e _) = e
-
-computeThreadChunkSize ::
-  SplitOrdering ->
-  Imp.TExp Int64 ->
-  Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  TV Int64 ->
-  ImpM rep r op ()
-computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var =
-  chunk_var
-    <-- sMin64
-      (Imp.unCount elements_per_thread)
-      ((Imp.unCount num_elements - thread_index) `divUp` pe64 stride)
-computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elements chunk_var = do
-  starting_point <-
-    dPrimV "starting_point" $
-      thread_index * Imp.unCount elements_per_thread
-  remaining_elements <-
-    dPrimV "remaining_elements" $
-      Imp.unCount num_elements - tvExp starting_point
-
-  let no_remaining_elements = tvExp remaining_elements .<=. 0
-      beyond_bounds = Imp.unCount num_elements .<=. tvExp starting_point
-
-  sIf
-    (no_remaining_elements .||. beyond_bounds)
-    (chunk_var <-- 0)
-    ( sIf
-        is_last_thread
-        (chunk_var <-- Imp.unCount last_thread_elements)
-        (chunk_var <-- Imp.unCount elements_per_thread)
-    )
-  where
-    last_thread_elements =
-      num_elements - Imp.elements thread_index * elements_per_thread
-    is_last_thread =
-      Imp.unCount num_elements
-        .<. (thread_index + 1)
-          * Imp.unCount elements_per_thread
 
 kernelInitialisationSimple ::
   Count NumGroups SubExp ->
