@@ -84,8 +84,6 @@ module Futhark.Construct
     eCopy,
     eBody,
     eLambda,
-    eRoundToMultipleOf,
-    eSliceArray,
     eBlank,
     eAll,
     eAny,
@@ -386,39 +384,6 @@ eLambda lam args = do
   bodyBind $ lambdaBody lam
   where
     bindParam param arg = letBindNames [paramName param] =<< arg
-
--- | @eRoundToMultipleOf t x d@ produces an expression that rounds the
--- integer expression @x@ upwards to be a multiple of @d@, with @t@
--- being the integer type of the expressions.
-eRoundToMultipleOf ::
-  MonadBuilder m =>
-  IntType ->
-  m (Exp (Rep m)) ->
-  m (Exp (Rep m)) ->
-  m (Exp (Rep m))
-eRoundToMultipleOf t x d =
-  ePlus x (eMod (eMinus d (eMod x d)) d)
-  where
-    eMod = eBinOp (SMod t Unsafe)
-    eMinus = eBinOp (Sub t OverflowWrap)
-    ePlus = eBinOp (Add t OverflowWrap)
-
--- | Construct an 'Index' expressions that slices an array with unit stride.
-eSliceArray ::
-  MonadBuilder m =>
-  Int ->
-  VName ->
-  m (Exp (Rep m)) ->
-  m (Exp (Rep m)) ->
-  m (Exp (Rep m))
-eSliceArray d arr i n = do
-  arr_t <- lookupType arr
-  let skips = map (slice (constant (0 :: Int64))) $ take d $ arrayDims arr_t
-  i' <- letSubExp "slice_i" =<< i
-  n' <- letSubExp "slice_n" =<< n
-  pure $ BasicOp $ Index arr $ fullSlice arr_t $ skips ++ [slice i' n']
-  where
-    slice j m = DimSlice j m (constant (1 :: Int64))
 
 -- | @eInBoundsForDim w i@ produces @0 <= i < w@.
 eDimInBounds :: MonadBuilder m => m (Exp (Rep m)) -> m (Exp (Rep m)) -> m (Exp (Rep m))

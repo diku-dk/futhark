@@ -13,7 +13,6 @@
 module Futhark.Optimise.Fusion.Composing
   ( fuseMaps,
     fuseRedomap,
-    mergeReduceOps,
   )
 where
 
@@ -279,14 +278,3 @@ fuseRedomap
                   ++ extra_map_ts
             }
      in (res_lam', new_inp)
-
-mergeReduceOps :: Lambda rep -> Lambda rep -> Lambda rep
-mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
-  let body' =
-        Body
-          (bodyDec bdy1)
-          (bodyStms bdy1 <> bodyStms bdy2)
-          (bodyResult bdy1 ++ bodyResult bdy2)
-      (len1, len2) = (length rtp1, length rtp2)
-      par' = take len1 par1 ++ take len2 par2 ++ drop len1 par1 ++ drop len2 par2
-   in Lambda par' body' (rtp1 ++ rtp2)
