@@ -15,7 +15,7 @@ pkgs.stdenv.mkDerivation {
       git-annex
       haskell.compiler.ghc924
       parallel
-      haskellPackages.weeder
+      haskell.packages.ghc924.weeder
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
