@@ -475,11 +475,10 @@ Such an array will take up no space at runtime.
 "Parameter *x* used as size would go out of scope."
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This error tends to happen because higher-order functions are used in
-a way that causes a size requirement to become impossible to
-constrait.  Real programs that run into this issue are quite complex,
-but to illustrate the problem, consider the following contrived
-function:
+This error tends to happen when higher-order functions are used in a
+way that causes a size requirement to become impossible to express.
+Real programs that encounter this issue tend to be complicated, but to
+illustrate the problem, consider the following contrived function:
 
 .. code-block:: futhark
 
