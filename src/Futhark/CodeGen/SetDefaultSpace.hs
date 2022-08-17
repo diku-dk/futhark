@@ -86,6 +86,8 @@ setCodeSpace space (While e body) =
   While e $ setCodeSpace space body
 setCodeSpace space (If e c1 c2) =
   If e (setCodeSpace space c1) (setCodeSpace space c2)
+setCodeSpace space (Switch cond cases defcase) =
+  Switch cond (map (fmap $ setCodeSpace space) cases) (setCodeSpace space defcase)
 setCodeSpace space (Comment s c) =
   Comment s $ setCodeSpace space c
 setCodeSpace _ Skip =

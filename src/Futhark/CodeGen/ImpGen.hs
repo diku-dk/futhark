@@ -133,10 +133,11 @@ import Control.Parallel.Strategies
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
-import Data.List (find)
+import Data.List (find, sortBy)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import Data.Ord (comparing)
 import qualified Data.Set as S
 import Data.String
 import Futhark.CodeGen.ImpCode
@@ -810,6 +811,23 @@ defCompileExp ::
   Pat (LetDec rep) ->
   Exp rep ->
   ImpM rep r op ()
+defCompileExp pat (Match [se] cases defbody _)
+  | Just cases' <- mapM intCase cases,
+    length cases > 1 = do
+      se' <- toExp se
+      cases'' <-
+        mapM (traverse $ collect . compileBody pat) $
+          sortBy (comparing fst) cases'
+      defbody' <- collect $ compileBody pat defbody
+      emit $ Imp.Switch se' cases'' defbody'
+  where
+    intCase (Case [Just (IntValue (Int8Value x))] body) =
+      Just (fromIntegral x, body)
+    intCase (Case [Just (IntValue (Int16Value x))] body) =
+      Just (fromIntegral x, body)
+    intCase (Case [Just (IntValue (Int32Value x))] body) =
+      Just (fromIntegral x, body)
+    intCase _ = Nothing
 defCompileExp pat (Match ses cases defbody _) =
   foldl f (compileBody pat defbody) cases
   where

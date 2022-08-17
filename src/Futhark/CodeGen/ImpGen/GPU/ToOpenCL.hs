@@ -852,6 +852,8 @@ typesInCode (Call _ _ es) = mconcat $ map typesInArg es
     typesInArg (ExpArg e) = typesInExp e
 typesInCode (If (TPrimExp e) c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
+typesInCode (Switch cond cases defcase) =
+  typesInExp cond <> foldMap typesInCode (defcase : map snd cases)
 typesInCode (Assert e _ _) = typesInExp e
 typesInCode (Comment _ c) = typesInCode c
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v

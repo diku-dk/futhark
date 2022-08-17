@@ -300,6 +300,9 @@ data Code a
     Call [VName] Name [Arg]
   | -- | Conditional execution.
     If (TExp Bool) (Code a) (Code a)
+  | -- | Switching based on an integer value.  Last body is the
+    -- default branch.
+    Switch Exp [(Int32, Code a)] (Code a)
   | -- | Assert that something must be true.  Should it turn
     -- out not to be true, then report a failure along with
     -- the given error message.
@@ -357,6 +360,7 @@ lexicalMemoryUsage func =
 
     go f (x :>>: y) = f x <> f y
     go f (If _ x y) = f x <> f y
+    go f (Switch _ cases defcase) = foldMap f $ defcase : map snd cases
     go f (For _ _ x) = f x
     go f (While _ x) = f x
     go f (Comment _ x) = f x
@@ -380,6 +384,7 @@ lexicalMemoryUsage func =
 calledFuncs :: Code a -> S.Set Name
 calledFuncs (x :>>: y) = calledFuncs x <> calledFuncs y
 calledFuncs (If _ x y) = calledFuncs x <> calledFuncs y
+calledFuncs (Switch _ cases defcase) = foldMap calledFuncs $ defcase : map snd cases
 calledFuncs (For _ _ x) = calledFuncs x
 calledFuncs (While _ x) = calledFuncs x
 calledFuncs (Comment _ x) = calledFuncs x
@@ -577,6 +582,13 @@ instance Pretty op => Pretty (Code op) where
         If {} -> ppr fbranch
         _ ->
           "{" </> indent 2 (ppr fbranch) </> "}"
+  ppr (Switch cond cases defcase) =
+    "switch" <+> ppr cond </> stack (map pprCase cases ++ [defcase'])
+    where
+      pprCase (k, code) =
+        "case" <+> ppr k <+> "{" </> indent 2 (ppr code) </> "}"
+      defcase' =
+        "default" <+> "{" </> indent 2 (ppr defcase) </> "}"
   ppr (Call dests fname args) =
     commasep (map ppr dests)
       <+> "<-"
@@ -631,6 +643,8 @@ instance Traversable Code where
     While cond <$> traverse f code
   traverse f (If cond x y) =
     If cond <$> traverse f x <*> traverse f y
+  traverse f (Switch cond cases defcase) =
+    Switch cond <$> traverse (traverse (traverse f)) cases <*> traverse f defcase
   traverse f (Op kernel) =
     Op <$> f kernel
   traverse _ Skip =
@@ -673,6 +687,7 @@ declaredIn (DeclareMem name _) = oneName name
 declaredIn (DeclareScalar name _ _) = oneName name
 declaredIn (DeclareArray name _ _ _) = oneName name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
+declaredIn (Switch _ cases defcase) = foldMap declaredIn $ defcase : map snd cases
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
@@ -733,6 +748,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' dests <> freeIn' args
   freeIn' (If cond t f) =
     freeIn' cond <> freeIn' t <> freeIn' f
+  freeIn' (Switch cond cases defcase) =
+    freeIn' cond <> foldMap freeIn' (defcase : map snd cases)
   freeIn' (Assert e msg _) =
     freeIn' e <> foldMap freeIn' msg
   freeIn' (Op op) =

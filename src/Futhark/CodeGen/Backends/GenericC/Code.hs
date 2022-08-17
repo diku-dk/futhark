@@ -235,6 +235,20 @@ compileCode (If cond tbranch fbranch) = do
       [C.cstm|if ($exp:cond') { $items:tbranch' } else $stm:x|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
+compileCode (Switch cond cases defcase) = do
+  cond' <- compileExp cond
+  cases' <- collect $ mapM_ onCase cases
+  defcase' <- collect $ compileCode defcase
+  stm
+    [C.cstm|switch ($exp:cond') {
+              $items:cases'
+              default: {$items:defcase'}
+            }|]
+  where
+    onCase (val, code) = do
+      code' <- collect $ compileCode code
+      stm [C.cstm|case $int:val: {$items:code'}|]
+      stm [C.cstm|break;|]
 compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
   join $
     copyMemoryDefaultSpace
