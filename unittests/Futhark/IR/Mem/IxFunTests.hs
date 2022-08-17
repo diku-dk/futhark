@@ -5,7 +5,7 @@ module Futhark.IR.Mem.IxFunTests
   )
 where
 
-import qualified Data.List as DL
+import qualified Data.List as L
 import qualified Futhark.IR.Mem.IxFun as IxFunLMAD
 import qualified Futhark.IR.Mem.IxFun.Alg as IxFunAlg
 import Futhark.IR.Mem.IxFunWrapper
@@ -30,7 +30,7 @@ instance IE.IntegralExp Int where
 allPoints :: [Int] -> [[Int]]
 allPoints dims =
   let total = product dims
-      strides = drop 1 $ DL.reverse $ scanl (*) 1 $ DL.reverse dims
+      strides = drop 1 $ L.reverse $ scanl (*) 1 $ L.reverse dims
    in map (unflatInd strides) [0 .. total - 1]
   where
     unflatInd :: [Int] -> Int -> [Int]
