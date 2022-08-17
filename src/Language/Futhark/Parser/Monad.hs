@@ -246,6 +246,9 @@ lexer cont = do
             xs -> do
               putTokens (xs, pos')
               lexer cont
+    (L _ (COMMENT _) : xs) -> do
+      putTokens (xs, pos)
+      lexer cont
     (x : xs) -> do
       putTokens (xs, pos)
       cont x
