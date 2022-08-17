@@ -54,6 +54,7 @@ import Prelude hiding (exponent)
 -- with a source position.
 data Token
   = ID Name
+  | COMMENT T.Text
   | INDEXING Name
   | QUALINDEXING [Name] Name
   | QUALPAREN [Name] Name

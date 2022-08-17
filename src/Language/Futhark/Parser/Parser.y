@@ -39,7 +39,7 @@ import Data.Monoid
 import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Prop
 import Language.Futhark.Pretty
-import Language.Futhark.Parser.Lexer
+import Language.Futhark.Parser.Lexer (Token(..))
 import Futhark.Util.Pretty
 import Futhark.Util.Loc
 import Language.Futhark.Parser.Monad
