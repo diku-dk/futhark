@@ -128,8 +128,7 @@ def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 -- **Span:** *O(n ✕ W(op))* in the worst case (all updates to same
 -- position), but *O(W(op))* in the best case.
 --
--- In practice, the *O(n)* behaviour only occurs if *m* is also very
--- large.
+-- In practice, linear span only occurs if *k* is also very large.
 def hist 'a [n] (op: a -> a -> a) (ne: a) (k: i64) (is: [n]i64) (as: [n]a) : *[k]a =
   intrinsics.hist_1d (1, map (\_ -> ne) (0..1..<k), op, ne, is, as)
 
@@ -142,8 +141,7 @@ def hist 'a [n] (op: a -> a -> a) (ne: a) (k: i64) (is: [n]i64) (as: [n]a) : *[k
 -- **Span:** *O(n ✕ W(op))* in the worst case (all updates to same
 -- position), but *O(W(op))* in the best case.
 --
--- In practice, the *O(n)* behaviour only occurs if *m* is also very
--- large.
+-- In practice, linear span only occurs if *k* is also very large.
 def reduce_by_index 'a [k] [n] (dest : *[k]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[k]a =
   intrinsics.hist_1d (1, dest, f, ne, is, as)
 
