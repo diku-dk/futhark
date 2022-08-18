@@ -24,7 +24,6 @@ import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.Error (compilerLimitationS)
-import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (prettyOneLine, prettyText)
@@ -787,20 +786,17 @@ inKernelOperations mode body =
               then [C.citems|return 1;|]
               else [C.citems|return;|]
 
-    callInKernel dests fname args
-      | isBuiltInFunction fname =
-          GC.opsCall GC.defaultOperations dests fname args
-      | otherwise = do
-          let out_args = [[C.cexp|&$id:d|] | d <- dests]
-              args' =
-                [C.cexp|global_failure|]
-                  : [C.cexp|global_failure_args|]
-                  : out_args
-                  ++ args
+    callInKernel dests fname args = do
+      let out_args = [[C.cexp|&$id:d|] | d <- dests]
+          args' =
+            [C.cexp|global_failure|]
+              : [C.cexp|global_failure_args|]
+              : out_args
+              ++ args
 
-          what_next <- whatNext
+      what_next <- whatNext
 
-          GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
+      GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
 
     errorInKernel msg@(ErrorMsg parts) backtrace = do
       n <- length . kernelFailures <$> GC.getUserState

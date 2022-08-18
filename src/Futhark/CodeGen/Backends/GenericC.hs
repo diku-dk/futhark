@@ -38,7 +38,6 @@ import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, halfH, lockH, timingH, utilH)
-import Futhark.IR.Prop (isBuiltInFunction)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (prettyText)
@@ -49,15 +48,8 @@ import NeatInterpolation (untrimming)
 defCall :: CallCompiler op s
 defCall dests fname args = do
   let out_args = [[C.cexp|&$id:d|] | d <- dests]
-      args'
-        | isBuiltInFunction fname = args
-        | otherwise = [C.cexp|ctx|] : out_args ++ args
-  case dests of
-    [dest]
-      | isBuiltInFunction fname ->
-          stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
-    _ ->
-      item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; goto cleanup; }|]
+      args' = [C.cexp|ctx|] : out_args ++ args
+  item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; goto cleanup; }|]
 
 defError :: ErrorCompiler op s
 defError msg stacktrace = do

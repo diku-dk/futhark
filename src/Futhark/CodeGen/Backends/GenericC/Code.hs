@@ -21,6 +21,7 @@ import Data.Loc
 import Data.Maybe
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.ImpCode
+import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
@@ -134,6 +135,37 @@ assignmentOperator Sub {} = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
 assignmentOperator Mul {} = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
 assignmentOperator _ = Nothing
 
+compileRead ::
+  VName ->
+  Count u (TPrimExp t VName) ->
+  PrimType ->
+  Space ->
+  Volatility ->
+  CompilerM op s C.Exp
+compileRead _ _ Unit _ _ =
+  pure [C.cexp|$exp:(UnitValue)|]
+compileRead src (Count iexp) restype DefaultSpace vol = do
+  src' <- rawMem src
+  fmap (fromStorage restype) $
+    derefPointer src'
+      <$> compileExp (untyped iexp)
+      <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
+compileRead src (Count iexp) restype (Space space) vol =
+  fmap (fromStorage restype) . join $
+    asks (opsReadScalar . envOperations)
+      <*> rawMem src
+      <*> compileExp (untyped iexp)
+      <*> pure (primStorageType restype)
+      <*> pure space
+      <*> pure vol
+compileRead src (Count iexp) _ ScalarSpace {} _ = do
+  iexp' <- compileExp $ untyped iexp
+  pure [C.cexp|$id:src[$exp:iexp']|]
+
+compileArg :: Arg -> CompilerM op s C.Exp
+compileArg (MemArg m) = pure [C.cexp|$exp:m|]
+compileArg (ExpArg e) = compileExp e
+
 compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
   join $ asks (opsCompiler . envOperations) <*> pure op
@@ -174,6 +206,19 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
           let ct = primTypeToCType t
           e' <- compileExp e
           item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
+          go code
+    go (DeclareScalar name vol t : Read dest src i restype space read_vol : code)
+      | name == dest = do
+          let ct = primTypeToCType t
+          e <- compileRead src i restype space read_vol
+          item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e;|]
+          go code
+    go (DeclareScalar name vol t : Call [dest] fname args : code)
+      | name == dest,
+        isBuiltInFunction fname = do
+          let ct = primTypeToCType t
+          args' <- mapM compileArg args
+          item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $id:(funName fname)($args:args');|]
           go code
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
@@ -276,29 +321,9 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
       <*> pure space
       <*> pure vol
       <*> (toStorage elemtype <$> compileExp elemexp)
-compileCode (Read x _ _ Unit __ _) =
-  stm [C.cstm|$id:x = $exp:(UnitValue);|]
-compileCode (Read x src (Count iexp) restype DefaultSpace vol) = do
-  src' <- rawMem src
-  e <-
-    fmap (fromStorage restype) $
-      derefPointer src'
-        <$> compileExp (untyped iexp)
-        <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
+compileCode (Read x src i restype space vol) = do
+  e <- compileRead src i restype space vol
   stm [C.cstm|$id:x = $exp:e;|]
-compileCode (Read x src (Count iexp) restype (Space space) vol) = do
-  e <-
-    fmap (fromStorage restype) . join $
-      asks (opsReadScalar . envOperations)
-        <*> rawMem src
-        <*> compileExp (untyped iexp)
-        <*> pure (primStorageType restype)
-        <*> pure space
-        <*> pure vol
-  stm [C.cstm|$id:x = $exp:e;|]
-compileCode (Read x src (Count iexp) _ ScalarSpace {} _) = do
-  iexp' <- compileExp $ untyped iexp
-  stm [C.cstm|$id:x = $id:src[$exp:iexp'];|]
 compileCode (DeclareMem name space) =
   declMem name space
 compileCode (DeclareScalar name vol t) = do
@@ -345,12 +370,13 @@ compileCode (SetScalar dest src) = do
   stm [C.cstm|$id:dest = $exp:src';|]
 compileCode (SetMem dest src space) =
   setMem dest src space
+compileCode (Call [dest] fname args)
+  | isBuiltInFunction fname = do
+      args' <- mapM compileArg args
+      stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
 compileCode (Call dests fname args) =
   join $
     asks (opsCall . envOperations)
       <*> pure dests
       <*> pure fname
       <*> mapM compileArg args
-  where
-    compileArg (MemArg m) = pure [C.cexp|$exp:m|]
-    compileArg (ExpArg e) = compileExp e
