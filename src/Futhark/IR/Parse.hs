@@ -37,7 +37,6 @@ import qualified Futhark.IR.SOACS.SOAC as SOAC
 import qualified Futhark.IR.SegOp as SegOp
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
-import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Primitive.Parse
 import Text.Megaparsec
 import Text.Megaparsec.Char hiding (space)
@@ -45,8 +44,9 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 type Parser = Parsec Void T.Text
 
-pStringLiteral :: Parser String
-pStringLiteral = lexeme $ char '"' >> manyTill L.charLiteral (char '"')
+pStringLiteral :: Parser T.Text
+pStringLiteral =
+  lexeme . fmap T.pack $ char '"' >> manyTill L.charLiteral (char '"')
 
 pName :: Parser Name
 pName =
@@ -604,7 +604,7 @@ pValueType = comb <$> pRank <*> pSignedType
 pEntryPointType :: Parser EntryPointType
 pEntryPointType =
   choice
-    [ keyword "opaque" $> TypeOpaque <*> pStringLiteral,
+    [ keyword "opaque" $> TypeOpaque . T.unpack <*> pStringLiteral,
       TypeTransparent <$> pValueType
     ]
 
@@ -612,7 +612,7 @@ pEntry :: Parser EntryPoint
 pEntry =
   parens $
     (,,)
-      <$> (nameFromString <$> pStringLiteral)
+      <$> (nameFromText <$> pStringLiteral)
       <* pComma
       <*> pEntryPointInputs
       <* pComma
@@ -642,7 +642,7 @@ pFunDef pr = do
 pOpaqueType :: Parser (String, OpaqueType)
 pOpaqueType =
   (,)
-    <$> (keyword "type" *> pStringLiteral <* pEqual)
+    <$> (keyword "type" *> (T.unpack <$> pStringLiteral) <* pEqual)
     <*> choice [pRecord, pOpaque]
   where
     pFieldName = choice [pName, nameFromString . show <$> pInt]

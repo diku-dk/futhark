@@ -23,7 +23,6 @@ import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.ImpCode
 import qualified Futhark.Manifest as Manifest
 import Futhark.Util (chunks, mapAccumLM)
-import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 

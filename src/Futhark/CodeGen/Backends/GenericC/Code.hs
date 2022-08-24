@@ -19,6 +19,7 @@ where
 import Control.Monad.Reader
 import Data.Loc
 import Data.Maybe
+import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
@@ -31,7 +32,7 @@ errorMsgString (ErrorMsg parts) = do
   let boolStr e = [C.cexp|($exp:e) ? "true" : "false"|]
       asLongLong e = [C.cexp|(long long int)$exp:e|]
       asDouble e = [C.cexp|(double)$exp:e|]
-      onPart (ErrorString s) = pure ("%s", [C.cexp|$string:s|])
+      onPart (ErrorString s) = pure ("%s", [C.cexp|$string:(T.unpack s)|])
       onPart (ErrorVal Bool x) = ("%s",) . boolStr <$> compileExp x
       onPart (ErrorVal Unit _) = pure ("%s", [C.cexp|"()"|])
       onPart (ErrorVal (IntType Int8) x) = ("%hhd",) <$> compileExp x
@@ -82,7 +83,7 @@ compilePrimExp f (UnOpExp USignum {} x) = do
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
 compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
-  pure [C.cexp|$id:(pretty op)($exp:x')|]
+  pure [C.cexp|$id:(prettyString op)($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
@@ -92,10 +93,10 @@ compilePrimExp f (CmpOpExp cmp x y) = do
     FCmpLe {} -> [C.cexp|$exp:x' <= $exp:y'|]
     CmpLlt {} -> [C.cexp|$exp:x' < $exp:y'|]
     CmpLle {} -> [C.cexp|$exp:x' <= $exp:y'|]
-    _ -> [C.cexp|$id:(pretty cmp)($exp:x', $exp:y')|]
+    _ -> [C.cexp|$id:(prettyString cmp)($exp:x', $exp:y')|]
 compilePrimExp f (ConvOpExp conv x) = do
   x' <- compilePrimExp f x
-  pure [C.cexp|$id:(pretty conv)($exp:x')|]
+  pure [C.cexp|$id:(prettyString conv)($exp:x')|]
 compilePrimExp f (BinOpExp bop x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
@@ -117,7 +118,7 @@ compilePrimExp f (BinOpExp bop x y) = do
     Or {} -> [C.cexp|$exp:x' | $exp:y'|]
     LogAnd {} -> [C.cexp|$exp:x' && $exp:y'|]
     LogOr {} -> [C.cexp|$exp:x' || $exp:y'|]
-    _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
+    _ -> [C.cexp|$id:(prettyString bop)($exp:x', $exp:y')|]
 compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
   pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
@@ -172,7 +173,7 @@ compileCode (Op op) =
 compileCode Skip = pure ()
 compileCode (Comment s code) = do
   xs <- collect $ compileCode code
-  let comment = "// " ++ s
+  let comment = "// " ++ T.unpack s
   stm
     [C.cstm|$comment:comment
               { $items:xs }
@@ -330,7 +331,7 @@ compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
 compileCode (DeclareArray name ScalarSpace {} _ _) =
-  error $ "Cannot declare array " ++ pretty name ++ " in scalar space."
+  error $ "Cannot declare array " ++ prettyString name ++ " in scalar space."
 compileCode (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = primTypeToCType t
@@ -348,7 +349,7 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
       [C.cexp|(struct memblock){NULL,
                                 (unsigned char*)$id:name_realtype,
                                 0,
-                                $string:(pretty name)}|]
+                                $string:(prettyString name)}|]
   item [C.citem|struct memblock $id:name = ctx->$id:name;|]
 compileCode (DeclareArray name (Space space) t vs) =
   join $

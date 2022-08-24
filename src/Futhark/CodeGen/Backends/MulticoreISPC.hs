@@ -35,7 +35,6 @@ import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
@@ -180,7 +179,7 @@ makeStringLiteral str = do
 -- | Set memory in ISPC
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
 setMem dest src space = do
-  let src_s = pretty $ C.toExp src noLoc
+  let src_s = prettyString $ C.toExp src noLoc
   strlit <- makeStringLiteral src_s
   GC.stm
     [C.cstm|if ($id:(GC.fatMemSet space)(ctx, &$exp:dest, &$exp:src,
@@ -192,7 +191,7 @@ setMem dest src space = do
 unRefMem :: C.ToExp a => a -> Space -> ISPCCompilerM ()
 unRefMem mem space = do
   cached <- isJust <$> GC.cacheMem mem
-  let mem_s = pretty $ C.toExp mem noLoc
+  let mem_s = prettyString $ C.toExp mem noLoc
   strlit <- makeStringLiteral mem_s
   unless cached $
     GC.stm
@@ -209,7 +208,7 @@ allocMem ::
   C.Stm ->
   ISPCCompilerM ()
 allocMem mem size space on_failure = do
-  let mem_s = pretty $ C.toExp mem noLoc
+  let mem_s = prettyString $ C.toExp mem noLoc
   strlit <- makeStringLiteral mem_s
   GC.stm
     [C.cstm|if ($id:(GC.fatMemAlloc space)(ctx, &$exp:mem, $exp:size,
@@ -388,7 +387,7 @@ handleError msg stacktrace = do
   let args' = map (\x -> [C.cexp|extract($exp:x, $id:uni)|]) args
   GC.items
     [C.citems|
-      $escstm:("foreach_active(" <> pretty uni <> ")")
+      $escstm:("foreach_active(" <> prettyString uni <> ")")
       {
         $id:shim(ctx, $args:args');
         err = FUTHARK_PROGRAM_ERROR;
@@ -422,11 +421,11 @@ compileExp :: Exp -> ISPCCompilerM C.Exp
 compileExp e@(ValueExp (FloatValue (Float64Value v))) =
   if isInfinite v || isNaN v
     then GC.compileExp e
-    else pure [C.cexp|$esc:(pretty v <> "d")|]
+    else pure [C.cexp|$esc:(prettyString v <> "d")|]
 compileExp e@(ValueExp (FloatValue (Float16Value v))) =
   if isInfinite v || isNaN v
     then GC.compileExp e
-    else pure [C.cexp|$esc:(pretty v <> "f16")|]
+    else pure [C.cexp|$esc:(prettyString v <> "f16")|]
 compileExp (ValueExp val) =
   pure $ C.toExp val mempty
 compileExp (LeafExp v _) =
@@ -451,7 +450,7 @@ compileExp (UnOpExp USignum {} x) = do
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
 compileExp (UnOpExp op x) = do
   x' <- compileExp x
-  pure [C.cexp|$id:(pretty op)($exp:x')|]
+  pure [C.cexp|$id:(prettyString op)($exp:x')|]
 compileExp (CmpOpExp cmp x y) = do
   x' <- compileExp x
   y' <- compileExp y
@@ -461,10 +460,10 @@ compileExp (CmpOpExp cmp x y) = do
     FCmpLe {} -> [C.cexp|$exp:x' <= $exp:y'|]
     CmpLlt {} -> [C.cexp|$exp:x' < $exp:y'|]
     CmpLle {} -> [C.cexp|$exp:x' <= $exp:y'|]
-    _ -> [C.cexp|$id:(pretty cmp)($exp:x', $exp:y')|]
+    _ -> [C.cexp|$id:(prettyString cmp)($exp:x', $exp:y')|]
 compileExp (ConvOpExp conv x) = do
   x' <- compileExp x
-  pure [C.cexp|$id:(pretty conv)($exp:x')|]
+  pure [C.cexp|$id:(prettyString conv)($exp:x')|]
 compileExp (BinOpExp bop x y) = do
   x' <- compileExp x
   y' <- compileExp y
@@ -481,7 +480,7 @@ compileExp (BinOpExp bop x y) = do
     Or {} -> [C.cexp|$exp:x' | $exp:y'|]
     LogAnd {} -> [C.cexp|$exp:x' && $exp:y'|]
     LogOr {} -> [C.cexp|$exp:x' || $exp:y'|]
-    _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
+    _ -> [C.cexp|$id:(prettyString bop)($exp:x', $exp:y')|]
 compileExp (FunExp h args _) = do
   args' <- mapM compileExp args
   pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
@@ -493,7 +492,7 @@ compileExp (FunExp h args _) = do
 compileCode :: MCCode -> ISPCCompilerM ()
 compileCode (Comment s code) = do
   xs <- GC.collect $ compileCode code
-  let comment = "// " ++ s
+  let comment = "// " ++ T.unpack s
   GC.stm
     [C.cstm|$comment:comment
               { $items:xs }
@@ -724,7 +723,7 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
       let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
       pure [C.citems|$tyqual:uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (_, _) = do
-      strlit <- makeStringLiteral $ pretty name
+      strlit <- makeStringLiteral $ prettyString name
       pure
         [C.citems|$tyqual:uniform struct memblock $id:name;
                      $id:name.desc = $id:strlit();
@@ -928,7 +927,7 @@ compileOp (ForEach i from bound body) = do
     else
       GC.stms
         [C.cstms|
-      $escstm:("foreach (" <> pretty i <> " = " <> pretty from' <> " ... " <> pretty bound' <> ")") {
+      $escstm:("foreach (" <> prettyString i <> " = " <> prettyString from' <> " ... " <> prettyString bound' <> ")") {
         $items:body'
       }|]
 compileOp (ForEachActive name body) = do
@@ -961,7 +960,7 @@ cachingMemory lexical f = do
   let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do
-    size <- newVName $ pretty mem <> "_cached_size"
+    size <- newVName $ prettyString mem <> "_cached_size"
     pure (mem, size)
 
   let lexMem env =

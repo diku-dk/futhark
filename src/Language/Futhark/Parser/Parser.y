@@ -424,14 +424,14 @@ Val     : def BindingId TypeParams FunParams maybeAscription(TypeExp) '=' Exp
         -- Some error cases
         | def '(' Pat ',' Pats1 ')' '=' Exp
           {% parseErrorAt (srcspan $2 $6) $ Just $
-             unlines ["Cannot bind patterns at top level.",
-                      "Bind a single name instead."]
+             T.unlines ["Cannot bind patterns at top level.",
+                        "Bind a single name instead."]
           }
 
         | let '(' Pat ',' Pats1 ')' '=' Exp
           {% parseErrorAt (srcspan $2 $6) $ Just $
-             unlines ["Cannot bind patterns at top level.",
-                      "Bind a single name instead."]
+             T.unlines ["Cannot bind patterns at top level.",
+                        "Bind a single name instead."]
           }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
@@ -464,8 +464,8 @@ TypeExpTerm :: { UncheckedTypeExp }
          -- Errors
          | '[' SizeExp ']' %prec bottom
            {% parseErrorAt (srcspan $1 $>) $ Just $
-                unlines ["missing array row type.",
-                         "Did you mean []"  ++ pretty $2 ++ "?"]
+                T.unlines ["missing array row type.",
+                           "Did you mean []"  <> prettyText $2 <> "?"]
            }
 
 SumType :: { UncheckedTypeExp }

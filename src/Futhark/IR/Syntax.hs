@@ -103,6 +103,8 @@
 module Futhark.IR.Syntax
   ( module Language.Futhark.Core,
     pretty,
+    prettyString,
+    prettyText,
     module Futhark.IR.Rep,
     module Futhark.IR.Syntax.Core,
 
@@ -170,11 +172,11 @@ import Control.Category
 import Data.Foldable
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Sequence as Seq
-import Data.String
+import qualified Data.Text as T
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (pretty, prettyString, prettyText)
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
 
@@ -303,7 +305,7 @@ data OpaqueOp
   = -- | No special operation.
     OpaqueNil
   | -- | Print the argument, prefixed by this string.
-    OpaqueTrace String
+    OpaqueTrace T.Text
   deriving (Eq, Ord, Show)
 
 -- | Which kind of reshape is this?

@@ -170,7 +170,7 @@ keyword s =
 indexing :: (Loc, T.Text) -> Alex Name
 indexing (loc, s) = case keyword s of
   ID v -> pure v
-  _ -> alexError loc $ "Cannot index keyword '" ++ T.unpack s ++ "'."
+  _ -> alexError loc $ "Cannot index keyword '" <> s <> "'."
 
 mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of

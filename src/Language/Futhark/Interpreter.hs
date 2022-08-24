@@ -46,6 +46,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
+import qualified Data.Text as T
 import Futhark.Util (chunk, maybeHead, splitFromEnd)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply, bool)
@@ -1120,7 +1121,7 @@ eval env (Project f e _ _) = do
     _ -> error "Value does not have expected field."
 eval env (Assert what e (Info s) loc) = do
   cond <- asBool <$> eval env what
-  unless cond $ bad loc env s
+  unless cond $ bad loc env $ T.unpack s
   eval env e
 eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es

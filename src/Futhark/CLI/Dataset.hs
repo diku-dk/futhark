@@ -108,7 +108,7 @@ commandLineOptions =
                       }
                 Left err ->
                   Left $ do
-                    hPutStrLn stderr err
+                    T.hPutStrLn stderr err
                     exitFailure
           )
           "TYPE"
@@ -172,7 +172,7 @@ setRangeOption tname set =
 
 tryMakeGenerator ::
   String ->
-  Either String (RandomConfiguration -> OutputFormat -> Word64 -> IO ())
+  Either T.Text (RandomConfiguration -> OutputFormat -> Word64 -> IO ())
 tryMakeGenerator t
   | Just vs <- readValues $ BS.pack t =
       pure $ \_ fmt _ -> mapM_ (outValue fmt) vs
@@ -187,7 +187,7 @@ tryMakeGenerator t
     outValue Binary = BS.putStr . Bin.encode
     outValue Type = T.putStrLn . V.valueTypeText . V.valueType
 
-toValueType :: UncheckedTypeExp -> Either String V.ValueType
+toValueType :: UncheckedTypeExp -> Either T.Text V.ValueType
 toValueType TETuple {} = Left "Cannot handle tuples yet."
 toValueType TERecord {} = Left "Cannot handle records yet."
 toValueType TEApply {} = Left "Cannot handle type applications yet."
@@ -208,7 +208,7 @@ toValueType (TEVar (QualName [] v) _)
     m = map f [minBound .. maxBound]
     f t = (nameFromText (V.primTypeText t), t)
 toValueType (TEVar v _) =
-  Left $ "Unknown type " ++ pretty v
+  Left $ "Unknown type " <> prettyText v
 
 -- | Closed interval, as in @System.Random@.
 type Range a = (a, a)

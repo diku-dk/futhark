@@ -83,9 +83,9 @@ addAttr _ dec = dec
 addAttrSpec :: AttrInfo Name -> UncheckedSpec -> UncheckedSpec
 addAttrSpec _attr dec = dec
 
-mustBe :: L Token -> String -> ParserMonad ()
+mustBe :: L Token -> T.Text -> ParserMonad ()
 mustBe (L _ (ID got)) expected
-  | nameToString got == expected = pure ()
+  | nameToText got == expected = pure ()
 mustBe (L loc _) expected =
   parseErrorAt loc . Just $
     "Only the keyword '" <> expected <> "' may appear here."
@@ -94,7 +94,7 @@ mustBeEmpty :: Located loc => loc -> ValueType -> ParserMonad ()
 mustBeEmpty _ (Array _ _ (Shape dims) _)
   | 0 `elem` dims = pure ()
 mustBeEmpty loc t =
-  parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
+  parseErrorAt loc $ Just $ prettyText t <> " is not an empty array."
 
 data ParserState = ParserState
   { _parserFile :: FilePath,
@@ -139,11 +139,12 @@ combArrayElements = foldM comb
       | valueType x == valueType y = Right x
       | otherwise =
           Left . SyntaxError NoLoc $
-            "Elements "
-              <> pretty x
-              <> " and "
-              <> pretty y
-              <> " cannot exist in same array."
+            prettyText $
+              "Elements "
+                <> ppr x
+                <> " and "
+                <> ppr y
+                <> " cannot exist in same array."
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l
@@ -155,7 +156,7 @@ applyExp es =
   foldM op (head es) (tail es)
   where
     op (AppExp (Index e is floc) _) (ArrayLit xs _ xloc) =
-      parseErrorAt (srcspan floc xloc) . Just . pretty $
+      parseErrorAt (srcspan floc xloc) . Just . prettyText $
         "Incorrect syntax for multi-dimensional indexing."
           </> "Use"
           <+> align (ppr index)
@@ -198,7 +199,7 @@ putTokens l = lift $ modify $ \env -> env {parserLexical = l}
 primTypeFromName :: Loc -> Name -> ParserMonad PrimType
 primTypeFromName loc s = maybe boom pure $ M.lookup s namesToPrimTypes
   where
-    boom = parseErrorAt loc $ Just $ "No type named " ++ nameToString s
+    boom = parseErrorAt loc $ Just $ "No type named " <> nameToText s
 
 intNegate :: IntValue -> IntValue
 intNegate (Int8Value v) = Int8Value (-v)
@@ -255,9 +256,9 @@ lexer cont = do
 
 parseError :: (L Token, [String]) -> ParserMonad a
 parseError (L loc EOF, expected) =
-  parseErrorAt (locOf loc) . Just . unlines $
+  parseErrorAt (locOf loc) . Just . T.unlines $
     [ "Unexpected end of file.",
-      "Expected one of the following: " ++ unwords expected
+      "Expected one of the following: " <> T.unwords (map T.pack expected)
     ]
 parseError (L loc DOC {}, _) =
   parseErrorAt (locOf loc) $
@@ -266,12 +267,12 @@ parseError (L loc _, expected) = do
   input <- lift $ gets parserInput
   let ~(Loc (Pos _ _ _ beg) (Pos _ _ _ end)) = locOf loc
       tok_src = T.take (end - beg + 1) $ T.drop beg input
-  parseErrorAt loc . Just . unlines $
-    [ "Unexpected token: '" <> T.unpack tok_src <> "'",
-      "Expected one of the following: " <> unwords expected
+  parseErrorAt loc . Just . T.unlines $
+    [ "Unexpected token: '" <> tok_src <> "'",
+      "Expected one of the following: " <> T.unwords (map T.pack expected)
     ]
 
-parseErrorAt :: Located loc => loc -> Maybe String -> ParserMonad a
+parseErrorAt :: Located loc => loc -> Maybe T.Text -> ParserMonad a
 parseErrorAt loc Nothing = throwError $ SyntaxError (locOf loc) "Syntax error."
 parseErrorAt loc (Just s) = throwError $ SyntaxError (locOf loc) s
 
@@ -291,7 +292,7 @@ backOneCol NoLoc = NoLoc
 --- Now for the parser interface.
 
 -- | A syntax error.
-data SyntaxError = SyntaxError {syntaxErrorLoc :: Loc, syntaxErrorMsg :: String}
+data SyntaxError = SyntaxError {syntaxErrorLoc :: Loc, syntaxErrorMsg :: T.Text}
 
 lexerErrToParseErr :: LexerError -> SyntaxError
 lexerErrToParseErr (LexerError loc msg) = SyntaxError loc msg

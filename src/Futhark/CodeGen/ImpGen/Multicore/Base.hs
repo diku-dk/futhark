@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Futhark.CodeGen.ImpGen.Multicore.Base
   ( extractAllocations,
     compileThreadResult,

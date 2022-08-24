@@ -42,7 +42,7 @@ failureSwitch failures =
         let escapeChar '%' = "%%"
             escapeChar c = [c]
          in concatMap escapeChar
-      onPart (ErrorString s) = printfEscape s
+      onPart (ErrorString s) = printfEscape $ T.unpack s
       -- FIXME: bogus for non-ints.
       onPart ErrorVal {} = "%lld"
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
@@ -86,9 +86,9 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 
   mapM_ GC.earlyDecl top_decls
 
-  let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
-      size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+  let size_name_inits = map (\k -> [C.cinit|$string:(prettyString k)|]) $ M.keys sizes
+      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (prettyString k))|]) $ M.keys sizes
+      size_class_inits = map (\c -> [C.cinit|$string:(prettyString c)|]) $ M.elems sizes
       num_sizes = M.size sizes
 
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
@@ -583,11 +583,11 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 loadKernel :: (KernelName, KernelSafety) -> C.Stm
 loadKernel (name, safety) =
   [C.cstm|{
-  ctx->$id:name = clCreateKernel(prog, $string:(pretty (C.toIdent name mempty)), &error);
+  ctx->$id:name = clCreateKernel(prog, $string:(prettyString (C.toIdent name mempty)), &error);
   OPENCL_SUCCEED_FATAL(error);
   $items:set_args
   if (ctx->debugging) {
-    fprintf(ctx->log, "Created kernel %s.\n", $string:(pretty name));
+    fprintf(ctx->log, "Created kernel %s.\n", $string:(prettyString name));
   }
   }|]
   where
@@ -616,7 +616,7 @@ kernelRuns = (<> "_runs")
 costCentreReport :: [Name] -> [C.BlockItem]
 costCentreReport names = report_kernels ++ [report_total]
   where
-    longest_name = foldl max 0 $ map (length . pretty) names
+    longest_name = foldl max 0 $ map (length . prettyString) names
     report_kernels = concatMap reportKernel names
     format_string name =
       let padding = replicate (longest_name - length name) ' '
@@ -629,7 +629,7 @@ costCentreReport names = report_kernels ++ [report_total]
           total_runtime = kernelRuntime name
        in [ [C.citem|
                str_builder(&builder,
-                           $string:(format_string (pretty name)),
+                           $string:(format_string (prettyString name)),
                            ctx->$id:runs,
                            (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
                            (long int) ctx->$id:total_runtime);

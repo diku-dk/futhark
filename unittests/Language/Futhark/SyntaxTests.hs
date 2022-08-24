@@ -61,7 +61,9 @@ instance IsString v => IsString (QualName v) where
 
 instance IsString UncheckedTypeExp where
   fromString =
-    either (error . syntaxErrorMsg) id . parseType "IsString UncheckedTypeExp" . fromString
+    either (error . T.unpack . syntaxErrorMsg) id
+      . parseType "IsString UncheckedTypeExp"
+      . fromString
 
 type Parser = Parsec Void T.Text
 

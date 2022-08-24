@@ -178,7 +178,7 @@ instance C.ToIdent T.Text where
   toIdent = C.toIdent . T.unpack
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . zEncodeString . pretty
+  toIdent = C.toIdent . zEncodeString . prettyString
 
 instance C.ToExp VName where
   toExp v _ = [C.cexp|$id:v|]
