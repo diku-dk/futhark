@@ -7,7 +7,7 @@
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
 -- for the AST defined in "Language.Futhark.Syntax".
 module Language.Futhark.Pretty
-  ( pretty,
+  ( prettyString,
     prettyTuple,
     leadingOperator,
     IsName (..),
@@ -541,7 +541,7 @@ ppBinOp bop =
     _ -> ppr bop
   where
     leading =
-      leadingOperator $ nameFromString $ pretty $ pprName $ qualLeaf bop
+      leadingOperator $ nameFromString $ prettyString $ pprName $ qualLeaf bop
 
 prettyBinOp ::
   (Eq vn, IsName vn, Annot f) =>
@@ -559,7 +559,7 @@ prettyBinOp p bop x y =
     bop' = case leading of
       Backtick -> text "`" <> ppr bop <> text "`"
       _ -> ppr bop
-    leading = leadingOperator $ nameFromString $ pretty $ pprName $ qualLeaf bop
+    leading = leadingOperator $ nameFromString $ prettyString $ pprName $ qualLeaf bop
     symPrecedence = precedence leading
     symRPrecedence = rprecedence leading
     precedence PipeRight = -1

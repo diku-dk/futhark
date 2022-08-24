@@ -82,7 +82,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                         pure . (`rem` fromIntegral num_locks) . flattenIndex dims
                 f locking arrs is'
               Nothing ->
-                error $ "Missing locks for " ++ pretty acc
+                error $ "Missing locks for " ++ prettyString acc
 
 withAcc ::
   Pat LetDecMem ->

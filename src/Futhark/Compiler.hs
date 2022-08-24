@@ -215,7 +215,7 @@ handleWarnings config m = do
   (ws, a) <- m
 
   when (futharkWarn config && anyWarnings ws) $ do
-    liftIO $ hPutStrLn stderr $ pretty ws
+    liftIO $ hPutStrLn stderr $ prettyString ws
     when (futharkWerror config) $
       externalErrorS "Treating above warnings as errors due to --Werror."
 

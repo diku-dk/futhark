@@ -205,7 +205,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
         (Acc tp_id _shp el_tps _) ->
           case M.lookup tp_id (fst env) of
             Just lam -> (lam, el_tps)
-            _ -> error $ "Lookup in environment failed! " ++ pretty tp_id ++ " env: " ++ pretty (fst env)
+            _ -> error $ "Lookup in environment failed! " ++ prettyString tp_id ++ " env: " ++ prettyString (fst env)
         _ -> error "Illegal accumulator type!"
     -- is a subexp invariant to a gid of a parallel dimension?
     isSeInvar2 variance gid (Var x) =

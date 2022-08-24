@@ -108,9 +108,9 @@ instance (ASTRep rep, Monad m) => HasScope rep (BuilderT rep m) where
       Nothing -> do
         known <- BuilderT $ gets $ M.keys . snd
         error . unlines $
-          [ "BuilderT.lookupType: unknown variable " ++ pretty name,
+          [ "BuilderT.lookupType: unknown variable " ++ prettyString name,
             "Known variables: ",
-            unwords $ map pretty known
+            unwords $ map prettyString known
           ]
       Just t' -> pure $ typeOf t'
   askScope = BuilderT $ gets snd

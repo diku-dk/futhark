@@ -19,12 +19,12 @@ import Test.Tasty.HUnit
 
 evalTest :: TypeExp Name -> Either String ([VName], StructRetType) -> TestTree
 evalTest te expected =
-  testCase (pretty te) $
+  testCase (prettyString te) $
     case (fmap (extract . fst) (run (checkTypeExp te)), expected) of
       (Left got_e, Left expected_e) ->
-        (expected_e `isInfixOf` pretty got_e) @? pretty got_e
+        (expected_e `isInfixOf` prettyString got_e) @? prettyString got_e
       (Left got_e, Right _) ->
-        assertFailure $ "Failed: " <> pretty got_e
+        assertFailure $ "Failed: " <> prettyString got_e
       (Right actual_t, Right expected_t) ->
         actual_t @?= expected_t
       (Right actual_t, Left _) ->
@@ -33,7 +33,7 @@ evalTest te expected =
     extract (_, svars, t, _) = (svars, t)
     run = snd . runTypeM env mempty (mkInitialImport "") blankNameSource
     -- We hack up an environment with some predefined type
-    -- abbreviations for testing.  This is all pretty sensitive to the
+    -- abbreviations for testing.  This is all prettyString sensitive to the
     -- specific unique names, so we have to be careful!
     env =
       initialEnv

@@ -251,7 +251,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
   sOp
     $ Imp.GetSize
       (tvVar hist_L2)
-      (keyWithEntryPoint entry $ nameFromString (pretty (tvVar hist_L2)))
+      (keyWithEntryPoint entry $ nameFromString (prettyString (tvVar hist_L2)))
     $ Imp.SizeBespoke (nameFromString "L2_for_histogram") hist_L2_def
 
   let hist_L2_ln_sz = 16 * 4 -- L2 cache line size approximation

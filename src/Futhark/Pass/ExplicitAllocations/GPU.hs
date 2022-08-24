@@ -68,7 +68,7 @@ handleHostOp ::
 handleHostOp (SizeOp op) =
   pure $ Inner $ SizeOp op
 handleHostOp (OtherOp op) =
-  error $ "Cannot allocate memory in SOAC: " ++ pretty op
+  error $ "Cannot allocate memory in SOAC: " ++ prettyString op
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
 handleHostOp (GPUBody ts (Body _ stms res)) =

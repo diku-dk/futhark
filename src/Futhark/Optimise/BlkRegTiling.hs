@@ -424,7 +424,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       case acc_0s of
         [acc_0] -> pure acc_0
         _ -> error "Impossible case reached when treating accumulators!"
-    getAccumFV tp = error ("Should be an accumulator type at this point, given: " ++ pretty tp)
+    getAccumFV tp = error ("Should be an accumulator type at this point, given: " ++ prettyString tp)
     --
     -- checks that the redomap result is used directly as the accumulated value,
     -- in which case it is safe to parallelize the innermost dimension (of tile tk)
@@ -732,11 +732,11 @@ mkTileMemSizes ::
       SubExp
     )
 mkTileMemSizes height_A width_B common_dim = do
-  tk_name <- nameFromString . pretty <$> newVName "Tk"
-  tx_name <- nameFromString . pretty <$> newVName "Tx"
-  ty_name <- nameFromString . pretty <$> newVName "Ty"
-  rx_name <- nameFromString . pretty <$> newVName "Rx"
-  ry_name <- nameFromString . pretty <$> newVName "Ry"
+  tk_name <- nameFromString . prettyString <$> newVName "Tk"
+  tx_name <- nameFromString . prettyString <$> newVName "Tx"
+  ty_name <- nameFromString . prettyString <$> newVName "Ty"
+  rx_name <- nameFromString . prettyString <$> newVName "Rx"
+  ry_name <- nameFromString . prettyString <$> newVName "Ry"
 
   (ty, ry) <- getParTiles ("Ty", "Ry") (ty_name, ry_name) height_A
   (tx, rx) <- getParTiles ("Tx", "Rx") (tx_name, rx_name) width_B
@@ -1069,8 +1069,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             (M.empty, M.empty)
             $ M.toList arr_tab0
 
-        tx_name <- nameFromString . pretty <$> newVName "Tx"
-        ty_name <- nameFromString . pretty <$> newVName "Ty"
+        tx_name <- nameFromString . prettyString <$> newVName "Tx"
+        ty_name <- nameFromString . prettyString <$> newVName "Ty"
 
         tx0 <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
         ty0 <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile

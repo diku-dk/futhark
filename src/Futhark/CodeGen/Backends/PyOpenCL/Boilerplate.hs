@@ -23,7 +23,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
     untyped,
   )
 import Futhark.CodeGen.OpenCL.Heuristics
-import Futhark.Util.Pretty (pretty, prettyText)
+import Futhark.Util.Pretty (prettyString, prettyText)
 import NeatInterpolation (text)
 
 errorMsgNumArgs :: ErrorMsg a -> Int
@@ -58,7 +58,7 @@ $assign'
   where
     assign' = T.pack assign
     size_heuristics = prettyText $ sizeHeuristicsToPython sizeHeuristicsTable
-    types' = prettyText $ map (show . pretty) types -- Looks enough like Python.
+    types' = prettyText $ map (show . prettyString) types -- Looks enough like Python.
     sizes' = prettyText $ sizeClassesToPython sizes
     max_num_args = prettyText $ foldl max 0 $ map (errorMsgNumArgs . failureError) failures
     failure_msgs = prettyText $ List $ map formatFailure failures
@@ -80,9 +80,9 @@ sizeClassesToPython :: M.Map Name SizeClass -> PyExp
 sizeClassesToPython = Dict . map f . M.toList
   where
     f (size_name, size_class) =
-      ( String $ pretty size_name,
+      ( String $ prettyString size_name,
         Dict
-          [ (String "class", String $ pretty size_class),
+          [ (String "class", String $ prettyString size_class),
             ( String "value",
               maybe None (Integer . fromIntegral) $
                 sizeDefault size_class

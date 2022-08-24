@@ -46,7 +46,7 @@ numberOfGroups ::
   SubExp ->
   m (SubExp, SubExp)
 numberOfGroups desc w group_size = do
-  max_num_groups_key <- nameFromString . pretty <$> newVName (desc ++ "_num_groups")
+  max_num_groups_key <- nameFromString . prettyString <$> newVName (desc ++ "_num_groups")
   num_groups <-
     letSubExp "num_groups" $
       Op $

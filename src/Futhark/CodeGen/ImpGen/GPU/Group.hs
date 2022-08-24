@@ -555,7 +555,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 compileGroupOp pat _ =
-  compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ pretty pat
+  compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ prettyString pat
 
 groupOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 groupOperations =

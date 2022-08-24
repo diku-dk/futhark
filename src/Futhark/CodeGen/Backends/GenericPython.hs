@@ -60,7 +60,7 @@ import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
 import Futhark.IR.Syntax.Core (Space (..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (pretty, prettyText)
+import Futhark.Util.Pretty (prettyString, prettyText)
 import Language.Futhark.Primitive hiding (Bool)
 
 -- | A substitute expression compiler, tried before the main
@@ -498,7 +498,7 @@ withConstantSubsts (Imp.Constants ps _) =
         Index (Var "self.constants") $
           IdxExp $
             String $
-              pretty $
+              prettyString $
                 Imp.paramName p
 
 compileConstants :: Imp.Constants op -> CompilerM op s ()
@@ -525,7 +525,7 @@ simpleCall :: String -> [PyExp] -> PyExp
 simpleCall fname = Call (Var fname) . map Arg
 
 compileName :: VName -> String
-compileName = zEncodeString . pretty
+compileName = zEncodeString . prettyString
 
 compileDim :: Imp.DimSize -> CompilerM op s PyExp
 compileDim (Imp.Constant v) = pure $ compilePrimValue v
@@ -553,7 +553,7 @@ unpackDim arr_name (Imp.Var var) i = do
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
 entryPointOutput (Imp.OpaqueValue desc vs) =
-  simpleCall "opaque" . (String (pretty desc) :)
+  simpleCall "opaque" . (String (prettyString desc) :)
     <$> mapM (entryPointOutput . Imp.TransparentValue) vs
 entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) = do
   name' <- compileVar name
@@ -721,7 +721,7 @@ extValueDescName :: Imp.ExternalValue -> String
 extValueDescName (Imp.TransparentValue v) = extName $ valueDescName v
 extValueDescName (Imp.OpaqueValue desc []) = extName $ zEncodeString desc
 extValueDescName (Imp.OpaqueValue desc (v : _)) =
-  extName $ zEncodeString desc ++ "_" ++ pretty (baseTag (valueDescVName v))
+  extName $ zEncodeString desc ++ "_" ++ prettyString (baseTag (valueDescVName v))
 
 extName :: String -> String
 extName = (++ "_ext")
@@ -782,7 +782,7 @@ printValue = fmap concat . mapM (uncurry printValue')
         ]
     printValue' (Imp.TransparentValue (Imp.ArrayValue mem (Space _) bt ept shape)) e =
       printValue' (Imp.TransparentValue (Imp.ArrayValue mem DefaultSpace bt ept shape)) $
-        simpleCall (pretty e ++ ".get") []
+        simpleCall (prettyString e ++ ".get") []
     printValue' (Imp.TransparentValue _) e =
       pure
         [ Exp $
@@ -907,10 +907,10 @@ entryTypes (Imp.EntryPoint _ res args) =
   (map descArg args, map desc res)
   where
     descArg ((_, u), d) = desc (u, d)
-    desc (u, Imp.OpaqueValue d _) = pretty u <> d
-    desc (u, Imp.TransparentValue (Imp.ScalarValue pt s _)) = pretty u <> readTypeEnum pt s
+    desc (u, Imp.OpaqueValue d _) = prettyString u <> d
+    desc (u, Imp.TransparentValue (Imp.ScalarValue pt s _)) = prettyString u <> readTypeEnum pt s
     desc (u, Imp.TransparentValue (Imp.ArrayValue _ _ pt s dims)) =
-      pretty u <> concat (replicate (length dims) "[]") <> readTypeEnum pt s
+      prettyString u <> concat (replicate (length dims) "[]") <> readTypeEnum pt s
 
 callEntryFun ::
   [PyStmt] ->
@@ -922,7 +922,7 @@ callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _) = do
   (_, prepare_in, body_bin, _, res) <- prepareEntry entry fun
 
   let str_input = map (readInput . snd) decl_args
-      end_of_input = [Exp $ simpleCall "end_of_input" [String $ pretty fname]]
+      end_of_input = [Exp $ simpleCall "end_of_input" [String $ prettyString fname]]
 
       exitcall = [Exp $ simpleCall "sys.exit" [Field (String "Assertion.{} failed") "format(e)"]]
       except' = Catch (Var "AssertionError") exitcall
@@ -1139,10 +1139,10 @@ compilePrimExp f (Imp.BinOpExp op x y) = do
     Shl {} -> simple "<<"
     LogAnd {} -> simple "and"
     LogOr {} -> simple "or"
-    _ -> pure $ simpleCall (pretty op) [x', y']
+    _ -> pure $ simpleCall (prettyString op) [x', y']
 compilePrimExp f (Imp.ConvOpExp conv x) = do
   x' <- compilePrimExp f x
-  pure $ simpleCall (pretty conv) [x']
+  pure $ simpleCall (prettyString conv) [x']
 compilePrimExp f (Imp.CmpOpExp cmp x y) = do
   (x', y', simple) <- compileBinOpLike f x y
   case cmp of
@@ -1151,11 +1151,11 @@ compilePrimExp f (Imp.CmpOpExp cmp x y) = do
     FCmpLe {} -> simple "<="
     CmpLlt -> simple "<"
     CmpLle -> simple "<="
-    _ -> pure $ simpleCall (pretty cmp) [x', y']
+    _ -> pure $ simpleCall (prettyString cmp) [x', y']
 compilePrimExp f (Imp.UnOpExp op exp1) =
   UnOp (compileUnOp op) <$> compilePrimExp f exp1
 compilePrimExp f (Imp.FunExp h args _) =
-  simpleCall (futharkFun (pretty h)) <$> mapM (compilePrimExp f) args
+  simpleCall (futharkFun (prettyString h)) <$> mapM (compilePrimExp f) args
 
 compileExp :: Imp.Exp -> CompilerM op s PyExp
 compileExp = compilePrimExp compileVar
@@ -1193,8 +1193,8 @@ compileCode (Imp.For i bound body) = do
   bound' <- compileExp bound
   let i' = compileName i
   body' <- collect $ compileCode body
-  counter <- pretty <$> newVName "counter"
-  one <- pretty <$> newVName "one"
+  counter <- prettyString <$> newVName "counter"
+  one <- prettyString <$> newVName "one"
   stm $ Assign (Var i') $ simpleCall (compilePrimToNp (Imp.primExpType bound)) [Integer 0]
   stm $ Assign (Var one) $ simpleCall (compilePrimToNp (Imp.primExpType bound)) [Integer 1]
   stm $
@@ -1259,8 +1259,8 @@ compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args
   dests' <- tupleOrSingle <$> mapM compileVar dests
   let fname'
-        | isBuiltInFunction fname = futharkFun (pretty fname)
-        | otherwise = "self." ++ futharkFun (pretty fname)
+        | isBuiltInFunction fname = futharkFun (prettyString fname)
+        | otherwise = "self." ++ futharkFun (prettyString fname)
       call' = simpleCall fname' args'
   -- If the function returns nothing (is called only for side
   -- effects), take care not to assign to an empty tuple.

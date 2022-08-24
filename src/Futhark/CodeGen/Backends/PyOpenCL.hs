@@ -20,7 +20,7 @@ import Futhark.CodeGen.RTS.Python (openclPy)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (prettyString)
 
 -- | Compile the program to Python with calls to OpenCL.
 compileProg ::
@@ -46,7 +46,7 @@ compileProg mode class_name prog = do
         unlines
           $ map
             ( \x ->
-                pretty $
+                prettyString $
                   Assign
                     (Var ("self." ++ zEncodeString (nameToString x) ++ "_var"))
                     (Var $ "program." ++ zEncodeString (nameToString x))
@@ -195,19 +195,19 @@ callKernel (Imp.GetSize v key) = do
   v' <- Py.compileVar v
   Py.stm $
     Assign v' $
-      Index (Var "self.sizes") (IdxExp $ String $ pretty key)
+      Index (Var "self.sizes") (IdxExp $ String $ prettyString key)
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- Py.compileVar v
   x' <- Py.compileExp x
   Py.stm $
     Assign v' $
-      BinOp "<=" (Index (Var "self.sizes") (IdxExp $ String $ pretty key)) x'
+      BinOp "<=" (Index (Var "self.sizes") (IdxExp $ String $ prettyString key)) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- Py.compileVar v
   Py.stm $
     Assign v' $
       Var $
-        "self.max_" ++ pretty size_class
+        "self.max_" ++ prettyString size_class
 callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
   workgroup_size' <- mapM (fmap asLong . Py.compileExp) workgroup_size
@@ -285,7 +285,7 @@ writeOpenCLScalar _ _ _ space _ =
 readOpenCLScalar :: Py.ReadScalar Imp.OpenCL ()
 readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
-  let val' = Var $ pretty val
+  let val' = Var $ prettyString val
   let nparr =
         Call
           (Var "np.empty")
@@ -312,7 +312,7 @@ allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" =
   Py.stm $
     Assign mem $
-      Py.simpleCall "opencl_alloc" [Var "self", size, String $ pretty mem]
+      Py.simpleCall "opencl_alloc" [Var "self", size, String $ prettyString mem]
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
 

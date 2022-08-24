@@ -321,7 +321,7 @@ checkSegLevel Nothing lvl = do
 checkSegLevel (Just SegThread {}) _ =
   TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
 checkSegLevel (Just x) y
-  | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ pretty x
+  | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ prettyString x
   | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
       TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
   | otherwise =

@@ -318,15 +318,15 @@ isEmptyArray :: Value -> Bool
 isEmptyArray = emptyShape . valueShape
 
 -- | String representation of an empty array with the provided element
--- type.  This is pretty ad-hoc - don't expect good results unless the
+-- type.  This is prettyString ad-hoc - don't expect good results unless the
 -- element type is a primitive.
 prettyEmptyArray :: TypeBase () () -> Value -> String
 prettyEmptyArray t v =
-  "empty(" ++ dims (valueShape v) ++ pretty t' ++ ")"
+  "empty(" ++ dims (valueShape v) ++ prettyString t' ++ ")"
   where
     t' = stripArray (arrayRank t) t
     dims (ShapeDim n rowshape) =
-      "[" ++ pretty n ++ "]" ++ dims rowshape
+      "[" ++ prettyString n ++ "]" ++ dims rowshape
     dims _ = ""
 
 -- | Create an array value; failing if that would result in an
@@ -353,21 +353,21 @@ asInteger :: Value -> Integer
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
 asInteger (ValuePrim (UnsignedValue v)) =
   toInteger (P.valueIntegral (P.doZExt v Int64) :: Word64)
-asInteger v = error $ "Unexpectedly not an integer: " ++ pretty v
+asInteger v = error $ "Unexpectedly not an integer: " ++ prettyString v
 
 asInt :: Value -> Int
 asInt = fromIntegral . asInteger
 
 asSigned :: Value -> IntValue
 asSigned (ValuePrim (SignedValue v)) = v
-asSigned v = error $ "Unexpected not a signed integer: " ++ pretty v
+asSigned v = error $ "Unexpected not a signed integer: " ++ prettyString v
 
 asInt64 :: Value -> Int64
 asInt64 = fromIntegral . asInteger
 
 asBool :: Value -> Bool
 asBool (ValuePrim (BoolValue x)) = x
-asBool v = error $ "Unexpectedly not a boolean: " ++ pretty v
+asBool v = error $ "Unexpectedly not a boolean: " ++ prettyString v
 
 lookupInEnv ::
   (Env -> M.Map VName x) ->
@@ -489,7 +489,7 @@ break loc = do
 
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
-fromArray v = error $ "Expected array value, but found: " ++ pretty v
+fromArray v = error $ "Expected array value, but found: " ++ prettyString v
 
 toArray :: ValueShape -> [Value] -> Value
 toArray shape vs = ValueArray shape (listArray (0, length vs - 1) vs)
@@ -501,7 +501,7 @@ toArray' rowshape vs = ValueArray shape (listArray (0, length vs - 1) vs)
 
 apply :: SrcLoc -> Env -> Value -> Value -> EvalM Value
 apply loc env (ValueFun f) v = stacking loc env (f v)
-apply _ _ f _ = error $ "Cannot apply non-function: " ++ pretty f
+apply _ _ f _ = error $ "Cannot apply non-function: " ++ prettyString f
 
 apply2 :: SrcLoc -> Env -> Value -> Value -> Value -> EvalM Value
 apply2 loc env f x y = stacking loc env $ do
@@ -512,7 +512,7 @@ matchPat :: Env -> Pat -> Value -> EvalM Env
 matchPat env p v = do
   m <- runMaybeT $ patternMatch env p v
   case m of
-    Nothing -> error $ "matchPat: missing case for " ++ pretty p ++ " and " ++ pretty v
+    Nothing -> error $ "matchPat: missing case for " ++ prettyString p ++ " and " ++ prettyString v
     Just env' -> pure env'
 
 patternMatch :: Env -> Pat -> Value -> MaybeT EvalM Env
@@ -677,9 +677,9 @@ evalIndex loc env is arr = do
   let oob =
         bad loc env $
           "Index ["
-            <> intercalate ", " (map pretty is)
+            <> intercalate ", " (map prettyString is)
             <> "] out of bounds for array of shape "
-            <> pretty (valueShape arr)
+            <> prettyString (valueShape arr)
             <> "."
   maybe oob pure $ indexArray is arr
 
@@ -729,14 +729,14 @@ evalTermVar env qv t =
       size_env <- extSizeEnv
       v $ evalType (size_env <> env) t
     Just (TermValue _ v) -> pure v
-    _ -> error $ "\"" <> pretty qv <> "\" is not bound to a value."
+    _ -> error $ "\"" <> prettyString qv <> "\" is not bound to a value."
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
   size_env <- extSizeEnv
   let t' = evalType (size_env <> env) t
   case traverse dim $ typeShape mempty t' of
-    Nothing -> error $ "typeValueShape: failed to fully evaluate type " ++ pretty t'
+    Nothing -> error $ "typeValueShape: failed to fully evaluate type " ++ prettyString t'
     Just shape -> pure shape
   where
     dim (ConstSize x) = Just $ fromIntegral x
@@ -861,15 +861,15 @@ evalAppExp env _ (Range start maybe_second end loc) = do
 
     badRange start' maybe_second' end' =
       "Range "
-        ++ pretty start'
+        ++ prettyString start'
         ++ ( case maybe_second' of
                Nothing -> ""
-               Just second' -> ".." ++ pretty second'
+               Just second' -> ".." ++ prettyString second'
            )
         ++ ( case end' of
-               DownToExclusive x -> "..>" ++ pretty x
-               ToInclusive x -> "..." ++ pretty x
-               UpToExclusive x -> "..<" ++ pretty x
+               DownToExclusive x -> "..>" ++ prettyString x
+               ToInclusive x -> "..." ++ prettyString x
+               UpToExclusive x -> "..<" ++ prettyString x
            )
         ++ " is invalid."
 evalAppExp env t (Coerce e te loc) = do
@@ -878,12 +878,12 @@ evalAppExp env t (Coerce e te loc) = do
     Just _ -> pure v
     Nothing ->
       bad loc env $
-        "Value `" <> pretty v <> "` of shape `"
-          ++ pretty (valueShape v)
+        "Value `" <> prettyString v <> "` of shape `"
+          ++ prettyString (valueShape v)
           ++ "` cannot match shape of type `"
-            <> pretty te
+            <> prettyString te
             <> "` (`"
-            <> pretty t
+            <> prettyString t
             <> "`)"
 evalAppExp env _ (LetPat sizes p e body _) = do
   v <- eval env e
@@ -1046,12 +1046,12 @@ eval _ (IntLit v (Info t) _) =
       pure $ ValuePrim $ UnsignedValue $ intValue it v
     Scalar (Prim (FloatType ft)) ->
       pure $ ValuePrim $ FloatValue $ floatValue ft v
-    _ -> error $ "eval: nonsensical type for integer literal: " ++ pretty t
+    _ -> error $ "eval: nonsensical type for integer literal: " ++ prettyString t
 eval _ (FloatLit v (Info t) _) =
   case t of
     Scalar (Prim (FloatType ft)) ->
       pure $ ValuePrim $ FloatValue $ floatValue ft v
-    _ -> error $ "eval: nonsensical type for float literal: " ++ pretty t
+    _ -> error $ "eval: nonsensical type for float literal: " ++ prettyString t
 eval env (Negate e _) = do
   ev <- eval env e
   ValuePrim <$> case ev of
@@ -1066,14 +1066,14 @@ eval env (Negate e _) = do
     ValuePrim (FloatValue (Float16Value v)) -> pure $ FloatValue $ Float16Value (-v)
     ValuePrim (FloatValue (Float32Value v)) -> pure $ FloatValue $ Float32Value (-v)
     ValuePrim (FloatValue (Float64Value v)) -> pure $ FloatValue $ Float64Value (-v)
-    _ -> error $ "Cannot negate " ++ pretty ev
+    _ -> error $ "Cannot negate " ++ prettyString ev
 eval env (Not e _) = do
   ev <- eval env e
   ValuePrim <$> case ev of
     ValuePrim (BoolValue b) -> pure $ BoolValue $ not b
     ValuePrim (SignedValue iv) -> pure $ SignedValue $ P.doComplement iv
     ValuePrim (UnsignedValue iv) -> pure $ UnsignedValue $ P.doComplement iv
-    _ -> error $ "Cannot logically negate " ++ pretty ev
+    _ -> error $ "Cannot logically negate " ++ prettyString ev
 eval env (Update src is v loc) =
   maybe oob pure
     =<< writeArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
@@ -1183,7 +1183,7 @@ evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
   case lookupVar qv env of
     Just (TermModule m) -> pure m
-    _ -> error $ quote (pretty qv) <> " is not bound to a module."
+    _ -> error $ quote (prettyString qv) <> " is not bound to a module."
 
 evalModExp :: Env -> ModExp -> EvalM Module
 evalModExp _ (ModImport _ (Info f) _) = do
@@ -1378,48 +1378,48 @@ initialCtx =
         ValueFun $ \v ->
           case fromTuple v of
             Just [x, y] -> f x y
-            _ -> error $ "Expected pair; got: " ++ pretty v
+            _ -> error $ "Expected pair; got: " ++ prettyString v
     fun3t f =
       TermValue Nothing $
         ValueFun $ \v ->
           case fromTuple v of
             Just [x, y, z] -> f x y z
-            _ -> error $ "Expected triple; got: " ++ pretty v
+            _ -> error $ "Expected triple; got: " ++ prettyString v
 
     fun5t f =
       TermValue Nothing $
         ValueFun $ \v ->
           case fromTuple v of
             Just [x, y, z, a, b] -> f x y z a b
-            _ -> error $ "Expected pentuple; got: " ++ pretty v
+            _ -> error $ "Expected pentuple; got: " ++ prettyString v
 
     fun6t f =
       TermValue Nothing $
         ValueFun $ \v ->
           case fromTuple v of
             Just [x, y, z, a, b, c] -> f x y z a b c
-            _ -> error $ "Expected sextuple; got: " ++ pretty v
+            _ -> error $ "Expected sextuple; got: " ++ prettyString v
 
     fun7t f =
       TermValue Nothing $
         ValueFun $ \v ->
           case fromTuple v of
             Just [x, y, z, a, b, c, d] -> f x y z a b c d
-            _ -> error $ "Expected septuple; got: " ++ pretty v
+            _ -> error $ "Expected septuple; got: " ++ prettyString v
 
     fun8t f =
       TermValue Nothing $
         ValueFun $ \v ->
           case fromTuple v of
             Just [x, y, z, a, b, c, d, e] -> f x y z a b c d e
-            _ -> error $ "Expected sextuple; got: " ++ pretty v
+            _ -> error $ "Expected sextuple; got: " ++ prettyString v
 
     fun10t fun =
       TermValue Nothing $
         ValueFun $ \v ->
           case fromTuple v of
             Just [x, y, z, a, b, c, d, e, f, g] -> fun x y z a b c d e f g
-            _ -> error $ "Expected octuple; got: " ++ pretty v
+            _ -> error $ "Expected octuple; got: " ++ prettyString v
 
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
@@ -1430,9 +1430,9 @@ initialCtx =
         _ ->
           bad noLoc mempty $
             "Cannot apply operator to arguments "
-              <> quote (pretty x)
+              <> quote (prettyString x)
               <> " and "
-              <> quote (pretty y)
+              <> quote (prettyString y)
               <> "."
       where
         bopDef' (valf, retf, op) (x, y) = do
@@ -1449,7 +1449,7 @@ initialCtx =
         _ ->
           bad noLoc mempty $
             "Cannot apply function to argument "
-              <> quote (pretty x)
+              <> quote (prettyString x)
               <> "."
       where
         unopDef' (valf, retf, op) x = do
@@ -1467,7 +1467,7 @@ initialCtx =
         _ ->
           bad noLoc mempty $
             "Cannot apply operator to argument "
-              <> quote (pretty v)
+              <> quote (prettyString v)
               <> "."
 
     def "!" =
@@ -1560,13 +1560,13 @@ initialCtx =
               ++ floatCmp P.FCmpLe
               ++ boolCmp P.CmpLle
     def s
-      | Just bop <- find ((s ==) . pretty) P.allBinOps =
+      | Just bop <- find ((s ==) . prettyString) P.allBinOps =
           Just $ tbopDef $ P.doBinOp bop
-      | Just unop <- find ((s ==) . pretty) P.allCmpOps =
+      | Just unop <- find ((s ==) . prettyString) P.allCmpOps =
           Just $ tbopDef $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
-      | Just cop <- find ((s ==) . pretty) P.allConvOps =
+      | Just cop <- find ((s ==) . prettyString) P.allConvOps =
           Just $ unopDef [(getV, Just . putV, P.doConvOp cop)]
-      | Just unop <- find ((s ==) . pretty) P.allUnOps =
+      | Just unop <- find ((s ==) . prettyString) P.allUnOps =
           Just $ unopDef [(getV, Just . putV, P.doUnOp unop)]
       | Just (pts, _, f) <- M.lookup s P.primFuns =
           case length pts of
@@ -1581,21 +1581,21 @@ initialCtx =
                         breakOnNaN vs res
                         pure $ ValuePrim res
                   _ ->
-                    error $ "Cannot apply " ++ pretty s ++ " to " ++ pretty x
+                    error $ "Cannot apply " ++ prettyString s ++ " to " ++ prettyString x
       | "sign_" `isPrefixOf` s =
           Just $
             fun1 $ \x ->
               case x of
                 (ValuePrim (UnsignedValue x')) ->
                   pure $ ValuePrim $ SignedValue x'
-                _ -> error $ "Cannot sign: " ++ pretty x
+                _ -> error $ "Cannot sign: " ++ prettyString x
       | "unsign_" `isPrefixOf` s =
           Just $
             fun1 $ \x ->
               case x of
                 (ValuePrim (SignedValue x')) ->
                   pure $ ValuePrim $ UnsignedValue x'
-                _ -> error $ "Cannot unsign: " ++ pretty x
+                _ -> error $ "Cannot unsign: " ++ prettyString x
     def s
       | "map_stream" `isPrefixOf` s =
           Just $ fun2t stream
@@ -1609,11 +1609,11 @@ initialCtx =
               | Just rowshape <- typeRowShape ret_t ->
                   toArray' rowshape <$> mapM (apply noLoc mempty f) (snd $ fromArray xs)
               | otherwise ->
-                  error $ "Bad pure type: " ++ pretty ret_t
+                  error $ "Bad pure type: " ++ prettyString ret_t
             _ ->
               error $
                 "Invalid arguments to map intrinsic:\n"
-                  ++ unlines [pretty t, pretty v]
+                  ++ unlines [prettyString t, prettyString v]
       where
         typeRowShape = sequenceA . structTypeShape mempty . stripArray 1
     def s | "reduce" `isPrefixOf` s = Just $
@@ -1635,7 +1635,7 @@ initialCtx =
                 foldl' update arr' $
                   zip (map asInt $ snd $ fromArray is) (snd $ fromArray vs)
           _ ->
-            error $ "scatter expects array, but got: " ++ pretty arr
+            error $ "scatter expects array, but got: " ++ prettyString arr
       where
         update arr' (i, v) =
           if i >= 0 && i < arrayLength arr'
@@ -1649,7 +1649,7 @@ initialCtx =
               foldl' update arr $
                 zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
           _ ->
-            error $ "scatter_2d expects array, but got: " ++ pretty arr
+            error $ "scatter_2d expects array, but got: " ++ prettyString arr
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _], v) =
@@ -1664,7 +1664,7 @@ initialCtx =
               foldl' update arr $
                 zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
           _ ->
-            error $ "scatter_3d expects array, but got: " ++ pretty arr
+            error $ "scatter_3d expects array, but got: " ++ prettyString arr
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _, _], v) =
@@ -1736,9 +1736,9 @@ initialCtx =
                 ValueAcc _ dest_arr' ->
                   pure $ ValueArray dest_shape dest_arr'
                 _ ->
-                  error $ "scatter_stream produced: " ++ pretty acc'
+                  error $ "scatter_stream produced: " ++ prettyString acc'
           _ ->
-            error $ "scatter_stream expects array, but got: " ++ pretty (dest, vs)
+            error $ "scatter_stream expects array, but got: " ++ prettyString (dest, vs)
     def "hist_stream" = Just $
       fun5t $ \dest op _ne f vs ->
         case (dest, vs) of
@@ -1751,9 +1751,9 @@ initialCtx =
                 ValueAcc _ dest_arr' ->
                   pure $ ValueArray dest_shape dest_arr'
                 _ ->
-                  error $ "hist_stream produced: " ++ pretty acc'
+                  error $ "hist_stream produced: " ++ prettyString acc'
           _ ->
-            error $ "hist_stream expects array, but got: " ++ pretty (dest, vs)
+            error $ "hist_stream expects array, but got: " ++ prettyString (dest, vs)
     def "acc_write" = Just $
       fun3t $ \acc i v ->
         case (acc, i) of
@@ -1767,7 +1767,7 @@ initialCtx =
                   pure $ ValueAcc op $ acc_arr // [(fromIntegral i', res)]
                 else pure acc
           _ ->
-            error $ "acc_write invalid arguments: " ++ pretty (acc, i, v)
+            error $ "acc_write invalid arguments: " ++ prettyString (acc, i, v)
     --
     def "flat_index_2d" = Just . fun6t $ \arr offset n1 s1 n2 s2 -> do
       let offset' = asInt64 offset
@@ -1786,7 +1786,7 @@ initialCtx =
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
-            "Index out of bounds: " ++ pretty [(n1', s1', n2', s2')]
+            "Index out of bounds: " ++ prettyString [(n1', s1', n2', s2')]
     --
     def "flat_update_2d" = Just . fun5t $ \arr offset s1 s2 v -> do
       let offset' = asInt64 offset
@@ -1802,7 +1802,7 @@ initialCtx =
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $
-                "Index out of bounds: " ++ pretty [(n1, s1', n2, s2')]
+                "Index out of bounds: " ++ prettyString [(n1, s1', n2, s2')]
         s -> error $ "flat_update_2d: invalid arg shape: " ++ show s
     --
     def "flat_index_3d" = Just . fun8t $ \arr offset n1 s1 n2 s2 n3 s3 -> do
@@ -1825,7 +1825,7 @@ initialCtx =
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
-            "Index out of bounds: " ++ pretty [(n1', s1', n2', s2', n3', s3')]
+            "Index out of bounds: " ++ prettyString [(n1', s1', n2', s2', n3', s3')]
     --
     def "flat_update_3d" = Just . fun6t $ \arr offset s1 s2 s3 v -> do
       let offset' = asInt64 offset
@@ -1842,7 +1842,7 @@ initialCtx =
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $
-                "Index out of bounds: " ++ pretty [(n1, s1', n2, s2', n3, s3')]
+                "Index out of bounds: " ++ prettyString [(n1, s1', n2, s2', n3, s3')]
         s -> error $ "flat_update_3d: invalid arg shape: " ++ show s
     --
     def "flat_index_4d" = Just . fun10t $ \arr offset n1 s1 n2 s2 n3 s3 n4 s4 -> do
@@ -1868,7 +1868,7 @@ initialCtx =
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
-            "Index out of bounds: " ++ pretty [(n1', s1', n2', s2', n3', s3', n4', s4')]
+            "Index out of bounds: " ++ prettyString [(n1', s1', n2', s2', n3', s3', n4', s4')]
     --
     def "flat_update_4d" = Just . fun7t $ \arr offset s1 s2 s3 s4 v -> do
       let offset' = asInt64 offset
@@ -1886,7 +1886,7 @@ initialCtx =
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $
-                "Index out of bounds: " ++ pretty [(n1, s1', n2, s2', n3, s3', n4, s4')]
+                "Index out of bounds: " ++ prettyString [(n1, s1', n2, s2', n3, s3', n4, s4')]
         s -> error $ "flat_update_4d: invalid arg shape: " ++ show s
     --
     def "unzip" = Just $
@@ -1899,7 +1899,7 @@ initialCtx =
         pure $ toTuple $ listPair $ unzip $ map (fromPair . fromTuple) $ snd $ fromArray x
       where
         fromPair (Just [x, y]) = (x, y)
-        fromPair l = error $ "Not a pair: " ++ pretty l
+        fromPair l = error $ "Not a pair: " ++ prettyString l
     def "zip" = Just $
       fun2t $ \xs ys -> do
         let ShapeDim _ xs_rowshape = valueShape xs
@@ -1947,11 +1947,11 @@ initialCtx =
           then
             bad mempty mempty $
               "Cannot unflatten array of shape ["
-                <> pretty xs_size
+                <> prettyString xs_size
                 <> "] to array of shape ["
-                <> pretty (asInt64 n)
+                <> prettyString (asInt64 n)
                 <> "]["
-                <> pretty (asInt64 m)
+                <> prettyString (asInt64 m)
                 <> "]"
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "vjp2" = Just $
@@ -1971,7 +1971,7 @@ initialCtx =
     stream f arg@(ValueArray _ xs) =
       let n = ValuePrim $ SignedValue $ Int64Value $ arrayLength xs
        in apply2 noLoc mempty f n arg
-    stream _ arg = error $ "Cannot stream: " ++ pretty arg
+    stream _ arg = error $ "Cannot stream: " ++ prettyString arg
 
 interpretExp :: Ctx -> Exp -> F ExtOp Value
 interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
@@ -2003,7 +2003,7 @@ checkEntryArgs entry args entry_t
       pure ()
   | otherwise =
       Left $
-        pretty $
+        prettyString $
           expected
             </> "Got input of types"
             </> indent 2 (stack (map ppr args_ts))
@@ -2056,7 +2056,7 @@ interpretFunction ctx fname vs = do
       Right ()
 
     badPrim vt pt =
-      Left . pretty $
+      Left . prettyString $
         "Invalid argument type."
           </> "Expected:"
           <+> align (ppr pt)

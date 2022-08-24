@@ -155,7 +155,7 @@ letExp desc e = do
   letBindNames vs e
   case vs of
     [v] -> pure v
-    _ -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
+    _ -> error $ "letExp: tuple-typed expression given:\n" ++ prettyString e
 
 -- | Like 'letExp', but the 'VName' and 'Slice' denote an array that
 -- is 'Update'd with the result of the expression.  The name of the
@@ -346,7 +346,7 @@ eSignum em = do
     Prim (IntType int_t) ->
       pure $ BasicOp $ UnOp (SSignum int_t) e'
     _ ->
-      error $ "eSignum: operand " ++ pretty e ++ " has invalid type."
+      error $ "eSignum: operand " ++ prettyString e ++ " has invalid type."
 
 -- | Construct a 'Copy' expression.
 eCopy ::
@@ -448,7 +448,7 @@ asInt ext to_it e = do
   where
     s = case e of
       Var v -> baseString v
-      _ -> "to_" ++ pretty to_it
+      _ -> "to_" ++ prettyString to_it
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp ::
@@ -648,7 +648,7 @@ instantiateShapes' names ts =
   where
     instantiate x =
       case maybeNth x names of
-        Nothing -> error $ "instantiateShapes': " ++ pretty names ++ ", " ++ show x
+        Nothing -> error $ "instantiateShapes': " ++ prettyString names ++ ", " ++ show x
         Just name -> pure $ Var name
 
 -- | Remove existentials by imposing sizes from another type where

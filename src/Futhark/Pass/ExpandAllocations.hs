@@ -169,7 +169,7 @@ transformExp (WithAcc inputs lam) = do
         (_, v, _) : _ ->
           throwError $
             "Cannot handle un-sliceable allocation size: "
-              ++ pretty v
+              ++ prettyString v
               ++ "\nLikely cause: irregular nested operations inside accumulator update operator."
         [] ->
           pure ()
@@ -211,7 +211,7 @@ transformScanRed lvl space ops kbody = do
     Just v ->
       throwError $
         "Cannot handle un-sliceable allocation size: "
-          ++ pretty v
+          ++ prettyString v
           ++ "\nLikely cause: irregular nested operations inside parallel constructs."
     Nothing ->
       pure ()
@@ -723,7 +723,7 @@ unAllocGPUStms = unAllocStms False
       fmap (stmsFromList . catMaybes) . mapM (unAllocStm nested) . stmsToList
 
     unAllocStm nested stm@(Let _ _ (Op Alloc {}))
-      | nested = throwError $ "Cannot handle nested allocation: " ++ pretty stm
+      | nested = throwError $ "Cannot handle nested allocation: " ++ prettyString stm
       | otherwise = pure Nothing
     unAllocStm _ (Let pat dec e) =
       Just <$> (Let <$> unAllocPat pat <*> pure dec <*> mapExpM unAlloc' e)

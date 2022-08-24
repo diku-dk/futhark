@@ -302,4 +302,4 @@ withAccBottomUp _ _ = Skip
 -- That's it!  We then let ordinary dead code elimination eventually
 -- simplify the body enough that we have an "identity" WithAcc.  There
 -- is no _guarantee_ that this will happen, but our general dead code
--- elimination tends to be pretty good.
+-- elimination tends to be prettyString good.

@@ -347,7 +347,7 @@ bindingNumber name = do
     Nothing ->
       error $
         "bindingNumber: variable "
-          ++ pretty name
+          ++ prettyString name
           ++ " not found."
 
 deepen :: ForwardingM rep a -> ForwardingM rep a
@@ -368,7 +368,7 @@ isInCurrentBody name = do
     Nothing ->
       error $
         "isInCurrentBody: variable "
-          ++ pretty name
+          ++ prettyString name
           ++ " not found."
 
 isOptimisable :: VName -> ForwardingM rep Bool
@@ -379,7 +379,7 @@ isOptimisable name = do
     Nothing ->
       error $
         "isOptimisable: variable "
-          ++ pretty name
+          ++ prettyString name
           ++ " not found."
 
 seenVar :: VName -> ForwardingM rep ()

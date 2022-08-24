@@ -1833,8 +1833,8 @@ convOp s from to = text s <> text "_" <> ppr from <> text "_" <> ppr to
 
 -- | True if signed.  Only makes a difference for integer types.
 prettySigned :: Bool -> PrimType -> String
-prettySigned True (IntType it) = 'u' : drop 1 (pretty it)
-prettySigned _ t = pretty t
+prettySigned True (IntType it) = 'u' : drop 1 (prettyString it)
+prettySigned _ t = prettyString t
 
 mul_hi8 :: IntValue -> IntValue -> Int8
 mul_hi8 a b =

@@ -97,9 +97,9 @@ instance Checkable rep => Show (ErrorCase rep) where
     "Type of expression\n"
       ++ prettyDoc 160 (indent 2 $ ppr e)
       ++ "\nmust be one of "
-      ++ intercalate ", " (map pretty ts)
+      ++ intercalate ", " (map prettyString ts)
       ++ ", but is "
-      ++ pretty t
+      ++ prettyString t
       ++ "."
   show (ReturnTypeError fname rettype bodytype) =
     "Declaration of function "
@@ -112,15 +112,15 @@ instance Checkable rep => Show (ErrorCase rep) where
     "Duplicate definition of function " ++ nameToString name ++ ""
   show (DupParamError funname paramname) =
     "Parameter "
-      ++ pretty paramname
+      ++ prettyString paramname
       ++ " mentioned multiple times in argument list of function "
       ++ nameToString funname
       ++ "."
   show (DupPatError name) =
-    "Variable " ++ pretty name ++ " bound twice in pattern."
+    "Variable " ++ prettyString name ++ " bound twice in pattern."
   show (InvalidPatError pat t desc) =
     "Pat\n"
-      ++ pretty pat
+      ++ prettyString pat
       ++ "\ncannot match value of type\n"
       ++ prettyTupleLines t
       ++ end
@@ -129,7 +129,7 @@ instance Checkable rep => Show (ErrorCase rep) where
         Nothing -> "."
         Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError name) =
-    "Use of unknown variable " ++ pretty name ++ "."
+    "Use of unknown variable " ++ prettyString name ++ "."
   show (UnknownFunctionError fname) =
     "Call of unknown function " ++ nameToString fname ++ "."
   show (ParameterMismatch fname expected got) =
@@ -139,11 +139,11 @@ instance Checkable rep => Show (ErrorCase rep) where
       ++ "expecting "
       ++ show nexpected
       ++ " arguments of type(s)\n"
-      ++ intercalate ", " (map pretty expected)
+      ++ intercalate ", " (map prettyString expected)
       ++ "\nGot "
       ++ show ngot
       ++ " arguments of types\n"
-      ++ intercalate ", " (map pretty got)
+      ++ intercalate ", " (map prettyString got)
     where
       nexpected = length expected
       ngot = length got
@@ -154,15 +154,15 @@ instance Checkable rep => Show (ErrorCase rep) where
     "Annotation of \""
       ++ desc
       ++ "\" type of expression is "
-      ++ pretty expected
+      ++ prettyString expected
       ++ ", but derived to be "
-      ++ pretty got
+      ++ prettyString got
       ++ "."
   show (ReturnAliased fname name) =
     "Unique return value of function "
       ++ nameToString fname
       ++ " is aliased to "
-      ++ pretty name
+      ++ prettyString name
       ++ ", which is not consumed."
   show (UniqueReturnAliased fname) =
     "A unique tuple element of return value of function "
@@ -170,9 +170,9 @@ instance Checkable rep => Show (ErrorCase rep) where
       ++ " is aliased to some other tuple component."
   show (NotAnArray e t) =
     "The expression "
-      ++ pretty e
+      ++ prettyString e
       ++ " is expected to be an array, but is "
-      ++ pretty t
+      ++ prettyString t
       ++ "."
   show (PermutationError perm rank name) =
     "The permutation ("
@@ -183,7 +183,7 @@ instance Checkable rep => Show (ErrorCase rep) where
       ++ show rank
       ++ "."
     where
-      name' = maybe "" ((++ " ") . pretty) name
+      name' = maybe "" ((++ " ") . prettyString) name
 
 -- | A type error.
 data TypeError rep = Error [String] (ErrorCase rep)
@@ -265,7 +265,7 @@ instance Semigroup Consumption where
   _ <> ConsumptionError e = ConsumptionError e
   Consumption o1 <> Consumption o2
     | v : _ <- namesToList $ consumed_in_o1 `namesIntersection` used_in_o2 =
-        ConsumptionError $ "Variable " <> pretty v <> " referenced after being consumed."
+        ConsumptionError $ "Variable " <> prettyString v <> " referenced after being consumed."
     | otherwise =
         Consumption $ o1 `seqOccurences` o2
     where
@@ -355,7 +355,7 @@ bound name = do
   when already_seen $
     bad $
       TypeError $
-        "Name " ++ pretty name ++ " bound twice"
+        "Name " ++ prettyString name ++ " bound twice"
   modify $ \s -> s {stateNames = oneName name <> stateNames s}
 
 occur :: Occurences -> TypeM rep ()
@@ -426,12 +426,12 @@ consumeOnlyParams consumable m = do
       | Just als <- lookup v consumable = pure als
       | otherwise =
           bad . TypeError . unlines $
-            [ pretty v ++ " was invalidly consumed.",
+            [ prettyString v ++ " was invalidly consumed.",
               what ++ " can be consumed here."
             ]
     what
       | null consumable = "Nothing"
-      | otherwise = "Only " ++ intercalate ", " (map (pretty . fst) consumable)
+      | otherwise = "Only " ++ intercalate ", " (map (prettyString . fst) consumable)
 
 -- | Given the immediate aliases, compute the full transitive alias
 -- set (including the immediate aliases).
@@ -557,9 +557,9 @@ checkAccIdent v = do
       pure (ispace, ts)
     _ ->
       bad . TypeError $
-        pretty v
+        prettyString v
           ++ " should be an accumulator but is of type "
-          ++ pretty t
+          ++ prettyString t
 
 checkOpaques :: OpaqueTypes -> Either (TypeError rep) ()
 checkOpaques (OpaqueTypes types) = descend [] types
@@ -662,7 +662,7 @@ checkFunParams ::
   [FParam rep] ->
   TypeM rep ()
 checkFunParams = mapM_ $ \param ->
-  context ("In function parameter " ++ pretty param) $
+  context ("In function parameter " ++ prettyString param) $
     checkFParamDec (paramName param) (paramDec param)
 
 checkLambdaParams ::
@@ -670,7 +670,7 @@ checkLambdaParams ::
   [LParam rep] ->
   TypeM rep ()
 checkLambdaParams = mapM_ $ \param ->
-  context ("In lambda parameter " ++ pretty param) $
+  context ("In lambda parameter " ++ prettyString param) $
     checkLParamDec (paramName param) (paramDec param)
 
 checkFun' ::
@@ -691,7 +691,7 @@ checkFun' (fname, rettype, params) consumable check = do
       let isArray = maybe False ((> 0) . arrayRank . typeOf) . (`M.lookup` scope)
       context
         ( "When checking the body aliases: "
-            ++ pretty (map namesToList body_aliases)
+            ++ prettyString (map namesToList body_aliases)
         )
         $ checkReturnAlias
         $ map (namesFromList . filter isArray . namesToList) body_aliases
@@ -729,7 +729,7 @@ checkFun' (fname, rettype, params) consumable check = do
 checkSubExp :: Checkable rep => SubExp -> TypeM rep Type
 checkSubExp (Constant val) =
   pure $ Prim $ primValueType val
-checkSubExp (Var ident) = context ("In subexp " ++ pretty ident) $ do
+checkSubExp (Var ident) = context ("In subexp " ++ prettyString ident) $ do
   observe ident
   lookupType ident
 
@@ -749,7 +749,7 @@ checkStms ::
 checkStms origstms m = delve $ stmsToList origstms
   where
     delve (stm@(Let pat _ e) : stms) = do
-      context (pretty $ "In expression of statement" </> indent 2 (ppr pat)) $
+      context (prettyString $ "In expression of statement" </> indent 2 (ppr pat)) $
         checkExp e
       checkStm stm $
         delve stms
@@ -810,11 +810,11 @@ checkLambdaResult ts es
       et <- checkSubExpRes e
       unless (et == t) . bad . TypeError $
         "Subexpression "
-          ++ pretty e
+          ++ prettyString e
           ++ " has type "
-          ++ pretty et
+          ++ prettyString et
           ++ " but expected "
-          ++ pretty t
+          ++ prettyString t
 
 checkBody ::
   Checkable rep =>
@@ -839,9 +839,9 @@ checkBasicOp (ArrayLit (e : es') t) = do
   let check elemt eleme = do
         elemet <- checkSubExp eleme
         unless (elemet == elemt) . bad . TypeError $
-          pretty elemet
+          prettyString elemet
             ++ " is not of expected type "
-            ++ pretty elemt
+            ++ prettyString elemt
             ++ "."
   et <- checkSubExp e
 
@@ -1011,7 +1011,7 @@ checkExp (Match ses cases def_case info) = do
     checkVal _ Nothing = True
     checkCase ses_ts (Case vs body) = do
       let ok = length vs == length ses_ts && and (zipWith checkVal ses_ts vs)
-      unless ok . bad . TypeError . pretty $
+      unless ok . bad . TypeError . prettyString $
         "Scrutinee"
           </> indent 2 (ppTuple' ses)
           </> "cannot match pattern"
@@ -1022,7 +1022,7 @@ checkExp (Apply fname args rettype_annot _) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args
   when (rettype_derived /= rettype_annot) $
-    bad . TypeError . pretty $
+    bad . TypeError . prettyString $
       "Expected apply result type:"
         </> indent 2 (ppr rettype_derived)
         </> "But annotation is:"
@@ -1079,19 +1079,19 @@ checkExp (DoLoop merge form loopbody) = do
           unless (a_t_r `subtypeOf` typeOf (paramDec p)) $
             bad . TypeError $
               "Loop parameter "
-                ++ pretty p
+                ++ prettyString p
                 ++ " not valid for element of "
-                ++ pretty a
+                ++ prettyString a
                 ++ ", which has row type "
-                ++ pretty a_t_r
+                ++ prettyString a_t_r
           als <- lookupAliases a
           pure (paramName p, als)
         _ ->
           bad . TypeError $
             "Cannot loop over "
-              ++ pretty a
+              ++ prettyString a
               ++ " of type "
-              ++ pretty a_t
+              ++ prettyString a_t
     checkForm mergeargs (ForLoop loopvar it boundexp loopvars) = do
       iparam <- primFParam loopvar $ IntType it
       let mergepat = map fst merge
@@ -1108,14 +1108,14 @@ checkExp (DoLoop merge form loopbody) = do
           unless (paramType condparam == Prim Bool) $
             bad . TypeError $
               "Conditional '"
-                ++ pretty cond
+                ++ prettyString cond
                 ++ "' of while-loop is not boolean, but "
-                ++ pretty (paramType condparam)
+                ++ prettyString (paramType condparam)
                 ++ "."
         Nothing ->
           bad $
             TypeError $
-              "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge variable."
+              "Conditional '" ++ prettyString cond ++ "' of while-loop is not a merge variable."
       let mergepat = map fst merge
           funparams = mergepat
           paramts = map paramDeclType funparams
@@ -1128,7 +1128,7 @@ checkExp (DoLoop merge form loopbody) = do
       argtypes <- mapM subExpType args
 
       let expected = expectedTypes (map paramName params) params args
-      unless (expected == argtypes) . bad . TypeError . pretty $
+      unless (expected == argtypes) . bad . TypeError . prettyString $
         "Loop parameters"
           </> indent 2 (ppTuple' params)
           </> "cannot accept initial values"
@@ -1150,7 +1150,7 @@ checkExp (WithAcc inputs lam) = do
       arr_t <- lookupType arr
       unless (shapeDims shape `isPrefixOf` arrayDims arr_t) $
         bad . TypeError $
-          pretty arr <> " is not an array of outer shape " <> pretty shape
+          prettyString arr <> " is not an array of outer shape " <> prettyString shape
       consume =<< lookupAliases arr
       pure $ stripArray (shapeRank shape) arr_t
 
@@ -1162,8 +1162,8 @@ checkExp (WithAcc inputs lam) = do
           bad $
             TypeError $
               unlines
-                [ "Accumulator operator return type: " ++ pretty (lambdaReturnType op_lam),
-                  "Type of neutral elements: " ++ pretty nes_ts
+                [ "Accumulator operator return type: " ++ prettyString (lambdaReturnType op_lam),
+                  "Type of neutral elements: " ++ prettyString nes_ts
                 ]
         checkLambda op_lam $
           replicate (shapeRank shape) (Prim int64, mempty)
@@ -1195,15 +1195,15 @@ checkSOACArrayArgs width = mapM checkSOACArrayArg
           let argSize = arraySize 0 t
           unless (argSize == width) . bad . TypeError $
             "SOAC argument "
-              ++ pretty v
+              ++ prettyString v
               ++ " has outer size "
-              ++ pretty argSize
+              ++ prettyString argSize
               ++ ", but width of SOAC is "
-              ++ pretty width
+              ++ prettyString width
           pure (rowType t, als)
         _ ->
           bad . TypeError $
-            "SOAC argument " ++ pretty v ++ " is not an array"
+            "SOAC argument " ++ prettyString v ++ " is not an array"
 
 checkType ::
   Checkable rep =>
@@ -1258,7 +1258,7 @@ checkPatElem ::
   PatElem (LetDec rep) ->
   TypeM rep ()
 checkPatElem (PatElem name dec) =
-  context ("When checking pattern element " ++ pretty name) $
+  context ("When checking pattern element " ++ prettyString name) $
     checkLetBoundDec name dec
 
 checkFlatDimIndex ::
@@ -1452,7 +1452,7 @@ checkAnyLambda soac (Lambda params body rettype) args = do
         "Anonymous function defined with "
           ++ show (length params)
           ++ " parameters:\n"
-          ++ pretty params
+          ++ prettyString params
           ++ "\nbut expected to take "
           ++ show (length args)
           ++ " arguments."
@@ -1485,16 +1485,16 @@ checkPrimExp (FunExp h args t) = do
       ++ " arguments."
   when (h_ret /= t) . bad . TypeError $
     "Function return annotation is "
-      ++ pretty t
+      ++ prettyString t
       ++ ", but expected "
-      ++ pretty h_ret
+      ++ prettyString h_ret
   zipWithM_ requirePrimExp h_ts args
 
 requirePrimExp :: Checkable rep => PrimType -> PrimExp VName -> TypeM rep ()
-requirePrimExp t e = context ("in PrimExp " ++ pretty e) $ do
+requirePrimExp t e = context ("in PrimExp " ++ prettyString e) $ do
   checkPrimExp e
   unless (primExpType e == t) . bad . TypeError $
-    pretty e ++ " must have type " ++ pretty t
+    prettyString e ++ " must have type " ++ prettyString t
 
 class ASTRep rep => CheckableOp rep where
   checkOp :: OpWithAliases (Op rep) -> TypeM rep ()

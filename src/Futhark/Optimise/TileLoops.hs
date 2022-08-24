@@ -1226,7 +1226,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
   gid_x <- newVName "gid_x"
   gid_y <- newVName "gid_y"
 
-  tile_size_key <- nameFromString . pretty <$> newVName "tile_size"
+  tile_size_key <- nameFromString . prettyString <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
   group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int64 OverflowUndef) tile_size tile_size
 

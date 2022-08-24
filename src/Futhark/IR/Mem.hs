@@ -590,9 +590,9 @@ matchFunctionReturnType rettype result = do
               TC.bad $
                 TC.TypeError $
                   "Array "
-                    ++ pretty v
+                    ++ prettyString v
                     ++ " returned by function, but has nontrivial index function "
-                    ++ pretty ixfun
+                    ++ prettyString ixfun
 
 matchLoopResultMem ::
   (Mem rep inner, TC.Checkable rep) =>
@@ -680,7 +680,7 @@ matchReturnType rettype res ts = do
 
       fetchCtx i = case maybeNth i $ zip res ts of
         Nothing ->
-          throwError $ "Cannot find variable #" ++ show i ++ " in results: " ++ pretty res
+          throwError $ "Cannot find variable #" ++ show i ++ " in results: " ++ prettyString res
         Just (se, t) -> pure (se, t)
 
       checkReturn (MemPrim x) (MemPrim y)
@@ -698,16 +698,16 @@ matchReturnType rettype res ts = do
               zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
               checkMemReturn x_ret y_ret
       checkReturn x y =
-        throwError $ unwords ["Expected", pretty x, "but got", pretty y]
+        throwError $ unwords ["Expected", prettyString x, "but got", prettyString y]
 
       checkDim (Free x) y
         | x == y = pure ()
         | otherwise =
-            throwError $ unwords ["Expected dim", pretty x, "but got", pretty y]
+            throwError $ unwords ["Expected dim", prettyString x, "but got", prettyString y]
       checkDim (Ext i) y = do
         (x, _) <- fetchCtx i
         unless (x == y) . throwError . unwords $
-          ["Expected ext dim", pretty i, "=>", pretty x, "but got", pretty y]
+          ["Expected ext dim", prettyString i, "=>", prettyString x, "but got", prettyString y]
 
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
         | x_mem == y_mem =
@@ -715,16 +715,16 @@ matchReturnType rettype res ts = do
               throwError . unwords $
                 [ "Index function unification failed (ReturnsInBlock)",
                   "\nixfun of body result: ",
-                  pretty y_ixfun,
+                  prettyString y_ixfun,
                   "\nixfun of return type: ",
-                  pretty x_ixfun
+                  prettyString x_ixfun
                 ]
       checkMemReturn
         (ReturnsNewBlock x_space x_ext x_ixfun)
         (ArrayIn y_mem y_ixfun) = do
           (x_mem, x_mem_type) <- fetchCtx x_ext
           unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
-            throwError . pretty $
+            throwError . prettyString $
               "Index function unification failed (ReturnsNewBlock)"
                 </> "Ixfun of body result:"
                 </> indent 2 (ppr y_ixfun)
@@ -734,17 +734,17 @@ matchReturnType rettype res ts = do
             MemMem y_space ->
               unless (x_space == y_space) . throwError . unwords $
                 [ "Expected memory",
-                  pretty y_mem,
+                  prettyString y_mem,
                   "in space",
-                  pretty x_space,
+                  prettyString x_space,
                   "but actually in space",
-                  pretty y_space
+                  prettyString y_space
                 ]
             t ->
               throwError . unwords $
-                ["Expected memory", pretty x_ext, "=>", pretty x_mem, "but but has type", pretty t]
+                ["Expected memory", prettyString x_ext, "=>", prettyString x_mem, "but but has type", prettyString t]
       checkMemReturn x y =
-        throwError . pretty $
+        throwError . prettyString $
           "Expected array in"
             </> indent 2 (ppr x)
             </> "but array returned in"
@@ -754,7 +754,7 @@ matchReturnType rettype res ts = do
       bad s =
         TC.bad $
           TC.TypeError $
-            pretty $
+            prettyString $
               "Return type"
                 </> indent 2 (ppTuple' rettype)
                 </> "cannot match returns of results"
@@ -781,7 +781,7 @@ matchPatToExp pat e = do
     )
     . TC.bad
     . TC.TypeError
-    . pretty
+    . prettyString
     $ "Expression type:"
       </> indent 2 (ppTuple' rt)
       </> "cannot match pattern type:"
@@ -862,9 +862,9 @@ lookupArraySummary name = do
     _ ->
       error $
         "Expected "
-          ++ pretty name
+          ++ prettyString name
           ++ " to be array but bound to:\n"
-          ++ pretty summary
+          ++ prettyString summary
 
 lookupMemSpace ::
   (Mem rep inner, HasScope rep m, Monad m) =>
@@ -878,9 +878,9 @@ lookupMemSpace name = do
     _ ->
       error $
         "Expected "
-          ++ pretty name
+          ++ prettyString name
           ++ " to be memory but bound to:\n"
-          ++ pretty summary
+          ++ prettyString summary
 
 checkMemInfo ::
   TC.Checkable rep =>
@@ -901,12 +901,12 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
       TC.bad $
         TC.TypeError $
           "Variable "
-            ++ pretty v
+            ++ prettyString v
             ++ " used as memory block, but is of type "
-            ++ pretty t
+            ++ prettyString t
             ++ "."
 
-  TC.context ("in index function " ++ pretty ixfun) $ do
+  TC.context ("in index function " ++ prettyString ixfun) $ do
     traverse_ (TC.requirePrimExp int64 . untyped) ixfun
     let ixfun_rank = IxFun.rank ixfun
         ident_rank = shapeRank shape
@@ -914,9 +914,9 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
       TC.bad $
         TC.TypeError $
           "Arity of index function ("
-            ++ pretty ixfun_rank
+            ++ prettyString ixfun_rank
             ++ ") does not match rank of array "
-            ++ pretty name
+            ++ prettyString name
             ++ " ("
             ++ show ident_rank
             ++ ")"
@@ -983,7 +983,7 @@ arrayVarReturns v = do
     MemArray et shape _ (ArrayIn mem ixfun) ->
       pure (et, Shape $ shapeDims shape, mem, ixfun)
     _ ->
-      error $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
+      error $ "arrayVarReturns: " ++ prettyString v ++ " is not an array."
 
 varReturns ::
   (HasScope rep m, Monad m, Mem rep inner) =>

@@ -337,7 +337,7 @@ callKernel (CmpSizeLe v key x) = do
   GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key <= $exp:x';|]
   sizeLoggingCode v key x'
 callKernel (GetSizeMax v size_class) =
-  let field = "max_" ++ pretty size_class
+  let field = "max_" ++ prettyString size_class
    in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
 callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   -- The other failure args are set automatically when the kernel is
@@ -428,7 +428,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
         $id:time_end = get_wall_time();
         long int $id:time_diff = $id:time_end - $id:time_start;
         fprintf(ctx->log, "kernel %s runtime: %ldus\n",
-                $string:(pretty kernel_name), $id:time_diff);
+                $string:(prettyString kernel_name), $id:time_diff);
       }
     }|]
   where
@@ -449,7 +449,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
           ++ " and local work size "
           ++ dims
           ++ "; local memory: %d bytes.\n",
-        [C.cexp|$string:(pretty kernel_name)|]
+        [C.cexp|$string:(prettyString kernel_name)|]
           : map (kernelDim global_work_size) [0 .. kernel_rank - 1]
           ++ map (kernelDim local_work_size) [0 .. kernel_rank - 1]
           ++ [[C.cexp|(int)$exp:local_bytes|]]

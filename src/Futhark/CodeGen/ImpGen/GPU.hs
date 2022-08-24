@@ -152,9 +152,9 @@ opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
 opCompiler pat e =
   compilerBugS $
     "opCompiler: Invalid pattern\n  "
-      ++ pretty pat
+      ++ prettyString pat
       ++ "\nfor expression\n  "
-      ++ pretty e
+      ++ prettyString e
 
 sizeClassWithEntryPoint :: Maybe Name -> Imp.SizeClass -> Imp.SizeClass
 sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
@@ -176,7 +176,7 @@ segOpCompiler pat (SegScan lvl@SegThread {} space scans _ kbody) =
 segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody) =
   compileSegHist pat num_groups group_size space ops kbody
 segOpCompiler pat segop =
-  compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
+  compilerBugS $ "segOpCompiler: unexpected " ++ prettyString (segLevel segop) ++ " for rhs of pattern " ++ prettyString pat
 
 -- Create boolean expression that checks whether all kernels in the
 -- enclosed code do not use more local memory than we have available.
@@ -323,7 +323,7 @@ mapTransposeForType bt = do
   pure fname
 
 mapTransposeName :: PrimType -> String
-mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
+mapTransposeName bt = "gpu_map_transpose_" ++ prettyString bt
 
 mapTransposeFunction :: PrimType -> Imp.Function Imp.HostOp
 mapTransposeFunction bt =

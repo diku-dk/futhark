@@ -48,7 +48,7 @@ argShapes shapes all_params valargts = do
   let addShape name =
         case M.lookup name mapping of
           Just se -> se
-          _ -> error $ "argShapes: " ++ pretty name
+          _ -> error $ "argShapes: " ++ prettyString name
   pure $ map addShape shapes
 
 ensureResultShape ::

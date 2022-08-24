@@ -24,7 +24,7 @@ import Futhark.IR.SOACS
 
 zeroTan :: Type -> ADM SubExp
 zeroTan (Prim t) = pure $ constant $ blankPrimValue t
-zeroTan t = error $ "zeroTan on non-primitive type: " ++ pretty t
+zeroTan t = error $ "zeroTan on non-primitive type: " ++ prettyString t
 
 zeroExp :: Type -> Exp SOACS
 zeroExp (Prim pt) =
@@ -262,7 +262,7 @@ basicFwd pat aux op = do
     Rotate rots arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
-    _ -> error $ "basicFwd: Unsupported op " ++ pretty op
+    _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
 fwdLambda l@(Lambda params body ret) =
@@ -401,7 +401,7 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
       let arg_pes = zipWith primExpFromSubExp argts (map fst args)
       case pdBuiltin f arg_pes of
         Nothing ->
-          error $ "No partial derivative defined for builtin function: " ++ pretty f
+          error $ "No partial derivative defined for builtin function: " ++ prettyString f
         Just derivs -> do
           let convertTo tt e
                 | e_t == tt = e
@@ -411,7 +411,7 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
                       (FloatType tt', FloatType ft) -> ConvOpExp (FPConv ft tt') e
                       (Bool, FloatType ft) -> ConvOpExp (FToB ft) e
                       (FloatType tt', Bool) -> ConvOpExp (BToF tt') e
-                      _ -> error $ "fwdStm.convertTo: " ++ pretty (f, tt, e_t)
+                      _ -> error $ "fwdStm.convertTo: " ++ prettyString (f, tt, e_t)
                 where
                   e_t = primExpType e
           zipWithM_ (letBindNames . pure) (patNames pat_tan)
@@ -459,7 +459,7 @@ fwdStm (Let pat aux (WithAcc inputs lam)) = do
     removeIndexTans _ ps = ps
 fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
-  error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
+  error $ "unhandled forward mode AD for Stm: " ++ prettyString stm ++ "\n" ++ show stm
 
 fwdBody :: Body SOACS -> ADM (Body SOACS)
 fwdBody (Body _ stms res) = buildBody_ $ do

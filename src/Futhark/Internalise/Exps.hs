@@ -39,7 +39,7 @@ internaliseValBinds :: VisibleTypes -> [E.ValBind] -> InternaliseM ()
 internaliseValBinds types = mapM_ $ internaliseValBind types
 
 internaliseFunName :: VName -> Name
-internaliseFunName = nameFromString . pretty
+internaliseFunName = nameFromString . prettyString
 
 internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
 internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
@@ -207,7 +207,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
     case E.typeOf start of
       E.Scalar (E.Prim (E.Signed it)) -> pure (it, CmpSle it, CmpSlt it)
       E.Scalar (E.Prim (E.Unsigned it)) -> pure (it, CmpUle it, CmpUlt it)
-      start_t -> error $ "Start value in range has type " ++ pretty start_t
+      start_t -> error $ "Start value in range has type " ++ prettyString start_t
 
   let one = intConst it 1
       negone = intConst it (-1)
@@ -346,7 +346,7 @@ internaliseAppExp desc _ e@E.Apply {} =
     (FunctionName qfname, args) -> do
       -- Argument evaluation is outermost-in so that any existential sizes
       -- created by function applications can be brought into scope.
-      let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
+      let fname = nameFromString $ prettyString $ baseName $ qualLeaf qfname
           loc = srclocOf e
           arg_desc = nameToString fname ++ "_arg"
 
@@ -370,7 +370,7 @@ internaliseAppExp desc _ e@E.Apply {} =
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
-  error $ "Unexpected LetFun " ++ pretty ofname
+  error $ "Unexpected LetFun " ++ prettyString ofname
 internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) = do
   ses <- internaliseExp "loop_init" mergeexp
   ((loopbody', (form', shapepat, mergepat', mergeinit')), initstms) <-
@@ -551,7 +551,7 @@ internaliseAppExp desc _ (E.If ce te fe _) =
       (internaliseBody (desc <> "_t") te)
       (internaliseBody (desc <> "_f") fe)
 internaliseAppExp _ _ e@E.BinOp {} =
-  error $ "internaliseAppExp: Unexpected BinOp " ++ pretty e
+  error $ "internaliseAppExp: Unexpected BinOp " ++ prettyString e
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =
@@ -633,7 +633,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
             -- Fixing this in the monomorphiser is a lot more tricky
             -- than just working around it here.
             case es' of
-              [] -> error $ "internaliseExp ArrayLit: existential type: " ++ pretty arr_t
+              [] -> error $ "internaliseExp ArrayLit: existential type: " ++ prettyString arr_t
               e' : _ -> mapM subExpType e'
 
       let arraylit ks rt = do
@@ -771,7 +771,7 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
     clauses _ [] _ =
       pure []
 internaliseExp _ (E.Constr _ _ (Info t) loc) =
-  error $ "internaliseExp: constructor with type " ++ pretty t ++ " at " ++ locStr loc
+  error $ "internaliseExp: constructor with type " ++ prettyString t ++ " at " ++ locStr loc
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
 internaliseExp _ (E.Literal v _) =
@@ -784,12 +784,12 @@ internaliseExp _ (E.IntLit v (Info t) _) =
       pure [I.Constant $ I.IntValue $ intValue it v]
     E.Scalar (E.Prim (E.FloatType ft)) ->
       pure [I.Constant $ I.FloatValue $ floatValue ft v]
-    _ -> error $ "internaliseExp: nonsensical type for integer literal: " ++ pretty t
+    _ -> error $ "internaliseExp: nonsensical type for integer literal: " ++ prettyString t
 internaliseExp _ (E.FloatLit v (Info t) _) =
   case t of
     E.Scalar (E.Prim (E.FloatType ft)) ->
       pure [I.Constant $ I.FloatValue $ floatValue ft v]
-    _ -> error $ "internaliseExp: nonsensical type for float literal: " ++ pretty t
+    _ -> error $ "internaliseExp: nonsensical type for float literal: " ++ prettyString t
 -- Builtin operators are handled specially because they are
 -- overloaded.
 internaliseExp desc (E.Project k e (Info rt) _) = do
@@ -868,7 +868,7 @@ generateCond orig_p orig_ses = do
         Nothing ->
           error "generateCond: missing constructor"
     compares (E.PatConstr _ (Info t) _ _) _ =
-      error $ "generateCond: PatConstr has nonsensical type: " ++ pretty t
+      error $ "generateCond: PatConstr has nonsensical type: " ++ prettyString t
     compares (E.Id _ t loc) ses =
       compares (E.Wildcard t loc) ses
     compares (E.Wildcard (Info t) _) ses = do
@@ -889,7 +889,7 @@ generateCond orig_p orig_ses = do
     compares (E.PatAscription pat _ _) ses =
       compares pat ses
     compares pat [] =
-      error $ "generateCond: No values left for pattern " ++ pretty pat
+      error $ "generateCond: No values left for pattern " ++ prettyString pat
 
     comparesMany [] ses = pure ([], [], ses)
     comparesMany (pat : pats) ses = do
@@ -1392,11 +1392,11 @@ internaliseBinOp _ desc E.Geq x y E.Bool _ =
 internaliseBinOp _ _ op _ _ t1 t2 =
   error $
     "Invalid binary operator "
-      ++ pretty op
+      ++ prettyString op
       ++ " with operand types "
-      ++ pretty t1
+      ++ prettyString t1
       ++ ", "
-      ++ pretty t2
+      ++ prettyString t2
 
 simpleBinOp ::
   String ->
@@ -1431,7 +1431,7 @@ findFuncall (E.Apply f arg (Info (_, argext)) _)
   | E.Hole (Info t) loc <- f =
       (FunctionHole t loc, [(arg, argext)])
 findFuncall e =
-  error $ "Invalid function expression in application:\n" ++ pretty e
+  error $ "Invalid function expression in application:\n" ++ prettyString e
 
 -- The type of a body.  Watch out: this only works for the degenerate
 -- case where the body does not already return its context.
@@ -1450,7 +1450,7 @@ internaliseLambda (E.Lambda params body _ (Info (_, RetType _ rettype)) _) rowty
     body' <- internaliseBody "lam" body
     rettype' <- internaliseLambdaReturnType rettype =<< bodyExtType body'
     pure (params', body', rettype')
-internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
+internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ prettyString e
 
 internaliseLambdaCoerce :: E.Exp -> [Type] -> InternaliseM (I.Lambda SOACS)
 internaliseLambdaCoerce lam argtypes = do
@@ -1493,20 +1493,20 @@ isOverloadedFunction qname args loc = do
     handleSign _ _ = Nothing
 
     handleIntrinsicOps [x] s
-      | Just unop <- find ((== s) . pretty) allUnOps = Just $ \desc -> do
+      | Just unop <- find ((== s) . prettyString) allUnOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp unop x'
     handleIntrinsicOps [TupLit [x, y] _] s
-      | Just bop <- find ((== s) . pretty) allBinOps = Just $ \desc -> do
+      | Just bop <- find ((== s) . prettyString) allBinOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           y' <- internaliseExp1 "y" y
           fmap pure $ letSubExp desc $ I.BasicOp $ I.BinOp bop x' y'
-      | Just cmp <- find ((== s) . pretty) allCmpOps = Just $ \desc -> do
+      | Just cmp <- find ((== s) . prettyString) allCmpOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           y' <- internaliseExp1 "y" y
           fmap pure $ letSubExp desc $ I.BasicOp $ I.CmpOp cmp x' y'
     handleIntrinsicOps [x] s
-      | Just conv <- find ((== s) . pretty) allConvOps = Just $ \desc -> do
+      | Just conv <- find ((== s) . prettyString) allConvOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
     handleIntrinsicOps _ _ = Nothing
@@ -1576,7 +1576,7 @@ isOverloadedFunction qname args loc = do
               letSubExp "arrays_equal"
                 =<< eIf (eSubExp shapes_match) compare_elems_body (resultBodyM [constant False])
     handleOps [x, y] name
-      | Just bop <- find ((name ==) . pretty) [minBound .. maxBound :: E.BinOp] =
+      | Just bop <- find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] =
           Just $ \desc -> do
             x' <- internaliseExp1 "x" x
             y' <- internaliseExp1 "y" y
@@ -1819,7 +1819,7 @@ isOverloadedFunction qname args loc = do
           bodyNames = indexName <> valueNames
           bodyParams = zipWith (I.Param mempty) bodyNames paramTypes
 
-      -- This body is pretty boring right now, as every input is exactly the output.
+      -- This body is prettyString boring right now, as every input is exactly the output.
       -- But it can get funky later on if fused with something else.
       body <- localScope (scopeOfLParams bodyParams) . buildBody_ $ do
         let outs = concat (replicate (length valueNames) indexName) ++ valueNames
@@ -1964,17 +1964,17 @@ funcall desc (QualName _ fname) args loc = do
       error $
         concat
           [ "Cannot apply ",
-            pretty fname,
+            prettyString fname,
             " to ",
             show (length args'),
             " arguments\n ",
-            pretty args',
+            prettyString args',
             "\nof types\n ",
-            pretty argts',
+            prettyString argts',
             "\nFunction has ",
             show (length fun_params),
             " parameters\n ",
-            pretty fun_params
+            prettyString fun_params
           ]
     Just ts -> do
       safety <- askSafety

@@ -982,7 +982,7 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
   forM_ (x : ys) $ \y -> do
     y_dims <- arrayDims <$> lookupType y
     let rows = case drop i y_dims of
-          [] -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
+          [] -> error $ "defCompileBasicOp Concat: empty array shape for " ++ prettyString y
           r : _ -> pe64 r
         skip_dims = take i y_dims
         sliceAllDim d = DimSlice 0 d 1
@@ -1056,9 +1056,9 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
 defCompileBasicOp pat e =
   error $
     "ImpGen.defCompileBasicOp: Invalid pattern\n  "
-      ++ pretty pat
+      ++ prettyString pat
       ++ "\nfor expression\n  "
-      ++ pretty e
+      ++ prettyString e
 
 -- | Note: a hack to be used only for functions.
 addArrays :: [ArrayDecl] -> ImpM rep r op ()
@@ -1260,7 +1260,7 @@ instance ToExp SubExp where
     lookupVar v >>= \case
       ScalarVar _ (ScalarEntry pt) ->
         pure $ Imp.var v pt
-      _ -> error $ "toExp SubExp: SubExp is not a primitive type: " ++ pretty v
+      _ -> error $ "toExp SubExp: SubExp is not a primitive type: " ++ prettyString v
 
   toExp' _ (Constant v) = Imp.ValueExp v
   toExp' t (Var v) = Imp.var v t
@@ -1338,21 +1338,21 @@ lookupVar name = do
   res <- gets $ M.lookup name . stateVTable
   case res of
     Just entry -> pure entry
-    _ -> error $ "Unknown variable: " ++ pretty name
+    _ -> error $ "Unknown variable: " ++ prettyString name
 
 lookupArray :: VName -> ImpM rep r op ArrayEntry
 lookupArray name = do
   res <- lookupVar name
   case res of
     ArrayVar _ entry -> pure entry
-    _ -> error $ "ImpGen.lookupArray: not an array: " ++ pretty name
+    _ -> error $ "ImpGen.lookupArray: not an array: " ++ prettyString name
 
 lookupMemory :: VName -> ImpM rep r op MemEntry
 lookupMemory name = do
   res <- lookupVar name
   case res of
     MemVar _ entry -> pure entry
-    _ -> error $ "Unknown memory block: " ++ pretty name
+    _ -> error $ "Unknown memory block: " ++ prettyString name
 
 lookupArraySpace :: VName -> ImpM rep r op Space
 lookupArraySpace =
@@ -1372,7 +1372,7 @@ lookupAcc name is = do
       acc' <- gets $ M.lookup acc . stateAccs
       case acc' of
         Just ([], _) ->
-          error $ "Accumulator with no arrays: " ++ pretty name
+          error $ "Accumulator with no arrays: " ++ prettyString name
         Just (arrs@(arr : _), Just (op, _)) -> do
           space <- lookupArraySpace arr
           let (i_params, ps) = splitAt (length is) $ lambdaParams op
@@ -1388,8 +1388,8 @@ lookupAcc name is = do
           space <- lookupArraySpace arr
           pure (acc, space, arrs, map pe64 (shapeDims ispace), Nothing)
         Nothing ->
-          error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
-    _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
+          error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ prettyString name
+    _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ prettyString name
 
 destinationFromPat :: Pat (LetDec rep) -> ImpM rep r op [ValueDestination]
 destinationFromPat = mapM inspect . patElems
@@ -1494,7 +1494,7 @@ isMapTransposeCopy bt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
        in (product mapped, product pretrans, product posttrans)
 
 mapTransposeName :: PrimType -> String
-mapTransposeName bt = "map_transpose_" ++ pretty bt
+mapTransposeName bt = "map_transpose_" ++ prettyString bt
 
 mapTransposeForType :: PrimType -> ImpM rep r op Name
 mapTransposeForType bt = do
@@ -1611,13 +1611,13 @@ copyArrayDWIM
           then
             error $
               "copyArrayDWIM: cannot copy to "
-                ++ pretty (memLocName destlocation)
+                ++ prettyString (memLocName destlocation)
                 ++ " from "
-                ++ pretty (memLocName srclocation)
+                ++ prettyString (memLocName srclocation)
                 ++ " because ranks do not match ("
-                ++ pretty destrank
+                ++ prettyString destrank
                 ++ " vs "
-                ++ pretty srcrank
+                ++ prettyString srcrank
                 ++ ")"
           else
             if destlocation' == srclocation'
@@ -1634,19 +1634,19 @@ copyDWIMDest ::
   ImpM rep r op ()
 copyDWIMDest _ _ (Constant v) (_ : _) =
   error $
-    unwords ["copyDWIMDest: constant source", pretty v, "cannot be indexed."]
+    unwords ["copyDWIMDest: constant source", prettyString v, "cannot be indexed."]
 copyDWIMDest pat dest_slice (Constant v) [] =
   case mapM dimFix dest_slice of
     Nothing ->
       error $
-        unwords ["copyDWIMDest: constant source", pretty v, "with slice destination."]
+        unwords ["copyDWIMDest: constant source", prettyString v, "with slice destination."]
     Just dest_is ->
       case pat of
         ScalarDestination name ->
           emit $ Imp.SetScalar name $ Imp.ValueExp v
         MemoryDestination {} ->
           error $
-            unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
+            unwords ["copyDWIMDest: constant source", prettyString v, "cannot be written to memory destination."]
         ArrayDestination (Just dest_loc) -> do
           (dest_mem, dest_space, dest_i) <-
             fullyIndexArray' dest_loc dest_is
@@ -1663,18 +1663,18 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
       emit $ Imp.SetMem mem src space
     (MemoryDestination {}, _) ->
       error $
-        unwords ["copyDWIMDest: cannot write", pretty src, "to memory destination."]
+        unwords ["copyDWIMDest: cannot write", prettyString src, "to memory destination."]
     (_, MemVar {}) ->
       error $
-        unwords ["copyDWIMDest: source", pretty src, "is a memory block."]
+        unwords ["copyDWIMDest: source", prettyString src, "is a memory block."]
     (_, ScalarVar _ (ScalarEntry _))
       | not $ null src_slice ->
           error $
-            unwords ["copyDWIMDest: prim-typed source", pretty src, "with slice", pretty src_slice]
+            unwords ["copyDWIMDest: prim-typed source", prettyString src, "with slice", prettyString src_slice]
     (ScalarDestination name, _)
       | not $ null dest_slice ->
           error $
-            unwords ["copyDWIMDest: prim-typed target", pretty name, "with slice", pretty dest_slice]
+            unwords ["copyDWIMDest: prim-typed target", prettyString name, "with slice", prettyString dest_slice]
     (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) ->
       emit $ Imp.SetScalar name $ Imp.var src pt
     (ScalarDestination name, ArrayVar _ arr)
@@ -1689,13 +1689,13 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           error $
             unwords
               [ "copyDWIMDest: prim-typed target",
-                pretty name,
+                prettyString name,
                 "and array-typed source",
-                pretty src,
+                prettyString src,
                 "of shape",
-                pretty (entryArrayShape arr),
+                prettyString (entryArrayShape arr),
                 "sliced with",
-                pretty src_slice
+                prettyString src_slice
               ]
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
       let src_loc = entryArrayLoc src_arr
@@ -1711,9 +1711,9 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           error $
             unwords
               [ "copyDWIMDest: array-typed target and prim-typed source",
-                pretty src,
+                prettyString src,
                 "with slice",
-                pretty dest_slice
+                prettyString dest_slice
               ]
     (ArrayDestination Nothing, _) ->
       pure () -- Nothing to do; something else set some memory
@@ -1768,7 +1768,7 @@ compileAlloc (Pat [mem]) e space = do
     Nothing -> emit $ Imp.Allocate (patElemName mem) e' space
     Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
-  error $ "compileAlloc: Invalid pattern: " ++ pretty pat
+  error $ "compileAlloc: Invalid pattern: " ++ prettyString pat
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format, as an t'Int64' expression.
@@ -1800,7 +1800,7 @@ sFor' :: VName -> Imp.Exp -> ImpM rep r op () -> ImpM rep r op ()
 sFor' i bound body = do
   let it = case primExpType bound of
         IntType bound_t -> bound_t
-        t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
+        t -> error $ "sFor': bound " ++ prettyString bound ++ " is of type " ++ prettyString t
   addLoopVar i it
   body' <- collect body
   emit $ Imp.For i bound body'

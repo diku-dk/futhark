@@ -15,7 +15,7 @@ import Futhark.Actions
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
-import Futhark.IR (ASTRep, Op, Prog, pretty)
+import Futhark.IR (ASTRep, Op, Prog, prettyString)
 import qualified Futhark.IR.GPU as GPU
 import qualified Futhark.IR.GPUMem as GPUMem
 import qualified Futhark.IR.MC as MC
@@ -400,12 +400,12 @@ commandLineOptions =
       "Disable type-checking.",
     Option
       []
-      ["pretty-print"]
+      ["prettyString-print"]
       ( NoArg $
           Right $ \opts ->
             opts {futharkPipeline = PrettyPrint}
       )
-      "Parse and pretty-print the AST of the given program.",
+      "Parse and prettyString-print the AST of the given program.",
     Option
       []
       ["backend"]
@@ -656,7 +656,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
           p =
             mapM_ putStrLn
               . intersperse ""
-              . map (if futharkPrintAST config then show else pretty)
+              . map (if futharkPrintAST config then show else prettyString)
 
           readProgram' = readProgramFile (futharkEntryPoints (futharkConfig config)) file
 
@@ -668,7 +668,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               fail $ "Syntax error at " <> locStr loc <> ":\n" <> T.unpack err
             Right prog
               | futharkPrintAST config -> print prog
-              | otherwise -> putStrLn $ pretty prog
+              | otherwise -> putStrLn $ prettyString prog
         TypeCheck -> do
           (_, imports, _) <- readProgram'
           liftIO $
@@ -676,7 +676,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               putStrLn $
                 if futharkPrintAST config
                   then show $ fileProg fm
-                  else pretty $ fileProg fm
+                  else prettyString $ fileProg fm
         Defunctorise -> do
           (_, imports, src) <- readProgram'
           liftIO $ p $ evalState (Defunctorise.transformProg imports) src

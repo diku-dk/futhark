@@ -15,7 +15,6 @@
 -- "Language.Futhark.Primitive".
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
-    pretty,
     prettyString,
     prettyText,
 

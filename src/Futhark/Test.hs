@@ -97,7 +97,7 @@ readAndDecompress file = E.try $ do
   s <- BS.readFile file
   E.evaluate $ decompress s
 
--- | Extract a pretty representation of some 'Values'.  In the IO
+-- | Extract a prettyString representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no
 -- guarantee that the resulting byte string yields a readable value.
 getValuesBS :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m BS.ByteString

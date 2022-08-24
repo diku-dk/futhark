@@ -669,7 +669,7 @@ typeCheckSOAC (VJP lam args vec) = do
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
   unless (vec_ts == lambdaReturnType lam) $
-    TC.bad . TC.TypeError . pretty $
+    TC.bad . TC.TypeError . prettyString $
       "Return type"
         </> PP.indent 2 (ppr (lambdaReturnType lam))
         </> "does not match type of seed vector"
@@ -679,7 +679,7 @@ typeCheckSOAC (JVP lam args vec) = do
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
   unless (vec_ts == map TC.argType args') $
-    TC.bad . TC.TypeError . pretty $
+    TC.bad . TC.TypeError . prettyString $
       "Parameter type"
         </> PP.indent 2 (ppr $ map TC.argType args')
         </> "does not match type of seed vector"

@@ -168,7 +168,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
       pure (prog, tenv, ienv')
     Just file -> do
       prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file] M.empty)
-      liftIO $ putStrLn $ pretty $ lpWarnings prog
+      liftIO $ putStrLn $ prettyString $ lpWarnings prog
 
       ienv <-
         foldM
@@ -196,7 +196,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-    prettyProgErrors = pretty . pprProgErrors
+    prettyProgErrors = prettyString . pprProgErrors
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -273,7 +273,7 @@ onDec d = do
           imports = lpImports prog
           src = lpNameSource prog
       case T.checkDec imports src tenv cur_import d of
-        (_, Left e) -> liftIO $ putStrLn $ pretty e
+        (_, Left e) -> liftIO $ putStrLn $ prettyString e
         (_, Right (tenv', d', src')) -> do
           let new_imports = filter ((`notElem` map fst old_imports) . fst) imports
           int_r <- runInterpreter $ do
@@ -293,15 +293,15 @@ onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case T.checkExp imports src tenv e of
-    (_, Left err) -> liftIO $ putStrLn $ pretty err
+    (_, Left err) -> liftIO $ putStrLn $ prettyString err
     (_, Right (tparams, e'))
       | null tparams -> do
           r <- runInterpreter $ I.interpretExp ienv e'
           case r of
             Left err -> liftIO $ print err
-            Right v -> liftIO $ putStrLn $ pretty v
+            Right v -> liftIO $ putStrLn $ prettyString v
       | otherwise -> liftIO $ do
-          putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
+          putStrLn $ "Inferred type of expression: " ++ prettyString (typeOf e')
           putStrLn $
             "The following types are ambiguous: "
               ++ intercalate ", " (map (prettyName . typeParamName) tparams)
@@ -404,18 +404,18 @@ genTypeCommand f g h e = do
     Right e' -> do
       (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of
-        Left err -> liftIO $ putStrLn $ pretty err
+        Left err -> liftIO $ putStrLn $ prettyString err
         Right x -> liftIO $ putStrLn $ h x
 
 typeCommand :: Command
 typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
-  pretty e
-    <> concatMap ((" " <>) . pretty) ps
+  prettyString e
+    <> concatMap ((" " <>) . prettyString) ps
     <> " : "
-    <> pretty (typeOf e)
+    <> prettyString (typeOf e)
 
 mtypeCommand :: Command
-mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
+mtypeCommand = genTypeCommand parseModExp T.checkModExp $ prettyString . fst
 
 unbreakCommand :: Command
 unbreakCommand _ = do

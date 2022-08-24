@@ -426,7 +426,7 @@ evalExp builtin sserver top_level_e = do
         case V.putValue s of
           Just s' ->
             pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType s')) $ VVal s'
-          Nothing -> error $ "Unable to write value " ++ pretty s
+          Nothing -> error $ "Unable to write value " ++ prettyString s
       evalExp' _ (Const val) =
         pure $ V.ValueAtom $ SValue (V.valueTypeTextNoDims (V.valueType val)) $ VVal val
       evalExp' vtable (Tuple es) =

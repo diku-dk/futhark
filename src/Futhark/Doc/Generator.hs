@@ -29,7 +29,7 @@ import qualified Text.Blaze.Html5.Attributes as A
 import Prelude hiding (abs)
 
 docToHtml :: Doc -> Html
-docToHtml = toHtml . pretty
+docToHtml = toHtml . prettyString
 
 primTypeHtml :: PrimType -> Html
 primTypeHtml = docToHtml . ppr
@@ -378,7 +378,7 @@ synopsisDec visible fm dec = case dec of
         Just $
           pure $
             fullRow $
-              keyword "open" <> fromString (" <" <> pretty x <> ">")
+              keyword "open" <> fromString (" <" <> prettyString x <> ">")
   LocalDec (SigDec s) _
     | sigName s `S.member` visible ->
         synopsisModType (keyword "local" <> " ") s
@@ -712,13 +712,13 @@ typeParamHtml :: TypeParam -> Html
 typeParamHtml (TypeParamDim name _) =
   brackets $ vnameHtml name
 typeParamHtml (TypeParamType l name _) =
-  "'" <> fromString (pretty l) <> vnameHtml name
+  "'" <> fromString (prettyString l) <> vnameHtml name
 
 typeAbbrevHtml :: Liftedness -> Html -> [TypeParam] -> Html
 typeAbbrevHtml l name params =
   what <> name <> mconcat (map ((" " <>) . typeParamHtml) params)
   where
-    what = keyword $ "type" ++ pretty l ++ " "
+    what = keyword $ "type" ++ prettyString l ++ " "
 
 docHtml :: Maybe DocComment -> DocM Html
 docHtml (Just (DocComment doc loc)) =
