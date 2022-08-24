@@ -52,10 +52,10 @@ compareIxFuns ixfunLMAD ixfunAlg =
       resAlg = map (IxFunAlg.index ixfunAlg) points
       errorMessage =
         "lmad ixfun:  "
-          ++ PR.pretty ixfunLMAD
+          ++ PR.prettyString ixfunLMAD
           ++ "\n"
           ++ "alg ixfun:   "
-          ++ PR.pretty ixfunAlg
+          ++ PR.prettyString ixfunAlg
           ++ "\n"
           ++ "lmad shape:  "
           ++ show lmadShape

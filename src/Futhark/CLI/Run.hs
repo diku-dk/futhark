@@ -81,7 +81,7 @@ interpret config fp = do
 putValue :: I.Value -> TypeBase () () -> IO ()
 putValue v t
   | I.isEmptyArray v = putStrLn $ I.prettyEmptyArray t v
-  | otherwise = putStrLn $ pretty v
+  | otherwise = putStrLn $ prettyString v
 
 data InterpreterConfig = InterpreterConfig
   { interpreterEntryPoint :: Name,
@@ -125,19 +125,19 @@ newFutharkiState cfg file = runExceptT $ do
   when (interpreterPrintWarnings cfg) $
     liftIO $
       hPutStr stderr $
-        pretty ws
+        prettyString ws
 
   let imp = T.mkInitialImport "."
   ienv1 <-
     foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
       map (fmap fileProg) imports
   (tenv1, d1, src') <-
-    badOnLeft pretty $
+    badOnLeft prettyString $
       snd $
         T.checkDec imports src T.initialEnv imp $
           mkOpen "/prelude/prelude"
   (tenv2, d2, _) <-
-    badOnLeft pretty $
+    badOnLeft prettyString $
       snd $
         T.checkDec imports src' tenv1 imp $
           mkOpen $

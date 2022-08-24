@@ -89,21 +89,21 @@ data NodeT
   deriving (Eq)
 
 instance Show EdgeT where
-  show (Dep vName) = "Dep " <> pretty vName
-  show (InfDep vName) = "iDep " <> pretty vName
+  show (Dep vName) = "Dep " <> prettyString vName
+  show (InfDep vName) = "iDep " <> prettyString vName
   show (Cons _) = "Cons"
   show (Fake _) = "Fake"
   show (Res _) = "Res"
   show (Alias _) = "Alias"
 
 instance Show NodeT where
-  show (StmNode (Let pat _ _)) = L.intercalate ", " $ map pretty $ patNames pat
-  show (SoacNode _ pat _ _) = pretty pat
+  show (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
+  show (SoacNode _ pat _ _) = prettyString pat
   show (FinalNode _ nt _) = show nt
-  show (ResNode name) = pretty $ "Res: " ++ pretty name
-  show (FreeNode name) = pretty $ "Input: " ++ pretty name
-  show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map pretty $ stmNames stm)
-  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map pretty $ stmNames stm)
+  show (ResNode name) = prettyString $ "Res: " ++ prettyString name
+  show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
+  show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
+  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
 
 -- | The name that this edge depends on.
 getName :: EdgeT -> VName

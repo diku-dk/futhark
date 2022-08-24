@@ -31,7 +31,7 @@ handleMCOp :: Op MC -> AllocM MC MCMem (Op MCMem)
 handleMCOp (ParOp par_op op) =
   Inner <$> (ParOp <$> traverse handleSegOp par_op <*> handleSegOp op)
 handleMCOp (OtherOp soac) =
-  error $ "Cannot allocate memory in SOAC: " ++ pretty soac
+  error $ "Cannot allocate memory in SOAC: " ++ prettyString soac
 
 -- | The pass from 'MC' to 'MCMem'.
 explicitAllocations :: Pass MC MCMem

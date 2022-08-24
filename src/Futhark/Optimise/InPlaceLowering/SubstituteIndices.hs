@@ -202,4 +202,4 @@ update ::
 update needle name subst ((othername, othersubst) : substs)
   | needle == othername = (name, subst) : substs
   | otherwise = (othername, othersubst) : update needle name subst substs
-update needle _ _ [] = error $ "Cannot find substitution for " ++ pretty needle
+update needle _ _ [] = error $ "Cannot find substitution for " ++ prettyString needle

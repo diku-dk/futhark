@@ -322,7 +322,7 @@ sForVectorized' :: VName -> Imp.Exp -> MulticoreGen () -> MulticoreGen ()
 sForVectorized' i bound body = do
   let it = case primExpType bound of
         IntType bound_t -> bound_t
-        t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
+        t -> error $ "sFor': bound " ++ prettyString bound ++ " is of type " ++ prettyString t
   addLoopVar i it
   body' <- collect body
   emit $ Imp.Op $ Imp.ForEach i (Imp.ValueExp $ blankPrimValue $ Imp.IntType Imp.Int64) bound body'
@@ -565,4 +565,4 @@ toIntegral 8 = pure int8
 toIntegral 16 = pure int16
 toIntegral 32 = pure int32
 toIntegral 64 = pure int64
-toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b
+toIntegral b = error $ "number of bytes is not supported for CAS - " ++ prettyString b

@@ -155,7 +155,7 @@ lookupFunction' fname = gets $ M.lookup fname . stateFunTable
 lookupFunction :: VName -> InternaliseM FunInfo
 lookupFunction fname = maybe bad pure =<< lookupFunction' fname
   where
-    bad = error $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
+    bad = error $ "Internalise.lookupFunction: Function '" ++ prettyString fname ++ "' not found."
 
 lookupConst :: VName -> InternaliseM (Maybe [SubExp])
 lookupConst fname = do

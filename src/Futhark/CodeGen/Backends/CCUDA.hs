@@ -298,7 +298,7 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeTile = "tile_size"
     cudaSizeClass SizeRegTile = "reg_tile_size"
     cudaSizeClass SizeLocalMemory = "shared_memory"
-    cudaSizeClass (SizeBespoke x _) = pretty x
+    cudaSizeClass (SizeBespoke x _) = prettyString x
 callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   time_start <- newVName "time_start"
@@ -359,7 +359,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
         fprintf(ctx->log, "Launching %s with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
-                $string:(pretty kernel_name),
+                $string:(prettyString kernel_name),
                 (long int)$exp:grid_x, (long int)$exp:grid_y, (long int)$exp:grid_z,
                 (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
                 (int)$exp:shared_tot);
@@ -377,7 +377,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
         CUDA_SUCCEED_FATAL(cuCtxSynchronize());
         $id:time_end = get_wall_time();
         fprintf(ctx->log, "Kernel %s runtime: %ldus\n",
-                $string:(pretty kernel_name), $id:time_end - $id:time_start);
+                $string:(prettyString kernel_name), $id:time_end - $id:time_start);
       }
     }|]
 

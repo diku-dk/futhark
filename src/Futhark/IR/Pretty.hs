@@ -11,7 +11,7 @@
 module Futhark.IR.Pretty
   ( prettyTuple,
     prettyTupleLines,
-    pretty,
+    prettyString,
     PrettyRep (..),
     ppTuple',
   )

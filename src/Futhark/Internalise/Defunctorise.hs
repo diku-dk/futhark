@@ -131,7 +131,7 @@ lookupMod' mname scope =
   let (mname', scope') = lookupSubstInScope mname scope
    in maybe (Left $ bad mname') (Right . extend) $ M.lookup (qualLeaf mname') $ scopeMods scope'
   where
-    bad mname' = "Unknown module: " ++ pretty mname ++ " (" ++ pretty mname' ++ ")"
+    bad mname' = "Unknown module: " ++ prettyString mname ++ " (" ++ prettyString mname' ++ ")"
     extend (ModMod (Scope inner_scope inner_mods)) =
       -- XXX: perhaps hacky fix for #1653.  We need to impose the
       -- substitutions of abstract types from outside, because the

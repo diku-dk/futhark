@@ -129,7 +129,7 @@ kernelAlloc (Pat [_]) _ ScalarSpace {} =
 kernelAlloc (Pat [mem]) size (Space "local") =
   allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
 kernelAlloc (Pat [mem]) _ _ =
-  compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
+  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel."
 kernelAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
@@ -160,7 +160,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                         pure . (`rem` fromIntegral num_locks) . flattenIndex dims
                 f locking space arrs is'
               Nothing ->
-                error $ "Missing locks for " ++ pretty acc
+                error $ "Missing locks for " ++ prettyString acc
 
 compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
@@ -603,7 +603,7 @@ compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
   kernelAlloc pat size space
 compileThreadOp pat _ =
-  compilerBugS $ "compileThreadOp: cannot compile rhs of binding " ++ pretty pat
+  compilerBugS $ "compileThreadOp: cannot compile rhs of binding " ++ prettyString pat
 
 -- | Locking strategy used for an atomic update.
 data Locking = Locking
@@ -957,7 +957,7 @@ simpleKernelGroups ::
 simpleKernelGroups max_num_groups kernel_size = do
   group_size <- dPrim "group_size" int64
   fname <- askFunction
-  let group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty $ tvVar group_size
+  let group_size_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar group_size
   sOp $ Imp.GetSize (tvVar group_size) group_size_key Imp.SizeGroup
   virt_num_groups <- dPrimVE "virt_num_groups" $ kernel_size `divUp` tvExp group_size
   num_groups <- dPrimV "num_groups" $ virt_num_groups `sMin64` max_num_groups
@@ -1177,7 +1177,7 @@ sReplicateKernel arr se = do
           drop (length ds) is'
 
 replicateName :: PrimType -> String
-replicateName bt = "replicate_" ++ pretty bt
+replicateName bt = "replicate_" ++ prettyString bt
 
 replicateForType :: PrimType -> CallKernelGen Name
 replicateForType bt = do
@@ -1249,7 +1249,7 @@ sIotaKernel arr n x s et = do
         keyWithEntryPoint fname $
           nameFromString $
             "iota_"
-              ++ pretty et
+              ++ prettyString et
               ++ "_"
               ++ show (baseTag $ kernelGlobalThreadIdVar constants)
 
@@ -1266,7 +1266,7 @@ sIotaKernel arr n x s et = do
               x
 
 iotaName :: IntType -> String
-iotaName bt = "iota_" ++ pretty bt
+iotaName bt = "iota_" ++ prettyString bt
 
 iotaForType :: IntType -> CallKernelGen Name
 iotaForType bt = do

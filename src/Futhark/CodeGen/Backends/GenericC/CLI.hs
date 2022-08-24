@@ -23,7 +23,7 @@ import Futhark.CodeGen.Backends.SimpleRep
   )
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
 import Futhark.Manifest
-import Futhark.Util.Pretty (pretty, prettyText)
+import Futhark.Util.Pretty (prettyString, prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -361,7 +361,7 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
      $items:(mconcat input_items)
 
      if (end_of_input(stdin) != 0) {
-       futhark_panic(1, "Expected EOF on stdin after reading input for \"%s\".\n", $string:(pretty entry_point_name));
+       futhark_panic(1, "Expected EOF on stdin after reading input for \"%s\".\n", $string:(prettyString entry_point_name));
      }
 
      $items:output_decls

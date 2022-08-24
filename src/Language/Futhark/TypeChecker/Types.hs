@@ -646,7 +646,7 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
     mkSubst (TypeParamType _ pv _) (TypeArgType at _) =
       (pv, Subst [] $ RetType [] $ second mempty at)
     mkSubst p a =
-      error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
+      error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
 
 substTypesRet ::
   Monoid as =>

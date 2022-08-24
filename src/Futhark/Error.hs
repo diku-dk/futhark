@@ -38,7 +38,7 @@ data CompilerError
     InternalError T.Text T.Text ErrorClass
 
 instance Show CompilerError where
-  show (ExternalError s) = pretty s
+  show (ExternalError s) = prettyString s
   show (InternalError s _ _) = T.unpack s
 
 -- | Raise an 'ExternalError' based on a prettyprinting result.

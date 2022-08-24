@@ -70,7 +70,7 @@ printAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty
+      actionProcedure = liftIO . putStrLn . prettyString
     }
 
 -- | Print the result to stdout, alias annotations.
@@ -79,7 +79,7 @@ printAliasesAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+      actionProcedure = liftIO . putStrLn . prettyString . aliasAnalysis
     }
 
 -- | Print last use information to stdout.
@@ -88,7 +88,7 @@ printLastUseGPU =
   Action
     { actionName = "print last use gpu",
       actionDescription = "Print last use information on gpu.",
-      actionProcedure = liftIO . putStrLn . pretty . LastUse.analyseGPUMem
+      actionProcedure = liftIO . putStrLn . prettyString . LastUse.analyseGPUMem
     }
 
 -- | Print interference information to stdout.
@@ -97,7 +97,7 @@ printInterferenceGPU =
   Action
     { actionName = "print interference gpu",
       actionDescription = "Print interference information on gpu.",
-      actionProcedure = liftIO . putStrLn . pretty . Interference.analyseProgGPU
+      actionProcedure = liftIO . putStrLn . prettyString . Interference.analyseProgGPU
     }
 
 -- | Print memory alias information to stdout
@@ -106,7 +106,7 @@ printMemAliasGPU =
   Action
     { actionName = "print mem alias gpu",
       actionDescription = "Print memory alias information on gpu.",
-      actionProcedure = liftIO . putStrLn . pretty . MemAlias.analyzeGPUMem
+      actionProcedure = liftIO . putStrLn . prettyString . MemAlias.analyzeGPUMem
     }
 
 -- | Print call graph to stdout.
@@ -115,7 +115,7 @@ callGraphAction =
   Action
     { actionName = "call-graph",
       actionDescription = "Prettyprint the callgraph of the result to standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . buildCallGraph
+      actionProcedure = liftIO . putStrLn . prettyString . buildCallGraph
     }
 
 -- | Print metrics about AST node counts to stdout.
@@ -133,7 +133,7 @@ impCodeGenAction =
   Action
     { actionName = "Compile imperative",
       actionDescription = "Translate program into imperative IL and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenSequential.compileProg
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenSequential.compileProg
     }
 
 -- | Convert the program to GPU ImpCode and print it to stdout.
@@ -142,7 +142,7 @@ kernelImpCodeGenAction =
   Action
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenGPU.compileProgOpenCL
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgOpenCL
     }
 
 -- | Convert the program to CPU multicore ImpCode and print it to stdout.
@@ -151,7 +151,7 @@ multicoreImpCodeGenAction =
   Action
     { actionName = "Compile to imperative multicore",
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenMulticore.compileProg
     }
 
 -- Lines that we prepend (in comments) to generated code.

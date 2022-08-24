@@ -78,7 +78,7 @@ zeroExp (Prim pt) =
   BasicOp $ SubExp $ Constant $ blankPrimValue pt
 zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
-zeroExp t = error $ "zeroExp: " ++ pretty t
+zeroExp t = error $ "zeroExp: " ++ prettyString t
 
 onePrim :: PrimType -> PrimValue
 onePrim (IntType it) = IntValue $ intValue it (1 :: Int)
@@ -90,7 +90,7 @@ oneExp :: Type -> Exp rep
 oneExp (Prim t) = BasicOp $ SubExp $ constant $ onePrim t
 oneExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ onePrim pt
-oneExp t = error $ "oneExp: " ++ pretty t
+oneExp t = error $ "oneExp: " ++ prettyString t
 
 -- | Whether 'Sparse' should check bounds or assume they are correct.
 -- The latter results in simpler code.
@@ -271,7 +271,7 @@ copyConsumedArrsInBody dontCopy b =
     onConsumed v = do
       v_t <- lookupType v
       case v_t of
-        Acc {} -> error $ "copyConsumedArrsInBody: Acc " <> pretty v
+        Acc {} -> error $ "copyConsumedArrsInBody: Acc " <> prettyString v
         Array {} -> M.singleton v <$> letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
         _ -> pure mempty
 
@@ -360,7 +360,7 @@ addExp x y = do
       lam <- addLambda $ rowType x_t
       pure $ Op $ Screma (arraySize 0 x_t) [x, y] (mapSOAC lam)
     _ ->
-      error $ "addExp: unexpected type: " ++ pretty x_t
+      error $ "addExp: unexpected type: " ++ prettyString x_t
 
 lookupAdj :: VName -> ADM Adj
 lookupAdj v = do

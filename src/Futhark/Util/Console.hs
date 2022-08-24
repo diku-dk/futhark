@@ -1,4 +1,4 @@
--- | Some utility functions for working with pretty console output.
+-- | Some utility functions for working with prettyString console output.
 module Futhark.Util.Console
   ( color,
     inRed,

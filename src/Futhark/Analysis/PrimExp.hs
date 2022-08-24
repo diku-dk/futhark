@@ -535,7 +535,7 @@ asFloatOp f x y
 
 numBad :: Pretty a => String -> a -> b
 numBad s x =
-  error $ "Invalid argument to PrimExp method " ++ s ++ ": " ++ pretty x
+  error $ "Invalid argument to PrimExp method " ++ s ++ ": " ++ prettyString x
 
 -- | Evaluate a 'PrimExp' in the given monad.  Invokes 'fail' on type
 -- errors.
@@ -566,9 +566,9 @@ evalBad :: (Pretty a, Pretty b, MonadFail m) => a -> b -> m c
 evalBad op arg =
   fail $
     "evalPrimExp: Type error when applying "
-      ++ pretty op
+      ++ prettyString op
       ++ " to "
-      ++ pretty arg
+      ++ prettyString arg
 
 -- | The type of values returned by a 'PrimExp'.  This function
 -- returning does not imply that the 'PrimExp' is type-correct.

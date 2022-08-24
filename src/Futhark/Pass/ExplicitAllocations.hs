@@ -263,7 +263,7 @@ allocsForPat def_space some_idents rts hints = do
       case maybeNth i idents of
         Just ident -> identName ident
         Nothing ->
-          error $ "getIdent: Ext " <> show i <> " but pattern has " <> show (length idents) <> " elements: " <> pretty idents
+          error $ "getIdent: Ext " <> show i <> " but pattern has " <> show (length idents) <> " elements: " <> prettyString idents
 
     instantiateExtIxFun idents = fmap $ fmap inst
       where
@@ -360,7 +360,7 @@ ensureArrayIn ::
   SubExp ->
   WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
 ensureArrayIn _ (Constant v) =
-  error $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
+  error $ "ensureArrayIn: " ++ prettyString v ++ " cannot be an array."
 ensureArrayIn space (Var v) = do
   (mem', v') <- lift $ ensureRowMajorArray (Just space) v
   (_, ixfun) <- lift $ lookupArraySummary v'
@@ -525,7 +525,7 @@ allocPermArray space perm s v = do
       addStm $ Let pat (defAux ()) $ BasicOp $ Manifest perm v
       pure (mem, v')
     _ ->
-      error $ "allocPermArray: " ++ pretty t
+      error $ "allocPermArray: " ++ prettyString t
 
 allocLinearArray ::
   (Allocable fromrep torep inner) =>
@@ -638,7 +638,7 @@ bodyReturnMemCtx (SubExpRes _ (Var v)) = do
       case mem_info of
         MemMem space ->
           pure [(subExpRes $ Var mem, MemMem space)]
-        _ -> error $ "bodyReturnMemCtx: not a memory block: " ++ pretty mem
+        _ -> error $ "bodyReturnMemCtx: not a memory block: " ++ prettyString mem
 
 allocInFunBody ::
   (Allocable fromrep torep inner) =>
@@ -922,7 +922,7 @@ allocInExp (WithAcc inputs bodylam) =
         case t of
           Prim Unit -> pure $ Param attrs pv $ MemPrim Unit
           Acc acc ispace ts u -> pure $ Param attrs pv $ MemAcc acc ispace ts u
-          _ -> error $ "Unexpected WithAcc lambda param: " ++ pretty (Param attrs pv t)
+          _ -> error $ "Unexpected WithAcc lambda param: " ++ prettyString (Param attrs pv t)
       allocInLambda params (lambdaBody lam)
 
     onInput (shape, arrs, op) =
@@ -955,7 +955,7 @@ allocInExp (WithAcc inputs bodylam) =
       (mem, ixfun) <- lookupArraySummary arr
       pure $ mkP attrs p pt shape u mem ixfun is
     onXParam _ p _ =
-      error $ "Cannot handle MkAcc param: " ++ pretty p
+      error $ "Cannot handle MkAcc param: " ++ prettyString p
 
     onYParam _ (Param attrs p (Prim t)) _ =
       pure $ Param attrs p $ MemPrim t
@@ -966,7 +966,7 @@ allocInExp (WithAcc inputs bodylam) =
           ixfun = IxFun.iota base_dims
       pure $ mkP attrs p pt shape u mem ixfun is
     onYParam _ p _ =
-      error $ "Cannot handle MkAcc param: " ++ pretty p
+      error $ "Cannot handle MkAcc param: " ++ prettyString p
 allocInExp e = mapExpM alloc e
   where
     alloc =

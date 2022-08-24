@@ -26,7 +26,7 @@ writeResult _ pe (WriteReturns _ (Shape rws) _ idx_vals) = do
     sWhen (inBounds slice' rws') $
       copyDWIM (patElemName pe) (unSlice slice') v []
 writeResult _ _ res =
-  error $ "writeResult: cannot handle " ++ pretty res
+  error $ "writeResult: cannot handle " ++ prettyString res
 
 compileSegMapBody ::
   Pat LetDecMem ->

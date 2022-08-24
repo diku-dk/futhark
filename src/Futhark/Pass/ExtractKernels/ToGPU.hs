@@ -28,7 +28,7 @@ getSize ::
   SizeClass ->
   m SubExp
 getSize desc size_class = do
-  size_key <- nameFromString . pretty <$> newVName desc
+  size_key <- nameFromString . prettyString <$> newVName desc
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 segThread ::

@@ -364,13 +364,13 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
           TC.bad $
             TC.TypeError $
               "WriteReturns returning "
-                ++ pretty e
+                ++ prettyString e
                 ++ " of type "
-                ++ pretty t
+                ++ prettyString t
                 ++ ", shape="
-                ++ pretty shape
+                ++ prettyString shape
                 ++ ", but destination array has type "
-                ++ pretty arr_t
+                ++ prettyString arr_t
     checkKernelResult (TileReturns cs dims v) t = do
       TC.checkCerts cs
       forM_ dims $ \(dim, tile) -> do
@@ -380,7 +380,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $
           TC.TypeError $
-            "Invalid type for TileReturns " ++ pretty v
+            "Invalid type for TileReturns " ++ prettyString v
     checkKernelResult (RegTileReturns cs dims_n_tiles arr) t = do
       TC.checkCerts cs
       mapM_ (TC.require [Prim int64]) dims
@@ -392,9 +392,9 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       unless (arr_t == expected) $
         TC.bad . TC.TypeError $
           "Invalid type for TileReturns. Expected:\n  "
-            ++ pretty expected
+            ++ prettyString expected
             ++ ",\ngot:\n  "
-            ++ pretty arr_t
+            ++ prettyString arr_t
       where
         (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
         expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles)
@@ -714,9 +714,9 @@ checkScanRed space ops ts kbody = do
       TC.bad $
         TC.TypeError $
           "Wrong return for body (does not match neutral elements; expected "
-            ++ pretty expecting
+            ++ prettyString expecting
             ++ "; found "
-            ++ pretty got
+            ++ prettyString got
             ++ ")"
 
     checkKernelBody ts kbody

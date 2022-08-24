@@ -30,7 +30,7 @@ import Futhark.Util (takeLast)
 
 patName :: Pat Type -> ADM VName
 patName (Pat [pe]) = pure $ patElemName pe
-patName pat = error $ "Expected single-element pattern: " ++ pretty pat
+patName pat = error $ "Expected single-element pattern: " ++ prettyString pat
 
 -- The vast majority of BasicOps require no special treatment in the
 -- forward pass and produce one value (and hence one adjoint).  We
@@ -252,12 +252,12 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
           convert (FloatType ft) (FloatType tt) = ConvOpExp (FPConv ft tt)
           convert Bool (FloatType tt) = ConvOpExp (BToF tt)
           convert (FloatType ft) Bool = ConvOpExp (FToB ft)
-          convert ft tt = error $ "diffStm.convert: " ++ pretty (f, ft, tt)
+          convert ft tt = error $ "diffStm.convert: " ++ prettyString (f, ft, tt)
 
       contribs <-
         case pdBuiltin f arg_pes of
           Nothing ->
-            error $ "No partial derivative defined for builtin function: " ++ pretty f
+            error $ "No partial derivative defined for builtin function: " ++ prettyString f
           Just derivs ->
             forM (zip derivs argts) $ \(deriv, argt) ->
               letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
@@ -313,7 +313,7 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
         let body' = Body () stms $ take (length inputs) res <> takeLast (length get_adjs_for) res
         ts' <- mapM lookupType get_adjs_for
         pure $ Lambda params body' $ take (length inputs) ts <> ts'
-diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
+diffStm stm _ = error $ "diffStm unhandled:\n" ++ prettyString stm
 
 diffStms :: Stms SOACS -> ADM ()
 diffStms all_stms

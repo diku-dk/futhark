@@ -187,7 +187,7 @@ instance SimplifiableRep rep => HasScope (Wise rep) (SimpleM rep) where
       Nothing ->
         error $
           "SimpleM.lookupType: cannot find variable "
-            ++ pretty name
+            ++ prettyString name
             ++ " in symbol table."
 
 instance
