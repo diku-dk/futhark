@@ -272,11 +272,11 @@ operations =
 
 closureFreeStructField :: VName -> Name
 closureFreeStructField v =
-  nameFromString "free_" <> nameFromString (pretty v)
+  nameFromString "free_" <> nameFromString (prettyString v)
 
 closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
-  nameFromString "retval_" <> nameFromString (pretty v)
+  nameFromString "retval_" <> nameFromString (prettyString v)
 
 data ValueType = Prim PrimType | MemBlock | RawMem
 
@@ -337,7 +337,7 @@ compileGetRetvalStructVals struct = zipWith field
        in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
-                 {.desc = $string:(pretty name),
+                 {.desc = $string:(prettyString name),
                  .mem = $id:struct->$id:(closureRetvalStructField name),
                  .size = 0, .references = NULL};|]
 
@@ -354,7 +354,7 @@ compileGetStructVals struct = zipWith field
        in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
-                 {.desc = $string:(pretty name),
+                 {.desc = $string:(prettyString name),
                   .mem = $id:struct->$id:(closureFreeStructField name),
                   .size = 0, .references = NULL};|]
 

@@ -308,12 +308,12 @@ instance Pretty Checking where
         case f of
           Nothing ->
             "Cannot apply function to"
-              <+> pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
+              <+> pquote (shorten $ flatten $ ppr e) <> " (invalid type)."
           Just fname ->
             "Cannot apply"
               <+> pquote (ppr fname)
               <+> "to"
-              <+> pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
+              <+> pquote (shorten $ flatten $ ppr e) <> " (invalid type)."
   ppr (CheckingReturn expected actual) =
     "Function body does not have expected type."
       </> "Expected:"
@@ -580,12 +580,12 @@ instantiateTypeParam qn loc tparam = do
   v <- newID $ mkTypeVarName name i
   case tparam of
     TypeParamType x _ _ -> do
-      constrain v . NoConstraint x . mkUsage loc $
-        "instantiated type parameter of " <> quote (pretty qn) <> "."
+      constrain v . NoConstraint x . mkUsage loc . prettyString $
+        "instantiated type parameter of " <> pquote (ppr qn) <> "."
       pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (qualName v) [])
     TypeParamDim {} -> do
-      constrain v . Size Nothing . mkUsage loc $
-        "instantiated size parameter of " <> quote (pretty qn) <> "."
+      constrain v . Size Nothing . mkUsage loc . prettyString $
+        "instantiated size parameter of " <> pquote (ppr qn) <> "."
       pure (v, SizeSubst $ NamedSize $ qualName v)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
@@ -669,7 +669,7 @@ instance MonadTypeChecker TermTypeM where
   lookupVar loc qn = do
     outer_env <- liftTypeM askEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
-    let usage = mkUsage loc $ "use of " ++ quote (pretty qn)
+    let usage = mkUsage loc $ prettyString $ "use of " <> pquote (ppr qn)
 
     t <- case M.lookup name $ scopeVtable scope of
       Nothing ->

@@ -8,6 +8,7 @@ module Futhark.Util.Pretty
     prettyDoc,
     prettyTuple,
     prettyTupleLines,
+    prettyString,
     prettyText,
     prettyTextOneLine,
     prettyOneLine,
@@ -30,7 +31,11 @@ import Text.PrettyPrint.Mainland.Class
 
 -- | Prettyprint a value, wrapped to 80 characters.
 pretty :: Pretty a => a -> String
-pretty = PP.pretty 80 . ppr
+pretty = prettyString
+
+-- | Prettyprint a value to a 'String', wrapped to 80 characters.
+prettyString :: Pretty a => a -> String
+prettyString = PP.pretty 80 . ppr
 
 -- | Prettyprint a value to a 'Text', wrapped to 80 characters.
 prettyText :: Pretty a => a -> Text

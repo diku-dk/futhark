@@ -37,7 +37,7 @@ import Futhark.MonadFreshNames
 import Futhark.Pipeline
 import Futhark.Util.Console (inRed, inYellow)
 import Futhark.Util.Log
-import Futhark.Util.Pretty (Doc, line, ppr, prettyText, punctuate, stack, text, (</>))
+import Futhark.Util.Pretty (Doc, line, ppr, punctuate, stack, text, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings

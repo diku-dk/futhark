@@ -1162,7 +1162,7 @@ compileExp = compilePrimExp compileVar
 
 errorMsgString :: Imp.ErrorMsg Imp.Exp -> CompilerM op s (String, [PyExp])
 errorMsgString (Imp.ErrorMsg parts) = do
-  let onPart (Imp.ErrorString s) = pure ("%s", String s)
+  let onPart (Imp.ErrorString s) = pure ("%s", String $ T.unpack s)
       onPart (Imp.ErrorVal IntType {} x) = ("%d",) <$> compileExp x
       onPart (Imp.ErrorVal FloatType {} x) = ("%f",) <$> compileExp x
       onPart (Imp.ErrorVal Imp.Bool x) = ("%r",) <$> compileExp x
@@ -1241,7 +1241,7 @@ compileCode (Imp.DeclareArray name _ t vs) = do
   stm $ Assign name' $ Field (Var "self") (compileName name)
 compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
-  stm $ Comment s code'
+  stm $ Comment (T.unpack s) code'
 compileCode (Imp.Assert e msg (loc, locs)) = do
   e' <- compileExp e
   (formatstr, formatargs) <- errorMsgString msg

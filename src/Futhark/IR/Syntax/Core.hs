@@ -87,6 +87,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Data.String
+import qualified Data.Text as T
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Language.Futhark.Core
 import Language.Futhark.Primitive
@@ -500,13 +501,13 @@ instance IsString (ErrorMsg a) where
 -- | A part of an error message.
 data ErrorMsgPart a
   = -- | A literal string.
-    ErrorString String
+    ErrorString T.Text
   | -- | A run-time value.
     ErrorVal PrimType a
   deriving (Eq, Ord, Show)
 
 instance IsString (ErrorMsgPart a) where
-  fromString = ErrorString
+  fromString = ErrorString . T.pack
 
 instance Functor ErrorMsg where
   fmap f (ErrorMsg parts) = ErrorMsg $ map (fmap f) parts

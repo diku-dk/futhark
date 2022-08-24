@@ -16,6 +16,7 @@
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
     pretty,
+    prettyString,
     prettyText,
 
     -- * Types
@@ -110,6 +111,7 @@ import qualified Data.Map.Strict as M
 import Data.Monoid hiding (Sum)
 import Data.Ord
 import qualified Data.Set as S
+import qualified Data.Text as T
 import Data.Traversable
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
@@ -767,7 +769,7 @@ data ExpBase f vn
   | -- | Fail if the first expression does not return true,
     -- and return the value of the second expression if it
     -- does.
-    Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
+    Assert (ExpBase f vn) (ExpBase f vn) (f T.Text) SrcLoc
   | -- | An n-ary value constructor.
     Constr Name [ExpBase f vn] (f PatType) SrcLoc
   | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc

@@ -514,11 +514,11 @@ topLevelNameMap = M.filterWithKey (\k _ -> available k) intrinsicsNameMap
     available (Type, _) = True
     available (Term, v) = v `S.member` (type_names <> binop_names <> fun_names)
       where
-        type_names = S.fromList $ map (nameFromString . pretty) anyPrimType
+        type_names = S.fromList $ map (nameFromText . prettyText) anyPrimType
         binop_names =
           S.fromList $
             map
-              (nameFromString . pretty)
+              (nameFromText . prettyText)
               [minBound .. (maxBound :: BinOp)]
         fun_names = S.fromList $ map nameFromString ["shape"]
     available _ = False

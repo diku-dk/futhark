@@ -11,6 +11,7 @@ import Control.Monad.Except
 import Control.Monad.Free.Church
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Compiler
 import Futhark.Pipeline
@@ -48,7 +49,7 @@ interpret config fp = do
   inps <-
     case vr of
       Left (SyntaxError loc err) -> do
-        hPutStrLn stderr $ "Input syntax error at " <> locStr loc <> ":\n" <> err
+        T.hPutStrLn stderr $ "Input syntax error at " <> T.pack (locStr loc) <> ":\n" <> err
         exitFailure
       Right vs ->
         pure vs
@@ -59,7 +60,7 @@ interpret config fp = do
         | Just (T.BoundV _ t) <- M.lookup (qualLeaf fname) $ T.envVtable tenv ->
             pure (fname, toStructural $ snd $ unfoldFunType t)
       _ -> do
-        hPutStrLn stderr $ "Invalid entry point: " ++ pretty entry
+        T.hPutStrLn stderr $ "Invalid entry point: " <> prettyText entry
         exitFailure
 
   case I.interpretFunction ienv (qualLeaf fname) inps of

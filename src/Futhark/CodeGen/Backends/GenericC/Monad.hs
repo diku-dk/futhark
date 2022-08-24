@@ -522,7 +522,7 @@ resetMem mem space = do
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = do
   refcount <- fatMemory space
-  let src_s = pretty $ C.toExp src noLoc
+  let src_s = prettyString $ C.toExp src noLoc
   if refcount
     then
       stm
@@ -547,7 +547,7 @@ unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
   refcount <- fatMemory space
   cached <- isJust <$> cacheMem mem
-  let mem_s = pretty $ C.toExp mem noLoc
+  let mem_s = prettyString $ C.toExp mem noLoc
   when (refcount && not cached) $
     stm
       [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
@@ -563,7 +563,7 @@ allocMem ::
   CompilerM op s ()
 allocMem mem size space on_failure = do
   refcount <- fatMemory space
-  let mem_s = pretty $ C.toExp mem noLoc
+  let mem_s = prettyString $ C.toExp mem noLoc
   if refcount
     then
       stm
@@ -603,7 +603,7 @@ cachingMemory lexical f = do
   let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do
-    size <- newVName $ pretty mem <> "_cached_size"
+    size <- newVName $ prettyString mem <> "_cached_size"
     pure (mem, size)
 
   let lexMem env =

@@ -87,9 +87,9 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
 
 generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () ()
 generateSizeFuns sizes = do
-  let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
-      size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+  let size_name_inits = map (\k -> [C.cinit|$string:(prettyString k)|]) $ M.keys sizes
+      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (prettyString k))|]) $ M.keys sizes
+      size_class_inits = map (\c -> [C.cinit|$string:(prettyString c)|]) $ M.elems sizes
 
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
@@ -316,7 +316,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
           [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
                                      &ctx->$id:name,
                                      ctx->cuda.module,
-                                     $string:(pretty (C.toIdent name mempty))));|]
+                                     $string:(prettyString (C.toIdent name mempty))));|]
         )
           : forCostCentre name
 

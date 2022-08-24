@@ -14,6 +14,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import qualified Data.Text as T
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -556,7 +557,7 @@ internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 internaliseExp desc (E.Hole (Info t) loc) = do
-  let msg = pretty $ "Reached hole of type: " <> align (ppr t)
+  let msg = prettyText $ "Reached hole of type: " <> align (ppr t)
       ts = internaliseType (E.toStruct t)
   c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
   case mapM hasStaticShape ts of
@@ -722,9 +723,9 @@ internaliseExp desc (E.Attr attr e loc) = do
   e' <- local (f attr') $ internaliseExp desc e
   case attr' of
     "trace" ->
-      traceRes (locStr loc) e'
+      traceRes (T.pack $ locStr loc) e'
     I.AttrComp "trace" [I.AttrName tag] ->
-      traceRes (nameToString tag) e'
+      traceRes (nameToText tag) e'
     "opaque" ->
       mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) e'
     _ ->
@@ -1881,7 +1882,7 @@ flatIndexHelper desc loc arr offset slices = do
       offset_inbounds_down
       [offset_inbounds_up, min_in_bounds, max_in_bounds]
 
-  c <- assert "bounds_cert" all_bounds (ErrorMsg [ErrorString $ "Flat slice out of bounds: " ++ pretty old_dim ++ " and " ++ pretty slices']) loc
+  c <- assert "bounds_cert" all_bounds (ErrorMsg [ErrorString $ "Flat slice out of bounds: " <> prettyText old_dim <> " and " <> prettyText slices']) loc
   let slice = I.FlatSlice offset' $ map (uncurry FlatDimIndex) slices'
   certifying c $
     forM arrs $ \arr' ->
@@ -1929,7 +1930,7 @@ flatUpdateHelper desc loc arr1 offset slices arr2 = do
       offset_inbounds_down
       [offset_inbounds_up, min_in_bounds, max_in_bounds]
 
-  c <- assert "bounds_cert" all_bounds (ErrorMsg [ErrorString $ "Flat slice out of bounds: " ++ pretty old_dim ++ " and " ++ pretty slices']) loc
+  c <- assert "bounds_cert" all_bounds (ErrorMsg [ErrorString $ "Flat slice out of bounds: " <> prettyText old_dim <> " and " <> prettyText slices']) loc
   let slice = I.FlatSlice offset' $ map (uncurry FlatDimIndex) slices'
   certifying c $
     forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
@@ -2128,14 +2129,14 @@ partitionWithSOACS k lam arrs = do
 
 typeExpForError :: E.TypeExp VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =
-  pure [ErrorString $ pretty qn]
+  pure [ErrorString $ prettyText qn]
 typeExpForError (E.TEUnique te _) =
   ("*" :) <$> typeExpForError te
 typeExpForError (E.TEDim dims te _) =
   (ErrorString ("?" <> dims' <> ".") :) <$> typeExpForError te
   where
     dims' = mconcat (map onDim dims)
-    onDim d = "[" <> pretty d <> "]"
+    onDim d = "[" <> prettyText d <> "]"
 typeExpForError (E.TEArray d te _) = do
   d' <- dimExpForError d
   te' <- typeExpForError te
@@ -2148,7 +2149,7 @@ typeExpForError (E.TERecord fields _) = do
   pure $ ["{"] ++ intercalate [", "] fields' ++ ["}"]
   where
     onField (k, te) =
-      (ErrorString (pretty k ++ ": ") :) <$> typeExpForError te
+      (ErrorString (prettyText k <> ": ") :) <$> typeExpForError te
 typeExpForError (E.TEArrow _ t1 t2 _) = do
   t1' <- typeExpForError t1
   t2' <- typeExpForError t2
@@ -2175,7 +2176,7 @@ dimExpForError (SizeExpNamed d _) = do
     _ -> pure $ I.Var $ E.qualLeaf d
   pure $ ErrorVal int64 d'
 dimExpForError (SizeExpConst d _) =
-  pure $ ErrorString $ pretty d
+  pure $ ErrorString $ prettyText d
 dimExpForError SizeExpAny = pure ""
 
 -- A smart constructor that compacts neighbouring literals for easier
@@ -2185,5 +2186,5 @@ errorMsg = ErrorMsg . compact
   where
     compact [] = []
     compact (ErrorString x : ErrorString y : parts) =
-      compact (ErrorString (x ++ y) : parts)
+      compact (ErrorString (x <> y) : parts)
     compact (x : y) = x : compact y

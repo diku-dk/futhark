@@ -665,7 +665,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
           maybe_prog <- parseFuthark file <$> T.readFile file
           case maybe_prog of
             Left (SyntaxError loc err) ->
-              fail $ "Syntax error at " <> locStr loc <> ":\n" <> err
+              fail $ "Syntax error at " <> locStr loc <> ":\n" <> T.unpack err
             Right prog
               | futharkPrintAST config -> print prog
               | otherwise -> putStrLn $ pretty prog

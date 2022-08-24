@@ -238,7 +238,7 @@ readEvalPrint = do
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
 
       case maybe_dec_or_e of
-        Left (SyntaxError _ err) -> liftIO $ putStrLn err
+        Left (SyntaxError _ err) -> liftIO $ T.putStrLn err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
@@ -400,7 +400,7 @@ genTypeCommand ::
 genTypeCommand f g h e = do
   prompt <- getPrompt
   case f prompt e of
-    Left (SyntaxError _ err) -> liftIO $ putStrLn err
+    Left (SyntaxError _ err) -> liftIO $ T.putStrLn err
     Right e' -> do
       (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of

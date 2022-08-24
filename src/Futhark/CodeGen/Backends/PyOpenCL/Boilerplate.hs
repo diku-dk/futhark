@@ -73,7 +73,7 @@ formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
           escapeChar c = [c]
        in concatMap escapeChar
 
-    onPart (ErrorString s) = formatEscape s
+    onPart (ErrorString s) = formatEscape $ T.unpack s
     onPart ErrorVal {} = "{}"
 
 sizeClassesToPython :: M.Map Name SizeClass -> PyExp

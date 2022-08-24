@@ -369,7 +369,7 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
-  kt <- mustHaveField (mkUsage loc $ "projection of field " ++ quote (pretty k)) k t
+  kt <- mustHaveField (mkUsage loc $ prettyString $ "projection of field " <> pquote (ppr k)) k t
   pure $ Project k e' (Info kt) loc
 checkExp (AppExp (If e1 e2 e3 loc) _) =
   sequentially checkCond $ \e1' _ -> do
@@ -434,7 +434,7 @@ checkExp (Var qn NoInfo loc) = do
 
     checkField e k = do
       t <- expType e
-      let usage = mkUsage loc $ "projection of field " ++ quote (pretty k)
+      let usage = mkUsage loc $ prettyString $ "projection of field " <> pquote (ppr k)
       kt <- mustHaveField usage k t
       pure $ Project k e (Info kt) loc
 checkExp (Negate arg loc) = do
@@ -589,7 +589,7 @@ checkExp (AppExp (Index e slice loc) _) = do
 checkExp (Assert e1 e2 NoInfo loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2
-  pure $ Assert e1' e2' (Info (pretty e1)) loc
+  pure $ Assert e1' e2' (Info (prettyText e1)) loc
 checkExp (Lambda params body rettype_te NoInfo loc) = do
   (params', body', body_t, rettype', info) <-
     removeSeminullOccurrences . noUnique . incLevel . bindingParams [] params $ \_ params' -> do
@@ -957,7 +957,7 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
         "Cannot apply"
           <+> fname'
           <+> "to argument #" <> ppr (prev_applied + 1)
-          <+> pquote (shorten $ pretty $ flatten $ ppr argexp) <> ","
+          <+> pquote (shorten $ flatten $ ppr argexp) <> ","
           <+/> "as"
           <+> fname'
           <+> "only takes"

@@ -139,6 +139,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Data.String
+import qualified Data.Text as T
 import Futhark.CodeGen.ImpCode
   ( Bytes,
     Count,
@@ -156,6 +157,7 @@ import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
+import Futhark.Util.Pretty (strictText)
 import Language.Futhark.Warnings
 import Prelude hiding (mod, quot)
 
@@ -400,7 +402,7 @@ collect' m = do
 
 -- | Execute a code generation action, wrapping the generated code
 -- within a 'Imp.Comment' with the given description.
-comment :: String -> ImpM rep r op () -> ImpM rep r op ()
+comment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 comment desc m = do
   code <- collect m
   emit $ Imp.Comment desc code
@@ -413,9 +415,9 @@ warnings :: Warnings -> ImpM rep r op ()
 warnings ws = modify $ \s -> s {stateWarnings = ws <> stateWarnings s}
 
 -- | Emit a warning about something the user should be aware of.
-warn :: Located loc => loc -> [loc] -> String -> ImpM rep r op ()
+warn :: Located loc => loc -> [loc] -> T.Text -> ImpM rep r op ()
 warn loc locs problem =
-  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (fromString problem)
+  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (strictText problem)
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM rep r op ()
@@ -875,12 +877,12 @@ defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op
 
-tracePrim :: String -> PrimType -> SubExp -> ImpM rep r op ()
+tracePrim :: T.Text -> PrimType -> SubExp -> ImpM rep r op ()
 tracePrim s t se =
   emit . Imp.TracePrint $
     ErrorMsg [ErrorString (s <> ": "), ErrorVal t (toExp' t se), ErrorString "\n"]
 
-traceArray :: String -> PrimType -> Shape -> SubExp -> ImpM rep r op ()
+traceArray :: T.Text -> PrimType -> Shape -> SubExp -> ImpM rep r op ()
 traceArray s t shape se = do
   emit . Imp.TracePrint $ ErrorMsg [ErrorString (s <> ": ")]
   sLoopNest shape $ \is -> do
@@ -907,7 +909,7 @@ defCompileBasicOp (Pat [pe]) (Opaque op se) = do
         Array t shape _ -> traceArray s t shape se
         _ ->
           warn [mempty :: SrcLoc] mempty $
-            s ++ ": cannot trace value of this (core) type: " <> pretty se_t
+            s <> ": cannot trace value of this (core) type: " <> prettyText se_t
 defCompileBasicOp (Pat [pe]) (UnOp op e) = do
   e' <- toExp e
   patElemName pe <~~ Imp.UnOpExp op e'
@@ -1818,7 +1820,7 @@ sWhile cond body = do
   body' <- collect body
   emit $ Imp.While cond body'
 
-sComment :: String -> ImpM rep r op () -> ImpM rep r op ()
+sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
   emit $ Imp.Comment s code'

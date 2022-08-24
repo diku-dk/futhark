@@ -26,7 +26,7 @@ import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (prettyOneLine, prettyText)
+import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
@@ -380,7 +380,7 @@ onKernel target kernel = do
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
 useAsParam (ScalarUse name pt) = do
-  let name_bits = zEncodeString (pretty name) <> "_bits"
+  let name_bits = zEncodeString (prettyString name) <> "_bits"
       ctp = case pt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
@@ -410,8 +410,8 @@ constDef (ConstUse v e) =
     )
   where
     e' = compilePrimExp e
-    def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ prettyOneLine e' ++ ")"
-    undef = "#undef " ++ pretty (C.toIdent v mempty)
+    def = "#define " ++ prettyString (C.toIdent v mempty) ++ " (" ++ prettyOneLine e' ++ ")"
+    undef = "#undef " ++ prettyString (C.toIdent v mempty)
 constDef _ = Nothing
 
 openClCode :: [C.Func] -> T.Text
@@ -578,7 +578,7 @@ compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
   where
     compileKernelConst (SizeConst key) =
-      pure [C.cexp|$id:(zEncodeString (pretty key))|]
+      pure [C.cexp|$id:(zEncodeString (prettyString key))|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses
@@ -653,7 +653,7 @@ inKernelOperations mode body =
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
     kernelOps (LocalAlloc name size) = do
-      name' <- newVName $ pretty name ++ "_backing"
+      name' <- newVName $ prettyString name ++ "_backing"
       GC.modifyUserState $ \s ->
         s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
@@ -685,7 +685,7 @@ inKernelOperations mode body =
       cast <- atomicCast s ty
       GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
       where
-        op' = op ++ "_" ++ pretty t ++ "_" ++ atomicSpace s
+        op' = op ++ "_" ++ prettyString t ++ "_" ++ atomicSpace s
 
     doAtomicCmpXchg s t old arr ind cmp val ty = do
       ind' <- GC.compileExp $ untyped $ unCount ind
@@ -694,14 +694,14 @@ inKernelOperations mode body =
       cast <- atomicCast s ty
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
       where
-        op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
+        op = "atomic_cmpxchg_" ++ prettyString t ++ "_" ++ atomicSpace s
     doAtomicXchg s t old arr ind val ty = do
       cast <- atomicCast s ty
       ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- GC.compileExp val
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
-        op = "atomic_chg_" ++ pretty t ++ "_" ++ atomicSpace s
+        op = "atomic_chg_" ++ prettyString t ++ "_" ++ atomicSpace s
     -- First the 64-bit operations.
     atomicOps s (AtomicAdd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]

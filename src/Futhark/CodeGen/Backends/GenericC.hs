@@ -40,7 +40,6 @@ import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, halfH, lockH, timingH, utilH)
 import qualified Futhark.Manifest as Manifest
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (prettyText)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
@@ -727,7 +726,7 @@ compileConstants (Constants ps init_consts) = do
 
     constMacro p = ([C.citem|$escstm:def|], [C.citem|$escstm:undef|])
       where
-        p' = pretty (C.toIdent (paramName p) mempty)
+        p' = prettyString (C.toIdent (paramName p) mempty)
         def = "#define " ++ p' ++ " (" ++ "ctx->constants." ++ p' ++ ")"
         undef = "#undef " ++ p'
 

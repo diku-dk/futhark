@@ -86,7 +86,8 @@ module Futhark.CodeGen.ImpCode
     withElemType,
 
     -- * Re-exports from other modules.
-    pretty,
+    prettyText,
+    prettyString,
     module Futhark.IR.Syntax.Core,
     module Language.Futhark.Core,
     module Language.Futhark.Primitive,
@@ -100,6 +101,7 @@ where
 import Data.List (intersperse)
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Text as T
 import Data.Traversable
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
@@ -307,7 +309,7 @@ data Code a
   | -- | Has the same semantics as the contained code, but
     -- the comment should show up in generated code for ease
     -- of inspection.
-    Comment String (Code a)
+    Comment T.Text (Code a)
   | -- | Print the given value to the screen, somehow
     -- annotated with the given string as a description.  If
     -- no type/value pair, just print the string.  This has
@@ -582,7 +584,7 @@ instance Pretty op => Pretty (Code op) where
       <+> "<-"
       <+> ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
-    "--" <+> text s </> ppr code
+    "--" <+> strictText s </> ppr code
   ppr (DebugPrint desc (Just e)) =
     "debug" <+> parens (commasep [text (show desc), ppr e])
   ppr (DebugPrint desc Nothing) =
