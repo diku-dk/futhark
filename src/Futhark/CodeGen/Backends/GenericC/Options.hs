@@ -34,7 +34,7 @@ data Option = Option
 -- | Whether an option accepts an argument.
 data OptionArgument
   = NoArgument
-  | -- | The 'String' becomes part of the help text.
+  | -- | The 'String' becomes part of the help pretty.
     RequiredArgument String
   | OptionalArgument
 

@@ -24,7 +24,7 @@ import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
-import Futhark.Util.Pretty (align, ppr)
+import Futhark.Util.Pretty (align, docText, pretty)
 import Language.Futhark as E hiding (TypeArg)
 
 -- | Convert a program in source Futhark to a program in the Futhark
@@ -557,7 +557,7 @@ internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 internaliseExp desc (E.Hole (Info t) loc) = do
-  let msg = prettyText $ "Reached hole of type: " <> align (ppr t)
+  let msg = docText $ "Reached hole of type: " <> align (pretty t)
       ts = internaliseType (E.toStruct t)
   c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
   case mapM hasStaticShape ts of

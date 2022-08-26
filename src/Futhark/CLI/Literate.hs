@@ -106,60 +106,55 @@ varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveVideo e _) = varsInExp e
 
-pprDirective :: Bool -> Directive -> PP.Doc
+pprDirective :: Bool -> Directive -> PP.Doc a
 pprDirective _ (DirectiveRes e) =
-  "> " <> PP.align (PP.ppr e)
+  "> " <> PP.align (PP.pretty e)
 pprDirective _ (DirectiveBrief f) =
   pprDirective False f
 pprDirective _ (DirectiveCovert f) =
   pprDirective False f
 pprDirective _ (DirectiveImg e params) =
-  "> :img "
-    <> PP.align (PP.ppr e)
-    <> if null params' then mempty else PP.stack $ ";" : params'
+  ("> :img " <> PP.align (PP.pretty e))
+    <> if null params' then mempty else ";" <> PP.hardline <> PP.stack params'
   where
-    params' =
-      catMaybes
-        [ p "file" imgFile PP.ppr
-        ]
-    p s f ppr = do
+    params' = catMaybes [p "file" imgFile PP.pretty]
+    p s f pretty = do
       x <- f params
-      Just $ s <> ": " <> ppr x
+      Just $ s <> ": " <> pretty x
 pprDirective True (DirectivePlot e (Just (h, w))) =
   PP.stack
-    [ "> :plot2d " <> PP.ppr e <> ";",
-      "size: (" <> PP.ppr w <> "," <> PP.ppr h <> ")"
+    [ "> :plot2d " <> PP.pretty e <> ";",
+      "size: (" <> PP.pretty w <> "," <> PP.pretty h <> ")"
     ]
 pprDirective _ (DirectivePlot e _) =
-  "> :plot2d " <> PP.align (PP.ppr e)
+  "> :plot2d " <> PP.align (PP.pretty e)
 pprDirective True (DirectiveGnuplot e script) =
   PP.stack $
-    "> :gnuplot " <> PP.align (PP.ppr e) <> ";"
-      : map PP.strictText (T.lines script)
+    "> :gnuplot " <> PP.align (PP.pretty e) <> ";"
+      : map PP.pretty (T.lines script)
 pprDirective False (DirectiveGnuplot e _) =
-  "> :gnuplot " <> PP.align (PP.ppr e)
+  "> :gnuplot " <> PP.align (PP.pretty e)
 pprDirective False (DirectiveVideo e _) =
-  "> :video " <> PP.align (PP.ppr e)
+  "> :video " <> PP.align (PP.pretty e)
 pprDirective True (DirectiveVideo e params) =
-  "> :video "
-    <> PP.ppr e
-    <> if null params' then mempty else PP.stack $ ";" : params'
+  ("> :video " <> PP.pretty e)
+    <> if null params' then mempty else ";" <> PP.hardline <> PP.stack params'
   where
     params' =
       catMaybes
-        [ p "fps" videoFPS PP.ppr,
+        [ p "fps" videoFPS PP.pretty,
           p "loop" videoLoop ppBool,
           p "autoplay" videoAutoplay ppBool,
-          p "format" videoFormat PP.strictText,
-          p "file" videoFile PP.ppr
+          p "format" videoFormat PP.pretty,
+          p "file" videoFile PP.pretty
         ]
     ppBool b = if b then "true" else "false"
-    p s f ppr = do
+    p s f pretty = do
       x <- f params
-      Just $ s <> ": " <> ppr x
+      Just $ s <> ": " <> pretty x
 
 instance PP.Pretty Directive where
-  ppr = pprDirective True
+  pretty = pprDirective True
 
 data Block
   = BlockCode T.Text
@@ -860,18 +855,18 @@ processBlock :: Env -> Block -> IO (Failure, T.Text, Files)
 processBlock _ (BlockCode code)
   | T.null code = pure (Success, "\n", mempty)
   | otherwise = pure (Success, "\n```futhark\n" <> code <> "```\n\n", mempty)
-processBlock _ (BlockComment text) =
-  pure (Success, text, mempty)
+processBlock _ (BlockComment pretty) =
+  pure (Success, pretty, mempty)
 processBlock env (BlockDirective directive) = do
   when (scriptVerbose (envOpts env) > 0) $
-    T.hPutStrLn stderr . prettyText $
-      "Processing " <> PP.align (PP.ppr directive) <> "..."
+    T.hPutStrLn stderr . PP.docText $
+      "Processing " <> PP.align (PP.pretty directive) <> "..."
   let prompt = case directive of
         DirectiveCovert _ -> mempty
         DirectiveBrief _ ->
-          "```\n" <> prettyText (pprDirective False directive) <> "\n```\n"
+          "```\n" <> PP.docText (pprDirective False directive) <> "\n```\n"
         _ ->
-          "```\n" <> prettyText (pprDirective True directive) <> "\n```\n"
+          "```\n" <> PP.docText (pprDirective True directive) <> "\n```\n"
       env' = env {envHash = hashText (envHash env <> prettyText directive)}
   (r, files) <- runScriptM $ processDirective env' directive
   case r of

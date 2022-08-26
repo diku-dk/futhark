@@ -95,7 +95,8 @@ import Data.List (find, isPrefixOf, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import Futhark.Util.Pretty hiding (bool, group, space)
+import qualified Data.Text as T
+import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic (includeToFilePath)
 import Language.Futhark.Traversals
@@ -230,10 +231,10 @@ data ValBinding
 
 --- Errors
 
-describeVar :: SrcLoc -> VName -> TermTypeM Doc
+describeVar :: SrcLoc -> VName -> TermTypeM (Doc a)
 describeVar loc v =
   gets $
-    maybe ("variable" <+> pquote (pprName v)) (nameReason loc)
+    maybe ("variable" <+> dquotes (prettyName v)) (nameReason loc)
       . M.lookup v
       . stateNames
 
@@ -243,31 +244,31 @@ useAfterConsume name rloc wloc = do
   typeError rloc mempty . withIndexLink "use-after-consume" $
     "Using"
       <+> name' <> ", but this was consumed at"
-      <+> text (locStrRel rloc wloc) <> ".  (Possibly through aliasing.)"
+      <+> pretty (locStrRel rloc wloc) <> ".  (Possibly through aliasing.)"
 
 badLetWithValue :: (Pretty arr, Pretty src) => arr -> src -> SrcLoc -> TermTypeM a
 badLetWithValue arre vale loc =
   typeError loc mempty $
     "Source array for in-place update"
-      </> indent 2 (ppr arre)
+      </> indent 2 (pretty arre)
       </> "might alias update value"
-      </> indent 2 (ppr vale)
+      </> indent 2 (pretty vale)
       </> "Hint: use"
-      <+> pquote "copy"
+      <+> dquotes "copy"
       <+> "to remove aliases from the value."
 
 returnAliased :: Name -> SrcLoc -> TermTypeM ()
 returnAliased name loc =
   typeError loc mempty . withIndexLink "return-aliased" $
     "Unique-typed return value is aliased to"
-      <+> pquote (pprName name) <> ", which is not consumable."
+      <+> dquotes (prettyName name) <> ", which is not consumable."
 
 uniqueReturnAliased :: SrcLoc -> TermTypeM a
 uniqueReturnAliased loc =
   typeError loc mempty . withIndexLink "unique-return-aliased" $
     "A unique-typed component of the return value is aliased to some other component."
 
-notConsumable :: MonadTypeChecker m => SrcLoc -> Doc -> m b
+notConsumable :: MonadTypeChecker m => SrcLoc -> Doc () -> m b
 notConsumable loc v =
   typeError loc mempty . withIndexLink "not-consumable" $
     "Would consume" <+> v <> ", which is not consumable."
@@ -275,7 +276,7 @@ notConsumable loc v =
 unusedSize :: (MonadTypeChecker m) => SizeBinder VName -> m a
 unusedSize p =
   typeError p mempty . withIndexLink "unused-size" $
-    "Size" <+> ppr p <+> "unused in pattern."
+    "Size" <+> pretty p <+> "unused in pattern."
 
 --- Scope management
 
@@ -297,87 +298,87 @@ data Checking
   | CheckingBranches StructType StructType
 
 instance Pretty Checking where
-  ppr (CheckingApply f e expected actual) =
+  pretty (CheckingApply f e expected actual) =
     header
       </> "Expected:"
-      <+> align (ppr expected)
+      <+> align (pretty expected)
       </> "Actual:  "
-      <+> align (ppr actual)
+      <+> align (pretty actual)
     where
       header =
         case f of
           Nothing ->
             "Cannot apply function to"
-              <+> pquote (shorten $ flatten $ ppr e) <> " (invalid type)."
+              <+> dquotes (shorten $ group $ pretty e) <> " (invalid type)."
           Just fname ->
             "Cannot apply"
-              <+> pquote (ppr fname)
+              <+> dquotes (pretty fname)
               <+> "to"
-              <+> pquote (shorten $ flatten $ ppr e) <> " (invalid type)."
-  ppr (CheckingReturn expected actual) =
+              <+> dquotes (shorten $ group $ pretty e) <> " (invalid type)."
+  pretty (CheckingReturn expected actual) =
     "Function body does not have expected type."
       </> "Expected:"
-      <+> align (ppr expected)
+      <+> align (pretty expected)
       </> "Actual:  "
-      <+> align (ppr actual)
-  ppr (CheckingAscription expected actual) =
+      <+> align (pretty actual)
+  pretty (CheckingAscription expected actual) =
     "Expression does not have expected type from explicit ascription."
       </> "Expected:"
-      <+> align (ppr expected)
+      <+> align (pretty expected)
       </> "Actual:  "
-      <+> align (ppr actual)
-  ppr (CheckingLetGeneralise fname) =
-    "Cannot generalise type of" <+> pquote (ppr fname) <> "."
-  ppr (CheckingParams fname) =
-    "Invalid use of parameters in" <+> pquote fname' <> "."
+      <+> align (pretty actual)
+  pretty (CheckingLetGeneralise fname) =
+    "Cannot generalise type of" <+> dquotes (pretty fname) <> "."
+  pretty (CheckingParams fname) =
+    "Invalid use of parameters in" <+> dquotes fname' <> "."
     where
-      fname' = maybe "anonymous function" ppr fname
-  ppr (CheckingPat pat NoneInferred) =
-    "Invalid pattern" <+> pquote (ppr pat) <> "."
-  ppr (CheckingPat pat (Ascribed t)) =
+      fname' = maybe "anonymous function" pretty fname
+  pretty (CheckingPat pat NoneInferred) =
+    "Invalid pattern" <+> dquotes (pretty pat) <> "."
+  pretty (CheckingPat pat (Ascribed t)) =
     "Pat"
-      <+> pquote (ppr pat)
+      <+> dquotes (pretty pat)
       <+> "cannot match value of type"
-      </> indent 2 (ppr t)
-  ppr (CheckingLoopBody expected actual) =
+      </> indent 2 (pretty t)
+  pretty (CheckingLoopBody expected actual) =
     "Loop body does not have expected type."
       </> "Expected:"
-      <+> align (ppr expected)
+      <+> align (pretty expected)
       </> "Actual:  "
-      <+> align (ppr actual)
-  ppr (CheckingLoopInitial expected actual) =
+      <+> align (pretty actual)
+  pretty (CheckingLoopInitial expected actual) =
     "Initial loop values do not have expected type."
       </> "Expected:"
-      <+> align (ppr expected)
+      <+> align (pretty expected)
       </> "Actual:  "
-      <+> align (ppr actual)
-  ppr (CheckingRecordUpdate fs expected actual) =
+      <+> align (pretty actual)
+  pretty (CheckingRecordUpdate fs expected actual) =
     "Type mismatch when updating record field"
-      <+> pquote fs' <> "."
+      <+> dquotes fs' <> "."
       </> "Existing:"
-      <+> align (ppr expected)
+      <+> align (pretty expected)
       </> "New:     "
-      <+> align (ppr actual)
+      <+> align (pretty actual)
     where
-      fs' = mconcat $ punctuate "." $ map ppr fs
-  ppr (CheckingRequired [expected] actual) =
+      fs' = mconcat $ punctuate "." $ map pretty fs
+  pretty (CheckingRequired [expected] actual) =
     "Expression must must have type"
-      <+> ppr expected <> "."
+      <+> pretty expected <> "."
       </> "Actual type:"
-      <+> align (ppr actual)
-  ppr (CheckingRequired expected actual) =
+      <+> align (pretty actual)
+  pretty (CheckingRequired expected actual) =
     "Type of expression must must be one of "
       <+> expected' <> "."
       </> "Actual type:"
-      <+> align (ppr actual)
+      <+> align (pretty actual)
     where
-      expected' = commasep (map ppr expected)
-  ppr (CheckingBranches t1 t2) =
+      expected' = commasep (map pretty expected)
+  pretty (CheckingBranches t1 t2) =
     "Branches differ in type."
       </> "Former:"
-      <+> ppr t1
+      <+> pretty t1
       </> "Latter:"
-      <+> ppr t2
+      <+> pretty t2
 
 -- | Type checking happens with access to this environment.  The
 -- 'TermScope' will be extended during type-checking as bindings come into
@@ -450,13 +451,13 @@ data NameReason
   = -- | Name is the result of a function application.
     NameAppRes (Maybe (QualName VName)) SrcLoc
 
-nameReason :: SrcLoc -> NameReason -> Doc
+nameReason :: SrcLoc -> NameReason -> Doc a
 nameReason loc (NameAppRes Nothing apploc) =
-  "result of application at" <+> text (locStrRel loc apploc)
+  "result of application at" <+> pretty (locStrRel loc apploc)
 nameReason loc (NameAppRes fname apploc) =
   "result of applying"
-    <+> pquote (ppr fname)
-    <+> parens ("at" <+> text (locStrRel loc apploc))
+    <+> dquotes (pretty fname)
+    <+> parens ("at" <+> pretty (locStrRel loc apploc))
 
 -- | The state is a set of constraints and a counter for generating
 -- type names.  This is distinct from the usual counter we use for
@@ -524,9 +525,9 @@ instance MonadUnify TermTypeM where
       Just checking' ->
         throwError $
           TypeError (locOf loc) notes $
-            ppr checking' <> line </> doc <> ppr bcs
+            pretty checking' <> line </> doc <> pretty bcs
       Nothing ->
-        throwError $ TypeError (locOf loc) notes $ doc <> ppr bcs
+        throwError $ TypeError (locOf loc) notes $ doc <> pretty bcs
 
   matchError loc notes bcs t1 t2 = do
     checking <- asks termChecking
@@ -535,19 +536,19 @@ instance MonadUnify TermTypeM where
         | hasNoBreadCrumbs bcs ->
             throwError $
               TypeError (locOf loc) notes $
-                ppr checking'
+                pretty checking'
         | otherwise ->
             throwError $
               TypeError (locOf loc) notes $
-                ppr checking' <> line </> doc <> ppr bcs
+                pretty checking' <> line </> doc <> pretty bcs
       Nothing ->
-        throwError $ TypeError (locOf loc) notes $ doc <> ppr bcs
+        throwError $ TypeError (locOf loc) notes $ doc <> pretty bcs
     where
       doc =
         "Types"
-          </> indent 2 (ppr t1)
+          </> indent 2 (pretty t1)
           </> "and"
-          </> indent 2 (ppr t2)
+          </> indent 2 (pretty t2)
           </> "do not match."
 
 -- | Instantiate a type scheme with fresh type variables for its type
@@ -580,12 +581,12 @@ instantiateTypeParam qn loc tparam = do
   v <- newID $ mkTypeVarName name i
   case tparam of
     TypeParamType x _ _ -> do
-      constrain v . NoConstraint x . mkUsage loc . prettyString $
-        "instantiated type parameter of " <> pquote (ppr qn) <> "."
+      constrain v . NoConstraint x . mkUsage loc . docText $
+        "instantiated type parameter of " <> dquotes (pretty qn) <> "."
       pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (qualName v) [])
     TypeParamDim {} -> do
-      constrain v . Size Nothing . mkUsage loc . prettyString $
-        "instantiated size parameter of " <> pquote (ppr qn) <> "."
+      constrain v . Size Nothing . mkUsage loc . docText $
+        "instantiated size parameter of " <> dquotes (pretty qn) <> "."
       pure (v, SizeSubst $ NamedSize $ qualName v)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
@@ -669,12 +670,12 @@ instance MonadTypeChecker TermTypeM where
   lookupVar loc qn = do
     outer_env <- liftTypeM askEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
-    let usage = mkUsage loc $ prettyString $ "use of " <> pquote (ppr qn)
+    let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
 
     t <- case M.lookup name $ scopeVtable scope of
       Nothing ->
         typeError loc mempty $
-          "Unknown variable" <+> pquote (ppr qn) <> "."
+          "Unknown variable" <+> dquotes (pretty qn) <> "."
       Just (WasConsumed wloc) -> useAfterConsume name loc wloc
       Just (BoundV _ tparams t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
@@ -719,7 +720,7 @@ instance MonadTypeChecker TermTypeM where
     checking <- asks termChecking
     case checking of
       Just checking' ->
-        throwError $ TypeError (locOf loc) notes (ppr checking' <> line </> s)
+        throwError $ TypeError (locOf loc) notes (pretty checking' <> line </> s)
       Nothing ->
         throwError $ TypeError (locOf loc) notes s
 
@@ -733,11 +734,11 @@ extSize loc e = do
     Nothing -> do
       let rsrc = case e of
             SourceArg (FName fname) e' ->
-              RigidArg fname $ prettyOneLine e'
+              RigidArg fname $ prettyTextOneLine e'
             SourceBound e' ->
-              RigidBound $ prettyOneLine e'
+              RigidBound $ prettyTextOneLine e'
             SourceSlice d i j s ->
-              RigidSlice d $ prettyOneLine $ DimSlice i j s
+              RigidSlice d $ prettyTextOneLine $ DimSlice i j s
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
@@ -808,14 +809,14 @@ updateTypes = astMap tv
 
 --- Basic checking
 
-unifies :: String -> StructType -> Exp -> TermTypeM Exp
+unifies :: T.Text -> StructType -> Exp -> TermTypeM Exp
 unifies why t e = do
   unify (mkUsage (srclocOf e) why) t . toStruct =<< expType e
   pure e
 
 -- | @require ts e@ causes a 'TypeError' if @expType e@ is not one of
 -- the types in @ts@.  Otherwise, simply returns @e@.
-require :: String -> [PrimType] -> Exp -> TermTypeM Exp
+require :: T.Text -> [PrimType] -> Exp -> TermTypeM Exp
 require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e

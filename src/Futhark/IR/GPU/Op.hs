@@ -27,6 +27,7 @@ where
 
 import Control.Monad
 import qualified Data.Sequence as SQ
+import qualified Data.Text as T
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -43,8 +44,8 @@ import Futhark.Transform.Substitute
 import Futhark.Util.Pretty
   ( commasep,
     parens,
-    ppr,
-    text,
+    ppTuple',
+    pretty,
     (<+>),
   )
 import qualified Futhark.Util.Pretty as PP
@@ -64,11 +65,11 @@ data SegLevel
   deriving (Eq, Ord, Show)
 
 instance PP.Pretty SegLevel where
-  ppr lvl =
+  pretty lvl =
     PP.parens
       ( lvl' <> PP.semi
-          <+> text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi
-          <+> text "groupsize=" <> ppr (segGroupSize lvl) <> virt
+          <+> "#groups=" <> pretty (segNumGroups lvl) <> PP.semi
+          <+> "groupsize=" <> pretty (segGroupSize lvl) <> virt
       )
     where
       lvl' = case lvl of
@@ -76,8 +77,8 @@ instance PP.Pretty SegLevel where
         SegGroup {} -> "group"
       virt = case segVirt lvl of
         SegNoVirt -> mempty
-        SegNoVirtFull dims -> PP.semi <+> text "full" <+> ppr (segSeqDims dims)
-        SegVirt -> PP.semi <+> text "virtualise"
+        SegNoVirtFull dims -> PP.semi <+> "full" <+> pretty (segSeqDims dims)
+        SegVirt -> PP.semi <+> "virtualise"
 
 instance Engine.Simplifiable SegLevel where
   simplify (SegThread num_groups group_size virt) =
@@ -164,16 +165,16 @@ instance FreeIn SizeOp where
   freeIn' _ = mempty
 
 instance PP.Pretty SizeOp where
-  ppr (GetSize name size_class) =
-    text "get_size" <> parens (commasep [ppr name, ppr size_class])
-  ppr (GetSizeMax size_class) =
-    text "get_size_max" <> parens (commasep [ppr size_class])
-  ppr (CmpSizeLe name size_class x) =
-    text "cmp_size" <> parens (commasep [ppr name, ppr size_class])
-      <+> text "<="
-      <+> ppr x
-  ppr (CalcNumGroups w max_num_groups group_size) =
-    text "calc_num_groups" <> parens (commasep [ppr w, ppr max_num_groups, ppr group_size])
+  pretty (GetSize name size_class) =
+    "get_size" <> parens (commasep [pretty name, pretty size_class])
+  pretty (GetSizeMax size_class) =
+    "get_size_max" <> parens (commasep [pretty size_class])
+  pretty (CmpSizeLe name size_class x) =
+    "cmp_size" <> parens (commasep [pretty name, pretty size_class])
+      <+> "<="
+      <+> pretty x
+  pretty (CalcNumGroups w max_num_groups group_size) =
+    "calc_num_groups" <> parens (commasep [pretty w, pretty max_num_groups, pretty group_size])
 
 instance OpMetrics SizeOp where
   opMetrics GetSize {} = seen "GetSize"
@@ -298,11 +299,11 @@ instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (HostOp rep op) where
   indexOp _ _ _ _ = Nothing
 
 instance (PrettyRep rep, PP.Pretty op) => PP.Pretty (HostOp rep op) where
-  ppr (SegOp op) = ppr op
-  ppr (OtherOp op) = ppr op
-  ppr (SizeOp op) = ppr op
-  ppr (GPUBody ts body) =
-    "gpu" <+> PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
+  pretty (SegOp op) = pretty op
+  pretty (OtherOp op) = pretty op
+  pretty (SizeOp op) = pretty op
+  pretty (GPUBody ts body) =
+    "gpu" <+> PP.colon <+> ppTuple' (map pretty ts) <+> PP.nestedBlock "{" "}" (pretty body)
 
 instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (HostOp rep op) where
   opMetrics (SegOp op) = opMetrics op
@@ -321,7 +322,7 @@ checkSegLevel Nothing lvl = do
 checkSegLevel (Just SegThread {}) _ =
   TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
 checkSegLevel (Just x) y
-  | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ prettyString x
+  | x == y = TC.bad $ TC.TypeError $ "Already at at level " <> prettyText x
   | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
       TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
   | otherwise =
@@ -348,7 +349,7 @@ typeCheckHostOp _ Nothing _ (GPUBody ts body) = do
     extendedScope
       (traverse subExpResType (bodyResult body))
       (scopeOf (bodyStms body))
-  unless (body_ts == ts) . TC.bad . TC.TypeError . unlines $
-    [ "Expected type: " ++ prettyTuple ts,
-      "Got body type: " ++ prettyTuple body_ts
+  unless (body_ts == ts) . TC.bad . TC.TypeError . T.unlines $
+    [ "Expected type: " <> prettyTuple ts,
+      "Got body type: " <> prettyTuple body_ts
     ]

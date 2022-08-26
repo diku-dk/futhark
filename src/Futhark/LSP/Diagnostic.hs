@@ -19,7 +19,7 @@ import qualified Data.Text as T
 import Futhark.Compiler.Program (ProgError (..))
 import Futhark.LSP.Tool (posToUri, rangeFromLoc, rangeFromSrcLoc)
 import Futhark.Util.Loc (Loc (..), SrcLoc, locOf)
-import Futhark.Util.Pretty (Doc, prettyText)
+import Futhark.Util.Pretty (Doc, docText)
 import Language.LSP.Diagnostics (partitionBySource)
 import Language.LSP.Server (LspT, getVersionedTextDoc, publishDiagnostics)
 import Language.LSP.Types
@@ -44,12 +44,12 @@ publish uri_diags_map = for_ uri_diags_map $ \(uri, diags) -> do
   publishDiagnostics maxDiagnostic (toNormalizedUri uri) (doc ^. version) (partitionBySource diags)
 
 -- | Send warning diagnostics to the client.
-publishWarningDiagnostics :: [(SrcLoc, Doc)] -> LspT () IO ()
+publishWarningDiagnostics :: [(SrcLoc, Doc a)] -> LspT () IO ()
 publishWarningDiagnostics warnings = do
   publish $ M.assocs $ M.unionsWith (++) $ map onWarn warnings
   where
     onWarn (srcloc, msg) =
-      let diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (prettyText msg)
+      let diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (docText msg)
        in case locOf srcloc of
             NoLoc -> mempty
             Loc pos _ -> M.singleton (posToUri pos) [diag]
@@ -60,12 +60,12 @@ publishErrorDiagnostics errors =
   publish $ M.assocs $ M.unionsWith (++) $ map onDiag $ NE.toList errors
   where
     onDiag (ProgError loc msg) =
-      let diag = mkDiagnostic (rangeFromLoc loc) DsError (prettyText msg)
+      let diag = mkDiagnostic (rangeFromLoc loc) DsError (docText msg)
        in case loc of
             NoLoc -> mempty
             Loc pos _ -> M.singleton (posToUri pos) [diag]
     onDiag (ProgWarning loc msg) =
-      let diag = mkDiagnostic (rangeFromLoc loc) DsError (prettyText msg)
+      let diag = mkDiagnostic (rangeFromLoc loc) DsError (docText msg)
        in case loc of
             NoLoc -> mempty
             Loc pos _ -> M.singleton (posToUri pos) [diag]

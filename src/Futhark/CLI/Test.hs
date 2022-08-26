@@ -21,10 +21,10 @@ import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal)
-import Futhark.Util.Console
 import Futhark.Util.Options
+import Futhark.Util.Pretty (annotate, bold, hardline, pretty, putDoc)
 import Futhark.Util.Table
-import System.Console.ANSI
+import System.Console.ANSI (clearFromCursorToScreenEnd, clearLine, cursorUpLine)
 import qualified System.Console.Terminal.Size as Terminal
 import System.Environment
 import System.Exit
@@ -454,16 +454,16 @@ excludeCases config tcase =
       InputOutputs entry $ filter (not . any excluded . runTags) runs
     excluded = (`elem` configExclude config) . T.pack
 
-statusTable :: TestStatus -> String
-statusTable ts = buildTable rows 1
+putStatusTable :: TestStatus -> IO ()
+putStatusTable ts = hPutTable stdout rows 1
   where
     rows =
-      [ [mkEntry "", passed, failed, mkEntry "remaining"],
-        map mkEntry ["programs", passedProgs, failedProgs, remainProgs'],
-        map mkEntry ["runs", passedRuns, failedRuns, remainRuns']
+      [ [mkEntry "" mempty, passed, failed, mkEntry "remaining" mempty],
+        map (`mkEntry` mempty) ["programs", passedProgs, failedProgs, remainProgs'],
+        map (`mkEntry` mempty) ["runs", passedRuns, failedRuns, remainRuns']
       ]
-    passed = ("passed", [SetColor Foreground Vivid Green])
-    failed = ("failed", [SetColor Foreground Vivid Red])
+    passed = mkEntry "passed" $ color Green
+    failed = mkEntry "failed" $ color Red
     passedProgs = show $ testStatusPass ts
     failedProgs = show $ testStatusFail ts
     totalProgs = show $ testStatusTotal ts
@@ -476,9 +476,7 @@ statusTable ts = buildTable rows 1
     remainRuns' = remainRuns ++ "/" ++ totalRuns
 
 tableLines :: Int
-tableLines = 1 + (length . lines $ blankTable)
-  where
-    blankTable = statusTable $ TestStatus [] [] 0 0 0 0 0 0 0
+tableLines = 8
 
 spaceTable :: IO ()
 spaceTable = putStr $ replicate tableLines '\n'
@@ -486,7 +484,7 @@ spaceTable = putStr $ replicate tableLines '\n'
 reportTable :: TestStatus -> IO ()
 reportTable ts = do
   moveCursorToTableTop
-  putStrLn $ statusTable ts
+  putStatusTable ts
   clearLine
   w <- maybe 80 Terminal.width <$> Terminal.size
   putStrLn $ atMostChars (w - length labelstr) running
@@ -561,7 +559,7 @@ runTests config paths = do
                   Failure s -> do
                     when fancy moveCursorToTableTop
                     clear
-                    putStr $ inBold (testCaseProgram test <> ":\n") <> T.unpack (T.unlines s)
+                    putDoc $ annotate bold (pretty (testCaseProgram test) <> ":") <> hardline <> pretty s
                     when fancy spaceTable
                     getResults $
                       ts'

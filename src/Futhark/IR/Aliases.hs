@@ -96,7 +96,7 @@ instance FreeIn AliasDec where
   freeIn' = const mempty
 
 instance PP.Pretty AliasDec where
-  ppr = PP.braces . PP.commasep . map PP.ppr . namesToList . unAliases
+  pretty = PP.braces . PP.commasep . map PP.pretty . namesToList . unAliases
 
 -- | The aliases of the let-bound variable.
 type VarAliases = AliasDec
@@ -162,23 +162,23 @@ instance (ASTRep rep, CanBeAliased (Op rep)) => PrettyRep (Aliases rep) where
         als ->
           Just $
             PP.oneLine $
-              PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
+              "-- Consumes " <> PP.commasep (map PP.pretty als)
 
-maybeComment :: [PP.Doc] -> Maybe PP.Doc
+maybeComment :: [PP.Doc a] -> Maybe (PP.Doc a)
 maybeComment [] = Nothing
-maybeComment cs = Just $ PP.folddoc (PP.</>) cs
+maybeComment cs = Just $ PP.stack cs
 
-resultAliasComment :: PP.Pretty a => a -> Names -> Maybe PP.Doc
+resultAliasComment :: PP.Pretty a => a -> Names -> Maybe (PP.Doc ann)
 resultAliasComment name als =
   case namesToList als of
     [] -> Nothing
     als' ->
       Just $
         PP.oneLine $
-          PP.text "-- Result for "
-            <> PP.ppr name
-            <> PP.text " aliases "
-            <> PP.commasep (map PP.ppr als')
+          "-- Result for "
+            <> PP.pretty name
+            <> " aliases "
+            <> PP.commasep (map PP.pretty als')
 
 removeAliases :: CanBeAliased (Op rep) => Rephraser Identity (Aliases rep) rep
 removeAliases =

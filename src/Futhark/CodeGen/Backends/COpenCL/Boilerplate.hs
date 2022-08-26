@@ -25,11 +25,12 @@ import Data.Maybe
 import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.RTS.C (freeListH, openclH)
 import Futhark.Util (chunk, zEncodeString)
-import Futhark.Util.Pretty (prettyOneLine)
+import Futhark.Util.Pretty (prettyTextOneLine)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -583,7 +584,7 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 loadKernel :: (KernelName, KernelSafety) -> C.Stm
 loadKernel (name, safety) =
   [C.cstm|{
-  ctx->$id:name = clCreateKernel(prog, $string:(prettyString (C.toIdent name mempty)), &error);
+  ctx->$id:name = clCreateKernel(prog, $string:(T.unpack (idText (C.toIdent name mempty))), &error);
   OPENCL_SUCCEED_FATAL(error);
   $items:set_args
   if (ctx->debugging) {
@@ -697,7 +698,7 @@ sizeLoggingCode :: VName -> Name -> C.Exp -> GC.CompilerM op () ()
 sizeLoggingCode v key x' = do
   GC.stm
     [C.cstm|if (ctx->logging) {
-    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(prettyOneLine key), (long)$exp:x', $id:v ? "true" : "false");
+    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(T.unpack (prettyTextOneLine key)), (long)$exp:x', $id:v ? "true" : "false");
     }|]
 
 -- Options that are common to multiple GPU-like backends.

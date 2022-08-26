@@ -91,63 +91,63 @@ data Scheduling
   | Static
 
 instance Pretty Scheduling where
-  ppr Dynamic = "Dynamic"
-  ppr Static = "Static"
+  pretty Dynamic = "Dynamic"
+  pretty Static = "Static"
 
 instance Pretty SchedulerInfo where
-  ppr (SchedulerInfo i sched) =
+  pretty (SchedulerInfo i sched) =
     stack
-      [ nestedBlock "scheduling {" "}" (ppr sched),
-        nestedBlock "iter {" "}" (ppr i)
+      [ nestedBlock "scheduling {" "}" (pretty sched),
+        nestedBlock "iter {" "}" (pretty i)
       ]
 
 instance Pretty ParallelTask where
-  ppr (ParallelTask code) = ppr code
+  pretty (ParallelTask code) = pretty code
 
 instance Pretty Multicore where
-  ppr (GetLoopBounds start end) =
-    ppr (start, end) <+> "<-" <+> "get_loop_bounds()"
-  ppr (GetTaskId v) =
-    ppr v <+> "<-" <+> "get_task_id()"
-  ppr (GetNumTasks v) =
-    ppr v <+> "<-" <+> "get_num_tasks()"
-  ppr (SegOp s free seq_code par_code retval scheduler) =
-    "SegOp" <+> text s <+> nestedBlock "{" "}" ppbody
+  pretty (GetLoopBounds start end) =
+    pretty (start, end) <+> "<-" <+> "get_loop_bounds()"
+  pretty (GetTaskId v) =
+    pretty v <+> "<-" <+> "get_task_id()"
+  pretty (GetNumTasks v) =
+    pretty v <+> "<-" <+> "get_num_tasks()"
+  pretty (SegOp s free seq_code par_code retval scheduler) =
+    "SegOp" <+> pretty s <+> nestedBlock "{" "}" ppbody
     where
       ppbody =
         stack
-          [ ppr scheduler,
-            nestedBlock "free {" "}" (ppr free),
-            nestedBlock "seq {" "}" (ppr seq_code),
-            maybe mempty (nestedBlock "par {" "}" . ppr) par_code,
-            nestedBlock "retvals {" "}" (ppr retval)
+          [ pretty scheduler,
+            nestedBlock "free {" "}" (pretty free),
+            nestedBlock "seq {" "}" (pretty seq_code),
+            maybe mempty (nestedBlock "par {" "}" . pretty) par_code,
+            nestedBlock "retvals {" "}" (pretty retval)
           ]
-  ppr (ParLoop s body params) =
-    "parloop" <+> ppr s </> nestedBlock "{" "}" ppbody
+  pretty (ParLoop s body params) =
+    "parloop" <+> pretty s </> nestedBlock "{" "}" ppbody
     where
       ppbody =
         stack
-          [ nestedBlock "params {" "}" (ppr params),
-            nestedBlock "body {" "}" (ppr body)
+          [ nestedBlock "params {" "}" (pretty params),
+            nestedBlock "body {" "}" (pretty body)
           ]
-  ppr (Atomic _) =
+  pretty (Atomic _) =
     "AtomicOp"
-  ppr (ISPCKernel body _) =
-    "ispc" <+> nestedBlock "{" "}" (ppr body)
-  ppr (ForEach i from to body) =
+  pretty (ISPCKernel body _) =
+    "ispc" <+> nestedBlock "{" "}" (pretty body)
+  pretty (ForEach i from to body) =
     "foreach"
-      <+> ppr i
+      <+> pretty i
       <+> "="
-      <+> ppr from
+      <+> pretty from
       <+> "to"
-      <+> ppr to
-      <+> nestedBlock "{" "}" (ppr body)
-  ppr (ForEachActive i body) =
+      <+> pretty to
+      <+> nestedBlock "{" "}" (pretty body)
+  pretty (ForEachActive i body) =
     "foreach_active"
-      <+> ppr i
-      <+> nestedBlock "{" "}" (ppr body)
-  ppr (ExtractLane dest tar lane) =
-    ppr dest <+> "<-" <+> "extract" <+> parens (commasep $ map ppr [tar, lane])
+      <+> pretty i
+      <+> nestedBlock "{" "}" (pretty body)
+  pretty (ExtractLane dest tar lane) =
+    pretty dest <+> "<-" <+> "extract" <+> parens (commasep $ map pretty [tar, lane])
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter

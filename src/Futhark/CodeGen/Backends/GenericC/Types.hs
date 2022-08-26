@@ -20,6 +20,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Monad
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode
 import qualified Futhark.Manifest as Manifest
 import Futhark.Util (chunks, mapAccumLM)
@@ -544,7 +545,7 @@ generateArray space ((signed, pt, rank), pub) = do
       pure $
         Just
           ( pretty_name,
-            Manifest.TypeArray (prettyText arr_type) pt_name rank ops
+            Manifest.TypeArray (typeText arr_type) pt_name rank ops
           )
     Private ->
       pure Nothing
@@ -559,7 +560,7 @@ generateOpaque types (desc, ot) = do
   libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
   (ops, record) <- opaqueLibraryFunctions types desc ot
   let opaque_type = [C.cty|struct $id:name*|]
-  pure (T.pack desc, Manifest.TypeOpaque (prettyText opaque_type) ops record)
+  pure (T.pack desc, Manifest.TypeOpaque (typeText opaque_type) ops record)
   where
     field vt@(ValueType _ (Rank r) _) i = do
       ct <- valueTypeToCType Private vt

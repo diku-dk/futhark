@@ -307,7 +307,7 @@ pPkgManifest = do
         comment = Just <$> pComment
         blankLine = some spaceChar >> pure Nothing
 
--- | Parse a text as a 'PkgManifest'.  The 'FilePath' is used for any error messages.
+-- | Parse a pretty as a 'PkgManifest'.  The 'FilePath' is used for any error messages.
 parsePkgManifest :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text Void) PkgManifest
 parsePkgManifest = parse pPkgManifest
 
