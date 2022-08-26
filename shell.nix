@@ -1,3 +1,4 @@
+# See header comment in default.nix for how to update sources.nix.
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
