@@ -27,7 +27,7 @@ data PositionMapping = PositionMapping
   }
   deriving (Show)
 
--- | Stale text document stored in state.
+-- | Stale pretty document stored in state.
 data StaleFile = StaleFile
   { -- | The last successfully compiled file content.
     -- Using VirtualFile for convenience, we can use anything with {version, content}

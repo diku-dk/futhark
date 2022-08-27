@@ -23,6 +23,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
     kernelRuntime,
   )
 import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.RTS.C (cudaH, freeListH)
 import Futhark.Util (chunk, zEncodeString)
@@ -316,7 +317,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
           [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
                                      &ctx->$id:name,
                                      ctx->cuda.module,
-                                     $string:(prettyString (C.toIdent name mempty))));|]
+                                     $string:(T.unpack (idText (C.toIdent name mempty)))));|]
         )
           : forCostCentre name
 

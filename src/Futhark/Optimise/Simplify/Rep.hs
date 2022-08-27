@@ -144,7 +144,7 @@ instance (ASTRep rep, CanBeWise (Op rep)) => ASTRep (Wise rep) where
     withoutWisdom . expTypesFromPat . removePatWisdom
 
 instance Pretty VarWisdom where
-  ppr _ = ppr ()
+  pretty _ = pretty ()
 
 instance (PrettyRep rep, CanBeWise (Op rep)) => PrettyRep (Wise rep) where
   ppExpDec (_, dec) = ppExpDec dec . removeExpWisdom

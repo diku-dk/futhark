@@ -25,10 +25,10 @@ import Futhark.Data.Reader
 import Futhark.Util.Pretty
 
 instance Pretty Value where
-  ppr = strictText . valueText
+  pretty = pretty . valueText
 
 instance Pretty ValueType where
-  ppr = strictText . valueTypeText
+  pretty = pretty . valueTypeText
 
 -- | The structure of a compound value, parameterised over the actual
 -- values.  For most cases you probably want 'CompoundValue'.
@@ -51,11 +51,11 @@ instance Traversable Compound where
   traverse f (ValueRecord m) = ValueRecord <$> traverse (traverse f) m
 
 instance Pretty v => Pretty (Compound v) where
-  ppr (ValueAtom v) = ppr v
-  ppr (ValueTuple vs) = parens $ commasep $ map ppr vs
-  ppr (ValueRecord m) = braces $ commasep $ map field $ M.toList m
+  pretty (ValueAtom v) = pretty v
+  pretty (ValueTuple vs) = parens $ commasep $ map pretty vs
+  pretty (ValueRecord m) = braces $ commasep $ map field $ M.toList m
     where
-      field (k, v) = ppr k <> equals <> ppr v
+      field (k, v) = pretty k <> equals <> pretty v
 
 -- | Create a tuple for a non-unit list, and otherwise a 'ValueAtom'
 mkCompound :: [Compound v] -> Compound v

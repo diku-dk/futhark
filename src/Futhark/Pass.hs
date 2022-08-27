@@ -36,7 +36,7 @@ instance MonadFreshNames PassM where
   getNameSource = PassM get
 
 -- | Execute a 'PassM' action, yielding logging information and either
--- an error text or a result.
+-- an error pretty or a result.
 runPassM ::
   MonadFreshNames m =>
   PassM a ->
@@ -51,7 +51,7 @@ data Pass fromrep torep = Pass
     -- name via 'passLongOption'.
     passName :: String,
     -- | A slightly longer description, which will show up in the
-    -- command-line help text.
+    -- command-line help pretty.
     passDescription :: String,
     passFunction :: Prog fromrep -> PassM (Prog torep)
   }

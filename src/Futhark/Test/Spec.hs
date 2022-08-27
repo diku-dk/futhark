@@ -42,7 +42,7 @@ import qualified Futhark.Data.Parser as V
 import qualified Futhark.Script as Script
 import qualified Futhark.Test.Values as V
 import Futhark.Util (directoryContents)
-import Futhark.Util.Pretty (prettyOneLine)
+import Futhark.Util.Pretty (prettyTextOneLine)
 import System.Exit
 import System.FilePath
 import System.IO
@@ -279,7 +279,7 @@ parseRunCases sep = parseRunCases' (0 :: Int)
     desc _ (GenValues gens) =
       unwords $ map genValueType gens
     desc _ (ScriptValues e) =
-      prettyOneLine e
+      T.unpack $ prettyTextOneLine e
     desc _ (ScriptFile path) =
       path
 

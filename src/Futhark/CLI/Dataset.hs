@@ -116,9 +116,9 @@ commandLineOptions =
       "Generate a random value of this type.",
     Option
       []
-      ["text"]
+      ["pretty"]
       (NoArg $ Right $ \opts -> opts {format = Text})
-      "Output data in text format (must precede --generate).",
+      "Output data in pretty format (must precede --generate).",
     Option
       "b"
       ["binary"]

@@ -12,10 +12,10 @@ where
 import Control.Monad.State
 import Data.List (find)
 import qualified Data.Map as M
-import Data.String (fromString)
+import qualified Data.Text as T
 import qualified Futhark.IR as I
 import Futhark.Internalise.TypesValues (internalisedTypeSize)
-import Futhark.Util.Pretty (prettyOneLine)
+import Futhark.Util.Pretty (prettyTextOneLine)
 import qualified Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Core (Name, Uniqueness (..), VName)
 import qualified Language.Futhark.Semantic as E
@@ -60,7 +60,7 @@ typeExpOpaqueName = f . rootType
     f (E.TEArray _ te _) =
       let (d, te') = withoutDims te
        in "arr_" <> typeExpOpaqueName te' <> "_" <> show (1 + d) <> "d"
-    f te = fromString $ prettyOneLine te
+    f te = T.unpack $ prettyTextOneLine te
 
 type GenOpaque = State I.OpaqueTypes
 
@@ -132,7 +132,7 @@ entryPointType types t ts
   where
     u = foldl max Nonunique $ map I.uniqueness ts
     desc =
-      maybe (fromString $ prettyOneLine t') typeExpOpaqueName $
+      maybe (T.unpack $ prettyTextOneLine t') typeExpOpaqueName $
         E.entryAscribed t
     t' = E.noSizes (E.entryType t) `E.setUniqueness` Nonunique
 

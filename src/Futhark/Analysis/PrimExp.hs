@@ -684,16 +684,16 @@ sExtAs from to = TPrimExp $ sExt (expIntType to) (untyped from)
 -- Prettyprinting instances
 
 instance Pretty v => Pretty (PrimExp v) where
-  ppr (LeafExp v _) = ppr v
-  ppr (ValueExp v) = ppr v
-  ppr (BinOpExp op x y) = ppr op <+> parens (ppr x) <+> parens (ppr y)
-  ppr (CmpOpExp op x y) = ppr op <+> parens (ppr x) <+> parens (ppr y)
-  ppr (ConvOpExp op x) = ppr op <+> parens (ppr x)
-  ppr (UnOpExp op x) = ppr op <+> parens (ppr x)
-  ppr (FunExp h args _) = text h <+> parens (commasep $ map ppr args)
+  pretty (LeafExp v _) = pretty v
+  pretty (ValueExp v) = pretty v
+  pretty (BinOpExp op x y) = pretty op <+> parens (pretty x) <+> parens (pretty y)
+  pretty (CmpOpExp op x y) = pretty op <+> parens (pretty x) <+> parens (pretty y)
+  pretty (ConvOpExp op x) = pretty op <+> parens (pretty x)
+  pretty (UnOpExp op x) = pretty op <+> parens (pretty x)
+  pretty (FunExp h args _) = pretty h <+> parens (commasep $ map pretty args)
 
 instance Pretty v => Pretty (TPrimExp t v) where
-  ppr = ppr . untyped
+  pretty = pretty . untyped
 
 -- | Produce a mapping from the leaves of the 'PrimExp' to their
 -- designated types.

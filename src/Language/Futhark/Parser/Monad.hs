@@ -52,7 +52,7 @@ import qualified Data.Map.Strict as M
 import Data.Monoid
 import qualified Data.Text as T
 import Futhark.Util.Loc
-import Futhark.Util.Pretty hiding (line)
+import Futhark.Util.Pretty hiding (line, line')
 import Language.Futhark.Parser.Lexer
 import Language.Futhark.Parser.Lexer.Wrapper (LexerError (..))
 import Language.Futhark.Pretty ()
@@ -138,13 +138,12 @@ combArrayElements = foldM comb
     comb x y
       | valueType x == valueType y = Right x
       | otherwise =
-          Left . SyntaxError NoLoc $
-            prettyText $
-              "Elements "
-                <> ppr x
-                <> " and "
-                <> ppr y
-                <> " cannot exist in same array."
+          Left . SyntaxError NoLoc . docText $
+            "Elements "
+              <> pretty x
+              <> " and "
+              <> pretty y
+              <> " cannot exist in same array."
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l
@@ -156,10 +155,10 @@ applyExp es =
   foldM op (head es) (tail es)
   where
     op (AppExp (Index e is floc) _) (ArrayLit xs _ xloc) =
-      parseErrorAt (srcspan floc xloc) . Just . prettyText $
+      parseErrorAt (srcspan floc xloc) . Just . docText $
         "Incorrect syntax for multi-dimensional indexing."
           </> "Use"
-          <+> align (ppr index)
+          <+> align (pretty index)
       where
         index = AppExp (Index e (is ++ map DimFix xs) xloc) NoInfo
     op f x =

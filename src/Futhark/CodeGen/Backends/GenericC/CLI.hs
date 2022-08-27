@@ -15,6 +15,7 @@ import Data.List (unzip5)
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
   ( cproduct,
     primAPIType,
@@ -23,7 +24,7 @@ import Futhark.CodeGen.Backends.SimpleRep
   )
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
 import Futhark.Manifest
-import Futhark.Util.Pretty (prettyString, prettyText)
+import Futhark.Util.Pretty (prettyString)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
@@ -411,7 +412,7 @@ cliDefs options manifest =
           map (uncurry (cliEntryPoint manifest)) $
             M.toList $
               manifestEntryPoints manifest
-   in prettyText
+   in definitionsText
         [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")

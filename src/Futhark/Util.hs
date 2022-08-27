@@ -31,6 +31,7 @@ module Futhark.Util
     isEnvVarAtLeast,
     startupTime,
     fancyTerminal,
+    hFancyTerminal,
     runProgramWithExitCode,
     directoryContents,
     roundFloat,
@@ -94,7 +95,7 @@ import System.Environment
 import System.Exit
 import qualified System.FilePath as Native
 import qualified System.FilePath.Posix as Posix
-import System.IO (hIsTerminalDevice, stdout)
+import System.IO (Handle, hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
@@ -202,8 +203,8 @@ focusNth i xs
   | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
 
--- | Compute a hash of a text that is stable across OS versions.
--- Returns the hash as a text as well, ready for human consumption.
+-- | Compute a hash of a pretty that is stable across OS versions.
+-- Returns the hash as a pretty as well, ready for human consumption.
 hashText :: T.Text -> T.Text
 hashText =
   T.decodeUtf8With T.lenientDecode . Base16.encode . MD5.hash . T.encodeUtf8
@@ -235,8 +236,13 @@ startupTime = unsafePerformIO getCurrentTime
 -- | Are we running in a terminal capable of fancy commands and
 -- visualisation?
 fancyTerminal :: Bool
-fancyTerminal = unsafePerformIO $ do
-  isTTY <- hIsTerminalDevice stdout
+fancyTerminal = unsafePerformIO $ hFancyTerminal stdout
+
+-- | Is this handle connected to a terminal capable of fancy commands
+-- and visualisation?
+hFancyTerminal :: Handle -> IO Bool
+hFancyTerminal h = do
+  isTTY <- hIsTerminalDevice h
   isDumb <- (Just "dumb" ==) <$> lookupEnv "TERM"
   pure $ isTTY && not isDumb
 
