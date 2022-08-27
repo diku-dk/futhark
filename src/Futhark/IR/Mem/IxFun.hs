@@ -140,28 +140,28 @@ data IxFun num = IxFun
   deriving (Show, Eq)
 
 instance Pretty Monotonicity where
-  ppr = text . show
+  pretty = pretty . show
 
 instance Pretty num => Pretty (LMAD num) where
-  ppr (LMAD offset dims) =
+  pretty (LMAD offset dims) =
     braces $
       semisep
-        [ "offset: " <> oneLine (ppr offset),
+        [ "offset: " <> oneLine (pretty offset),
           "strides: " <> p ldStride,
           "shape: " <> p ldShape,
           "permutation: " <> p ldPerm,
           "monotonicity: " <> p ldMon
         ]
     where
-      p f = oneLine $ brackets $ commasep $ map (ppr . f) dims
+      p f = oneLine $ brackets $ commasep $ map (pretty . f) dims
 
 instance Pretty num => Pretty (IxFun num) where
-  ppr (IxFun lmads oshp cg) =
+  pretty (IxFun lmads oshp cg) =
     braces $
       semisep
-        [ "base: " <> brackets (commasep $ map ppr oshp),
+        [ "base: " <> brackets (commasep $ map pretty oshp),
           "contiguous: " <> if cg then "true" else "false",
-          "LMADs: " <> brackets (commastack $ NE.toList $ NE.map ppr lmads)
+          "LMADs: " <> brackets (commastack $ NE.toList $ NE.map pretty lmads)
         ]
 
 instance Substitute num => Substitute (LMAD num) where

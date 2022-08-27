@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Diagnostics will no longer contain control codes when output is a
+  file.
+
 ## [0.22.1]
 
 ### Removed

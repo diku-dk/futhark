@@ -34,6 +34,7 @@ import Futhark.CodeGen.Backends.GenericC.Code
 import Futhark.CodeGen.Backends.GenericC.EntryPoints
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
@@ -166,8 +167,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = 
 
 declsCode :: (HeaderSection -> Bool) -> CompilerState s -> T.Text
 declsCode p =
-  T.unlines
-    . map prettyText
+  definitionsText
     . concatMap (DL.toList . snd)
     . filter (p . fst)
     . M.toList
@@ -476,8 +476,8 @@ $halfH
 $timingH
 |]
 
-  let early_decls = T.unlines $ map prettyText $ DL.toList $ compEarlyDecls endstate
-      lib_decls = T.unlines $ map prettyText $ DL.toList $ compLibDecls endstate
+  let early_decls = definitionsText $ DL.toList $ compEarlyDecls endstate
+      lib_decls = definitionsText $ DL.toList $ compLibDecls endstate
       clidefs = cliDefs options manifest
       serverdefs = serverDefs options manifest
       libdefs =
@@ -550,17 +550,11 @@ $entry_point_decls
       generateCommonLibFuns memreport
 
       pure
-        ( T.unlines $ map prettyText prototypes,
-          T.unlines $ map (prettyText . funcToDef) functions,
-          T.unlines $ map prettyText entry_points,
+        ( definitionsText prototypes,
+          funcsText functions,
+          definitionsText entry_points,
           Manifest.Manifest (M.fromList entry_points_manifest) type_funs backend version
         )
-
-    funcToDef func = C.FuncDef func loc
-      where
-        loc = case func of
-          C.OldFunc _ _ _ _ _ _ l -> l
-          C.Func _ _ _ _ _ l -> l
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -726,7 +720,7 @@ compileConstants (Constants ps init_consts) = do
 
     constMacro p = ([C.citem|$escstm:def|], [C.citem|$escstm:undef|])
       where
-        p' = prettyString (C.toIdent (paramName p) mempty)
+        p' = T.unpack $ idText (C.toIdent (paramName p) mempty)
         def = "#define " ++ p' ++ " (" ++ "ctx->constants." ++ p' ++ ")"
         undef = "#undef " ++ p'
 

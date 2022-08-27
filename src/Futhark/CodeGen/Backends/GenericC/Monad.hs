@@ -94,6 +94,8 @@ import Data.List (unzip4)
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Text as T
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
@@ -522,7 +524,7 @@ resetMem mem space = do
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = do
   refcount <- fatMemory space
-  let src_s = prettyString $ C.toExp src noLoc
+  let src_s = T.unpack $ expText $ C.toExp src noLoc
   if refcount
     then
       stm
@@ -547,7 +549,7 @@ unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
   refcount <- fatMemory space
   cached <- isJust <$> cacheMem mem
-  let mem_s = prettyString $ C.toExp mem noLoc
+  let mem_s = T.unpack $ expText $ C.toExp mem noLoc
   when (refcount && not cached) $
     stm
       [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
@@ -563,7 +565,7 @@ allocMem ::
   CompilerM op s ()
 allocMem mem size space on_failure = do
   refcount <- fatMemory space
-  let mem_s = prettyString $ C.toExp mem noLoc
+  let mem_s = T.unpack $ expText $ C.toExp mem noLoc
   if refcount
     then
       stm

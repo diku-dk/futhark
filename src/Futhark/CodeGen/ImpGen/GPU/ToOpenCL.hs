@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -17,6 +18,7 @@ import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.GPU hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.GPU as ImpGPU
@@ -26,7 +28,6 @@ import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 import NeatInterpolation (untrimming)
@@ -70,8 +71,8 @@ translateGPU target prog =
       opencl_prelude =
         T.unlines
           [ genPrelude target used_types,
-            T.unlines $ map prettyText device_prototypes,
-            T.unlines $ map prettyText device_defs
+            definitionsText device_prototypes,
+            funcsText device_defs
           ]
    in ImpOpenCL.Program
         opencl_code
@@ -405,18 +406,18 @@ useAsParam ConstUse {} =
 constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
 constDef (ConstUse v e) =
   Just
-    ( [C.citem|$escstm:def|],
-      [C.citem|$escstm:undef|]
+    ( [C.citem|$escstm:(T.unpack def)|],
+      [C.citem|$escstm:(T.unpack undef)|]
     )
   where
     e' = compilePrimExp e
-    def = "#define " ++ prettyString (C.toIdent v mempty) ++ " (" ++ prettyOneLine e' ++ ")"
-    undef = "#undef " ++ prettyString (C.toIdent v mempty)
+    def = "#define " <> idText (C.toIdent v mempty) <> " (" <> expText e' <> ")"
+    undef = "#undef " <> idText (C.toIdent v mempty)
 constDef _ = Nothing
 
 openClCode :: [C.Func] -> T.Text
 openClCode kernels =
-  prettyText [C.cunit|$edecls:funcs|]
+  definitionsText [C.cunit|$edecls:funcs|]
   where
     funcs =
       [ [C.cedecl|$func:kernel_func|]

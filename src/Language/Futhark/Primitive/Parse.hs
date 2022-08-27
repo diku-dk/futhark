@@ -19,7 +19,7 @@ import Data.Char (isAlphaNum)
 import Data.Functor
 import qualified Data.Text as T
 import Data.Void
-import Futhark.Util.Pretty hiding (empty)
+import Futhark.Util.Pretty
 import Language.Futhark.Primitive
 import Text.Megaparsec
 import Text.Megaparsec.Char

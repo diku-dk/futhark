@@ -36,7 +36,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Futhark.Util (nubOrd)
-import Futhark.Util.Pretty hiding ((<|>))
+import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
@@ -216,7 +216,7 @@ evalTypeExp (TEVar name loc) = do
     _ ->
       typeError loc mempty $
         "Type constructor"
-          <+> pquote (spread (ppr name : map ppr ps))
+          <+> dquotes (hsep (pretty name : map pretty ps))
           <+> "used without any arguments."
 --
 evalTypeExp (TETuple ts loc) = do
@@ -233,7 +233,7 @@ evalTypeExp t@(TERecord fs loc) = do
   let field_names = map fst fs
   unless (sort field_names == sort (nubOrd field_names)) $
     typeError loc mempty $
-      "Duplicate record fields in" <+> ppr t <> "."
+      "Duplicate record fields in" <+> pretty t <> "."
 
   checked <- traverse evalTypeExp $ M.fromList fs
   let fs' = fmap (\(x, _, _, _) -> x) checked
@@ -261,13 +261,13 @@ evalTypeExp (TEArray d t loc) = do
     (SizeLifted, _) ->
       typeError loc mempty $
         "Cannot create array with elements of size-lifted type"
-          <+> pquote (ppr t)
-          <+/> "(might cause irregular array)."
+          <+> dquotes (pretty t)
+          <+> "(might cause irregular array)."
     (Lifted, _) ->
       typeError loc mempty $
         "Cannot create array with elements of lifted type"
-          <+> pquote (ppr t)
-          <+/> "(might contain function)."
+          <+> dquotes (pretty t)
+          <+> "(might contain function)."
   where
     checkSizeExp SizeExpAny = do
       dv <- newTypeName "d"
@@ -282,7 +282,7 @@ evalTypeExp (TEUnique t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp t
   unless (mayContainArray st) $
     warn loc $
-      "Declaring" <+> pquote (ppr st) <+> "as unique has no effect."
+      "Declaring" <+> dquotes (pretty st) <+> "as unique has no effect."
   pure (TEUnique t' loc, svars, RetType dims $ st `setUniqueness` Unique, l)
   where
     mayContainArray (Scalar Prim {}) = False
@@ -325,7 +325,7 @@ evalTypeExp (TEDim dims t loc) = do
         Just d ->
           typeError loc mempty . withIndexLink "unused-existential" $
             "Existential size "
-              <> pquote (pprName d)
+              <> dquotes (prettyName d)
               <> " not used as array size."
         Nothing ->
           pure
@@ -343,7 +343,7 @@ evalTypeExp t@(TESum cs loc) = do
   let constructors = map fst cs
   unless (sort constructors == sort (nubOrd constructors)) $
     typeError loc mempty $
-      "Duplicate constructors in" <+> ppr t
+      "Duplicate constructors in" <+> pretty t
 
   unless (length constructors < 256) $
     typeError loc mempty "Sum types must have less than 256 constructors."
@@ -370,11 +370,11 @@ evalTypeExp ote@TEApply {} = do
     then
       typeError tloc mempty $
         "Type constructor"
-          <+> pquote (ppr tname)
+          <+> dquotes (pretty tname)
           <+> "requires"
-          <+> ppr (length ps)
+          <+> pretty (length ps)
           <+> "arguments, but provided"
-          <+> ppr (length targs) <> "."
+          <+> pretty (length targs) <> "."
     else do
       (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
       pure
@@ -393,7 +393,7 @@ evalTypeExp ote@TEApply {} = do
       pure (op', loc, args ++ [arg])
     rootAndArgs te' =
       typeError (srclocOf te') mempty $
-        "Type" <+> pquote (ppr te') <+> "is not a type constructor."
+        "Type" <+> dquotes (pretty te') <+> "is not a type constructor."
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpDim (SizeExpNamed v dloc) loc) = do
       v' <- checkNamedSize loc v
@@ -425,9 +425,9 @@ evalTypeExp ote@TEApply {} = do
     checkArgApply p a =
       typeError tloc mempty $
         "Type argument"
-          <+> ppr a
+          <+> pretty a
           <+> "not valid for a type parameter"
-          <+> ppr p <> "."
+          <+> pretty p <> "."
 
 -- | Check a type expression, producing:
 --
@@ -470,9 +470,9 @@ checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
           lift $
             typeError loc mempty $
               "Name"
-                <+> pquote (ppr v)
+                <+> dquotes (pretty v)
                 <+> "also bound at"
-                <+> text (locStr prev_loc) <> "."
+                <+> pretty (locStr prev_loc) <> "."
         Nothing ->
           modify $ M.insert (ns, v) loc
 
@@ -489,10 +489,10 @@ checkForDuplicateNamesInType = check mempty
   where
     bad v loc prev_loc =
       typeError loc mempty $
-        text "Name"
-          <+> pquote (ppr v)
+        "Name"
+          <+> dquotes (pretty v)
           <+> "also bound at"
-          <+> text (locStr prev_loc) <> "."
+          <+> pretty (locStr prev_loc) <> "."
 
     check seen (TEArrow (Just v) t1 t2 loc)
       | Just prev_loc <- M.lookup v seen =
@@ -542,10 +542,10 @@ checkTypeParams ps m =
         Just prev ->
           lift $
             typeError loc mempty $
-              text "Type parameter"
-                <+> pquote (ppr v)
+              "Type parameter"
+                <+> dquotes (pretty v)
                 <+> "previously defined at"
-                <+> text (locStr prev) <> "."
+                <+> pretty (locStr prev) <> "."
         Nothing -> do
           modify $ M.insert (ns, v) loc
           lift $ checkName ns v loc
@@ -570,10 +570,10 @@ data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst Size
   deriving (Show)
 
 instance Pretty t => Pretty (Subst t) where
-  ppr (Subst [] t) = ppr t
-  ppr (Subst tps t) = mconcat (map ppr tps) <> colon <+> ppr t
-  ppr PrimSubst = "#<primsubst>"
-  ppr (SizeSubst d) = ppr d
+  pretty (Subst [] t) = pretty t
+  pretty (Subst tps t) = mconcat (map pretty tps) <> colon <+> pretty t
+  pretty PrimSubst = "#<primsubst>"
+  pretty (SizeSubst d) = pretty d
 
 -- | Create a type substitution corresponding to a type binding.
 substFromAbbr :: TypeBinding -> Subst StructRetType

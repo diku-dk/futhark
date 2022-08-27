@@ -79,7 +79,7 @@ instance Monoid Names where
   mempty = Names mempty
 
 instance Pretty Names where
-  ppr = ppr . namesToList
+  pretty = pretty . namesToList
 
 -- | Does the set of names contain this name?
 nameIn :: VName -> Names -> Bool

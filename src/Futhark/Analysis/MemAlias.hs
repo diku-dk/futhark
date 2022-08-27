@@ -45,9 +45,9 @@ instance Monoid MemAliases where
   mempty = MemAliases mempty
 
 instance Pretty MemAliases where
-  ppr (MemAliases m) = stack $ map f $ M.toList m
+  pretty (MemAliases m) = stack $ map f $ M.toList m
     where
-      f (v, vs) = ppr v <+> "aliases:" </> indent 2 (oneLine $ ppr vs)
+      f (v, vs) = pretty v <+> "aliases:" </> indent 2 (oneLine $ pretty vs)
 
 addAlias :: VName -> VName -> MemAliases -> MemAliases
 addAlias v1 v2 m =

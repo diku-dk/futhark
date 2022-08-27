@@ -21,6 +21,7 @@ module Language.Futhark.TypeChecker.Monad
     lookupImport,
     localEnv,
     TypeError (..),
+    prettyTypeError,
     withIndexLink,
     unappliedFunctor,
     unknownVariable,
@@ -66,7 +67,6 @@ import qualified Data.Set as S
 import qualified Data.Version as Version
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
-import Futhark.Util.Console
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
@@ -74,46 +74,49 @@ import Language.Futhark.Warnings
 import qualified Paths_futhark
 import Prelude hiding (mapM, mod)
 
-newtype Note = Note Doc
+newtype Note = Note (Doc ())
 
 -- | A collection of extra information regarding a type error.
 newtype Notes = Notes [Note]
   deriving (Semigroup, Monoid)
 
 instance Pretty Note where
-  ppr (Note msg) = "Note:" <+> align msg
+  pretty (Note msg) = unAnnotate $ "Note:" <+> align msg
 
 instance Pretty Notes where
-  ppr (Notes notes) = foldMap (((line <> line) <>) . ppr) notes
+  pretty (Notes notes) = unAnnotate $ foldMap (((line <> line) <>) . pretty) notes
 
 -- | A single note.
-aNote :: Pretty a => a -> Notes
-aNote = Notes . pure . Note . ppr
+aNote :: Doc () -> Notes
+aNote = Notes . pure . Note
 
 -- | Information about an error during type checking.
-data TypeError = TypeError Loc Notes Doc
+data TypeError = TypeError Loc Notes (Doc ())
 
-instance Pretty TypeError where
-  ppr (TypeError loc notes msg) =
-    text (inRed $ "Error at " <> locStr (srclocOf loc) <> ":")
-      </> msg <> ppr notes
+-- | Prettyprint type error.
+prettyTypeError :: TypeError -> Doc AnsiStyle
+prettyTypeError (TypeError loc notes msg) =
+  annotate
+    (bold <> color Red)
+    ("Error at " <> pretty (locText (srclocOf loc)) <> ":")
+    </> unAnnotate msg <> pretty notes
 
-errorIndexUrl :: Doc
+errorIndexUrl :: Doc a
 errorIndexUrl = version_url <> "error-index.html"
   where
     version = Paths_futhark.version
     base_url = "https://futhark.readthedocs.io/en/"
     version_url
       | last (Version.versionBranch version) == 0 = base_url <> "latest/"
-      | otherwise = base_url <> "v" <> text (Version.showVersion version) <> "/"
+      | otherwise = base_url <> "v" <> pretty (Version.showVersion version) <> "/"
 
 -- | Attach a reference to documentation explaining the error in more detail.
-withIndexLink :: Doc -> Doc -> Doc
+withIndexLink :: Doc a -> Doc a -> Doc a
 withIndexLink href msg =
   stack
     [ msg,
       "\nFor more information, see:",
-      indent 2 (ppr errorIndexUrl <> "#" <> href)
+      indent 2 (errorIndexUrl <> "#" <> href)
     ]
 
 -- | An unexpected functor appeared!
@@ -130,12 +133,12 @@ unknownVariable ::
   m a
 unknownVariable space name loc =
   typeError loc mempty $
-    "Unknown" <+> ppr space <+> pquote (ppr name)
+    "Unknown" <+> pretty space <+> dquotes (pretty name)
 
 -- | An unknown type was referenced.
 unknownType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
 unknownType loc name =
-  typeError loc mempty $ "Unknown type" <+> ppr name <> "."
+  typeError loc mempty $ "Unknown type" <+> pretty name <> "."
 
 -- | A name prefixed with an underscore was used.
 underscoreUse ::
@@ -146,7 +149,7 @@ underscoreUse ::
 underscoreUse loc name =
   typeError loc mempty $
     "Use of"
-      <+> pquote (ppr name)
+      <+> dquotes (pretty name)
         <> ": variables prefixed with underscore may not be accessed."
 
 -- | A mapping from import strings to 'Env's.  This is used to resolve
@@ -246,9 +249,9 @@ lookupImport loc file = do
     Nothing ->
       typeError loc mempty $
         "Unknown import"
-          <+> dquotes (text canonical_import)
+          <+> dquotes (pretty canonical_import)
           </> "Known:"
-          <+> commasep (map text (M.keys imports))
+          <+> commasep (map pretty (M.keys imports))
     Just scope -> pure (canonical_import, scope)
 
 -- | Evaluate a 'TypeM' computation within an extended (/not/
@@ -268,7 +271,7 @@ incCounter = do
 -- internal interface is because we use distinct monads for checking
 -- expressions and declarations.
 class Monad m => MonadTypeChecker m where
-  warn :: Located loc => loc -> Doc -> m ()
+  warn :: Located loc => loc -> Doc () -> m ()
 
   newName :: VName -> m VName
   newID :: Name -> m VName
@@ -291,11 +294,11 @@ class Monad m => MonadTypeChecker m where
       _ ->
         typeError loc mempty $
           "Sizes must have type i64, but"
-            <+> pquote (ppr v)
+            <+> dquotes (pretty v)
             <+> "has type:"
-            </> ppr t
+            </> pretty t
 
-  typeError :: Located loc => loc -> Notes -> Doc -> m a
+  typeError :: Located loc => loc -> Notes -> Doc () -> m a
 
 -- | Elaborate the given name in the given namespace at the given
 -- location, producing the corresponding unique 'VName'.
@@ -368,7 +371,7 @@ instance MonadTypeChecker TypeM where
             case getType t of
               Nothing ->
                 typeError loc mempty $
-                  "Attempt to use function" <+> pprName name <+> "as value."
+                  "Attempt to use function" <+> prettyName name <+> "as value."
               Just t' ->
                 pure
                   ( qn',

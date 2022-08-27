@@ -17,6 +17,7 @@ import Futhark.Compiler
 import Futhark.Pipeline
 import Futhark.Util (toPOSIX)
 import Futhark.Util.Options
+import Futhark.Util.Pretty (AnsiStyle, Doc, hPutDoc)
 import Language.Futhark
 import qualified Language.Futhark.Interpreter as I
 import Language.Futhark.Parser
@@ -39,7 +40,7 @@ interpret config fp = do
   pr <- newFutharkiState config fp
   (tenv, ienv) <- case pr of
     Left err -> do
-      hPutStrLn stderr err
+      hPutDoc stderr err
       exitFailure
     Right env -> pure env
 
@@ -65,7 +66,7 @@ interpret config fp = do
 
   case I.interpretFunction ienv (qualLeaf fname) inps of
     Left err -> do
-      hPutStrLn stderr err
+      T.hPutStrLn stderr err
       exitFailure
     Right run -> do
       run' <- runInterpreter' run
@@ -80,7 +81,7 @@ interpret config fp = do
 
 putValue :: I.Value -> TypeBase () () -> IO ()
 putValue v t
-  | I.isEmptyArray v = putStrLn $ I.prettyEmptyArray t v
+  | I.isEmptyArray v = T.putStrLn $ I.prettyEmptyArray t v
   | otherwise = putStrLn $ prettyString v
 
 data InterpreterConfig = InterpreterConfig
@@ -113,10 +114,10 @@ options =
 newFutharkiState ::
   InterpreterConfig ->
   FilePath ->
-  IO (Either String (T.Env, I.Ctx))
+  IO (Either (Doc AnsiStyle) (T.Env, I.Ctx))
 newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
-    badOnLeft show
+    badOnLeft prettyCompilerError
       =<< liftIO
         ( runExceptT (readProgramFile [] file)
             `catch` \(err :: IOException) ->
@@ -124,30 +125,28 @@ newFutharkiState cfg file = runExceptT $ do
         )
   when (interpreterPrintWarnings cfg) $
     liftIO $
-      hPutStr stderr $
-        prettyString ws
+      hPutDoc stderr $
+        prettyWarnings ws
 
   let imp = T.mkInitialImport "."
   ienv1 <-
-    foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
+    foldM (\ctx -> badOnLeft I.prettyInterpreterError <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
       map (fmap fileProg) imports
   (tenv1, d1, src') <-
-    badOnLeft prettyString $
-      snd $
-        T.checkDec imports src T.initialEnv imp $
-          mkOpen "/prelude/prelude"
+    badOnLeft T.prettyTypeError . snd $
+      T.checkDec imports src T.initialEnv imp $
+        mkOpen "/prelude/prelude"
   (tenv2, d2, _) <-
-    badOnLeft prettyString $
-      snd $
-        T.checkDec imports src' tenv1 imp $
-          mkOpen $
-            toPOSIX $
-              dropExtension file
-  ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
-  ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
+    badOnLeft T.prettyTypeError . snd $
+      T.checkDec imports src' tenv1 imp $
+        mkOpen $
+          toPOSIX $
+            dropExtension file
+  ienv2 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv1 d1)
+  ienv3 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv2 d2)
   pure (tenv2, ienv3)
   where
-    badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
+    badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 

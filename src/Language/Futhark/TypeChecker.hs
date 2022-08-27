@@ -13,6 +13,7 @@ module Language.Futhark.TypeChecker
     checkModExp,
     Notes,
     TypeError (..),
+    prettyTypeError,
     Warnings,
     initialEnv,
     envWithImports,
@@ -157,10 +158,10 @@ dupDefinitionError ::
 dupDefinitionError space name loc1 loc2 =
   typeError loc1 mempty $
     "Duplicate definition of"
-      <+> ppr space
-      <+> pprName name <> "."
+      <+> pretty space
+      <+> prettyName name <> "."
       </> "Previously defined at"
-      <+> text (locStr loc2) <> "."
+      <+> pretty (locStr loc2) <> "."
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
@@ -228,7 +229,7 @@ checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) =
           typeError loc mempty $
             "All function parameters must have non-anonymous sizes."
               </> "Hint: add size parameters to"
-              <+> pquote (pprName name') <> "."
+              <+> dquotes (prettyName name') <> "."
 
         pure (tparams', vtype', vtype_t)
 
@@ -304,7 +305,7 @@ checkSpecs (IncludeSpec e loc : specs) = do
       (lookupType loc qn >> warnAbout qn)
         `catchError` \_ -> pure ()
     warnAbout qn =
-      warn loc $ "Inclusion shadows type" <+> pquote (ppr qn) <+> "."
+      warn loc $ "Inclusion shadows type" <+> dquotes (pretty qn) <+> "."
 
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (TySet, MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
@@ -561,7 +562,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
       [] -> pure ()
       tp : _ ->
         typeError loc mempty $
-          "Size parameter" <+> pquote (ppr tp) <+> "unused."
+          "Size parameter" <+> dquotes (pretty tp) <+> "unused."
 
     case (l, l') of
       (_, Lifted)
@@ -579,7 +580,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
             typeError loc mempty $
               "Non-lifted type abbreviations may not use existential sizes in their definition."
                 </> "Hint: use 'type~' or add size parameters to"
-                <+> pquote (pprName name) <> "."
+                <+> dquotes (prettyName name) <> "."
       _ -> pure ()
 
     bindSpaced [(Type, name)] $ do
@@ -657,12 +658,12 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
       | p : _ <- filter nastyParameter params' ->
           warn loc $
             "Entry point parameter\n"
-              </> indent 2 (ppr p)
+              </> indent 2 (pretty p)
               </> "\nwill have an opaque type, so the entry point will likely not be callable."
       | nastyReturnType maybe_tdecl' rettype_t ->
           warn loc $
             "Entry point return type\n"
-              </> indent 2 (ppr rettype)
+              </> indent 2 (pretty rettype)
               </> "\nwill have an opaque type, so the result will likely not be usable."
     _ -> pure ()
 
@@ -735,7 +736,7 @@ checkOneDec (ImportDec name NoInfo loc) = do
   (name', env) <- lookupImport loc name
   when (isBuiltin name) $
     typeError loc mempty $
-      ppr name <+> "may not be explicitly imported."
+      pretty name <+> "may not be explicitly imported."
   pure (mempty, env, ImportDec name (Info name') loc)
 checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb

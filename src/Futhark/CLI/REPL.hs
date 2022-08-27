@@ -13,7 +13,7 @@ import Control.Monad.Except
 import Control.Monad.Free.Church
 import Control.Monad.State
 import Data.Char
-import Data.List (intercalate, intersperse)
+import Data.List (intersperse)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe
@@ -24,6 +24,7 @@ import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
+import Futhark.Util.Pretty (AnsiStyle, Doc, docText, pretty, putDoc)
 import Futhark.Version
 import Language.Futhark
 import qualified Language.Futhark.Interpreter as I
@@ -85,7 +86,7 @@ repl maybe_prog = do
             case maybe_new_state of
               Right new_state -> toploop new_state
               Left err -> do
-                liftIO $ putStrLn err
+                liftIO $ putDoc err
                 toploop s'
           Right _ -> pure ()
 
@@ -99,9 +100,9 @@ repl maybe_prog = do
       noprog_init_state <- liftIO $ newFutharkiState 0 noLoadedProg Nothing
       case noprog_init_state of
         Left err ->
-          error $ "Failed to initialise interpreter state: " ++ err
+          error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
         Right s -> do
-          liftIO $ putStrLn prog_err
+          liftIO $ putDoc prog_err
           pure s {futharkiLoaded = maybe_prog}
     Right s ->
       pure s
@@ -148,7 +149,7 @@ extendEnvs prog (tenv, ictx) opens = (tenv', ictx')
     t_imports = filter ((`elem` opens) . fst) $ lpImports prog
     i_envs = map snd $ filter ((`elem` opens) . fst) $ M.toList $ I.ctxImports ictx
 
-newFutharkiState :: Int -> LoadedProg -> Maybe FilePath -> IO (Either String FutharkiState)
+newFutharkiState :: Int -> LoadedProg -> Maybe FilePath -> IO (Either (Doc AnsiStyle) FutharkiState)
 newFutharkiState count prev_prog maybe_file = runExceptT $ do
   (prog, tenv, ienv) <- case maybe_file of
     Nothing -> do
@@ -158,7 +159,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
       -- Then into the interpreter.
       ienv <-
         foldM
-          (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
+          (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
           I.initialCtx
           $ map (fmap fileProg) (lpImports prog)
 
@@ -168,11 +169,11 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
       pure (prog, tenv, ienv')
     Just file -> do
       prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file] M.empty)
-      liftIO $ putStrLn $ prettyString $ lpWarnings prog
+      liftIO $ putDoc $ prettyWarnings $ lpWarnings prog
 
       ienv <-
         foldM
-          (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
+          (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
           I.initialCtx
           $ map (fmap fileProg) (lpImports prog)
 
@@ -192,11 +193,9 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
         futharkiLoaded = maybe_file
       }
   where
-    badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
+    badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
-
-    prettyProgErrors = prettyString . pprProgErrors
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -266,14 +265,14 @@ onDec d = do
   cur_prog <- gets futharkiProg
   imp_r <- liftIO $ extendProg cur_prog files M.empty
   case imp_r of
-    Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgErrors e
+    Left e -> liftIO $ putDoc $ prettyProgErrors e
     Right prog -> do
       env <- gets futharkiEnv
       let (tenv, ienv) = extendEnvs prog env (map fst $ decImports d)
           imports = lpImports prog
           src = lpNameSource prog
       case T.checkDec imports src tenv cur_import d of
-        (_, Left e) -> liftIO $ putStrLn $ prettyString e
+        (_, Left e) -> liftIO $ putDoc $ T.prettyTypeError e
         (_, Right (tenv', d', src')) -> do
           let new_imports = filter ((`notElem` map fst old_imports) . fst) imports
           int_r <- runInterpreter $ do
@@ -293,7 +292,7 @@ onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case T.checkExp imports src tenv e of
-    (_, Left err) -> liftIO $ putStrLn $ prettyString err
+    (_, Left err) -> liftIO $ putDoc $ T.prettyTypeError err
     (_, Right (tparams, e'))
       | null tparams -> do
           r <- runInterpreter $ I.interpretExp ienv e'
@@ -301,14 +300,14 @@ onExp e = do
             Left err -> liftIO $ print err
             Right v -> liftIO $ putStrLn $ prettyString v
       | otherwise -> liftIO $ do
-          putStrLn $ "Inferred type of expression: " ++ prettyString (typeOf e')
-          putStrLn $
+          T.putStrLn $ "Inferred type of expression: " <> prettyText (typeOf e')
+          T.putStrLn $
             "The following types are ambiguous: "
-              ++ intercalate ", " (map (prettyName . typeParamName) tparams)
+              <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
 
-prettyBreaking :: Breaking -> String
+prettyBreaking :: Breaking -> T.Text
 prettyBreaking b =
-  prettyStacktrace (breakingAt b) $ map locStr $ NE.toList $ breakingStack b
+  prettyStacktrace (breakingAt b) $ map locText $ NE.toList $ breakingStack b
 
 -- Are we currently willing to break for this reason?  Among othe
 -- things, we do not want recursive breakpoints.  It could work fine
@@ -341,9 +340,9 @@ runInterpreter m = runF m (pure . Right) intOp
 
       -- Are we supposed to respect this breakpoint?
       when (breakForReason s top why) $ do
-        liftIO $ putStrLn $ why' <> " at " ++ locStr w
-        liftIO $ putStrLn $ prettyBreaking breaking
-        liftIO $ putStrLn "<Enter> to continue."
+        liftIO $ T.putStrLn $ why' <> " at " <> locText w
+        liftIO $ T.putStrLn $ prettyBreaking breaking
+        liftIO $ T.putStrLn "<Enter> to continue."
 
         -- Note the cleverness to preserve the Haskeline session (for
         -- line history and such).
@@ -404,7 +403,7 @@ genTypeCommand f g h e = do
     Right e' -> do
       (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of
-        Left err -> liftIO $ putStrLn $ prettyString err
+        Left err -> liftIO $ putDoc $ T.prettyTypeError err
         Right x -> liftIO $ putStrLn $ h x
 
 typeCommand :: Command
@@ -450,7 +449,7 @@ frameCommand which = do
               { futharkiEnv = (tenv, ctx),
                 futharkiBreaking = Just breaking
               }
-          liftIO $ putStrLn $ prettyBreaking breaking
+          liftIO $ T.putStrLn $ prettyBreaking breaking
     (Just _, _) ->
       liftIO $ putStrLn $ "Invalid stack index: " ++ T.unpack which
     (Nothing, _) ->

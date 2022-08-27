@@ -25,9 +25,8 @@ import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal, pmapIO)
-import Futhark.Util.Console
 import Futhark.Util.Options
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (AnsiStyle, Color (..), annotate, bold, color, line, pretty, prettyText, putDoc)
 import Futhark.Util.ProgressBar
 import Statistics.Resampling (Estimator (..), resample)
 import Statistics.Resampling.Bootstrap (bootstrapBCA)
@@ -41,6 +40,14 @@ import System.IO
 import System.Random.MWC (create)
 import Text.Printf
 import Text.Regex.TDFA
+
+putStyleLn :: AnsiStyle -> T.Text -> IO ()
+putStyleLn s t = putDoc $ annotate s (pretty t <> line)
+
+putRedLn, putBoldRedLn, putBoldLn :: T.Text -> IO ()
+putRedLn = putStyleLn (color Red)
+putBoldRedLn = putStyleLn (color Red <> bold)
+putBoldLn = putStyleLn bold
 
 data BenchOptions = BenchOptions
   { optBackend :: String,
@@ -185,7 +192,7 @@ compileBenchmark opts (program, program_spec) = do
 
               case res of
                 Left (err, errstr) -> do
-                  putStrLn $ inRed err
+                  putRedLn $ T.pack err
                   maybe (pure ()) SBS.putStrLn errstr
                   pure $ Left FailedToCompile
                 Right () ->
@@ -211,8 +218,8 @@ withProgramServer program runner extra_options f = do
   where
     onError :: SomeException -> IO (Maybe a)
     onError e = do
-      putStrLn $ inBold $ inRed $ "\nFailed to run " ++ program
-      putStrLn $ inRed $ show e
+      putBoldRedLn $ "\nFailed to run " <> T.pack program
+      putRedLn $ T.pack $ show e
       pure Nothing
 
 -- Truncate dataset name display after this many characters.
@@ -227,7 +234,7 @@ runBenchmark opts futhark (program, cases) = do
     mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where
     forInputOutputs server tuning_desc (InputOutputs entry_name runs) = do
-      putStr $ inBold $ "\n" ++ program' ++ tuning_desc ++ ":\n"
+      putBoldLn $ "\n" <> T.pack program' <> T.pack tuning_desc <> ":"
       BenchResult program' . catMaybes
         <$> mapM (runBenchmarkCase server opts futhark program entry_name pad_to) runs
       where
@@ -392,7 +399,7 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
   case res of
     Left err -> liftIO $ do
       putStrLn ""
-      putStrLn $ inRed $ T.unpack err
+      putRedLn err
       pure $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
       let vec_runtimes = U.fromList $ map (fromIntegral . runMicroseconds) runtimes
@@ -421,7 +428,7 @@ getMemoryUsage t =
   foldMap matchMap $ T.lines t
   where
     mem_regex = "Peak memory usage for space '([^']+)': ([0-9]+) bytes." :: T.Text
-    matchMap line = case (line =~ mem_regex :: (T.Text, T.Text, T.Text, [T.Text])) of
+    matchMap l = case (l =~ mem_regex :: (T.Text, T.Text, T.Text, [T.Text])) of
       (_, _, _, [device, bytes]) -> M.singleton device (read $ T.unpack bytes)
       _ -> mempty
 

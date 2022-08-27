@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Trustworthy #-}
 
 -- | This monomorphization module converts a well-typed, polymorphic,
@@ -156,11 +157,11 @@ instance Eq MonoSize where
   _ == _ = False
 
 instance Pretty MonoSize where
-  ppr (MonoKnown i) = text "?" <> ppr i
-  ppr (MonoAnon v) = text "?" <> pprName v
+  pretty (MonoKnown i) = "?" <> pretty i
+  pretty (MonoAnon v) = "?" <> prettyName v
 
 instance Pretty (Shape MonoSize) where
-  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
+  pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
 
 -- The kind of type relative to which we monomorphise.  What is most
 -- important to us is not the specific dimensions, but merely whether

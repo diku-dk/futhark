@@ -105,4 +105,4 @@ data KernelTarget
   deriving (Eq)
 
 instance Pretty OpenCL where
-  ppr = text . show
+  pretty = pretty . show

@@ -88,7 +88,7 @@ printLastUseGPU =
   Action
     { actionName = "print last use gpu",
       actionDescription = "Print last use information on gpu.",
-      actionProcedure = liftIO . putStrLn . prettyString . LastUse.analyseGPUMem
+      actionProcedure = liftIO . print . LastUse.analyseGPUMem
     }
 
 -- | Print interference information to stdout.
@@ -97,7 +97,7 @@ printInterferenceGPU =
   Action
     { actionName = "print interference gpu",
       actionDescription = "Print interference information on gpu.",
-      actionProcedure = liftIO . putStrLn . prettyString . Interference.analyseProgGPU
+      actionProcedure = liftIO . print . Interference.analyseProgGPU
     }
 
 -- | Print memory alias information to stdout
@@ -106,7 +106,7 @@ printMemAliasGPU =
   Action
     { actionName = "print mem alias gpu",
       actionDescription = "Print memory alias information on gpu.",
-      actionProcedure = liftIO . putStrLn . prettyString . MemAlias.analyzeGPUMem
+      actionProcedure = liftIO . print . MemAlias.analyzeGPUMem
     }
 
 -- | Print call graph to stdout.

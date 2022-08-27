@@ -1254,7 +1254,7 @@ compileCode (Imp.Assert e msg (loc, locs)) = do
           (Tuple formatargs)
       )
   where
-    stacktrace = prettyStacktrace 0 $ map locStr $ loc : locs
+    stacktrace = T.unpack $ prettyStacktrace 0 $ map locText $ loc : locs
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args
   dests' <- tupleOrSingle <$> mapM compileVar dests

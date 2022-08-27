@@ -90,7 +90,7 @@ import Futhark.IR.SOACS.SOAC
 import qualified Futhark.IR.SOACS.SOAC as Futhark
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
-import Futhark.Util.Pretty (ppr, text)
+import Futhark.Util.Pretty (pretty)
 import qualified Futhark.Util.Pretty as PP
 
 -- | A single, simple transformation.  If you want several, don't just
@@ -388,30 +388,30 @@ data SOAC rep
   deriving (Eq, Show)
 
 instance PP.Pretty Input where
-  ppr (Input (ArrayTransforms ts) arr _) = foldl f (ppr arr) ts
+  pretty (Input (ArrayTransforms ts) arr _) = foldl f (pretty arr) ts
     where
       f e (Rearrange cs perm) =
-        text "rearrange" <> ppr cs <> PP.apply [PP.apply (map ppr perm), e]
+        pretty "rearrange" <> pretty cs <> PP.apply [PP.apply (map pretty perm), e]
       f e (Reshape cs ReshapeArbitrary shape) =
-        text "reshape" <> ppr cs <> PP.apply [ppr shape, e]
+        pretty "reshape" <> pretty cs <> PP.apply [pretty shape, e]
       f e (ReshapeOuter cs ReshapeArbitrary shape) =
-        text "reshape_outer" <> ppr cs <> PP.apply [ppr shape, e]
+        pretty "reshape_outer" <> pretty cs <> PP.apply [pretty shape, e]
       f e (ReshapeInner cs ReshapeArbitrary shape) =
-        text "reshape_inner" <> ppr cs <> PP.apply [ppr shape, e]
+        pretty "reshape_inner" <> pretty cs <> PP.apply [pretty shape, e]
       f e (Reshape cs ReshapeCoerce shape) =
-        text "coerce" <> ppr cs <> PP.apply [ppr shape, e]
+        pretty "coerce" <> pretty cs <> PP.apply [pretty shape, e]
       f e (ReshapeOuter cs ReshapeCoerce shape) =
-        text "coerce_outer" <> ppr cs <> PP.apply [ppr shape, e]
+        pretty "coerce_outer" <> pretty cs <> PP.apply [pretty shape, e]
       f e (ReshapeInner cs ReshapeCoerce shape) =
-        text "coerce_inner" <> ppr cs <> PP.apply [ppr shape, e]
+        pretty "coerce_inner" <> pretty cs <> PP.apply [pretty shape, e]
       f e (Replicate cs ne) =
-        text "replicate" <> ppr cs <> PP.apply [ppr ne, e]
+        pretty "replicate" <> pretty cs <> PP.apply [pretty ne, e]
 
 instance PrettyRep rep => PP.Pretty (SOAC rep) where
-  ppr (Screma w form arrs) = Futhark.ppScrema w arrs form
-  ppr (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
-  ppr (Stream w lam nes arrs) = Futhark.ppStream w arrs nes lam
-  ppr (Scatter w lam arrs dests) = Futhark.ppScatter w arrs lam dests
+  pretty (Screma w form arrs) = Futhark.ppScrema w arrs form
+  pretty (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
+  pretty (Stream w lam nes arrs) = Futhark.ppStream w arrs nes lam
+  pretty (Scatter w lam arrs dests) = Futhark.ppScatter w arrs lam dests
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC rep -> [Input]

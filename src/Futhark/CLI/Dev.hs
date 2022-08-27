@@ -127,13 +127,13 @@ instance Representation UntypedPassState where
   representation (SeqMem _) = "SeqMem"
 
 instance PP.Pretty UntypedPassState where
-  ppr (SOACS prog) = PP.ppr prog
-  ppr (GPU prog) = PP.ppr prog
-  ppr (MC prog) = PP.ppr prog
-  ppr (Seq prog) = PP.ppr prog
-  ppr (SeqMem prog) = PP.ppr prog
-  ppr (MCMem prog) = PP.ppr prog
-  ppr (GPUMem prog) = PP.ppr prog
+  pretty (SOACS prog) = PP.pretty prog
+  pretty (GPU prog) = PP.pretty prog
+  pretty (MC prog) = PP.pretty prog
+  pretty (Seq prog) = PP.pretty prog
+  pretty (SeqMem prog) = PP.pretty prog
+  pretty (MCMem prog) = PP.pretty prog
+  pretty (GPUMem prog) = PP.pretty prog
 
 newtype UntypedPass
   = UntypedPass

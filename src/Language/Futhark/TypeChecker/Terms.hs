@@ -27,7 +27,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import Futhark.Util.Pretty hiding (bool, group, space)
+import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
 import Language.Futhark.Traversals
@@ -274,9 +274,9 @@ checkExp (RecordLit fs loc) = do
         Just sloc ->
           lift . typeError rloc mempty $
             "Field"
-              <+> pquote (ppr f)
+              <+> dquotes (pretty f)
               <+> "previously defined at"
-              <+> text (locStrRel rloc sloc) <> "."
+              <+> pretty (locStrRel rloc sloc) <> "."
         Nothing -> pure ()
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
@@ -369,7 +369,7 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
-  kt <- mustHaveField (mkUsage loc $ prettyString $ "projection of field " <> pquote (ppr k)) k t
+  kt <- mustHaveField (mkUsage loc $ docText $ "projection of field " <> dquotes (pretty k)) k t
   pure $ Project k e' (Info kt) loc
 checkExp (AppExp (If e1 e2 e3 loc) _) =
   sequentially checkCond $ \e1' _ -> do
@@ -402,7 +402,7 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
       pure $ QualParens (modname', modnameloc) e' loc
     ModFun {} ->
       typeError loc mempty . withIndexLink "module-is-parametric" $
-        "Module" <+> ppr modname <+> " is a parametric module."
+        "Module" <+> pretty modname <+> " is a parametric module."
   where
     qualifyEnv modname' env =
       env {envNameMap = M.map (qualify' modname') $ envNameMap env}
@@ -434,7 +434,7 @@ checkExp (Var qn NoInfo loc) = do
 
     checkField e k = do
       t <- expType e
-      let usage = mkUsage loc $ prettyString $ "projection of field " <> pquote (ppr k)
+      let usage = mkUsage loc $ docText $ "projection of field " <> dquotes (pretty k)
       kt <- mustHaveField usage k t
       pure $ Project k e (Info kt) loc
 checkExp (Negate arg loc) = do
@@ -451,7 +451,7 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
     t <- expType e'
     case anyConsumption e_occs of
       Just c ->
-        let msg = "type computed with consumption at " ++ locStr (location c)
+        let msg = "type computed with consumption at " <> locText (location c)
          in zeroOrderType (mkUsage loc "consumption in right-hand side of 'let'-binding") msg t
       _ -> pure ()
 
@@ -568,7 +568,7 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
     updateField _ _ _ =
       typeError loc mempty . withIndexLink "record-type-not-known" $
         "Full type of"
-          </> indent 2 (ppr src)
+          </> indent 2 (pretty src)
           </> textwrap " is not known at this point.  Add a type annotation to the original record to disambiguate."
 
 --
@@ -668,7 +668,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
           loc
     _ ->
       typeError loc mempty $
-        "Operator section with invalid operator of type" <+> ppr ftype
+        "Operator section with invalid operator of type" <+> pretty ftype
 checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
@@ -690,7 +690,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
           loc
     _ ->
       typeError loc mempty $
-        "Operator section with invalid operator of type" <+> ppr ftype
+        "Operator section with invalid operator of type" <+> pretty ftype
 checkExp (ProjectSection fields NoInfo loc) = do
   a <- newTypeVar loc "a"
   let usage = mkUsage loc "projection at"
@@ -769,23 +769,23 @@ data Unmatched p
   deriving (Functor, Show)
 
 instance Pretty (Unmatched (PatBase Info VName)) where
-  ppr um = case um of
-    (UnmatchedNum p nums) -> ppr' p <+> "where p is not one of" <+> ppr nums
-    (UnmatchedBool p) -> ppr' p
-    (UnmatchedConstr p) -> ppr' p
-    (Unmatched p) -> ppr' p
+  pretty um = case um of
+    (UnmatchedNum p nums) -> pretty' p <+> "where p is not one of" <+> pretty nums
+    (UnmatchedBool p) -> pretty' p
+    (UnmatchedConstr p) -> pretty' p
+    (Unmatched p) -> pretty' p
     where
-      ppr' (PatAscription p t _) = ppr p <> ":" <+> ppr t
-      ppr' (PatParens p _) = parens $ ppr' p
-      ppr' (PatAttr _ p _) = parens $ ppr' p
-      ppr' (Id v _ _) = pprName v
-      ppr' (TuplePat pats _) = parens $ commasep $ map ppr' pats
-      ppr' (RecordPat fs _) = braces $ commasep $ map ppField fs
+      pretty' (PatAscription p t _) = pretty p <> ":" <+> pretty t
+      pretty' (PatParens p _) = parens $ pretty' p
+      pretty' (PatAttr _ p _) = parens $ pretty' p
+      pretty' (Id v _ _) = prettyName v
+      pretty' (TuplePat pats _) = parens $ commasep $ map pretty' pats
+      pretty' (RecordPat fs _) = braces $ commasep $ map ppField fs
         where
-          ppField (name, t) = text (nameToString name) <> equals <> ppr' t
-      ppr' Wildcard {} = "_"
-      ppr' (PatLit e _ _) = ppr e
-      ppr' (PatConstr n _ ps _) = "#" <> ppr n <+> sep (map ppr' ps)
+          ppField (name, t) = pretty (nameToString name) <> equals <> pretty' t
+      pretty' Wildcard {} = "_"
+      pretty' (PatLit e _ _) = pretty e
+      pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do
@@ -888,7 +888,7 @@ checkApply
       when (any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)) $ do
         typeError loc mempty . withIndexLink "existential-param-ret" $
           "Existential size would appear in function parameter of return type:"
-            </> indent 2 (ppr (RetType ext tp2'))
+            </> indent 2 (pretty (RetType ext tp2'))
             </> textwrap "This is usually because a higher-order function is used with functional arguments that return existential sizes or locally named sizes, which are then used as parameters of other function arguments."
 
       occur [observation as loc]
@@ -897,7 +897,7 @@ checkApply
 
       case anyConsumption dflow of
         Just c ->
-          let msg = "type of expression with consumption at " ++ locStr (location c)
+          let msg = "type of expression with consumption at " <> locText (location c)
            in zeroOrderType (mkUsage argloc "potential consumption in expression") msg tp1
         _ -> pure ()
 
@@ -944,7 +944,7 @@ checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tfun' <- normPatType tfun
   checkApply loc fname tfun' arg
 checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
-  let fname' = maybe "expression" (pquote . ppr) fname
+  let fname' = maybe "expression" (dquotes . pretty) fname
 
   typeError loc mempty $
     if prev_applied == 0
@@ -952,16 +952,16 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
         "Cannot apply"
           <+> fname'
           <+> "as function, as it has type:"
-          </> indent 2 (ppr ftype)
+          </> indent 2 (pretty ftype)
       else
         "Cannot apply"
           <+> fname'
-          <+> "to argument #" <> ppr (prev_applied + 1)
-          <+> pquote (shorten $ flatten $ ppr argexp) <> ","
-          <+/> "as"
+          <+> "to argument #" <> pretty (prev_applied + 1)
+          <+> dquotes (shorten $ group $ pretty argexp) <> ","
+          </> "as"
           <+> fname'
           <+> "only takes"
-          <+> ppr prev_applied
+          <+> pretty prev_applied
           <+> arguments <> "."
   where
     arguments
@@ -1072,7 +1072,7 @@ causalityCheck binding_body = do
         | otherwise = Nothing
 
       checkParamCausality known p =
-        checkCausality (ppr p) known (patternType p) (locOf p)
+        checkCausality (pretty p) known (patternType p) (locOf p)
 
       onExp ::
         S.Set VName ->
@@ -1080,7 +1080,7 @@ causalityCheck binding_body = do
         StateT (S.Set VName) (Either TypeError) Exp
 
       onExp known (Var v (Info t) loc)
-        | Just bad <- checkCausality (pquote (ppr v)) known t loc =
+        | Just bad <- checkCausality (dquotes (pretty v)) known t loc =
             bad
       onExp known (ProjectSection _ (Info t) loc)
         | Just bad <- checkCausality "projection section" known t loc =
@@ -1151,19 +1151,19 @@ causalityCheck binding_body = do
     causality what loc d dloc t =
       Left . TypeError loc mempty . withIndexLink "causality-check" $
         "Causality check: size"
-          <+/> pquote (pprName d)
-          <+/> "needed for type of"
+          </> dquotes (prettyName d)
+          </> "needed for type of"
           <+> what <> colon
-          </> indent 2 (ppr t)
+          </> indent 2 (pretty t)
           </> "But"
-          <+> pquote (pprName d)
+          <+> dquotes (prettyName d)
           <+> "is computed at"
-          <+/> text (locStrRel loc dloc) <> "."
+          </> pretty (locStrRel loc dloc) <> "."
           </> ""
           </> "Hint:"
           <+> align
             ( textwrap "Bind the expression producing"
-                <+> pquote (pprName d)
+                <+> dquotes (prettyName d)
                 <+> "with 'let' beforehand."
             )
 
@@ -1184,7 +1184,7 @@ localChecks = void . check
         ps' ->
           typeError loc mempty . withIndexLink "unmatched-cases" $
             "Unmatched cases in match expression:"
-              </> indent 2 (stack (map ppr ps'))
+              </> indent 2 (stack (map pretty ps'))
     check e@(IntLit x ty loc) =
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI x t) x t loc
@@ -1223,9 +1223,9 @@ localChecks = void . check
       unless inBounds $
         typeError loc mempty . withIndexLink "literal-out-of-bounds" $
           "Literal "
-            <> ppr x
+            <> pretty x
             <> " out of bounds for inferred type "
-            <> ppr ty
+            <> pretty ty
             <> "."
 
 -- | Type-check a top-level (or module-level) function definition.
@@ -1273,7 +1273,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
       fname' <- checkName Term fname loc
       when (nameToString fname `elem` doNotShadow) $
         typeError loc mempty . withIndexLink "may-not-be-redefined" $
-          "The" <+> pprName fname <+> "operator may not be redefined."
+          "The" <+> prettyName fname <+> "operator may not be redefined."
 
       pure (fname', tparams', params'', maybe_retdecl'', RetType dims rettype'', body'')
 
@@ -1301,7 +1301,7 @@ fixOverloadedTypes tyvars_at_toplevel =
       | otherwise =
           typeError usage mempty . withIndexLink "ambiguous-type" $
             "Type is ambiguous (could be one of"
-              <+> commasep (map ppr ots) <> ")."
+              <+> commasep (map pretty ots) <> ")."
               </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
@@ -1320,18 +1320,18 @@ fixOverloadedTypes tyvars_at_toplevel =
           </> indent 2 (stack $ map field $ M.toList fs)
           </> "Add a type annotation to disambiguate the type."
       where
-        field (l, t) = ppr l <> colon <+> align (ppr t)
+        field (l, t) = pretty l <> colon <+> align (pretty t)
     fixOverloaded (_, HasConstrs cs usage) =
       typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be a sum type with constructors:"
-          <+> ppr (Sum cs) <> ")."
+          <+> pretty (Sum cs) <> ")."
           </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
-        "Ambiguous size" <+> pquote (pprName v) <> "."
+        "Ambiguous size" <+> dquotes (prettyName v) <> "."
     fixOverloaded (v, Size Nothing (Usage (Just u) loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
-        "Ambiguous size" <+> pquote (pprName v) <+> "arising from" <+> text u <> "."
+        "Ambiguous size" <+> dquotes (prettyName v) <+> "arising from" <+> pretty u <> "."
     fixOverloaded _ = pure ()
 
 hiddenParamNames :: [Pat] -> Names
@@ -1472,10 +1472,10 @@ checkGlobalAliases params body_t loc = do
     v : _ ->
       typeError loc mempty . withIndexLink "alias-free-variable" $
         "Function result aliases the free variable "
-          <> pquote (pprName v)
+          <> dquotes (prettyName v)
           <> "."
           </> "Use"
-          <+> pquote "copy"
+          <+> dquotes "copy"
           <+> "to break the aliasing."
     _ ->
       pure ()
@@ -1543,15 +1543,15 @@ verifyFunctionParams fname params =
       | d : _ <- S.toList $ freeInPat p `S.intersection` forbidden =
           typeError p mempty . withIndexLink "inaccessible-size" $
             "Parameter"
-              <+> pquote (ppr p)
-              <+/> "refers to size"
-              <+> pquote (pprName d)
+              <+> dquotes (pretty p)
+              </> "refers to size"
+              <+> dquotes (prettyName d)
                 <> comma
-              <+/> textwrap "which will not be accessible to the caller"
+              </> textwrap "which will not be accessible to the caller"
                 <> comma
-              <+/> textwrap "possibly because it is nested in a tuple or record."
-              <+/> textwrap "Consider ascribing an explicit type that does not reference "
-                <> pquote (pprName d)
+              </> textwrap "possibly because it is nested in a tuple or record."
+              </> textwrap "Consider ascribing an explicit type that does not reference "
+                <> dquotes (prettyName d)
                 <> "."
       | otherwise = verifyParams forbidden' ps
       where
@@ -1639,11 +1639,11 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           notes <- dimNotes defloc $ NamedSize $ qualName k
           typeError defloc notes . withIndexLink "unknowable-param-def" $
             "Unknowable size"
-              <+> pquote (pprName k)
+              <+> dquotes (prettyName k)
               <+> "in parameter of"
-              <+> pquote (pprName defname)
+              <+> dquotes (prettyName defname)
                 <> ", which is inferred as:"
-              </> indent 2 (ppr t)
+              </> indent 2 (pretty t)
       | k `S.member` produced_sizes =
           pure $ Just $ Right k
     closeOver (_, _) =

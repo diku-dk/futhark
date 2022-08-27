@@ -17,7 +17,7 @@ import qualified Data.Set as S
 import Data.String (fromString)
 import qualified Data.Text as T
 import Data.Version
-import Futhark.Util.Pretty (Doc, ppr)
+import Futhark.Util.Pretty (Doc, docText, pretty)
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Semantic
@@ -28,17 +28,17 @@ import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import Prelude hiding (abs)
 
-docToHtml :: Doc -> Html
-docToHtml = toHtml . prettyString
+docToHtml :: Doc a -> Html
+docToHtml = toHtml . docText
 
 primTypeHtml :: PrimType -> Html
-primTypeHtml = docToHtml . ppr
+primTypeHtml = docToHtml . pretty
 
 prettyU :: Uniqueness -> Html
-prettyU = docToHtml . ppr
+prettyU = docToHtml . pretty
 
 renderName :: Name -> Html
-renderName name = docToHtml (ppr name)
+renderName name = docToHtml (pretty name)
 
 joinBy :: Html -> [Html] -> Html
 joinBy _ [] = mempty
@@ -86,7 +86,7 @@ data IndexWhat = IndexValue | IndexFunction | IndexModule | IndexModuleType | In
 -- can generate an index.
 type Documented = M.Map VName IndexWhat
 
-warn :: SrcLoc -> Doc -> DocM ()
+warn :: SrcLoc -> Doc () -> DocM ()
 warn loc s = lift $ lift $ tell $ singleWarning loc s
 
 document :: VName -> IndexWhat -> DocM ()
@@ -324,7 +324,7 @@ addBoilerplate current titleText content =
             <> H.link
               ! A.href (fromString $ relativise "style.css" current)
               ! A.rel "stylesheet"
-              ! A.type_ "text/css"
+              ! A.type_ "pretty/css"
 
       navigation =
         H.ul ! A.id "navigation" $

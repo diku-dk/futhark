@@ -27,7 +27,7 @@ instance Semigroup Log where
 instance Monoid Log where
   mempty = Log mempty
 
--- | Transform a log into text.  Every log entry becomes its own line
+-- | Transform a log into pretty.  Every log entry becomes its own line
 -- (or possibly more, in case of multi-line entries).
 toText :: Log -> T.Text
 toText = T.intercalate "\n" . DL.toList . unLog

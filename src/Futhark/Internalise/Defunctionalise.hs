@@ -532,7 +532,7 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
       t' = first (runIdentity . astMap mapper) $ typeOf e2'
   pure (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
-  error $ "defuncExp: Unexpected LetFun: " ++ prettyName vn
+  error $ "defuncExp: Unexpected LetFun: " ++ show vn
 defuncExp (AppExp (If e1 e2 e3 loc) res) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2
@@ -1272,7 +1272,7 @@ defuncValBind (ValBind entry name _ (Info (RetType _ rettype)) tparams params bo
 defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) tparams params body _ _ _) = do
   when (any isTypeParam tparams) $
     error $
-      prettyName name
+      show name
         ++ " has type parameters, "
         ++ "but the defunctionaliser expects a monomorphic input program."
   (tparams', params', body', sv) <-

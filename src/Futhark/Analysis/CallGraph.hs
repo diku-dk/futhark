@@ -141,17 +141,17 @@ buildFGstm (Let _ _ e) = execWriter $ mapExpM folder e
         }
 
 instance Pretty FunCalls where
-  ppr = stack . map f . M.toList . fcMap
+  pretty = stack . map f . M.toList . fcMap
     where
-      f (x, (attrs, y)) = "=>" <+> ppr y <+> parens ("at" <+> ppr x <+> ppr attrs)
+      f (x, (attrs, y)) = "=>" <+> pretty y <+> parens ("at" <+> pretty x <+> pretty attrs)
 
 instance Pretty CallGraph where
-  ppr (CallGraph fg cg) =
+  pretty (CallGraph fg cg) =
     stack $
       punctuate line $
         ppFunCalls ("called at top level", cg) : map ppFunCalls (M.toList fg)
     where
       ppFunCalls (f, fcalls) =
-        ppr f
-          </> text (map (const '=') (nameToString f))
-          </> indent 2 (ppr fcalls)
+        pretty f
+          </> pretty (map (const '=') (nameToString f))
+          </> indent 2 (pretty fcalls)

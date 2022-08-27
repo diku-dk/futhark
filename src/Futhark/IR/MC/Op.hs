@@ -32,7 +32,7 @@ import Futhark.Transform.Substitute
 import Futhark.Util.Pretty
   ( Pretty,
     nestedBlock,
-    ppr,
+    pretty,
     (<+>),
     (</>),
   )
@@ -129,13 +129,13 @@ instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (MCOp rep op) where
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
 
 instance (PrettyRep rep, Pretty op) => Pretty (MCOp rep op) where
-  ppr (ParOp Nothing op) = ppr op
-  ppr (ParOp (Just par_op) op) =
+  pretty (ParOp Nothing op) = pretty op
+  pretty (ParOp (Just par_op) op) =
     "par"
-      <+> nestedBlock "{" "}" (ppr par_op)
+      <+> nestedBlock "{" "}" (pretty par_op)
       </> "seq"
-      <+> nestedBlock "{" "}" (ppr op)
-  ppr (OtherOp op) = ppr op
+      <+> nestedBlock "{" "}" (pretty op)
+  pretty (OtherOp op) = pretty op
 
 instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (MCOp rep op) where
   opMetrics (ParOp par_op op) = opMetrics par_op >> opMetrics op

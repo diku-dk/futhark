@@ -52,7 +52,7 @@ import Futhark.Server.Values
 import Futhark.Test.Spec
 import qualified Futhark.Test.Values as V
 import Futhark.Util (isEnvVarAtLeast, pmapIO)
-import Futhark.Util.Pretty (prettyOneLine, prettyText, prettyTextOneLine)
+import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import System.Directory
 import System.Exit
 import System.FilePath
@@ -116,7 +116,9 @@ getValuesBS _ dir (InFile file) =
 getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
 getValuesBS _ _ (ScriptValues e) =
-  fail $ "Cannot get values from FutharkScript expression: " <> prettyOneLine e
+  fail $
+    "Cannot get values from FutharkScript expression: "
+      <> T.unpack (prettyTextOneLine e)
 getValuesBS _ _ (ScriptFile f) =
   fail $ "Cannot get values from FutharkScript file: " <> f
 

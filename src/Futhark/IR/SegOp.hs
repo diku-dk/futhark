@@ -93,11 +93,13 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty
-  ( Pretty,
-    commasep,
+  ( Doc,
+    Pretty,
+    apply,
+    hsep,
     parens,
-    ppr,
-    text,
+    ppTuple',
+    pretty,
     (<+>),
     (</>),
   )
@@ -336,13 +338,12 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
   mapM_ consumeKernelResult kres
   TC.checkStms stms $ do
     unless (length ts == length kres) $
-      TC.bad $
-        TC.TypeError $
-          "Kernel return type is "
-            ++ prettyTuple ts
-            ++ ", but body returns "
-            ++ show (length kres)
-            ++ " values."
+      TC.bad . TC.TypeError $
+        "Kernel return type is "
+          <> prettyTuple ts
+          <> ", but body returns "
+          <> prettyText (length kres)
+          <> " values."
     zipWithM_ checkKernelResult kres ts
   where
     consumeKernelResult (WriteReturns _ _ arr _) =
@@ -364,13 +365,13 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
           TC.bad $
             TC.TypeError $
               "WriteReturns returning "
-                ++ prettyString e
-                ++ " of type "
-                ++ prettyString t
-                ++ ", shape="
-                ++ prettyString shape
-                ++ ", but destination array has type "
-                ++ prettyString arr_t
+                <> prettyText e
+                <> " of type "
+                <> prettyText t
+                <> ", shape="
+                <> prettyText shape
+                <> ", but destination array has type "
+                <> prettyText arr_t
     checkKernelResult (TileReturns cs dims v) t = do
       TC.checkCerts cs
       forM_ dims $ \(dim, tile) -> do
@@ -380,7 +381,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $
           TC.TypeError $
-            "Invalid type for TileReturns " ++ prettyString v
+            "Invalid type for TileReturns " <> prettyText v
     checkKernelResult (RegTileReturns cs dims_n_tiles arr) t = do
       TC.checkCerts cs
       mapM_ (TC.require [Prim int64]) dims
@@ -392,54 +393,54 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       unless (arr_t == expected) $
         TC.bad . TC.TypeError $
           "Invalid type for TileReturns. Expected:\n  "
-            ++ prettyString expected
-            ++ ",\ngot:\n  "
-            ++ prettyString arr_t
+            <> prettyText expected
+            <> ",\ngot:\n  "
+            <> prettyText arr_t
       where
         (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
-        expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles)
+        expected = t `arrayOfShape` Shape (blk_tiles <> reg_tiles)
 
 kernelBodyMetrics :: OpMetrics (Op rep) => KernelBody rep -> MetricsM ()
 kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
 
 instance PrettyRep rep => Pretty (KernelBody rep) where
-  ppr (KernelBody _ stms res) =
-    PP.stack (map ppr (stmsToList stms))
-      </> text "return"
-      <+> PP.braces (PP.commasep $ map ppr res)
+  pretty (KernelBody _ stms res) =
+    PP.stack (map pretty (stmsToList stms))
+      </> "return"
+      <+> PP.braces (PP.commasep $ map pretty res)
 
-certAnnots :: Certs -> [PP.Doc]
+certAnnots :: Certs -> [Doc ann]
 certAnnots cs
   | cs == mempty = []
-  | otherwise = [ppr cs]
+  | otherwise = [pretty cs]
 
 instance Pretty KernelResult where
-  ppr (Returns ResultNoSimplify cs what) =
-    PP.spread $ certAnnots cs ++ ["returns (manifest)" <+> ppr what]
-  ppr (Returns ResultPrivate cs what) =
-    PP.spread $ certAnnots cs ++ ["returns (private)" <+> ppr what]
-  ppr (Returns ResultMaySimplify cs what) =
-    PP.spread $ certAnnots cs ++ ["returns" <+> ppr what]
-  ppr (WriteReturns cs shape arr res) =
-    PP.spread $
+  pretty (Returns ResultNoSimplify cs what) =
+    hsep $ certAnnots cs <> ["returns (manifest)" <+> pretty what]
+  pretty (Returns ResultPrivate cs what) =
+    hsep $ certAnnots cs <> ["returns (private)" <+> pretty what]
+  pretty (Returns ResultMaySimplify cs what) =
+    hsep $ certAnnots cs <> ["returns" <+> pretty what]
+  pretty (WriteReturns cs shape arr res) =
+    hsep $
       certAnnots cs
-        ++ [ ppr arr
+        <> [ pretty arr
                <+> PP.colon
-               <+> ppr shape
+               <+> pretty shape
                </> "with"
                <+> PP.apply (map ppRes res)
            ]
     where
-      ppRes (slice, e) = ppr slice <+> text "=" <+> ppr e
-  ppr (TileReturns cs dims v) =
-    PP.spread $ certAnnots cs ++ ["tile" <> parens (commasep $ map onDim dims) <+> ppr v]
+      ppRes (slice, e) = pretty slice <+> "=" <+> pretty e
+  pretty (TileReturns cs dims v) =
+    hsep $ certAnnots cs <> ["tile" <> apply (map onDim dims) <+> pretty v]
     where
-      onDim (dim, tile) = ppr dim <+> "/" <+> ppr tile
-  ppr (RegTileReturns cs dims_n_tiles v) =
-    PP.spread $ certAnnots cs ++ ["blkreg_tile" <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v]
+      onDim (dim, tile) = pretty dim <+> "/" <+> pretty tile
+  pretty (RegTileReturns cs dims_n_tiles v) =
+    hsep $ certAnnots cs <> ["blkreg_tile" <> apply (map onDim dims_n_tiles) <+> pretty v]
     where
       onDim (dim, blk_tile, reg_tile) =
-        ppr dim <+> "/" <+> parens (ppr blk_tile <+> "*" <+> ppr reg_tile)
+        pretty dim <+> "/" <+> parens (pretty blk_tile <+> "*" <+> pretty reg_tile)
 
 -- | These dimensions (indexed from 0, outermost) of the corresponding
 -- 'SegSpace' should not be parallelised, but instead iterated
@@ -653,9 +654,9 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
         TC.bad $
           TC.TypeError $
             "SegHist operator has return type "
-              ++ prettyTuple (lambdaReturnType op)
-              ++ " but neutral element has type "
-              ++ prettyTuple nes_t
+              <> prettyTuple (lambdaReturnType op)
+              <> " but neutral element has type "
+              <> prettyTuple nes_t
 
       -- Arrays must have proper type.
       let dest_shape' = Shape segment_dims <> dest_shape <> shape
@@ -676,9 +677,9 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
       TC.bad $
         TC.TypeError $
           "SegHist body has return type "
-            ++ prettyTuple ts
-            ++ " but should have type "
-            ++ prettyTuple bucket_ret_t
+            <> prettyTuple ts
+            <> " but should have type "
+            <> prettyTuple bucket_ret_t
   where
     segment_dims = init $ segSpaceDims space
 
@@ -714,10 +715,10 @@ checkScanRed space ops ts kbody = do
       TC.bad $
         TC.TypeError $
           "Wrong return for body (does not match neutral elements; expected "
-            ++ prettyString expecting
-            ++ "; found "
-            ++ prettyString got
-            ++ ")"
+            <> prettyText expecting
+            <> "; found "
+            <> prettyText got
+            <> ")"
 
     checkKernelBody ts kbody
 
@@ -886,60 +887,60 @@ instance OpMetrics (Op rep) => OpMetrics (SegOp lvl rep) where
       kernelBodyMetrics body
 
 instance Pretty SegSpace where
-  ppr (SegSpace phys dims) =
-    parens
-      ( commasep $ do
+  pretty (SegSpace phys dims) =
+    apply
+      ( do
           (i, d) <- dims
-          pure $ ppr i <+> "<" <+> ppr d
+          pure $ pretty i <+> "<" <+> pretty d
       )
-      <+> parens (text "~" <> ppr phys)
+      <+> parens ("~" <> pretty phys)
 
 instance PrettyRep rep => Pretty (SegBinOp rep) where
-  ppr (SegBinOp comm lam nes shape) =
-    PP.braces (PP.commasep $ map ppr nes) <> PP.comma
-      </> ppr shape <> PP.comma
-      </> comm' <> ppr lam
+  pretty (SegBinOp comm lam nes shape) =
+    PP.braces (PP.commasep $ map pretty nes) <> PP.comma
+      </> pretty shape <> PP.comma
+      </> comm' <> pretty lam
     where
       comm' = case comm of
-        Commutative -> text "commutative "
+        Commutative -> "commutative "
         Noncommutative -> mempty
 
 instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
-  ppr (SegMap lvl space ts body) =
-    text "segmap" <> ppr lvl
-      </> PP.align (ppr space)
+  pretty (SegMap lvl space ts body) =
+    "segmap" <> pretty lvl
+      </> PP.align (pretty space)
       <+> PP.colon
-      <+> ppTuple' ts
-      <+> PP.nestedBlock "{" "}" (ppr body)
-  ppr (SegRed lvl space reds ts body) =
-    text "segred" <> ppr lvl
-      </> PP.align (ppr space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr reds)
+      <+> ppTuple' (map pretty ts)
+      <+> PP.nestedBlock "{" "}" (pretty body)
+  pretty (SegRed lvl space reds ts body) =
+    "segred" <> pretty lvl
+      </> PP.align (pretty space)
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
       </> PP.colon
-      <+> ppTuple' ts
-      <+> PP.nestedBlock "{" "}" (ppr body)
-  ppr (SegScan lvl space scans ts body) =
-    text "segscan" <> ppr lvl
-      </> PP.align (ppr space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr scans)
+      <+> ppTuple' (map pretty ts)
+      <+> PP.nestedBlock "{" "}" (pretty body)
+  pretty (SegScan lvl space scans ts body) =
+    "segscan" <> pretty lvl
+      </> PP.align (pretty space)
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
       </> PP.colon
-      <+> ppTuple' ts
-      <+> PP.nestedBlock "{" "}" (ppr body)
-  ppr (SegHist lvl space ops ts body) =
-    text "seghist" <> ppr lvl
-      </> PP.align (ppr space)
+      <+> ppTuple' (map pretty ts)
+      <+> PP.nestedBlock "{" "}" (pretty body)
+  pretty (SegHist lvl space ops ts body) =
+    "seghist" <> pretty lvl
+      </> PP.align (pretty space)
       </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
       </> PP.colon
-      <+> ppTuple' ts
-      <+> PP.nestedBlock "{" "}" (ppr body)
+      <+> ppTuple' (map pretty ts)
+      <+> PP.nestedBlock "{" "}" (pretty body)
     where
       ppOp (HistOp w rf dests nes shape op) =
-        ppr w <> PP.comma
-          <+> ppr rf <> PP.comma
-          </> PP.braces (PP.commasep $ map ppr dests) <> PP.comma
-          </> PP.braces (PP.commasep $ map ppr nes) <> PP.comma
-          </> ppr shape <> PP.comma
-          </> ppr op
+        pretty w <> PP.comma
+          <+> pretty rf <> PP.comma
+          </> PP.braces (PP.commasep $ map pretty dests) <> PP.comma
+          </> PP.braces (PP.commasep $ map pretty nes) <> PP.comma
+          </> pretty shape <> PP.comma
+          </> pretty op
 
 instance
   ( ASTRep rep,

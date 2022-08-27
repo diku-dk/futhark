@@ -27,6 +27,7 @@ import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import qualified Futhark.CodeGen.Backends.MulticoreC as MC
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
@@ -84,7 +85,7 @@ compileProg version prog = do
       )
       (ws, defs)
 
-  let ispc_decls = T.unlines $ map prettyText $ DL.toList $ sDefs $ GC.compUserState endstate
+  let ispc_decls = definitionsText $ DL.toList $ sDefs $ GC.compUserState endstate
 
   -- The bool #define is a workaround around an ISPC bug, stdbool doesn't get included.
   let ispcdefs =
@@ -179,7 +180,7 @@ makeStringLiteral str = do
 -- | Set memory in ISPC
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
 setMem dest src space = do
-  let src_s = prettyString $ C.toExp src noLoc
+  let src_s = T.unpack $ expText $ C.toExp src noLoc
   strlit <- makeStringLiteral src_s
   GC.stm
     [C.cstm|if ($id:(GC.fatMemSet space)(ctx, &$exp:dest, &$exp:src,
@@ -191,7 +192,7 @@ setMem dest src space = do
 unRefMem :: C.ToExp a => a -> Space -> ISPCCompilerM ()
 unRefMem mem space = do
   cached <- isJust <$> GC.cacheMem mem
-  let mem_s = prettyString $ C.toExp mem noLoc
+  let mem_s = T.unpack $ expText $ C.toExp mem noLoc
   strlit <- makeStringLiteral mem_s
   unless cached $
     GC.stm
@@ -208,13 +209,12 @@ allocMem ::
   C.Stm ->
   ISPCCompilerM ()
 allocMem mem size space on_failure = do
-  let mem_s = prettyString $ C.toExp mem noLoc
+  let mem_s = T.unpack $ expText $ C.toExp mem noLoc
   strlit <- makeStringLiteral mem_s
   GC.stm
-    [C.cstm|if ($id:(GC.fatMemAlloc space)(ctx, &$exp:mem, $exp:size,
-                                              $id:strlit())) {
+    [C.cstm|if ($id:(GC.fatMemAlloc space)(ctx, &$exp:mem, $exp:size, $id:strlit())) {
                     $stm:on_failure
-                  }|]
+            }|]
 
 -- | Free memory in ISPC
 freeAllocatedMem :: ISPCCompilerM [C.BlockItem]
@@ -653,7 +653,7 @@ compileCode (Assert e msg (loc, locs)) = do
   err <- GC.collect $ handleError msg stacktrace
   GC.stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
-    stacktrace = prettyStacktrace 0 $ map locStr $ loc : locs
+    stacktrace = T.unpack $ prettyStacktrace 0 $ map locText $ loc : locs
 compileCode code =
   GC.compileCode code
 
@@ -927,7 +927,7 @@ compileOp (ForEach i from bound body) = do
     else
       GC.stms
         [C.cstms|
-      $escstm:("foreach (" <> prettyString i <> " = " <> prettyString from' <> " ... " <> prettyString bound' <> ")") {
+      $escstm:(T.unpack ("foreach (" <> prettyText i <> " = " <> expText from' <> " ... " <> expText bound' <> ")")) {
         $items:body'
       }|]
 compileOp (ForEachActive name body) = do

@@ -51,7 +51,7 @@ import Futhark.Server
 import Futhark.Server.Values (getValue, putValue)
 import qualified Futhark.Test.Values as V
 import Futhark.Util (nubOrd)
-import Futhark.Util.Pretty hiding (float, line, sep, space, string, (</>), (<|>))
+import Futhark.Util.Pretty hiding (line, sep, space, (</>))
 import Language.Futhark.Core (Name, nameFromText, nameToText)
 import Language.Futhark.Tuple (areTupleFields)
 import Text.Megaparsec
@@ -119,28 +119,29 @@ data Exp
   deriving (Show)
 
 instance Pretty Func where
-  ppr (FuncFut f) = ppr f
-  ppr (FuncBuiltin f) = "$" <> ppr f
+  pretty (FuncFut f) = pretty f
+  pretty (FuncBuiltin f) = "$" <> pretty f
 
 instance Pretty Exp where
-  ppr = pprPrec 0
-  pprPrec _ (ServerVar _ v) = "$" <> ppr v
-  pprPrec _ (Const v) = stack $ map strictText $ T.lines $ V.valueText v
-  pprPrec i (Let pat e1 e2) =
-    parensIf (i > 0) $ "let" <+> pat' <+> equals <+> ppr e1 <+> "in" <+> ppr e2
+  pretty = pprPrec (0 :: Int)
     where
-      pat' = case pat of
-        [x] -> ppr x
-        _ -> parens $ commasep $ map ppr pat
-  pprPrec _ (Call v []) = ppr v
-  pprPrec i (Call v args) =
-    parensIf (i > 0) $ ppr v <+> spread (map (align . pprPrec 1) args)
-  pprPrec _ (Tuple vs) =
-    parens $ commasep $ map (align . ppr) vs
-  pprPrec _ (StringLit s) = ppr $ show s
-  pprPrec _ (Record m) = braces $ commasep $ map field m
-    where
-      field (k, v) = align (ppr k <> equals <> ppr v)
+      pprPrec _ (ServerVar _ v) = "$" <> pretty v
+      pprPrec _ (Const v) = stack $ map pretty $ T.lines $ V.valueText v
+      pprPrec i (Let pat e1 e2) =
+        parensIf (i > 0) $ "let" <+> pat' <+> equals <+> pretty e1 <+> "in" <+> pretty e2
+        where
+          pat' = case pat of
+            [x] -> pretty x
+            _ -> parens $ commasep $ map pretty pat
+      pprPrec _ (Call v []) = pretty v
+      pprPrec i (Call v args) =
+        parensIf (i > 0) $ pretty v <+> hsep (map (align . pprPrec 1) args)
+      pprPrec _ (Tuple vs) =
+        parens $ commasep $ map (align . pretty) vs
+      pprPrec _ (StringLit s) = pretty $ show s
+      pprPrec _ (Record m) = braces $ commasep $ map field m
+        where
+          field (k, v) = align (pretty k <> equals <> pretty v)
 
 type Parser = Parsec Void T.Text
 
@@ -248,13 +249,13 @@ data ScriptValueType
   deriving (Eq, Show)
 
 instance Pretty ScriptValueType where
-  ppr (STValue t) = ppr t
-  ppr (STFun ins outs) =
-    spread $ intersperse "->" (map ppr ins ++ [outs'])
+  pretty (STValue t) = pretty t
+  pretty (STFun ins outs) =
+    hsep $ intersperse "->" (map pretty ins ++ [outs'])
     where
       outs' = case outs of
-        [out] -> strictText out
-        _ -> parens $ commasep $ map strictText outs
+        [out] -> pretty out
+        _ -> parens $ commasep $ map pretty outs
 
 -- | A Haskell-level value or a variable on the server.
 data ValOrVar = VVal V.Value | VVar VarName
