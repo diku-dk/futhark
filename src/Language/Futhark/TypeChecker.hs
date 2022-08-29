@@ -14,6 +14,7 @@ module Language.Futhark.TypeChecker
     Notes,
     TypeError (..),
     prettyTypeError,
+    prettyTypeErrorNoLoc,
     Warnings,
     initialEnv,
     envWithImports,
