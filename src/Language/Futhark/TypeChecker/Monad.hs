@@ -22,6 +22,7 @@ module Language.Futhark.TypeChecker.Monad
     localEnv,
     TypeError (..),
     prettyTypeError,
+    prettyTypeErrorNoLoc,
     withIndexLink,
     unappliedFunctor,
     unknownVariable,
@@ -99,7 +100,13 @@ prettyTypeError (TypeError loc notes msg) =
   annotate
     (bold <> color Red)
     ("Error at " <> pretty (locText (srclocOf loc)) <> ":")
-    </> unAnnotate msg <> pretty notes
+    </> prettyTypeErrorNoLoc (TypeError loc notes msg)
+
+-- | Prettyprint type error, without location information.  This can
+-- be used for cases where the location is printed in some other way.
+prettyTypeErrorNoLoc :: TypeError -> Doc AnsiStyle
+prettyTypeErrorNoLoc (TypeError _ notes msg) =
+  unAnnotate msg <> pretty notes <> hardline
 
 errorIndexUrl :: Doc a
 errorIndexUrl = version_url <> "error-index.html"

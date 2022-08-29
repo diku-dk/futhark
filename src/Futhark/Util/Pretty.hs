@@ -11,6 +11,7 @@ module Futhark.Util.Pretty
     prettyText,
     prettyTextOneLine,
     docText,
+    docTextForHandle,
 
     -- * Rendering to terminal
     putDoc,
@@ -42,7 +43,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Numeric.Half
 import Prettyprinter
-import Prettyprinter.Render.Terminal (AnsiStyle, Color (..), bgColor, bold, color)
+import Prettyprinter.Render.Terminal (AnsiStyle, Color (..), bgColor, bgColorDull, bold, color, colorDull)
 import qualified Prettyprinter.Render.Terminal
 import qualified Prettyprinter.Render.Text
 import Prettyprinter.Symbols.Ascii
@@ -60,6 +61,18 @@ hPutDoc h d = do
   if colours
     then Prettyprinter.Render.Terminal.hPutDoc h d
     else Prettyprinter.Render.Text.hPutDoc h d
+
+-- | Produce text suitable for printing on the given handle.  This
+-- mostly means stripping any control characters if the handle is not
+-- a terminal.
+docTextForHandle :: Handle -> Doc AnsiStyle -> IO T.Text
+docTextForHandle h d = do
+  colours <- hIsTerminalDevice h
+  let sds = layoutSmart defaultLayoutOptions d
+  pure $
+    if colours
+      then Prettyprinter.Render.Terminal.renderStrict sds
+      else Prettyprinter.Render.Text.renderStrict sds
 
 -- | Prettyprint a value to a 'String', appropriately wrapped.
 prettyString :: Pretty a => a -> String

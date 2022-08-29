@@ -24,7 +24,7 @@ import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (AnsiStyle, Doc, docText, pretty, putDoc)
+import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, annotate, bgColorDull, bold, brackets, color, docTextForHandle, hardline, pretty, putDoc, (<+>))
 import Futhark.Version
 import Language.Futhark
 import qualified Language.Futhark.Interpreter as I
@@ -35,16 +35,19 @@ import NeatInterpolation (text)
 import qualified System.Console.Haskeline as Haskeline
 import System.Directory
 import System.FilePath
+import System.IO (stdout)
 import Text.Read (readMaybe)
 
-banner :: String
+banner :: Doc AnsiStyle
 banner =
-  unlines
-    [ "|// |\\    |   |\\  |\\   /",
-      "|/  | \\   |\\  |\\  |/  /",
-      "|   |  \\  |/  |   |\\  \\",
-      "|   |   \\ |   |   | \\  \\"
+  mconcat . map ((<> hardline) . decorate . pretty) $
+    [ "┃╱╱ ┃╲    ┃   ┃╲  ┃╲   ╱" :: T.Text,
+      "┃╱  ┃ ╲   ┃╲  ┃╲  ┃╱  ╱ ",
+      "┃   ┃  ╲  ┃╱  ┃   ┃╲  ╲ ",
+      "┃   ┃   ╲ ┃   ┃   ┃ ╲  ╲"
     ]
+  where
+    decorate = annotate (bgColorDull Red <> bold <> color White)
 
 -- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
@@ -59,11 +62,11 @@ data StopReason = EOF | Stop | Exit | Load FilePath | Interrupt
 repl :: Maybe FilePath -> IO ()
 repl maybe_prog = do
   when fancyTerminal $ do
-    putStr banner
+    putDoc banner
     putStrLn $ "Version " ++ showVersion version ++ "."
     putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
     putStrLn ""
-    putStrLn "Run :help for a list of commands."
+    putDoc $ "Run" <+> annotate bold ":help" <+> "for a list of commands."
     putStrLn ""
 
   let toploop s = do
@@ -99,8 +102,9 @@ repl maybe_prog = do
     Left prog_err -> do
       noprog_init_state <- liftIO $ newFutharkiState 0 noLoadedProg Nothing
       case noprog_init_state of
-        Left err ->
-          error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
+        Left err -> do
+          err' <- docTextForHandle stdout err
+          error $ "Failed to initialise interpreter state: " <> T.unpack err'
         Right s -> do
           liftIO $ putDoc prog_err
           pure s {futharkiLoaded = maybe_prog}
@@ -200,7 +204,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
 getPrompt :: FutharkiM String
 getPrompt = do
   i <- gets futharkiCount
-  pure $ "[" ++ show i ++ "]> "
+  fmap T.unpack $ liftIO $ docTextForHandle stdout $ annotate bold $ brackets (pretty i) <> "> "
 
 -- The ExceptT part is more of a continuation, really.
 newtype FutharkiM a = FutharkiM {runFutharkiM :: ExceptT StopReason (StateT FutharkiState (Haskeline.InputT IO)) a}
@@ -292,7 +296,7 @@ onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case T.checkExp imports src tenv e of
-    (_, Left err) -> liftIO $ putDoc $ T.prettyTypeError err
+    (_, Left err) -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc err
     (_, Right (tparams, e'))
       | null tparams -> do
           r <- runInterpreter $ I.interpretExp ienv e'
@@ -403,7 +407,7 @@ genTypeCommand f g h e = do
     Right e' -> do
       (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of
-        Left err -> liftIO $ putDoc $ T.prettyTypeError err
+        Left err -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc err
         Right x -> liftIO $ putStrLn $ h x
 
 typeCommand :: Command
@@ -469,8 +473,8 @@ cdCommand dir
 helpCommand :: Command
 helpCommand _ = liftIO $
   forM_ commands $ \(cmd, (_, desc)) -> do
-    T.putStrLn $ ":" <> cmd
-    T.putStrLn $ T.replicate (1 + T.length cmd) "-"
+    putDoc $ annotate bold $ ":" <> pretty cmd <> hardline
+    T.putStrLn $ T.replicate (1 + T.length cmd) "─"
     T.putStr desc
     T.putStrLn ""
     T.putStrLn ""
