@@ -324,7 +324,7 @@ addBoilerplate current titleText content =
             <> H.link
               ! A.href (fromString $ relativise "style.css" current)
               ! A.rel "stylesheet"
-              ! A.type_ "pretty/css"
+              ! A.type_ "text/css"
 
       navigation =
         H.ul ! A.id "navigation" $
