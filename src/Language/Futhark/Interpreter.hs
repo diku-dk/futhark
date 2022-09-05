@@ -132,14 +132,14 @@ getSizes = get
 extSizeEnv :: EvalM Env
 extSizeEnv = i64Env <$> getSizes
 
-prettyRecord :: Pretty a => M.Map Name a -> Doc ann
-prettyRecord m
+prettyRecord :: (a -> Doc ann) -> M.Map Name a -> Doc ann
+prettyRecord p m
   | Just vs <- areTupleFields m =
-      parens $ commasep $ map pretty vs
+      parens $ commasep $ map p vs
   | otherwise =
       braces $ commasep $ map field $ M.toList m
   where
-    field (k, v) = pretty k <+> equals <+> pretty v
+    field (k, v) = pretty k <+> equals <+> p v
 
 valueStructType :: ValueType -> StructType
 valueStructType = first (ConstSize . fromIntegral)
@@ -159,7 +159,7 @@ type ValueShape = Shape Int64
 instance Pretty d => Pretty (Shape d) where
   pretty ShapeLeaf = mempty
   pretty (ShapeDim d s) = brackets (pretty d) <> pretty s
-  pretty (ShapeRecord m) = prettyRecord m
+  pretty (ShapeRecord m) = prettyRecord pretty m
   pretty (ShapeSum cs) =
     mconcat (punctuate " | " cs')
     where
@@ -280,8 +280,8 @@ instance Pretty Value where
             separator = case x of
               ValueArray _ _ -> comma <> line
               _ -> comma <> space
-         in brackets $ cat $ punctuate separator (map pretty elements)
-      pprPrec _ (ValueRecord m) = prettyRecord m
+         in brackets $ align $ cat $ punctuate separator (map pretty elements)
+      pprPrec _ (ValueRecord m) = prettyRecord pretty m
       pprPrec _ ValueFun {} = "#<fun>"
       pprPrec _ ValueAcc {} = "#<acc>"
       pprPrec p (ValueSum _ n vs) =
