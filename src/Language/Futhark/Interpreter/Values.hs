@@ -137,7 +137,7 @@ instance Eq (Value m) where
   _ == _ = False
 
 prettyValueWith :: (PrimValue -> Doc a) -> Value m -> Doc a
-prettyValueWith pprPrim = pprPrec (0 :: Int)
+prettyValueWith pprPrim = pprPrec 0
   where
     pprPrec _ (ValuePrim v) = pprPrim v
     pprPrec _ (ValueArray _ a) =
@@ -150,7 +150,7 @@ prettyValueWith pprPrim = pprPrec (0 :: Int)
     pprPrec _ ValueFun {} = "#<fun>"
     pprPrec _ ValueAcc {} = "#<acc>"
     pprPrec p (ValueSum _ n vs) =
-      parensIf (p > 0) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
+      parensIf (p > (0 :: Int)) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v
 
