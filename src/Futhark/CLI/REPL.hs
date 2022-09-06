@@ -302,7 +302,7 @@ onExp e = do
           r <- runInterpreter $ I.interpretExp ienv e'
           case r of
             Left err -> liftIO $ print err
-            Right v -> liftIO $ putStrLn $ prettyString v
+            Right v -> liftIO $ putDoc $ I.prettyValue v <> hardline
       | otherwise -> liftIO $ do
           T.putStrLn $ "Inferred type of expression: " <> prettyText (typeOf e')
           T.putStrLn $

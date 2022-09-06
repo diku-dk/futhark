@@ -16,6 +16,8 @@ module Futhark.Util.Pretty
     -- * Rendering to terminal
     putDoc,
     hPutDoc,
+    putDocLn,
+    hPutDocLn,
 
     -- * Building blocks
     module Prettyprinter,
@@ -53,6 +55,12 @@ import System.IO (Handle, hIsTerminalDevice, stdout)
 putDoc :: Doc AnsiStyle -> IO ()
 putDoc = hPutDoc stdout
 
+-- | Like 'putDoc', but with a final newline.
+putDocLn :: Doc AnsiStyle -> IO ()
+putDocLn h = do
+  putDoc h
+  putStrLn ""
+
 -- | Print a doc with styling to the given file; stripping colors if
 -- the file does not seem to support such things.
 hPutDoc :: Handle -> Doc AnsiStyle -> IO ()
@@ -61,6 +69,12 @@ hPutDoc h d = do
   if colours
     then Prettyprinter.Render.Terminal.hPutDoc h d
     else Prettyprinter.Render.Text.hPutDoc h d
+
+-- | Like 'hPutDoc', but with a final newline.
+hPutDocLn :: Handle -> Doc AnsiStyle -> IO ()
+hPutDocLn h d = do
+  hPutDoc h d
+  putStrLn ""
 
 -- | Produce text suitable for printing on the given handle.  This
 -- mostly means stripping any control characters if the handle is not

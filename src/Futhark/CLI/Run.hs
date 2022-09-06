@@ -82,7 +82,7 @@ interpret config fp = do
 putValue :: I.Value -> TypeBase () () -> IO ()
 putValue v t
   | I.isEmptyArray v = T.putStrLn $ I.prettyEmptyArray t v
-  | otherwise = putStrLn $ prettyString v
+  | otherwise = T.putStrLn $ I.valueText v
 
 data InterpreterConfig = InterpreterConfig
   { interpreterEntryPoint :: Name,
