@@ -44,7 +44,6 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Trans.State
 import Data.Array hiding (index)
-import qualified Data.Map.Strict as M
 import Data.Monoid
 import qualified Data.Text as T
 import Futhark.Util.Loc
@@ -177,11 +176,6 @@ getTokens = lift $ gets parserLexical
 
 putTokens :: ([L Token], Pos) -> ParserMonad ()
 putTokens l = lift $ modify $ \env -> env {parserLexical = l}
-
-primTypeFromName :: Loc -> Name -> ParserMonad PrimType
-primTypeFromName loc s = maybe boom pure $ M.lookup s namesToPrimTypes
-  where
-    boom = parseErrorAt loc $ Just $ "No type named " <> nameToText s
 
 intNegate :: IntValue -> IntValue
 intNegate (Int8Value v) = Int8Value (-v)
