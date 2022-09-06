@@ -24,7 +24,7 @@ import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, annotate, bgColorDull, bold, brackets, color, docTextForHandle, hardline, pretty, putDoc, (<+>))
+import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, pretty, putDoc, (<+>))
 import Futhark.Version
 import Language.Futhark
 import qualified Language.Futhark.Interpreter as I
@@ -102,9 +102,8 @@ repl maybe_prog = do
     Left prog_err -> do
       noprog_init_state <- liftIO $ newFutharkiState 0 noLoadedProg Nothing
       case noprog_init_state of
-        Left err -> do
-          err' <- docTextForHandle stdout err
-          error $ "Failed to initialise interpreter state: " <> T.unpack err'
+        Left err ->
+          error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
         Right s -> do
           liftIO $ putDoc prog_err
           pure s {futharkiLoaded = maybe_prog}
