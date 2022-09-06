@@ -47,9 +47,9 @@ import Prelude hiding (break, mod)
 prettyRecord :: (a -> Doc ann) -> M.Map Name a -> Doc ann
 prettyRecord p m
   | Just vs <- areTupleFields m =
-      parens $ commasep $ map p vs
+      parens $ align $ vsep $ punctuate comma $ map p vs
   | otherwise =
-      braces $ commasep $ map field $ M.toList m
+      braces $ align $ vsep $ punctuate comma $ map field $ M.toList m
   where
     field (k, v) = pretty k <+> equals <+> p v
 
@@ -143,14 +143,16 @@ prettyValueWith pprPrim = pprPrec (0 :: Int)
     pprPrec _ (ValueArray _ a) =
       let elements = elems a -- [Value]
           separator = case elements of
-            ValueArray _ _ : _ -> comma <> line
-            _ -> comma <> space
-       in brackets $ align $ fillSep $ punctuate separator (map (pprPrec 0) elements)
+            ValueArray _ _ : _ -> vsep
+            _ -> hsep
+       in brackets $ align $ separator $ punctuate comma $ map pprElem elements
     pprPrec _ (ValueRecord m) = prettyRecord (pprPrec 0) m
     pprPrec _ ValueFun {} = "#<fun>"
     pprPrec _ ValueAcc {} = "#<acc>"
     pprPrec p (ValueSum _ n vs) =
       parensIf (p > 0) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
+    pprElem v@ValueArray {} = pprPrec 0 v
+    pprElem v = group $ pprPrec 0 v
 
 -- | Prettyprint value.
 prettyValue :: Value m -> Doc a

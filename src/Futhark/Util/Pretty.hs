@@ -51,6 +51,24 @@ import qualified Prettyprinter.Render.Text
 import Prettyprinter.Symbols.Ascii
 import System.IO (Handle, hIsTerminalDevice, stdout)
 
+-- | Print a doc with styling to the given file; stripping colors if
+-- the file does not seem to support such things.
+hPutDoc :: Handle -> Doc AnsiStyle -> IO ()
+hPutDoc h d = do
+  colours <- hIsTerminalDevice h
+  if colours
+    then Prettyprinter.Render.Terminal.renderIO h (layouter d)
+    else Prettyprinter.Render.Text.hPutDoc h d
+  where
+    layouter =
+      layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
+
+-- | Like 'hPutDoc', but with a final newline.
+hPutDocLn :: Handle -> Doc AnsiStyle -> IO ()
+hPutDocLn h d = do
+  hPutDoc h d
+  putStrLn ""
+
 -- | Like 'hPutDoc', but to stdout.
 putDoc :: Doc AnsiStyle -> IO ()
 putDoc = hPutDoc stdout
@@ -59,21 +77,6 @@ putDoc = hPutDoc stdout
 putDocLn :: Doc AnsiStyle -> IO ()
 putDocLn h = do
   putDoc h
-  putStrLn ""
-
--- | Print a doc with styling to the given file; stripping colors if
--- the file does not seem to support such things.
-hPutDoc :: Handle -> Doc AnsiStyle -> IO ()
-hPutDoc h d = do
-  colours <- hIsTerminalDevice h
-  if colours
-    then Prettyprinter.Render.Terminal.hPutDoc h d
-    else Prettyprinter.Render.Text.hPutDoc h d
-
--- | Like 'hPutDoc', but with a final newline.
-hPutDocLn :: Handle -> Doc AnsiStyle -> IO ()
-hPutDocLn h d = do
-  hPutDoc h d
   putStrLn ""
 
 -- | Produce text suitable for printing on the given handle.  This
