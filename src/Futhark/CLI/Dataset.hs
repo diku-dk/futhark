@@ -26,7 +26,6 @@ import Language.Futhark.Syntax hiding
   ( FloatValue (..),
     IntValue (..),
     PrimValue (..),
-    Value,
     ValueType,
   )
 import System.Exit

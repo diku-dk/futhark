@@ -48,7 +48,6 @@ module Language.Futhark.Syntax
     FloatValue (..),
     PrimValue (..),
     IsPrimValue (..),
-    Value (..),
 
     -- * Abstract syntax tree
     AttrInfo (..),
@@ -101,7 +100,6 @@ where
 
 import Control.Applicative
 import Control.Monad
-import Data.Array
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
@@ -477,15 +475,6 @@ data Diet
     -- not consume.
     Observe
   deriving (Eq, Ord, Show)
-
--- | Simple Futhark values.  Values are fully evaluated and their type
--- is always unambiguous.
-data Value
-  = PrimValue !PrimValue
-  | -- | It is assumed that the array is 0-indexed.  The type
-    -- is the full type.
-    ArrayValue !(Array Int Value) ValueType
-  deriving (Eq, Show)
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.

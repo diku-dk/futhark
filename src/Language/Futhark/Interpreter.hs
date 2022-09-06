@@ -51,10 +51,11 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import qualified Data.Text as T
+import qualified Futhark.Data as V
 import Futhark.Util (chunk, maybeHead, splitFromEnd)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
-import Language.Futhark hiding (Shape, Value, matchDims)
+import Language.Futhark hiding (Shape, matchDims)
 import qualified Language.Futhark as F
 import Language.Futhark.Interpreter.Values hiding (Value)
 import qualified Language.Futhark.Interpreter.Values
@@ -1862,7 +1863,25 @@ interpretImport ctx (fp, prog) = do
 ctxWithImports :: [Env] -> Ctx -> Ctx
 ctxWithImports envs ctx = ctx {ctxEnv = mconcat (reverse envs) <> ctxEnv ctx}
 
-checkEntryArgs :: VName -> [F.Value] -> StructType -> Either T.Text ()
+valueType :: V.Value -> ValueType
+valueType v =
+  let V.ValueType shape pt = V.valueType v
+   in arrayOf mempty (F.Shape (map fromIntegral shape)) (Scalar (Prim (toPrim pt)))
+  where
+    toPrim V.I8 = Signed Int8
+    toPrim V.I16 = Signed Int16
+    toPrim V.I32 = Signed Int32
+    toPrim V.I64 = Signed Int64
+    toPrim V.U8 = Unsigned Int8
+    toPrim V.U16 = Unsigned Int16
+    toPrim V.U32 = Unsigned Int32
+    toPrim V.U64 = Unsigned Int64
+    toPrim V.Bool = Bool
+    toPrim V.F16 = FloatType Float16
+    toPrim V.F32 = FloatType Float32
+    toPrim V.F64 = FloatType Float64
+
+checkEntryArgs :: VName -> [V.Value] -> StructType -> Either T.Text ()
 checkEntryArgs entry args entry_t
   | args_ts == param_ts =
       pure ()
@@ -1883,7 +1902,7 @@ checkEntryArgs entry args entry_t
 
 -- | Execute the named function on the given arguments; may fail
 -- horribly if these are ill-typed.
-interpretFunction :: Ctx -> VName -> [F.Value] -> Either T.Text (F ExtOp Value)
+interpretFunction :: Ctx -> VName -> [V.Value] -> Either T.Text (F ExtOp Value)
 interpretFunction ctx fname vs = do
   ft <- case lookupVar (qualName fname) $ ctxEnv ctx of
     Just (TermValue (Just (T.BoundV _ t)) _) ->
@@ -1893,9 +1912,7 @@ interpretFunction ctx fname vs = do
     _ ->
       Left $ "Unknown function `" <> nameToText (toName fname) <> "`."
 
-  vs' <- case mapM convertValue vs of
-    Just vs' -> Right vs'
-    Nothing -> Left "Invalid input: irregular array."
+  let vs' = map fromDataValue vs
 
   checkEntryArgs fname vs ft
 
@@ -1926,6 +1943,3 @@ interpretFunction ctx fname vs = do
           <+> align (pretty pt)
           </> "Got:     "
           <+> align (pretty vt)
-
-    convertValue (F.PrimValue p) = Just $ ValuePrim p
-    convertValue (F.ArrayValue arr t) = mkArray t =<< mapM convertValue (elems arr)

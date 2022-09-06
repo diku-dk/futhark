@@ -16,14 +16,10 @@ module Language.Futhark.Parser.Monad
     lexer,
     mustBeEmpty,
     arrayFromList,
-    combArrayElements,
     binOp,
     binOpName,
     mustBe,
-    floatNegate,
-    intNegate,
     primNegate,
-    primTypeFromName,
     applyExp,
     patternExp,
     addDocSpec,
@@ -131,19 +127,6 @@ getLinesFromM fetch (GetLine f) = do
 getNoLines :: ReadLineMonad a -> Either SyntaxError a
 getNoLines (Value x) = Right x
 getNoLines (GetLine f) = getNoLines $ f Nothing
-
-combArrayElements :: Value -> [Value] -> Either SyntaxError Value
-combArrayElements = foldM comb
-  where
-    comb x y
-      | valueType x == valueType y = Right x
-      | otherwise =
-          Left . SyntaxError NoLoc . docText $
-            "Elements "
-              <> pretty x
-              <> " and "
-              <> pretty y
-              <> " cannot exist in same array."
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l

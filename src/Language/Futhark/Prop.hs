@@ -17,7 +17,6 @@ module Language.Futhark.Prop
     namesToPrimTypes,
     qualName,
     qualify,
-    valueType,
     primValueType,
     leadingOperator,
     progImports,
@@ -452,11 +451,6 @@ primValueType (SignedValue v) = Signed $ intValueType v
 primValueType (UnsignedValue v) = Unsigned $ intValueType v
 primValueType (FloatValue v) = FloatType $ floatValueType v
 primValueType BoolValue {} = Bool
-
--- | The type of the value.
-valueType :: Value -> ValueType
-valueType (PrimValue bv) = Scalar $ Prim $ primValueType bv
-valueType (ArrayValue _ t) = t
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.

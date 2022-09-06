@@ -9,18 +9,18 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.Map as M
 import Data.Maybe
-import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Compiler
+import Futhark.Data.Reader (readValues)
 import Futhark.Pipeline
 import Futhark.Util (toPOSIX)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (AnsiStyle, Doc, hPutDoc)
 import Language.Futhark
 import qualified Language.Futhark.Interpreter as I
-import Language.Futhark.Parser
 import qualified Language.Futhark.Semantic as T
 import qualified Language.Futhark.TypeChecker as T
 import System.Exit
@@ -45,14 +45,14 @@ interpret config fp = do
     Right env -> pure env
 
   let entry = interpreterEntryPoint config
-  vr <- parseValues "stdin" <$> T.getContents
+  vr <- readValues <$> BS.getContents
 
   inps <-
     case vr of
-      Left (SyntaxError loc err) -> do
-        T.hPutStrLn stderr $ "Input syntax error at " <> T.pack (locStr loc) <> ":\n" <> err
+      Nothing -> do
+        T.hPutStrLn stderr "Incorrectly formatted input data."
         exitFailure
-      Right vs ->
+      Just vs ->
         pure vs
 
   (fname, ret) <-

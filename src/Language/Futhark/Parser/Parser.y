@@ -9,8 +9,6 @@ module Language.Futhark.Parser.Parser
   , declaration
   , modExpression
   , futharkType
-  , anyValue
-  , anyValues
   , parse
   , ReadLineMonad (..)
   , getLinesFromM
@@ -51,8 +49,6 @@ import Language.Futhark.Parser.Monad
 %name expression Exp
 %name modExpression ModExp
 %name declaration Dec
-%name anyValue Value
-%name anyValues CatValues
 
 %tokentype { L Token }
 %error { parseError }
@@ -938,94 +934,3 @@ AttrInfo :: { AttrInfo Name }
 Attrs :: { [AttrInfo Name] }
        : AttrInfo           { [$1] }
        | AttrInfo ',' Attrs { $1 : $3 }
-
-Value :: { Value }
-Value : IntValue { $1 }
-      | FloatValue { $1 }
-      | StringValue { $1 }
-      | BoolValue { $1 }
-      | ArrayValue { $1 }
-
-CatValues :: { [Value] }
-CatValues : Value CatValues { $1 : $2 }
-          |                 { [] }
-
-PrimType :: { PrimType }
-         : id {% let L loc (ID s) = $1 in primTypeFromName loc s }
-
-IntValue :: { Value }
-         : SignedLit { PrimValue (SignedValue (fst $1)) }
-         | '-' SignedLit { PrimValue (SignedValue (intNegate (fst $2))) }
-         | UnsignedLit { PrimValue (UnsignedValue (fst $1)) }
-
-FloatValue :: { Value }
-         : FloatLit     { PrimValue (FloatValue (fst $1)) }
-         | '-' FloatLit { PrimValue (FloatValue (floatNegate (fst $2))) }
-
-StringValue :: { Value }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in
-                           ArrayValue (arrayFromList $ map (PrimValue . UnsignedValue . Int8Value . fromIntegral) $ BS.unpack $ T.encodeUtf8 s) $ Scalar $ Prim $ Signed Int32 }
-
-BoolValue :: { Value }
-BoolValue : true           { PrimValue $ BoolValue True }
-          | false          { PrimValue $ BoolValue False }
-
-SignedLit :: { (IntValue, Loc) }
-          : i8lit   { let L loc (I8LIT num)  = $1 in (Int8Value num, loc) }
-          | i16lit  { let L loc (I16LIT num) = $1 in (Int16Value num, loc) }
-          | i32lit  { let L loc (I32LIT num) = $1 in (Int32Value num, loc) }
-          | i64lit  { let L loc (I64LIT num) = $1 in (Int64Value num, loc) }
-          | intlit  { let L loc (INTLIT num) = $1 in (Int32Value $ fromInteger num, loc) }
-          | charlit { let L loc (CHARLIT char) = $1 in (Int32Value $ fromIntegral $ ord char, loc) }
-
-UnsignedLit :: { (IntValue, Loc) }
-            : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value $ fromIntegral num, pos) }
-            | u16lit { let L pos (U16LIT num) = $1 in (Int16Value $ fromIntegral num, pos) }
-            | u32lit { let L pos (U32LIT num) = $1 in (Int32Value $ fromIntegral num, pos) }
-            | u64lit { let L pos (U64LIT num) = $1 in (Int64Value $ fromIntegral num, pos) }
-
-FloatLit :: { (FloatValue, Loc) }
-         : f16lit { let L loc (F16LIT num) = $1 in (Float16Value num, loc) }
-         | f32lit { let L loc (F32LIT num) = $1 in (Float32Value num, loc) }
-         | f64lit { let L loc (F64LIT num) = $1 in (Float64Value num, loc) }
-         | QualName {% let (qn, loc) = $1 in
-                       case qn of
-                         QualName ["f16"] "inf" -> pure (Float16Value (1/0), loc)
-                         QualName ["f16"] "nan" -> pure (Float16Value (0/0), loc)
-                         QualName ["f32"] "inf" -> pure (Float32Value (1/0), loc)
-                         QualName ["f32"] "nan" -> pure (Float32Value (0/0), loc)
-                         QualName ["f64"] "inf" -> pure (Float64Value (1/0), loc)
-                         QualName ["f64"] "nan" -> pure (Float64Value (0/0), loc)
-                         _ -> parseErrorAt (snd $1) Nothing
-                    }
-         | floatlit { let L loc (FLOATLIT num) = $1 in (Float64Value num, loc) }
-
-ArrayValue :: { Value }
-ArrayValue :  '[' Value ']'
-             {% pure $ ArrayValue (arrayFromList [$2]) $
-                arrayOf Unique (Shape [1]) (valueType $2)
-             }
-           |  '[' Value ',' Values ']'
-             {% case combArrayElements $2 $4 of
-                  Left e -> throwError e
-                  Right v -> pure $ ArrayValue (arrayFromList $ $2:$4) $
-                             arrayOf Unique (Shape [1+fromIntegral (length $4)]) (valueType v)
-             }
-           | id '(' ValueType ')'
-             {% ($1 `mustBe` "empty") >> mustBeEmpty (srcspan $2 $4) $3 >> pure (ArrayValue (listArray (0,-1) []) $3) }
-
-           -- Errors
-           | '[' ']'
-             {% emptyArrayError $1 }
-
-Dim :: { Int64 }
-Dim : intlit { let L _ (INTLIT num) = $1 in fromInteger num }
-
-ValueType :: { ValueType }
-ValueType : '[' Dim ']' ValueType  { arrayOf Nonunique (Shape [$2]) $4 }
-          | '[' Dim ']' PrimType { arrayOf Nonunique (Shape [$2]) (Scalar (Prim $4)) }
-
-Values :: { [Value] }
-Values : Value ',' Values { $1 : $3 }
-       | Value            { [$1] }
-       |                  { [] }

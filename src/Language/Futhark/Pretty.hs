@@ -16,7 +16,6 @@ module Language.Futhark.Pretty
 where
 
 import Control.Monad
-import Data.Array
 import Data.Char (chr)
 import Data.Functor
 import Data.List (intersperse)
@@ -70,13 +69,6 @@ instance Annot NoInfo where
 
 instance Annot Info where
   unAnnot = Just . unInfo
-
-instance Pretty Value where
-  pretty (PrimValue bv) = pretty bv
-  pretty (ArrayValue a t)
-    | [] <- elems a = "empty" <> parens (pretty t)
-    | Array {} <- t = brackets $ commastack $ map pretty $ elems a
-    | otherwise = brackets $ commasep $ map pretty $ elems a
 
 instance Pretty PrimValue where
   pretty (UnsignedValue (Int8Value v)) =

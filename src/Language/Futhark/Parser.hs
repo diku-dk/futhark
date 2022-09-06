@@ -6,8 +6,6 @@ module Language.Futhark.Parser
     parseExp,
     parseModExp,
     parseType,
-    parseValue,
-    parseValues,
     parseDecOrExpIncrM,
     SyntaxError (..),
   )
@@ -49,23 +47,6 @@ parseType ::
   T.Text ->
   Either SyntaxError UncheckedTypeExp
 parseType = parse futharkType
-
--- | Parse any Futhark value from the given 'String', using the 'FilePath'
--- as the source name for error messages.
-parseValue ::
-  FilePath ->
-  T.Text ->
-  Either SyntaxError Value
-parseValue = parse anyValue
-
--- | Parse several Futhark values (separated by anything) from the given
--- 'String', using the 'FilePath' as the source name for error
--- messages.
-parseValues ::
-  FilePath ->
-  T.Text ->
-  Either SyntaxError [Value]
-parseValues = parse anyValues
 
 -- | Parse an Futhark expression incrementally from monadic actions, using the
 -- 'FilePath' as the source name for error messages.
