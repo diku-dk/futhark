@@ -142,11 +142,10 @@ prettyValueWith pprPrim = pprPrec (0 :: Int)
     pprPrec _ (ValuePrim v) = pprPrim v
     pprPrec _ (ValueArray _ a) =
       let elements = elems a -- [Value]
-          (x : _) = elements
-          separator = case x of
-            ValueArray _ _ -> comma <> line
+          separator = case elements of
+            ValueArray _ _ : _ -> comma <> line
             _ -> comma <> space
-       in brackets $ align $ cat $ punctuate separator (map (pprPrec 0) elements)
+       in brackets $ align $ fillSep $ punctuate separator (map (pprPrec 0) elements)
     pprPrec _ (ValueRecord m) = prettyRecord (pprPrec 0) m
     pprPrec _ ValueFun {} = "#<fun>"
     pprPrec _ ValueAcc {} = "#<acc>"
