@@ -132,14 +132,14 @@ instance Pretty Exp where
         where
           pat' = case pat of
             [x] -> pretty x
-            _ -> parens $ commasep $ map pretty pat
+            _ -> parens $ align $ commasep $ map pretty pat
       pprPrec _ (Call v []) = pretty v
       pprPrec i (Call v args) =
         parensIf (i > 0) $ pretty v <+> hsep (map (align . pprPrec 1) args)
       pprPrec _ (Tuple vs) =
         parens $ commasep $ map (align . pretty) vs
       pprPrec _ (StringLit s) = pretty $ show s
-      pprPrec _ (Record m) = braces $ commasep $ map field m
+      pprPrec _ (Record m) = braces $ align $ commasep $ map field m
         where
           field (k, v) = align (pretty k <> equals <> pretty v)
 
