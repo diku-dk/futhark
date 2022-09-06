@@ -18,25 +18,29 @@ module Language.Futhark.Interpreter.Values
     prettyValue,
     valueText,
     fromTuple,
-    mkArray,
     arrayLength,
     isEmptyArray,
     prettyEmptyArray,
     toArray,
     toArray',
     toTuple,
+
+    -- * Conversion
+    fromDataValue,
   )
 where
 
-import Control.Monad (guard)
 import Data.Array
 import Data.List (genericLength)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import qualified Data.Text as T
-import Futhark.Util.Pretty hiding (apply)
-import Language.Futhark hiding (Shape, Value, matchDims)
+import qualified Data.Vector.Storable as SVec
+import qualified Futhark.Data as V
+import Futhark.Util (chunk)
+import Futhark.Util.Pretty
+import Language.Futhark hiding (Shape, matchDims)
 import qualified Language.Futhark.Primitive as P
 import Prelude hiding (break, mod)
 
@@ -199,16 +203,6 @@ toArray' rowshape vs = ValueArray shape (listArray (0, length vs - 1) vs)
   where
     shape = ShapeDim (genericLength vs) rowshape
 
--- | Create an array value; failing if that would result in an
--- irregular array.
-mkArray :: TypeBase Int64 () -> [Value m] -> Maybe (Value m)
-mkArray t [] =
-  pure $ toArray (typeShape mempty t) []
-mkArray _ (v : vs) = do
-  let v_shape = valueShape v
-  guard $ all ((== v_shape) . valueShape) vs
-  pure $ toArray' v_shape $ v : vs
-
 arrayLength :: Integral int => Array Int (Value m) -> int
 arrayLength = fromIntegral . (+ 1) . snd . bounds
 
@@ -218,3 +212,50 @@ toTuple = ValueRecord . M.fromList . zip tupleFieldNames
 fromTuple :: Value m -> Maybe [Value m]
 fromTuple (ValueRecord m) = areTupleFields m
 fromTuple _ = Nothing
+
+fromDataShape :: V.Vector Int -> ValueShape
+fromDataShape = foldr (ShapeDim . fromIntegral) ShapeLeaf . SVec.toList
+
+fromDataValueWith ::
+  SVec.Storable a =>
+  (a -> PrimValue) ->
+  SVec.Vector Int ->
+  SVec.Vector a ->
+  Value m
+fromDataValueWith f shape vector =
+  if SVec.null shape
+    then ValuePrim $ f $ SVec.head vector
+    else
+      toArray (fromDataShape shape)
+        . map (fromDataValueWith f shape' . SVec.fromList)
+        $ chunk (SVec.product shape') (SVec.toList vector)
+  where
+    shape' = SVec.tail shape
+
+-- | Convert a Futhark value in the externally observable data format
+-- to an interpreter value.
+fromDataValue :: V.Value -> Value m
+fromDataValue (V.I8Value shape vector) =
+  fromDataValueWith (SignedValue . Int8Value) shape vector
+fromDataValue (V.I16Value shape vector) =
+  fromDataValueWith (SignedValue . Int16Value) shape vector
+fromDataValue (V.I32Value shape vector) =
+  fromDataValueWith (SignedValue . Int32Value) shape vector
+fromDataValue (V.I64Value shape vector) =
+  fromDataValueWith (SignedValue . Int64Value) shape vector
+fromDataValue (V.U8Value shape vector) =
+  fromDataValueWith (UnsignedValue . Int8Value . fromIntegral) shape vector
+fromDataValue (V.U16Value shape vector) =
+  fromDataValueWith (UnsignedValue . Int16Value . fromIntegral) shape vector
+fromDataValue (V.U32Value shape vector) =
+  fromDataValueWith (UnsignedValue . Int32Value . fromIntegral) shape vector
+fromDataValue (V.U64Value shape vector) =
+  fromDataValueWith (UnsignedValue . Int64Value . fromIntegral) shape vector
+fromDataValue (V.F16Value shape vector) =
+  fromDataValueWith (FloatValue . Float16Value) shape vector
+fromDataValue (V.F32Value shape vector) =
+  fromDataValueWith (FloatValue . Float32Value) shape vector
+fromDataValue (V.F64Value shape vector) =
+  fromDataValueWith (FloatValue . Float64Value) shape vector
+fromDataValue (V.BoolValue shape vector) =
+  fromDataValueWith BoolValue shape vector
