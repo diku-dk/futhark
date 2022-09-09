@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | We generate code for non-segmented/single-segment SegRed using
@@ -53,12 +51,12 @@ where
 import Control.Monad.Except
 import Data.List (genericLength, zip7)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.Error
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (chunks)
 import Futhark.Util.IntegralExp (divUp, quot, rem)

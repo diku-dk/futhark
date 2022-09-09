@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
 -- | A primitive expression is an expression where the non-leaves are
@@ -73,8 +71,8 @@ where
 
 import Control.Category
 import Control.Monad
-import qualified Data.Map as M
-import qualified Data.Set as S
+import Data.Map qualified as M
+import Data.Set qualified as S
 import Data.Traversable
 import Futhark.IR.Prop.Names
 import Futhark.Util.IntegralExp

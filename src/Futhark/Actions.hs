@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | All (almost) compiler pipelines end with an 'Action', which does
 -- something with the result of the pipeline.
 module Futhark.Actions
@@ -30,26 +27,26 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Futhark.Analysis.Alias
 import Futhark.Analysis.CallGraph (buildCallGraph)
-import qualified Futhark.Analysis.Interference as Interference
-import qualified Futhark.Analysis.LastUse as LastUse
-import qualified Futhark.Analysis.MemAlias as MemAlias
+import Futhark.Analysis.Interference qualified as Interference
+import Futhark.Analysis.LastUse qualified as LastUse
+import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.Analysis.Metrics
-import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
-import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
-import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
-import qualified Futhark.CodeGen.Backends.MulticoreISPC as MulticoreISPC
-import qualified Futhark.CodeGen.Backends.MulticoreWASM as MulticoreWASM
-import qualified Futhark.CodeGen.Backends.PyOpenCL as PyOpenCL
-import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
-import qualified Futhark.CodeGen.Backends.SequentialPython as SequentialPy
-import qualified Futhark.CodeGen.Backends.SequentialWASM as SequentialWASM
-import qualified Futhark.CodeGen.ImpGen.GPU as ImpGenGPU
-import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
-import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
+import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
+import Futhark.CodeGen.Backends.COpenCL qualified as COpenCL
+import Futhark.CodeGen.Backends.MulticoreC qualified as MulticoreC
+import Futhark.CodeGen.Backends.MulticoreISPC qualified as MulticoreISPC
+import Futhark.CodeGen.Backends.MulticoreWASM qualified as MulticoreWASM
+import Futhark.CodeGen.Backends.PyOpenCL qualified as PyOpenCL
+import Futhark.CodeGen.Backends.SequentialC qualified as SequentialC
+import Futhark.CodeGen.Backends.SequentialPython qualified as SequentialPy
+import Futhark.CodeGen.Backends.SequentialWASM qualified as SequentialWASM
+import Futhark.CodeGen.ImpGen.GPU qualified as ImpGenGPU
+import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGenMulticore
+import Futhark.CodeGen.ImpGen.Sequential qualified as ImpGenSequential
 import Futhark.Compiler.CLI
 import Futhark.IR
 import Futhark.IR.GPUMem (GPUMem)
@@ -62,7 +59,7 @@ import Futhark.Version (versionString)
 import System.Directory
 import System.Exit
 import System.FilePath
-import qualified System.Info
+import System.Info qualified
 
 -- | Print the result to stdout.
 printAction :: ASTRep rep => Action rep

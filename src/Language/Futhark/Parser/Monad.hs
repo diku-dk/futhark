@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Utility functions and definitions used in the Happy-generated
 -- parser.  They are defined here because the @.y@ file is opaque to
 -- linters and other tools.  In particular, we cannot enable warnings
@@ -45,7 +42,7 @@ import Control.Monad.Except
 import Control.Monad.Trans.State
 import Data.Array hiding (index)
 import Data.Monoid
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (line, line')
 import Language.Futhark.Parser.Lexer

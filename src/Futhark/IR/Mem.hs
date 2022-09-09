@@ -1,8 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -111,33 +106,33 @@ import Control.Monad.State
 import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.List (elemIndex, find)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.PrimExp.Simplify
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR.Aliases
   ( Aliases,
     removeExpAliases,
     removePatAliases,
     removeScopeAliases,
   )
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util
 import Futhark.Util.Pretty (docText, indent, ppTuple', pretty, (<+>), (</>))
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
 type LetDecMem = MemInfo SubExp NoUniqueness MemBind

@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
 -- | This module provides various simple ways to query and manipulate
 -- fundamental Futhark terms, such as types and values.  The intent is to
 -- keep "Futhark.Language.Syntax" simple, and put whatever embellishments
@@ -108,13 +103,13 @@ import Data.Char
 import Data.Foldable
 import Data.List (genericLength, isPrefixOf, sortOn)
 import Data.Loc (Loc (..), posFile)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Util (maxinum)
 import Futhark.Util.Pretty
-import qualified Language.Futhark.Primitive as Primitive
+import Language.Futhark.Primitive qualified as Primitive
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals
 import Language.Futhark.Tuple

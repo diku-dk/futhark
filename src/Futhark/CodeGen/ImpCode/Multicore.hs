@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Multicore imperative code.
 module Futhark.CodeGen.ImpCode.Multicore
   ( Program,
@@ -15,7 +13,7 @@ module Futhark.CodeGen.ImpCode.Multicore
   )
 where
 
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty
 

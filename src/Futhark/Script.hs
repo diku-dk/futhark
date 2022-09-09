@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
 -- | FutharkScript is a (tiny) subset of Futhark used to write small
 -- expressions that are evaluated by server executables.  The @futhark
 -- literate@ command is the main user.
@@ -41,15 +37,15 @@ import Data.Foldable (toList)
 import Data.Functor
 import Data.IORef
 import Data.List (intersperse)
-import qualified Data.Map as M
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Traversable
 import Data.Void
-import qualified Futhark.Data.Parser as V
+import Futhark.Data.Parser qualified as V
 import Futhark.Server
 import Futhark.Server.Values (getValue, putValue)
-import qualified Futhark.Test.Values as V
+import Futhark.Test.Values qualified as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (line, sep, space, (</>))
 import Language.Futhark.Core (Name, nameFromText, nameToText)

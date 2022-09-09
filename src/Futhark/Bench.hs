@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Facilities for handling Futhark benchmark results.  A Futhark
 -- benchmark program is just like a Futhark test program.
 module Futhark.Bench
@@ -20,17 +17,17 @@ where
 
 import Control.Applicative
 import Control.Monad.Except
-import qualified Data.Aeson as JSON
-import qualified Data.Aeson.Key as JSON
-import qualified Data.Aeson.KeyMap as JSON
-import qualified Data.ByteString.Char8 as SBS
-import qualified Data.ByteString.Lazy.Char8 as LBS
-import qualified Data.DList as DL
-import qualified Data.Map as M
+import Data.Aeson qualified as JSON
+import Data.Aeson.Key qualified as JSON
+import Data.Aeson.KeyMap qualified as JSON
+import Data.ByteString.Char8 qualified as SBS
+import Data.ByteString.Lazy.Char8 qualified as LBS
+import Data.DList qualified as DL
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Time.Clock
-import qualified Data.Vector.Unboxed as U
+import Data.Vector.Unboxed qualified as U
 import Futhark.Server
 import Futhark.Test
 import Statistics.Autocorrelation (autocorrelation)

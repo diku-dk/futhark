@@ -1,16 +1,13 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | Partially evaluate all modules away from a source Futhark
 -- program.  This is implemented as a source-to-source transformation.
 module Futhark.Internalise.Defunctorise (transformProg) where
 
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
-import qualified Data.DList as DL
-import qualified Data.Map as M
+import Data.DList qualified as DL
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Semantic (FileModule (..), Imports)

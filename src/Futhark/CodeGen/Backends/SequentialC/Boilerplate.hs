@@ -3,8 +3,8 @@
 -- | Boilerplate for sequential C code.
 module Futhark.CodeGen.Backends.SequentialC.Boilerplate (generateBoilerplate) where
 
-import qualified Futhark.CodeGen.Backends.GenericC as GC
-import qualified Language.C.Quote.OpenCL as C
+import Futhark.CodeGen.Backends.GenericC qualified as GC
+import Language.C.Quote.OpenCL qualified as C
 
 -- | Generate the necessary boilerplate.
 generateBoilerplate :: GC.CompilerM op s ()

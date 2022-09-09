@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Our compilation strategy for 'SegHist' is based around avoiding
@@ -42,13 +40,13 @@ module Futhark.CodeGen.ImpGen.GPU.SegHist (compileSegHist) where
 import Control.Monad.Except
 import Data.List (foldl', genericLength, zip5)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExplicitAllocations ()
 import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)

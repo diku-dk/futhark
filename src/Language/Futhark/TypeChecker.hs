@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | The type checker checks whether the program is type-consistent
 -- and adds type annotations and various other elaborations.  The
 -- program does not need to have any particular properties for the
@@ -25,10 +22,10 @@ import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor (first, second)
 import Data.Either
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.FreshNames hiding (newName)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark

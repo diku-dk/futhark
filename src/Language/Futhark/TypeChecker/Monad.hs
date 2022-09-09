@@ -1,11 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Main monad in which the type checker runs, as well as ancillary
 -- data definitions.
 module Language.Futhark.TypeChecker.Monad
@@ -62,17 +54,17 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
 import Data.List (find, isPrefixOf)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Version as Version
+import Data.Set qualified as S
+import Data.Version qualified as Version
 import Futhark.FreshNames hiding (newName)
-import qualified Futhark.FreshNames
+import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Warnings
-import qualified Paths_futhark
+import Paths_futhark qualified
 import Prelude hiding (mapM, mod)
 
 newtype Note = Note (Doc ())

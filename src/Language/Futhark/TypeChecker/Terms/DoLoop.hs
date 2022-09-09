@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Type inference of @loop@.  This is complicated because of the
 -- uniqueness and size inference, so the implementation is separate
 -- from the main type checker.
@@ -17,9 +13,9 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark

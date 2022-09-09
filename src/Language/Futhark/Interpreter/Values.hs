@@ -1,6 +1,3 @@
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | The value representation used in the interpreter.
 --
 -- Kept simple and free of unnecessary operational details (in
@@ -32,16 +29,16 @@ where
 
 import Data.Array
 import Data.List (genericLength)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
-import qualified Data.Text as T
-import qualified Data.Vector.Storable as SVec
-import qualified Futhark.Data as V
+import Data.Text qualified as T
+import Data.Vector.Storable qualified as SVec
+import Futhark.Data qualified as V
 import Futhark.Util (chunk)
 import Futhark.Util.Pretty
 import Language.Futhark hiding (Shape, matchDims)
-import qualified Language.Futhark.Primitive as P
+import Language.Futhark.Primitive qualified as P
 import Prelude hiding (break, mod)
 
 prettyRecord :: (a -> Doc ann) -> M.Map Name a -> Doc ann

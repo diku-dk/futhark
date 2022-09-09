@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
 -- | This module contains a representation for the index function based on
@@ -41,8 +39,8 @@ import Control.Monad.Writer
 import Data.Function (on, (&))
 import Data.List (sort, sortBy, zip4, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)

@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Match simplification rules.
@@ -9,8 +7,8 @@ import Control.Monad
 import Data.Either
 import Data.List (partition, transpose, unzip4, zip5)
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
 import Futhark.Optimise.Simplify.Rule

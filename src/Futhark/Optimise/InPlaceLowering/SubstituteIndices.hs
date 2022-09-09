@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module exports facilities for transforming array accesses in
@@ -13,7 +12,7 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
 where
 
 import Control.Monad
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases

@@ -2,10 +2,10 @@
 module Futhark.Optimise.MemoryBlockMerging.GreedyColoring (colorGraph, Coloring) where
 
 import Data.Function ((&))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
-import qualified Data.Set as S
-import qualified Futhark.Analysis.Interference as Interference
+import Data.Set qualified as S
+import Futhark.Analysis.Interference qualified as Interference
 
 -- | A map of values to their color, identified by an integer.
 type Coloring a = M.Map a Int

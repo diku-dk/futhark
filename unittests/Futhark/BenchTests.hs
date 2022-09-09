@@ -2,8 +2,8 @@
 
 module Futhark.BenchTests (tests) where
 
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.Bench
 import Test.Tasty
 import Test.Tasty.QuickCheck

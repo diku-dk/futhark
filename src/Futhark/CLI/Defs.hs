@@ -1,11 +1,9 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | @futhark defs@
 module Futhark.CLI.Defs (main) where
 
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Sequence qualified as Seq
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Futhark.Compiler
 import Futhark.Util.Loc
 import Futhark.Util.Options

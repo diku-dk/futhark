@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | @futhark py@
 module Futhark.CLI.Python (main) where
 

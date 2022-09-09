@@ -1,8 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | This module provides facilities for transforming Futhark programs
@@ -34,7 +29,7 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.FreshNames hiding (newName)
 import Futhark.IR.Prop.Names

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | A very simple representation of collections of warnings.
 -- Warnings have a position (so they can be ordered), and their
 -- 'Pretty'-instance produces a human-readable string.

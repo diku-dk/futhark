@@ -1,9 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Type checker building blocks that do not involve unification.
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp,
@@ -32,9 +26,9 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List (find, foldl', sort, unzip4, (\\))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark

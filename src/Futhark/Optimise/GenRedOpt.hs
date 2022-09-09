@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Tries to turn a generalized reduction kernel into
@@ -19,8 +18,8 @@ module Futhark.Optimise.GenRedOpt (optimiseGenRed) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Builder
 import Futhark.IR.GPU

@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | Facilities for determining which names are used in some syntactic
@@ -46,9 +44,9 @@ where
 import Control.Category
 import Control.Monad.State.Strict
 import Data.Foldable
-import qualified Data.IntMap.Strict as IM
-import qualified Data.IntSet as IS
-import qualified Data.Map.Strict as M
+import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
+import Data.Map.Strict qualified as M
 import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Syntax

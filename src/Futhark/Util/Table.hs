@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Basic table building for prettier futhark-test output.
 module Futhark.Util.Table
   ( hPutTable,

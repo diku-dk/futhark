@@ -9,7 +9,7 @@ module Futhark.LSP.State
   )
 where
 
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.Compiler.Program (LoadedProg)
 import Futhark.LSP.PositionMapping (PositionMapping, StaleFile (..))
 import Language.LSP.VFS (VirtualFile)

@@ -1,6 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Compile a 'GPUMem' program to imperative code with kernels.
@@ -17,12 +14,12 @@ where
 import Control.Monad.Except
 import Data.Bifunctor (second)
 import Data.List (foldl')
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU (bytes)
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
-import qualified Futhark.CodeGen.ImpGen
+import Futhark.CodeGen.ImpGen qualified
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.SegHist
 import Futhark.CodeGen.ImpGen.GPU.SegMap
@@ -32,7 +29,7 @@ import Futhark.CodeGen.ImpGen.GPU.Transpose
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Error
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (IntegralExp, divUp, quot, rem)
 import Prelude hiding (quot, rem)

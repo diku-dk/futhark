@@ -1,6 +1,3 @@
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.AD.Rev.Loop (diffLoop, stripmineStms) where
@@ -8,10 +5,10 @@ module Futhark.AD.Rev.Loop (diffLoop, stripmineStms) where
 import Control.Monad
 import Data.Foldable (toList)
 import Data.List (nub, (\\))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.AD.Rev.Monad
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.Aliases (consumedInStms)

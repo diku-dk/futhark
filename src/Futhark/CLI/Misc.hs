@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Various small subcommands that are too simple to deserve their own file.
 module Futhark.CLI.Misc
   ( mainImports,
@@ -12,11 +10,11 @@ module Futhark.CLI.Misc
 where
 
 import Control.Monad.State
-import qualified Data.ByteString.Lazy as BS
+import Data.ByteString.Lazy qualified as BS
 import Data.Function (on)
 import Data.List (isInfixOf, nubBy)
 import Data.Loc (L (..), startPos)
-import qualified Data.Text.IO as T
+import Data.Text.IO qualified as T
 import Futhark.Compiler
 import Futhark.Test
 import Futhark.Util (hashText, interactWithFileSafely)

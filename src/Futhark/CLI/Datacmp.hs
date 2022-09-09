@@ -1,10 +1,8 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | @futhark datacmp@
 module Futhark.CLI.Datacmp (main) where
 
 import Control.Exception
-import qualified Data.ByteString.Lazy.Char8 as BS
+import Data.ByteString.Lazy.Char8 qualified as BS
 import Futhark.Data.Compare
 import Futhark.Data.Reader
 import Futhark.Util.Options

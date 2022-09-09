@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Type checking of patterns.
 module Language.Futhark.TypeChecker.Terms.Pat
   ( binding,
@@ -19,9 +15,9 @@ import Control.Monad.State
 import Data.Bitraversable
 import Data.Either
 import Data.List (find, isPrefixOf, sort)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)

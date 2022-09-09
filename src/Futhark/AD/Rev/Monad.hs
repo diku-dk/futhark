@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- Naming scheme:
@@ -61,9 +56,9 @@ import Control.Monad
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
 import Data.List (foldl')
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.Aliases (consumedInStms)

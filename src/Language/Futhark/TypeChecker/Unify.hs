@@ -1,9 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | Implementation of unification and other core type system building
 -- blocks.
 module Language.Futhark.TypeChecker.Unify
@@ -41,10 +35,10 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.List (foldl', intersect)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)

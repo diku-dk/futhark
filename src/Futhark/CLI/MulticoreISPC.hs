@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | @futhark multicore@
 module Futhark.CLI.MulticoreISPC (main) where
 

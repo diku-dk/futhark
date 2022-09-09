@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 
 -- | Definition of the tokens used in the lexer.
@@ -24,14 +22,14 @@ module Language.Futhark.Parser.Lexer.Tokens
   )
 where
 
-import qualified Data.ByteString.Lazy as BS
+import Data.ByteString.Lazy qualified as BS
 import Data.Char (digitToInt, ord)
 import Data.Either
 import Data.List (find, foldl')
 import Data.Loc (Loc (..), Pos (..))
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.Read as T
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
+import Data.Text.Read qualified as T
 import Language.Futhark.Core
   ( Int16,
     Int32,

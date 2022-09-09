@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Do various kernel optimisations - mostly related to coalescing.
@@ -8,7 +7,7 @@ import Control.Arrow (first)
 import Control.Monad.State.Strict
 import Data.Foldable
 import Data.List (elemIndex, isPrefixOf, sort)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR
 import Futhark.IR.GPU hiding

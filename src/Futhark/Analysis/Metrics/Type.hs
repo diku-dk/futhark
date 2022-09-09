@@ -3,9 +3,9 @@
 -- test modules.
 module Futhark.Analysis.Metrics.Type (AstMetrics (..)) where
 
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 
 -- | AST metrics are simply a collection from identifiable node names
 -- to the number of times that node appears.

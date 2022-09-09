@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | Abstract Syntax Tree metrics.  This is used in the @futhark test@
 -- program, for the @structure@ stanzas.
 module Futhark.Analysis.Metrics
@@ -22,9 +17,9 @@ where
 
 import Control.Monad.Writer
 import Data.List (tails)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.IR
 

@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Variation of "Futhark.CodeGen.ImpCode" that contains the notion
 -- of a kernel invocation.
 module Futhark.CodeGen.ImpCode.GPU

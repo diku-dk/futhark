@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Opaque type for an operations log that provides fast O(1)
 -- appends.
 module Futhark.Util.Log
@@ -12,11 +8,11 @@ module Futhark.Util.Log
   )
 where
 
-import qualified Control.Monad.RWS.Lazy
-import qualified Control.Monad.RWS.Strict
+import Control.Monad.RWS.Lazy qualified
+import Control.Monad.RWS.Strict qualified
 import Control.Monad.Writer
-import qualified Data.DList as DL
-import qualified Data.Text as T
+import Data.DList qualified as DL
+import Data.Text qualified as T
 
 -- | An efficiently catenable sequence of log entries.
 newtype Log = Log {unLog :: DL.DList T.Text}

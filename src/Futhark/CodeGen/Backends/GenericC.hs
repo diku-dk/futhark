@@ -1,9 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | C code generation for whole programs, built on
 -- "Futhark.CodeGen.Backends.GenericC.Monad".  Most of this module is
@@ -24,11 +19,11 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.DList as DL
+import Data.DList qualified as DL
 import Data.Loc
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Futhark.CodeGen.Backends.GenericC.Code
 import Futhark.CodeGen.Backends.GenericC.EntryPoints
@@ -39,10 +34,10 @@ import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, halfH, lockH, timingH, utilH)
-import qualified Futhark.Manifest as Manifest
+import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
 defCall :: CallCompiler op s
