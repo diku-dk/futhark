@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-overlapping-patterns -Wno-incomplete-patterns -Wno-incomplete-uni-patterns -Wno-incomplete-record-updates #-}
 
@@ -14,7 +11,7 @@ import Control.Monad
 import Data.List (find, foldl', isSuffixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases

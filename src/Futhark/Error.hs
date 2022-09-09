@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Futhark error definitions.
 module Futhark.Error
   ( CompilerError (..),
@@ -18,7 +16,7 @@ where
 
 import Control.Exception
 import Control.Monad.Error.Class
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Prettyprinter.Render.Text (renderStrict)
 

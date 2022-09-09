@@ -1,20 +1,17 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | @futhark pkg@
 module Futhark.CLI.Pkg (main) where
 
-import qualified Codec.Archive.Zip as Zip
+import Codec.Archive.Zip qualified as Zip
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.ByteString.Lazy as LBS
+import Data.ByteString.Lazy qualified as LBS
 import Data.List (intercalate, isPrefixOf)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Monoid
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Futhark.Pkg.Info
 import Futhark.Pkg.Solve
 import Futhark.Pkg.Types
@@ -25,7 +22,7 @@ import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
-import qualified System.FilePath.Posix as Posix
+import System.FilePath.Posix qualified as Posix
 import System.IO
 import Prelude
 

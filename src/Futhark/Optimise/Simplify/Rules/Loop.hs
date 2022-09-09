@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Loop simplification rules.
 module Futhark.Optimise.Simplify.Rules.Loop (loopRules) where
 
@@ -9,8 +7,8 @@ import Data.List (partition)
 import Data.Maybe
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases

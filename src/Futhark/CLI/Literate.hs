@@ -1,29 +1,25 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | @futhark literate@
 module Futhark.CLI.Literate (main) where
 
-import qualified Codec.BMP as BMP
+import Codec.BMP qualified as BMP
 import Control.Monad.Except
 import Control.Monad.State hiding (State)
 import Data.Bifunctor (first, second)
 import Data.Bits
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as LBS
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as LBS
 import Data.Char
 import Data.Functor
 import Data.Int (Int64)
 import Data.List (foldl', transpose)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
-import qualified Data.Vector.Storable as SVec
-import qualified Data.Vector.Storable.ByteString as SVec
+import Data.Set qualified as S
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
+import Data.Text.IO qualified as T
+import Data.Vector.Storable qualified as SVec
+import Data.Vector.Storable.ByteString qualified as SVec
 import Data.Void
 import Data.Word (Word32, Word8)
 import Futhark.Data
@@ -41,7 +37,7 @@ import Futhark.Util
   )
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 import Futhark.Util.ProgressBar
 import System.Directory
   ( copyFile,

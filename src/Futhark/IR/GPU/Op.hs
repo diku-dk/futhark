@@ -1,9 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -26,18 +20,18 @@ module Futhark.IR.GPU.Op
 where
 
 import Control.Monad
-import qualified Data.Sequence as SQ
-import qualified Data.Text as T
-import qualified Futhark.Analysis.Alias as Alias
+import Data.Sequence qualified as SQ
+import Data.Text qualified as T
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, removeBodyAliases)
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -48,7 +42,7 @@ import Futhark.Util.Pretty
     pretty,
     (<+>),
   )
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 
 -- | At which level the *body* of a t'SegOp' executes.
 data SegLevel

@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TupleSections #-}
-
 -- |
 --
 -- Functions for generic traversals across Futhark syntax trees.  The
@@ -29,8 +26,8 @@ module Language.Futhark.Traversals
   )
 where
 
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Set as S
+import Data.List.NonEmpty qualified as NE
+import Data.Set qualified as S
 import Language.Futhark.Syntax
 
 -- | Express a monad mapping operation on a syntax node.  Each element

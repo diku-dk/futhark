@@ -48,22 +48,22 @@ data IxFun num
 
 instance Pretty num => Pretty (IxFun num) where
   pretty (Direct dims) =
-    pretty "Direct" <> parens (commasep $ map pretty dims)
+    "Direct" <> parens (commasep $ map pretty dims)
   pretty (Permute fun perm) = pretty fun <> pretty perm
   pretty (Index fun is) = pretty fun <> pretty is
   pretty (FlatIndex fun is) = pretty fun <> pretty is
   pretty (Reshape fun oldshape) =
     pretty fun
-      <> pretty "->reshape"
+      <> "->reshape"
       <> parens (pretty oldshape)
   pretty (Coerce fun oldshape) =
     pretty fun
-      <> pretty "->coerce"
+      <> "->coerce"
       <> parens (pretty oldshape)
   pretty (OffsetIndex fun i) =
-    pretty fun <> pretty "->offset_index" <> parens (pretty i)
+    pretty fun <> "->offset_index" <> parens (pretty i)
   pretty (Rebase new_base fun) =
-    pretty "rebase(" <> pretty new_base <> pretty ", " <> pretty fun <> pretty ")"
+    "rebase(" <> pretty new_base <> ", " <> pretty fun <> ")"
 
 iota :: Shape num -> IxFun num
 iota = Direct

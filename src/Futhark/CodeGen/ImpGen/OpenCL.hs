@@ -6,7 +6,7 @@ module Futhark.CodeGen.ImpGen.OpenCL
 where
 
 import Data.Bifunctor (second)
-import qualified Futhark.CodeGen.ImpCode.OpenCL as OpenCL
+import Futhark.CodeGen.ImpCode.OpenCL qualified as OpenCL
 import Futhark.CodeGen.ImpGen.GPU
 import Futhark.CodeGen.ImpGen.GPU.ToOpenCL
 import Futhark.IR.GPUMem

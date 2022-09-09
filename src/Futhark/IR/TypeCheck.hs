@@ -1,13 +1,5 @@
 {-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The type checker checks whether the program is type-consistent.
@@ -57,10 +49,10 @@ import Control.Monad.State.Strict
 import Control.Parallel.Strategies
 import Data.List (find, intercalate, isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
 import Futhark.IR.Aliases hiding (lookupAliases)

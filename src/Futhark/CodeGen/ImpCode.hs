@@ -1,7 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | ImpCode is an imperative intermediate language used as a stepping
 -- stone in code generation.  The functional core IR
@@ -99,9 +96,9 @@ module Futhark.CodeGen.ImpCode
 where
 
 import Data.List (intersperse)
-import qualified Data.Map as M
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Traversable
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program. The C code is strictly
 -- sequential, but can handle the full Futhark language.
@@ -13,11 +11,11 @@ module Futhark.CodeGen.Backends.SequentialC
 where
 
 import Control.Monad
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.SequentialC.Boilerplate
-import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
-import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
+import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
+import Futhark.CodeGen.ImpGen.Sequential qualified as ImpGen
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 

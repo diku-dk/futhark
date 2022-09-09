@@ -55,19 +55,19 @@ where
 
 import Control.Monad
 import Control.Monad.Trans.Class
-import qualified Control.Monad.Trans.Reader as R
+import Control.Monad.Trans.Reader qualified as R
 import Control.Monad.Trans.State.Strict ()
 import Control.Monad.Trans.State.Strict hiding (State)
 import Data.Bifunctor (first, second)
 import Data.Foldable
-import qualified Data.IntMap.Strict as IM
-import qualified Data.IntSet as IS
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
+import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
-import qualified Data.Sequence as SQ
+import Data.Sequence qualified as SQ
 import Data.Set (Set, (\\))
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Error
 import Futhark.IR.GPU
 import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
@@ -79,7 +79,7 @@ import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
     Routing (..),
     Vertex (..),
   )
-import qualified Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph as MG
+import Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph qualified as MG
 
 --------------------------------------------------------------------------------
 --                              MIGRATION TABLES                              --

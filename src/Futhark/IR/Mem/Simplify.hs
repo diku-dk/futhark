@@ -1,7 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.IR.Mem.Simplify
@@ -14,14 +10,14 @@ where
 
 import Control.Monad
 import Data.List (find)
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR.Mem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Prop.Aliases (AliasedOp)
-import qualified Futhark.Optimise.Simplify as Simplify
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Optimise.Simplify qualified as Simplify
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules

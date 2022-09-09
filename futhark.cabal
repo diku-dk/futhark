@@ -88,7 +88,8 @@ source-repository head
 
 common common
   ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
-  default-language: Haskell2010
+  default-language: GHC2021
+  default-extensions: OverloadedStrings
 
 library
   import: common

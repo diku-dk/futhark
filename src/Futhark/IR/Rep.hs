@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The core Futhark AST is parameterised by a @rep@ type parameter,
@@ -9,7 +8,7 @@ module Futhark.IR.Rep
   )
 where
 
-import qualified Data.Kind
+import Data.Kind qualified
 import Futhark.IR.Prop.Types
 import Futhark.IR.RetType
 import Futhark.IR.Syntax.Core (DeclExtType, DeclType, ExtType, Type)

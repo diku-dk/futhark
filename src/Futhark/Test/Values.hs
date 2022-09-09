@@ -1,6 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | This module provides an efficient value representation as well as
@@ -16,8 +14,8 @@ module Futhark.Test.Values
   )
 where
 
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Data.Traversable
 import Futhark.Data
 import Futhark.Data.Compare

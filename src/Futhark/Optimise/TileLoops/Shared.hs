@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 module Futhark.Optimise.TileLoops.Shared
   ( TileM,
     Env,
@@ -22,10 +20,10 @@ where
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (foldl', zip4)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.IR.GPU
-import qualified Futhark.IR.Mem.IxFun as IxFun
-import qualified Futhark.IR.SeqMem as ExpMem
+import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.SeqMem qualified as ExpMem
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename

@@ -1,9 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Code generation for standalone executables.
 module Futhark.CodeGen.Backends.GenericC.CLI
@@ -12,8 +7,8 @@ module Futhark.CodeGen.Backends.GenericC.CLI
 where
 
 import Data.List (unzip5)
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
@@ -25,8 +20,8 @@ import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
 import Futhark.Manifest
 import Futhark.Util.Pretty (prettyString)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 genericOptions :: [Option]
 genericOptions =

@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 module Futhark.CodeGen.Backends.COpenCL.Boilerplate
@@ -20,10 +18,10 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 where
 
 import Control.Monad.State
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
@@ -31,8 +29,8 @@ import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.RTS.C (freeListH, openclH)
 import Futhark.Util (chunk, zEncodeString)
 import Futhark.Util.Pretty (prettyTextOneLine)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes

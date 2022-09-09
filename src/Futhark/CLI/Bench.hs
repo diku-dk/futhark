@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | @futhark bench@
 module Futhark.CLI.Bench (main) where
 
@@ -8,19 +5,19 @@ import Control.Arrow (first)
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except hiding (throwError)
-import qualified Data.ByteString.Char8 as SBS
-import qualified Data.ByteString.Lazy.Char8 as LBS
+import Data.ByteString.Char8 qualified as SBS
+import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either
 import Data.Function ((&))
 import Data.IORef
 import Data.List (sortBy)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Ord
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
-import qualified Data.Vector.Unboxed as U
+import Data.Vector.Unboxed qualified as U
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test

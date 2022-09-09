@@ -1,10 +1,4 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.ExtractKernels.Distribution
@@ -49,7 +43,7 @@ import Control.Monad.Trans.Maybe
 import Data.Bifunctor (second)
 import Data.Foldable
 import Data.List (elemIndex, sortOn)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR
 import Futhark.IR.SegOp

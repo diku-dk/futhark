@@ -1,7 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Conversion of a monomorphic, first-order, defunctorised source
@@ -11,10 +8,10 @@ module Futhark.Internalise.Exps (transformProg) where
 import Control.Monad.Reader
 import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings

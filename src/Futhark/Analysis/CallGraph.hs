@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | This module exports functionality for generating a call graph of
 -- an Futhark program.
 module Futhark.Analysis.CallGraph
@@ -15,9 +13,9 @@ where
 
 import Control.Monad.Writer.Strict
 import Data.List (foldl')
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.SOACS
 import Futhark.Util.Pretty
 

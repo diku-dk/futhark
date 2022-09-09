@@ -1,6 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Extraction of parallelism from a SOACs program.  This generates
@@ -15,7 +12,7 @@ import Data.Bitraversable
 import Futhark.Analysis.Rephrase
 import Futhark.IR
 import Futhark.IR.MC
-import qualified Futhark.IR.MC as MC
+import Futhark.IR.MC qualified as MC
 import Futhark.IR.SOACS hiding
   ( Body,
     Exp,
@@ -24,7 +21,7 @@ import Futhark.IR.SOACS hiding
     Pat,
     Stm,
   )
-import qualified Futhark.IR.SOACS as SOACS
+import Futhark.IR.SOACS qualified as SOACS
 import Futhark.Pass
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.ToGPU (injectSOACS)

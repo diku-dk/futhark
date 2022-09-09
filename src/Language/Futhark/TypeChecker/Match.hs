@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Checking for missing cases in a match expression.  Based on
 -- "Warnings for pattern matching" by Luc Maranget.  We only detect
 -- inexhaustiveness here - ideally, we would also like to check for
@@ -10,7 +8,7 @@ module Language.Futhark.TypeChecker.Match
   )
 where
 
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Util (maybeHead, nubOrd)
 import Futhark.Util.Pretty hiding (group, space)

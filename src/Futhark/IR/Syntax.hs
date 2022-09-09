@@ -1,8 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | = Definition of the Futhark core language IR
@@ -170,8 +166,8 @@ where
 import Control.Category
 import Data.Foldable
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
+import Data.Sequence qualified as Seq
+import Data.Text qualified as T
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core

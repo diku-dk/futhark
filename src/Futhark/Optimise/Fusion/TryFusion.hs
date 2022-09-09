@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Facilities for fusing two SOACs.
@@ -20,13 +18,13 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (find, tails, (\\))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.HORep.MapNest as MapNest
-import qualified Futhark.Analysis.HORep.SOAC as SOAC
+import Futhark.Analysis.HORep.MapNest qualified as MapNest
+import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
-import qualified Futhark.IR.SOACS as Futhark
+import Futhark.IR.SOACS qualified as Futhark
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Transform.Rename (renameLambda)

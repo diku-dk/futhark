@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | Lambda-lifting of typed, monomorphic Futhark programs without
 -- modules.  After this pass, the program will no longer contain any
 -- 'LetFun's or 'Lambda's.
@@ -12,9 +8,9 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Foldable
 import Data.List (partition)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
 import Language.Futhark

@@ -1,6 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- |
@@ -15,7 +12,7 @@ module Futhark.Transform.Substitute
 where
 
 import Control.Monad.Identity
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Prop.Names
 import Futhark.IR.Prop.Scope

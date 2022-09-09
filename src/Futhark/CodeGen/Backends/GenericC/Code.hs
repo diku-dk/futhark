@@ -1,9 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Translation of ImpCode Exp and Code to C.
 module Futhark.CodeGen.Backends.GenericC.Code
@@ -19,13 +14,13 @@ where
 import Control.Monad.Reader
 import Data.Loc
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 errorMsgString :: ErrorMsg Exp -> CompilerM op s (String, [C.Exp])
 errorMsgString (ErrorMsg parts) = do

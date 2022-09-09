@@ -1,11 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Kernel extraction.
@@ -178,7 +171,7 @@ import Futhark.Pass.ExtractKernels.Intragroup
 import Futhark.Pass.ExtractKernels.StreamKernel
 import Futhark.Pass.ExtractKernels.ToGPU
 import Futhark.Tools
-import qualified Futhark.Transform.FirstOrderTransform as FOT
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Util.Log
 import Prelude hiding (log)

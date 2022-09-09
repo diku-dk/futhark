@@ -13,7 +13,7 @@ module Futhark.CodeGen.RTS.Python
 where
 
 import Data.FileEmbed
-import qualified Data.Text as T
+import Data.Text qualified as T
 
 -- | @rts/python/memory.py@
 memoryPy :: T.Text

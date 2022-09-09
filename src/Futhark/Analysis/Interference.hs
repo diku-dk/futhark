@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Interference analysis for Futhark programs.
@@ -10,13 +8,13 @@ import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.Map (Map)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Set (Set)
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Analysis.LastUse (LastUseMap)
-import qualified Futhark.Analysis.LastUse as LastUse
-import qualified Futhark.Analysis.MemAlias as MemAlias
+import Futhark.Analysis.LastUse qualified as LastUse
+import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.IR.GPUMem
 import Futhark.Util (invertMap)
 

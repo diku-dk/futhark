@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Futhark.CodeGen.ImpGen.Multicore.SegScan
   ( compileSegScan,
   )
@@ -7,7 +5,7 @@ where
 
 import Control.Monad
 import Data.List (zip4)
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem

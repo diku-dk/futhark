@@ -1,6 +1,6 @@
 module Futhark.AD.DerivativesTests (tests) where
 
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core (nameFromString)

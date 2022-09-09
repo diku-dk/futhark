@@ -1,6 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 
 -- | Definitions of primitive types, the values that inhabit these
 -- types, and operations on these values.  A primitive value can also
@@ -114,8 +112,8 @@ module Language.Futhark.Primitive
 where
 
 import Control.Category
-import qualified Data.Binary.Get as G
-import qualified Data.Binary.Put as P
+import Data.Binary.Get qualified as G
+import Data.Binary.Put qualified as P
 import Data.Bits
   ( complement,
     countLeadingZeros,
@@ -129,7 +127,7 @@ import Data.Bits
   )
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CUShort (..))
 import Futhark.Util

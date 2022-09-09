@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
 -- | Perform horizontal and vertical fusion of SOACs.  See the paper
 -- /A T2 Graph-Reduction Approach To Fusion/ for the basic idea (some
 -- extensions discussed in /Design and GPGPU Performance of Futhark’s
@@ -9,20 +6,20 @@ module Futhark.Optimise.Fusion (fuseSOACs) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Graph.Inductive.Graph as G
-import qualified Data.Graph.Inductive.Query.DFS as Q
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
+import Data.Graph.Inductive.Graph qualified as G
+import Data.Graph.Inductive.Query.DFS qualified as Q
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.HORep.SOAC as H
+import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
-import qualified Futhark.IR.SOACS as Futhark
+import Futhark.IR.SOACS qualified as Futhark
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
-import qualified Futhark.Optimise.Fusion.TryFusion as TF
+import Futhark.Optimise.Fusion.TryFusion qualified as TF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute

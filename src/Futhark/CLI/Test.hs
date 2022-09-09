@@ -1,6 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 -- | @futhark test@
 module Futhark.CLI.Test (main) where
@@ -10,13 +8,13 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except hiding (throwError)
-import qualified Control.Monad.Except as E
-import qualified Data.ByteString as SBS
-import qualified Data.ByteString.Lazy as LBS
+import Control.Monad.Except qualified as E
+import Data.ByteString qualified as SBS
+import Data.ByteString.Lazy qualified as LBS
 import Data.List (delete, partition)
-import qualified Data.Map.Strict as M
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
+import Data.Map.Strict qualified as M
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
@@ -25,7 +23,7 @@ import Futhark.Util.Options
 import Futhark.Util.Pretty (annotate, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
 import System.Console.ANSI (clearFromCursorToScreenEnd, clearLine, cursorUpLine)
-import qualified System.Console.Terminal.Size as Terminal
+import System.Console.Terminal.Size qualified as Terminal
 import System.Environment
 import System.Exit
 import System.FilePath

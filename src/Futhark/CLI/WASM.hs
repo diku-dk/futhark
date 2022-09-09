@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | @futhark wasm@
 module Futhark.CLI.WASM (main) where
 

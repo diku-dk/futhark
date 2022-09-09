@@ -1,30 +1,28 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RankNTypes #-}
-
 -- | Futhark Compiler Driver
 module Futhark.CLI.Dev (main) where
 
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State
+import Data.Kind qualified
 import Data.List (intersperse)
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Futhark.Actions
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
 import Futhark.IR (ASTRep, Op, Prog, prettyString)
-import qualified Futhark.IR.GPU as GPU
-import qualified Futhark.IR.GPUMem as GPUMem
-import qualified Futhark.IR.MC as MC
-import qualified Futhark.IR.MCMem as MCMem
+import Futhark.IR.GPU qualified as GPU
+import Futhark.IR.GPUMem qualified as GPUMem
+import Futhark.IR.MC qualified as MC
+import Futhark.IR.MCMem qualified as MCMem
 import Futhark.IR.Parse
 import Futhark.IR.Prop.Aliases (CanBeAliased)
-import qualified Futhark.IR.SOACS as SOACS
-import qualified Futhark.IR.Seq as Seq
-import qualified Futhark.IR.SeqMem as SeqMem
+import Futhark.IR.SOACS qualified as SOACS
+import Futhark.IR.Seq qualified as Seq
+import Futhark.IR.SeqMem qualified as SeqMem
 import Futhark.IR.TypeCheck (Checkable, checkProg)
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
@@ -36,7 +34,7 @@ import Futhark.Optimise.Fusion
 import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
-import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
@@ -44,8 +42,8 @@ import Futhark.Optimise.Unstream
 import Futhark.Pass
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
-import qualified Futhark.Pass.ExplicitAllocations.GPU as GPU
-import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
+import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
+import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
@@ -54,7 +52,7 @@ import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.Util.Log
 import Futhark.Util.Options
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 import Language.Futhark.Core (locStr, nameFromString)
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import System.Exit
@@ -151,7 +149,7 @@ data UntypedAction
   | MCMemAction (BackendAction MCMem.MCMem)
   | SeqMemAction (BackendAction SeqMem.SeqMem)
   | PolyAction
-      ( forall rep.
+      ( forall (rep :: Data.Kind.Type).
         ( ASTRep rep,
           (CanBeAliased (Op rep)),
           (OpMetrics (Op rep))

@@ -1,10 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
@@ -48,18 +41,18 @@ import Data.Bifunctor (first)
 import Data.Either (partitionEithers)
 import Data.Foldable (toList)
 import Data.List (foldl', transpose, zip4)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Analysis.SymbolTable (IndexOp)
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Mem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep (mkWiseBody)
 import Futhark.Pass
 import Futhark.Tools

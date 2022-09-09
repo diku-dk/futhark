@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Generation of kernels with group-level bodies.
@@ -19,16 +17,16 @@ where
 import Control.Monad.Except
 import Data.Bifunctor
 import Data.List (partition, zip4)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Data.Set qualified as S
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.Construct (fullSliceNum)
 import Futhark.Error
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM, takeLast)

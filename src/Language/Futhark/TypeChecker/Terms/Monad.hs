@@ -1,10 +1,3 @@
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | Facilities for type-checking terms.  Factored out of
 -- "Language.Futhark.TypeChecker.Terms" to prevent the module from
 -- being gigantic.
@@ -92,16 +85,16 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (isAscii)
 import Data.List (find, isPrefixOf, sort)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic (includeToFilePath)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
-import qualified Language.Futhark.TypeChecker.Monad as TypeM
+import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import Prelude hiding (mod)

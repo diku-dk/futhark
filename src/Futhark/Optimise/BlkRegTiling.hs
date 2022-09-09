@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Perform a restricted form of block+register tiling corresponding to
@@ -20,13 +19,13 @@
 module Futhark.Optimise.BlkRegTiling (mmBlkRegTiling, doRegTiling3D) where
 
 import Control.Monad.Reader
-import qualified Data.List as L
+import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Sequence as Seq
+import Data.Sequence qualified as Seq
 import Futhark.IR.GPU
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools

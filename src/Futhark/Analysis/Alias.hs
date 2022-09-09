@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Alias analysis of a full Futhark program.  Takes as input a
@@ -22,7 +21,7 @@ module Futhark.Analysis.Alias
 where
 
 import Data.List (foldl')
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.IR.Aliases
 
 -- | Perform alias analysis on a Futhark program.

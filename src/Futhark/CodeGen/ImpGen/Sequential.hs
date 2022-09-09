@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Compile Futhark to sequential imperative code.
@@ -8,8 +7,8 @@ module Futhark.CodeGen.ImpGen.Sequential
   )
 where
 
-import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
-import qualified Futhark.CodeGen.ImpGen as ImpGen
+import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
+import Futhark.CodeGen.ImpGen qualified as ImpGen
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 

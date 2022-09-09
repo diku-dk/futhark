@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Parser for the Futhark core language.
 module Futhark.IR.Parse
   ( parseSOACS,
@@ -18,29 +14,29 @@ import Data.Char (isAlpha)
 import Data.Functor
 import Data.List (zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Void
 import Futhark.Analysis.PrimExp.Parse
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
-import qualified Futhark.IR.GPU.Op as GPU
+import Futhark.IR.GPU.Op qualified as GPU
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MC (MC)
-import qualified Futhark.IR.MC.Op as MC
+import Futhark.IR.MC.Op qualified as MC
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Mem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SOACS (SOACS)
-import qualified Futhark.IR.SOACS.SOAC as SOAC
-import qualified Futhark.IR.SegOp as SegOp
+import Futhark.IR.SOACS.SOAC qualified as SOAC
+import Futhark.IR.SegOp qualified as SegOp
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
 import Language.Futhark.Primitive.Parse
 import Text.Megaparsec
 import Text.Megaparsec.Char hiding (space)
-import qualified Text.Megaparsec.Char.Lexer as L
+import Text.Megaparsec.Char.Lexer qualified as L
 
 type Parser = Parsec Void T.Text
 

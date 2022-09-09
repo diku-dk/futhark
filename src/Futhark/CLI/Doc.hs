@@ -1,7 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | @futhark doc@
 module Futhark.CLI.Doc (main) where
@@ -9,8 +7,8 @@ module Futhark.CLI.Doc (main) where
 import Control.Monad.State
 import Data.FileEmbed
 import Data.List (nubBy)
-import qualified Data.Text.Lazy as T
-import qualified Data.Text.Lazy.IO as T
+import Data.Text.Lazy qualified as T
+import Data.Text.Lazy.IO qualified as T
 import Futhark.Compiler (Imports, dumpError, fileProg, newFutharkConfig, readProgramFiles)
 import Futhark.Doc.Generator
 import Futhark.Pipeline (FutharkM, Verbosity (..), runFutharkM)

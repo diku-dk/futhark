@@ -1,5 +1,3 @@
-{-# LANGUAGE TupleSections #-}
-
 -- | Particularly simple simplification rules.
 module Futhark.Optimise.Simplify.Rules.Simple
   ( TypeLookup,
@@ -10,7 +8,7 @@ where
 
 import Control.Monad
 import Data.List (isSuffixOf)
-import qualified Data.List.NonEmpty as NE
+import Data.List.NonEmpty qualified as NE
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR
 import Futhark.Util (focusNth)

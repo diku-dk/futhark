@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Dependency solver
 --
 -- This is a relatively simple problem due to the choice of the
@@ -15,9 +12,9 @@ where
 
 import Control.Monad.Free.Church
 import Control.Monad.State
-import qualified Data.Map as M
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Pkg.Info
 import Futhark.Pkg.Types
 import Prelude

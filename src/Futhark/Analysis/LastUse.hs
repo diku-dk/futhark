@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Provides last-use analysis for Futhark programs.
@@ -19,7 +15,7 @@ import Data.Bifunctor (bimap, first)
 import Data.Foldable
 import Data.Function ((&))
 import Data.Map (Map)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Tuple
 import Futhark.Analysis.Alias (aliasAnalysis)
 import Futhark.IR.Aliases

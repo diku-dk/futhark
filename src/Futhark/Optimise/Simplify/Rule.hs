@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -56,8 +53,8 @@ module Futhark.Optimise.Simplify.Rule
 where
 
 import Control.Monad.State
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Builder
 import Futhark.IR
 

@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -7,15 +6,15 @@ module Futhark.CLI.Dataset (main) where
 
 import Control.Monad
 import Control.Monad.ST
-import qualified Data.Binary as Bin
-import qualified Data.ByteString.Lazy.Char8 as BS
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Binary qualified as Bin
+import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Vector.Generic (freeze)
-import qualified Data.Vector.Storable as SVec
-import qualified Data.Vector.Storable.Mutable as USVec
+import Data.Vector.Storable qualified as SVec
+import Data.Vector.Storable.Mutable qualified as USVec
 import Data.Word
-import qualified Futhark.Data as V
+import Futhark.Data qualified as V
 import Futhark.Data.Reader (readValues)
 import Futhark.Util (convFloat)
 import Futhark.Util.Options

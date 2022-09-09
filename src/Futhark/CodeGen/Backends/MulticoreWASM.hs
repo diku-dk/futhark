@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.  This C program is expected to
 -- be converted to WebAssembly, so we also produce the intended
@@ -16,12 +14,12 @@ module Futhark.CodeGen.Backends.MulticoreWASM
 where
 
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericWASM
-import qualified Futhark.CodeGen.Backends.MulticoreC as MC
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
-import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Futhark.CodeGen.Backends.MulticoreC qualified as MC
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
+import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGen
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 

@@ -1,12 +1,9 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Language.Futhark.TypeChecker.TypesTests (tests) where
 
 import Data.Bifunctor (first)
 import Data.List (isInfixOf)
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.FreshNames
 import Futhark.Util.Pretty (docText, prettyTextOneLine)
 import Language.Futhark

@@ -1,9 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The simplification engine is only willing to hoist allocations
@@ -82,12 +76,12 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor
 import Data.List (find)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Construct
 import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (arraySizeInBytesExp)
 import Futhark.Pass.ExplicitAllocations.GPU ()

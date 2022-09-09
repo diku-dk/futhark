@@ -1,5 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | C code generator.  This module can convert a correct ImpCode
@@ -20,24 +18,24 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
-import qualified Data.DList as DL
+import Data.DList qualified as DL
 import Data.List (unzip4)
 import Data.Loc (noLoc)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
-import qualified Futhark.CodeGen.Backends.MulticoreC as MC
+import Futhark.CodeGen.Backends.MulticoreC qualified as MC
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
-import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGen
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
 type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a

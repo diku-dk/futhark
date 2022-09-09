@@ -1,5 +1,3 @@
-{-# LANGUAGE Trustworthy #-}
-
 -- | Non-Futhark-specific utilities.  If you find yourself writing
 -- general functions on generic data structures, consider putting them
 -- here.
@@ -73,28 +71,28 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Crypto.Hash.MD5 as MD5
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base16 as Base16
+import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as Base16
 import Data.Char
 import Data.Either
 import Data.Foldable (fold)
 import Data.Function ((&))
 import Data.List (foldl', genericDrop, genericSplitAt, sortBy)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.Encoding.Error as T
+import Data.Set qualified as S
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
+import Data.Text.Encoding.Error qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Numeric
-import qualified System.Directory.Tree as Dir
+import System.Directory.Tree qualified as Dir
 import System.Environment
 import System.Exit
-import qualified System.FilePath as Native
-import qualified System.FilePath.Posix as Posix
+import System.FilePath qualified as Native
+import System.FilePath.Posix qualified as Posix
 import System.IO (Handle, hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe

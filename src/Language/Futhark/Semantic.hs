@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Definitions of various semantic objects (*not* the Futhark
 -- semantics themselves).
 module Language.Futhark.Semantic
@@ -23,14 +21,14 @@ module Language.Futhark.Semantic
   )
 where
 
-import qualified Data.Map.Strict as M
-import qualified Data.Text as T
+import Data.Map.Strict qualified as M
+import Data.Text qualified as T
 import Futhark.Util (dropLast, fromPOSIX, toPOSIX)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
 import Language.Futhark
-import qualified System.FilePath as Native
-import qualified System.FilePath.Posix as Posix
+import System.FilePath qualified as Native
+import System.FilePath.Posix qualified as Posix
 import Prelude hiding (mod)
 
 -- | Canonical reference to a Futhark code file.  Does not include the

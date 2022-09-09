@@ -26,7 +26,7 @@ module Futhark.CodeGen.RTS.C
 where
 
 import Data.FileEmbed
-import qualified Data.Text as T
+import Data.Text qualified as T
 
 -- We mark everything here NOINLINE so that the dependent modules
 -- don't have to be recompiled just because we change the RTS files.

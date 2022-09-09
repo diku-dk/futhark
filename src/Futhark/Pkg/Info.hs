@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Obtaining information about packages over THE INTERNET!
 module Futhark.Pkg.Info
   ( -- * Package info
@@ -19,22 +17,22 @@ module Futhark.Pkg.Info
   )
 where
 
-import qualified Codec.Archive.Zip as Zip
+import Codec.Archive.Zip qualified as Zip
 import Control.Monad.IO.Class
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as LBS
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as LBS
 import Data.IORef
 import Data.List (foldl', intersperse)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Data.Time (UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
 import Futhark.Pkg.Types
 import Futhark.Util (maybeHead)
 import Futhark.Util.Log
 import System.Exit
-import qualified System.FilePath.Posix as Posix
+import System.FilePath.Posix qualified as Posix
 import System.IO
 import System.Process.ByteString (readProcessWithExitCode)
 

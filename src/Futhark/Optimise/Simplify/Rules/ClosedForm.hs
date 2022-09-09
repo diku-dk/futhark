@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | This module implements facilities for determining whether a
 -- reduction or fold can be expressed in a closed form (i.e. not as a
 -- SOAC).
@@ -14,7 +12,7 @@ module Futhark.Optimise.Simplify.Rules.ClosedForm
 where
 
 import Control.Monad
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Construct
 import Futhark.IR

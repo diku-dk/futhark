@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Futhark.IR.PropTests
@@ -6,8 +5,8 @@ module Futhark.IR.PropTests
   )
 where
 
-import qualified Futhark.IR.Prop.RearrangeTests
-import qualified Futhark.IR.Prop.ReshapeTests
+import Futhark.IR.Prop.RearrangeTests qualified
+import Futhark.IR.Prop.ReshapeTests qualified
 import Test.Tasty
 
 tests :: TestTree

@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Code generation for ImpCode with multicore operations.
@@ -10,8 +8,8 @@ module Futhark.CodeGen.ImpGen.Multicore
 where
 
 import Control.Monad
-import qualified Data.Map as M
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Data.Map qualified as M
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.CodeGen.ImpGen.Multicore.SegHist

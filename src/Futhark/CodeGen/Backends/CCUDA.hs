@@ -1,6 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Code generation for CUDA.
 module Futhark.CodeGen.Backends.CCUDA
@@ -14,22 +12,22 @@ where
 
 import Control.Monad
 import Data.Maybe (catMaybes)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions, sizeLoggingCode)
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
-import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
+import Futhark.CodeGen.ImpGen.CUDA qualified as ImpGen
 import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
     GetSize,
     GetSizeMax,
   )
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to CUDA.

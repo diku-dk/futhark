@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | This module implements common-subexpression elimination.  This
@@ -36,7 +33,7 @@ module Futhark.Optimise.CSE
 where
 
 import Control.Monad.Reader
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Futhark.Analysis.Alias
 import Futhark.IR
@@ -48,11 +45,11 @@ import Futhark.IR.Aliases
     removeProgAliases,
     removeStmAliases,
   )
-import qualified Futhark.IR.GPU as GPU
-import qualified Futhark.IR.MC as MC
-import qualified Futhark.IR.Mem as Memory
+import Futhark.IR.GPU qualified as GPU
+import Futhark.IR.MC qualified as MC
+import Futhark.IR.Mem qualified as Memory
 import Futhark.IR.Prop.Aliases
-import qualified Futhark.IR.SOACS.SOAC as SOAC
+import Futhark.IR.SOACS.SOAC qualified as SOAC
 import Futhark.Pass
 import Futhark.Transform.Substitute
 

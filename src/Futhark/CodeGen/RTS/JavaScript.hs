@@ -9,7 +9,7 @@ module Futhark.CodeGen.RTS.JavaScript
 where
 
 import Data.FileEmbed
-import qualified Data.Text as T
+import Data.Text qualified as T
 
 -- | @rts/javascript/server.js@
 serverJs :: T.Text

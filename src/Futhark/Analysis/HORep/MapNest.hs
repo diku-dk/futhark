@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Analysis.HORep.MapNest
@@ -15,13 +13,13 @@ module Futhark.Analysis.HORep.MapNest
 where
 
 import Data.List (find)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.HORep.SOAC (SOAC)
-import qualified Futhark.Analysis.HORep.SOAC as SOAC
+import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Construct
 import Futhark.IR hiding (typeOf)
-import qualified Futhark.IR.SOACS.SOAC as Futhark
+import Futhark.IR.SOACS.SOAC qualified as Futhark
 import Futhark.Transform.Substitute
 
 data Nesting rep = Nesting

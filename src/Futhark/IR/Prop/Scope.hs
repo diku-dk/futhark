@@ -1,10 +1,4 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -41,10 +35,10 @@ module Futhark.IR.Prop.Scope
 where
 
 import Control.Monad.Except
-import qualified Control.Monad.RWS.Lazy
-import qualified Control.Monad.RWS.Strict
+import Control.Monad.RWS.Lazy qualified
+import Control.Monad.RWS.Strict qualified
 import Control.Monad.Reader
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Types
 import Futhark.IR.Rep

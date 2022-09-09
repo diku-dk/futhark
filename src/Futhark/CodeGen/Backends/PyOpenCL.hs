@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Code generation for Python with OpenCL.
 module Futhark.CodeGen.Backends.PyOpenCL
   ( compileProg,
@@ -8,14 +5,14 @@ module Futhark.CodeGen.Backends.PyOpenCL
 where
 
 import Control.Monad
-import qualified Data.Map as M
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericPython as Py
+import Data.Map qualified as M
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericPython qualified as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
-import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
-import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
+import Futhark.CodeGen.ImpCode.OpenCL qualified as Imp
+import Futhark.CodeGen.ImpGen.OpenCL qualified as ImpGen
 import Futhark.CodeGen.RTS.Python (openclPy)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames

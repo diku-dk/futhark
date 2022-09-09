@@ -10,7 +10,7 @@ where
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
 import Futhark.IR
 import Futhark.Optimise.Simplify.Rules.Simple

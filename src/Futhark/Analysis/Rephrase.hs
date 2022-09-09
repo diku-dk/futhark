@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-
 -- | Facilities for changing the rep of some fragment, with no
 -- context.  We call this "rephrasing", for no deep reason.
 module Futhark.Analysis.Rephrase

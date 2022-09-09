@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -19,8 +16,8 @@ import Control.Monad
 import Data.Char (chr)
 import Data.Functor
 import Data.List (intersperse)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import Data.Ord

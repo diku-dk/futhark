@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -53,7 +49,7 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.Reader
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Rephrase
 import Futhark.Builder
@@ -64,7 +60,7 @@ import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 
 -- | The rep for the basic representation.
 data Aliases rep

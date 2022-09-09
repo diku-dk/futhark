@@ -27,8 +27,8 @@ module Futhark.Analysis.UsageTable
 where
 
 import Data.Bits
-import qualified Data.Foldable as Foldable
-import qualified Data.IntMap.Strict as IM
+import Data.Foldable qualified as Foldable
+import Data.IntMap.Strict qualified as IM
 import Data.List (foldl')
 import Futhark.IR
 import Futhark.IR.Prop.Aliases

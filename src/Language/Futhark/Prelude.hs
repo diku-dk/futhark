@@ -1,7 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE Trustworthy #-}
 
 -- | The Futhark Prelude Library embedded embedded as strings read
 -- during compilation of the Futhark compiler.  The advantage is that
@@ -10,10 +8,10 @@
 module Language.Futhark.Prelude (prelude) where
 
 import Data.FileEmbed
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Futhark.Util (toPOSIX)
-import qualified System.FilePath.Posix as Posix
+import System.FilePath.Posix qualified as Posix
 
 -- | Prelude embedded as 'T.Text' values, one for every file.
 prelude :: [(Posix.FilePath, T.Text)]

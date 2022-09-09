@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -12,10 +7,10 @@ import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import qualified Data.Kind
+import Data.Kind qualified
 import Data.List (transpose)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder

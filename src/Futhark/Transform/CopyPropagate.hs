@@ -1,6 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Perform copy propagation.  This is done by invoking the
 -- simplifier with no rules, so hoisting and dead-code elimination may
 -- also take place.
@@ -11,7 +8,7 @@ module Futhark.Transform.CopyPropagate
   )
 where
 
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify

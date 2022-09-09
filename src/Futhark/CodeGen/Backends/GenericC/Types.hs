@@ -1,9 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Code generation for public API types.
 module Futhark.CodeGen.Backends.GenericC.Types
@@ -16,16 +11,16 @@ where
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Char (isDigit)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode
-import qualified Futhark.Manifest as Manifest
+import Futhark.Manifest qualified as Manifest
 import Futhark.Util (chunks, mapAccumLM)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 opaqueToCType :: String -> CompilerM op s C.Type
 opaqueToCType desc = do

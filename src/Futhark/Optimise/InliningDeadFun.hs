@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | This module implements a compiler pass for inlining functions,
 -- then removing those that have become dead.
 module Futhark.Optimise.InliningDeadFun
@@ -14,10 +11,10 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Parallel.Strategies
 import Data.List (partition)
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
 import Futhark.Analysis.CallGraph
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify

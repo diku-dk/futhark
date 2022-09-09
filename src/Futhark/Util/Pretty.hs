@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | A re-export of the prettyprinting library, along with some
@@ -42,12 +41,12 @@ module Futhark.Util.Pretty
 where
 
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Numeric.Half
 import Prettyprinter
 import Prettyprinter.Render.Terminal (AnsiStyle, Color (..), bgColor, bgColorDull, bold, color, colorDull)
-import qualified Prettyprinter.Render.Terminal
-import qualified Prettyprinter.Render.Text
+import Prettyprinter.Render.Terminal qualified
+import Prettyprinter.Render.Text qualified
 import Prettyprinter.Symbols.Ascii
 import System.IO (Handle, hIsTerminalDevice, stdout)
 

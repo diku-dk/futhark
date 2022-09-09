@@ -14,13 +14,13 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Strict hiding (State)
 import Data.Bifunctor (first)
 import Data.Foldable
-import qualified Data.IntMap as IM
+import Data.IntMap qualified as IM
 import Data.IntSet ((\\))
-import qualified Data.IntSet as IS
-import qualified Data.Map as M
+import Data.IntSet qualified as IS
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Sequence ((|>))
-import qualified Data.Sequence as SQ
+import Data.Sequence qualified as SQ
 import Futhark.Analysis.Alias
 import Futhark.Construct (sliceDim)
 import Futhark.Error

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Generally useful definition used in various places in the
 -- language server implementation.
 module Futhark.LSP.Tool
@@ -12,7 +10,7 @@ module Futhark.LSP.Tool
   )
 where
 
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Compiler.Program (lpImports)
 import Futhark.LSP.PositionMapping
   ( PositionMapping,

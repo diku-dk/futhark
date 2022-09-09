@@ -5,19 +5,19 @@ module Futhark.IR.Mem.IxFunTests
   )
 where
 
-import qualified Data.List as L
-import qualified Futhark.IR.Mem.IxFun as IxFunLMAD
-import qualified Futhark.IR.Mem.IxFun.Alg as IxFunAlg
+import Data.List qualified as L
+import Futhark.IR.Mem.IxFun qualified as IxFunLMAD
+import Futhark.IR.Mem.IxFun.Alg qualified as IxFunAlg
 import Futhark.IR.Mem.IxFunWrapper
-import qualified Futhark.IR.Mem.IxFunWrapper as IxFunWrap
+import Futhark.IR.Mem.IxFunWrapper qualified as IxFunWrap
 import Futhark.IR.Syntax
 import Futhark.IR.Syntax.Core ()
-import qualified Futhark.Util.IntegralExp as IE
-import qualified Futhark.Util.Pretty as PR
+import Futhark.Util.IntegralExp qualified as IE
+import Futhark.Util.Pretty qualified as PR
 import Test.Tasty
 import Test.Tasty.HUnit
 import Prelude hiding (span)
-import qualified Prelude as P
+import Prelude qualified as P
 
 instance IE.IntegralExp Int where
   quot = P.quot

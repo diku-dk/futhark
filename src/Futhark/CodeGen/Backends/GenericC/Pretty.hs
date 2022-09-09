@@ -11,11 +11,11 @@ module Futhark.CodeGen.Backends.GenericC.Pretty
   )
 where
 
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Language.C.Pretty ()
-import qualified Language.C.Syntax as C
-import qualified Text.PrettyPrint.Mainland as MPP
-import qualified Text.PrettyPrint.Mainland.Class as MPP
+import Language.C.Syntax qualified as C
+import Text.PrettyPrint.Mainland qualified as MPP
+import Text.PrettyPrint.Mainland.Class qualified as MPP
 
 expText :: C.Exp -> T.Text
 expText = T.pack . MPP.pretty 8000 . MPP.ppr

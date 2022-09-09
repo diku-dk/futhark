@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 module Futhark.CodeGen.Backends.GenericWASM
@@ -17,10 +16,10 @@ module Futhark.CodeGen.Backends.GenericWASM
 where
 
 import Data.List (intercalate, nub)
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.SimpleRep (opaqueName)
-import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
+import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
 import Futhark.CodeGen.RTS.JavaScript
 import Language.Futhark.Primitive
 import NeatInterpolation (text)

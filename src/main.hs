@@ -1,7 +1,7 @@
 -- | The *actual* @futhark@ command line program, as seen by cabal.
 module Main (main) where
 
-import qualified Futhark.CLI.Main
+import Futhark.CLI.Main qualified
 
 -- | This is the main function.
 main :: IO ()

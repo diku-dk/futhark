@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Facilities for answering queries about a program, such as "what
 -- appears at this source location", or "where is this name bound".
 -- The intent is that this is used as a building block for IDE-like
@@ -16,12 +14,12 @@ where
 import Control.Monad
 import Control.Monad.State
 import Data.List (find)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.Util.Loc (Loc (..), Pos (..))
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Traversals
-import qualified System.FilePath.Posix as Posix
+import System.FilePath.Posix qualified as Posix
 
 -- | What a name is bound to.
 data BoundTo

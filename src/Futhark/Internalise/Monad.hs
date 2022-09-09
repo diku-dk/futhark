@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Internalise.Monad
@@ -31,7 +26,7 @@ where
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools

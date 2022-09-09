@@ -72,7 +72,7 @@ where
 
 import Data.Foldable as Foldable
 import Data.Maybe
-import qualified Data.Sequence as Seq
+import Data.Sequence qualified as Seq
 import Futhark.Construct hiding (toExp)
 import Futhark.IR hiding
   ( Iota,
@@ -81,17 +81,17 @@ import Futhark.IR hiding
     Reshape,
     typeOf,
   )
-import qualified Futhark.IR as Futhark
+import Futhark.IR qualified as Futhark
 import Futhark.IR.SOACS.SOAC
   ( HistOp (..),
     ScremaForm (..),
     scremaType,
   )
-import qualified Futhark.IR.SOACS.SOAC as Futhark
+import Futhark.IR.SOACS.SOAC qualified as Futhark
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
 import Futhark.Util.Pretty (pretty)
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 
 -- | A single, simple transformation.  If you want several, don't just
 -- create a list, use 'ArrayTransforms' instead.
@@ -391,21 +391,21 @@ instance PP.Pretty Input where
   pretty (Input (ArrayTransforms ts) arr _) = foldl f (pretty arr) ts
     where
       f e (Rearrange cs perm) =
-        pretty "rearrange" <> pretty cs <> PP.apply [PP.apply (map pretty perm), e]
+        "rearrange" <> pretty cs <> PP.apply [PP.apply (map pretty perm), e]
       f e (Reshape cs ReshapeArbitrary shape) =
-        pretty "reshape" <> pretty cs <> PP.apply [pretty shape, e]
+        "reshape" <> pretty cs <> PP.apply [pretty shape, e]
       f e (ReshapeOuter cs ReshapeArbitrary shape) =
-        pretty "reshape_outer" <> pretty cs <> PP.apply [pretty shape, e]
+        "reshape_outer" <> pretty cs <> PP.apply [pretty shape, e]
       f e (ReshapeInner cs ReshapeArbitrary shape) =
-        pretty "reshape_inner" <> pretty cs <> PP.apply [pretty shape, e]
+        "reshape_inner" <> pretty cs <> PP.apply [pretty shape, e]
       f e (Reshape cs ReshapeCoerce shape) =
-        pretty "coerce" <> pretty cs <> PP.apply [pretty shape, e]
+        "coerce" <> pretty cs <> PP.apply [pretty shape, e]
       f e (ReshapeOuter cs ReshapeCoerce shape) =
-        pretty "coerce_outer" <> pretty cs <> PP.apply [pretty shape, e]
+        "coerce_outer" <> pretty cs <> PP.apply [pretty shape, e]
       f e (ReshapeInner cs ReshapeCoerce shape) =
-        pretty "coerce_inner" <> pretty cs <> PP.apply [pretty shape, e]
+        "coerce_inner" <> pretty cs <> PP.apply [pretty shape, e]
       f e (Replicate cs ne) =
-        pretty "replicate" <> pretty cs <> PP.apply [pretty ne, e]
+        "replicate" <> pretty cs <> PP.apply [pretty ne, e]
 
 instance PrettyRep rep => PP.Pretty (SOAC rep) where
   pretty (Screma w form arrs) = Futhark.ppScrema w arrs form

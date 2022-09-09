@@ -25,9 +25,9 @@ module Futhark.Analysis.PrimExp.Convert
   )
 where
 
-import qualified Control.Monad.Fail as Fail
+import Control.Monad.Fail qualified as Fail
 import Control.Monad.Identity
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp
 import Futhark.Construct

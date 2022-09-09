@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Analysis.MemAlias
@@ -14,9 +12,9 @@ import Control.Monad.Reader
 import Data.Bifunctor
 import Data.Function ((&))
 import Data.Functor ((<&>))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Util

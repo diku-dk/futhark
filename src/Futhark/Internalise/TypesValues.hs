@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Futhark.Internalise.TypesValues
   ( -- * Internalising types
     internaliseReturnType,
@@ -22,11 +18,11 @@ where
 import Control.Monad.State
 import Data.Bitraversable (bitraverse)
 import Data.List (delete, find, foldl')
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
-import qualified Language.Futhark as E
+import Language.Futhark qualified as E
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique

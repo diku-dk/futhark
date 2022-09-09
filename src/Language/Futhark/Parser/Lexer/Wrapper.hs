@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 -- | Utility definitions used by the lexer.  None of the default Alex
@@ -22,11 +21,11 @@ module Language.Futhark.Parser.Lexer.Wrapper
 where
 
 import Control.Applicative (liftA)
-import qualified Data.ByteString.Internal as BS (w2c)
-import qualified Data.ByteString.Lazy as BS
+import Data.ByteString.Internal qualified as BS (w2c)
+import Data.ByteString.Lazy qualified as BS
 import Data.Int (Int64)
 import Data.Loc (Loc, Pos (..))
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Word (Word8)
 
 type Byte = Word8

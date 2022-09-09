@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | This module provides a monadic facility similar (and built on top
@@ -21,16 +20,16 @@ module Futhark.MonadFreshNames
 where
 
 import Control.Monad.Except
-import qualified Control.Monad.RWS.Lazy
-import qualified Control.Monad.RWS.Strict
+import Control.Monad.RWS.Lazy qualified
+import Control.Monad.RWS.Strict qualified
 import Control.Monad.Reader
-import qualified Control.Monad.State.Lazy
-import qualified Control.Monad.State.Strict
-import qualified Control.Monad.Trans.Maybe
-import qualified Control.Monad.Writer.Lazy
-import qualified Control.Monad.Writer.Strict
+import Control.Monad.State.Lazy qualified
+import Control.Monad.State.Strict qualified
+import Control.Monad.Trans.Maybe qualified
+import Control.Monad.Writer.Lazy qualified
+import Control.Monad.Writer.Strict qualified
 import Futhark.FreshNames hiding (newName)
-import qualified Futhark.FreshNames as FreshNames
+import Futhark.FreshNames qualified as FreshNames
 import Futhark.IR.Syntax
 
 -- | A monad that stores a name source.  The following is a good

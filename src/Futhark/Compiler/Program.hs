@@ -1,6 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 -- | Low-level compilation parts.  Look at "Futhark.Compiler" for a
 -- more high-level API.
@@ -37,26 +35,26 @@ import Control.Monad.Except
 import Control.Monad.State (execStateT, gets, modify)
 import Data.Bifunctor (first)
 import Data.List (intercalate, sort)
-import qualified Data.List.NonEmpty as NE
+import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (..), Located, locOf)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (mapMaybe)
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
 import Futhark.Util.Pretty (Doc, align, pretty)
-import qualified Language.Futhark as E
+import Language.Futhark qualified as E
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
 import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Semantic
-import qualified Language.Futhark.TypeChecker as E
+import Language.Futhark.TypeChecker qualified as E
 import Language.Futhark.Warnings
 import System.Directory (getModificationTime)
 import System.FilePath (normalise)
-import qualified System.FilePath.Posix as Posix
+import System.FilePath.Posix qualified as Posix
 
 data LoadedFile fm = LoadedFile
   { lfPath :: FilePath,

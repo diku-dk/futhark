@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | Various boilerplate definitions for the PyOpenCL backend.
@@ -8,9 +7,9 @@ module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 where
 
 import Control.Monad.Identity
-import qualified Data.Map as M
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericPython as Py
+import Data.Map qualified as M
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericPython qualified as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.ImpCode.OpenCL
   ( ErrorMsg (..),

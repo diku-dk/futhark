@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Generating metadata so that programs can run at all.
 module Futhark.Internalise.Entry
   ( entryPoint,
@@ -11,14 +8,14 @@ where
 
 import Control.Monad.State
 import Data.List (find)
-import qualified Data.Map as M
-import qualified Data.Text as T
-import qualified Futhark.IR as I
+import Data.Map qualified as M
+import Data.Text qualified as T
+import Futhark.IR qualified as I
 import Futhark.Internalise.TypesValues (internalisedTypeSize)
 import Futhark.Util.Pretty (prettyTextOneLine)
-import qualified Language.Futhark as E hiding (TypeArg)
+import Language.Futhark qualified as E hiding (TypeArg)
 import Language.Futhark.Core (Name, Uniqueness (..), VName)
-import qualified Language.Futhark.Semantic as E
+import Language.Futhark.Semantic qualified as E
 
 -- | The types that are visible to the outside world.
 newtype VisibleTypes = VisibleTypes [E.TypeBind]

@@ -1,9 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC.Monad
@@ -89,18 +84,18 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
-import qualified Data.DList as DL
+import Data.DList qualified as DL
 import Data.List (unzip4)
 import Data.Loc
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 -- How public an array type definition sould be.  Public types show up
 -- in the generated API, while private types are used only to

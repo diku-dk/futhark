@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module defines a convenience typeclass for creating
@@ -22,7 +21,7 @@ module Futhark.Builder.Class
   )
 where
 
-import qualified Data.Kind
+import Data.Kind qualified
 import Futhark.IR
 import Futhark.MonadFreshNames
 

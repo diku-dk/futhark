@@ -1,9 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -69,13 +63,13 @@ import Data.List
     isPrefixOf,
     partition,
   )
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR
 import Futhark.IR.Aliases
   ( Aliases,
@@ -84,8 +78,8 @@ import Futhark.IR.Aliases
   )
 import Futhark.IR.Mem
 import Futhark.IR.Prop.Aliases
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Tools
@@ -103,7 +97,7 @@ import Futhark.Util.Pretty
     (<+>),
     (</>),
   )
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
 -- | An operator for 'SegHist'.

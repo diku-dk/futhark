@@ -1,7 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
@@ -47,7 +43,7 @@ where
 import Control.Category
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.String
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Word (Word16, Word32, Word64, Word8)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty

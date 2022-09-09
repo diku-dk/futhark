@@ -1,7 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Code generation for C with OpenCL.
 module Futhark.CodeGen.Backends.COpenCL
@@ -15,21 +12,21 @@ where
 
 import Control.Monad hiding (mapM)
 import Data.List (intercalate)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
-import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
+import Futhark.CodeGen.ImpGen.OpenCL qualified as ImpGen
 import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
     GetSize,
     GetSizeMax,
   )
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to OpenCL.

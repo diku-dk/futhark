@@ -1,7 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.IR.GPUMem
@@ -19,14 +15,14 @@ module Futhark.IR.GPUMem
 where
 
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.GPU.Op
 import Futhark.IR.GPU.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
-import qualified Futhark.IR.TypeCheck as TC
+import Futhark.IR.TypeCheck qualified as TC
 import Futhark.MonadFreshNames
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BuilderOps (..), mkLetNamesB', mkLetNamesB'')
 

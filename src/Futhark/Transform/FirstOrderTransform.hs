@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The code generator cannot handle the array combinators (@map@ and
@@ -21,9 +19,9 @@ where
 import Control.Monad.Except
 import Control.Monad.State
 import Data.List (find, zip4)
-import qualified Data.Map.Strict as M
-import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.IR as AST
+import Data.Map.Strict qualified as M
+import Futhark.Analysis.Alias qualified as Alias
+import Futhark.IR qualified as AST
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames

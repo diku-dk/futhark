@@ -1,13 +1,5 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.CodeGen.ImpGen
@@ -131,15 +123,15 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Control.Parallel.Strategies
 import Data.Bifunctor (first)
-import qualified Data.DList as DL
+import Data.DList qualified as DL
 import Data.Either
 import Data.List (find)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Data.String
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
   ( Bytes,
     Count,
@@ -148,11 +140,11 @@ import Futhark.CodeGen.ImpCode
     elements,
     withElemType,
   )
-import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.CodeGen.ImpCode qualified as Imp
 import Futhark.CodeGen.ImpGen.Transpose
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp

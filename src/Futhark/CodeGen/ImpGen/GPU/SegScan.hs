@@ -3,11 +3,11 @@
 -- the scan and the chosen abckend.
 module Futhark.CodeGen.ImpGen.GPU.SegScan (compileSegScan) where
 
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import Futhark.CodeGen.ImpGen.GPU.Base
-import qualified Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass as SinglePass
-import qualified Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass as TwoPass
+import Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass qualified as SinglePass
+import Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass qualified as TwoPass
 import Futhark.IR.GPUMem
 
 -- The single-pass scan does not support multiple operators, so jam

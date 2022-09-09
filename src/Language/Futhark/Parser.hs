@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Interface to the Futhark parser.
 module Language.Futhark.Parser
   ( parseFuthark,
@@ -11,7 +9,7 @@ module Language.Futhark.Parser
   )
 where
 
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Language.Futhark.Parser.Parser
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
