@@ -35,12 +35,9 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Install dependencies
-      run: |
-        sudo add-apt-repository ppa:hvr/ghc
-        sudo apt-get update
-        sudo apt-get install ghc-9.0.1
-        echo "/opt/ghc/bin" >> $GITHUB_PATH
+    - uses: haskell/actions/setup@v2
+      with:
+        ghc-version: '9.2.4'
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
