@@ -8,12 +8,12 @@ module Futhark.Version
   )
 where
 
-import qualified Data.ByteString.Char8 as BS
+import Data.ByteString.Char8 qualified as BS
 import Data.FileEmbed
 import Data.Version
 import Futhark.Util (trim)
 import GitHash
-import qualified Paths_futhark
+import Paths_futhark qualified
 
 {-# NOINLINE version #-}
 

@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveLift #-}
-
 -- | This module provides facilities for generating unique names.
 module Futhark.FreshNames
   ( VNameSource,

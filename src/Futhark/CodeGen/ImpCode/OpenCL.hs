@@ -21,8 +21,8 @@ module Futhark.CodeGen.ImpCode.OpenCL
   )
 where
 
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty

@@ -1,8 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | @futhark repl@
 module Futhark.CLI.REPL (main) where
@@ -14,11 +10,11 @@ import Control.Monad.Free.Church
 import Control.Monad.State
 import Data.Char
 import Data.List (intersperse)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Version
 import Futhark.Compiler
 import Futhark.MonadFreshNames
@@ -27,12 +23,12 @@ import Futhark.Util.Options
 import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, pretty, putDoc, (<+>))
 import Futhark.Version
 import Language.Futhark
-import qualified Language.Futhark.Interpreter as I
+import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Parser
-import qualified Language.Futhark.Semantic as T
-import qualified Language.Futhark.TypeChecker as T
+import Language.Futhark.Semantic qualified as T
+import Language.Futhark.TypeChecker qualified as T
 import NeatInterpolation (text)
-import qualified System.Console.Haskeline as Haskeline
+import System.Console.Haskeline qualified as Haskeline
 import System.Directory
 import System.FilePath
 import System.IO (stdout)

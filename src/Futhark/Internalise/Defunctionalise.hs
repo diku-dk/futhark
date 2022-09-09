@@ -1,12 +1,7 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise (transformProg) where
 
-import qualified Control.Arrow as Arrow
+import Control.Arrow qualified as Arrow
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -14,10 +9,10 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
 import Data.List (partition, sortOn, tails)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
 import Language.Futhark

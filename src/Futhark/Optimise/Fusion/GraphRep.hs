@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | A graph representation of a sequence of Futhark statements
 -- (i.e. a 'Body'), built to handle fusion.  Could perhaps be made
 -- more general.  An important property is that it does not handle
@@ -47,18 +45,18 @@ where
 
 import Data.Bifunctor (bimap)
 import Data.Foldable (foldlM)
-import qualified Data.Graph.Inductive.Dot as G
-import qualified Data.Graph.Inductive.Graph as G
-import qualified Data.Graph.Inductive.Query.DFS as Q
-import qualified Data.Graph.Inductive.Tree as G
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
-import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.HORep.SOAC as H
+import Data.Graph.Inductive.Dot qualified as G
+import Data.Graph.Inductive.Graph qualified as G
+import Data.Graph.Inductive.Query.DFS qualified as Q
+import Data.Graph.Inductive.Tree qualified as G
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
+import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
-import qualified Futhark.IR.SOACS as Futhark
+import Futhark.IR.SOACS qualified as Futhark
 import Futhark.Util (nubOrd)
 
 -- | Information associated with an edge in the graph.

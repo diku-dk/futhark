@@ -81,10 +81,10 @@ module Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
   )
 where
 
-import qualified Data.IntMap.Strict as IM
-import qualified Data.IntSet as IS
+import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 import Data.List (foldl')
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
 import Prelude hiding (lookup)
 

@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Extract limited nested parallelism for execution inside
@@ -10,11 +7,11 @@ module Futhark.Pass.ExtractKernels.Intragroup (intraGroupParallelise) where
 import Control.Monad.Identity
 import Control.Monad.RWS
 import Control.Monad.Trans.Maybe
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.GPU hiding (HistOp)
-import qualified Futhark.IR.GPU.Op as GPU
+import Futhark.IR.GPU.Op qualified as GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -22,7 +19,7 @@ import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ToGPU
 import Futhark.Tools
-import qualified Futhark.Transform.FirstOrderTransform as FOT
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Util.Log
 import Prelude hiding (log)
 

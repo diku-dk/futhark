@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | @futhark cuda@
 module Futhark.CLI.CUDA (main) where
 

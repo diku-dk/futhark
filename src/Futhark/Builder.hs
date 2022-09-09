@@ -1,10 +1,4 @@
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -37,7 +31,7 @@ import Control.Monad.Error.Class
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Writer
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.Builder.Class
 import Futhark.IR
 

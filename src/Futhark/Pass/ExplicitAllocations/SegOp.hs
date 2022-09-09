@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -10,7 +8,7 @@ module Futhark.Pass.ExplicitAllocations.SegOp
 where
 
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Pass.ExplicitAllocations
 
 instance SizeSubst (SegOp lvl rep)

@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module exports a type class covering representations of
@@ -11,7 +10,7 @@ module Futhark.IR.RetType
 where
 
 import Control.Monad.Identity
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.IR.Prop.Types
 import Futhark.IR.Syntax.Core
 

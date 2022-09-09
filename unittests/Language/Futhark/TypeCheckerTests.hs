@@ -1,6 +1,6 @@
 module Language.Futhark.TypeCheckerTests (tests) where
 
-import qualified Language.Futhark.TypeChecker.TypesTests
+import Language.Futhark.TypeChecker.TypesTests qualified
 import Test.Tasty
 
 tests :: TestTree

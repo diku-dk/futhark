@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | A sequential representation.
@@ -22,9 +21,9 @@ import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify as Simplify
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify qualified as Simplify
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 

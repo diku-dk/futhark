@@ -1,11 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-overlapping-patterns -Wno-incomplete-patterns -Wno-incomplete-uni-patterns -Wno-incomplete-record-updates #-}
 
@@ -43,11 +36,11 @@ import Control.Monad.Writer.Strict
 import Data.Function ((&))
 import Data.List (find, partition, tails)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.IR
 import Futhark.IR.SOACS (SOACS)
-import qualified Futhark.IR.SOACS as SOACS
+import Futhark.IR.SOACS qualified as SOACS
 import Futhark.IR.SOACS.SOAC hiding (HistOp, histDest)
 import Futhark.IR.SOACS.Simplify (simpleSOACS, simplifyStms)
 import Futhark.IR.SegOp
@@ -58,7 +51,7 @@ import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.Interchange
 import Futhark.Tools
 import Futhark.Transform.CopyPropagate
-import qualified Futhark.Transform.FirstOrderTransform as FOT
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Util
 import Futhark.Util.Log

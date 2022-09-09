@@ -1,9 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | This monomorphization module converts a well-typed, polymorphic,
 -- module-free Futhark program into an equivalent monomorphic program.
 --
@@ -38,10 +32,10 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
 import Data.List (partition)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Sequence as Seq
-import qualified Data.Set as S
+import Data.Sequence qualified as Seq
+import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 import Language.Futhark

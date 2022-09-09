@@ -9,8 +9,8 @@ module Language.Futhark.FreeVars
   )
 where
 
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
 

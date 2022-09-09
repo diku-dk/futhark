@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Code generation for segmented and non-segmented scans.  Uses a
@@ -10,11 +8,11 @@ module Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass (compileSegScan) where
 import Control.Monad.Except
 import Data.List (zip4)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)

@@ -1,9 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Generate the entry point packing/unpacking code.
 module Futhark.CodeGen.Backends.GenericC.EntryPoints
@@ -14,14 +9,14 @@ where
 import Control.Monad.Reader
 import Data.Char (isAlpha, isAlphaNum)
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Types (opaqueToCType, valueTypeToCType)
 import Futhark.CodeGen.ImpCode
-import qualified Futhark.Manifest as Manifest
+import Futhark.Manifest qualified as Manifest
 import Futhark.Util (zEncodeString)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 valueDescToType :: ValueDesc -> ValueType
 valueDescToType (ScalarValue pt signed _) =

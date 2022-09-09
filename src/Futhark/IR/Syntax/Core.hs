@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 
 -- | The most primitive ("core") aspects of the AST.  Split out of
@@ -83,11 +79,11 @@ import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Data.String
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Language.Futhark.Core
 import Language.Futhark.Primitive

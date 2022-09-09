@@ -1,6 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -38,8 +35,8 @@ where
 import Control.Category
 import Control.Monad.Identity
 import Control.Monad.Reader
-import qualified Data.Kind
-import qualified Data.Map.Strict as M
+import Data.Kind qualified
+import Data.Map.Strict qualified as M
 import Futhark.Analysis.Rephrase
 import Futhark.Builder
 import Futhark.IR
@@ -49,7 +46,7 @@ import Futhark.IR.Aliases
     VarAliases,
     unAliases,
   )
-import qualified Futhark.IR.Aliases as Aliases
+import Futhark.IR.Aliases qualified as Aliases
 import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute

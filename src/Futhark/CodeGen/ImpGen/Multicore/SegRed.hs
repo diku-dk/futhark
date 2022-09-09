@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Futhark.CodeGen.ImpGen.Multicore.SegRed
   ( compileSegRed,
     compileSegRed',
@@ -8,7 +6,7 @@ module Futhark.CodeGen.ImpGen.Multicore.SegRed
 where
 
 import Control.Monad
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem

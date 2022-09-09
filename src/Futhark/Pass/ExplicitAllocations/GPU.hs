@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -10,10 +8,10 @@ module Futhark.Pass.ExplicitAllocations.GPU
   )
 where
 
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 

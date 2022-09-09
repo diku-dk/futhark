@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The IR tracks aliases, mostly to ensure the soundness of in-place
@@ -32,9 +30,9 @@ module Futhark.IR.Prop.Aliases
 where
 
 import Data.Bifunctor (first, second)
-import qualified Data.Kind
+import Data.Kind qualified
 import Data.List (find, transpose)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.IR.Prop (IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
 import Futhark.IR.Prop.Patterns

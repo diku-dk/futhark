@@ -1,8 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | We require that entry points return arrays with zero offset in
@@ -19,7 +14,7 @@ module Futhark.Optimise.EntryPointMem
 where
 
 import Data.List (find)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Mem

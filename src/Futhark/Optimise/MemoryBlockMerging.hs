@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module implements an optimization that tries to statically reuse
@@ -11,16 +9,16 @@ import Control.Exception
 import Control.Monad.State.Strict
 import Data.Function ((&))
 import Data.Map (Map, (!))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Set (Set)
-import qualified Data.Set as S
-import qualified Futhark.Analysis.Interference as Interference
+import Data.Set qualified as S
+import Futhark.Analysis.Interference qualified as Interference
 import Futhark.Builder.Class
 import Futhark.Construct
 import Futhark.IR.GPUMem
-import qualified Futhark.Optimise.MemoryBlockMerging.GreedyColoring as GreedyColoring
+import Futhark.Optimise.MemoryBlockMerging.GreedyColoring qualified as GreedyColoring
 import Futhark.Pass (Pass (..), PassM)
-import qualified Futhark.Pass as Pass
+import Futhark.Pass qualified as Pass
 import Futhark.Util (invertMap)
 
 -- | A mapping from allocation names to their size and space.

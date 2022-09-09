@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Code generation for 'SegMap' is quite straightforward.  The only
@@ -8,7 +7,7 @@
 module Futhark.CodeGen.ImpGen.GPU.SegMap (compileSegMap) where
 
 import Control.Monad.Except
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.Group

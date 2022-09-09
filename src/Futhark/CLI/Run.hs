@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
 -- | @futhark run@
 module Futhark.CLI.Run (main) where
 
@@ -9,10 +5,10 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
-import qualified Data.ByteString.Lazy as BS
-import qualified Data.Map as M
+import Data.ByteString.Lazy qualified as BS
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text.IO as T
+import Data.Text.IO qualified as T
 import Futhark.Compiler
 import Futhark.Data.Reader (readValues)
 import Futhark.Pipeline
@@ -20,9 +16,9 @@ import Futhark.Util (toPOSIX)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (AnsiStyle, Doc, hPutDoc)
 import Language.Futhark
-import qualified Language.Futhark.Interpreter as I
-import qualified Language.Futhark.Semantic as T
-import qualified Language.Futhark.TypeChecker as T
+import Language.Futhark.Interpreter qualified as I
+import Language.Futhark.Semantic qualified as T
+import Language.Futhark.TypeChecker qualified as T
 import System.Exit
 import System.FilePath
 import System.IO

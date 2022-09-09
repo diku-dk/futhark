@@ -5,9 +5,9 @@ where
 
 import Control.Arrow ((***))
 import Data.Function ((&))
-import qualified Data.Map as M
-import qualified Data.Set as S
-import qualified Futhark.Optimise.MemoryBlockMerging.GreedyColoring as GreedyColoring
+import Data.Map qualified as M
+import Data.Set qualified as S
+import Futhark.Optimise.MemoryBlockMerging.GreedyColoring qualified as GreedyColoring
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -22,7 +22,9 @@ psumTest =
   testCase "psumTest"
     $ assertEqual
       "Color simple 1-2-3 using two colors"
-      ([(0, "local"), (1, "local")], [(1 :: Int, 0), (2, 1), (3, 0)])
+      ( [(0, "local"), (1, "local")] :: [(Int, String)],
+        [(1 :: Int, 0), (2, 1), (3, 0)]
+      )
     $ (M.toList *** M.toList)
     $ GreedyColoring.colorGraph
       (M.fromList [(1, "local"), (2, "local"), (3, "local")])
@@ -33,7 +35,9 @@ allIntersect =
   testCase "allIntersect"
     $ assertEqual
       "Color a graph where all values intersect"
-      ([(0, "local"), (1, "local"), (2, "local")], [(1 :: Int, 2), (2, 1), (3, 0)])
+      ( [(0, "local"), (1, "local"), (2, "local")] :: [(Int, String)],
+        [(1 :: Int, 2), (2, 1), (3, 0)]
+      )
     $ (M.toList *** M.toList)
     $ GreedyColoring.colorGraph
       (M.fromList [(1, "local"), (2, "local"), (3, "local")])
@@ -57,7 +61,9 @@ noIntersections =
     & M.toList *** M.toList
     & assertEqual
       "Color nodes with no intersections"
-      ([(0, "local")], [(1, 0), (2, 0), (3, 0)] :: [(Int, Int)])
+      ( [(0, "local")] :: [(Int, String)],
+        [(1, 0), (2, 0), (3, 0)] :: [(Int, Int)]
+      )
     & testCase "noIntersections"
 
 differentSpaces :: TestTree
@@ -68,5 +74,7 @@ differentSpaces =
     & M.toList *** M.toList
     & assertEqual
       "Color nodes with no intersections but in different spaces"
-      ([(0, "c"), (1, "b"), (2, "a")], [(1, 2), (2, 1), (3, 0)] :: [(Int, Int)])
+      ( [(0, "c"), (1, "b"), (2, "a")] :: [(Int, String)],
+        [(1, 2), (2, 1), (3, 0)] :: [(Int, Int)]
+      )
     & testCase "differentSpaces"

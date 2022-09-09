@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Expand allocations inside of maps when possible.
@@ -11,15 +9,15 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Either (rights)
 import Data.List (find, foldl')
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Rephrase
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Error
 import Futhark.IR
-import qualified Futhark.IR.GPU.Simplify as GPU
+import Futhark.IR.GPU.Simplify qualified as GPU
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass

@@ -1,10 +1,4 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -73,10 +67,10 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
 import Data.List (find, foldl', inits, mapAccumL)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases

@@ -1,7 +1,4 @@
 {
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog

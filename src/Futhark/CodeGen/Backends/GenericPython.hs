@@ -1,7 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | A generic Python code generator which is polymorphic in the type
 -- of the operations.  Concretely, we use this to handle both
 -- sequential and PyOpenCL Python code.
@@ -48,12 +44,12 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.RWS
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
-import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.CodeGen.ImpCode qualified as Imp
 import Futhark.CodeGen.RTS.Python
 import Futhark.Compiler.Config (CompilerMode (..))
 import Futhark.IR.Prop (isBuiltInFunction, subExpVars)

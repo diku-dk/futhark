@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | = Constructing Futhark ASTs
@@ -124,7 +121,7 @@ where
 import Control.Monad.Identity
 import Control.Monad.State
 import Data.List (foldl', sortOn, transpose)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.Builder
 import Futhark.IR
 import Futhark.Util (maybeNth)

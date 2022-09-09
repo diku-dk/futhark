@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Handling of diagnostics in the language server - things like
 -- warnings and errors.
 module Futhark.LSP.Diagnostic
@@ -13,9 +11,9 @@ where
 import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
 import Data.Foldable (for_)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.Compiler.Program (ProgError (..))
 import Futhark.LSP.Tool (posToUri, rangeFromLoc, rangeFromSrcLoc)
 import Futhark.Util.Loc (Loc (..), SrcLoc, locOf)

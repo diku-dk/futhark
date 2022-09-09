@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | @futhark pyopencl@
 module Futhark.CLI.PyOpenCL (main) where
 

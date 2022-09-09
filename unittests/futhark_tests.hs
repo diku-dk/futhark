@@ -1,15 +1,15 @@
 module Main (main) where
 
-import qualified Futhark.AD.DerivativesTests
-import qualified Futhark.BenchTests
-import qualified Futhark.IR.Mem.IxFunTests
-import qualified Futhark.IR.PropTests
-import qualified Futhark.IR.Syntax.CoreTests
-import qualified Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
-import qualified Futhark.Pkg.SolveTests
-import qualified Language.Futhark.PrimitiveTests
-import qualified Language.Futhark.SyntaxTests
-import qualified Language.Futhark.TypeCheckerTests
+import Futhark.AD.DerivativesTests qualified
+import Futhark.BenchTests qualified
+import Futhark.IR.Mem.IxFunTests qualified
+import Futhark.IR.PropTests qualified
+import Futhark.IR.Syntax.CoreTests qualified
+import Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests qualified
+import Futhark.Pkg.SolveTests qualified
+import Language.Futhark.PrimitiveTests qualified
+import Language.Futhark.SyntaxTests qualified
+import Language.Futhark.TypeCheckerTests qualified
 import Test.Tasty
 
 allTests :: TestTree

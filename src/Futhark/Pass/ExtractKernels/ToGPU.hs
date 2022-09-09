@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.ExtractKernels.ToGPU
@@ -19,7 +17,7 @@ import Futhark.Analysis.Rephrase
 import Futhark.IR
 import Futhark.IR.GPU
 import Futhark.IR.SOACS (SOACS)
-import qualified Futhark.IR.SOACS.SOAC as SOAC
+import Futhark.IR.SOACS.SOAC qualified as SOAC
 import Futhark.Tools
 
 getSize ::

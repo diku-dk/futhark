@@ -1,7 +1,4 @@
 {
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -w #-}
 -- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer

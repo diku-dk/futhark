@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Futhark.CodeGen.Backends.GenericPython.AST
   ( PyExp (..),
     PyIdx (..),
@@ -13,7 +11,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   )
 where
 
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark.Core
 

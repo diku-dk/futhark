@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | A simple representation with SOACs and nested parallelism.
@@ -22,7 +21,7 @@ import Futhark.IR.Prop
 import Futhark.IR.SOACS.SOAC
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
-import qualified Futhark.IR.TypeCheck as TC
+import Futhark.IR.TypeCheck qualified as TC
 
 -- | The rep for the basic representation.
 data SOACS

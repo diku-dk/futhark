@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -8,10 +7,10 @@ module Futhark.Optimise.TileLoops (tileLoops) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
-import qualified Data.Sequence as Seq
-import qualified Futhark.Analysis.Alias as Alias
+import Data.Sequence qualified as Seq
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.IR.GPU
 import Futhark.IR.Prop.Aliases (consumedInStm)
 import Futhark.MonadFreshNames

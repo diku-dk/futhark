@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Futhark.CodeGen.ImpGen.Multicore.Base
   ( extractAllocations,
     compileThreadResult,
@@ -34,9 +32,9 @@ where
 
 import Control.Monad
 import Data.Bifunctor
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem

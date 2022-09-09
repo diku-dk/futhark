@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Partial derivatives of scalar Futhark operations and built-in functions.
 module Futhark.AD.Derivatives
   ( pdBuiltin,

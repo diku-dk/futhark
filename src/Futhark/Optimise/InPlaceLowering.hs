@@ -1,8 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -71,7 +66,7 @@ module Futhark.Optimise.InPlaceLowering
 where
 
 import Control.Monad.RWS
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Ord (comparing)
 import Futhark.Analysis.Alias
 import Futhark.Builder

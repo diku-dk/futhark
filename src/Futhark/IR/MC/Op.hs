@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -18,14 +16,14 @@ where
 
 import Data.Bifunctor (first)
 import Futhark.Analysis.Metrics
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify as Simplify
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify qualified as Simplify
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute

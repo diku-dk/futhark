@@ -17,9 +17,9 @@ module Futhark.Optimise.Fusion.Composing
 where
 
 import Data.List (mapAccumL)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.HORep.SOAC as SOAC
+import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Builder (Buildable (..), insertStm, insertStms, mkLet)
 import Futhark.Construct (mapResult)
 import Futhark.IR

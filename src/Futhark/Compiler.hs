@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 
 -- | High-level API for invoking the Futhark compiler.
@@ -23,21 +21,21 @@ import Control.Monad
 import Control.Monad.Except
 import Data.Bifunctor (first)
 import Data.List (sortOn)
-import qualified Data.List.NonEmpty as NE
+import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (..), posCoff, posFile)
-import qualified Data.Text.IO as T
-import qualified Futhark.Analysis.Alias as Alias
+import Data.Text.IO qualified as T
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Compiler.Config
 import Futhark.Compiler.Program
 import Futhark.IR
-import qualified Futhark.IR.SOACS as I
-import qualified Futhark.IR.TypeCheck as I
+import Futhark.IR.SOACS qualified as I
+import Futhark.IR.TypeCheck qualified as I
 import Futhark.Internalise
 import Futhark.MonadFreshNames
 import Futhark.Pipeline
 import Futhark.Util.Log
 import Futhark.Util.Pretty
-import qualified Language.Futhark as E
+import Language.Futhark qualified as E
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings
 import System.Exit (ExitCode (..), exitWith)

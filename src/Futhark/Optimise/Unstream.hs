@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Sequentialise any remaining SOACs.  It is very important that
@@ -23,14 +22,14 @@ module Futhark.Optimise.Unstream (unstreamGPU, unstreamMC) where
 import Control.Monad.Reader
 import Control.Monad.State
 import Futhark.IR.GPU
-import qualified Futhark.IR.GPU as GPU
+import Futhark.IR.GPU qualified as GPU
 import Futhark.IR.GPU.Simplify (simplifyGPU)
 import Futhark.IR.MC
-import qualified Futhark.IR.MC as MC
+import Futhark.IR.MC qualified as MC
 import Futhark.MonadFreshNames
 import Futhark.Pass
 import Futhark.Tools
-import qualified Futhark.Transform.FirstOrderTransform as FOT
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 
 -- | The pass for GPU kernels.
 unstreamGPU :: Pass GPU GPU

@@ -1,7 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -58,23 +54,23 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.Function ((&))
 import Data.List (intersperse)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, removeLambdaAliases)
 import Futhark.IR.Prop.Aliases
-import qualified Futhark.IR.TypeCheck as TC
+import Futhark.IR.TypeCheck qualified as TC
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty (Doc, Pretty, align, comma, commasep, docText, parens, ppTuple', pretty, (<+>), (</>))
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
 -- | A second-order array combinator (SOAC).

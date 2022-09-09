@@ -1,5 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
 -- | This module implements an optimization that migrates host
 -- statements into 'GPUBody' kernels to reduce the number of
 -- host-device synchronizations that occur when a scalar variable is
@@ -14,11 +12,11 @@ import Control.Monad.Reader
 import Control.Monad.State hiding (State)
 import Data.Bifunctor (second)
 import Data.Foldable
-import qualified Data.IntMap.Strict as IM
+import Data.IntMap.Strict qualified as IM
 import Data.List (transpose, zip4)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Sequence ((<|), (><), (|>))
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Construct (fullSlice, mkBody, sliceDim)
 import Futhark.Error
 import Futhark.IR.GPU

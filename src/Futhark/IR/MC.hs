@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | A representation for multicore CPU parallelism.
@@ -26,13 +24,13 @@ import Futhark.IR.MC.Op
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.SOACS.SOAC hiding (HistOp (..))
-import qualified Futhark.IR.SOACS.Simplify as SOAC
+import Futhark.IR.SOACS.Simplify qualified as SOAC
 import Futhark.IR.SegOp
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
-import qualified Futhark.IR.TypeCheck as TypeCheck
-import qualified Futhark.Optimise.Simplify as Simplify
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TypeCheck
+import Futhark.Optimise.Simplify qualified as Simplify
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 

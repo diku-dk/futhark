@@ -1,7 +1,3 @@
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | An interpreter operating on type-checked source Futhark terms.
 -- Relatively slow.
 module Language.Futhark.Interpreter
@@ -46,22 +42,22 @@ import Data.List
     isPrefixOf,
     transpose,
   )
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
-import qualified Data.Text as T
-import qualified Futhark.Data as V
+import Data.Text qualified as T
+import Futhark.Data qualified as V
 import Futhark.Util (chunk, maybeHead, splitFromEnd)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
-import qualified Language.Futhark as F
+import Language.Futhark qualified as F
 import Language.Futhark.Interpreter.Values hiding (Value)
-import qualified Language.Futhark.Interpreter.Values
+import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
-import qualified Language.Futhark.Primitive as P
-import qualified Language.Futhark.Semantic as T
+import Language.Futhark.Primitive qualified as P
+import Language.Futhark.Semantic qualified as T
 import Prelude hiding (break, mod)
 
 data StackFrame = StackFrame

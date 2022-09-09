@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | @futhark c@
 module Futhark.CLI.C (main) where
 

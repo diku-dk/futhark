@@ -9,8 +9,8 @@ where
 
 import Data.Char (isDigit, ord)
 import Data.List (sortOn)
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Language.Futhark.Core (Name, nameFromString, nameToText)
 
 -- | Does this record map correspond to a tuple?

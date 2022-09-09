@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-
 -- | Functions for inspecting and constructing various types.
 module Futhark.IR.Prop.Types
   ( rankShaped,
@@ -70,9 +67,9 @@ where
 
 import Control.Monad.State
 import Data.List (elemIndex, foldl')
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Rearrange
 import Futhark.IR.Syntax.Core

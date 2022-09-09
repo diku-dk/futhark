@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- Naming scheme:
@@ -15,7 +11,7 @@ module Futhark.AD.Rev (revVJP) where
 import Control.Monad
 import Data.List ((\\))
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.AD.Derivatives
 import Futhark.AD.Rev.Loop
 import Futhark.AD.Rev.Monad

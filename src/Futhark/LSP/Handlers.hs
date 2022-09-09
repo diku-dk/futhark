@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | The handlers exposed by the language server.
 module Futhark.LSP.Handlers (handlers) where
 
@@ -7,7 +5,7 @@ import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
 import Data.Aeson.Types (Value (Array, String))
 import Data.IORef
-import qualified Data.Vector as V
+import Data.Vector qualified as V
 import Futhark.LSP.Compile (tryReCompile, tryTakeStateFromIORef)
 import Futhark.LSP.State (State (..))
 import Futhark.LSP.Tool (findDefinitionRange, getHoverInfoFromState)

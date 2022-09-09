@@ -10,8 +10,8 @@ where
 
 import Data.Algorithm.Diff (Diff, PolyDiff (Both, First, Second), getDiff)
 import Data.Bifunctor (Bifunctor (bimap, first, second))
-import qualified Data.Text as T
-import qualified Data.Vector as V
+import Data.Text qualified as T
+import Data.Vector qualified as V
 import Futhark.Util.Loc (Loc (Loc), Pos (Pos))
 import Language.LSP.VFS (VirtualFile)
 

@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | "Sinking" is conceptually the opposite of hoisting.  The idea is
@@ -48,11 +46,11 @@ module Futhark.Optimise.Sink (sinkGPU, sinkMC) where
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl')
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Sequence ((<|))
-import qualified Data.Sequence as SQ
-import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.SymbolTable as ST
+import Data.Sequence qualified as SQ
+import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Builder.Class
 import Futhark.Construct (sliceDim)
 import Futhark.IR.Aliases

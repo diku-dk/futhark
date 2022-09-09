@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Facilities for inspecting the data dependencies of a program.
 module Futhark.Analysis.DataDependencies
   ( Dependencies,
@@ -8,8 +6,8 @@ module Futhark.Analysis.DataDependencies
   )
 where
 
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
 import Futhark.IR
 
 -- | A mapping from a variable name @v@, to those variables on which

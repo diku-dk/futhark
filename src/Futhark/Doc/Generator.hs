@@ -1,21 +1,19 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | The core logic of @futhark doc@.
 module Futhark.Doc.Generator (renderFiles) where
 
-import qualified CMarkGFM as GFM
+import CMarkGFM qualified as GFM
 import Control.Arrow ((***))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Writer hiding (Sum)
 import Data.Char (isAlpha, isSpace, toUpper)
 import Data.List (find, groupBy, inits, intersperse, isPrefixOf, partition, sort, sortOn, tails)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Ord
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Data.String (fromString)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Version
 import Futhark.Util.Pretty (Doc, docText, pretty)
 import Futhark.Version
@@ -24,8 +22,8 @@ import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad hiding (warn)
 import System.FilePath (makeRelative, splitPath, (-<.>), (<.>), (</>))
 import Text.Blaze.Html5 (AttributeValue, Html, toHtml, (!))
-import qualified Text.Blaze.Html5 as H
-import qualified Text.Blaze.Html5.Attributes as A
+import Text.Blaze.Html5 qualified as H
+import Text.Blaze.Html5.Attributes qualified as A
 import Prelude hiding (abs)
 
 docToHtml :: Doc a -> Html
