@@ -142,25 +142,23 @@ instance Pretty Monotonicity where
 
 instance Pretty num => Pretty (LMAD num) where
   pretty (LMAD offset dims) =
-    braces $
-      semisep
-        [ "offset: " <> oneLine (pretty offset),
-          "strides: " <> p ldStride,
-          "shape: " <> p ldShape,
-          "permutation: " <> p ldPerm,
-          "monotonicity: " <> p ldMon
-        ]
+    braces . semistack $
+      [ "offset:" <+> group (pretty offset),
+        "strides:" <+> p ldStride,
+        "shape:" <+> p ldShape,
+        "permutation:" <+> p ldPerm,
+        "monotonicity:" <+> p ldMon
+      ]
     where
-      p f = oneLine $ brackets $ commasep $ map (pretty . f) dims
+      p f = group $ brackets $ align $ commasep $ map (pretty . f) dims
 
 instance Pretty num => Pretty (IxFun num) where
   pretty (IxFun lmads oshp cg) =
-    braces $
-      semisep
-        [ "base: " <> brackets (commasep $ map pretty oshp),
-          "contiguous: " <> if cg then "true" else "false",
-          "LMADs: " <> brackets (commastack $ NE.toList $ NE.map pretty lmads)
-        ]
+    braces . semistack $
+      [ "base:" <+> brackets (commasep $ map pretty oshp),
+        "contiguous:" <+> if cg then "true" else "false",
+        "LMADs:" <+> brackets (commastack $ NE.toList $ NE.map pretty lmads)
+      ]
 
 instance Substitute num => Substitute (LMAD num) where
   substituteNames substs = fmap $ substituteNames substs
