@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Diagnostics will no longer contain control codes when output is a
   file.
 
+* CLI executables now fail when printing an opaque instead of
+  producing garbage.  This improves handling of some incorrect uses of
+  `auto output` (#1251).
+
 ## [0.22.1]
 
 ### Removed
