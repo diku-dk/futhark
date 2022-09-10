@@ -6,7 +6,6 @@
 module Futhark.CodeGen.Backends.GenericC
   ( compileProg,
     compileProg',
-    compileFun,
     defaultOperations,
     CParts (..),
     asLibrary,
@@ -27,6 +26,7 @@ import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Futhark.CodeGen.Backends.GenericC.Code
 import Futhark.CodeGen.Backends.GenericC.EntryPoints
+import Futhark.CodeGen.Backends.GenericC.Fun
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty
@@ -93,72 +93,6 @@ defaultOperations =
       error "Has no type for non-default memory space"
     defCompiler _ =
       error "The default compiler cannot compile extended operations"
-
-compileFunBody :: [C.Exp] -> [Param] -> Code op -> CompilerM op s ()
-compileFunBody output_ptrs outputs code = do
-  mapM_ declareOutput outputs
-  compileCode code
-  zipWithM_ setRetVal' output_ptrs outputs
-  where
-    declareOutput (MemParam name space) =
-      declMem name space
-    declareOutput (ScalarParam name pt) = do
-      let ctp = primTypeToCType pt
-      decl [C.cdecl|$ty:ctp $id:name;|]
-
-    setRetVal' p (MemParam name space) = do
-      resetMem [C.cexp|*$exp:p|] space
-      setMem [C.cexp|*$exp:p|] name space
-    setRetVal' p (ScalarParam name _) =
-      stm [C.cstm|*$exp:p = $id:name;|]
-
-compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = inNewFunction $ do
-  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
-  inparams <- mapM compileInput inputs
-
-  cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
-    body' <- collect $ compileFunBody out_ptrs outputs body
-    decl_mem <- declAllocatedMem
-    free_mem <- freeAllocatedMem
-
-    pure
-      ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
-        [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
-               $stms:ignores
-               int err = 0;
-               $items:decl_cached
-               $items:decl_mem
-               $items:get_constants
-               $items:body'
-              cleanup:
-               {
-               $stms:free_cached
-               $items:free_mem
-               }
-               return err;
-  }|]
-      )
-  where
-    -- Ignore all the boilerplate parameters, just in case we don't
-    -- actually need to use them.
-    ignores = [[C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra]
-
-    compileInput (ScalarParam name bt) = do
-      let ctp = primTypeToCType bt
-      pure [C.cparam|$ty:ctp $id:name|]
-    compileInput (MemParam name space) = do
-      ty <- memToCType name space
-      pure [C.cparam|$ty:ty $id:name|]
-
-    compileOutput (ScalarParam name bt) = do
-      let ctp = primTypeToCType bt
-      p_name <- newVName $ "out_" ++ baseString name
-      pure ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
-    compileOutput (MemParam name space) = do
-      ty <- memToCType name space
-      p_name <- newVName $ baseString name ++ "_p"
-      pure ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 declsCode :: (HeaderSection -> Bool) -> CompilerState s -> T.Text
 declsCode p =

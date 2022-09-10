@@ -15,7 +15,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Futhark.CodeGen.Backends.GenericC qualified as GC
+import Futhark.CodeGen.Backends.GenericC.Fun qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.GPU hiding (Program)
