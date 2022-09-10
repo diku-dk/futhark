@@ -30,6 +30,7 @@ module Futhark.Util.Pretty
     shorten,
     commastack,
     commasep,
+    semistack,
     semisep,
     stack,
     parensIf,
@@ -161,6 +162,10 @@ shorten a
 -- | Like 'commasep', but a newline after every comma.
 commastack :: [Doc a] -> Doc a
 commastack = align . vsep . punctuate comma
+
+-- | Like 'semisep', but a newline after every semicolon.
+semistack :: [Doc a] -> Doc a
+semistack = align . vsep . punctuate semi
 
 -- | Separate with commas.
 commasep :: [Doc a] -> Doc a
