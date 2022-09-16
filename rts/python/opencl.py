@@ -74,6 +74,7 @@ def apply_size_heuristics(self, size_heuristics, sizes):
 
 def initialise_opencl_object(self,
                              program_src='',
+                             build_options=[],
                              command_queue=None,
                              interactive=False,
                              platform_pref=None,
@@ -214,8 +215,6 @@ def initialise_opencl_object(self,
     # compiler should provide us with the variables to which
     # parameters are mapped.
     if (len(program_src) >= 0):
-        build_options = []
-
         build_options += ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
 
         build_options += ["-D{}={}".format(s.

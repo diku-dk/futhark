@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark repl` no longer prints scalar types with type suffixes (#1724).
 
+* `futhark pyopencl` executables now accept ``--build-option``.
+
 ### Removed
 
 ### Changed

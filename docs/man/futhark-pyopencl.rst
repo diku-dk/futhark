@@ -34,7 +34,7 @@ The generated code requires at least PyOpenCL version 2015.2.
 OPTIONS
 =======
 
-Accepts the same options as :ref:`futhark-c(1)`.
+Accepts the same options as :ref:`futhark-opencl(1)`.
 
 SEE ALSO
 ========
