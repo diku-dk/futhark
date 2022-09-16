@@ -39,6 +39,7 @@ self.global_failure_args_max = $max_num_args
 self.failure_msgs=$failure_msgs
 program = initialise_opencl_object(self,
                                    program_src=fut_opencl_src,
+                                   build_options=build_options,
                                    command_queue=command_queue,
                                    interactive=interactive,
                                    platform_pref=platform_pref,

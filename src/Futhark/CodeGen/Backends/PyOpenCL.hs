@@ -53,6 +53,7 @@ compileProg mode class_name prog = do
   let defines =
         [ Assign (Var "synchronous") $ Bool False,
           Assign (Var "preferred_platform") None,
+          Assign (Var "build_options") $ List [],
           Assign (Var "preferred_device") None,
           Assign (Var "default_threshold") None,
           Assign (Var "default_group_size") None,
@@ -74,6 +75,7 @@ compileProg mode class_name prog = do
   let constructor =
         Py.Constructor
           [ "self",
+            "build_options=build_options",
             "command_queue=None",
             "interactive=False",
             "platform_pref=preferred_platform",
@@ -100,6 +102,16 @@ compileProg mode class_name prog = do
               optionArgument = RequiredArgument "str",
               optionAction =
                 [Assign (Var "preferred_device") $ Var "optarg"]
+            },
+          Option
+            { optionLongName = "build-option",
+              optionShortName = Nothing,
+              optionArgument = RequiredArgument "str",
+              optionAction =
+                [ Assign (Var "build_options") $
+                    BinOp "+" (Var "build_options") $
+                      List [Var "optarg"]
+                ]
             },
           Option
             { optionLongName = "default-threshold",
