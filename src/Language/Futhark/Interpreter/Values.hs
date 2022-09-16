@@ -165,7 +165,14 @@ prettyValue = prettyValueWith pprPrim
     pprPrim (SignedValue (Int64Value v)) = pretty v
     pprPrim (BoolValue True) = "true"
     pprPrim (BoolValue False) = "false"
-    pprPrim (FloatValue v) = pretty v
+    pprPrim (FloatValue (Float16Value v)) = pprFloat "f16." v
+    pprPrim (FloatValue (Float32Value v)) = pprFloat "f32." v
+    pprPrim (FloatValue (Float64Value v)) = pprFloat "f64." v
+    pprFloat t v
+      | isInfinite v, v >= 0 = t <> "inf"
+      | isInfinite v, v < 0 = "-" <> t <> "inf"
+      | isNaN v = t <> "nan"
+      | otherwise = pretty $ show v
 
 -- | The value in the textual format.
 valueText :: Value m -> T.Text
