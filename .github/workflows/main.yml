@@ -297,7 +297,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O1 --runner=tools/oclgrindrunner.sh tests
+        futhark test -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh tests
 
   test-pyopencl:
     runs-on: ubuntu-22.04
@@ -323,7 +323,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --no-terminal --backend=pyopencl --exclude=compiled --pass-option=--build-option=-O1 --runner=tools/oclgrindrunner.sh tests
+        futhark test -c --no-terminal --backend=pyopencl --exclude=compiled --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh tests
 
   test-cuda:
     runs-on: ubuntu-22.04
