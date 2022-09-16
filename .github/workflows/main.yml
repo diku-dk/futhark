@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-linux-nix:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v2
@@ -30,7 +30,7 @@ jobs:
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
   build-linux-cabal:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v2
@@ -99,7 +99,7 @@ jobs:
         path: futhark-nightly-macos-x86_64.tar.xz
 
   test-style:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v2
@@ -122,7 +122,7 @@ jobs:
   # Fails mysteriously right now.
   #
   # build-docs:
-  #   runs-on: ubuntu-20.04
+  #   runs-on: ubuntu-22.04
 
   #   steps:
   #   - uses: actions/checkout@v2
@@ -145,7 +145,7 @@ jobs:
   #         nix-shell --pure --run "make docs"
 
   test-interpreter:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -165,7 +165,7 @@ jobs:
         futhark test -i tests
 
   test-c:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -192,7 +192,7 @@ jobs:
         make -C tests_lib/c -j
 
   test-multicore:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -219,7 +219,7 @@ jobs:
         make -C tests_lib/c FUTHARK_BACKEND=multicore
 
   test-ispc:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -249,7 +249,7 @@ jobs:
         nix-shell --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
   test-python:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -258,7 +258,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python-numpy python3-numpy
+        sudo apt-get install -y python3-numpy
 
     - uses: actions/download-artifact@v2
       with:
@@ -275,7 +275,7 @@ jobs:
         make -C tests_lib/python -j
 
   test-opencl:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -300,7 +300,7 @@ jobs:
         futhark test -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --runner=tools/oclgrindrunner.sh tests
 
   test-pyopencl:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -326,7 +326,7 @@ jobs:
         futhark test -c --no-terminal --backend=pyopencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests
 
   test-cuda:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -351,7 +351,7 @@ jobs:
         futhark test -C --no-terminal --backend=cuda tests
 
   test-wasm:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -383,7 +383,7 @@ jobs:
         futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm tests
 
   test-wasm-multicore:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -415,7 +415,7 @@ jobs:
         futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --no-tuning --exclude=no_wasm tests
 
   test-wasm-lib:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -450,7 +450,7 @@ jobs:
         make -C tests_lib/web
 
   test-tools:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -499,7 +499,7 @@ jobs:
         path: prelude-docs.tar.xz
 
   benchmark-opencl:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
 
     steps:
@@ -530,7 +530,7 @@ jobs:
         futhark test -C --no-terminal --backend=opencl  --pass-compiler-option=--Werror futhark-benchmarks
 
   deploy-nightly:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix, build-mac-cabal, test-tools]
     if: github.ref == 'refs/heads/master'
 
