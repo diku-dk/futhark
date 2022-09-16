@@ -592,7 +592,9 @@ runTests config paths = do
         }
 
   -- Removes "Now testing" output.
-  when fancy $ cursorUpLine 1 >> clearLine
+  if fancy
+    then cursorUpLine 1 >> clearLine
+    else putStrLn $ show (testStatusPass ts) <> "/" <> show (testStatusTotal ts) <> " passed."
 
   unless (null excluded) . putStrLn $
     show (length excluded) ++ " program(s) excluded."
