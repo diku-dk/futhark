@@ -508,6 +508,9 @@ def futhark_ceil64(x):
 def futhark_floor64(x):
   return np.floor(x)
 
+def futhark_nextafter64(x, y):
+  return np.nextafter(x, y)
+
 def futhark_isnan64(x):
   return np.isnan(x)
 
@@ -603,6 +606,9 @@ def futhark_ceil32(x):
 def futhark_floor32(x):
   return np.floor(x)
 
+def futhark_nextafter32(x, y):
+  return np.nextafter(x, y)
+
 def futhark_isnan32(x):
   return np.isnan(x)
 
@@ -697,6 +703,9 @@ def futhark_ceil16(x):
 
 def futhark_floor16(x):
   return np.floor(x)
+
+def futhark_nextafter16(x, y):
+  return np.nextafter(x, y)
 
 def futhark_isnan16(x):
   return np.isnan(x)

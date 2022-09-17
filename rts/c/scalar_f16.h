@@ -317,6 +317,10 @@ static inline f16 futrts_ceil16(f16 x) {
   return ceil(x);
 }
 
+static inline f16 futrts_nextafter16(f16 x, f16 y) {
+  return nextafter(x, y);
+}
+
 static inline f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
   return mix(v0, v1, t);
 }
@@ -463,6 +467,10 @@ static inline f16 futrts_ceil16(f16 x) {
   return (float16)ceil((float)x);
 }
 
+static inline f16 futrts_nextafter16(f16 x, f16 y) {
+  return (float16)futrts_nextafter32((float)x, (float) y);
+}
+
 static inline f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
   return v0 + (v1 - v0) * t;
 }
@@ -587,6 +595,10 @@ static inline f16 futrts_floor16(f16 x) {
 
 static inline f16 futrts_ceil16(f16 x) {
   return hceil(x);
+}
+
+static inline f16 futrts_nextafter16(f16 x, f16 y) {
+  return __ushort_as_half(halfbitsnextafter(__half_as_ushort(x), __half_as_ushort(y)));
 }
 
 static inline f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
@@ -781,6 +793,10 @@ static inline f16 futrts_floor16(f16 x) {
 
 static inline f16 futrts_ceil16(f16 x) {
   return futrts_ceil32(x);
+}
+
+static inline f16 futrts_nextafter16(f16 x, f16 y) {
+  return halfbits2float(halfbitsnextafter(float2halfbits(x), float2halfbits(y)));
 }
 
 static inline f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {

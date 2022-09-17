@@ -235,4 +235,22 @@ static float halfbits2float(uint16_t value) {
   return u.y;
 }
 
+static uint16_t halfbitsnextafter(uint16_t from, uint16_t to) {
+  int fabs = from & 0x7FFF, tabs = to & 0x7FFF;
+  if(fabs > 0x7C00 || tabs > 0x7C00) {
+    return ((from&0x7FFF)>0x7C00) ? (from|0x200) : (to|0x200);
+  }
+  if(from == to || !(fabs|tabs)) {
+    return to;
+  }
+  if(!fabs) {
+    return (to&0x8000)+1;
+  }
+  unsigned int out =
+    from +
+    (((from>>15)^(unsigned int)((from^(0x8000|(0x8000-(from>>15))))<(to^(0x8000|(0x8000-(to>>15))))))<<1)
+    - 1;
+  return out;
+}
+
 // End of half.h.
