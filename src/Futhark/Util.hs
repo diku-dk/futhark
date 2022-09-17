@@ -38,6 +38,8 @@ module Futhark.Util
     roundDouble,
     ceilDouble,
     floorDouble,
+    nextafterf,
+    nextafter,
     lgamma,
     lgammaf,
     tgamma,
@@ -306,6 +308,20 @@ ceilDouble = c_ceil
 -- | Round a double-precision floating point number downwards correctly.
 floorDouble :: Double -> Double
 floorDouble = c_floor
+
+foreign import ccall "nextafter" c_nextafter :: Double -> Double -> Double
+
+foreign import ccall "nextafterf" c_nextafterf :: Float -> Float -> Float
+
+-- | The next representable single-precision floating-point value in
+-- the given direction.
+nextafterf :: Float -> Float -> Float
+nextafterf = c_nextafterf
+
+-- | The next representable double-precision floating-point value in
+-- the given direction.
+nextafter :: Double -> Double -> Double
+nextafter = c_nextafter
 
 foreign import ccall "lgamma" c_lgamma :: Double -> Double
 

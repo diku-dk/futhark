@@ -146,6 +146,8 @@ import Futhark.Util
     hypotf,
     lgamma,
     lgammaf,
+    nextafter,
+    nextafterf,
     roundDouble,
     roundFloat,
     tgamma,
@@ -1266,6 +1268,10 @@ primFuns =
       f32 "floor32" floorFloat,
       f64 "floor64" floorDouble,
       --
+      f16_2 "nextafter16" (\x y -> convFloat $ nextafterf (convFloat x) (convFloat y)),
+      f32_2 "nextafter32" nextafterf,
+      f64_2 "nextafter64" nextafter,
+      --
       f16 "gamma16" $ convFloat . tgammaf . convFloat,
       f32 "gamma32" tgammaf,
       f64 "gamma64" tgamma,
@@ -1543,6 +1549,27 @@ primFuns =
     f16 s f = (s, ([FloatType Float16], FloatType Float16, f16PrimFun f))
     f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
     f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))
+    f16_2 s f =
+      ( s,
+        ( [FloatType Float16, FloatType Float16],
+          FloatType Float16,
+          f16PrimFun2 f
+        )
+      )
+    f32_2 s f =
+      ( s,
+        ( [FloatType Float32, FloatType Float32],
+          FloatType Float32,
+          f32PrimFun2 f
+        )
+      )
+    f64_2 s f =
+      ( s,
+        ( [FloatType Float64, FloatType Float64],
+          FloatType Float64,
+          f64PrimFun2 f
+        )
+      )
     f16_3 s f =
       ( s,
         ( [FloatType Float16, FloatType Float16, FloatType Float16],
@@ -1592,6 +1619,30 @@ primFuns =
     f64PrimFun f [FloatValue (Float64Value x)] =
       Just $ FloatValue $ Float64Value $ f x
     f64PrimFun _ _ = Nothing
+
+    f16PrimFun2
+      f
+      [ FloatValue (Float16Value a),
+        FloatValue (Float16Value b)
+        ] =
+        Just $ FloatValue $ Float16Value $ f a b
+    f16PrimFun2 _ _ = Nothing
+
+    f32PrimFun2
+      f
+      [ FloatValue (Float32Value a),
+        FloatValue (Float32Value b)
+        ] =
+        Just $ FloatValue $ Float32Value $ f a b
+    f32PrimFun2 _ _ = Nothing
+
+    f64PrimFun2
+      f
+      [ FloatValue (Float64Value a),
+        FloatValue (Float64Value b)
+        ] =
+        Just $ FloatValue $ Float64Value $ f a b
+    f64PrimFun2 _ _ = Nothing
 
     f16PrimFun3
       f
