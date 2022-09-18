@@ -130,29 +130,8 @@ import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Map qualified as M
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CUShort (..))
-import Futhark.Util
-  ( cbrt,
-    cbrtf,
-    ceilDouble,
-    ceilFloat,
-    convFloat,
-    erf,
-    erfc,
-    erfcf,
-    erff,
-    floorDouble,
-    floorFloat,
-    hypot,
-    hypotf,
-    lgamma,
-    lgammaf,
-    nextafter,
-    nextafterf,
-    roundDouble,
-    roundFloat,
-    tgamma,
-    tgammaf,
-  )
+import Futhark.Util (convFloat)
+import Futhark.Util.CMath
 import Futhark.Util.Pretty
 import Numeric.Half
 import Prelude hiding (id, (.))
