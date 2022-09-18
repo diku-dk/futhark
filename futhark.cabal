@@ -348,6 +348,7 @@ library
       Futhark.Transform.Rename
       Futhark.Transform.Substitute
       Futhark.Util
+      Futhark.Util.CMath
       Futhark.Util.IntegralExp
       Futhark.Util.Loc
       Futhark.Util.Log
