@@ -20,7 +20,7 @@ import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, pretty, putDoc, (<+>))
+import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, pretty, putDoc, putDocLn, (<+>))
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
@@ -85,7 +85,7 @@ repl maybe_prog = do
             case maybe_new_state of
               Right new_state -> toploop new_state
               Left err -> do
-                liftIO $ putDoc err
+                liftIO $ putDocLn err
                 toploop s'
           Right _ -> pure ()
 
