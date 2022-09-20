@@ -155,13 +155,13 @@ instance PP.Pretty Directive where
 data Block
   = BlockCode T.Text
   | BlockComment T.Text
-  | BlockDirective Directive
+  | BlockDirective Directive T.Text
   deriving (Show)
 
 varsInScripts :: [Block] -> S.Set EntryName
 varsInScripts = foldMap varsInBlock
   where
-    varsInBlock (BlockDirective d) = varsInDirective d
+    varsInBlock (BlockDirective d _) = varsInDirective d
     varsInBlock BlockCode {} = mempty
     varsInBlock BlockComment {} = mempty
 
@@ -280,10 +280,26 @@ atStartOfLine = do
 afterExp :: Parser ()
 afterExp = choice [atStartOfLine, void eol]
 
+withParsedSource :: Parser a -> (a -> T.Text -> b) -> Parser b
+withParsedSource p f = do
+  s <- getInput
+  bef <- getOffset
+  x <- p
+  aft <- getOffset
+  pure $ f x $ T.take (aft - bef) s
+
+stripCommentPrefix :: T.Text -> T.Text
+stripCommentPrefix = T.unlines . map onLine . T.lines
+  where
+    onLine s
+      | "-- " `T.isPrefixOf` s = T.drop 3 s
+      | otherwise = T.drop 2 s
+
 parseBlock :: Parser Block
 parseBlock =
   choice
-    [ token "-- >" $> BlockDirective <*> parseDirective,
+    [ withParsedSource (token "-- >" *> parseDirective) $ \d s ->
+        BlockDirective d $ stripCommentPrefix s,
       BlockCode <$> parseTestBlock,
       BlockCode <$> parseBlockCode,
       BlockComment <$> parseBlockComment
@@ -853,7 +869,7 @@ processBlock _ (BlockCode code)
   | otherwise = pure (Success, "\n```futhark\n" <> code <> "```\n\n", mempty)
 processBlock _ (BlockComment pretty) =
   pure (Success, pretty, mempty)
-processBlock env (BlockDirective directive) = do
+processBlock env (BlockDirective directive text) = do
   when (scriptVerbose (envOpts env) > 0) $
     T.hPutStrLn stderr . PP.docText $
       "Processing " <> PP.align (PP.pretty directive) <> "..."
@@ -862,7 +878,7 @@ processBlock env (BlockDirective directive) = do
         DirectiveBrief _ ->
           "```\n" <> PP.docText (pprDirective False directive) <> "\n```\n"
         _ ->
-          "```\n" <> PP.docText (pprDirective True directive) <> "\n```\n"
+          "```\n" <> text <> "```\n"
       env' = env {envHash = hashText (envHash env <> prettyText directive)}
   (r, files) <- runScriptM $ processDirective env' directive
   case r of
