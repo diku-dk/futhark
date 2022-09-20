@@ -23,7 +23,7 @@
 let
   config = {
     packageOverrides = pkgs: rec {
-      haskellPackages = pkgs.haskell.packages.ghc924.override {
+      haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
           futhark-data =
             haskellPackagesNew.callPackage ./nix/futhark-data.nix { };
