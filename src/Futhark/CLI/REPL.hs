@@ -271,7 +271,7 @@ onDec d = do
           imports = lpImports prog
           src = lpNameSource prog
       case T.checkDec imports src tenv cur_import d of
-        (_, Left e) -> liftIO $ putDoc $ T.prettyTypeError e
+        (_, Left e) -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc e
         (_, Right (tenv', d', src')) -> do
           let new_imports = filter ((`notElem` map fst old_imports) . fst) imports
           int_r <- runInterpreter $ do
