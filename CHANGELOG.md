@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * New functions: `f16.nextafter`, `f32.nextafter`, `f64.nextafter`,
   matching the ones in the C math library.
 
+* `futhark literate` now prints directives in the output exactly as
+  they appear in the source.
+
 ### Removed
 
 ### Changed
