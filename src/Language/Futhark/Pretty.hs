@@ -120,7 +120,7 @@ prettyScalarType :: Pretty (Shape dim) => Int -> ScalarTypeBase dim as -> Doc a
 prettyScalarType _ (Prim et) = pretty et
 prettyScalarType p (TypeVar _ u v targs) =
   parensIf (not (null targs) && p > 3) $
-    pretty u <> pretty v <+> hsep (map (prettyTypeArg 3) targs)
+    pretty u <> hsep (pretty v : map (prettyTypeArg 3) targs)
 prettyScalarType _ (Record fs)
   | Just ts <- areTupleFields fs =
       group $ parens $ align $ mconcat $ punctuate ("," <> line) $ map pretty ts
