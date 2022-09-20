@@ -168,7 +168,7 @@ varsInScripts = foldMap varsInBlock
 type Parser = Parsec Void T.Text
 
 postlexeme :: Parser ()
-postlexeme = void $ hspace *> optional (try $ eol *> "-- " *> postlexeme)
+postlexeme = void $ hspace *> optional (try $ eol *> "--" *> postlexeme)
 
 lexeme :: Parser a -> Parser a
 lexeme p = p <* postlexeme
