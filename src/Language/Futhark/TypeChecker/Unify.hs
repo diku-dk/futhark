@@ -721,7 +721,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   <+> "must be one of"
                   <+> commasep (map pretty ts)
                   </> "due to"
-                  </> pretty old_usage <> "."
+                  <+> pretty old_usage <> "."
     Just (HasFields required_fields old_usage) -> do
       link
       case tp of
