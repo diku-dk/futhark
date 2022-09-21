@@ -282,6 +282,7 @@ printStm manifest tname e =
                  $ty:et' *arr = calloc($exp:num_elems, $id:info.size);
                  assert(arr != NULL);
                  assert($id:values_array(ctx, $exp:e, arr) == 0);
+                 assert(futhark_context_sync(ctx) == 0);
                  write_array(stdout, binary_output, &$id:info, arr,
                              $id:shape_array(ctx, $exp:e), $int:rank);
                  free(arr);

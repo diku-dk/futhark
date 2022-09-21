@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Non-server executables neglected to synchronise before printing results (#1731).
+
 ## [0.22.2]
 
 ### Added
