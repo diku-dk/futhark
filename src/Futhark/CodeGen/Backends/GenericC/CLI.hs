@@ -305,10 +305,6 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
       printstms =
         printResult manifest $ zip (map outputType outputs) output_vals
 
-      ctx_ty = [C.cty|struct futhark_context|]
-      sync_ctx = "futhark_context_sync" :: T.Text
-      error_ctx = "futhark_context_get_error" :: T.Text
-
       cli_entry_point_function_name = "futrts_cli_entry_" ++ T.unpack entry_point_name
 
       pause_profiling = "futhark_context_pause_profiling" :: T.Text
@@ -321,8 +317,8 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
                 int r;
                 // Run the program once.
                 $stms:pack_input
-                if ($id:sync_ctx(ctx) != 0) {
-                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                if (futhark_context_sync(ctx) != 0) {
+                  futhark_panic(1, "%s", futhark_context_get_error(ctx));
                 };
                 // Only profile last run.
                 if (profile_run) {
@@ -333,10 +329,10 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
                              $args:(map addrOf output_vals),
                              $args:input_args);
                 if (r != 0) {
-                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                  futhark_panic(1, "%s", futhark_context_get_error(ctx));
                 }
-                if ($id:sync_ctx(ctx) != 0) {
-                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                if (futhark_context_sync(ctx) != 0) {
+                  futhark_panic(1, "%s", futhark_context_get_error(ctx));
                 };
                 if (profile_run) {
                   $id:pause_profiling(ctx);
@@ -350,7 +346,7 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
                 $stms:free_input
               |]
    in ( [C.cedecl|
-   static int $id:cli_entry_point_function_name($ty:ctx_ty *ctx) {
+   static int $id:cli_entry_point_function_name(struct futhark_context *ctx) {
      typename int64_t t_start, t_end;
      int time_runs = 0, profile_run = 0;
      int retval = 0;
