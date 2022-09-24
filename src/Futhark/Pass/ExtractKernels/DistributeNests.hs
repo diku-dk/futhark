@@ -39,6 +39,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.IR
+import Futhark.IR.GPU.Op (SegVirt (..))
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SOACS qualified as SOACS
 import Futhark.IR.SOACS.SOAC hiding (HistOp, histDest)

@@ -921,11 +921,11 @@ pSegLevel =
         [ pSemi
             *> choice
               [ keyword "full"
-                  $> SegOp.SegNoVirtFull
-                  <*> (SegOp.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
-                keyword "virtualise" $> SegOp.SegVirt
+                  $> GPU.SegNoVirtFull
+                  <*> (GPU.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
+                keyword "virtualise" $> GPU.SegVirt
               ],
-          pure SegOp.SegNoVirt
+          pure GPU.SegNoVirt
         ]
 
 pHostOp :: PR rep -> Parser op -> Parser (GPU.HostOp rep op)

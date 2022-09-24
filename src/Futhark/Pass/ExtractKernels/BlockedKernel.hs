@@ -21,6 +21,7 @@ import Control.Monad
 import Control.Monad.Writer
 import Futhark.Analysis.PrimExp
 import Futhark.IR
+import Futhark.IR.GPU.Op (SegVirt (..))
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
