@@ -82,8 +82,10 @@ compileSegRed ::
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen ()
-compileSegRed pat lvl space reds body =
-  compileSegRed' pat lvl space reds $ \red_cont ->
+compileSegRed pat lvl space reds body = do
+  KernelAttrs _ _ num_groups group_size <- lvlKernelAttrs lvl
+  let grid = KernelGrid num_groups group_size
+  compileSegRed' pat grid space reds $ \red_cont ->
     compileStms mempty (kernelBodyStms body) $ do
       let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult body
 
@@ -96,12 +98,12 @@ compileSegRed pat lvl space reds body =
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
   Pat LetDecMem ->
-  SegLevel ->
+  KernelGrid ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
-compileSegRed' pat lvl space reds body
+compileSegRed' pat grid space reds body
   | genericLength reds > maxNumOps =
       compilerLimitationS $
         "compileSegRed': at most " ++ show maxNumOps ++ " reduction operators are supported."
@@ -116,8 +118,8 @@ compileSegRed' pat lvl space reds body
         (smallSegmentsReduction pat num_groups group_size space reds body)
         (largeSegmentsReduction pat num_groups group_size space reds body)
   where
-    num_groups = segNumGroups lvl
-    group_size = segGroupSize lvl
+    num_groups = gridNumGroups grid
+    group_size = gridGroupSize grid
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
 -- arguments go in local memory (so we need to do the allocation of

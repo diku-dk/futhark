@@ -491,6 +491,8 @@ compileSegScan ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scans kbody = do
+  attrs <- lvlKernelAttrs lvl
+
   -- Since stage 2 involves a group size equal to the number of groups
   -- used for stage 1, we have to cap this number to the maximum group
   -- size.
@@ -501,14 +503,13 @@ compileSegScan pat lvl space scans kbody = do
     fmap (Imp.Count . tvSize) $
       dPrimV "stage1_num_groups" $
         sMin64 (tvExp stage1_max_num_groups) $
-          pe64 $
-            Imp.unCount $
-              segNumGroups lvl
+          pe64 . Imp.unCount . kAttrNumGroups $
+            attrs
 
   (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 pat stage1_num_groups (segGroupSize lvl) space scans kbody
+    scanStage1 pat stage1_num_groups (kAttrGroupSize attrs) space scans kbody
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
 
   scanStage2 pat stage1_num_threads elems_per_group stage1_num_groups crossesSegment space scans
-  scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scans
+  scanStage3 pat (kAttrNumGroups attrs) (kAttrGroupSize attrs) elems_per_group crossesSegment space scans

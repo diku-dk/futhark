@@ -19,6 +19,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     sKernelThread,
     KernelAttrs (..),
     defKernelAttrs,
+    lvlKernelAttrs,
     allocLocal,
     kernelAlloc,
     compileThreadResult,
@@ -1075,6 +1076,33 @@ defKernelAttrs num_groups group_size =
       kAttrNumGroups = num_groups,
       kAttrGroupSize = group_size
     }
+
+getSize :: String -> SizeClass -> CallKernelGen (TV Int64)
+getSize desc size_class = do
+  v <- dPrim desc int64
+  fname <- askFunction
+  let v_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar v
+  sOp $ Imp.GetSize (tvVar v) v_key size_class
+  pure v
+
+-- | Compute kernel attributes from 'SegLevel'; including synthesising
+-- group-size and thread count if no grid is provided.
+lvlKernelAttrs :: SegLevel -> CallKernelGen KernelAttrs
+lvlKernelAttrs lvl =
+  case lvl of
+    SegThread _ Nothing -> mkGrid
+    SegThread _ (Just (KernelGrid num_groups group_size)) ->
+      pure $ defKernelAttrs num_groups group_size
+    SegGroup _ Nothing -> mkGrid
+    SegGroup _ (Just (KernelGrid num_groups group_size)) ->
+      pure $ defKernelAttrs num_groups group_size
+    SegThreadInGroup {} ->
+      error "lvlKernelAttrs: SegThreadInGroup"
+  where
+    mkGrid = do
+      group_size <- getSize "group_size" Imp.SizeGroup
+      num_groups <- getSize "num_groups" Imp.SizeNumGroups
+      pure $ defKernelAttrs (Count $ tvSize num_groups) (Count $ tvSize group_size)
 
 sKernel ::
   Operations GPUMem KernelEnv Imp.KernelOp ->

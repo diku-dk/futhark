@@ -910,23 +910,36 @@ pSegOp pr pLvl =
 
 pSegLevel :: Parser GPU.SegLevel
 pSegLevel =
-  parens $
-    choice
-      [ keyword "thread" $> GPU.SegThread,
-        keyword "group" $> GPU.SegGroup
-      ]
-      <*> (pSemi *> lexeme "#groups=" $> GPU.Count <*> pSubExp)
-      <*> (pSemi *> lexeme "groupsize=" $> GPU.Count <*> pSubExp)
-      <*> choice
-        [ pSemi
-            *> choice
-              [ keyword "full"
-                  $> GPU.SegNoVirtFull
-                  <*> (GPU.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
-                keyword "virtualise" $> GPU.SegVirt
-              ],
+  parens . choice $
+    [ "thread"
+        $> GPU.SegThread
+        <* pSemi
+        <*> pSegVirt
+        <* pSemi
+        <*> optional pKernelGrid,
+      "group"
+        $> GPU.SegGroup
+        <* pSemi
+        <*> pSegVirt
+        <* pSemi
+        <*> optional pKernelGrid,
+      "ingroup" $> GPU.SegThreadInGroup <* pSemi <*> pSegVirt
+    ]
+  where
+    pSegVirt =
+      choice
+        [ choice
+            [ keyword "full"
+                $> GPU.SegNoVirtFull
+                <*> (GPU.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
+              keyword "virtualise" $> GPU.SegVirt
+            ],
           pure GPU.SegNoVirt
         ]
+    pKernelGrid =
+      GPU.KernelGrid
+        <$> (lexeme "groups=" $> GPU.Count <*> pSubExp <* pSemi)
+        <*> (lexeme "groupsize=" $> GPU.Count <*> pSubExp)
 
 pHostOp :: PR rep -> Parser op -> Parser (GPU.HostOp rep op)
 pHostOp pr pOther =

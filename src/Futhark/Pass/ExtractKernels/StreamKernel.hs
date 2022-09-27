@@ -74,7 +74,9 @@ segThreadCapped ws desc r = do
             (SDivUp Int64 Unsafe)
             (eSubExp w)
             (eSubExp =<< asIntS Int64 group_size)
-      pure $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
+      let grid = KernelGrid (Count usable_groups) (Count group_size)
+      pure $ SegThread SegNoVirt (Just grid)
     NoRecommendation v -> do
       (num_groups, _) <- numberOfGroups desc w group_size
-      pure $ SegThread (Count num_groups) (Count group_size) v
+      let grid = KernelGrid (Count num_groups) (Count group_size)
+      pure $ SegThread v (Just grid)

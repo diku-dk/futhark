@@ -89,12 +89,9 @@ genRedOpts env ker = do
         Just stms_after -> pure $ Just $ stms_before <> stms_after
         Nothing -> pure $ Just $ stms_before <> oneStm ker_snd
 
-se1 :: SubExp
-se1 = intConst Int64 1
-
 genRed2Tile2d :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU, Stm GPU))
 genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space kres_tps old_kbody))))
-  | (SegThread _ seg_group_size _novirt) <- seg_thd,
+  | SegThread _novirt _ <- seg_thd,
     -- novirt == SegNoVirtFull || novirt == SegNoVirt,
     KernelBody () kstms kres <- old_kbody,
     Just (css, r_ses) <- allGoodReturns kres,
@@ -161,11 +158,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       gid_flat_1 <- newVName "gid_flat"
       let space1 = SegSpace gid_flat_1 gid_dims_new
 
-      (grid_size, host_stms1) <- runBuilder $ do
-        let grid_pexp = foldl (\x d -> x * pe64 d) (pe64 se1) $ map snd gid_dims_new
-        dim_prod <- letSubExp "dim_prod" =<< toExp grid_pexp
-        letSubExp "grid_size" =<< ceilDiv dim_prod (unCount seg_group_size)
-      let level1 = SegThread (Count grid_size) seg_group_size (SegNoVirtFull (SegSeqDims [])) -- novirt ?
+      let level1 = SegThread (SegNoVirtFull (SegSeqDims [])) Nothing -- novirt ?
           kbody1 = KernelBody () ker1_stms [Returns ResultMaySimplify (Certs []) k1_res]
 
       -- is it OK here to use the "aux" from the parrent kernel?
@@ -177,7 +170,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       ker2_exp <- renameExp $ Op (SegOp (SegMap seg_thd seg_space kres_tps ker2_body))
       let ker2 = Let pat_ker aux ker2_exp
       pure $
-        Just (code1_tr_host <> host_stms1 <> oneStm ker1, ker2)
+        Just (code1_tr_host <> oneStm ker1, ker2)
   where
     isIndVarToParDim _ (Constant _) _ = False
     isIndVarToParDim variance (Var acc_ind) par_dim =
@@ -198,7 +191,6 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
               (reverse acc_inds)
        in invar_dims ++ inner_dims
     --
-    ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
     getAccLambda acc_tp =
       case acc_tp of
         (Acc tp_id _shp el_tps _) ->
