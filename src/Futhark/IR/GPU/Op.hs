@@ -12,8 +12,10 @@ module Futhark.IR.GPU.Op
 
     -- * SegOp refinements
     SegLevel (..),
+    segVirt,
     SegVirt (..),
     SegSeqDims (..),
+    KernelGrid (..),
 
     -- * Reexports
     module Futhark.IR.GPU.Sizes,
@@ -80,68 +82,84 @@ data SegVirt
     SegNoVirtFull SegSeqDims
   deriving (Eq, Ord, Show)
 
--- | At which level the *body* of a t'SegOp' executes.
-data SegLevel
-  = SegThread
-      { segNumGroups :: Count NumGroups SubExp,
-        segGroupSize :: Count GroupSize SubExp,
-        segVirt :: SegVirt
-      }
-  | SegGroup
-      { segNumGroups :: Count NumGroups SubExp,
-        segGroupSize :: Count GroupSize SubExp,
-        segVirt :: SegVirt
-      }
+-- | The actual, physical grid dimensions used for the GPU kernel
+-- running this 'SegOp'.
+data KernelGrid = KernelGrid
+  { gridNumGroups :: Count NumGroups SubExp,
+    gridGroupSize :: Count GroupSize SubExp
+  }
   deriving (Eq, Ord, Show)
 
+-- | At which level the *body* of a t'SegOp' executes.
+data SegLevel
+  = SegThread SegVirt (Maybe KernelGrid)
+  | SegGroup SegVirt (Maybe KernelGrid)
+  | SegThreadInGroup SegVirt
+  deriving (Eq, Ord, Show)
+
+-- | The 'SegVirt' of the 'SegLevel'.
+segVirt :: SegLevel -> SegVirt
+segVirt (SegThread v _) = v
+segVirt (SegGroup v _) = v
+segVirt (SegThreadInGroup v) = v
+
+instance PP.Pretty SegVirt where
+  pretty SegNoVirt = mempty
+  pretty (SegNoVirtFull dims) = "full" <+> pretty (segSeqDims dims)
+  pretty SegVirt = "virtualise"
+
+instance PP.Pretty KernelGrid where
+  pretty (KernelGrid num_groups group_size) =
+    "groups=" <> pretty num_groups <> PP.semi
+      <+> "groupsize=" <> pretty group_size
+
 instance PP.Pretty SegLevel where
-  pretty lvl =
-    PP.parens
-      ( lvl' <> PP.semi
-          <+> "#groups=" <> pretty (segNumGroups lvl) <> PP.semi
-          <+> "groupsize=" <> pretty (segGroupSize lvl) <> virt
-      )
-    where
-      lvl' = case lvl of
-        SegThread {} -> "thread"
-        SegGroup {} -> "group"
-      virt = case segVirt lvl of
-        SegNoVirt -> mempty
-        SegNoVirtFull dims -> PP.semi <+> "full" <+> pretty (segSeqDims dims)
-        SegVirt -> PP.semi <+> "virtualise"
+  pretty (SegThread virt grid) =
+    PP.parens ("thread" <> PP.semi <+> pretty virt <> PP.semi <+> pretty grid)
+  pretty (SegGroup virt grid) =
+    PP.parens ("group" <> PP.semi <+> pretty virt <> PP.semi <+> pretty grid)
+  pretty (SegThreadInGroup virt) =
+    PP.parens ("ingroup" <> PP.semi <+> pretty virt)
+
+instance Engine.Simplifiable KernelGrid where
+  simplify (KernelGrid num_groups group_size) =
+    KernelGrid
+      <$> traverse Engine.simplify num_groups
+      <*> traverse Engine.simplify group_size
 
 instance Engine.Simplifiable SegLevel where
-  simplify (SegThread num_groups group_size virt) =
-    SegThread
-      <$> traverse Engine.simplify num_groups
-      <*> traverse Engine.simplify group_size
-      <*> pure virt
-  simplify (SegGroup num_groups group_size virt) =
-    SegGroup
-      <$> traverse Engine.simplify num_groups
-      <*> traverse Engine.simplify group_size
-      <*> pure virt
+  simplify (SegThread virt grid) =
+    SegThread virt <$> Engine.simplify grid
+  simplify (SegGroup virt grid) =
+    SegGroup virt <$> Engine.simplify grid
+  simplify (SegThreadInGroup virt) =
+    pure $ SegThreadInGroup virt
+
+instance Substitute KernelGrid where
+  substituteNames substs (KernelGrid num_groups group_size) =
+    KernelGrid
+      (substituteNames substs num_groups)
+      (substituteNames substs group_size)
 
 instance Substitute SegLevel where
-  substituteNames substs (SegThread num_groups group_size virt) =
-    SegThread
-      (substituteNames substs num_groups)
-      (substituteNames substs group_size)
-      virt
-  substituteNames substs (SegGroup num_groups group_size virt) =
-    SegGroup
-      (substituteNames substs num_groups)
-      (substituteNames substs group_size)
-      virt
+  substituteNames substs (SegThread virt grid) =
+    SegThread virt (substituteNames substs grid)
+  substituteNames substs (SegGroup virt grid) =
+    SegGroup virt (substituteNames substs grid)
+  substituteNames _ (SegThreadInGroup virt) =
+    SegThreadInGroup virt
 
 instance Rename SegLevel where
   rename = substituteRename
 
+instance FreeIn KernelGrid where
+  freeIn' (KernelGrid num_groups group_size) =
+    freeIn' (num_groups, group_size)
+
 instance FreeIn SegLevel where
-  freeIn' (SegThread num_groups group_size _) =
-    freeIn' num_groups <> freeIn' group_size
-  freeIn' (SegGroup num_groups group_size _) =
-    freeIn' num_groups <> freeIn' group_size
+  freeIn' (SegThread _virt grid) = freeIn' grid
+  freeIn' (SegGroup _virt grid) = freeIn' grid
+  freeIn' (SegThreadInGroup _virt) = mempty
 
 -- | A simple size-level query or computation.
 data SizeOp
@@ -341,22 +359,34 @@ instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (HostOp rep op) where
   opMetrics (SizeOp op) = opMetrics op
   opMetrics (GPUBody _ body) = inside "GPUBody" $ bodyMetrics body
 
+checkGrid :: TC.Checkable rep => KernelGrid -> TC.TypeM rep ()
+checkGrid grid = do
+  TC.require [Prim int64] $ unCount $ gridNumGroups grid
+  TC.require [Prim int64] $ unCount $ gridGroupSize grid
+
 checkSegLevel ::
   TC.Checkable rep =>
   Maybe SegLevel ->
   SegLevel ->
   TC.TypeM rep ()
-checkSegLevel Nothing lvl = do
-  TC.require [Prim int64] $ unCount $ segNumGroups lvl
-  TC.require [Prim int64] $ unCount $ segGroupSize lvl
+checkSegLevel (Just SegGroup {}) (SegThreadInGroup _virt) =
+  pure ()
+checkSegLevel _ (SegThreadInGroup _virt) =
+  TC.bad $ TC.TypeError "ingroup SegOp not in group SegOp."
 checkSegLevel (Just SegThread {}) _ =
   TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
-checkSegLevel (Just x) y
-  | x == y = TC.bad $ TC.TypeError $ "Already at at level " <> prettyText x
-  | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
-      TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
-  | otherwise =
-      pure ()
+checkSegLevel (Just SegThreadInGroup {}) _ =
+  TC.bad $ TC.TypeError "SegOps cannot occur when already at ingroup level."
+checkSegLevel _ (SegThread _virt Nothing) =
+  pure ()
+checkSegLevel (Just _) SegThread {} =
+  TC.bad $ TC.TypeError "thread-level SegOp cannot be nested"
+checkSegLevel Nothing (SegThread _virt grid) =
+  mapM_ checkGrid grid
+checkSegLevel (Just _) SegGroup {} =
+  TC.bad $ TC.TypeError "group-level SegOp cannot be nested"
+checkSegLevel Nothing (SegGroup _virt grid) =
+  mapM_ checkGrid grid
 
 typeCheckHostOp ::
   TC.Checkable rep =>

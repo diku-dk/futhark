@@ -215,6 +215,7 @@ compileSegScan ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scanOp kbody = do
+  attrs <- lvlKernelAttrs lvl
   let Pat all_pes = pat
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
@@ -233,7 +234,7 @@ compileSegScan pat lvl space scanOp kbody = do
       mem_constraint = max k_mem sumT `div` maxT
       reg_constraint = (k_reg - 1 - sumT') `div` (2 * sumT')
 
-      group_size = segGroupSize lvl
+      group_size = kAttrGroupSize attrs
       group_size' = pe64 $ unCount group_size
 
   num_groups <-
@@ -274,7 +275,7 @@ compileSegScan pat lvl space scanOp kbody = do
     constants <- kernelConstants <$> askEnv
 
     (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-
-      createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
+      createLocalArrays (kAttrGroupSize attrs) (intConst Int64 m) tys
 
     dynamicId <- dPrim "dynamic_id" int32
     sWhen (kernelLocalThreadId constants .==. 0) $ do

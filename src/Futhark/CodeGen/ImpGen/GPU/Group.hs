@@ -195,14 +195,8 @@ partitionSeqDims (SegSeqDims seq_is) space =
   bimap (map fst) (map fst) $
     partition ((`elem` seq_is) . snd) (zip (unSegSpace space) [0 ..])
 
-sanityCheckLevel :: SegLevel -> InKernelGen ()
-sanityCheckLevel SegThread {} = pure ()
-sanityCheckLevel SegGroup {} =
-  error "compileGroupOp: unexpected group-level SegOp."
-
-compileFlatId :: SegLevel -> SegSpace -> InKernelGen ()
-compileFlatId lvl space = do
-  sanityCheckLevel lvl
+compileFlatId :: SegSpace -> InKernelGen ()
+compileFlatId space = do
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
   dPrimV_ (segFlat space) ltid
 
@@ -342,7 +336,7 @@ compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
   kernelAlloc pat size space
 compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
-  compileFlatId lvl space
+  compileFlatId space
 
   groupCoverSegSpace (segVirt lvl) space $
     compileStms mempty (kernelBodyStms body) $
@@ -350,7 +344,7 @@ compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
         kernelBodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
-  compileFlatId lvl space
+  compileFlatId space
 
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
@@ -397,7 +391,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
         (segBinOpLambda scan)
         arrs_flat
 compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
-  compileFlatId lvl space
+  compileFlatId space
 
   let dims' = map pe64 dims
       mkTempArr t =
@@ -512,7 +506,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
-  compileFlatId lvl space
+  compileFlatId space
   let (ltids, _dims) = unzip $ unSegSpace space
 
   -- We don't need the red_pes, because it is guaranteed by our type
@@ -522,7 +516,8 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
       (_red_pes, map_pes) =
         splitAt num_red_res $ patElems pat
 
-  ops' <- prepareIntraGroupSegHist (segGroupSize lvl) ops
+  group_size <- kernelGroupSizeCount . kernelConstants <$> askEnv
+  ops' <- prepareIntraGroupSegHist group_size ops
 
   -- Ensure that all locks have been initialised.
   sOp $ Imp.Barrier Imp.FenceLocal

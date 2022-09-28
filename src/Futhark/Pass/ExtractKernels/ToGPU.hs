@@ -34,10 +34,12 @@ segThread ::
   String ->
   m SegLevel
 segThread desc =
-  SegThread
-    <$> (Count <$> getSize (desc ++ "_num_groups") SizeNumGroups)
-    <*> (Count <$> getSize (desc ++ "_group_size") SizeGroup)
-    <*> pure SegVirt
+  SegThread SegVirt <$> (Just <$> kernelGrid)
+  where
+    kernelGrid =
+      KernelGrid
+        <$> (Count <$> getSize (desc ++ "_num_groups") SizeNumGroups)
+        <*> (Count <$> getSize (desc ++ "_group_size") SizeGroup)
 
 injectSOACS ::
   ( Monad m,
