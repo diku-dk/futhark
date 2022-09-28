@@ -1108,10 +1108,7 @@ graphedScalarOperands e =
     collectHostOp (OtherOp op) = collectFree op
     collectHostOp GPUBody {} = pure ()
 
-    collectSegLevel (SegThread (Count num) (Count size) _) =
-      collectSubExp num >> collectSubExp size
-    collectSegLevel (SegGroup (Count num) (Count size) _) =
-      collectSubExp num >> collectSubExp size
+    collectSegLevel = mapM_ captureName . namesToList . freeIn
 
     collectSegSpace space =
       mapM_ collectSubExp (segSpaceDims space)

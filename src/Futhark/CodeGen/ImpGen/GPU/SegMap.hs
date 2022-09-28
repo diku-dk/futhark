@@ -23,10 +23,11 @@ compileSegMap ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegMap pat lvl space kbody = do
+  attrs <- lvlKernelAttrs lvl
+
   let (is, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
-      group_size' = pe64 <$> segGroupSize lvl
-      attrs = defKernelAttrs (segNumGroups lvl) (segGroupSize lvl)
+      group_size' = pe64 <$> kAttrGroupSize attrs
 
   emit $ Imp.DebugPrint "\n# SegMap" Nothing
   case lvl of
@@ -58,4 +59,6 @@ compileSegMap pat lvl space kbody = do
             compileStms mempty (kernelBodyStms kbody) $
               zipWithM_ (compileGroupResult space) (patElems pat) $
                 kernelBodyResult kbody
+    SegThreadInGroup {} ->
+      error "compileSegMap: SegThreadInGroup"
   emit $ Imp.DebugPrint "" Nothing

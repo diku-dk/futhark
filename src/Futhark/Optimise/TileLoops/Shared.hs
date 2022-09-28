@@ -85,12 +85,13 @@ segMap1D ::
   String ->
   SegLevel ->
   ResultManifest ->
+  SubExp -> -- dim_x
   (VName -> Builder GPU Result) ->
   Builder GPU [VName]
-segMap1D desc lvl manifest f = do
+segMap1D desc lvl manifest w f = do
   ltid <- newVName "ltid"
   ltid_flat <- newVName "ltid_flat"
-  let space = SegSpace ltid_flat [(ltid, unCount $ segGroupSize lvl)]
+  let space = SegSpace ltid_flat [(ltid, w)]
 
   ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBuilder $ do
     res <- f ltid
@@ -164,12 +165,11 @@ segScatter2D ::
   String ->
   SubExp ->
   VName ->
-  SegLevel -> -- lvl
   [SubExp] -> -- dims of sequential loop on top
   (SubExp, SubExp) -> -- (dim_y, dim_x)
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
-segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
+segScatter2D desc arr_size updt_arr seq_dims (dim_x, dim_y) f = do
   ltid_flat <- newVName "ltid_flat"
   ltid_y <- newVName "ltid_y"
   ltid_x <- newVName "ltid_x"
@@ -178,10 +178,8 @@ segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
   let seq_space = zip seq_is seq_dims
 
   let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
-      lvl' =
-        SegThread
-          (segNumGroups lvl)
-          (segGroupSize lvl)
+      lvl =
+        SegThreadInGroup
           (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
   ((t_v, res_v, res_i), stms) <- runBuilder $ do
@@ -194,7 +192,7 @@ segScatter2D desc arr_size updt_arr lvl seq_dims (dim_x, dim_y) f = do
   let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
-  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl' segspace [t_v] body
+  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
