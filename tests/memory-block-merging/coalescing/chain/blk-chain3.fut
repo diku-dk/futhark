@@ -28,7 +28,7 @@ let main [m] [n] (i1: i32) (i2: i32) (k: i32)
   let u[ind1]    = b -- Coalescing.
 
   let c          = map (+i2) a
-  let u[i1+i2]   = c -- Coalescing
+  let u[i1+2]   = c -- Coalescing
 
   let z[i1+i2+k] = u
   in  z
