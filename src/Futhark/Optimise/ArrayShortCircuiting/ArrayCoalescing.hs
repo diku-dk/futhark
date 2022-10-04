@@ -226,8 +226,9 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_b
       bu_env''
     $ zip (patElems pat)
     $ concatMap histDest histops
-shortCircuitGPUMem lutab _ (Inner (GPUBody _ body)) td_env bu_env = do
-  mkCoalsTabStms lutab (bodyStms body) td_env bu_env
+shortCircuitGPUMem lutab pat (Inner (GPUBody _ body)) td_env bu_env = do
+  fresh <- newNameFromString "gpubody"
+  shortCircuitGPUMemHelper 0 (SegThread (Count $ Constant $ IntValue $ Int64Value 1) (Count $ Constant $ IntValue $ Int64Value 1) SegNoVirt) lutab pat (SegSpace undefined [(fresh, Constant $ IntValue $ Int64Value 1)]) (bodyToKernelBody body) td_env bu_env
 shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = pure bu_env
 shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = pure bu_env
 
@@ -269,6 +270,10 @@ threadSlice space (RegTileReturns _ dims _) =
       dims
     $ unSegSpace space
 threadSlice _ _ = Nothing
+
+bodyToKernelBody :: Body (Aliases GPUMem) -> KernelBody (Aliases GPUMem)
+bodyToKernelBody (Body dec stms res) =
+  KernelBody dec stms $ map (\(SubExpRes cert subexps) -> Returns ResultNoSimplify cert subexps) res
 
 -- | A helper for all the different kinds of 'SegOp'.
 --
