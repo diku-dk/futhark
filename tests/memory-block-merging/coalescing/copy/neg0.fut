@@ -1,6 +1,13 @@
 -- Memory block merging with a copy into a multidimensional array.  Very similar
 -- to pos3.fut, but this should not coalesce in the CPU pipeline (see body
 -- comment).
+--
+-- NOTE: Due to a regression in the fusion engine, the seq-mem code is not
+-- actually being fused, which means that it can be short-circuited:
+-- https://github.com/diku-dk/futhark/issues/1733
+--
+-- When that bug has been fixed, there should be two seq-mem allocations instead
+-- of one.
 -- ==
 -- input { 1i64
 --         [6, 0, 7]
@@ -12,7 +19,7 @@
 --           [7, 1, 8],
 --           [0, 1, 2]]
 --        }
--- structure seq-mem { Alloc 2 }
+-- structure seq-mem { Alloc 1 }
 -- structure gpu-mem { Alloc 1 }
 
 let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
