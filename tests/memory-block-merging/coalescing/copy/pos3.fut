@@ -11,7 +11,7 @@
 --           [0, 1, 2]]
 --        }
 -- structure seq-mem { Alloc 1 }
--- structure gpu-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 2 }
 
 let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
   -- This is the basis array in which everything will be put.
