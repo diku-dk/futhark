@@ -227,8 +227,9 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_b
     $ zip (patElems pat)
     $ concatMap histDest histops
 shortCircuitGPUMem lutab pat (Inner (GPUBody _ body)) td_env bu_env = do
-  fresh <- newNameFromString "gpubody"
-  shortCircuitGPUMemHelper 0 (SegThread (Count $ Constant $ IntValue $ Int64Value 1) (Count $ Constant $ IntValue $ Int64Value 1) SegNoVirt) lutab pat (SegSpace undefined [(fresh, Constant $ IntValue $ Int64Value 1)]) (bodyToKernelBody body) td_env bu_env
+  fresh1 <- newNameFromString "gpubody"
+  fresh2 <- newNameFromString "gpubody"
+  shortCircuitGPUMemHelper 0 (SegThread (Count $ Constant $ IntValue $ Int64Value 1) (Count $ Constant $ IntValue $ Int64Value 1) SegNoVirt) lutab pat (SegSpace fresh1 [(fresh2, Constant $ IntValue $ Int64Value 1)]) (bodyToKernelBody body) td_env bu_env
 shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = pure bu_env
 shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = pure bu_env
 
