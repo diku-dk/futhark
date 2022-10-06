@@ -72,7 +72,7 @@ liftAllocationsInStms (stms :|> stm@(Let pat _ (Op (Inner inner)))) lifted acc t
   if pat_names `namesIntersect` to_lift
     then liftAllocationsInStms stms (stm' :<| lifted) acc ((to_lift `namesSubtract` pat_names) <> freeIn stm)
     else liftAllocationsInStms stms lifted (stm' :<| acc) to_lift
-liftAllocationsInStms (stms :|> stm@(Let pat _ (If cond then_body else_body dec))) lifted acc to_lift = do
+liftAllocationsInStms (stms :|> stm@(Let pat aux (If cond then_body else_body dec))) lifted acc to_lift = do
   then_body' <- liftAllocationsInBody then_body
   else_body' <- liftAllocationsInBody else_body
   let stm' = stm {stmExp = If cond then_body' else_body' dec}
@@ -88,6 +88,7 @@ liftAllocationsInStms (stms :|> stm@(Let pat _ (If cond then_body else_body dec)
             <> freeIn then_body'
             <> freeIn else_body'
             <> freeIn dec
+            <> freeIn aux
         )
     else liftAllocationsInStms stms lifted (stm' :<| acc) to_lift
 liftAllocationsInStms (stms :|> stm@(Let pat _ (DoLoop params form body))) lifted acc to_lift = do
