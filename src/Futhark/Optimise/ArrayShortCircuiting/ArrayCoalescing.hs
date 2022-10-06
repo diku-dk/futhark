@@ -386,7 +386,18 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
       ( \entry -> do
           wrts <- aggSummaryMapTotal (scalarTable td_env) (unSegSpace space0) $ srcwrts $ memrefs entry
           uses <- aggSummaryMapTotal (scalarTable td_env) (unSegSpace space0) $ dstrefs $ memrefs entry
-          pure $ entry {memrefs = MemRefs uses wrts}
+
+          -- Add destination uses from the pattern
+          let uses' =
+                foldMap
+                  ( \p ->
+                      case p of
+                        PatElem _ (_, MemArray _ _ _ (ArrayIn p_mem p_ixf)) | p_mem `nameIn` alsmem entry -> ixfunToAccessSummary p_ixf
+                        _ -> mempty
+                  )
+                  ps0
+
+          pure $ entry {memrefs = MemRefs (uses <> uses') wrts}
       )
       $ activeCoals bu_env''
   let bu_env''' = bu_env'' {activeCoals = actv}
