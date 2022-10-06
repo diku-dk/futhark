@@ -54,7 +54,7 @@ reshape ::
 reshape (l, a) x = (I.reshape l x, IA.reshape a x)
 
 coerce ::
-  (Eq num, IntegralExp num) =>
+  IntegralExp num =>
   IxFun num ->
   Shape num ->
   IxFun num
