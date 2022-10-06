@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -390,10 +391,9 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
           -- Add destination uses from the pattern
           let uses' =
                 foldMap
-                  ( \p ->
-                      case p of
-                        PatElem _ (_, MemArray _ _ _ (ArrayIn p_mem p_ixf)) | p_mem `nameIn` alsmem entry -> ixfunToAccessSummary p_ixf
-                        _ -> mempty
+                  ( \case
+                      PatElem _ (_, MemArray _ _ _ (ArrayIn p_mem p_ixf)) | p_mem `nameIn` alsmem entry -> ixfunToAccessSummary p_ixf
+                      _ -> mempty
                   )
                   ps0
 
