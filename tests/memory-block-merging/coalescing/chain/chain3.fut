@@ -10,7 +10,7 @@
 --          [[7, 7], [7, 7]]
 --        }
 -- structure seq-mem { Alloc 3 }
--- structure gpu-mem { Alloc 3 }
+-- structure gpu-mem { Alloc 4 }
 
 let main [n] (vss0: [n][n]i32)
              (ns: [n]i32)

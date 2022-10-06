@@ -1,7 +1,7 @@
 -- Parallel blocked LU-decomposition.
 --
 -- ==
--- structure gpu-mem { Alloc 41 }
+-- structure gpu-mem { Alloc 32 }
 
 def block_size: i64 = 32
 
@@ -11,6 +11,7 @@ def dotprod [n] (a: [n]f32) (b: [n]f32): f32 =
   |> reduce (+) 0
 
 def lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
+  #[incremental_flattening(only_intra)]
   map (\mat ->
          let mat = copy mat
          in #[unsafe]

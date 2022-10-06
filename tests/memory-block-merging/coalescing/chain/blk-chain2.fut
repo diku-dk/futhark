@@ -18,7 +18,7 @@
 --          ]
 --        }
 -- structure seq-mem { Alloc 3 }
--- structure gpu-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 4 }
 
 -- Needs two-dimensional overlap checking
 
