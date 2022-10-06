@@ -312,7 +312,7 @@ addInvAliassesVarTab td_env vtab x
                   let coal = Coalesced TransitiveCoal (MemBlock ptp shp m_y x_ixfn0) fv_subs
                       vartab' = M.insert x0 coal vtab
                    in addInvAliassesVarTab td_env vartab' x0
-addInvAliassesVarTab _ _ _ = error "impossible"
+addInvAliassesVarTab _ _ _ = Nothing
 
 areAliased :: TopDnEnv rep -> VName -> VName -> Bool
 areAliased _ m_x m_y =
