@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 {-# OPTIONS_GHC -fno-warn-unused-top-binds #-}
 
-module Futhark.Analysis.AlgSimplify2Tests
+module Futhark.Analysis.AlgSimplifyTests
   ( tests,
   )
 where
@@ -14,7 +14,7 @@ import Data.Function ((&))
 import Data.List (subsequences)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, mapMaybe)
-import Futhark.Analysis.AlgSimplify2 hiding (add, sub)
+import Futhark.Analysis.AlgSimplify hiding (add, sub)
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core
 import Test.Tasty
@@ -24,7 +24,7 @@ import Test.Tasty.QuickCheck
 tests :: TestTree
 tests =
   testGroup
-    "AlgSimplify2Tests"
+    "AlgSimplifyTests"
     [ testProperty "simplify is idempotent" $ \(TestableExp e) -> simplify e == simplify (simplify e),
       testProperty "simplify doesn't change exp evalutation result" $
         \(TestableExp e) ->

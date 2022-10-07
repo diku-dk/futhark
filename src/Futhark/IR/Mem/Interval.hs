@@ -18,7 +18,7 @@ import Control.Monad
 import Data.Function (on)
 import Data.List (maximumBy, minimumBy, (\\))
 import qualified Data.Map.Strict as M
-import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify
+import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Prop
 import Futhark.IR.Syntax hiding (Result)

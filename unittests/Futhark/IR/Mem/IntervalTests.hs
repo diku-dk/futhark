@@ -3,7 +3,7 @@ module Futhark.IR.Mem.IntervalTests
   )
 where
 
-import Futhark.Analysis.AlgSimplify2
+import Futhark.Analysis.AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem.Interval
 import Futhark.IR.Syntax

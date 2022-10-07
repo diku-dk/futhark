@@ -53,7 +53,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust, isJust)
-import qualified Futhark.Analysis.AlgSimplify2 as AlgSimplify2
+import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
@@ -1126,12 +1126,12 @@ gcd x y = gcd' (abs x) (abs y)
 disjoint :: [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
 disjoint less_thans non_negatives (LMAD offset1 [dim1]) (LMAD offset2 [dim2]) =
   doesNotDivide (gcd (ldStride dim1) (ldStride dim2)) (offset1 - offset2)
-    || AlgSimplify2.lessThanish
+    || AlgSimplify.lessThanish
       less_thans
       non_negatives
       (offset2 + (ldShape dim2 - 1) * ldStride dim2)
       offset1
-    || AlgSimplify2.lessThanish
+    || AlgSimplify.lessThanish
       less_thans
       non_negatives
       (offset1 + (ldShape dim1 - 1) * ldStride dim1)
@@ -1157,14 +1157,14 @@ disjoint2 less_thans non_negatives lmad1 lmad2 =
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
       (neg_offset, pos_offset) =
-        partition AlgSimplify2.negated $
-          offset1 `AlgSimplify2.sub` offset2
+        partition AlgSimplify.negated $
+          offset1 `AlgSimplify.sub` offset2
       (interval1', interval2') =
         unzip $
-          sortBy (flip AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride . fst)) $
+          sortBy (flip AlgSimplify.compareComplexity `on` (AlgSimplify.simplify0 . untyped . stride . fst)) $
             intervalPairs interval1 interval2
    in case ( distributeOffset pos_offset interval1',
-             distributeOffset (map AlgSimplify2.negate neg_offset) interval2'
+             distributeOffset (map AlgSimplify.negate neg_offset) interval2'
            ) of
         (Just interval1'', Just interval2'') ->
           not (selfOverlap less_thans non_negatives interval1'')
@@ -1179,24 +1179,24 @@ disjoint3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> 
 disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
-      interval1' = fixPoint (mergeDims . joinDims) $ sortBy (flip AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride)) interval1
-      interval2' = fixPoint (mergeDims . joinDims) $ sortBy (flip AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride)) interval2
+      interval1' = fixPoint (mergeDims . joinDims) $ sortBy (flip AlgSimplify.compareComplexity `on` (AlgSimplify.simplify0 . untyped . stride)) interval1
+      interval2' = fixPoint (mergeDims . joinDims) $ sortBy (flip AlgSimplify.compareComplexity `on` (AlgSimplify.simplify0 . untyped . stride)) interval2
       (interval1'', interval2'') =
         unzip $
-          sortBy (flip AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride . fst)) $
+          sortBy (flip AlgSimplify.compareComplexity `on` (AlgSimplify.simplify0 . untyped . stride . fst)) $
             intervalPairs interval1' interval2'
-  disjointHelper 4 interval1'' interval2'' $ offset1 `AlgSimplify2.sub` offset2
+  disjointHelper 4 interval1'' interval2'' $ offset1 `AlgSimplify.sub` offset2
   where
-    disjointHelper :: Int -> [Interval] -> [Interval] -> AlgSimplify2.SofP -> IO Bool
+    disjointHelper :: Int -> [Interval] -> [Interval] -> AlgSimplify.SofP -> IO Bool
     disjointHelper 0 _ _ _ = pure False
     disjointHelper i is10 is20 offset =
       let (is1, is2) =
             unzip $
-              sortBy (flip AlgSimplify2.compareComplexity `on` (AlgSimplify2.simplify0 . untyped . stride . fst)) $
+              sortBy (flip AlgSimplify.compareComplexity `on` (AlgSimplify.simplify0 . untyped . stride . fst)) $
                 intervalPairs is10 is20
-          (neg_offset, pos_offset) = partition AlgSimplify2.negated offset
+          (neg_offset, pos_offset) = partition AlgSimplify.negated offset
        in case ( distributeOffset pos_offset is1,
-                 distributeOffset (map AlgSimplify2.negate neg_offset) is2
+                 distributeOffset (map AlgSimplify.negate neg_offset) is2
                ) of
             (Just is1', Just is2') -> do
               overlap1 <- selfOverlapZ3 scope asserts less_thans non_negatives is1'
@@ -1205,17 +1205,17 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
                 (Nothing, Nothing) ->
                   or <$> zipWithM (disjointZ3 scope asserts less_thans non_negatives) is1' is2'
                 (Just overlapping_dim, _) ->
-                  let expanded_offset = AlgSimplify2.simplifySofP' <$> expandOffset offset is1
+                  let expanded_offset = AlgSimplify.simplifySofP' <$> expandOffset offset is1
                       splits = splitDim overlapping_dim is1'
                    in allM (\(new_offset, new_is1) -> disjointHelper (i - 1) (joinDims new_is1) (joinDims is2') new_offset) splits
                         ||^ maybe (pure False) (disjointHelper (i - 1) is1 is2) expanded_offset
                 (_, Just overlapping_dim) ->
-                  let expanded_offset = AlgSimplify2.simplifySofP' <$> expandOffset offset is2
+                  let expanded_offset = AlgSimplify.simplifySofP' <$> expandOffset offset is2
                       splits = splitDim overlapping_dim is2'
                    in allM
                         ( \(new_offset, new_is2) ->
                             disjointHelper (i - 1) (joinDims is1') (joinDims new_is2) $
-                              map AlgSimplify2.negate new_offset
+                              map AlgSimplify.negate new_offset
                         )
                         splits
                         ||^ maybe (pure False) (disjointHelper (i - 1) is1 is2) expanded_offset
@@ -1241,25 +1241,25 @@ mergeDims = helper [] . reverse
         then helper acc $ x {numElements = numElements x * numElements y} : rest
         else helper (x : acc) (y : rest)
 
-splitDim :: Interval -> [Interval] -> [(AlgSimplify2.SofP, [Interval])]
+splitDim :: Interval -> [Interval] -> [(AlgSimplify.SofP, [Interval])]
 splitDim overlapping_dim0 is
-  | [st] <- AlgSimplify2.simplify0 $ untyped $ stride overlapping_dim0,
-    [st1] <- AlgSimplify2.simplify0 $ untyped $ stride overlapping_dim,
-    [spn] <- AlgSimplify2.simplify0 $ untyped $ stride overlapping_dim * numElements overlapping_dim,
+  | [st] <- AlgSimplify.simplify0 $ untyped $ stride overlapping_dim0,
+    [st1] <- AlgSimplify.simplify0 $ untyped $ stride overlapping_dim,
+    [spn] <- AlgSimplify.simplify0 $ untyped $ stride overlapping_dim * numElements overlapping_dim,
     lowerBound overlapping_dim == 0,
-    Just big_dim_elems <- AlgSimplify2.maybeDivide spn st,
-    Just small_dim_elems <- AlgSimplify2.maybeDivide st st1 =
+    Just big_dim_elems <- AlgSimplify.maybeDivide spn st,
+    Just small_dim_elems <- AlgSimplify.maybeDivide st st1 =
       [ ( [],
           init before
-            <> [ Interval 0 (isInt64 $ AlgSimplify2.prodToExp big_dim_elems) (stride overlapping_dim0),
-                 Interval 0 (isInt64 $ AlgSimplify2.prodToExp small_dim_elems) (stride overlapping_dim)
+            <> [ Interval 0 (isInt64 $ AlgSimplify.prodToExp big_dim_elems) (stride overlapping_dim0),
+                 Interval 0 (isInt64 $ AlgSimplify.prodToExp small_dim_elems) (stride overlapping_dim)
                ]
             <> after
         )
       ]
   | otherwise =
       let shrunk_dim = overlapping_dim {numElements = numElements overlapping_dim - 1}
-          point_offset = AlgSimplify2.simplify0 $ untyped $ (numElements overlapping_dim - 1 + lowerBound overlapping_dim) * stride overlapping_dim
+          point_offset = AlgSimplify.simplify0 $ untyped $ (numElements overlapping_dim - 1 + lowerBound overlapping_dim) * stride overlapping_dim
        in [ (point_offset, before <> after),
             ([], before <> [shrunk_dim] <> after)
           ]
@@ -1269,16 +1269,16 @@ splitDim overlapping_dim0 is
         elemIndex overlapping_dim0 is
           >>= (flip focusNth is . (+ 1))
 
-lmadToIntervals :: LMAD (TPrimExp Int64 VName) -> (AlgSimplify2.SofP, [Interval])
-lmadToIntervals (LMAD offset []) = (AlgSimplify2.simplify0 $ untyped offset, [Interval 0 1 1])
+lmadToIntervals :: LMAD (TPrimExp Int64 VName) -> (AlgSimplify.SofP, [Interval])
+lmadToIntervals (LMAD offset []) = (AlgSimplify.simplify0 $ untyped offset, [Interval 0 1 1])
 lmadToIntervals lmad@(LMAD offset dims0) =
   (offset', map helper $ permuteInv (lmadPermutation lmad) dims0)
   where
-    offset' = AlgSimplify2.simplify0 $ untyped offset
+    offset' = AlgSimplify.simplify0 $ untyped offset
 
     helper :: LMADDim (TPrimExp Int64 VName) -> Interval
     helper (LMADDim strd _ shp _ _) = do
-      Interval 0 (AlgSimplify2.simplify' shp) (AlgSimplify2.simplify' strd)
+      Interval 0 (AlgSimplify.simplify' shp) (AlgSimplify.simplify' strd)
 
 -- | Dynamically determine if two 'LMADDim' are equal.
 --

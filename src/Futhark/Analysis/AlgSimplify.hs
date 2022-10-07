@@ -2,7 +2,7 @@
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 {-# OPTIONS_GHC -fno-warn-unused-top-binds #-}
 
-module Futhark.Analysis.AlgSimplify2
+module Futhark.Analysis.AlgSimplify
   ( Prod (..),
     SofP,
     simplify0,
@@ -200,7 +200,7 @@ maybeDivide dividend divisor
   | otherwise = Nothing
 
 -- | Given a list of 'Names' that we know are non-negative (>= 0), determine
--- whether we can say for sure that the given 'AlgSimplify2.SofP' is
+-- whether we can say for sure that the given 'AlgSimplify.SofP' is
 -- non-negative. Conservatively returns 'False' if there is any doubt.
 --
 -- TODO: We need to expand this to be able to handle cases such as @i*n + g < (i
