@@ -104,7 +104,6 @@ library
       Futhark.AD.Rev.Scan
       Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
-      Futhark.Analysis.AlgSimplify
       Futhark.Analysis.AlgSimplify2
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
