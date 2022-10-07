@@ -3,7 +3,7 @@
 -- ==
 -- input { [5, 15] }
 -- output { [10, 30, 6, 16] }
--- structure seq-mem { Alloc 1 }
+-- structure seq-mem { Alloc 2 }
 -- structure gpu-mem { Alloc 1 }
 
 let main (ns: []i32): []i32 =

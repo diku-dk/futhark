@@ -283,7 +283,7 @@ noMemOverlap td_env (Set is0) (Set js0)
               allM
                 ( \j ->
                     pure (IxFun.disjoint less_thans (nonNegatives td_env) i j)
-                      ||^ pure (IxFun.disjoint2 less_thans (nonNegatives td_env) i j)
+                      ||^ pure (IxFun.disjoint2 () () less_thans (nonNegatives td_env) i j)
                       ||^ IxFun.disjoint3 (typeOf <$> scope td_env) asserts less_thans non_negs i j
                 )
                 js

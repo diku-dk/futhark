@@ -53,6 +53,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromJust, isJust)
+import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
@@ -77,6 +78,9 @@ import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (gcd, id, mod, (.))
+
+traceWith :: Pretty a => String -> a -> a
+traceWith s a = trace (s <> ": " <> pretty a) a
 
 type Shape num = [num]
 
@@ -1152,8 +1156,8 @@ disjoint less_thans non_negatives lmad1 lmad2 =
     (Just lmad1', Just lmad2') -> disjoint less_thans non_negatives lmad1' lmad2'
     _ -> False
 
-disjoint2 :: [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
-disjoint2 less_thans non_negatives lmad1 lmad2 =
+disjoint2 :: scope -> asserts -> [(VName, PrimExp VName)] -> Names -> LMAD (TPrimExp Int64 VName) -> LMAD (TPrimExp Int64 VName) -> Bool
+disjoint2 _ _ less_thans non_negatives lmad1 lmad2 =
   let (offset1, interval1) = lmadToIntervals lmad1
       (offset2, interval2) = lmadToIntervals lmad2
       (neg_offset, pos_offset) =
@@ -1167,8 +1171,8 @@ disjoint2 less_thans non_negatives lmad1 lmad2 =
              distributeOffset (map AlgSimplify.negate neg_offset) interval2'
            ) of
         (Just interval1'', Just interval2'') ->
-          not (selfOverlap less_thans non_negatives interval1'')
-            && not (selfOverlap less_thans non_negatives interval2'')
+          not (isJust $ selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval1'')
+            && not (isJust $ selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval2'')
             && any
               (not . uncurry (intervalOverlap less_thans non_negatives))
               (zip interval1'' interval2'')
@@ -1199,11 +1203,17 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
                  distributeOffset (map AlgSimplify.negate neg_offset) is2
                ) of
             (Just is1', Just is2') -> do
-              overlap1 <- selfOverlapZ3 scope asserts less_thans non_negatives is1'
-              overlap2 <- selfOverlapZ3 scope asserts less_thans non_negatives is2'
-              case (overlap1, overlap2) of
+              let overlap1 = selfOverlap scope asserts less_thans non_negatives is1'
+              let overlap2 = selfOverlap scope asserts less_thans non_negatives is2'
+              case traceWith ("is1': " <> pretty is1' <> "\nis2': " <> pretty is2' <> "\noverlaps") (overlap1, overlap2) of
                 (Nothing, Nothing) ->
-                  or <$> zipWithM (disjointZ3 scope asserts less_thans non_negatives) is1' is2'
+                  case namesFromList <$> mapM justLeafExp non_negatives of
+                    Just non_negatives' ->
+                      return $
+                        any
+                          (not . uncurry (intervalOverlap less_thans non_negatives'))
+                          (zip is1 is2)
+                    _ -> return False
                 (Just overlapping_dim, _) ->
                   let expanded_offset = AlgSimplify.simplifySofP' <$> expandOffset offset is1
                       splits = splitDim overlapping_dim is1'

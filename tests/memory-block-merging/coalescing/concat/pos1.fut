@@ -7,7 +7,7 @@
 -- output { [[6, 16, 10, 30, 1, 5],
 --           [0,  0,  0,  0, 0, 0]]
 --        }
--- structure seq-mem { Alloc 1 }
+-- structure seq-mem { Alloc 3 }
 -- structure gpu-mem { Alloc 1 }
 
 let main [n] (ns: [n]i32) (i: i64): [][]i32 =

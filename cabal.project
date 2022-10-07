@@ -3,8 +3,3 @@ index-state: 2022-07-01T07:12:32Z
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
-
-source-repository-package
-    type: git
-    location: https://github.com/Munksgaard/haskell-z3.git
-    tag: 23f6eebe199c292c8d556c52a245e64d4b3caa92

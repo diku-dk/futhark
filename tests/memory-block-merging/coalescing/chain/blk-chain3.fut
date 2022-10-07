@@ -12,8 +12,8 @@
 --          , [ [5, 6], [7, 8], [9, 0] ]
 --          ]
 --        }
--- structure seq-mem { Alloc 0 }
--- structure gpu-mem { Alloc 0 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 1 }
 
 -- This is blk-chain2.fut with the alternative ind1
 
