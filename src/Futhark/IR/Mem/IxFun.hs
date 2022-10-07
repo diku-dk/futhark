@@ -1171,8 +1171,12 @@ disjoint2 _ _ less_thans non_negatives lmad1 lmad2 =
              distributeOffset (map AlgSimplify.negate neg_offset) interval2'
            ) of
         (Just interval1'', Just interval2'') ->
-          not (isJust $ selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval1'')
-            && not (isJust $ selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval2'')
+          ( isNothing $
+              selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval1''
+          )
+            && ( isNothing $
+                   selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval2''
+               )
             && any
               (not . uncurry (intervalOverlap less_thans non_negatives))
               (zip interval1'' interval2'')
@@ -1209,11 +1213,11 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
                 (Nothing, Nothing) ->
                   case namesFromList <$> mapM justLeafExp non_negatives of
                     Just non_negatives' ->
-                      return $
+                      pure $
                         any
                           (not . uncurry (intervalOverlap less_thans non_negatives'))
                           (zip is1 is2)
-                    _ -> return False
+                    _ -> pure False
                 (Just overlapping_dim, _) ->
                   let expanded_offset = AlgSimplify.simplifySofP' <$> expandOffset offset is1
                       splits = splitDim overlapping_dim is1'
