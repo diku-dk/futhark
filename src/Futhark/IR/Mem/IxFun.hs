@@ -52,7 +52,7 @@ import Data.List (elemIndex, partition, sort, sortBy, zip4, zip5, zipWith5)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromJust, isJust)
+import Data.Maybe (fromJust, isJust, isNothing)
 import Debug.Trace
 import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
 import Futhark.Analysis.PrimExp
