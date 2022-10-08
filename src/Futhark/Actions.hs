@@ -4,6 +4,7 @@ module Futhark.Actions
   ( printAction,
     printAliasesAction,
     printLastUseGPU,
+    printFusionGraph,
     printInterferenceGPU,
     printMemAliasGPU,
     callGraphAction,
@@ -54,6 +55,7 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
+import Futhark.Optimise.Fusion.GraphRep qualified
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
 import System.Directory
@@ -86,6 +88,22 @@ printLastUseGPU =
     { actionName = "print last use gpu",
       actionDescription = "Print last use information on gpu.",
       actionProcedure = liftIO . print . LastUse.analyseGPUMem
+    }
+
+-- | Print fusion graph to stdout.
+printFusionGraph :: Action SOACS
+printFusionGraph =
+  Action
+    { actionName = "print fusion graph",
+      actionDescription = "Print fusion graph in Graphviz format.",
+      actionProcedure =
+        liftIO
+          . mapM_
+            ( putStrLn
+                . Futhark.Optimise.Fusion.GraphRep.pprg
+                . Futhark.Optimise.Fusion.GraphRep.mkDepGraphForFun
+            )
+          . progFuns
     }
 
 -- | Print interference information to stdout.

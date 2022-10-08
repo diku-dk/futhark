@@ -39,10 +39,12 @@ module Futhark.Optimise.Fusion.GraphRep
 
     -- * Construction
     mkDepGraph,
+    mkDepGraphForFun,
     pprg,
   )
 where
 
+import Control.Monad.Reader
 import Data.Bifunctor (bimap)
 import Data.Foldable (foldlM)
 import Data.Graph.Inductive.Dot qualified as G
@@ -330,6 +332,12 @@ mkDepGraph body = applyAugs augs $ emptyGraph body
         makeAliasTable (bodyStms body),
         initialGraphConstruction
       ]
+
+-- | Make a dependency graph corresponding to a function.
+mkDepGraphForFun :: FunDef SOACS -> DepGraph
+mkDepGraphForFun f = runReader (mkDepGraph (funDefBody f)) scope
+  where
+    scope = scopeOfFParams (funDefParams f) <> scopeOf (bodyStms (funDefBody f))
 
 -- | Merges two contexts.
 mergedContext :: Ord b => a -> G.Context a b -> G.Context a b -> G.Context a b
