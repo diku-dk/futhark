@@ -187,7 +187,7 @@ Some passes can prettyprint internal representations in
 [GraphViz](https://graphviz.org/) format.  For example, to see the
 fusion graph (prior to fusion), do
 
-    $ futhark dev -e --inline-aggr -e fot.fut  --fusion-graph > foo.dot
+    $ futhark dev -e --inline-aggr -e foo.fut  --fusion-graph > foo.dot
 
 and then to render `foo.dot` as `foo.dot.pdf` with GraphViz:
 
