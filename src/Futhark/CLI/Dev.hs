@@ -462,6 +462,11 @@ commandLineOptions =
       "Print the resulting IR with aliases.",
     Option
       []
+      ["fusion-graph"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = SOACSAction printFusionGraph})
+      "Print fusion graph.",
+    Option
+      []
       ["print-last-use-gpu"]
       ( NoArg $
           Right $ \opts ->

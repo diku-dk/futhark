@@ -180,3 +180,15 @@ which is not the case if you are comparing against a fixed expected
 output. Eventually you will have a hopefully small program that
 produces different results with the two compilers, and you can look in
 detail at the IR to figure out what goes wrong.
+
+## Graphs of internal data structures
+
+Some passes can prettyprint internal representations in
+[GraphViz](https://graphviz.org/) format.  For example, to see the
+fusion graph (prior to fusion), do
+
+    $ futhark dev -e --inline-aggr -e fot.fut  --fusion-graph > foo.dot
+
+and then to render `foo.dot` as `foo.dot.pdf` with GraphViz:
+
+    $ dot foo.dot -Tpdf -O
