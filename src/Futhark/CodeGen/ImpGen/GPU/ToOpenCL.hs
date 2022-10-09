@@ -1,5 +1,4 @@
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | This module defines a translation from imperative code with
 -- kernels to imperative code with OpenCL or CUDA calls.
@@ -12,24 +11,23 @@ where
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Data.Set qualified as S
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC.Fun qualified as GC
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.GPU hiding (Program)
-import qualified Futhark.CodeGen.ImpCode.GPU as ImpGPU
+import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
-import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
+import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.Error (compilerLimitationS)
-import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (prettyOneLine, prettyText)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
 -- | Generate CUDA host and device code.
@@ -71,8 +69,8 @@ translateGPU target prog =
       opencl_prelude =
         T.unlines
           [ genPrelude target used_types,
-            T.unlines $ map prettyText device_prototypes,
-            T.unlines $ map prettyText device_defs
+            definitionsText device_prototypes,
+            funcsText device_defs
           ]
    in ImpOpenCL.Program
         opencl_code
@@ -381,7 +379,7 @@ onKernel target kernel = do
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
 useAsParam (ScalarUse name pt) = do
-  let name_bits = zEncodeString (pretty name) <> "_bits"
+  let name_bits = zEncodeString (prettyString name) <> "_bits"
       ctp = case pt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
@@ -406,18 +404,18 @@ useAsParam ConstUse {} =
 constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
 constDef (ConstUse v e) =
   Just
-    ( [C.citem|$escstm:def|],
-      [C.citem|$escstm:undef|]
+    ( [C.citem|$escstm:(T.unpack def)|],
+      [C.citem|$escstm:(T.unpack undef)|]
     )
   where
     e' = compilePrimExp e
-    def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ prettyOneLine e' ++ ")"
-    undef = "#undef " ++ pretty (C.toIdent v mempty)
+    def = "#define " <> idText (C.toIdent v mempty) <> " (" <> expText e' <> ")"
+    undef = "#undef " <> idText (C.toIdent v mempty)
 constDef _ = Nothing
 
 openClCode :: [C.Func] -> T.Text
 openClCode kernels =
-  prettyText [C.cunit|$edecls:funcs|]
+  definitionsText [C.cunit|$edecls:funcs|]
   where
     funcs =
       [ [C.cedecl|$func:kernel_func|]
@@ -579,7 +577,7 @@ compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
   where
     compileKernelConst (SizeConst key) =
-      pure [C.cexp|$id:(zEncodeString (pretty key))|]
+      pure [C.cexp|$id:(zEncodeString (prettyString key))|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses
@@ -654,7 +652,7 @@ inKernelOperations mode body =
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
     kernelOps (LocalAlloc name size) = do
-      name' <- newVName $ pretty name ++ "_backing"
+      name' <- newVName $ prettyString name ++ "_backing"
       GC.modifyUserState $ \s ->
         s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
@@ -686,7 +684,7 @@ inKernelOperations mode body =
       cast <- atomicCast s ty
       GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
       where
-        op' = op ++ "_" ++ pretty t ++ "_" ++ atomicSpace s
+        op' = op ++ "_" ++ prettyString t ++ "_" ++ atomicSpace s
 
     doAtomicCmpXchg s t old arr ind cmp val ty = do
       ind' <- GC.compileExp $ untyped $ unCount ind
@@ -695,14 +693,14 @@ inKernelOperations mode body =
       cast <- atomicCast s ty
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
       where
-        op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
+        op = "atomic_cmpxchg_" ++ prettyString t ++ "_" ++ atomicSpace s
     doAtomicXchg s t old arr ind val ty = do
       cast <- atomicCast s ty
       ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- GC.compileExp val
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
-        op = "atomic_chg_" ++ pretty t ++ "_" ++ atomicSpace s
+        op = "atomic_chg_" ++ prettyString t ++ "_" ++ atomicSpace s
     -- First the 64-bit operations.
     atomicOps s (AtomicAdd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]
@@ -787,20 +785,17 @@ inKernelOperations mode body =
               then [C.citems|return 1;|]
               else [C.citems|return;|]
 
-    callInKernel dests fname args
-      | isBuiltInFunction fname =
-          GC.opsCall GC.defaultOperations dests fname args
-      | otherwise = do
-          let out_args = [[C.cexp|&$id:d|] | d <- dests]
-              args' =
-                [C.cexp|global_failure|]
-                  : [C.cexp|global_failure_args|]
-                  : out_args
-                  ++ args
+    callInKernel dests fname args = do
+      let out_args = [[C.cexp|&$id:d|] | d <- dests]
+          args' =
+            [C.cexp|global_failure|]
+              : [C.cexp|global_failure_args|]
+              : out_args
+              ++ args
 
-          what_next <- whatNext
+      what_next <- whatNext
 
-          GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
+      GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
 
     errorInKernel msg@(ErrorMsg parts) backtrace = do
       n <- length . kernelFailures <$> GC.getUserState

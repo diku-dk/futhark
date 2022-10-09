@@ -7,20 +7,20 @@ module Language.Futhark.Warnings
     singleWarning,
     singleWarning',
     listWarnings,
+    prettyWarnings,
   )
 where
 
 import Data.List (sortOn)
 import Data.Monoid
-import Futhark.Util.Console (inYellow)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
-import Language.Futhark.Core (locStr, prettyStacktrace)
+import Language.Futhark.Core (locText, prettyStacktrace)
 import Prelude
 
 -- | The warnings produced by the compiler.  The 'Show' instance
 -- produces a human-readable description.
-newtype Warnings = Warnings [(SrcLoc, [SrcLoc], Doc)]
+newtype Warnings = Warnings [(SrcLoc, [SrcLoc], Doc ())]
 
 instance Semigroup Warnings where
   Warnings ws1 <> Warnings ws2 = Warnings $ ws1 <> ws2
@@ -28,39 +28,38 @@ instance Semigroup Warnings where
 instance Monoid Warnings where
   mempty = Warnings mempty
 
-instance Pretty Warnings where
-  ppr (Warnings []) = mempty
-  ppr (Warnings ws) =
-    stack $ punctuate line $ map onWarning $ sortOn (rep . wloc) ws
-    where
-      wloc (x, _, _) = locOf x
-      rep NoLoc = ("", 0)
-      rep (Loc p _) = (posFile p, posCoff p)
-      onWarning (loc, [], w) =
-        text (inYellow ("Warning at " ++ locStr loc ++ ":"))
-          </> indent 2 w
-      onWarning (loc, locs, w) =
-        text
-          ( inYellow
-              ( "Warning at\n"
-                  ++ prettyStacktrace 0 (map locStr (loc : locs))
-              )
-          )
-          </> indent 2 w
+prettyWarnings :: Warnings -> Doc AnsiStyle
+prettyWarnings (Warnings []) = mempty
+prettyWarnings (Warnings ws) =
+  stack $ map ((<> hardline) . onWarning) $ sortOn (rep . wloc) ws
+  where
+    wloc (x, _, _) = locOf x
+    rep NoLoc = ("", 0)
+    rep (Loc p _) = (posFile p, posCoff p)
+    onWarning (loc, [], w) =
+      annotate
+        (color Yellow)
+        ("Warning at" <+> pretty (locText loc) <> ":")
+        </> indent 2 (unAnnotate w)
+    onWarning (loc, locs, w) =
+      annotate
+        (color Yellow)
+        ("Warning at" </> pretty (prettyStacktrace 0 (map locText (loc : locs))))
+        </> indent 2 (unAnnotate w)
 
 -- | True if there are any warnings in the set.
 anyWarnings :: Warnings -> Bool
 anyWarnings (Warnings ws) = not $ null ws
 
 -- | A single warning at the given location.
-singleWarning :: SrcLoc -> Doc -> Warnings
+singleWarning :: SrcLoc -> Doc () -> Warnings
 singleWarning loc = singleWarning' loc []
 
 -- | A single warning at the given location, but also with a stack
 -- trace (sort of) to the location.
-singleWarning' :: SrcLoc -> [SrcLoc] -> Doc -> Warnings
+singleWarning' :: SrcLoc -> [SrcLoc] -> Doc () -> Warnings
 singleWarning' loc locs problem = Warnings [(loc, locs, problem)]
 
 -- | Exports Warnings into a list of (location, problem).
-listWarnings :: Warnings -> [(SrcLoc, Doc)]
+listWarnings :: Warnings -> [(SrcLoc, Doc ())]
 listWarnings (Warnings ws) = map (\(loc, _, doc) -> (loc, doc)) ws

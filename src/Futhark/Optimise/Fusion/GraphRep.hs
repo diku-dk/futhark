@@ -1,9 +1,8 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | A graph representation of a sequence of Futhark statements
 -- (i.e. a 'Body'), built to handle fusion.  Could perhaps be made
 -- more general.  An important property is that it does not handle
--- "nested bodies" (e.g. 'If'); these are represented as single nodes.
+-- "nested bodies" (e.g. 'Match'); these are represented as single
+-- nodes.
 --
 -- This is all implemented on top of the graph representation provided
 -- by the @fgl@ package ("Data.Graph.Inductive").  The graph provided
@@ -40,24 +39,26 @@ module Futhark.Optimise.Fusion.GraphRep
 
     -- * Construction
     mkDepGraph,
+    mkDepGraphForFun,
     pprg,
   )
 where
 
+import Control.Monad.Reader
 import Data.Bifunctor (bimap)
 import Data.Foldable (foldlM)
-import qualified Data.Graph.Inductive.Dot as G
-import qualified Data.Graph.Inductive.Graph as G
-import qualified Data.Graph.Inductive.Query.DFS as Q
-import qualified Data.Graph.Inductive.Tree as G
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
-import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.HORep.SOAC as H
+import Data.Graph.Inductive.Dot qualified as G
+import Data.Graph.Inductive.Graph qualified as G
+import Data.Graph.Inductive.Query.DFS qualified as Q
+import Data.Graph.Inductive.Tree qualified as G
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
+import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
-import qualified Futhark.IR.SOACS as Futhark
+import Futhark.IR.SOACS qualified as Futhark
 import Futhark.Util (nubOrd)
 
 -- | Information associated with an edge in the graph.
@@ -83,26 +84,26 @@ data NodeT
     -- Unclear whether we actually need these.
     FreeNode VName
   | FinalNode (Stms SOACS) NodeT (Stms SOACS)
-  | IfNode (Stm SOACS) [(NodeT, [EdgeT])]
+  | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
   deriving (Eq)
 
 instance Show EdgeT where
-  show (Dep vName) = "Dep " <> pretty vName
-  show (InfDep vName) = "iDep " <> pretty vName
+  show (Dep vName) = "Dep " <> prettyString vName
+  show (InfDep vName) = "iDep " <> prettyString vName
   show (Cons _) = "Cons"
   show (Fake _) = "Fake"
   show (Res _) = "Res"
   show (Alias _) = "Alias"
 
 instance Show NodeT where
-  show (StmNode (Let pat _ _)) = L.intercalate ", " $ map pretty $ patNames pat
-  show (SoacNode _ pat _ _) = pretty pat
+  show (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
+  show (SoacNode _ pat _ _) = prettyString pat
   show (FinalNode _ nt _) = show nt
-  show (ResNode name) = pretty $ "Res: " ++ pretty name
-  show (FreeNode name) = pretty $ "Input: " ++ pretty name
-  show (IfNode stm _) = "If: " ++ L.intercalate ", " (map pretty $ stmNames stm)
-  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map pretty $ stmNames stm)
+  show (ResNode name) = prettyString $ "Res: " ++ prettyString name
+  show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
+  show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
+  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
 
 -- | The name that this edge depends on.
 getName :: EdgeT -> VName
@@ -290,8 +291,8 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
       Left H.NotSOAC -> pure n
   DoLoop {} ->
     pure $ DoNode s []
-  If {} ->
-    pure $ IfNode s []
+  Match {} ->
+    pure $ MatchNode s []
   _ -> pure n
 nodeToSoacNode n = pure n
 
@@ -331,6 +332,12 @@ mkDepGraph body = applyAugs augs $ emptyGraph body
         makeAliasTable (bodyStms body),
         initialGraphConstruction
       ]
+
+-- | Make a dependency graph corresponding to a function.
+mkDepGraphForFun :: FunDef SOACS -> DepGraph
+mkDepGraphForFun f = runReader (mkDepGraph (funDefBody f)) scope
+  where
+    scope = scopeOfFParams (funDefParams f) <> scopeOf (bodyStms (funDefBody f))
 
 -- | Merges two contexts.
 mergedContext :: Ord b => a -> G.Context a b -> G.Context a b -> G.Context a b
@@ -375,16 +382,18 @@ bodyInputs :: Body SOACS -> Classifications
 bodyInputs (Body _ stms res) = foldMap stmInputs stms <> freeClassifications res
 
 expInputs :: Exp SOACS -> Classifications
-expInputs (If cond b1 b2 attr) =
-  bodyInputs b1 <> bodyInputs b2 <> freeClassifications (cond, attr)
+expInputs (Match cond cases defbody attr) =
+  foldMap (bodyInputs . caseBody) cases
+    <> bodyInputs defbody
+    <> freeClassifications (cond, attr)
 expInputs (DoLoop params form b1) =
   freeClassifications (params, form) <> bodyInputs b1
 expInputs (Op soac) = case soac of
   Futhark.Screma w is form -> inputs is <> freeClassifications (w, form)
   Futhark.Hist w is ops lam -> inputs is <> freeClassifications (w, ops, lam)
   Futhark.Scatter w is lam iws -> inputs is <> freeClassifications (w, lam, iws)
-  Futhark.Stream w is form nes lam ->
-    inputs is <> freeClassifications (w, form, nes, lam)
+  Futhark.Stream w is nes lam ->
+    inputs is <> freeClassifications (w, nes, lam)
   Futhark.JVP {} -> freeClassifications soac
   Futhark.VJP {} -> freeClassifications soac
   where
@@ -407,7 +416,7 @@ getOutputs node = case node of
   (StmNode stm) -> stmNames stm
   (ResNode _) -> []
   (FreeNode name) -> [name]
-  (IfNode stm _) -> stmNames stm
+  (MatchNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
   FinalNode {} -> error "Final nodes cannot generate edges"
   (SoacNode _ pat _ _) -> patNames pat

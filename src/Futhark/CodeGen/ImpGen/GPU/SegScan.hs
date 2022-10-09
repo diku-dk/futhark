@@ -3,11 +3,11 @@
 -- the scan and the chosen abckend.
 module Futhark.CodeGen.ImpGen.GPU.SegScan (compileSegScan) where
 
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import Futhark.CodeGen.ImpGen.GPU.Base
-import qualified Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass as SinglePass
-import qualified Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass as TwoPass
+import Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass qualified as SinglePass
+import Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass qualified as TwoPass
 import Futhark.IR.GPUMem
 
 -- The single-pass scan does not support multiple operators, so jam
@@ -64,4 +64,4 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           SinglePass.compileSegScan pat lvl space scan' kbody
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
   where
-    n = product $ map toInt64Exp $ segSpaceDims space
+    n = product $ map pe64 $ segSpaceDims space

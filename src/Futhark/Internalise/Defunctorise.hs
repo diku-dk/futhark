@@ -1,16 +1,13 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | Partially evaluate all modules away from a source Futhark
 -- program.  This is implemented as a source-to-source transformation.
 module Futhark.Internalise.Defunctorise (transformProg) where
 
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
-import qualified Data.DList as DL
-import qualified Data.Map as M
+import Data.DList qualified as DL
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Semantic (FileModule (..), Imports)
@@ -131,7 +128,7 @@ lookupMod' mname scope =
   let (mname', scope') = lookupSubstInScope mname scope
    in maybe (Left $ bad mname') (Right . extend) $ M.lookup (qualLeaf mname') $ scopeMods scope'
   where
-    bad mname' = "Unknown module: " ++ pretty mname ++ " (" ++ pretty mname' ++ ")"
+    bad mname' = "Unknown module: " ++ prettyString mname ++ " (" ++ prettyString mname' ++ ")"
     extend (ModMod (Scope inner_scope inner_mods)) =
       -- XXX: perhaps hacky fix for #1653.  We need to impose the
       -- substitutions of abstract types from outside, because the

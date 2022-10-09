@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | Definition of the core compiler driver building blocks.  The
 -- spine of the compiler is the 'FutharkM' monad, although note that
 -- individual passes are pure functions, and do not use the 'FutharkM'
@@ -33,10 +28,10 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer.Strict hiding (pass)
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Time.Clock
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Compiler.Config (Verbosity (..))
 import Futhark.Error
 import Futhark.IR (PrettyRep, Prog)

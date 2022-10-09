@@ -1,10 +1,4 @@
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -37,7 +31,7 @@ import Control.Monad.Error.Class
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Writer
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.Builder.Class
 import Futhark.IR
 
@@ -108,9 +102,9 @@ instance (ASTRep rep, Monad m) => HasScope rep (BuilderT rep m) where
       Nothing -> do
         known <- BuilderT $ gets $ M.keys . snd
         error . unlines $
-          [ "BuilderT.lookupType: unknown variable " ++ pretty name,
+          [ "BuilderT.lookupType: unknown variable " ++ prettyString name,
             "Known variables: ",
-            unwords $ map pretty known
+            unwords $ map prettyString known
           ]
       Just t' -> pure $ typeOf t'
   askScope = BuilderT $ gets snd
@@ -123,7 +117,7 @@ instance (ASTRep rep, Monad m) => LocalScope rep (BuilderT rep m) where
     pure x
 
 instance
-  (ASTRep rep, MonadFreshNames m, BuilderOps rep) =>
+  (MonadFreshNames m, BuilderOps rep) =>
   MonadBuilder (BuilderT rep m)
   where
   type Rep (BuilderT rep m) = rep

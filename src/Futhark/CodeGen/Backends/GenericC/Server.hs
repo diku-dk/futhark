@@ -1,9 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Code generation for server executables.
 module Futhark.CodeGen.Backends.GenericC.Server
@@ -12,16 +7,16 @@ module Futhark.CodeGen.Backends.GenericC.Server
 where
 
 import Data.Bifunctor (first, second)
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.RTS.C (serverH, tuningH, valuesH)
 import Futhark.Manifest
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (prettyText)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import Language.Futhark.Core (nameFromText)
 
 genericOptions :: [Option]
@@ -321,7 +316,7 @@ serverDefs options manifest =
         generateOptionParser "parse_options" $ genericOptions ++ options
       (boilerplate_defs, type_inits, entry_point_inits) =
         mkBoilerplate manifest
-   in prettyText
+   in definitionsText
         [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")

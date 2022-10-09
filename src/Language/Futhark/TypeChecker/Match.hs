@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Checking for missing cases in a match expression.  Based on
 -- "Warnings for pattern matching" by Luc Maranget.  We only detect
 -- inexhaustiveness here - ideally, we would also like to check for
@@ -10,10 +8,10 @@ module Language.Futhark.TypeChecker.Match
   )
 where
 
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Util (maybeHead, nubOrd)
-import Futhark.Util.Pretty hiding (bool, group, space)
+import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark hiding (ExpBase (Constr))
 
 data Constr
@@ -34,21 +32,21 @@ matchType :: Match -> StructType
 matchType (MatchWild t) = t
 matchType (MatchConstr _ _ t) = t
 
-pprMatch :: Int -> Match -> Doc
+pprMatch :: Int -> Match -> Doc a
 pprMatch _ MatchWild {} = "_"
-pprMatch _ (MatchConstr (ConstrLit l) _ _) = ppr l
+pprMatch _ (MatchConstr (ConstrLit l) _ _) = pretty l
 pprMatch p (MatchConstr (Constr c) ps _) =
   parensIf (not (null ps) && p >= 10) $
-    "#" <> ppr c <> mconcat (map ((" " <>) . pprMatch 10) ps)
+    "#" <> pretty c <> mconcat (map ((" " <>) . pprMatch 10) ps)
 pprMatch _ (MatchConstr ConstrTuple ps _) =
   parens $ commasep $ map (pprMatch (-1)) ps
 pprMatch _ (MatchConstr (ConstrRecord fs) ps _) =
   braces $ commasep $ zipWith ppField fs ps
   where
-    ppField name t = text (nameToString name) <> equals <> pprMatch (-1) t
+    ppField name t = pretty (nameToString name) <> equals <> pprMatch (-1) t
 
 instance Pretty Match where
-  ppr = pprMatch (-1)
+  pretty = pprMatch (-1)
 
 patternToMatch :: Pat -> Match
 patternToMatch (Id _ (Info t) _) = MatchWild $ toStruct t

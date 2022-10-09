@@ -1,19 +1,15 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Interface to the Futhark parser.
 module Language.Futhark.Parser
   ( parseFuthark,
     parseExp,
     parseModExp,
     parseType,
-    parseValue,
-    parseValues,
     parseDecOrExpIncrM,
     SyntaxError (..),
   )
 where
 
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Language.Futhark.Parser.Parser
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
@@ -49,23 +45,6 @@ parseType ::
   T.Text ->
   Either SyntaxError UncheckedTypeExp
 parseType = parse futharkType
-
--- | Parse any Futhark value from the given 'String', using the 'FilePath'
--- as the source name for error messages.
-parseValue ::
-  FilePath ->
-  T.Text ->
-  Either SyntaxError Value
-parseValue = parse anyValue
-
--- | Parse several Futhark values (separated by anything) from the given
--- 'String', using the 'FilePath' as the source name for error
--- messages.
-parseValues ::
-  FilePath ->
-  T.Text ->
-  Either SyntaxError [Value]
-parseValues = parse anyValues
 
 -- | Parse an Futhark expression incrementally from monadic actions, using the
 -- 'FilePath' as the source name for error messages.

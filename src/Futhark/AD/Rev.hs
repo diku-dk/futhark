@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- Naming scheme:
@@ -15,7 +11,7 @@ module Futhark.AD.Rev (revVJP) where
 import Control.Monad
 import Data.List ((\\))
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.AD.Derivatives
 import Futhark.AD.Rev.Loop
 import Futhark.AD.Rev.Monad
@@ -30,7 +26,7 @@ import Futhark.Util (takeLast)
 
 patName :: Pat Type -> ADM VName
 patName (Pat [pe]) = pure $ patElemName pe
-patName pat = error $ "Expected single-element pattern: " ++ pretty pat
+patName pat = error $ "Expected single-element pattern: " ++ prettyString pat
 
 -- The vast majority of BasicOps require no special treatment in the
 -- forward pass and produce one value (and hence one adjoint).  We
@@ -57,11 +53,11 @@ diffBasicOp pat aux e m =
         case t of
           FloatType ft ->
             update <=< letExp "contrib" $
-              If
-                (Var pat_adj)
-                (resultBody [constant (floatValue ft (1 :: Int))])
+              Match
+                [Var pat_adj]
+                [Case [Just $ BoolValue True] $ resultBody [constant (floatValue ft (1 :: Int))]]
                 (resultBody [constant (floatValue ft (0 :: Int))])
-                (IfDec [Prim (FloatType ft)] IfNormal)
+                (MatchDec [Prim (FloatType ft)] MatchNormal)
           IntType it ->
             update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_adj)
           Bool ->
@@ -252,24 +248,24 @@ diffStm stm@(Let pat _ (Apply f args _ _)) m
           convert (FloatType ft) (FloatType tt) = ConvOpExp (FPConv ft tt)
           convert Bool (FloatType tt) = ConvOpExp (BToF tt)
           convert (FloatType ft) Bool = ConvOpExp (FToB ft)
-          convert ft tt = error $ "diffStm.convert: " ++ pretty (f, ft, tt)
+          convert ft tt = error $ "diffStm.convert: " ++ prettyString (f, ft, tt)
 
       contribs <-
         case pdBuiltin f arg_pes of
           Nothing ->
-            error $ "No partial derivative defined for builtin function: " ++ pretty f
+            error $ "No partial derivative defined for builtin function: " ++ prettyString f
           Just derivs ->
             forM (zip derivs argts) $ \(deriv, argt) ->
               letExp "contrib" <=< toExp . convert ret argt $ pat_adj' ~*~ deriv
 
       zipWithM_ updateSubExpAdj (map fst args) contribs
-diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
+diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
   addStm stm
   m
   returnSweepCode $ do
-    let tbody_free = freeIn tbody
-        fbody_free = freeIn fbody
-        branches_free = namesToList $ tbody_free <> fbody_free
+    let cases_free = map freeIn cases
+        defbody_free = freeIn defbody
+        branches_free = namesToList $ mconcat $ defbody_free : cases_free
 
     adjs <- mapM lookupAdj $ patNames pat
 
@@ -278,10 +274,10 @@ diffStm stm@(Let pat _ (If cond tbody fbody _)) m = do
           <=< letTupExp "branch_adj"
           <=< renameExp
         )
-        =<< eIf
-          (eSubExp cond)
-          (diffBody adjs branches_free tbody)
-          (diffBody adjs branches_free fbody)
+        =<< eMatch
+          ses
+          (map (fmap $ diffBody adjs branches_free) cases)
+          (diffBody adjs branches_free defbody)
     zipWithM_ insAdj branches_free branches_free_adj
 diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
@@ -313,7 +309,7 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
         let body' = Body () stms $ take (length inputs) res <> takeLast (length get_adjs_for) res
         ts' <- mapM lookupType get_adjs_for
         pure $ Lambda params body' $ take (length inputs) ts <> ts'
-diffStm stm _ = error $ "diffStm unhandled:\n" ++ pretty stm
+diffStm stm _ = error $ "diffStm unhandled:\n" ++ prettyString stm
 
 diffStms :: Stms SOACS -> ADM ()
 diffStms all_stms

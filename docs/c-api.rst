@@ -607,16 +607,18 @@ the manifest contains:
 
   * The C function name of the entry point.
 
-  * A list of all *inputs*, including their type and whether they are
-    *unique* (consuming).
+  * A list of all *inputs*, including their type (as a name) and
+    *whether they are unique* (consuming).
 
-  * A list of all *outputs*, including their type and whether they are
-    *unique*.
+  * A list of all *outputs*, including their type (as a name) and
+    *whether they are unique*.
 
 * A mapping from the name of each non-scalar type to:
 
-  * The C type of used to represent the type (which is in practice
+  * The C type used to represent this type (which is in practice
     always a pointer of some kind).
+
+  * What *kind* of type this is - either an *array* or an *opaque*.
 
   * For arrays, the element type and rank.
 
@@ -628,6 +630,15 @@ the manifest contains:
     * For arrays: ``free``, ``shape``, ``values``, ``new``.
 
     * For opaques: ``free``, ``store``, ``restore``.
+
+  * For opaques that are actually records (including tuples):
+
+    * The list of fields, including their type and a projection
+      function.  The field ordering here is the one used expected by
+      the *new* function.
+
+    * The name of the C *new* function for creating a record from
+      field values.
 
 Manifests are defined by the following JSON Schema:
 

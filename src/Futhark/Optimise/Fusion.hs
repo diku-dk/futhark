@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
 -- | Perform horizontal and vertical fusion of SOACs.  See the paper
 -- /A T2 Graph-Reduction Approach To Fusion/ for the basic idea (some
 -- extensions discussed in /Design and GPGPU Performance of Futhark’s
@@ -9,20 +6,20 @@ module Futhark.Optimise.Fusion (fuseSOACs) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Graph.Inductive.Graph as G
-import qualified Data.Graph.Inductive.Query.DFS as Q
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
+import Data.Graph.Inductive.Graph qualified as G
+import Data.Graph.Inductive.Query.DFS qualified as Q
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.HORep.SOAC as H
+import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
-import qualified Futhark.IR.SOACS as Futhark
+import Futhark.IR.SOACS qualified as Futhark
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
-import qualified Futhark.Optimise.Fusion.TryFusion as TF
+import Futhark.Optimise.Fusion.TryFusion qualified as TF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -98,7 +95,7 @@ finalizeNode nt = case nt of
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm
-  IfNode stm lst -> do
+  MatchNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm
   FinalNode stms1 nt' stms2 -> do
@@ -253,10 +250,10 @@ okToFuseProducer _ = pure True
 
 -- First node is producer, second is consumer.
 vFuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT], [EdgeT]) -> (NodeT, [EdgeT]) -> FusionM (Maybe NodeT)
-vFuseNodeT _ infusible (s1, _, e1s) (IfNode stm2 dfused, _)
+vFuseNodeT _ infusible (s1, _, e1s) (MatchNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
-      pure $ Just $ IfNode stm2 $ (s1, e1s) : dfused
+      pure $ Just $ MatchNode stm2 $ (s1, e1s) : dfused
 vFuseNodeT _ infusible (StmNode stm1, _, _) (SoacNode ots2 pats2 soac2 aux2, _)
   | null infusible,
     [stm1_out] <- patNames $ stmPat stm1,
@@ -398,11 +395,10 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     doFuseScans . localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
       b <- doFusionWithDelayed body to_fuse
       pure (incoming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
-  IfNode (Let pat aux (If sz b1 b2 dec)) to_fuse -> doFuseScans $ do
-    b1' <- doFusionWithDelayed b1 to_fuse
-    b2' <- doFusionWithDelayed b2 to_fuse
-    rb2' <- renameBody b2'
-    pure (incoming, node, IfNode (Let pat aux (If sz b1' rb2' dec)) [], outgoing)
+  MatchNode (Let pat aux (Match cond cases defbody dec)) to_fuse -> doFuseScans $ do
+    cases' <- mapM (traverse $ renameBody <=< (`doFusionWithDelayed` to_fuse)) cases
+    defbody' <- doFusionWithDelayed defbody to_fuse
+    pure (incoming, node, MatchNode (Let pat aux (Match cond cases' defbody' dec)) [], outgoing)
   StmNode (Let pat aux (Op (Futhark.VJP lam args vec))) -> doFuseScans $ do
     lam' <- doFusionLambda lam
     pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP lam' args vec))), outgoing)
@@ -415,7 +411,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   SoacNode ots pat soac aux -> do
     let lam = H.lambda soac
     lam' <- localScope (scopeOf lam) $ case soac of
-      H.Stream _ Sequential {} _ _ _ ->
+      H.Stream {} ->
         dontFuseScans $ doFusionLambda lam
       _ ->
         doFuseScans $ doFusionLambda lam

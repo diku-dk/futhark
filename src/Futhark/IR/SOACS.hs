@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | A simple representation with SOACs and nested parallelism.
@@ -22,7 +21,7 @@ import Futhark.IR.Prop
 import Futhark.IR.SOACS.SOAC
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
-import qualified Futhark.IR.TypeCheck as TC
+import Futhark.IR.TypeCheck qualified as TC
 
 -- | The rep for the basic representation.
 data SOACS
@@ -57,7 +56,7 @@ usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
     lamUsesAD = bodyUsesAD . lambdaBody
     expUsesAD (Op JVP {}) = True
     expUsesAD (Op VJP {}) = True
-    expUsesAD (Op (Stream _ _ _ _ lam)) = lamUsesAD lam
+    expUsesAD (Op (Stream _ _ _ lam)) = lamUsesAD lam
     expUsesAD (Op (Screma _ _ (ScremaForm scans reds lam))) =
       lamUsesAD lam
         || any (lamUsesAD . scanLambda) scans
@@ -66,7 +65,8 @@ usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
       lamUsesAD lam || any (lamUsesAD . histOp) ops
     expUsesAD (Op (Scatter _ _ lam _)) =
       lamUsesAD lam
-    expUsesAD (If _ tbody fbody _) = bodyUsesAD tbody || bodyUsesAD fbody
+    expUsesAD (Match _ cases def_case _) =
+      any (bodyUsesAD . caseBody) cases || bodyUsesAD def_case
     expUsesAD (DoLoop _ _ body) = bodyUsesAD body
     expUsesAD (WithAcc _ lam) = lamUsesAD lam
     expUsesAD BasicOp {} = False

@@ -1,9 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -12,8 +6,6 @@
 -- over @iota@s (so there will be explicit indexing inside them).
 module Futhark.IR.SegOp
   ( SegOp (..),
-    SegVirt (..),
-    SegSeqDims (..),
     segLevel,
     segBody,
     segSpace,
@@ -36,7 +28,6 @@ module Futhark.IR.SegOp
     KernelResult (..),
     kernelResultCerts,
     kernelResultSubExp,
-    SplitOrdering (..),
 
     -- ** Generic traversal
     SegOpMapper (..),
@@ -70,13 +61,13 @@ import Data.List
     isPrefixOf,
     partition,
   )
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR
 import Futhark.IR.Aliases
   ( Aliases,
@@ -85,8 +76,8 @@ import Futhark.IR.Aliases
   )
 import Futhark.IR.Mem
 import Futhark.IR.Prop.Aliases
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Tools
@@ -94,38 +85,18 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty
-  ( Pretty,
-    commasep,
+  ( Doc,
+    Pretty,
+    apply,
+    hsep,
     parens,
-    ppr,
-    text,
+    ppTuple',
+    pretty,
     (<+>),
     (</>),
   )
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
-
--- | How an array is split into chunks.
-data SplitOrdering
-  = SplitContiguous
-  | SplitStrided SubExp
-  deriving (Eq, Ord, Show)
-
-instance FreeIn SplitOrdering where
-  freeIn' SplitContiguous = mempty
-  freeIn' (SplitStrided stride) = freeIn' stride
-
-instance Substitute SplitOrdering where
-  substituteNames _ SplitContiguous =
-    SplitContiguous
-  substituteNames subst (SplitStrided stride) =
-    SplitStrided $ substituteNames subst stride
-
-instance Rename SplitOrdering where
-  rename SplitContiguous =
-    pure SplitContiguous
-  rename (SplitStrided stride) =
-    SplitStrided <$> rename stride
 
 -- | An operator for 'SegHist'.
 data HistOp rep = HistOp
@@ -227,13 +198,6 @@ data KernelResult
       Shape -- Size of array.  Must match number of dims.
       VName -- Which array
       [(Slice SubExp, SubExp)]
-  | -- Arbitrary number of index/value pairs.
-    ConcatReturns
-      Certs
-      SplitOrdering -- Permuted?
-      SubExp -- The final size.
-      SubExp -- Per-thread/group (max) chunk size.
-      VName -- Chunk by this worker.
   | TileReturns
       Certs
       [(SubExp, SubExp)] -- Total/tile for each dimension
@@ -255,7 +219,6 @@ data KernelResult
 kernelResultCerts :: KernelResult -> Certs
 kernelResultCerts (Returns _ cs _) = cs
 kernelResultCerts (WriteReturns cs _ _ _) = cs
-kernelResultCerts (ConcatReturns cs _ _ _ _) = cs
 kernelResultCerts (TileReturns cs _ _) = cs
 kernelResultCerts (RegTileReturns cs _ _) = cs
 
@@ -263,15 +226,12 @@ kernelResultCerts (RegTileReturns cs _ _) = cs
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (Returns _ _ se) = se
 kernelResultSubExp (WriteReturns _ _ arr _) = Var arr
-kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
 kernelResultSubExp (TileReturns _ _ v) = Var v
 kernelResultSubExp (RegTileReturns _ _ v) = Var v
 
 instance FreeIn KernelResult where
   freeIn' (Returns _ cs what) = freeIn' cs <> freeIn' what
   freeIn' (WriteReturns cs rws arr res) = freeIn' cs <> freeIn' rws <> freeIn' arr <> freeIn' res
-  freeIn' (ConcatReturns cs o w per_thread_elems v) =
-    freeIn' cs <> freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
   freeIn' (TileReturns cs dims v) =
     freeIn' cs <> freeIn' dims <> freeIn' v
   freeIn' (RegTileReturns cs dims_n_tiles v) =
@@ -299,13 +259,6 @@ instance Substitute KernelResult where
       (substituteNames subst rws)
       (substituteNames subst arr)
       (substituteNames subst res)
-  substituteNames subst (ConcatReturns cs o w per_thread_elems v) =
-    ConcatReturns
-      (substituteNames subst cs)
-      (substituteNames subst o)
-      (substituteNames subst w)
-      (substituteNames subst per_thread_elems)
-      (substituteNames subst v)
   substituteNames subst (TileReturns cs dims v) =
     TileReturns
       (substituteNames subst cs)
@@ -377,13 +330,12 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
   mapM_ consumeKernelResult kres
   TC.checkStms stms $ do
     unless (length ts == length kres) $
-      TC.bad $
-        TC.TypeError $
-          "Kernel return type is "
-            ++ prettyTuple ts
-            ++ ", but body returns "
-            ++ show (length kres)
-            ++ " values."
+      TC.bad . TC.TypeError $
+        "Kernel return type is "
+          <> prettyTuple ts
+          <> ", but body returns "
+          <> prettyText (length kres)
+          <> " values."
     zipWithM_ checkKernelResult kres ts
   where
     consumeKernelResult (WriteReturns _ _ arr _) =
@@ -405,25 +357,13 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
           TC.bad $
             TC.TypeError $
               "WriteReturns returning "
-                ++ pretty e
-                ++ " of type "
-                ++ pretty t
-                ++ ", shape="
-                ++ pretty shape
-                ++ ", but destination array has type "
-                ++ pretty arr_t
-    checkKernelResult (ConcatReturns cs o w per_thread_elems v) t = do
-      TC.checkCerts cs
-      case o of
-        SplitContiguous -> pure ()
-        SplitStrided stride -> TC.require [Prim int64] stride
-      TC.require [Prim int64] w
-      TC.require [Prim int64] per_thread_elems
-      vt <- lookupType v
-      unless (vt == t `arrayOfRow` arraySize 0 vt) $
-        TC.bad $
-          TC.TypeError $
-            "Invalid type for ConcatReturns " ++ pretty v
+                <> prettyText e
+                <> " of type "
+                <> prettyText t
+                <> ", shape="
+                <> prettyText shape
+                <> ", but destination array has type "
+                <> prettyText arr_t
     checkKernelResult (TileReturns cs dims v) t = do
       TC.checkCerts cs
       forM_ dims $ \(dim, tile) -> do
@@ -433,7 +373,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $
           TC.TypeError $
-            "Invalid type for TileReturns " ++ pretty v
+            "Invalid type for TileReturns " <> prettyText v
     checkKernelResult (RegTileReturns cs dims_n_tiles arr) t = do
       TC.checkCerts cs
       mapM_ (TC.require [Prim int64]) dims
@@ -445,102 +385,54 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       unless (arr_t == expected) $
         TC.bad . TC.TypeError $
           "Invalid type for TileReturns. Expected:\n  "
-            ++ pretty expected
-            ++ ",\ngot:\n  "
-            ++ pretty arr_t
+            <> prettyText expected
+            <> ",\ngot:\n  "
+            <> prettyText arr_t
       where
         (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
-        expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles)
+        expected = t `arrayOfShape` Shape (blk_tiles <> reg_tiles)
 
 kernelBodyMetrics :: OpMetrics (Op rep) => KernelBody rep -> MetricsM ()
 kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
 
 instance PrettyRep rep => Pretty (KernelBody rep) where
-  ppr (KernelBody _ stms res) =
-    PP.stack (map ppr (stmsToList stms))
-      </> text "return"
-      <+> PP.braces (PP.commasep $ map ppr res)
+  pretty (KernelBody _ stms res) =
+    PP.stack (map pretty (stmsToList stms))
+      </> "return"
+      <+> PP.braces (PP.commasep $ map pretty res)
 
-certAnnots :: Certs -> [PP.Doc]
+certAnnots :: Certs -> [Doc ann]
 certAnnots cs
   | cs == mempty = []
-  | otherwise = [ppr cs]
+  | otherwise = [pretty cs]
 
 instance Pretty KernelResult where
-  ppr (Returns ResultNoSimplify cs what) =
-    PP.spread $ certAnnots cs ++ ["returns (manifest)" <+> ppr what]
-  ppr (Returns ResultPrivate cs what) =
-    PP.spread $ certAnnots cs ++ ["returns (private)" <+> ppr what]
-  ppr (Returns ResultMaySimplify cs what) =
-    PP.spread $ certAnnots cs ++ ["returns" <+> ppr what]
-  ppr (WriteReturns cs shape arr res) =
-    PP.spread $
+  pretty (Returns ResultNoSimplify cs what) =
+    hsep $ certAnnots cs <> ["returns (manifest)" <+> pretty what]
+  pretty (Returns ResultPrivate cs what) =
+    hsep $ certAnnots cs <> ["returns (private)" <+> pretty what]
+  pretty (Returns ResultMaySimplify cs what) =
+    hsep $ certAnnots cs <> ["returns" <+> pretty what]
+  pretty (WriteReturns cs shape arr res) =
+    hsep $
       certAnnots cs
-        ++ [ ppr arr
+        <> [ pretty arr
                <+> PP.colon
-               <+> ppr shape
+               <+> pretty shape
                </> "with"
                <+> PP.apply (map ppRes res)
            ]
     where
-      ppRes (slice, e) = ppr slice <+> text "=" <+> ppr e
-  ppr (ConcatReturns cs SplitContiguous w per_thread_elems v) =
-    PP.spread $
-      certAnnots cs
-        ++ [ "concat"
-               <> parens (commasep [ppr w, ppr per_thread_elems])
-               <+> ppr v
-           ]
-  ppr (ConcatReturns cs (SplitStrided stride) w per_thread_elems v) =
-    PP.spread $
-      certAnnots cs
-        ++ [ "concat_strided"
-               <> parens (commasep [ppr stride, ppr w, ppr per_thread_elems])
-               <+> ppr v
-           ]
-  ppr (TileReturns cs dims v) =
-    PP.spread $ certAnnots cs ++ ["tile" <> parens (commasep $ map onDim dims) <+> ppr v]
+      ppRes (slice, e) = pretty slice <+> "=" <+> pretty e
+  pretty (TileReturns cs dims v) =
+    hsep $ certAnnots cs <> ["tile" <> apply (map onDim dims) <+> pretty v]
     where
-      onDim (dim, tile) = ppr dim <+> "/" <+> ppr tile
-  ppr (RegTileReturns cs dims_n_tiles v) =
-    PP.spread $ certAnnots cs ++ ["blkreg_tile" <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v]
+      onDim (dim, tile) = pretty dim <+> "/" <+> pretty tile
+  pretty (RegTileReturns cs dims_n_tiles v) =
+    hsep $ certAnnots cs <> ["blkreg_tile" <> apply (map onDim dims_n_tiles) <+> pretty v]
     where
       onDim (dim, blk_tile, reg_tile) =
-        ppr dim <+> "/" <+> parens (ppr blk_tile <+> "*" <+> ppr reg_tile)
-
--- | These dimensions (indexed from 0, outermost) of the corresponding
--- 'SegSpace' should not be parallelised, but instead iterated
--- sequentially.  For example, with a 'SegSeqDims' of @[0]@ and a
--- 'SegSpace' with dimensions @[n][m]@, there will be an outer loop
--- with @n@ iterations, while the @m@ dimension will be parallelised.
---
--- Semantically, this has no effect, but it may allow reductions in
--- memory usage or other low-level optimisations.  Operationally, the
--- guarantee is that for a SegSeqDims of e.g. @[i,j,k]@, threads
--- running at any given moment will always have the same indexes along
--- the dimensions specified by @[i,j,k]@.
---
--- At the moment, this is only supported for 'SegNoVirtFull'
--- intra-group parallelism in GPU code, as we have not yet found it
--- useful anywhere else.
-newtype SegSeqDims = SegSeqDims {segSeqDims :: [Int]}
-  deriving (Eq, Ord, Show)
-
--- | Do we need group-virtualisation when generating code for the
--- segmented operation?  In most cases, we do, but for some simple
--- kernels, we compute the full number of groups in advance, and then
--- virtualisation is an unnecessary (but generally very small)
--- overhead.  This only really matters for fairly trivial but very
--- wide @map@ kernels where each thread performs constant-time work on
--- scalars.
-data SegVirt
-  = SegVirt
-  | SegNoVirt
-  | -- | Not only do we not need virtualisation, but we _guarantee_
-    -- that all physical threads participate in the work.  This can
-    -- save some checks in code generation.
-    SegNoVirtFull SegSeqDims
-  deriving (Eq, Ord, Show)
+        pretty dim <+> "/" <+> parens (pretty blk_tile <+> "*" <+> pretty reg_tile)
 
 -- | Index space of a 'SegOp'.
 data SegSpace = SegSpace
@@ -613,8 +505,6 @@ segResultShape _ t (WriteReturns _ shape _ _) =
   t `arrayOfShape` shape
 segResultShape space t Returns {} =
   foldr (flip arrayOfRow) t $ segSpaceDims space
-segResultShape _ t (ConcatReturns _ _ w _ _) =
-  t `arrayOfRow` w
 segResultShape _ t (TileReturns _ dims _) =
   t `arrayOfShape` Shape (map fst dims)
 segResultShape _ t (RegTileReturns _ dims_n_tiles _) =
@@ -722,9 +612,9 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
         TC.bad $
           TC.TypeError $
             "SegHist operator has return type "
-              ++ prettyTuple (lambdaReturnType op)
-              ++ " but neutral element has type "
-              ++ prettyTuple nes_t
+              <> prettyTuple (lambdaReturnType op)
+              <> " but neutral element has type "
+              <> prettyTuple nes_t
 
       -- Arrays must have proper type.
       let dest_shape' = Shape segment_dims <> dest_shape <> shape
@@ -745,9 +635,9 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
       TC.bad $
         TC.TypeError $
           "SegHist body has return type "
-            ++ prettyTuple ts
-            ++ " but should have type "
-            ++ prettyTuple bucket_ret_t
+            <> prettyTuple ts
+            <> " but should have type "
+            <> prettyTuple bucket_ret_t
   where
     segment_dims = init $ segSpaceDims space
 
@@ -783,10 +673,10 @@ checkScanRed space ops ts kbody = do
       TC.bad $
         TC.TypeError $
           "Wrong return for body (does not match neutral elements; expected "
-            ++ pretty expecting
-            ++ "; found "
-            ++ pretty got
-            ++ ")"
+            <> prettyText expecting
+            <> "; found "
+            <> prettyText got
+            <> ")"
 
     checkKernelBody ts kbody
 
@@ -830,7 +720,7 @@ mapSegBinOp tv (SegBinOp comm red_op nes shape) =
 
 -- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM ::
-  (Applicative m, Monad m) =>
+  Monad m =>
   SegOpMapper lvl frep trep m ->
   SegOp lvl frep ->
   m (SegOp lvl trep)
@@ -922,10 +812,7 @@ instance (ASTRep rep, ASTConstraints lvl) => Rename (SegOp lvl rep) where
     where
       renamer = SegOpMapper rename rename rename rename rename
 
-instance
-  (ASTRep rep, FreeIn (LParamInfo rep), FreeIn lvl) =>
-  FreeIn (SegOp lvl rep)
-  where
+instance (ASTRep rep, FreeIn lvl) => FreeIn (SegOp lvl rep) where
   freeIn' e =
     fvBind (namesFromList $ M.keys $ scopeOfSegSpace (segSpace e)) $
       flip execState mempty $
@@ -958,60 +845,60 @@ instance OpMetrics (Op rep) => OpMetrics (SegOp lvl rep) where
       kernelBodyMetrics body
 
 instance Pretty SegSpace where
-  ppr (SegSpace phys dims) =
-    parens
-      ( commasep $ do
+  pretty (SegSpace phys dims) =
+    apply
+      ( do
           (i, d) <- dims
-          pure $ ppr i <+> "<" <+> ppr d
+          pure $ pretty i <+> "<" <+> pretty d
       )
-      <+> parens (text "~" <> ppr phys)
+      <+> parens ("~" <> pretty phys)
 
 instance PrettyRep rep => Pretty (SegBinOp rep) where
-  ppr (SegBinOp comm lam nes shape) =
-    PP.braces (PP.commasep $ map ppr nes) <> PP.comma
-      </> ppr shape <> PP.comma
-      </> comm' <> ppr lam
+  pretty (SegBinOp comm lam nes shape) =
+    PP.braces (PP.commasep $ map pretty nes) <> PP.comma
+      </> pretty shape <> PP.comma
+      </> comm' <> pretty lam
     where
       comm' = case comm of
-        Commutative -> text "commutative "
+        Commutative -> "commutative "
         Noncommutative -> mempty
 
 instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
-  ppr (SegMap lvl space ts body) =
-    text "segmap" <> ppr lvl
-      </> PP.align (ppr space)
+  pretty (SegMap lvl space ts body) =
+    "segmap" <> pretty lvl
+      </> PP.align (pretty space)
       <+> PP.colon
-      <+> ppTuple' ts
-      <+> PP.nestedBlock "{" "}" (ppr body)
-  ppr (SegRed lvl space reds ts body) =
-    text "segred" <> ppr lvl
-      </> PP.align (ppr space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr reds)
+      <+> ppTuple' (map pretty ts)
+      <+> PP.nestedBlock "{" "}" (pretty body)
+  pretty (SegRed lvl space reds ts body) =
+    "segred" <> pretty lvl
+      </> PP.align (pretty space)
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
       </> PP.colon
-      <+> ppTuple' ts
-      <+> PP.nestedBlock "{" "}" (ppr body)
-  ppr (SegScan lvl space scans ts body) =
-    text "segscan" <> ppr lvl
-      </> PP.align (ppr space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppr scans)
+      <+> ppTuple' (map pretty ts)
+      <+> PP.nestedBlock "{" "}" (pretty body)
+  pretty (SegScan lvl space scans ts body) =
+    "segscan" <> pretty lvl
+      </> PP.align (pretty space)
+      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
       </> PP.colon
-      <+> ppTuple' ts
-      <+> PP.nestedBlock "{" "}" (ppr body)
-  ppr (SegHist lvl space ops ts body) =
-    text "seghist" <> ppr lvl
-      </> PP.align (ppr space)
+      <+> ppTuple' (map pretty ts)
+      <+> PP.nestedBlock "{" "}" (pretty body)
+  pretty (SegHist lvl space ops ts body) =
+    "seghist" <> pretty lvl
+      </> PP.align (pretty space)
       </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
       </> PP.colon
-      <+> ppTuple' ts
-      <+> PP.nestedBlock "{" "}" (ppr body)
+      <+> ppTuple' (map pretty ts)
+      <+> PP.nestedBlock "{" "}" (pretty body)
     where
       ppOp (HistOp w rf dests nes shape op) =
-        ppr w <> PP.comma
-          <+> ppr rf <> PP.comma
-          </> PP.braces (PP.commasep $ map ppr dests) <> PP.comma
-          </> PP.braces (PP.commasep $ map ppr nes) <> PP.comma
-          </> ppr shape <> PP.comma
-          </> ppr op
+        pretty w <> PP.comma
+          <+> pretty rf <> PP.comma
+          </> PP.braces (PP.commasep $ map pretty dests) <> PP.comma
+          </> PP.braces (PP.commasep $ map pretty nes) <> PP.comma
+          </> pretty shape <> PP.comma
+          </> pretty op
 
 instance
   ( ASTRep rep,
@@ -1126,12 +1013,6 @@ instance
 
 --- Simplification
 
-instance Engine.Simplifiable SplitOrdering where
-  simplify SplitContiguous =
-    pure SplitContiguous
-  simplify (SplitStrided stride) =
-    SplitStrided <$> Engine.simplify stride
-
 instance Engine.Simplifiable SegSpace where
   simplify (SegSpace phys dims) =
     SegSpace phys <$> mapM (traverse Engine.simplify) dims
@@ -1145,13 +1026,6 @@ instance Engine.Simplifiable KernelResult where
       <*> Engine.simplify ws
       <*> Engine.simplify a
       <*> Engine.simplify res
-  simplify (ConcatReturns cs o w pte what) =
-    ConcatReturns
-      <$> Engine.simplify cs
-      <*> Engine.simplify o
-      <*> Engine.simplify w
-      <*> Engine.simplify pte
-      <*> Engine.simplify what
   simplify (TileReturns cs dims what) =
     TileReturns <$> Engine.simplify cs <*> Engine.simplify dims <*> Engine.simplify what
   simplify (RegTileReturns cs dims_n_tiles what) =

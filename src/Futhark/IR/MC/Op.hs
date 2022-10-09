@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -18,21 +16,21 @@ where
 
 import Data.Bifunctor (first)
 import Futhark.Analysis.Metrics
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify as Simplify
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify qualified as Simplify
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.Pretty
   ( Pretty,
     nestedBlock,
-    ppr,
+    pretty,
     (<+>),
     (</>),
   )
@@ -129,13 +127,13 @@ instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (MCOp rep op) where
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
 
 instance (PrettyRep rep, Pretty op) => Pretty (MCOp rep op) where
-  ppr (ParOp Nothing op) = ppr op
-  ppr (ParOp (Just par_op) op) =
+  pretty (ParOp Nothing op) = pretty op
+  pretty (ParOp (Just par_op) op) =
     "par"
-      <+> nestedBlock "{" "}" (ppr par_op)
+      <+> nestedBlock "{" "}" (pretty par_op)
       </> "seq"
-      <+> nestedBlock "{" "}" (ppr op)
-  ppr (OtherOp op) = ppr op
+      <+> nestedBlock "{" "}" (pretty op)
+  pretty (OtherOp op) = pretty op
 
 instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (MCOp rep op) where
   opMetrics (ParOp par_op op) = opMetrics par_op >> opMetrics op

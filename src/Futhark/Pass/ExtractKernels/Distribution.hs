@@ -1,10 +1,4 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.ExtractKernels.Distribution
@@ -49,7 +43,7 @@ import Control.Monad.Trans.Maybe
 import Data.Bifunctor (second)
 import Data.Foldable
 import Data.List (elemIndex, sortOn)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR
 import Futhark.IR.SegOp
@@ -82,7 +76,7 @@ ppTargets :: Targets -> String
 ppTargets (Targets target targets) =
   unlines $ map ppTarget $ targets ++ [target]
   where
-    ppTarget (pat, res) = pretty pat ++ " <- " ++ pretty res
+    ppTarget (pat, res) = prettyString pat ++ " <- " ++ prettyString res
 
 singleTarget :: Target -> Targets
 singleTarget = flip Targets []
@@ -132,9 +126,9 @@ scopeOfLoopNesting = scopeOfLParams . map fst . loopNestingParamsAndArrs
 
 ppLoopNesting :: LoopNesting -> String
 ppLoopNesting (MapNesting _ _ _ params_and_arrs) =
-  pretty (map fst params_and_arrs)
+  prettyString (map fst params_and_arrs)
     ++ " <- "
-    ++ pretty (map snd params_and_arrs)
+    ++ prettyString (map snd params_and_arrs)
 
 loopNestingParams :: LoopNesting -> [Param Type]
 loopNestingParams = map fst . loopNestingParamsAndArrs
@@ -559,10 +553,10 @@ tryDistribute mk_lvl nest targets stms =
         distributed' <- renameStm kernel_stm
         logMsg $
           "distributing\n"
-            ++ unlines (map pretty $ stmsToList stms)
-            ++ pretty (snd $ innerTarget targets)
+            ++ unlines (map prettyString $ stmsToList stms)
+            ++ prettyString (snd $ innerTarget targets)
             ++ "\nas\n"
-            ++ pretty distributed'
+            ++ prettyString distributed'
             ++ "\ndue to targets\n"
             ++ ppTargets targets
             ++ "\nand with new targets\n"

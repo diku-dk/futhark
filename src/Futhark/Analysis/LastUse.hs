@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Provides last-use analysis for Futhark programs.
@@ -15,11 +11,11 @@ module Futhark.Analysis.LastUse
 where
 
 import Control.Monad.Reader
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap, first)
 import Data.Foldable
 import Data.Function ((&))
 import Data.Map (Map)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Tuple
 import Futhark.Analysis.Alias (aliasAnalysis)
 import Futhark.IR.Aliases
@@ -158,14 +154,23 @@ analyseStm (lumap0, used0) (Let pat _ e) = do
     analyseExp (lumap, used) (Apply _ args _ _) = do
       let nms = freeIn $ map fst args
       pure (insertNames pat_name nms lumap, used <> nms)
-    analyseExp (lumap, used) (If cse then_body else_body dec) = do
-      (lumap_then, used_then) <- analyseBody lumap used then_body
-      (lumap_else, used_else) <- analyseBody lumap used else_body
+    analyseExp (lumap, used) (Match ses cases defbody dec) = do
+      (lumap_cases, used_cases) <-
+        bimap mconcat mconcat . unzip
+          <$> mapM (analyseBody lumap used . caseBody) cases
+      (lumap_defbody, used_defbody) <- analyseBody lumap used defbody
       let (lumap', used') =
-            (lumap_then <> lumap_else, used_then <> used_else)
+            (lumap_defbody <> lumap_cases, used_cases <> used_defbody)
               & flip (foldl addAliasesFromBodyRes) (zip (patElems pat) (map resSubExp $ bodyResult then_body))
               & flip (foldl addAliasesFromBodyRes) (zip (patElems pat) (map resSubExp $ bodyResult else_body))
-          nms = (freeIn cse <> freeIn dec) `namesSubtract` used'
+          nms = (freeIn ses <> freeIn dec) `namesSubtract` used'
+      pure
+        ( insertNames pat_name nms lumap',
+          used' <> nms
+        )
+    analyseExp (lumap, used) (DoLoop merge form body) = do
+      (lumap', used') <- analyseBody lumap used body
+      let nms = (freeIn merge <> freeIn form) `namesSubtract` used'
       pure (insertNames pat_name nms lumap', used' <> nms)
     analyseExp (lumap, used) (DoLoop merge form body) = do
       let (lumap', used') =

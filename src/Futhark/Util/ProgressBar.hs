@@ -1,6 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
-
--- | Facilities for generating and otherwise handling text-based progress bars.
+-- | Facilities for generating and otherwise handling pretty-based progress bars.
 module Futhark.Util.ProgressBar
   ( progressBar,
     ProgressBar (..),
@@ -8,7 +6,7 @@ module Futhark.Util.ProgressBar
   )
 where
 
-import qualified Data.Text as T
+import Data.Text qualified as T
 
 -- | Information about a progress bar to render.  The "progress space"
 -- spans from 0 and up to the `progressBarBound`, but can be

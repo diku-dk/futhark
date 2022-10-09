@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | This module provides a monadic facility similar (and built on top
@@ -22,16 +21,16 @@ module Futhark.MonadFreshNames
 where
 
 import Control.Monad.Except
-import qualified Control.Monad.RWS.Lazy
-import qualified Control.Monad.RWS.Strict
+import Control.Monad.RWS.Lazy qualified
+import Control.Monad.RWS.Strict qualified
 import Control.Monad.Reader
-import qualified Control.Monad.State.Lazy
-import qualified Control.Monad.State.Strict
-import qualified Control.Monad.Trans.Maybe
-import qualified Control.Monad.Writer.Lazy
-import qualified Control.Monad.Writer.Strict
+import Control.Monad.State.Lazy qualified
+import Control.Monad.State.Strict qualified
+import Control.Monad.Trans.Maybe qualified
+import Control.Monad.Writer.Lazy qualified
+import Control.Monad.Writer.Strict qualified
 import Futhark.FreshNames hiding (newName)
-import qualified Futhark.FreshNames as FreshNames
+import Futhark.FreshNames qualified as FreshNames
 import Futhark.IR.Syntax
 
 -- | A monad that stores a name source.  The following is a good
@@ -42,27 +41,27 @@ import Futhark.IR.Syntax
 --    getNameSource = get
 --    putNameSource = put
 -- @
-class (Applicative m, Monad m) => MonadFreshNames m where
+class Monad m => MonadFreshNames m where
   getNameSource :: m VNameSource
   putNameSource :: VNameSource -> m ()
 
-instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Lazy.StateT VNameSource im) where
+instance Monad im => MonadFreshNames (Control.Monad.State.Lazy.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Lazy.get
   putNameSource = Control.Monad.State.Lazy.put
 
-instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
+instance Monad im => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
 
 instance
-  (Applicative im, Monad im, Monoid w) =>
+  (Monad im, Monoid w) =>
   MonadFreshNames (Control.Monad.RWS.Lazy.RWST r w VNameSource im)
   where
   getNameSource = Control.Monad.RWS.Lazy.get
   putNameSource = Control.Monad.RWS.Lazy.put
 
 instance
-  (Applicative im, Monad im, Monoid w) =>
+  (Monad im, Monoid w) =>
   MonadFreshNames (Control.Monad.RWS.Strict.RWST r w VNameSource im)
   where
   getNameSource = Control.Monad.RWS.Strict.get

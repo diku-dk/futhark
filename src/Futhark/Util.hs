@@ -1,5 +1,3 @@
-{-# LANGUAGE Trustworthy #-}
-
 -- | Non-Futhark-specific utilities.  If you find yourself writing
 -- general functions on generic data structures, consider putting them
 -- here.
@@ -33,26 +31,9 @@ module Futhark.Util
     isEnvVarAtLeast,
     startupTime,
     fancyTerminal,
+    hFancyTerminal,
     runProgramWithExitCode,
     directoryContents,
-    roundFloat,
-    ceilFloat,
-    floorFloat,
-    roundDouble,
-    ceilDouble,
-    floorDouble,
-    lgamma,
-    lgammaf,
-    tgamma,
-    tgammaf,
-    erf,
-    erff,
-    erfc,
-    erfcf,
-    cbrt,
-    cbrtf,
-    hypot,
-    hypotf,
     fromPOSIX,
     toPOSIX,
     trim,
@@ -80,29 +61,29 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Crypto.Hash.MD5 as MD5
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base16 as Base16
+import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as Base16
 import Data.Char
 import Data.Either
 import Data.Foldable (fold, toList)
 import Data.Function ((&))
 import Data.List (findIndex, foldl', genericDrop, genericSplitAt, sortBy)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.Encoding.Error as T
+import Data.Set qualified as S
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
+import Data.Text.Encoding.Error qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
 import Numeric
-import qualified System.Directory.Tree as Dir
+import System.Directory.Tree qualified as Dir
 import System.Environment
 import System.Exit
-import qualified System.FilePath as Native
-import qualified System.FilePath.Posix as Posix
-import System.IO (hIsTerminalDevice, stdout)
+import System.FilePath qualified as Native
+import System.FilePath.Posix qualified as Posix
+import System.IO (Handle, hIsTerminalDevice, stdout)
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Unsafe
 import System.Process.ByteString
@@ -262,8 +243,13 @@ startupTime = unsafePerformIO getCurrentTime
 -- | Are we running in a terminal capable of fancy commands and
 -- visualisation?
 fancyTerminal :: Bool
-fancyTerminal = unsafePerformIO $ do
-  isTTY <- hIsTerminalDevice stdout
+fancyTerminal = unsafePerformIO $ hFancyTerminal stdout
+
+-- | Is this handle connected to a terminal capable of fancy commands
+-- and visualisation?
+hFancyTerminal :: Handle -> IO Bool
+hFancyTerminal h = do
+  isTTY <- hIsTerminalDevice h
   isDumb <- (Just "dumb" ==) <$> lookupEnv "TERM"
   pure $ isTTY && not isDumb
 
@@ -293,114 +279,6 @@ directoryContents dir = do
   where
     isFile (Dir.File _ path) = Just path
     isFile _ = Nothing
-
-foreign import ccall "nearbyint" c_nearbyint :: Double -> Double
-
-foreign import ccall "nearbyintf" c_nearbyintf :: Float -> Float
-
-foreign import ccall "ceil" c_ceil :: Double -> Double
-
-foreign import ccall "ceilf" c_ceilf :: Float -> Float
-
-foreign import ccall "floor" c_floor :: Double -> Double
-
-foreign import ccall "floorf" c_floorf :: Float -> Float
-
--- | Round a single-precision floating point number correctly.
-roundFloat :: Float -> Float
-roundFloat = c_nearbyintf
-
--- | Round a single-precision floating point number upwards correctly.
-ceilFloat :: Float -> Float
-ceilFloat = c_ceilf
-
--- | Round a single-precision floating point number downwards correctly.
-floorFloat :: Float -> Float
-floorFloat = c_floorf
-
--- | Round a double-precision floating point number correctly.
-roundDouble :: Double -> Double
-roundDouble = c_nearbyint
-
--- | Round a double-precision floating point number upwards correctly.
-ceilDouble :: Double -> Double
-ceilDouble = c_ceil
-
--- | Round a double-precision floating point number downwards correctly.
-floorDouble :: Double -> Double
-floorDouble = c_floor
-
-foreign import ccall "lgamma" c_lgamma :: Double -> Double
-
-foreign import ccall "lgammaf" c_lgammaf :: Float -> Float
-
-foreign import ccall "tgamma" c_tgamma :: Double -> Double
-
-foreign import ccall "tgammaf" c_tgammaf :: Float -> Float
-
--- | The system-level @lgamma()@ function.
-lgamma :: Double -> Double
-lgamma = c_lgamma
-
--- | The system-level @lgammaf()@ function.
-lgammaf :: Float -> Float
-lgammaf = c_lgammaf
-
--- | The system-level @tgamma()@ function.
-tgamma :: Double -> Double
-tgamma = c_tgamma
-
--- | The system-level @tgammaf()@ function.
-tgammaf :: Float -> Float
-tgammaf = c_tgammaf
-
-foreign import ccall "hypot" c_hypot :: Double -> Double -> Double
-
-foreign import ccall "hypotf" c_hypotf :: Float -> Float -> Float
-
--- | The system-level @hypot@ function.
-hypot :: Double -> Double -> Double
-hypot = c_hypot
-
--- | The system-level @hypotf@ function.
-hypotf :: Float -> Float -> Float
-hypotf = c_hypotf
-
-foreign import ccall "erf" c_erf :: Double -> Double
-
-foreign import ccall "erff" c_erff :: Float -> Float
-
-foreign import ccall "erfc" c_erfc :: Double -> Double
-
-foreign import ccall "erfcf" c_erfcf :: Float -> Float
-
--- | The system-level @erf()@ function.
-erf :: Double -> Double
-erf = c_erf
-
--- | The system-level @erff()@ function.
-erff :: Float -> Float
-erff = c_erff
-
--- | The system-level @erfc()@ function.
-erfc :: Double -> Double
-erfc = c_erfc
-
--- | The system-level @erfcf()@ function.
-erfcf :: Float -> Float
-erfcf = c_erfcf
-
-foreign import ccall "cbrt" c_cbrt :: Double -> Double
-
-foreign import ccall "cbrtf" c_cbrtf :: Float -> Float
-
--- | The system-level @cbrt@ function.
-cbrt :: Double -> Double
-cbrt = c_cbrt
-
--- | The system-level @cbrtf@ function.
-cbrtf :: Float -> Float
-cbrtf = c_cbrtf
 
 -- | Turn a POSIX filepath into a filepath for the native system.
 toPOSIX :: Native.FilePath -> Posix.FilePath

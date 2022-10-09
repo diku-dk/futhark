@@ -1,11 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-overlapping-patterns -Wno-incomplete-patterns -Wno-incomplete-uni-patterns -Wno-incomplete-record-updates #-}
 
@@ -43,11 +36,12 @@ import Control.Monad.Writer.Strict
 import Data.Function ((&))
 import Data.List (find, partition, tails)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.IR
+import Futhark.IR.GPU.Op (SegVirt (..))
 import Futhark.IR.SOACS (SOACS)
-import qualified Futhark.IR.SOACS as SOACS
+import Futhark.IR.SOACS qualified as SOACS
 import Futhark.IR.SOACS.SOAC hiding (HistOp, histDest)
 import Futhark.IR.SOACS.Simplify (simpleSOACS, simplifyStms)
 import Futhark.IR.SegOp
@@ -58,7 +52,7 @@ import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.Interchange
 import Futhark.Tools
 import Futhark.Transform.CopyPropagate
-import qualified Futhark.Transform.FirstOrderTransform as FOT
+import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Util
 import Futhark.Util.Log
@@ -322,7 +316,7 @@ bodyContainsParallelism = any isParallelStm . bodyStms
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
     isMap BasicOp {} = False
     isMap Apply {} = False
-    isMap If {} = False
+    isMap Match {} = False
     isMap (DoLoop _ ForLoop {} body) = bodyContainsParallelism body
     isMap (DoLoop _ WhileLoop {} _) = False
     isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
@@ -339,7 +333,7 @@ distributeMapBodyStms ::
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
   where
     onStms acc [] = pure acc
-    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w arrs Sequential accs lam)) : stms) = do
+    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w arrs accs lam)) : stms) = do
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
@@ -413,11 +407,10 @@ maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
                 pure acc'
         _ ->
           addStmToAcc stm acc
-maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
+maybeDistributeStm stm@(Let pat _ (Match cond cases defbody ret)) acc
   | all (`notNameIn` freeIn pat) (patNames pat),
-    bodyContainsParallelism tbranch
-      || bodyContainsParallelism fbranch
-      || not (all primType (ifReturns ret)) =
+    any bodyContainsParallelism (defbody : map caseBody cases)
+      || not (all primType (matchReturns ret)) =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
           | not $
@@ -429,7 +422,7 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
                 nest' <- expandKernelNest pat_unused nest
                 addPostStms kernels
                 types <- asksScope scopeForSOACs
-                let branch = Branch perm pat cond tbranch fbranch ret
+                let branch = Branch perm pat cond cases defbody ret
                 stms <-
                   (`runReaderT` types) $
                     simplifyStms . oneStm =<< interchangeBranch nest' branch

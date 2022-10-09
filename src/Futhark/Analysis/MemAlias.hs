@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Analysis.MemAlias
@@ -14,9 +12,9 @@ import Control.Monad.Reader
 import Data.Bifunctor
 import Data.Function ((&))
 import Data.Functor ((<&>))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Util
@@ -45,9 +43,9 @@ instance Monoid MemAliases where
   mempty = MemAliases mempty
 
 instance Pretty MemAliases where
-  ppr (MemAliases m) = stack $ map f $ M.toList m
+  pretty (MemAliases m) = stack $ map f $ M.toList m
     where
-      f (v, vs) = ppr v <+> "aliases:" </> indent 2 (oneLine $ ppr vs)
+      f (v, vs) = pretty v <+> "aliases:" </> indent 2 (oneLine $ pretty vs)
 
 addAlias :: VName -> VName -> MemAliases -> MemAliases
 addAlias v1 v2 m =
@@ -85,12 +83,10 @@ analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
 analyzeStm m (Let _ _ (Op (Inner inner))) = do
   on_inner <- asks onInner
   on_inner m inner
-analyzeStm m (Let pat _ (If _ then_body else_body _)) = do
-  m' <-
-    analyzeStms (bodyStms then_body) m
-      >>= analyzeStms (bodyStms else_body)
-  zip (patNames pat) (map resSubExp $ bodyResult then_body)
-    <> zip (patNames pat) (map resSubExp $ bodyResult else_body)
+analyzeStm m (Let pat _ (Match _ cases defbody _)) = do
+  let bodies = defbody : map caseBody cases
+  m' <- foldM (flip analyzeStms) m $ map bodyStms bodies
+  foldMap (zip (patNames pat) . map resSubExp . bodyResult) bodies
     & mapMaybe (filterFun m')
     & foldr (uncurry addAlias) m'
     & pure

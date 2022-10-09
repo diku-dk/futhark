@@ -49,9 +49,6 @@ instance Enum a => Enum (Wrapped a) where
   toEnum a = Wrapped $ toEnum a
   fromEnum (Wrapped a) = fromEnum a
 
-instance Pretty a => Pretty (Wrapped a) where
-  ppr = ppr . wrappedValue
-
 liftOp ::
   (a -> a) ->
   Wrapped a ->

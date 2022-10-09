@@ -1,6 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Simple C runtime representation.
@@ -38,12 +36,12 @@ where
 
 import Data.Bits (shiftR, xor)
 import Data.Char (isAlphaNum, isDigit, ord)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
 import Futhark.Util (zEncodeString)
-import qualified Language.C.Quote.C as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.C qualified as C
+import Language.C.Syntax qualified as C
 import Text.Printf
 
 -- | The C type corresponding to a signed integer type.
@@ -178,7 +176,7 @@ instance C.ToIdent T.Text where
   toIdent = C.toIdent . T.unpack
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . zEncodeString . pretty
+  toIdent = C.toIdent . zEncodeString . prettyString
 
 instance C.ToExp VName where
   toExp v _ = [C.cexp|$id:v|]

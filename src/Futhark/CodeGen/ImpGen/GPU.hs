@@ -1,6 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Compile a 'GPUMem' program to imperative code with kernels.
@@ -17,11 +14,12 @@ where
 import Control.Monad.Except
 import Data.Bifunctor (second)
 import Data.List (foldl')
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU (bytes)
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
-import qualified Futhark.CodeGen.ImpGen
+import Futhark.CodeGen.ImpGen qualified
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.SegHist
 import Futhark.CodeGen.ImpGen.GPU.SegMap
@@ -31,7 +29,7 @@ import Futhark.CodeGen.ImpGen.GPU.Transpose
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Error
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (IntegralExp, divUp, quot, rem)
 import Prelude hiding (quot, rem)
@@ -134,7 +132,7 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
   let num_groups_maybe_zero =
-        sMin64 (toInt64Exp w64 `divUp` toInt64Exp group_size) $
+        sMin64 (pe64 w64 `divUp` pe64 group_size) $
           sExt64 (tvExp max_num_groups)
   -- We also don't want zero groups.
   let num_groups = sMax64 1 num_groups_maybe_zero
@@ -151,9 +149,9 @@ opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
 opCompiler pat e =
   compilerBugS $
     "opCompiler: Invalid pattern\n  "
-      ++ pretty pat
+      ++ prettyString pat
       ++ "\nfor expression\n  "
-      ++ pretty e
+      ++ prettyString e
 
 sizeClassWithEntryPoint :: Maybe Name -> Imp.SizeClass -> Imp.SizeClass
 sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
@@ -168,14 +166,14 @@ segOpCompiler ::
   CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
-segOpCompiler pat (SegRed lvl@SegThread {} space reds _ kbody) =
+segOpCompiler pat (SegRed lvl@(SegThread _ _) space reds _ kbody) =
   compileSegRed pat lvl space reds kbody
-segOpCompiler pat (SegScan lvl@SegThread {} space scans _ kbody) =
+segOpCompiler pat (SegScan lvl@(SegThread _ _) space scans _ kbody) =
   compileSegScan pat lvl space scans kbody
-segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody) =
-  compileSegHist pat num_groups group_size space ops kbody
+segOpCompiler pat (SegHist lvl@(SegThread _ _) space ops _ kbody) =
+  compileSegHist pat lvl space ops kbody
 segOpCompiler pat segop =
-  compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
+  compilerBugS $ "segOpCompiler: unexpected " ++ prettyString (segLevel segop) ++ " for rhs of pattern " ++ prettyString pat
 
 -- Create boolean expression that checks whether all kernels in the
 -- enclosed code do not use more local memory than we have available.
@@ -246,29 +244,34 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
 
-  sIota (patElemName pe) (toInt64Exp n) x' s' et
+  sIota (patElemName pe) (pe64 n) x' s' et
 expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
   | Acc {} <- patElemType pe = pure ()
   | otherwise =
       sReplicate (patElemName pe) se
+expCompiler (Pat [pe]) (BasicOp (Rotate rs arr))
+  | Acc {} <- patElemType pe = pure ()
+  | otherwise =
+      sRotateKernel (patElemName pe) (map pe64 rs) arr
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   pure ()
 expCompiler pat (WithAcc inputs lam) =
   withAcc pat inputs lam
--- This is a multi-versioning If created by incremental flattening.
+-- This is a multi-versioning Match created by incremental flattening.
 -- We need to augment the conditional with a check that any local
 -- memory requirements in tbranch are compatible with the hardware.
--- We do not check anything for fbranch, as we assume that it will
+-- We do not check anything for defbody, as we assume that it will
 -- always be safe (and what would we do if none of the branches would
 -- work?).
-expCompiler dest (If cond tbranch fbranch (IfDec _ IfEquiv)) = do
-  tcode <- collect $ compileBody dest tbranch
-  fcode <- collect $ compileBody dest fbranch
+expCompiler dest (Match cond (first_case : cases) defbranch sort@(MatchDec _ MatchEquiv)) = do
+  tcode <- collect $ compileBody dest $ caseBody first_case
+  fcode <- collect $ expCompiler dest $ Match cond cases defbranch sort
   check <- checkLocalMemoryReqs tcode
+  let matches = caseMatch cond (casePat first_case)
   emit $ case check of
     Nothing -> fcode
-    Just ok -> Imp.If (ok .&&. toBoolExp cond) tcode fcode
+    Just ok -> Imp.If (matches .&&. ok) tcode fcode
 expCompiler dest e =
   defCompileExp dest e
 
@@ -292,7 +295,7 @@ callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem src
   | bt_size <- primByteSize bt,
     Just destoffset <- IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset <- IxFun.linearWithOffset srcIxFun bt_size = do
-      let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
+      let num_elems = Imp.elements $ product $ map pe64 srcshape
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       sCopy
@@ -316,7 +319,7 @@ mapTransposeForType bt = do
   pure fname
 
 mapTransposeName :: PrimType -> String
-mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
+mapTransposeName bt = "gpu_map_transpose_" ++ prettyString bt
 
 mapTransposeFunction :: PrimType -> Imp.Function Imp.HostOp
 mapTransposeFunction bt =

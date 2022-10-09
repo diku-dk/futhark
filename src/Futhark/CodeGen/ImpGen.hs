@@ -1,13 +1,5 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.CodeGen.ImpGen
@@ -82,6 +74,7 @@ module Futhark.CodeGen.ImpGen
     typeSize,
     inBounds,
     isMapTransposeCopy,
+    caseMatch,
 
     -- * Constructing code.
     dLParams,
@@ -97,6 +90,7 @@ module Futhark.CodeGen.ImpGen
     dPrimVE,
     dIndexSpace,
     dIndexSpace',
+    rotateIndex,
     sFor,
     sWhile,
     sComment,
@@ -130,14 +124,15 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Control.Parallel.Strategies
 import Data.Bifunctor (first)
-import qualified Data.DList as DL
+import Data.DList qualified as DL
 import Data.Either
 import Data.List (find)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Data.String
+import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
   ( Bytes,
     Count,
@@ -146,17 +141,18 @@ import Futhark.CodeGen.ImpCode
     elements,
     withElemType,
   )
-import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.CodeGen.ImpCode qualified as Imp
 import Futhark.CodeGen.ImpGen.Transpose
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
+import Futhark.Util.Pretty hiding (nest, space)
 import Language.Futhark.Warnings
-import Prelude hiding (quot)
+import Prelude hiding (mod, quot)
 
 -- | How to compile an t'Op'.
 type OpCompiler rep r op = Pat (LetDec rep) -> Op rep -> ImpM rep r op ()
@@ -399,7 +395,7 @@ collect' m = do
 
 -- | Execute a code generation action, wrapping the generated code
 -- within a 'Imp.Comment' with the given description.
-comment :: String -> ImpM rep r op () -> ImpM rep r op ()
+comment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 comment desc m = do
   code <- collect m
   emit $ Imp.Comment desc code
@@ -412,9 +408,9 @@ warnings :: Warnings -> ImpM rep r op ()
 warnings ws = modify $ \s -> s {stateWarnings = ws <> stateWarnings s}
 
 -- | Emit a warning about something the user should be aware of.
-warn :: Located loc => loc -> [loc] -> String -> ImpM rep r op ()
+warn :: Located loc => loc -> [loc] -> T.Text -> ImpM rep r op ()
 warn loc locs problem =
-  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (fromString problem)
+  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (pretty problem)
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM rep r op ()
@@ -796,13 +792,23 @@ compileExp pat e = do
   ec <- asks envExpCompiler
   ec pat e
 
+-- | Generate an expression that is true if the subexpressions match
+-- the case pasttern.
+caseMatch :: [SubExp] -> [Maybe PrimValue] -> Imp.TExp Bool
+caseMatch ses vs = foldl (.&&.) true (zipWith cmp ses vs)
+  where
+    cmp se (Just v) = isBool $ toExp' (primValueType v) se ~==~ ValueExp v
+    cmp _ Nothing = true
+
 defCompileExp ::
   (Mem rep inner) =>
   Pat (LetDec rep) ->
   Exp rep ->
   ImpM rep r op ()
-defCompileExp pat (If cond tbranch fbranch _) =
-  sIf (toBoolExp cond) (compileBody pat tbranch) (compileBody pat fbranch)
+defCompileExp pat (Match ses cases defbody _) =
+  foldl f (compileBody pat defbody) cases
+  where
+    f rest (Case vs body) = sIf (caseMatch ses vs) (compileBody pat body) rest
 defCompileExp pat (Apply fname args _ _) = do
   dest <- destinationFromPat pat
   targets <- funcallTargets dest
@@ -864,12 +870,12 @@ defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op
 
-tracePrim :: String -> PrimType -> SubExp -> ImpM rep r op ()
+tracePrim :: T.Text -> PrimType -> SubExp -> ImpM rep r op ()
 tracePrim s t se =
   emit . Imp.TracePrint $
     ErrorMsg [ErrorString (s <> ": "), ErrorVal t (toExp' t se), ErrorString "\n"]
 
-traceArray :: String -> PrimType -> Shape -> SubExp -> ImpM rep r op ()
+traceArray :: T.Text -> PrimType -> Shape -> SubExp -> ImpM rep r op ()
 traceArray s t shape se = do
   emit . Imp.TracePrint $ ErrorMsg [ErrorString (s <> ": ")]
   sLoopNest shape $ \is -> do
@@ -896,7 +902,7 @@ defCompileBasicOp (Pat [pe]) (Opaque op se) = do
         Array t shape _ -> traceArray s t shape se
         _ ->
           warn [mempty :: SrcLoc] mempty $
-            s ++ ": cannot trace value of this (core) type: " <> pretty se_t
+            s <> ": cannot trace value of this (core) type: " <> prettyText se_t
 defCompileBasicOp (Pat [pe]) (UnOp op e) = do
   e' <- toExp e
   patElemName pe <~~ Imp.UnOpExp op e'
@@ -921,7 +927,7 @@ defCompileBasicOp _ (Assert e msg loc) = do
     uncurry warn loc "Safety check required at run-time."
 defCompileBasicOp (Pat [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
-      copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt64Exp) idxs
+      copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . pe64) idxs
 defCompileBasicOp _ Index {} =
   pure ()
 defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
@@ -929,8 +935,8 @@ defCompileBasicOp (Pat [pe]) (Update safety _ slice se) =
     Unsafe -> write
     Safe -> sWhen (inBounds slice' dims) write
   where
-    slice' = fmap toInt64Exp slice
-    dims = map toInt64Exp $ arrayDims $ patElemType pe
+    slice' = fmap pe64 slice
+    dims = map pe64 $ arrayDims $ patElemType pe
     write = sUpdate (patElemName pe) slice' se
 defCompileBasicOp _ FlatIndex {} =
   pure ()
@@ -939,7 +945,7 @@ defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   v_loc <- entryArrayLoc <$> lookupArray v
   copy (elemType (patElemType pe)) (flatSliceMemLoc pe_loc slice') v_loc
   where
-    slice' = fmap toInt64Exp slice
+    slice' = fmap pe64 slice
 defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se)
   | Acc {} <- patElemType pe = pure ()
   | otherwise = do
@@ -952,7 +958,7 @@ defCompileBasicOp _ Scratch {} =
 defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
   e' <- toExp e
   s' <- toExp s
-  sFor "i" (toInt64Exp n) $ \i -> do
+  sFor "i" (pe64 n) $ \i -> do
     let i' = sExt it $ untyped i
     x <-
       dPrimV "x" . TPrimExp $
@@ -969,11 +975,11 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
   forM_ (x : ys) $ \y -> do
     y_dims <- arrayDims <$> lookupType y
     let rows = case drop i y_dims of
-          [] -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
-          r : _ -> toInt64Exp r
+          [] -> error $ "defCompileBasicOp Concat: empty array shape for " ++ prettyString y
+          r : _ -> pe64 r
         skip_dims = take i y_dims
         sliceAllDim d = DimSlice 0 d 1
-        skip_slices = map (sliceAllDim . toInt64Exp) skip_dims
+        skip_slices = map (sliceAllDim . pe64) skip_dims
         destslice = skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
     copyDWIM (patElemName pe) destslice (Var y) []
     offs_glb <-- tvExp offs_glb + rows
@@ -998,8 +1004,13 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
     isLiteral _ = Nothing
 defCompileBasicOp _ Rearrange {} =
   pure ()
-defCompileBasicOp _ Rotate {} =
-  pure ()
+defCompileBasicOp (Pat [pe]) (Rotate rs arr) = do
+  shape <- arrayShape <$> lookupType arr
+  sLoopNest shape $ \is -> do
+    is' <- sequence $ zipWith3 rotate (shapeDims shape) rs is
+    copyDWIMFix (patElemName pe) is (Var arr) is'
+  where
+    rotate d r i = dPrimVE "rot_i" $ rotateIndex (pe64 d) (pe64 r) i
 defCompileBasicOp _ Reshape {} =
   pure ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
@@ -1008,7 +1019,7 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
   -- we might otherwise end up declaring lambda parameters (if any)
   -- multiple times, as they are duplicated every time we do an
   -- UpdateAcc for the same accumulator.
-  let is' = map toInt64Exp is
+  let is' = map pe64 is
 
   -- We need to figure out whether we are updating a scatter-like
   -- accumulator or a generalised reduction.  This also binds the
@@ -1038,9 +1049,9 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
 defCompileBasicOp pat e =
   error $
     "ImpGen.defCompileBasicOp: Invalid pattern\n  "
-      ++ pretty pat
+      ++ prettyString pat
       ++ "\nfor expression\n  "
-      ++ pretty e
+      ++ prettyString e
 
 -- | Note: a hack to be used only for functions.
 addArrays :: [ArrayDecl] -> ImpM rep r op ()
@@ -1228,18 +1239,12 @@ tvVar (TV v _) = v
 
 -- | Compile things to 'Imp.Exp'.
 class ToExp a where
-  -- | Compile to an 'Imp.Exp', where the type (must must still be a
+  -- | Compile to an 'Imp.Exp', where the type (which must still be a
   -- primitive) is deduced monadically.
   toExp :: a -> ImpM rep r op Imp.Exp
 
   -- | Compile where we know the type in advance.
   toExp' :: PrimType -> a -> Imp.Exp
-
-  toInt64Exp :: a -> Imp.TExp Int64
-  toInt64Exp = TPrimExp . toExp' int64
-
-  toBoolExp :: a -> Imp.TExp Bool
-  toBoolExp = TPrimExp . toExp' Bool
 
 instance ToExp SubExp where
   toExp (Constant v) =
@@ -1248,7 +1253,7 @@ instance ToExp SubExp where
     lookupVar v >>= \case
       ScalarVar _ (ScalarEntry pt) ->
         pure $ Imp.var v pt
-      _ -> error $ "toExp SubExp: SubExp is not a primitive type: " ++ pretty v
+      _ -> error $ "toExp SubExp: SubExp is not a primitive type: " ++ prettyString v
 
   toExp' _ (Constant v) = Imp.ValueExp v
   toExp' t (Var v) = Imp.var v t
@@ -1326,21 +1331,21 @@ lookupVar name = do
   res <- gets $ M.lookup name . stateVTable
   case res of
     Just entry -> pure entry
-    _ -> error $ "Unknown variable: " ++ pretty name
+    _ -> error $ "Unknown variable: " ++ prettyString name
 
 lookupArray :: VName -> ImpM rep r op ArrayEntry
 lookupArray name = do
   res <- lookupVar name
   case res of
     ArrayVar _ entry -> pure entry
-    _ -> error $ "ImpGen.lookupArray: not an array: " ++ pretty name
+    _ -> error $ "ImpGen.lookupArray: not an array: " ++ prettyString name
 
 lookupMemory :: VName -> ImpM rep r op MemEntry
 lookupMemory name = do
   res <- lookupVar name
   case res of
     MemVar _ entry -> pure entry
-    _ -> error $ "Unknown memory block: " ++ pretty name
+    _ -> error $ "Unknown memory block: " ++ prettyString name
 
 lookupArraySpace :: VName -> ImpM rep r op Space
 lookupArraySpace =
@@ -1360,7 +1365,7 @@ lookupAcc name is = do
       acc' <- gets $ M.lookup acc . stateAccs
       case acc' of
         Just ([], _) ->
-          error $ "Accumulator with no arrays: " ++ pretty name
+          error $ "Accumulator with no arrays: " ++ prettyString name
         Just (arrs@(arr : _), Just (op, _)) -> do
           space <- lookupArraySpace arr
           let (i_params, ps) = splitAt (length is) $ lambdaParams op
@@ -1369,15 +1374,15 @@ lookupAcc name is = do
             ( acc,
               space,
               arrs,
-              map toInt64Exp (shapeDims ispace),
+              map pe64 (shapeDims ispace),
               Just op {lambdaParams = ps}
             )
         Just (arrs@(arr : _), Nothing) -> do
           space <- lookupArraySpace arr
-          pure (acc, space, arrs, map toInt64Exp (shapeDims ispace), Nothing)
+          pure (acc, space, arrs, map pe64 (shapeDims ispace), Nothing)
         Nothing ->
-          error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ pretty name
-    _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
+          error $ "ImpGen.lookupAcc: unlisted accumulator: " ++ prettyString name
+    _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ prettyString name
 
 destinationFromPat :: Pat (LetDec rep) -> ImpM rep r op [ValueDestination]
 destinationFromPat = mapM inspect . patElems
@@ -1482,7 +1487,7 @@ isMapTransposeCopy bt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
        in (product mapped, product pretrans, product posttrans)
 
 mapTransposeName :: PrimType -> String
-mapTransposeName bt = "map_transpose_" ++ pretty bt
+mapTransposeName bt = "map_transpose_" ++ prettyString bt
 
 mapTransposeForType :: PrimType -> ImpM rep r op Name
 mapTransposeForType bt = do
@@ -1579,8 +1584,8 @@ copyArrayDWIM
           emit $ Imp.Read tmp srcmem srcoffset bt srcspace vol
           emit $ Imp.Write targetmem targetoffset bt destspace vol $ Imp.var tmp bt
     | otherwise = do
-        let destslice' = fullSliceNum (map toInt64Exp destshape) destslice
-            srcslice' = fullSliceNum (map toInt64Exp srcshape) srcslice
+        let destslice' = fullSliceNum (map pe64 destshape) destslice
+            srcslice' = fullSliceNum (map pe64 srcshape) srcslice
             destrank = length $ sliceDims destslice'
             srcrank = length $ sliceDims srcslice'
             destlocation' = sliceMemLoc destlocation destslice'
@@ -1589,13 +1594,13 @@ copyArrayDWIM
           then
             error $
               "copyArrayDWIM: cannot copy to "
-                ++ pretty (memLocName destlocation)
+                ++ prettyString (memLocName destlocation)
                 ++ " from "
-                ++ pretty (memLocName srclocation)
+                ++ prettyString (memLocName srclocation)
                 ++ " because ranks do not match ("
-                ++ pretty destrank
+                ++ prettyString destrank
                 ++ " vs "
-                ++ pretty srcrank
+                ++ prettyString srcrank
                 ++ ")"
           else
             if destlocation' == srclocation'
@@ -1612,19 +1617,19 @@ copyDWIMDest ::
   ImpM rep r op ()
 copyDWIMDest _ _ (Constant v) (_ : _) =
   error $
-    unwords ["copyDWIMDest: constant source", pretty v, "cannot be indexed."]
+    unwords ["copyDWIMDest: constant source", prettyString v, "cannot be indexed."]
 copyDWIMDest pat dest_slice (Constant v) [] =
   case mapM dimFix dest_slice of
     Nothing ->
       error $
-        unwords ["copyDWIMDest: constant source", pretty v, "with slice destination."]
+        unwords ["copyDWIMDest: constant source", prettyString v, "with slice destination."]
     Just dest_is ->
       case pat of
         ScalarDestination name ->
           emit $ Imp.SetScalar name $ Imp.ValueExp v
         MemoryDestination {} ->
           error $
-            unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
+            unwords ["copyDWIMDest: constant source", prettyString v, "cannot be written to memory destination."]
         ArrayDestination (Just dest_loc) -> do
           (dest_mem, dest_space, dest_i) <-
             fullyIndexArray' dest_loc dest_is
@@ -1641,18 +1646,18 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
       emit $ Imp.SetMem mem src space
     (MemoryDestination {}, _) ->
       error $
-        unwords ["copyDWIMDest: cannot write", pretty src, "to memory destination."]
+        unwords ["copyDWIMDest: cannot write", prettyString src, "to memory destination."]
     (_, MemVar {}) ->
       error $
-        unwords ["copyDWIMDest: source", pretty src, "is a memory block."]
+        unwords ["copyDWIMDest: source", prettyString src, "is a memory block."]
     (_, ScalarVar _ (ScalarEntry _))
       | not $ null src_slice ->
           error $
-            unwords ["copyDWIMDest: prim-typed source", pretty src, "with slice", pretty src_slice]
+            unwords ["copyDWIMDest: prim-typed source", prettyString src, "with slice", prettyString src_slice]
     (ScalarDestination name, _)
       | not $ null dest_slice ->
           error $
-            unwords ["copyDWIMDest: prim-typed target", pretty name, "with slice", pretty dest_slice]
+            unwords ["copyDWIMDest: prim-typed target", prettyString name, "with slice", prettyString dest_slice]
     (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) ->
       emit $ Imp.SetScalar name $ Imp.var src pt
     (ScalarDestination name, ArrayVar _ arr)
@@ -1667,13 +1672,13 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           error $
             unwords
               [ "copyDWIMDest: prim-typed target",
-                pretty name,
+                prettyString name,
                 "and array-typed source",
-                pretty src,
+                prettyString src,
                 "of shape",
-                pretty (entryArrayShape arr),
+                prettyString (entryArrayShape arr),
                 "sliced with",
-                pretty src_slice
+                prettyString src_slice
               ]
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
       let src_loc = entryArrayLoc src_arr
@@ -1689,9 +1694,9 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           error $
             unwords
               [ "copyDWIMDest: array-typed target and prim-typed source",
-                pretty src,
+                prettyString src,
                 "with slice",
-                pretty dest_slice
+                prettyString dest_slice
               ]
     (ArrayDestination Nothing, _) ->
       pure () -- Nothing to do; something else set some memory
@@ -1740,19 +1745,19 @@ copyDWIMFix dest dest_is src src_is =
 compileAlloc ::
   Mem rep inner => Pat (LetDec rep) -> SubExp -> Space -> ImpM rep r op ()
 compileAlloc (Pat [mem]) e space = do
-  let e' = Imp.bytes $ toInt64Exp e
+  let e' = Imp.bytes $ pe64 e
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of
     Nothing -> emit $ Imp.Allocate (patElemName mem) e' space
     Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
-  error $ "compileAlloc: Invalid pattern: " ++ pretty pat
+  error $ "compileAlloc: Invalid pattern: " ++ prettyString pat
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format, as an t'Int64' expression.
 typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
-  Imp.bytes $ primByteSize (elemType t) * product (map toInt64Exp (arrayDims t))
+  Imp.bytes $ primByteSize (elemType t) * product (map pe64 (arrayDims t))
 
 -- | Is this indexing in-bounds for an array of the given shape?  This
 -- is useful for things like scatter, which ignores out-of-bounds
@@ -1767,11 +1772,18 @@ inBounds (Slice slice) dims =
 
 --- Building blocks for constructing code.
 
+rotateIndex ::
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64
+rotateIndex d r i = (i + r) `mod` d
+
 sFor' :: VName -> Imp.Exp -> ImpM rep r op () -> ImpM rep r op ()
 sFor' i bound body = do
   let it = case primExpType bound of
         IntType bound_t -> bound_t
-        t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
+        t -> error $ "sFor': bound " ++ prettyString bound ++ " is of type " ++ prettyString t
   addLoopVar i it
   body' <- collect body
   emit $ Imp.For i bound body'
@@ -1791,7 +1803,7 @@ sWhile cond body = do
   body' <- collect body
   emit $ Imp.While cond body'
 
-sComment :: String -> ImpM rep r op () -> ImpM rep r op ()
+sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
   emit $ Imp.Comment s code'
@@ -1904,7 +1916,7 @@ sLoopNest ::
   Shape ->
   ([Imp.TExp Int64] -> ImpM rep r op ()) ->
   ImpM rep r op ()
-sLoopNest = sLoopSpace . map toInt64Exp . shapeDims
+sLoopNest = sLoopSpace . map pe64 . shapeDims
 
 sCopy ::
   VName ->

@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -24,7 +21,7 @@ module Futhark.Optimise.Simplify.Rule
     SimplificationRule (..),
     RuleGeneric,
     RuleBasicOp,
-    RuleIf,
+    RuleMatch,
     RuleDoLoop,
 
     -- * Top-down rules
@@ -32,7 +29,7 @@ module Futhark.Optimise.Simplify.Rule
     TopDownRule,
     TopDownRuleGeneric,
     TopDownRuleBasicOp,
-    TopDownRuleIf,
+    TopDownRuleMatch,
     TopDownRuleDoLoop,
     TopDownRuleOp,
 
@@ -41,7 +38,7 @@ module Futhark.Optimise.Simplify.Rule
     BottomUpRule,
     BottomUpRuleGeneric,
     BottomUpRuleBasicOp,
-    BottomUpRuleIf,
+    BottomUpRuleMatch,
     BottomUpRuleDoLoop,
     BottomUpRuleOp,
 
@@ -56,8 +53,8 @@ module Futhark.Optimise.Simplify.Rule
 where
 
 import Control.Monad.State
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Builder
 import Futhark.IR
 
@@ -72,7 +69,7 @@ newtype RuleM rep a = RuleM (BuilderT rep (StateT VNameSource Maybe) a)
       LocalScope rep
     )
 
-instance (ASTRep rep, BuilderOps rep) => MonadBuilder (RuleM rep) where
+instance (BuilderOps rep) => MonadBuilder (RuleM rep) where
   type Rep (RuleM rep) = rep
   mkExpDecM pat e = RuleM $ mkExpDecM pat e
   mkBodyM stms res = RuleM $ mkBodyM stms res
@@ -116,14 +113,14 @@ type RuleBasicOp rep a =
     Rule rep
   )
 
-type RuleIf rep a =
+type RuleMatch rep a =
   a ->
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
-  ( SubExp,
+  ( [SubExp],
+    [Case (Body rep)],
     Body rep,
-    Body rep,
-    IfDec (BranchType rep)
+    MatchDec (BranchType rep)
   ) ->
   Rule rep
 
@@ -149,7 +146,7 @@ type RuleOp rep a =
 data SimplificationRule rep a
   = RuleGeneric (RuleGeneric rep a)
   | RuleBasicOp (RuleBasicOp rep a)
-  | RuleIf (RuleIf rep a)
+  | RuleMatch (RuleMatch rep a)
   | RuleDoLoop (RuleDoLoop rep a)
   | RuleOp (RuleOp rep a)
 
@@ -158,7 +155,7 @@ data SimplificationRule rep a
 data Rules rep a = Rules
   { rulesAny :: [SimplificationRule rep a],
     rulesBasicOp :: [SimplificationRule rep a],
-    rulesIf :: [SimplificationRule rep a],
+    rulesMatch :: [SimplificationRule rep a],
     rulesDoLoop :: [SimplificationRule rep a],
     rulesOp :: [SimplificationRule rep a]
   }
@@ -178,7 +175,7 @@ type TopDownRuleGeneric rep = RuleGeneric rep (TopDown rep)
 
 type TopDownRuleBasicOp rep = RuleBasicOp rep (TopDown rep)
 
-type TopDownRuleIf rep = RuleIf rep (TopDown rep)
+type TopDownRuleMatch rep = RuleMatch rep (TopDown rep)
 
 type TopDownRuleDoLoop rep = RuleDoLoop rep (TopDown rep)
 
@@ -194,7 +191,7 @@ type BottomUpRuleGeneric rep = RuleGeneric rep (BottomUp rep)
 
 type BottomUpRuleBasicOp rep = RuleBasicOp rep (BottomUp rep)
 
-type BottomUpRuleIf rep = RuleIf rep (BottomUp rep)
+type BottomUpRuleMatch rep = RuleMatch rep (BottomUp rep)
 
 type BottomUpRuleDoLoop rep = RuleDoLoop rep (BottomUp rep)
 
@@ -231,19 +228,20 @@ ruleBook topdowns bottomups =
     groupRules :: [SimplificationRule m a] -> Rules m a
     groupRules rs =
       Rules
-        rs
-        (filter forBasicOp rs)
-        (filter forIf rs)
-        (filter forDoLoop rs)
-        (filter forOp rs)
+        { rulesAny = rs,
+          rulesBasicOp = filter forBasicOp rs,
+          rulesMatch = filter forMatch rs,
+          rulesDoLoop = filter forDoLoop rs,
+          rulesOp = filter forOp rs
+        }
 
     forBasicOp RuleBasicOp {} = True
     forBasicOp RuleGeneric {} = True
     forBasicOp _ = False
 
-    forIf RuleIf {} = True
-    forIf RuleGeneric {} = True
-    forIf _ = False
+    forMatch RuleMatch {} = True
+    forMatch RuleGeneric {} = True
+    forMatch _ = False
 
     forDoLoop RuleDoLoop {} = True
     forDoLoop RuleGeneric {} = True
@@ -283,7 +281,7 @@ rulesForStm stm = case stmExp stm of
   BasicOp {} -> rulesBasicOp
   DoLoop {} -> rulesDoLoop
   Op {} -> rulesOp
-  If {} -> rulesIf
+  Match {} -> rulesMatch
   _ -> rulesAny
 
 applyRule :: SimplificationRule rep a -> a -> Stm rep -> Rule rep
@@ -291,8 +289,8 @@ applyRule (RuleGeneric f) a stm = f a stm
 applyRule (RuleBasicOp f) a (Let pat aux (BasicOp e)) = f a pat aux e
 applyRule (RuleDoLoop f) a (Let pat aux (DoLoop merge form body)) =
   f a pat aux (merge, form, body)
-applyRule (RuleIf f) a (Let pat aux (If cond tbody fbody ifsort)) =
-  f a pat aux (cond, tbody, fbody, ifsort)
+applyRule (RuleMatch f) a (Let pat aux (Match cond cases defbody ifsort)) =
+  f a pat aux (cond, cases, defbody, ifsort)
 applyRule (RuleOp f) a (Let pat aux (Op op)) =
   f a pat aux op
 applyRule _ _ _ =

@@ -3,6 +3,8 @@
 -- | Code snippets used by the C backends.
 module Futhark.CodeGen.RTS.C
   ( atomicsH,
+    contextH,
+    contextPrototypesH,
     cudaH,
     freeListH,
     halfH,
@@ -24,7 +26,7 @@ module Futhark.CodeGen.RTS.C
 where
 
 import Data.FileEmbed
-import qualified Data.Text as T
+import Data.Text qualified as T
 
 -- We mark everything here NOINLINE so that the dependent modules
 -- don't have to be recompiled just because we change the RTS files.
@@ -118,3 +120,13 @@ ispcUtilH = $(embedStringFile "rts/c/ispc_util.h")
 cacheH :: T.Text
 cacheH = $(embedStringFile "rts/c/cache.h")
 {-# NOINLINE cacheH #-}
+
+-- | @rts/c/context.h@
+contextH :: T.Text
+contextH = $(embedStringFile "rts/c/context.h")
+{-# NOINLINE contextH #-}
+
+-- | @rts/c/context_prototypes.h@
+contextPrototypesH :: T.Text
+contextPrototypesH = $(embedStringFile "rts/c/context_prototypes.h")
+{-# NOINLINE contextPrototypesH #-}

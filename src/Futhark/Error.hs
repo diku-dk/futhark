@@ -1,8 +1,7 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Futhark error definitions.
 module Futhark.Error
   ( CompilerError (..),
+    prettyCompilerError,
     ErrorClass (..),
     externalError,
     externalErrorS,
@@ -17,8 +16,9 @@ where
 
 import Control.Exception
 import Control.Monad.Error.Class
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Util.Pretty
+import Prettyprinter.Render.Text (renderStrict)
 
 -- | There are two classes of internal errors: actual bugs, and
 -- implementation limitations.  The latter are already known and need
@@ -32,27 +32,30 @@ data ErrorClass
 data CompilerError
   = -- | An error that happened due to something the user did, such as
     -- provide incorrect code or options.
-    ExternalError Doc
-  | -- | An internal compiler error.  The second text is extra data
+    ExternalError (Doc AnsiStyle)
+  | -- | An internal compiler error.  The second pretty is extra data
     -- for debugging, which can be written to a file.
     InternalError T.Text T.Text ErrorClass
 
-instance Show CompilerError where
-  show (ExternalError s) = pretty s
-  show (InternalError s _ _) = T.unpack s
+-- | Print an error intended for human consumption.
+prettyCompilerError :: CompilerError -> Doc AnsiStyle
+prettyCompilerError (ExternalError e) = e
+prettyCompilerError (InternalError s _ _) = pretty s
 
 -- | Raise an 'ExternalError' based on a prettyprinting result.
-externalError :: MonadError CompilerError m => Doc -> m a
+externalError :: MonadError CompilerError m => Doc AnsiStyle -> m a
 externalError = throwError . ExternalError
 
 -- | Raise an 'ExternalError' based on a string.
 externalErrorS :: MonadError CompilerError m => String -> m a
-externalErrorS = externalError . text
+externalErrorS = externalError . pretty
 
 -- | Raise an v'InternalError' based on a prettyprinting result.
-internalErrorS :: MonadError CompilerError m => String -> Doc -> m a
+internalErrorS :: MonadError CompilerError m => String -> Doc AnsiStyle -> m a
 internalErrorS s d =
-  throwError $ InternalError (T.pack s) (prettyText d) CompilerBug
+  throwError $ InternalError (T.pack s) (p d) CompilerBug
+  where
+    p = renderStrict . layoutSmart defaultLayoutOptions
 
 -- | An error that is not the users fault, but a bug (or limitation)
 -- in the compiler.  Compiler passes should only ever report this

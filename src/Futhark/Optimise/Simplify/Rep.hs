@@ -1,6 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -38,8 +35,8 @@ where
 import Control.Category
 import Control.Monad.Identity
 import Control.Monad.Reader
-import qualified Data.Kind
-import qualified Data.Map.Strict as M
+import Data.Kind qualified
+import Data.Map.Strict qualified as M
 import Futhark.Analysis.Rephrase
 import Futhark.Builder
 import Futhark.IR
@@ -49,7 +46,7 @@ import Futhark.IR.Aliases
     VarAliases,
     unAliases,
   )
-import qualified Futhark.IR.Aliases as Aliases
+import Futhark.IR.Aliases qualified as Aliases
 import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -144,7 +141,7 @@ instance (ASTRep rep, CanBeWise (Op rep)) => ASTRep (Wise rep) where
     withoutWisdom . expTypesFromPat . removePatWisdom
 
 instance Pretty VarWisdom where
-  ppr _ = ppr ()
+  pretty _ = pretty ()
 
 instance (PrettyRep rep, CanBeWise (Op rep)) => PrettyRep (Wise rep) where
   ppExpDec (_, dec) = ppExpDec dec . removeExpWisdom
@@ -315,8 +312,8 @@ informLambda (Lambda ps body ret) = Lambda ps (informBody body) ret
 
 -- | Construct a 'Wise' expression.
 informExp :: Informing rep => Exp rep -> Exp (Wise rep)
-informExp (If cond tbranch fbranch (IfDec ts ifsort)) =
-  If cond (informBody tbranch) (informBody fbranch) (IfDec ts ifsort)
+informExp (Match cond cases defbody (MatchDec ts ifsort)) =
+  Match cond (map (fmap informBody) cases) (informBody defbody) (MatchDec ts ifsort)
 informExp (DoLoop merge form loopbody) =
   let form' = case form of
         ForLoop i it bound params -> ForLoop i it bound params

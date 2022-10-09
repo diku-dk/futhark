@@ -16,7 +16,7 @@ type Program = Definitions Sequential
 data Sequential
 
 instance Pretty Sequential where
-  ppr _ = empty
+  pretty _ = mempty
 
 instance FreeIn Sequential where
   freeIn' _ = mempty

@@ -1925,6 +1925,10 @@ static inline float futrts_ceil32(float x) {
   return ceil(x);
 }
 
+static inline float futrts_nextafter32(float x, float y) {
+  return nextafter(x, y);
+}
+
 static inline float futrts_lerp32(float v0, float v1, float t) {
   return mix(v0, v1, t);
 }
@@ -2117,6 +2121,16 @@ static inline float futrts_ceil32(float x) {
   return ceil(x);
 }
 
+extern "C" unmasked uniform float nextafterf(uniform float x, uniform float y);
+static inline float futrts_nextafter32(float x, float y) {
+  float res;
+  foreach_active (i) {
+    uniform float r = nextafterf(extract(x, i), extract(y, i));
+    res = insert(res, i, r);
+  }
+  return res;
+}
+
 static inline float futrts_lerp32(float v0, float v1, float t) {
   return v0 + (v1 - v0) * t;
 }
@@ -2241,6 +2255,10 @@ static inline float futrts_floor32(float x) {
 
 static inline float futrts_ceil32(float x) {
   return ceilf(x);
+}
+
+static inline float futrts_nextafter32(float x, float y) {
+  return nextafterf(x, y);
 }
 
 static inline float futrts_lerp32(float v0, float v1, float t) {
@@ -2527,6 +2545,16 @@ static inline double futrts_round64(double x) {
 
 static inline double futrts_ceil64(double x) {
   return ceil(x);
+}
+
+extern "C" unmasked uniform double nextafter(uniform float x, uniform double y);
+static inline float futrts_nextafter64(double x, double y) {
+  double res;
+  foreach_active (i) {
+    uniform double r = nextafter(extract(x, i), extract(y, i));
+    res = insert(res, i, r);
+  }
+  return res;
 }
 
 static inline double futrts_floor64(double x) {
@@ -2841,6 +2869,10 @@ static inline double futrts_round64(double x) {
 
 static inline double futrts_ceil64(double x) {
   return ceil(x);
+}
+
+static inline float futrts_nextafter64(float x, float y) {
+  return nextafter(x, y);
 }
 
 static inline double futrts_floor64(double x) {

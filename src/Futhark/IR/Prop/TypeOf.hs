@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module provides facilities for obtaining the types of
@@ -134,7 +131,7 @@ expExtType ::
   Exp rep ->
   m [ExtType]
 expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf) rt
-expExtType (If _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
+expExtType (Match _ _ _ rt) = pure $ map extTypeOf $ matchReturns rt
 expExtType (DoLoop merge _ _) =
   pure $ loopExtType $ map fst merge
 expExtType (BasicOp op) = staticShapes <$> basicOpType op

@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | C code generator.  This module can convert a correct ImpCode
@@ -31,19 +30,19 @@ where
 
 import Control.Monad
 import Data.Loc
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore hiding (ValueType)
-import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGen
 import Futhark.CodeGen.RTS.C (schedulerH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
@@ -144,6 +143,7 @@ generateContext = do
                       int logging;
                       typename lock_t lock;
                       char *error;
+                      typename lock_t error_lock;
                       typename FILE *log;
                       int total_runs;
                       long int total_runtime;
@@ -174,6 +174,7 @@ generateContext = do
              ctx->profiling_paused = 0;
              ctx->logging = 0;
              ctx->error = NULL;
+             create_lock(&ctx->error_lock);
              ctx->log = stderr;
              create_lock(&ctx->lock);
 
@@ -270,11 +271,11 @@ operations =
 
 closureFreeStructField :: VName -> Name
 closureFreeStructField v =
-  nameFromString "free_" <> nameFromString (pretty v)
+  nameFromString "free_" <> nameFromString (prettyString v)
 
 closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
-  nameFromString "retval_" <> nameFromString (pretty v)
+  nameFromString "retval_" <> nameFromString (prettyString v)
 
 data ValueType = Prim PrimType | MemBlock | RawMem
 
@@ -335,7 +336,7 @@ compileGetRetvalStructVals struct = zipWith field
        in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
-                 {.desc = $string:(pretty name),
+                 {.desc = $string:(prettyString name),
                  .mem = $id:struct->$id:(closureRetvalStructField name),
                  .size = 0, .references = NULL};|]
 
@@ -352,7 +353,7 @@ compileGetStructVals struct = zipWith field
        in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (ty, _) =
       [C.cdecl|$ty:ty $id:name =
-                 {.desc = $string:(pretty name),
+                 {.desc = $string:(prettyString name),
                   .mem = $id:struct->$id:(closureFreeStructField name),
                   .size = 0, .references = NULL};|]
 

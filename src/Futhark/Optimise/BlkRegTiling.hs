@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Perform a restricted form of block+register tiling corresponding to
@@ -20,13 +19,13 @@
 module Futhark.Optimise.BlkRegTiling (mmBlkRegTiling, doRegTiling3D) where
 
 import Control.Monad.Reader
-import qualified Data.List as L
+import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Sequence as Seq
+import Data.Sequence qualified as Seq
 import Futhark.IR.GPU
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools
@@ -212,7 +211,7 @@ kkLoopBody
             is_inner_coal = isInnerCoal env inp_X load_X
             str_A = baseString inp_X
         x_loc <-
-          segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' segthd_lvl [r_par, tseq_div_tpar] (t_par, t_par) $
+          segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' [r_par, tseq_div_tpar] (t_par, t_par) $
             scatterFun is_inner_coal
 
         pure (x_loc, copyLoc2Reg is_inner_coal str_A x_loc)
@@ -407,7 +406,8 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
             (height_A, width_B, rem_outer_dims)
             code2'
 
-        let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+        let grid = KernelGrid (Count grid_size) (Count group_size)
+            level' = SegGroup SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_t, gridDim_t), (gid_y, gridDim_y), (gid_x, gridDim_x)])
             kbody' = KernelBody () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
@@ -424,7 +424,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       case acc_0s of
         [acc_0] -> pure acc_0
         _ -> error "Impossible case reached when treating accumulators!"
-    getAccumFV tp = error ("Should be an accumulator type at this point, given: " ++ pretty tp)
+    getAccumFV tp = error ("Should be an accumulator type at this point, given: " ++ prettyString tp)
     --
     -- checks that the redomap result is used directly as the accumulated value,
     -- in which case it is safe to parallelize the innermost dimension (of tile tk)
@@ -577,7 +577,8 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
             (height_A, width_B, rem_outer_dims)
             code2'
 
-        let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+        let grid = KernelGrid (Count grid_size) (Count group_size)
+            level' = SegGroup SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
             kbody' = KernelBody () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
@@ -732,11 +733,11 @@ mkTileMemSizes ::
       SubExp
     )
 mkTileMemSizes height_A width_B common_dim = do
-  tk_name <- nameFromString . pretty <$> newVName "Tk"
-  tx_name <- nameFromString . pretty <$> newVName "Tx"
-  ty_name <- nameFromString . pretty <$> newVName "Ty"
-  rx_name <- nameFromString . pretty <$> newVName "Rx"
-  ry_name <- nameFromString . pretty <$> newVName "Ry"
+  tk_name <- nameFromString . prettyString <$> newVName "Tk"
+  tx_name <- nameFromString . prettyString <$> newVName "Tx"
+  ty_name <- nameFromString . prettyString <$> newVName "Ty"
+  rx_name <- nameFromString . prettyString <$> newVName "Rx"
+  ry_name <- nameFromString . prettyString <$> newVName "Ry"
 
   (ty, ry) <- getParTiles ("Ty", "Ry") (ty_name, ry_name) height_A
   (tx, rx) <- getParTiles ("Tx", "Rx") (tx_name, rx_name) width_B
@@ -771,7 +772,7 @@ mkNewSegthdLvl ::
 mkNewSegthdLvl tx ty grid_pexp = do
   grid_size <- letSubExp "grid_size" =<< toExp grid_pexp
   group_size <- letSubExp "group_size" =<< toExp (pe64 ty * pe64 tx)
-  let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
+  let segthd_lvl = SegThreadInGroup (SegNoVirtFull (SegSeqDims []))
   pure (grid_size, group_size, segthd_lvl)
 
 mkGidsXYF :: Builder GPU (VName, VName, VName)
@@ -1069,8 +1070,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             (M.empty, M.empty)
             $ M.toList arr_tab0
 
-        tx_name <- nameFromString . pretty <$> newVName "Tx"
-        ty_name <- nameFromString . pretty <$> newVName "Ty"
+        tx_name <- nameFromString . prettyString <$> newVName "Tx"
+        ty_name <- nameFromString . prettyString <$> newVName "Ty"
 
         tx0 <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
         ty0 <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
@@ -1085,7 +1086,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         let grid_pexp = product $ gridxyz_pexp : map (pe64 . snd) rem_outer_dims_rev
         grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
         group_size <- letSubExp "group_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
-        let segthd_lvl = SegThread (Count grid_size) (Count group_size) (SegNoVirtFull (SegSeqDims []))
+        let segthd_lvl = SegThreadInGroup (SegNoVirtFull (SegSeqDims []))
 
         count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz group_size
 
@@ -1286,7 +1287,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
 
           pure $ map (RegTileReturns mempty regtile_ret_dims) epilogue_res'
         -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do
-        let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+        let grid = KernelGrid (Count grid_size) (Count group_size)
+            level' = SegGroup SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
             kbody' = KernelBody () stms_seggroup ret_seggroup
 

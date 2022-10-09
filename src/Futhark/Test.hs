@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Facilities for reading Futhark test programs.  A Futhark test
 -- program is an ordinary Futhark program where an initial comment
 -- block specifies input- and output-sets.
@@ -34,25 +30,25 @@ import Codec.Compression.GZip
 import Codec.Compression.Zlib.Internal (DecompressError)
 import Control.Applicative
 import Control.Exception (catch)
-import qualified Control.Exception.Base as E
+import Control.Exception.Base qualified as E
 import Control.Monad
 import Control.Monad.Except
-import qualified Data.Binary as Bin
-import qualified Data.ByteString as SBS
-import qualified Data.ByteString.Lazy as BS
+import Data.Binary qualified as Bin
+import Data.ByteString qualified as SBS
+import Data.ByteString.Lazy qualified as BS
 import Data.Char
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
-import qualified Futhark.Script as Script
+import Data.Set qualified as S
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
+import Data.Text.IO qualified as T
+import Futhark.Script qualified as Script
 import Futhark.Server
 import Futhark.Server.Values
 import Futhark.Test.Spec
-import qualified Futhark.Test.Values as V
+import Futhark.Test.Values qualified as V
 import Futhark.Util (isEnvVarAtLeast, pmapIO)
-import Futhark.Util.Pretty (prettyOneLine, prettyText, prettyTextOneLine)
+import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import System.Directory
 import System.Exit
 import System.FilePath
@@ -97,7 +93,7 @@ readAndDecompress file = E.try $ do
   s <- BS.readFile file
   E.evaluate $ decompress s
 
--- | Extract a pretty representation of some 'Values'.  In the IO
+-- | Extract a prettyString representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no
 -- guarantee that the resulting byte string yields a readable value.
 getValuesBS :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m BS.ByteString
@@ -116,7 +112,9 @@ getValuesBS _ dir (InFile file) =
 getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
 getValuesBS _ _ (ScriptValues e) =
-  fail $ "Cannot get values from FutharkScript expression: " <> prettyOneLine e
+  fail $
+    "Cannot get values from FutharkScript expression: "
+      <> T.unpack (prettyTextOneLine e)
 getValuesBS _ _ (ScriptFile f) =
   fail $ "Cannot get values from FutharkScript file: " <> f
 

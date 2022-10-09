@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | This module implements facilities for determining whether a
 -- reduction or fold can be expressed in a closed form (i.e. not as a
 -- SOAC).
@@ -14,7 +12,7 @@ module Futhark.Optimise.Simplify.Rules.ClosedForm
 where
 
 import Control.Monad
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Construct
 import Futhark.IR
@@ -39,7 +37,7 @@ Motivation:
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm ::
-  (ASTRep rep, BuilderOps rep) =>
+  (BuilderOps rep) =>
   VarLookup rep ->
   Pat (LetDec rep) ->
   Lambda rep ->
@@ -68,10 +66,10 @@ foldClosedForm look pat lam accs arrs = do
     BasicOp $
       CmpOp (CmpEq int64) inputsize (intConst Int64 0)
   letBind pat
-    =<< ( If (Var isEmpty)
-            <$> resultBodyM accs
+    =<< ( Match [Var isEmpty]
+            <$> (pure . Case [Just $ BoolValue True] <$> resultBodyM accs)
             <*> renameBody closedBody
-            <*> pure (IfDec [primBodyType t] IfNormal)
+            <*> pure (MatchDec [primBodyType t] MatchNormal)
         )
   where
     knownBnds = determineKnownBindings look lam accs arrs
@@ -79,7 +77,7 @@ foldClosedForm look pat lam accs arrs = do
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm ::
-  (ASTRep rep, BuilderOps rep) =>
+  (BuilderOps rep) =>
   Pat (LetDec rep) ->
   [(FParam rep, SubExp)] ->
   Names ->
@@ -108,10 +106,10 @@ loopClosedForm pat merge i it bound body = do
       CmpOp (CmpSlt it) bound (intConst it 0)
 
   letBind pat
-    =<< ( If (Var isEmpty)
-            <$> resultBodyM mergeexp
+    =<< ( Match [Var isEmpty]
+            <$> (pure . Case [Just (BoolValue True)] <$> resultBodyM mergeexp)
             <*> renameBody closedBody
-            <*> pure (IfDec [primBodyType t] IfNormal)
+            <*> pure (MatchDec [primBodyType t] MatchNormal)
         )
   where
     (mergepat, mergeexp) = unzip merge

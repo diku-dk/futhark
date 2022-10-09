@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
 
 -- | The Futhark source language AST definition.  Many types, such as
@@ -15,7 +11,7 @@
 -- "Language.Futhark.Primitive".
 module Language.Futhark.Syntax
   ( module Language.Futhark.Core,
-    pretty,
+    prettyString,
     prettyText,
 
     -- * Types
@@ -47,7 +43,6 @@ module Language.Futhark.Syntax
     FloatValue (..),
     PrimValue (..),
     IsPrimValue (..),
-    Value (..),
 
     -- * Abstract syntax tree
     AttrInfo (..),
@@ -100,16 +95,16 @@ where
 
 import Control.Applicative
 import Control.Monad
-import Data.Array
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Monoid hiding (Sum)
 import Data.Ord
-import qualified Data.Set as S
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Traversable
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
@@ -476,15 +471,6 @@ data Diet
     Observe
   deriving (Eq, Ord, Show)
 
--- | Simple Futhark values.  Values are fully evaluated and their type
--- is always unambiguous.
-data Value
-  = PrimValue !PrimValue
-  | -- | It is assumed that the array is 0-indexed.  The type
-    -- is the full type.
-    ArrayValue !(Array Int Value) ValueType
-  deriving (Eq, Show)
-
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
 data IdentBase f vn = Ident
@@ -767,7 +753,7 @@ data ExpBase f vn
   | -- | Fail if the first expression does not return true,
     -- and return the value of the second expression if it
     -- does.
-    Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
+    Assert (ExpBase f vn) (ExpBase f vn) (f T.Text) SrcLoc
   | -- | An n-ary value constructor.
     Constr Name [ExpBase f vn] (f PatType) SrcLoc
   | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc
@@ -1240,36 +1226,36 @@ deriving instance Show (ProgBase NoInfo Name)
 --- the Attributes module.
 
 instance Pretty PrimType where
-  ppr (Unsigned Int8) = text "u8"
-  ppr (Unsigned Int16) = text "u16"
-  ppr (Unsigned Int32) = text "u32"
-  ppr (Unsigned Int64) = text "u64"
-  ppr (Signed t) = ppr t
-  ppr (FloatType t) = ppr t
-  ppr Bool = text "bool"
+  pretty (Unsigned Int8) = "u8"
+  pretty (Unsigned Int16) = "u16"
+  pretty (Unsigned Int32) = "u32"
+  pretty (Unsigned Int64) = "u64"
+  pretty (Signed t) = pretty t
+  pretty (FloatType t) = pretty t
+  pretty Bool = "bool"
 
 instance Pretty BinOp where
-  ppr Backtick = text "``"
-  ppr Plus = text "+"
-  ppr Minus = text "-"
-  ppr Pow = text "**"
-  ppr Times = text "*"
-  ppr Divide = text "/"
-  ppr Mod = text "%"
-  ppr Quot = text "//"
-  ppr Rem = text "%%"
-  ppr ShiftR = text ">>"
-  ppr ShiftL = text "<<"
-  ppr Band = text "&"
-  ppr Xor = text "^"
-  ppr Bor = text "|"
-  ppr LogAnd = text "&&"
-  ppr LogOr = text "||"
-  ppr Equal = text "=="
-  ppr NotEqual = text "!="
-  ppr Less = text "<"
-  ppr Leq = text "<="
-  ppr Greater = text ">"
-  ppr Geq = text ">="
-  ppr PipeLeft = text "<|"
-  ppr PipeRight = text "|>"
+  pretty Backtick = "``"
+  pretty Plus = "+"
+  pretty Minus = "-"
+  pretty Pow = "**"
+  pretty Times = "*"
+  pretty Divide = "/"
+  pretty Mod = "%"
+  pretty Quot = "//"
+  pretty Rem = "%%"
+  pretty ShiftR = ">>"
+  pretty ShiftL = "<<"
+  pretty Band = "&"
+  pretty Xor = "^"
+  pretty Bor = "|"
+  pretty LogAnd = "&&"
+  pretty LogOr = "||"
+  pretty Equal = "=="
+  pretty NotEqual = "!="
+  pretty Less = "<"
+  pretty Leq = "<="
+  pretty Greater = ">"
+  pretty Geq = ">="
+  pretty PipeLeft = "<|"
+  pretty PipeRight = "|>"

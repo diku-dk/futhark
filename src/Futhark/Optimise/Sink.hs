@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | "Sinking" is conceptually the opposite of hoisting.  The idea is
@@ -48,11 +46,11 @@ module Futhark.Optimise.Sink (sinkGPU, sinkMC) where
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl')
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Sequence ((<|))
-import qualified Data.Sequence as SQ
-import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.SymbolTable as ST
+import Data.Sequence qualified as SQ
+import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Builder.Class
 import Futhark.Construct (sliceDim)
 import Futhark.IR.Aliases
@@ -81,13 +79,16 @@ type Constraints rep =
 multiplicity :: Constraints rep => Stm rep -> M.Map VName Int
 multiplicity stm =
   case stmExp stm of
-    If cond tbranch fbranch _ ->
-      free cond 1 `comb` free tbranch 1 `comb` free fbranch 1
-    Op {} -> free stm 2
-    DoLoop {} -> free stm 2
-    _ -> free stm 1
+    Match cond cases defbody _ ->
+      foldl comb mempty $
+        free 1 cond
+          : free 1 defbody
+          : map (free 1 . caseBody) cases
+    Op {} -> free 2 stm
+    DoLoop {} -> free 2 stm
+    _ -> free 1 stm
   where
-    free x k = M.fromList $ zip (namesToList $ freeIn x) $ repeat k
+    free k x = M.fromList $ zip (namesToList $ freeIn x) $ repeat k
     comb = M.unionWith (+)
 
 optimiseBranch ::
@@ -172,12 +173,15 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
            in if patElemName pe `nameIn` sunk
                 then (stms', sunk)
                 else (stm : stms', sunk)
-      | If cond tbranch fbranch ret <- stmExp stm =
-          let (tbranch', tsunk) = optimiseBranch onOp vtable sinking tbranch
-              (fbranch', fsunk) = optimiseBranch onOp vtable sinking fbranch
+      | Match cond cases defbody ret <- stmExp stm =
+          let onCase (Case vs body) =
+                let (body', body_sunk) = optimiseBranch onOp vtable sinking body
+                 in (Case vs body', body_sunk)
+              (cases', cases_sunk) = unzip $ map onCase cases
+              (defbody', defbody_sunk) = optimiseBranch onOp vtable sinking defbody
               (stms', sunk) = optimiseStms' vtable' sinking stms
-           in ( stm {stmExp = If cond tbranch' fbranch' ret} : stms',
-                tsunk <> fsunk <> sunk
+           in ( stm {stmExp = Match cond cases' defbody' ret} : stms',
+                mconcat cases_sunk <> defbody_sunk <> sunk
               )
       | DoLoop merge lform body <- stmExp stm =
           let comps = (merge, lform, body)

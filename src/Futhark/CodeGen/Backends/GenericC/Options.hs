@@ -15,8 +15,8 @@ import Data.Char (isSpace)
 import Data.Function ((&))
 import Data.List (intercalate)
 import Data.Maybe
-import qualified Language.C.Quote.C as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.C qualified as C
+import Language.C.Syntax qualified as C
 
 -- | Specification if a single command line option.  The option must
 -- have a long name, and may also have a short name.
@@ -34,7 +34,7 @@ data Option = Option
 -- | Whether an option accepts an argument.
 data OptionArgument
   = NoArgument
-  | -- | The 'String' becomes part of the help text.
+  | -- | The 'String' becomes part of the help pretty.
     RequiredArgument String
   | OptionalArgument
 
@@ -114,7 +114,7 @@ optionFields = zipWith field [(1 :: Int) ..]
       [C.cinit| { $string:(optionLongName option), $id:arg, NULL, $int:i } |]
       where
         arg = case optionArgument option of
-          NoArgument -> "no_argument"
+          NoArgument -> "no_argument" :: String
           RequiredArgument _ -> "required_argument"
           OptionalArgument -> "optional_argument"
 

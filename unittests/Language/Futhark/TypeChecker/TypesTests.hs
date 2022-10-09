@@ -1,13 +1,11 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Language.Futhark.TypeChecker.TypesTests (tests) where
 
 import Data.Bifunctor (first)
 import Data.List (isInfixOf)
-import qualified Data.Map as M
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.FreshNames
-import Futhark.Util.Pretty (prettyOneLine)
+import Futhark.Util.Pretty (docText, prettyTextOneLine)
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.SyntaxTests ()
@@ -19,12 +17,14 @@ import Test.Tasty.HUnit
 
 evalTest :: TypeExp Name -> Either String ([VName], StructRetType) -> TestTree
 evalTest te expected =
-  testCase (pretty te) $
+  testCase (prettyString te) $
     case (fmap (extract . fst) (run (checkTypeExp te)), expected) of
       (Left got_e, Left expected_e) ->
-        (expected_e `isInfixOf` pretty got_e) @? pretty got_e
+        let got_e_s = T.unpack $ docText $ prettyTypeError got_e
+         in (expected_e `isInfixOf` got_e_s) @? got_e_s
       (Left got_e, Right _) ->
-        assertFailure $ "Failed: " <> pretty got_e
+        let got_e_s = T.unpack $ docText $ prettyTypeError got_e
+         in assertFailure $ "Failed: " <> got_e_s
       (Right actual_t, Right expected_t) ->
         actual_t @?= expected_t
       (Right actual_t, Left _) ->
@@ -33,7 +33,7 @@ evalTest te expected =
     extract (_, svars, t, _) = (svars, t)
     run = snd . runTypeM env mempty (mkInitialImport "") blankNameSource
     -- We hack up an environment with some predefined type
-    -- abbreviations for testing.  This is all pretty sensitive to the
+    -- abbreviations for testing.  This is all prettyString sensitive to the
     -- specific unique names, so we have to be careful!
     env =
       initialEnv
@@ -151,10 +151,10 @@ evalTests =
 
 substTest :: M.Map VName (Subst StructRetType) -> StructRetType -> StructRetType -> TestTree
 substTest m t expected =
-  testCase (pretty_m <> ": " <> prettyOneLine t) $
+  testCase (pretty_m <> ": " <> T.unpack (prettyTextOneLine t)) $
     applySubst (`M.lookup` m) t @?= expected
   where
-    pretty_m = prettyOneLine $ map (first prettyName) $ M.toList m
+    pretty_m = T.unpack $ prettyText $ map (first toName) $ M.toList m
 
 -- Some of these tests may be a bit fragile, in that they depend on
 -- internal renumbering, which can be arbitrary.

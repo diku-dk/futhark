@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module implements an optimization that tries to statically reuse
@@ -11,16 +9,16 @@ import Control.Exception
 import Control.Monad.State.Strict
 import Data.Function ((&))
 import Data.Map (Map, (!))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Set (Set)
-import qualified Data.Set as S
-import qualified Futhark.Analysis.Interference as Interference
+import Data.Set qualified as S
+import Futhark.Analysis.Interference qualified as Interference
 import Futhark.Builder.Class
 import Futhark.Construct
 import Futhark.IR.GPUMem
-import qualified Futhark.Optimise.MemoryBlockMerging.GreedyColoring as GreedyColoring
+import Futhark.Optimise.MemoryBlockMerging.GreedyColoring qualified as GreedyColoring
 import Futhark.Pass (Pass (..), PassM)
-import qualified Futhark.Pass as Pass
+import Futhark.Pass qualified as Pass
 import Futhark.Util (invertMap)
 
 -- | A mapping from allocation names to their size and space.
@@ -30,9 +28,8 @@ getAllocsStm :: Stm GPUMem -> Allocs
 getAllocsStm (Let (Pat [PatElem name _]) _ (Op (Alloc se sp))) =
   M.singleton name (se, sp)
 getAllocsStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
-getAllocsStm (Let _ _ (If _ then_body else_body _)) =
-  foldMap getAllocsStm (bodyStms then_body)
-    <> foldMap getAllocsStm (bodyStms else_body)
+getAllocsStm (Let _ _ (Match _ cases defbody _)) =
+  foldMap (foldMap getAllocsStm . bodyStms) $ defbody : map caseBody cases
 getAllocsStm (Let _ _ (DoLoop _ _ body)) =
   foldMap getAllocsStm (bodyStms body)
 getAllocsStm _ = mempty
@@ -54,15 +51,10 @@ setAllocsStm m stm@(Let (Pat [PatElem name _]) _ (Op (Alloc _ _)))
 setAllocsStm _ stm@(Let _ _ (Op (Alloc _ _))) = stm
 setAllocsStm m stm@(Let _ _ (Op (Inner (SegOp segop)))) =
   stm {stmExp = Op $ Inner $ SegOp $ setAllocsSegOp m segop}
-setAllocsStm m stm@(Let _ _ (If cse then_body else_body dec)) =
-  stm
-    { stmExp =
-        If
-          cse
-          (then_body {bodyStms = setAllocsStm m <$> bodyStms then_body})
-          (else_body {bodyStms = setAllocsStm m <$> bodyStms else_body})
-          dec
-    }
+setAllocsStm m stm@(Let _ _ (Match cond cases defbody dec)) =
+  stm {stmExp = Match cond (map (fmap onBody) cases) (onBody defbody) dec}
+  where
+    onBody (Body () stms res) = Body () (setAllocsStm m <$> stms) res
 setAllocsStm m stm@(Let _ _ (DoLoop merge form body)) =
   stm
     { stmExp =
@@ -172,23 +164,18 @@ onKernels ::
   (SegOp SegLevel GPUMem -> m (SegOp SegLevel GPUMem)) ->
   Stms GPUMem ->
   m (Stms GPUMem)
-onKernels f stms = inScopeOf stms $ mapM helper stms
+onKernels f orig_stms = inScopeOf orig_stms $ mapM helper orig_stms
   where
     helper stm@Let {stmExp = Op (Inner (SegOp segop))} = do
       exp' <- f segop
       pure $ stm {stmExp = Op $ Inner $ SegOp exp'}
-    helper stm@Let {stmExp = If c then_body else_body dec} = do
-      then_body_stms <- f `onKernels` bodyStms then_body
-      else_body_stms <- f `onKernels` bodyStms else_body
-      pure $
-        stm
-          { stmExp =
-              If
-                c
-                (then_body {bodyStms = then_body_stms})
-                (else_body {bodyStms = else_body_stms})
-                dec
-          }
+    helper stm@Let {stmExp = Match c cases defbody dec} = do
+      cases' <- mapM (traverse onBody) cases
+      defbody' <- onBody defbody
+      pure $ stm {stmExp = Match c cases' defbody' dec}
+      where
+        onBody (Body () stms res) =
+          Body () <$> f `onKernels` stms <*> pure res
     helper stm@Let {stmExp = DoLoop merge form body} = do
       body_stms <- f `onKernels` bodyStms body
       pure $ stm {stmExp = DoLoop merge form (body {bodyStms = body_stms})}

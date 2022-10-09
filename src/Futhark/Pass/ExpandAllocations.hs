@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Expand allocations inside of maps when possible.
@@ -9,16 +7,17 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Either (rights)
 import Data.List (find, foldl')
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Rephrase
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Error
 import Futhark.IR
-import qualified Futhark.IR.GPU.Simplify as GPU
+import Futhark.IR.GPU.Simplify qualified as GPU
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass
@@ -86,26 +85,20 @@ transformStms stms =
 transformStm :: Stm GPUMem -> ExpandM (Stms GPUMem)
 -- It is possible that we are unable to expand allocations in some
 -- code versions.  If so, we can remove the offending branch.  Only if
--- both versions fail do we propagate the error.
-transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
-  tbranch' <- (Right <$> transformBody tbranch) `catchError` (pure . Left)
-  fbranch' <- (Right <$> transformBody fbranch) `catchError` (pure . Left)
-  case (tbranch', fbranch') of
-    (Left _, Right fbranch'') ->
-      pure $ useBranch fbranch''
-    (Right tbranch'', Left _) ->
-      pure $ useBranch tbranch''
-    (Right tbranch'', Right fbranch'') ->
-      pure $ oneStm $ Let pat aux $ If cond tbranch'' fbranch'' (IfDec ts IfEquiv)
-    (Left e, _) ->
+-- all versions fail do we propagate the error.
+-- FIXME: this can remove safety checks if the default branch fails!
+transformStm (Let pat aux (Match cond cases defbody (MatchDec ts MatchEquiv))) = do
+  let onCase (Case vs body) =
+        (Right . Case vs <$> transformBody body) `catchError` (pure . Left)
+  cases' <- rights <$> mapM onCase cases
+  defbody' <- (Right <$> transformBody defbody) `catchError` (pure . Left)
+  case (cases', defbody') of
+    ([], Left e) ->
       throwError e
-  where
-    bindRes pe (SubExpRes cs se) =
-      certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ SubExp se
-
-    useBranch b =
-      bodyStms b
-        <> stmsFromList (zipWith bindRes (patElems pat) (bodyResult b))
+    (_ : _, Left _) ->
+      pure $ oneStm $ Let pat aux $ Match cond (init cases') (caseBody $ last cases') (MatchDec ts MatchEquiv)
+    (_, Right defbody'') ->
+      pure $ oneStm $ Let pat aux $ Match cond cases' defbody'' (MatchDec ts MatchEquiv)
 transformStm (Let pat aux e) = do
   (stms, e') <- transformExp =<< mapExpM transform e
   pure $ stms <> oneStm (Let pat aux e')
@@ -117,33 +110,33 @@ transformStm (Let pat aux e) = do
 
 transformExp :: Exp GPUMem -> ExpandM (Stms GPUMem, Exp GPUMem)
 transformExp (Op (Inner (SegOp (SegMap lvl space ts kbody)))) = do
-  (alloc_stms, (_, kbody')) <- transformScanRed lvl space [] kbody
+  (alloc_stms, (lvl', _, kbody')) <- transformScanRed lvl space [] kbody
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegMap lvl space ts kbody'
+      Op $ Inner $ SegOp $ SegMap lvl' space ts kbody'
     )
 transformExp (Op (Inner (SegOp (SegRed lvl space reds ts kbody)))) = do
-  (alloc_stms, (lams, kbody')) <-
+  (alloc_stms, (lvl', lams, kbody')) <-
     transformScanRed lvl space (map segBinOpLambda reds) kbody
   let reds' = zipWith (\red lam -> red {segBinOpLambda = lam}) reds lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegRed lvl space reds' ts kbody'
+      Op $ Inner $ SegOp $ SegRed lvl' space reds' ts kbody'
     )
 transformExp (Op (Inner (SegOp (SegScan lvl space scans ts kbody)))) = do
-  (alloc_stms, (lams, kbody')) <-
+  (alloc_stms, (lvl', lams, kbody')) <-
     transformScanRed lvl space (map segBinOpLambda scans) kbody
   let scans' = zipWith (\red lam -> red {segBinOpLambda = lam}) scans lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegScan lvl space scans' ts kbody'
+      Op $ Inner $ SegOp $ SegScan lvl' space scans' ts kbody'
     )
 transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
-  (alloc_stms, (lams', kbody')) <- transformScanRed lvl space lams kbody
+  (alloc_stms, (lvl', lams', kbody')) <- transformScanRed lvl space lams kbody
   let ops' = zipWith onOp ops lams'
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegHist lvl space ops' ts kbody'
+      Op $ Inner $ SegOp $ SegHist lvl' space ops' ts kbody'
     )
   where
     lams = map histOp ops
@@ -163,7 +156,7 @@ transformExp (WithAcc inputs lam) = do
       let -- XXX: fake a SegLevel, which we don't have here.  We will not
           -- use it for anything, as we will not allow irregular
           -- allocations inside the update function.
-          lvl = SegThread (Count $ intConst Int64 0) (Count $ intConst Int64 0) SegNoVirt
+          lvl = SegThread SegNoVirt Nothing
           (op_lam', lam_allocs) =
             extractLambdaAllocations (lvl, [0]) bound_outside mempty op_lam
           variantAlloc (_, Var v, _) = v `notNameIn` bound_outside
@@ -174,7 +167,7 @@ transformExp (WithAcc inputs lam) = do
         (_, v, _) : _ ->
           throwError $
             "Cannot handle un-sliceable allocation size: "
-              ++ pretty v
+              ++ prettyString v
               ++ "\nLikely cause: irregular nested operations inside accumulator update operator."
         [] ->
           pure ()
@@ -193,12 +186,33 @@ transformExp (WithAcc inputs lam) = do
 transformExp e =
   pure (mempty, e)
 
+ensureGridKnown :: SegLevel -> ExpandM (Stms GPUMem, SegLevel, KernelGrid)
+ensureGridKnown lvl =
+  case lvl of
+    SegThread _ (Just grid) -> pure (mempty, lvl, grid)
+    SegGroup _ (Just grid) -> pure (mempty, lvl, grid)
+    SegThread virt Nothing -> mkGrid (SegThread virt)
+    SegGroup virt Nothing -> mkGrid (SegGroup virt)
+    SegThreadInGroup {} -> error "ensureGridKnown: SegThreadInGroup"
+  where
+    mkGrid f = do
+      (grid, stms) <-
+        runBuilder $
+          KernelGrid
+            <$> (Count <$> getSize "num_groups" SizeNumGroups)
+            <*> (Count <$> getSize "group_size" SizeGroup)
+      pure (stms, f $ Just grid, grid)
+
+    getSize desc size_class = do
+      size_key <- nameFromString . prettyString <$> newVName desc
+      letSubExp desc $ Op $ Inner $ SizeOp $ GetSize size_key size_class
+
 transformScanRed ::
   SegLevel ->
   SegSpace ->
   [Lambda GPUMem] ->
   KernelBody GPUMem ->
-  ExpandM (Stms GPUMem, ([Lambda GPUMem], KernelBody GPUMem))
+  ExpandM (Stms GPUMem, (SegLevel, [Lambda GPUMem], KernelBody GPUMem))
 transformScanRed lvl space ops kbody = do
   bound_outside <- asks $ namesFromList . M.keys
   let user = (lvl, [le64 $ segFlat space])
@@ -216,7 +230,7 @@ transformScanRed lvl space ops kbody = do
     Just v ->
       throwError $
         "Cannot handle un-sliceable allocation size: "
-          ++ pretty v
+          ++ prettyString v
           ++ "\nLikely cause: irregular nested operations inside parallel constructs."
     Nothing ->
       pure ()
@@ -228,10 +242,14 @@ transformScanRed lvl space ops kbody = do
     _ ->
       pure ()
 
-  allocsForBody variant_allocs invariant_allocs lvl space kbody' $ \alloc_stms kbody'' -> do
-    ops'' <- forM ops' $ \op' ->
-      localScope (scopeOf op') $ offsetMemoryInLambda op'
-    pure (alloc_stms, (ops'', kbody''))
+  if null variant_allocs && null invariant_allocs
+    then pure (mempty, (lvl, ops, kbody))
+    else do
+      (lvl_stms, lvl', grid) <- ensureGridKnown lvl
+      allocsForBody variant_allocs invariant_allocs grid space kbody' $ \alloc_stms kbody'' -> do
+        ops'' <- forM ops' $ \op' ->
+          localScope (scopeOf op') $ offsetMemoryInLambda op'
+        pure (lvl_stms <> alloc_stms, (lvl', ops'', kbody''))
   where
     bound_in_kernel =
       namesFromList (M.keys $ scopeOfSegSpace space)
@@ -243,15 +261,15 @@ boundInKernelBody = namesFromList . M.keys . scopeOf . kernelBodyStms
 allocsForBody ::
   Extraction ->
   Extraction ->
-  SegLevel ->
+  KernelGrid ->
   SegSpace ->
   KernelBody GPUMem ->
   (Stms GPUMem -> KernelBody GPUMem -> OffsetM b) ->
   ExpandM b
-allocsForBody variant_allocs invariant_allocs lvl space kbody' m = do
+allocsForBody variant_allocs invariant_allocs grid space kbody' m = do
   (alloc_offsets, alloc_stms) <-
     memoryRequirements
-      lvl
+      grid
       space
       (kernelBodyStms kbody')
       variant_allocs
@@ -265,26 +283,26 @@ allocsForBody variant_allocs invariant_allocs lvl space kbody' m = do
       m alloc_stms kbody''
 
 memoryRequirements ::
-  SegLevel ->
+  KernelGrid ->
   SegSpace ->
   Stms GPUMem ->
   Extraction ->
   Extraction ->
   ExpandM (RebaseMap, Stms GPUMem)
-memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
+memoryRequirements grid space kstms variant_allocs invariant_allocs = do
   (num_threads, num_threads_stms) <-
     runBuilder . letSubExp "num_threads" . BasicOp $
       BinOp
         (Mul Int64 OverflowUndef)
-        (unCount $ segNumGroups lvl)
-        (unCount $ segGroupSize lvl)
+        (unCount $ gridNumGroups grid)
+        (unCount $ gridGroupSize grid)
 
   (invariant_alloc_stms, invariant_alloc_offsets) <-
     inScopeOf num_threads_stms $
       expandedInvariantAllocations
         num_threads
-        (segNumGroups lvl)
-        (segGroupSize lvl)
+        (gridNumGroups grid)
+        (gridGroupSize grid)
         invariant_allocs
 
   (variant_alloc_stms, variant_alloc_offsets) <-
@@ -444,7 +462,7 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
 
     untouched d = DimSlice 0 d 1
 
-    newBase user@(SegThread {}, _) (old_shape, _) =
+    newBaseThread user (old_shape, _) =
       let (users_shape, user_ids) = getNumUsers user
           num_dims = length old_shape
           perm = [num_dims .. num_dims + shapeRank users_shape - 1] ++ [0 .. num_dims - 1]
@@ -455,7 +473,10 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
               Slice $
                 map DimFix user_ids ++ map untouched old_shape
        in offset_ixfun
-    newBase user@(SegGroup {}, _) (old_shape, _) =
+
+    newBase user@(SegThreadInGroup {}, _) = newBaseThread user
+    newBase user@(SegThread {}, _) = newBaseThread user
+    newBase user@(SegGroup {}, _) = \(old_shape, _) ->
       let (users_shape, user_ids) = getNumUsers user
           root_ixfun = IxFun.iota $ map pe64 (shapeDims users_shape) ++ old_shape
           offset_ixfun =
@@ -474,6 +495,8 @@ expandedInvariantAllocations num_threads (Count num_groups) (Count group_size) =
   where
     getNumUsers (SegThread {}, [gtid]) = (Shape [num_threads], [gtid])
     getNumUsers (SegThread {}, [gid, ltid]) = (Shape [num_groups, group_size], [gid, ltid])
+    getNumUsers (SegThreadInGroup {}, [gtid]) = (Shape [num_threads], [gtid])
+    getNumUsers (SegThreadInGroup {}, [gid, ltid]) = (Shape [num_groups, group_size], [gid, ltid])
     getNumUsers (SegGroup {}, [gid]) = (Shape [num_groups], [gid])
     getNumUsers user = error $ "getNumUsers: unhandled " ++ show user
 
@@ -728,7 +751,7 @@ unAllocGPUStms = unAllocStms False
       fmap (stmsFromList . catMaybes) . mapM (unAllocStm nested) . stmsToList
 
     unAllocStm nested stm@(Let _ _ (Op Alloc {}))
-      | nested = throwError $ "Cannot handle nested allocation: " ++ pretty stm
+      | nested = throwError $ "Cannot handle nested allocation: " ++ prettyString stm
       | otherwise = pure Nothing
     unAllocStm _ (Let pat dec e) =
       Just <$> (Let <$> unAllocPat pat <*> pure dec <*> mapExpM unAlloc' e)

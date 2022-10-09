@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Building blocks for parsing prim primexpressions.  *Not* an infix
 -- representation.
 module Futhark.Analysis.PrimExp.Parse
@@ -12,7 +10,7 @@ module Futhark.Analysis.PrimExp.Parse
 where
 
 import Data.Functor
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Void
 import Futhark.Analysis.PrimExp
 import Futhark.Util.Pretty (prettyText)

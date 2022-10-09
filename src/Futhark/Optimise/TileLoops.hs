@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -8,10 +7,10 @@ module Futhark.Optimise.TileLoops (tileLoops) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
-import qualified Data.Sequence as Seq
-import qualified Futhark.Analysis.Alias as Alias
+import Data.Sequence qualified as Seq
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.IR.GPU
 import Futhark.IR.Prop.Aliases (consumedInStm)
 import Futhark.MonadFreshNames
@@ -133,7 +132,6 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
           Just . injectPrelude initial_space variance prestms' used
             <$> tileGeneric
               (tiling2d $ reverse $ zip top_gtids_rev top_kdims_rev)
-              initial_lvl
               res_ts
               (stmPat stm_to_tile)
               (gtid_x, gtid_y)
@@ -155,7 +153,6 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
           Just . injectPrelude initial_space variance prestms' used
             <$> tileGeneric
               (tiling1d $ reverse top_space_rev)
-              initial_lvl
               res_ts
               (stmPat stm_to_tile)
               gtid
@@ -405,7 +402,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
         mergeinit' <-
           fmap (map Var) $
             certifying (stmAuxCerts aux) $
-              tilingSegMap tiling "tiled_loopinit" (scalarLevel tiling) ResultPrivate $
+              tilingSegMap tiling "tiled_loopinit" ResultPrivate $
                 \in_bounds slice ->
                   fmap varsRes $
                     protectOutOfBounds "loopinit" in_bounds merge_ts $ do
@@ -448,7 +445,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 doPrelude :: Tiling -> PrivStms -> Stms GPU -> [VName] -> Builder GPU [VName]
 doPrelude tiling privstms prestms prestms_live =
   -- Create a SegMap that takes care of the prelude for every thread.
-  tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
+  tilingSegMap tiling "prelude" ResultPrivate $
     \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
       fmap varsRes . protectOutOfBounds "pre" in_bounds ts $ do
@@ -579,7 +576,6 @@ data ResidualTileArgs = ResidualTileArgs
 data Tiling = Tiling
   { tilingSegMap ::
       String ->
-      SegLevel ->
       ResultManifest ->
       (PrimExp VName -> [DimIndex SubExp] -> Builder GPU Result) ->
       Builder GPU [VName],
@@ -605,13 +601,7 @@ data Tiling = Tiling
   }
 
 type DoTiling gtids kdims =
-  SegLevel -> gtids -> kdims -> SubExp -> Builder GPU Tiling
-
-scalarLevel :: Tiling -> SegLevel
-scalarLevel tiling =
-  SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
-  where
-    lvl = tilingLevel tiling
+  gtids -> kdims -> SubExp -> Builder GPU Tiling
 
 protectOutOfBounds ::
   String ->
@@ -644,7 +634,7 @@ postludeGeneric ::
   [Type] ->
   Builder GPU [VName]
 postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
-  tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultPrivate $ \in_bounds slice -> do
+  tilingSegMap tiling "thread_res" ResultPrivate $ \in_bounds slice -> do
     -- Read our per-thread result from the tiled loop.
     forM_ (zip (patNames pat) accs') $ \(us, everyone) -> do
       everyone_t <- lookupType everyone
@@ -665,7 +655,6 @@ type TiledBody = Names -> PrivStms -> Builder GPU [VName]
 
 tileGeneric ::
   DoTiling gtids kdims ->
-  SegLevel ->
   [Type] ->
   Pat Type ->
   gtids ->
@@ -676,8 +665,8 @@ tileGeneric ::
   Stms GPU ->
   Result ->
   TileM (Stms GPU, Tiling, TiledBody)
-tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms poststms_res = do
-  (tiling, tiling_stms) <- runBuilder $ doTiling initial_lvl gtids kdims w
+tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res = do
+  (tiling, tiling_stms) <- runBuilder $ doTiling gtids kdims w
 
   pure (tiling_stms, tiling, tiledBody tiling)
   where
@@ -691,7 +680,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form inputs poststms p
 
       -- We don't use a Replicate here, because we want to enforce a
       -- scalar memory space.
-      mergeinits <- tilingSegMap tiling "mergeinit" (scalarLevel tiling) ResultPrivate $ \in_bounds slice ->
+      mergeinits <- tilingSegMap tiling "mergeinit" ResultPrivate $ \in_bounds slice ->
         -- Constant neutral elements (a common case) do not need protection from OOB.
         if freeIn red_nes == mempty
           then pure $ subExpsRes red_nes
@@ -777,16 +766,15 @@ readTile1D ::
   SubExp ->
   VName ->
   VName ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  KernelGrid ->
   TileKind ->
   PrivStms ->
   SubExp ->
   [InputArray] ->
   Builder GPU [InputTile]
-readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs =
+readTile1D tile_size gid gtid (KernelGrid _num_groups group_size) kind privstms tile_id inputs =
   fmap (inputsToTiles inputs)
-    . segMap1D "full_tile" lvl ResultNoSimplify
+    . segMap1D "full_tile" lvl ResultNoSimplify tile_size
     $ \ltid -> do
       j <-
         letSubExp "j"
@@ -814,18 +802,17 @@ readTile1D tile_size gid gtid num_groups group_size kind privstms tile_id inputs
           TileFull ->
             mapM readTileElem arrs
   where
-    lvl = SegThread num_groups group_size SegNoVirt
+    lvl = SegThreadInGroup SegNoVirt
 
 processTile1D ::
   VName ->
   VName ->
   SubExp ->
   SubExp ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  KernelGrid ->
   ProcessTileArgs ->
   Builder GPU [VName]
-processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
+processTile1D gid gtid kdim tile_size (KernelGrid _num_groups group_size) tile_args = do
   let red_comm = processComm tile_args
       privstms = processPrivStms tile_args
       map_lam = processMapLam tile_args
@@ -834,7 +821,7 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
       tile_id = processTileId tile_args
       accs = processAcc tile_args
 
-  segMap1D "acc" lvl ResultPrivate $ \ltid -> do
+  segMap1D "acc" lvl ResultPrivate (unCount group_size) $ \ltid -> do
     reconstructGtids1D group_size gtid gid ltid
     addPrivStms [DimFix $ Var ltid] privstms
 
@@ -858,18 +845,17 @@ processTile1D gid gtid kdim tile_size num_groups group_size tile_args = do
           (eBody [pure $ Op $ OtherOp $ Screma tile_size tiles' form'])
           (resultBodyM thread_accs)
   where
-    lvl = SegThread num_groups group_size SegNoVirt
+    lvl = SegThreadInGroup SegNoVirt
 
 processResidualTile1D ::
   VName ->
   VName ->
   SubExp ->
   SubExp ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  KernelGrid ->
   ResidualTileArgs ->
   Builder GPU [VName]
-processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
+processResidualTile1D gid gtid kdim tile_size grid args = do
   -- The number of residual elements that are not covered by
   -- the whole tiles.
   residual_input <-
@@ -900,8 +886,7 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
           tile_size
           gid
           gtid
-          num_groups
-          group_size
+          grid
           TilePartial
           privstms
           num_whole_tiles
@@ -922,61 +907,52 @@ processResidualTile1D gid gtid kdim tile_size num_groups group_size args = do
       let tile_args =
             ProcessTileArgs privstms red_comm red_lam map_lam tiles accs num_whole_tiles
       resultBody . map Var
-        <$> processTile1D gid gtid kdim residual_input num_groups group_size tile_args
+        <$> processTile1D gid gtid kdim residual_input grid tile_args
 
 tiling1d :: [(VName, SubExp)] -> DoTiling VName SubExp
-tiling1d dims_on_top initial_lvl gtid kdim w = do
+tiling1d dims_on_top gtid kdim w = do
   gid <- newVName "gid"
   gid_flat <- newVName "gid_flat"
 
-  (lvl, space) <-
-    if null dims_on_top
-      then
-        pure
-          ( SegGroup (segNumGroups initial_lvl) (segGroupSize initial_lvl) $ segVirt initial_lvl,
-            SegSpace gid_flat [(gid, unCount $ segNumGroups initial_lvl)]
-          )
-      else do
-        group_size <-
-          letSubExp "computed_group_size" $
-            BasicOp $
-              BinOp (SMin Int64) (unCount (segGroupSize initial_lvl)) kdim
+  tile_size_key <- nameFromString . prettyString <$> newVName "tile_size"
+  tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeGroup
+  let group_size = tile_size
 
-        -- How many groups we need to exhaust the innermost dimension.
-        ldim <-
-          letSubExp "ldim" $
-            BasicOp $
-              BinOp (SDivUp Int64 Unsafe) kdim group_size
+  (grid, space) <- do
+    -- How many groups we need to exhaust the innermost dimension.
+    ldim <-
+      letSubExp "ldim" . BasicOp $
+        BinOp (SDivUp Int64 Unsafe) kdim group_size
 
-        num_groups <-
-          letSubExp "computed_num_groups"
-            =<< foldBinOp (Mul Int64 OverflowUndef) ldim (map snd dims_on_top)
+    num_groups <-
+      letSubExp "computed_num_groups"
+        =<< foldBinOp (Mul Int64 OverflowUndef) ldim (map snd dims_on_top)
 
-        pure
-          ( SegGroup (Count num_groups) (Count group_size) SegNoVirt,
-            SegSpace gid_flat $ dims_on_top ++ [(gid, ldim)]
-          )
-  let tile_size = unCount $ segGroupSize lvl
+    pure
+      ( KernelGrid (Count num_groups) (Count group_size),
+        SegSpace gid_flat $ dims_on_top ++ [(gid, ldim)]
+      )
+  let tiling_lvl = SegThreadInGroup SegNoVirt
 
   pure
     Tiling
-      { tilingSegMap = \desc lvl' manifest f -> segMap1D desc lvl' manifest $ \ltid -> do
+      { tilingSegMap = \desc manifest f -> segMap1D desc tiling_lvl manifest tile_size $ \ltid -> do
           letBindNames [gtid]
             =<< toExp (le64 gid * pe64 tile_size + le64 ltid)
           f (untyped $ le64 gtid .<. pe64 kdim) [DimFix $ Var ltid],
         tilingReadTile =
-          readTile1D tile_size gid gtid (segNumGroups lvl) (segGroupSize lvl),
+          readTile1D tile_size gid gtid grid,
         tilingProcessTile =
-          processTile1D gid gtid kdim tile_size (segNumGroups lvl) (segGroupSize lvl),
+          processTile1D gid gtid kdim tile_size grid,
         tilingProcessResidualTile =
-          processResidualTile1D gid gtid kdim tile_size (segNumGroups lvl) (segGroupSize lvl),
+          processResidualTile1D gid gtid kdim tile_size grid,
         tilingTileReturns = tileReturns dims_on_top [(kdim, tile_size)],
         tilingTileShape = Shape [tile_size],
         tilingNumWholeTiles =
           letSubExp "num_whole_tiles" $
             BasicOp $
               BinOp (SQuot Int64 Unsafe) w tile_size,
-        tilingLevel = lvl,
+        tilingLevel = SegGroup SegNoVirt (Just grid),
         tilingSpace = space
       }
 
@@ -1016,18 +992,16 @@ readTile2D ::
   (VName, VName) ->
   (VName, VName) ->
   SubExp ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
   TileKind ->
   PrivStms ->
   SubExp ->
   [InputArray] ->
   Builder GPU [InputTile]
-readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups group_size kind privstms tile_id inputs =
+readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size kind privstms tile_id inputs =
   fmap (inputsToTiles inputs)
     . segMap2D
       "full_tile"
-      (SegThread num_groups group_size (SegNoVirtFull (SegSeqDims [])))
+      (SegThread (SegNoVirtFull (SegSeqDims [])) Nothing)
       ResultNoSimplify
       (tile_size, tile_size)
     $ \(ltid_x, ltid_y) -> do
@@ -1089,11 +1063,9 @@ processTile2D ::
   (VName, VName) ->
   (SubExp, SubExp) ->
   SubExp ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
   ProcessTileArgs ->
   Builder GPU [VName]
-processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_groups group_size tile_args = do
+processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size tile_args = do
   let privstms = processPrivStms tile_args
       red_comm = processComm tile_args
       red_lam = processRedLam tile_args
@@ -1107,7 +1079,7 @@ processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size num_gro
 
   segMap2D
     "acc"
-    (SegThread num_groups group_size (SegNoVirtFull (SegSeqDims [])))
+    (SegThreadInGroup (SegNoVirtFull (SegSeqDims [])))
     ResultPrivate
     (tile_size, tile_size)
     $ \(ltid_x, ltid_y) -> do
@@ -1147,86 +1119,73 @@ processResidualTile2D ::
   (VName, VName) ->
   (SubExp, SubExp) ->
   SubExp ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
   ResidualTileArgs ->
   Builder GPU [VName]
-processResidualTile2D
-  gids
-  gtids
-  kdims
-  tile_size
-  num_groups
-  group_size
-  args = do
-    -- The number of residual elements that are not covered by
-    -- the whole tiles.
-    residual_input <-
-      letSubExp "residual_input" $
-        BasicOp $
-          BinOp (SRem Int64 Unsafe) w tile_size
+processResidualTile2D gids gtids kdims tile_size args = do
+  -- The number of residual elements that are not covered by
+  -- the whole tiles.
+  residual_input <-
+    letSubExp "residual_input" $
+      BasicOp $
+        BinOp (SRem Int64 Unsafe) w tile_size
 
-    letTupExp "acc_after_residual"
-      =<< eIf
-        (toExp $ pe64 residual_input .==. 0)
-        (resultBodyM $ map Var accs)
-        (nonemptyTile residual_input)
-    where
-      privstms = residualPrivStms args
-      red_comm = residualComm args
-      red_lam = residualRedLam args
-      map_lam = residualMapLam args
-      accs = residualAcc args
-      inputs = residualInput args
-      num_whole_tiles = residualNumWholeTiles args
-      w = residualInputSize args
+  letTupExp "acc_after_residual"
+    =<< eIf
+      (toExp $ pe64 residual_input .==. 0)
+      (resultBodyM $ map Var accs)
+      (nonemptyTile residual_input)
+  where
+    privstms = residualPrivStms args
+    red_comm = residualComm args
+    red_lam = residualRedLam args
+    map_lam = residualMapLam args
+    accs = residualAcc args
+    inputs = residualInput args
+    num_whole_tiles = residualNumWholeTiles args
+    w = residualInputSize args
 
-      nonemptyTile residual_input = renameBody <=< runBodyBuilder $ do
-        -- Collectively construct a tile.  Threads that are out-of-bounds
-        -- provide a blank dummy value.
-        full_tile <-
-          readTile2D
-            kdims
-            gtids
-            gids
-            tile_size
-            num_groups
-            group_size
-            TilePartial
-            privstms
-            num_whole_tiles
-            inputs
+    nonemptyTile residual_input = renameBody <=< runBodyBuilder $ do
+      -- Collectively construct a tile.  Threads that are out-of-bounds
+      -- provide a blank dummy value.
+      full_tile <-
+        readTile2D
+          kdims
+          gtids
+          gids
+          tile_size
+          TilePartial
+          privstms
+          num_whole_tiles
+          inputs
 
-        let slice =
-              DimSlice (intConst Int64 0) residual_input (intConst Int64 1)
-        tiles <- forM full_tile $ \case
-          InputTiled perm tile' ->
-            InputTiled perm
-              <$> letExp "partial_tile" (BasicOp $ Index tile' (Slice [slice, slice]))
-          InputUntiled arr ->
-            pure $ InputUntiled arr
+      let slice =
+            DimSlice (intConst Int64 0) residual_input (intConst Int64 1)
+      tiles <- forM full_tile $ \case
+        InputTiled perm tile' ->
+          InputTiled perm
+            <$> letExp "partial_tile" (BasicOp $ Index tile' (Slice [slice, slice]))
+        InputUntiled arr ->
+          pure $ InputUntiled arr
 
-        let tile_args =
-              ProcessTileArgs privstms red_comm red_lam map_lam tiles accs num_whole_tiles
+      let tile_args =
+            ProcessTileArgs privstms red_comm red_lam map_lam tiles accs num_whole_tiles
 
-        -- Now each thread performs a traversal of the tile and
-        -- updates its accumulator.
-        resultBody . map Var
-          <$> processTile2D
-            gids
-            gtids
-            kdims
-            tile_size
-            num_groups
-            group_size
-            tile_args
+      -- Now each thread performs a traversal of the tile and
+      -- updates its accumulator.
+      resultBody . map Var
+        <$> processTile2D
+          gids
+          gtids
+          kdims
+          tile_size
+          tile_args
 
 tiling2d :: [(VName, SubExp)] -> DoTiling (VName, VName) (SubExp, SubExp)
-tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
+tiling2d dims_on_top (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
   gid_x <- newVName "gid_x"
   gid_y <- newVName "gid_y"
 
-  tile_size_key <- nameFromString . pretty <$> newVName "tile_size"
+  tile_size_key <- nameFromString . prettyString <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
   group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int64 OverflowUndef) tile_size tile_size
 
@@ -1247,24 +1206,26 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
         (num_groups_y : map snd dims_on_top)
 
   gid_flat <- newVName "gid_flat"
-  let lvl = SegGroup (Count num_groups) (Count group_size) (SegNoVirtFull (SegSeqDims []))
+  let grid = KernelGrid (Count num_groups) (Count group_size)
+      lvl = SegGroup (SegNoVirtFull (SegSeqDims [])) (Just grid)
       space =
         SegSpace gid_flat $
           dims_on_top ++ [(gid_x, num_groups_x), (gid_y, num_groups_y)]
+      tiling_lvl = SegThreadInGroup SegNoVirt
 
   pure
     Tiling
-      { tilingSegMap = \desc lvl' manifest f ->
-          segMap2D desc lvl' manifest (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
+      { tilingSegMap = \desc manifest f ->
+          segMap2D desc tiling_lvl manifest (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
             reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
             f
               ( untyped $
                   le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
               )
               [DimFix $ Var ltid_x, DimFix $ Var ltid_y],
-        tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size (segNumGroups lvl) (segGroupSize lvl),
-        tilingProcessTile = processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size (segNumGroups lvl) (segGroupSize lvl),
-        tilingProcessResidualTile = processResidualTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size (segNumGroups lvl) (segGroupSize lvl),
+        tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size,
+        tilingProcessTile = processTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size,
+        tilingProcessResidualTile = processResidualTile2D (gid_x, gid_y) (gtid_x, gtid_y) (kdim_x, kdim_y) tile_size,
         tilingTileReturns = tileReturns dims_on_top [(kdim_x, tile_size), (kdim_y, tile_size)],
         tilingTileShape = Shape [tile_size, tile_size],
         tilingNumWholeTiles =

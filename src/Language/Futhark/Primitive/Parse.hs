@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Parsers for primitive values and types.
 module Language.Futhark.Primitive.Parse
   ( pPrimValue,
@@ -17,13 +15,13 @@ where
 
 import Data.Char (isAlphaNum)
 import Data.Functor
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Void
-import Futhark.Util.Pretty hiding (empty)
+import Futhark.Util.Pretty
 import Language.Futhark.Primitive
 import Text.Megaparsec
 import Text.Megaparsec.Char
-import qualified Text.Megaparsec.Char.Lexer as L
+import Text.Megaparsec.Char.Lexer qualified as L
 
 -- | Is this character a valid member of an identifier?
 constituent :: Char -> Bool

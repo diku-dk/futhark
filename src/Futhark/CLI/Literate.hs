@@ -1,29 +1,25 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | @futhark literate@
 module Futhark.CLI.Literate (main) where
 
-import qualified Codec.BMP as BMP
+import Codec.BMP qualified as BMP
 import Control.Monad.Except
 import Control.Monad.State hiding (State)
 import Data.Bifunctor (first, second)
 import Data.Bits
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as LBS
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as LBS
 import Data.Char
 import Data.Functor
 import Data.Int (Int64)
 import Data.List (foldl', transpose)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
-import qualified Data.Vector.Storable as SVec
-import qualified Data.Vector.Storable.ByteString as SVec
+import Data.Set qualified as S
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
+import Data.Text.IO qualified as T
+import Data.Vector.Storable qualified as SVec
+import Data.Vector.Storable.ByteString qualified as SVec
 import Data.Void
 import Data.Word (Word32, Word8)
 import Futhark.Data
@@ -41,7 +37,7 @@ import Futhark.Util
   )
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
 import Futhark.Util.ProgressBar
 import System.Directory
   ( copyFile,
@@ -106,78 +102,73 @@ varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveVideo e _) = varsInExp e
 
-pprDirective :: Bool -> Directive -> PP.Doc
+pprDirective :: Bool -> Directive -> PP.Doc a
 pprDirective _ (DirectiveRes e) =
-  "> " <> PP.align (PP.ppr e)
+  "> " <> PP.align (PP.pretty e)
 pprDirective _ (DirectiveBrief f) =
   pprDirective False f
 pprDirective _ (DirectiveCovert f) =
   pprDirective False f
 pprDirective _ (DirectiveImg e params) =
-  "> :img "
-    <> PP.align (PP.ppr e)
-    <> if null params' then mempty else PP.stack $ ";" : params'
+  ("> :img " <> PP.align (PP.pretty e))
+    <> if null params' then mempty else ";" <> PP.hardline <> PP.stack params'
   where
-    params' =
-      catMaybes
-        [ p "file" imgFile PP.ppr
-        ]
-    p s f ppr = do
+    params' = catMaybes [p "file" imgFile PP.pretty]
+    p s f pretty = do
       x <- f params
-      Just $ s <> ": " <> ppr x
+      Just $ s <> ": " <> pretty x
 pprDirective True (DirectivePlot e (Just (h, w))) =
   PP.stack
-    [ "> :plot2d " <> PP.ppr e <> ";",
-      "size: (" <> PP.ppr w <> "," <> PP.ppr h <> ")"
+    [ "> :plot2d " <> PP.pretty e <> ";",
+      "size: (" <> PP.pretty w <> "," <> PP.pretty h <> ")"
     ]
 pprDirective _ (DirectivePlot e _) =
-  "> :plot2d " <> PP.align (PP.ppr e)
+  "> :plot2d " <> PP.align (PP.pretty e)
 pprDirective True (DirectiveGnuplot e script) =
   PP.stack $
-    "> :gnuplot " <> PP.align (PP.ppr e) <> ";"
-      : map PP.strictText (T.lines script)
+    "> :gnuplot " <> PP.align (PP.pretty e) <> ";"
+      : map PP.pretty (T.lines script)
 pprDirective False (DirectiveGnuplot e _) =
-  "> :gnuplot " <> PP.align (PP.ppr e)
+  "> :gnuplot " <> PP.align (PP.pretty e)
 pprDirective False (DirectiveVideo e _) =
-  "> :video " <> PP.align (PP.ppr e)
+  "> :video " <> PP.align (PP.pretty e)
 pprDirective True (DirectiveVideo e params) =
-  "> :video "
-    <> PP.ppr e
-    <> if null params' then mempty else PP.stack $ ";" : params'
+  ("> :video " <> PP.pretty e)
+    <> if null params' then mempty else ";" <> PP.hardline <> PP.stack params'
   where
     params' =
       catMaybes
-        [ p "fps" videoFPS PP.ppr,
+        [ p "fps" videoFPS PP.pretty,
           p "loop" videoLoop ppBool,
           p "autoplay" videoAutoplay ppBool,
-          p "format" videoFormat PP.strictText,
-          p "file" videoFile PP.ppr
+          p "format" videoFormat PP.pretty,
+          p "file" videoFile PP.pretty
         ]
     ppBool b = if b then "true" else "false"
-    p s f ppr = do
+    p s f pretty = do
       x <- f params
-      Just $ s <> ": " <> ppr x
+      Just $ s <> ": " <> pretty x
 
 instance PP.Pretty Directive where
-  ppr = pprDirective True
+  pretty = pprDirective True
 
 data Block
   = BlockCode T.Text
   | BlockComment T.Text
-  | BlockDirective Directive
+  | BlockDirective Directive T.Text
   deriving (Show)
 
 varsInScripts :: [Block] -> S.Set EntryName
 varsInScripts = foldMap varsInBlock
   where
-    varsInBlock (BlockDirective d) = varsInDirective d
+    varsInBlock (BlockDirective d _) = varsInDirective d
     varsInBlock BlockCode {} = mempty
     varsInBlock BlockComment {} = mempty
 
 type Parser = Parsec Void T.Text
 
 postlexeme :: Parser ()
-postlexeme = void $ hspace *> optional (try $ eol *> "-- " *> postlexeme)
+postlexeme = void $ hspace *> optional (try $ eol *> "--" *> postlexeme)
 
 lexeme :: Parser a -> Parser a
 lexeme p = p <* postlexeme
@@ -289,10 +280,26 @@ atStartOfLine = do
 afterExp :: Parser ()
 afterExp = choice [atStartOfLine, void eol]
 
+withParsedSource :: Parser a -> (a -> T.Text -> b) -> Parser b
+withParsedSource p f = do
+  s <- getInput
+  bef <- getOffset
+  x <- p
+  aft <- getOffset
+  pure $ f x $ T.take (aft - bef) s
+
+stripCommentPrefix :: T.Text -> T.Text
+stripCommentPrefix = T.unlines . map onLine . T.lines
+  where
+    onLine s
+      | "-- " `T.isPrefixOf` s = T.drop 3 s
+      | otherwise = T.drop 2 s
+
 parseBlock :: Parser Block
 parseBlock =
   choice
-    [ token "-- >" $> BlockDirective <*> parseDirective,
+    [ withParsedSource (token "-- >" *> parseDirective) $ \d s ->
+        BlockDirective d $ stripCommentPrefix s,
       BlockCode <$> parseTestBlock,
       BlockCode <$> parseBlockCode,
       BlockComment <$> parseBlockComment
@@ -860,18 +867,18 @@ processBlock :: Env -> Block -> IO (Failure, T.Text, Files)
 processBlock _ (BlockCode code)
   | T.null code = pure (Success, "\n", mempty)
   | otherwise = pure (Success, "\n```futhark\n" <> code <> "```\n\n", mempty)
-processBlock _ (BlockComment text) =
-  pure (Success, text, mempty)
-processBlock env (BlockDirective directive) = do
+processBlock _ (BlockComment pretty) =
+  pure (Success, pretty, mempty)
+processBlock env (BlockDirective directive text) = do
   when (scriptVerbose (envOpts env) > 0) $
-    T.hPutStrLn stderr . prettyText $
-      "Processing " <> PP.align (PP.ppr directive) <> "..."
+    T.hPutStrLn stderr . PP.docText $
+      "Processing " <> PP.align (PP.pretty directive) <> "..."
   let prompt = case directive of
         DirectiveCovert _ -> mempty
         DirectiveBrief _ ->
-          "```\n" <> prettyText (pprDirective False directive) <> "\n```\n"
+          "```\n" <> PP.docText (pprDirective False directive) <> "\n```\n"
         _ ->
-          "```\n" <> prettyText (pprDirective True directive) <> "\n```\n"
+          "```\n" <> text <> "```\n"
       env' = env {envHash = hashText (envHash env <> prettyText directive)}
   (r, files) <- runScriptM $ processDirective env' directive
   case r of

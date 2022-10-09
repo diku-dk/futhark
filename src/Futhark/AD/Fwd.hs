@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -12,10 +7,10 @@ import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import qualified Data.Kind
+import Data.Kind qualified
 import Data.List (transpose)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
@@ -24,7 +19,7 @@ import Futhark.IR.SOACS
 
 zeroTan :: Type -> ADM SubExp
 zeroTan (Prim t) = pure $ constant $ blankPrimValue t
-zeroTan t = error $ "zeroTan on non-primitive type: " ++ pretty t
+zeroTan t = error $ "zeroTan on non-primitive type: " ++ prettyString t
 
 zeroExp :: Type -> Exp SOACS
 zeroExp (Prim pt) =
@@ -262,7 +257,7 @@ basicFwd pat aux op = do
     Rotate rots arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
-    _ -> error $ "basicFwd: Unsupported op " ++ pretty op
+    _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
 fwdLambda l@(Lambda params body ret) =
@@ -311,19 +306,13 @@ fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
             redLambda = op',
             redNeutral = redNeutral red `interleave` map Var neutral_tans
           }
-fwdSOAC pat aux (Stream size xs form nes lam) = do
+fwdSOAC pat aux (Stream size xs nes lam) = do
   pat' <- bundleNew pat
   lam' <- fwdStreamLambda lam
   xs' <- bundleTan xs
   nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
   let nes' = interleave nes nes_tan
-  case form of
-    Sequential ->
-      addStm $ Let pat' aux $ Op $ Stream size xs' Sequential nes' lam'
-    Parallel o comm lam0 -> do
-      lam0' <- fwdLambda lam0
-      let form' = Parallel o comm lam0'
-      addStm $ Let pat' aux $ Op $ Stream size xs' form' nes' lam'
+  addStm $ Let pat' aux $ Op $ Stream size xs' nes' lam'
 fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
   pat' <- bundleNew pat
   ops' <- mapM fwdHist ops
@@ -407,7 +396,7 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
       let arg_pes = zipWith primExpFromSubExp argts (map fst args)
       case pdBuiltin f arg_pes of
         Nothing ->
-          error $ "No partial derivative defined for builtin function: " ++ pretty f
+          error $ "No partial derivative defined for builtin function: " ++ prettyString f
         Just derivs -> do
           let convertTo tt e
                 | e_t == tt = e
@@ -417,17 +406,17 @@ fwdStm stm@(Let pat _ (Apply f args _ _))
                       (FloatType tt', FloatType ft) -> ConvOpExp (FPConv ft tt') e
                       (Bool, FloatType ft) -> ConvOpExp (FToB ft) e
                       (FloatType tt', Bool) -> ConvOpExp (BToF tt') e
-                      _ -> error $ "fwdStm.convertTo: " ++ pretty (f, tt, e_t)
+                      _ -> error $ "fwdStm.convertTo: " ++ prettyString (f, tt, e_t)
                 where
                   e_t = primExpType e
           zipWithM_ (letBindNames . pure) (patNames pat_tan)
             =<< mapM toExp (zipWith (~*~) (map (convertTo ret) arg_tans) derivs)
-fwdStm (Let pat aux (If cond t f (IfDec ret ifsort))) = do
-  t' <- slocal' $ fwdBody t
-  f' <- slocal' $ fwdBody f
+fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
+  cases' <- slocal' $ mapM (traverse fwdBody) cases
+  defbody' <- slocal' $ fwdBody defbody
   pat' <- bundleNew pat
   ret' <- bundleTan ret
-  addStm $ Let pat' aux $ If cond t' f' $ IfDec ret' ifsort
+  addStm $ Let pat' aux $ Match ses cases' defbody' $ MatchDec ret' ifsort
 fwdStm (Let pat aux (DoLoop val_pats loop@(WhileLoop v) body)) = do
   val_pats' <- bundleNew val_pats
   pat' <- bundleNew pat
@@ -465,7 +454,7 @@ fwdStm (Let pat aux (WithAcc inputs lam)) = do
     removeIndexTans _ ps = ps
 fwdStm (Let pat aux (Op soac)) = fwdSOAC pat aux soac
 fwdStm stm =
-  error $ "unhandled forward mode AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
+  error $ "unhandled forward mode AD for Stm: " ++ prettyString stm ++ "\n" ++ show stm
 
 fwdBody :: Body SOACS -> ADM (Body SOACS)
 fwdBody (Body _ stms res) = buildBody_ $ do

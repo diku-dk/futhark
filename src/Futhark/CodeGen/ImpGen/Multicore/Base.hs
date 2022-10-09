@@ -32,9 +32,9 @@ where
 
 import Control.Monad
 import Data.Bifunctor
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem
@@ -96,11 +96,11 @@ getLoopBounds = do
 getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64)
 getIterationDomain SegMap {} space = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
   pure $ product ns_64
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
   case unSegSpace space of
     [_] -> pure $ product ns_64
     -- A segmented SegOp is over the segments
@@ -136,8 +136,6 @@ compileThreadResult ::
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ _ ConcatReturns {} =
-  compilerBugS "compileThreadResult: ConcatReturn unhandled."
 compileThreadResult _ _ WriteReturns {} =
   compilerBugS "compileThreadResult: WriteReturns unhandled."
 compileThreadResult _ _ TileReturns {} =
@@ -322,7 +320,7 @@ sForVectorized' :: VName -> Imp.Exp -> MulticoreGen () -> MulticoreGen ()
 sForVectorized' i bound body = do
   let it = case primExpType bound of
         IntType bound_t -> bound_t
-        t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
+        t -> error $ "sFor': bound " ++ prettyString bound ++ " is of type " ++ prettyString t
   addLoopVar i it
   body' <- collect body
   emit $ Imp.Op $ Imp.ForEach i (Imp.ValueExp $ blankPrimValue $ Imp.IntType Imp.Int64) bound body'
@@ -346,9 +344,9 @@ sLoopNestVectorized = sLoopNest' [] . shapeDims
   where
     sLoopNest' is [] f = f $ reverse is
     sLoopNest' is [d] f =
-      sForVectorized "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) [] f
+      sForVectorized "nest_i" (pe64 d) $ \i -> sLoopNest' (i : is) [] f
     sLoopNest' is (d : ds) f =
-      sFor "nest_i" (toInt64Exp d) $ \i -> sLoopNest' (i : is) ds f
+      sFor "nest_i" (pe64 d) $ \i -> sLoopNest' (i : is) ds f
 
 -------------------------------
 ------- SegHist helpers -------
@@ -565,4 +563,4 @@ toIntegral 8 = pure int8
 toIntegral 16 = pure int16
 toIntegral 32 = pure int32
 toIntegral 64 = pure int64
-toIntegral b = error $ "number of bytes is not supported for CAS - " ++ pretty b
+toIntegral b = error $ "number of bytes is not supported for CAS - " ++ prettyString b

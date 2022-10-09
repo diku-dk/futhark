@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 
 -- | High-level API for invoking the Futhark compiler.
@@ -8,7 +6,7 @@ module Futhark.Compiler
     runCompilerOnProgram,
     dumpError,
     handleWarnings,
-    pprProgErrors,
+    prettyProgErrors,
     module Futhark.Compiler.Program,
     module Futhark.Compiler.Config,
     readProgramFile,
@@ -23,22 +21,21 @@ import Control.Monad
 import Control.Monad.Except
 import Data.Bifunctor (first)
 import Data.List (sortOn)
-import qualified Data.List.NonEmpty as NE
+import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (..), posCoff, posFile)
-import qualified Data.Text.IO as T
-import qualified Futhark.Analysis.Alias as Alias
+import Data.Text.IO qualified as T
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Compiler.Config
 import Futhark.Compiler.Program
 import Futhark.IR
-import qualified Futhark.IR.SOACS as I
-import qualified Futhark.IR.TypeCheck as I
+import Futhark.IR.SOACS qualified as I
+import Futhark.IR.TypeCheck qualified as I
 import Futhark.Internalise
 import Futhark.MonadFreshNames
 import Futhark.Pipeline
-import Futhark.Util.Console (inRed, inYellow)
 import Futhark.Util.Log
-import Futhark.Util.Pretty (Doc, line, ppr, prettyText, punctuate, stack, text, (</>))
-import qualified Language.Futhark as E
+import Futhark.Util.Pretty
+import Language.Futhark qualified as E
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Warnings
 import System.Exit (ExitCode (..), exitWith)
@@ -51,7 +48,7 @@ dumpError :: FutharkConfig -> CompilerError -> IO ()
 dumpError config err =
   case err of
     ExternalError s -> do
-      T.hPutStrLn stderr $ prettyText s
+      hPutDoc stderr s
       T.hPutStrLn stderr ""
       T.hPutStrLn stderr "If you find this error message confusing, uninformative, or wrong, please open an issue:"
       T.hPutStrLn stderr "  https://github.com/diku-dk/futhark/issues"
@@ -130,25 +127,25 @@ runPipelineOnProgram config pipeline file = do
 typeCheckInternalProgram :: I.Prog I.SOACS -> FutharkM ()
 typeCheckInternalProgram prog =
   case I.checkProg prog' of
-    Left err -> internalErrorS ("After internalisation:\n" ++ show err) (ppr prog')
+    Left err -> internalErrorS ("After internalisation:\n" ++ show err) (pretty prog')
     Right () -> pure ()
   where
     prog' = Alias.aliasAnalysis prog
 
 -- | Prettyprint program errors as suitable for showing on a text console.
-pprProgErrors :: NE.NonEmpty ProgError -> Doc
-pprProgErrors = stack . punctuate line . map onError . sortOn (rep . locOf) . NE.toList
+prettyProgErrors :: NE.NonEmpty ProgError -> Doc AnsiStyle
+prettyProgErrors = stack . punctuate line . map onError . sortOn (rep . locOf) . NE.toList
   where
     rep NoLoc = ("", 0)
     rep (Loc p _) = (posFile p, posCoff p)
     onError (ProgError NoLoc msg) =
-      msg
+      unAnnotate msg
     onError (ProgError loc msg) =
-      text (inRed $ "Error at " <> locStr (srclocOf loc) <> ":") </> msg
+      annotate (color Red) ("Error at " <> pretty (locText (srclocOf loc))) <> ":" </> unAnnotate msg
     onError (ProgWarning NoLoc msg) =
-      msg
+      unAnnotate msg
     onError (ProgWarning loc msg) =
-      text (inYellow $ "Warning at " <> locStr (srclocOf loc) <> ":") </> msg
+      annotate (color Yellow) $ "Warning at " <> pretty (locText (srclocOf loc)) <> ":" </> unAnnotate msg
 
 -- | Throw an exception formatted with 'pprProgErrors' if there's
 -- an error.
@@ -157,7 +154,7 @@ throwOnProgError ::
   Either (NE.NonEmpty ProgError) a ->
   m a
 throwOnProgError =
-  either (externalError . pprProgErrors) pure
+  either (externalError . prettyProgErrors) pure
 
 -- | Read and type-check a Futhark program, comprising a single file,
 -- including all imports.
@@ -215,7 +212,7 @@ handleWarnings config m = do
   (ws, a) <- m
 
   when (futharkWarn config && anyWarnings ws) $ do
-    liftIO $ hPutStrLn stderr $ pretty ws
+    liftIO $ hPutDoc stderr $ prettyWarnings ws
     when (futharkWerror config) $
       externalErrorS "Treating above warnings as errors due to --Werror."
 

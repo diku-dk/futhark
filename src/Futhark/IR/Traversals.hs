@@ -83,7 +83,7 @@ identityMapper =
 -- expression.  Importantly, the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
 mapExpM ::
-  (Applicative m, Monad m) =>
+  Monad m =>
   Mapper frep trep m ->
   Exp frep ->
   m (Exp trep)
@@ -103,12 +103,14 @@ mapExpM tv (BasicOp (ConvOp conv x)) =
   BasicOp <$> (ConvOp conv <$> mapOnSubExp tv x)
 mapExpM tv (BasicOp (UnOp op x)) =
   BasicOp <$> (UnOp op <$> mapOnSubExp tv x)
-mapExpM tv (If c texp fexp (IfDec ts s)) =
-  If
-    <$> mapOnSubExp tv c
-    <*> mapOnBody tv mempty texp
-    <*> mapOnBody tv mempty fexp
-    <*> (IfDec <$> mapM (mapOnBranchType tv) ts <*> pure s)
+mapExpM tv (Match ses cases defbody (MatchDec ts s)) =
+  Match
+    <$> mapM (mapOnSubExp tv) ses
+    <*> mapM mapOnCase cases
+    <*> mapOnBody tv mempty defbody
+    <*> (MatchDec <$> mapM (mapOnBranchType tv) ts <*> pure s)
+  where
+    mapOnCase (Case vs body) = Case vs <$> mapOnBody tv mempty body
 mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
     (,) <$> mapOnSubExp tv arg <*> pure d
@@ -301,10 +303,10 @@ walkExpM tv (BasicOp (ConvOp _ x)) =
   walkOnSubExp tv x
 walkExpM tv (BasicOp (UnOp _ x)) =
   walkOnSubExp tv x
-walkExpM tv (If c texp fexp (IfDec ts _)) = do
-  walkOnSubExp tv c
-  walkOnBody tv mempty texp
-  walkOnBody tv mempty fexp
+walkExpM tv (Match ses cases defbody (MatchDec ts _)) = do
+  mapM_ (walkOnSubExp tv) ses
+  mapM_ (walkOnBody tv mempty . caseBody) cases
+  walkOnBody tv mempty defbody
   mapM_ (walkOnBranchType tv) ts
 walkExpM tv (Apply _ args ret _) =
   mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret

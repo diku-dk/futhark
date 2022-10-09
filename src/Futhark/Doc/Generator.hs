@@ -1,44 +1,42 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | The core logic of @futhark doc@.
 module Futhark.Doc.Generator (renderFiles) where
 
-import qualified CMarkGFM as GFM
+import CMarkGFM qualified as GFM
 import Control.Arrow ((***))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Writer hiding (Sum)
 import Data.Char (isAlpha, isSpace, toUpper)
 import Data.List (find, groupBy, inits, intersperse, isPrefixOf, partition, sort, sortOn, tails)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Ord
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Data.String (fromString)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Version
-import Futhark.Util.Pretty (Doc, ppr)
+import Futhark.Util.Pretty (Doc, docText, pretty)
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad hiding (warn)
 import System.FilePath (makeRelative, splitPath, (-<.>), (<.>), (</>))
 import Text.Blaze.Html5 (AttributeValue, Html, toHtml, (!))
-import qualified Text.Blaze.Html5 as H
-import qualified Text.Blaze.Html5.Attributes as A
+import Text.Blaze.Html5 qualified as H
+import Text.Blaze.Html5.Attributes qualified as A
 import Prelude hiding (abs)
 
-docToHtml :: Doc -> Html
-docToHtml = toHtml . pretty
+docToHtml :: Doc a -> Html
+docToHtml = toHtml . docText
 
 primTypeHtml :: PrimType -> Html
-primTypeHtml = docToHtml . ppr
+primTypeHtml = docToHtml . pretty
 
 prettyU :: Uniqueness -> Html
-prettyU = docToHtml . ppr
+prettyU = docToHtml . pretty
 
 renderName :: Name -> Html
-renderName name = docToHtml (ppr name)
+renderName name = docToHtml (pretty name)
 
 joinBy :: Html -> [Html] -> Html
 joinBy _ [] = mempty
@@ -80,13 +78,13 @@ type FileMap = M.Map VName (FilePath, Namespace)
 
 type DocM = ReaderT Context (WriterT Documented (Writer Warnings))
 
-data IndexWhat = IndexValue | IxFun | IndexModule | IndexModuleType | IndexType
+data IndexWhat = IndexValue | IndexFunction | IndexModule | IndexModuleType | IndexType
 
 -- | We keep a mapping of the names we have actually documented, so we
 -- can generate an index.
 type Documented = M.Map VName IndexWhat
 
-warn :: SrcLoc -> Doc -> DocM ()
+warn :: SrcLoc -> Doc () -> DocM ()
 warn loc s = lift $ lift $ tell $ singleWarning loc s
 
 document :: VName -> IndexWhat -> DocM ()
@@ -302,7 +300,7 @@ indexPage important_imports imports documented fm =
                 baseString name
           what' = case what of
             IndexValue -> "value"
-            IxFun -> "function"
+            IndexFunction -> "function"
             IndexType -> "type"
             IndexModuleType -> "module type"
             IndexModule -> "module"
@@ -378,7 +376,7 @@ synopsisDec visible fm dec = case dec of
         Just $
           pure $
             fullRow $
-              keyword "open" <> fromString (" <" <> pretty x <> ">")
+              keyword "open" <> fromString (" <" <> prettyString x <> ">")
   LocalDec (SigDec s) _
     | sigName s `S.member` visible ->
         synopsisModType (keyword "local" <> " ") s
@@ -712,13 +710,13 @@ typeParamHtml :: TypeParam -> Html
 typeParamHtml (TypeParamDim name _) =
   brackets $ vnameHtml name
 typeParamHtml (TypeParamType l name _) =
-  "'" <> fromString (pretty l) <> vnameHtml name
+  "'" <> fromString (prettyString l) <> vnameHtml name
 
 typeAbbrevHtml :: Liftedness -> Html -> [TypeParam] -> Html
 typeAbbrevHtml l name params =
   what <> name <> mconcat (map ((" " <>) . typeParamHtml) params)
   where
-    what = keyword $ "type" ++ pretty l ++ " "
+    what = keyword $ "type" ++ prettyString l ++ " "
 
 docHtml :: Maybe DocComment -> DocM Html
 docHtml (Just (DocComment doc loc)) =
@@ -849,7 +847,7 @@ valBindWhat vb
     orderZero t =
       IndexValue
   | otherwise =
-      IxFun
+      IndexFunction
 
 describeSpecs :: [Spec] -> DocM Html
 describeSpecs specs =
@@ -864,7 +862,7 @@ describeSpec (ValSpec name tparams t _ doc _) =
   where
     what =
       case t of
-        TEArrow {} -> IxFun
+        TEArrow {} -> IndexFunction
         _ -> IndexValue
 describeSpec (TypeAbbrSpec vb) =
   describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)

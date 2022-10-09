@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Optimisation pipelines.
 module Futhark.Passes
   ( standardPipeline,
@@ -20,15 +18,16 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS, usesAD)
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
-import qualified Futhark.Optimise.ArrayShortCircuiting as ArrayShortCircuiting
+import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
+import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
-import qualified Futhark.Optimise.MemoryBlockMerging as MemoryBlockMerging
+import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.MergeGPUBodies
 import Futhark.Optimise.ReduceDeviceSyncs
 import Futhark.Optimise.Sink
@@ -36,9 +35,9 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
-import qualified Futhark.Pass.ExplicitAllocations.GPU as GPU
-import qualified Futhark.Pass.ExplicitAllocations.MC as MC
-import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
+import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
+import Futhark.Pass.ExplicitAllocations.MC qualified as MC
+import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
@@ -129,6 +128,7 @@ sequentialCpuPipeline =
     >>> passes
       [ performCSE False,
         simplifySeqMem,
+        entryPointMemSeq,
         simplifySeqMem,
         LiftAllocations.liftAllocationsSeqMem,
         simplifySeqMem,
@@ -150,6 +150,7 @@ gpuPipeline =
       [ simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,
+        entryPointMemGPU,
         doubleBufferGPU,
         simplifyGPUMem,
         performCSE False,
@@ -192,6 +193,7 @@ multicorePipeline =
       [ simplifyMCMem,
         performCSE False,
         simplifyMCMem,
+        entryPointMemMC,
         doubleBufferMC,
         simplifyMCMem
       ]

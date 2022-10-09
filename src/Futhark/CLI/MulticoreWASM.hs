@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | @futhark wasm-multicore@
 module Futhark.CLI.MulticoreWASM (main) where
 

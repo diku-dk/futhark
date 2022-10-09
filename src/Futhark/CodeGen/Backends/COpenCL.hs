@@ -1,7 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Code generation for C with OpenCL.
 module Futhark.CodeGen.Backends.COpenCL
@@ -15,21 +12,21 @@ where
 
 import Control.Monad hiding (mapM)
 import Data.List (intercalate)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
-import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
+import Futhark.CodeGen.ImpGen.OpenCL qualified as ImpGen
 import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
     GetSize,
     GetSizeMax,
   )
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to OpenCL.
@@ -337,7 +334,7 @@ callKernel (CmpSizeLe v key x) = do
   GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key <= $exp:x';|]
   sizeLoggingCode v key x'
 callKernel (GetSizeMax v size_class) =
-  let field = "max_" ++ pretty size_class
+  let field = "max_" ++ prettyString size_class
    in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
 callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   -- The other failure args are set automatically when the kernel is
@@ -428,7 +425,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
         $id:time_end = get_wall_time();
         long int $id:time_diff = $id:time_end - $id:time_start;
         fprintf(ctx->log, "kernel %s runtime: %ldus\n",
-                $string:(pretty kernel_name), $id:time_diff);
+                $string:(prettyString kernel_name), $id:time_diff);
       }
     }|]
   where
@@ -449,7 +446,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
           ++ " and local work size "
           ++ dims
           ++ "; local memory: %d bytes.\n",
-        [C.cexp|$string:(pretty kernel_name)|]
+        [C.cexp|$string:(prettyString kernel_name)|]
           : map (kernelDim global_work_size) [0 .. kernel_rank - 1]
           ++ map (kernelDim local_work_size) [0 .. kernel_rank - 1]
           ++ [[C.cexp|(int)$exp:local_bytes|]]

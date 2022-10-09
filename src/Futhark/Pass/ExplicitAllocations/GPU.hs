@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -10,49 +8,60 @@ module Futhark.Pass.ExplicitAllocations.GPU
   )
 where
 
-import qualified Data.Map as M
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
 instance SizeSubst (HostOp rep op) where
-  opSizeSubst (Pat [size]) (SizeOp (SplitSpace _ _ _ elems_per_thread)) =
-    M.singleton (patElemName size) elems_per_thread
-  opSizeSubst _ _ = mempty
-
   opIsConst (SizeOp GetSize {}) = True
   opIsConst (SizeOp GetSizeMax {}) = True
   opIsConst _ = False
 
-allocAtLevel :: SegLevel -> AllocM fromrep trep a -> AllocM fromrep trep a
+allocAtLevel :: SegLevel -> AllocM GPU GPUMem a -> AllocM GPU GPUMem a
 allocAtLevel lvl = local $ \env ->
   env
     { allocSpace = space,
-      aggressiveReuse = True
+      aggressiveReuse = True,
+      allocInOp = handleHostOp (Just lvl)
     }
   where
     space = case lvl of
-      SegThread {} -> DefaultSpace
       SegGroup {} -> Space "local"
+      SegThread {} -> DefaultSpace
+      SegThreadInGroup {} -> DefaultSpace
 
 handleSegOp ::
+  Maybe SegLevel ->
   SegOp SegLevel GPU ->
   AllocM GPU GPUMem (SegOp SegLevel GPUMem)
-handleSegOp op = do
+handleSegOp outer_lvl op = do
   num_threads <-
-    letSubExp "num_threads" $
-      BasicOp $
-        BinOp
-          (Mul Int64 OverflowUndef)
-          (unCount (segNumGroups lvl))
-          (unCount (segGroupSize lvl))
-  allocAtLevel lvl $ mapSegOpM (mapper num_threads) op
+    letSubExp "num_threads"
+      =<< case maybe_grid of
+        Just grid ->
+          pure . BasicOp $
+            BinOp
+              (Mul Int64 OverflowUndef)
+              (unCount (gridNumGroups grid))
+              (unCount (gridGroupSize grid))
+        Nothing ->
+          foldBinOp
+            (Mul Int64 OverflowUndef)
+            (intConst Int64 1)
+            (segSpaceDims $ segSpace op)
+  allocAtLevel (segLevel op) $ mapSegOpM (mapper num_threads) op
   where
+    maybe_grid =
+      case (outer_lvl, segLevel op) of
+        (Just (SegThread _ (Just grid)), _) -> Just grid
+        (Just (SegGroup _ (Just grid)), _) -> Just grid
+        (_, SegThread _ (Just grid)) -> Just grid
+        (_, SegGroup _ (Just grid)) -> Just grid
+        _ -> Nothing
     scope = scopeOfSegSpace $ segSpace op
-    lvl = segLevel op
     mapper num_threads =
       identitySegOpMapper
         { mapOnSegOpBody =
@@ -63,20 +72,22 @@ handleSegOp op = do
         }
     f = case segLevel op of
       SegThread {} -> inThread
+      SegThreadInGroup {} -> inThread
       SegGroup {} -> inGroup
     inThread env = env {envExpHints = inThreadExpHints}
     inGroup env = env {envExpHints = inGroupExpHints}
 
 handleHostOp ::
+  Maybe SegLevel ->
   HostOp GPU (SOAC GPU) ->
   AllocM GPU GPUMem (MemOp (HostOp GPUMem ()))
-handleHostOp (SizeOp op) =
+handleHostOp _ (SizeOp op) =
   pure $ Inner $ SizeOp op
-handleHostOp (OtherOp op) =
-  error $ "Cannot allocate memory in SOAC: " ++ pretty op
-handleHostOp (SegOp op) =
-  Inner . SegOp <$> handleSegOp op
-handleHostOp (GPUBody ts (Body _ stms res)) =
+handleHostOp _ (OtherOp op) =
+  error $ "Cannot allocate memory in SOAC: " ++ prettyString op
+handleHostOp outer_lvl (SegOp op) =
+  Inner . SegOp <$> handleSegOp outer_lvl op
+handleHostOp _ (GPUBody ts (Body _ stms res)) =
   fmap (Inner . GPUBody ts) . buildBody_ . allocInStms stms $ pure res
 
 kernelExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
@@ -86,9 +97,9 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
       dims' = rearrangeShape perm dims
       ixfun = IxFun.permute (IxFun.iota $ map pe64 dims') perm_inv
   pure [Hint ixfun DefaultSpace]
-kernelExpHints (Op (Inner (SegOp (SegMap lvl@SegThread {} space ts body)))) =
+kernelExpHints (Op (Inner (SegOp (SegMap lvl@(SegThread _ _) space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
-kernelExpHints (Op (Inner (SegOp (SegRed lvl@SegThread {} space reds ts body)))) =
+kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space reds ts body)))) =
   (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint lvl space) (drop num_reds ts) map_res
   where
     num_reds = segBinOpResults reds
@@ -102,11 +113,8 @@ mapResultHint ::
   Type ->
   KernelResult ->
   AllocM GPU GPUMem ExpHint
-mapResultHint lvl space = hint
+mapResultHint _lvl space = hint
   where
-    num_threads =
-      pe64 (unCount $ segNumGroups lvl) * pe64 (unCount $ segGroupSize lvl)
-
     -- Heuristic: do not rearrange for returned arrays that are
     -- sufficiently small.
     coalesceReturnOfShape _ [] = False
@@ -115,19 +123,8 @@ mapResultHint lvl space = hint
 
     hint t Returns {}
       | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
-          chunkmap <- asks chunkMap
           let space_dims = segSpaceDims space
-              t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
-          pure $ Hint (innermost space_dims t_dims) DefaultSpace
-    hint t (ConcatReturns _ SplitStrided {} w _ _) = do
-      chunkmap <- asks chunkMap
-      let t_dims = map (dimAllocationSize chunkmap) $ arrayDims t
-      pure $ Hint (innermost [w] t_dims) DefaultSpace
-    hint Prim {} (ConcatReturns _ SplitContiguous w elems_per_thread _) = do
-      let ixfun_base = IxFun.iota [sExt64 num_threads, pe64 elems_per_thread]
-          ixfun_tr = IxFun.permute ixfun_base [1, 0]
-          ixfun = IxFun.reshape ixfun_tr [pe64 w]
-      pure $ Hint ixfun DefaultSpace
+          pure $ Hint (innermost space_dims (arrayDims t)) DefaultSpace
     hint _ _ = pure NoHint
 
 innermost :: [SubExp] -> [SubExp] -> IxFun
@@ -187,11 +184,11 @@ inThreadExpHints e = do
 
 -- | The pass from 'GPU' to 'GPUMem'.
 explicitAllocations :: Pass GPU GPUMem
-explicitAllocations = explicitAllocationsGeneric handleHostOp kernelExpHints
+explicitAllocations = explicitAllocationsGeneric (handleHostOp Nothing) kernelExpHints
 
 -- | Convert some 'GPU' stms to 'GPUMem'.
 explicitAllocationsInStms ::
   (MonadFreshNames m, HasScope GPUMem m) =>
   Stms GPU ->
   m (Stms GPUMem)
-explicitAllocationsInStms = explicitAllocationsInStmsGeneric handleHostOp kernelExpHints
+explicitAllocationsInStms = explicitAllocationsInStmsGeneric (handleHostOp Nothing) kernelExpHints

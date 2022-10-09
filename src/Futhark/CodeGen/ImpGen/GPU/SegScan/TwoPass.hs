@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Code generation for segmented and non-segmented scans.  Uses a
@@ -9,11 +8,11 @@ import Control.Monad.Except
 import Control.Monad.State
 import Data.List (delete, find, foldl', zip4)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
@@ -156,12 +155,12 @@ scanStage1 ::
   KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
 scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
-  let num_groups' = fmap toInt64Exp num_groups
-      group_size' = fmap toInt64Exp group_size
+  let num_groups' = fmap pe64 num_groups
+      group_size' = fmap pe64 group_size
   num_threads <- dPrimV "num_threads" $ sExt32 $ unCount num_groups' * unCount group_size'
 
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
   let num_elements = product dims'
       elems_per_thread = num_elements `divUp` sExt64 (tvExp num_threads)
       elems_per_group = unCount group_size' * elems_per_thread
@@ -332,7 +331,7 @@ scanStage2 ::
   CallKernelGen ()
 scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
 
   -- Our group size is the number of groups for the stage 1 kernel.
   let group_size = Count $ unCount num_groups
@@ -407,9 +406,9 @@ scanStage3 ::
   [SegBinOp GPUMem] ->
   CallKernelGen ()
 scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
-  let group_size' = fmap toInt64Exp group_size
+  let group_size' = fmap pe64 group_size
       (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
   required_groups <-
     dPrimVE "required_groups" $
       sExt32 $
@@ -492,6 +491,8 @@ compileSegScan ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scans kbody = do
+  attrs <- lvlKernelAttrs lvl
+
   -- Since stage 2 involves a group size equal to the number of groups
   -- used for stage 1, we have to cap this number to the maximum group
   -- size.
@@ -502,14 +503,13 @@ compileSegScan pat lvl space scans kbody = do
     fmap (Imp.Count . tvSize) $
       dPrimV "stage1_num_groups" $
         sMin64 (tvExp stage1_max_num_groups) $
-          toInt64Exp $
-            Imp.unCount $
-              segNumGroups lvl
+          pe64 . Imp.unCount . kAttrNumGroups $
+            attrs
 
   (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 pat stage1_num_groups (segGroupSize lvl) space scans kbody
+    scanStage1 pat stage1_num_groups (kAttrGroupSize attrs) space scans kbody
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
 
   scanStage2 pat stage1_num_threads elems_per_group stage1_num_groups crossesSegment space scans
-  scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scans
+  scanStage3 pat (kAttrNumGroups attrs) (kAttrGroupSize attrs) elems_per_group crossesSegment space scans

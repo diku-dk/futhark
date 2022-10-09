@@ -1,7 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.IR.Mem.Simplify
@@ -14,19 +10,34 @@ where
 
 import Control.Monad
 import Data.List (find)
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR.Mem
-import qualified Futhark.IR.Mem.IxFun as IxFun
-import qualified Futhark.Optimise.Simplify as Simplify
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Prop.Aliases (AliasedOp)
+import Futhark.Optimise.Simplify qualified as Simplify
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (simplifiable)
 import Futhark.Util
+
+-- | Some constraints that must hold for the simplification rules to work.
+type SimplifyMemory rep inner =
+  ( Simplify.SimplifiableRep rep,
+    LetDec rep ~ LetDecMem,
+    ExpDec rep ~ (),
+    BodyDec rep ~ (),
+    CanBeWise (Op rep),
+    BuilderOps (Wise rep),
+    OpReturns (OpWithWisdom inner),
+    ST.IndexOp (OpWithWisdom inner),
+    AliasedOp (OpWithWisdom inner),
+    Mem rep inner
+  )
 
 simpleGeneric ::
   (SimplifyMemory rep inner) =>
@@ -93,23 +104,12 @@ blockers =
       Engine.isAllocation = isAlloc mempty mempty
     }
 
--- | Some constraints that must hold for the simplification rules to work.
-type SimplifyMemory rep inner =
-  ( Simplify.SimplifiableRep rep,
-    LetDec rep ~ LetDecMem,
-    ExpDec rep ~ (),
-    BodyDec rep ~ (),
-    CanBeWise (Op rep),
-    BuilderOps (Wise rep),
-    Mem rep inner
-  )
-
 callKernelRules :: SimplifyMemory rep inner => RuleBook (Wise rep)
 callKernelRules =
   standardRules
     <> ruleBook
       [ RuleBasicOp copyCopyToCopy,
-        RuleIf unExistentialiseMemory,
+        RuleMatch unExistentialiseMemory,
         RuleOp decertifySafeAlloc
       ]
       []
@@ -118,8 +118,8 @@ callKernelRules =
 -- the array is not existential, and the index function of the array
 -- does not refer to any names in the pattern, then we can create a
 -- block of the proper size and always return there.
-unExistentialiseMemory :: SimplifyMemory rep inner => TopDownRuleIf (Wise rep)
-unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
+unExistentialiseMemory :: SimplifyMemory rep inner => TopDownRuleMatch (Wise rep)
+unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
   | ST.simplifyMemory vtable,
     fixable <- foldl hasConcretisableMemory mempty $ patElems pat,
     not $ null fixable = Simplify $ do
@@ -149,9 +149,9 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
                 pure $ SubExpRes cs $ Var mem
           updateResult _ se =
             pure se
-      tbranch' <- updateBody tbranch
-      fbranch' <- updateBody fbranch
-      letBind pat $ If cond tbranch' fbranch' ifdec
+      cases' <- mapM (traverse updateBody) cases
+      defbody' <- updateBody defbody
+      letBind pat $ Match cond cases' defbody' ifdec
   where
     onlyUsedIn name here =
       not . any ((name `nameIn`) . freeIn) . filter ((/= here) . patElemName) $
@@ -167,13 +167,13 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
             <$> find
               ((mem ==) . patElemName . snd)
               (zip [(0 :: Int) ..] $ patElems pat),
-        Just tse <- maybeNth j $ bodyResult tbranch,
-        Just fse <- maybeNth j $ bodyResult fbranch,
+        Just cases_ses <- mapM (maybeNth j . bodyResult . caseBody) cases,
+        Just defbody_se <- maybeNth j $ bodyResult defbody,
         mem `onlyUsedIn` patElemName pat_elem,
         length (IxFun.base ixfun) == shapeRank shape, -- See #1325
         all knownSize (shapeDims shape),
         not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
-        fse /= tse =
+        any (defbody_se /=) cases_ses =
           let mem_size =
                 untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
            in (pat_elem, mem_size, mem, space) : fixable

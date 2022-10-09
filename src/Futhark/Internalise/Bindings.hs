@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Strict #-}
 
 -- | Internalising bindings.
@@ -14,9 +13,9 @@ where
 
 import Control.Monad.Reader hiding (mapM)
 import Data.Bifunctor
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.IR.SOACS as I
+import Futhark.IR.SOACS qualified as I
 import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
 import Futhark.Util
@@ -146,7 +145,6 @@ flattenPat = flattenPat'
       flattenPat' $ E.Id name t loc
     flattenPat' (E.Id v (Info t) loc) =
       pure [(E.Ident v (Info t) loc, mempty)]
-    -- XXX: treat empty tuples and records as unit.
     flattenPat' (E.TuplePat [] loc) =
       flattenPat' (E.Wildcard (Info $ E.Scalar $ E.Record mempty) loc)
     flattenPat' (E.RecordPat [] loc) =

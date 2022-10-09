@@ -1,6 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 -- | @futhark test@
 module Futhark.CLI.Test (main) where
@@ -10,22 +8,22 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except hiding (throwError)
-import qualified Control.Monad.Except as E
-import qualified Data.ByteString as SBS
-import qualified Data.ByteString.Lazy as LBS
+import Control.Monad.Except qualified as E
+import Data.ByteString qualified as SBS
+import Data.ByteString.Lazy qualified as LBS
 import Data.List (delete, partition)
-import qualified Data.Map.Strict as M
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
+import Data.Map.Strict qualified as M
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal)
-import Futhark.Util.Console
 import Futhark.Util.Options
+import Futhark.Util.Pretty (annotate, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
-import System.Console.ANSI
-import qualified System.Console.Terminal.Size as Terminal
+import System.Console.ANSI (clearFromCursorToScreenEnd, clearLine, cursorUpLine)
+import System.Console.Terminal.Size qualified as Terminal
 import System.Environment
 import System.Exit
 import System.FilePath
@@ -454,16 +452,16 @@ excludeCases config tcase =
       InputOutputs entry $ filter (not . any excluded . runTags) runs
     excluded = (`elem` configExclude config) . T.pack
 
-statusTable :: TestStatus -> String
-statusTable ts = buildTable rows 1
+putStatusTable :: TestStatus -> IO ()
+putStatusTable ts = hPutTable stdout rows 1
   where
     rows =
-      [ [mkEntry "", passed, failed, mkEntry "remaining"],
-        map mkEntry ["programs", passedProgs, failedProgs, remainProgs'],
-        map mkEntry ["runs", passedRuns, failedRuns, remainRuns']
+      [ [mkEntry "" mempty, passed, failed, mkEntry "remaining" mempty],
+        map (`mkEntry` mempty) ["programs", passedProgs, failedProgs, remainProgs'],
+        map (`mkEntry` mempty) ["runs", passedRuns, failedRuns, remainRuns']
       ]
-    passed = ("passed", [SetColor Foreground Vivid Green])
-    failed = ("failed", [SetColor Foreground Vivid Red])
+    passed = mkEntry "passed" $ color Green
+    failed = mkEntry "failed" $ color Red
     passedProgs = show $ testStatusPass ts
     failedProgs = show $ testStatusFail ts
     totalProgs = show $ testStatusTotal ts
@@ -476,9 +474,7 @@ statusTable ts = buildTable rows 1
     remainRuns' = remainRuns ++ "/" ++ totalRuns
 
 tableLines :: Int
-tableLines = 1 + (length . lines $ blankTable)
-  where
-    blankTable = statusTable $ TestStatus [] [] 0 0 0 0 0 0 0
+tableLines = 8
 
 spaceTable :: IO ()
 spaceTable = putStr $ replicate tableLines '\n'
@@ -486,7 +482,7 @@ spaceTable = putStr $ replicate tableLines '\n'
 reportTable :: TestStatus -> IO ()
 reportTable ts = do
   moveCursorToTableTop
-  putStrLn $ statusTable ts
+  putStatusTable ts
   clearLine
   w <- maybe 80 Terminal.width <$> Terminal.size
   putStrLn $ atMostChars (w - length labelstr) running
@@ -496,19 +492,6 @@ reportTable ts = do
 
 moveCursorToTableTop :: IO ()
 moveCursorToTableTop = cursorUpLine tableLines
-
-reportText :: TestStatus -> IO ()
-reportText ts =
-  putStr $
-    "("
-      ++ show (testStatusFail ts)
-      ++ " failed, "
-      ++ show (testStatusPass ts)
-      ++ " passed, "
-      ++ show num_remain
-      ++ " to go).\n"
-  where
-    num_remain = length $ testStatusRemain ts
 
 runTests :: TestConfig -> [FilePath] -> IO ()
 runTests config paths = do
@@ -533,10 +516,10 @@ runTests config paths = do
 
       report
         | fancy = reportTable
-        | otherwise = reportText
+        | otherwise = const (pure ())
       clear
         | fancy = clearFromCursorToScreenEnd
-        | otherwise = putStr "\n"
+        | otherwise = pure ()
 
       numTestCases tc =
         case testAction $ testCaseTest tc of
@@ -552,10 +535,7 @@ runTests config paths = do
             report ts
             msg <- takeMVar reportmvar
             case msg of
-              TestStarted test -> do
-                unless fancy $
-                  putStr $
-                    "Started testing " <> testCaseProgram test <> " "
+              TestStarted test ->
                 getResults $ ts {testStatusRun = test : testStatusRun ts}
               TestDone test res -> do
                 let ts' =
@@ -573,14 +553,15 @@ runTests config paths = do
                             { testStatusRunPass =
                                 testStatusRunPass ts' + numTestCases test
                             }
-                    unless fancy $
-                      putStr $
-                        "Finished testing " <> testCaseProgram test <> " "
                     getResults $ ts'' {testStatusPass = testStatusPass ts + 1}
                   Failure s -> do
                     when fancy moveCursorToTableTop
                     clear
-                    putStr $ inBold (testCaseProgram test <> ":\n") <> T.unpack (T.unlines s)
+                    putDoc $
+                      annotate bold (pretty (testCaseProgram test) <> ":")
+                        <> hardline
+                        <> vsep (map pretty s)
+                        <> hardline
                     when fancy spaceTable
                     getResults $
                       ts'
@@ -611,12 +592,13 @@ runTests config paths = do
         }
 
   -- Removes "Now testing" output.
-  when fancy $ cursorUpLine 1 >> clearLine
+  if fancy
+    then cursorUpLine 1 >> clearLine
+    else putStrLn $ show (testStatusPass ts) <> "/" <> show (testStatusTotal ts) <> " passed."
 
-  let excluded_str
-        | null excluded = ""
-        | otherwise = " (" ++ show (length excluded) ++ " program(s) excluded).\n"
-  putStr excluded_str
+  unless (null excluded) . putStrLn $
+    show (length excluded) ++ " program(s) excluded."
+
   exitWith $ case testStatusFail ts of
     0 -> ExitSuccess
     _ -> ExitFailure 1

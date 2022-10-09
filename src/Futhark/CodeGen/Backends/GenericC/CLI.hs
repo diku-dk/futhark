@@ -1,9 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Trustworthy #-}
-{-# LANGUAGE TupleSections #-}
 
 -- | Code generation for standalone executables.
 module Futhark.CodeGen.Backends.GenericC.CLI
@@ -12,9 +7,10 @@ module Futhark.CodeGen.Backends.GenericC.CLI
 where
 
 import Data.List (unzip5)
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
   ( cproduct,
     primAPIType,
@@ -23,9 +19,9 @@ import Futhark.CodeGen.Backends.SimpleRep
   )
 import Futhark.CodeGen.RTS.C (tuningH, valuesH)
 import Futhark.Manifest
-import Futhark.Util.Pretty (pretty, prettyText)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Futhark.Util.Pretty (prettyString)
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 genericOptions :: [Option]
 genericOptions =
@@ -270,7 +266,11 @@ printStm manifest tname e =
       let info = tname <> "_info"
        in [C.cstm|write_scalar(stdout, binary_output, &$id:info, &$exp:e);|]
     Just (TypeOpaque desc _ _) ->
-      [C.cstm|printf("#<opaque %s>", $string:(T.unpack desc));|]
+      [C.cstm|{
+         fprintf(stderr, "Values of type \"%s\" have no external representation.\n", $string:(T.unpack desc));
+         retval = 1;
+         goto print_end;
+       }|]
     Just (TypeArray _ et rank ops) ->
       let et' = uncurry primAPIType $ scalarToPrim et
           values_array = arrayValues ops
@@ -282,6 +282,7 @@ printStm manifest tname e =
                  $ty:et' *arr = calloc($exp:num_elems, $id:info.size);
                  assert(arr != NULL);
                  assert($id:values_array(ctx, $exp:e, arr) == 0);
+                 assert(futhark_context_sync(ctx) == 0);
                  write_array(stdout, binary_output, &$id:info, arr,
                              $id:shape_array(ctx, $exp:e), $int:rank);
                  free(arr);
@@ -304,10 +305,6 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
       printstms =
         printResult manifest $ zip (map outputType outputs) output_vals
 
-      ctx_ty = [C.cty|struct futhark_context|]
-      sync_ctx = "futhark_context_sync" :: T.Text
-      error_ctx = "futhark_context_get_error" :: T.Text
-
       cli_entry_point_function_name = "futrts_cli_entry_" ++ T.unpack entry_point_name
 
       pause_profiling = "futhark_context_pause_profiling" :: T.Text
@@ -320,8 +317,8 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
                 int r;
                 // Run the program once.
                 $stms:pack_input
-                if ($id:sync_ctx(ctx) != 0) {
-                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                if (futhark_context_sync(ctx) != 0) {
+                  futhark_panic(1, "%s", futhark_context_get_error(ctx));
                 };
                 // Only profile last run.
                 if (profile_run) {
@@ -332,10 +329,10 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
                              $args:(map addrOf output_vals),
                              $args:input_args);
                 if (r != 0) {
-                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                  futhark_panic(1, "%s", futhark_context_get_error(ctx));
                 }
-                if ($id:sync_ctx(ctx) != 0) {
-                  futhark_panic(1, "%s", $id:error_ctx(ctx));
+                if (futhark_context_sync(ctx) != 0) {
+                  futhark_panic(1, "%s", futhark_context_get_error(ctx));
                 };
                 if (profile_run) {
                   $id:pause_profiling(ctx);
@@ -349,9 +346,10 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
                 $stms:free_input
               |]
    in ( [C.cedecl|
-   static void $id:cli_entry_point_function_name($ty:ctx_ty *ctx) {
+   static int $id:cli_entry_point_function_name(struct futhark_context *ctx) {
      typename int64_t t_start, t_end;
      int time_runs = 0, profile_run = 0;
+     int retval = 0;
 
      // We do not want to profile all the initialisation.
      $id:pause_profiling(ctx);
@@ -361,7 +359,7 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
      $items:(mconcat input_items)
 
      if (end_of_input(stdin) != 0) {
-       futhark_panic(1, "Expected EOF on stdin after reading input for \"%s\".\n", $string:(pretty entry_point_name));
+       futhark_panic(1, "Expected EOF on stdin after reading input for \"%s\".\n", $string:(prettyString entry_point_name));
      }
 
      $items:output_decls
@@ -392,11 +390,12 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
        }
        $stms:printstms
      }
-
+     print_end: {}
      $stms:free_outputs
+     return retval;
    }|],
         [C.cinit|{ .name = $string:(T.unpack entry_point_name),
-                       .fun = $id:cli_entry_point_function_name }|]
+                   .fun = $id:cli_entry_point_function_name }|]
       )
 
 {-# NOINLINE cliDefs #-}
@@ -411,7 +410,7 @@ cliDefs options manifest =
           map (uncurry (cliEntryPoint manifest)) $
             M.toList $
               manifestEntryPoints manifest
-   in prettyText
+   in definitionsText
         [C.cunit|
 $esc:("#include <getopt.h>")
 $esc:("#include <ctype.h>")
@@ -435,7 +434,7 @@ $func:option_parser
 
 $edecls:cli_entry_point_decls
 
-typedef void entry_point_fun(struct futhark_context*);
+typedef int entry_point_fun(struct futhark_context*);
 
 struct entry_point_entry {
   const char *name;
@@ -443,6 +442,7 @@ struct entry_point_entry {
 };
 
 int main(int argc, char** argv) {
+  int retval = 0;
   fut_progname = argv[0];
 
   struct futhark_context_config *cfg = futhark_context_config_new();
@@ -492,7 +492,7 @@ int main(int argc, char** argv) {
       fprintf(stderr, "Send EOF (CTRL-d) after typing all input values.\n");
     }
 
-    entry_point_fun(ctx);
+    retval = entry_point_fun(ctx);
 
     if (runtime_file != NULL) {
       fclose(runtime_file);
@@ -507,5 +507,5 @@ int main(int argc, char** argv) {
 
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
-  return 0;
+  return retval;
 }|]

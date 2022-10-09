@@ -1,8 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -71,7 +66,7 @@ module Futhark.Optimise.InPlaceLowering
 where
 
 import Control.Monad.RWS
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Ord (comparing)
 import Futhark.Analysis.Alias
 import Futhark.Builder
@@ -347,7 +342,7 @@ bindingNumber name = do
     Nothing ->
       error $
         "bindingNumber: variable "
-          ++ pretty name
+          ++ prettyString name
           ++ " not found."
 
 deepen :: ForwardingM rep a -> ForwardingM rep a
@@ -368,7 +363,7 @@ isInCurrentBody name = do
     Nothing ->
       error $
         "isInCurrentBody: variable "
-          ++ pretty name
+          ++ prettyString name
           ++ " not found."
 
 isOptimisable :: VName -> ForwardingM rep Bool
@@ -379,7 +374,7 @@ isOptimisable name = do
     Nothing ->
       error $
         "isOptimisable: variable "
-          ++ pretty name
+          ++ prettyString name
           ++ " not found."
 
 seenVar :: VName -> ForwardingM rep ()

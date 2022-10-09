@@ -1,7 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module provides various simple ways to query and manipulate
@@ -42,9 +38,9 @@ where
 
 import Control.Monad
 import Data.List (elemIndex, find)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe (isJust, mapMaybe)
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.Pretty
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Names
@@ -126,9 +122,9 @@ safeExp (BasicOp op) = safeBasicOp op
 safeExp (DoLoop _ _ body) = safeBody body
 safeExp (Apply fname _ _ _) =
   isBuiltInFunction fname
-safeExp (If _ tbranch fbranch _) =
-  all (safeExp . stmExp) (bodyStms tbranch)
-    && all (safeExp . stmExp) (bodyStms fbranch)
+safeExp (Match _ cases def_case _) =
+  all (all (safeExp . stmExp) . bodyStms . caseBody) cases
+    && all (safeExp . stmExp) (bodyStms def_case)
 safeExp WithAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 

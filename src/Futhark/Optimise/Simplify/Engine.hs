@@ -1,10 +1,4 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -72,11 +66,11 @@ where
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
-import Data.List (find, foldl', mapAccumL)
-import qualified Data.Map as M
+import Data.List (find, foldl', inits, mapAccumL)
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
@@ -117,7 +111,7 @@ emptyEnv rules blockers =
     }
 
 -- | A function that protects a hoisted operation (if possible).  The
--- first operand is the condition of the 'If' we have hoisted out of
+-- first operand is the condition of the 'Case' we have hoisted out of
 -- (or equivalently, a boolean indicating whether a loop has nonzero
 -- trip count).
 type Protect m = SubExp -> Pat (LetDec (Rep m)) -> Op (Rep m) -> Maybe (m ())
@@ -140,6 +134,10 @@ data SimpleOps rep = SimpleOps
     -- actually be used.
     protectHoistedOpS :: Protect (Builder (Wise rep)),
     opUsageS :: Op (Wise rep) -> UT.UsageTable,
+    simplifyPatFromExpS ::
+      Pat (LetDec rep) ->
+      Exp (Wise rep) ->
+      SimpleM rep (Pat (LetDec rep)),
     simplifyOpS :: SimplifyOp rep (Op (Wise rep))
   }
 
@@ -148,11 +146,12 @@ bindableSimpleOps ::
   SimplifyOp rep (Op (Wise rep)) ->
   SimpleOps rep
 bindableSimpleOps =
-  SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
+  SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty) simplifyPatFromExp
   where
     mkExpDecS' _ pat e = pure $ mkExpDec pat e
     mkBodyS' _ stms res = pure $ mkBody stms res
     protectHoistedOpS' _ _ _ = Nothing
+    simplifyPatFromExp pat _ = traverse simplify pat
 
 newtype SimpleM rep a
   = SimpleM
@@ -182,7 +181,7 @@ instance SimplifiableRep rep => HasScope (Wise rep) (SimpleM rep) where
       Nothing ->
         error $
           "SimpleM.lookupType: cannot find variable "
-            ++ pretty name
+            ++ prettyString name
             ++ " in symbol table."
 
 instance
@@ -262,102 +261,6 @@ bindLoopVar :: SimplifiableRep rep => VName -> IntType -> SubExp -> SimpleM rep 
 bindLoopVar var it bound =
   localVtable $ ST.insertLoopVar var it bound
 
--- | We are willing to hoist potentially unsafe statements out of
--- branches, but they most be protected by adding a branch on top of
--- them.  (This means such hoisting is not worth it unless they are in
--- turn hoisted out of a loop somewhere.)
-protectIfHoisted ::
-  SimplifiableRep rep =>
-  -- | Branch condition.
-  SubExp ->
-  -- | Which side of the branch are we
-  -- protecting here?
-  Bool ->
-  SimpleM rep (Stms (Wise rep), a) ->
-  SimpleM rep (Stms (Wise rep), a)
-protectIfHoisted cond side m = do
-  (hoisted, x) <- m
-  ops <- asks $ protectHoistedOpS . fst
-  hoisted' <- runBuilder_ $ do
-    if not $ all (safeExp . stmExp) hoisted
-      then do
-        cond' <-
-          if side
-            then pure cond
-            else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
-        mapM_ (protectIf ops unsafeOrCostly cond') hoisted
-      else addStms hoisted
-  pure (hoisted', x)
-  where
-    unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
-
--- | We are willing to hoist potentially unsafe statements out of
--- loops, but they most be protected by adding a branch on top of
--- them.
-protectLoopHoisted ::
-  SimplifiableRep rep =>
-  [(FParam (Wise rep), SubExp)] ->
-  LoopForm (Wise rep) ->
-  SimpleM rep (a, b, Stms (Wise rep)) ->
-  SimpleM rep (a, b, Stms (Wise rep))
-protectLoopHoisted merge form m = do
-  (x, y, stms) <- m
-  ops <- asks $ protectHoistedOpS . fst
-  stms' <- runBuilder_ $ do
-    if not $ all (safeExp . stmExp) stms
-      then do
-        is_nonempty <- checkIfNonEmpty
-        mapM_ (protectIf ops (not . safeExp) is_nonempty) stms
-      else addStms stms
-  pure (x, y, stms')
-  where
-    checkIfNonEmpty =
-      case form of
-        WhileLoop cond
-          | Just (_, cond_init) <-
-              find ((== cond) . paramName . fst) merge ->
-              pure cond_init
-          | otherwise -> pure $ constant True -- infinite loop
-        ForLoop _ it bound _ ->
-          letSubExp "loop_nonempty" $
-            BasicOp $
-              CmpOp (CmpSlt it) (intConst it 0) bound
-
-protectIf ::
-  MonadBuilder m =>
-  Protect m ->
-  (Exp (Rep m) -> Bool) ->
-  SubExp ->
-  Stm (Rep m) ->
-  m ()
-protectIf _ _ taken (Let pat aux (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
-  cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
-  auxing aux . letBind pat $
-    If cond' taken_body untaken_body $
-      IfDec if_ts IfFallback
-protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
-  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
-  cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
-  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
-protectIf protect _ taken (Let pat aux (Op op))
-  | Just m <- protect taken pat op =
-      auxing aux m
-protectIf _ f taken (Let pat aux e)
-  | f e =
-      case makeSafe e of
-        Just e' ->
-          auxing aux $ letBind pat e'
-        Nothing -> do
-          taken_body <- eBody [pure e]
-          untaken_body <-
-            eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
-          if_ts <- expTypesFromPat pat
-          auxing aux . letBind pat $
-            If taken taken_body untaken_body $
-              IfDec if_ts IfFallback
-protectIf _ _ _ stm =
-  addStm stm
-
 makeSafe :: Exp rep -> Maybe (Exp rep)
 makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
   Just $ BasicOp (BinOp (SDiv t Safe) x y)
@@ -392,6 +295,132 @@ emptyOfType ctx_names (Array et shape _) = do
     zeroIfContext (Var v) | v `elem` ctx_names = intConst Int64 0
     zeroIfContext se = se
 
+protectIf ::
+  MonadBuilder m =>
+  Protect m ->
+  (Exp (Rep m) -> Bool) ->
+  SubExp ->
+  Stm (Rep m) ->
+  m ()
+protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] taken_body] untaken_body (MatchDec if_ts MatchFallback))) = do
+  cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
+  auxing aux . letBind pat $
+    Match [cond'] [Case [Just (BoolValue True)] taken_body] untaken_body $
+      MatchDec if_ts MatchFallback
+protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
+  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
+  cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
+  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
+protectIf protect _ taken (Let pat aux (Op op))
+  | Just m <- protect taken pat op =
+      auxing aux m
+protectIf _ f taken (Let pat aux e)
+  | f e =
+      case makeSafe e of
+        Just e' ->
+          auxing aux $ letBind pat e'
+        Nothing -> do
+          taken_body <- eBody [pure e]
+          untaken_body <-
+            eBody $ map (emptyOfType $ patNames pat) (patTypes pat)
+          if_ts <- expTypesFromPat pat
+          auxing aux . letBind pat
+            $ Match
+              [taken]
+              [Case [Just $ BoolValue True] taken_body]
+              untaken_body
+            $ MatchDec if_ts MatchFallback
+protectIf _ _ _ stm =
+  addStm stm
+
+-- | We are willing to hoist potentially unsafe statements out of
+-- loops, but they must be protected by adding a branch on top of
+-- them.
+protectLoopHoisted ::
+  SimplifiableRep rep =>
+  [(FParam (Wise rep), SubExp)] ->
+  LoopForm (Wise rep) ->
+  SimpleM rep (a, b, Stms (Wise rep)) ->
+  SimpleM rep (a, b, Stms (Wise rep))
+protectLoopHoisted merge form m = do
+  (x, y, stms) <- m
+  ops <- asks $ protectHoistedOpS . fst
+  stms' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) stms
+      then do
+        is_nonempty <- checkIfNonEmpty
+        mapM_ (protectIf ops (not . safeExp) is_nonempty) stms
+      else addStms stms
+  pure (x, y, stms')
+  where
+    checkIfNonEmpty =
+      case form of
+        WhileLoop cond
+          | Just (_, cond_init) <-
+              find ((== cond) . paramName . fst) merge ->
+              pure cond_init
+          | otherwise -> pure $ constant True -- infinite loop
+        ForLoop _ it bound _ ->
+          letSubExp "loop_nonempty" $
+            BasicOp $
+              CmpOp (CmpSlt it) (intConst it 0) bound
+
+-- Produces a true subexpression if the pattern (as in a 'Case')
+-- matches the subexpression.
+matching ::
+  BuilderOps rep =>
+  [(SubExp, Maybe PrimValue)] ->
+  Builder rep SubExp
+matching = letSubExp "match" <=< eAll <=< sequence . mapMaybe cmp
+  where
+    cmp (se, Just (BoolValue True)) =
+      Just $ pure se
+    cmp (se, Just v) =
+      Just . letSubExp "match_val" . BasicOp $
+        CmpOp (CmpEq (primValueType v)) se (Constant v)
+    cmp (_, Nothing) = Nothing
+
+matchingExactlyThis ::
+  BuilderOps rep =>
+  [SubExp] ->
+  [[Maybe PrimValue]] ->
+  [Maybe PrimValue] ->
+  Builder rep SubExp
+matchingExactlyThis ses prior this = do
+  prior_matches <- mapM (matching . zip ses) prior
+  letSubExp "matching_just_this"
+    =<< eBinOp
+      LogAnd
+      (eUnOp Not (eAny prior_matches))
+      (eSubExp =<< matching (zip ses this))
+
+-- | We are willing to hoist potentially unsafe statements out of
+-- matches, but they must be protected by adding a branch on top of
+-- them.  (This means such hoisting is not worth it unless they are in
+-- turn hoisted out of a loop somewhere.)
+protectCaseHoisted ::
+  SimplifiableRep rep =>
+  -- | Scrutinee.
+  [SubExp] ->
+  -- | Pattern of previosu cases.
+  [[Maybe PrimValue]] ->
+  -- | Pattern of this case.
+  [Maybe PrimValue] ->
+  SimpleM rep (Stms (Wise rep), a) ->
+  SimpleM rep (Stms (Wise rep), a)
+protectCaseHoisted ses prior vs m = do
+  (hoisted, x) <- m
+  ops <- asks $ protectHoistedOpS . fst
+  hoisted' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) hoisted
+      then do
+        cond' <- matchingExactlyThis ses prior vs
+        mapM_ (protectIf ops unsafeOrCostly cond') hoisted
+      else addStms hoisted
+  pure (hoisted', x)
+  where
+    unsafeOrCostly e = not (safeExp e) || not (cheapExp e)
+
 -- | Statements that are not worth hoisting out of loops, because they
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
 -- further optimisation.
@@ -407,9 +436,11 @@ nonrecSimplifyStm ::
   SimpleM rep (Stm (Wise rep))
 nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
   cs' <- simplify cs
-  (pat', pat_cs) <- collectCerts $ simplifyPat $ removePatWisdom pat
+  e' <- simplifyExpBase e
+  simplifyPat <- asks $ simplifyPatFromExpS . fst
+  (pat', pat_cs) <- collectCerts $ simplifyPat (removePatWisdom pat) e'
   let aux' = StmAux (cs' <> pat_cs) attrs dec
-  mkWiseStm pat' aux' <$> simplifyExpBase e
+  pure $ mkWiseStm pat' aux' e'
 
 -- Bottom-up simplify a statement.  Recurses into sub-Bodies and Ops.
 -- Does not copy-propagate into the pattern and similar, as it is
@@ -623,9 +654,9 @@ cheapExp (BasicOp Replicate {}) = False
 cheapExp (BasicOp Concat {}) = False
 cheapExp (BasicOp Manifest {}) = False
 cheapExp DoLoop {} = False
-cheapExp (If _ tbranch fbranch _) =
-  all cheapStm (bodyStms tbranch)
-    && all cheapStm (bodyStms fbranch)
+cheapExp (Match _ cases defbranch _) =
+  all (all cheapStm . bodyStms . caseBody) cases
+    && all cheapStm (bodyStms defbranch)
 cheapExp (Op op) = cheapOp op
 cheapExp _ = True -- Used to be False, but
 -- let's try it out.
@@ -637,9 +668,9 @@ loopInvariantStm vtable =
 matchBlocker ::
   (ASTRep rep, CanBeWise (Op rep), FreeIn a) =>
   a ->
-  IfDec rt ->
+  MatchDec rt ->
   SimpleM rep (BlockPred (Wise rep))
-matchBlocker cond (IfDec _ ifsort) = do
+matchBlocker cond (MatchDec _ ifsort) = do
   is_alloc_fun <- asksEngineEnv $ isAllocation . envHoistBlockers
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   vtable <- askVtable
@@ -658,13 +689,13 @@ matchBlocker cond (IfDec _ ifsort) = do
         is_alloc_fun stm
           || ( ST.loopDepth vtable > 0
                  && cond_loop_invariant
-                 && ifsort /= IfFallback
+                 && ifsort /= MatchFallback
                  && loopInvariantStm vtable stm
                  -- Avoid hoisting out something that might change the
                  -- asymptotics of the program.
                  && all primType (patTypes (stmPat stm))
              )
-          || ( ifsort /= IfFallback
+          || ( ifsort /= MatchFallback
                  && any (`UT.isSize` usage) (patNames (stmPat stm))
                  && all primType (patTypes (stmPat stm))
              )
@@ -685,7 +716,7 @@ matchBlocker cond (IfDec _ ifsort) = do
         | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
         -- Hoist aggressively out of versioning branches.
-        ifsort /= IfEquiv
+        ifsort /= MatchEquiv
 
       block =
         branch_blocker
@@ -781,18 +812,27 @@ simplifyExp ::
   Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
   SimpleM rep (Exp (Wise rep), Stms (Wise rep))
-simplifyExp usage (Pat pes) (If cond tbranch fbranch ifdec@(IfDec ts ifsort)) = do
+simplifyExp usage (Pat pes) (Match ses cases defbody ifdec@(MatchDec ts ifsort)) = do
   let pes_usages = map (fromMaybe mempty . (`UT.lookup` usage) . patElemName) pes
-  cond' <- simplify cond
+  ses' <- mapM simplify ses
   ts' <- mapM simplify ts
-  block <- matchBlocker cond ifdec
-  (hoisted1, tbranch') <-
-    protectIfHoisted cond' True $
-      simplifyBody block usage pes_usages tbranch
-  (hoisted2, fbranch') <-
-    protectIfHoisted cond' False $
-      simplifyBody block usage pes_usages fbranch
-  pure (If cond' tbranch' fbranch' $ IfDec ts' ifsort, hoisted1 <> hoisted2)
+  let pats = map casePat cases
+  block <- matchBlocker ses ifdec
+  (cases_hoisted, cases') <-
+    unzip <$> zipWithM (simplifyCase block ses' pes_usages) (inits pats) cases
+  (defbody_hoisted, defbody') <-
+    protectCaseHoisted ses' pats [] $
+      simplifyBody block usage pes_usages defbody
+  pure
+    ( Match ses' cases' defbody' $ MatchDec ts' ifsort,
+      mconcat $ defbody_hoisted : cases_hoisted
+    )
+  where
+    simplifyCase block ses' pes_usages prior (Case vs body) = do
+      (hoisted, body') <-
+        protectCaseHoisted ses' prior vs $
+          simplifyBody block usage pes_usages body
+      pure (hoisted, Case vs body')
 simplifyExp _ _ (DoLoop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params
@@ -976,15 +1016,6 @@ instance Simplifiable SubExpRes where
     cs' <- simplify cs
     (se', se_cs) <- collectCerts $ simplify se
     pure $ SubExpRes (se_cs <> cs') se'
-
-simplifyPat ::
-  (SimplifiableRep rep, Simplifiable dec) =>
-  Pat dec ->
-  SimpleM rep (Pat dec)
-simplifyPat (Pat xs) =
-  Pat <$> mapM inspect xs
-  where
-    inspect (PatElem name rep) = PatElem name <$> simplify rep
 
 instance Simplifiable () where
   simplify = pure

@@ -1,10 +1,4 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -41,10 +35,10 @@ module Futhark.IR.Prop.Scope
 where
 
 import Control.Monad.Except
-import qualified Control.Monad.RWS.Lazy
-import qualified Control.Monad.RWS.Strict
+import Control.Monad.RWS.Lazy qualified
+import Control.Monad.RWS.Strict qualified
 import Control.Monad.Reader
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Types
 import Futhark.IR.Rep
@@ -89,7 +83,7 @@ class (Applicative m, RepTypes rep) => HasScope rep m | m -> rep where
       notFound =
         error $
           "Scope.lookupInfo: Name "
-            ++ pretty name
+            ++ prettyString name
             ++ " not found in type environment."
 
   -- | Return the type environment contained in the applicative
@@ -102,7 +96,7 @@ class (Applicative m, RepTypes rep) => HasScope rep m | m -> rep where
   asksScope f = f <$> askScope
 
 instance
-  (Applicative m, Monad m, RepTypes rep) =>
+  (Monad m, RepTypes rep) =>
   HasScope rep (ReaderT (Scope rep) m)
   where
   askScope = ask
@@ -111,13 +105,13 @@ instance (Monad m, HasScope rep m) => HasScope rep (ExceptT e m) where
   askScope = lift askScope
 
 instance
-  (Applicative m, Monad m, Monoid w, RepTypes rep) =>
+  (Monad m, Monoid w, RepTypes rep) =>
   HasScope rep (Control.Monad.RWS.Strict.RWST (Scope rep) w s m)
   where
   askScope = ask
 
 instance
-  (Applicative m, Monad m, Monoid w, RepTypes rep) =>
+  (Monad m, Monoid w, RepTypes rep) =>
   HasScope rep (Control.Monad.RWS.Lazy.RWST (Scope rep) w s m)
   where
   askScope = ask
@@ -131,23 +125,23 @@ class (HasScope rep m, Monad m) => LocalScope rep m where
   -- does not replace it.
   localScope :: Scope rep -> m a -> m a
 
-instance (Monad m, LocalScope rep m) => LocalScope rep (ExceptT e m) where
+instance (LocalScope rep m) => LocalScope rep (ExceptT e m) where
   localScope = mapExceptT . localScope
 
 instance
-  (Applicative m, Monad m, RepTypes rep) =>
+  (Monad m, RepTypes rep) =>
   LocalScope rep (ReaderT (Scope rep) m)
   where
   localScope = local . M.union
 
 instance
-  (Applicative m, Monad m, Monoid w, RepTypes rep) =>
+  (Monad m, Monoid w, RepTypes rep) =>
   LocalScope rep (Control.Monad.RWS.Strict.RWST (Scope rep) w s m)
   where
   localScope = local . M.union
 
 instance
-  (Applicative m, Monad m, Monoid w, RepTypes rep) =>
+  (Monad m, Monoid w, RepTypes rep) =>
   LocalScope rep (Control.Monad.RWS.Lazy.RWST (Scope rep) w s m)
   where
   localScope = local . M.union

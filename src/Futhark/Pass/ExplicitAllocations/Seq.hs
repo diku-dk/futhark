@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-
 module Futhark.Pass.ExplicitAllocations.Seq
   ( explicitAllocations,
     simplifiable,

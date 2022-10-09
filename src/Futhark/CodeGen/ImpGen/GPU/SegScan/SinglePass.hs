@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Code generation for segmented and non-segmented scans.  Uses a
@@ -9,11 +8,11 @@ module Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass (compileSegScan) where
 import Control.Monad.Except
 import Data.List (zip4)
 import Data.Maybe
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
@@ -34,8 +33,8 @@ createLocalArrays ::
   [PrimType] ->
   InKernelGen (VName, [VName], [VName], VName, [VName])
 createLocalArrays (Count groupSize) m types = do
-  let groupSizeE = toInt64Exp groupSize
-      workSize = toInt64Exp m * groupSizeE
+  let groupSizeE = pe64 groupSize
+      workSize = pe64 m * groupSizeE
       prefixArraysSize =
         foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $
           map primByteSize types
@@ -55,7 +54,7 @@ createLocalArrays (Count groupSize) m types = do
 
   byteOffsets <-
     mapM (fmap varTE . dPrimV "byte_offsets") $
-      scanl (\off tySize -> alignTo off tySize + toInt64Exp groupSize * tySize) 0 $
+      scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $
         map primByteSize types
 
   warpByteOffsets <-
@@ -216,6 +215,7 @@ compileSegScan ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegScan pat lvl space scanOp kbody = do
+  attrs <- lvlKernelAttrs lvl
   let Pat all_pes = pat
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
@@ -234,7 +234,7 @@ compileSegScan pat lvl space scanOp kbody = do
       mem_constraint = max k_mem sumT `div` maxT
       reg_constraint = (k_reg - 1 - sumT') `div` (2 * sumT')
 
-      group_size = segGroupSize lvl
+      group_size = kAttrGroupSize attrs
       group_size' = pe64 $ unCount group_size
 
   num_groups <-
@@ -245,7 +245,7 @@ compileSegScan pat lvl space scanOp kbody = do
     dPrimVE "num_threads" $ num_groups' * group_size'
 
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
+      dims' = map pe64 dims
       segmented = length dims' > 1
       not_segmented_e = if segmented then false else true
       segment_size = last dims'
@@ -275,7 +275,7 @@ compileSegScan pat lvl space scanOp kbody = do
     constants <- kernelConstants <$> askEnv
 
     (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-
-      createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
+      createLocalArrays (kAttrGroupSize attrs) (intConst Int64 m) tys
 
     dynamicId <- dPrim "dynamic_id" int32
     sWhen (kernelLocalThreadId constants .==. 0) $ do

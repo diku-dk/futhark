@@ -1,17 +1,14 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | @futhark autotune@
 module Futhark.CLI.Autotune (main) where
 
 import Control.Monad
-import qualified Data.ByteString.Char8 as SBS
+import Data.ByteString.Char8 qualified as SBS
 import Data.Function (on)
 import Data.List (elemIndex, intersect, isPrefixOf, minimumBy, sort, sortOn)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Tree
 import Futhark.Bench
 import Futhark.Server

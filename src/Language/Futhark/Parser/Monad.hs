@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Utility functions and definitions used in the Happy-generated
 -- parser.  They are defined here because the @.y@ file is opaque to
 -- linters and other tools.  In particular, we cannot enable warnings
@@ -16,14 +13,10 @@ module Language.Futhark.Parser.Monad
     lexer,
     mustBeEmpty,
     arrayFromList,
-    combArrayElements,
     binOp,
     binOpName,
     mustBe,
-    floatNegate,
-    intNegate,
     primNegate,
-    primTypeFromName,
     applyExp,
     patternExp,
     addDocSpec,
@@ -48,11 +41,10 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Trans.State
 import Data.Array hiding (index)
-import qualified Data.Map.Strict as M
 import Data.Monoid
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Util.Loc
-import Futhark.Util.Pretty hiding (line)
+import Futhark.Util.Pretty hiding (line, line')
 import Language.Futhark.Parser.Lexer
 import Language.Futhark.Parser.Lexer.Wrapper (LexerError (..))
 import Language.Futhark.Pretty ()
@@ -83,9 +75,9 @@ addAttr _ dec = dec
 addAttrSpec :: AttrInfo Name -> UncheckedSpec -> UncheckedSpec
 addAttrSpec _attr dec = dec
 
-mustBe :: L Token -> String -> ParserMonad ()
+mustBe :: L Token -> T.Text -> ParserMonad ()
 mustBe (L _ (ID got)) expected
-  | nameToString got == expected = pure ()
+  | nameToText got == expected = pure ()
 mustBe (L loc _) expected =
   parseErrorAt loc . Just $
     "Only the keyword '" <> expected <> "' may appear here."
@@ -94,7 +86,7 @@ mustBeEmpty :: Located loc => loc -> ValueType -> ParserMonad ()
 mustBeEmpty _ (Array _ _ (Shape dims) _)
   | 0 `elem` dims = pure ()
 mustBeEmpty loc t =
-  parseErrorAt loc $ Just $ pretty t ++ " is not an empty array."
+  parseErrorAt loc $ Just $ prettyText t <> " is not an empty array."
 
 data ParserState = ParserState
   { _parserFile :: FilePath,
@@ -132,19 +124,6 @@ getNoLines :: ReadLineMonad a -> Either SyntaxError a
 getNoLines (Value x) = Right x
 getNoLines (GetLine f) = getNoLines $ f Nothing
 
-combArrayElements :: Value -> [Value] -> Either SyntaxError Value
-combArrayElements = foldM comb
-  where
-    comb x y
-      | valueType x == valueType y = Right x
-      | otherwise =
-          Left . SyntaxError NoLoc $
-            "Elements "
-              <> pretty x
-              <> " and "
-              <> pretty y
-              <> " cannot exist in same array."
-
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l
 
@@ -155,10 +134,10 @@ applyExp es =
   foldM op (head es) (tail es)
   where
     op (AppExp (Index e is floc) _) (ArrayLit xs _ xloc) =
-      parseErrorAt (srcspan floc xloc) . Just . pretty $
+      parseErrorAt (srcspan floc xloc) . Just . docText $
         "Incorrect syntax for multi-dimensional indexing."
           </> "Use"
-          <+> align (ppr index)
+          <+> align (pretty index)
       where
         index = AppExp (Index e (is ++ map DimFix xs) xloc) NoInfo
     op f x =
@@ -194,11 +173,6 @@ getTokens = lift $ gets parserLexical
 
 putTokens :: ([L Token], Pos) -> ParserMonad ()
 putTokens l = lift $ modify $ \env -> env {parserLexical = l}
-
-primTypeFromName :: Loc -> Name -> ParserMonad PrimType
-primTypeFromName loc s = maybe boom pure $ M.lookup s namesToPrimTypes
-  where
-    boom = parseErrorAt loc $ Just $ "No type named " ++ nameToString s
 
 intNegate :: IntValue -> IntValue
 intNegate (Int8Value v) = Int8Value (-v)
@@ -246,15 +220,18 @@ lexer cont = do
             xs -> do
               putTokens (xs, pos')
               lexer cont
+    (L _ (COMMENT _) : xs) -> do
+      putTokens (xs, pos)
+      lexer cont
     (x : xs) -> do
       putTokens (xs, pos)
       cont x
 
 parseError :: (L Token, [String]) -> ParserMonad a
 parseError (L loc EOF, expected) =
-  parseErrorAt (locOf loc) . Just . unlines $
+  parseErrorAt (locOf loc) . Just . T.unlines $
     [ "Unexpected end of file.",
-      "Expected one of the following: " ++ unwords expected
+      "Expected one of the following: " <> T.unwords (map T.pack expected)
     ]
 parseError (L loc DOC {}, _) =
   parseErrorAt (locOf loc) $
@@ -263,12 +240,12 @@ parseError (L loc _, expected) = do
   input <- lift $ gets parserInput
   let ~(Loc (Pos _ _ _ beg) (Pos _ _ _ end)) = locOf loc
       tok_src = T.take (end - beg + 1) $ T.drop beg input
-  parseErrorAt loc . Just . unlines $
-    [ "Unexpected token: '" <> T.unpack tok_src <> "'",
-      "Expected one of the following: " <> unwords expected
+  parseErrorAt loc . Just . T.unlines $
+    [ "Unexpected token: '" <> tok_src <> "'",
+      "Expected one of the following: " <> T.unwords (map T.pack expected)
     ]
 
-parseErrorAt :: Located loc => loc -> Maybe String -> ParserMonad a
+parseErrorAt :: Located loc => loc -> Maybe T.Text -> ParserMonad a
 parseErrorAt loc Nothing = throwError $ SyntaxError (locOf loc) "Syntax error."
 parseErrorAt loc (Just s) = throwError $ SyntaxError (locOf loc) s
 
@@ -288,7 +265,7 @@ backOneCol NoLoc = NoLoc
 --- Now for the parser interface.
 
 -- | A syntax error.
-data SyntaxError = SyntaxError {syntaxErrorLoc :: Loc, syntaxErrorMsg :: String}
+data SyntaxError = SyntaxError {syntaxErrorLoc :: Loc, syntaxErrorMsg :: T.Text}
 
 lexerErrToParseErr :: LexerError -> SyntaxError
 lexerErrToParseErr (LexerError loc msg) = SyntaxError loc msg

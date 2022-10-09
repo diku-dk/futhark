@@ -12,14 +12,15 @@ module Futhark.Optimise.MergeGPUBodies (mergeGPUBodies) where
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Strict hiding (State)
+import Data.Bifunctor (first)
 import Data.Foldable
-import qualified Data.IntMap as IM
+import Data.IntMap qualified as IM
 import Data.IntSet ((\\))
-import qualified Data.IntSet as IS
-import qualified Data.Map as M
+import Data.IntSet qualified as IS
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Sequence ((|>))
-import qualified Data.Sequence as SQ
+import Data.Sequence qualified as SQ
 import Futhark.Analysis.Alias
 import Futhark.Construct (sliceDim)
 import Futhark.Error
@@ -173,11 +174,13 @@ transformExp aliases e =
   case e of
     BasicOp {} -> pure (removeExpAliases e, depsOf e)
     Apply {} -> pure (removeExpAliases e, depsOf e)
-    If c tbody fbody dec -> do
-      (tbody', t_deps) <- transformBody aliases tbody
-      (fbody', f_deps) <- transformBody aliases fbody
-      let deps = depsOf c <> t_deps <> f_deps <> depsOf dec
-      pure (If c tbody' fbody' dec, deps)
+    Match ses cases defbody dec -> do
+      let transformCase (Case vs body) =
+            first (Case vs) <$> transformBody aliases body
+      (cases', cases_deps) <- unzip <$> mapM transformCase cases
+      (defbody', defbody_deps) <- transformBody aliases defbody
+      let deps = depsOf ses <> mconcat cases_deps <> defbody_deps <> depsOf dec
+      pure (Match ses cases' defbody' dec, deps)
     DoLoop merge lform body -> do
       -- What merge and lform aliases outside the loop is irrelevant as those
       -- cannot be consumed within the loop.

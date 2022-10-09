@@ -6,6 +6,7 @@ module Language.Futhark.Semantic
     mkImportFrom,
     includeToFilePath,
     includeToString,
+    includeToText,
     FileModule (..),
     Imports,
     Namespace (..),
@@ -20,13 +21,14 @@ module Language.Futhark.Semantic
   )
 where
 
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
+import Data.Text qualified as T
 import Futhark.Util (dropLast, fromPOSIX, toPOSIX)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
 import Language.Futhark
-import qualified System.FilePath as Native
-import qualified System.FilePath.Posix as Posix
+import System.FilePath qualified as Native
+import System.FilePath.Posix qualified as Posix
 import Prelude hiding (mod)
 
 -- | Canonical reference to a Futhark code file.  Does not include the
@@ -67,6 +69,11 @@ includeToFilePath (ImportName s _) = fromPOSIX $ Posix.normalise s Posix.<.> "fu
 -- 'ImportName'.
 includeToString :: ImportName -> String
 includeToString (ImportName s _) = Posix.normalise s
+
+-- | Produce a human-readable canonicalized text from an
+-- 'ImportName'.
+includeToText :: ImportName -> T.Text
+includeToText (ImportName s _) = T.pack $ Posix.normalise s
 
 -- | The result of type checking some file.  Can be passed to further
 -- invocations of the type checker.
@@ -147,22 +154,22 @@ instance Semigroup Env where
     Env (vt1 <> vt2) (tt1 <> tt2) (st1 <> st2) (mt1 <> mt2) (nt1 <> nt2)
 
 instance Pretty Namespace where
-  ppr Term = text "name"
-  ppr Type = text "type"
-  ppr Signature = text "module type"
+  pretty Term = "name"
+  pretty Type = "type"
+  pretty Signature = "module type"
 
 instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
 
 instance Pretty MTy where
-  ppr = ppr . mtyMod
+  pretty = pretty . mtyMod
 
 instance Pretty Mod where
-  ppr (ModEnv e) = ppr e
-  ppr (ModFun (FunSig _ mod mty)) = ppr mod <+> text "->" </> ppr mty
+  pretty (ModEnv e) = pretty e
+  pretty (ModFun (FunSig _ mod mty)) = pretty mod <+> "->" </> pretty mty
 
 instance Pretty Env where
-  ppr (Env vtable ttable sigtable modtable _) =
+  pretty (Env vtable ttable sigtable modtable _) =
     nestedBlock "{" "}" $
       stack $
         punctuate line $
@@ -175,21 +182,21 @@ instance Pretty Env where
     where
       renderTypeBind (name, TypeAbbr l tps tp) =
         p l
-          <+> pprName name
-            <> mconcat (map ((text " " <>) . ppr) tps)
-            <> text " ="
-          <+> ppr tp
+          <+> prettyName name
+            <> mconcat (map ((" " <>) . pretty) tps)
+            <> " ="
+          <+> pretty tp
         where
-          p Lifted = text "type^"
-          p SizeLifted = text "type~"
-          p Unlifted = text "type"
+          p Lifted = "type^"
+          p SizeLifted = "type~"
+          p Unlifted = "type"
       renderValBind (name, BoundV tps t) =
-        text "val"
-          <+> pprName name
-            <> mconcat (map ((text " " <>) . ppr) tps)
-            <> text " ="
-          <+> ppr t
+        "val"
+          <+> prettyName name
+            <> mconcat (map ((" " <>) . pretty) tps)
+            <> " ="
+          <+> pretty t
       renderModType (name, _sig) =
-        text "module type" <+> pprName name
+        "module type" <+> prettyName name
       renderMod (name, mod) =
-        text "module" <+> pprName name <> text " =" <+> ppr mod
+        "module" <+> prettyName name <> " =" <+> pretty mod

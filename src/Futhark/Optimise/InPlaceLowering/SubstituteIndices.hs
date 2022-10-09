@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module exports facilities for transforming array accesses in
@@ -13,7 +12,7 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
 where
 
 import Control.Monad
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
@@ -37,8 +36,7 @@ substituteIndices ::
   ( MonadFreshNames m,
     BuilderOps rep,
     Buildable rep,
-    Aliased rep,
-    LParamInfo rep ~ Type
+    Aliased rep
   ) =>
   IndexSubstitutions ->
   Stms rep ->
@@ -203,4 +201,4 @@ update ::
 update needle name subst ((othername, othersubst) : substs)
   | needle == othername = (name, subst) : substs
   | otherwise = (othername, othersubst) : update needle name subst substs
-update needle _ _ [] = error $ "Cannot find substitution for " ++ pretty needle
+update needle _ _ [] = error $ "Cannot find substitution for " ++ prettyString needle

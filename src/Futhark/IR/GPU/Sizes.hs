@@ -1,7 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | In the context of this module, a "size" is any kind of tunable
 -- (run-time) constant.
 module Futhark.IR.GPU.Sizes
@@ -45,19 +41,19 @@ data SizeClass
   deriving (Eq, Ord, Show)
 
 instance Pretty SizeClass where
-  ppr (SizeThreshold path def) =
-    "threshold" <> parens (def' <> comma <+> spread (map pStep path))
+  pretty (SizeThreshold path def) =
+    "threshold" <> parens (def' <> comma <+> hsep (map pStep path))
     where
-      pStep (v, True) = ppr v
-      pStep (v, False) = "!" <> ppr v
-      def' = maybe "def" ppr def
-  ppr SizeGroup = text "group_size"
-  ppr SizeNumGroups = text "num_groups"
-  ppr SizeTile = text "tile_size"
-  ppr SizeRegTile = text "reg_tile_size"
-  ppr SizeLocalMemory = text "local_memory"
-  ppr (SizeBespoke k def) =
-    text "bespoke" <> parens (ppr k <> comma <+> ppr def)
+      pStep (v, True) = pretty v
+      pStep (v, False) = "!" <> pretty v
+      def' = maybe "def" pretty def
+  pretty SizeGroup = "group_size"
+  pretty SizeNumGroups = "num_groups"
+  pretty SizeTile = "tile_size"
+  pretty SizeRegTile = "reg_tile_size"
+  pretty SizeLocalMemory = "local_memory"
+  pretty (SizeBespoke k def) =
+    "bespoke" <> parens (pretty k <> comma <+> pretty def)
 
 -- | The default value for the size.  If 'Nothing', that means the backend gets to decide.
 sizeDefault :: SizeClass -> Maybe Int64

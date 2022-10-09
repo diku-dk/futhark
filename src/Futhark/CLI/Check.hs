@@ -5,7 +5,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Futhark.Compiler
 import Futhark.Util.Options
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (hPutDoc)
 import Language.Futhark.Warnings
 import System.IO
 
@@ -31,6 +31,6 @@ main = mainWithOptions newCheckConfig options "program" $ \args cfg ->
       (warnings, _, _) <- readProgramOrDie file
       when (checkWarn cfg && anyWarnings warnings) $
         liftIO $
-          hPutStrLn stderr $
-            pretty warnings
+          hPutDoc stderr $
+            prettyWarnings warnings
     _ -> Nothing

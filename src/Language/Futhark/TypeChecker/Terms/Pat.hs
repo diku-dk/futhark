@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Type checking of patterns.
 module Language.Futhark.TypeChecker.Terms.Pat
   ( binding,
@@ -19,10 +15,10 @@ import Control.Monad.State
 import Data.Bitraversable
 import Data.Either
 import Data.List (find, isPrefixOf, sort)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
-import Futhark.Util.Pretty hiding (bool, group, space)
+import Data.Set qualified as S
+import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Terms.Monad
@@ -65,12 +61,12 @@ checkIfUsed allow_consume occs v
     Just occ <- find consumes occs =
       typeError (srclocOf occ) mempty $
         "Consuming"
-          <+> pquote (pprName $ identName v)
-          <+> textwrap ("which is a non-consumable parameter bound at " <> locStr (locOf v) <> ".")
+          <+> dquotes (prettyName $ identName v)
+          <+> textwrap ("which is a non-consumable parameter bound at " <> locText (locOf v) <> ".")
   | not $ identName v `S.member` allOccurring occs,
-    not $ "_" `isPrefixOf` prettyName (identName v) =
+    not $ "_" `isPrefixOf` baseString (identName v) =
       warn (srclocOf v) $
-        "Unused variable" <+> pquote (pprName $ identName v) <+> "."
+        "Unused variable" <+> dquotes (prettyName $ identName v) <+> "."
   | otherwise =
       pure ()
   where
@@ -215,7 +211,7 @@ bindingSizes sizes m = do
       | Just prevloc <- M.lookup (sizeName size) prev =
           typeError size mempty $
             "Size name also bound at "
-              <> text (locStrRel (srclocOf size) prevloc)
+              <> pretty (locStrRel (srclocOf size) prevloc)
               <> "."
       | otherwise =
           pure $ M.insert (sizeName size) (srclocOf size) prev
@@ -277,7 +273,7 @@ checkPat' sizes (PatAttr attr p loc) t =
   PatAttr <$> checkAttr attr <*> checkPat' sizes p t <*> pure loc
 checkPat' _ (Id name _ loc) _
   | name' `elem` doNotShadow =
-      typeError loc mempty $ "The" <+> text name' <+> "operator may not be redefined."
+      typeError loc mempty $ "The" <+> pretty name' <+> "operator may not be redefined."
   where
     name' = nameToString name
 checkPat' _ (Id name NoInfo loc) (Ascribed t) = do
@@ -309,7 +305,7 @@ checkPat' _ (RecordPat p_fs _) _
   | Just (f, fp) <- find (("_" `isPrefixOf`) . nameToString . fst) p_fs =
       typeError fp mempty $
         "Underscore-prefixed fields are not allowed."
-          </> "Did you mean" <> dquotes (text (drop 1 (nameToString f)) <> "=_") <> "?"
+          </> "Did you mean" <> dquotes (pretty (drop 1 (nameToString f)) <> "=_") <> "?"
 checkPat' sizes (RecordPat p_fs loc) (Ascribed (Scalar (Record t_fs)))
   | sort (map fst p_fs) == sort (M.keys t_fs) =
       RecordPat . M.toList <$> check <*> pure loc
@@ -322,7 +318,7 @@ checkPat' sizes p@(RecordPat fields loc) (Ascribed t) = do
 
   when (sort (M.keys fields') /= sort (map fst fields)) $
     typeError loc mempty $
-      "Duplicate fields in record pattern" <+> ppr p <> "."
+      "Duplicate fields in record pattern" <+> pretty p <> "."
 
   unify (mkUsage loc "matching a record pattern") (Scalar (Record fields')) $ toStruct t
   t' <- normTypeFully t
@@ -398,7 +394,7 @@ checkPat sizes p t m = do
     size : _ ->
       typeError size mempty $
         "Cannot bind"
-          <+> ppr size
+          <+> pretty size
           <+> "as it is never used as the size of a concrete (non-function) value."
     [] ->
       bindNameMap (patNameMap p') $ m p'

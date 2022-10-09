@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Futhark.Internalise.TypesValues
   ( -- * Internalising types
     internaliseReturnType,
@@ -22,11 +18,11 @@ where
 import Control.Monad.State
 import Data.Bitraversable (bitraverse)
 import Data.List (delete, find, foldl')
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
-import qualified Language.Futhark as E
+import Language.Futhark qualified as E
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
@@ -52,7 +48,7 @@ internaliseParamTypes ts =
     mapM (fmap (map onType) . internaliseTypeM mempty) ts
   where
     onType = fromMaybe bad . hasStaticShape
-    bad = error $ "internaliseParamTypes: " ++ pretty ts
+    bad = error $ "internaliseParamTypes: " ++ prettyString ts
 
 -- We need to fix up the arrays for any Acc return values or loop
 -- parameters.  We look at the concrete types for this, since the Acc
@@ -164,9 +160,9 @@ internaliseTypeM exts orig_t =
               acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
           pure [acc_t]
     E.Scalar E.TypeVar {} ->
-      error $ "internaliseTypeM: cannot handle type variable: " ++ pretty orig_t
+      error $ "internaliseTypeM: cannot handle type variable: " ++ prettyString orig_t
     E.Scalar E.Arrow {} ->
-      error $ "internaliseTypeM: cannot handle function type: " ++ pretty orig_t
+      error $ "internaliseTypeM: cannot handle function type: " ++ prettyString orig_t
     E.Scalar (E.Sum cs) -> do
       (ts, _) <-
         internaliseConstructors
@@ -176,7 +172,7 @@ internaliseTypeM exts orig_t =
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
 
     onAccType = fromMaybe bad . hasStaticShape
-    bad = error $ "internaliseTypeM Acc: " ++ pretty orig_t
+    bad = error $ "internaliseTypeM Acc: " ++ prettyString orig_t
 
 internaliseConstructors ::
   M.Map Name [I.TypeBase ExtShape Uniqueness] ->

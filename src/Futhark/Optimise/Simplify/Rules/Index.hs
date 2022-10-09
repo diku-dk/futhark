@@ -10,7 +10,7 @@ where
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
 import Futhark.IR
 import Futhark.Optimise.Simplify.Rules.Simple
@@ -195,14 +195,13 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
                 (thisres, thisstms) <- collectStms $ do
                   i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int64 OverflowWrap) i start
                   letSubExp "index_concat" . BasicOp . Index x' $
-                    Slice $
-                      ibef ++ DimFix i' : iaft
+                    Slice (ibef ++ DimFix i' : iaft)
                 thisbody <- mkBodyM thisstms [subExpRes thisres]
                 (altres, altstms) <- collectStms $ mkBranch xs_and_starts'
                 altbody <- mkBodyM altstms [subExpRes altres]
                 letSubExp "index_concat_branch" $
-                  If cmp thisbody altbody $
-                    IfDec [primBodyType res_t] IfNormal
+                  Match [cmp] [Case [Just $ BoolValue True] thisbody] altbody $
+                    MatchDec [primBodyType res_t] MatchNormal
           SubExpResult cs <$> mkBranch xs_and_starts
     Just (ArrayLit ses _, cs)
       | DimFix (Constant (IntValue (Int64Value i))) : inds' <- inds,

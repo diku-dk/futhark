@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 
 -- |
@@ -42,13 +41,13 @@
 --   than in the source language.  See 'Futhark.IR.SOACS.SOAC.SOAC'.
 module Futhark.Internalise (internaliseProg) where
 
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Compiler.Config
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.Entry (visibleTypes)
-import qualified Futhark.Internalise.Exps as Exps
+import Futhark.Internalise.Exps qualified as Exps
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise

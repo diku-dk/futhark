@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Partial derivatives of scalar Futhark operations and built-in functions.
 module Futhark.AD.Derivatives
   ( pdBuiltin,
@@ -371,6 +369,9 @@ pdBuiltin "ceil64" [_] = Just [fConst Float64 0]
 pdBuiltin "floor16" [_] = Just [fConst Float16 0]
 pdBuiltin "floor32" [_] = Just [fConst Float32 0]
 pdBuiltin "floor64" [_] = Just [fConst Float64 0]
+pdBuiltin "nextafter16" [_, _] = Just [fConst Float16 1, fConst Float16 0]
+pdBuiltin "nextafter32" [_, _] = Just [fConst Float32 1, fConst Float32 0]
+pdBuiltin "nextafter64" [_, _] = Just [fConst Float64 1, fConst Float64 0]
 pdBuiltin "clz8" [_] = Just [iConst Int32 0]
 pdBuiltin "clz16" [_] = Just [iConst Int32 0]
 pdBuiltin "clz32" [_] = Just [iConst Int32 0]

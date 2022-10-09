@@ -1,12 +1,7 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise (transformProg) where
 
-import qualified Control.Arrow as Arrow
+import Control.Arrow qualified as Arrow
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -14,10 +9,10 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
 import Data.List (partition, sortOn, tails)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
 import Language.Futhark
@@ -422,12 +417,12 @@ defuncFun tparams pats e0 ret loc = do
     )
   where
     closureFromDynamicFun (vn, Binding _ (DynamicFun (clsr_env, sv) _)) =
-      let name = nameFromString $ pretty vn
+      let name = nameFromString $ prettyString vn
        in ( RecordFieldExplicit name clsr_env mempty,
             (vn, Binding Nothing sv)
           )
     closureFromDynamicFun (vn, Binding _ sv) =
-      let name = nameFromString $ pretty vn
+      let name = nameFromString $ prettyString vn
           tp' = typeFromSV sv
        in ( RecordFieldExplicit
               name
@@ -532,7 +527,7 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
       t' = first (runIdentity . astMap mapper) $ typeOf e2'
   pure (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
-  error $ "defuncExp: Unexpected LetFun: " ++ prettyName vn
+  error $ "defuncExp: Unexpected LetFun: " ++ show vn
 defuncExp (AppExp (If e1 e2 e3 loc) res) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2
@@ -582,7 +577,7 @@ defuncExp (AppExp (DoLoop sparams pat e1 form e3 loc) res) = do
     envFromIdent (Ident vn (Info tp) _) =
       M.singleton vn $ Binding Nothing $ Dynamic tp
 defuncExp e@(AppExp BinOp {} _) =
-  error $ "defuncExp: unexpected binary operator: " ++ pretty e
+  error $ "defuncExp: unexpected binary operator: " ++ prettyString e
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
   case sv0 of
@@ -664,9 +659,9 @@ defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
 defuncExp (Constr name _ (Info t) loc) =
   error $
     "Constructor "
-      ++ pretty name
+      ++ prettyString name
       ++ " given type "
-      ++ pretty t
+      ++ prettyString t
       ++ " at "
       ++ locStr loc
 defuncExp (AppExp (Match e cs loc) res) = do
@@ -954,7 +949,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
     _ ->
       error $
         "Application of an expression\n"
-          ++ pretty e1
+          ++ prettyString e1
           ++ "\nthat is neither a static lambda "
           ++ "nor a dynamic function, but has static value:\n"
           ++ show sv1
@@ -971,7 +966,7 @@ defuncApply depth e@(Var qn (Info t) loc) = do
           pure (Var qn (Info (foldFunType argtypes' $ RetType [] rettype)) loc, sv)
       | otherwise -> do
           fname <- newVName $ "dyn_" <> baseString (qualLeaf qn)
-          let (pats, e0, sv') = liftDynFun (pretty qn) sv depth
+          let (pats, e0, sv') = liftDynFun (prettyString qn) sv depth
               (argtypes', rettype) = dynamicFunType sv' argtypes
               dims' = mempty
 
@@ -1019,7 +1014,7 @@ liftDynFun s sv d =
       ++ " Tried to lift a StaticVal "
       ++ take 100 (show sv)
       ++ ", but expected a dynamic function.\n"
-      ++ pretty d
+      ++ prettyString d
 
 -- | Converts a pattern to an environment that binds the individual names of the
 -- pattern to their corresponding types wrapped in a 'Dynamic' static value.
@@ -1077,7 +1072,7 @@ buildEnvPat :: [VName] -> Env -> Pat
 buildEnvPat sizes env = RecordPat (map buildField $ M.toList env) mempty
   where
     buildField (vn, Binding _ sv) =
-      ( nameFromString (pretty vn),
+      ( nameFromString (prettyString vn),
         if vn `elem` sizes
           then Wildcard (Info $ typeFromSV sv) mempty
           else Id vn (Info $ typeFromSV sv) mempty
@@ -1122,7 +1117,7 @@ typeFromSV (Dynamic tp) =
   tp
 typeFromSV (LambdaSV _ _ _ env) =
   Scalar . Record . M.fromList $
-    map (bimap (nameFromString . pretty) (typeFromSV . bindingSV)) $
+    map (bimap (nameFromString . prettyString) (typeFromSV . bindingSV)) $
       M.toList env
 typeFromSV (RecordSV ls) =
   let ts = map (fmap typeFromSV) ls
@@ -1175,17 +1170,17 @@ matchPatSV (PatConstr c1 _ ps _) (SumSV c2 ls fs)
   | Just ts <- lookup c1 fs =
       mconcat $ zipWith matchPatSV ps $ map svFromType ts
   | otherwise =
-      error $ "matchPatSV: missing constructor in type: " ++ pretty c1
+      error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | Just ts <- M.lookup c1 fs =
       mconcat $ zipWith matchPatSV ps $ map svFromType ts
   | otherwise =
-      error $ "matchPatSV: missing constructor in type: " ++ pretty c1
+      error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
 matchPatSV pat sv =
   error $
     "Tried to match pattern "
-      ++ pretty pat
+      ++ prettyString pat
       ++ " with static value "
       ++ show sv
       ++ "."
@@ -1238,7 +1233,7 @@ updatePat pat (Dynamic t) = updatePat pat (svFromType t)
 updatePat pat sv =
   error $
     "Tried to update pattern "
-      ++ pretty pat
+      ++ prettyString pat
       ++ "to reflect the static value "
       ++ show sv
 
@@ -1272,7 +1267,7 @@ defuncValBind (ValBind entry name _ (Info (RetType _ rettype)) tparams params bo
 defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) tparams params body _ _ _) = do
   when (any isTypeParam tparams) $
     error $
-      prettyName name
+      show name
         ++ " has type parameters, "
         ++ "but the defunctionaliser expects a monomorphic input program."
   (tparams', params', body', sv) <-

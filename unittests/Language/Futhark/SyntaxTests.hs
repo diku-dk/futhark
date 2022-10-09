@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Language.Futhark.SyntaxTests (tests) where
@@ -8,9 +5,9 @@ module Language.Futhark.SyntaxTests (tests) where
 import Control.Applicative hiding (many, some)
 import Data.Char (isAlpha)
 import Data.Functor
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.String
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Void
 import Language.Futhark
 import Language.Futhark.Parser
@@ -19,7 +16,7 @@ import Language.Futhark.PrimitiveTests ()
 import Test.QuickCheck
 import Test.Tasty
 import Text.Megaparsec
-import qualified Text.Megaparsec.Char.Lexer as L
+import Text.Megaparsec.Char.Lexer qualified as L
 import Prelude
 
 tests :: TestTree
@@ -61,7 +58,9 @@ instance IsString v => IsString (QualName v) where
 
 instance IsString UncheckedTypeExp where
   fromString =
-    either (error . syntaxErrorMsg) id . parseType "IsString UncheckedTypeExp" . fromString
+    either (error . T.unpack . syntaxErrorMsg) id
+      . parseType "IsString UncheckedTypeExp"
+      . fromString
 
 type Parser = Parsec Void T.Text
 

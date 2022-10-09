@@ -1,7 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
@@ -15,6 +11,8 @@ module Language.Futhark.Core
     srclocOf,
     locStr,
     locStrRel,
+    locText,
+    locTextRel,
     prettyStacktrace,
 
     -- * Name handling
@@ -28,7 +26,6 @@ module Language.Futhark.Core
     baseName,
     baseString,
     quote,
-    pquote,
 
     -- * Number re-export
     Int8,
@@ -46,7 +43,7 @@ where
 import Control.Category
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.String
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Word (Word16, Word32, Word64, Word8)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
@@ -70,8 +67,8 @@ instance Monoid Uniqueness where
   mempty = Unique
 
 instance Pretty Uniqueness where
-  ppr Unique = star
-  ppr Nonunique = empty
+  pretty Unique = "*"
+  pretty Nonunique = mempty
 
 -- | The abstract (not really) type representing names in the Futhark
 -- compiler.  'String's, being lists of characters, are very slow,
@@ -80,7 +77,7 @@ newtype Name = Name T.Text
   deriving (Show, Eq, Ord, IsString, Semigroup)
 
 instance Pretty Name where
-  ppr = text . nameToString
+  pretty = pretty . nameToString
 
 -- | Convert a name to the corresponding list of characters.
 nameToString :: Name -> String
@@ -136,24 +133,32 @@ locStrRel a b =
         first_part = show line1 ++ ":" ++ show col1
     _ -> locStr b
 
+-- | 'locStr', but for text.
+locText :: Located a => a -> T.Text
+locText = T.pack . locStr
+
+-- | 'locStrRel', but for text.
+locTextRel :: (Located a, Located b) => a -> b -> T.Text
+locTextRel a b = T.pack $ locStrRel a b
+
 -- | Given a list of strings representing entries in the stack trace
 -- and the index of the frame to highlight, produce a final
 -- newline-terminated string for showing to the user.  This string
 -- should also be preceded by a newline.  The most recent stack frame
 -- must come first in the list.
-prettyStacktrace :: Int -> [String] -> String
-prettyStacktrace cur = unlines . zipWith f [(0 :: Int) ..]
+prettyStacktrace :: Int -> [T.Text] -> T.Text
+prettyStacktrace cur = T.unlines . zipWith f [(0 :: Int) ..]
   where
     -- Formatting hack: assume no stack is deeper than 100
     -- elements.  Since Futhark does not support recursion, going
     -- beyond that would require a truly perverse program.
     f i x =
       (if cur == i then "-> " else "   ")
-        ++ '#'
-        : show i
-        ++ (if i > 9 then "" else " ")
-        ++ " "
-        ++ x
+        <> "#"
+        <> T.pack (show i)
+        <> (if i > 9 then "" else " ")
+        <> " "
+        <> x
 
 -- | A name tagged with some integer.  Only the integer is used in
 -- comparisons, no matter the type of @vn@.
@@ -181,9 +186,5 @@ instance Ord VName where
 -- | Enclose a string in the prefered quotes used in error messages.
 -- These are picked to not collide with characters permitted in
 -- identifiers.
-quote :: String -> String
-quote s = "\"" ++ s ++ "\""
-
--- | As 'quote', but works on prettyprinted representation.
-pquote :: Doc -> Doc
-pquote = dquotes
+quote :: T.Text -> T.Text
+quote s = "\"" <> s <> "\""

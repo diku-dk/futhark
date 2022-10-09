@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:           futhark
-version:        0.22.0
+version:        0.23.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -37,6 +37,8 @@ extra-source-files:
 -- Cabal's recompilation tracking doesn't work when we use wildcards
 -- here, so for now we spell out every single file.
     rts/c/atomics.h
+    rts/c/context.h
+    rts/c/context_prototypes.h
     rts/c/lock.h
     rts/c/timing.h
     rts/c/errors.h
@@ -87,6 +89,56 @@ source-repository head
 common common
   ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
   default-language: Haskell2010
+  default-extensions:
+    OverloadedStrings
+    -- The following extensions correspond to the GHC2021 language,
+    -- but we want to remain compatible with GHC 9.0, so we cannot use
+    -- it just yet.
+    BangPatterns
+    BinaryLiterals
+    ConstrainedClassMethods
+    ConstraintKinds
+    DeriveDataTypeable
+    DeriveFoldable
+    DeriveFunctor
+    DeriveGeneric
+    DeriveLift
+    DeriveTraversable
+    DoAndIfThenElse
+    EmptyCase
+    EmptyDataDecls
+    EmptyDataDeriving
+    ExistentialQuantification
+    ExplicitForAll
+    FlexibleContexts
+    FlexibleInstances
+    ForeignFunctionInterface
+    GADTSyntax
+    GeneralisedNewtypeDeriving
+    HexFloatLiterals
+    ImplicitPrelude
+    ImportQualifiedPost
+    InstanceSigs
+    KindSignatures
+    MonomorphismRestriction
+    MultiParamTypeClasses
+    NamedFieldPuns
+    NamedWildCards
+    NumericUnderscores
+    PatternGuards
+    PolyKinds
+    PostfixOperators
+    RankNTypes
+    RelaxedPolyRec
+    ScopedTypeVariables
+    StandaloneDeriving
+    StandaloneKindSignatures
+    StarIsType
+    TraditionalRecordSyntax
+    TupleSections
+    TypeApplications
+    TypeOperators
+    TypeSynonymInstances
 
 library
   import: common
@@ -117,7 +169,6 @@ library
       Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
-      Futhark.Analysis.PrimExp.Generalize
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.Rephrase
@@ -158,8 +209,14 @@ library
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
+      Futhark.CodeGen.Backends.GenericC.Code
+      Futhark.CodeGen.Backends.GenericC.EntryPoints
+      Futhark.CodeGen.Backends.GenericC.Fun
+      Futhark.CodeGen.Backends.GenericC.Monad
       Futhark.CodeGen.Backends.GenericC.Options
+      Futhark.CodeGen.Backends.GenericC.Pretty
       Futhark.CodeGen.Backends.GenericC.Server
+      Futhark.CodeGen.Backends.GenericC.Types
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Options
@@ -186,6 +243,7 @@ library
       Futhark.CodeGen.ImpGen.CUDA
       Futhark.CodeGen.ImpGen.GPU
       Futhark.CodeGen.ImpGen.GPU.Base
+      Futhark.CodeGen.ImpGen.GPU.Group
       Futhark.CodeGen.ImpGen.GPU.SegHist
       Futhark.CodeGen.ImpGen.GPU.SegMap
       Futhark.CodeGen.ImpGen.GPU.SegRed
@@ -273,6 +331,7 @@ library
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
       Futhark.Optimise.DoubleBuffer
+      Futhark.Optimise.EntryPointMem
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.GraphRep
@@ -304,6 +363,7 @@ library
       Futhark.Optimise.Simplify.Rules.ClosedForm
       Futhark.Optimise.Simplify.Rules.Index
       Futhark.Optimise.Simplify.Rules.Loop
+      Futhark.Optimise.Simplify.Rules.Match
       Futhark.Optimise.Simplify.Rules.Simple
       Futhark.Optimise.Sink
       Futhark.Optimise.TileLoops
@@ -347,7 +407,7 @@ library
       Futhark.Transform.Rename
       Futhark.Transform.Substitute
       Futhark.Util
-      Futhark.Util.Console
+      Futhark.Util.CMath
       Futhark.Util.IntegralExp
       Futhark.Util.Loc
       Futhark.Util.Log
@@ -359,6 +419,7 @@ library
       Language.Futhark
       Language.Futhark.Core
       Language.Futhark.Interpreter
+      Language.Futhark.Interpreter.Values
       Language.Futhark.FreeVars
       Language.Futhark.Parser
       Language.Futhark.Parser.Monad
@@ -398,7 +459,7 @@ library
       aeson >=2.0.0.0
     , ansi-terminal >=0.6.3.1
     , array >=0.4
-    , base >=4.13 && <5
+    , base >=4.15 && <5
     , base16-bytestring
     , binary >=0.8.3
     , blaze-html >=0.9.0.1
@@ -425,7 +486,7 @@ library
     , haskeline
     , language-c-quote >= 0.12
     , lens
-    , lsp == 1.5.*
+    , lsp >= 1.5.0
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
     , megaparsec >=9.0.0
@@ -449,6 +510,8 @@ library
     , zlib >=0.6.1.2
     , statistics
     , mwc-random
+    , prettyprinter >= 1.7
+    , prettyprinter-ansi-terminal >= 1.1
 
 executable futhark
   import: common

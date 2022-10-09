@@ -5,7 +5,7 @@ where
 
 import Control.Monad
 import Data.List (zip4)
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed')
@@ -35,7 +35,7 @@ segHistOpChunks :: [HistOp rep] -> [a] -> [[a]]
 segHistOpChunks = chunks . map (length . histNeutral)
 
 histSize :: HistOp MCMem -> Imp.TExp Int64
-histSize = product . map toInt64Exp . shapeDims . histShape
+histSize = product . map pe64 . shapeDims . histShape
 
 genHistOpParams :: HistOp MCMem -> MulticoreGen ()
 genHistOpParams histops =
@@ -56,7 +56,7 @@ nonsegmentedHist ::
   MulticoreGen Imp.MCCode
 nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
       num_histos' = tvExp num_histos
       hist_width = histSize $ head histops
       use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64
@@ -94,7 +94,7 @@ onOpAtomic op = do
       -- Allocate a static array of locks
       -- as in the GPU backend
       let num_locks = 100151 -- This number is taken from the GPU backend
-          dims = map toInt64Exp $ shapeDims (histOpShape op <> histShape op)
+          dims = map pe64 $ shapeDims (histOpShape op <> histShape op)
       locks <-
         sStaticArray "hist_locks" DefaultSpace int32 $
           Imp.ArrayZeros num_locks
@@ -109,7 +109,7 @@ atomicHistogram ::
   MulticoreGen ()
 atomicHistogram pat space histops kbody = do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (all_red_pes, map_pes) = splitAt num_red_res $ patElems pat
 
@@ -129,8 +129,8 @@ atomicHistogram pat space histops kbody = do
         forM_ (zip4 histops red_res_split atomicOps pes_per_op) $
           \(HistOp dest_shape _ _ _ shape lam, (bucket, vs'), do_op, dest_res) -> do
             let (_is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
-                dest_shape' = map toInt64Exp $ shapeDims dest_shape
-                bucket' = map toInt64Exp bucket
+                dest_shape' = map pe64 $ shapeDims dest_shape
+                bucket' = map pe64 bucket
                 bucket_in_bounds = inBounds (Slice (map DimFix bucket')) dest_shape'
 
             sComment "save map-out results" $
@@ -187,7 +187,7 @@ subHistogram pat space histops num_histos kbody = do
   emit $ Imp.DebugPrint "subHistogram segHist" Nothing
 
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
 
   let pes = patElems pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
@@ -247,8 +247,8 @@ subHistogram pat space histops num_histos kbody = do
                ) -> do
                 histop' <- renameHistop histop
 
-                let bucket' = map toInt64Exp bucket
-                    dest_shape' = map toInt64Exp $ shapeDims dest_shape
+                let bucket' = map pe64 bucket
+                    dest_shape' = map pe64 $ shapeDims dest_shape
                     acc_params' = (lambdaParams . histOp) histop'
                     vs_params' = takeLast (length vs') $ lambdaParams $ histOp histop'
 
@@ -310,7 +310,7 @@ subHistogram pat space histops num_histos kbody = do
                   map fst segment_dims ++ [subhistogram_id] ++ bucket_ids
               )
 
-    let ns_red = map (toInt64Exp . snd) $ unSegSpace segred_space
+    let ns_red = map (pe64 . snd) $ unSegSpace segred_space
         iterations = product $ init ns_red -- The segmented reduction is sequential over the inner most dimension
         scheduler_info = Imp.SchedulerInfo (untyped iterations) Imp.Static
         red_task = Imp.ParallelTask red_code
@@ -346,7 +346,7 @@ compileSegHistBody ::
   MulticoreGen Imp.MCCode
 compileSegHistBody pat space histops kbody = collect $ do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       map_pes = drop num_red_res $ patElems pat
@@ -369,8 +369,8 @@ compileSegHistBody pat space histops kbody = collect $ do
         forM_ (zip3 per_red_pes histops (splitHistResults histops red_res)) $
           \(red_pes, HistOp dest_shape _ _ _ shape lam, (bucket, vs')) -> do
             let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
-                bucket' = map toInt64Exp bucket
-                dest_shape' = map toInt64Exp $ shapeDims dest_shape
+                bucket' = map pe64 bucket
+                dest_shape' = map pe64 $ shapeDims dest_shape
                 bucket_in_bounds = inBounds (Slice (map DimFix bucket')) dest_shape'
 
             sComment "save map-out results" $

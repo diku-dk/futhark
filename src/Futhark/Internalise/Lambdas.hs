@@ -1,10 +1,6 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 module Futhark.Internalise.Lambdas
   ( InternaliseLambda,
-    internaliseStreamMapLambda,
     internaliseFoldLambda,
-    internaliseStreamLambda,
     internalisePartitionLambda,
   )
 where
@@ -17,31 +13,6 @@ import Language.Futhark as E
 -- | A function for internalising lambdas.
 type InternaliseLambda =
   E.Exp -> [I.Type] -> InternaliseM ([I.LParam SOACS], I.Body SOACS, [I.Type])
-
-internaliseStreamMapLambda ::
-  InternaliseLambda ->
-  E.Exp ->
-  [I.SubExp] ->
-  InternaliseM (I.Lambda SOACS)
-internaliseStreamMapLambda internaliseLambda lam args = do
-  chunk_size <- newVName "chunk_size"
-  let chunk_param = I.Param mempty chunk_size (I.Prim int64)
-      outer = (`setOuterSize` I.Var chunk_size)
-  localScope (scopeOfLParams [chunk_param]) $ do
-    argtypes <- mapM I.subExpType args
-    (lam_params, orig_body, rettype) <-
-      internaliseLambda lam $ I.Prim int64 : map outer argtypes
-    let orig_chunk_param : params = lam_params
-    body <- runBodyBuilder $ do
-      letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
-      pure orig_body
-    mkLambda (chunk_param : params) $ do
-      letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
-      ensureResultShape
-        (ErrorMsg [ErrorString "not all iterations produce same shape"])
-        (srclocOf lam)
-        (map outer rettype)
-        =<< bodyBind body
 
 internaliseFoldLambda ::
   InternaliseLambda ->
@@ -64,24 +35,6 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
       (srclocOf lam)
       rettype'
       =<< bodyBind body
-
-internaliseStreamLambda ::
-  InternaliseLambda ->
-  E.Exp ->
-  [I.Type] ->
-  InternaliseM ([LParam SOACS], Body SOACS)
-internaliseStreamLambda internaliseLambda lam rowts = do
-  chunk_size <- newVName "chunk_size"
-  let chunk_param = I.Param mempty chunk_size $ I.Prim int64
-      chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
-  localScope (scopeOfLParams [chunk_param]) $ do
-    (lam_params, orig_body, _) <-
-      internaliseLambda lam $ I.Prim int64 : chunktypes
-    let orig_chunk_param : params = lam_params
-    body <- runBodyBuilder $ do
-      letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
-      pure orig_body
-    pure (chunk_param : params, body)
 
 -- Given @k@ lambdas, this will return a lambda that returns an
 -- (k+2)-element tuple of integers.  The first element is the

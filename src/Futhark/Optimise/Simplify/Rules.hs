@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This module defines a collection of simplification rules, as per
@@ -22,13 +19,12 @@ where
 
 import Control.Monad
 import Control.Monad.State
-import Data.Either
 import Data.List (insert, unzip4, zip4)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
@@ -36,20 +32,18 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.BasicOp
 import Futhark.Optimise.Simplify.Rules.Index
 import Futhark.Optimise.Simplify.Rules.Loop
+import Futhark.Optimise.Simplify.Rules.Match
 import Futhark.Util
 
 topDownRules :: BuilderOps rep => [TopDownRule rep]
 topDownRules =
   [ RuleGeneric constantFoldPrimFun,
-    RuleIf ruleIf,
-    RuleIf hoistBranchInvariant,
     RuleGeneric withAccTopDown
   ]
 
 bottomUpRules :: (BuilderOps rep, TraverseOpStms rep) => [BottomUpRule rep]
 bottomUpRules =
-  [ RuleIf removeDeadBranchResult,
-    RuleGeneric withAccBottomUp,
+  [ RuleGeneric withAccBottomUp,
     RuleBasicOp simplifyIndex
   ]
 
@@ -57,7 +51,11 @@ bottomUpRules =
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
 standardRules :: (BuilderOps rep, TraverseOpStms rep, Aliased rep) => RuleBook rep
-standardRules = ruleBook topDownRules bottomUpRules <> loopRules <> basicOpRules
+standardRules =
+  ruleBook topDownRules bottomUpRules
+    <> loopRules
+    <> basicOpRules
+    <> matchRules
 
 -- | Turn @copy(x)@ into @x@ iff @x@ is not used after this copy
 -- statement and it can be consumed.
@@ -134,211 +132,6 @@ simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
 simplifyIndex _ _ _ _ = Skip
-
-ruleIf :: BuilderOps rep => TopDownRuleIf rep
-ruleIf _ pat _ (e1, tb, fb, IfDec _ ifsort)
-  | Just branch <- checkBranch,
-    ifsort /= IfFallback || isCt1 e1 = Simplify $ do
-      let ses = bodyResult branch
-      addStms $ bodyStms branch
-      sequence_
-        [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-          | (p, SubExpRes cs se) <- zip (patElems pat) ses
-        ]
-  where
-    checkBranch
-      | isCt1 e1 = Just tb
-      | isCt0 e1 = Just fb
-      | otherwise = Nothing
-
--- IMPROVE: the following two rules can be generalised to work in more
--- cases, especially when the branches have bindings, or return more
--- than one value.
---
--- if c then True else v == c || v
-ruleIf
-  _
-  pat
-  _
-  ( cond,
-    Body _ tstms [SubExpRes tcs (Constant (BoolValue True))],
-    Body _ fstms [SubExpRes fcs se],
-    IfDec ts _
-    )
-    | null tstms,
-      null fstms,
-      [Prim Bool] <- map extTypeOf ts =
-        Simplify $ certifying (tcs <> fcs) $ letBind pat $ BasicOp $ BinOp LogOr cond se
--- When type(x)==bool, if c then x else y == (c && x) || (!c && y)
-ruleIf _ pat _ (cond, tb, fb, IfDec ts _)
-  | Body _ tstms [SubExpRes tcs tres] <- tb,
-    Body _ fstms [SubExpRes fcs fres] <- fb,
-    all (safeExp . stmExp) $ tstms <> fstms,
-    all ((== Prim Bool) . extTypeOf) ts = Simplify $ do
-      addStms tstms
-      addStms fstms
-      e <-
-        eBinOp
-          LogOr
-          (pure $ BasicOp $ BinOp LogAnd cond tres)
-          ( eBinOp
-              LogAnd
-              (pure $ BasicOp $ UnOp Not cond)
-              (pure $ BasicOp $ SubExp fres)
-          )
-      certifying (tcs <> fcs) $ letBind pat e
-ruleIf _ pat _ (_, tbranch, _, IfDec _ IfFallback)
-  | all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
-      let ses = bodyResult tbranch
-      addStms $ bodyStms tbranch
-      sequence_
-        [ certifying cs $ letBindNames [patElemName p] $ BasicOp $ SubExp se
-          | (p, SubExpRes cs se) <- zip (patElems pat) ses
-        ]
-ruleIf _ pat _ (cond, tb, fb, _)
-  | Body _ _ [SubExpRes tcs (Constant (IntValue t))] <- tb,
-    Body _ _ [SubExpRes fcs (Constant (IntValue f))] <- fb =
-      if oneIshInt t && zeroIshInt f && tcs == mempty && fcs == mempty
-        then
-          Simplify $
-            letBind pat $
-              BasicOp $
-                ConvOp (BToI (intValueType t)) cond
-        else
-          if zeroIshInt t && oneIshInt f
-            then Simplify $ do
-              cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
-              letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond_neg
-            else Skip
--- Simplify
---
---   let z = if c then x else y
---
--- to
---
---   let z = y
---
--- in the case where 'x' is a loop parameter with initial value 'y'
--- and the new value of the loop parameter is 'z'.  ('x' and 'y' can
--- be flipped.)
-ruleIf vtable (Pat [pe]) aux (_c, tb, fb, IfDec [_] _)
-  | Body _ tstms [SubExpRes xcs x] <- tb,
-    null tstms,
-    Body _ fstms [SubExpRes ycs y] <- fb,
-    null fstms,
-    matches x y || matches y x =
-      Simplify $
-        certifying (stmAuxCerts aux <> xcs <> ycs) $
-          letBind (Pat [pe]) $
-            BasicOp $
-              SubExp y
-  where
-    z = patElemName pe
-    matches (Var x) y
-      | Just (initial, res) <- ST.lookupLoopParam x vtable =
-          initial == y && res == Var z
-    matches _ _ = False
-ruleIf _ _ _ _ = Skip
-
--- | Move out results of a conditional expression whose computation is
--- either invariant to the branches (only done for results used for
--- existentials), or the same in both branches.
-hoistBranchInvariant :: BuilderOps rep => TopDownRuleIf rep
-hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
-  let tses = bodyResult tb
-      fses = bodyResult fb
-  (hoistings, (pes, ts, res)) <-
-    fmap (fmap unzip3 . partitionEithers) . mapM branchInvariant $
-      zip4 [0 ..] (patElems pat) ret (zip tses fses)
-  let ctx_fixes = catMaybes hoistings
-      (tses', fses') = unzip res
-      tb' = tb {bodyResult = tses'}
-      fb' = fb {bodyResult = fses'}
-      ret' = foldr (uncurry fixExt) ts ctx_fixes
-  if not $ null hoistings -- Was something hoisted?
-    then do
-      -- We may have to add some reshapes if we made the type
-      -- less existential.
-      tb'' <- reshapeBodyResults tb' $ map extTypeOf ret'
-      fb'' <- reshapeBodyResults fb' $ map extTypeOf ret'
-      letBind (Pat pes) $ If cond tb'' fb'' (IfDec ret' ifsort)
-    else cannotSimplify
-  where
-    bound_in_branches =
-      namesFromList . concatMap (patNames . stmPat) $
-        bodyStms tb <> bodyStms fb
-    invariant Constant {} = True
-    invariant (Var v) = v `notNameIn` bound_in_branches
-
-    branchInvariant (i, pe, t, (tse, fse))
-      -- Do both branches return the same value?
-      | tse == fse = do
-          certifying (resCerts tse <> resCerts fse) $
-            letBindNames [patElemName pe] $
-              BasicOp $
-                SubExp $
-                  resSubExp tse
-          hoisted i pe
-
-      -- Do both branches return values that are free in the
-      -- branch, and are we not the only pattern element?  The
-      -- latter is to avoid infinite application of this rule.
-      | invariant $ resSubExp tse,
-        invariant $ resSubExp fse,
-        patSize pat > 1,
-        Prim _ <- patElemType pe = do
-          bt <- expTypesFromPat $ Pat [pe]
-          letBindNames [patElemName pe]
-            =<< ( If cond
-                    <$> resultBodyM [resSubExp tse]
-                    <*> resultBodyM [resSubExp fse]
-                    <*> pure (IfDec bt ifsort)
-                )
-          hoisted i pe
-      | otherwise =
-          pure $ Right (pe, t, (tse, fse))
-
-    hoisted i pe = pure $ Left $ Just (i, Var $ patElemName pe)
-
-    reshapeBodyResults body rets = buildBody_ $ do
-      ses <- bodyBind body
-      let (ctx_ses, val_ses) = splitFromEnd (length rets) ses
-      (ctx_ses ++) <$> zipWithM reshapeResult val_ses rets
-    reshapeResult (SubExpRes cs (Var v)) t@Array {} = do
-      v_t <- lookupType v
-      let newshape = arrayDims $ removeExistentials t v_t
-      SubExpRes cs
-        <$> if newshape /= arrayDims v_t
-          then letSubExp "branch_ctx_reshaped" (shapeCoerce newshape v)
-          else pure $ Var v
-    reshapeResult se _ =
-      pure se
-
--- | Remove the return values of a branch, that are not actually used
--- after a branch.  Standard dead code removal can remove the branch
--- if *none* of the return values are used, but this rule is more
--- precise.
-removeDeadBranchResult :: BuilderOps rep => BottomUpRuleIf rep
-removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
-  | -- Only if there is no existential binding...
-    all (`notNameIn` foldMap freeIn (patElems pat)) (patNames pat),
-    -- Figure out which of the names in 'pat' are used...
-    patused <- map (`UT.isUsedDirectly` used) $ patNames pat,
-    -- If they are not all used, then this rule applies.
-    not (and patused) =
-      -- Remove the parts of the branch-results that correspond to dead
-      -- return value bindings.  Note that this leaves dead code in the
-      -- branch bodies, but that will be removed later.
-      let tses = bodyResult tb
-          fses = bodyResult fb
-          pick :: [a] -> [a]
-          pick = map snd . filter fst . zip patused
-          tb' = tb {bodyResult = pick tses}
-          fb' = fb {bodyResult = pick fses}
-          pat' = pick $ patElems pat
-          rettype' = pick rettype
-       in Simplify $ letBind (Pat pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
-  | otherwise = Skip
 
 withAccTopDown :: BuilderOps rep => TopDownRuleGeneric rep
 -- A WithAcc with no accumulators is sent to Valhalla.
@@ -466,16 +259,6 @@ withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
     keepNonAccRes (pe, _) = patElemName pe `UT.used` utable
 withAccBottomUp _ _ = Skip
 
--- Some helper functions
-
-isCt1 :: SubExp -> Bool
-isCt1 (Constant v) = oneIsh v
-isCt1 _ = False
-
-isCt0 :: SubExp -> Bool
-isCt0 (Constant v) = zeroIsh v
-isCt0 _ = False
-
 -- Note [Dead Code Elimination for WithAcc]
 --
 -- Our static semantics for accumulators are basically those of linear
@@ -517,4 +300,4 @@ isCt0 _ = False
 -- That's it!  We then let ordinary dead code elimination eventually
 -- simplify the body enough that we have an "identity" WithAcc.  There
 -- is no _guarantee_ that this will happen, but our general dead code
--- elimination tends to be pretty good.
+-- elimination tends to be prettyString good.

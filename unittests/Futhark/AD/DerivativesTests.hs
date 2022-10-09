@@ -1,10 +1,10 @@
 module Futhark.AD.DerivativesTests (tests) where
 
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Syntax.Core (nameFromString)
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (prettyString)
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -40,12 +40,12 @@ tests =
       ]
 
     binOpTest bop =
-      testCase (pretty bop) $
+      testCase (prettyString bop) $
         let t = binOpType bop
             (dx, dy) = pdBinOp bop (blank t) (blank t)
          in (primExpType dx, primExpType dy) @?= (t, t)
 
     unOpTest bop =
-      testCase (pretty bop) $
+      testCase (prettyString bop) $
         let t = unOpType bop
          in primExpType (pdUnOp bop $ blank t) @?= t

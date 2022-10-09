@@ -5,7 +5,7 @@ let main x = x + 2
 ```
 
 ```
-> main 2i32
+> main 2
 ```
 
 ```
@@ -14,7 +14,7 @@ let main x = x + 2
 
 
 ```
-> main 2.0f32
+> main 2f32
 ```
 
 **FAILED**

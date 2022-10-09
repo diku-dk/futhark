@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Definition and parsing of a test specification.
 module Futhark.Test.Spec
   ( testSpecFromProgram,
@@ -31,20 +28,21 @@ import Control.Monad
 import Data.Char
 import Data.Functor
 import Data.List (foldl')
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Void
 import Futhark.Analysis.Metrics.Type
 import Futhark.Data.Parser
-import qualified Futhark.Data.Parser as V
-import qualified Futhark.Script as Script
-import qualified Futhark.Test.Values as V
+import Futhark.Data.Parser qualified as V
+import Futhark.Script qualified as Script
+import Futhark.Test.Values qualified as V
 import Futhark.Util (directoryContents)
-import Futhark.Util.Pretty (prettyOneLine)
+import Futhark.Util.Pretty (prettyTextOneLine)
 import System.Exit
 import System.FilePath
+import System.IO
 import System.IO.Error
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
@@ -278,7 +276,7 @@ parseRunCases sep = parseRunCases' (0 :: Int)
     desc _ (GenValues gens) =
       unwords $ map genValueType gens
     desc _ (ScriptValues e) =
-      prettyOneLine e
+      T.unpack $ prettyTextOneLine e
     desc _ (ScriptFile path) =
       path
 
@@ -407,7 +405,7 @@ testSpecFromProgramOrDie prog = do
   spec_or_err <- testSpecFromProgram prog
   case spec_or_err of
     Left err -> do
-      putStrLn err
+      hPutStrLn stderr err
       exitFailure
     Right spec -> pure spec
 
@@ -443,7 +441,7 @@ testSpecsFromPathsOrDie dirs = do
   specs_or_err <- testSpecsFromPaths dirs
   case specs_or_err of
     Left err -> do
-      putStrLn err
+      hPutStrLn stderr err
       exitFailure
     Right specs -> pure specs
 
@@ -462,6 +460,6 @@ testSpecFromFileOrDie dirs = do
   spec_or_err <- testSpecFromFile dirs
   case spec_or_err of
     Left err -> do
-      putStrLn err
+      hPutStrLn stderr err
       exitFailure
     Right spec -> pure spec

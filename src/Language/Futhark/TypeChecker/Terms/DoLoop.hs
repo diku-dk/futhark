@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Type inference of @loop@.  This is complicated because of the
 -- uniqueness and size inference, so the implementation is separate
 -- from the main type checker.
@@ -17,11 +13,11 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Util (nubOrd)
-import Futhark.Util.Pretty hiding (bool, group, space)
+import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Terms.Monad hiding (consumed)
@@ -118,15 +114,15 @@ convergePat loop_loc pat body_cons body_t body_loc = do
               S.map aliasVar (aliases t) `S.intersection` bound_outside =
             lift . typeError loop_loc mempty $
               "Return value for loop parameter"
-                <+> pquote (pprName pat_v)
+                <+> dquotes (prettyName pat_v)
                 <+> "aliases"
-                <+> pquote (pprName v) <> "."
+                <+> dquotes (prettyName v) <> "."
         | otherwise = do
             (cons, obs) <- get
             unless (S.null $ aliases t `S.intersection` cons) $
               lift . typeError loop_loc mempty $
                 "Return value for loop parameter"
-                  <+> pquote (pprName pat_v)
+                  <+> dquotes (prettyName pat_v)
                   <+> "aliases other consumed loop parameter."
             when
               ( unique pat_v_t
@@ -134,7 +130,7 @@ convergePat loop_loc pat body_cons body_t body_loc = do
               )
               $ lift . typeError loop_loc mempty
               $ "Return value for consuming loop parameter"
-                <+> pquote (pprName pat_v)
+                <+> dquotes (prettyName pat_v)
                 <+> "aliases previously returned value."
             if unique pat_v_t
               then put (cons <> aliases t, obs)
@@ -343,7 +339,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               | otherwise ->
                   typeError (srclocOf e) mempty $
                     "Iteratee of a for-in loop must be an array, but expression has type"
-                      <+> ppr t
+                      <+> pretty t
         While cond ->
           noUnique . bindingPat [] mergepat (Ascribed merge_t) $ \mergepat' ->
             onlySelfAliasing

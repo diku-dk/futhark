@@ -46,10 +46,6 @@ data Prod = Prod
   }
   deriving (Show, Eq, Ord)
 
-instance Pretty Prod where
-  ppr (Prod b exps) =
-    (if b then "-" else "") <> ppr exps
-
 type SofP = [Prod]
 
 sumOfProducts :: Exp -> SofP

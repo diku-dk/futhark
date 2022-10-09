@@ -1,6 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 -- | Low-level compilation parts.  Look at "Futhark.Compiler" for a
 -- more high-level API.
@@ -10,6 +8,7 @@ module Futhark.Compiler.Program
     Imports,
     FileModule (..),
     E.Warnings,
+    prettyWarnings,
     ProgError (..),
     LoadedProg (lpNameSource),
     noLoadedProg,
@@ -36,26 +35,26 @@ import Control.Monad.Except
 import Control.Monad.State (execStateT, gets, modify)
 import Data.Bifunctor (first)
 import Data.List (intercalate, sort)
-import qualified Data.List.NonEmpty as NE
+import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (..), Located, locOf)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (mapMaybe)
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
-import Futhark.Util.Pretty (Doc, align, ppr, text)
-import qualified Language.Futhark as E
+import Futhark.Util.Pretty (Doc, align, pretty)
+import Language.Futhark qualified as E
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
 import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Semantic
-import qualified Language.Futhark.TypeChecker as E
+import Language.Futhark.TypeChecker qualified as E
 import Language.Futhark.Warnings
 import System.Directory (getModificationTime)
 import System.FilePath (normalise)
-import qualified System.FilePath.Posix as Posix
+import System.FilePath.Posix qualified as Posix
 
 data LoadedFile fm = LoadedFile
   { lfPath :: FilePath,
@@ -69,10 +68,10 @@ data LoadedFile fm = LoadedFile
 -- | Note that the location may be 'NoLoc'.  This essentially only
 -- happens when the problem is that a root file cannot be found.
 data ProgError
-  = ProgError Loc Doc
+  = ProgError Loc (Doc ())
   | -- | Not actually an error, but we want them reported
     -- with errors.
-    ProgWarning Loc Doc
+    ProgWarning Loc (Doc ())
 
 type WithErrors = Either (NE.NonEmpty ProgError)
 
@@ -80,10 +79,10 @@ instance Located ProgError where
   locOf (ProgError l _) = l
   locOf (ProgWarning l _) = l
 
--- | A mapping from absolute pathnames to text representing a virtual
+-- | A mapping from absolute pathnames to pretty representing a virtual
 -- file system.  Before loading a file from the file system, this
 -- mapping is consulted.  If the desired pathname has an entry here,
--- the corresponding text is used instead of loading the file from
+-- the corresponding pretty is used instead of loading the file from
 -- disk.
 type VFS = M.Map FilePath T.Text
 
@@ -99,10 +98,6 @@ type ReaderState = MVar (M.Map ImportName (Maybe (MVar UncheckedImport)))
 newState :: [ImportName] -> IO ReaderState
 newState known = newMVar $ M.fromList $ zip known $ repeat Nothing
 
--- Since we need to work with base 4.14 that does not have NE.singleton.
-singleError :: ProgError -> NE.NonEmpty ProgError
-singleError = (NE.:| [])
-
 orderedImports ::
   [(ImportName, MVar UncheckedImport)] ->
   IO [(ImportName, WithErrors (LoadedFile E.UncheckedProg))]
@@ -111,12 +106,12 @@ orderedImports = fmap reverse . flip execStateT [] . mapM_ (spelunk [])
     spelunk steps (include, mvar)
       | include `elem` steps = do
           let problem =
-                ProgError (locOf include) . text $
+                ProgError (locOf include) . pretty $
                   "Import cycle: "
                     <> intercalate
                       " -> "
                       (map includeToString $ reverse $ include : steps)
-          modify ((include, Left (singleError problem)) :)
+          modify ((include, Left (NE.singleton problem)) :)
       | otherwise = do
           prev <- gets $ lookup include
           case prev of
@@ -166,11 +161,11 @@ readImportFile include vfs = do
     (Just (Right (s, mod_time)), _) ->
       pure $ Right $ loaded filepath s mod_time
     (Just (Left e), _) ->
-      pure $ Left $ ProgError (locOf include) $ text e
+      pure $ Left $ ProgError (locOf include) $ pretty e
     (Nothing, Just s) ->
       pure $ Right $ loaded prelude_str s startupTime
     (Nothing, Nothing) ->
-      pure $ Left $ ProgError (locOf include) $ text not_found
+      pure $ Left $ ProgError (locOf include) $ pretty not_found
   where
     prelude_str = "/" Posix.</> includeToString include Posix.<.> "fut"
 
@@ -183,13 +178,13 @@ readImportFile include vfs = do
         }
 
     not_found =
-      "Could not find import " <> E.quote (includeToString include) <> "."
+      "Could not find import " <> E.quote (includeToText include) <> "."
 
 handleFile :: ReaderState -> VFS -> LoadedFile T.Text -> IO UncheckedImport
 handleFile state_mvar vfs (LoadedFile file_name import_name file_contents mod_time) = do
   case parseFuthark file_name file_contents of
     Left (SyntaxError loc err) ->
-      pure . UncheckedImport . Left . singleError $ ProgError loc $ text err
+      pure . UncheckedImport . Left . NE.singleton $ ProgError loc $ pretty err
     Right prog -> do
       let imports = map (uncurry (mkImportFrom import_name)) $ E.progImports prog
       mvars <-
@@ -212,7 +207,7 @@ readImport state_mvar vfs include =
       Nothing -> do
         prog_mvar <- newImportMVar $ do
           readImportFile include vfs >>= \case
-            Left e -> pure $ UncheckedImport $ Left $ singleError e
+            Left e -> pure $ UncheckedImport $ Left $ NE.singleton e
             Right file -> handleFile state_mvar vfs file
         pure (M.insert include prog_mvar state, prog_mvar)
 
@@ -247,14 +242,14 @@ readUntypedLibraryExceptKnown known vfs fps = do
                         lfPath = fp
                       }
                 Just (Left e) ->
-                  pure . UncheckedImport . Left . singleError $
+                  pure . UncheckedImport . Left . NE.singleton $
                     ProgError NoLoc $
-                      text $
+                      pretty $
                         show e
                 Nothing ->
-                  pure . UncheckedImport . Left . singleError $
+                  pure . UncheckedImport . Left . NE.singleton $
                     ProgError NoLoc $
-                      text $
+                      pretty $
                         fp <> ": file not found."
             pure (M.insert include prog_mvar state, (include, prog_mvar))
       where
@@ -292,14 +287,14 @@ typeCheckProg orig_imports orig_src =
             | otherwise = prependRoots roots prog
       case E.checkProg (asImports imports) src import_name prog' of
         (prog_ws, Left (E.TypeError loc notes msg)) -> do
-          let err' = msg <> ppr notes
+          let err' = msg <> pretty notes
               warningToError (wloc, wmsg) = ProgWarning (locOf wloc) wmsg
           Left $
             ProgError (locOf loc) err'
               NE.:| map warningToError (listWarnings prog_ws)
         (prog_ws, Right (m, src')) ->
           let warnHole (loc, t) =
-                singleWarning (E.srclocOf loc) $ "Hole of type: " <> align (ppr t)
+                singleWarning (E.srclocOf loc) $ "Hole of type: " <> align (pretty t)
               prog_ws' = prog_ws <> foldMap warnHole (E.progHoles (fileProg m))
            in Right
                 ( imports ++ [LoadedFile path import_name (CheckedFile src prog_ws' m) mod_time],

@@ -1,6 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Code generation for Python with OpenCL.
 module Futhark.CodeGen.Backends.PyOpenCL
   ( compileProg,
@@ -8,19 +5,19 @@ module Futhark.CodeGen.Backends.PyOpenCL
 where
 
 import Control.Monad
-import qualified Data.Map as M
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericPython as Py
+import Data.Map qualified as M
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericPython qualified as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
-import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
-import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
+import Futhark.CodeGen.ImpCode.OpenCL qualified as Imp
+import Futhark.CodeGen.ImpGen.OpenCL qualified as ImpGen
 import Futhark.CodeGen.RTS.Python (openclPy)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (prettyString)
 
 -- | Compile the program to Python with calls to OpenCL.
 compileProg ::
@@ -46,7 +43,7 @@ compileProg mode class_name prog = do
         unlines
           $ map
             ( \x ->
-                pretty $
+                prettyString $
                   Assign
                     (Var ("self." ++ zEncodeString (nameToString x) ++ "_var"))
                     (Var $ "program." ++ zEncodeString (nameToString x))
@@ -56,6 +53,7 @@ compileProg mode class_name prog = do
   let defines =
         [ Assign (Var "synchronous") $ Bool False,
           Assign (Var "preferred_platform") None,
+          Assign (Var "build_options") $ List [],
           Assign (Var "preferred_device") None,
           Assign (Var "default_threshold") None,
           Assign (Var "default_group_size") None,
@@ -77,6 +75,7 @@ compileProg mode class_name prog = do
   let constructor =
         Py.Constructor
           [ "self",
+            "build_options=build_options",
             "command_queue=None",
             "interactive=False",
             "platform_pref=preferred_platform",
@@ -103,6 +102,16 @@ compileProg mode class_name prog = do
               optionArgument = RequiredArgument "str",
               optionAction =
                 [Assign (Var "preferred_device") $ Var "optarg"]
+            },
+          Option
+            { optionLongName = "build-option",
+              optionShortName = Nothing,
+              optionArgument = RequiredArgument "str",
+              optionAction =
+                [ Assign (Var "build_options") $
+                    BinOp "+" (Var "build_options") $
+                      List [Var "optarg"]
+                ]
             },
           Option
             { optionLongName = "default-threshold",
@@ -195,19 +204,19 @@ callKernel (Imp.GetSize v key) = do
   v' <- Py.compileVar v
   Py.stm $
     Assign v' $
-      Index (Var "self.sizes") (IdxExp $ String $ pretty key)
+      Index (Var "self.sizes") (IdxExp $ String $ prettyString key)
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- Py.compileVar v
   x' <- Py.compileExp x
   Py.stm $
     Assign v' $
-      BinOp "<=" (Index (Var "self.sizes") (IdxExp $ String $ pretty key)) x'
+      BinOp "<=" (Index (Var "self.sizes") (IdxExp $ String $ prettyString key)) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- Py.compileVar v
   Py.stm $
     Assign v' $
       Var $
-        "self.max_" ++ pretty size_class
+        "self.max_" ++ prettyString size_class
 callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
   workgroup_size' <- mapM (fmap asLong . Py.compileExp) workgroup_size
@@ -285,7 +294,7 @@ writeOpenCLScalar _ _ _ space _ =
 readOpenCLScalar :: Py.ReadScalar Imp.OpenCL ()
 readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
-  let val' = Var $ pretty val
+  let val' = Var $ prettyString val
   let nparr =
         Call
           (Var "np.empty")
@@ -312,7 +321,7 @@ allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" =
   Py.stm $
     Assign mem $
-      Py.simpleCall "opencl_alloc" [Var "self", size, String $ pretty mem]
+      Py.simpleCall "opencl_alloc" [Var "self", size, String $ prettyString mem]
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
 

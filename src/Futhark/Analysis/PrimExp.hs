@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
 -- | A primitive expression is an expression where the non-leaves are
@@ -68,13 +66,14 @@ module Futhark.Analysis.PrimExp
     (~/~),
     (~+~),
     (~-~),
+    (~==~),
   )
 where
 
 import Control.Category
 import Control.Monad
-import qualified Data.Map as M
-import qualified Data.Set as S
+import Data.Map qualified as M
+import Data.Set qualified as S
 import Data.Traversable
 import Futhark.IR.Prop.Names
 import Futhark.Util.IntegralExp
@@ -553,7 +552,7 @@ asFloatOp f x y
 
 numBad :: Pretty a => String -> a -> b
 numBad s x =
-  error $ "Invalid argument to PrimExp method " ++ s ++ ": " ++ pretty x
+  error $ "Invalid argument to PrimExp method " ++ s ++ ": " ++ prettyString x
 
 -- | Evaluate a 'PrimExp' in the given monad.  Invokes 'fail' on type
 -- errors.
@@ -584,9 +583,9 @@ evalBad :: (Pretty a, Pretty b, MonadFail m) => a -> b -> m c
 evalBad op arg =
   fail $
     "evalPrimExp: Type error when applying "
-      ++ pretty op
+      ++ prettyString op
       ++ " to "
-      ++ pretty arg
+      ++ prettyString arg
 
 -- | The type of values returned by a 'PrimExp'.  This function
 -- returning does not imply that the 'PrimExp' is type-correct.
@@ -711,16 +710,16 @@ sExtAs from to = TPrimExp $ sExt (expIntType to) (untyped from)
 -- Prettyprinting instances
 
 instance Pretty v => Pretty (PrimExp v) where
-  ppr (LeafExp v _) = ppr v
-  ppr (ValueExp v) = ppr v
-  ppr (BinOpExp op x y) = ppr op <+> parens (ppr x) <+> parens (ppr y)
-  ppr (CmpOpExp op x y) = ppr op <+> parens (ppr x) <+> parens (ppr y)
-  ppr (ConvOpExp op x) = ppr op <+> parens (ppr x)
-  ppr (UnOpExp op x) = ppr op <+> parens (ppr x)
-  ppr (FunExp h args _) = text h <+> parens (commasep $ map ppr args)
+  pretty (LeafExp v _) = pretty v
+  pretty (ValueExp v) = pretty v
+  pretty (BinOpExp op x y) = pretty op <+> parens (pretty x) <+> parens (pretty y)
+  pretty (CmpOpExp op x y) = pretty op <+> parens (pretty x) <+> parens (pretty y)
+  pretty (ConvOpExp op x) = pretty op <+> parens (pretty x)
+  pretty (UnOpExp op x) = pretty op <+> parens (pretty x)
+  pretty (FunExp h args _) = pretty h <+> parens (commasep $ map pretty args)
 
 instance Pretty v => Pretty (TPrimExp t v) where
-  ppr = ppr . untyped
+  pretty = pretty . untyped
 
 -- | Produce a mapping from the leaves of the 'PrimExp' to their
 -- designated types.
@@ -782,6 +781,14 @@ x ~-~ y = BinOpExp op x y
       Bool -> LogOr
       Unit -> LogOr
 
+-- | Equality of untyped 'PrimExp's, which must have the same type.
+(~==~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~==~ y = CmpOpExp (CmpEq t) x y
+  where
+    t = primExpType x
+
 infix 7 ~*~, ~/~
 
 infix 6 ~+~, ~-~
+
+infix 4 ~==~

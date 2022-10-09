@@ -966,20 +966,8 @@ static int opencl_alloc(struct opencl_context *ctx, FILE *log,
 
   size_t size;
 
-  if (free_list_find(&ctx->free_list, min_size, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, min_size, tag, &size, mem_out) == 0) {
     // Successfully found a free block.  Is it big enough?
-    //
-    // FIXME: we might also want to check whether the block is *too
-    // big*, to avoid internal fragmentation.  However, this can
-    // sharply impact performance on programs where arrays change size
-    // frequently.  Fortunately, such allocations are usually fairly
-    // short-lived, as they are necessarily within a loop, so the risk
-    // of internal fragmentation resulting in an OOM situation is
-    // limited.  However, it would be preferable if we could go back
-    // and *shrink* oversize allocations when we encounter an OOM
-    // condition.  That is technically feasible, since we do not
-    // expose OpenCL pointer values directly to the application, but
-    // instead rely on a level of indirection.
     if (size >= min_size) {
       if (ctx->cfg.debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
@@ -1034,14 +1022,6 @@ static int opencl_alloc(struct opencl_context *ctx, FILE *log,
 static int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) {
   size_t size;
   cl_mem existing_mem;
-
-  // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, -1, &size, &existing_mem) == 0) {
-    int error = clReleaseMemObject(existing_mem);
-    if (error != CL_SUCCESS) {
-      return error;
-    }
-  }
 
   int error = clGetMemObjectInfo(mem, CL_MEM_SIZE, sizeof(size_t), &size, NULL);
 

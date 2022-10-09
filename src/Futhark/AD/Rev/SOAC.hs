@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.AD.Rev.SOAC (vjpSOAC) where
@@ -87,4 +83,4 @@ vjpSOAC ops pat _aux (Screma w as form) m
 vjpSOAC ops pat aux (Scatter w lam ass written_info) m =
   vjpScatter ops pat aux (w, lam, ass, written_info) m
 vjpSOAC _ _ _ soac _ =
-  error $ "vjpSOAC unhandled:\n" ++ pretty soac
+  error $ "vjpSOAC unhandled:\n" ++ prettyString soac

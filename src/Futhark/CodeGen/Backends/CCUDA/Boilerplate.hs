@@ -8,9 +8,9 @@ module Futhark.CodeGen.Backends.CCUDA.Boilerplate
   )
 where
 
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( copyDevToDev,
     copyDevToHost,
@@ -22,12 +22,13 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
     kernelRuns,
     kernelRuntime,
   )
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC qualified as GC
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.RTS.C (cudaH, freeListH)
 import Futhark.Util (chunk, zEncodeString)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
@@ -87,9 +88,9 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
 
 generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () ()
 generateSizeFuns sizes = do
-  let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
-      size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+  let size_name_inits = map (\k -> [C.cinit|$string:(prettyString k)|]) $ M.keys sizes
+      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (prettyString k))|]) $ M.keys sizes
+      size_class_inits = map (\c -> [C.cinit|$string:(prettyString c)|]) $ M.elems sizes
 
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
@@ -316,7 +317,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
           [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
                                      &ctx->$id:name,
                                      ctx->cuda.module,
-                                     $string:(pretty (C.toIdent name mempty))));|]
+                                     $string:(T.unpack (idText (C.toIdent name mempty)))));|]
         )
           : forCostCentre name
 
@@ -336,6 +337,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          int logging;
                          typename lock_t lock;
                          char *error;
+                         typename lock_t error_lock;
                          typename FILE *log;
                          $sdecls:fields
                          $sdecls:kernel_fields
@@ -374,6 +376,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->profiling_paused = 0;
                  ctx->logging = cfg->cu_cfg.logging;
                  ctx->error = NULL;
+                 create_lock(&ctx->error_lock);
                  ctx->log = stderr;
                  ctx->cuda.profiling_records_capacity = 200;
                  ctx->cuda.profiling_records_used = 0;

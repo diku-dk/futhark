@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Code generation for ImpCode with multicore operations.
@@ -9,8 +8,8 @@ module Futhark.CodeGen.ImpGen.Multicore
 where
 
 import Control.Monad
-import qualified Data.Map as M
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Data.Map qualified as M
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.CodeGen.ImpGen.Multicore.SegHist
@@ -57,7 +56,7 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
 updateAcc acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
-  let is' = map toInt64Exp is
+  let is' = map pe64 is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
   sWhen (inBounds (Slice (map DimFix is')) dims) $
     case op of
@@ -81,7 +80,7 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                         pure . (`rem` fromIntegral num_locks) . flattenIndex dims
                 f locking arrs is'
               Nothing ->
-                error $ "Missing locks for " ++ pretty acc
+                error $ "Missing locks for " ++ prettyString acc
 
 withAcc ::
   Pat LetDecMem ->

@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Facilities for inspecting the data dependencies of a program.
 module Futhark.Analysis.DataDependencies
   ( Dependencies,
@@ -8,7 +6,8 @@ module Futhark.Analysis.DataDependencies
   )
 where
 
-import qualified Data.Map.Strict as M
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
 import Futhark.IR
 
 -- | A mapping from a variable name @v@, to those variables on which
@@ -28,14 +27,15 @@ dataDependencies' ::
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
-    grow deps (Let pat _ (If c tb fb _)) =
-      let tdeps = dataDependencies' deps tb
-          fdeps = dataDependencies' deps fb
-          cdeps = depsOf deps c
-          comb (pe, SubExpRes _ tres, SubExpRes _ fres) =
+    grow deps (Let pat _ (Match c cases defbody _)) =
+      let cases_deps = map (dataDependencies' deps . caseBody) cases
+          defbody_deps = dataDependencies' deps defbody
+          cdeps = foldMap (depsOf deps) c
+          comb (pe, se_cases_deps, se_defbody_deps) =
             ( patElemName pe,
               mconcat $
-                [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres]
+                se_cases_deps
+                  ++ [freeIn pe, cdeps, se_defbody_deps]
                   ++ map (depsOfVar deps) (namesToList $ freeIn pe)
             )
           branchdeps =
@@ -43,9 +43,11 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
               map comb $
                 zip3
                   (patElems pat)
-                  (bodyResult tb)
-                  (bodyResult fb)
-       in M.unions [branchdeps, deps, tdeps, fdeps]
+                  ( L.transpose . zipWith (map . depsOf) cases_deps $
+                      map (map resSubExp . bodyResult . caseBody) cases
+                  )
+                  (map (depsOf defbody_deps . resSubExp) (bodyResult defbody))
+       in M.unions $ [branchdeps, deps, defbody_deps] ++ cases_deps
     grow deps (Let pat _ e) =
       let free = freeIn pat <> freeIn e
           freeDeps = mconcat $ map (depsOfVar deps) $ namesToList free

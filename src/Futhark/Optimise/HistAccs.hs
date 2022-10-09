@@ -5,7 +5,7 @@ module Futhark.Optimise.HistAccs (histAccsGPU) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Futhark.IR.GPU
 import Futhark.MonadFreshNames
 import Futhark.Pass

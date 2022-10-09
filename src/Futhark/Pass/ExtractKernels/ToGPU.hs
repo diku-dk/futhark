@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.ExtractKernels.ToGPU
@@ -19,7 +17,7 @@ import Futhark.Analysis.Rephrase
 import Futhark.IR
 import Futhark.IR.GPU
 import Futhark.IR.SOACS (SOACS)
-import qualified Futhark.IR.SOACS.SOAC as SOAC
+import Futhark.IR.SOACS.SOAC qualified as SOAC
 import Futhark.Tools
 
 getSize ::
@@ -28,7 +26,7 @@ getSize ::
   SizeClass ->
   m SubExp
 getSize desc size_class = do
-  size_key <- nameFromString . pretty <$> newVName desc
+  size_key <- nameFromString . prettyString <$> newVName desc
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 segThread ::
@@ -36,10 +34,12 @@ segThread ::
   String ->
   m SegLevel
 segThread desc =
-  SegThread
-    <$> (Count <$> getSize (desc ++ "_num_groups") SizeNumGroups)
-    <*> (Count <$> getSize (desc ++ "_group_size") SizeGroup)
-    <*> pure SegVirt
+  SegThread SegVirt <$> (Just <$> kernelGrid)
+  where
+    kernelGrid =
+      KernelGrid
+        <$> (Count <$> getSize (desc ++ "_num_groups") SizeNumGroups)
+        <*> (Count <$> getSize (desc ++ "_group_size") SizeGroup)
 
 injectSOACS ::
   ( Monad m,

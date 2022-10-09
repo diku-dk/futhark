@@ -1,28 +1,23 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
 -- for the AST defined in "Language.Futhark.Syntax".
 module Language.Futhark.Pretty
-  ( pretty,
+  ( prettyString,
     prettyTuple,
     leadingOperator,
     IsName (..),
-    prettyName,
     Annot (..),
   )
 where
 
 import Control.Monad
-import Data.Array
 import Data.Char (chr)
 import Data.Functor
 import Data.List (intersperse)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import Data.Ord
@@ -42,23 +37,22 @@ import Prelude
 -- VNames, we in fact only define it inside the modules for the core
 -- language (as an orphan instance).
 class IsName v where
-  pprName :: v -> Doc
+  prettyName :: v -> Doc a
+  toName :: v -> Name
 
 -- | Depending on the environment variable FUTHARK_COMPILER_DEBUGGING,
 -- VNames are printed as either the name with an internal tag, or just
 -- the base name.
 instance IsName VName where
-  pprName
+  prettyName
     | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
-        \(VName vn i) -> ppr vn <> text "_" <> text (show i)
-    | otherwise = ppr . baseName
+        \(VName vn i) -> pretty vn <> "_" <> pretty (show i)
+    | otherwise = pretty . baseName
+  toName = baseName
 
 instance IsName Name where
-  pprName = ppr
-
--- | Prettyprint a name to a string.
-prettyName :: IsName v => v -> String
-prettyName = prettyDoc 80 . pprName
+  prettyName = pretty
+  toName = id
 
 -- | Class for type constructors that represent annotations.  Used in
 -- the prettyprinter to either print the original AST, or the computed
@@ -73,125 +67,129 @@ instance Annot NoInfo where
 instance Annot Info where
   unAnnot = Just . unInfo
 
-instance Pretty Value where
-  ppr (PrimValue bv) = ppr bv
-  ppr (ArrayValue a t)
-    | [] <- elems a = text "empty" <> parens (ppr t)
-    | Array {} <- t = brackets $ commastack $ map ppr $ elems a
-    | otherwise = brackets $ commasep $ map ppr $ elems a
-
 instance Pretty PrimValue where
-  ppr (UnsignedValue (Int8Value v)) =
-    text (show (fromIntegral v :: Word8)) <> text "u8"
-  ppr (UnsignedValue (Int16Value v)) =
-    text (show (fromIntegral v :: Word16)) <> text "u16"
-  ppr (UnsignedValue (Int32Value v)) =
-    text (show (fromIntegral v :: Word32)) <> text "u32"
-  ppr (UnsignedValue (Int64Value v)) =
-    text (show (fromIntegral v :: Word64)) <> text "u64"
-  ppr (SignedValue v) = ppr v
-  ppr (BoolValue True) = text "true"
-  ppr (BoolValue False) = text "false"
-  ppr (FloatValue v) = ppr v
+  pretty (UnsignedValue (Int8Value v)) =
+    pretty (show (fromIntegral v :: Word8)) <> "u8"
+  pretty (UnsignedValue (Int16Value v)) =
+    pretty (show (fromIntegral v :: Word16)) <> "u16"
+  pretty (UnsignedValue (Int32Value v)) =
+    pretty (show (fromIntegral v :: Word32)) <> "u32"
+  pretty (UnsignedValue (Int64Value v)) =
+    pretty (show (fromIntegral v :: Word64)) <> "u64"
+  pretty (SignedValue v) = pretty v
+  pretty (BoolValue True) = "true"
+  pretty (BoolValue False) = "false"
+  pretty (FloatValue v) = pretty v
 
 instance Pretty Size where
-  ppr (AnySize Nothing) = mempty
-  ppr (AnySize (Just v)) = text "?" <> pprName v
-  ppr (NamedSize v) = ppr v
-  ppr (ConstSize n) = ppr n
+  pretty (AnySize Nothing) = mempty
+  pretty (AnySize (Just v)) = "?" <> prettyName v
+  pretty (NamedSize v) = pretty v
+  pretty (ConstSize n) = pretty n
 
 instance IsName vn => Pretty (SizeExp vn) where
-  ppr SizeExpAny = mempty
-  ppr (SizeExpNamed v _) = ppr v
-  ppr (SizeExpConst n _) = ppr n
+  pretty SizeExpAny = mempty
+  pretty (SizeExpNamed v _) = pretty v
+  pretty (SizeExpConst n _) = pretty n
 
 instance Pretty (Shape Size) where
-  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
+  pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
 
 instance Pretty (Shape ()) where
-  ppr (Shape ds) = mconcat $ replicate (length ds) $ text "[]"
+  pretty (Shape ds) = mconcat $ replicate (length ds) "[]"
 
 instance Pretty (Shape Int64) where
-  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
+  pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
 
 instance Pretty (Shape Bool) where
-  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
+  pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
+
+prettyRetType :: Pretty (Shape dim) => Int -> RetTypeBase dim as -> Doc a
+prettyRetType p (RetType [] t) =
+  prettyType p t
+prettyRetType _ (RetType dims t) =
+  "?"
+    <> mconcat (map (brackets . prettyName) dims)
+    <> "."
+    <> pretty t
 
 instance Pretty (Shape dim) => Pretty (RetTypeBase dim as) where
-  ppr = pprPrec 0
-  pprPrec p (RetType [] t) = pprPrec p t
-  pprPrec _ (RetType dims t) =
-    text "?" <> mconcat (map (brackets . pprName) dims) <> text "." <> ppr t
+  pretty = prettyRetType 0
+
+prettyScalarType :: Pretty (Shape dim) => Int -> ScalarTypeBase dim as -> Doc a
+prettyScalarType _ (Prim et) = pretty et
+prettyScalarType p (TypeVar _ u v targs) =
+  parensIf (not (null targs) && p > 3) $
+    pretty u <> hsep (pretty v : map (prettyTypeArg 3) targs)
+prettyScalarType _ (Record fs)
+  | Just ts <- areTupleFields fs =
+      group $ parens $ align $ mconcat $ punctuate ("," <> line) $ map pretty ts
+  | otherwise =
+      group $ braces $ align $ mconcat $ punctuate ("," <> line) fs'
+  where
+    ppField (name, t) = pretty (nameToString name) <> colon <+> align (pretty t)
+    fs' = map ppField $ M.toList fs
+prettyScalarType p (Arrow _ (Named v) t1 t2) =
+  parensIf (p > 1) $
+    parens (prettyName v <> colon <+> align (pretty t1)) <+> "->" <+> prettyRetType 1 t2
+prettyScalarType p (Arrow _ Unnamed t1 t2) =
+  parensIf (p > 1) $ prettyType 2 t1 <+> "->" <+> prettyRetType 1 t2
+prettyScalarType p (Sum cs) =
+  parensIf (p > 0) $
+    group (align (mconcat $ punctuate (" |" <> line) cs'))
+  where
+    ppConstr (name, fs) = sep $ ("#" <> pretty name) : map (prettyType 2) fs
+    cs' = map ppConstr $ M.toList cs
 
 instance Pretty (Shape dim) => Pretty (ScalarTypeBase dim as) where
-  ppr = pprPrec 0
-  pprPrec _ (Prim et) = ppr et
-  pprPrec p (TypeVar _ u v targs) =
-    parensIf (not (null targs) && p > 3) $
-      ppr u <> ppr v <+> spread (map (pprPrec 3) targs)
-  pprPrec _ (Record fs)
-    | Just ts <- areTupleFields fs =
-        oneLine (parens $ commasep $ map ppr ts)
-          <|> parens (align $ mconcat $ punctuate (text "," <> line) $ map ppr ts)
-    | otherwise =
-        oneLine (braces $ commasep fs')
-          <|> braces (align $ mconcat $ punctuate (text "," <> line) fs')
-    where
-      ppField (name, t) = text (nameToString name) <> colon <+> align (ppr t)
-      fs' = map ppField $ M.toList fs
-  pprPrec p (Arrow _ (Named v) t1 t2) =
-    parensIf (p > 1) $
-      parens (pprName v <> colon <+> align (ppr t1)) <+/> text "->" <+> pprPrec 1 t2
-  pprPrec p (Arrow _ Unnamed t1 t2) =
-    parensIf (p > 1) $ pprPrec 2 t1 <+/> text "->" <+> pprPrec 1 t2
-  pprPrec p (Sum cs) =
-    parensIf (p > 0) $
-      oneLine (mconcat $ punctuate (text " | ") cs')
-        <|> align (mconcat $ punctuate (text " |" <> line) cs')
-    where
-      ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map (pprPrec 2) fs
-      cs' = map ppConstr $ M.toList cs
+  pretty = prettyScalarType 0
+
+prettyType :: Pretty (Shape dim) => Int -> TypeBase dim as -> Doc a
+prettyType _ (Array _ u shape at) =
+  pretty u <> pretty shape <> align (prettyScalarType 1 at)
+prettyType p (Scalar t) =
+  prettyScalarType p t
 
 instance Pretty (Shape dim) => Pretty (TypeBase dim as) where
-  ppr = pprPrec 0
-  pprPrec _ (Array _ u shape at) = ppr u <> ppr shape <> align (pprPrec 1 at)
-  pprPrec p (Scalar t) = pprPrec p t
+  pretty = prettyType 0
+
+prettyTypeArg :: Pretty (Shape dim) => Int -> TypeArg dim -> Doc a
+prettyTypeArg _ (TypeArgDim d _) = pretty $ Shape [d]
+prettyTypeArg p (TypeArgType t _) = prettyType p t
 
 instance Pretty (Shape dim) => Pretty (TypeArg dim) where
-  ppr = pprPrec 0
-  pprPrec _ (TypeArgDim d _) = ppr $ Shape [d]
-  pprPrec p (TypeArgType t _) = pprPrec p t
+  pretty = prettyTypeArg 0
 
 instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
-  ppr (TEUnique t _) = text "*" <> ppr t
-  ppr (TEArray d at _) = brackets (ppr d) <> ppr at
-  ppr (TETuple ts _) = parens $ commasep $ map ppr ts
-  ppr (TERecord fs _) = braces $ commasep $ map ppField fs
+  pretty (TEUnique t _) = "*" <> pretty t
+  pretty (TEArray d at _) = brackets (pretty d) <> pretty at
+  pretty (TETuple ts _) = parens $ commasep $ map pretty ts
+  pretty (TERecord fs _) = braces $ commasep $ map ppField fs
     where
-      ppField (name, t) = text (nameToString name) <> colon <+> ppr t
-  ppr (TEVar name _) = ppr name
-  ppr (TEApply t arg _) = ppr t <+> ppr arg
-  ppr (TEArrow (Just v) t1 t2 _) = parens v' <+> text "->" <+> ppr t2
+      ppField (name, t) = pretty (nameToString name) <> colon <+> pretty t
+  pretty (TEVar name _) = pretty name
+  pretty (TEApply t arg _) = pretty t <+> pretty arg
+  pretty (TEArrow (Just v) t1 t2 _) = parens v' <+> "->" <+> pretty t2
     where
-      v' = pprName v <> colon <+> ppr t1
-  ppr (TEArrow Nothing t1 t2 _) = ppr t1 <+> text "->" <+> ppr t2
-  ppr (TESum cs _) =
-    align $ cat $ punctuate (text " |" <> softline) $ map ppConstr cs
+      v' = prettyName v <> colon <+> pretty t1
+  pretty (TEArrow Nothing t1 t2 _) = pretty t1 <+> "->" <+> pretty t2
+  pretty (TESum cs _) =
+    align $ cat $ punctuate (" |" <> softline) $ map ppConstr cs
     where
-      ppConstr (name, fs) = text "#" <> ppr name <+> sep (map ppr fs)
-  ppr (TEDim dims te _) =
-    text "?" <> mconcat (map (brackets . pprName) dims) <> text "." <> ppr te
+      ppConstr (name, fs) = "#" <> pretty name <+> sep (map pretty fs)
+  pretty (TEDim dims te _) =
+    "?" <> mconcat (map (brackets . prettyName) dims) <> "." <> pretty te
 
 instance (Eq vn, IsName vn) => Pretty (TypeArgExp vn) where
-  ppr (TypeArgExpDim d _) = brackets $ ppr d
-  ppr (TypeArgExpType t) = ppr t
+  pretty (TypeArgExpDim d _) = brackets $ pretty d
+  pretty (TypeArgExpType t) = pretty t
 
 instance IsName vn => Pretty (QualName vn) where
-  ppr (QualName names name) =
-    mconcat $ punctuate (text ".") $ map pprName names ++ [pprName name]
+  pretty (QualName names name) =
+    mconcat $ punctuate "." $ map prettyName names ++ [prettyName name]
 
 instance IsName vn => Pretty (IdentBase f vn) where
-  ppr = pprName . identName
+  pretty = prettyName . identName
 
 hasArrayLit :: ExpBase ty vn -> Bool
 hasArrayLit ArrayLit {} = True
@@ -199,349 +197,353 @@ hasArrayLit (TupLit es2 _) = any hasArrayLit es2
 hasArrayLit _ = False
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (DimIndexBase f vn) where
-  ppr (DimFix e) = ppr e
-  ppr (DimSlice i j (Just s)) =
-    maybe mempty ppr i
-      <> text ":"
-      <> maybe mempty ppr j
-      <> text ":"
-      <> ppr s
-  ppr (DimSlice i (Just j) s) =
-    maybe mempty ppr i
-      <> text ":"
-      <> ppr j
-      <> maybe mempty ((text ":" <>) . ppr) s
-  ppr (DimSlice i Nothing Nothing) =
-    maybe mempty ppr i <> text ":"
+  pretty (DimFix e) = pretty e
+  pretty (DimSlice i j (Just s)) =
+    maybe mempty pretty i
+      <> ":"
+      <> maybe mempty pretty j
+      <> ":"
+      <> pretty s
+  pretty (DimSlice i (Just j) s) =
+    maybe mempty pretty i
+      <> ":"
+      <> pretty j
+      <> maybe mempty ((":" <>) . pretty) s
+  pretty (DimSlice i Nothing Nothing) =
+    maybe mempty pretty i <> ":"
 
 instance IsName vn => Pretty (SizeBinder vn) where
-  ppr (SizeBinder v _) = brackets $ pprName v
+  pretty (SizeBinder v _) = brackets $ prettyName v
 
-letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc
-letBody body@(AppExp LetPat {} _) = ppr body
-letBody body@(AppExp LetFun {} _) = ppr body
-letBody body = text "in" <+> align (ppr body)
+letBody :: (Eq vn, IsName vn, Annot f) => ExpBase f vn -> Doc a
+letBody body@(AppExp LetPat {} _) = pretty body
+letBody body@(AppExp LetFun {} _) = pretty body
+letBody body = "in" <+> align (pretty body)
+
+prettyAppExp :: (Eq vn, IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
+prettyAppExp p (Coerce e t _) =
+  parensIf (p /= -1) $ prettyExp 0 e <+> ":>" <+> align (pretty t)
+prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) = prettyBinOp p bop x y
+prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
+prettyAppExp _ (DoLoop sizeparams pat initexp form loopbody _) =
+  "loop"
+    <+> align
+      ( hsep (map (brackets . prettyName) sizeparams ++ [pretty pat])
+          <+> equals
+          <+> pretty initexp
+          <+> pretty form
+          <+> "do"
+      )
+    </> indent 2 (pretty loopbody)
+prettyAppExp _ (Index e idxs _) =
+  prettyExp 9 e <> brackets (commasep (map pretty idxs))
+prettyAppExp p (LetPat sizes pat e body _) =
+  parensIf (p /= -1) . align $
+    hsep ("let" : map pretty sizes ++ [align (pretty pat)])
+      <+> ( if linebreak
+              then equals </> indent 2 (pretty e)
+              else equals <+> align (pretty e)
+          )
+      </> letBody body
+  where
+    linebreak = case e of
+      AppExp {} -> True
+      Attr {} -> True
+      ArrayLit {} -> False
+      _ -> hasArrayLit e
+prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
+  "let"
+    <+> prettyName fname
+    <+> hsep (map pretty tparams ++ map pretty params)
+      <> retdecl'
+    <+> equals
+    </> indent 2 (pretty e)
+    </> letBody body
+  where
+    retdecl' = case (pretty <$> unAnnot rettype) `mplus` (pretty <$> retdecl) of
+      Just rettype' -> colon <+> align rettype'
+      Nothing -> mempty
+prettyAppExp _ (LetWith dest src idxs ve body _)
+  | dest == src =
+      "let"
+        <+> pretty dest <> list (map pretty idxs)
+        <+> equals
+        <+> align (pretty ve)
+        </> letBody body
+  | otherwise =
+      "let"
+        <+> pretty dest
+        <+> equals
+        <+> pretty src
+        <+> "with"
+        <+> brackets (commasep (map pretty idxs))
+        <+> "="
+        <+> align (pretty ve)
+        </> letBody body
+prettyAppExp p (Range start maybe_step end _) =
+  parensIf (p /= -1) $
+    pretty start
+      <> maybe mempty ((".." <>) . pretty) maybe_step
+      <> case end of
+        DownToExclusive end' -> "..>" <> pretty end'
+        ToInclusive end' -> "..." <> pretty end'
+        UpToExclusive end' -> "..<" <> pretty end'
+prettyAppExp _ (If c t f _) =
+  "if"
+    <+> pretty c
+    </> "then"
+    <+> align (pretty t)
+    </> "else"
+    <+> align (pretty f)
+prettyAppExp p (Apply f arg _ _) =
+  parensIf (p >= 10) $ prettyExp 0 f <+> prettyExp 10 arg
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
-  ppr = pprPrec (-1)
-  pprPrec p (Coerce e t _) =
-    parensIf (p /= -1) $ pprPrec 0 e <+> text ":>" <+> align (pprPrec 0 t)
-  pprPrec p (BinOp (bop, _) _ (x, _) (y, _) _) = prettyBinOp p bop x y
-  pprPrec _ (Match e cs _) = text "match" <+> ppr e </> (stack . map ppr) (NE.toList cs)
-  pprPrec _ (DoLoop sizeparams pat initexp form loopbody _) =
-    text "loop"
-      <+> align
-        ( spread (map (brackets . pprName) sizeparams)
-            <+/> ppr pat
-            <+> equals
-            <+/> ppr initexp
-            <+/> ppr form
-            <+> text "do"
-        )
-      </> indent 2 (ppr loopbody)
-  pprPrec _ (Index e idxs _) =
-    pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec p (LetPat sizes pat e body _) =
-    parensIf (p /= -1) $
-      align $
-        text "let"
-          <+> spread (map ppr sizes)
-          <+> align (ppr pat)
-          <+> ( if linebreak
-                  then equals </> indent 2 (ppr e)
-                  else equals <+> align (ppr e)
-              )
-          </> letBody body
-    where
-      linebreak = case e of
-        AppExp {} -> True
-        Attr {} -> True
-        ArrayLit {} -> False
-        _ -> hasArrayLit e
-  pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
-    text "let"
-      <+> pprName fname
-      <+> spread (map ppr tparams ++ map ppr params)
-        <> retdecl'
-      <+> equals
-      </> indent 2 (ppr e)
-      </> letBody body
-    where
-      retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
-        Just rettype' -> colon <+> align rettype'
-        Nothing -> mempty
-  pprPrec _ (LetWith dest src idxs ve body _)
-    | dest == src =
-        text "let"
-          <+> ppr dest <> list (map ppr idxs)
-          <+> equals
-          <+> align (ppr ve)
-          </> letBody body
-    | otherwise =
-        text "let"
-          <+> ppr dest
-          <+> equals
-          <+> ppr src
-          <+> text "with"
-          <+> brackets (commasep (map ppr idxs))
-          <+> text "="
-          <+> align (ppr ve)
-          </> letBody body
-  pprPrec p (Range start maybe_step end _) =
-    parensIf (p /= -1) $
-      ppr start
-        <> maybe mempty ((text ".." <>) . ppr) maybe_step
-        <> case end of
-          DownToExclusive end' -> text "..>" <> ppr end'
-          ToInclusive end' -> text "..." <> ppr end'
-          UpToExclusive end' -> text "..<" <> ppr end'
-  pprPrec _ (If c t f _) =
-    text "if"
-      <+> ppr c
-      </> text "then"
-      <+> align (ppr t)
-      </> text "else"
-      <+> align (ppr f)
-  pprPrec p (Apply f arg _ _) =
-    parensIf (p >= 10) $ pprPrec 0 f <+/> pprPrec 10 arg
+  pretty = prettyAppExp (-1)
+
+prettyExp :: (Eq vn, IsName vn, Annot f) => Int -> ExpBase f vn -> Doc a
+prettyExp _ (Var name t _) = pretty name <> inst
+  where
+    inst = case unAnnot t of
+      Just t'
+        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
+            "@" <> parens (align $ pretty t')
+      _ -> mempty
+prettyExp _ (Hole t _) = "???" <> inst
+  where
+    inst = case unAnnot t of
+      Just t'
+        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
+            "@" <> parens (align $ pretty t')
+      _ -> mempty
+prettyExp _ (Parens e _) = align $ parens $ pretty e
+prettyExp _ (QualParens (v, _) e _) = pretty v <> "." <> align (parens $ pretty e)
+prettyExp p (Ascript e t _) =
+  parensIf (p /= -1) $ prettyExp 0 e <+> ":" <+> align (pretty t)
+prettyExp _ (Literal v _) = pretty v
+prettyExp _ (IntLit v _ _) = pretty v
+prettyExp _ (FloatLit v _ _) = pretty v
+prettyExp _ (TupLit es _)
+  | any hasArrayLit es = parens $ commastack $ map pretty es
+  | otherwise = parens $ commasep $ map pretty es
+prettyExp _ (RecordLit fs _)
+  | any fieldArray fs = braces $ commastack $ map pretty fs
+  | otherwise = braces $ commasep $ map pretty fs
+  where
+    fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
+    fieldArray RecordFieldImplicit {} = False
+prettyExp _ (ArrayLit es info _) =
+  brackets (commasep $ map pretty es) <> info'
+  where
+    info' = case unAnnot info of
+      Just t
+        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
+            "@" <> parens (align $ pretty t)
+      _ -> mempty
+prettyExp _ (StringLit s _) =
+  pretty $ show $ map (chr . fromIntegral) s
+prettyExp _ (Project k e _ _) = pretty e <> "." <> pretty k
+prettyExp _ (Negate e _) = "-" <> pretty e
+prettyExp _ (Not e _) = "-" <> pretty e
+prettyExp _ (Update src idxs ve _) =
+  pretty src
+    <+> "with"
+    <+> brackets (commasep (map pretty idxs))
+    <+> "="
+    <+> align (pretty ve)
+prettyExp _ (RecordUpdate src fs ve _ _) =
+  pretty src
+    <+> "with"
+    <+> mconcat (intersperse "." (map pretty fs))
+    <+> "="
+    <+> align (pretty ve)
+prettyExp _ (Assert e1 e2 _ _) = "assert" <+> prettyExp 10 e1 <+> prettyExp 10 e2
+prettyExp p (Lambda params body rettype _ _) =
+  parensIf (p /= -1) $
+    "\\" <> hsep (map pretty params) <> ppAscription rettype
+      <+> "->"
+      </> indent 2 (pretty body)
+prettyExp _ (OpSection binop _ _) =
+  parens $ pretty binop
+prettyExp _ (OpSectionLeft binop _ x _ _ _) =
+  parens $ pretty x <+> ppBinOp binop
+prettyExp _ (OpSectionRight binop _ x _ _ _) =
+  parens $ ppBinOp binop <+> pretty x
+prettyExp _ (ProjectSection fields _ _) =
+  parens $ mconcat $ map p fields
+  where
+    p name = "." <> pretty name
+prettyExp _ (IndexSection idxs _ _) =
+  parens $ "." <> brackets (commasep (map pretty idxs))
+prettyExp _ (Constr n cs _ _) = "#" <> pretty n <+> sep (map pretty cs)
+prettyExp _ (Attr attr e _) =
+  "#[" <> pretty attr <> "]" </> prettyExp (-1) e
+prettyExp i (AppExp e _) = prettyAppExp i e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
-  ppr = pprPrec (-1)
-  pprPrec _ (Var name t _) = ppr name <> inst
-    where
-      inst = case unAnnot t of
-        Just t'
-          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
-              text "@" <> parens (align $ ppr t')
-        _ -> mempty
-  pprPrec _ (Hole t _) = "???" <> inst
-    where
-      inst = case unAnnot t of
-        Just t'
-          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
-              text "@" <> parens (align $ ppr t')
-        _ -> mempty
-  pprPrec _ (Parens e _) = align $ parens $ ppr e
-  pprPrec _ (QualParens (v, _) e _) = ppr v <> text "." <> align (parens $ ppr e)
-  pprPrec p (Ascript e t _) =
-    parensIf (p /= -1) $ pprPrec 0 e <+> text ":" <+> align (pprPrec 0 t)
-  pprPrec _ (Literal v _) = ppr v
-  pprPrec _ (IntLit v _ _) = ppr v
-  pprPrec _ (FloatLit v _ _) = ppr v
-  pprPrec _ (TupLit es _)
-    | any hasArrayLit es = parens $ commastack $ map ppr es
-    | otherwise = parens $ commasep $ map ppr es
-  pprPrec _ (RecordLit fs _)
-    | any fieldArray fs = braces $ commastack $ map ppr fs
-    | otherwise = braces $ commasep $ map ppr fs
-    where
-      fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
-      fieldArray RecordFieldImplicit {} = False
-  pprPrec _ (ArrayLit es info _) =
-    brackets (commasep $ map ppr es) <> info'
-    where
-      info' = case unAnnot info of
-        Just t
-          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
-              text "@" <> parens (align $ ppr t)
-        _ -> mempty
-  pprPrec _ (StringLit s _) =
-    text $ show $ map (chr . fromIntegral) s
-  pprPrec _ (Project k e _ _) = ppr e <> text "." <> ppr k
-  pprPrec _ (Negate e _) = text "-" <> ppr e
-  pprPrec _ (Not e _) = text "-" <> ppr e
-  pprPrec _ (Update src idxs ve _) =
-    ppr src
-      <+> text "with"
-      <+> brackets (commasep (map ppr idxs))
-      <+> text "="
-      <+> align (ppr ve)
-  pprPrec _ (RecordUpdate src fs ve _ _) =
-    ppr src
-      <+> text "with"
-      <+> mconcat (intersperse (text ".") (map ppr fs))
-      <+> text "="
-      <+> align (ppr ve)
-  pprPrec _ (Assert e1 e2 _ _) = text "assert" <+> pprPrec 10 e1 <+> pprPrec 10 e2
-  pprPrec p (Lambda params body rettype _ _) =
-    parensIf (p /= -1) $
-      text "\\" <> spread (map ppr params) <> ppAscription rettype
-        <+> text "->"
-        </> indent 2 (ppr body)
-  pprPrec _ (OpSection binop _ _) =
-    parens $ ppr binop
-  pprPrec _ (OpSectionLeft binop _ x _ _ _) =
-    parens $ ppr x <+> ppBinOp binop
-  pprPrec _ (OpSectionRight binop _ x _ _ _) =
-    parens $ ppBinOp binop <+> ppr x
-  pprPrec _ (ProjectSection fields _ _) =
-    parens $ mconcat $ map p fields
-    where
-      p name = text "." <> ppr name
-  pprPrec _ (IndexSection idxs _ _) =
-    parens $ text "." <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Constr n cs _ _) = text "#" <> ppr n <+> sep (map ppr cs)
-  pprPrec _ (Attr attr e _) =
-    text "#[" <> ppr attr <> text "]" </> pprPrec (-1) e
-  pprPrec i (AppExp e _) = pprPrec i e
+  pretty = prettyExp (-1)
 
 instance IsName vn => Pretty (AttrAtom vn) where
-  ppr (AtomName v) = ppr v
-  ppr (AtomInt x) = ppr x
+  pretty (AtomName v) = pretty v
+  pretty (AtomInt x) = pretty x
 
 instance IsName vn => Pretty (AttrInfo vn) where
-  ppr (AttrAtom attr _) = ppr attr
-  ppr (AttrComp f attrs _) = ppr f <> parens (commasep $ map ppr attrs)
+  pretty (AttrAtom attr _) = pretty attr
+  pretty (AttrComp f attrs _) = pretty f <> parens (commasep $ map pretty attrs)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
-  ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
-  ppr (RecordFieldImplicit name _ _) = pprName name
+  pretty (RecordFieldExplicit name e _) = pretty name <> equals <> pretty e
+  pretty (RecordFieldImplicit name _ _) = prettyName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
-  ppr (CasePat p e _) = text "case" <+> ppr p <+> text "->" </> indent 2 (ppr e)
+  pretty (CasePat p e _) = "case" <+> pretty p <+> "->" </> indent 2 (pretty e)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
-  ppr (For i ubound) =
-    text "for" <+> ppr i <+> text "<" <+> align (ppr ubound)
-  ppr (ForIn x e) =
-    text "for" <+> ppr x <+> text "in" <+> ppr e
-  ppr (While cond) =
-    text "while" <+> ppr cond
+  pretty (For i ubound) =
+    "for" <+> pretty i <+> "<" <+> align (pretty ubound)
+  pretty (ForIn x e) =
+    "for" <+> pretty x <+> "in" <+> pretty e
+  pretty (While cond) =
+    "while" <+> pretty cond
 
 instance Pretty PatLit where
-  ppr (PatLitInt x) = ppr x
-  ppr (PatLitFloat f) = ppr f
-  ppr (PatLitPrim v) = ppr v
+  pretty (PatLitInt x) = pretty x
+  pretty (PatLitFloat f) = pretty f
+  pretty (PatLitPrim v) = pretty v
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (PatBase f vn) where
-  ppr (PatAscription p t _) = ppr p <> colon <+> align (ppr t)
-  ppr (PatParens p _) = parens $ ppr p
-  ppr (Id v t _) = case unAnnot t of
-    Just t' -> parens $ pprName v <> colon <+> align (ppr t')
-    Nothing -> pprName v
-  ppr (TuplePat pats _) = parens $ commasep $ map ppr pats
-  ppr (RecordPat fs _) = braces $ commasep $ map ppField fs
+  pretty (PatAscription p t _) = pretty p <> colon <+> align (pretty t)
+  pretty (PatParens p _) = parens $ pretty p
+  pretty (Id v t _) = case unAnnot t of
+    Just t' -> parens $ prettyName v <> colon <+> align (pretty t')
+    Nothing -> prettyName v
+  pretty (TuplePat pats _) = parens $ commasep $ map pretty pats
+  pretty (RecordPat fs _) = braces $ commasep $ map ppField fs
     where
-      ppField (name, t) = text (nameToString name) <> equals <> ppr t
-  ppr (Wildcard t _) = case unAnnot t of
-    Just t' -> parens $ text "_" <> colon <+> ppr t'
-    Nothing -> text "_"
-  ppr (PatLit e _ _) = ppr e
-  ppr (PatConstr n _ ps _) = text "#" <> ppr n <+> sep (map ppr ps)
-  ppr (PatAttr attr p _) = text "#[" <> ppr attr <> text "]" <+/> ppr p
+      ppField (name, t) = pretty (nameToString name) <> equals <> pretty t
+  pretty (Wildcard t _) = case unAnnot t of
+    Just t' -> parens $ "_" <> colon <+> pretty t'
+    Nothing -> "_"
+  pretty (PatLit e _ _) = pretty e
+  pretty (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty ps)
+  pretty (PatAttr attr p _) = "#[" <> pretty attr <> "]" </> pretty p
 
-ppAscription :: Pretty t => Maybe t -> Doc
+ppAscription :: Pretty t => Maybe t -> Doc a
 ppAscription Nothing = mempty
-ppAscription (Just t) = colon <> align (ppr t)
+ppAscription (Just t) = colon <> align (pretty t)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ProgBase f vn) where
-  ppr = stack . punctuate line . map ppr . progDecs
+  pretty = stack . punctuate line . map pretty . progDecs
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (DecBase f vn) where
-  ppr (ValDec dec) = ppr dec
-  ppr (TypeDec dec) = ppr dec
-  ppr (SigDec sig) = ppr sig
-  ppr (ModDec sd) = ppr sd
-  ppr (OpenDec x _) = text "open" <+> ppr x
-  ppr (LocalDec dec _) = text "local" <+> ppr dec
-  ppr (ImportDec x _ _) = text "import" <+> ppr x
+  pretty (ValDec dec) = pretty dec
+  pretty (TypeDec dec) = pretty dec
+  pretty (SigDec sig) = pretty sig
+  pretty (ModDec sd) = pretty sd
+  pretty (OpenDec x _) = "open" <+> pretty x
+  pretty (LocalDec dec _) = "local" <+> pretty dec
+  pretty (ImportDec x _ _) = "import" <+> pretty x
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
-  ppr (ModVar v _) = ppr v
-  ppr (ModParens e _) = parens $ ppr e
-  ppr (ModImport v _ _) = text "import" <+> ppr (show v)
-  ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
-  ppr (ModApply f a _ _ _) = parens $ ppr f <+> parens (ppr a)
-  ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se
-  ppr (ModLambda param maybe_sig body _) =
-    text "\\" <> ppr param <> maybe_sig'
-      <+> text "->"
-      </> indent 2 (ppr body)
+  pretty (ModVar v _) = pretty v
+  pretty (ModParens e _) = parens $ pretty e
+  pretty (ModImport v _ _) = "import" <+> pretty (show v)
+  pretty (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ds)
+  pretty (ModApply f a _ _ _) = parens $ pretty f <+> parens (pretty a)
+  pretty (ModAscript me se _ _) = pretty me <> colon <+> pretty se
+  pretty (ModLambda param maybe_sig body _) =
+    "\\" <> pretty param <> maybe_sig'
+      <+> "->"
+      </> indent 2 (pretty body)
     where
       maybe_sig' = case maybe_sig of
         Nothing -> mempty
-        Just (sig, _) -> colon <+> ppr sig
+        Just (sig, _) -> colon <+> pretty sig
 
 instance Pretty Liftedness where
-  ppr Unlifted = text ""
-  ppr SizeLifted = text "~"
-  ppr Lifted = text "^"
+  pretty Unlifted = ""
+  pretty SizeLifted = "~"
+  pretty Lifted = "^"
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
-  ppr (TypeBind name l params te rt _ _) =
-    text "type" <> ppr l
-      <+> pprName name
-      <+> spread (map ppr params)
+  pretty (TypeBind name l params te rt _ _) =
+    "type" <> pretty l
+      <+> prettyName name
+      <+> hsep (map pretty params)
       <+> equals
-      <+> maybe (ppr te) ppr (unAnnot rt)
+      <+> maybe (pretty te) pretty (unAnnot rt)
 
 instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
-  ppr (TypeParamDim name _) = brackets $ pprName name
-  ppr (TypeParamType l name _) = text "'" <> ppr l <> pprName name
+  pretty (TypeParamDim name _) = brackets $ prettyName name
+  pretty (TypeParamType l name _) = "'" <> pretty l <> prettyName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
-  ppr (ValBind entry name retdecl rettype tparams args body _ attrs _) =
-    mconcat (map ((<> line) . ppr) attrs)
-      <> text fun
-      <+> pprName name
-      <+> align (sep (map ppr tparams ++ map ppr args))
-        <> retdecl'
-        <> text " ="
-      </> indent 2 (ppr body)
+  pretty (ValBind entry name retdecl rettype tparams args body _ attrs _) =
+    mconcat (map ((<> line) . pretty) attrs)
+      <> fun
+      <+> align
+        ( sep
+            ( prettyName name
+                : map pretty tparams
+                ++ map pretty args
+                ++ retdecl'
+                ++ ["="]
+            )
+        )
+      </> indent 2 (pretty body)
     where
       fun
         | isJust entry = "entry"
         | otherwise = "def"
-      retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
-        Just rettype' -> colon <+> align rettype'
+      retdecl' = case (pretty <$> unAnnot rettype) `mplus` (pretty <$> retdecl) of
+        Just rettype' -> [colon <+> align rettype']
         Nothing -> mempty
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
-  ppr (TypeAbbrSpec tpsig) = ppr tpsig
-  ppr (TypeSpec l name ps _ _) =
-    text "type" <> ppr l <+> pprName name <+> spread (map ppr ps)
-  ppr (ValSpec name tparams vtype _ _ _) =
-    text "val" <+> pprName name <+> spread (map ppr tparams) <> colon <+> ppr vtype
-  ppr (ModSpec name sig _ _) =
-    text "module" <+> pprName name <> colon <+> ppr sig
-  ppr (IncludeSpec e _) =
-    text "include" <+> ppr e
+  pretty (TypeAbbrSpec tpsig) = pretty tpsig
+  pretty (TypeSpec l name ps _ _) =
+    "type" <> pretty l <+> prettyName name <+> hsep (map pretty ps)
+  pretty (ValSpec name tparams vtype _ _ _) =
+    "val" <+> prettyName name <+> hsep (map pretty tparams) <> colon <+> pretty vtype
+  pretty (ModSpec name sig _ _) =
+    "module" <+> prettyName name <> colon <+> pretty sig
+  pretty (IncludeSpec e _) =
+    "include" <+> pretty e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SigExpBase f vn) where
-  ppr (SigVar v _ _) = ppr v
-  ppr (SigParens e _) = parens $ ppr e
-  ppr (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ss)
-  ppr (SigWith s (TypeRef v ps td _) _) =
-    ppr s <+> text "with" <+> ppr v <+> spread (map ppr ps) <> text " =" <+> ppr td
-  ppr (SigArrow (Just v) e1 e2 _) =
-    parens (pprName v <> colon <+> ppr e1) <+> text "->" <+> ppr e2
-  ppr (SigArrow Nothing e1 e2 _) =
-    ppr e1 <+> text "->" <+> ppr e2
+  pretty (SigVar v _ _) = pretty v
+  pretty (SigParens e _) = parens $ pretty e
+  pretty (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ss)
+  pretty (SigWith s (TypeRef v ps td _) _) =
+    pretty s <+> "with" <+> pretty v <+> hsep (map pretty ps) <> " =" <+> pretty td
+  pretty (SigArrow (Just v) e1 e2 _) =
+    parens (prettyName v <> colon <+> pretty e1) <+> "->" <+> pretty e2
+  pretty (SigArrow Nothing e1 e2 _) =
+    pretty e1 <+> "->" <+> pretty e2
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SigBindBase f vn) where
-  ppr (SigBind name e _ _) =
-    text "module type" <+> pprName name <+> equals <+> ppr e
+  pretty (SigBind name e _ _) =
+    "module type" <+> prettyName name <+> equals <+> pretty e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ModParamBase f vn) where
-  ppr (ModParam pname psig _ _) =
-    parens (pprName pname <> colon <+> ppr psig)
+  pretty (ModParam pname psig _ _) =
+    parens (prettyName pname <> colon <+> pretty psig)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ModBindBase f vn) where
-  ppr (ModBind name ps sig e _ _) =
-    text "module" <+> pprName name <+> spread (map ppr ps) <+> sig' <> text " =" <+> ppr e
+  pretty (ModBind name ps sig e _ _) =
+    "module" <+> prettyName name <+> hsep (map pretty ps) <+> sig' <> " =" <+> pretty e
     where
       sig' = case sig of
         Nothing -> mempty
-        Just (s, _) -> colon <+> ppr s <> text " "
+        Just (s, _) -> colon <+> pretty s <> " "
 
-ppBinOp :: IsName v => QualName v -> Doc
+ppBinOp :: IsName v => QualName v -> Doc a
 ppBinOp bop =
   case leading of
-    Backtick -> text "`" <> ppr bop <> text "`"
-    _ -> ppr bop
+    Backtick -> "`" <> pretty bop <> "`"
+    _ -> pretty bop
   where
-    leading =
-      leadingOperator $ nameFromString $ pretty $ pprName $ qualLeaf bop
+    leading = leadingOperator $ toName $ qualLeaf bop
 
 prettyBinOp ::
   (Eq vn, IsName vn, Annot f) =>
@@ -549,17 +551,17 @@ prettyBinOp ::
   QualName vn ->
   ExpBase f vn ->
   ExpBase f vn ->
-  Doc
+  Doc a
 prettyBinOp p bop x y =
   parensIf (p > symPrecedence) $
-    pprPrec symPrecedence x
-      <+/> bop'
-      <+> pprPrec symRPrecedence y
+    prettyExp symPrecedence x
+      <+> bop'
+      <+> prettyExp symRPrecedence y
   where
     bop' = case leading of
-      Backtick -> text "`" <> ppr bop <> text "`"
-      _ -> ppr bop
-    leading = leadingOperator $ nameFromString $ pretty $ pprName $ qualLeaf bop
+      Backtick -> "`" <> pretty bop <> "`"
+      _ -> pretty bop
+    leading = leadingOperator $ toName $ qualLeaf bop
     symPrecedence = precedence leading
     symRPrecedence = rprecedence leading
     precedence PipeRight = -1

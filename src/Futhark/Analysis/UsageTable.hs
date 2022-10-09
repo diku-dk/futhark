@@ -27,8 +27,8 @@ module Futhark.Analysis.UsageTable
 where
 
 import Data.Bits
-import qualified Data.Foldable as Foldable
-import qualified Data.IntMap.Strict as IM
+import Data.Foldable qualified as Foldable
+import Data.IntMap.Strict qualified as IM
 import Data.List (foldl')
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
@@ -179,8 +179,8 @@ usageInExp (Apply _ args _ _) =
     ]
 usageInExp e@DoLoop {} =
   foldMap consumedUsage $ namesToList $ consumedInExp e
-usageInExp (If _ tbranch fbranch _) =
-  usageInBody tbranch <> usageInBody fbranch
+usageInExp (Match _ cases defbody _) =
+  foldMap (usageInBody . caseBody) cases <> usageInBody defbody
 usageInExp (WithAcc inputs lam) =
   foldMap inputUsage inputs <> usageInBody (lambdaBody lam)
   where

@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Pass.ExtractKernels.BlockedKernel
@@ -23,6 +21,7 @@ import Control.Monad
 import Control.Monad.Writer
 import Futhark.Analysis.PrimExp
 import Futhark.IR
+import Futhark.IR.GPU.Op (SegVirt (..))
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
@@ -129,7 +128,7 @@ segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
         SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim ::
-  (MonadFreshNames m, MonadBuilder m) =>
+  MonadBuilder m =>
   Pat Type ->
   m (Pat Type, [(VName, SubExp)], m ())
 dummyDim pat = do

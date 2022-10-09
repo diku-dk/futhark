@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -7,15 +6,15 @@ module Futhark.CLI.Dataset (main) where
 
 import Control.Monad
 import Control.Monad.ST
-import qualified Data.Binary as Bin
-import qualified Data.ByteString.Lazy.Char8 as BS
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Binary qualified as Bin
+import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Vector.Generic (freeze)
-import qualified Data.Vector.Storable as SVec
-import qualified Data.Vector.Storable.Mutable as USVec
+import Data.Vector.Storable qualified as SVec
+import Data.Vector.Storable.Mutable qualified as USVec
 import Data.Word
-import qualified Futhark.Data as V
+import Futhark.Data qualified as V
 import Futhark.Data.Reader (readValues)
 import Futhark.Util (convFloat)
 import Futhark.Util.Options
@@ -26,7 +25,6 @@ import Language.Futhark.Syntax hiding
   ( FloatValue (..),
     IntValue (..),
     PrimValue (..),
-    Value,
     ValueType,
   )
 import System.Exit
@@ -108,7 +106,7 @@ commandLineOptions =
                       }
                 Left err ->
                   Left $ do
-                    hPutStrLn stderr err
+                    T.hPutStrLn stderr err
                     exitFailure
           )
           "TYPE"
@@ -116,9 +114,9 @@ commandLineOptions =
       "Generate a random value of this type.",
     Option
       []
-      ["text"]
+      ["pretty"]
       (NoArg $ Right $ \opts -> opts {format = Text})
-      "Output data in text format (must precede --generate).",
+      "Output data in pretty format (must precede --generate).",
     Option
       "b"
       ["binary"]
@@ -172,7 +170,7 @@ setRangeOption tname set =
 
 tryMakeGenerator ::
   String ->
-  Either String (RandomConfiguration -> OutputFormat -> Word64 -> IO ())
+  Either T.Text (RandomConfiguration -> OutputFormat -> Word64 -> IO ())
 tryMakeGenerator t
   | Just vs <- readValues $ BS.pack t =
       pure $ \_ fmt _ -> mapM_ (outValue fmt) vs
@@ -187,7 +185,7 @@ tryMakeGenerator t
     outValue Binary = BS.putStr . Bin.encode
     outValue Type = T.putStrLn . V.valueTypeText . V.valueType
 
-toValueType :: UncheckedTypeExp -> Either String V.ValueType
+toValueType :: UncheckedTypeExp -> Either T.Text V.ValueType
 toValueType TETuple {} = Left "Cannot handle tuples yet."
 toValueType TERecord {} = Left "Cannot handle records yet."
 toValueType TEApply {} = Left "Cannot handle type applications yet."
@@ -208,7 +206,7 @@ toValueType (TEVar (QualName [] v) _)
     m = map f [minBound .. maxBound]
     f t = (nameFromText (V.primTypeText t), t)
 toValueType (TEVar v _) =
-  Left $ "Unknown type " ++ pretty v
+  Left $ "Unknown type " <> prettyText v
 
 -- | Closed interval, as in @System.Random@.
 type Range a = (a, a)

@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
-
 -- | This monomorphization module converts a well-typed, polymorphic,
 -- module-free Futhark program into an equivalent monomorphic program.
 --
@@ -37,10 +32,10 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
 import Data.List (partition)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Sequence as Seq
-import qualified Data.Set as S
+import Data.Sequence qualified as Seq
+import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 import Language.Futhark
@@ -156,11 +151,11 @@ instance Eq MonoSize where
   _ == _ = False
 
 instance Pretty MonoSize where
-  ppr (MonoKnown i) = text "?" <> ppr i
-  ppr (MonoAnon v) = text "?" <> pprName v
+  pretty (MonoKnown i) = "?" <> pretty i
+  pretty (MonoAnon v) = "?" <> prettyName v
 
 instance Pretty (Shape MonoSize) where
-  ppr (Shape ds) = mconcat (map (brackets . ppr) ds)
+  pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
 
 -- The kind of type relative to which we monomorphise.  What is most
 -- important to us is not the specific dimensions, but merely whether
@@ -605,10 +600,10 @@ desugarProjectSection fields (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
         t ->
           error $
             "desugarOpSection: type "
-              ++ pretty t
+              ++ prettyString t
               ++ " does not have field "
-              ++ pretty field
-desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
+              ++ prettyString field
+desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ prettyString t
 
 desugarIndexSection :: [DimIndex] -> PatType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
@@ -623,7 +618,7 @@ desugarIndexSection idxs (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
       loc
   where
     t1' = fromStruct t1
-desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
+desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
 
 noticeDims :: TypeBase Size as -> MonoM ()
 noticeDims = mapM_ notice . freeInType
@@ -854,7 +849,7 @@ typeSubstsM loc orig_t1 orig_t2 =
         typeSubstClause (_, ts1) (_, ts2) = zipWithM sub ts1 ts2
     sub t1@(Scalar Sum {}) t2 = sub t1 t2
     sub t1 t2@(Scalar Sum {}) = sub t1 t2
-    sub t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
+    sub t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", prettyString t1, prettyString t2]
 
     addSubst (QualName _ v) (RetType ext t) = do
       (ts, sizes) <- get
@@ -976,7 +971,7 @@ transformDecs (dec : _) =
   error $
     "The monomorphization module expects a module-free "
       ++ "input program, but received: "
-      ++ pretty dec
+      ++ prettyString dec
 
 -- | Monomorphise a list of top-level declarations. A module-free input program
 -- is expected, so only value declarations and type declaration are accepted.

@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Implementation of the Futhark module system (at least most of it;
 -- some is scattered elsewhere in the type checker).
 module Language.Futhark.TypeChecker.Modules
@@ -15,10 +12,10 @@ import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Data.Either
 import Data.List (intersect)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Semantic
@@ -216,10 +213,10 @@ refineEnv loc tset env tname ps t
             "Cannot refine a type having"
               <+> tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
-      typeError loc mempty $ pquote (ppr tname) <+> "is not an abstract type in the module type."
+      typeError loc mempty $ dquotes (pretty tname) <+> "is not an abstract type in the module type."
   where
     tpMsg [] = "no type parameters"
-    tpMsg xs = "type parameters" <+> spread (map ppr xs)
+    tpMsg xs = "type parameters" <+> hsep (map pretty xs)
 
 paramsMatch :: [TypeParam] -> [TypeParam] -> Bool
 paramsMatch ps1 ps2 = length ps1 == length ps2 && all match (zip ps1 ps2)
@@ -287,7 +284,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
         "Module defines"
           </> indent 2 (ppTypeAbbr abs name mod_t)
           </> "but module type requires"
-          <+> text what <> "."
+          <+> what <> "."
       where
         what = case name_l of
           Unlifted -> "a non-lifted type"
@@ -342,17 +339,17 @@ resolveMTyNames = resolveMTyNames'
 missingType :: Pretty a => Loc -> a -> Either TypeError b
 missingType loc name =
   Left . TypeError loc mempty $
-    "Module does not define a type named" <+> ppr name <> "."
+    "Module does not define a type named" <+> pretty name <> "."
 
 missingVal :: Pretty a => Loc -> a -> Either TypeError b
 missingVal loc name =
   Left . TypeError loc mempty $
-    "Module does not define a value named" <+> ppr name <> "."
+    "Module does not define a value named" <+> pretty name <> "."
 
 missingMod :: Pretty a => Loc -> a -> Either TypeError b
 missingMod loc name =
   Left . TypeError loc mempty $
-    "Module does not define a module named" <+> ppr name <> "."
+    "Module does not define a module named" <+> pretty name <> "."
 
 mismatchedType ::
   Loc ->
@@ -369,19 +366,19 @@ mismatchedType loc abs quals name spec_t env_t =
       </> "but module type requires"
       </> indent 2 (ppTypeAbbr abs (QualName quals name) spec_t)
 
-ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetType) -> Doc
+ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetType) -> Doc a
 ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
   | qualLeaf tn `elem` abs,
     map typeParamToArg ps == args =
-      "type" <> ppr l
-        <+> ppr name
-        <+> spread (map ppr ps)
+      "type" <> pretty l
+        <+> pretty name
+        <+> hsep (map pretty ps)
 ppTypeAbbr _ name (l, ps, t) =
-  "type" <> ppr l
-    <+> ppr name
-    <+> spread (map ppr ps)
+  "type" <> pretty l
+    <+> pretty name
+    <+> hsep (map pretty ps)
     <+> equals
-    <+/> nest 2 (align (ppr t))
+    <+> nest 2 (align (pretty t))
 
 -- | Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for
@@ -538,8 +535,8 @@ matchMTys orig_mty orig_mty_sig =
               "Type"
                 </> indent 2 (ppTypeAbbr [] (QualName quals name) (l, ps, t))
                 </> textwrap "cannot be made abstract because size parameter"
-                <+/> pquote (pprName d)
-                <+/> textwrap "is not used as an array size in the definition."
+                </> dquotes (prettyName d)
+                </> textwrap "is not used as an array size in the definition."
 
       let spec_t' = applySubst (`M.lookup` abs_subst_to_type) spec_t
           nonrigid = ps <> map (`TypeParamDim` mempty) (retDims t)
@@ -577,11 +574,11 @@ matchMTys orig_mty orig_mty_sig =
                 </> indent 2 (ppValBind (QualName quals spec_name) v)
                 </> fromMaybe mempty problem
 
-    matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Maybe Doc)
+    matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Maybe (Doc ()))
     matchValBinding loc (BoundV spec_tps orig_spec_t) (BoundV tps orig_t) = do
       case doUnification loc spec_tps tps (toStruct orig_spec_t) (toStruct orig_t) of
         Left (TypeError _ notes msg) ->
-          Just $ Just $ msg <> ppr notes
+          Just $ Just $ msg <> pretty notes
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
         Right t
@@ -590,10 +587,10 @@ matchMTys orig_mty orig_mty_sig =
 
     ppValBind v (BoundV tps t) =
       "val"
-        <+> ppr v
-        <+> spread (map ppr tps)
+        <+> pretty v
+        <+> hsep (map pretty tps)
         <+> colon
-        </> indent 2 (align (ppr t))
+        </> indent 2 (align (pretty t))
 
 -- | Apply a parametric module to an argument.
 applyFunctor ::

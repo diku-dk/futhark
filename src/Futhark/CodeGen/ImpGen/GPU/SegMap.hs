@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Code generation for 'SegMap' is quite straightforward.  The only
@@ -8,9 +7,10 @@
 module Futhark.CodeGen.ImpGen.GPU.SegMap (compileSegMap) where
 
 import Control.Monad.Except
-import qualified Futhark.CodeGen.ImpCode.GPU as Imp
+import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.CodeGen.ImpGen.GPU.Group
 import Futhark.IR.GPUMem
 import Futhark.Util.IntegralExp (divUp)
 import Prelude hiding (quot, rem)
@@ -23,10 +23,11 @@ compileSegMap ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegMap pat lvl space kbody = do
+  attrs <- lvlKernelAttrs lvl
+
   let (is, dims) = unzip $ unSegSpace space
-      dims' = map toInt64Exp dims
-      group_size' = toInt64Exp <$> segGroupSize lvl
-      attrs = defKernelAttrs (segNumGroups lvl) (segGroupSize lvl)
+      dims' = map pe64 dims
+      group_size' = pe64 <$> kAttrGroupSize attrs
 
   emit $ Imp.DebugPrint "\n# SegMap" Nothing
   case lvl of
@@ -58,4 +59,6 @@ compileSegMap pat lvl space kbody = do
             compileStms mempty (kernelBodyStms kbody) $
               zipWithM_ (compileGroupResult space) (patElems pat) $
                 kernelBodyResult kbody
+    SegThreadInGroup {} ->
+      error "compileSegMap: SegThreadInGroup"
   emit $ Imp.DebugPrint "" Nothing

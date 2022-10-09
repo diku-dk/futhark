@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Interference analysis for Futhark programs.
@@ -10,13 +8,13 @@ import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.Map (Map)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Set (Set)
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Analysis.LastUse (LastUseMap)
-import qualified Futhark.Analysis.LastUse as LastUse
-import qualified Futhark.Analysis.MemAlias as MemAlias
+import Futhark.Analysis.LastUse qualified as LastUse
+import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.IR.GPUMem
 import Futhark.Util (cartesian, invertMap)
 
@@ -111,10 +109,10 @@ analyseExp ::
   m (InUse, LastUsed, Graph VName)
 analyseExp lumap inuse_outside expr =
   case expr of
-    If _ then_body else_body _ -> do
-      res1 <- analyseBody lumap inuse_outside then_body
-      res2 <- analyseBody lumap inuse_outside else_body
-      pure $ res1 <> res2
+    Match _ cases defbody _ ->
+      fmap mconcat $
+        mapM (analyseBody lumap inuse_outside) $
+          defbody : map caseBody cases
     DoLoop merge _ body ->
       analyseLoopParams merge <$> analyseBody lumap inuse_outside body
     Op (Inner (SegOp segop)) -> do
@@ -281,10 +279,8 @@ memSizes stms =
               <$> mapM memSizesStm
             $ stmsToList
             $ kernelBodyStms body
-    memSizesExp (If _ then_body else_body _) = do
-      then_res <- memSizes $ bodyStms then_body
-      else_res <- memSizes $ bodyStms else_body
-      pure $ then_res <> else_res
+    memSizesExp (Match _ cases defbody _) = do
+      mconcat <$> mapM (memSizes . bodyStms) (defbody : map caseBody cases)
     memSizesExp (DoLoop _ _ body) =
       memSizes $ bodyStms body
     memSizesExp _ = pure mempty
@@ -300,9 +296,8 @@ memSpaces stms =
     getSpacesStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
     getSpacesStm (Let _ _ (Op (Inner (SegOp segop)))) =
       foldMap getSpacesStm $ kernelBodyStms $ segBody segop
-    getSpacesStm (Let _ _ (If _ then_body else_body _)) =
-      foldMap getSpacesStm (bodyStms then_body)
-        <> foldMap getSpacesStm (bodyStms else_body)
+    getSpacesStm (Let _ _ (Match _ cases defbody _)) =
+      foldMap (foldMap getSpacesStm . bodyStms) $ defbody : map caseBody cases
     getSpacesStm (Let _ _ (DoLoop _ _ body)) =
       foldMap getSpacesStm (bodyStms body)
     getSpacesStm _ = mempty
@@ -321,11 +316,10 @@ analyseGPU' lumap stms =
       m (InUse, LastUsed, Graph VName)
     helper stm@Let {stmExp = Op (Inner (SegOp segop))} =
       inScopeOf stm $ analyseSegOp lumap mempty segop
-    helper stm@Let {stmExp = If _ then_body else_body _} =
-      inScopeOf stm $ do
-        res1 <- analyseGPU' lumap (bodyStms then_body)
-        res2 <- analyseGPU' lumap (bodyStms else_body)
-        pure (res1 <> res2)
+    helper stm@Let {stmExp = Match _ cases defbody _} =
+      inScopeOf stm $
+        mconcat
+          <$> mapM (analyseGPU' lumap . bodyStms) (defbody : map caseBody cases)
     helper stm@Let {stmExp = DoLoop merge _ body} =
       fmap (analyseLoopParams merge) . inScopeOf stm $
         analyseGPU' lumap $

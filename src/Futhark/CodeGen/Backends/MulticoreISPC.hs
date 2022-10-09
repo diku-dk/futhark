@@ -1,5 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | C code generator.  This module can convert a correct ImpCode
@@ -20,24 +18,24 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
-import qualified Data.DList as DL
+import Data.DList qualified as DL
 import Data.List (unzip4)
 import Data.Loc (noLoc)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
-import qualified Futhark.CodeGen.Backends.MulticoreC as MC
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC qualified as GC
+import Futhark.CodeGen.Backends.GenericC.Pretty
+import Futhark.CodeGen.Backends.MulticoreC qualified as MC
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
-import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGen
 import Futhark.CodeGen.RTS.C (errorsH, ispcUtilH, uniformH)
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (prettyText)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
 type ISPCCompilerM a = GC.CompilerM Multicore ISPCState a
@@ -76,7 +74,6 @@ compileProg version prog = do
           operations
           (ISPCState mempty mempty)
           ( do
-              GC.libDecl [C.cedecl|char** futhark_get_error_ref(struct futhark_context* ctx) { return &ctx->error; }|]
               MC.generateContext
               mapM_ compileBuiltinFun funs
           )
@@ -86,7 +83,7 @@ compileProg version prog = do
       )
       (ws, defs)
 
-  let ispc_decls = T.unlines $ map prettyText $ DL.toList $ sDefs $ GC.compUserState endstate
+  let ispc_decls = definitionsText $ DL.toList $ sDefs $ GC.compUserState endstate
 
   -- The bool #define is a workaround around an ISPC bug, stdbool doesn't get included.
   let ispcdefs =
@@ -181,7 +178,7 @@ makeStringLiteral str = do
 -- | Set memory in ISPC
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
 setMem dest src space = do
-  let src_s = pretty $ C.toExp src noLoc
+  let src_s = T.unpack $ expText $ C.toExp src noLoc
   strlit <- makeStringLiteral src_s
   GC.stm
     [C.cstm|if ($id:(GC.fatMemSet space)(ctx, &$exp:dest, &$exp:src,
@@ -193,7 +190,7 @@ setMem dest src space = do
 unRefMem :: C.ToExp a => a -> Space -> ISPCCompilerM ()
 unRefMem mem space = do
   cached <- isJust <$> GC.cacheMem mem
-  let mem_s = pretty $ C.toExp mem noLoc
+  let mem_s = T.unpack $ expText $ C.toExp mem noLoc
   strlit <- makeStringLiteral mem_s
   unless cached $
     GC.stm
@@ -210,13 +207,12 @@ allocMem ::
   C.Stm ->
   ISPCCompilerM ()
 allocMem mem size space on_failure = do
-  let mem_s = pretty $ C.toExp mem noLoc
+  let mem_s = T.unpack $ expText $ C.toExp mem noLoc
   strlit <- makeStringLiteral mem_s
   GC.stm
-    [C.cstm|if ($id:(GC.fatMemAlloc space)(ctx, &$exp:mem, $exp:size,
-                                              $id:strlit())) {
+    [C.cstm|if ($id:(GC.fatMemAlloc space)(ctx, &$exp:mem, $exp:size, $id:strlit())) {
                     $stm:on_failure
-                  }|]
+            }|]
 
 -- | Free memory in ISPC
 freeAllocatedMem :: ISPCCompilerM [C.BlockItem]
@@ -379,8 +375,7 @@ handleError msg stacktrace = do
   shim <- MC.multicoreDef "assert_shim" $ \s -> do
     pure
       [C.cedecl|void $id:s(struct futhark_context* ctx, $params:params) {
-        if (ctx->error == NULL)
-          ctx->error = msgprintf($string:formatstr', $args:formatargs', $string:stacktrace);
+          set_error(ctx, msgprintf($string:formatstr', $args:formatargs', $string:stacktrace));
       }|]
   ispcDecl
     [C.cedecl|extern "C" $tyqual:unmasked void $id:shim($tyqual:uniform struct futhark_context* $tyqual:uniform, $params:params_uni);|]
@@ -390,7 +385,7 @@ handleError msg stacktrace = do
   let args' = map (\x -> [C.cexp|extract($exp:x, $id:uni)|]) args
   GC.items
     [C.citems|
-      $escstm:("foreach_active(" <> pretty uni <> ")")
+      $escstm:("foreach_active(" <> prettyString uni <> ")")
       {
         $id:shim(ctx, $args:args');
         err = FUTHARK_PROGRAM_ERROR;
@@ -424,11 +419,11 @@ compileExp :: Exp -> ISPCCompilerM C.Exp
 compileExp e@(ValueExp (FloatValue (Float64Value v))) =
   if isInfinite v || isNaN v
     then GC.compileExp e
-    else pure [C.cexp|$esc:(pretty v <> "d")|]
+    else pure [C.cexp|$esc:(prettyString v <> "d")|]
 compileExp e@(ValueExp (FloatValue (Float16Value v))) =
   if isInfinite v || isNaN v
     then GC.compileExp e
-    else pure [C.cexp|$esc:(pretty v <> "f16")|]
+    else pure [C.cexp|$esc:(prettyString v <> "f16")|]
 compileExp (ValueExp val) =
   pure $ C.toExp val mempty
 compileExp (LeafExp v _) =
@@ -453,7 +448,7 @@ compileExp (UnOpExp USignum {} x) = do
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
 compileExp (UnOpExp op x) = do
   x' <- compileExp x
-  pure [C.cexp|$id:(pretty op)($exp:x')|]
+  pure [C.cexp|$id:(prettyString op)($exp:x')|]
 compileExp (CmpOpExp cmp x y) = do
   x' <- compileExp x
   y' <- compileExp y
@@ -463,10 +458,10 @@ compileExp (CmpOpExp cmp x y) = do
     FCmpLe {} -> [C.cexp|$exp:x' <= $exp:y'|]
     CmpLlt {} -> [C.cexp|$exp:x' < $exp:y'|]
     CmpLle {} -> [C.cexp|$exp:x' <= $exp:y'|]
-    _ -> [C.cexp|$id:(pretty cmp)($exp:x', $exp:y')|]
+    _ -> [C.cexp|$id:(prettyString cmp)($exp:x', $exp:y')|]
 compileExp (ConvOpExp conv x) = do
   x' <- compileExp x
-  pure [C.cexp|$id:(pretty conv)($exp:x')|]
+  pure [C.cexp|$id:(prettyString conv)($exp:x')|]
 compileExp (BinOpExp bop x y) = do
   x' <- compileExp x
   y' <- compileExp y
@@ -483,7 +478,7 @@ compileExp (BinOpExp bop x y) = do
     Or {} -> [C.cexp|$exp:x' | $exp:y'|]
     LogAnd {} -> [C.cexp|$exp:x' && $exp:y'|]
     LogOr {} -> [C.cexp|$exp:x' || $exp:y'|]
-    _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
+    _ -> [C.cexp|$id:(prettyString bop)($exp:x', $exp:y')|]
 compileExp (FunExp h args _) = do
   args' <- mapM compileExp args
   pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
@@ -495,7 +490,7 @@ compileExp (FunExp h args _) = do
 compileCode :: MCCode -> ISPCCompilerM ()
 compileCode (Comment s code) = do
   xs <- GC.collect $ compileCode code
-  let comment = "// " ++ s
+  let comment = "// " ++ T.unpack s
   GC.stm
     [C.cstm|$comment:comment
               { $items:xs }
@@ -544,7 +539,7 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
     Just cur_size ->
       GC.stm
         [C.cstm|if ($exp:cur_size < $exp:size) {
-                  err = lexical_realloc(futhark_get_error_ref(ctx), &$exp:name, &$exp:cur_size, $exp:size);
+                  err = lexical_realloc(ctx, &$exp:name, &$exp:cur_size, $exp:size);
                   if (err != FUTHARK_SUCCESS) {
                     $escstm:("unmasked { return err; }")
                   }
@@ -656,7 +651,7 @@ compileCode (Assert e msg (loc, locs)) = do
   err <- GC.collect $ handleError msg stacktrace
   GC.stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
-    stacktrace = prettyStacktrace 0 $ map locStr $ loc : locs
+    stacktrace = T.unpack $ prettyStacktrace 0 $ map locText $ loc : locs
 compileCode code =
   GC.compileCode code
 
@@ -726,7 +721,7 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
       let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
       pure [C.citems|$tyqual:uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
     field name (_, _) = do
-      strlit <- makeStringLiteral $ pretty name
+      strlit <- makeStringLiteral $ prettyString name
       pure
         [C.citems|$tyqual:uniform struct memblock $id:name;
                      $id:name.desc = $id:strlit();
@@ -930,7 +925,7 @@ compileOp (ForEach i from bound body) = do
     else
       GC.stms
         [C.cstms|
-      $escstm:("foreach (" <> pretty i <> " = " <> pretty from' <> " ... " <> pretty bound' <> ")") {
+      $escstm:(T.unpack ("foreach (" <> prettyText i <> " = " <> expText from' <> " ... " <> expText bound' <> ")")) {
         $items:body'
       }|]
 compileOp (ForEachActive name body) = do
@@ -963,7 +958,7 @@ cachingMemory lexical f = do
   let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do
-    size <- newVName $ pretty mem <> "_cached_size"
+    size <- newVName $ prettyString mem <> "_cached_size"
     pure (mem, size)
 
   let lexMem env =

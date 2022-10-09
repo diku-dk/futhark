@@ -1,9 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -18,6 +12,10 @@ module Futhark.IR.GPU.Op
 
     -- * SegOp refinements
     SegLevel (..),
+    segVirt,
+    SegVirt (..),
+    SegSeqDims (..),
+    KernelGrid (..),
 
     -- * Reexports
     module Futhark.IR.GPU.Sizes,
@@ -26,117 +24,146 @@ module Futhark.IR.GPU.Op
 where
 
 import Control.Monad
-import qualified Data.Sequence as SQ
-import qualified Futhark.Analysis.Alias as Alias
+import Data.Sequence qualified as SQ
+import Data.Text qualified as T
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, removeBodyAliases)
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.Pretty
   ( commasep,
     parens,
-    ppr,
-    text,
+    ppTuple',
+    pretty,
     (<+>),
   )
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty qualified as PP
+
+-- | These dimensions (indexed from 0, outermost) of the corresponding
+-- 'SegSpace' should not be parallelised, but instead iterated
+-- sequentially.  For example, with a 'SegSeqDims' of @[0]@ and a
+-- 'SegSpace' with dimensions @[n][m]@, there will be an outer loop
+-- with @n@ iterations, while the @m@ dimension will be parallelised.
+--
+-- Semantically, this has no effect, but it may allow reductions in
+-- memory usage or other low-level optimisations.  Operationally, the
+-- guarantee is that for a SegSeqDims of e.g. @[i,j,k]@, threads
+-- running at any given moment will always have the same indexes along
+-- the dimensions specified by @[i,j,k]@.
+--
+-- At the moment, this is only supported for 'SegNoVirtFull'
+-- intra-group parallelism in GPU code, as we have not yet found it
+-- useful anywhere else.
+newtype SegSeqDims = SegSeqDims {segSeqDims :: [Int]}
+  deriving (Eq, Ord, Show)
+
+-- | Do we need group-virtualisation when generating code for the
+-- segmented operation?  In most cases, we do, but for some simple
+-- kernels, we compute the full number of groups in advance, and then
+-- virtualisation is an unnecessary (but generally very small)
+-- overhead.  This only really matters for fairly trivial but very
+-- wide @map@ kernels where each thread performs constant-time work on
+-- scalars.
+data SegVirt
+  = SegVirt
+  | SegNoVirt
+  | -- | Not only do we not need virtualisation, but we _guarantee_
+    -- that all physical threads participate in the work.  This can
+    -- save some checks in code generation.
+    SegNoVirtFull SegSeqDims
+  deriving (Eq, Ord, Show)
+
+-- | The actual, physical grid dimensions used for the GPU kernel
+-- running this 'SegOp'.
+data KernelGrid = KernelGrid
+  { gridNumGroups :: Count NumGroups SubExp,
+    gridGroupSize :: Count GroupSize SubExp
+  }
+  deriving (Eq, Ord, Show)
 
 -- | At which level the *body* of a t'SegOp' executes.
 data SegLevel
-  = SegThread
-      { segNumGroups :: Count NumGroups SubExp,
-        segGroupSize :: Count GroupSize SubExp,
-        segVirt :: SegVirt
-      }
-  | SegGroup
-      { segNumGroups :: Count NumGroups SubExp,
-        segGroupSize :: Count GroupSize SubExp,
-        segVirt :: SegVirt
-      }
+  = SegThread SegVirt (Maybe KernelGrid)
+  | SegGroup SegVirt (Maybe KernelGrid)
+  | SegThreadInGroup SegVirt
   deriving (Eq, Ord, Show)
 
+-- | The 'SegVirt' of the 'SegLevel'.
+segVirt :: SegLevel -> SegVirt
+segVirt (SegThread v _) = v
+segVirt (SegGroup v _) = v
+segVirt (SegThreadInGroup v) = v
+
+instance PP.Pretty SegVirt where
+  pretty SegNoVirt = mempty
+  pretty (SegNoVirtFull dims) = "full" <+> pretty (segSeqDims dims)
+  pretty SegVirt = "virtualise"
+
+instance PP.Pretty KernelGrid where
+  pretty (KernelGrid num_groups group_size) =
+    "groups=" <> pretty num_groups <> PP.semi
+      <+> "groupsize=" <> pretty group_size
+
 instance PP.Pretty SegLevel where
-  ppr lvl =
-    PP.parens
-      ( lvl' <> PP.semi
-          <+> text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi
-          <+> text "groupsize=" <> ppr (segGroupSize lvl) <> virt
-      )
-    where
-      lvl' = case lvl of
-        SegThread {} -> "thread"
-        SegGroup {} -> "group"
-      virt = case segVirt lvl of
-        SegNoVirt -> mempty
-        SegNoVirtFull dims -> PP.semi <+> text "full" <+> ppr (segSeqDims dims)
-        SegVirt -> PP.semi <+> text "virtualise"
+  pretty (SegThread virt grid) =
+    PP.parens ("thread" <> PP.semi <+> pretty virt <> PP.semi <+> pretty grid)
+  pretty (SegGroup virt grid) =
+    PP.parens ("group" <> PP.semi <+> pretty virt <> PP.semi <+> pretty grid)
+  pretty (SegThreadInGroup virt) =
+    PP.parens ("ingroup" <> PP.semi <+> pretty virt)
+
+instance Engine.Simplifiable KernelGrid where
+  simplify (KernelGrid num_groups group_size) =
+    KernelGrid
+      <$> traverse Engine.simplify num_groups
+      <*> traverse Engine.simplify group_size
 
 instance Engine.Simplifiable SegLevel where
-  simplify (SegThread num_groups group_size virt) =
-    SegThread
-      <$> traverse Engine.simplify num_groups
-      <*> traverse Engine.simplify group_size
-      <*> pure virt
-  simplify (SegGroup num_groups group_size virt) =
-    SegGroup
-      <$> traverse Engine.simplify num_groups
-      <*> traverse Engine.simplify group_size
-      <*> pure virt
+  simplify (SegThread virt grid) =
+    SegThread virt <$> Engine.simplify grid
+  simplify (SegGroup virt grid) =
+    SegGroup virt <$> Engine.simplify grid
+  simplify (SegThreadInGroup virt) =
+    pure $ SegThreadInGroup virt
+
+instance Substitute KernelGrid where
+  substituteNames substs (KernelGrid num_groups group_size) =
+    KernelGrid
+      (substituteNames substs num_groups)
+      (substituteNames substs group_size)
 
 instance Substitute SegLevel where
-  substituteNames substs (SegThread num_groups group_size virt) =
-    SegThread
-      (substituteNames substs num_groups)
-      (substituteNames substs group_size)
-      virt
-  substituteNames substs (SegGroup num_groups group_size virt) =
-    SegGroup
-      (substituteNames substs num_groups)
-      (substituteNames substs group_size)
-      virt
+  substituteNames substs (SegThread virt grid) =
+    SegThread virt (substituteNames substs grid)
+  substituteNames substs (SegGroup virt grid) =
+    SegGroup virt (substituteNames substs grid)
+  substituteNames _ (SegThreadInGroup virt) =
+    SegThreadInGroup virt
 
 instance Rename SegLevel where
   rename = substituteRename
 
+instance FreeIn KernelGrid where
+  freeIn' (KernelGrid num_groups group_size) =
+    freeIn' (num_groups, group_size)
+
 instance FreeIn SegLevel where
-  freeIn' (SegThread num_groups group_size _) =
-    freeIn' num_groups <> freeIn' group_size
-  freeIn' (SegGroup num_groups group_size _) =
-    freeIn' num_groups <> freeIn' group_size
+  freeIn' (SegThread _virt grid) = freeIn' grid
+  freeIn' (SegGroup _virt grid) = freeIn' grid
+  freeIn' (SegThreadInGroup _virt) = mempty
 
 -- | A simple size-level query or computation.
 data SizeOp
-  = -- | @SplitSpace o w i elems_per_thread@.
-    --
-    -- Computes how to divide array elements to
-    -- threads in a kernel.  Returns the number of
-    -- elements in the chunk that the current thread
-    -- should take.
-    --
-    -- @w@ is the length of the outer dimension in
-    -- the array. @i@ is the current thread
-    -- index. Each thread takes at most
-    -- @elems_per_thread@ elements.
-    --
-    -- If the order @o@ is 'SplitContiguous', thread with index @i@
-    -- should receive elements
-    -- @i*elems_per_tread, i*elems_per_thread + 1,
-    -- ..., i*elems_per_thread + (elems_per_thread-1)@.
-    --
-    -- If the order @o@ is @'SplitStrided' stride@,
-    -- the thread will receive elements @i,
-    -- i+stride, i+2*stride, ...,
-    -- i+(elems_per_thread-1)*stride@.
-    SplitSpace SplitOrdering SubExp SubExp SubExp
-  | -- | Produce some runtime-configurable size.
+  = -- | Produce some runtime-configurable size.
     GetSize Name SizeClass
   | -- | The maximum size of some class.
     GetSizeMax SizeClass
@@ -150,12 +177,6 @@ data SizeOp
   deriving (Eq, Ord, Show)
 
 instance Substitute SizeOp where
-  substituteNames subst (SplitSpace o w i elems_per_thread) =
-    SplitSpace
-      (substituteNames subst o)
-      (substituteNames subst w)
-      (substituteNames subst i)
-      (substituteNames subst elems_per_thread)
   substituteNames substs (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass (substituteNames substs x)
   substituteNames substs (CalcNumGroups w max_num_groups group_size) =
@@ -166,12 +187,6 @@ instance Substitute SizeOp where
   substituteNames _ op = op
 
 instance Rename SizeOp where
-  rename (SplitSpace o w i elems_per_thread) =
-    SplitSpace
-      <$> rename o
-      <*> rename w
-      <*> rename i
-      <*> rename elems_per_thread
   rename (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass <$> rename x
   rename (CalcNumGroups w max_num_groups group_size) =
@@ -183,7 +198,6 @@ instance IsOp SizeOp where
   cheapOp _ = True
 
 instance TypedOp SizeOp where
-  opType SplitSpace {} = pure [Prim int64]
   opType (GetSize _ _) = pure [Prim int64]
   opType (GetSizeMax _) = pure [Prim int64]
   opType CmpSizeLe {} = pure [Prim Bool]
@@ -194,43 +208,29 @@ instance AliasedOp SizeOp where
   consumedInOp _ = mempty
 
 instance FreeIn SizeOp where
-  freeIn' (SplitSpace o w i elems_per_thread) =
-    freeIn' o <> freeIn' [w, i, elems_per_thread]
   freeIn' (CmpSizeLe _ _ x) = freeIn' x
   freeIn' (CalcNumGroups w _ group_size) = freeIn' w <> freeIn' group_size
   freeIn' _ = mempty
 
 instance PP.Pretty SizeOp where
-  ppr (SplitSpace SplitContiguous w i elems_per_thread) =
-    text "split_space"
-      <> parens (commasep [ppr w, ppr i, ppr elems_per_thread])
-  ppr (SplitSpace (SplitStrided stride) w i elems_per_thread) =
-    text "split_space_strided"
-      <> parens (commasep [ppr stride, ppr w, ppr i, ppr elems_per_thread])
-  ppr (GetSize name size_class) =
-    text "get_size" <> parens (commasep [ppr name, ppr size_class])
-  ppr (GetSizeMax size_class) =
-    text "get_size_max" <> parens (commasep [ppr size_class])
-  ppr (CmpSizeLe name size_class x) =
-    text "cmp_size" <> parens (commasep [ppr name, ppr size_class])
-      <+> text "<="
-      <+> ppr x
-  ppr (CalcNumGroups w max_num_groups group_size) =
-    text "calc_num_groups" <> parens (commasep [ppr w, ppr max_num_groups, ppr group_size])
+  pretty (GetSize name size_class) =
+    "get_size" <> parens (commasep [pretty name, pretty size_class])
+  pretty (GetSizeMax size_class) =
+    "get_size_max" <> parens (commasep [pretty size_class])
+  pretty (CmpSizeLe name size_class x) =
+    "cmp_size" <> parens (commasep [pretty name, pretty size_class])
+      <+> "<="
+      <+> pretty x
+  pretty (CalcNumGroups w max_num_groups group_size) =
+    "calc_num_groups" <> parens (commasep [pretty w, pretty max_num_groups, pretty group_size])
 
 instance OpMetrics SizeOp where
-  opMetrics SplitSpace {} = seen "SplitSpace"
   opMetrics GetSize {} = seen "GetSize"
   opMetrics GetSizeMax {} = seen "GetSizeMax"
   opMetrics CmpSizeLe {} = seen "CmpSizeLe"
   opMetrics CalcNumGroups {} = seen "CalcNumGroups"
 
 typeCheckSizeOp :: TC.Checkable rep => SizeOp -> TC.TypeM rep ()
-typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
-  case o of
-    SplitContiguous -> pure ()
-    SplitStrided stride -> TC.require [Prim int64] stride
-  mapM_ (TC.require [Prim int64]) [w, i, elems_per_thread]
 typeCheckSizeOp GetSize {} = pure ()
 typeCheckSizeOp GetSizeMax {} = pure ()
 typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int64] x
@@ -347,11 +347,11 @@ instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (HostOp rep op) where
   indexOp _ _ _ _ = Nothing
 
 instance (PrettyRep rep, PP.Pretty op) => PP.Pretty (HostOp rep op) where
-  ppr (SegOp op) = ppr op
-  ppr (OtherOp op) = ppr op
-  ppr (SizeOp op) = ppr op
-  ppr (GPUBody ts body) =
-    "gpu" <+> PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
+  pretty (SegOp op) = pretty op
+  pretty (OtherOp op) = pretty op
+  pretty (SizeOp op) = pretty op
+  pretty (GPUBody ts body) =
+    "gpu" <+> PP.colon <+> ppTuple' (map pretty ts) <+> PP.nestedBlock "{" "}" (pretty body)
 
 instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (HostOp rep op) where
   opMetrics (SegOp op) = opMetrics op
@@ -359,22 +359,34 @@ instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (HostOp rep op) where
   opMetrics (SizeOp op) = opMetrics op
   opMetrics (GPUBody _ body) = inside "GPUBody" $ bodyMetrics body
 
+checkGrid :: TC.Checkable rep => KernelGrid -> TC.TypeM rep ()
+checkGrid grid = do
+  TC.require [Prim int64] $ unCount $ gridNumGroups grid
+  TC.require [Prim int64] $ unCount $ gridGroupSize grid
+
 checkSegLevel ::
   TC.Checkable rep =>
   Maybe SegLevel ->
   SegLevel ->
   TC.TypeM rep ()
-checkSegLevel Nothing lvl = do
-  TC.require [Prim int64] $ unCount $ segNumGroups lvl
-  TC.require [Prim int64] $ unCount $ segGroupSize lvl
+checkSegLevel (Just SegGroup {}) (SegThreadInGroup _virt) =
+  pure ()
+checkSegLevel _ (SegThreadInGroup _virt) =
+  TC.bad $ TC.TypeError "ingroup SegOp not in group SegOp."
 checkSegLevel (Just SegThread {}) _ =
   TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
-checkSegLevel (Just x) y
-  | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ pretty x
-  | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
-      TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
-  | otherwise =
-      pure ()
+checkSegLevel (Just SegThreadInGroup {}) _ =
+  TC.bad $ TC.TypeError "SegOps cannot occur when already at ingroup level."
+checkSegLevel _ (SegThread _virt Nothing) =
+  pure ()
+checkSegLevel (Just _) SegThread {} =
+  TC.bad $ TC.TypeError "thread-level SegOp cannot be nested"
+checkSegLevel Nothing (SegThread _virt grid) =
+  mapM_ checkGrid grid
+checkSegLevel (Just _) SegGroup {} =
+  TC.bad $ TC.TypeError "group-level SegOp cannot be nested"
+checkSegLevel Nothing (SegGroup _virt grid) =
+  mapM_ checkGrid grid
 
 typeCheckHostOp ::
   TC.Checkable rep =>
@@ -397,7 +409,7 @@ typeCheckHostOp _ Nothing _ (GPUBody ts body) = do
     extendedScope
       (traverse subExpResType (bodyResult body))
       (scopeOf (bodyStms body))
-  unless (body_ts == ts) . TC.bad . TC.TypeError . unlines $
-    [ "Expected type: " ++ prettyTuple ts,
-      "Got body type: " ++ prettyTuple body_ts
+  unless (body_ts == ts) . TC.bad . TC.TypeError . T.unlines $
+    [ "Expected type: " <> prettyTuple ts,
+      "Got body type: " <> prettyTuple body_ts
     ]

@@ -1,8 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -84,6 +79,7 @@ module Futhark.IR.Mem
     lookupMemInfo,
     subExpMemInfo,
     lookupArraySummary,
+    lookupMemSpace,
     existentialiseIxFun,
 
     -- * Type checking parts
@@ -110,32 +106,33 @@ import Control.Monad.State
 import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.List (elemIndex, find)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
+import Data.Text qualified as T
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.PrimExp.Simplify
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR.Aliases
   ( Aliases,
     removeExpAliases,
     removePatAliases,
     removeScopeAliases,
   )
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
-import qualified Futhark.IR.TypeCheck as TC
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.IR.TypeCheck qualified as TC
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util
-import Futhark.Util.Pretty (indent, ppr, text, (<+>), (</>))
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty (docText, indent, ppTuple', pretty, (<+>), (</>))
+import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
 type LetDecMem = MemInfo SubExp NoUniqueness MemBind
@@ -223,9 +220,9 @@ instance Substitute inner => Substitute (MemOp inner) where
   substituteNames subst (Inner k) = Inner $ substituteNames subst k
 
 instance PP.Pretty inner => PP.Pretty (MemOp inner) where
-  ppr (Alloc e DefaultSpace) = PP.text "alloc" <> PP.apply [PP.ppr e]
-  ppr (Alloc e s) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.ppr s]
-  ppr (Inner k) = PP.ppr k
+  pretty (Alloc e DefaultSpace) = "alloc" <> PP.apply [PP.pretty e]
+  pretty (Alloc e s) = "alloc" <> PP.apply [PP.pretty e, PP.pretty s]
+  pretty (Inner k) = PP.pretty k
 
 instance OpMetrics inner => OpMetrics (MemOp inner) where
   opMetrics Alloc {} = seen "Alloc"
@@ -376,13 +373,13 @@ instance
   ) =>
   PP.Pretty (MemInfo d u ret)
   where
-  ppr (MemPrim bt) = PP.ppr bt
-  ppr (MemMem DefaultSpace) = PP.text "mem"
-  ppr (MemMem s) = PP.text "mem" <> PP.ppr s
-  ppr (MemArray bt shape u ret) =
-    PP.ppr (Array bt shape u) <+> PP.text "@" <+> PP.ppr ret
-  ppr (MemAcc acc ispace ts u) =
-    PP.ppr u <> PP.ppr (Acc acc ispace ts NoUniqueness :: Type)
+  pretty (MemPrim bt) = PP.pretty bt
+  pretty (MemMem DefaultSpace) = "mem"
+  pretty (MemMem s) = "mem" <> PP.pretty s
+  pretty (MemArray bt shape u ret) =
+    PP.pretty (Array bt shape u) <+> "@" <+> PP.pretty ret
+  pretty (MemAcc acc ispace ts u) =
+    PP.pretty u <> PP.pretty (Acc acc ispace ts NoUniqueness :: Type)
 
 -- | Memory information for an array bound somewhere in the program.
 data MemBind
@@ -405,8 +402,8 @@ instance Substitute MemBind where
     ArrayIn (substituteNames substs ident) (substituteNames substs ixfun)
 
 instance PP.Pretty MemBind where
-  ppr (ArrayIn mem ixfun) =
-    PP.ppr mem <+> "->" PP.</> PP.ppr ixfun
+  pretty (ArrayIn mem ixfun) =
+    PP.pretty mem <+> "->" PP.</> PP.pretty ixfun
 
 instance FreeIn MemBind where
   freeIn' (ArrayIn mem ixfun) = freeIn' mem <> freeIn' ixfun
@@ -475,10 +472,10 @@ existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
     ctx' = M.map leafExp $ M.fromList $ zip (map Free ctx) [0 ..]
 
 instance PP.Pretty MemReturn where
-  ppr (ReturnsInBlock v ixfun) =
-    PP.parens $ ppr v <+> "->" PP.</> PP.ppr ixfun
-  ppr (ReturnsNewBlock space i ixfun) =
-    "?" <> ppr i <> PP.ppr space <+> "->" PP.</> PP.ppr ixfun
+  pretty (ReturnsInBlock v ixfun) =
+    PP.parens $ pretty v <+> "->" PP.</> PP.pretty ixfun
+  pretty (ReturnsNewBlock space i ixfun) =
+    "?" <> pretty i <> PP.pretty space <+> "->" PP.</> PP.pretty ixfun
 
 instance FreeIn MemReturn where
   freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
@@ -586,12 +583,11 @@ matchFunctionReturnType rettype result = do
           | IxFun.isLinear ixfun ->
               pure ()
           | otherwise ->
-              TC.bad $
-                TC.TypeError $
-                  "Array "
-                    ++ pretty v
-                    ++ " returned by function, but has nontrivial index function "
-                    ++ pretty ixfun
+              TC.bad . TC.TypeError $
+                "Array "
+                  <> prettyText v
+                  <> " returned by function, but has nontrivial index function "
+                  <> prettyText ixfun
 
 matchLoopResultMem ::
   (Mem rep inner, TC.Checkable rep) =>
@@ -679,7 +675,7 @@ matchReturnType rettype res ts = do
 
       fetchCtx i = case maybeNth i $ zip res ts of
         Nothing ->
-          throwError $ "Cannot find variable #" ++ show i ++ " in results: " ++ pretty res
+          throwError $ "Cannot find variable #" <> prettyText i <> " in results: " <> prettyText res
         Just (se, t) -> pure (se, t)
 
       checkReturn (MemPrim x) (MemPrim y)
@@ -697,68 +693,65 @@ matchReturnType rettype res ts = do
               zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
               checkMemReturn x_ret y_ret
       checkReturn x y =
-        throwError $ unwords ["Expected", pretty x, "but got", pretty y]
+        throwError $ T.unwords ["Expected", prettyText x, "but got", prettyText y]
 
       checkDim (Free x) y
         | x == y = pure ()
         | otherwise =
-            throwError $ unwords ["Expected dim", pretty x, "but got", pretty y]
+            throwError $ T.unwords ["Expected dim", prettyText x, "but got", prettyText y]
       checkDim (Ext i) y = do
         (x, _) <- fetchCtx i
-        unless (x == y) . throwError . unwords $
-          ["Expected ext dim", pretty i, "=>", pretty x, "but got", pretty y]
+        unless (x == y) . throwError . T.unwords $
+          ["Expected ext dim", prettyText i, "=>", prettyText x, "but got", prettyText y]
 
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
         | x_mem == y_mem =
             unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
-              throwError . unwords $
+              throwError . T.unwords $
                 [ "Index function unification failed (ReturnsInBlock)",
                   "\nixfun of body result: ",
-                  pretty y_ixfun,
+                  prettyText y_ixfun,
                   "\nixfun of return type: ",
-                  pretty x_ixfun
+                  prettyText x_ixfun
                 ]
       checkMemReturn
         (ReturnsNewBlock x_space x_ext x_ixfun)
         (ArrayIn y_mem y_ixfun) = do
           (x_mem, x_mem_type) <- fetchCtx x_ext
           unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
-            throwError . pretty $
+            throwError . docText $
               "Index function unification failed (ReturnsNewBlock)"
                 </> "Ixfun of body result:"
-                </> indent 2 (ppr y_ixfun)
+                </> indent 2 (pretty y_ixfun)
                 </> "Ixfun of return type:"
-                </> indent 2 (ppr x_ixfun)
+                </> indent 2 (pretty x_ixfun)
           case x_mem_type of
             MemMem y_space ->
-              unless (x_space == y_space) . throwError . unwords $
+              unless (x_space == y_space) . throwError . T.unwords $
                 [ "Expected memory",
-                  pretty y_mem,
+                  prettyText y_mem,
                   "in space",
-                  pretty x_space,
+                  prettyText x_space,
                   "but actually in space",
-                  pretty y_space
+                  prettyText y_space
                 ]
             t ->
-              throwError . unwords $
-                ["Expected memory", pretty x_ext, "=>", pretty x_mem, "but but has type", pretty t]
+              throwError . T.unwords $
+                ["Expected memory", prettyText x_ext, "=>", prettyText x_mem, "but but has type", prettyText t]
       checkMemReturn x y =
-        throwError . pretty $
+        throwError . docText $
           "Expected array in"
-            </> indent 2 (ppr x)
+            </> indent 2 (pretty x)
             </> "but array returned in"
-            </> indent 2 (ppr y)
+            </> indent 2 (pretty y)
 
-      bad :: String -> TC.TypeM rep a
       bad s =
-        TC.bad $
-          TC.TypeError $
-            pretty $
-              "Return type"
-                </> indent 2 (ppTuple' rettype)
-                </> "cannot match returns of results"
-                </> indent 2 (ppTuple' ts)
-                </> text s
+        TC.bad . TC.TypeError . docText $
+          "Return type"
+            </> indent 2 (ppTuple' $ map pretty rettype)
+            </> "cannot match returns of results"
+            </> indent 2 (ppTuple' $ map pretty ts)
+            </> pretty s
 
   either bad pure =<< runExceptT (zipWithM_ checkReturn rettype ts)
 
@@ -773,17 +766,15 @@ matchPatToExp pat e = do
 
   let (ctx_ids, val_ts) = unzip $ bodyReturnsFromPat $ removePatAliases pat
       (ctx_map_ids, ctx_map_exts) = getExtMaps $ zip ctx_ids [0 .. 1]
+      ok =
+        length val_ts == length rt
+          && and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)
 
-  unless
-    ( length val_ts == length rt
-        && and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)
-    )
-    $ TC.bad
-    $ TC.TypeError
-    $ "Expression type:\n  "
-      ++ prettyTuple rt
-      ++ "\ncannot match pattern type:\n  "
-      ++ prettyTuple val_ts
+  unless ok . TC.bad . TC.TypeError . docText $
+    "Expression type:"
+      </> indent 2 (ppTuple' $ map pretty rt)
+      </> "cannot match pattern type:"
+      </> indent 2 (ppTuple' $ map pretty val_ts)
   where
     matches _ _ (MemPrim x) (MemPrim y) = x == y
     matches _ _ (MemMem x_space) (MemMem y_space) =
@@ -858,11 +849,27 @@ lookupArraySummary name = do
     MemArray _ _ _ (ArrayIn mem ixfun) ->
       pure (mem, ixfun)
     _ ->
-      error $
+      error . T.unpack $
         "Expected "
-          ++ pretty name
-          ++ " to be array but bound to:\n"
-          ++ pretty summary
+          <> prettyText name
+          <> " to be array but bound to:\n"
+          <> prettyText summary
+
+lookupMemSpace ::
+  (Mem rep inner, HasScope rep m, Monad m) =>
+  VName ->
+  m Space
+lookupMemSpace name = do
+  summary <- lookupMemInfo name
+  case summary of
+    MemMem space ->
+      pure space
+    _ ->
+      error . T.unpack $
+        "Expected "
+          <> prettyText name
+          <> " to be memory but bound to:\n"
+          <> prettyText summary
 
 checkMemInfo ::
   TC.Checkable rep =>
@@ -883,12 +890,12 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
       TC.bad $
         TC.TypeError $
           "Variable "
-            ++ pretty v
-            ++ " used as memory block, but is of type "
-            ++ pretty t
-            ++ "."
+            <> prettyText v
+            <> " used as memory block, but is of type "
+            <> prettyText t
+            <> "."
 
-  TC.context ("in index function " ++ pretty ixfun) $ do
+  TC.context ("in index function " <> prettyText ixfun) $ do
     traverse_ (TC.requirePrimExp int64 . untyped) ixfun
     let ixfun_rank = IxFun.rank ixfun
         ident_rank = shapeRank shape
@@ -896,12 +903,12 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
       TC.bad $
         TC.TypeError $
           "Arity of index function ("
-            ++ pretty ixfun_rank
-            ++ ") does not match rank of array "
-            ++ pretty name
-            ++ " ("
-            ++ show ident_rank
-            ++ ")"
+            <> prettyText ixfun_rank
+            <> ") does not match rank of array "
+            <> prettyText name
+            <> " ("
+            <> prettyText ident_rank
+            <> ")"
 
 bodyReturnsFromPat ::
   Pat (MemBound NoUniqueness) -> [(VName, BodyReturns)]
@@ -965,7 +972,7 @@ arrayVarReturns v = do
     MemArray et shape _ (ArrayIn mem ixfun) ->
       pure (et, Shape $ shapeDims shape, mem, ixfun)
     _ ->
-      error $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
+      error . T.unpack $ "arrayVarReturns: " <> prettyText v <> " is not an array."
 
 varReturns ::
   (HasScope rep m, Monad m, Mem rep inner) =>
@@ -996,10 +1003,7 @@ subExpReturns (Constant v) =
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
 expReturns ::
-  ( Monad m,
-    LocalScope rep m,
-    Mem rep inner
-  ) =>
+  (LocalScope rep m, Mem rep inner) =>
   Exp rep ->
   m [ExpReturns]
 expReturns (BasicOp (SubExp se)) =
@@ -1024,16 +1028,6 @@ expReturns (BasicOp (Rearrange perm v)) = do
       dims' = rearrangeShape perm dims
   pure
     [ MemArray et (Shape $ map Free dims') NoUniqueness $
-        Just $
-          ReturnsInBlock mem $
-            existentialiseIxFun [] ixfun'
-    ]
-expReturns (BasicOp (Rotate offsets v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let offsets' = map pe64 offsets
-      ixfun' = IxFun.rotate ixfun offsets'
-  pure
-    [ MemArray et (Shape $ map Free dims) NoUniqueness $
         Just $
           ReturnsInBlock mem $
             existentialiseIxFun [] ixfun'
@@ -1076,7 +1070,7 @@ expReturns e@(DoLoop merge _ _) = do
     mergevars = map fst merge
 expReturns (Apply _ _ ret _) =
   pure $ map funReturnsToExpReturns ret
-expReturns (If _ _ _ (IfDec ret _)) =
+expReturns (Match _ _ _ (MatchDec ret _)) =
   pure $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =
   opReturns op
@@ -1119,7 +1113,7 @@ flatSliceInfo v slice@(FlatSlice offset idxs) = do
     & MemArray et (Shape (flatSliceDims slice)) NoUniqueness
     & pure
 
-class TypedOp op => OpReturns op where
+class IsOp op => OpReturns op where
   opReturns :: (Mem rep inner, Monad m, HasScope rep m) => op -> m [ExpReturns]
   opReturns op = extReturns <$> opType op
 

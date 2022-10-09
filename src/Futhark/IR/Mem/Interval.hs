@@ -14,12 +14,11 @@ where
 
 import Data.Function (on)
 import Data.List (maximumBy, minimumBy, (\\))
-import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
+import Futhark.Analysis.AlgSimplify qualified as AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Prop
 import Futhark.IR.Syntax hiding (Result)
 import Futhark.Util
-import Futhark.Util.Pretty
 
 data Interval = Interval
   { lowerBound :: TPrimExp Int64 VName,
@@ -28,21 +27,12 @@ data Interval = Interval
   }
   deriving (Show, Eq)
 
-instance Pretty Interval where
-  ppr (Interval lb ne st) =
-    braces $
-      semisep
-        [ "lowerBound: " <> ppr lb,
-          "numElements: " <> ppr ne,
-          "stride: " <> ppr st
-        ]
-
 instance FreeIn Interval where
   freeIn' (Interval lb ne st) = freeIn' lb <> freeIn' ne <> freeIn' st
 
 distributeOffset :: MonadFail m => AlgSimplify.SofP -> [Interval] -> m [Interval]
 distributeOffset [] interval = pure interval
-distributeOffset offset [] = fail $ "Cannot distribute offset " <> pretty offset <> " across empty interval"
+distributeOffset offset [] = fail $ "Cannot distribute offset " <> show offset <> " across empty interval"
 distributeOffset offset [Interval lb ne 1] = pure [Interval (lb + TPrimExp (AlgSimplify.sumToExp offset)) ne 1]
 distributeOffset offset (Interval lb ne st0 : is)
   | st <- AlgSimplify.Prod False [untyped st0],

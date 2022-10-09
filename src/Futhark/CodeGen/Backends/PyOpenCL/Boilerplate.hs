@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | Various boilerplate definitions for the PyOpenCL backend.
@@ -8,9 +7,9 @@ module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 where
 
 import Control.Monad.Identity
-import qualified Data.Map as M
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericPython as Py
+import Data.Map qualified as M
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericPython qualified as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.ImpCode.OpenCL
   ( ErrorMsg (..),
@@ -23,7 +22,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
     untyped,
   )
 import Futhark.CodeGen.OpenCL.Heuristics
-import Futhark.Util.Pretty (pretty, prettyText)
+import Futhark.Util.Pretty (prettyString, prettyText)
 import NeatInterpolation (text)
 
 errorMsgNumArgs :: ErrorMsg a -> Int
@@ -40,6 +39,7 @@ self.global_failure_args_max = $max_num_args
 self.failure_msgs=$failure_msgs
 program = initialise_opencl_object(self,
                                    program_src=fut_opencl_src,
+                                   build_options=build_options,
                                    command_queue=command_queue,
                                    interactive=interactive,
                                    platform_pref=platform_pref,
@@ -58,7 +58,7 @@ $assign'
   where
     assign' = T.pack assign
     size_heuristics = prettyText $ sizeHeuristicsToPython sizeHeuristicsTable
-    types' = prettyText $ map (show . pretty) types -- Looks enough like Python.
+    types' = prettyText $ map (show . prettyString) types -- Looks enough like Python.
     sizes' = prettyText $ sizeClassesToPython sizes
     max_num_args = prettyText $ foldl max 0 $ map (errorMsgNumArgs . failureError) failures
     failure_msgs = prettyText $ List $ map formatFailure failures
@@ -73,16 +73,16 @@ formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
           escapeChar c = [c]
        in concatMap escapeChar
 
-    onPart (ErrorString s) = formatEscape s
+    onPart (ErrorString s) = formatEscape $ T.unpack s
     onPart ErrorVal {} = "{}"
 
 sizeClassesToPython :: M.Map Name SizeClass -> PyExp
 sizeClassesToPython = Dict . map f . M.toList
   where
     f (size_name, size_class) =
-      ( String $ pretty size_name,
+      ( String $ prettyString size_name,
         Dict
-          [ (String "class", String $ pretty size_class),
+          [ (String "class", String $ prettyString size_class),
             ( String "value",
               maybe None (Integer . fromIntegral) $
                 sizeDefault size_class

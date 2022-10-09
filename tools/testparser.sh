@@ -20,24 +20,24 @@ if [ "$TESTPARSER_WORKER" ]; then
         suffix=$2
         shift; shift
         out=$dir/${f}_${suffix}
-        mkdir -p $(dirname $out)
-        if ! ( futhark dev -w "$@" $f > $out && futhark dev $out >/dev/null); then
-            echo "^- $f $@"
+        mkdir -p "$(dirname "$out")"
+        if ! ( futhark dev -w "$@" "$f" > "$out" && futhark dev "$out" >/dev/null); then
+            echo "^- $f $*"
             exit 1
         fi
     }
     for f in "$@"; do
-        if futhark check $f 2>/dev/null && ! (fgrep 'tags { disable }' -q $f) ; then
-            testwith $f soacs -s
-            testwith $f mc -s --extract-multicore
-            testwith $f gpu --gpu
-            testwith $f mc_mem --mc-mem
-            if ! grep -q no_opencl $f; then
-                testwith $f gpu_mem --gpu-mem
+        if futhark check "$f" 2>/dev/null && ! (grep -F 'tags { disable }' -q "$f") ; then
+            testwith "$f" soacs -s
+            testwith "$f" mc -s --extract-multicore
+            testwith "$f" gpu --gpu
+            testwith "$f" mc_mem --mc-mem
+            if ! grep -q no_opencl "$f"; then
+                testwith "$f" gpu_mem --gpu-mem
             fi
         fi
     done
 else
     export TESTPARSER_WORKER=1
-    find "$@" -name \*.fut -print0 | xargs -0 -n 1 -P $THREADS $0 -rec
+    find "$@" -name \*.fut -print0 | xargs -0 -n 1 -P $THREADS "$0" -rec
 fi

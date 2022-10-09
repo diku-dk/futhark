@@ -1,8 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | @futhark repl@
 module Futhark.CLI.REPL (main) where
@@ -13,37 +9,41 @@ import Control.Monad.Except
 import Control.Monad.Free.Church
 import Control.Monad.State
 import Data.Char
-import Data.List (intercalate, intersperse)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
+import Data.List (intersperse)
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Version
 import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
+import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, pretty, putDoc, putDocLn, (<+>))
 import Futhark.Version
 import Language.Futhark
-import qualified Language.Futhark.Interpreter as I
+import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Parser
-import qualified Language.Futhark.Semantic as T
-import qualified Language.Futhark.TypeChecker as T
+import Language.Futhark.Semantic qualified as T
+import Language.Futhark.TypeChecker qualified as T
 import NeatInterpolation (text)
-import qualified System.Console.Haskeline as Haskeline
+import System.Console.Haskeline qualified as Haskeline
 import System.Directory
 import System.FilePath
+import System.IO (stdout)
 import Text.Read (readMaybe)
 
-banner :: String
+banner :: Doc AnsiStyle
 banner =
-  unlines
-    [ "|// |\\    |   |\\  |\\   /",
-      "|/  | \\   |\\  |\\  |/  /",
-      "|   |  \\  |/  |   |\\  \\",
-      "|   |   \\ |   |   | \\  \\"
+  mconcat . map ((<> hardline) . decorate . pretty) $
+    [ "┃╱╱ ┃╲    ┃   ┃╲  ┃╲   ╱" :: T.Text,
+      "┃╱  ┃ ╲   ┃╲  ┃╲  ┃╱  ╱ ",
+      "┃   ┃  ╲  ┃╱  ┃   ┃╲  ╲ ",
+      "┃   ┃   ╲ ┃   ┃   ┃ ╲  ╲"
     ]
+  where
+    decorate = annotate (bgColorDull Red <> bold <> color White)
 
 -- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
@@ -58,11 +58,11 @@ data StopReason = EOF | Stop | Exit | Load FilePath | Interrupt
 repl :: Maybe FilePath -> IO ()
 repl maybe_prog = do
   when fancyTerminal $ do
-    putStr banner
+    putDoc banner
     putStrLn $ "Version " ++ showVersion version ++ "."
     putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
     putStrLn ""
-    putStrLn "Run :help for a list of commands."
+    putDoc $ "Run" <+> annotate bold ":help" <+> "for a list of commands."
     putStrLn ""
 
   let toploop s = do
@@ -85,7 +85,7 @@ repl maybe_prog = do
             case maybe_new_state of
               Right new_state -> toploop new_state
               Left err -> do
-                liftIO $ putStrLn err
+                liftIO $ putDocLn err
                 toploop s'
           Right _ -> pure ()
 
@@ -99,9 +99,9 @@ repl maybe_prog = do
       noprog_init_state <- liftIO $ newFutharkiState 0 noLoadedProg Nothing
       case noprog_init_state of
         Left err ->
-          error $ "Failed to initialise interpreter state: " ++ err
+          error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
         Right s -> do
-          liftIO $ putStrLn prog_err
+          liftIO $ putDoc prog_err
           pure s {futharkiLoaded = maybe_prog}
     Right s ->
       pure s
@@ -148,7 +148,7 @@ extendEnvs prog (tenv, ictx) opens = (tenv', ictx')
     t_imports = filter ((`elem` opens) . fst) $ lpImports prog
     i_envs = map snd $ filter ((`elem` opens) . fst) $ M.toList $ I.ctxImports ictx
 
-newFutharkiState :: Int -> LoadedProg -> Maybe FilePath -> IO (Either String FutharkiState)
+newFutharkiState :: Int -> LoadedProg -> Maybe FilePath -> IO (Either (Doc AnsiStyle) FutharkiState)
 newFutharkiState count prev_prog maybe_file = runExceptT $ do
   (prog, tenv, ienv) <- case maybe_file of
     Nothing -> do
@@ -158,7 +158,7 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
       -- Then into the interpreter.
       ienv <-
         foldM
-          (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
+          (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
           I.initialCtx
           $ map (fmap fileProg) (lpImports prog)
 
@@ -168,11 +168,11 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
       pure (prog, tenv, ienv')
     Just file -> do
       prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file] M.empty)
-      liftIO $ putStrLn $ pretty $ lpWarnings prog
+      liftIO $ putDoc $ prettyWarnings $ lpWarnings prog
 
       ienv <-
         foldM
-          (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
+          (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
           I.initialCtx
           $ map (fmap fileProg) (lpImports prog)
 
@@ -192,16 +192,14 @@ newFutharkiState count prev_prog maybe_file = runExceptT $ do
         futharkiLoaded = maybe_file
       }
   where
-    badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
+    badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
-
-    prettyProgErrors = pretty . pprProgErrors
 
 getPrompt :: FutharkiM String
 getPrompt = do
   i <- gets futharkiCount
-  pure $ "[" ++ show i ++ "]> "
+  fmap T.unpack $ liftIO $ docTextForHandle stdout $ annotate bold $ brackets (pretty i) <> "> "
 
 -- The ExceptT part is more of a continuation, really.
 newtype FutharkiM a = FutharkiM {runFutharkiM :: ExceptT StopReason (StateT FutharkiState (Haskeline.InputT IO)) a}
@@ -238,7 +236,7 @@ readEvalPrint = do
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
 
       case maybe_dec_or_e of
-        Left (SyntaxError _ err) -> liftIO $ putStrLn err
+        Left (SyntaxError _ err) -> liftIO $ T.putStrLn err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
@@ -266,14 +264,14 @@ onDec d = do
   cur_prog <- gets futharkiProg
   imp_r <- liftIO $ extendProg cur_prog files M.empty
   case imp_r of
-    Left e -> liftIO $ T.putStrLn $ prettyText $ pprProgErrors e
+    Left e -> liftIO $ putDoc $ prettyProgErrors e
     Right prog -> do
       env <- gets futharkiEnv
       let (tenv, ienv) = extendEnvs prog env (map fst $ decImports d)
           imports = lpImports prog
           src = lpNameSource prog
       case T.checkDec imports src tenv cur_import d of
-        (_, Left e) -> liftIO $ putStrLn $ pretty e
+        (_, Left e) -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc e
         (_, Right (tenv', d', src')) -> do
           let new_imports = filter ((`notElem` map fst old_imports) . fst) imports
           int_r <- runInterpreter $ do
@@ -293,22 +291,22 @@ onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case T.checkExp imports src tenv e of
-    (_, Left err) -> liftIO $ putStrLn $ pretty err
+    (_, Left err) -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc err
     (_, Right (tparams, e'))
       | null tparams -> do
           r <- runInterpreter $ I.interpretExp ienv e'
           case r of
             Left err -> liftIO $ print err
-            Right v -> liftIO $ putStrLn $ pretty v
+            Right v -> liftIO $ putDoc $ I.prettyValue v <> hardline
       | otherwise -> liftIO $ do
-          putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
-          putStrLn $
+          T.putStrLn $ "Inferred type of expression: " <> prettyText (typeOf e')
+          T.putStrLn $
             "The following types are ambiguous: "
-              ++ intercalate ", " (map (prettyName . typeParamName) tparams)
+              <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
 
-prettyBreaking :: Breaking -> String
+prettyBreaking :: Breaking -> T.Text
 prettyBreaking b =
-  prettyStacktrace (breakingAt b) $ map locStr $ NE.toList $ breakingStack b
+  prettyStacktrace (breakingAt b) $ map locText $ NE.toList $ breakingStack b
 
 -- Are we currently willing to break for this reason?  Among othe
 -- things, we do not want recursive breakpoints.  It could work fine
@@ -341,9 +339,9 @@ runInterpreter m = runF m (pure . Right) intOp
 
       -- Are we supposed to respect this breakpoint?
       when (breakForReason s top why) $ do
-        liftIO $ putStrLn $ why' <> " at " ++ locStr w
-        liftIO $ putStrLn $ prettyBreaking breaking
-        liftIO $ putStrLn "<Enter> to continue."
+        liftIO $ T.putStrLn $ why' <> " at " <> locText w
+        liftIO $ T.putStrLn $ prettyBreaking breaking
+        liftIO $ T.putStrLn "<Enter> to continue."
 
         -- Note the cleverness to preserve the Haskeline session (for
         -- line history and such).
@@ -400,22 +398,22 @@ genTypeCommand ::
 genTypeCommand f g h e = do
   prompt <- getPrompt
   case f prompt e of
-    Left (SyntaxError _ err) -> liftIO $ putStrLn err
+    Left (SyntaxError _ err) -> liftIO $ T.putStrLn err
     Right e' -> do
       (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of
-        Left err -> liftIO $ putStrLn $ pretty err
+        Left err -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc err
         Right x -> liftIO $ putStrLn $ h x
 
 typeCommand :: Command
 typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
-  pretty e
-    <> concatMap ((" " <>) . pretty) ps
+  prettyString e
+    <> concatMap ((" " <>) . prettyString) ps
     <> " : "
-    <> pretty (typeOf e)
+    <> prettyString (typeOf e)
 
 mtypeCommand :: Command
-mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
+mtypeCommand = genTypeCommand parseModExp T.checkModExp $ prettyString . fst
 
 unbreakCommand :: Command
 unbreakCommand _ = do
@@ -450,7 +448,7 @@ frameCommand which = do
               { futharkiEnv = (tenv, ctx),
                 futharkiBreaking = Just breaking
               }
-          liftIO $ putStrLn $ prettyBreaking breaking
+          liftIO $ T.putStrLn $ prettyBreaking breaking
     (Just _, _) ->
       liftIO $ putStrLn $ "Invalid stack index: " ++ T.unpack which
     (Nothing, _) ->
@@ -470,8 +468,8 @@ cdCommand dir
 helpCommand :: Command
 helpCommand _ = liftIO $
   forM_ commands $ \(cmd, (_, desc)) -> do
-    T.putStrLn $ ":" <> cmd
-    T.putStrLn $ T.replicate (1 + T.length cmd) "-"
+    putDoc $ annotate bold $ ":" <> pretty cmd <> hardline
+    T.putStrLn $ T.replicate (1 + T.length cmd) "─"
     T.putStr desc
     T.putStrLn ""
     T.putStrLn ""

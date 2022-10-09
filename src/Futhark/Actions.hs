@@ -1,12 +1,10 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | All (almost) compiler pipelines end with an 'Action', which does
 -- something with the result of the pipeline.
 module Futhark.Actions
   ( printAction,
     printAliasesAction,
     printLastUseGPU,
+    printFusionGraph,
     printInterferenceGPU,
     printMemAliasGPU,
     callGraphAction,
@@ -30,26 +28,26 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Futhark.Analysis.Alias
 import Futhark.Analysis.CallGraph (buildCallGraph)
-import qualified Futhark.Analysis.Interference as Interference
-import qualified Futhark.Analysis.LastUse as LastUse
-import qualified Futhark.Analysis.MemAlias as MemAlias
+import Futhark.Analysis.Interference qualified as Interference
+import Futhark.Analysis.LastUse qualified as LastUse
+import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.Analysis.Metrics
-import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
-import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
-import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
-import qualified Futhark.CodeGen.Backends.MulticoreISPC as MulticoreISPC
-import qualified Futhark.CodeGen.Backends.MulticoreWASM as MulticoreWASM
-import qualified Futhark.CodeGen.Backends.PyOpenCL as PyOpenCL
-import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
-import qualified Futhark.CodeGen.Backends.SequentialPython as SequentialPy
-import qualified Futhark.CodeGen.Backends.SequentialWASM as SequentialWASM
-import qualified Futhark.CodeGen.ImpGen.GPU as ImpGenGPU
-import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
-import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
+import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
+import Futhark.CodeGen.Backends.COpenCL qualified as COpenCL
+import Futhark.CodeGen.Backends.MulticoreC qualified as MulticoreC
+import Futhark.CodeGen.Backends.MulticoreISPC qualified as MulticoreISPC
+import Futhark.CodeGen.Backends.MulticoreWASM qualified as MulticoreWASM
+import Futhark.CodeGen.Backends.PyOpenCL qualified as PyOpenCL
+import Futhark.CodeGen.Backends.SequentialC qualified as SequentialC
+import Futhark.CodeGen.Backends.SequentialPython qualified as SequentialPy
+import Futhark.CodeGen.Backends.SequentialWASM qualified as SequentialWASM
+import Futhark.CodeGen.ImpGen.GPU qualified as ImpGenGPU
+import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGenMulticore
+import Futhark.CodeGen.ImpGen.Sequential qualified as ImpGenSequential
 import Futhark.Compiler.CLI
 import Futhark.IR
 import Futhark.IR.GPUMem (GPUMem)
@@ -57,12 +55,13 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
+import Futhark.Optimise.Fusion.GraphRep qualified
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
 import System.Directory
 import System.Exit
 import System.FilePath
-import qualified System.Info
+import System.Info qualified
 
 -- | Print the result to stdout.
 printAction :: ASTRep rep => Action rep
@@ -70,7 +69,7 @@ printAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty
+      actionProcedure = liftIO . putStrLn . prettyString
     }
 
 -- | Print the result to stdout, alias annotations.
@@ -79,7 +78,7 @@ printAliasesAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+      actionProcedure = liftIO . putStrLn . prettyString . aliasAnalysis
     }
 
 -- | Print last use information to stdout.
@@ -88,7 +87,23 @@ printLastUseGPU =
   Action
     { actionName = "print last use gpu",
       actionDescription = "Print last use information on gpu.",
-      actionProcedure = liftIO . putStrLn . pretty . LastUse.analyseGPUMem
+      actionProcedure = liftIO . print . LastUse.analyseGPUMem
+    }
+
+-- | Print fusion graph to stdout.
+printFusionGraph :: Action SOACS
+printFusionGraph =
+  Action
+    { actionName = "print fusion graph",
+      actionDescription = "Print fusion graph in Graphviz format.",
+      actionProcedure =
+        liftIO
+          . mapM_
+            ( putStrLn
+                . Futhark.Optimise.Fusion.GraphRep.pprg
+                . Futhark.Optimise.Fusion.GraphRep.mkDepGraphForFun
+            )
+          . progFuns
     }
 
 -- | Print interference information to stdout.
@@ -97,7 +112,7 @@ printInterferenceGPU =
   Action
     { actionName = "print interference gpu",
       actionDescription = "Print interference information on gpu.",
-      actionProcedure = liftIO . putStrLn . pretty . Interference.analyseProgGPU
+      actionProcedure = liftIO . print . Interference.analyseProgGPU
     }
 
 -- | Print memory alias information to stdout
@@ -106,7 +121,7 @@ printMemAliasGPU =
   Action
     { actionName = "print mem alias gpu",
       actionDescription = "Print memory alias information on gpu.",
-      actionProcedure = liftIO . putStrLn . pretty . MemAlias.analyzeGPUMem
+      actionProcedure = liftIO . print . MemAlias.analyzeGPUMem
     }
 
 -- | Print call graph to stdout.
@@ -115,7 +130,7 @@ callGraphAction =
   Action
     { actionName = "call-graph",
       actionDescription = "Prettyprint the callgraph of the result to standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . buildCallGraph
+      actionProcedure = liftIO . putStrLn . prettyString . buildCallGraph
     }
 
 -- | Print metrics about AST node counts to stdout.
@@ -133,7 +148,7 @@ impCodeGenAction =
   Action
     { actionName = "Compile imperative",
       actionDescription = "Translate program into imperative IL and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenSequential.compileProg
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenSequential.compileProg
     }
 
 -- | Convert the program to GPU ImpCode and print it to stdout.
@@ -142,7 +157,7 @@ kernelImpCodeGenAction =
   Action
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenGPU.compileProgOpenCL
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgOpenCL
     }
 
 -- | Convert the program to CPU multicore ImpCode and print it to stdout.
@@ -151,7 +166,7 @@ multicoreImpCodeGenAction =
   Action
     { actionName = "Compile to imperative multicore",
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenMulticore.compileProg
     }
 
 -- Lines that we prepend (in comments) to generated code.

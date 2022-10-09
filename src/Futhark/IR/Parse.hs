@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
-
 -- | Parser for the Futhark core language.
 module Futhark.IR.Parse
   ( parseSOACS,
@@ -16,37 +12,37 @@ where
 
 import Data.Char (isAlpha)
 import Data.Functor
-import Data.List (zipWith5)
+import Data.List (zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Set as S
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Void
 import Futhark.Analysis.PrimExp.Parse
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
-import qualified Futhark.IR.GPU.Op as GPU
+import Futhark.IR.GPU.Op qualified as GPU
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MC (MC)
-import qualified Futhark.IR.MC.Op as MC
+import Futhark.IR.MC.Op qualified as MC
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Mem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SOACS (SOACS)
-import qualified Futhark.IR.SOACS.SOAC as SOAC
-import qualified Futhark.IR.SegOp as SegOp
+import Futhark.IR.SOACS.SOAC qualified as SOAC
+import Futhark.IR.SegOp qualified as SegOp
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
-import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Primitive.Parse
 import Text.Megaparsec
 import Text.Megaparsec.Char hiding (space)
-import qualified Text.Megaparsec.Char.Lexer as L
+import Text.Megaparsec.Char.Lexer qualified as L
 
 type Parser = Parsec Void T.Text
 
-pStringLiteral :: Parser String
-pStringLiteral = lexeme $ char '"' >> manyTill L.charLiteral (char '"')
+pStringLiteral :: Parser T.Text
+pStringLiteral =
+  lexeme . fmap T.pack $ char '"' >> manyTill L.charLiteral (char '"')
 
 pName :: Parser Name
 pName =
@@ -408,29 +404,54 @@ pPat pr = Pat <$> braces (pPatElem pr `sepBy` pComma)
 pResult :: Parser Result
 pResult = braces $ pSubExpRes `sepBy` pComma
 
+pMatchSort :: Parser MatchSort
+pMatchSort =
+  choice
+    [ lexeme "<fallback>" $> MatchFallback,
+      lexeme "<equiv>" $> MatchEquiv,
+      pure MatchNormal
+    ]
+
+pBranchBody :: PR rep -> Parser (Body rep)
+pBranchBody pr =
+  choice
+    [ try $ Body (pBodyDec pr) mempty <$> pResult,
+      braces (pBody pr)
+    ]
+
 pIf :: PR rep -> Parser (Exp rep)
 pIf pr =
   keyword "if"
     $> f
-    <*> pSort
+    <*> pMatchSort
     <*> pSubExp
-    <*> (keyword "then" *> pBranchBody)
-    <*> (keyword "else" *> pBranchBody)
+    <*> (keyword "then" *> pBranchBody pr)
+    <*> (keyword "else" *> pBranchBody pr)
     <*> (lexeme ":" *> pBranchTypes pr)
   where
-    pSort =
-      choice
-        [ lexeme "<fallback>" $> IfFallback,
-          lexeme "<equiv>" $> IfEquiv,
-          pure IfNormal
-        ]
     f sort cond tbranch fbranch t =
-      If cond tbranch fbranch $ IfDec t sort
-    pBranchBody =
-      choice
-        [ try $ Body (pBodyDec pr) mempty <$> pResult,
-          braces (pBody pr)
-        ]
+      Match [cond] [Case [Just $ BoolValue True] tbranch] fbranch $ MatchDec t sort
+
+pMatch :: PR rep -> Parser (Exp rep)
+pMatch pr =
+  keyword "match"
+    $> f
+    <*> pMatchSort
+    <*> braces (pSubExp `sepBy` pComma)
+    <*> many pCase
+    <*> (keyword "default" *> lexeme "->" *> pBranchBody pr)
+    <*> (lexeme ":" *> pBranchTypes pr)
+  where
+    f sort cond cases defbody t =
+      Match cond cases defbody $ MatchDec t sort
+    pCase =
+      keyword "case"
+        $> Case
+        <*> braces (pMaybeValue `sepBy` pComma)
+        <* lexeme "->"
+        <*> pBranchBody pr
+    pMaybeValue =
+      choice [lexeme "_" $> Nothing, Just <$> pPrimValue]
 
 pApply :: PR rep -> Parser (Exp rep)
 pApply pr =
@@ -527,6 +548,7 @@ pExp :: PR rep -> Parser (Exp rep)
 pExp pr =
   choice
     [ pIf pr,
+      pMatch pr,
       pApply pr,
       pLoop pr,
       pWithAcc pr,
@@ -578,7 +600,7 @@ pValueType = comb <$> pRank <*> pSignedType
 pEntryPointType :: Parser EntryPointType
 pEntryPointType =
   choice
-    [ keyword "opaque" $> TypeOpaque <*> pStringLiteral,
+    [ keyword "opaque" $> TypeOpaque . T.unpack <*> pStringLiteral,
       TypeTransparent <$> pValueType
     ]
 
@@ -586,7 +608,7 @@ pEntry :: Parser EntryPoint
 pEntry =
   parens $
     (,,)
-      <$> (nameFromString <$> pStringLiteral)
+      <$> (nameFromText <$> pStringLiteral)
       <* pComma
       <*> pEntryPointInputs
       <* pComma
@@ -616,7 +638,7 @@ pFunDef pr = do
 pOpaqueType :: Parser (String, OpaqueType)
 pOpaqueType =
   (,)
-    <$> (keyword "type" *> pStringLiteral <* pEqual)
+    <$> (keyword "type" *> (T.unpack <$> pStringLiteral) <* pEqual)
     <*> choice [pRecord, pOpaque]
   where
     pFieldName = choice [pName, nameFromString . show <$> pInt]
@@ -710,28 +732,7 @@ pSOAC pr =
             <*> braces (pSubExp `sepBy` pComma)
             <* pComma
             <*> pLambda pr
-    pStream =
-      choice
-        [ keyword "streamParComm" *> pStreamPar SOAC.InOrder Commutative,
-          keyword "streamPar" *> pStreamPar SOAC.InOrder Noncommutative,
-          keyword "streamParPerComm" *> pStreamPar SOAC.Disorder Commutative,
-          keyword "streamParPer" *> pStreamPar SOAC.Disorder Noncommutative,
-          keyword "streamSeq" *> pStreamSeq
-        ]
-    pStreamPar order comm =
-      parens $
-        SOAC.Stream
-          <$> pSubExp
-          <* pComma
-          <*> braces (pVName `sepBy` pComma)
-          <* pComma
-          <*> pParForm order comm
-          <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
-          <* pComma
-          <*> pLambda pr
-    pParForm order comm =
-      SOAC.Parallel order comm <$> pLambda pr
+    pStream = keyword "streamSeq" *> pStreamSeq
     pStreamSeq =
       parens $
         SOAC.Stream
@@ -739,7 +740,6 @@ pSOAC pr =
           <* pComma
           <*> braces (pVName `sepBy` pComma)
           <* pComma
-          <*> pure SOAC.Sequential
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> pLambda pr
@@ -806,26 +806,6 @@ pSizeOp =
               <*> pName
               <* pComma
               <*> pSubExp
-          ),
-      keyword "split_space"
-        *> parens
-          ( GPU.SplitSpace GPU.SplitContiguous
-              <$> pSubExp
-              <* pComma
-              <*> pSubExp
-              <* pComma
-              <*> pSubExp
-          ),
-      keyword "split_space_strided"
-        *> parens
-          ( GPU.SplitSpace
-              <$> (GPU.SplitStrided <$> pSubExp)
-              <* pComma
-              <*> pSubExp
-              <* pComma
-              <*> pSubExp
-              <* pComma
-              <*> pSubExp
           )
     ]
 
@@ -862,24 +842,6 @@ pKernelResult = do
         <*> pVName,
       try "blkreg_tile"
         *> parens (SegOp.RegTileReturns cs <$> (pRegTile `sepBy` pComma))
-        <*> pVName,
-      keyword "concat"
-        *> parens
-          ( SegOp.ConcatReturns cs SegOp.SplitContiguous
-              <$> pSubExp
-              <* pComma
-              <*> pSubExp
-          )
-        <*> pVName,
-      keyword "concat_strided"
-        *> parens
-          ( SegOp.ConcatReturns cs
-              <$> (SegOp.SplitStrided <$> pSubExp)
-              <* pComma
-              <*> pSubExp
-              <* pComma
-              <*> pSubExp
-          )
         <*> pVName
     ]
   where
@@ -948,23 +910,36 @@ pSegOp pr pLvl =
 
 pSegLevel :: Parser GPU.SegLevel
 pSegLevel =
-  parens $
-    choice
-      [ keyword "thread" $> GPU.SegThread,
-        keyword "group" $> GPU.SegGroup
-      ]
-      <*> (pSemi *> lexeme "#groups=" $> GPU.Count <*> pSubExp)
-      <*> (pSemi *> lexeme "groupsize=" $> GPU.Count <*> pSubExp)
-      <*> choice
-        [ pSemi
-            *> choice
-              [ keyword "full"
-                  $> SegOp.SegNoVirtFull
-                  <*> (SegOp.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
-                keyword "virtualise" $> SegOp.SegVirt
-              ],
-          pure SegOp.SegNoVirt
+  parens . choice $
+    [ "thread"
+        $> GPU.SegThread
+        <* pSemi
+        <*> pSegVirt
+        <* pSemi
+        <*> optional pKernelGrid,
+      "group"
+        $> GPU.SegGroup
+        <* pSemi
+        <*> pSegVirt
+        <* pSemi
+        <*> optional pKernelGrid,
+      "ingroup" $> GPU.SegThreadInGroup <* pSemi <*> pSegVirt
+    ]
+  where
+    pSegVirt =
+      choice
+        [ choice
+            [ keyword "full"
+                $> GPU.SegNoVirtFull
+                <*> (GPU.SegSeqDims <$> brackets (pInt `sepBy` pComma)),
+              keyword "virtualise" $> GPU.SegVirt
+            ],
+          pure GPU.SegNoVirt
         ]
+    pKernelGrid =
+      GPU.KernelGrid
+        <$> (lexeme "groups=" $> GPU.Count <*> pSubExp <* pSemi)
+        <*> (lexeme "groupsize=" $> GPU.Count <*> pSubExp)
 
 pHostOp :: PR rep -> Parser op -> Parser (GPU.HostOp rep op)
 pHostOp pr pOther =
@@ -1005,11 +980,10 @@ pIxFunBase pNum =
     pLMAD = braces $ do
       offset <- pLab "offset" pNum <* pSemi
       strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
-      rotates <- pLab "rotates" $ brackets (pNum `sepBy` pComma) <* pSemi
       shape <- pLab "shape" $ brackets (pNum `sepBy` pComma) <* pSemi
       perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma) <* pSemi
       mon <- pLab "monotonicity" $ brackets (pMon `sepBy` pComma)
-      pure $ IxFun.LMAD offset $ zipWith5 IxFun.LMADDim strides rotates shape perm mon
+      pure $ IxFun.LMAD offset $ zipWith4 IxFun.LMADDim strides shape perm mon
 
 pPrimExpLeaf :: Parser VName
 pPrimExpLeaf = pVName

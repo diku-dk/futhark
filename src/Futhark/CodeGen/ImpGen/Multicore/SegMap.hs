@@ -5,7 +5,7 @@ module Futhark.CodeGen.ImpGen.Multicore.SegMap
 where
 
 import Control.Monad
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
@@ -20,13 +20,13 @@ writeResult is pe (Returns _ _ se) =
   copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
 writeResult _ pe (WriteReturns _ (Shape rws) _ idx_vals) = do
   let (iss, vs) = unzip idx_vals
-      rws' = map toInt64Exp rws
+      rws' = map pe64 rws
   forM_ (zip iss vs) $ \(slice, v) -> do
-    let slice' = fmap toInt64Exp slice
+    let slice' = fmap pe64 slice
     sWhen (inBounds slice' rws') $
       copyDWIM (patElemName pe) (unSlice slice') v []
 writeResult _ _ res =
-  error $ "writeResult: cannot handle " ++ pretty res
+  error $ "writeResult: cannot handle " ++ prettyString res
 
 compileSegMapBody ::
   Pat LetDecMem ->
@@ -35,7 +35,7 @@ compileSegMapBody ::
   MulticoreGen Imp.MCCode
 compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
   let (is, ns) = unzip $ unSegSpace space
-      ns' = map toInt64Exp ns
+      ns' = map pe64 ns
   dPrim_ (segFlat space) int64
   sOp $ Imp.GetTaskId (segFlat space)
   kstms' <- mapM renameStm kstms

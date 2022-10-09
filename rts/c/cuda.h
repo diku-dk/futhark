@@ -699,7 +699,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
   }
 
   size_t size;
-  if (free_list_find(&ctx->free_list, min_size, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, min_size, tag, &size, mem_out) == 0) {
     if (size >= min_size) {
       if (ctx->cfg.debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
@@ -742,14 +742,6 @@ static CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
                           const char *tag) {
   size_t size;
   CUdeviceptr existing_mem;
-
-  // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, -1, &size, &existing_mem) == 0) {
-    CUresult res = cuMemFree(existing_mem);
-    if (res != CUDA_SUCCESS) {
-      return res;
-    }
-  }
 
   CUresult res = cuMemGetAddressRange(NULL, &size, mem);
   if (res == CUDA_SUCCESS) {

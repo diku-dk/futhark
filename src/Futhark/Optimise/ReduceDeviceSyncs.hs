@@ -1,5 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
 -- | This module implements an optimization that migrates host
 -- statements into 'GPUBody' kernels to reduce the number of
 -- host-device synchronizations that occur when a scalar variable is
@@ -14,12 +12,12 @@ import Control.Monad.Reader
 import Control.Monad.State hiding (State)
 import Data.Bifunctor (second)
 import Data.Foldable
-import qualified Data.IntMap.Strict as IM
-import Data.List (unzip4, zip4)
-import qualified Data.Map.Strict as M
+import Data.IntMap.Strict qualified as IM
+import Data.List (transpose, zip4)
+import Data.Map.Strict qualified as M
 import Data.Sequence ((<|), (><), (|>))
-import qualified Data.Text as T
-import Futhark.Construct (fullSlice, sliceDim)
+import Data.Text qualified as T
+import Futhark.Construct (fullSlice, mkBody, sliceDim)
 import Futhark.Error
 import Futhark.IR.GPU
 import Futhark.MonadFreshNames
@@ -149,90 +147,109 @@ optimizeStm out stm = do
         pure (out |> stm)
       Apply {} ->
         pure (out |> stm)
-      If cond (Body _ tstms0 tres) (Body _ fstms0 fres) (IfDec btypes sort) ->
-        do
-          -- Rewrite branches.
-          tstms1 <- optimizeStms tstms0
-          fstms1 <- optimizeStms fstms0
+      Match ses cases defbody (MatchDec btypes sort) -> do
+        -- Rewrite branches.
+        cases_stms <- mapM (optimizeStms . bodyStms . caseBody) cases
+        let cases_res = map (bodyResult . caseBody) cases
+        defbody_stms <- optimizeStms $ bodyStms defbody
+        let defbody_res = bodyResult defbody
 
-          -- Ensure return values and types match if one or both branches
-          -- return a result that now reside on device.
-          let bmerge (res, tstms, fstms) (pe, tr, fr, bt) =
-                do
-                  let onHost (Var v) = (v ==) <$> resolveName v
-                      onHost _ = pure True
+        -- Ensure return values and types match if one or both branches
+        -- return a result that now reside on device.
+        let bmerge (acc, all_stms) (pe, reses, bt) = do
+              let onHost (Var v) = (v ==) <$> resolveName v
+                  onHost _ = pure True
 
-                  tr_on_host <- onHost (resSubExp tr)
-                  fr_on_host <- onHost (resSubExp fr)
+              on_host <- and <$> mapM (onHost . resSubExp) reses
 
-                  if tr_on_host && fr_on_host
-                    then -- No result resides on device ==> nothing to do.
-                      pure ((pe, tr, fr, bt) : res, tstms, fstms)
-                    else -- Otherwise, ensure both results are migrated.
-                    do
-                      let t = patElemType pe
-                      (tstms', tarr) <- storeScalar tstms (resSubExp tr) t
-                      (fstms', farr) <- storeScalar fstms (resSubExp fr) t
+              if on_host
+                then -- No result resides on device ==> nothing to do.
+                  pure ((pe, reses, bt) : acc, all_stms)
+                else do
+                  -- Otherwise, ensure all results are migrated.
+                  (all_stms', arrs) <-
+                    fmap unzip $
+                      forM (zip all_stms reses) $ \(stms, res) ->
+                        storeScalar stms (resSubExp res) (patElemType pe)
 
-                      pe' <- arrayizePatElem pe
-                      let bt' = staticShapes1 (patElemType pe')
-                      let tr' = tr {resSubExp = Var tarr}
-                      let fr' = fr {resSubExp = Var farr}
-                      pure ((pe', tr', fr', bt') : res, tstms', fstms')
+                  pe' <- arrayizePatElem pe
+                  let bt' = staticShapes1 (patElemType pe')
+                      reses' = zipWith SubExpRes (map resCerts reses) (map Var arrs)
+                  pure ((pe', reses', bt') : acc, all_stms')
 
-          let pes = patElems (stmPat stm)
-          let zipped = zip4 pes tres fres btypes
-          (zipped', tstms2, fstms2) <- foldM bmerge ([], tstms1, fstms1) zipped
-          let (pes', tres', fres', btypes') = unzip4 (reverse zipped')
+            pes = patElems (stmPat stm)
+        (acc, ~(defbody_stms' : cases_stms')) <-
+          foldM bmerge ([], defbody_stms : cases_stms) $
+            zip3 pes (transpose $ defbody_res : cases_res) btypes
+        let (pes', reses, btypes') = unzip3 (reverse acc)
 
-          -- Rewrite statement.
-          let tbranch' = Body () tstms2 tres'
-          let fbranch' = Body () fstms2 fres'
-          let e' = If cond tbranch' fbranch' (IfDec btypes' sort)
-          let stm' = Let (Pat pes') (stmAux stm) e'
+        -- Rewrite statement.
+        let cases' =
+              zipWith Case (map casePat cases) $
+                zipWith mkBody cases_stms' $
+                  drop 1 $
+                    transpose reses
+            defbody' = mkBody defbody_stms' $ map head reses
+            e' = Match ses cases' defbody' (MatchDec btypes' sort)
+            stm' = Let (Pat pes') (stmAux stm) e'
 
-          -- Read migrated scalars that are used on host.
-          foldM addRead (out |> stm') (zip pes pes')
+        -- Read migrated scalars that are used on host.
+        foldM addRead (out |> stm') (zip pes pes')
       DoLoop ps lf b -> do
         -- Enable the migration of for-in loop variables.
         (params, lform, body) <- rewriteForIn (ps, lf, b)
 
         -- Update statement bound variables and parameters if their values
         -- have been migrated to device.
-        let lmerge (res, stms) (pe, (Param _ pn pt, pval), MoveToDevice) = do
-              -- Rewrite the bound variable.
+        let lmerge (res, stms, rebinds) (pe, param, StayOnHost) =
+              pure ((pe, param) : res, stms, rebinds)
+            lmerge (res, stms, rebinds) (pe, (Param _ pn pt, pval), _) = do
+              -- Migrate the bound variable.
               pe' <- arrayizePatElem pe
 
-              -- Move the initial value to device if not already there.
+              -- Move the initial value to device if not already there to
+              -- ensure that the parameter argument and loop return value
+              -- converge.
               (stms', arr) <- storeScalar stms pval (fromDecl pt)
 
-              -- Rewrite the parameter.
+              -- Migrate the parameter.
               pn' <- newName pn
               let pt' = toDecl (patElemType pe') Nonunique
               let pval' = Var arr
               let param' = (Param mempty pn' pt', pval')
 
-              -- Record the migration.
-              Ident pn (fromDecl pt) `movedTo` pn'
+              -- Record the migration and rebind the parameter inside the
+              -- loop body if necessary.
+              rebinds' <- (pe {patElemName = pn}) `migratedTo` (pn', rebinds)
 
-              pure ((pe', param') : res, stms')
-            lmerge _ (_, _, UsedOnHost) =
-              -- Initial loop parameter value and loop result should have
-              -- been made available on host instead.
-              compilerBugS "optimizeStm: unhandled host usage of loop param"
-            lmerge (res, stms) (pe, param, StayOnHost) =
-              pure ((pe, param) : res, stms)
+              pure ((pe', param') : res, stms', rebinds')
 
         mt <- ask
-
         let pes = patElems (stmPat stm)
         let mss = map (\(Param _ n _, _) -> statusOf n mt) params
-        (zipped', out') <- foldM lmerge ([], out) (zip3 pes params mss)
+        (zipped', out', rebinds) <-
+          foldM lmerge ([], out, mempty) (zip3 pes params mss)
         let (pes', params') = unzip (reverse zipped')
 
+        -- Rewrite body.
+        let body1 = body {bodyStms = rebinds >< bodyStms body}
+        body2 <- optimizeBody body1
+        let zipped =
+              zip4
+                mss
+                (bodyResult body2)
+                (map resSubExp $ bodyResult body)
+                (map patElemType pes)
+        let rstore (bstms, res) (StayOnHost, r, _, _) =
+              pure (bstms, r : res)
+            rstore (bstms, res) (_, SubExpRes certs _, se, t) = do
+              (bstms', dev) <- storeScalar bstms se t
+              pure (bstms', SubExpRes certs (Var dev) : res)
+        (bstms, res) <- foldM rstore (bodyStms body2, []) zipped
+        let body3 = body2 {bodyStms = bstms, bodyResult = reverse res}
+
         -- Rewrite statement.
-        body' <- optimizeBody body
-        let e' = DoLoop params' lform body'
+        let e' = DoLoop params' lform body3
         let stm' = Let (Pat pes') (stmAux stm) e'
 
         -- Read migrated scalars that are used on host.

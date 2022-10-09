@@ -1,10 +1,8 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Futhark.Pkg.SolveTests (tests) where
 
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Monoid
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Pkg.Solve
 import Futhark.Pkg.Types
 import Test.Tasty

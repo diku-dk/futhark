@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 -- | Utility definitions used by the lexer.  None of the default Alex
@@ -22,10 +21,11 @@ module Language.Futhark.Parser.Lexer.Wrapper
 where
 
 import Control.Applicative (liftA)
-import qualified Data.ByteString.Internal as BS (w2c)
-import qualified Data.ByteString.Lazy as BS
+import Data.ByteString.Internal qualified as BS (w2c)
+import Data.ByteString.Lazy qualified as BS
 import Data.Int (Int64)
 import Data.Loc (Loc, Pos (..))
+import Data.Text qualified as T
 import Data.Word (Word8)
 
 type Byte = Word8
@@ -90,10 +90,10 @@ runAlex start_pos input (Alex f) =
 
 newtype Alex a = Alex {unAlex :: AlexState -> Either LexerError (AlexState, a)}
 
-data LexerError = LexerError Loc String
+data LexerError = LexerError Loc T.Text
 
 instance Show LexerError where
-  show (LexerError _ s) = s
+  show (LexerError _ s) = T.unpack s
 
 instance Functor Alex where
   fmap = liftA
@@ -126,7 +126,7 @@ alexSetInput (pos, c, inp, bpos) =
     } of
     state@AlexState {} -> Right (state, ())
 
-alexError :: Loc -> String -> Alex a
+alexError :: Loc -> T.Text -> Alex a
 alexError loc message = Alex $ const $ Left $ LexerError loc message
 
 alexGetStartCode :: Alex Int

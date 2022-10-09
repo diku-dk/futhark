@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
 -- | @futhark run@
 module Futhark.CLI.Run (main) where
 
@@ -9,18 +5,20 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
-import qualified Data.Map as M
+import Data.ByteString.Lazy qualified as BS
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text.IO as T
+import Data.Text.IO qualified as T
 import Futhark.Compiler
+import Futhark.Data.Reader (readValues)
 import Futhark.Pipeline
 import Futhark.Util (toPOSIX)
 import Futhark.Util.Options
+import Futhark.Util.Pretty (AnsiStyle, Doc, hPutDoc)
 import Language.Futhark
-import qualified Language.Futhark.Interpreter as I
-import Language.Futhark.Parser
-import qualified Language.Futhark.Semantic as T
-import qualified Language.Futhark.TypeChecker as T
+import Language.Futhark.Interpreter qualified as I
+import Language.Futhark.Semantic qualified as T
+import Language.Futhark.TypeChecker qualified as T
 import System.Exit
 import System.FilePath
 import System.IO
@@ -38,19 +36,19 @@ interpret config fp = do
   pr <- newFutharkiState config fp
   (tenv, ienv) <- case pr of
     Left err -> do
-      hPutStrLn stderr err
+      hPutDoc stderr err
       exitFailure
     Right env -> pure env
 
   let entry = interpreterEntryPoint config
-  vr <- parseValues "stdin" <$> T.getContents
+  vr <- readValues <$> BS.getContents
 
   inps <-
     case vr of
-      Left (SyntaxError loc err) -> do
-        hPutStrLn stderr $ "Input syntax error at " <> locStr loc <> ":\n" <> err
+      Nothing -> do
+        T.hPutStrLn stderr "Incorrectly formatted input data."
         exitFailure
-      Right vs ->
+      Just vs ->
         pure vs
 
   (fname, ret) <-
@@ -59,12 +57,12 @@ interpret config fp = do
         | Just (T.BoundV _ t) <- M.lookup (qualLeaf fname) $ T.envVtable tenv ->
             pure (fname, toStructural $ snd $ unfoldFunType t)
       _ -> do
-        hPutStrLn stderr $ "Invalid entry point: " ++ pretty entry
+        T.hPutStrLn stderr $ "Invalid entry point: " <> prettyText entry
         exitFailure
 
   case I.interpretFunction ienv (qualLeaf fname) inps of
     Left err -> do
-      hPutStrLn stderr err
+      T.hPutStrLn stderr err
       exitFailure
     Right run -> do
       run' <- runInterpreter' run
@@ -79,8 +77,8 @@ interpret config fp = do
 
 putValue :: I.Value -> TypeBase () () -> IO ()
 putValue v t
-  | I.isEmptyArray v = putStrLn $ I.prettyEmptyArray t v
-  | otherwise = putStrLn $ pretty v
+  | I.isEmptyArray v = T.putStrLn $ I.prettyEmptyArray t v
+  | otherwise = T.putStrLn $ I.valueText v
 
 data InterpreterConfig = InterpreterConfig
   { interpreterEntryPoint :: Name,
@@ -112,10 +110,10 @@ options =
 newFutharkiState ::
   InterpreterConfig ->
   FilePath ->
-  IO (Either String (T.Env, I.Ctx))
+  IO (Either (Doc AnsiStyle) (T.Env, I.Ctx))
 newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
-    badOnLeft show
+    badOnLeft prettyCompilerError
       =<< liftIO
         ( runExceptT (readProgramFile [] file)
             `catch` \(err :: IOException) ->
@@ -123,30 +121,28 @@ newFutharkiState cfg file = runExceptT $ do
         )
   when (interpreterPrintWarnings cfg) $
     liftIO $
-      hPutStr stderr $
-        pretty ws
+      hPutDoc stderr $
+        prettyWarnings ws
 
   let imp = T.mkInitialImport "."
   ienv1 <-
-    foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
+    foldM (\ctx -> badOnLeft I.prettyInterpreterError <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
       map (fmap fileProg) imports
   (tenv1, d1, src') <-
-    badOnLeft pretty $
-      snd $
-        T.checkDec imports src T.initialEnv imp $
-          mkOpen "/prelude/prelude"
+    badOnLeft T.prettyTypeError . snd $
+      T.checkDec imports src T.initialEnv imp $
+        mkOpen "/prelude/prelude"
   (tenv2, d2, _) <-
-    badOnLeft pretty $
-      snd $
-        T.checkDec imports src' tenv1 imp $
-          mkOpen $
-            toPOSIX $
-              dropExtension file
-  ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
-  ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
+    badOnLeft T.prettyTypeError . snd $
+      T.checkDec imports src' tenv1 imp $
+        mkOpen $
+          toPOSIX $
+            dropExtension file
+  ienv2 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv1 d1)
+  ienv3 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv2 d2)
   pure (tenv2, ienv3)
   where
-    badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
+    badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 

@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 module Futhark.CodeGen.Backends.COpenCL.Boilerplate
@@ -20,18 +18,19 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 where
 
 import Control.Monad.State
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.RTS.C (freeListH, openclH)
 import Futhark.Util (chunk, zEncodeString)
-import Futhark.Util.Pretty (prettyOneLine)
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import Futhark.Util.Pretty (prettyTextOneLine)
+import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
@@ -42,7 +41,7 @@ failureSwitch failures =
         let escapeChar '%' = "%%"
             escapeChar c = [c]
          in concatMap escapeChar
-      onPart (ErrorString s) = printfEscape s
+      onPart (ErrorString s) = printfEscape $ T.unpack s
       -- FIXME: bogus for non-ints.
       onPart ErrorVal {} = "%lld"
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
@@ -86,9 +85,9 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 
   mapM_ GC.earlyDecl top_decls
 
-  let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
-      size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+  let size_name_inits = map (\k -> [C.cinit|$string:(prettyString k)|]) $ M.keys sizes
+      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (prettyString k))|]) $ M.keys sizes
+      size_class_inits = map (\c -> [C.cinit|$string:(prettyString c)|]) $ M.elems sizes
       num_sizes = M.size sizes
 
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
@@ -319,6 +318,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          int logging;
                          typename lock_t lock;
                          char *error;
+                         typename lock_t error_lock;
                          typename FILE *log;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
@@ -342,6 +342,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      ctx->profiling_paused = 0;
                      ctx->logging = cfg->opencl.logging;
                      ctx->error = NULL;
+                     create_lock(&ctx->error_lock);
                      ctx->log = stderr;
                      ctx->opencl.profiling_records_capacity = 200;
                      ctx->opencl.profiling_records_used = 0;
@@ -581,11 +582,11 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 loadKernel :: (KernelName, KernelSafety) -> C.Stm
 loadKernel (name, safety) =
   [C.cstm|{
-  ctx->$id:name = clCreateKernel(prog, $string:(pretty (C.toIdent name mempty)), &error);
+  ctx->$id:name = clCreateKernel(prog, $string:(T.unpack (idText (C.toIdent name mempty))), &error);
   OPENCL_SUCCEED_FATAL(error);
   $items:set_args
   if (ctx->debugging) {
-    fprintf(ctx->log, "Created kernel %s.\n", $string:(pretty name));
+    fprintf(ctx->log, "Created kernel %s.\n", $string:(prettyString name));
   }
   }|]
   where
@@ -614,7 +615,7 @@ kernelRuns = (<> "_runs")
 costCentreReport :: [Name] -> [C.BlockItem]
 costCentreReport names = report_kernels ++ [report_total]
   where
-    longest_name = foldl max 0 $ map (length . pretty) names
+    longest_name = foldl max 0 $ map (length . prettyString) names
     report_kernels = concatMap reportKernel names
     format_string name =
       let padding = replicate (longest_name - length name) ' '
@@ -627,7 +628,7 @@ costCentreReport names = report_kernels ++ [report_total]
           total_runtime = kernelRuntime name
        in [ [C.citem|
                str_builder(&builder,
-                           $string:(format_string (pretty name)),
+                           $string:(format_string (prettyString name)),
                            ctx->$id:runs,
                            (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
                            (long int) ctx->$id:total_runtime);
@@ -695,7 +696,7 @@ sizeLoggingCode :: VName -> Name -> C.Exp -> GC.CompilerM op () ()
 sizeLoggingCode v key x' = do
   GC.stm
     [C.cstm|if (ctx->logging) {
-    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(prettyOneLine key), (long)$exp:x', $id:v ? "true" : "false");
+    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(T.unpack (prettyTextOneLine key)), (long)$exp:x', $id:v ? "true" : "false");
     }|]
 
 -- Options that are common to multiple GPU-like backends.

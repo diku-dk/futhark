@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Handling of diagnostics in the language server - things like
 -- warnings and errors.
 module Futhark.LSP.Diagnostic
@@ -13,13 +11,13 @@ where
 import Colog.Core (logStringStderr, (<&))
 import Control.Lens ((^.))
 import Data.Foldable (for_)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.Compiler.Program (ProgError (..))
 import Futhark.LSP.Tool (posToUri, rangeFromLoc, rangeFromSrcLoc)
 import Futhark.Util.Loc (Loc (..), SrcLoc, locOf)
-import Futhark.Util.Pretty (Doc, prettyText)
+import Futhark.Util.Pretty (Doc, docText)
 import Language.LSP.Diagnostics (partitionBySource)
 import Language.LSP.Server (LspT, getVersionedTextDoc, publishDiagnostics)
 import Language.LSP.Types
@@ -44,12 +42,12 @@ publish uri_diags_map = for_ uri_diags_map $ \(uri, diags) -> do
   publishDiagnostics maxDiagnostic (toNormalizedUri uri) (doc ^. version) (partitionBySource diags)
 
 -- | Send warning diagnostics to the client.
-publishWarningDiagnostics :: [(SrcLoc, Doc)] -> LspT () IO ()
+publishWarningDiagnostics :: [(SrcLoc, Doc a)] -> LspT () IO ()
 publishWarningDiagnostics warnings = do
   publish $ M.assocs $ M.unionsWith (++) $ map onWarn warnings
   where
     onWarn (srcloc, msg) =
-      let diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (prettyText msg)
+      let diag = mkDiagnostic (rangeFromSrcLoc srcloc) DsWarning (docText msg)
        in case locOf srcloc of
             NoLoc -> mempty
             Loc pos _ -> M.singleton (posToUri pos) [diag]
@@ -60,12 +58,12 @@ publishErrorDiagnostics errors =
   publish $ M.assocs $ M.unionsWith (++) $ map onDiag $ NE.toList errors
   where
     onDiag (ProgError loc msg) =
-      let diag = mkDiagnostic (rangeFromLoc loc) DsError (prettyText msg)
+      let diag = mkDiagnostic (rangeFromLoc loc) DsError (docText msg)
        in case loc of
             NoLoc -> mempty
             Loc pos _ -> M.singleton (posToUri pos) [diag]
     onDiag (ProgWarning loc msg) =
-      let diag = mkDiagnostic (rangeFromLoc loc) DsError (prettyText msg)
+      let diag = mkDiagnostic (rangeFromLoc loc) DsError (docText msg)
        in case loc of
             NoLoc -> mempty
             Loc pos _ -> M.singleton (posToUri pos) [diag]

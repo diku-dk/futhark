@@ -3,8 +3,8 @@
 -- | Boilerplate for sequential C code.
 module Futhark.CodeGen.Backends.SequentialC.Boilerplate (generateBoilerplate) where
 
-import qualified Futhark.CodeGen.Backends.GenericC as GC
-import qualified Language.C.Quote.OpenCL as C
+import Futhark.CodeGen.Backends.GenericC qualified as GC
+import Language.C.Quote.OpenCL qualified as C
 
 -- | Generate the necessary boilerplate.
 generateBoilerplate :: GC.CompilerM op s ()
@@ -73,6 +73,7 @@ generateBoilerplate = do
                           int logging;
                           typename lock_t lock;
                           char *error;
+                          typename lock_t error_lock;
                           typename FILE *log;
                           int profiling_paused;
                           $sdecls:fields
@@ -95,6 +96,7 @@ generateBoilerplate = do
                                   ctx->profiling = cfg->debugging;
                                   ctx->logging = cfg->debugging;
                                   ctx->error = NULL;
+                                  create_lock(&ctx->error_lock);
                                   ctx->log = stderr;
                                   create_lock(&ctx->lock);
                                   $stms:init_fields

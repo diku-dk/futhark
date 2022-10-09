@@ -1,38 +1,36 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | The main function for the @futhark@ command line program.
 module Futhark.CLI.Main (main) where
 
 import Control.Exception
 import Data.List (sortOn)
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Futhark.CLI.Autotune as Autotune
-import qualified Futhark.CLI.Bench as Bench
-import qualified Futhark.CLI.C as C
-import qualified Futhark.CLI.CUDA as CCUDA
-import qualified Futhark.CLI.Check as Check
-import qualified Futhark.CLI.Datacmp as Datacmp
-import qualified Futhark.CLI.Dataset as Dataset
-import qualified Futhark.CLI.Defs as Defs
-import qualified Futhark.CLI.Dev as Dev
-import qualified Futhark.CLI.Doc as Doc
-import qualified Futhark.CLI.LSP as LSP
-import qualified Futhark.CLI.Literate as Literate
-import qualified Futhark.CLI.Misc as Misc
-import qualified Futhark.CLI.Multicore as Multicore
-import qualified Futhark.CLI.MulticoreISPC as MulticoreISPC
-import qualified Futhark.CLI.MulticoreWASM as MulticoreWASM
-import qualified Futhark.CLI.OpenCL as OpenCL
-import qualified Futhark.CLI.Pkg as Pkg
-import qualified Futhark.CLI.PyOpenCL as PyOpenCL
-import qualified Futhark.CLI.Python as Python
-import qualified Futhark.CLI.Query as Query
-import qualified Futhark.CLI.REPL as REPL
-import qualified Futhark.CLI.Run as Run
-import qualified Futhark.CLI.Test as Test
-import qualified Futhark.CLI.WASM as WASM
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
+import Futhark.CLI.Autotune qualified as Autotune
+import Futhark.CLI.Bench qualified as Bench
+import Futhark.CLI.C qualified as C
+import Futhark.CLI.CUDA qualified as CCUDA
+import Futhark.CLI.Check qualified as Check
+import Futhark.CLI.Datacmp qualified as Datacmp
+import Futhark.CLI.Dataset qualified as Dataset
+import Futhark.CLI.Defs qualified as Defs
+import Futhark.CLI.Dev qualified as Dev
+import Futhark.CLI.Doc qualified as Doc
+import Futhark.CLI.LSP qualified as LSP
+import Futhark.CLI.Literate qualified as Literate
+import Futhark.CLI.Misc qualified as Misc
+import Futhark.CLI.Multicore qualified as Multicore
+import Futhark.CLI.MulticoreISPC qualified as MulticoreISPC
+import Futhark.CLI.MulticoreWASM qualified as MulticoreWASM
+import Futhark.CLI.OpenCL qualified as OpenCL
+import Futhark.CLI.Pkg qualified as Pkg
+import Futhark.CLI.PyOpenCL qualified as PyOpenCL
+import Futhark.CLI.Python qualified as Python
+import Futhark.CLI.Query qualified as Query
+import Futhark.CLI.REPL qualified as REPL
+import Futhark.CLI.Run qualified as Run
+import Futhark.CLI.Test qualified as Test
+import Futhark.CLI.WASM qualified as WASM
 import Futhark.Error
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
@@ -78,7 +76,7 @@ commands =
       ("literate", (Literate.main, "Process a literate Futhark program.")),
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
-      ("tokens", (Misc.mainTokens, "Express gratitude."))
+      ("tokens", (Misc.mainTokens, "Print tokens from Futhark file."))
     ]
 
 msg :: String

@@ -5,11 +5,11 @@ module Futhark.CodeGen.Backends.SequentialPython
 where
 
 import Control.Monad
-import qualified Data.Text as T
-import qualified Futhark.CodeGen.Backends.GenericPython as GenericPython
+import Data.Text qualified as T
+import Futhark.CodeGen.Backends.GenericPython qualified as GenericPython
 import Futhark.CodeGen.Backends.GenericPython.AST
-import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
-import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
+import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
+import Futhark.CodeGen.ImpGen.Sequential qualified as ImpGen
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 

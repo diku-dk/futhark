@@ -1,7 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -9,8 +5,6 @@
 -- the main form of parallelism in the early stages of the compiler.
 module Futhark.IR.SOACS.SOAC
   ( SOAC (..),
-    StreamOrd (..),
-    StreamForm (..),
     ScremaForm (..),
     HistOp (..),
     Scan (..),
@@ -60,28 +54,28 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.Function ((&))
 import Data.List (intersperse)
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
-import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, removeLambdaAliases)
 import Futhark.IR.Prop.Aliases
-import qualified Futhark.IR.TypeCheck as TC
+import Futhark.IR.TypeCheck qualified as TC
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks, maybeNth)
-import Futhark.Util.Pretty (Doc, Pretty, comma, commasep, parens, ppr, text, (<+>), (</>))
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty (Doc, Pretty, align, comma, commasep, docText, parens, ppTuple', pretty, (<+>), (</>))
+import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
 -- | A second-order array combinator (SOAC).
 data SOAC rep
-  = Stream SubExp [VName] (StreamForm rep) [SubExp] (Lambda rep)
+  = Stream SubExp [VName] [SubExp] (Lambda rep)
   | -- | @Scatter <length> <inputs> <lambda> <outputs>@
     --
     -- Scatter maps values from a set of input arrays to indices and values of a
@@ -143,19 +137,6 @@ data HistOp rep = HistOp
     histNeutral :: [SubExp],
     histOp :: Lambda rep
   }
-  deriving (Eq, Ord, Show)
-
--- | Is the stream chunk required to correspond to a contiguous
--- subsequence of the original input ('InOrder') or not?  'Disorder'
--- streams can be more efficient, but not all algorithms work with
--- this.
-data StreamOrd = InOrder | Disorder
-  deriving (Eq, Ord, Show)
-
--- | What kind of stream is this?
-data StreamForm rep
-  = Parallel StreamOrd Commutativity (Lambda rep)
-  | Sequential
   deriving (Eq, Ord, Show)
 
 -- | The essential parts of a 'Screma' factored out (everything
@@ -402,7 +383,7 @@ identitySOACMapper =
 -- SOAC.  The mapping does not descend recursively into subexpressions
 -- and is done left-to-right.
 mapSOACM ::
-  (Applicative m, Monad m) =>
+  Monad m =>
   SOACMapper frep trep m ->
   SOAC frep ->
   m (SOAC trep)
@@ -416,18 +397,12 @@ mapSOACM tv (VJP lam args vec) =
     <$> mapOnSOACLambda tv lam
     <*> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
-mapSOACM tv (Stream size arrs form accs lam) =
+mapSOACM tv (Stream size arrs accs lam) =
   Stream
     <$> mapOnSOACSubExp tv size
     <*> mapM (mapOnSOACVName tv) arrs
-    <*> mapOnStreamForm form
     <*> mapM (mapOnSOACSubExp tv) accs
     <*> mapOnSOACLambda tv lam
-  where
-    mapOnStreamForm (Parallel o comm lam0) =
-      Parallel o comm <$> mapOnSOACLambda tv lam0
-    mapOnStreamForm Sequential =
-      pure Sequential
 mapSOACM tv (Scatter w ivs lam as) =
   Scatter
     <$> mapOnSOACSubExp tv w
@@ -494,10 +469,6 @@ instance ASTRep rep => FreeIn (ScremaForm rep) where
   freeIn' (ScremaForm scans reds lam) =
     freeIn' scans <> freeIn' reds <> freeIn' lam
 
-instance ASTRep rep => FreeIn (StreamForm rep) where
-  freeIn' Sequential = mempty
-  freeIn' (Parallel _ _ lam) = freeIn' lam
-
 instance ASTRep rep => FreeIn (HistOp rep) where
   freeIn' (HistOp w rf dests nes lam) =
     freeIn' w <> freeIn' rf <> freeIn' dests <> freeIn' nes <> freeIn' lam
@@ -537,7 +508,7 @@ soacType (JVP lam _ _) =
 soacType (VJP lam _ _) =
   lambdaReturnType lam
     ++ map paramType (lambdaParams lam)
-soacType (Stream outersize _ _ accs lam) =
+soacType (Stream outersize _ accs lam) =
   map (substNamesInType substs) rtp
   where
     nms = map paramName $ take (1 + length accs) params
@@ -570,14 +541,8 @@ instance (ASTRep rep, Aliased rep) => AliasedOp (SOAC rep) where
     where
       consumedArray v = fromMaybe v $ lookup v params_to_arrs
       params_to_arrs = zip (map paramName $ lambdaParams map_lam) arrs
-  consumedInOp (Stream _ arrs form accs lam) =
-    namesFromList $
-      subExpVars $
-        case form of
-          Sequential ->
-            map consumedArray $ namesToList $ consumedByLambda lam
-          Parallel {} ->
-            map consumedArray $ namesToList $ consumedByLambda lam
+  consumedInOp (Stream _ arrs accs lam) =
+    namesFromList $ subExpVars $ map consumedArray $ namesToList $ consumedByLambda lam
     where
       consumedArray v = fromMaybe (Var v) $ lookup v paramsToInput
       -- Drop the chunk parameter, which cannot alias anything.
@@ -608,13 +573,8 @@ instance
     JVP (Alias.analyseLambda aliases lam) args vec
   addOpAliases aliases (VJP lam args vec) =
     VJP (Alias.analyseLambda aliases lam) args vec
-  addOpAliases aliases (Stream size arr form accs lam) =
-    Stream size arr (analyseStreamForm form) accs $
-      Alias.analyseLambda aliases lam
-    where
-      analyseStreamForm (Parallel o comm lam0) =
-        Parallel o comm (Alias.analyseLambda aliases lam0)
-      analyseStreamForm Sequential = Sequential
+  addOpAliases aliases (Stream size arr accs lam) =
+    Stream size arr accs $ Alias.analyseLambda aliases lam
   addOpAliases aliases (Scatter len arrs lam dests) =
     Scatter len arrs (Alias.analyseLambda aliases lam) dests
   addOpAliases aliases (Hist w arrs ops bucket_fun) =
@@ -705,22 +665,22 @@ typeCheckSOAC (VJP lam args vec) = do
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
   unless (vec_ts == lambdaReturnType lam) $
-    TC.bad . TC.TypeError . pretty $
+    TC.bad . TC.TypeError . docText $
       "Return type"
-        </> PP.indent 2 (ppr (lambdaReturnType lam))
+        </> PP.indent 2 (pretty (lambdaReturnType lam))
         </> "does not match type of seed vector"
-        </> PP.indent 2 (ppr vec_ts)
+        </> PP.indent 2 (pretty vec_ts)
 typeCheckSOAC (JVP lam args vec) = do
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
   unless (vec_ts == map TC.argType args') $
-    TC.bad . TC.TypeError . pretty $
+    TC.bad . TC.TypeError . docText $
       "Parameter type"
-        </> PP.indent 2 (ppr $ map TC.argType args')
+        </> PP.indent 2 (pretty $ map TC.argType args')
         </> "does not match type of seed vector"
-        </> PP.indent 2 (ppr vec_ts)
-typeCheckSOAC (Stream size arrexps form accexps lam) = do
+        </> PP.indent 2 (pretty vec_ts)
+typeCheckSOAC (Stream size arrexps accexps lam) = do
   TC.require [Prim int64] size
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
@@ -732,23 +692,8 @@ typeCheckSOAC (Stream size arrexps form accexps lam) = do
   let acc_len = length accexps
   let lamrtp = take acc_len $ lambdaReturnType lam
   unless (map TC.argType accargs == lamrtp) $
-    TC.bad $
-      TC.TypeError "Stream with inconsistent accumulator type in lambda."
-  -- check reduce's lambda, if any
-  _ <- case form of
-    Parallel _ _ lam0 -> do
-      let acct = map TC.argType accargs
-          outerRetType = lambdaReturnType lam0
-      TC.checkLambda lam0 $ map TC.noArgAliases $ accargs ++ accargs
-      unless (acct == outerRetType) $
-        TC.bad $
-          TC.TypeError $
-            "Initial value is of type "
-              ++ prettyTuple acct
-              ++ ", but stream's reduce lambda returns type "
-              ++ prettyTuple outerRetType
-              ++ "."
-    Sequential -> pure ()
+    TC.bad . TC.TypeError $
+      "Stream with inconsistent accumulator type in lambda."
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
@@ -822,12 +767,11 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
     TC.checkLambda op $ map TC.noArgAliases $ nes' ++ nes'
     let nes_t = map TC.argType nes'
     unless (nes_t == lambdaReturnType op) $
-      TC.bad $
-        TC.TypeError $
-          "Operator has return type "
-            ++ prettyTuple (lambdaReturnType op)
-            ++ " but neutral element has type "
-            ++ prettyTuple nes_t
+      TC.bad . TC.TypeError $
+        "Operator has return type "
+          <> prettyTuple (lambdaReturnType op)
+          <> " but neutral element has type "
+          <> prettyTuple nes_t
 
     -- Arrays must have proper type.
     forM_ (zip nes_t dests) $ \(t, dest) -> do
@@ -845,12 +789,11 @@ typeCheckSOAC (Hist w arrs ops bucket_fun) = do
         concatMap ((`replicate` Prim int64) . shapeRank . histShape) ops
           ++ nes_ts
   unless (bucket_ret_t == lambdaReturnType bucket_fun) $
-    TC.bad $
-      TC.TypeError $
-        "Bucket function has return type "
-          ++ prettyTuple (lambdaReturnType bucket_fun)
-          ++ " but should have type "
-          ++ prettyTuple bucket_ret_t
+    TC.bad . TC.TypeError $
+      "Bucket function has return type "
+        <> prettyTuple (lambdaReturnType bucket_fun)
+        <> " but should have type "
+        <> prettyTuple bucket_ret_t
 typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
   TC.require [Prim int64] w
   arrs' <- TC.checkSOACArrayArgs w arrs
@@ -862,12 +805,11 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
       let scan_t = map TC.argType scan_nes'
       TC.checkLambda scan_lam $ map TC.noArgAliases $ scan_nes' ++ scan_nes'
       unless (scan_t == lambdaReturnType scan_lam) $
-        TC.bad $
-          TC.TypeError $
-            "Scan function returns type "
-              ++ prettyTuple (lambdaReturnType scan_lam)
-              ++ " but neutral element has type "
-              ++ prettyTuple scan_t
+        TC.bad . TC.TypeError $
+          "Scan function returns type "
+            <> prettyTuple (lambdaReturnType scan_lam)
+            <> " but neutral element has type "
+            <> prettyTuple scan_t
       pure scan_nes'
 
   red_nes' <- fmap concat $
@@ -876,12 +818,11 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
       let red_t = map TC.argType red_nes'
       TC.checkLambda red_lam $ map TC.noArgAliases $ red_nes' ++ red_nes'
       unless (red_t == lambdaReturnType red_lam) $
-        TC.bad $
-          TC.TypeError $
-            "Reduce function returns type "
-              ++ prettyTuple (lambdaReturnType red_lam)
-              ++ " but neutral element has type "
-              ++ prettyTuple red_t
+        TC.bad . TC.TypeError $
+          "Reduce function returns type "
+            <> prettyTuple (lambdaReturnType red_lam)
+            <> " but neutral element has type "
+            <> prettyTuple red_t
       pure red_nes'
 
   let map_lam_ts = lambdaReturnType map_lam
@@ -890,18 +831,18 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
     ( take (length scan_nes' + length red_nes') map_lam_ts
         == map TC.argType (scan_nes' ++ red_nes')
     )
-    $ TC.bad
-    $ TC.TypeError
+    . TC.bad
+    . TC.TypeError
     $ "Map function return type "
-      ++ prettyTuple map_lam_ts
-      ++ " wrong for given scan and reduction functions."
+      <> prettyTuple map_lam_ts
+      <> " wrong for given scan and reduction functions."
 
 instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
   opMetrics (VJP lam _ _) =
     inside "VJP" $ lambdaMetrics lam
   opMetrics (JVP lam _ _) =
     inside "JVP" $ lambdaMetrics lam
-  opMetrics (Stream _ _ _ _ lam) =
+  opMetrics (Stream _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Scatter _len _ lam _) =
     inside "Scatter" $ lambdaMetrics lam
@@ -914,119 +855,104 @@ instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
       lambdaMetrics map_lam
 
 instance PrettyRep rep => PP.Pretty (SOAC rep) where
-  ppr (VJP lam args vec) =
-    text "vjp"
+  pretty (VJP lam args vec) =
+    "vjp"
       <> parens
         ( PP.align $
-            ppr lam <> comma
-              </> PP.braces (commasep $ map ppr args) <> comma
-              </> PP.braces (commasep $ map ppr vec)
+            pretty lam <> comma
+              </> PP.braces (commasep $ map pretty args) <> comma
+              </> PP.braces (commasep $ map pretty vec)
         )
-  ppr (JVP lam args vec) =
-    text "jvp"
+  pretty (JVP lam args vec) =
+    "jvp"
       <> parens
         ( PP.align $
-            ppr lam <> comma
-              </> PP.braces (commasep $ map ppr args) <> comma
-              </> PP.braces (commasep $ map ppr vec)
+            pretty lam <> comma
+              </> PP.braces (commasep $ map pretty args) <> comma
+              </> PP.braces (commasep $ map pretty vec)
         )
-  ppr (Stream size arrs form acc lam) =
-    ppStream size arrs form acc lam
-  ppr (Scatter w arrs lam dests) =
+  pretty (Stream size arrs acc lam) =
+    ppStream size arrs acc lam
+  pretty (Scatter w arrs lam dests) =
     ppScatter w arrs lam dests
-  ppr (Hist w arrs ops bucket_fun) =
+  pretty (Hist w arrs ops bucket_fun) =
     ppHist w arrs ops bucket_fun
-  ppr (Screma w arrs (ScremaForm scans reds map_lam))
+  pretty (Screma w arrs (ScremaForm scans reds map_lam))
     | null scans,
       null reds =
-        text "map"
-          <> parens
-            ( ppr w <> comma
-                </> ppTuple' arrs <> comma
-                </> ppr map_lam
+        "map"
+          <> (parens . align)
+            ( pretty w <> comma
+                </> ppTuple' (map pretty arrs) <> comma
+                </> pretty map_lam
             )
     | null scans =
-        text "redomap"
-          <> parens
-            ( ppr w <> comma
-                </> ppTuple' arrs <> comma
-                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
-                </> ppr map_lam
+        "redomap"
+          <> (parens . align)
+            ( pretty w <> comma
+                </> ppTuple' (map pretty arrs) <> comma
+                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds) <> comma
+                </> pretty map_lam
             )
     | null reds =
-        text "scanomap"
-          <> parens
-            ( ppr w <> comma
-                </> ppTuple' arrs <> comma
-                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
-                </> ppr map_lam
+        "scanomap"
+          <> (parens . align)
+            ( pretty w <> comma
+                </> ppTuple' (map pretty arrs) <> comma
+                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty scans) <> comma
+                </> pretty map_lam
             )
-  ppr (Screma w arrs form) = ppScrema w arrs form
+  pretty (Screma w arrs form) = ppScrema w arrs form
 
 -- | Prettyprint the given Screma.
 ppScrema ::
-  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> ScremaForm rep -> Doc
+  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> ScremaForm rep -> Doc ann
 ppScrema w arrs (ScremaForm scans reds map_lam) =
-  text "screma"
-    <> parens
-      ( ppr w <> comma
-          </> ppTuple' arrs <> comma
-          </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr scans) <> comma
-          </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppr reds) <> comma
-          </> ppr map_lam
+  "screma"
+    <> (parens . align)
+      ( pretty w <> comma
+          </> ppTuple' (map pretty arrs) <> comma
+          </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty scans) <> comma
+          </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds) <> comma
+          </> pretty map_lam
       )
 
 -- | Prettyprint the given Stream.
 ppStream ::
-  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> StreamForm rep -> [SubExp] -> Lambda rep -> Doc
-ppStream size arrs form acc lam =
-  case form of
-    Parallel o comm lam0 ->
-      let ord_str = if o == Disorder then "Per" else ""
-          comm_str = case comm of
-            Commutative -> "Comm"
-            Noncommutative -> ""
-       in text ("streamPar" ++ ord_str ++ comm_str)
-            <> parens
-              ( ppr size <> comma
-                  </> ppTuple' arrs <> comma
-                  </> ppr lam0 <> comma
-                  </> ppTuple' acc <> comma
-                  </> ppr lam
-              )
-    Sequential ->
-      text "streamSeq"
-        <> parens
-          ( ppr size <> comma
-              </> ppTuple' arrs <> comma
-              </> ppTuple' acc <> comma
-              </> ppr lam
-          )
+  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> [SubExp] -> Lambda rep -> Doc ann
+ppStream size arrs acc lam =
+  "streamSeq"
+    <> (parens . align)
+      ( pretty size <> comma
+          </> ppTuple' (map pretty arrs) <> comma
+          </> ppTuple' (map pretty acc) <> comma
+          </> pretty lam
+      )
 
 -- | Prettyprint the given Scatter.
 ppScatter ::
-  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> Lambda rep -> [(Shape, Int, VName)] -> Doc
+  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> Lambda rep -> [(Shape, Int, VName)] -> Doc ann
 ppScatter w arrs lam dests =
   "scatter"
-    <> parens
-      ( ppr w <> comma
-          </> ppTuple' arrs <> comma
-          </> ppr lam <> comma
-          </> commasep (map ppr dests)
+    <> (parens . align)
+      ( pretty w <> comma
+          </> ppTuple' (map pretty arrs) <> comma
+          </> pretty lam <> comma
+          </> commasep (map pretty dests)
       )
 
 instance PrettyRep rep => Pretty (Scan rep) where
-  ppr (Scan scan_lam scan_nes) =
-    ppr scan_lam <> comma </> PP.braces (commasep $ map ppr scan_nes)
+  pretty (Scan scan_lam scan_nes) =
+    pretty scan_lam <> comma </> PP.braces (commasep $ map pretty scan_nes)
 
-ppComm :: Commutativity -> Doc
+ppComm :: Commutativity -> Doc ann
 ppComm Noncommutative = mempty
-ppComm Commutative = text "commutative "
+ppComm Commutative = "commutative "
 
 instance PrettyRep rep => Pretty (Reduce rep) where
-  ppr (Reduce comm red_lam red_nes) =
-    ppComm comm <> ppr red_lam <> comma
-      </> PP.braces (commasep $ map ppr red_nes)
+  pretty (Reduce comm red_lam red_nes) =
+    ppComm comm <> pretty red_lam <> comma
+      </> PP.braces (commasep $ map pretty red_nes)
 
 -- | Prettyprint the given histogram operation.
 ppHist ::
@@ -1035,19 +961,19 @@ ppHist ::
   [inp] ->
   [HistOp rep] ->
   Lambda rep ->
-  Doc
+  Doc ann
 ppHist w arrs ops bucket_fun =
-  text "hist"
+  "hist"
     <> parens
-      ( ppr w <> comma
-          </> ppTuple' arrs <> comma
+      ( pretty w <> comma
+          </> ppTuple' (map pretty arrs) <> comma
           </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppOp ops) <> comma
-          </> ppr bucket_fun
+          </> pretty bucket_fun
       )
   where
     ppOp (HistOp dest_w rf dests nes op) =
-      ppr dest_w <> comma
-        <+> ppr rf <> comma
-        <+> PP.braces (commasep $ map ppr dests) <> comma
-        </> ppTuple' nes <> comma
-        </> ppr op
+      pretty dest_w <> comma
+        <+> pretty rf <> comma
+        <+> PP.braces (commasep $ map pretty dests) <> comma
+        </> ppTuple' (map pretty nes) <> comma
+        </> pretty op

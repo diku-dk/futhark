@@ -31,7 +31,7 @@ data DeviceType = DeviceCPU | DeviceGPU
 newtype DeviceInfo = DeviceInfo String
 
 instance Pretty DeviceInfo where
-  ppr (DeviceInfo s) = text "device_info" <> parens (ppr s)
+  pretty (DeviceInfo s) = "device_info" <> parens (pretty s)
 
 -- | A size that can be assigned a default.
 data WhichSize = LockstepWidth | NumGroups | GroupSize | TileSize | RegTileSize | Threshold

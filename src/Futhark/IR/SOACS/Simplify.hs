@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -32,17 +28,17 @@ import Data.Either
 import Data.Foldable
 import Data.List (partition, transpose, unzip6, zip6)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Analysis.DataDependencies
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
-import qualified Futhark.Optimise.Simplify as Simplify
-import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Optimise.Simplify qualified as Simplify
+import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
@@ -96,22 +92,12 @@ simplifySOAC (JVP lam arr vec) = do
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
   pure (JVP lam' arr' vec', hoisted)
-simplifySOAC (Stream outerdim arr form nes lam) = do
+simplifySOAC (Stream outerdim arr nes lam) = do
   outerdim' <- Engine.simplify outerdim
-  (form', form_hoisted) <- simplifyStreamForm form
   nes' <- mapM Engine.simplify nes
   arr' <- mapM Engine.simplify arr
   (lam', lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda lam
-  pure
-    ( Stream outerdim' arr' form' nes' lam',
-      form_hoisted <> lam_hoisted
-    )
-  where
-    simplifyStreamForm (Parallel o comm lam0) = do
-      (lam0', hoisted) <- Engine.simplifyLambda lam0
-      pure (Parallel o comm lam0', hoisted)
-    simplifyStreamForm Sequential =
-      pure (Sequential, mempty)
+  pure (Stream outerdim' arr' nes' lam', lam_hoisted)
 simplifySOAC (Scatter w ivs lam as) = do
   w' <- Engine.simplify w
   (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda lam
@@ -317,7 +303,7 @@ liftIdentityMapping _ pat aux op
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
-liftIdentityStreaming _ (Pat pes) aux (Stream w arrs form nes lam)
+liftIdentityStreaming _ (Pat pes) aux (Stream w arrs nes lam)
   | (variant_map, invariant_map) <-
       partitionEithers $ map isInvariantRes $ zip3 map_ts map_pes map_res,
     not $ null invariant_map = Simplify $ do
@@ -331,10 +317,8 @@ liftIdentityStreaming _ (Pat pes) aux (Stream w arrs form nes lam)
                 lambdaReturnType = fold_ts ++ variant_map_ts
               }
 
-      auxing aux $
-        letBind (Pat $ fold_pes ++ variant_map_pes) $
-          Op $
-            Stream w arrs form nes lam'
+      auxing aux . letBind (Pat $ fold_pes ++ variant_map_pes) . Op $
+        Stream w arrs nes lam'
   where
     num_folds = length nes
     (fold_pes, map_pes) = splitAt num_folds pes
@@ -353,7 +337,7 @@ liftIdentityStreaming _ _ _ _ = Skip
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping ::
-  (Aliased rep, Buildable rep, BuilderOps rep, HasSOAC rep) =>
+  (Aliased rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
 removeReplicateMapping vtable pat aux op
   | Just (Screma w arrs form) <- asSOAC op,
@@ -680,7 +664,7 @@ simplifyKnownIterationSOAC _ pat _ op
       zipWithM_ bindResult red_pes red_res
       zipWithM_ bindArrayResult map_pes map_res
 simplifyKnownIterationSOAC _ pat _ op
-  | Just (Stream (Constant k) arrs _ nes fold_lam) <- asSOAC op,
+  | Just (Stream (Constant k) arrs nes fold_lam) <- asSOAC op,
     oneIsh k = Simplify $ do
       let (chunk_param, acc_params, slice_params) =
             partitionChunkedFoldParameters (length nes) (lambdaParams fold_lam)

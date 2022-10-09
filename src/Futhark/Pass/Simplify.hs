@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 module Futhark.Pass.Simplify
   ( simplify,
     simplifySOACS,
@@ -12,13 +10,13 @@ module Futhark.Pass.Simplify
   )
 where
 
-import qualified Futhark.IR.GPU.Simplify as GPU
-import qualified Futhark.IR.GPUMem as GPUMem
-import qualified Futhark.IR.MC as MC
-import qualified Futhark.IR.MCMem as MCMem
-import qualified Futhark.IR.SOACS.Simplify as SOACS
-import qualified Futhark.IR.Seq as Seq
-import qualified Futhark.IR.SeqMem as SeqMem
+import Futhark.IR.GPU.Simplify qualified as GPU
+import Futhark.IR.GPUMem qualified as GPUMem
+import Futhark.IR.MC qualified as MC
+import Futhark.IR.MCMem qualified as MCMem
+import Futhark.IR.SOACS.Simplify qualified as SOACS
+import Futhark.IR.Seq qualified as Seq
+import Futhark.IR.SeqMem qualified as SeqMem
 import Futhark.IR.Syntax
 import Futhark.Pass
 

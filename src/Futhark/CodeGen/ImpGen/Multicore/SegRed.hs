@@ -6,7 +6,7 @@ module Futhark.CodeGen.ImpGen.Multicore.SegRed
 where
 
 import Control.Monad
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
@@ -210,7 +210,7 @@ genReductionLoop ::
   MulticoreGen ()
 genReductionLoop typ kbodymap slugs slug_local_accs space i = do
   let (is, ns) = unzip $ unSegSpace space
-      ns' = map toInt64Exp ns
+      ns' = map pe64 ns
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
   kbodymap $ \all_red_res' -> do
     forM_ (zip3 all_red_res' slugs slug_local_accs) $ \(red_res, slug, local_accs) ->
@@ -389,7 +389,7 @@ compileSegRedBody ::
   MulticoreGen Imp.MCCode
 compileSegRedBody pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map toInt64Exp ns
+      ns_64 = map pe64 ns
       inner_bound = last ns_64
   dPrim_ (segFlat space) int64
   sOp $ Imp.GetTaskId (segFlat space)

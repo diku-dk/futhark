@@ -11,7 +11,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   )
 where
 
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark.Core
 
@@ -92,116 +92,116 @@ newtype PyProg = PyProg [PyStmt]
   deriving (Eq, Show)
 
 instance Pretty PyIdx where
-  ppr (IdxExp e) = ppr e
-  ppr (IdxRange from to) = ppr from <> text ":" <> ppr to
+  pretty (IdxExp e) = pretty e
+  pretty (IdxRange from to) = pretty from <> ":" <> pretty to
 
 instance Pretty PyArg where
-  ppr (ArgKeyword k e) = text k <> equals <> ppr e
-  ppr (Arg e) = ppr e
+  pretty (ArgKeyword k e) = pretty k <> equals <> pretty e
+  pretty (Arg e) = pretty e
 
 instance Pretty PyExp where
-  ppr (Integer x) = ppr x
-  ppr (Bool x) = ppr x
-  ppr (Float x)
-    | isInfinite x = text $ if x > 0 then "float('inf')" else "float('-inf')"
-    | otherwise = ppr x
-  ppr (String x) = text $ show x
-  ppr (RawStringLiteral s) = text "\"\"\"" <> strictText s <> text "\"\"\""
-  ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n
-  ppr (Field e s) = ppr e <> text "." <> text s
-  ppr (BinOp s e1 e2) = parens (ppr e1 <+> text s <+> ppr e2)
-  ppr (UnOp s e) = text s <> parens (ppr e)
-  ppr (Cond e1 e2 e3) = ppr e2 <+> text "if" <+> ppr e1 <+> text "else" <+> ppr e3
-  ppr (Cast src bt) =
-    text "ct.cast"
+  pretty (Integer x) = pretty x
+  pretty (Bool x) = pretty x
+  pretty (Float x)
+    | isInfinite x = if x > 0 then "float('inf')" else "float('-inf')"
+    | otherwise = pretty x
+  pretty (String x) = pretty $ show x
+  pretty (RawStringLiteral s) = "\"\"\"" <> pretty s <> "\"\"\""
+  pretty (Var n) = pretty $ map (\x -> if x == '\'' then 'm' else x) n
+  pretty (Field e s) = pretty e <> "." <> pretty s
+  pretty (BinOp s e1 e2) = parens (pretty e1 <+> pretty s <+> pretty e2)
+  pretty (UnOp s e) = pretty s <> parens (pretty e)
+  pretty (Cond e1 e2 e3) = pretty e2 <+> "if" <+> pretty e1 <+> "else" <+> pretty e3
+  pretty (Cast src bt) =
+    "ct.cast"
       <> parens
-        ( ppr src <> text ","
-            <+> text "ct.POINTER" <> parens (text bt)
+        ( pretty src <> ","
+            <+> "ct.POINTER" <> parens (pretty bt)
         )
-  ppr (Index src idx) = ppr src <> brackets (ppr idx)
-  ppr (Call fun exps) = ppr fun <> parens (commasep $ map ppr exps)
-  ppr (Tuple [dim]) = parens (ppr dim <> text ",")
-  ppr (Tuple dims) = parens (commasep $ map ppr dims)
-  ppr (List es) = brackets $ commasep $ map ppr es
-  ppr (Dict kvs) = braces $ commasep $ map ppElem kvs
+  pretty (Index src idx) = pretty src <> brackets (pretty idx)
+  pretty (Call fun exps) = pretty fun <> parens (commasep $ map pretty exps)
+  pretty (Tuple [dim]) = parens (pretty dim <> ",")
+  pretty (Tuple dims) = parens (commasep $ map pretty dims)
+  pretty (List es) = brackets $ commasep $ map pretty es
+  pretty (Dict kvs) = braces $ commasep $ map ppElem kvs
     where
-      ppElem (k, v) = ppr k <> colon <+> ppr v
-  ppr (Lambda p e) = text "lambda" <+> text p <> text ":" <+> ppr e
-  ppr None = text "None"
+      ppElem (k, v) = pretty k <> colon <+> pretty v
+  pretty (Lambda p e) = "lambda" <+> pretty p <> ":" <+> pretty e
+  pretty None = "None"
 
 instance Pretty PyStmt where
-  ppr (If cond [] []) =
-    text "if"
-      <+> ppr cond <> text ":"
-      </> indent 2 (text "pass")
-  ppr (If cond [] fbranch) =
-    text "if"
-      <+> ppr cond <> text ":"
-      </> indent 2 (text "pass")
-      </> text "else:"
-      </> indent 2 (stack $ map ppr fbranch)
-  ppr (If cond tbranch []) =
-    text "if"
-      <+> ppr cond <> text ":"
-      </> indent 2 (stack $ map ppr tbranch)
-  ppr (If cond tbranch fbranch) =
-    text "if"
-      <+> ppr cond <> text ":"
-      </> indent 2 (stack $ map ppr tbranch)
-      </> text "else:"
-      </> indent 2 (stack $ map ppr fbranch)
-  ppr (Try pystms pyexcepts) =
-    text "try:"
-      </> indent 2 (stack $ map ppr pystms)
-      </> stack (map ppr pyexcepts)
-  ppr (While cond body) =
-    text "while"
-      <+> ppr cond <> text ":"
-      </> indent 2 (stack $ map ppr body)
-  ppr (For i what body) =
-    text "for"
-      <+> ppr i
-      <+> text "in"
-      <+> ppr what <> text ":"
-      </> indent 2 (stack $ map ppr body)
-  ppr (With what body) =
-    text "with"
-      <+> ppr what <> text ":"
-      </> indent 2 (stack $ map ppr body)
-  ppr (Assign e1 e2) = ppr e1 <+> text "=" <+> ppr e2
-  ppr (AssignOp op e1 e2) = ppr e1 <+> text (op ++ "=") <+> ppr e2
-  ppr (Comment s body) = text "#" <> text s </> stack (map ppr body)
-  ppr (Assert e1 e2) = text "assert" <+> ppr e1 <> text "," <+> ppr e2
-  ppr (Raise e) = text "raise" <+> ppr e
-  ppr (Exp c) = ppr c
-  ppr (Return e) = text "return" <+> ppr e
-  ppr Pass = text "pass"
-  ppr (Import from (Just as)) =
-    text "import" <+> text from <+> text "as" <+> text as
-  ppr (Import from Nothing) =
-    text "import" <+> text from
-  ppr (FunDef d) = ppr d
-  ppr (ClassDef d) = ppr d
-  ppr (Escape s) = stack $ map strictText $ T.lines s
+  pretty (If cond [] []) =
+    "if"
+      <+> pretty cond <> ":"
+      </> indent 2 "pass"
+  pretty (If cond [] fbranch) =
+    "if"
+      <+> pretty cond <> ":"
+      </> indent 2 "pass"
+      </> "else:"
+      </> indent 2 (stack $ map pretty fbranch)
+  pretty (If cond tbranch []) =
+    "if"
+      <+> pretty cond <> ":"
+      </> indent 2 (stack $ map pretty tbranch)
+  pretty (If cond tbranch fbranch) =
+    "if"
+      <+> pretty cond <> ":"
+      </> indent 2 (stack $ map pretty tbranch)
+      </> "else:"
+      </> indent 2 (stack $ map pretty fbranch)
+  pretty (Try pystms pyexcepts) =
+    "try:"
+      </> indent 2 (stack $ map pretty pystms)
+      </> stack (map pretty pyexcepts)
+  pretty (While cond body) =
+    "while"
+      <+> pretty cond <> ":"
+      </> indent 2 (stack $ map pretty body)
+  pretty (For i what body) =
+    "for"
+      <+> pretty i
+      <+> "in"
+      <+> pretty what <> ":"
+      </> indent 2 (stack $ map pretty body)
+  pretty (With what body) =
+    "with"
+      <+> pretty what <> ":"
+      </> indent 2 (stack $ map pretty body)
+  pretty (Assign e1 e2) = pretty e1 <+> "=" <+> pretty e2
+  pretty (AssignOp op e1 e2) = pretty e1 <+> pretty (op ++ "=") <+> pretty e2
+  pretty (Comment s body) = "#" <> pretty s </> stack (map pretty body)
+  pretty (Assert e1 e2) = "assert" <+> pretty e1 <> "," <+> pretty e2
+  pretty (Raise e) = "raise" <+> pretty e
+  pretty (Exp c) = pretty c
+  pretty (Return e) = "return" <+> pretty e
+  pretty Pass = "pass"
+  pretty (Import from (Just as)) =
+    "import" <+> pretty from <+> "as" <+> pretty as
+  pretty (Import from Nothing) =
+    "import" <+> pretty from
+  pretty (FunDef d) = pretty d
+  pretty (ClassDef d) = pretty d
+  pretty (Escape s) = stack $ map pretty $ T.lines s
 
 instance Pretty PyFunDef where
-  ppr (Def fname params body) =
-    text "def"
-      <+> text fname <> parens (commasep $ map ppr params) <> text ":"
-      </> indent 2 (stack (map ppr body))
+  pretty (Def fname params body) =
+    "def"
+      <+> pretty fname <> parens (commasep $ map pretty params) <> ":"
+      </> indent 2 (stack (map pretty body))
 
 instance Pretty PyClassDef where
-  ppr (Class cname body) =
-    text "class"
-      <+> text cname <> text ":"
-      </> indent 2 (stack (map ppr body))
+  pretty (Class cname body) =
+    "class"
+      <+> pretty cname <> ":"
+      </> indent 2 (stack (map pretty body))
 
 instance Pretty PyExcept where
-  ppr (Catch pyexp stms) =
-    text "except"
-      <+> ppr pyexp
-      <+> text "as e:"
-      </> indent 2 (stack $ map ppr stms)
+  pretty (Catch pyexp stms) =
+    "except"
+      <+> pretty pyexp
+      <+> "as e:"
+      </> indent 2 (vsep $ map pretty stms)
 
 instance Pretty PyProg where
-  ppr (PyProg stms) = stack (map ppr stms)
+  pretty (PyProg stms) = vsep (map pretty stms)

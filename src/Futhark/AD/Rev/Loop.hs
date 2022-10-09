@@ -1,6 +1,3 @@
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.AD.Rev.Loop (diffLoop, stripmineStms) where
@@ -8,10 +5,10 @@ module Futhark.AD.Rev.Loop (diffLoop, stripmineStms) where
 import Control.Monad
 import Data.Foldable (toList)
 import Data.List (nub, (\\))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.AD.Rev.Monad
-import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.Aliases (consumedInStms)
@@ -38,7 +35,7 @@ bindForLoop ::
   a
 bindForLoop (DoLoop val_pats form@(ForLoop i it bound loop_vars) body) f =
   f val_pats form i it bound loop_vars body
-bindForLoop e _ = error $ "bindForLoop: not a for-loop:\n" <> pretty e
+bindForLoop e _ = error $ "bindForLoop: not a for-loop:\n" <> prettyString e
 
 -- | A convenience function to rename a for-loop and then bind the
 -- renamed components.
@@ -94,7 +91,7 @@ computeWhileIters (DoLoop val_pats (WhileLoop b) body) = do
       pure (pure (subExpRes bound_plus_one) <> bodyResult body)
   res <- letTupExp' "loop" $ DoLoop ((bound_param, bound_init) : val_pats) (WhileLoop b) body'
   pure $ head res
-computeWhileIters e = error $ "convertWhileIters: not a while-loop:\n" <> pretty e
+computeWhileIters e = error $ "convertWhileIters: not a while-loop:\n" <> prettyString e
 
 -- | Converts a 'WhileLoop' into a 'ForLoop'. Requires that the
 -- surrounding 'DoLoop' is annotated with a @#[bound(n)]@ attribute,
@@ -113,7 +110,7 @@ convertWhileLoop bound_se (DoLoop val_pats (WhileLoop cond) body) =
             (resultBodyM $ map (Var . paramName . fst) val_pats)
         ]
     pure $ DoLoop val_pats (ForLoop i Int64 bound_se mempty) body'
-convertWhileLoop _ e = error $ "convertWhileLoopBound: not a while-loop:\n" <> pretty e
+convertWhileLoop _ e = error $ "convertWhileLoopBound: not a while-loop:\n" <> prettyString e
 
 -- | @nestifyLoop n bound loop@ transforms a loop into a depth-@n@ loop nest
 -- of @bound@-iteration loops. This transformation does not preserve

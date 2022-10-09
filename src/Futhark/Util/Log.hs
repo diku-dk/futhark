@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Opaque type for an operations log that provides fast O(1)
 -- appends.
 module Futhark.Util.Log
@@ -12,11 +8,11 @@ module Futhark.Util.Log
   )
 where
 
-import qualified Control.Monad.RWS.Lazy
-import qualified Control.Monad.RWS.Strict
+import Control.Monad.RWS.Lazy qualified
+import Control.Monad.RWS.Strict qualified
 import Control.Monad.Writer
-import qualified Data.DList as DL
-import qualified Data.Text as T
+import Data.DList qualified as DL
+import Data.Text qualified as T
 
 -- | An efficiently catenable sequence of log entries.
 newtype Log = Log {unLog :: DL.DList T.Text}
@@ -27,7 +23,7 @@ instance Semigroup Log where
 instance Monoid Log where
   mempty = Log mempty
 
--- | Transform a log into text.  Every log entry becomes its own line
+-- | Transform a log into pretty.  Every log entry becomes its own line
 -- (or possibly more, in case of multi-line entries).
 toText :: Log -> T.Text
 toText = T.intercalate "\n" . DL.toList . unLog
@@ -51,11 +47,11 @@ class (Applicative m, Monad m) => MonadLogger m where
   -- | Append an entire log.
   addLog :: Log -> m ()
 
-instance (Applicative m, Monad m) => MonadLogger (WriterT Log m) where
+instance Monad m => MonadLogger (WriterT Log m) where
   addLog = tell
 
-instance (Applicative m, Monad m) => MonadLogger (Control.Monad.RWS.Lazy.RWST r Log s m) where
+instance Monad m => MonadLogger (Control.Monad.RWS.Lazy.RWST r Log s m) where
   addLog = tell
 
-instance (Applicative m, Monad m) => MonadLogger (Control.Monad.RWS.Strict.RWST r Log s m) where
+instance Monad m => MonadLogger (Control.Monad.RWS.Strict.RWST r Log s m) where
   addLog = tell

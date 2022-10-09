@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | Alias analysis of a full Futhark program.  Takes as input a
 -- program with an arbitrary rep and produces one with aliases.  This
@@ -21,7 +21,7 @@ module Futhark.Analysis.Alias
 where
 
 import Data.List (foldl')
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Futhark.IR.Aliases
 
 -- | Perform alias analysis on a Futhark program.
@@ -90,12 +90,12 @@ analyseExp ::
   Exp (Aliases rep)
 -- Would be better to put this in a BranchType annotation, but that
 -- requires a lot of other work.
-analyseExp aliases (If cond tb fb dec) =
-  let Body ((tb_als, tb_cons), tb_dec) tb_stms tb_res = analyseBody aliases tb
-      Body ((fb_als, fb_cons), fb_dec) fb_stms fb_res = analyseBody aliases fb
-      cons = tb_cons <> fb_cons
+analyseExp aliases (Match cond cases defbody matchdec) =
+  let cases' = map (fmap $ analyseBody aliases) cases
+      defbody' = analyseBody aliases defbody
+      all_cons = foldMap (snd . fst . bodyDec) $ defbody' : map caseBody cases'
       isConsumed v =
-        any (`nameIn` unAliases cons) $
+        any (`nameIn` unAliases all_cons) $
           v : namesToList (M.findWithDefault mempty v aliases)
       notConsumed =
         AliasDec
@@ -103,11 +103,11 @@ analyseExp aliases (If cond tb fb dec) =
           . filter (not . isConsumed)
           . namesToList
           . unAliases
-      tb_als' = map notConsumed tb_als
-      fb_als' = map notConsumed fb_als
-      tb' = Body ((tb_als', tb_cons), tb_dec) tb_stms tb_res
-      fb' = Body ((fb_als', fb_cons), fb_dec) fb_stms fb_res
-   in If cond tb' fb' dec
+      onBody (Body ((als, cons), dec) stms res) =
+        Body ((map notConsumed als, cons), dec) stms res
+      cases'' = map (fmap onBody) cases'
+      defbody'' = onBody defbody'
+   in Match cond cases'' defbody'' matchdec
 analyseExp aliases e = mapExp analyse e
   where
     analyse =

@@ -1,6 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 
 -- | Definitions of primitive types, the values that inhabit these
 -- types, and operations on these values.  A primitive value can also
@@ -115,8 +113,8 @@ module Language.Futhark.Primitive
 where
 
 import Control.Category
-import qualified Data.Binary.Get as G
-import qualified Data.Binary.Put as P
+import Data.Binary.Get qualified as G
+import Data.Binary.Put qualified as P
 import Data.Bits
   ( complement,
     countLeadingZeros,
@@ -130,30 +128,11 @@ import Data.Bits
   )
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CUShort (..))
-import Futhark.Util
-  ( cbrt,
-    cbrtf,
-    ceilDouble,
-    ceilFloat,
-    convFloat,
-    erf,
-    erfc,
-    erfcf,
-    erff,
-    floorDouble,
-    floorFloat,
-    hypot,
-    hypotf,
-    lgamma,
-    lgammaf,
-    roundDouble,
-    roundFloat,
-    tgamma,
-    tgammaf,
-  )
+import Futhark.Util (convFloat)
+import Futhark.Util.CMath
 import Futhark.Util.Pretty
 import Numeric.Half
 import Prelude hiding (id, (.))
@@ -169,10 +148,10 @@ data IntType
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 instance Pretty IntType where
-  ppr Int8 = text "i8"
-  ppr Int16 = text "i16"
-  ppr Int32 = text "i32"
-  ppr Int64 = text "i64"
+  pretty Int8 = "i8"
+  pretty Int16 = "i16"
+  pretty Int32 = "i32"
+  pretty Int64 = "i64"
 
 -- | A list of all integer types.
 allIntTypes :: [IntType]
@@ -186,9 +165,9 @@ data FloatType
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 instance Pretty FloatType where
-  ppr Float16 = text "f16"
-  ppr Float32 = text "f32"
-  ppr Float64 = text "f64"
+  pretty Float16 = "f16"
+  pretty Float32 = "f32"
+  pretty Float64 = "f64"
 
 -- | A list of all floating-point types.
 allFloatTypes :: [FloatType]
@@ -229,10 +208,10 @@ instance Bounded PrimType where
   maxBound = Unit
 
 instance Pretty PrimType where
-  ppr (IntType t) = ppr t
-  ppr (FloatType t) = ppr t
-  ppr Bool = text "bool"
-  ppr Unit = text "unit"
+  pretty (IntType t) = pretty t
+  pretty (FloatType t) = pretty t
+  pretty Bool = "bool"
+  pretty Unit = "unit"
 
 -- | A list of all primitive types.
 allPrimTypes :: [PrimType]
@@ -250,10 +229,10 @@ data IntValue
   deriving (Eq, Ord, Show)
 
 instance Pretty IntValue where
-  ppr (Int8Value v) = text $ show v ++ "i8"
-  ppr (Int16Value v) = text $ show v ++ "i16"
-  ppr (Int32Value v) = text $ show v ++ "i32"
-  ppr (Int64Value v) = text $ show v ++ "i64"
+  pretty (Int8Value v) = pretty $ show v ++ "i8"
+  pretty (Int16Value v) = pretty $ show v ++ "i16"
+  pretty (Int32Value v) = pretty $ show v ++ "i32"
+  pretty (Int64Value v) = pretty $ show v ++ "i64"
 
 -- | Create an t'IntValue' from a type and an 'Integer'.
 intValue :: Integral int => IntType -> int -> IntValue
@@ -315,21 +294,21 @@ instance Ord FloatValue where
   (>=) = flip (<=)
 
 instance Pretty FloatValue where
-  ppr (Float16Value v)
-    | isInfinite v, v >= 0 = text "f16.inf"
-    | isInfinite v, v < 0 = text "-f16.inf"
-    | isNaN v = text "f16.nan"
-    | otherwise = text $ show v ++ "f16"
-  ppr (Float32Value v)
-    | isInfinite v, v >= 0 = text "f32.inf"
-    | isInfinite v, v < 0 = text "-f32.inf"
-    | isNaN v = text "f32.nan"
-    | otherwise = text $ show v ++ "f32"
-  ppr (Float64Value v)
-    | isInfinite v, v >= 0 = text "f64.inf"
-    | isInfinite v, v < 0 = text "-f64.inf"
-    | isNaN v = text "f64.nan"
-    | otherwise = text $ show v ++ "f64"
+  pretty (Float16Value v)
+    | isInfinite v, v >= 0 = "f16.inf"
+    | isInfinite v, v < 0 = "-f16.inf"
+    | isNaN v = "f16.nan"
+    | otherwise = pretty $ show v ++ "f16"
+  pretty (Float32Value v)
+    | isInfinite v, v >= 0 = "f32.inf"
+    | isInfinite v, v < 0 = "-f32.inf"
+    | isNaN v = "f32.nan"
+    | otherwise = pretty $ show v ++ "f32"
+  pretty (Float64Value v)
+    | isInfinite v, v >= 0 = "f64.inf"
+    | isInfinite v, v < 0 = "-f64.inf"
+    | isNaN v = "f64.nan"
+    | otherwise = pretty $ show v ++ "f64"
 
 -- | Create a t'FloatValue' from a type and a 'Rational'.
 floatValue :: Real num => FloatType -> num -> FloatValue
@@ -358,11 +337,11 @@ data PrimValue
   deriving (Eq, Ord, Show)
 
 instance Pretty PrimValue where
-  ppr (IntValue v) = ppr v
-  ppr (BoolValue True) = text "true"
-  ppr (BoolValue False) = text "false"
-  ppr (FloatValue v) = ppr v
-  ppr UnitValue = text "()"
+  pretty (IntValue v) = pretty v
+  pretty (BoolValue True) = "true"
+  pretty (BoolValue False) = "false"
+  pretty (FloatValue v) = pretty v
+  pretty UnitValue = "()"
 
 -- | The type of a basic value.
 primValueType :: PrimValue -> PrimType
@@ -1274,6 +1253,10 @@ primFuns =
       f32 "floor32" floorFloat,
       f64 "floor64" floorDouble,
       --
+      f16_2 "nextafter16" (\x y -> convFloat $ nextafterf (convFloat x) (convFloat y)),
+      f32_2 "nextafter32" nextafterf,
+      f64_2 "nextafter64" nextafter,
+      --
       f16 "gamma16" $ convFloat . tgammaf . convFloat,
       f32 "gamma32" tgammaf,
       f64 "gamma64" tgamma,
@@ -1551,6 +1534,27 @@ primFuns =
     f16 s f = (s, ([FloatType Float16], FloatType Float16, f16PrimFun f))
     f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
     f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))
+    f16_2 s f =
+      ( s,
+        ( [FloatType Float16, FloatType Float16],
+          FloatType Float16,
+          f16PrimFun2 f
+        )
+      )
+    f32_2 s f =
+      ( s,
+        ( [FloatType Float32, FloatType Float32],
+          FloatType Float32,
+          f32PrimFun2 f
+        )
+      )
+    f64_2 s f =
+      ( s,
+        ( [FloatType Float64, FloatType Float64],
+          FloatType Float64,
+          f64PrimFun2 f
+        )
+      )
     f16_3 s f =
       ( s,
         ( [FloatType Float16, FloatType Float16, FloatType Float16],
@@ -1600,6 +1604,30 @@ primFuns =
     f64PrimFun f [FloatValue (Float64Value x)] =
       Just $ FloatValue $ Float64Value $ f x
     f64PrimFun _ _ = Nothing
+
+    f16PrimFun2
+      f
+      [ FloatValue (Float16Value a),
+        FloatValue (Float16Value b)
+        ] =
+        Just $ FloatValue $ Float16Value $ f a b
+    f16PrimFun2 _ _ = Nothing
+
+    f32PrimFun2
+      f
+      [ FloatValue (Float32Value a),
+        FloatValue (Float32Value b)
+        ] =
+        Just $ FloatValue $ Float32Value $ f a b
+    f32PrimFun2 _ _ = Nothing
+
+    f64PrimFun2
+      f
+      [ FloatValue (Float64Value a),
+        FloatValue (Float64Value b)
+        ] =
+        Just $ FloatValue $ Float64Value $ f a b
+    f64PrimFun2 _ _ = Nothing
 
     f16PrimFun3
       f
@@ -1739,74 +1767,74 @@ associativeBinOp _ = False
 -- Prettyprinting instances
 
 instance Pretty BinOp where
-  ppr (Add t OverflowWrap) = taggedI "add" t
-  ppr (Add t OverflowUndef) = taggedI "add_nw" t
-  ppr (Sub t OverflowWrap) = taggedI "sub" t
-  ppr (Sub t OverflowUndef) = taggedI "sub_nw" t
-  ppr (Mul t OverflowWrap) = taggedI "mul" t
-  ppr (Mul t OverflowUndef) = taggedI "mul_nw" t
-  ppr (FAdd t) = taggedF "fadd" t
-  ppr (FSub t) = taggedF "fsub" t
-  ppr (FMul t) = taggedF "fmul" t
-  ppr (UDiv t Safe) = taggedI "udiv_safe" t
-  ppr (UDiv t Unsafe) = taggedI "udiv" t
-  ppr (UDivUp t Safe) = taggedI "udiv_up_safe" t
-  ppr (UDivUp t Unsafe) = taggedI "udiv_up" t
-  ppr (UMod t Safe) = taggedI "umod_safe" t
-  ppr (UMod t Unsafe) = taggedI "umod" t
-  ppr (SDiv t Safe) = taggedI "sdiv_safe" t
-  ppr (SDiv t Unsafe) = taggedI "sdiv" t
-  ppr (SDivUp t Safe) = taggedI "sdiv_up_safe" t
-  ppr (SDivUp t Unsafe) = taggedI "sdiv_up" t
-  ppr (SMod t Safe) = taggedI "smod_safe" t
-  ppr (SMod t Unsafe) = taggedI "smod" t
-  ppr (SQuot t Safe) = taggedI "squot_safe" t
-  ppr (SQuot t Unsafe) = taggedI "squot" t
-  ppr (SRem t Safe) = taggedI "srem_safe" t
-  ppr (SRem t Unsafe) = taggedI "srem" t
-  ppr (FDiv t) = taggedF "fdiv" t
-  ppr (FMod t) = taggedF "fmod" t
-  ppr (SMin t) = taggedI "smin" t
-  ppr (UMin t) = taggedI "umin" t
-  ppr (FMin t) = taggedF "fmin" t
-  ppr (SMax t) = taggedI "smax" t
-  ppr (UMax t) = taggedI "umax" t
-  ppr (FMax t) = taggedF "fmax" t
-  ppr (Shl t) = taggedI "shl" t
-  ppr (LShr t) = taggedI "lshr" t
-  ppr (AShr t) = taggedI "ashr" t
-  ppr (And t) = taggedI "and" t
-  ppr (Or t) = taggedI "or" t
-  ppr (Xor t) = taggedI "xor" t
-  ppr (Pow t) = taggedI "pow" t
-  ppr (FPow t) = taggedF "fpow" t
-  ppr LogAnd = text "logand"
-  ppr LogOr = text "logor"
+  pretty (Add t OverflowWrap) = taggedI "add" t
+  pretty (Add t OverflowUndef) = taggedI "add_nw" t
+  pretty (Sub t OverflowWrap) = taggedI "sub" t
+  pretty (Sub t OverflowUndef) = taggedI "sub_nw" t
+  pretty (Mul t OverflowWrap) = taggedI "mul" t
+  pretty (Mul t OverflowUndef) = taggedI "mul_nw" t
+  pretty (FAdd t) = taggedF "fadd" t
+  pretty (FSub t) = taggedF "fsub" t
+  pretty (FMul t) = taggedF "fmul" t
+  pretty (UDiv t Safe) = taggedI "udiv_safe" t
+  pretty (UDiv t Unsafe) = taggedI "udiv" t
+  pretty (UDivUp t Safe) = taggedI "udiv_up_safe" t
+  pretty (UDivUp t Unsafe) = taggedI "udiv_up" t
+  pretty (UMod t Safe) = taggedI "umod_safe" t
+  pretty (UMod t Unsafe) = taggedI "umod" t
+  pretty (SDiv t Safe) = taggedI "sdiv_safe" t
+  pretty (SDiv t Unsafe) = taggedI "sdiv" t
+  pretty (SDivUp t Safe) = taggedI "sdiv_up_safe" t
+  pretty (SDivUp t Unsafe) = taggedI "sdiv_up" t
+  pretty (SMod t Safe) = taggedI "smod_safe" t
+  pretty (SMod t Unsafe) = taggedI "smod" t
+  pretty (SQuot t Safe) = taggedI "squot_safe" t
+  pretty (SQuot t Unsafe) = taggedI "squot" t
+  pretty (SRem t Safe) = taggedI "srem_safe" t
+  pretty (SRem t Unsafe) = taggedI "srem" t
+  pretty (FDiv t) = taggedF "fdiv" t
+  pretty (FMod t) = taggedF "fmod" t
+  pretty (SMin t) = taggedI "smin" t
+  pretty (UMin t) = taggedI "umin" t
+  pretty (FMin t) = taggedF "fmin" t
+  pretty (SMax t) = taggedI "smax" t
+  pretty (UMax t) = taggedI "umax" t
+  pretty (FMax t) = taggedF "fmax" t
+  pretty (Shl t) = taggedI "shl" t
+  pretty (LShr t) = taggedI "lshr" t
+  pretty (AShr t) = taggedI "ashr" t
+  pretty (And t) = taggedI "and" t
+  pretty (Or t) = taggedI "or" t
+  pretty (Xor t) = taggedI "xor" t
+  pretty (Pow t) = taggedI "pow" t
+  pretty (FPow t) = taggedF "fpow" t
+  pretty LogAnd = "logand"
+  pretty LogOr = "logor"
 
 instance Pretty CmpOp where
-  ppr (CmpEq t) = text "eq_" <> ppr t
-  ppr (CmpUlt t) = taggedI "ult" t
-  ppr (CmpUle t) = taggedI "ule" t
-  ppr (CmpSlt t) = taggedI "slt" t
-  ppr (CmpSle t) = taggedI "sle" t
-  ppr (FCmpLt t) = taggedF "lt" t
-  ppr (FCmpLe t) = taggedF "le" t
-  ppr CmpLlt = text "llt"
-  ppr CmpLle = text "lle"
+  pretty (CmpEq t) = "eq_" <> pretty t
+  pretty (CmpUlt t) = taggedI "ult" t
+  pretty (CmpUle t) = taggedI "ule" t
+  pretty (CmpSlt t) = taggedI "slt" t
+  pretty (CmpSle t) = taggedI "sle" t
+  pretty (FCmpLt t) = taggedF "lt" t
+  pretty (FCmpLe t) = taggedF "le" t
+  pretty CmpLlt = "llt"
+  pretty CmpLle = "lle"
 
 instance Pretty ConvOp where
-  ppr op = convOp (convOpFun op) from to
+  pretty op = convOp (convOpFun op) from to
     where
       (from, to) = convOpType op
 
 instance Pretty UnOp where
-  ppr Not = text "not"
-  ppr (Abs t) = taggedI "abs" t
-  ppr (FAbs t) = taggedF "fabs" t
-  ppr (SSignum t) = taggedI "ssignum" t
-  ppr (USignum t) = taggedI "usignum" t
-  ppr (FSignum t) = taggedF "fsignum" t
-  ppr (Complement t) = taggedI "complement" t
+  pretty Not = "not"
+  pretty (Abs t) = taggedI "abs" t
+  pretty (FAbs t) = taggedF "fabs" t
+  pretty (SSignum t) = taggedI "ssignum" t
+  pretty (USignum t) = taggedI "usignum" t
+  pretty (FSignum t) = taggedF "fsignum" t
+  pretty (Complement t) = taggedI "complement" t
 
 -- | The human-readable name for a 'ConvOp'.  This is used to expose
 -- the 'ConvOp' in the @intrinsics@ module of a Futhark program.
@@ -1823,24 +1851,24 @@ convOpFun BToI {} = "btoi"
 convOpFun FToB {} = "ftob"
 convOpFun BToF {} = "btof"
 
-taggedI :: String -> IntType -> Doc
-taggedI s Int8 = text $ s ++ "8"
-taggedI s Int16 = text $ s ++ "16"
-taggedI s Int32 = text $ s ++ "32"
-taggedI s Int64 = text $ s ++ "64"
+taggedI :: String -> IntType -> Doc a
+taggedI s Int8 = pretty $ s ++ "8"
+taggedI s Int16 = pretty $ s ++ "16"
+taggedI s Int32 = pretty $ s ++ "32"
+taggedI s Int64 = pretty $ s ++ "64"
 
-taggedF :: String -> FloatType -> Doc
-taggedF s Float16 = text $ s ++ "16"
-taggedF s Float32 = text $ s ++ "32"
-taggedF s Float64 = text $ s ++ "64"
+taggedF :: String -> FloatType -> Doc a
+taggedF s Float16 = pretty $ s ++ "16"
+taggedF s Float32 = pretty $ s ++ "32"
+taggedF s Float64 = pretty $ s ++ "64"
 
-convOp :: (Pretty from, Pretty to) => String -> from -> to -> Doc
-convOp s from to = text s <> text "_" <> ppr from <> text "_" <> ppr to
+convOp :: (Pretty from, Pretty to) => String -> from -> to -> Doc a
+convOp s from to = pretty s <> "_" <> pretty from <> "_" <> pretty to
 
 -- | True if signed.  Only makes a difference for integer types.
 prettySigned :: Bool -> PrimType -> String
-prettySigned True (IntType it) = 'u' : drop 1 (pretty it)
-prettySigned _ t = pretty t
+prettySigned True (IntType it) = 'u' : drop 1 (prettyString it)
+prettySigned _ t = prettyString t
 
 mul_hi8 :: IntValue -> IntValue -> Int8
 mul_hi8 a b =

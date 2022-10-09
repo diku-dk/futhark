@@ -1,3 +1,4 @@
+# See header comment in default.nix for how to update sources.nix.
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
@@ -13,9 +14,9 @@ pkgs.stdenv.mkDerivation {
       file
       git
       git-annex
-      ghc
+      haskell.compiler.ghc924
       parallel
-      haskellPackages.weeder
+      haskell.packages.ghc924.weeder
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
@@ -25,7 +26,7 @@ pkgs.stdenv.mkDerivation {
       zlib.out
       cabal2nix
       ghcid
-      haskell.packages.ghc923.ormolu_0_5_0_0
+      haskell.packages.ghc924.ormolu_0_5_0_1
       niv
       ispc
       python3Packages.numpy
