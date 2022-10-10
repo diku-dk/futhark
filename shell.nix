@@ -35,7 +35,6 @@ pkgs.stdenv.mkDerivation {
       python3Packages.sphinx
       python3Packages.sphinxcontrib-bibtex
       imagemagick # needed for literate tests
-      z3
     ]
     ++ lib.optionals (stdenv.isLinux)
       [ opencl-headers
