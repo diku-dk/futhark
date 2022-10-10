@@ -439,8 +439,8 @@ test_flatSlice_transpose_slice_iota =
 -- test_lessThanOrEqualish =
 --   [testCase "1 <= 1" $ IxFunLMAD.lessThanOrEqualish mempty mempty 1 1 @? "Failed"]
 
-test_disjoint3 :: [TestTree]
-test_disjoint3 =
+_test_disjoint3 :: [TestTree]
+_test_disjoint3 =
   let foo s = VName (nameFromString s)
       add_nw64 = (+)
       add64 = (+)
