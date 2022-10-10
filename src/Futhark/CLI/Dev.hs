@@ -28,7 +28,7 @@ import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
-import qualified Futhark.Optimise.ArrayShortCircuiting as ArrayShortCircuiting
+import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion

@@ -53,7 +53,6 @@ import Data.Maybe (fromJust, isJust, isNothing)
 import Futhark.Analysis.AlgSimplify qualified as AlgSimplify
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)
 import Futhark.IR.Mem.Interval
 import Futhark.IR.Prop
 import Futhark.IR.Syntax

@@ -6,7 +6,6 @@ module Futhark.IR.Mem.IxFunTests
 where
 
 import Data.Function ((&))
-import Data.List qualified as DL
 import Data.List qualified as L
 import Data.Map qualified as M
 import Futhark.Analysis.PrimExp.Convert

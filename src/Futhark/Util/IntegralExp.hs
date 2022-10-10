@@ -21,7 +21,6 @@ module Futhark.Util.IntegralExp
 where
 
 import Data.Int
-import Futhark.Util.Pretty
 import Prelude
 
 -- | A twist on the 'Integral' type class that is more friendly to

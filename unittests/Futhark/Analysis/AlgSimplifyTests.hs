@@ -12,7 +12,7 @@ where
 import Control.Monad
 import Data.Function ((&))
 import Data.List (subsequences)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import Futhark.Analysis.AlgSimplify hiding (add, sub)
 import Futhark.Analysis.PrimExp

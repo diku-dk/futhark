@@ -16,8 +16,8 @@ module Futhark.IR.Mem.IxFun.Alg
   )
 where
 
-import qualified Data.List as DL
-import qualified Data.Set as S
+import Data.List qualified as L
+import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
@@ -172,7 +172,7 @@ index (Rebase new_base fun) is =
 allPoints :: (IntegralExp num, Enum num) => [num] -> [[num]]
 allPoints dims =
   let total = product dims
-      strides = drop 1 $ DL.reverse $ scanl (*) 1 $ DL.reverse dims
+      strides = drop 1 $ L.reverse $ scanl (*) 1 $ L.reverse dims
    in map (unflatInd strides) [0 .. total - 1]
   where
     unflatInd strides x =
