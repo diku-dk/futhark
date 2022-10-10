@@ -1,4 +1,4 @@
--- && must be short-circuiting.
+-- || must be short-circuiting.
 --
 -- ==
 -- input { 0i64 [false, false] } output { false }
