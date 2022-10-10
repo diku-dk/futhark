@@ -111,6 +111,7 @@ replaceInExp _ e@(Op (Alloc _ _)) = pure e
 replaceInExp _ (Op (Inner i)) = do
   on_op <- asks onInner
   Op . Inner <$> on_op i
+replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
 replaceInExp _ e@WithAcc {} = pure e
 replaceInExp _ e@Apply {} = pure e
 
