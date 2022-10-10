@@ -19,12 +19,12 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
   )
 where
 
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 
 type DirAlias = IxFun -> IxFun
@@ -87,7 +87,7 @@ getDirAliasFromExp (BasicOp (Reshape ReshapeArbitrary shp x)) =
 getDirAliasFromExp (BasicOp (Rearrange _ _)) =
   Nothing
 getDirAliasFromExp (BasicOp (Rotate rs x)) =
-  Just (x, (`IxFun.rotate` fmap pe64 rs))
+  Nothing -- Just (x, (`IxFun.rotate` fmap pe64 rs))
 getDirAliasFromExp (BasicOp (Index x slc)) =
   Just (x, (`IxFun.slice` (Slice $ map (fmap pe64) $ unSlice slc)))
 getDirAliasFromExp (BasicOp (Update _ x _ _elm)) = Just (x, id)

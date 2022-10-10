@@ -27,7 +27,6 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     basePMconv,
     getArrMemAssocFParam,
     getScopeMemInfo,
-    prettyCoalTab,
     createsNewArrOK,
     getArrMemAssoc,
     getUniqueMemFParam,
@@ -36,12 +35,12 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
   )
 where
 
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
 import Prelude
@@ -203,41 +202,45 @@ data BotUpEnv = BotUpEnv
   }
 
 instance Pretty AccessSummary where
-  ppr Undeterminable = "Undeterminable"
-  ppr (Set a) = "Access-Set:" <+/> ppr a <+/> " "
+  pretty Undeterminable = "Undeterminable"
+  pretty (Set a) = "Access-Set:" -- <+> pretty a <+> " "
 
 instance Pretty MemRefs where
-  ppr (MemRefs a b) = "( Use-Sum:" <+> ppr a <+> "Write-Sum:" <+> ppr b <> ")"
+  pretty (MemRefs a b) = "( Use-Sum:" <+> pretty a <+> "Write-Sum:" <+> pretty b <> ")"
 
 instance Pretty CoalescedKind where
-  ppr CopyCoal = "Copy"
-  ppr InPlaceCoal = "InPlace"
-  ppr ConcatCoal = "Concat"
-  ppr TransitiveCoal = "Transitive"
+  pretty CopyCoal = "Copy"
+  pretty InPlaceCoal = "InPlace"
+  pretty ConcatCoal = "Concat"
+  pretty TransitiveCoal = "Transitive"
 
 instance Pretty ArrayMemBound where
-  ppr (MemBlock ptp shp m_nm ixfn) =
-    "{" <> ppr ptp <> "," <+> ppr shp <> "," <+> ppr m_nm <> "," <+/> ppr ixfn <> "}"
+  pretty (MemBlock ptp shp m_nm ixfn) =
+    "{" <> pretty ptp <> "," <+> pretty shp <> "," <+> pretty m_nm <> "," <+> pretty ixfn <> "}"
 
 instance Pretty Coalesced where
-  ppr (Coalesced knd mbd subs) =
-    "(Kind:" <+> ppr knd <> ", membds:" <+> ppr mbd <> ", subs:" <+> ppr subs <> ")" <+> "\n"
+  pretty (Coalesced knd mbd subs) =
+    "(Kind:"
+      <+> pretty knd <> ", membds:"
+      <+> pretty mbd -- <> ", subs:" <+> pretty subs
+        <> ")"
+      <+> "\n"
 
 instance Pretty CoalsEntry where
-  ppr etry =
+  pretty etry =
     "{"
-      <+/> "Dstmem:"
-      <+> ppr (dstmem etry)
+      <+> "Dstmem:"
+      <+> pretty (dstmem etry)
         <> ", AliasMems:"
-      <+> ppr (alsmem etry)
-      <+/> ", optdeps:"
-      <+> ppr (optdeps etry)
-      <+/> ", memrefs:"
-      <+> ppr (memrefs etry)
-      <+/> ", vartab:"
-      <+> ppr (vartab etry)
-      <+/> "}"
-      <+/> "\n"
+      <+> pretty (alsmem etry)
+      <+> ", optdeps:"
+      -- <+> pretty (optdeps etry)
+      <+> ", memrefs:"
+      <+> pretty (memrefs etry)
+      <+> ", vartab:"
+      -- <+> pretty (vartab etry)
+      <+> "}"
+      <+> "\n"
 
 -- | Compute the union of two 'CoalsEntry'. If two 'CoalsEntry' do not refer to
 -- the same destination memory and use the same index function, the first
@@ -366,17 +369,6 @@ markFailedCoal (coal_tab, inhb_tab) src_mem =
        in ( M.delete src_mem coal_tab,
             M.insert src_mem failed_set' inhb_tab
           )
-
--- | A poor attempt at a pretty printer of the Coalescing Table
-prettyCoalTab :: CoalsTab -> String
-prettyCoalTab tab =
-  let list_tups =
-        map
-          ( \(m_b, CoalsEntry md _ als vtab deps (MemRefs d s)) ->
-              (m_b, md, namesToList als, M.keys vtab, M.toList deps, (d, s))
-          )
-          $ M.toList tab
-   in pretty list_tups
 
 -- | basic conversion of a Var Expression to a PrimExp
 basePMconv ::

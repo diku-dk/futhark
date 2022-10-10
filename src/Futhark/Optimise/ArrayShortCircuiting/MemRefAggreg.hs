@@ -19,14 +19,14 @@ import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.List (intersect, uncons)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map.Strict as M
+import Data.Map.Strict qualified as M
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Analysis.AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.Mem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
@@ -442,7 +442,7 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
           new_offset = replaceIteratorWith lower_bound offset0
           new_lmad =
             IxFun.LMAD new_offset $
-              IxFun.LMADDim new_stride 0 spn 0 IxFun.Inc : map incPerm dims0
+              IxFun.LMADDim new_stride spn 0 IxFun.Inc : map incPerm dims0
       if new_var `nameIn` freeIn new_lmad
         then pure Undeterminable
         else pure $ Set $ S.singleton new_lmad

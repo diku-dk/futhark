@@ -7,9 +7,9 @@ module Futhark.Optimise.ArrayShortCircuiting (optimiseSeqMem, optimiseGPUMem) wh
 
 import Control.Monad.Reader
 import Data.Function ((&))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
-import qualified Futhark.Analysis.Alias as AnlAls
+import Futhark.Analysis.Alias qualified as AnlAls
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.IxFun (substituteInIxFun)
@@ -17,7 +17,7 @@ import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Pass (Pass (..))
-import qualified Futhark.Pass as Pass
+import Futhark.Pass qualified as Pass
 import Futhark.Util
 
 ----------------------------------------------------------------
@@ -97,12 +97,12 @@ replaceInStm (Let (Pat elems) d e) = do
 
 replaceInExp :: (Mem rep inner, LetDec rep ~ LetDecMem) => [PatElem LetDecMem] -> Exp rep -> ReplaceM inner (Exp rep)
 replaceInExp _ e@(BasicOp _) = pure e
-replaceInExp pat_elems (If se then_body else_body dec) = do
-  then_body' <- replaceInIfBody then_body
-  else_body' <- replaceInIfBody else_body
-  if_rets <- zipWithM (generalizeIxfun pat_elems) pat_elems $ ifReturns dec
-  let dec' = dec {ifReturns = if_rets}
-  pure $ If se then_body' else_body' dec'
+replaceInExp pat_elems (Match cond_ses cases defbody dec) = do
+  defbody' <- replaceInIfBody defbody
+  cases' <- mapM (\(Case p b) -> Case p <$> replaceInIfBody b) cases
+  case_rets <- zipWithM (generalizeIxfun pat_elems) pat_elems $ matchReturns dec
+  let dec' = dec {matchReturns = case_rets}
+  pure $ Match cond_ses cases' defbody' dec'
 replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
   loop_inits' <- mapM (replaceInFParam . fst) loop_inits
   stms' <- mapM replaceInStm stms
@@ -111,7 +111,6 @@ replaceInExp _ e@(Op (Alloc _ _)) = pure e
 replaceInExp _ (Op (Inner i)) = do
   on_op <- asks onInner
   Op . Inner <$> on_op i
-replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
 replaceInExp _ e@WithAcc {} = pure e
 replaceInExp _ e@Apply {} = pure e
 

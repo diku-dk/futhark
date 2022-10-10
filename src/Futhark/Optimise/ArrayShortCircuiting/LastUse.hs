@@ -19,7 +19,8 @@ module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg,
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
-import qualified Data.Map.Strict as M
+import Data.Bifunctor (bimap, first)
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import Futhark.IR.Aliases
@@ -174,18 +175,20 @@ lastUseExp ::
   --    2. the set of last-used vars in the expression at this level,
   --    3. the updated used names, now including expression's free vars.
   LastUseM rep (LUTabFun, Names, Names)
-lastUseExp (If _ then_body else_body _) used_nms = do
+lastUseExp (Match cond_ses cases body dec) used_nms = do
   -- For an if-then-else, we duplicate the last use at each body level, meaning
   -- we record the last use of the outer statement, and also the last use in the
   -- statement in the inner bodies. We can safely ignore the if-condition as it is
   -- a boolean scalar.
-  (then_lutab, then_used_nms) <- lastUseBody then_body (M.empty, used_nms)
-  (else_lutab, else_used_nms) <- lastUseBody else_body (M.empty, used_nms)
-  let free_in_body_then = freeIn then_body
-  let free_in_body_else = freeIn else_body
-  let used_nms' = then_used_nms <> else_used_nms
-  (_, last_used_arrs) <- lastUsedInNames used_nms $ free_in_body_then <> free_in_body_else
-  pure (then_lutab <> else_lutab, last_used_arrs, used_nms')
+  (lutab_cases, used_cases) <-
+    bimap mconcat mconcat . unzip
+      <$> mapM (flip lastUseBody (M.empty, used_nms) . caseBody) cases
+  (lutab', body_used_nms) <- lastUseBody body (M.empty, used_nms)
+  let free_in_body = freeIn body
+  let free_in_cases = freeIn cases
+  let used_nms' = used_cases <> body_used_nms
+  (_, last_used_arrs) <- lastUsedInNames used_nms $ free_in_body <> free_in_cases
+  pure (lutab_cases <> lutab', last_used_arrs, used_nms')
 lastUseExp (DoLoop var_ses _ body) used_nms0 = do
   free_in_body <- aliasTransitiveClosure $ freeIn body
   -- compute the aliasing transitive closure of initializers that are not last-uses

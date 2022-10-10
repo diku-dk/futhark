@@ -10,9 +10,9 @@ module Futhark.Pass.LowerAllocations (lowerAllocationsSeqMem, lowerAllocationsGP
 
 import Control.Monad.Reader
 import Data.Function ((&))
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Sequence (Seq (..))
-import qualified Data.Sequence as Seq
+import Data.Sequence qualified as Seq
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Pass (Pass (..))
@@ -71,10 +71,10 @@ lowerAllocationsInStms (stm0@(Let _ _ (Op (Inner inner))) :<| stms) alloc0 acc0 
   let stm = stm0 {stmExp = Op $ Inner inner'}
       (alloc, acc) = insertLoweredAllocs (freeIn stm0) alloc0 acc0
   lowerAllocationsInStms stms alloc (acc :|> stm)
-lowerAllocationsInStms (stm@(Let _ _ (If cond then_body else_body dec)) :<| stms) alloc acc = do
-  then_body' <- lowerAllocationsInBody then_body
-  else_body' <- lowerAllocationsInBody else_body
-  let stm' = stm {stmExp = If cond then_body' else_body' dec}
+lowerAllocationsInStms (stm@(Let _ _ (Match cond_ses cases body dec)) :<| stms) alloc acc = do
+  cases' <- mapM (\(Case pat b) -> Case pat <$> lowerAllocationsInBody b) cases
+  body' <- lowerAllocationsInBody body
+  let stm' = stm {stmExp = Match cond_ses cases' body' dec}
       (alloc', acc') = insertLoweredAllocs (freeIn stm) alloc acc
   lowerAllocationsInStms stms alloc' (acc' :|> stm')
 lowerAllocationsInStms (stm@(Let _ _ (DoLoop params form body)) :<| stms) alloc acc = do

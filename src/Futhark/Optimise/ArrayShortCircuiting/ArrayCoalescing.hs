@@ -8,22 +8,22 @@
 -- | Playground for work on merging memory blocks
 module Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing (mkCoalsTab, CoalsTab, mkCoalsTabGPU) where
 
-import qualified Control.Exception.Base as Exc
+import Control.Exception.Base qualified as Exc
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Function ((&))
-import qualified Data.List as L
+import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
-import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
@@ -176,6 +176,9 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl@SegThread {} space _ kern
 shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl@SegGroup {} space _ kernel_body))) td_env bu_env =
   -- No special handling necessary for 'SegMap'. Just call the helper-function.
   shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env
+shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl@SegThreadInGroup {} space _ kernel_body))) td_env bu_env =
+  -- No special handling necessary for 'SegMap'. Just call the helper-function.
+  shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env
 shortCircuitGPUMem lutab pat (Inner (SegOp (SegRed lvl space binops _ kernel_body))) td_env bu_env =
   -- When handling 'SegRed', we we first invalidate all active coalesce-entries
   -- where any of the variables in 'vartab' are also free in the list of
@@ -230,7 +233,7 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_b
 shortCircuitGPUMem lutab pat (Inner (GPUBody _ body)) td_env bu_env = do
   fresh1 <- newNameFromString "gpubody"
   fresh2 <- newNameFromString "gpubody"
-  shortCircuitGPUMemHelper 0 (SegThread (Count $ Constant $ IntValue $ Int64Value 1) (Count $ Constant $ IntValue $ Int64Value 1) SegNoVirt) lutab pat (SegSpace fresh1 [(fresh2, Constant $ IntValue $ Int64Value 1)]) (bodyToKernelBody body) td_env bu_env
+  shortCircuitGPUMemHelper 0 (SegThread SegNoVirt $ Just $ KernelGrid (Count $ Constant $ IntValue $ Int64Value 1) (Count $ Constant $ IntValue $ Int64Value 1)) lutab pat (SegSpace fresh1 [(fresh2, Constant $ IntValue $ Int64Value 1)]) (bodyToKernelBody body) td_env bu_env
 shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = pure bu_env
 shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = pure bu_env
 
@@ -572,7 +575,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
       inhb_tab'' = M.unionWith (<>) failed_optdeps inhb_tab'
    in -- new_inhibited = M.unionWith (<>) inhb_tab'' (inhibited topenv)
       if not $ M.null actv_tab'
-        then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab'))
+        then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ show (M.keys actv_tab'))
         else
           if M.null $ inhb_tab'' `M.difference` inhibited topenv
             then pure succ_tab''
@@ -654,7 +657,7 @@ mkCoalsTabStm ::
 mkCoalsTabStm _ (Let (Pat [pe]) _ e) td_env bu_env
   | Just primexp <- primExpFromExp (basePMconv (scope td_env) (scals bu_env)) e =
       pure $ bu_env {scals = M.insert (patElemName pe) primexp (scals bu_env)}
-mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
+mkCoalsTabStm lutab (Let patt _ (Match _ cases defbody _)) td_env bu_env = do
   let pat_val_elms = patElems patt
       -- ToDo: 1. we need to record existential memory blocks in alias table on the top-down pass.
       --       2. need to extend the scope table
@@ -672,70 +675,62 @@ mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
       --     in @activeCoals@ to the body results of the then and else branches, but only
       --     if the current pattern element can be potentially coalesced and also
       --     if the current pattern element satisfies safety conditions 2 & 5.
-      res_mem_then = findMemBodyResult activeCoals0 (scope td_env) pat_val_elms body_then
-      res_mem_else = findMemBodyResult activeCoals0 (scope td_env) pat_val_elms body_else
+      res_mem_def = findMemBodyResult activeCoals0 (scope td_env) pat_val_elms defbody
+      res_mem_cases = map (findMemBodyResult activeCoals0 (scope td_env) pat_val_elms . caseBody) cases
 
-      subs_then = mkSubsTab patt $ map resSubExp $ bodyResult body_then
-      subs_else = mkSubsTab patt $ map resSubExp $ bodyResult body_else
+      subs_def = mkSubsTab patt $ map resSubExp $ bodyResult defbody
+      subs_cases = map (mkSubsTab patt . map resSubExp . bodyResult . caseBody) cases
 
-      actv_then_i = foldl (transferCoalsToBody subs_then) activeCoals0 res_mem_then
-      actv_else_i = foldl (transferCoalsToBody subs_else) activeCoals0 res_mem_else
+      actv_def_i = foldl (transferCoalsToBody subs_def) activeCoals0 res_mem_def
+      actv_cases_i = zipWith (\subs res -> foldl (transferCoalsToBody subs) activeCoals0 res) subs_cases res_mem_cases
 
       -- eliminate the original pattern binding of the if statement,
       -- @let x = if y[0,0] > 0 then map (+y[0,0]) a else map (+1) b@
       -- @let y[0] = x@
       -- should succeed because @m_y@ is used before @x@ is created.
-      (actv_then, actv_else) =
-        foldl
-          ( \(acth, acel) (m_b, _, _, m_r) ->
-              if m_b == m_r
-                then (acth, acel)
-                else (M.delete m_b acth, M.delete m_b acel)
-          )
-          (actv_then_i, actv_else_i)
-          res_mem_then
+      aux ac (MemBodyResult m_b _ _ m_r) = if m_b == m_r then ac else M.delete m_b ac
+      actv_def = foldl aux actv_def_i res_mem_def
+      actv_cases = zipWith (foldl aux) actv_cases_i res_mem_cases
 
   -- iii) process the then and else bodies
-  res_then <- mkCoalsTabStms lutab (bodyStms body_then) td_env (bu_env {activeCoals = actv_then})
-  res_else <- mkCoalsTabStms lutab (bodyStms body_else) td_env (bu_env {activeCoals = actv_else})
-  let (actv_then0, succ_then0, inhb_then0) = (activeCoals res_then, successCoals res_then, inhibit res_then)
-      (actv_else0, succ_else0, inhb_else0) = (activeCoals res_else, successCoals res_else, inhibit res_else)
+  res_def <- mkCoalsTabStms lutab (bodyStms defbody) td_env (bu_env {activeCoals = actv_def})
+  res_cases <- zipWithM (\c a -> mkCoalsTabStms lutab (bodyStms $ caseBody c) td_env (bu_env {activeCoals = a})) cases actv_cases
+  let (actv_def0, succ_def0, inhb_def0) = (activeCoals res_def, successCoals res_def, inhibit res_def)
 
       -- iv) optimistically mark the pattern succesful:
       ((activeCoals1, inhibit1), successCoals1) =
         foldl
-          (foldfun ((actv_then0, succ_then0), (actv_else0, succ_else0)))
+          ( foldfun
+              ( (actv_def0, succ_def0)
+                  : zip (map activeCoals res_cases) (map successCoals res_cases)
+              )
+          )
           ((activeCoals0, inhibit0), successCoals bu_env)
-          (zip res_mem_then res_mem_else)
+          (L.transpose $ res_mem_def : res_mem_cases)
 
       --  v) unify coalescing results of all branches by taking the union
       --     of all entries in the current/then/else success tables.
-      then_failed =
-        M.difference actv_then0 $
-          M.intersectionWith unionCoalsEntry actv_then0 activeCoals0
-      (_, inhb_then1) =
-        foldl markFailedCoal (then_failed, inhb_then0) (M.keys then_failed)
 
-      else_failed =
-        M.difference actv_else0 $
-          M.intersectionWith unionCoalsEntry actv_else0 activeCoals0
-      (_, inhb_else1) = foldl markFailedCoal (else_failed, inhb_else0) (M.keys else_failed)
+      actv_res = foldr (M.intersectionWith unionCoalsEntry) activeCoals1 $ actv_def0 : map activeCoals res_cases
 
-      actv_res =
-        M.intersectionWith unionCoalsEntry actv_then0 $
-          M.intersectionWith unionCoalsEntry actv_else0 activeCoals1
+      succ_res = foldr (M.unionWith unionCoalsEntry) successCoals1 $ succ_def0 : map successCoals res_cases
 
-      succ_res =
-        M.unionWith unionCoalsEntry succ_then0 $
-          M.unionWith unionCoalsEntry succ_else0 successCoals1
-      --
       -- vi) The step of filtering by 3rd safety condition is not
       --       necessary, because we perform index analysis of the
       --       source/destination uses, and they should have been
       --       filtered during the analysis of the then/else bodies.
       inhibit_res =
-        M.unionWith (<>) inhibit1 $ -- inhibit_res0 $
-          M.unionWith (<>) inhb_then1 inhb_else1
+        M.unionsWith
+          (<>)
+          ( inhibit1
+              : zipWith
+                ( \actv inhb ->
+                    let failed = M.difference actv $ M.intersectionWith unionCoalsEntry actv activeCoals0
+                     in snd $ foldl markFailedCoal (failed, inhb) (M.keys failed)
+                )
+                (actv_def0 : map activeCoals res_cases)
+                (inhb_def0 : map inhibit res_cases)
+          )
   pure
     bu_env
       { activeCoals =
@@ -744,34 +739,75 @@ mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
         inhibit = inhibit_res
       }
   where
-    foldfun _ ((act, _), _) ((m_b, _, _, _), (_, _, _, _))
-      | Nothing <- M.lookup m_b act =
-          error "Imposible Case!!!"
+    -- foldfun _ ((act, _), _) ((m_b, _, _, _), (_, _, _, _))
+    --   | Nothing <- M.lookup m_b act =
+    --       error "Imposible Case!!!"
+    foldfun _ _ [] =
+      error "Imposible Case 1!!!"
+    foldfun _ ((act, _), _) mem_body_results
+      | Nothing <- M.lookup (patMem $ head mem_body_results) act =
+          error "Imposible Case 2!!!"
+    -- foldfun
+    --   ((_, succ_then0), (_, succ_else0))
+    --   ((act, inhb), succc)
+    --   ((m_b, _, r1, mr1), (_, _, r2, mr2))
+    --     | Just info <- M.lookup m_b act,
+    --       Just _ <- M.lookup mr1 succ_then0,
+    --       Just _ <- M.lookup mr2 succ_else0 =
+    --         -- Optimistically promote to successful coalescing and append!
+    --         let info' =
+    --               info
+    --                 { optdeps =
+    --                     M.insert r2 mr2 $
+    --                       M.insert r1 mr1 $
+    --                         optdeps info
+    --                 }
+    --             (act', succc') = markSuccessCoal (act, succc) m_b info'
+    --          in ((act', inhb), succc')
     foldfun
-      ((_, succ_then0), (_, succ_else0))
+      acc
       ((act, inhb), succc)
-      ((m_b, _, r1, mr1), (_, _, r2, mr2))
+      mem_body_results@(MemBodyResult m_b _ _ _ : _)
         | Just info <- M.lookup m_b act,
-          Just _ <- M.lookup mr1 succ_then0,
-          Just _ <- M.lookup mr2 succ_else0 =
+          Just _ <- zipWithM (M.lookup . bodyMem) mem_body_results $ map snd acc =
             -- Optimistically promote to successful coalescing and append!
             let info' =
                   info
                     { optdeps =
-                        M.insert r2 mr2 $
-                          M.insert r1 mr1 $
-                            optdeps info
+                        foldr
+                          (\mbr -> M.insert (bodyName mbr) (bodyMem mbr))
+                          (optdeps info)
+                          mem_body_results
                     }
                 (act', succc') = markSuccessCoal (act, succc) m_b info'
              in ((act', inhb), succc')
+    -- foldfun
+    --   ((actv_then0, _), (actv_else0, _))
+    --   ((act, inhb), succc)
+    --   ((m_b, _, _, mr1), (_, _, _, mr2))
+    --     | Just info <- M.lookup m_b act,
+    --       m_b == mr1 && m_b == mr2,
+    --       Just info_then <- M.lookup mr1 actv_then0,
+    --       Just info_else <- M.lookup mr2 actv_else0 =
+    --         -- Treating special case resembling:
+    --         -- @let x0 = map (+1) a                                  @
+    --         -- @let x3 = if cond then let x1 = x0 with [0] <- 2 in x1@
+    --         -- @                 else let x2 = x0 with [1] <- 3 in x2@
+    --         -- @let z[1] = x3                                        @
+    --         -- In this case the result active table should be the union
+    --         -- of the @m_x@ entries of the then and else active tables.
+    --         let info' =
+    --               unionCoalsEntry info $
+    --                 unionCoalsEntry info_then info_else
+    --             act' = M.insert m_b info' act
+    --          in ((act', inhb), succc)
     foldfun
-      ((actv_then0, _), (actv_else0, _))
+      acc
       ((act, inhb), succc)
-      ((m_b, _, _, mr1), (_, _, _, mr2))
+      mem_body_results@(MemBodyResult m_b _ _ _ : _)
         | Just info <- M.lookup m_b act,
-          m_b == mr1 && m_b == mr2,
-          Just info_then <- M.lookup mr1 actv_then0,
-          Just info_else <- M.lookup mr2 actv_else0 =
+          all ((==) m_b . bodyMem) mem_body_results,
+          Just info' <- zipWithM (M.lookup . bodyMem) mem_body_results $ map fst acc =
             -- Treating special case resembling:
             -- @let x0 = map (+1) a                                  @
             -- @let x3 = if cond then let x1 = x0 with [0] <- 2 in x1@
@@ -779,16 +815,15 @@ mkCoalsTabStm lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env = do
             -- @let z[1] = x3                                        @
             -- In this case the result active table should be the union
             -- of the @m_x@ entries of the then and else active tables.
-            let info' =
-                  unionCoalsEntry info $
-                    unionCoalsEntry info_then info_else
-                act' = M.insert m_b info' act
+            let info'' =
+                  foldl unionCoalsEntry info info'
+                act' = M.insert m_b info'' act
              in ((act', inhb), succc)
-    foldfun _ ((act, inhb), succc) ((m_b, _, _, _), (_, _, _, _)) =
+    foldfun _ ((act, inhb), succc) (mbr : _) =
       -- one of the branches has failed coalescing,
       -- hence remove the coalescing of the result.
 
-      (markFailedCoal (act, inhb) m_b, succc)
+      (markFailedCoal (act, inhb) (patMem mbr), succc)
 --
 -- mkCoalsTabStm lutab (Let pat _ (Op (Inner (Kernel str cs ker_space tps ker_bdy)))) td_env bu_env =
 --  bu_env
@@ -848,9 +883,9 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       --      @let y[0] = a1                @
       --      Meaning the coalescing of @x@ in @let db = copy x@ should fail because
       --      @a1@ appears in the definition of @let x = map (stencil a1) (iota n)@.
-      res_mem_bdy = zipWith (\(b, m_b) (r, m_r) -> (m_b, b, r, m_r)) patmems resmems
-      res_mem_arg = zipWith (\(b, m_b) (r, m_r) -> (m_b, b, r, m_r)) patmems argmems
-      res_mem_ini = zipWith (\(b, m_b) (r, m_r) -> (m_b, b, r, m_r)) patmems inimems
+      res_mem_bdy = zipWith (\(b, m_b) (r, m_r) -> MemBodyResult m_b b r m_r) patmems resmems
+      res_mem_arg = zipWith (\(b, m_b) (r, m_r) -> MemBodyResult m_b b r m_r) patmems argmems
+      res_mem_ini = zipWith (\(b, m_b) (r, m_r) -> MemBodyResult m_b b r m_r) patmems inimems
 
       -- ToDo: check that an optimistic dependency is placed on the ini.
       actv2 =
@@ -873,7 +908,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
       --   the memory block of the result.
       actv3 =
         foldl
-          ( \tab ((_, _, _, m_r), (_, _, _, m_a)) ->
+          ( \tab (MemBodyResult _ _ _ m_r, MemBodyResult _ _ _ m_a) ->
               if m_r == m_a
                 then tab
                 else case M.lookup m_r tab of
@@ -1148,7 +1183,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (FlatUpdate x _ _elm)))
           bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
 mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
-  error $ "In ArrayCoalescing.hs, fun mkCoalsTabStm, illegal pattern for in-place update: " ++ pretty pat
+  error $ "In ArrayCoalescing.hs, fun mkCoalsTabStm, illegal pattern for in-place update: " ++ show pat
 -- default handling
 mkCoalsTabStm lutab (Let pat _ (Op op)) td_env bu_env = do
   -- Process body
@@ -1453,6 +1488,13 @@ appendCoalsInfo mb info_new coalstab =
     Nothing -> M.insert mb info_new coalstab
     Just info_old -> M.insert mb (unionCoalsEntry info_old info_new) coalstab
 
+data MemBodyResult = MemBodyResult
+  { patMem :: VName,
+    patName :: VName,
+    bodyName :: VName,
+    bodyMem :: VName
+  }
+
 -- | Results in pairs of pattern-blockresult pairs of (var name, mem block)
 --   for those if-patterns that are candidates for coalescing.
 findMemBodyResult ::
@@ -1461,7 +1503,7 @@ findMemBodyResult ::
   ScopeTab rep ->
   [PatElem (VarAliases, LetDecMem)] ->
   Body (Aliases rep) ->
-  [(VName, VName, VName, VName)]
+  [MemBodyResult]
 findMemBodyResult activeCoals_tab scope_env patelms bdy =
   let scope_env' = scope_env <> scopeOf (bodyStms bdy)
    in mapMaybe
@@ -1476,7 +1518,7 @@ findMemBodyResult activeCoals_tab scope_env patelms bdy =
                       Just coal_etry ->
                         case M.lookup b (vartab coal_etry) of
                           Nothing -> Nothing
-                          Just _ -> Just (m_b, b, r, m_r)
+                          Just _ -> Just $ MemBodyResult m_b b r m_r
               _ -> Nothing
         )
         (zip patelms $ map resSubExp $ bodyResult bdy)
@@ -1491,9 +1533,9 @@ findMemBodyResult activeCoals_tab scope_env patelms bdy =
 transferCoalsToBody ::
   M.Map VName (TPrimExp Int64 VName) -> -- (PrimExp VName)
   CoalsTab ->
-  (VName, VName, VName, VName) ->
+  MemBodyResult ->
   CoalsTab
-transferCoalsToBody exist_subs activeCoals_tab (m_b, b, r, m_r)
+transferCoalsToBody exist_subs activeCoals_tab (MemBodyResult m_b b r m_r)
   | -- the @Nothing@ pattern for the two lookups cannot happen
     -- because they were already cheked in @findMemBodyResult@
     Just etry <- M.lookup m_b activeCoals_tab,
@@ -1557,10 +1599,21 @@ computeScalarTable scope_table (Let _ _ (DoLoop loop_inits loop_form body)) =
             <> scopeOf (bodyStms body)
       )
       (stmsToList $ bodyStms body)
-computeScalarTable scope_table (Let _ _ (If _ then_body else_body _)) =
-  (<>)
-    <$> (mconcat <$> mapM (computeScalarTable $ scope_table <> scopeOf (bodyStms then_body)) (stmsToList $ bodyStms then_body))
-    <*> (mconcat <$> mapM (computeScalarTable $ scope_table <> scopeOf (bodyStms else_body)) (stmsToList $ bodyStms else_body))
+computeScalarTable scope_table (Let _ _ (Match cond_ses cases body dec)) = do
+  body_tab <- mconcat <$> mapM (computeScalarTable $ scope_table <> scopeOf (bodyStms body)) (stmsToList $ bodyStms body)
+  cases_tab <-
+    mconcat
+      <$> mapM
+        ( \(Case _ b) ->
+            mconcat
+              <$> mapM
+                (computeScalarTable $ scope_table <> scopeOf (bodyStms b))
+                ( stmsToList $
+                    bodyStms body
+                )
+        )
+        cases
+  pure $ body_tab <> cases_tab
 computeScalarTable scope_table (Let _ _ (Op op)) = do
   on_op <- asks scalarTableOnOp
   on_op scope_table op

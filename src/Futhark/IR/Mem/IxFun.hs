@@ -27,7 +27,6 @@ module Futhark.IR.Mem.IxFun
     isLinear,
     substituteInIxFun,
     substituteInLMAD,
-    leastGeneralGeneralization,
     existentialize,
     closeEnough,
     equivalent,
@@ -51,12 +50,10 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust, isJust, isNothing)
-import Debug.Trace
 import Futhark.Analysis.AlgSimplify qualified as AlgSimplify
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)
-import Futhark.Analysis.PrimExp.Generalize qualified as PEG
 import Futhark.IR.Mem.Interval
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
@@ -77,9 +74,6 @@ import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (gcd, id, mod, (.))
-
-traceWith :: Pretty a => String -> a -> a
-traceWith s a = trace (s <> ": " <> pretty a) a
 
 -- | The shape of an index function.
 type Shape num = [num]
@@ -116,9 +110,9 @@ instance Ord Monotonicity where
   (<=) _ Dec = True
 
 instance Ord num => Ord (LMADDim num) where
-  (LMADDim s1 r1 q1 p1 m1) <= (LMADDim s2 r2 q2 p2 m2) =
-    ([q1, s1, r1] < [q2, s2, r2])
-      || ( ([q1, s1, r1] == [q2, s2, r2])
+  (LMADDim s1 q1 p1 m1) <= (LMADDim s2 q2 p2 m2) =
+    ([q1, s1] < [q2, s2])
+      || ( ([q1, s1] == [q2, s2])
              && ( (p1 < p2)
                     || ( (p1 == p2)
                            && (m1 <= m2)
@@ -218,7 +212,7 @@ instance FreeIn num => FreeIn (IxFun num) where
   freeIn' = foldMap freeIn'
 
 instance FreeIn num => FreeIn (LMADDim num) where
-  freeIn' (LMADDim s r n _ _) = freeIn' s <> freeIn' r <> freeIn' n
+  freeIn' (LMADDim s n _ _) = freeIn' s <> freeIn' n
 
 instance Functor LMAD where
   fmap f = runIdentity . traverse (pure . f)
@@ -890,55 +884,6 @@ ixfunMonotonicity (IxFun (lmad :| lmads) _ _) =
     isMonDim mon (LMADDim s _ _ ldmon) =
       s == 0 || mon == ldmon
 
--- | Generalization (anti-unification)
---
--- Anti-unification of two index functions is supported under the following conditions:
---
---   0. Both index functions are represented by ONE lmad (assumed common case!)
---   1. The support array of the two indexfuns have the same dimensionality (we
---   can relax this condition if we use a 1D support, as we probably should!)
---   2. The contiguous property and the per-dimension monotonicity are the same
---   (otherwise we might loose important information; this can be relaxed!)
---   3. Most importantly, both index functions correspond to the same
---   permutation (since the permutation is represented by INTs, this restriction
---   cannot be relaxed, unless we move to a gated-LMAD representation!)
-leastGeneralGeneralization ::
-  Eq v =>
-  IxFun (PrimExp v) ->
-  IxFun (PrimExp v) ->
-  Maybe (IxFun (PrimExp (Ext v)), [(PrimExp v, PrimExp v)])
-leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| []) oshp2 ctg2) = do
-  guard $
-    length oshp1 == length oshp2
-      && ctg1 == ctg2
-      && map ldPerm (lmadDims lmad1) == map ldPerm (lmadDims lmad2)
-      && lmadDMon lmad1 == lmadDMon lmad2
-  let (ctg, dperm, dmon) = (ctg1, lmadPermutation lmad1, lmadDMon lmad1)
-  (dshp, m1) <- generalize [] (lmadDShp lmad1) (lmadDShp lmad2)
-  (oshp, m2) <- generalize m1 oshp1 oshp2
-  (dstd, m3) <- generalize m2 (lmadDSrd lmad1) (lmadDSrd lmad2)
-  (drot, m4) <- generalize m3 (lmadDRot lmad1) (lmadDRot lmad2)
-  let (offt, m5) = PEG.leastGeneralGeneralization m4 (lmadOffset lmad1) (lmadOffset lmad2)
-  let lmad_dims =
-        map (\(a, b, c, d, e) -> LMADDim a b c d e) $
-          zip5 dstd drot dshp dperm dmon
-      lmad = LMAD offt lmad_dims
-  pure (IxFun (lmad :| []) oshp ctg, m5)
-  where
-    lmadDMon = map ldMon . lmadDims
-    lmadDSrd = map ldStride . lmadDims
-    lmadDShp = map ldShape . lmadDims
-    lmadDRot = map ldRotate . lmadDims
-    generalize m l1 l2 =
-      foldM
-        ( \(l_acc, m') (pe1, pe2) -> do
-            let (e, m'') = PEG.leastGeneralGeneralization m' pe1 pe2
-            pure (l_acc ++ [e], m'')
-        )
-        ([], m)
-        (zip l1 l2)
-leastGeneralGeneralization _ _ = Nothing
-
 isSequential :: [Int] -> Bool
 isSequential xs =
   all (uncurry (==)) $ zip xs [0 ..]
@@ -1026,7 +971,7 @@ flatSpan (LMAD _ dims) =
 -- conservativeFlatten :: (IntegralExp e, Ord e, Pretty e) => LMAD e -> LMAD e
 conservativeFlatten :: LMAD (TPrimExp Int64 VName) -> Maybe (LMAD (TPrimExp Int64 VName))
 conservativeFlatten (LMAD offset []) =
-  pure $ LMAD offset [LMADDim 1 0 1 0 Inc]
+  pure $ LMAD offset [LMADDim 1 1 0 Inc]
 conservativeFlatten l@(LMAD _ [_]) =
   pure l
 conservativeFlatten l@(LMAD offset dims) = do
@@ -1035,7 +980,7 @@ conservativeFlatten l@(LMAD offset dims) = do
       gcd
       (ldStride $ head dims)
       $ map ldStride dims
-  pure $ LMAD offset [LMADDim strd 0 (shp + 1) 0 Unknown]
+  pure $ LMAD offset [LMADDim strd (shp + 1) 0 Unknown]
   where
     shp = flatSpan l
 
@@ -1139,7 +1084,7 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 = do
             (Just is1', Just is2') -> do
               let overlap1 = selfOverlap scope asserts less_thans non_negatives is1'
               let overlap2 = selfOverlap scope asserts less_thans non_negatives is2'
-              case traceWith ("is1': " <> pretty is1' <> "\nis2': " <> pretty is2' <> "\noverlaps") (overlap1, overlap2) of
+              case (overlap1, overlap2) of
                 (Nothing, Nothing) ->
                   case namesFromList <$> mapM justLeafExp non_negatives of
                     Just non_negatives' ->
@@ -1221,7 +1166,7 @@ lmadToIntervals lmad@(LMAD offset dims0) =
     offset' = AlgSimplify.simplify0 $ untyped offset
 
     helper :: LMADDim (TPrimExp Int64 VName) -> Interval
-    helper (LMADDim strd _ shp _ _) = do
+    helper (LMADDim strd shp _ _) = do
       Interval 0 (AlgSimplify.simplify' shp) (AlgSimplify.simplify' strd)
 
 -- | Dynamically determine if two 'LMADDim' are equal.

@@ -161,17 +161,12 @@ analyseStm (lumap0, used0) (Let pat _ e) = do
       (lumap_defbody, used_defbody) <- analyseBody lumap used defbody
       let (lumap', used') =
             (lumap_defbody <> lumap_cases, used_cases <> used_defbody)
-              & flip (foldl addAliasesFromBodyRes) (zip (patElems pat) (map resSubExp $ bodyResult then_body))
-              & flip (foldl addAliasesFromBodyRes) (zip (patElems pat) (map resSubExp $ bodyResult else_body))
+              & flip (foldl addAliasesFromBodyRes) (zip (patElems pat) (map resSubExp $ bodyResult defbody))
           nms = (freeIn ses <> freeIn dec) `namesSubtract` used'
       pure
         ( insertNames pat_name nms lumap',
           used' <> nms
         )
-    analyseExp (lumap, used) (DoLoop merge form body) = do
-      (lumap', used') <- analyseBody lumap used body
-      let nms = (freeIn merge <> freeIn form) `namesSubtract` used'
-      pure (insertNames pat_name nms lumap', used' <> nms)
     analyseExp (lumap, used) (DoLoop merge form body) = do
       let (lumap', used') =
             zip (patElems pat) (map resSubExp $ bodyResult body)

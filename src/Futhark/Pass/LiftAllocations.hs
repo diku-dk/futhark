@@ -72,10 +72,10 @@ liftAllocationsInStms (stms :|> stm@(Let pat _ (Op (Inner inner)))) lifted acc t
   if pat_names `namesIntersect` to_lift
     then liftAllocationsInStms stms (stm' :<| lifted) acc ((to_lift `namesSubtract` pat_names) <> freeIn stm)
     else liftAllocationsInStms stms lifted (stm' :<| acc) to_lift
-liftAllocationsInStms (stms :|> stm@(Let pat aux (If cond then_body else_body dec))) lifted acc to_lift = do
-  then_body' <- liftAllocationsInBody then_body
-  else_body' <- liftAllocationsInBody else_body
-  let stm' = stm {stmExp = If cond then_body' else_body' dec}
+liftAllocationsInStms (stms :|> stm@(Let pat aux (Match cond_ses cases body dec))) lifted acc to_lift = do
+  cases' <- mapM (\(Case p b) -> Case p <$> liftAllocationsInBody b) cases
+  body' <- liftAllocationsInBody body
+  let stm' = stm {stmExp = Match cond_ses cases' body' dec}
       pat_names = namesFromList $ patNames pat
   if pat_names `namesIntersect` to_lift
     then
@@ -84,9 +84,9 @@ liftAllocationsInStms (stms :|> stm@(Let pat aux (If cond then_body else_body de
         (stm' :<| lifted)
         acc
         ( (to_lift `namesSubtract` pat_names)
-            <> freeIn cond
-            <> freeIn then_body'
-            <> freeIn else_body'
+            <> freeIn cond_ses
+            <> freeIn cases
+            <> freeIn body
             <> freeIn dec
             <> freeIn aux
         )
