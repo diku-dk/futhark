@@ -43,7 +43,7 @@ testDistributeOffset =
             Interval 0 32 32,
             Interval 0 32 1
           ]
-      res == [Interval 1 1 (1024 * r), Interval 0 32 32, Interval 0 32 1] @? "Failed. Got " <> pretty res,
+      res == [Interval 1 1 (1024 * r), Interval 0 32 32, Interval 0 32 1] @? "Failed. Got " <> show res,
     testCase "Stride is 32, offsets are multples of 32" $ do
       let n = TPrimExp $ LeafExp (name "n" 0) $ IntType Int64
       let g1 = TPrimExp $ LeafExp (name "g" 1) $ IntType Int64
@@ -64,5 +64,5 @@ testDistributeOffset =
              Interval 0 32 1
            ]
         @? "Failed. Got "
-          <> pretty res
+          <> show res
   ]

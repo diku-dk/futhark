@@ -36,13 +36,6 @@ permute ::
   IxFun num
 permute (l, a) x = (I.permute l x, IA.permute a x)
 
-rotate ::
-  IntegralExp num =>
-  IxFun num ->
-  Indices num ->
-  IxFun num
-rotate (l, a) x = (I.rotate l x, IA.rotate a x)
-
 reshape ::
   IntegralExp num =>
   IxFun num ->
