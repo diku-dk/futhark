@@ -349,10 +349,25 @@ internaliseAppExp desc _ e@E.Apply {} =
 
       -- Some functions are magical (overloaded) and we handle that here.
       case () of
-        -- Overloaded functions never take array arguments (except
-        -- equality, but those cannot be existential), so we can safely
-        -- ignore the existential dimensions.
         ()
+          -- Short-circuiting operators are magical.
+          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+            baseString (qualLeaf qfname) == "&&",
+            [(x, _), (y, _)] <- args ->
+              internaliseExp desc $
+                E.AppExp
+                  (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
+                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
+          | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+            baseString (qualLeaf qfname) == "||",
+            [(x, _), (y, _)] <- args ->
+              internaliseExp desc $
+                E.AppExp
+                  (E.If x (E.Literal (E.BoolValue True) mempty) y mempty)
+                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
+          -- Overloaded functions never take array arguments (except
+          -- equality, but those cannot be existential), so we can safely
+          -- ignore the existential dimensions.
           | Just internalise <- isOverloadedFunction qfname (map fst args) loc ->
               internalise desc
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
@@ -1274,6 +1289,10 @@ internaliseBinOp ::
   E.PrimType ->
   E.PrimType ->
   InternaliseM [I.SubExp]
+internaliseBinOp _ desc E.LogAnd x y E.Bool _ =
+  simpleBinOp desc I.LogAnd x y
+internaliseBinOp _ desc E.LogOr x y E.Bool _ =
+  simpleBinOp desc I.LogOr x y
 internaliseBinOp _ desc E.Plus x y (E.Signed t) _ =
   simpleBinOp desc (I.Add t I.OverflowWrap) x y
 internaliseBinOp _ desc E.Plus x y (E.Unsigned t) _ =
@@ -1508,17 +1527,6 @@ isOverloadedFunction qname args loc = do
           fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
     handleIntrinsicOps _ _ = Nothing
 
-    -- Short-circuiting operators are magical.
-    handleOps [x, y] "&&" = Just $ \desc ->
-      internaliseExp desc $
-        E.AppExp
-          (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
-          (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
-    handleOps [x, y] "||" = Just $ \desc ->
-      internaliseExp desc $
-        E.AppExp
-          (E.If x (E.Literal (E.BoolValue True) mempty) y mempty)
-          (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
     -- Handle equality and inequality specially, to treat the case of
     -- arrays.
     handleOps [xe, ye] op
