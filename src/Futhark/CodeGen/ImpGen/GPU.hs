@@ -16,7 +16,6 @@ import Data.Bifunctor (second)
 import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe
-import Futhark.CodeGen.ImpCode.GPU (bytes)
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import Futhark.CodeGen.ImpGen qualified

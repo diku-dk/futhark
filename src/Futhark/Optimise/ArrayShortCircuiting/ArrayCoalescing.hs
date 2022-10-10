@@ -1490,7 +1490,7 @@ appendCoalsInfo mb info_new coalstab =
 
 data MemBodyResult = MemBodyResult
   { patMem :: VName,
-    patName :: VName,
+    _patName :: VName,
     bodyName :: VName,
     bodyMem :: VName
   }
@@ -1599,7 +1599,7 @@ computeScalarTable scope_table (Let _ _ (DoLoop loop_inits loop_form body)) =
             <> scopeOf (bodyStms body)
       )
       (stmsToList $ bodyStms body)
-computeScalarTable scope_table (Let _ _ (Match cond_ses cases body dec)) = do
+computeScalarTable scope_table (Let _ _ (Match _ cases body _)) = do
   body_tab <- mconcat <$> mapM (computeScalarTable $ scope_table <> scopeOf (bodyStms body)) (stmsToList $ bodyStms body)
   cases_tab <-
     mconcat

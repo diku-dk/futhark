@@ -45,7 +45,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Function (on, (&))
-import Data.List (elemIndex, partition, sort, sortBy, zip4, zip5, zipWith4, zipWith5)
+import Data.List (elemIndex, partition, sort, sortBy, zip4, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
@@ -882,17 +882,6 @@ ixfunMonotonicity (IxFun (lmad :| lmads) _ _) =
       Bool
     isMonDim mon (LMADDim s _ _ ldmon) =
       s == 0 || mon == ldmon
-
-isSequential :: [Int] -> Bool
-isSequential xs =
-  all (uncurry (==)) $ zip xs [0 ..]
-
-existentializeExp :: TPrimExp t v -> State [TPrimExp t v] (TPrimExp t (Ext v))
-existentializeExp e = do
-  i <- gets length
-  modify (++ [e])
-  let t = primExpType $ untyped e
-  pure $ TPrimExp $ LeafExp (Ext i) t
 
 -- | Turn all the leaves of the index function into 'Ext's.  We
 --  require that there's only one LMAD, that the index function is

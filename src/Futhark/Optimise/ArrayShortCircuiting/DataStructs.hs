@@ -42,7 +42,7 @@ import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SeqMem
-import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
+import Futhark.Util.Pretty hiding (line, sep, (</>))
 import Prelude
 
 type ScopeTab rep = Scope (Aliases rep)
@@ -203,7 +203,7 @@ data BotUpEnv = BotUpEnv
 
 instance Pretty AccessSummary where
   pretty Undeterminable = "Undeterminable"
-  pretty (Set a) = "Access-Set:" -- <+> pretty a <+> " "
+  pretty (Set _) = "Access-Set:" -- <+> pretty a <+> " "
 
 instance Pretty MemRefs where
   pretty (MemRefs a b) = "( Use-Sum:" <+> pretty a <+> "Write-Sum:" <+> pretty b <> ")"
@@ -219,7 +219,7 @@ instance Pretty ArrayMemBound where
     "{" <> pretty ptp <> "," <+> pretty shp <> "," <+> pretty m_nm <> "," <+> pretty ixfn <> "}"
 
 instance Pretty Coalesced where
-  pretty (Coalesced knd mbd subs) =
+  pretty (Coalesced knd mbd _) =
     "(Kind:"
       <+> pretty knd <> ", membds:"
       <+> pretty mbd -- <> ", subs:" <+> pretty subs

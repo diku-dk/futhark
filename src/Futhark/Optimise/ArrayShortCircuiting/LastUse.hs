@@ -19,7 +19,7 @@ module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg,
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
-import Data.Bifunctor (bimap, first)
+import Data.Bifunctor (bimap)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
@@ -175,7 +175,7 @@ lastUseExp ::
   --    2. the set of last-used vars in the expression at this level,
   --    3. the updated used names, now including expression's free vars.
   LastUseM rep (LUTabFun, Names, Names)
-lastUseExp (Match cond_ses cases body dec) used_nms = do
+lastUseExp (Match _ cases body _) used_nms = do
   -- For an if-then-else, we duplicate the last use at each body level, meaning
   -- we record the last use of the outer statement, and also the last use in the
   -- statement in the inner bodies. We can safely ignore the if-condition as it is

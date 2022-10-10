@@ -19,8 +19,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     sKernelThread,
     KernelAttrs (..),
     defKernelAttrs,
-    sReplicate,
-    sIota,
     sCopyKernel,
     lvlKernelAttrs,
     allocLocal,

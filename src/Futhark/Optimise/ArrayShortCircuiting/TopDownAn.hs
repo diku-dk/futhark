@@ -86,7 +86,7 @@ getDirAliasFromExp (BasicOp (Reshape ReshapeArbitrary shp x)) =
   Just (x, (`IxFun.reshape` shapeDims (fmap pe64 shp)))
 getDirAliasFromExp (BasicOp (Rearrange _ _)) =
   Nothing
-getDirAliasFromExp (BasicOp (Rotate rs x)) =
+getDirAliasFromExp (BasicOp (Rotate _ _)) =
   Nothing -- Just (x, (`IxFun.rotate` fmap pe64 rs))
 getDirAliasFromExp (BasicOp (Index x slc)) =
   Just (x, (`IxFun.slice` (Slice $ map (fmap pe64) $ unSlice slc)))
