@@ -201,6 +201,9 @@ data BotUpEnv = BotUpEnv
     inhibit :: InhibitTab
   }
 
+instance Pretty CoalsTab where
+  pretty = pretty . M.toList
+
 instance Pretty AccessSummary where
   pretty Undeterminable = "Undeterminable"
   pretty (Set _) = "Access-Set:" -- <+> pretty a <+> " "
@@ -234,11 +237,11 @@ instance Pretty CoalsEntry where
         <> ", AliasMems:"
       <+> pretty (alsmem etry)
       <+> ", optdeps:"
-      -- <+> pretty (optdeps etry)
+      <+> pretty (M.toList $ optdeps etry)
       <+> ", memrefs:"
       <+> pretty (memrefs etry)
       <+> ", vartab:"
-      -- <+> pretty (vartab etry)
+      <+> pretty (M.toList $ vartab etry)
       <+> "}"
       <+> "\n"
 
