@@ -327,6 +327,7 @@ createsNewArrOK (BasicOp Copy {}) = True
 createsNewArrOK (BasicOp Concat {}) = True
 createsNewArrOK (BasicOp ArrayLit {}) = True
 createsNewArrOK (BasicOp Scratch {}) = True
+createsNewArrOK (BasicOp Rotate {}) = True
 createsNewArrOK (Op op) = createsNewArrOp op
 createsNewArrOK _ = False
 
