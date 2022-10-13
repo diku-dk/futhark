@@ -2,6 +2,9 @@
 /*
 !/*/
 
+# The previous lines explicitly unignores .git
+/.git
+
 # Ignore Emacs autosave files.
 
 \#*\#
