@@ -40,6 +40,7 @@ data StaticVal
     -- holes.)
     DynamicFun (Exp, StaticVal) StaticVal
   | IntrinsicSV
+  | HoleSV SrcLoc
   deriving (Show)
 
 -- | The type is Just if this is a polymorphic binding that must be
@@ -111,6 +112,8 @@ replaceStaticValSizes globals orig_substs sv =
         replaceStaticValSizes globals orig_substs sv2
     IntrinsicSV ->
       IntrinsicSV
+    HoleSV loc ->
+      HoleSV loc
   where
     tv substs =
       identityMapper
@@ -219,6 +222,7 @@ restrictEnvTo (FV m) = asks restrict
     restrict' u (DynamicFun (e, sv1) sv2) =
       DynamicFun (e, restrict' u sv1) $ restrict' u sv2
     restrict' _ IntrinsicSV = IntrinsicSV
+    restrict' _ (HoleSV loc) = HoleSV loc
     restrict'' u (Binding t sv) = Binding t $ restrict' u sv
 
 -- | Defunctionalization monad.  The Reader environment tracks both
@@ -325,6 +329,8 @@ sizesToRename :: StaticVal -> S.Set VName
 sizesToRename (DynamicFun (_, sv1) sv2) =
   sizesToRename sv1 <> sizesToRename sv2
 sizesToRename IntrinsicSV =
+  mempty
+sizesToRename HoleSV {} =
   mempty
 sizesToRename Dynamic {} =
   mempty
@@ -498,11 +504,13 @@ defuncExp e@(Var qn (Info t) loc) = do
     IntrinsicSV -> do
       (pats, body, tp) <- etaExpand (typeOf e) e
       defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
+    HoleSV hole_loc ->
+      pure (Hole (Info t) hole_loc, HoleSV hole_loc)
     _ ->
       let tp = typeFromSV sv
        in pure (Var qn (Info tp) loc, sv)
 defuncExp (Hole (Info t) loc) =
-  pure (Hole (Info t) loc, IntrinsicSV)
+  pure (Hole (Info t) loc, HoleSV loc)
 defuncExp (Ascript e0 tydecl loc)
   | orderZero (typeOf e0) = do
       (e0', sv) <- defuncExp e0
@@ -933,8 +941,18 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
       pure (apply_e, sv)
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.
-    IntrinsicSV
-      | depth == 0 ->
+    IntrinsicSV -> intrinsicOrHole argtypes e' sv1
+    HoleSV _ -> intrinsicOrHole argtypes e' sv1
+    _ ->
+      error $
+        "Application of an expression\n"
+          ++ prettyString e1
+          ++ "\nthat is neither a static lambda "
+          ++ "nor a dynamic function, but has static value:\n"
+          ++ show sv1
+  where
+    intrinsicOrHole argtypes e' sv
+      | depth == 0 =
           -- If the intrinsic is fully applied, then we are done.
           -- Otherwise we need to eta-expand it and recursively
           -- defunctionalise. XXX: might it be better to simply
@@ -945,14 +963,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             else do
               (pats, body, tp) <- etaExpand (typeOf e') e'
               defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
-      | otherwise -> pure (e', IntrinsicSV)
-    _ ->
-      error $
-        "Application of an expression\n"
-          ++ prettyString e1
-          ++ "\nthat is neither a static lambda "
-          ++ "nor a dynamic function, but has static value:\n"
-          ++ show sv1
+      | otherwise = pure (e', sv)
 defuncApply depth e@(Var qn (Info t) loc) = do
   let (argtypes, _) = unfoldFunType t
   sv <- lookupVar (toStruct t) (qualLeaf qn)
@@ -1129,6 +1140,8 @@ typeFromSV (SumSV name svs fields) =
    in Scalar $ Sum $ M.insert name svs' $ M.fromList fields
 typeFromSV IntrinsicSV =
   error "Tried to get the type from the static value of an intrinsic."
+typeFromSV HoleSV {} =
+  error "Tried to get the type from the static value of a hole."
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
