@@ -47,6 +47,7 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
+import Futhark.Pass.Flatten (flattenSOACs)
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
 import Futhark.Passes
@@ -571,6 +572,7 @@ commandLineOptions =
     kernelsPassOption sinkGPU [],
     kernelsPassOption reduceDeviceSyncs [],
     typedPassOption soacsProg GPU extractKernels [],
+    typedPassOption soacsProg GPU flattenSOACs [],
     typedPassOption soacsProg MC extractMulticore [],
     iplOption [],
     allocateOption "a",

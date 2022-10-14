@@ -380,6 +380,9 @@ library
       Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
+      Futhark.Pass.Flatten
+      Futhark.Pass.Flatten.Builtins
+      Futhark.Pass.Flatten.Distribute
       Futhark.Pass.KernelBabysitting
       Futhark.Pass.Simplify
       Futhark.Passes
