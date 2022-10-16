@@ -86,7 +86,6 @@ import Futhark.Transform.Substitute
 import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty
   ( Doc,
-    Pretty,
     apply,
     hsep,
     parens,

@@ -28,8 +28,7 @@ import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.Pretty
-  ( Pretty,
-    nestedBlock,
+  ( nestedBlock,
     pretty,
     (<+>),
     (</>),
