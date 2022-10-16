@@ -424,13 +424,13 @@ eIndex arr i = do
   pure $ BasicOp $ Index arr $ fullSlice arr_t [DimFix i']
 
 -- | The last element of the given array.
-eLast :: MonadBuilder m => VName -> m VName
+eLast :: MonadBuilder m => VName -> m (Exp (Rep m))
 eLast arr = do
   n <- arraySize 0 <$> lookupType arr
   nm1 <-
     letSubExp "nm1" . BasicOp $
       BinOp (Sub Int64 OverflowUndef) n (intConst Int64 1)
-  letExp (baseString arr <> "_last") =<< eIndex arr (eSubExp nm1)
+  eIndex arr (eSubExp nm1)
 
 -- | Construct an unspecified value of the given type.
 eBlank :: MonadBuilder m => Type -> m (Exp (Rep m))
