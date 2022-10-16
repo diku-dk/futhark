@@ -86,6 +86,8 @@ module Futhark.Construct
     eAny,
     eDimInBounds,
     eOutOfBounds,
+    eIndex,
+    eLast,
 
     -- * Other building blocks
     asIntZ,
@@ -413,6 +415,22 @@ eOutOfBounds arr is = do
           BasicOp $
             BinOp LogOr less_than_zero greater_than_size
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
+
+-- | The array element at this index.
+eIndex :: MonadBuilder m => VName -> m (Exp (Rep m)) -> m (Exp (Rep m))
+eIndex arr i = do
+  i' <- letSubExp "i" =<< i
+  arr_t <- lookupType arr
+  pure $ BasicOp $ Index arr $ fullSlice arr_t [DimFix i']
+
+-- | The last element of the given array.
+eLast :: MonadBuilder m => VName -> m VName
+eLast arr = do
+  n <- arraySize 0 <$> lookupType arr
+  nm1 <-
+    letSubExp "nm1" . BasicOp $
+      BinOp (Sub Int64 OverflowUndef) n (intConst Int64 1)
+  letExp (baseString arr <> "_last") =<< eIndex arr (eSubExp nm1)
 
 -- | Construct an unspecified value of the given type.
 eBlank :: MonadBuilder m => Type -> m (Exp (Rep m))
