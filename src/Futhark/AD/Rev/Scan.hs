@@ -79,7 +79,7 @@ mkScanLinFunO t = do
 -- but insert explicit indexing to reverse inside the map.
 mkScan2ndMaps :: SubExp -> (Type, VName, (VName, VName)) -> ADM VName
 mkScan2ndMaps w (arr_tp, y_adj, (ds, cs)) = do
-  y_adj_last <- eLast y_adj
+  y_adj_last <- letExp (baseString y_adj <> "_last") =<< eLast y_adj
 
   par_i <- newParam "i" $ Prim int64
   lam <- mkLambda [par_i] $ do
