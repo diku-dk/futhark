@@ -57,7 +57,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
 import Futhark.IR.Aliases hiding (lookupAliases)
 import Futhark.Util
-import Futhark.Util.Pretty (Pretty, align, docText, indent, ppTuple', pretty, (<+>), (</>))
+import Futhark.Util.Pretty (align, docText, indent, ppTuple', pretty, (<+>), (</>))
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.

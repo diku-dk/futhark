@@ -69,7 +69,7 @@ import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks, maybeNth)
-import Futhark.Util.Pretty (Doc, Pretty, align, comma, commasep, docText, parens, ppTuple', pretty, (<+>), (</>))
+import Futhark.Util.Pretty (Doc, align, comma, commasep, docText, parens, ppTuple', pretty, (<+>), (</>))
 import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
