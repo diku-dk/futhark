@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Fixed compiler crash when attempting to tile irregular parallelism (#1739).
 
+* Incorrect regularity checking in loop interchange (#1744).
+
 ## [0.22.2]
 
 ### Added

@@ -376,7 +376,7 @@ maybeDistributeStm stm@(Let pat _ (Op (Screma w arrs form))) acc
         Nothing -> addStmToAcc stm acc
         Just acc' -> distribute =<< onInnerMap (MapLoop pat (stmAux stm) w lam arrs) acc'
 maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
-  | all (`notNameIn` freeIn pat) (patNames pat),
+  | all (`notNameIn` freeIn (patTypes pat)) (patNames pat),
     bodyContainsParallelism body =
       distributeSingleStm acc stm >>= \case
         Just (kernels, res, nest, acc')
