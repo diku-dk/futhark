@@ -1033,7 +1033,7 @@ substituteInModule substs = onModule
     onModule (Module (Env terms types _)) =
       Module $ Env (replaceM onTerm terms) (replaceM onType types) mempty
     onModule (ModuleFun f) =
-      ModuleFun $ \m -> onModule <$> f (substituteInModule (M.mapMaybe maybeHead rev_substs) m)
+      ModuleFun $ \m -> onModule <$> f (substituteInModule substs m)
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m

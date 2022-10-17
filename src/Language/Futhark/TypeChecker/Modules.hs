@@ -454,11 +454,19 @@ matchMTys orig_mty orig_mty_sig =
       (ModFun (FunSig mod_abs mod_pmod mod_mod))
       (ModFun (FunSig sig_abs sig_pmod sig_mod))
       loc = do
+        -- We need to use different substitutions when matching
+        -- parameter and body signatures - this is because the
+        -- concrete parameter must be *at least as* general as the
+        -- ascripted parameter, while the concrete body must be *at
+        -- most as* general as the ascripted body.
         abs_substs <- resolveAbsTypes mod_abs mod_pmod sig_abs loc
+        p_abs_substs <- resolveAbsTypes sig_abs sig_pmod mod_abs loc
         let abs_subst_to_type =
               old_abs_subst_to_type <> M.map (substFromAbbr . snd) abs_substs
+            p_abs_subst_to_type =
+              old_abs_subst_to_type <> M.map (substFromAbbr . snd) p_abs_substs
             abs_name_substs = M.map (qualLeaf . fst) abs_substs
-        pmod_substs <- matchMods abs_subst_to_type quals mod_pmod sig_pmod loc
+        pmod_substs <- matchMods p_abs_subst_to_type quals sig_pmod mod_pmod loc
         mod_substs <- matchMTys' abs_subst_to_type quals mod_mod sig_mod loc
         pure (pmod_substs <> mod_substs <> abs_name_substs)
 

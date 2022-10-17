@@ -198,21 +198,18 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
         . localScope (const f_closure) -- Start afresh.
         . generating
         $ do
-          outer_substs <- scopeSubsts <$> askScope
           abs <- asks envAbs
-          let forward (k, v) = (lookupSubst k outer_substs, v)
-              p_substs' = M.fromList $ map forward $ M.toList p_substs
-              keep k _ = k `M.member` p_substs' || k `S.member` abs
+          let keep k _ = k `M.member` p_substs || k `S.member` abs
               abs_substs =
                 M.filterWithKey keep $
-                  M.map (`lookupSubst` scopeSubsts (modScope arg_mod)) p_substs'
+                  M.map (`lookupSubst` scopeSubsts (modScope arg_mod)) p_substs
                     <> scopeSubsts f_closure
                     <> scopeSubsts (modScope arg_mod)
           extendScope
             ( Scope
                 abs_substs
                 ( M.singleton (modParamName f_p) $
-                    substituteInMod p_substs' arg_mod
+                    substituteInMod p_substs arg_mod
                 )
             )
             $ do
