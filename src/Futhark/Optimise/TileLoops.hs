@@ -126,7 +126,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
         not $ null $ tiledInputs inputs,
         gtid_y : gtid_x : top_gtids_rev <- reverse gtids,
         kdim_y : kdim_x : top_kdims_rev <- reverse kdims,
-        (prestms', poststms') <-
+        Just (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
         used <- freeIn stm_to_tile <> freeIn poststms' <> freeIn stms_res =
           Just . injectPrelude initial_space variance prestms' used
@@ -147,7 +147,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
         inputs <- map (is1DTileable gtid variance) arrs,
         not $ null $ tiledInputs inputs,
         gtid `notNameIn` branch_variant,
-        (prestms', poststms') <-
+        Just (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
         used <- freeIn stm_to_tile <> freeIn poststms' <> freeIn stms_res =
           Just . injectPrelude initial_space variance prestms' used
@@ -165,7 +165,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- Tiling inside for-loop.
       | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
         not $ any ((`nameIn` freeIn merge) . paramName . fst) merge,
-        (prestms', poststms') <-
+        Just (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
           let branch_variant' =
                 branch_variant
@@ -212,15 +212,22 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             descend (prestms <> oneStm stm_to_tile) poststms
 
 -- | Move statements from prelude to postlude if they are not used in
--- the tiled statement anyway.
+-- the tiled statement anyway.  Also, fail if the provided Stm uses
+-- anything from the resulting prelude whose size is not free in the
+-- prelude.
 preludeToPostlude ::
   VarianceTable ->
   Stms GPU ->
   Stm GPU ->
   Stms GPU ->
-  (Stms GPU, Stms GPU)
-preludeToPostlude variance prelude stm_to_tile postlude =
-  (prelude_used, prelude_not_used <> postlude)
+  Maybe (Stms GPU, Stms GPU)
+preludeToPostlude variance prelude stm_to_tile postlude = do
+  let prelude_sizes =
+        freeIn $ foldMap (patTypes . stmPat) prelude_used
+      prelude_bound =
+        namesFromList $ foldMap (patNames . stmPat) prelude_used
+  guard $ not $ prelude_sizes `namesIntersect` prelude_bound
+  Just (prelude_used, prelude_not_used <> postlude)
   where
     used_in_tiled = freeIn stm_to_tile
 
