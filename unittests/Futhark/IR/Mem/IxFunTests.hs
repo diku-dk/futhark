@@ -458,7 +458,7 @@ _test_disjoint3 =
                   namesToList $
                     freeIn lm1 <> freeIn lm2 <> freeIn lessthans <> freeIn asserts
          in IxFunLMAD.disjoint3 scmap asserts lessthans nonnegs lm1 lm2
-   in [ testCase "lm1 and lm2" $ do
+   in [ testCase "lm1 and lm2" $
           let lessthans =
                 [ ( i_12214,
                     sdiv64 (sub64 n_blab 1) block_size_12121
@@ -477,7 +477,7 @@ _test_disjoint3 =
               n_blab = TPrimExp $ LeafExp (foo "n" 1337) $ IntType Int64
               gtid_12553 = TPrimExp $ LeafExp (foo "gtid" 12553) $ IntType Int64
 
-          let lm1 =
+              lm1 =
                 IxFunLMAD.LMAD
                   (add_nw64 (mul64 block_size_12121 i_12214) (mul_nw64 (add_nw64 gtid_12553 1) (sub64 (mul64 block_size_12121 n_blab) block_size_12121)))
                   [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (sub_nw64 (sub_nw64 (add64 1 i_12214) gtid_12553) 1) 0 IxFunLMAD.Inc,
@@ -513,11 +513,10 @@ _test_disjoint3 =
                     IxFunLMAD.LMADDim 1 (block_size_12121 + 1) 1 IxFunLMAD.Inc
                   ]
 
-          res1 <- disjointTester asserts lessthans lm1 lm_w
-          res2 <- disjointTester asserts lessthans lm2 lm_w
-          res3 <- disjointTester asserts lessthans lm_lower_per lm_blocks
-
-          res1 && res2 && res3 @? "Failed",
+              res1 = disjointTester asserts lessthans lm1 lm_w
+              res2 = disjointTester asserts lessthans lm2 lm_w
+              res3 = disjointTester asserts lessthans lm_lower_per lm_blocks
+           in res1 && res2 && res3 @? "Failed",
         testCase "nw second half" $ do
           let lessthans =
                 [ ( i_12214,
@@ -572,12 +571,12 @@ _test_disjoint3 =
                     IxFunLMAD.LMADDim 1 block_size_12121 1 IxFunLMAD.Inc
                   ]
 
-          res1 <- disjointTester asserts lessthans lm1 lm_w
-          res2 <- disjointTester asserts lessthans lm2 lm_w
-          res3 <- disjointTester asserts lessthans lm3 lm_w
-          res4 <- disjointTester asserts lessthans lm4 lm_w
-          res1 && res2 && res3 && res4 @? "Failed " <> show [res1, res2, res3, res4],
-        testCase "lud long" $ do
+              res1 = disjointTester asserts lessthans lm1 lm_w
+              res2 = disjointTester asserts lessthans lm2 lm_w
+              res3 = disjointTester asserts lessthans lm3 lm_w
+              res4 = disjointTester asserts lessthans lm4 lm_w
+           in res1 && res2 && res3 && res4 @? "Failed " <> show [res1, res2, res3, res4],
+        testCase "lud long" $
           let lessthans =
                 [ (step, num_blocks - 1 :: TPrimExp Int64 VName)
                 ]
@@ -619,7 +618,7 @@ _test_disjoint3 =
                 [ untyped ((1 :: TPrimExp Int64 VName) .<. num_blocks :: TPrimExp Bool VName)
                 ]
 
-          res1 <- disjointTester asserts lessthans lm1 lm_w1
-          res2 <- disjointTester asserts lessthans lm1 lm_w2
-          res1 && res2 @? "Failed"
+              res1 = disjointTester asserts lessthans lm1 lm_w1
+              res2 = disjointTester asserts lessthans lm1 lm_w2
+           in res1 && res2 @? "Failed"
       ]

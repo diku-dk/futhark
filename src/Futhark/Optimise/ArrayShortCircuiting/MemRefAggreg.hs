@@ -14,10 +14,9 @@ module Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 where
 
 import Control.Monad
-import Control.Monad.IO.Class
 import Data.Function ((&))
 import Data.Functor ((<&>))
-import Data.List (intersect, uncons)
+import Data.List (intersect, partition, uncons)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -165,7 +164,7 @@ recordMemRefUses ::
   TopDnEnv rep ->
   BotUpEnv ->
   Stm (Aliases rep) ->
-  IO (CoalsTab, InhibitTab)
+  (CoalsTab, InhibitTab)
 recordMemRefUses td_env bu_env stm =
   let active_tab = activeCoals bu_env
       inhibit_tab = inhibit bu_env
@@ -180,55 +179,53 @@ recordMemRefUses td_env bu_env stm =
                     else state
               )
               (active_tab, inhibit_tab)
-            & pure
-        Just (stm_wrts, stm_uses) -> do
-          (mb_wrts, prev_uses, mb_lmads) <-
-            fmap unzip3 $
-              liftIO $
-                mapM
-                  ( \(m_b, etry) -> do
-                      let alias_m_b = getAliases mempty m_b
-                          stm_uses' = filter ((`notNameIn` alias_m_b) . tupFst) stm_uses
-                          all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
-                          ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
-                          lmads' = mapMaybe mbLmad ixfns
-                          lmads'' =
-                            if length lmads' == length ixfns
-                              then Set $ S.fromList lmads'
-                              else Undeterminable
-                          wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
-                          wrt_tmps = mapMaybe mbLmad wrt_ixfns
-                          prev_use =
-                            translateAccessSummary (scope td_env) (scalarTable td_env) $
-                              (dstrefs . memrefs) etry
-                          wrt_lmads' =
-                            if length wrt_tmps == length wrt_ixfns
-                              then Set $ S.fromList wrt_tmps
-                              else Undeterminable
-                          original_mem_aliases =
-                            fmap tupFst stm_uses
-                              & uncons
-                              & fmap fst
-                              & (=<<) (`M.lookup` active_tab)
-                              & maybe mempty alsmem
-                          (wrt_lmads'', lmads) =
-                            if m_b `nameIn` original_mem_aliases
-                              then (wrt_lmads' <> lmads'', Set mempty)
-                              else (wrt_lmads', lmads'')
-                      no_overlap <- noMemOverlap td_env prev_use wrt_lmads''
-                      let wrt_lmads =
-                            if no_overlap
-                              then Just wrt_lmads''
-                              else Nothing
-                      pure (wrt_lmads, prev_use, lmads)
-                  )
-                  active_etries
+        Just (stm_wrts, stm_uses) ->
+          let (mb_wrts, prev_uses, mb_lmads) =
+                unzip3 $
+                  map
+                    ( \(m_b, etry) ->
+                        let alias_m_b = getAliases mempty m_b
+                            stm_uses' = filter ((`notNameIn` alias_m_b) . tupFst) stm_uses
+                            all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
+                            ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
+                            lmads' = mapMaybe mbLmad ixfns
+                            lmads'' =
+                              if length lmads' == length ixfns
+                                then Set $ S.fromList lmads'
+                                else Undeterminable
+                            wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
+                            wrt_tmps = mapMaybe mbLmad wrt_ixfns
+                            prev_use =
+                              translateAccessSummary (scope td_env) (scalarTable td_env) $
+                                (dstrefs . memrefs) etry
+                            wrt_lmads' =
+                              if length wrt_tmps == length wrt_ixfns
+                                then Set $ S.fromList wrt_tmps
+                                else Undeterminable
+                            original_mem_aliases =
+                              fmap tupFst stm_uses
+                                & uncons
+                                & fmap fst
+                                & (=<<) (`M.lookup` active_tab)
+                                & maybe mempty alsmem
+                            (wrt_lmads'', lmads) =
+                              if m_b `nameIn` original_mem_aliases
+                                then (wrt_lmads' <> lmads'', Set mempty)
+                                else (wrt_lmads', lmads'')
+                            no_overlap = noMemOverlap td_env prev_use wrt_lmads''
+                            wrt_lmads =
+                              if no_overlap
+                                then Just wrt_lmads''
+                                else Nothing
+                         in (wrt_lmads, prev_use, lmads)
+                    )
+                    active_etries
 
-          -- keep only the entries that do not overlap with the memory
-          -- blocks defined in @pat@ or @inner_free_vars@.
-          -- the others must be recorded in @inhibit_tab@ because
-          -- they violate the 3rd safety condition.
-          let active_tab1 =
+              -- keep only the entries that do not overlap with the memory
+              -- blocks defined in @pat@ or @inner_free_vars@.
+              -- the others must be recorded in @inhibit_tab@ because
+              -- they violate the 3rd safety condition.
+              active_tab1 =
                 M.fromList
                   $ map
                     ( \(wrts, (uses, prev_use, (k, etry))) ->
@@ -245,7 +242,7 @@ recordMemRefUses td_env bu_env stm =
                     filter (isNothing . fst) $
                       zip mb_wrts active_etries
               (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) $ M.keys failed_tab
-          pure (active_tab1, inhibit_tab1)
+           in (active_tab1, inhibit_tab1)
   where
     tupFst (a, _, _) = a
     tupSnd (_, b, _) = b
@@ -270,32 +267,32 @@ recordMemRefUses td_env bu_env stm =
 --  possible. Currently the implementations are dummy      --
 --  aiming to be useful only when one of the sets is empty.--
 -------------------------------------------------------------
-noMemOverlap :: (CanBeAliased (Op rep), RepTypes rep) => TopDnEnv rep -> AccessSummary -> AccessSummary -> IO Bool
+noMemOverlap :: (CanBeAliased (Op rep), RepTypes rep) => TopDnEnv rep -> AccessSummary -> AccessSummary -> Bool
 noMemOverlap _ _ (Set mr)
-  | mr == mempty = pure True
+  | mr == mempty = True
 noMemOverlap _ (Set mr) _
-  | mr == mempty = pure True
+  | mr == mempty = True
 noMemOverlap td_env (Set is0) (Set js0)
-  | Just non_negs <- mapM (primExpFromSubExpM (basePMconv (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env = do
-      (_, not_disjoints) <-
-        partitionM
-          ( \i ->
-              allM
-                ( \j ->
-                    pure (IxFun.disjoint less_thans (nonNegatives td_env) i j)
-                      ||^ pure (IxFun.disjoint2 () () less_thans (nonNegatives td_env) i j)
-                      ||^ IxFun.disjoint3 (typeOf <$> scope td_env) asserts less_thans non_negs i j
-                )
-                js
-          )
-          is
-      pure $ null not_disjoints
+  | Just non_negs <- mapM (primExpFromSubExpM (basePMconv (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env =
+      let (_, not_disjoints) =
+            partition
+              ( \i ->
+                  all
+                    ( \j ->
+                        IxFun.disjoint less_thans (nonNegatives td_env) i j
+                          || IxFun.disjoint2 () () less_thans (nonNegatives td_env) i j
+                          || IxFun.disjoint3 (typeOf <$> scope td_env) asserts less_thans non_negs i j
+                    )
+                    js
+              )
+              is
+       in null not_disjoints
   where
     less_thans = map (fmap $ fixPoint $ substituteInPrimExp $ scalarTable td_env) $ knownLessThan td_env
     asserts = map (fixPoint (substituteInPrimExp $ scalarTable td_env) . primExpFromSubExp Bool) $ td_asserts td_env
     is = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList is0
     js = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList js0
-noMemOverlap _ _ _ = pure False
+noMemOverlap _ _ _ = False
 
 -- | Suppossed to aggregate the iteration-level summaries
 --     across a loop of index i = 0 .. n-1

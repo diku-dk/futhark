@@ -9,7 +9,6 @@
 module Futhark.MonadFreshNames
   ( MonadFreshNames (..),
     modifyNameSource,
-    modifyNameSourceIO,
     newName,
     newNameFromString,
     newVName,
@@ -74,16 +73,6 @@ modifyNameSource :: MonadFreshNames m => (VNameSource -> (a, VNameSource)) -> m 
 modifyNameSource m = do
   src <- getNameSource
   let (x, src') = m src
-  putNameSource src'
-  pure x
-
--- | Run a computation needing a fresh name source and returning a new
--- one, using 'getNameSource' and 'putNameSource' before and after the
--- computation.
-modifyNameSourceIO :: (MonadFreshNames m, MonadIO m) => (VNameSource -> IO (a, VNameSource)) -> m a
-modifyNameSourceIO m = do
-  src <- getNameSource
-  (x, src') <- liftIO $ m src
   putNameSource src'
   pure x
 

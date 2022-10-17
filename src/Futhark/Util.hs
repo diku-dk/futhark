@@ -48,11 +48,6 @@ module Futhark.Util
     cartesian,
     traverseFold,
     fixPoint,
-    ifM,
-    (||^),
-    (&&^),
-    allM,
-    partitionM,
   )
 where
 
@@ -455,25 +450,3 @@ fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
-
-ifM :: Monad m => m Bool -> m a -> m a -> m a
-ifM b t f = do b' <- b; if b' then t else f
-
-(||^) :: Monad m => m Bool -> m Bool -> m Bool
-(||^) a = ifM a (pure True)
-
-(&&^) :: Monad m => m Bool -> m Bool -> m Bool
-(&&^) a b = ifM a b (pure False)
-
-allM :: Monad m => (a -> m Bool) -> [a] -> m Bool
-allM p = foldr ((&&^) . p) (pure True)
-
-partitionM :: Monad m => (a -> m Bool) -> [a] -> m ([a], [a])
-partitionM f = helper ([], [])
-  where
-    helper (acct, accf) [] = pure (reverse acct, reverse accf)
-    helper (acct, accf) (x : xs) = do
-      res <- f x
-      if res
-        then helper (x : acct, accf) xs
-        else helper (acct, x : accf) xs
