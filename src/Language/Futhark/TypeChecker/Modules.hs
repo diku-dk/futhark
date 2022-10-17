@@ -375,8 +375,7 @@ ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
         <+> hsep (map pretty ps)
 ppTypeAbbr _ name (l, ps, t) =
   "type" <> pretty l
-    <+> pretty name
-    <+> hsep (map pretty ps)
+    <+> hsep (pretty name : map pretty ps)
     <+> equals
     <+> nest 2 (align (pretty t))
 
