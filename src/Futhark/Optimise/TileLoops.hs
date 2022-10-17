@@ -433,8 +433,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 
         loopbody' <-
           localScope (scopeOfFParams mergeparams') . runBodyBuilder $
-            resultBody . map Var
-              <$> tiledBody private' privstms'
+            resultBody . map Var <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
             DoLoop merge' (ForLoop i it bound []) loopbody'
@@ -452,13 +451,12 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 doPrelude :: Tiling -> PrivStms -> Stms GPU -> [VName] -> Builder GPU [VName]
 doPrelude tiling privstms prestms prestms_live =
   -- Create a SegMap that takes care of the prelude for every thread.
-  tilingSegMap tiling "prelude" ResultPrivate $
-    \in_bounds slice -> do
-      ts <- mapM lookupType prestms_live
-      fmap varsRes . protectOutOfBounds "pre" in_bounds ts $ do
-        addPrivStms slice privstms
-        addStms prestms
-        pure $ varsRes prestms_live
+  tilingSegMap tiling "prelude" ResultPrivate $ \in_bounds slice -> do
+    ts <- mapM lookupType prestms_live
+    fmap varsRes . protectOutOfBounds "pre" in_bounds ts $ do
+      addPrivStms slice privstms
+      addStms prestms
+      pure $ varsRes prestms_live
 
 liveSet :: FreeIn a => Stms GPU -> a -> Names
 liveSet stms after =
@@ -733,10 +731,9 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
 
 mkReadPreludeValues :: [VName] -> [VName] -> ReadPrelude
 mkReadPreludeValues prestms_live_arrs prestms_live slice =
-  fmap mconcat $
-    forM (zip prestms_live_arrs prestms_live) $ \(arr, v) -> do
-      arr_t <- lookupType arr
-      letBindNames [v] $ BasicOp $ Index arr $ fullSlice arr_t slice
+  fmap mconcat . forM (zip prestms_live_arrs prestms_live) $ \(arr, v) -> do
+    arr_t <- lookupType arr
+    letBindNames [v] $ BasicOp $ Index arr $ fullSlice arr_t slice
 
 tileReturns :: [(VName, SubExp)] -> [(SubExp, SubExp)] -> VName -> Builder GPU KernelResult
 tileReturns dims_on_top dims arr = do
