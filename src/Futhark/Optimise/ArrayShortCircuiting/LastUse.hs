@@ -29,6 +29,8 @@ import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Prelude
 
+-- | 'LastUseReader' allows us to abstract over representations by supplying the
+-- 'onOp' function.
 newtype LastUseReader rep = LastUseReader
   { onOp :: Op (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names, Names)
   }
@@ -39,15 +41,15 @@ aliasLookup :: VName -> LastUseM rep Names
 aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
 
--- | Perform last-use analysis on a 'Prog'
+-- | Perform last-use analysis on a 'Prog' in 'SeqMem'
 lastUsePrg :: Prog (Aliases SeqMem) -> LUTabPrg
 lastUsePrg prg = M.fromList $ map lastUseSeqMem $ progFuns prg
 
--- | Perform last-use analysis on a 'Prog'
+-- | Perform last-use analysis on a 'Prog' in 'GPUMem'
 lastUsePrgGPU :: Prog (Aliases GPUMem) -> LUTabPrg
 lastUsePrgGPU prg = M.fromList $ map lastUseGPUMem $ progFuns prg
 
--- | Perform last-use analysis on a 'FunDef'
+-- | Perform last-use analysis on a 'FunDef' in 'SeqMem'
 lastUseSeqMem :: FunDef (Aliases SeqMem) -> (Name, LUTabFun)
 lastUseSeqMem (FunDef _ _ fname _ _ body) =
   let (res, _) =
@@ -56,7 +58,7 @@ lastUseSeqMem (FunDef _ _ fname _ _ body) =
           (LastUseReader lastUseSeqOp)
    in (fname, res)
 
--- | Perform last-use analysis on a 'FunDef'
+-- | Perform last-use analysis on a 'FunDef' in 'GPUMem'
 lastUseGPUMem :: FunDef (Aliases GPUMem) -> (Name, LUTabFun)
 lastUseGPUMem (FunDef _ _ fname _ _ body) =
   let (res, _) =
