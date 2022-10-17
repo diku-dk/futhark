@@ -253,8 +253,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
       _ -> hasArrayLit e
 prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
   "let"
-    <+> prettyName fname
-    <+> hsep (map pretty tparams ++ map pretty params)
+    <+> hsep (prettyName fname : map pretty tparams ++ map pretty params)
       <> retdecl'
     <+> equals
     </> indent 2 (pretty e)
@@ -468,8 +467,7 @@ instance Pretty Liftedness where
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
   pretty (TypeBind name l params te rt _ _) =
     "type" <> pretty l
-      <+> prettyName name
-      <+> hsep (map pretty params)
+      <+> hsep (prettyName name : map pretty params)
       <+> equals
       <+> maybe (pretty te) pretty (unAnnot rt)
 
@@ -502,9 +500,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
 instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
   pretty (TypeAbbrSpec tpsig) = pretty tpsig
   pretty (TypeSpec l name ps _ _) =
-    "type" <> pretty l <+> prettyName name <+> hsep (map pretty ps)
+    "type" <> pretty l <+> hsep (prettyName name : map pretty ps)
   pretty (ValSpec name tparams vtype _ _ _) =
-    "val" <+> prettyName name <+> hsep (map pretty tparams) <> colon <+> pretty vtype
+    "val" <+> hsep (prettyName name : map pretty tparams) <> colon <+> pretty vtype
   pretty (ModSpec name sig _ _) =
     "module" <+> prettyName name <> colon <+> pretty sig
   pretty (IncludeSpec e _) =
@@ -531,11 +529,11 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ModParamBase f vn) where
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ModBindBase f vn) where
   pretty (ModBind name ps sig e _ _) =
-    "module" <+> prettyName name <+> hsep (map pretty ps) <+> sig' <> " =" <+> pretty e
+    "module" <+> hsep (prettyName name : map pretty ps) <> sig' <> " =" <+> pretty e
     where
       sig' = case sig of
         Nothing -> mempty
-        Just (s, _) -> colon <+> pretty s <> " "
+        Just (s, _) -> " " <> colon <+> pretty s <> " "
 
 ppBinOp :: IsName v => QualName v -> Doc a
 ppBinOp bop =
