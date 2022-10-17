@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Ascription of higher-order modules (#1741).
 
+* Fixed compiler crash when attempting to tile irregular parallelism (#1739).
+
 ## [0.22.2]
 
 ### Added
