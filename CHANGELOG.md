@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Fixed handling of holes in defunctionalisation (#1738).
 
+* Ascription of higher-order modules (#1741).
+
 ## [0.22.2]
 
 ### Added
