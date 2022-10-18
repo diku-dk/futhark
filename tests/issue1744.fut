@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_opencl no_cuda no_pyopencl }
+
 entry main (xs: [3][3]f32) : [3]f32 =
   map (\x ->
          let ss = map (map2 (*) x) xs
