@@ -191,7 +191,7 @@ nonNegativesInPat (Pat elems) =
   foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
 
 -- | The topdown handler for loops.
-updateTopdownEnvLoop :: TopdownEnv rep -> [(FParam rep, SubExp)] -> (LoopForm (Aliases rep)) -> TopdownEnv rep
+updateTopdownEnvLoop :: TopdownEnv rep -> [(FParam rep, SubExp)] -> LoopForm (Aliases rep) -> TopdownEnv rep
 updateTopdownEnvLoop td_env arginis lform =
   let scopetab =
         scope td_env
