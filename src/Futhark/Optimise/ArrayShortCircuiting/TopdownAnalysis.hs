@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+module Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
   ( TopdownEnv (..),
     ScopeTab,
     TopDownHelper,

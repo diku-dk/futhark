@@ -28,7 +28,7 @@ import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
-import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+import Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
 import Futhark.Util
 
 -----------------------------------------------------

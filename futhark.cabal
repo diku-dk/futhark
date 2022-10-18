@@ -349,7 +349,7 @@ library
       Futhark.Optimise.ArrayShortCircuiting.DataStructs
       Futhark.Optimise.ArrayShortCircuiting.LastUse
       Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
-      Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+      Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
       Futhark.Optimise.MergeGPUBodies
       Futhark.Optimise.ReduceDeviceSyncs
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable

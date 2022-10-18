@@ -28,7 +28,7 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
-import Futhark.Optimise.ArrayShortCircuiting.TopDownAn
+import Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
 import Futhark.Util
 
 type Coalesceable rep inner =
