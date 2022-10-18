@@ -64,7 +64,6 @@ emptyTopDnEnv =
     { alloc = mempty,
       scope = mempty,
       inhibited = mempty,
-      ranges = mempty,
       v_alias = mempty,
       m_alias = mempty,
       nonNegatives = mempty,

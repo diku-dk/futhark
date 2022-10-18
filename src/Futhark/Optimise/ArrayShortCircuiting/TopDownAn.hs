@@ -7,7 +7,6 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
     ScopeTab,
     TopDownHelper,
     InhibitTab,
-    RangeTab,
     topdwnTravBinding,
     topDownLoop,
     getDirAliasedIxfn,
@@ -33,8 +32,6 @@ type DirAlias = IxFun -> IxFun
 type InvAlias = Maybe (IxFun -> IxFun)
 -- ^ An inverse aliasing transformation
 
-type RangeTab = M.Map VName (PrimExp VName, PrimExp VName)
-
 type VarAliasTab = M.Map VName (VName, DirAlias, InvAlias)
 
 type MemAliasTab = M.Map VName Names
@@ -46,8 +43,6 @@ data TopDnEnv rep = TopDnEnv
     scope :: ScopeTab rep,
     -- | the inherited inhibitions from the previous try
     inhibited :: InhibitTab,
-    -- | table holding closed ranges for i64-integral scalars
-    ranges :: RangeTab,
     -- | for statements such as transpose, reshape, index, etc., that alias
     --   an array variable: maps var-names to pair of aliased var name
     --   and index function transformation. For example, for
