@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
-  ( TopDnEnv (..),
+  ( TopdownEnv (..),
     ScopeTab,
     TopDownHelper,
     InhibitTab,
@@ -36,7 +36,7 @@ type VarAliasTab = M.Map VName (VName, DirAlias, InvAlias)
 
 type MemAliasTab = M.Map VName Names
 
-data TopDnEnv rep = TopDnEnv
+data TopdownEnv rep = TopdownEnv
   { -- | contains the already allocated memory blocks
     alloc :: AllocTab,
     -- | variable info, including var-to-memblock assocs
@@ -63,7 +63,7 @@ data TopDnEnv rep = TopDnEnv
     td_asserts :: [SubExp]
   }
 
-isInScope :: TopDnEnv rep -> VName -> Bool
+isInScope :: TopdownEnv rep -> VName -> Bool
 isInScope td_env m =
   m `M.member` scope td_env
 
@@ -150,12 +150,12 @@ instance TopDownHelper () where
   innerKnownLessThan () = mempty
   scopeHelper () = mempty
 
--- | fills in the TopDnEnv table
+-- | fills in the TopdownEnv table
 updateTopdownEnv ::
   (ASTRep rep, Op rep ~ MemOp inner, TopDownHelper (OpWithAliases inner)) =>
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   Stm (Aliases rep) ->
-  TopDnEnv rep
+  TopdownEnv rep
 updateTopdownEnv env stm@(Let (Pat [pe]) _ (Op (Alloc (Var vname) sp))) =
   env
     { alloc = M.insert (patElemName pe) sp $ alloc env,
@@ -190,7 +190,8 @@ nonNegativesInPat :: Typed rep => Pat rep -> Names
 nonNegativesInPat (Pat elems) =
   foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
 
-updateTopdownEnvLoop :: TopDnEnv rep -> [(FParam rep, SubExp)] -> (LoopForm (Aliases rep)) -> TopDnEnv rep
+-- | The topdown handler for loops.
+updateTopdownEnvLoop :: TopdownEnv rep -> [(FParam rep, SubExp)] -> (LoopForm (Aliases rep)) -> TopdownEnv rep
 updateTopdownEnvLoop td_env arginis lform =
   let scopetab =
         scope td_env
@@ -213,7 +214,7 @@ updateTopdownEnvLoop td_env arginis lform =
 -- | Get direct aliased index function?  Returns a triple of current memory
 -- block to be coalesced, the destination memory block and the index function of
 -- the access in the space of the destination block.
-getDirAliasedIxfn :: HasMemBlock (Aliases rep) => TopDnEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
+getDirAliasedIxfn :: HasMemBlock (Aliases rep) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
@@ -229,7 +230,7 @@ getDirAliasedIxfn td_env coals_tab x =
 
 -- | Like 'getDirAliasedIxfn', but this version returns 'Nothing' if the value
 -- is not currently subject to coalescing.
-getDirAliasedIxfn' :: HasMemBlock (Aliases rep) => TopDnEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
+getDirAliasedIxfn' :: HasMemBlock (Aliases rep) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn' td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x _) ->
@@ -271,7 +272,7 @@ walkAliasTab _ _ _ = Nothing
 --   We assume inverting aliases has been performed by the top-down pass.
 addInvAliassesVarTab ::
   HasMemBlock (Aliases rep) =>
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   M.Map VName Coalesced ->
   VName ->
   Maybe (M.Map VName Coalesced)
@@ -290,11 +291,11 @@ addInvAliassesVarTab td_env vtab x
                    in addInvAliassesVarTab td_env vartab' x0
 addInvAliassesVarTab _ _ _ = Nothing
 
-areAliased :: TopDnEnv rep -> VName -> VName -> Bool
+areAliased :: TopdownEnv rep -> VName -> VName -> Bool
 areAliased _ m_x m_y =
   -- this is a dummy implementation
   m_x == m_y
 
-areAnyAliased :: TopDnEnv rep -> VName -> [VName] -> Bool
+areAnyAliased :: TopdownEnv rep -> VName -> [VName] -> Bool
 areAnyAliased td_env m_x =
   any (areAliased td_env m_x)

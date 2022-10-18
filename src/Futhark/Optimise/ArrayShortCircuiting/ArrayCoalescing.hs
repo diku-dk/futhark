@@ -48,7 +48,7 @@ newtype ComputeScalarTableOnOp rep = ComputeScalarTableOnOp
 type ScalarTableM rep a = Reader (ComputeScalarTableOnOp rep) a
 
 newtype ShortCircuitReader rep = ShortCircuitReader
-  { onOp :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases rep) -> TopDnEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv
+  { onOp :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases rep) -> TopdownEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv
   }
 
 newtype ShortCircuitM rep a = ShortCircuitM (ReaderT (ShortCircuitReader rep) (State VNameSource) a)
@@ -58,9 +58,9 @@ instance MonadFreshNames (ShortCircuitM rep) where
   putNameSource = put
   getNameSource = get
 
-emptyTopDnEnv :: TopDnEnv rep
-emptyTopDnEnv =
-  TopDnEnv
+emptyTopdownEnv :: TopdownEnv rep
+emptyTopdownEnv =
+  TopdownEnv
     { alloc = mempty,
       scope = mempty,
       inhibited = mempty,
@@ -136,7 +136,7 @@ mkCoalsTabFun lufun r computeScalarOnOp fun@(FunDef _ _ _ _ fpars body) = do
           )
           computeScalarOnOp
       topenv =
-        emptyTopDnEnv
+        emptyTopdownEnv
           { scope = scopeOfFParams fpars,
             alloc = unique_mems,
             scalarTable = scalar_table,
@@ -153,7 +153,7 @@ paramSizes _ = mempty
 --
 -- Because 'SeqMem' don't have any special operation, simply return the input
 -- 'BotUpEnv'.
-shortCircuitSeqMem :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases SeqMem) -> TopDnEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
+shortCircuitSeqMem :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases SeqMem) -> TopdownEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
 shortCircuitSeqMem _ _ _ _ = pure
 
 -- | Short-circuit handler for 'GPUMem' 'Op'.
@@ -164,7 +164,7 @@ shortCircuitGPUMem ::
   LUTabFun ->
   Pat (VarAliases, LetDecMem) ->
   Op (Aliases GPUMem) ->
-  TopDnEnv GPUMem ->
+  TopdownEnv GPUMem ->
   BotUpEnv ->
   ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = pure bu_env
@@ -299,7 +299,7 @@ shortCircuitGPUMemHelper ::
   Pat (VarAliases, LetDecMem) ->
   SegSpace ->
   KernelBody (Aliases GPUMem) ->
-  TopDnEnv GPUMem ->
+  TopdownEnv GPUMem ->
   BotUpEnv ->
   ShortCircuitM GPUMem BotUpEnv
 shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_env bu_env = do
@@ -447,7 +447,7 @@ ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMAD
 
 -- | Given a pattern element and the corresponding kernel result, try to put the
 -- kernel result directly in the memory block of pattern element
-makeSegMapCoals :: SegLevel -> TopDnEnv GPUMem -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElem (VarAliases, LetDecMem), SegSpace, KernelResult) -> (CoalsTab, InhibitTab)
+makeSegMapCoals :: SegLevel -> TopdownEnv GPUMem -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElem (VarAliases, LetDecMem), SegSpace, KernelResult) -> (CoalsTab, InhibitTab)
 makeSegMapCoals lvl td_env kernel_body (active, inhb) (PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space, Returns _ _ (Var return_name))
   | Just mb@(MemBlock tp return_shp return_mem _) <-
       getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
@@ -547,7 +547,7 @@ fixPointCoalesce ::
   LUTabFun ->
   [Param FParamMem] ->
   Body (Aliases rep) ->
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   ShortCircuitM rep CoalsTab
 fixPointCoalesce lutab fpar bdy topenv = do
   buenv <- mkCoalsTabStms lutab (bodyStms bdy) topenv (emptyBotUpEnv {inhibit = inhibited topenv})
@@ -608,7 +608,7 @@ mkCoalsTabStms ::
   (Coalesceable rep inner) =>
   LUTabFun ->
   Stms (Aliases rep) ->
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   BotUpEnv ->
   ShortCircuitM rep BotUpEnv
 mkCoalsTabStms lutab stms0 = traverseStms stms0
@@ -649,7 +649,7 @@ mkCoalsTabStm ::
   (Coalesceable rep inner) =>
   LUTabFun ->
   Stm (Aliases rep) ->
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   BotUpEnv ->
   ShortCircuitM rep BotUpEnv
 mkCoalsTabStm _ (Let (Pat [pe]) _ e) td_env bu_env
@@ -1275,7 +1275,7 @@ filterSafetyCond2and5 ::
   CoalsTab ->
   InhibitTab ->
   ScalarTab ->
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   [PatElem (VarAliases, LetDecMem)] ->
   (CoalsTab, InhibitTab)
 filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
@@ -1322,7 +1322,7 @@ mkCoalsHelper3PatternMatch ::
   Pat (VarAliases, LetDecMem) ->
   Exp (Aliases rep) ->
   LUTabFun ->
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   CoalsTab ->
   CoalsTab ->
   InhibitTab ->

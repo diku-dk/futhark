@@ -77,7 +77,7 @@ translateAccessSummary _ _ _ = Undeterminable
 -- | This function computes the written and read memory references for the current statement
 getUseSumFromStm ::
   (Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   CoalsTab ->
   Stm (Aliases rep) ->
   -- | A pair of written and written+read memory locations, along with their
@@ -161,7 +161,7 @@ getUseSumFromStm _ _ _ =
 --            should be computed on the top-down pass.
 recordMemRefUses ::
   (CanBeAliased (Op rep), RepTypes rep, Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
-  TopDnEnv rep ->
+  TopdownEnv rep ->
   BotUpEnv ->
   Stm (Aliases rep) ->
   (CoalsTab, InhibitTab)
@@ -267,7 +267,7 @@ recordMemRefUses td_env bu_env stm =
 --  possible. Currently the implementations are dummy      --
 --  aiming to be useful only when one of the sets is empty.--
 -------------------------------------------------------------
-noMemOverlap :: (CanBeAliased (Op rep), RepTypes rep) => TopDnEnv rep -> AccessSummary -> AccessSummary -> Bool
+noMemOverlap :: (CanBeAliased (Op rep), RepTypes rep) => TopdownEnv rep -> AccessSummary -> AccessSummary -> Bool
 noMemOverlap _ _ (Set mr)
   | mr == mempty = True
 noMemOverlap _ (Set mr) _
