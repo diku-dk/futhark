@@ -122,7 +122,7 @@ You may wish to set the environment variable
   generation in some cases, so turn it off when actually
   generating code.)
 - Tools that talk to server-mode executables will print the messages
-  sent back and worth on the standard error stream.
+  sent back and forth on the standard error stream.
 
 ## Running compiler pipelines
 
