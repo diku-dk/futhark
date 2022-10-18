@@ -32,6 +32,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     getUniqueMemFParam,
     markFailedCoal,
     accessSubtract,
+    markSuccessCoal,
   )
 where
 
@@ -375,6 +376,25 @@ markFailedCoal (coal_tab, inhb_tab) src_mem =
        in ( M.delete src_mem coal_tab,
             M.insert src_mem failed_set' inhb_tab
           )
+
+-- | promotion from active-to-successful coalescing tables
+--   should be handled with this function (for clarity).
+markSuccessCoal ::
+  (CoalsTab, CoalsTab) ->
+  VName ->
+  CoalsEntry ->
+  (CoalsTab, CoalsTab)
+markSuccessCoal (actv, succc) m_b info_b =
+  ( M.delete m_b actv,
+    appendCoalsInfo m_b info_b succc
+  )
+
+-- | merges entries in the coalesced table.
+appendCoalsInfo :: VName -> CoalsEntry -> CoalsTab -> CoalsTab
+appendCoalsInfo mb info_new coalstab =
+  case M.lookup mb coalstab of
+    Nothing -> M.insert mb info_new coalstab
+    Just info_old -> M.insert mb (unionCoalsEntry info_old info_new) coalstab
 
 -- | Attempt to convert a 'VName' to a PrimExp.
 --

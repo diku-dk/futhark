@@ -81,18 +81,6 @@ emptyBotUpEnv =
       inhibit = mempty
     }
 
--- | promotion from active-to-successful coalescing tables
---   should be handled with this function (for clarity).
-markSuccessCoal ::
-  (CoalsTab, CoalsTab) ->
-  VName ->
-  CoalsEntry ->
-  (CoalsTab, CoalsTab)
-markSuccessCoal (actv, succc) m_b info_b =
-  ( M.delete m_b actv,
-    appendCoalsInfo m_b info_b succc
-  )
-
 --------------------------------------------------------------------------------
 --- Main Coalescing Transformation computes a successful coalescing table    ---
 --------------------------------------------------------------------------------
@@ -1478,13 +1466,6 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Concat concat_dim (b0 :| bs) _))
            in if null res then Nothing else Just res
 -- CASE other than a), b), or c) not supported
 genCoalStmtInfo _ _ _ _ = Nothing
-
--- | merges entries in the coalesced table.
-appendCoalsInfo :: VName -> CoalsEntry -> CoalsTab -> CoalsTab
-appendCoalsInfo mb info_new coalstab =
-  case M.lookup mb coalstab of
-    Nothing -> M.insert mb info_new coalstab
-    Just info_old -> M.insert mb (unionCoalsEntry info_old info_new) coalstab
 
 data MemBodyResult = MemBodyResult
   { patMem :: VName,
