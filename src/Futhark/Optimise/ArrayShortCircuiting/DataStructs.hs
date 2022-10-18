@@ -24,7 +24,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     BotUpEnv (..),
     InhibitTab,
     unionCoalsEntry,
-    basePMconv,
+    vnameToPrimExp,
     getArrMemAssocFParam,
     getScopeMemInfo,
     createsNewArrOK,
@@ -35,6 +35,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
   )
 where
 
+import Control.Applicative
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -375,17 +376,15 @@ markFailedCoal (coal_tab, inhb_tab) src_mem =
           )
 
 -- | basic conversion of a Var Expression to a PrimExp
-basePMconv ::
+vnameToPrimExp ::
   (CanBeAliased (Op rep), RepTypes rep) =>
   ScopeTab rep ->
   ScalarTab ->
   VName ->
   Maybe (PrimExp VName)
-basePMconv scopetab scaltab v =
-  case M.lookup v scaltab of
-    Just y ->
-      Just y -- error $ "Impossible. While looking up " <> pretty v <> " found " <> pretty y
-    Nothing -> case M.lookup v scopetab of
+vnameToPrimExp scopetab scaltab v =
+  M.lookup v scaltab
+    <|> case M.lookup v scopetab of
       Just info ->
         case typeOf info of
           Prim tp -> Just $ LeafExp v tp

@@ -653,7 +653,7 @@ mkCoalsTabStm ::
   BotUpEnv ->
   ShortCircuitM rep BotUpEnv
 mkCoalsTabStm _ (Let (Pat [pe]) _ e) td_env bu_env
-  | Just primexp <- primExpFromExp (basePMconv (scope td_env) (scals bu_env)) e =
+  | Just primexp <- primExpFromExp (vnameToPrimExp (scope td_env) (scals bu_env)) e =
       pure $ bu_env {scals = M.insert (patElemName pe) primexp (scals bu_env)}
 mkCoalsTabStm lutab (Let patt _ (Match _ cases defbody _)) td_env bu_env = do
   let pat_val_elms = patElems patt
@@ -1585,7 +1585,7 @@ computeScalarTable ::
   Stm (Aliases rep) ->
   ScalarTableM rep (M.Map VName (PrimExp VName))
 computeScalarTable scope_table (Let (Pat [pe]) _ e)
-  | Just primexp <- primExpFromExp (basePMconv scope_table mempty) e =
+  | Just primexp <- primExpFromExp (vnameToPrimExp scope_table mempty) e =
       pure $ M.singleton (patElemName pe) primexp
 computeScalarTable scope_table (Let _ _ (DoLoop loop_inits loop_form body)) =
   mconcat

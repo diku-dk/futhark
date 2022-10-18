@@ -273,7 +273,7 @@ noMemOverlap _ _ (Set mr)
 noMemOverlap _ (Set mr) _
   | mr == mempty = True
 noMemOverlap td_env (Set is0) (Set js0)
-  | Just non_negs <- mapM (primExpFromSubExpM (basePMconv (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env =
+  | Just non_negs <- mapM (primExpFromSubExpM (vnameToPrimExp (scope td_env) (scalarTable td_env)) . Var) $ namesToList $ nonNegatives td_env =
       let (_, not_disjoints) =
             partition
               ( \i ->
