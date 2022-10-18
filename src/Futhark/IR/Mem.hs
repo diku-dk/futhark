@@ -131,7 +131,7 @@ import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util
-import Futhark.Util.Pretty (docText, indent, ppTuple', ppTupleLines', pretty, (<+>), (</>))
+import Futhark.Util.Pretty (docText, indent, ppTupleLines', pretty, (<+>), (</>))
 import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
