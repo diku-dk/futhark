@@ -385,7 +385,7 @@ instance PrettyRep rep => Pretty (FunDef rep) where
     annot (attrAnnots attrs) $
       fun
         </> indent 2 (pretty (nameToString name))
-        <+> apply (map pretty fparams)
+        <+> parens (commastack $ map pretty fparams)
         </> indent 2 (colon <+> align (ppTupleLines' $ map pretty rettype))
         <+> equals
         <+> nestedBlock "{" "}" (pretty body)
