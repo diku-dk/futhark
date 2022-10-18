@@ -827,7 +827,7 @@ mkCoalsTabStm lutab (Let patt _ (Match _ cases defbody _)) td_env bu_env = do
 --  bu_env
 --
 
-mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
+mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
   let pat_val_elms = patElems pat
 
       --  i) Filter @activeCoals@ by the 2nd, 3rd AND 5th safety conditions. In
@@ -983,7 +983,7 @@ mkCoalsTabStm lutab lstm@(Let pat _ (DoLoop arginis lform body)) td_env bu_env =
   where
     allocs_bdy = foldl getAllocs (alloc td_env') $ bodyStms body
     td_env_allocs = td_env' {alloc = allocs_bdy, scope = scope td_env' <> scopeOf (bodyStms body)}
-    td_env' = topDownLoop td_env lstm
+    td_env' = updateTopdownEnvLoop td_env arginis lform
     getAllocs tab (Let (Pat [pe]) _ (Op (Alloc _ sp))) =
       M.insert (patElemName pe) sp tab
     getAllocs tab _ = tab

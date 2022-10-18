@@ -8,7 +8,7 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
     TopDownHelper,
     InhibitTab,
     updateTopdownEnv,
-    topDownLoop,
+    updateTopdownEnvLoop,
     getDirAliasedIxfn,
     getDirAliasedIxfn',
     addInvAliassesVarTab,
@@ -207,8 +207,8 @@ nonNegativesInPat :: Typed rep => Pat rep -> Names
 nonNegativesInPat (Pat elems) =
   foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
 
-topDownLoop :: TopDnEnv rep -> Stm (Aliases rep) -> TopDnEnv rep
-topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
+updateTopdownEnvLoop :: TopDnEnv rep -> [(FParam rep, SubExp)] -> (LoopForm (Aliases rep)) -> TopDnEnv rep
+updateTopdownEnvLoop td_env arginis lform =
   let scopetab =
         scope td_env
           <> scopeOfFParams (map fst arginis)
@@ -226,8 +226,6 @@ topDownLoop td_env (Let _pat _ (DoLoop arginis lform _)) =
           nonNegatives = non_negatives,
           knownLessThan = less_than <> knownLessThan td_env
         }
-topDownLoop _ _ =
-  error "ArrayShortCircuiting.TopDownAn: function topDownLoop should only be called on Loops!"
 
 -- | Get direct aliased index function?  Returns a triple of current memory
 -- block to be coalesced, the destination memory block and the index function of
