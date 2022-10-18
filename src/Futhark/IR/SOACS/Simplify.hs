@@ -83,12 +83,12 @@ simplifySOAC ::
   Simplify.SimplifiableRep rep =>
   Simplify.SimplifyOp rep (SOAC (Wise rep))
 simplifySOAC (VJP lam arr vec) = do
-  (lam', hoisted) <- Engine.simplifyLambda lam
+  (lam', hoisted) <- Engine.simplifyLambda mempty lam
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
   pure (VJP lam' arr' vec', hoisted)
 simplifySOAC (JVP lam arr vec) = do
-  (lam', hoisted) <- Engine.simplifyLambda lam
+  (lam', hoisted) <- Engine.simplifyLambda mempty lam
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
   pure (JVP lam' arr' vec', hoisted)
@@ -96,11 +96,11 @@ simplifySOAC (Stream outerdim arr nes lam) = do
   outerdim' <- Engine.simplify outerdim
   nes' <- mapM Engine.simplify nes
   arr' <- mapM Engine.simplify arr
-  (lam', lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda lam
+  (lam', lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   pure (Stream outerdim' arr' nes' lam', lam_hoisted)
 simplifySOAC (Scatter w ivs lam as) = do
   w' <- Engine.simplify w
-  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda lam
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
   pure (Scatter w' ivs' lam' as', hoisted)
@@ -112,25 +112,25 @@ simplifySOAC (Hist w imgs ops bfun) = do
       rf' <- Engine.simplify rf
       dests' <- Engine.simplify dests
       nes' <- mapM Engine.simplify nes
-      (op', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda op
+      (op', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty op
       pure (HistOp dests_w' rf' dests' nes' op', hoisted)
   imgs' <- mapM Engine.simplify imgs
-  (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda bfun
+  (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty bfun
   pure (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
 simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
   (scans', scans_hoisted) <- fmap unzip $
     forM scans $ \(Scan lam nes) -> do
-      (lam', hoisted) <- Engine.simplifyLambda lam
+      (lam', hoisted) <- Engine.simplifyLambda mempty lam
       nes' <- Engine.simplify nes
       pure (Scan lam' nes', hoisted)
 
   (reds', reds_hoisted) <- fmap unzip $
     forM reds $ \(Reduce comm lam nes) -> do
-      (lam', hoisted) <- Engine.simplifyLambda lam
+      (lam', hoisted) <- Engine.simplifyLambda mempty lam
       nes' <- Engine.simplify nes
       pure (Reduce comm lam' nes', hoisted)
 
-  (map_lam', map_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda map_lam
+  (map_lam', map_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty map_lam
 
   (,)
     <$> ( Screma
