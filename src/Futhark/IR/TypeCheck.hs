@@ -993,7 +993,9 @@ checkExp ::
 checkExp (BasicOp op) = checkBasicOp op
 checkExp (Match ses cases def_case info) = do
   ses_ts <- mapM checkSubExp ses
-  alternatives $ checkCaseBody def_case : map (checkCase ses_ts) cases
+  alternatives $
+    context "in body of last case" (checkCaseBody def_case)
+      : map (checkCase ses_ts) cases
   where
     checkVal t (Just v) = Prim (primValueType v) == t
     checkVal _ Nothing = True
