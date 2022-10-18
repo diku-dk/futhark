@@ -35,6 +35,7 @@ module Futhark.Util.Pretty
     stack,
     parensIf,
     ppTuple',
+    ppTupleLines',
 
     -- * Operators
     (</>),
@@ -113,15 +114,16 @@ prettyTextOneLine = Prettyprinter.Render.Text.renderStrict . layoutSmart oneLine
 ppTuple' :: [Doc a] -> Doc a
 ppTuple' ets = braces $ commasep $ map align ets
 
+ppTupleLines' :: [Doc a] -> Doc a
+ppTupleLines' ets = braces $ commastack $ map align ets
+
 -- | Prettyprint a list enclosed in curly braces.
 prettyTuple :: Pretty a => [a] -> Text
 prettyTuple = docText . ppTuple' . map pretty
 
 -- | Like 'prettyTuple', but put a linebreak after every element.
 prettyTupleLines :: Pretty a => [a] -> Text
-prettyTupleLines = docText . ppTupleLines'
-  where
-    ppTupleLines' = braces . hsep . punctuate comma . map (align . pretty)
+prettyTupleLines = docText . ppTupleLines' . map pretty
 
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
 -- parentheses.
