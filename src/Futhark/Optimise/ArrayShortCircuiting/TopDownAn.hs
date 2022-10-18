@@ -168,23 +168,6 @@ updateTopdownEnv env stm@(Let pat _ (Op (Inner inner))) =
       nonNegatives = nonNegatives env <> innerNonNegatives (patNames pat) inner,
       knownLessThan = knownLessThan env <> innerKnownLessThan inner
     }
--- updateTopdownEnv env stm@(Let pat _ e@(If cond then_body else_body _)) =
---   let res = getDirAliasFromExp e
---       new_aliases =
---         foldMap
---           ( \(pe, then_res, else_res) -> case (getScopeMemInfo (patElemName pe) (scope env <> scopeOf stm), then_res, else_res) of
---               (Just (MemBlock _ _ m_x ixf), Var v1, Var v2) ->
---                 if not $ m_x `elem` patNames pat && v1 == v2
---                   then M.singleton (patElemName pe) (v1, id, Nothing)
---                   else mempty
---               Nothing -> mempty
---           )
---           $ zip3 (patElems pat) (map resSubExp $ bodyResult then_body) (trace ("diralias: " <> res) $ map resSubExp $ bodyResult else_body)
---    in env
---         { v_alias = v_alias env <> new_aliases,
---           scope = scope env <> scopeOf stm,
---           usage_table = usageInStm stm <> usage_table env
---         }
 updateTopdownEnv env (Let (Pat _) _ (BasicOp (Assert se _ _))) =
   env {td_asserts = se : td_asserts env}
 updateTopdownEnv env stm@(Let (Pat [pe]) _ e)
