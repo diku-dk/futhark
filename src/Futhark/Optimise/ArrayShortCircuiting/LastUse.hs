@@ -244,25 +244,45 @@ lastUseGPUOp (Inner (SegOp (SegMap _ _ tps kbody))) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (body_lutab, lu_vars, used_nms' <> used_nms'')
-lastUseGPUOp (Inner (SegOp (SegRed _ _ _ tps kbody))) used_nms = do
-  -- TODO: Handle SegBinOp
-  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
+lastUseGPUOp (Inner (SegOp (SegRed _ _ sbos tps kbody))) used_nms = do
+  (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegBinOp sbos used_nms
+  (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
-  pure (body_lutab, lu_vars, used_nms' <> used_nms'')
-lastUseGPUOp (Inner (SegOp (SegScan _ _ _ tps kbody))) used_nms = do
-  -- TODO: Handle SegBinOp
-  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
+  pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
+lastUseGPUOp (Inner (SegOp (SegScan _ _ sbos tps kbody))) used_nms = do
+  (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegBinOp sbos used_nms
+  (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
-  pure (body_lutab, lu_vars, used_nms' <> used_nms'')
-lastUseGPUOp (Inner (SegOp (SegHist _ _ _ tps kbody))) used_nms = do
-  -- TODO: Handle SegBinOp
-  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
+  pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
+lastUseGPUOp (Inner (SegOp (SegHist _ _ hos tps kbody))) used_nms = do
+  (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseHistOp hos used_nms
+  (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
-  pure (body_lutab, lu_vars, used_nms' <> used_nms'')
+  pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
 lastUseGPUOp (Inner (GPUBody tps body)) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
   pure (body_lutab, lu_vars, used_nms' <> used_nms'')
+
+lastUseSegBinOp :: [SegBinOp (Aliases GPUMem)] -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
+lastUseSegBinOp sbos used_nms = do
+  (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper sbos
+  pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
+  where
+    helper (SegBinOp _ (Lambda _ body _) neutral shp) = do
+      (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn neutral <> freeIn shp
+      (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
+      pure (body_lutab, lu_vars, used_nms'')
+
+lastUseHistOp :: [HistOp (Aliases GPUMem)] -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
+lastUseHistOp hos used_nms = do
+  (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper hos
+  pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
+  where
+    helper (HistOp shp rf dest neutral shp' (Lambda _ body _)) = do
+      (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn shp <> freeIn rf <> freeIn dest <> freeIn neutral <> freeIn shp'
+      (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
+      pure (body_lutab, lu_vars, used_nms'')
 
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do
