@@ -278,7 +278,7 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> "else"
       <+> maybeNest f
       </> colon
-      <+> ppTuple' (map pretty ret)
+      <+> ppTupleLines' (map pretty ret)
     where
       info' = case ifsort of
         MatchNormal -> mempty
@@ -291,7 +291,7 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> "->"
       <+> maybeNest defb
       </> colon
-      <+> ppTuple' (map pretty ret)
+      <+> ppTupleLines' (map pretty ret)
     where
       info' = case ifsort of
         MatchNormal -> mempty
@@ -359,7 +359,7 @@ instance PrettyRep rep => Pretty (Lambda rep) where
   pretty (Lambda params body rettype) =
     "\\"
       <+> ppTuple' (map pretty params)
-      </> indent 2 (colon <+> ppTupleLines' rettype <+> "->")
+      </> indent 2 (colon <+> ppTupleLines' (map pretty rettype) <+> "->")
       </> indent 2 (pretty body)
 
 instance Pretty Signedness where
@@ -386,7 +386,7 @@ instance PrettyRep rep => Pretty (FunDef rep) where
       fun
         </> indent 2 (pretty (nameToString name))
         <+> apply (map pretty fparams)
-        </> indent 2 (colon <+> align (ppTuple' $ map pretty rettype))
+        </> indent 2 (colon <+> align (ppTupleLines' $ map pretty rettype))
         <+> equals
         <+> nestedBlock "{" "}" (pretty body)
     where
@@ -396,8 +396,8 @@ instance PrettyRep rep => Pretty (FunDef rep) where
           "entry"
             <> (parens . align)
               ( "\"" <> pretty p_name <> "\"" <> comma
-                  </> ppTupleLines' p_entry <> comma
-                  </> ppTupleLines' ret_entry
+                  </> ppTupleLines' (map pretty p_entry) <> comma
+                  </> ppTupleLines' (map pretty ret_entry)
               )
 
 instance Pretty OpaqueType where
@@ -420,7 +420,3 @@ instance PrettyRep rep => Pretty (Prog rep) where
 instance Pretty d => Pretty (DimIndex d) where
   pretty (DimFix i) = pretty i
   pretty (DimSlice i n s) = pretty i <+> ":+" <+> pretty n <+> "*" <+> pretty s
-
--- | Like 'prettyTupleLines', but produces a 'Doc'.
-ppTupleLines' :: Pretty a => [a] -> Doc b
-ppTupleLines' = braces . stack . punctuate comma . map (align . pretty)
