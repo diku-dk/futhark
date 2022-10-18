@@ -616,7 +616,7 @@ mkCoalsTabStms lutab stms0 = traverseStms stms0
     non_negs_in_pats = foldMap (nonNegativesInPat . stmPat) stms0
     traverseStms Empty _ bu_env = pure bu_env
     traverseStms (stm :<| stms) td_env bu_env = do
-      let td_env' = topdwnTravBinding td_env stm
+      let td_env' = updateTopdownEnv td_env stm
       bu_env' <- traverseStms stms td_env' bu_env
       mkCoalsTabStm lutab stm (td_env' {nonNegatives = nonNegatives td_env' <> non_negs_in_pats}) bu_env'
 

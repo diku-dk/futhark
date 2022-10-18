@@ -7,7 +7,7 @@ module Futhark.Optimise.ArrayShortCircuiting.TopDownAn
     ScopeTab,
     TopDownHelper,
     InhibitTab,
-    topdwnTravBinding,
+    updateTopdownEnv,
     topDownLoop,
     getDirAliasedIxfn,
     getDirAliasedIxfn',
@@ -151,24 +151,24 @@ instance TopDownHelper () where
   scopeHelper () = mempty
 
 -- | fills in the TopDnEnv table
-topdwnTravBinding ::
+updateTopdownEnv ::
   (ASTRep rep, Op rep ~ MemOp inner, TopDownHelper (OpWithAliases inner)) =>
   TopDnEnv rep ->
   Stm (Aliases rep) ->
   TopDnEnv rep
-topdwnTravBinding env stm@(Let (Pat [pe]) _ (Op (Alloc (Var vname) sp))) =
+updateTopdownEnv env stm@(Let (Pat [pe]) _ (Op (Alloc (Var vname) sp))) =
   env
     { alloc = M.insert (patElemName pe) sp $ alloc env,
       scope = scope env <> scopeOf stm,
       nonNegatives = nonNegatives env <> oneName vname
     }
-topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
+updateTopdownEnv env stm@(Let pat _ (Op (Inner inner))) =
   env
     { scope = scope env <> scopeOf stm <> scopeHelper inner,
       nonNegatives = nonNegatives env <> innerNonNegatives (patNames pat) inner,
       knownLessThan = knownLessThan env <> innerKnownLessThan inner
     }
--- topdwnTravBinding env stm@(Let pat _ e@(If cond then_body else_body _)) =
+-- updateTopdownEnv env stm@(Let pat _ e@(If cond then_body else_body _)) =
 --   let res = getDirAliasFromExp e
 --       new_aliases =
 --         foldMap
@@ -185,9 +185,9 @@ topdwnTravBinding env stm@(Let pat _ (Op (Inner inner))) =
 --           scope = scope env <> scopeOf stm,
 --           usage_table = usageInStm stm <> usage_table env
 --         }
-topdwnTravBinding env (Let (Pat _) _ (BasicOp (Assert se _ _))) =
+updateTopdownEnv env (Let (Pat _) _ (BasicOp (Assert se _ _))) =
   env {td_asserts = se : td_asserts env}
-topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
+updateTopdownEnv env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
       let ixfn_inv = getInvAliasFromExp e
        in env
@@ -195,7 +195,7 @@ topdwnTravBinding env stm@(Let (Pat [pe]) _ e)
               scope = scope env <> scopeOf stm,
               nonNegatives = nonNegatives env <> nonNegativesInPat (stmPat stm)
             }
-topdwnTravBinding env stm =
+updateTopdownEnv env stm =
   env
     { scope = scope env <> scopeOf stm,
       nonNegatives =
