@@ -36,6 +36,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
 where
 
 import Control.Applicative
+import Data.Functor ((<&>))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -375,7 +376,11 @@ markFailedCoal (coal_tab, inhb_tab) src_mem =
             M.insert src_mem failed_set' inhb_tab
           )
 
--- | basic conversion of a Var Expression to a PrimExp
+-- | Attempt to convert a 'VName' to a PrimExp.
+--
+-- First look in 'ScalarTab' to see if we have recorded the scalar value of the
+-- argument. Otherwise look up the type of the argument and return a 'LeafExp'
+-- if it is a 'PrimType'.
 vnameToPrimExp ::
   (CanBeAliased (Op rep), RepTypes rep) =>
   ScopeTab rep ->
@@ -384,9 +389,12 @@ vnameToPrimExp ::
   Maybe (PrimExp VName)
 vnameToPrimExp scopetab scaltab v =
   M.lookup v scaltab
-    <|> case M.lookup v scopetab of
-      Just info ->
-        case typeOf info of
-          Prim tp -> Just $ LeafExp v tp
-          _ -> Nothing
-      _ -> Nothing
+    <|> ( M.lookup v scopetab
+            >>= toPrimType . typeOf
+            <&> LeafExp v
+        )
+
+-- | Attempt to extract the 'PrimType' from a 'TypeBase'.
+toPrimType :: TypeBase shp u -> Maybe PrimType
+toPrimType (Prim pt) = Just pt
+toPrimType _ = Nothing
