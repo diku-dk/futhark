@@ -48,6 +48,7 @@ module Futhark.Util
     cartesian,
     traverseFold,
     fixPoint,
+    concatMapM,
   )
 where
 
@@ -450,3 +451,6 @@ fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
+
+concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
+concatMapM f xs = mconcat <$> mapM f xs

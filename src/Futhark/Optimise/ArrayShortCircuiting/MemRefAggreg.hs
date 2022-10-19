@@ -313,12 +313,11 @@ aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
         Nothing -> False
         Just _ -> True
 aggSummaryLoopTotal _ _ scalars_loop (Just (iterator_var, (lower_bound, upper_bound))) (Set lmads) =
-  mconcat
-    <$> mapM
-      ( aggSummaryOne iterator_var lower_bound upper_bound
-          . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
-      )
-      (S.toList lmads)
+  concatMapM
+    ( aggSummaryOne iterator_var lower_bound upper_bound
+        . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
+    )
+    (S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = pure Undeterminable
 
 -- | For a given iteration of the loop $i$, computes the aggregated loop access
@@ -344,15 +343,14 @@ aggSummaryLoopPartial scalars_loop (Just (iterator_var, (_, upper_bound))) (Set 
   --   new_stride = old_offset - old_offset (where k+1 is substituted for k)
   --   new_offset = old_offset where k = lower bound of iteration
   --   new_span = upper bound of iteration
-  mconcat
-    <$> mapM
-      ( aggSummaryOne
-          iterator_var
-          (isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
-          (upper_bound - typedLeafExp iterator_var - 1)
-          . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
-      )
-      (S.toList lmads)
+  concatMapM
+    ( aggSummaryOne
+        iterator_var
+        (isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
+        (upper_bound - typedLeafExp iterator_var - 1)
+        . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
+    )
+    (S.toList lmads)
 
 -- | For a given map with $k$ dimensions and an index $i$ for each dimension,
 -- compute the aggregated access summary of all other threads.
@@ -379,10 +377,9 @@ aggSummaryMapPartial scalars dims =
     helper (Set acc) ((gtid, size) : rest) (Set as) = do
       partial_as <- aggSummaryMapPartialOne scalars (gtid, size) (Set as)
       total_as <-
-        mconcat
-          <$> mapM
-            (aggSummaryOne gtid 0 (TPrimExp $ primExpFromSubExp (IntType Int64) size))
-            (S.toList as)
+        concatMapM
+          (aggSummaryOne gtid 0 (TPrimExp $ primExpFromSubExp (IntType Int64) size))
+          (S.toList as)
       helper (Set acc <> partial_as) rest total_as
 
 -- | Given an access summary $a$, a thread id $i$ and the size $n$ of the
@@ -397,17 +394,16 @@ aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> 
 aggSummaryMapPartialOne _ _ Undeterminable = pure Undeterminable
 aggSummaryMapPartialOne _ (_, Constant n) (Set _) | oneIsh n = pure mempty
 aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
-  mapM
+  concatMapM
     helper
     [ (0, isInt64 (LeafExp gtid $ IntType Int64)),
       ( isInt64 (LeafExp gtid $ IntType Int64) + 1,
         isInt64 (primExpFromSubExp (IntType Int64) size) - isInt64 (LeafExp gtid $ IntType Int64) - 1
       )
     ]
-    <&> mconcat
   where
     lmads = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $ S.toList lmads0
-    helper (x, y) = mconcat <$> mapM (aggSummaryOne gtid x y) lmads
+    helper (x, y) = concatMapM (aggSummaryOne gtid x y) lmads
 
 -- | Computes to total access summary over a multi-dimensional map.
 aggSummaryMapTotal :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
@@ -419,13 +415,12 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
   foldM
     ( \as' (gtid', size') -> case as' of
         Set lmads' ->
-          mconcat
-            <$> mapM
-              ( aggSummaryOne gtid' 0 $
-                  TPrimExp $
-                    primExpFromSubExp (IntType Int64) size'
-              )
-              (S.toList lmads')
+          concatMapM
+            ( aggSummaryOne gtid' 0 $
+                TPrimExp $
+                  primExpFromSubExp (IntType Int64) size'
+            )
+            (S.toList lmads')
         Undeterminable -> pure Undeterminable
     )
     (Set lmads)

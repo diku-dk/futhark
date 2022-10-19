@@ -27,7 +27,7 @@ import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
-import Prelude
+import Futhark.Util
 
 -- | 'LastUseReader' allows us to abstract over representations by supplying the
 -- 'onOp' function.
@@ -129,7 +129,7 @@ lastUseStms ::
   [VName] ->
   LastUseM rep (LUTabFun, Names)
 lastUseStms Empty (lutab, nms) res_nms = do
-  aliases <- mconcat <$> mapM aliasLookup res_nms
+  aliases <- concatMapM aliasLookup res_nms
   pure (lutab, nms <> aliases)
 lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms = do
   let extra_alias = case e of
