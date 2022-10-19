@@ -16,7 +16,7 @@ import Futhark.Analysis.LastUse (LastUseMap)
 import Futhark.Analysis.LastUse qualified as LastUse
 import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.IR.GPUMem
-import Futhark.Util (invertMap)
+import Futhark.Util (cartesian, invertMap)
 
 -- | The set of 'VName' currently in use.
 type InUse = Names
@@ -36,12 +36,6 @@ makeEdge :: Ord a => a -> a -> Graph a
 makeEdge v1 v2
   | v1 == v2 = mempty
   | otherwise = S.singleton (min v1 v2, max v1 v2)
-
--- | Compute the cartesian product of two foldable collections, using the given
--- combinator function.
-cartesian :: (Monoid m, Foldable t) => (a -> a -> m) -> t a -> t a -> m
-cartesian f xs ys =
-  foldMap (uncurry f) [(x, y) | x <- toList xs, y <- toList ys]
 
 analyseStm ::
   LocalScope GPUMem m =>
