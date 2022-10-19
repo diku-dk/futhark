@@ -14,7 +14,6 @@ module Futhark.Analysis.PrimExp
     isF16,
     isF32,
     isF64,
-    isValueExp,
     evalPrimExp,
     primExpType,
     primExpSizeAtLeast,
@@ -171,11 +170,6 @@ isF32 = TPrimExp
 -- | This expression is of type t'Double'.
 isF64 :: PrimExp v -> TPrimExp Double v
 isF64 = TPrimExp
-
--- | @True@ if the 'PrimExp' is a 'ValueExp'
-isValueExp :: PrimExp v -> Bool
-isValueExp (ValueExp _) = True
-isValueExp _ = False
 
 -- | True if the 'PrimExp' has at least this many nodes.  This can be
 -- much more efficient than comparing with 'length' for large
