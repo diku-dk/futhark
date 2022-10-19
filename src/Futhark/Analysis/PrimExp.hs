@@ -228,6 +228,20 @@ constFoldPrimExp (BinOpExp LogOr x y)
   | oneIshExp y = y
   | zeroIshExp x = y
   | zeroIshExp y = x
+constFoldPrimExp (UnOpExp Abs {} x)
+  | not $ negativeIshExp x = x
+constFoldPrimExp (BinOpExp UMod {} x y)
+  | sameIshExp x y,
+    IntType it <- primExpType x =
+      ValueExp $ IntValue $ intValue it (0 :: Integer)
+constFoldPrimExp (BinOpExp SMod {} x y)
+  | sameIshExp x y,
+    IntType it <- primExpType x =
+      ValueExp $ IntValue $ intValue it (0 :: Integer)
+constFoldPrimExp (BinOpExp SRem {} x y)
+  | sameIshExp x y,
+    IntType it <- primExpType x =
+      ValueExp $ IntValue $ intValue it (0 :: Integer)
 constFoldPrimExp e = e
 
 -- | The class of numeric types that can be used for constructing
@@ -336,8 +350,8 @@ instance (NumExp t, Pretty v) => Num (TPrimExp t v) where
     | otherwise = numBad "*" (x, y)
 
   abs (TPrimExp x)
-    | IntType t <- primExpType x = TPrimExp $ UnOpExp (Abs t) x
-    | FloatType t <- primExpType x = TPrimExp $ UnOpExp (FAbs t) x
+    | IntType t <- primExpType x = TPrimExp $ constFoldPrimExp $ UnOpExp (Abs t) x
+    | FloatType t <- primExpType x = TPrimExp $ constFoldPrimExp $ UnOpExp (FAbs t) x
     | otherwise = numBad "abs" x
 
   signum (TPrimExp x)
@@ -419,7 +433,7 @@ instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
 
   TPrimExp x `mod` TPrimExp y
     | Just z <- msum [asIntOp (`SMod` Unsafe) x y] =
-        TPrimExp z
+        TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "mod" (x, y)
 
   TPrimExp x `quot` TPrimExp y
@@ -588,6 +602,15 @@ zeroIshExp _ = False
 oneIshExp :: PrimExp v -> Bool
 oneIshExp (ValueExp v) = oneIsh v
 oneIshExp _ = False
+
+-- | Is the expression a constant negative of some sort?
+negativeIshExp :: PrimExp v -> Bool
+negativeIshExp (ValueExp v) = negativeIsh v
+negativeIshExp _ = False
+
+sameIshExp :: PrimExp v -> PrimExp v -> Bool
+sameIshExp (ValueExp v1) (ValueExp v2) = v1 == v2
+sameIshExp _ _ = False
 
 -- | If the given 'PrimExp' is a constant of the wrong integer type,
 -- coerce it to the given integer type.  This is a workaround for an
