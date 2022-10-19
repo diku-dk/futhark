@@ -197,7 +197,7 @@ whether you are using the ``futhark`` package from Nixpkgs or one you
 have installed otherwise.
 
 * On NixOS, for OpenCL, you should import ``opencl-headers`` and
-  ``opencl-icd``.  You also need some form of OpenCL backend.  If you
+  ``ocl-icd``.  You also need some form of OpenCL backend.  If you
   have an AMD GPU and use ROCm, you may also need
   ``rocm-opencl-runtime``.
 
@@ -212,4 +212,4 @@ have installed otherwise.
 
 These can be easily made available with e.g::
 
-  nix-shell -p opencl-headers -p opencl-icd
+  nix-shell -p opencl-headers -p ocl-icd
