@@ -47,6 +47,30 @@ You can also use `cabal` directly if you are familiar with it.  In
 particular, `cabal run futhark -- args...` is useful for running the
 Futhark compiler with the provided args.
 
+### Enabling profiling
+
+Asking GHC to generate profiling information is useful not just for
+the obvious purpose of gathering profiling information, but also so
+that stack traces become more informative.  Run
+
+    make configure-profile
+
+to turn on profiling.  This setting will be stored in the file
+`cabal.project.local` and all future builds will be with profiling
+information.  Note that the compiler runs significantly slower this
+way.
+
+To produce a profiling report when running the compiler, add `+RTS -p`
+to the *end* command line.
+
+See also [the chapter on
+profiling](https://downloads.haskell.org/ghc/latest/docs/users_guide/profiling.html)
+in the GHC User's Guide.
+
+Note that GHCs code generator is sometimes slightly buggy in its
+handling of profiled code.  If you encounter a compiler crash with an
+error message like "PAP object entered", then this is a GHC bug.
+
 ## Debugging Internal Type Errors
 
 The Futhark compiler uses a typed core language, and the type checker is
@@ -98,7 +122,7 @@ You may wish to set the environment variable
   generation in some cases, so turn it off when actually
   generating code.)
 - Tools that talk to server-mode executables will print the messages
-  sent back and worth on the standard error stream.
+  sent back and forth on the standard error stream.
 
 ## Running compiler pipelines
 

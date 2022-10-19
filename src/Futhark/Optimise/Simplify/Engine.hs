@@ -452,7 +452,7 @@ recSimplifyStm ::
   UT.UsageTable ->
   SimpleM rep (Stms (Wise rep), Stm (Wise rep))
 recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
-  ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp usage pat e
+  ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp (usage <> UT.usageInPat pat) pat e
   let aux' = StmAux (cs <> e_cs) attrs dec
   pure (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
 
@@ -666,8 +666,8 @@ loopInvariantStm vtable =
   all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
 
 matchBlocker ::
-  (ASTRep rep, CanBeWise (Op rep), FreeIn a) =>
-  a ->
+  (ASTRep rep, CanBeWise (Op rep)) =>
+  [SubExp] ->
   MatchDec rt ->
   SimpleM rep (BlockPred (Wise rep))
 matchBlocker cond (MatchDec _ ifsort) = do
@@ -896,7 +896,7 @@ simplifyExp usage _ (WithAcc inputs lam) = do
       Nothing ->
         pure (Nothing, mempty)
       Just (op_lam, nes) -> do
-        (op_lam', op_lam_stms) <- blockMigrated (simplifyLambda op_lam)
+        (op_lam', op_lam_stms) <- blockMigrated (simplifyLambda mempty op_lam)
         nes' <- simplify nes
         pure (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
@@ -1063,11 +1063,12 @@ instance Simplifiable d => Simplifiable (Slice d) where
 
 simplifyLambda ::
   SimplifiableRep rep =>
+  Names ->
   Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
-simplifyLambda lam = do
+simplifyLambda extra_bound lam = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
-  simplifyLambdaMaybeHoist par_blocker mempty lam
+  simplifyLambdaMaybeHoist (par_blocker `orIf` hasFree extra_bound) mempty lam
 
 simplifyLambdaNoHoisting ::
   SimplifiableRep rep =>

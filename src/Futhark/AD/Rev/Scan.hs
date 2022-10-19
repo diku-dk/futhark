@@ -79,12 +79,7 @@ mkScanLinFunO t = do
 -- but insert explicit indexing to reverse inside the map.
 mkScan2ndMaps :: SubExp -> (Type, VName, (VName, VName)) -> ADM VName
 mkScan2ndMaps w (arr_tp, y_adj, (ds, cs)) = do
-  nm1 <- letSubExp "nm1" =<< toExp (pe64 w - 1)
-  y_adj_last <-
-    letExp (baseString y_adj ++ "_last") $
-      BasicOp $
-        Index y_adj $
-          fullSlice arr_tp [DimFix nm1]
+  y_adj_last <- letExp (baseString y_adj <> "_last") =<< eLast y_adj
 
   par_i <- newParam "i" $ Prim int64
   lam <- mkLambda [par_i] $ do
@@ -121,9 +116,8 @@ mkScanFinalMap ops w scan_lam xs ys rs = do
           (resultBodyM $ map (Var . paramName) par_r)
           ( buildBody_ $ do
               im1 <- letSubExp "im1" =<< toExp (le64 i - 1)
-              ys_im1 <- forM ys $ \y -> do
-                y_t <- lookupType y
-                letSubExp (baseString y ++ "_last") $ BasicOp $ Index y $ fullSlice y_t [DimFix im1]
+              ys_im1 <- forM ys $ \y ->
+                letSubExp (baseString y <> "_im1") =<< eIndex y (eSubExp im1)
 
               lam_res <-
                 mapM (letExp "const" . BasicOp . SubExp . resSubExp)
