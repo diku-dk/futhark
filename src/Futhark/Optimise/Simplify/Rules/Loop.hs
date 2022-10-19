@@ -238,34 +238,6 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
     notIndex _ = True
 simplifyLoopVariables _ _ _ _ = Skip
 
--- If a for-loop with no loop variables has a counter of type Int64,
--- and the bound is just a constant or sign-extended integer of
--- smaller type, then change the loop to iterate over the smaller type
--- instead.  We then move the sign extension inside the loop instead.
--- This addresses loops of the form @for i in x..<y@ in the source
--- language.
-narrowLoopType :: (BuilderOps rep) => TopDownRuleDoLoop rep
-narrowLoopType vtable pat aux (merge, ForLoop i Int64 n [], body)
-  | Just (n', it', cs) <- smallerType =
-      Simplify $ do
-        i' <- newVName $ baseString i
-        let form' = ForLoop i' it' n' []
-        body' <- insertStmsM . inScopeOf form' $ do
-          letBindNames [i] $ BasicOp $ ConvOp (SExt it' Int64) (Var i')
-          pure body
-        auxing aux $ certifying cs $ letBind pat $ DoLoop merge form' body'
-  where
-    smallerType
-      | Var n' <- n,
-        Just (ConvOp (SExt it' _) n'', cs) <- ST.lookupBasicOp n' vtable =
-          Just (n'', it', cs)
-      | Constant (IntValue (Int64Value n')) <- n,
-        toInteger n' <= toInteger (maxBound :: Int32) =
-          Just (intConst Int32 (toInteger n'), Int32, mempty)
-      | otherwise =
-          Nothing
-narrowLoopType _ _ _ _ = Skip
-
 unroll ::
   BuilderOps rep =>
   Integer ->
@@ -313,8 +285,7 @@ topDownRules =
   [ RuleDoLoop hoistLoopInvariantMergeVariables,
     RuleDoLoop simplifyClosedFormLoop,
     RuleDoLoop simplifyKnownIterationLoop,
-    RuleDoLoop simplifyLoopVariables,
-    RuleDoLoop narrowLoopType
+    RuleDoLoop simplifyLoopVariables
   ]
 
 bottomUpRules :: BuilderOps rep => [BottomUpRule rep]
