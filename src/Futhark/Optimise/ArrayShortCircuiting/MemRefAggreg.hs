@@ -15,7 +15,6 @@ where
 
 import Control.Monad
 import Data.Function ((&))
-import Data.Functor ((<&>))
 import Data.List (intersect, partition, uncons)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
