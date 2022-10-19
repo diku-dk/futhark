@@ -2,7 +2,7 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | Playground for work on merging memory blocks
+-- | Perform array short circuiting
 module Futhark.Optimise.ArrayShortCircuiting (optimiseSeqMem, optimiseGPUMem) where
 
 import Control.Monad.Reader
