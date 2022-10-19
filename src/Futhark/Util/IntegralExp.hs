@@ -25,7 +25,7 @@ import Prelude
 
 -- | A twist on the 'Integral' type class that is more friendly to
 -- symbolic representations.
-class (Num e, Eq e) => IntegralExp e where
+class Num e => IntegralExp e where
   quot :: e -> e -> e
   rem :: e -> e -> e
   div :: e -> e -> e

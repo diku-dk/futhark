@@ -115,7 +115,7 @@ shape (Rebase _ ixfun) =
   shape ixfun
 
 index ::
-  IntegralExp num =>
+  (Eq num, IntegralExp num) =>
   IxFun num ->
   Indices num ->
   num
