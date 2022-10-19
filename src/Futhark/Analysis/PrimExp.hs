@@ -228,7 +228,8 @@ constFoldPrimExp (BinOpExp LogOr x y)
   | oneIshExp y = y
   | zeroIshExp x = y
   | zeroIshExp y = x
-constFoldPrimExp (UnOpExp Abs {} x) | not $ negativeIshExp x = x
+constFoldPrimExp (UnOpExp Abs {} x)
+  | not $ negativeIshExp x = x
 constFoldPrimExp (BinOpExp UMod {} x y)
   | sameIshExp x y,
     IntType it <- primExpType x =

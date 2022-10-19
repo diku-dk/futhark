@@ -1930,10 +1930,7 @@ sCopy ::
   ImpM rep r op ()
 sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
   if destmem == srcmem
-    then
-      sUnless
-        (destoffset .==. srcoffset)
-        the_copy
+    then sUnless (destoffset .==. srcoffset) the_copy
     else the_copy
   where
     the_copy =

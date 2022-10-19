@@ -447,7 +447,7 @@ data LoopForm rep
       IntType
       -- ^ The type of the loop iterator var
       SubExp
-      -- ^ The upper bound
+      -- ^ The number of iterations.
       [(LParam rep, VName)]
   | WhileLoop VName
 
