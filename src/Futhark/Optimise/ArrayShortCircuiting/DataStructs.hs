@@ -209,7 +209,7 @@ instance Pretty CoalsTab where
 
 instance Pretty AccessSummary where
   pretty Undeterminable = "Undeterminable"
-  pretty (Set _) = "Access-Set:" -- <+> pretty a <+> " "
+  pretty (Set a) = "Access-Set:" <+> pretty (S.toList a) <+> " "
 
 instance Pretty MemRefs where
   pretty (MemRefs a b) = "( Use-Sum:" <+> pretty a <+> "Write-Sum:" <+> pretty b <> ")"

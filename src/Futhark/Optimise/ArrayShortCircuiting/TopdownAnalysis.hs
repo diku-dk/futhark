@@ -211,7 +211,7 @@ updateTopdownEnvLoop td_env arginis lform =
           knownLessThan = less_than <> knownLessThan td_env
         }
 
--- | Get direct aliased index function?  Returns a triple of current memory
+-- | Get direct aliased index function.  Returns a triple of current memory
 -- block to be coalesced, the destination memory block and the index function of
 -- the access in the space of the destination block.
 getDirAliasedIxfn :: HasMemBlock (Aliases rep) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)

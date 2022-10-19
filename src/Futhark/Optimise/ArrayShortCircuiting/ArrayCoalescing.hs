@@ -344,7 +344,6 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
                 foldMap
                   ( \(p, space, res) -> case M.lookup (patElemName p) $ vartab entry of
                       Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
-                        -- aggSummaryMapPartial (scalarTable td_env) (unSegSpace space) $
                         maybe
                           Undeterminable
                           ( ixfunToAccessSummary
@@ -358,7 +357,11 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
           let source_writes = srcwrts (memrefs entry) <> thread_writes
           destination_uses <-
             case dstrefs (memrefs entry) `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
-              Set s -> mconcat <$> mapM (\lm -> aggSummaryMapPartial (scalarTable td_env) (unSegSpace space0) (Set $ S.singleton lm)) (S.toList s)
+              Set s ->
+                mconcat
+                  <$> mapM
+                    (aggSummaryMapPartial (scalarTable td_env) $ unSegSpace space0)
+                    (S.toList s)
               -- Set s -> mconcat <$> mapM undefined (S.toList s)
               Undeterminable -> pure Undeterminable
           let res = noMemOverlap td_env destination_uses source_writes
@@ -927,7 +930,7 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
       --     mem-block m_y, in which m_b is coalesced into.
       --     W_i and U_j correspond to the accesses within the loop body.
       mb_loop_idx = mbLoopIndexRange lform
-  res_actv1 <- filterMapM1 (loopSoundness1Entry (scope td_env' <> scopeOf (bodyStms body)) scals_loop mb_loop_idx) res_actv0
+  res_actv1 <- filterMapM1 (loopSoundness1Entry scals_loop mb_loop_idx) res_actv0
 
   -- b) Update the memory-reference summaries across loop:
   --   W = Union_{i=0..n-1} W_i Union W_{before-loop}
@@ -1074,10 +1077,10 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
         aggSummaryLoopTotal (scope td_env) scope_loop scal_tab idx $
           (dstrefs . memrefs) etry
       pure $ etry {memrefs = MemRefs uses wrts}
-    loopSoundness1Entry scope_loop scal_tab idx etry = do
+    loopSoundness1Entry scal_tab idx etry = do
       let wrt_i = (srcwrts . memrefs) etry
       use_p <-
-        aggSummaryLoopPartial (scope td_env) scope_loop (scal_tab <> scalarTable td_env) idx $
+        aggSummaryLoopPartial (scal_tab <> scalarTable td_env) idx $
           dstrefs $
             memrefs etry
       pure $ noMemOverlap td_env' wrt_i use_p

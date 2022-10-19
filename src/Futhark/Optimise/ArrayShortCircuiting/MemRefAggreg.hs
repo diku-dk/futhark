@@ -145,8 +145,6 @@ getUseSumFromStm _ _ (Let Pat {} _ (Op (Alloc _ _))) = Just ([], [])
 getUseSumFromStm _ _ _ =
   -- if-then-else, loops are supposed to be treated separately,
   -- calls are not supported, and Ops are not yet supported
-  -- error
-  --   ("In MemRefAggreg.hs, getUseSumFromStm, unsuported case of stm being: " ++ pretty stm)
   Nothing
 
 -- | This function:
@@ -154,11 +152,6 @@ getUseSumFromStm _ _ _ =
 --          (by calling @getUseSumFromStm@)
 --     2. fails the entries in active coalesced table for which the write set
 --          overlaps the uses of the destination (to that point)
---   ToDo: a) the @noMemOverlap@ test probably requires the @scals@ field
---            from @BotUpEnv@ so that it translates the index functions.
---         b) it will also require a dictionary of ranges, e.g., for loop
---            indices, and positive constants, such as loop counts. This
---            should be computed on the top-down pass.
 recordMemRefUses ::
   (CanBeAliased (Op rep), RepTypes rep, Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
   TopdownEnv rep ->
@@ -179,47 +172,10 @@ recordMemRefUses td_env bu_env stm =
                     else state
               )
               (active_tab, inhibit_tab)
-        Just (stm_wrts, stm_uses) ->
+        Just use_sums ->
           let (mb_wrts, prev_uses, mb_lmads) =
-                unzip3 $
-                  map
-                    ( \(m_b, etry) ->
-                        let alias_m_b = getAliases mempty m_b
-                            stm_uses' = filter ((`notNameIn` alias_m_b) . tupFst) stm_uses
-                            all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
-                            ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
-                            lmads' = mapMaybe mbLmad ixfns
-                            lmads'' =
-                              if length lmads' == length ixfns
-                                then Set $ S.fromList lmads'
-                                else Undeterminable
-                            wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
-                            wrt_tmps = mapMaybe mbLmad wrt_ixfns
-                            prev_use =
-                              translateAccessSummary (scope td_env) (scalarTable td_env) $
-                                (dstrefs . memrefs) etry
-                            wrt_lmads' =
-                              if length wrt_tmps == length wrt_ixfns
-                                then Set $ S.fromList wrt_tmps
-                                else Undeterminable
-                            original_mem_aliases =
-                              fmap tupFst stm_uses
-                                & uncons
-                                & fmap fst
-                                & (=<<) (`M.lookup` active_tab)
-                                & maybe mempty alsmem
-                            (wrt_lmads'', lmads) =
-                              if m_b `nameIn` original_mem_aliases
-                                then (wrt_lmads' <> lmads'', Set mempty)
-                                else (wrt_lmads', lmads'')
-                            no_overlap = noMemOverlap td_env prev_use wrt_lmads''
-                            wrt_lmads =
-                              if no_overlap
-                                then Just wrt_lmads''
-                                else Nothing
-                         in (wrt_lmads, prev_use, lmads)
-                    )
-                    active_etries
+                map (checkOverlapAndExpand use_sums active_tab) active_etries
+                  & unzip3
 
               -- keep only the entries that do not overlap with the memory
               -- blocks defined in @pat@ or @inner_free_vars@.
@@ -233,7 +189,7 @@ recordMemRefUses td_env bu_env stm =
                             etry' = etry {memrefs = mrefs'}
                          in (k, addLmads wrts uses etry')
                     )
-                  $ filter (isJust . fst)
+                  $ mapMaybe (\(x, y) -> (,y) <$> x) -- only keep successful coals
                   $ zip mb_wrts
                   $ zip3 mb_lmads prev_uses active_etries
               failed_tab =
@@ -244,6 +200,42 @@ recordMemRefUses td_env bu_env stm =
               (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) $ M.keys failed_tab
            in (active_tab1, inhibit_tab1)
   where
+    checkOverlapAndExpand (stm_wrts, stm_uses) active_tab (m_b, etry) =
+      let alias_m_b = getAliases mempty m_b
+          stm_uses' = filter ((`notNameIn` alias_m_b) . tupFst) stm_uses
+          all_aliases = foldl getAliases mempty $ namesToList $ alsmem etry
+          ixfns = map tupThd $ filter ((`nameIn` all_aliases) . tupSnd) stm_uses'
+          lmads' = mapMaybe mbLmad ixfns
+          lmads'' =
+            if length lmads' == length ixfns
+              then Set $ S.fromList lmads'
+              else Undeterminable
+          wrt_ixfns = map tupThd $ filter ((`nameIn` alias_m_b) . tupFst) stm_wrts
+          wrt_tmps = mapMaybe mbLmad wrt_ixfns
+          prev_use =
+            translateAccessSummary (scope td_env) (scalarTable td_env) $
+              (dstrefs . memrefs) etry
+          wrt_lmads' =
+            if length wrt_tmps == length wrt_ixfns
+              then Set $ S.fromList wrt_tmps
+              else Undeterminable
+          original_mem_aliases =
+            fmap tupFst stm_uses
+              & uncons
+              & fmap fst
+              & (=<<) (`M.lookup` active_tab)
+              & maybe mempty alsmem
+          (wrt_lmads'', lmads) =
+            if m_b `nameIn` original_mem_aliases
+              then (wrt_lmads' <> lmads'', Set mempty)
+              else (wrt_lmads', lmads'')
+          no_overlap = noMemOverlap td_env prev_use wrt_lmads''
+          wrt_lmads =
+            if no_overlap
+              then Just wrt_lmads''
+              else Nothing
+       in (wrt_lmads, prev_use, lmads)
+
     tupFst (a, _, _) = a
     tupSnd (_, b, _) = b
     tupThd (_, _, c) = c
@@ -256,17 +248,13 @@ recordMemRefUses td_env bu_env stm =
         (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subs indfun =
           Just lmad
     mbLmad _ = Nothing
-    addLmads (Just wrts) uses etry =
+    addLmads wrts uses etry =
       etry {memrefs = MemRefs uses wrts <> memrefs etry}
-    addLmads _ _ _ =
-      error "Impossible case reached because we have filtered Nothings before"
 
--------------------------------------------------------------
--- Helper Functions for Partial and Total Loop Aggregation --
---  of memory references. Please implement as precise as   --
---  possible. Currently the implementations are dummy      --
---  aiming to be useful only when one of the sets is empty.--
--------------------------------------------------------------
+-- | Check for memory overlap of two access summaries.
+--
+-- This check is conservative, so unless we can guarantee that there is no
+-- overlap, we return 'False'.
 noMemOverlap :: (CanBeAliased (Op rep), RepTypes rep) => TopdownEnv rep -> AccessSummary -> AccessSummary -> Bool
 noMemOverlap _ _ (Set mr)
   | mr == mempty = True
@@ -294,13 +282,15 @@ noMemOverlap td_env (Set is0) (Set js0)
     js = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList js0
 noMemOverlap _ _ _ = False
 
--- | Suppossed to aggregate the iteration-level summaries
---     across a loop of index i = 0 .. n-1
---   The current implementation is naive, in that it
---     treats the case when the summary is loop-invariant,
---     and returns Undeterminable in the other cases.
---   The current implementation is good for while, but needs
---     to be refined for @for i < n@ loops
+-- | Computes the total aggregated access summary for a loop by expanding the
+-- access summary given according to the iterator variable and bounds of the
+-- loop.
+--
+-- Corresponds to:
+--
+-- \[
+--   \bigcup_{j=0}^{j<n} Access_j
+-- \]
 aggSummaryLoopTotal ::
   MonadFreshNames m =>
   ScopeTab rep ->
@@ -331,20 +321,23 @@ aggSummaryLoopTotal _ _ scalars_loop (Just (iterator_var, (lower_bound, upper_bo
       (S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = pure Undeterminable
 
--- | Partially aggregate the iteration-level summaries
---     across a loop of index i = 0 .. n-1. This means that it
---     computes the summary: Union_{j=i+1..n} Access_j
+-- | For a given iteration of the loop $i$, computes the aggregated loop access
+-- summary of all later iterations.
+--
+-- Corresponds to:
+--
+-- \[
+--   \bigcup_{j=i+1}^{j<n} Access_j
+-- \]
 aggSummaryLoopPartial ::
   MonadFreshNames m =>
-  ScopeTab rep ->
-  ScopeTab rep ->
   ScalarTab ->
   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
   m AccessSummary
-aggSummaryLoopPartial _ _ _ _ Undeterminable = pure Undeterminable
-aggSummaryLoopPartial _ _ _ Nothing _ = pure Undeterminable
-aggSummaryLoopPartial _ _ scalars_loop (Just (iterator_var, (_, upper_bound))) (Set lmads) = do
+aggSummaryLoopPartial _ _ Undeterminable = pure Undeterminable
+aggSummaryLoopPartial _ Nothing _ = pure Undeterminable
+aggSummaryLoopPartial scalars_loop (Just (iterator_var, (_, upper_bound))) (Set lmads) = do
   -- map over each index function in the access summary
   --   Substitube a fresh variable k for the loop iterator
   --   if k is in stride or span of ixfun: fall back to total
@@ -361,30 +354,45 @@ aggSummaryLoopPartial _ _ scalars_loop (Just (iterator_var, (_, upper_bound))) (
       )
       (S.toList lmads)
 
-aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
-aggSummaryMapPartial _ [] _ = pure mempty
-aggSummaryMapPartial _ _ (Set lmads)
-  | lmads == mempty = pure mempty
-aggSummaryMapPartial scalars ((gtid, size) : rest) as = do
-  total_inner <-
-    foldM
-      ( \as' (gtid', size') -> case as' of
-          Set lmads ->
-            mconcat
-              <$> mapM
-                ( aggSummaryOne gtid' 0 $
-                    TPrimExp $
-                      primExpFromSubExp (IntType Int64) size'
-                )
-                (S.toList lmads)
-          Undeterminable -> pure Undeterminable
-      )
-      as
-      $ reverse rest
-  this_dim <- aggSummaryMapPartialOne scalars (gtid, size) total_inner
-  rest' <- aggSummaryMapPartial scalars rest as
-  pure $ this_dim <> rest'
+-- | For a given map with $k$ dimensions and an index $i$ for each dimension,
+-- compute the aggregated access summary of all other threads.
+--
+-- For the innermost dimension, this corresponds to
+--
+-- \[
+--   \bigcup_{j=0}^{j<i} Access_j \cup \bigcup_{j=i+1}^{j<n} Access_j
+-- \]
+--
+-- where $Access_j$ describes the point accesses in the map. As we move up in
+-- dimensionality, the previous access summaries are kept, in addition to the
+-- total aggregation of the inner dimensions. For outer dimensions, the equation
+-- is the same, the point accesses in $Access_j$ are replaced with the total
+-- aggregation of the inner dimensions.
+aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> LmadRef -> m AccessSummary
+aggSummaryMapPartial _ [] = const $ pure mempty
+aggSummaryMapPartial scalars dims =
+  helper mempty (reverse dims) . Set . S.singleton -- Reverse dims so we work from the inside out
+  where
+    helper acc [] _ = pure acc
+    helper Undeterminable _ _ = pure Undeterminable
+    helper _ _ Undeterminable = pure Undeterminable
+    helper (Set acc) ((gtid, size) : rest) (Set as) = do
+      partial_as <- aggSummaryMapPartialOne scalars (gtid, size) (Set as)
+      total_as <-
+        mconcat
+          <$> mapM
+            (aggSummaryOne gtid 0 (TPrimExp $ primExpFromSubExp (IntType Int64) size))
+            (S.toList as)
+      helper (Set acc <> partial_as) rest total_as
 
+-- | Given an access summary $a$, a thread id $i$ and the size $n$ of the
+-- dimension, compute the partial map summary.
+--
+-- Corresponds to
+--
+-- \[
+--   \bigcup_{j=0}^{j<i} a_j \cup \bigcup_{j=i+1}^{j<n} a_j
+-- \]
 aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
 aggSummaryMapPartialOne _ _ Undeterminable = pure Undeterminable
 aggSummaryMapPartialOne _ (_, Constant n) (Set _) | oneIsh n = pure mempty
@@ -401,6 +409,7 @@ aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
     lmads = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $ S.toList lmads0
     helper (x, y) = mconcat <$> mapM (aggSummaryOne gtid x y) lmads
 
+-- | Computes to total access summary over a multi-dimensional map.
 aggSummaryMapTotal :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapTotal _ [] _ = pure mempty
 aggSummaryMapTotal _ _ (Set lmads)
@@ -427,6 +436,15 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
         map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $
           S.toList lmads0
 
+-- | Helper function that aggregates the accesses of single LMAD according to a
+-- given iterator value, a lower bound and a span.
+--
+-- If successful, the result is an index function with an extra outer
+-- dimension. The stride of the outer dimension is computed by taking the
+-- difference between two points in the index function.
+--
+-- The function returns 'Underterminable' if the iterator is free in the output
+-- LMAD or the dimensions of the input LMAD .
 aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
   | iterator_var `nameIn` freeIn dims0 = pure Undeterminable
@@ -447,5 +465,6 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
     incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
     replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped
 
+-- | Takes a 'VName' and converts it into a 'TPrimExp' with type 'Int64'.
 typedLeafExp :: VName -> TPrimExp Int64 VName
 typedLeafExp vname = isInt64 $ LeafExp vname (IntType Int64)
