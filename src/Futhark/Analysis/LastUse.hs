@@ -136,6 +136,16 @@ analyseStm (lumap0, used0) (Let pat _ e) = do
         used_acc <> unAliases aliases
       )
 
+    addAliasesFromBodyRes (lumap_acc, used_acc) (PatElem {}, Constant _) = (lumap_acc, used_acc)
+    addAliasesFromBodyRes (lumap_acc, used_acc) (PatElem name _, Var body_res) =
+      -- Any aliases of `name` should have the same last-use as `name`
+      ( case M.lookup name lumap_acc of
+          Just name' ->
+            insertNames name' (oneName body_res) lumap_acc
+          Nothing -> lumap_acc,
+        used_acc <> oneName body_res
+      )
+
     pat_name = patElemName $ head $ patElems pat
 
     analyseExp (lumap, used) (BasicOp _) = do
@@ -149,16 +159,21 @@ analyseStm (lumap0, used0) (Let pat _ e) = do
         bimap mconcat mconcat . unzip
           <$> mapM (analyseBody lumap used . caseBody) cases
       (lumap_defbody, used_defbody) <- analyseBody lumap used defbody
-      let used' = used_cases <> used_defbody
+      let (lumap', used') =
+            (lumap_defbody <> lumap_cases, used_cases <> used_defbody)
+              & flip (foldl addAliasesFromBodyRes) (zip (patElems pat) (map resSubExp $ bodyResult defbody))
           nms = (freeIn ses <> freeIn dec) `namesSubtract` used'
       pure
-        ( insertNames pat_name nms (lumap_cases <> lumap_defbody),
+        ( insertNames pat_name nms lumap',
           used' <> nms
         )
     analyseExp (lumap, used) (DoLoop merge form body) = do
-      (lumap', used') <- analyseBody lumap used body
-      let nms = (freeIn merge <> freeIn form) `namesSubtract` used'
-      pure (insertNames pat_name nms lumap', used' <> nms)
+      let (lumap', used') =
+            zip (patElems pat) (map resSubExp $ bodyResult body)
+              & foldl addAliasesFromBodyRes (lumap, used)
+      (lumap'', used'') <- analyseBody lumap' used' body
+      let nms = (freeIn merge <> freeIn form) `namesSubtract` used''
+      pure (insertNames pat_name nms lumap'', used'' <> nms)
     analyseExp (lumap, used) (Op op) = do
       onOp <- asks envLastUseOp
       onOp pat_name (lumap, used) op
