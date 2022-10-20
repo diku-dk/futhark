@@ -3,9 +3,8 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | This pass attempts to lower allocations as far towards the top in their body
--- as possible. It does not try to hoist allocations outside across body
--- boundaries.
+-- | This pass attempts to lower allocations as far towards the bottom of their
+-- body as possible.
 module Futhark.Pass.LowerAllocations (lowerAllocationsSeqMem, lowerAllocationsGPUMem) where
 
 import Control.Monad.Reader
