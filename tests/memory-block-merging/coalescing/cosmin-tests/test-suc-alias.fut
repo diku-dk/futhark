@@ -1,3 +1,7 @@
+-- ==
+-- structure gpu-mem { Alloc 4 }
+-- structure seq-mem { Alloc 1 }
+
 let main [n] (ind: i64) (ass: [n][n]i64) =
   let np1 = n+1
   let yss = replicate np1 (replicate np1 2)

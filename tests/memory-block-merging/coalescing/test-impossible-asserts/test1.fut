@@ -8,6 +8,8 @@
 --           [588i64, 595856i64, 0i64],
 --           [7i64, 8i64, 9i64]]
 --        }
+-- structure gpu-mem { Alloc 2 }
+-- structure seq-mem { Alloc 1 }
 
 let main [n] (xs: *[n][n]i64) (a0: [n]i64) (i: i64): (i64, [n][n]i64) =
   let a = map (\e -> e*e/3) a0

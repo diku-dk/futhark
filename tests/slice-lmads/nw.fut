@@ -38,6 +38,8 @@
 --            8i32, 12i32,  8i32, 23i32, 24i32, 33i32, 39i32, 33i32, 27i32, 33i32,
 --            6i32,  9i32, 20i32, 17i32, 26i32, 28i32, 39i32, 39i32, 35i32, 32i32,
 --            4i32, 14i32, 16i32, 27i32, 19i32, 26i32, 33i32, 39i32, 40i32, 38i32] }
+-- structure gpu-mem { Alloc 6 }
+-- structure seq-mem { Alloc 8 }
 
 import "intrinsics"
 

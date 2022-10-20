@@ -1,3 +1,7 @@
+-- ==
+-- structure gpu-mem { Alloc 4 }
+-- structure seq-mem { Alloc 2 }
+
 let main [n] (ind: i64) (ass: [n][n]i64) =
   let yss = map (map (+1)) ass |> opaque -- replicate n (replicate n 2)
   let cs  = map (reduce (+) 0) yss
