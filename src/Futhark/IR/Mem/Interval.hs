@@ -58,7 +58,7 @@ findClosestStride offset_term is =
       p =
         minimumBy
           ( compare
-              `on` ( (\(AlgSimplify.Prod _ xs) -> length (offset_term \\ xs))
+              `on` ( termDifferenceLength
                        . minimumBy (compare `on` \s -> length (offset_term \\ AlgSimplify.atoms s))
                        . AlgSimplify.simplify0
                    )
@@ -70,6 +70,8 @@ findClosestStride offset_term is =
             minimumBy (compare `on` \s -> length (offset_term \\ AlgSimplify.atoms s)) $
               AlgSimplify.simplify0 p
       )
+  where
+    termDifferenceLength (AlgSimplify.Prod _ xs) = length (offset_term \\ xs)
 
 expandOffset :: AlgSimplify.SofP -> [Interval] -> Maybe AlgSimplify.SofP
 expandOffset [] _ = Nothing
