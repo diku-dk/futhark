@@ -102,7 +102,7 @@ simplify' :: TExp -> TExp
 simplify' = TPrimExp . simplify . untyped
 
 applyZero :: Prod -> Maybe Prod
-applyZero p@(Prod neg as)
+applyZero p@(Prod _ as)
   | val 0 `elem` as = Nothing
   | otherwise = Just p
 
