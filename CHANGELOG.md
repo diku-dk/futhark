@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect regularity checking in loop interchange (#1744).
 
+* Pattern match exhaustiveness of bools (#1748).
+
 ## [0.22.2]
 
 ### Added
