@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.Match
   )
 where
 
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Util (maybeHead, nubOrd)
@@ -23,16 +24,16 @@ data Constr
   deriving (Eq, Ord, Show)
 
 -- | A representation of the essentials of a pattern.
-data Match
-  = MatchWild StructType
-  | MatchConstr Constr [Match] StructType
+data Match t
+  = MatchWild t
+  | MatchConstr Constr [Match t] t
   deriving (Eq, Ord, Show)
 
-matchType :: Match -> StructType
+matchType :: Match StructType -> StructType
 matchType (MatchWild t) = t
 matchType (MatchConstr _ _ t) = t
 
-pprMatch :: Int -> Match -> Doc a
+pprMatch :: Int -> Match t -> Doc a
 pprMatch _ MatchWild {} = "_"
 pprMatch _ (MatchConstr (ConstrLit l) _ _) = pretty l
 pprMatch p (MatchConstr (Constr c) ps _) =
@@ -45,10 +46,10 @@ pprMatch _ (MatchConstr (ConstrRecord fs) ps _) =
   where
     ppField name t = pretty (nameToString name) <> equals <> pprMatch (-1) t
 
-instance Pretty Match where
+instance Pretty (Match t) where
   pretty = pprMatch (-1)
 
-patternToMatch :: Pat -> Match
+patternToMatch :: Pat -> Match StructType
 patternToMatch (Id _ (Info t) _) = MatchWild $ toStruct t
 patternToMatch (Wildcard (Info t) _) = MatchWild $ toStruct t
 patternToMatch (PatParens p _) = patternToMatch p
@@ -67,29 +68,35 @@ patternToMatch p@(RecordPat fs _) =
 patternToMatch (PatConstr c (Info t) args _) =
   MatchConstr (Constr c) (map patternToMatch args) $ toStruct t
 
-isConstr :: Match -> Maybe Name
+isConstr :: Match t -> Maybe Name
 isConstr (MatchConstr (Constr c) _ _) = Just c
 isConstr _ = Nothing
 
-complete :: [Match] -> Bool
+isBool :: Match t -> Maybe Bool
+isBool (MatchConstr (ConstrLit (PatLitPrim (BoolValue b))) _ _) = Just b
+isBool _ = Nothing
+
+complete :: [Match StructType] -> Bool
 complete xs
   | Just x <- maybeHead xs,
     Scalar (Sum all_cs) <- matchType x,
     Just xs_cs <- mapM isConstr xs =
       all (`elem` xs_cs) (M.keys all_cs)
   | otherwise =
-      (any (isBool True) xs && any (isBool False) xs)
+      all (`elem` fromMaybe [] (mapM isBool xs)) [True, False]
         || all isRecord xs
         || all isTuple xs
   where
-    isBool b1 (MatchConstr (ConstrLit (PatLitPrim (BoolValue b2))) _ _) = b1 == b2
-    isBool _ _ = False
     isRecord (MatchConstr ConstrRecord {} _ _) = True
     isRecord _ = False
     isTuple (MatchConstr ConstrTuple _ _) = True
     isTuple _ = False
 
-specialise :: [StructType] -> Match -> [[Match]] -> [[Match]]
+specialise ::
+  [StructType] ->
+  Match StructType ->
+  [[Match StructType]] ->
+  [[Match StructType]]
 specialise ats c1 = go
   where
     go ((c2 : row) : ps)
@@ -109,14 +116,14 @@ specialise ats c1 = go
     match _ _ =
       Nothing
 
-defaultMat :: [[Match]] -> [[Match]]
+defaultMat :: [[Match t]] -> [[Match t]]
 defaultMat = mapMaybe onRow
   where
     onRow (MatchConstr {} : _) = Nothing
     onRow (MatchWild {} : ps) = Just ps
     onRow [] = Nothing -- Should not happen.
 
-findUnmatched :: [[Match]] -> Int -> [[Match]]
+findUnmatched :: [[Match StructType]] -> Int -> [[Match ()]]
 findUnmatched pmat n
   | ((p : _) : _) <- pmat,
     Just heads <- mapM maybeHead pmat =
@@ -133,40 +140,44 @@ findUnmatched pmat n
           pmat' = specialise ats c pmat
       u <- findUnmatched pmat' (a_k + n - 1)
       pure $ case c of
-        MatchConstr c' _ t ->
+        MatchConstr c' _ _ ->
           let (r, p) = splitAt a_k u
-           in MatchConstr c' r t : p
-        MatchWild t ->
-          MatchWild t : u
+           in MatchConstr c' r () : p
+        MatchWild _ ->
+          MatchWild () : u
 
     incompleteCase pt cs = do
       u <- findUnmatched (defaultMat pmat) (n - 1)
       if null cs
-        then pure $ MatchWild pt : u
+        then pure $ MatchWild () : u
         else case pt of
           Scalar (Sum all_cs) -> do
             -- Figure out which constructors are missing.
             let sigma = mapMaybe isConstr cs
                 notCovered (k, _) = k `notElem` sigma
             (cname, ts) <- filter notCovered $ M.toList all_cs
-            pure $ MatchConstr (Constr cname) (map MatchWild ts) pt : u
-          _ ->
-            -- This is where we could have enumerated missing match
-            -- values (e.g. for booleans), rather than just emitting a
-            -- wildcard.
-            pure $ MatchWild pt : u
-
--- If we get here, then the number of columns must be zero.
-findUnmatched [] _ = [[]]
+            pure $ MatchConstr (Constr cname) (map (const (MatchWild ())) ts) () : u
+          Scalar (Prim Bool) -> do
+            -- Figure out which constants are missing.
+            let sigma = mapMaybe isBool cs
+            b <- filter (`notElem` sigma) [True, False]
+            pure $ MatchConstr (ConstrLit (PatLitPrim (BoolValue b))) [] () : u
+          _ -> do
+            -- FIXME: this is wrong in the unlikely case where someone
+            -- is pattern-matching every single possible number for
+            -- some numeric type.  It should be handled more like Bool
+            -- above.
+            pure $ MatchWild () : u
+findUnmatched [] n = [replicate n $ MatchWild ()]
 findUnmatched _ _ = []
 
 {-# NOINLINE unmatched #-}
 
 -- | Find the unmatched cases.
-unmatched :: [Pat] -> [Match]
+unmatched :: [Pat] -> [Match ()]
 unmatched orig_ps =
   -- The algorithm may find duplicate example, which we filter away
   -- here.
   nubOrd $
     mapMaybe maybeHead $
-      findUnmatched (map ((: []) . patternToMatch) orig_ps) 1
+      findUnmatched (map (L.singleton . patternToMatch) orig_ps) 1
