@@ -969,14 +969,15 @@ removeSeminullOccurrences m = do
 checkIfConsumable :: SrcLoc -> Aliasing -> TermTypeM ()
 checkIfConsumable loc als = do
   vtable <- asks $ scopeVtable . termScope
-  let consumable v = case M.lookup v vtable of
+  let boundAlias (AliasBound v) = Just v
+      boundAlias (AliasFree _) = Nothing
+      consumable v = case M.lookup v vtable of
         Just (BoundV Local _ t)
           | Scalar Arrow {} <- t -> False
           | otherwise -> True
         Just (BoundV l _ _) -> l == Local
-        _ -> True
-  -- The sort ensures that AliasBound vars are shown before AliasFree.
-  case map aliasVar $ sort $ filter (not . consumable . aliasVar) $ S.toList als of
+        _ -> False -- Implies name from module.
+  case sort $ filter (not . consumable) $ mapMaybe boundAlias $ S.toList als of
     v : _ -> notConsumable loc =<< describeVar loc v
     [] -> pure ()
 
