@@ -69,7 +69,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     -- * Errors
     useAfterConsume,
     unusedSize,
-    notConsumable,
     uniqueReturnAliased,
     returnAliased,
     badLetWithValue,
