@@ -895,10 +895,9 @@ checkApply
            in zeroOrderType (mkUsage argloc "potential consumption in expression") msg tp1
         _ -> pure ()
 
-      occurs <- (dflow `seqOccurrences`) <$> consumeArg argloc argtype' (diet tp1')
-
-      checkIfConsumable loc $ S.map AliasBound $ allConsumed occurs
-      occur occurs
+      arg_consumed <- consumedByArg argloc argtype' (diet tp1')
+      checkIfConsumable loc $ mconcat arg_consumed
+      occur $ dflow `seqOccurrences` map (`consumption` argloc) arg_consumed
 
       -- Unification ignores uniqueness in higher-order arguments, so
       -- we check for that here.
@@ -1011,12 +1010,12 @@ maskAliases (Scalar (Sum ets)) (SumDiet ds) =
 maskAliases t FuncDiet {} = t
 maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
-consumeArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Occurrence]
-consumeArg loc (Scalar (Record ets)) (RecordDiet ds) =
-  concat . M.elems <$> traverse (uncurry $ consumeArg loc) (M.intersectionWith (,) ets ds)
-consumeArg loc (Scalar (Sum ets)) (SumDiet ds) =
-  concat <$> traverse (uncurry $ consumeArg loc) (concat $ M.elems $ M.intersectionWith zip ets ds)
-consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
+consumedByArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Aliasing]
+consumedByArg loc (Scalar (Record ets)) (RecordDiet ds) =
+  mconcat . M.elems <$> traverse (uncurry $ consumedByArg loc) (M.intersectionWith (,) ets ds)
+consumedByArg loc (Scalar (Sum ets)) (SumDiet ds) =
+  mconcat <$> traverse (uncurry $ consumedByArg loc) (concat $ M.elems $ M.intersectionWith zip ets ds)
+consumedByArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
   | not $ contravariantArg t1 d =
       typeError loc mempty . withIndexLink "consuming-argument" $
         "Non-consuming higher-order parameter passed consuming argument."
@@ -1031,8 +1030,8 @@ consumeArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
       contravariantArg tp dp && contravariantArg tr dr
     contravariantArg _ _ =
       True
-consumeArg loc at Consume = pure [consumption (aliases at) loc]
-consumeArg loc at _ = pure [observation (aliases at) loc]
+consumedByArg _ at Consume = pure [aliases at]
+consumedByArg _ _ _ = pure []
 
 -- | Type-check a single expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case the list of type
