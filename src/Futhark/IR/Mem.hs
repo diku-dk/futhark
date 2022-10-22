@@ -131,7 +131,7 @@ import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util
-import Futhark.Util.Pretty (docText, indent, ppTuple', pretty, (<+>), (</>))
+import Futhark.Util.Pretty (docText, indent, ppTupleLines', pretty, (<+>), (</>))
 import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
@@ -748,9 +748,9 @@ matchReturnType rettype res ts = do
       bad s =
         TC.bad . TC.TypeError . docText $
           "Return type"
-            </> indent 2 (ppTuple' $ map pretty rettype)
+            </> indent 2 (ppTupleLines' $ map pretty rettype)
             </> "cannot match returns of results"
-            </> indent 2 (ppTuple' $ map pretty ts)
+            </> indent 2 (ppTupleLines' $ map pretty ts)
             </> pretty s
 
   either bad pure =<< runExceptT (zipWithM_ checkReturn rettype ts)
@@ -772,9 +772,9 @@ matchPatToExp pat e = do
 
   unless ok . TC.bad . TC.TypeError . docText $
     "Expression type:"
-      </> indent 2 (ppTuple' $ map pretty rt)
+      </> indent 2 (ppTupleLines' $ map pretty rt)
       </> "cannot match pattern type:"
-      </> indent 2 (ppTuple' $ map pretty val_ts)
+      </> indent 2 (ppTupleLines' $ map pretty val_ts)
   where
     matches _ _ (MemPrim x) (MemPrim y) = x == y
     matches _ _ (MemMem x_space) (MemMem y_space) =

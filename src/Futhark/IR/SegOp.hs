@@ -1097,9 +1097,10 @@ simplifyKernelBody space (KernelBody _ stms res) = do
 
 simplifyLambda ::
   Engine.SimplifiableRep rep =>
+  Names ->
   Lambda (Wise rep) ->
   Engine.SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
-simplifyLambda = Engine.blockMigrated . Engine.simplifyLambda
+simplifyLambda bound = Engine.blockMigrated . Engine.simplifyLambda bound
 
 segSpaceSymbolTable :: ASTRep rep => SegSpace -> ST.SymbolTable rep
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
@@ -1109,12 +1110,13 @@ segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
 
 simplifySegBinOp ::
   Engine.SimplifiableRep rep =>
+  VName ->
   SegBinOp (Wise rep) ->
   Engine.SimpleM rep (SegBinOp (Wise rep), Stms (Wise rep))
-simplifySegBinOp (SegBinOp comm lam nes shape) = do
+simplifySegBinOp phys_id (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      simplifyLambda lam
+      simplifyLambda (oneName phys_id) lam
   shape' <- Engine.simplify shape
   nes' <- mapM Engine.simplify nes
   pure (SegBinOp comm lam' nes' shape', hoisted)
@@ -1138,7 +1140,7 @@ simplifySegOp (SegRed lvl space reds ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (reds', reds_hoisted) <-
     Engine.localVtable (<> scope_vtable) $
-      unzip <$> mapM simplifySegBinOp reds
+      unzip <$> mapM (simplifySegBinOp (segFlat space)) reds
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
   pure
@@ -1152,7 +1154,7 @@ simplifySegOp (SegScan lvl space scans ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (scans', scans_hoisted) <-
     Engine.localVtable (<> scope_vtable) $
-      unzip <$> mapM simplifySegBinOp scans
+      unzip <$> mapM (simplifySegBinOp (segFlat space)) scans
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
   pure
@@ -1176,7 +1178,7 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
         (lam', op_hoisted) <-
           Engine.localVtable (<> scope_vtable) $
             Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-              simplifyLambda lam
+              simplifyLambda (oneName (segFlat space)) lam
         pure
           ( HistOp w' rf' arrs' nes' dims' lam',
             op_hoisted

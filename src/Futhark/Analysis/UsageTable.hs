@@ -23,6 +23,7 @@ module Futhark.Analysis.UsageTable
     consumedU,
     presentU,
     usageInStm,
+    usageInPat,
   )
 where
 
@@ -119,7 +120,7 @@ sizeUsage name = UsageTable $ IM.singleton (baseTag name) sizeU
 -- | Construct a usage table where the given names have been used as
 -- an array or memory size.
 sizeUsages :: Names -> UsageTable
-sizeUsages = UsageTable . IM.map (const sizeU) . namesIntMap
+sizeUsages = UsageTable . IM.map (const (sizeU <> presentU)) . namesIntMap
 
 -- | A description of how a single variable has been used.
 newtype Usages = Usages Int -- Bitmap representation for speed.
@@ -155,20 +156,17 @@ usageInBody = foldMap consumedUsage . namesToList . consumedInBody
 usageInStm :: (ASTRep rep, Aliased rep) => Stm rep -> UsageTable
 usageInStm (Let pat rep e) =
   mconcat
-    [ usageInPat,
-      usageInExpDec,
+    [ usageInPat pat `without` patNames pat,
+      usages $ freeIn rep,
       usageInExp e,
       usages (freeIn e)
     ]
-  where
-    usageInPat =
-      usages
-        ( mconcat (map freeIn $ patElems pat)
-            `namesSubtract` namesFromList (patNames pat)
-        )
-        <> sizeUsages (foldMap (freeIn . patElemType) (patElems pat))
-    usageInExpDec =
-      usages $ freeIn rep
+
+-- | Usage table reflecting use in pattern.  In particular, free
+-- variables in the decorations are considered used as sizes, even if
+-- they are also bound in this pattern.
+usageInPat :: FreeIn t => Pat t -> UsageTable
+usageInPat = sizeUsages . foldMap freeIn . patElems
 
 usageInExp :: Aliased rep => Exp rep -> UsageTable
 usageInExp (Apply _ args _ _) =

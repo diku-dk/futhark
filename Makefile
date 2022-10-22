@@ -16,6 +16,9 @@ configure:
 	cabal update
 	cabal configure
 
+configure-profile:
+	cabal configure --enable-profiling --profiling-detail=toplevel-functions
+
 build:
 	cabal build
 

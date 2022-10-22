@@ -3,9 +3,7 @@
 -- ==
 -- structure gpu {
 --   /If 1
---   /If/True/If 1
---   /If/True/If/True/GPUBody/If 1
---   /If/True/GPUBody/If 1
+--   /If/True/GPUBody 1
 -- }
 
 def main (A: [5]i64) : [1]i64 =

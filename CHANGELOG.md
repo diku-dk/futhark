@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Fixed handling of holes in defunctionalisation (#1738).
 
+* Ascription of higher-order modules (#1741).
+
+* Fixed compiler crash when attempting to tile irregular parallelism (#1739).
+
+* Incorrect regularity checking in loop interchange (#1744).
+
+* Pattern match exhaustiveness of bools (#1748).
+
+* Improper consumption checking of nonlocal bindings (#1749).
+
 ## [0.22.2]
 
 ### Added

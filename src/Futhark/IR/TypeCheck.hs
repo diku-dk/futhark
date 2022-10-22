@@ -384,15 +384,19 @@ checkConsumption :: Consumption -> TypeM rep Occurences
 checkConsumption (ConsumptionError e) = bad $ TypeError e
 checkConsumption (Consumption os) = pure os
 
--- | Type check two mutually control flow branches.  Think @if@.  This
--- interacts with consumption checking, as it is OK for an array to be
--- consumed in both branches.
+-- | Type check two mutually exclusive control flow branches.  Think
+-- @if@.  This interacts with consumption checking, as it is OK for an
+-- array to be consumed in both branches.
 alternative :: TypeM rep a -> TypeM rep b -> TypeM rep (a, b)
 alternative m1 m2 = do
   (x, os1) <- collectOccurences m1
   (y, os2) <- collectOccurences m2
   tell $ Consumption $ os1 `altOccurences` os2
   pure (x, y)
+
+alternatives :: [TypeM rep ()] -> TypeM rep ()
+alternatives [] = pure ()
+alternatives (x : xs) = void $ x `alternative` alternatives xs
 
 -- | Permit consumption of only the specified names.  If one of these
 -- names is consumed, the consumption will be rewritten to be a
@@ -989,8 +993,9 @@ checkExp ::
 checkExp (BasicOp op) = checkBasicOp op
 checkExp (Match ses cases def_case info) = do
   ses_ts <- mapM checkSubExp ses
-  mapM_ (checkCase ses_ts) cases
-  checkCaseBody def_case
+  alternatives $
+    context "in body of last case" (checkCaseBody def_case)
+      : map (checkCase ses_ts) cases
   where
     checkVal t (Just v) = Prim (primValueType v) == t
     checkVal _ Nothing = True
@@ -1002,7 +1007,9 @@ checkExp (Match ses cases def_case info) = do
           </> "cannot match pattern"
           </> indent 2 (ppTuple' $ map pretty vs)
       context ("in body of case " <> prettyTuple vs) $ checkCaseBody body
-    checkCaseBody = matchBranchType (matchReturns info)
+    checkCaseBody body = do
+      void $ checkBody body
+      matchBranchType (matchReturns info) body
 checkExp (Apply fname args rettype_annot _) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args
