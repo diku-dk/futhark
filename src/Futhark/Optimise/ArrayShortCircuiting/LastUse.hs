@@ -2,7 +2,7 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | Playground for work on merging memory blocks
+-- | Last use analysis for array short circuiting
 --
 -- Last-Use analysis of a Futhark program in aliased explicit-memory lore form.
 -- Takes as input such a program or a function and produces a 'M.Map VName
@@ -12,7 +12,7 @@
 -- parameters if it happens to not be used inside function's body.  Such cases
 -- are supposed to be treated separately.
 --
--- This pass is different from 'Futhark.Analysis.LastUse' in that memory blocks
+-- This pass is different from "Futhark.Analysis.LastUse" in that memory blocks
 -- are used to alias arrays. For instance, an 'Update' will not result in a last
 -- use of the array being updated, because the result lives in the same memory.
 module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg, lastUsePrgGPU, lastUseGPUMem) where

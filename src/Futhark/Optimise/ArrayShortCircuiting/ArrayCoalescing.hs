@@ -830,7 +830,6 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
       res_mem_arg = zipWith (\(b, m_b) (r, m_r) -> MemBodyResult m_b b r m_r) patmems argmems
       res_mem_ini = zipWith (\(b, m_b) (r, m_r) -> MemBodyResult m_b b r m_r) patmems inimems
 
-      -- ToDo: check that an optimistic dependency is placed on the ini.
       actv2 =
         let subs_res = mkSubsTab pat $ map resSubExp $ bodyResult body
             actv11 = foldl (transferCoalsToBody subs_res) actv1 res_mem_bdy
@@ -838,7 +837,7 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
             actv12 = foldl (transferCoalsToBody subs_arg) actv11 res_mem_arg
             subs_ini = mkSubsTab pat $ map snd arginis
          in foldl (transferCoalsToBody subs_ini) actv12 res_mem_ini
-      -- foldl (transferCoalsToBody M.empty) actv1 (res_mem_bdy++res_mem_arg++res_mem_ini)
+
       -- The code below adds an aliasing relation to the loop-arg memory
       --   so that to prevent, e.g., the coalescing of an iterative stencil
       --   (you need a buffer for the result and a separate one for the stencil).
