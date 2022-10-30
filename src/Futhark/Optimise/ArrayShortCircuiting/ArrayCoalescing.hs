@@ -196,27 +196,26 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_b
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
   bu_env'' <- shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env'
-  pure
-    $ foldl
-      ( \acc (PatElem p _, hist_dest) ->
-          case ( getScopeMemInfo p $ scope td_env,
-                 getScopeMemInfo hist_dest $ scope td_env
-               ) of
-            (Just (MemBlock _ _ p_mem _), Just (MemBlock _ _ dest_mem _)) ->
-              case M.lookup p_mem $ successCoals acc of
-                Just entry ->
-                  -- Update this entry with an optdep for the memory block of hist_dest
-                  let entry' = entry {optdeps = M.insert p p_mem $ optdeps entry}
-                   in acc
-                        { successCoals = M.insert p_mem entry' $ successCoals acc,
-                          activeCoals = M.insert dest_mem entry $ activeCoals acc
-                        }
-                Nothing -> acc
-            _ -> acc
-      )
-      bu_env''
-    $ zip (patElems pat)
-    $ concatMap histDest histops
+  pure $
+    foldl insertHistCoals bu_env'' $
+      zip (patElems pat) $
+        concatMap histDest histops
+  where
+    insertHistCoals acc (PatElem p _, hist_dest) =
+      case ( getScopeMemInfo p $ scope td_env,
+             getScopeMemInfo hist_dest $ scope td_env
+           ) of
+        (Just (MemBlock _ _ p_mem _), Just (MemBlock _ _ dest_mem _)) ->
+          case M.lookup p_mem $ successCoals acc of
+            Just entry ->
+              -- Update this entry with an optdep for the memory block of hist_dest
+              let entry' = entry {optdeps = M.insert p p_mem $ optdeps entry}
+               in acc
+                    { successCoals = M.insert p_mem entry' $ successCoals acc,
+                      activeCoals = M.insert dest_mem entry $ activeCoals acc
+                    }
+            Nothing -> acc
+        _ -> acc
 shortCircuitGPUMem lutab pat (Inner (GPUBody _ body)) td_env bu_env = do
   fresh1 <- newNameFromString "gpubody"
   fresh2 <- newNameFromString "gpubody"
@@ -332,21 +331,19 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
 
   -- Check partial overlap.
   let checkPartialOverlap bu_env_f (k, entry) = do
-        let thread_writes =
-              foldMap
-                ( \(p, space, res) -> case M.lookup (patElemName p) $ vartab entry of
-                    Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
-                      maybe
-                        Undeterminable
-                        ( ixfunToAccessSummary
-                            . IxFun.slice ixf
-                            . fullSlice (IxFun.shape ixf)
-                        )
-                        $ threadSlice space res
-                    Nothing -> mempty
-                )
-                ps_space_and_res
-        let source_writes = srcwrts (memrefs entry) <> thread_writes
+        let sliceThreadAccess (p, space, res) =
+              case M.lookup (patElemName p) $ vartab entry of
+                Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
+                  maybe
+                    Undeterminable
+                    ( ixfunToAccessSummary
+                        . IxFun.slice ixf
+                        . fullSlice (IxFun.shape ixf)
+                    )
+                    $ threadSlice space res
+                Nothing -> mempty
+            thread_writes = foldMap sliceThreadAccess ps_space_and_res
+            source_writes = srcwrts (memrefs entry) <> thread_writes
         destination_uses <-
           case dstrefs (memrefs entry)
             `accessSubtract` dstrefs (maybe mempty memrefs $ M.lookup k $ activeCoals bu_env) of
@@ -852,18 +849,14 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
       -- @  y[slc_y] = b         @
       -- This should fail coalescing because we are aliasing @m_a@ with
       --   the memory block of the result.
-      actv3 =
-        foldl
-          ( \tab (MemBodyResult _ _ _ m_r, MemBodyResult _ _ _ m_a) ->
-              if m_r == m_a
-                then tab
-                else case M.lookup m_r tab of
-                  Nothing -> tab
-                  Just etry ->
-                    M.insert m_r (etry {alsmem = alsmem etry <> oneName m_a}) tab
-          )
-          actv2
-          (zip res_mem_bdy res_mem_arg)
+      insertMemAliases tab (MemBodyResult _ _ _ m_r, MemBodyResult _ _ _ m_a) =
+        if m_r == m_a
+          then tab
+          else case M.lookup m_r tab of
+            Nothing -> tab
+            Just etry ->
+              M.insert m_r (etry {alsmem = alsmem etry <> oneName m_a}) tab
+      actv3 = foldl insertMemAliases actv2 (zip res_mem_bdy res_mem_arg)
       -- analysing the loop body starts from a null memory-reference set;
       --  the results of the loop body iteration are aggregated later
       actv4 = M.map (\etry -> etry {memrefs = mempty}) actv3

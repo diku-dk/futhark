@@ -41,19 +41,20 @@ replaceInParams :: CoalsTab -> [Param FParamMem] -> (Names, [Param FParamMem])
 replaceInParams coalstab fparams =
   let (mem_allocs_to_remove, fparams') =
         foldl
-          ( \(to_remove, acc) (Param attrs name dec) ->
-              case dec of
-                MemMem DefaultSpace
-                  | Just entry <- M.lookup name coalstab ->
-                      (oneName (dstmem entry) <> to_remove, Param attrs (dstmem entry) dec : acc)
-                MemArray pt shp u (ArrayIn m ixf)
-                  | Just entry <- M.lookup m coalstab ->
-                      (to_remove, Param attrs name (MemArray pt shp u $ ArrayIn (dstmem entry) ixf) : acc)
-                _ -> (to_remove, Param attrs name dec : acc)
-          )
+          replaceInParam
           (mempty, mempty)
           fparams
    in (mem_allocs_to_remove, reverse fparams')
+  where
+    replaceInParam (to_remove, acc) (Param attrs name dec) =
+      case dec of
+        MemMem DefaultSpace
+          | Just entry <- M.lookup name coalstab ->
+              (oneName (dstmem entry) <> to_remove, Param attrs (dstmem entry) dec : acc)
+        MemArray pt shp u (ArrayIn m ixf)
+          | Just entry <- M.lookup m coalstab ->
+              (to_remove, Param attrs name (MemArray pt shp u $ ArrayIn (dstmem entry) ixf) : acc)
+        _ -> (to_remove, Param attrs name dec : acc)
 
 removeStms :: Names -> Body rep -> Body rep
 removeStms to_remove (Body dec stms res) =
