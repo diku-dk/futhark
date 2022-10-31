@@ -153,6 +153,11 @@ a different *action* with one of the following options:
 You must use the appropriate pipeline as well (e.g. `--gpu-mem` for
 `--compile-imperative-kernels`).
 
+You can also use e.g. `--backend=c` to run the same code generation
+and compilation as `futhark c`.  This is useful for experimenting with
+other compiler pipelines, but still producing an executable or
+library.
+
 ## When you are about to have a bad day
 
 When using the `cuda` backend, you can use the `--dump-ptx` runtime
