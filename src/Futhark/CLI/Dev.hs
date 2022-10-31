@@ -28,6 +28,7 @@ import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
@@ -48,6 +49,8 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
+import Futhark.Pass.LiftAllocations as LiftAllocations
+import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.Util.Log
@@ -219,6 +222,13 @@ kernelsProg name rep =
   externalErrorS $
     "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
 
+seqMemProg :: String -> UntypedPassState -> FutharkM (Prog SeqMem.SeqMem)
+seqMemProg _ (SeqMem prog) =
+  pure prog
+seqMemProg name rep =
+  externalErrorS $
+    "Pass " ++ name ++ " expects SeqMem representation, but got " ++ representation rep
+
 typedPassOption ::
   Checkable torep =>
   (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
@@ -245,6 +255,13 @@ kernelsPassOption ::
   FutharkOption
 kernelsPassOption =
   typedPassOption kernelsProg GPU
+
+seqMemPassOption ::
+  Pass SeqMem.SeqMem SeqMem.SeqMem ->
+  String ->
+  FutharkOption
+seqMemPassOption =
+  typedPassOption seqMemProg SeqMem
 
 kernelsMemPassOption ::
   Pass GPUMem.GPUMem GPUMem.GPUMem ->
@@ -577,6 +594,12 @@ commandLineOptions =
     kernelsMemPassOption doubleBufferGPU [],
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption MemoryBlockMerging.optimise [],
+    seqMemPassOption LiftAllocations.liftAllocationsSeqMem [],
+    kernelsMemPassOption LiftAllocations.liftAllocationsGPUMem [],
+    seqMemPassOption LowerAllocations.lowerAllocationsSeqMem [],
+    kernelsMemPassOption LowerAllocations.lowerAllocationsGPUMem [],
+    seqMemPassOption ArrayShortCircuiting.optimiseSeqMem [],
+    kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
     simplifyOption "e",
     soacsPipelineOption
