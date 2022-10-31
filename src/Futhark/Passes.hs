@@ -18,6 +18,7 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS, usesAD)
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
+import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.EntryPointMem
@@ -41,6 +42,8 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
+import Futhark.Pass.LiftAllocations as LiftAllocations
+import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 
@@ -126,6 +129,14 @@ sequentialCpuPipeline =
       [ performCSE False,
         simplifySeqMem,
         entryPointMemSeq,
+        simplifySeqMem,
+        LiftAllocations.liftAllocationsSeqMem,
+        simplifySeqMem,
+        ArrayShortCircuiting.optimiseSeqMem,
+        simplifySeqMem,
+        performCSE False,
+        simplifySeqMem,
+        LowerAllocations.lowerAllocationsSeqMem,
         simplifySeqMem
       ]
 
@@ -141,6 +152,16 @@ gpuPipeline =
         simplifyGPUMem,
         entryPointMemGPU,
         doubleBufferGPU,
+        simplifyGPUMem,
+        performCSE False,
+        LiftAllocations.liftAllocationsGPUMem,
+        simplifyGPUMem,
+        ArrayShortCircuiting.optimiseGPUMem,
+        simplifyGPUMem,
+        performCSE False,
+        simplifyGPUMem,
+        LowerAllocations.lowerAllocationsGPUMem,
+        performCSE False,
         simplifyGPUMem,
         MemoryBlockMerging.optimise,
         simplifyGPUMem,

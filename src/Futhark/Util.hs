@@ -19,11 +19,13 @@ module Futhark.Util
     takeLast,
     dropLast,
     mapEither,
+    partitionMaybe,
     maybeNth,
     maybeHead,
     splitFromEnd,
     splitAt3,
     focusNth,
+    focusMaybe,
     hashText,
     unixEnvironment,
     isEnvVarAtLeast,
@@ -46,6 +48,7 @@ module Futhark.Util
     cartesian,
     traverseFold,
     fixPoint,
+    concatMapM,
   )
 where
 
@@ -60,7 +63,7 @@ import Data.Char
 import Data.Either
 import Data.Foldable (fold, toList)
 import Data.Function ((&))
-import Data.List (foldl', genericDrop, genericSplitAt, sortBy)
+import Data.List (findIndex, foldl', genericDrop, genericSplitAt, sortBy)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
@@ -155,6 +158,16 @@ dropLast n = reverse . drop n . reverse
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
 
+-- | A combination of 'partition' and 'mapMaybe'
+partitionMaybe :: (a -> Maybe b) -> [a] -> ([b], [a])
+partitionMaybe f = helper ([], [])
+  where
+    helper (acc1, acc2) [] = (reverse acc1, reverse acc2)
+    helper (acc1, acc2) (x : xs) =
+      case f x of
+        Just x' -> helper (x' : acc1, acc2) xs
+        Nothing -> helper (acc1, x : acc2) xs
+
 -- | Return the list element at the given index, if the index is valid.
 maybeNth :: Integral int => int -> [a] -> Maybe a
 maybeNth i l
@@ -184,8 +197,17 @@ focusNth i xs
   | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
 
--- | Compute a hash of a pretty that is stable across OS versions.
--- Returns the hash as a pretty as well, ready for human consumption.
+-- | Return the first list element that satisifes a predicate, along with the
+-- elements before and after.
+focusMaybe :: (a -> Maybe b) -> [a] -> Maybe ([a], b, [a])
+focusMaybe f xs = do
+  idx <- findIndex (isJust . f) xs
+  (before, focus, after) <- focusNth idx xs
+  res <- f focus
+  pure (before, res, after)
+
+-- | Compute a hash of a text that is stable across OS versions.
+-- Returns the hash as a text as well, ready for human consumption.
 hashText :: T.Text -> T.Text
 hashText =
   T.decodeUtf8With T.lenientDecode . Base16.encode . MD5.hash . T.encodeUtf8
@@ -429,3 +451,6 @@ fixPoint :: Eq a => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
+
+concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
+concatMapM f xs = mconcat <$> mapM f xs

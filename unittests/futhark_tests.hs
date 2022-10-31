@@ -1,7 +1,9 @@
 module Main (main) where
 
 import Futhark.AD.DerivativesTests qualified
+import Futhark.Analysis.AlgSimplifyTests qualified
 import Futhark.BenchTests qualified
+import Futhark.IR.Mem.IntervalTests qualified
 import Futhark.IR.Mem.IxFunTests qualified
 import Futhark.IR.PropTests qualified
 import Futhark.IR.Syntax.CoreTests qualified
@@ -22,9 +24,11 @@ allTests =
       Futhark.IR.PropTests.tests,
       Futhark.IR.Syntax.CoreTests.tests,
       Futhark.Pkg.SolveTests.tests,
+      Futhark.IR.Mem.IntervalTests.tests,
       Futhark.IR.Mem.IxFunTests.tests,
       Language.Futhark.PrimitiveTests.tests,
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests.tests,
+      Futhark.Analysis.AlgSimplifyTests.tests,
       Language.Futhark.TypeCheckerTests.tests
     ]
 
