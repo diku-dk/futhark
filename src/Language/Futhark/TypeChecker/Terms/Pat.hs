@@ -337,7 +337,7 @@ checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
 
       outer_t' <- normTypeFully outer_t
       PatAscription
-        <$> checkPat' sizes p (Ascribed (addAliasesFromType st outer_t'))
+        <$> checkPat' sizes p (Ascribed (addAliasesFromType (fromStruct st) outer_t'))
         <*> pure t'
         <*> pure loc
     NoneInferred ->

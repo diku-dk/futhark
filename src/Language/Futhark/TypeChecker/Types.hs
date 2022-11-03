@@ -4,6 +4,7 @@ module Language.Futhark.TypeChecker.Types
     renameRetType,
     subtypeOf,
     subuniqueOf,
+    returnType,
     addAliasesFromType,
     checkForDuplicateNames,
     checkTypeParams,
@@ -81,24 +82,67 @@ mustBeExplicitInBinding bind_t =
 mustBeExplicitInType :: StructType -> S.Set VName
 mustBeExplicitInType = snd . determineSizeWitnesses
 
+-- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
+-- an argument the given types to a function with the given return
+-- type, consuming the argument with the given diet.
+returnType :: Aliasing -> PatType -> Diet -> PatType -> PatType
+returnType _ (Array _ Unique et shape) _ _ =
+  Array mempty Nonunique et shape -- Intentional!
+returnType appres (Array als Nonunique et shape) d arg =
+  Array (appres <> als <> arg_als) Nonunique et shape
+  where
+    arg_als = aliases $ maskAliases arg d
+returnType appres (Scalar (Record fs)) d arg =
+  Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
+returnType _ (Scalar (Prim t)) _ _ =
+  Scalar $ Prim t
+returnType _ (Scalar (TypeVar _ Unique t targs)) _ _ =
+  Scalar $ TypeVar mempty Nonunique t targs -- Intentional!
+returnType appres (Scalar (TypeVar als Nonunique t targs)) d arg =
+  Scalar $ TypeVar (appres <> als <> arg_als) Unique t targs
+  where
+    arg_als = aliases $ maskAliases arg d
+returnType _ (Scalar (Arrow old_als v t1 (RetType dims t2))) d arg =
+  Scalar $ Arrow als v (t1 `setAliases` mempty) $ RetType dims $ t2 `setAliases` als
+  where
+    -- Make sure to propagate the aliases of an existing closure.
+    als = old_als <> aliases (maskAliases arg d)
+returnType appres (Scalar (Sum cs)) d arg =
+  Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
+
+-- @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
+-- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.
+maskAliases ::
+  Monoid as =>
+  TypeBase shape as ->
+  Diet ->
+  TypeBase shape as
+maskAliases t Consume = t `setAliases` mempty
+maskAliases t Observe = t
+maskAliases (Scalar (Record ets)) (RecordDiet ds) =
+  Scalar $ Record $ M.intersectionWith maskAliases ets ds
+maskAliases (Scalar (Sum ets)) (SumDiet ds) =
+  Scalar $ Sum $ M.intersectionWith (zipWith maskAliases) ets ds
+maskAliases t FuncDiet {} = t
+maskAliases _ _ = error "Invalid arguments passed to maskAliases."
+
 -- | The two types are assumed to be structurally equal, but not
--- necessarily regarding sizes.  Adds aliases from the latter to the
--- former.
-addAliasesFromType :: StructType -> PatType -> PatType
-addAliasesFromType (Array _ u1 et1 shape1) (Array als _ _ _) =
-  Array als u1 et1 shape1
+-- necessarily regarding sizes.  Combines aliases.
+addAliasesFromType :: PatType -> PatType -> PatType
+addAliasesFromType (Array als1 u1 et1 shape1) (Array als2 _ _ _) =
+  Array (als1 <> als2) u1 et1 shape1
 addAliasesFromType
-  (Scalar (TypeVar _ u1 tv1 targs1))
+  (Scalar (TypeVar als1 u1 tv1 targs1))
   (Scalar (TypeVar als2 _ _ _)) =
-    Scalar $ TypeVar als2 u1 tv1 targs1
+    Scalar $ TypeVar (als1 <> als2) u1 tv1 targs1
 addAliasesFromType (Scalar (Record ts1)) (Scalar (Record ts2))
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
       Scalar $ Record $ M.intersectionWith addAliasesFromType ts1 ts2
 addAliasesFromType
-  (Scalar (Arrow _ mn1 pt1 (RetType dims1 rt1)))
-  (Scalar (Arrow as2 _ _ (RetType _ rt2))) =
-    Scalar (Arrow as2 mn1 pt1 (RetType dims1 rt1'))
+  (Scalar (Arrow als1 mn1 pt1 (RetType dims1 rt1)))
+  (Scalar (Arrow als2 _ _ (RetType _ rt2))) =
+    Scalar (Arrow (als1 <> als2) mn1 pt1 (RetType dims1 rt1'))
     where
       rt1' = addAliasesFromType rt1 rt2
 addAliasesFromType (Scalar (Sum cs1)) (Scalar (Sum cs2))
