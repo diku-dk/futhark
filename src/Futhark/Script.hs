@@ -321,6 +321,11 @@ evalExp builtin sserver top_level_e = do
         cmdMaybe $ cmdNew server v t vs
         pure v
 
+      getField from (f, _) = do
+        to <- newVar "field"
+        cmdMaybe $ cmdProject server to from $ nameToText f
+        pure to
+
       toVal :: ValOrVar -> m V.Value
       toVal (VVal v) = pure v
       toVal (VVar v) = readVar server v
@@ -347,7 +352,9 @@ evalExp builtin sserver top_level_e = do
       interValToVal = traverse scriptValueToVal
 
       -- Apart from type checking, this function also converts
-      -- FutharkScript tuples/records to Futhark-level tuples/records.
+      -- FutharkScript tuples/records to Futhark-level tuples/records,
+      -- as well as maps between different names for the same
+      -- tuple/record.
       interValToVar :: m VarName -> TypeName -> ExpValue -> m VarName
       interValToVar _ t (V.ValueAtom v)
         | STValue t == scriptValueType v = scriptValueToVar v
@@ -359,6 +366,11 @@ evalExp builtin sserver top_level_e = do
         | Just fs <- isRecord t types,
           Just vs' <- mapM ((`M.lookup` vs) . nameToText . fst) fs =
             mkRecord t =<< zipWithM (interValToVar bad) (map snd fs) vs'
+      interValToVar _ t (V.ValueAtom (SValue vt (VVar v)))
+        | Just t_fs <- isRecord t types,
+          Just vt_fs <- isRecord vt types,
+          vt_fs == t_fs =
+            mkRecord t =<< mapM (getField v) vt_fs
       interValToVar bad _ _ = bad
 
       valToInterVal :: V.CompoundValue -> ExpValue
