@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark literate` now handles type abbreviations in entry points
+  (#1750).
+
 ## [0.22.3]
 
 ### Fixed
