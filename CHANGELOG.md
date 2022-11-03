@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Uniqueness checking bug (#1751).
 
+* Simplification bug (#1753).
+
 ## [0.22.3]
 
 ### Fixed
