@@ -747,10 +747,12 @@ arrayOps = mconcat . map onStm . stmsToList . bodyStms
         Nothing -> execState (walkExpM walker e) mempty
     onOp op
       | Just soac <- asSOAC op =
-          execWriter $
-            mapSOACM
-              identitySOACMapper {mapOnSOACLambda = onLambda}
-              (soac :: SOAC rep)
+          -- Copies are not safe to move out of nested ops (#1753).
+          S.filter (notCopy . snd) $
+            execWriter $
+              mapSOACM
+                identitySOACMapper {mapOnSOACLambda = onLambda}
+                (soac :: SOAC rep)
       | otherwise =
           mempty
     onLambda lam = do
@@ -761,6 +763,8 @@ arrayOps = mconcat . map onStm . stmsToList . bodyStms
         { walkOnBody = const $ modify . (<>) . arrayOps,
           walkOnOp = modify . (<>) . onOp
         }
+    notCopy (ArrayCopy {}) = False
+    notCopy _ = True
 
 replaceArrayOps ::
   forall rep.
