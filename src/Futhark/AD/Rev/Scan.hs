@@ -117,7 +117,7 @@ mkScanFinalMap ops w scan_lam xs ys rs = do
           ( buildBody_ $ do
               im1 <- letSubExp "im1" =<< toExp (le64 i - 1)
               ys_im1 <- forM ys $ \y ->
-                letSubExp (baseString y <> "_im1") =<< eIndex y (eSubExp im1)
+                letSubExp (baseString y <> "_im1") =<< eIndex y [eSubExp im1]
 
               lam_res <-
                 mapM (letExp "const" . BasicOp . SubExp . resSubExp)

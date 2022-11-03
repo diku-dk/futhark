@@ -15,6 +15,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (bimap, first, second)
 import Data.Foldable
+import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Debug.Trace
@@ -23,10 +24,12 @@ import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass
 import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace, segScan)
-import Futhark.Pass.ExtractKernels.ToGPU (scopeForGPU, soacsLambdaToGPU, soacsStmToGPU)
+import Futhark.Pass.ExtractKernels.ToGPU (scopeForGPU, soacsExpToGPU, soacsLambdaToGPU, soacsStmToGPU)
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
+import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
 
 data FlattenEnv = FlattenEnv
 
@@ -41,7 +44,8 @@ newtype FlattenM a = FlattenM (StateT VNameSource (Reader FlattenEnv) a)
     )
 
 data IrregularRep = IrregularRep
-  { irregularSegments :: VName,
+  { -- | Array of size of each segment, type @[]i64@.
+    irregularSegments :: VName,
     irregularFlags :: VName,
     irregularOffsets :: VName,
     iregularElems :: VName
@@ -56,7 +60,7 @@ data ResRep
     -- irregular array.
     Irregular IrregularRep
 
-data DistEnv = DistEnv {distResMap :: M.Map ResTag ResRep}
+newtype DistEnv = DistEnv {distResMap :: M.Map ResTag ResRep}
 
 insertRep :: ResTag -> ResRep -> DistEnv -> DistEnv
 insertRep rt rep env = env {distResMap = M.insert rt rep $ distResMap env}
@@ -70,50 +74,189 @@ instance Monoid DistEnv where
 instance Semigroup DistEnv where
   DistEnv x <> DistEnv y = DistEnv (x <> y)
 
+resVar :: ResTag -> DistEnv -> ResRep
+resVar rt env = fromMaybe bad $ M.lookup rt $ distResMap env
+  where
+    bad = error $ "resVar: unknown tag: " ++ show rt
+
 flagsAndElems :: DistEnv -> [DistInput] -> (Maybe (VName, VName), [VName])
 flagsAndElems env [] = (Nothing, [])
 flagsAndElems env (DistInputFree v _ : vs) =
   second (v :) $ flagsAndElems env vs
 flagsAndElems env (DistInput rt _ : vs) =
-  case M.lookup rt $ distResMap env of
-    Just (Regular v') ->
+  case resVar rt env of
+    Regular v' ->
       second (v' :) $ flagsAndElems env vs
-    Just (Irregular (IrregularRep _ flags offsets elems)) ->
+    Irregular (IrregularRep _ flags offsets elems) ->
       bimap (mplus $ Just (flags, offsets)) (elems :) $ flagsAndElems env vs
-    _ ->
-      error "flagsAndElems: nope"
 
-transformDistStm :: DistEnv -> DistStm -> Builder GPU DistEnv
-transformDistStm env (DistStm inps res stm) =
-  case stm of
-    Let _ _ (BasicOp (Iota (Var n) x s Int64))
+type Segments = NE.NonEmpty SubExp
+
+segMap1 :: Segments -> ([SubExp] -> Builder GPU Result) -> Builder GPU (Exp GPU)
+segMap1 segments f = do
+  gtids <- replicateM (length segments) (newVName "gtid")
+  space <- mkSegSpace $ zip gtids $ toList segments
+  ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
+    res <- f $ map Var gtids
+    ts <- mapM (subExpType . resSubExp) res
+    let resToRes (SubExpRes cs se) = Returns ResultMaySimplify cs se
+    pure (map resToRes res, ts)
+  let kbody = KernelBody () stms res
+  pure $ Op $ SegOp $ SegMap (SegThread SegNoVirt Nothing) space ts kbody
+  where
+    mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
+
+readInput :: Segments -> DistEnv -> [SubExp] -> [(VName, DistInput)] -> SubExp -> Builder GPU SubExp
+readInput _ _ _ _ (Constant x) = pure $ Constant x
+readInput segments env is inputs (Var v) =
+  case lookup v inputs of
+    Nothing -> pure $ Var v
+    Just (DistInputFree arr _) ->
+      letSubExp (baseString v) =<< eIndex arr (map eSubExp is)
+    Just (DistInput rt _) -> do
+      case resVar rt env of
+        Regular arr ->
+          letSubExp (baseString v) =<< eIndex arr (map eSubExp is)
+        Irregular (IrregularRep _ flags offsets elems) ->
+          undefined
+
+readInputs :: Segments -> DistEnv -> [SubExp] -> [(VName, DistInput)] -> Builder GPU ()
+readInputs segments env is = mapM_ onInput
+  where
+    onInput (v, DistInputFree arr _) =
+      letBindNames [v] =<< eIndex arr (map eSubExp is)
+    onInput (v, DistInput rt t) =
+      case M.lookup rt $ distResMap env of
+        Just (Regular arr) ->
+          letBindNames [v] =<< eIndex arr (map eSubExp is)
+        Just (Irregular (IrregularRep _ flags offsets elems)) -> do
+          offset <- letSubExp "offset" =<< eIndex offsets (map eSubExp is)
+          num_elems <- letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
+          let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
+          letBindNames [v] $ BasicOp $ Index elems slice
+        Nothing -> error $ "readInputs: " <> show rt
+
+transformScalarStms ::
+  Segments ->
+  DistEnv ->
+  [(VName, DistInput)] ->
+  [DistResult] ->
+  Stms SOACS ->
+  [VName] ->
+  Builder GPU DistEnv
+transformScalarStms segments env inps distres stms res = do
+  vs <- letTupExp "scalar_dist" <=< renameExp <=< segMap1 segments $ \is -> do
+    readInputs segments env is inps
+    addStms $ fmap soacsStmToGPU stms
+    pure $ subExpsRes $ map Var res
+  pure $ insertReps (zip (map distResTag distres) $ map Regular vs) env
+
+transformScalarStm ::
+  Segments ->
+  DistEnv ->
+  [(VName, DistInput)] ->
+  [DistResult] ->
+  Stm SOACS ->
+  Builder GPU DistEnv
+transformScalarStm segments env inps res stm =
+  transformScalarStms segments env inps res (oneStm stm) (patNames (stmPat stm))
+
+transformDistBasicOp ::
+  Segments ->
+  DistEnv ->
+  ( [(VName, DistInput)],
+    DistResult,
+    PatElem Type,
+    StmAux (),
+    BasicOp
+  ) ->
+  Builder GPU DistEnv
+transformDistBasicOp segments env (inps, res, pe, aux, e) =
+  case e of
+    BinOp {} ->
+      scalarCase
+    CmpOp {} ->
+      scalarCase
+    ConvOp {} ->
+      scalarCase
+    UnOp {} ->
+      scalarCase
+    Assert {} ->
+      scalarCase
+    Opaque op se
+      | Var v <- se,
+        Just (DistInput rt_in _) <- lookup v inps -> do
+          -- TODO: actually insert opaques
+          pure $ insertRep (distResTag res) (resVar rt_in env) env
+      | otherwise ->
+          scalarCase
+    Index arr slice
+      | null $ sliceDims slice ->
+          scalarCase
+      | Just rep <- lookup arr inps ->
+          case rep of
+            DistInput arr_rt _ ->
+              case resVar arr_rt env of
+                Irregular (IrregularRep arr_ns arr_flags arr_offsets arr_elems) -> do
+                  ns <- letExp "slice_sizes" <=< segMap1 segments $ \is -> do
+                    slice_ns <- mapM (readInput segments env is inps) $ sliceDims slice
+                    fmap varsRes . letTupExp "n" <=< toExp $ product $ map pe64 slice_ns
+                  offsets <- doPrefixSum ns
+                  m <- letSubExp "total_elems" =<< eLast offsets
+                  flags <- genFlags m offsets
+                  elems <- letExp "elems" <=< segMap1 (NE.singleton m) $ \is ->
+                    fmap (subExpsRes . pure) . letSubExp "v"
+                      =<< eIndex arr_elems (map eSubExp is)
+                  let rep = Irregular $ IrregularRep ns flags offsets elems
+                  pure $ insertRep (distResTag res) rep env
+    Iota (Var n) x s Int64
       | Just (DistInputFree ns _) <- lookup n inps -> do
-          let ~[DistResult rt _] = res
           (flags, offsets, elems) <- doSegIota ns
           let rep = Irregular $ IrregularRep ns flags offsets elems
-          pure $ insertRep rt rep env
-    Let _ _ (Op (Screma w arrs form))
+          pure $ insertRep (distResTag res) rep env
+    _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
+  where
+    scalarCase =
+      transformScalarStm segments env inps [res] $
+        Let (Pat [pe]) aux (BasicOp e)
+
+transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
+transformDistStm segments env (DistStm inps res stm) = do
+  case stm of
+    Let pat aux (BasicOp e) -> do
+      let ~[res'] = res
+          ~[pe] = patElems pat
+      transformDistBasicOp segments env (inps, res', pe, stmAux stm, e)
+    Let _ _ (Op (Screma _ arrs form))
       | Just reds <- isReduceSOAC form,
         Just arrs' <- mapM (`lookup` inps) arrs,
         (Just (flags, offsets), elems) <- flagsAndElems env arrs' -> do
           elems' <- genSegRed flags offsets elems $ singleReduce reds
           pure $ insertReps (zip (map distResTag res) (map Regular elems')) env
-    _ -> error $ "Unhandled:\n" ++ prettyString stm
+    _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
-transformDistributed :: Distributed -> Builder GPU ()
-transformDistributed (Distributed dstms resmap) = do
-  env <- foldM transformDistStm mempty dstms
-  forM_ (M.toList resmap) $ \(rt, v) -> do
-    case M.lookup rt $ distResMap env of
-      Just (Regular v') -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
-      Just Irregular {} -> error $ "Result is irregular: " ++ prettyString v
-      Nothing -> error $ "Missing result binding: " ++ prettyString v
+distResCerts :: DistEnv -> [DistInput] -> Certs
+distResCerts env = Certs . map f
+  where
+    f (DistInputFree v _) = v
+    f (DistInput rt _) = case resVar rt env of
+      Regular v -> v
+      Irregular {} -> error "resCerts: irregular"
+
+transformDistributed :: Segments -> Distributed -> Builder GPU ()
+transformDistributed segments (Distributed dstms resmap) = do
+  env <- foldM (transformDistStm segments) mempty dstms
+  forM_ (M.toList resmap) $ \(rt, (cs_inps, v)) ->
+    certifying (distResCerts env cs_inps) $
+      case resVar rt env of
+        Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
+        Irregular {} -> error $ "Result is irregular: " ++ prettyString v
 
 transformStm :: Scope SOACS -> Stm SOACS -> PassM (Stms GPU)
 transformStm scope (Let pat _ (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form = do
       let distributed = distributeMap scope pat w arrs lam
-          m = transformDistributed distributed
+          m = transformDistributed (NE.singleton w) distributed
       traceM $ prettyString distributed
       runReaderT (runBuilder_ m) scope
 transformStm scope stm = pure $ oneStm $ soacsStmToGPU stm

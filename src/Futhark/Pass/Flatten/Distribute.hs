@@ -10,15 +10,11 @@ module Futhark.Pass.Flatten.Distribute
   )
 where
 
-import Control.Monad.Reader
-import Control.Monad.State
 import Data.Bifunctor (second)
 import Data.List qualified as L
 import Data.Map qualified as M
-import Data.Maybe (mapMaybe)
-import Futhark.IR.GPU
+import Data.Maybe (fromMaybe, mapMaybe)
 import Futhark.IR.SOACS
-import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 
 newtype ResTag = ResTag Int
@@ -54,7 +50,8 @@ data DistStm = DistStm
   }
   deriving (Eq, Ord, Show)
 
-type ResMap = M.Map ResTag VName
+-- | First element of tuple are certificates for this result.
+type ResMap = M.Map ResTag ([DistInput], VName)
 
 data Distributed = Distributed [DistStm] ResMap
   deriving (Eq, Ord, Show)
@@ -99,14 +96,18 @@ instance Pretty Distributed where
       stms' = stack $ map pretty stms
       onRes (rt, v) = "let" <+> pretty v <+> "=" <+> pretty rt
 
-resultMap :: [DistStm] -> Pat Type -> Result -> M.Map ResTag VName
-resultMap stms pat res = mconcat $ map f stms
+resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat Type -> Result -> ResMap
+resultMap avail_inputs stms pat res = mconcat $ map f stms
   where
-    res_map = zip (map resSubExp res) (patNames pat)
     f stm =
       foldMap g $ zip (distStmResult stm) (patNames (stmPat (distStm stm)))
     g (DistResult rt _, v) =
-      maybe mempty (M.singleton rt) $ lookup (Var v) res_map
+      maybe mempty (M.singleton rt) $ findRes v
+    findRes v = do
+      (SubExpRes cs _, pv) <-
+        L.find ((Var v ==) . resSubExp . fst) $ zip res $ patNames pat
+      Just (map findCert $ unCerts cs, pv)
+    findCert v = fromMaybe (DistInputFree v (Prim Unit)) $ lookup v avail_inputs
 
 splitIrregDims :: Names -> Type -> (Rank, Type)
 splitIrregDims bound_outside (Array pt shape u) =
@@ -121,12 +122,12 @@ distributeMap :: Scope SOACS -> Pat Type -> SubExp -> [VName] -> Lambda SOACS ->
 distributeMap outer_scope map_pat w arrs lam =
   let param_inputs =
         zipWith paramInput (lambdaParams lam) arrs
-      (_, stms) =
+      ((_, avail_inputs), stms) =
         L.mapAccumL distributeStm (ResTag 0, param_inputs) $
           stmsToList $
             bodyStms $
               lambdaBody lam
-   in Distributed stms $ resultMap stms map_pat (bodyResult (lambdaBody lam))
+   in Distributed stms $ resultMap avail_inputs stms map_pat $ bodyResult $ lambdaBody lam
   where
     bound_outside = namesFromList $ M.keys outer_scope
     paramInput p arr = (paramName p, DistInputFree arr $ paramType p)
@@ -141,9 +142,16 @@ distributeMap outer_scope map_pat w arrs lam =
           new_tags = map ResTag $ take (patSize pat) [tag ..]
           avail_inputs' =
             avail_inputs <> zipWith patInput new_tags (patElems pat)
+          free_in_stm = freeIn stm
+          used_free = mapMaybe (freeInput avail_inputs) $ namesToList free_in_stm
+          used_free_types =
+            mapMaybe (freeInput avail_inputs)
+              . namesToList
+              . foldMap (freeIn . distInputType . snd)
+              $ used_free
           stm' =
             DistStm
-              (mapMaybe (freeInput avail_inputs) $ namesToList $ freeIn stm)
+              (used_free_types <> used_free)
               (zipWith DistResult new_tags $ map distType $ patTypes pat)
               stm
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')

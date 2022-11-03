@@ -417,11 +417,11 @@ eOutOfBounds arr is = do
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
 
 -- | The array element at this index.
-eIndex :: MonadBuilder m => VName -> m (Exp (Rep m)) -> m (Exp (Rep m))
-eIndex arr i = do
-  i' <- letSubExp "i" =<< i
+eIndex :: MonadBuilder m => VName -> [m (Exp (Rep m))] -> m (Exp (Rep m))
+eIndex arr is = do
+  is' <- mapM (letSubExp "i" =<<) is
   arr_t <- lookupType arr
-  pure $ BasicOp $ Index arr $ fullSlice arr_t [DimFix i']
+  pure $ BasicOp $ Index arr $ fullSlice arr_t $ map DimFix is'
 
 -- | The last element of the given array.
 eLast :: MonadBuilder m => VName -> m (Exp (Rep m))
@@ -430,7 +430,7 @@ eLast arr = do
   nm1 <-
     letSubExp "nm1" . BasicOp $
       BinOp (Sub Int64 OverflowUndef) n (intConst Int64 1)
-  eIndex arr (eSubExp nm1)
+  eIndex arr [eSubExp nm1]
 
 -- | Construct an unspecified value of the given type.
 eBlank :: MonadBuilder m => Type -> m (Exp (Rep m))

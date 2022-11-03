@@ -723,7 +723,7 @@ checkSubExp (Var ident) = context ("In subexp " <> prettyText ident) $ do
   lookupType ident
 
 checkCerts :: Checkable rep => Certs -> TypeM rep ()
-checkCerts (Certs cs) = mapM_ (requireI [Prim Unit]) cs
+checkCerts = mapM_ lookupType . unCerts
 
 checkSubExpRes :: Checkable rep => SubExpRes -> TypeM rep Type
 checkSubExpRes (SubExpRes cs se) = do
@@ -1276,8 +1276,8 @@ checkStm ::
   Stm (Aliases rep) ->
   TypeM rep a ->
   TypeM rep a
-checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
-  context "When checking certificates" $ mapM_ (requireI [Prim Unit]) cs
+checkStm stm@(Let pat (StmAux cs _ (_, dec)) e) m = do
+  context "When checking certificates" $ checkCerts cs
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" <> message "  " pat <> "\nwith\n" <> message "  " e) $
     matchPat pat e

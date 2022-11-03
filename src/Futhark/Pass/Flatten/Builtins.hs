@@ -2,9 +2,12 @@
 
 module Futhark.Pass.Flatten.Builtins
   ( flatteningBuiltins,
+    genFlags,
     genSegScan,
     genSegRed,
     doSegIota,
+    doPrefixSum,
+    doRepIota,
   )
 where
 
@@ -13,23 +16,25 @@ import Control.Monad.State.Strict
 import Data.Foldable
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
-import Debug.Trace
+import Data.Text qualified as T
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
-import Futhark.Pass
 import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace, segScan)
 import Futhark.Pass.ExtractKernels.ToGPU
   ( scopeForGPU,
     soacsLambdaToGPU,
     soacsStmToGPU,
   )
-import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
 
-segIotaName, segRepName :: Name
-segIotaName = "builtin#segiota"
-segRepName = "builtin#segrep"
+builtinName :: T.Text -> Name
+builtinName = nameFromText . ("builtin#" <>)
+
+segIotaName, repIotaName, prefixSumName :: Name
+segIotaName = builtinName "segiota"
+repIotaName = builtinName "repiota"
+prefixSumName = builtinName "prefixsum"
 
 genScan :: String -> SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
 genScan desc w lam nes arrs = do
@@ -78,16 +83,15 @@ genSegPrefixSum desc flags ns = do
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
   head <$> genSegScan desc add_lam [intConst Int64 0] flags [ns]
 
-genScatter :: VName -> VName -> SubExp -> Builder GPU (Exp GPU)
-genScatter dest is v = do
-  n <- arraySize 0 <$> lookupType is
+genScatter :: VName -> SubExp -> (SubExp -> Builder GPU (VName, SubExp)) -> Builder GPU (Exp GPU)
+genScatter dest n f = do
   m <- arraySize 0 <$> lookupType dest
   gtid <- newVName "gtid"
   space <- mkSegSpace [(gtid, n)]
-  v_t <- subExpType v
-  (res, stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
-    i <- letSubExp "i" =<< eIndex is (eSubExp $ Var gtid)
-    pure $ WriteReturns mempty (Shape [m]) dest [(Slice [DimFix i], v)]
+  ((res, v_t), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
+    (i, v) <- f $ Var gtid
+    v_t <- subExpType v
+    pure (WriteReturns mempty (Shape [m]) dest [(Slice [DimFix (Var i)], v)], v_t)
   let kbody = KernelBody () stms [res]
   pure $ Op $ SegOp $ SegMap (SegThread SegNoVirt Nothing) space [v_t] kbody
 
@@ -107,7 +111,10 @@ genFlags m offsets = do
   flags_allfalse <-
     letExp "flags_allfalse" . BasicOp $
       Replicate (Shape [m]) (constant False)
-  letExp "flags" =<< genScatter flags_allfalse offsets (constant True)
+  n <- arraySize 0 <$> lookupType offsets
+  letExp "flags" <=< genScatter flags_allfalse n $ \gtid -> do
+    i <- letExp "i" =<< eIndex offsets [eSubExp gtid]
+    pure (i, constant True)
 
 genSegRed :: VName -> VName -> [VName] -> Reduce SOACS -> Builder GPU [VName]
 genSegRed flags offsets elems red = do
@@ -121,16 +128,16 @@ genSegRed flags offsets elems red = do
   num_segments <- arraySize 0 <$> lookupType offsets
   letTupExp "segred" <=< genTabulate num_segments $ \i -> do
     next_start <-
-      letSubExp "next_start" =<< eIndex offsets (toExp (pe64 i))
+      letSubExp "next_start" =<< eIndex offsets [toExp (pe64 i)]
     this_end <-
       letSubExp "this_end" =<< toExp (pe64 next_start - 1)
-    mapM (letSubExp "res" <=< (`eIndex` eSubExp this_end)) scanned
+    mapM (letSubExp "res" <=< (`eIndex` [eSubExp this_end])) scanned
 
 genSegIota :: VName -> Builder GPU (VName, VName, VName)
-genSegIota ns = do
-  n <- arraySize 0 <$> lookupType ns
+genSegIota ks = do
+  n <- arraySize 0 <$> lookupType ks
   is_empty <- letSubExp "is_empty" =<< toExp (pe64 n .==. 0)
-  offsets <- genPrefixSum "offsets" ns
+  offsets <- genPrefixSum "offsets" ks
   m <-
     letSubExp "m"
       =<< eIf
@@ -141,11 +148,44 @@ genSegIota ns = do
   ones <- letExp "ones" $ BasicOp $ Replicate (Shape [m]) one
   iotas <- genSegPrefixSum "iotas" flags ones
   res <- letExp "res" <=< genTabulate m $ \i -> do
-    x <- letSubExp "x" =<< eIndex iotas (eSubExp i)
+    x <- letSubExp "x" =<< eIndex iotas [eSubExp i]
     letTupExp' "xm1" $ BasicOp $ BinOp (Sub Int64 OverflowUndef) x one
   pure (flags, offsets, res)
   where
     one = intConst Int64 1
+
+genRepIota :: VName -> Builder GPU (VName, VName, VName)
+genRepIota ks = do
+  n <- arraySize 0 <$> lookupType ks
+  is_empty <- letSubExp "is_empty" =<< toExp (pe64 n .==. 0)
+  offsets <- genPrefixSum "offsets" ks
+  m <-
+    letSubExp "m"
+      =<< eIf
+        (eSubExp is_empty)
+        (eBody [eSubExp zero])
+        (eBody [eLast offsets])
+  is <- letExp "is" <=< genTabulate n $ \i -> do
+    o <- letSubExp "o" =<< eIndex offsets [eSubExp i]
+    k <- letSubExp "n" =<< eIndex ks [eSubExp i]
+    letTupExp' "i"
+      =<< eIf
+        (toExp (pe64 k .==. 0))
+        (eBody [eSubExp negone])
+        (eBody [toExp $ pe64 o - pe64 k])
+  zeroes <- letExp "zeroes" $ BasicOp $ Replicate (Shape [m]) zero
+  starts <-
+    letExp "starts" <=< genScatter zeroes n $ \gtid -> do
+      i <- letExp "i" =<< eIndex is [eSubExp gtid]
+      pure (i, gtid)
+  flags <- letExp "flags" <=< genTabulate m $ \i -> do
+    x <- letSubExp "x" =<< eIndex starts [eSubExp i]
+    letTupExp' "nonzero" =<< toExp (pe64 x .>. 0)
+  res <- genSegPrefixSum "res" flags starts
+  pure (flags, offsets, res)
+  where
+    zero = intConst Int64 0
+    negone = intConst Int64 (-1)
 
 buildingBuiltin :: Builder GPU (FunDef GPU) -> FunDef GPU
 buildingBuiltin m = fst $ evalState (runBuilderT m mempty) blankNameSource
@@ -174,12 +214,56 @@ segIotaBuiltin = buildingBuiltin $ do
         funDefBody = body
       }
 
+repIotaBuiltin :: FunDef GPU
+repIotaBuiltin = buildingBuiltin $ do
+  np <- newParam "n" $ Prim int64
+  nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
+  body <-
+    localScope (scopeOfFParams [np, nsp]) . buildBody_ $ do
+      (flags, offsets, res) <- genRepIota (paramName nsp)
+      m <- arraySize 0 <$> lookupType res
+      pure $ subExpsRes [m, Var flags, Var offsets, Var res]
+  pure
+    FunDef
+      { funDefEntryPoint = Nothing,
+        funDefAttrs = mempty,
+        funDefName = repIotaName,
+        funDefRetType =
+          [ Prim int64,
+            Array Bool (Shape [Ext 0]) Unique,
+            Array int64 (Shape [Free $ Var $ paramName np]) Unique,
+            Array int64 (Shape [Ext 0]) Unique
+          ],
+        funDefParams = [np, nsp],
+        funDefBody = body
+      }
+
+prefixSumBuiltin :: FunDef GPU
+prefixSumBuiltin = buildingBuiltin $ do
+  np <- newParam "n" $ Prim int64
+  nsp <- newParam "ns" $ Array int64 (Shape [Var (paramName np)]) Nonunique
+  body <-
+    localScope (scopeOfFParams [np, nsp]) . buildBody_ $
+      varsRes . pure <$> genPrefixSum "res" (paramName nsp)
+  pure
+    FunDef
+      { funDefEntryPoint = Nothing,
+        funDefAttrs = mempty,
+        funDefName = prefixSumName,
+        funDefRetType =
+          [ Prim int64,
+            Array int64 (Shape [Free $ Var $ paramName np]) Nonunique
+          ],
+        funDefParams = [np, nsp],
+        funDefBody = body
+      }
+
 -- | Builtin functions used in flattening.  Must be prepended to a
 -- program that is transformed by flattening.  The intention is to
 -- avoid the code explosion that would result if we inserted
 -- primitives everywhere.
 flatteningBuiltins :: [FunDef GPU]
-flatteningBuiltins = [segIotaBuiltin]
+flatteningBuiltins = [segIotaBuiltin, segIotaBuiltin, prefixSumBuiltin]
 
 -- | Perform a segmented iota. Returns flags,offsets,data.
 doSegIota :: VName -> Builder GPU (VName, VName, VName)
@@ -204,3 +288,37 @@ doSegIota ns = do
       restype
       (Safe, mempty, mempty)
   pure (flags, offsets, elems)
+
+doRepIota :: VName -> Builder GPU (VName, VName, VName)
+doRepIota ns = do
+  ns_t <- lookupType ns
+  let n = arraySize 0 ns_t
+  m <- newVName "m"
+  flags <- newVName "repiota_flags"
+  offsets <- newVName "repiota_offsets"
+  elems <- newVName "repiota_elems"
+  let args = [(n, Prim int64), (Var ns, ns_t)]
+      restype =
+        fromMaybe (error "doRepIota: bad application") $
+          applyRetType
+            (funDefRetType repIotaBuiltin)
+            (funDefParams repIotaBuiltin)
+            args
+  letBindNames [m, flags, offsets, elems] $
+    Apply
+      (funDefName repIotaBuiltin)
+      [(n, Observe), (Var ns, Observe)]
+      restype
+      (Safe, mempty, mempty)
+  pure (flags, offsets, elems)
+
+doPrefixSum :: VName -> Builder GPU VName
+doPrefixSum ns = do
+  ns_t <- lookupType ns
+  let n = arraySize 0 ns_t
+  letExp "prefix_sum" $
+    Apply
+      (funDefName prefixSumBuiltin)
+      [(n, Observe), (Var ns, Observe)]
+      [toDecl (staticShapes1 ns_t) Unique]
+      (Safe, mempty, mempty)
