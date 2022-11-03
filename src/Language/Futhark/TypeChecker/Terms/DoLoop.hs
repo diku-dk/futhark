@@ -113,7 +113,7 @@ convergePat loop_loc pat body_cons body_t body_loc = do
             S.toList $
               S.map aliasVar (aliases t) `S.intersection` bound_outside =
             lift . typeError loop_loc mempty $
-              "Return value for loop parameter"
+              "Return value for consuming loop parameter"
                 <+> dquotes (prettyName pat_v)
                 <+> "aliases"
                 <+> dquotes (prettyName v) <> "."
@@ -189,6 +189,11 @@ type UncheckedLoop =
 type CheckedLoop =
   ([VName], Pat, Exp, LoopFormBase Info VName, Exp)
 
+loopReturnType :: Pat -> PatType -> PatType
+loopReturnType pat = returnType mempty pat_t (diet pat_t)
+  where
+    pat_t = patternType pat
+
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkDoLoop ::
@@ -227,9 +232,13 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     -- (There is also a convergence loop for inferring uniqueness, but
     -- that's orthogonal to the size handling.)
 
+    -- We don't want the loop parameters to alias their initial
+    -- values, so we blank them here.  We will actually check them
+    -- properly later.
     (merge_t, new_dims_to_initial_dim) <-
       -- dim handling (1)
-      allDimsFreshInType loc Nonrigid "loop" =<< expTypeFully mergeexp'
+      allDimsFreshInType loc Nonrigid "loop" . flip setAliases mempty
+        =<< expTypeFully mergeexp'
     let new_dims = M.keys new_dims_to_initial_dim
 
     -- dim handling (2)
@@ -309,7 +318,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           bound_t <- expTypeFully uboundexp'
           bindingIdent i bound_t $ \i' ->
             noUnique . bindingPat [] mergepat (Ascribed merge_t) $
-              \mergepat' -> onlySelfAliasing . tapOccurrences $ do
+              \mergepat' -> tapOccurrences $ do
                 loopbody' <- noSizeEscape $ checkExp loopbody
                 (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                 pure
@@ -327,7 +336,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               | Just t' <- peelArray 1 t ->
                   bindingPat [] xpat (Ascribed t') $ \xpat' ->
                     noUnique . bindingPat [] mergepat (Ascribed merge_t) $
-                      \mergepat' -> onlySelfAliasing . tapOccurrences $ do
+                      \mergepat' -> tapOccurrences $ do
                         loopbody' <- noSizeEscape $ checkExp loopbody
                         (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                         pure
@@ -342,8 +351,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                       <+> pretty t
         While cond ->
           noUnique . bindingPat [] mergepat (Ascribed merge_t) $ \mergepat' ->
-            onlySelfAliasing
-              . tapOccurrences
+            tapOccurrences
               . sequentially
                 ( checkExp cond
                     >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)
@@ -363,6 +371,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
       convergePat loc mergepat' (allConsumed bodyflow) loopbody_t $
         mkUsage (srclocOf loopbody') "being (part of) the result of the loop body"
 
+    merge_t' <- expTypeFully mergeexp'
     let consumeMerge (Id _ (Info pt) ploc) mt
           | unique pt = consume ploc $ aliases mt
         consumeMerge (TuplePat pats _) t
@@ -374,14 +383,14 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           consumeMerge pat t
         consumeMerge _ _ =
           pure ()
-    consumeMerge mergepat'' =<< expTypeFully mergeexp'
+    consumeMerge mergepat'' merge_t'
 
     -- dim handling (4)
     wellTypedLoopArg Initial sparams mergepat'' mergeexp'
 
     (loopt, retext) <-
       freshDimsInType loc (Rigid RigidLoop) "loop" (S.fromList sparams) $
-        patternType mergepat''
+        loopReturnType mergepat'' merge_t'
     -- We set all of the uniqueness to be unique.  This is intentional,
     -- and matches what happens for function calls.  Those arrays that
     -- really *cannot* be consumed will alias something unconsumable,
@@ -396,4 +405,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           second (`S.difference` S.map AliasBound bound_here) $
             loopt `setUniqueness` Unique
 
-    pure ((sparams, mergepat'', mergeexp', form', loopbody'), AppRes loopt' retext)
+    pure
+      ( (sparams, mergepat'', mergeexp', form', loopbody'),
+        AppRes loopt' retext
+      )

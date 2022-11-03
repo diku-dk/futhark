@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Handling of non-inlined functions in GPU code.  Still very restricted.
 
+* Uniqueness checking bug (#1751).
+
 ## [0.22.3]
 
 ### Fixed
