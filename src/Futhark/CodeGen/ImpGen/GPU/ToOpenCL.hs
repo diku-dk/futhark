@@ -286,7 +286,9 @@ onKernel target kernel = do
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
         | not $ null called =
-            (SafetyFull, [])
+            ( SafetyFull,
+              [C.citems|volatile __local bool local_failure;|]
+            )
         | length (kernelFailures kstate) == length failures =
             if kernelFailureTolerant kernel
               then (SafetyNone, [])
