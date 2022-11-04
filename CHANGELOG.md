@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark literate` now handles type abbreviations in entry points
+  (#1750).
+
+* Handling of non-inlined functions in GPU code.  Still very restricted.
+
+* Uniqueness checking bug (#1751).
+
+* Simplification bug (#1753).
+
+## [0.22.3]
+
+### Fixed
+
 * Non-server executables neglected to synchronise before printing results (#1731).
 
 * Fixed handling of holes in defunctionalisation (#1738).

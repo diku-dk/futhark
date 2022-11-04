@@ -38,6 +38,8 @@
 --            8i32, 12i32,  8i32, 23i32, 24i32, 33i32, 39i32, 33i32, 27i32, 33i32,
 --            6i32,  9i32, 20i32, 17i32, 26i32, 28i32, 39i32, 39i32, 35i32, 32i32,
 --            4i32, 14i32, 16i32, 27i32, 19i32, 26i32, 33i32, 39i32, 40i32, 38i32] }
+-- structure gpu-mem { Alloc 6 }
+-- structure seq-mem { Alloc 8 }
 
 import "intrinsics"
 
@@ -57,19 +59,20 @@ def process_block [b][bp1]
   let block =
     loop block = copy block for m < b do
        let inds =
-            tabulate b (\tx ->  (
-                    if tx > m then (-1, -1)
-                    else let ind_x = i32.i64 (tx + 1)
-                         let ind_y = i32.i64 (m - tx + 1)
-                         in  (i64.i32 ind_y, i64.i32 ind_x)))
+            tabulate b (\tx ->
+                          if tx > m then (-1, -1)
+                          else let ind_x = i32.i64 (tx + 1)
+                               let ind_y = i32.i64 (m - tx + 1)
+                               in (i64.i32 ind_y, i64.i32 ind_x))
         let vals =
             -- tabulate over the m'th anti-diagonal before the middle
-            tabulate b (\tx ->  (
-                    if tx > m then 0
-                    else let ind_x = i32.i64 (tx + 1)
-                         let ind_y = i32.i64 (m - tx + 1)
-                         let v = mkVal ind_y ind_x penalty block ref
-                         in  v))
+            tabulate b
+                     (\tx ->
+                        if tx > m then 0
+                        else let ind_x = i32.i64 (tx + 1)
+                             let ind_y = i32.i64 (m - tx + 1)
+                             let v = mkVal ind_y ind_x penalty block ref
+                             in v)
         in scatter_2d block inds vals
 
   -- Process the second half (anti-diagonally) of the block
@@ -112,8 +115,8 @@ entry nw_flat [n]
       map2 (process_block penalty)
       (flat_index_3d input (i * block_size)
                      ip1 (row_length * block_size - block_size)
-                     (block_size + 1) row_length
-                     (block_size + 1) 1i64)
+                     bp1 row_length
+                     bp1 1i64)
       (flat_index_3d refs (row_length + 1 + i * block_size)
                      ip1 (row_length * block_size - block_size)
                      block_size row_length
@@ -133,8 +136,8 @@ entry nw_flat [n]
       map2 (process_block penalty)
       (flat_index_3d input (((i + 1) * block_size + 1) * row_length - block_size - 1)
                      (num_blocks - i - 1) (row_length * block_size - block_size)
-                     (block_size + 1) row_length
-                     (block_size + 1) 1i64)
+                     bp1 row_length
+                     bp1 1i64)
       (flat_index_3d refs (((i + 1) * block_size + 2) * row_length - block_size)
                      (num_blocks - i - 1) (row_length * block_size - block_size)
                      block_size row_length

@@ -52,7 +52,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     Names,
     Occurrence (..),
     Occurrences,
-    onlySelfAliasing,
     noUnique,
     removeSeminullOccurrences,
     occur,
@@ -67,7 +66,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     allConsumed,
 
     -- * Errors
-    useAfterConsume,
     unusedSize,
     uniqueReturnAliased,
     returnAliased,
@@ -931,16 +929,6 @@ observe :: Ident -> TermTypeM ()
 observe (Ident nm (Info t) loc) =
   let als = AliasBound nm `S.insert` aliases t
    in occur [observation als loc]
-
-onlySelfAliasing :: TermTypeM a -> TermTypeM a
-onlySelfAliasing = localScope (\scope -> scope {scopeVtable = M.mapWithKey set $ scopeVtable scope})
-  where
-    set k (BoundV l tparams t) =
-      BoundV l tparams $
-        t `addAliases` S.intersection (S.singleton (AliasBound k))
-    set _ (OverloadedF ts pts rt) = OverloadedF ts pts rt
-    set _ EqualityF = EqualityF
-    set _ (WasConsumed loc) = WasConsumed loc
 
 -- | Enter a context where nothing outside can be consumed (i.e. the
 -- body of a function definition).

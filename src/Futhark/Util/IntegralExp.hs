@@ -44,6 +44,10 @@ class Num e => IntegralExp e where
 newtype Wrapped a = Wrapped {wrappedValue :: a}
   deriving (Eq, Ord, Show)
 
+instance Enum a => Enum (Wrapped a) where
+  toEnum a = Wrapped $ toEnum a
+  fromEnum (Wrapped a) = fromEnum a
+
 liftOp ::
   (a -> a) ->
   Wrapped a ->

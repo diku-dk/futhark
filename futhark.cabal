@@ -156,6 +156,7 @@ library
       Futhark.AD.Rev.Scan
       Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
+      Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
       Futhark.Analysis.DataDependencies
@@ -281,6 +282,7 @@ library
       Futhark.IR.MC.Op
       Futhark.IR.MCMem
       Futhark.IR.Mem
+      Futhark.IR.Mem.Interval
       Futhark.IR.Mem.IxFun
       Futhark.IR.Mem.Simplify
       Futhark.IR.Parse
@@ -342,6 +344,12 @@ library
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
+      Futhark.Optimise.ArrayShortCircuiting
+      Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
+      Futhark.Optimise.ArrayShortCircuiting.DataStructs
+      Futhark.Optimise.ArrayShortCircuiting.LastUse
+      Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
+      Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
       Futhark.Optimise.MergeGPUBodies
       Futhark.Optimise.ReduceDeviceSyncs
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
@@ -384,6 +392,8 @@ library
       Futhark.Pass.Flatten.Builtins
       Futhark.Pass.Flatten.Distribute
       Futhark.Pass.KernelBabysitting
+      Futhark.Pass.LiftAllocations
+      Futhark.Pass.LowerAllocations
       Futhark.Pass.Simplify
       Futhark.Passes
       Futhark.Pipeline
@@ -521,11 +531,13 @@ test-suite unit
       Futhark.AD.DerivativesTests
       Futhark.BenchTests
       Futhark.Pkg.SolveTests
+      Futhark.Analysis.AlgSimplifyTests
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
+      Futhark.IR.Mem.IntervalTests
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper

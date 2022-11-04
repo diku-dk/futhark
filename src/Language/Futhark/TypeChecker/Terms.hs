@@ -961,55 +961,6 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
       | prev_applied == 1 = "argument"
       | otherwise = "arguments"
 
--- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
--- an argument the given types to a function with the given return
--- type, consuming the argument with the given diet.
-returnType ::
-  Aliasing ->
-  PatType ->
-  Diet ->
-  PatType ->
-  PatType
-returnType _ (Array _ Unique et shape) _ _ =
-  Array mempty Nonunique et shape -- Intentional!
-returnType appres (Array als Nonunique et shape) d arg =
-  Array (appres <> als <> arg_als) Nonunique et shape
-  where
-    arg_als = aliases $ maskAliases arg d
-returnType appres (Scalar (Record fs)) d arg =
-  Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
-returnType _ (Scalar (Prim t)) _ _ =
-  Scalar $ Prim t
-returnType _ (Scalar (TypeVar _ Unique t targs)) _ _ =
-  Scalar $ TypeVar mempty Nonunique t targs -- Intentional!
-returnType appres (Scalar (TypeVar als Nonunique t targs)) d arg =
-  Scalar $ TypeVar (appres <> als <> arg_als) Unique t targs
-  where
-    arg_als = aliases $ maskAliases arg d
-returnType _ (Scalar (Arrow old_als v t1 (RetType dims t2))) d arg =
-  Scalar $ Arrow als v (t1 `setAliases` mempty) $ RetType dims $ t2 `setAliases` als
-  where
-    -- Make sure to propagate the aliases of an existing closure.
-    als = old_als <> aliases (maskAliases arg d)
-returnType appres (Scalar (Sum cs)) d arg =
-  Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
-
--- @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
--- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.
-maskAliases ::
-  Monoid as =>
-  TypeBase shape as ->
-  Diet ->
-  TypeBase shape as
-maskAliases t Consume = t `setAliases` mempty
-maskAliases t Observe = t
-maskAliases (Scalar (Record ets)) (RecordDiet ds) =
-  Scalar $ Record $ M.intersectionWith maskAliases ets ds
-maskAliases (Scalar (Sum ets)) (SumDiet ds) =
-  Scalar $ Sum $ M.intersectionWith (zipWith maskAliases) ets ds
-maskAliases t FuncDiet {} = t
-maskAliases _ _ = error "Invalid arguments passed to maskAliases."
-
 consumedByArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Aliasing]
 consumedByArg loc (Scalar (Record ets)) (RecordDiet ds) =
   mconcat . M.elems <$> traverse (uncurry $ consumedByArg loc) (M.intersectionWith (,) ets ds)
