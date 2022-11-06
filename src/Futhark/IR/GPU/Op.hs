@@ -281,7 +281,7 @@ instance (ASTRep rep, IsOp op) => IsOp (HostOp rep op) where
   safeOp (SegOp op) = safeOp op
   safeOp (OtherOp op) = safeOp op
   safeOp (SizeOp op) = safeOp op
-  safeOp GPUBody {} = True
+  safeOp (GPUBody _ body) = all (safeExp . stmExp) $ bodyStms body
 
   cheapOp (SegOp op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
