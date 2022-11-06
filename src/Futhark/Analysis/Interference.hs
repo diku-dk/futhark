@@ -211,16 +211,14 @@ analyseLambda lumap inuse (Lambda _ body _) =
 
 analyseProgGPU :: Prog GPUMem -> Graph VName
 analyseProgGPU prog =
-  let (lumap, _) = LastUse.analyseGPUMem prog
-      graph =
-        foldMap
-          ( \f ->
-              runReader (analyseGPU lumap $ bodyStms $ funDefBody f) $
-                scopeOf f
-          )
-          $ progFuns prog
-      graph' = applyAliases (MemAlias.analyzeGPUMem prog) graph
-   in graph'
+  applyAliases (MemAlias.analyzeGPUMem prog) $
+    onConsts (progConsts prog) <> foldMap onFun (progFuns prog)
+  where
+    (lumap, _) = LastUse.analyseGPUMem prog
+    onFun f =
+      runReader (analyseGPU lumap $ bodyStms $ funDefBody f) $ scopeOf f
+    onConsts stms =
+      runReader (analyseGPU lumap stms) (mempty :: Scope GPUMem)
 
 applyAliases :: MemAlias.MemAliases -> Graph VName -> Graph VName
 applyAliases aliases =
