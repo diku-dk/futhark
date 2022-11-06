@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Simplification bug (#1753).
 
+* A bug related to optimisation of scalar code migrated to GPU.
+
 ## [0.22.3]
 
 ### Fixed
