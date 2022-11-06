@@ -841,6 +841,9 @@ reductionStageTwo
                 negate groups_per_segment
 
       sLoopNest (slugShape slug) $ \vec_is -> do
+        unless (null $ slugShape slug) $
+          sOp (Imp.Barrier Imp.FenceLocal)
+
         -- There is no guarantee that the number of workgroups for the
         -- segment is less than the workgroup size, so each thread may
         -- have to read multiple elements.  We do this in a sequential
