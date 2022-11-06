@@ -287,7 +287,9 @@ onKernel target kernel = do
         -- We conservatively assume that any called function can fail.
         | not $ null called =
             ( SafetyFull,
-              [C.citems|volatile __local bool local_failure;|]
+              [C.citems|volatile __local bool local_failure;
+                        // Harmless for all threads to write this.
+                        local_failure = false;|]
             )
         | length (kernelFailures kstate) == length failures =
             if kernelFailureTolerant kernel
