@@ -12,7 +12,6 @@ where
 
 import Control.Monad.Reader
 import Data.Bifunctor (bimap, first)
-import Data.Foldable
 import Data.Function ((&))
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -106,13 +105,16 @@ analyseProg onOp prog =
   runReader helper (Env onOp)
   where
     helper = do
-      let consts =
+      let bound_in_consts =
             progConsts prog
-              & concatMap (toList . fmap patElemName . patElems . stmPat)
+              & concatMap (patNames . stmPat)
               & namesFromList
-          funs = progFuns $ aliasAnalysis prog
-      (lus, used) <- mconcat <$> mapM (analyseFun mempty consts) funs
-      pure (flipMap lus, used)
+          prog_alias = aliasAnalysis prog
+          consts = progConsts prog_alias
+          funs = progFuns prog_alias
+      (consts_lu, consts_used) <- analyseStms mempty mempty consts
+      (lus, used) <- mconcat <$> mapM (analyseFun mempty bound_in_consts) funs
+      pure (flipMap $ consts_lu <> lus, consts_used <> used)
 
 analyseFun :: (FreeIn (OpWithAliases (Op rep)), ASTRep rep) => LastUse -> Used -> FunDef (Aliases rep) -> LastUseM rep
 analyseFun lumap used fun = do
