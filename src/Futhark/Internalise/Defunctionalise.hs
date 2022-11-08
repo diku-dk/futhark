@@ -40,7 +40,7 @@ data StaticVal
     -- holes.)
     DynamicFun (Exp, StaticVal) StaticVal
   | IntrinsicSV
-  | HoleSV SrcLoc
+  | HoleSV PatType SrcLoc
   deriving (Show)
 
 -- | The type is Just if this is a polymorphic binding that must be
@@ -112,8 +112,8 @@ replaceStaticValSizes globals orig_substs sv =
         replaceStaticValSizes globals orig_substs sv2
     IntrinsicSV ->
       IntrinsicSV
-    HoleSV loc ->
-      HoleSV loc
+    HoleSV t loc ->
+      HoleSV t loc
   where
     tv substs =
       identityMapper
@@ -222,7 +222,7 @@ restrictEnvTo (FV m) = asks restrict
     restrict' u (DynamicFun (e, sv1) sv2) =
       DynamicFun (e, restrict' u sv1) $ restrict' u sv2
     restrict' _ IntrinsicSV = IntrinsicSV
-    restrict' _ (HoleSV loc) = HoleSV loc
+    restrict' _ (HoleSV t loc) = HoleSV t loc
     restrict'' u (Binding t sv) = Binding t $ restrict' u sv
 
 -- | Defunctionalization monad.  The Reader environment tracks both
@@ -504,13 +504,13 @@ defuncExp e@(Var qn (Info t) loc) = do
     IntrinsicSV -> do
       (pats, body, tp) <- etaExpand (typeOf e) e
       defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
-    HoleSV hole_loc ->
-      pure (Hole (Info t) hole_loc, HoleSV hole_loc)
+    HoleSV _ hole_loc ->
+      pure (Hole (Info t) hole_loc, sv)
     _ ->
       let tp = typeFromSV sv
        in pure (Var qn (Info tp) loc, sv)
 defuncExp (Hole (Info t) loc) =
-  pure (Hole (Info t) loc, HoleSV loc)
+  pure (Hole (Info t) loc, HoleSV t loc)
 defuncExp (Ascript e0 tydecl loc)
   | orderZero (typeOf e0) = do
       (e0', sv) <- defuncExp e0
@@ -942,7 +942,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.
     IntrinsicSV -> intrinsicOrHole argtypes e' sv1
-    HoleSV _ -> intrinsicOrHole argtypes e' sv1
+    HoleSV {} -> intrinsicOrHole argtypes e' sv1
     _ ->
       error $
         "Application of an expression\n"
@@ -1138,10 +1138,10 @@ typeFromSV (DynamicFun (_, sv) _) =
 typeFromSV (SumSV name svs fields) =
   let svs' = map typeFromSV svs
    in Scalar $ Sum $ M.insert name svs' $ M.fromList fields
+typeFromSV (HoleSV t _) =
+  t
 typeFromSV IntrinsicSV =
   error "Tried to get the type from the static value of an intrinsic."
-typeFromSV HoleSV {} =
-  error "Tried to get the type from the static value of a hole."
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
