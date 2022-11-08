@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Memory optimisation bug for top-level constants (#1755).
 
+* Handling of holes in defunctionalisation (again).
+
 ## [0.22.3]
 
 ### Fixed
