@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `assert` was sometimes optimised away by CSE.
+
 * `futhark literate` now handles type abbreviations in entry points
   (#1750).
 
