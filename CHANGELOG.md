@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Memory short circuiting, a major new optimisation by Philip
+  Munksgaard that avoids copies by constructing values in-place.
+
 ### Removed
 
 ### Changed
