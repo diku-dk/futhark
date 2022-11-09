@@ -228,8 +228,11 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   if any (bad cse_arrays) $ patElems pat
     then m [Let pat' (StmAux cs attrs edec) e']
     else case M.lookup (edec, e') esubsts of
-      Just subpat ->
-        local (addNameSubst pat' subpat) $ do
+      Just (subcs, subpat) -> do
+        let subsumes = all (`elem` unCerts subcs) (unCerts cs)
+        -- We can only do a plain name substitution if it doesn't
+        -- violate any certificate dependencies.
+        local (if subsumes then addNameSubst pat' subpat else id) $ do
           let lets =
                 [ Let (Pat [patElem']) (StmAux cs attrs edec) $
                     BasicOp (SubExp $ Var $ patElemName patElem)
@@ -238,7 +241,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
                 ]
           m lets
       _ ->
-        local (addExpSubst pat' edec e') $
+        local (addExpSubst pat' edec cs e') $
           m [Let pat' (StmAux cs attrs edec) e']
   where
     bad cse_arrays pe
@@ -250,7 +253,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
 type ExpressionSubstitutions rep =
   M.Map
     (ExpDec rep, Exp rep)
-    (Pat (LetDec rep))
+    (Certs, Pat (LetDec rep))
 
 type NameSubstitutions = M.Map VName VName
 
@@ -273,11 +276,12 @@ addExpSubst ::
   ASTRep rep =>
   Pat (LetDec rep) ->
   ExpDec rep ->
+  Certs ->
   Exp rep ->
   CSEState rep ->
   CSEState rep
-addExpSubst pat edec e (CSEState (esubsts, nsubsts) cse_arrays) =
-  CSEState (M.insert (edec, e) pat esubsts, nsubsts) cse_arrays
+addExpSubst pat edec cs e (CSEState (esubsts, nsubsts) cse_arrays) =
+  CSEState (M.insert (edec, e) (cs, pat) esubsts, nsubsts) cse_arrays
 
 -- | The operations that permit CSE.
 class CSEInOp op where
