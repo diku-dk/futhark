@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Handling of holes in defunctionalisation (again).
 
+* A few cases where optimisation (safely but perhaps confusingly)
+  removed bounds checks (#1758).
+
 ## [0.22.3]
 
 ### Fixed

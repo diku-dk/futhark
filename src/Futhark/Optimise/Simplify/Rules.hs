@@ -62,7 +62,7 @@ standardRules =
 --
 -- This simplistic rule is only valid before we introduce memory.
 removeUnnecessaryCopy :: BuilderOps rep => BottomUpRuleBasicOp rep
-removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
+removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Copy v)
   | not (v `UT.isConsumed` used),
     -- This two first clauses below are too conservative, but the
     -- problem is that 'v' might not look like it has been consumed if
@@ -76,7 +76,7 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) _ (Copy v)
       -- used again.
       || (v_is_fresh && v_not_used_again),
     (v_not_used_again && consumable) || not (patElemName d `UT.isConsumed` used) =
-      Simplify $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
+      Simplify $ auxing aux $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where
     v_not_used_again = not (v `UT.used` used)
     v_is_fresh = v `ST.lookupAliases` vtable == mempty
