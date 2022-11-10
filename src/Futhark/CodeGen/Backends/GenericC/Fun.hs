@@ -3,6 +3,7 @@
 -- | C code generation for functions.
 module Futhark.CodeGen.Backends.GenericC.Fun
   ( compileFun,
+    compileVoidFun,
     module Futhark.CodeGen.Backends.GenericC.Monad,
     module Futhark.CodeGen.Backends.GenericC.Code,
   )
@@ -33,6 +34,24 @@ compileFunBody output_ptrs outputs code = do
       setMem [C.cexp|*$exp:p|] name space
     setRetVal' p (ScalarParam name _) =
       stm [C.cstm|*$exp:p = $id:name;|]
+
+compileInput :: Param -> CompilerM op s C.Param
+compileInput (ScalarParam name bt) = do
+  let ctp = primTypeToCType bt
+  pure [C.cparam|$ty:ctp $id:name|]
+compileInput (MemParam name space) = do
+  ty <- memToCType name space
+  pure [C.cparam|$ty:ty $id:name|]
+
+compileOutput :: Param -> CompilerM op s (C.Param, C.Exp)
+compileOutput (ScalarParam name bt) = do
+  let ctp = primTypeToCType bt
+  p_name <- newVName $ "out_" ++ baseString name
+  pure ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
+compileOutput (MemParam name space) = do
+  ty <- memToCType name space
+  p_name <- newVName $ baseString name ++ "_p"
+  pure ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = inNewFunction $ do
@@ -66,18 +85,23 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = 
     -- actually need to use them.
     ignores = [[C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra]
 
-    compileInput (ScalarParam name bt) = do
-      let ctp = primTypeToCType bt
-      pure [C.cparam|$ty:ctp $id:name|]
-    compileInput (MemParam name space) = do
-      ty <- memToCType name space
-      pure [C.cparam|$ty:ty $id:name|]
+-- | Generate code for a function that returns void (meaning it cannot
+-- fail) and has no extra parameters (meaning it cannot allocate
+-- memory non-lexxical or do anything fancy).
+compileVoidFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
+compileVoidFun get_constants (fname, func@(Function _ outputs inputs body)) = inNewFunction $ do
+  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
+  inparams <- mapM compileInput inputs
 
-    compileOutput (ScalarParam name bt) = do
-      let ctp = primTypeToCType bt
-      p_name <- newVName $ "out_" ++ baseString name
-      pure ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
-    compileOutput (MemParam name space) = do
-      ty <- memToCType name space
-      p_name <- newVName $ baseString name ++ "_p"
-      pure ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
+  cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
+    body' <- collect $ compileFunBody out_ptrs outputs body
+
+    pure
+      ( [C.cedecl|static void $id:(funName fname)($params:outparams, $params:inparams);|],
+        [C.cfun|static void $id:(funName fname)($params:outparams, $params:inparams) {
+               $items:decl_cached
+               $items:get_constants
+               $items:body'
+               $stms:free_cached
+               }|]
+      )

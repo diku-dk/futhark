@@ -74,6 +74,7 @@ module Futhark.CodeGen.ImpCode
     declaredIn,
     lexicalMemoryUsage,
     calledFuncs,
+    callGraph,
 
     -- * Typed enumerations
     Bytes,
@@ -95,6 +96,7 @@ module Futhark.CodeGen.ImpCode
   )
 where
 
+import Data.Bifunctor (second)
 import Data.List (intersperse)
 import Data.Map qualified as M
 import Data.Set qualified as S
@@ -153,7 +155,7 @@ instance Functor Definitions where
     Definitions types (fmap f consts) (fmap f funs)
 
 -- | A collection of imperative functions.
-newtype Functions a = Functions [(Name, Function a)]
+newtype Functions a = Functions {unFunctions :: [(Name, Function a)]}
   deriving (Show)
 
 instance Semigroup (Functions a) where
@@ -374,16 +376,28 @@ lexicalMemoryUsage func =
         onArg (MemArg x) = oneName x
     set x = go set x
 
--- | The set of functions that are called by this code.  Assumes there
--- are no function calls in 'Op's.
-calledFuncs :: Code a -> S.Set Name
-calledFuncs (x :>>: y) = calledFuncs x <> calledFuncs y
-calledFuncs (If _ x y) = calledFuncs x <> calledFuncs y
-calledFuncs (For _ _ x) = calledFuncs x
-calledFuncs (While _ x) = calledFuncs x
-calledFuncs (Comment _ x) = calledFuncs x
-calledFuncs (Call _ f _) = S.singleton f
-calledFuncs _ = mempty
+-- | The set of functions that are called by this code.  Accepts a
+-- function for determing function calls in 'Op's.
+calledFuncs :: (a -> S.Set Name) -> Code a -> S.Set Name
+calledFuncs _ (Call _ v _) = S.singleton v
+calledFuncs f (Op x) = f x
+calledFuncs f (x :>>: y) = calledFuncs f x <> calledFuncs f y
+calledFuncs f (If _ x y) = calledFuncs f x <> calledFuncs f y
+calledFuncs f (For _ _ x) = calledFuncs f x
+calledFuncs f (While _ x) = calledFuncs f x
+calledFuncs f (Comment _ x) = calledFuncs f x
+calledFuncs _ _ = mempty
+
+-- | Compute call graph, as per 'calledFuncs', but also include
+-- transitive calls.
+callGraph :: (a -> S.Set Name) -> Functions a -> M.Map Name (S.Set Name)
+callGraph f (Functions funs) =
+  loop $ M.fromList $ map (second $ calledFuncs f . functionBody) funs
+  where
+    loop cur =
+      let grow v = maybe (S.singleton v) (S.insert v) (M.lookup v cur)
+          next = M.map (foldMap grow) cur
+       in if next == cur then cur else loop next
 
 -- | A side-effect free expression whose execution will produce a
 -- single primitive value.
