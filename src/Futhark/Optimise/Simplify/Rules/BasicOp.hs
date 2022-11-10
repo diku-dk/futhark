@@ -154,9 +154,9 @@ ruleBasicOp vtable pat aux op
     defOf = (`ST.lookupExp` vtable)
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
-ruleBasicOp vtable pat _ (Update _ src _ (Var v))
+ruleBasicOp vtable pat aux (Update _ src _ (Var v))
   | Just (BasicOp Scratch {}, _) <- ST.lookupExp v vtable =
-      Simplify $ letBind pat $ BasicOp $ SubExp $ Var src
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ Var src
 -- If we are writing a single-element slice from some array, and the
 -- element of that array can be computed as a PrimExp based on the
 -- index, let's just write that instead.
@@ -170,10 +170,10 @@ ruleBasicOp vtable pat aux (Update safety src (Slice [DimSlice i n s]) (Var v))
           letBind pat $
             BasicOp $
               Update safety src (Slice [DimFix i]) e'
-ruleBasicOp vtable pat _ (Update _ dest destis (Var v))
+ruleBasicOp vtable pat aux (Update _ dest destis (Var v))
   | Just (e, _) <- ST.lookupExp v vtable,
     arrayFrom e =
-      Simplify $ letBind pat $ BasicOp $ SubExp $ Var dest
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ Var dest
   where
     arrayFrom (BasicOp (Copy copy_v))
       | Just (e', _) <- ST.lookupExp copy_v vtable =
@@ -187,9 +187,9 @@ ruleBasicOp vtable pat _ (Update _ dest destis (Var v))
           True
     arrayFrom _ =
       False
-ruleBasicOp vtable pat _ (Update _ dest is se)
+ruleBasicOp vtable pat aux (Update _ dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
-    isFullSlice (arrayShape dest_t) is = Simplify $
+    isFullSlice (arrayShape dest_t) is = Simplify . auxing aux $
       case se of
         Var v | not $ null $ sliceDims is -> do
           v_reshaped <-
