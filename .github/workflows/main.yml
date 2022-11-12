@@ -98,6 +98,45 @@ jobs:
         name: futhark-nightly-macos-x86_64.tar.xz
         path: futhark-nightly-macos-x86_64.tar.xz
 
+  build-windows-cabal:
+    runs-on: windows-2019
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        choco install -y msys2
+        choco install ghc --version=9.2.4
+      env:
+        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+
+    - uses: actions/cache@v2
+      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
+      with:
+        path: |
+          ~/AppData/Roaming/cabal/packages
+          ~/AppData/Roaming/cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-cabal
+
+    - name: Build
+      shell: bash
+      run: |
+        cabal update
+        try() { cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.; }
+        try || try || try
+    - uses: papeloto/action-zip@v1
+      with:
+        files: futhark.exe
+        dest: futhark-nightly-windows-x86_64.zip
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-nightly-windows-x86_64.zip
+        path: futhark-nightly-windows-x86_64.zip
+
+
   test-style:
     runs-on: ubuntu-22.04
 
