@@ -121,7 +121,7 @@ bindingAbs abs = local $ \env ->
 lookupImport :: String -> TransformM Scope
 lookupImport name = maybe bad pure =<< asks (M.lookup name . envImports)
   where
-    bad = error $ "Unknown import: " ++ name
+    bad = error $ "Defunctorise: unknown import: " ++ name
 
 lookupMod' :: QualName VName -> Scope -> Either String Mod
 lookupMod' mname scope =
