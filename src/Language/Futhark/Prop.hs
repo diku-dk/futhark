@@ -113,6 +113,7 @@ import Language.Futhark.Primitive qualified as Primitive
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals
 import Language.Futhark.Tuple
+import System.FilePath (takeDirectory)
 
 -- | The name of the default program entry point (@main@).
 defaultEntryPoint :: Name
@@ -1172,9 +1173,9 @@ intrinsics =
     tupInt64 x =
       tupleRecord $ replicate x $ Scalar $ Prim $ Signed Int64
 
--- | Is this file part of the built-in prelude?
+-- | Is this include part of the built-in prelude?
 isBuiltin :: FilePath -> Bool
-isBuiltin = ("/prelude/" `isPrefixOf`)
+isBuiltin = (== "/prelude") . takeDirectory
 
 -- | Is the position of this thing builtin as per 'isBuiltin'?  Things
 -- without location are considered not built-in.
