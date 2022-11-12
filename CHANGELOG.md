@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A few cases where optimisation (safely but perhaps confusingly)
   removed bounds checks (#1758).
 
+* Futhark now works on Windows again (#1734).  This support remains
+  very flaky and not well tested.
+
 ## [0.22.3]
 
 ### Fixed
