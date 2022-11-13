@@ -5,6 +5,7 @@ module Futhark.Pass.Flatten.Builtins
     genFlags,
     genSegScan,
     genSegRed,
+    exScanAndSum,
     doSegIota,
     doPrefixSum,
     doRepIota,
@@ -140,8 +141,8 @@ genFlags m offsets = do
     i <- letExp "i" =<< eIndex offsets [eSubExp gtid]
     pure (i, constant True)
 
-genSegRed :: VName -> VName -> [VName] -> Reduce SOACS -> Builder GPU [VName]
-genSegRed flags offsets elems red = do
+genSegRed :: VName -> VName -> VName -> [VName] -> Reduce SOACS -> Builder GPU [VName]
+genSegRed segments flags offsets elems red = do
   scanned <-
     genSegScan
       "red"
@@ -151,11 +152,13 @@ genSegRed flags offsets elems red = do
       elems
   num_segments <- arraySize 0 <$> lookupType offsets
   letTupExp "segred" <=< genTabulate num_segments $ \i -> do
-    next_start <-
-      letSubExp "next_start" =<< eIndex offsets [toExp (pe64 i)]
-    this_end <-
-      letSubExp "this_end" =<< toExp (pe64 next_start - 1)
-    mapM (letSubExp "res" <=< (`eIndex` [eSubExp this_end])) scanned
+    n <- letSubExp "n" =<< eIndex segments [eSubExp i]
+    offset <- letSubExp "offset" =<< eIndex offsets [toExp (pe64 i)]
+    letTupExp' "segment_res" <=< eIf (toExp $ pe64 n .==. 0) (eBody $ map eSubExp nes) $
+      eBody $
+        map (`eIndex` [toExp $ pe64 offset + pe64 n - 1]) scanned
+  where
+    nes = redNeutral red
 
 -- Returns (#segments, segment start offsets, sum of segment sizes)
 exScanAndSum :: VName -> Builder GPU (SubExp, VName, SubExp)

@@ -79,16 +79,16 @@ resVar rt env = fromMaybe bad $ M.lookup rt $ distResMap env
   where
     bad = error $ "resVar: unknown tag: " ++ show rt
 
-flagsAndElems :: DistEnv -> [DistInput] -> (Maybe (VName, VName), [VName])
-flagsAndElems env [] = (Nothing, [])
-flagsAndElems env (DistInputFree v _ : vs) =
-  second (v :) $ flagsAndElems env vs
-flagsAndElems env (DistInput rt _ : vs) =
+segsAndElems :: DistEnv -> [DistInput] -> (Maybe (VName, VName, VName), [VName])
+segsAndElems env [] = (Nothing, [])
+segsAndElems env (DistInputFree v _ : vs) =
+  second (v :) $ segsAndElems env vs
+segsAndElems env (DistInput rt _ : vs) =
   case resVar rt env of
     Regular v' ->
-      second (v' :) $ flagsAndElems env vs
-    Irregular (IrregularRep _ flags offsets elems) ->
-      bimap (mplus $ Just (flags, offsets)) (elems :) $ flagsAndElems env vs
+      second (v' :) $ segsAndElems env vs
+    Irregular (IrregularRep segments flags offsets elems) ->
+      bimap (mplus $ Just (segments, flags, offsets)) (elems :) $ segsAndElems env vs
 
 type Segments = NE.NonEmpty SubExp
 
@@ -201,10 +201,13 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
                   ns <- letExp "slice_sizes" <=< segMap1 segments $ \is -> do
                     slice_ns <- mapM (readInput segments env is inps) $ sliceDims slice
                     fmap varsRes . letTupExp "n" <=< toExp $ product $ map pe64 slice_ns
-                  offsets <- doPrefixSum ns
-                  m <- letSubExp "total_elems" =<< eLast offsets
+                  (_n, offsets, m) <- exScanAndSum ns
+                  (_, _, repiota_elems) <- doRepIota ns
                   flags <- genFlags m offsets
-                  elems <- letExp "elems" <=< segMap1 (NE.singleton m) $ \is ->
+                  elems <- letExp "elems" <=< renameExp <=< segMap1 (NE.singleton m) $ \is -> do
+                    readInputs segments env is inps
+                    segment <- letSubExp "segment" =<< eIndex repiota_elems (map eSubExp is)
+                    is <- traverse (toSubExp "x") $ fixSlice (fmap pe64 slice) [pe64 segment] -- TODO - only works for scalars.
                     fmap (subExpsRes . pure) . letSubExp "v"
                       =<< eIndex arr_elems (map eSubExp is)
                   let rep = Irregular $ IrregularRep ns flags offsets elems
@@ -230,8 +233,8 @@ transformDistStm segments env (DistStm inps res stm) = do
     Let _ _ (Op (Screma _ arrs form))
       | Just reds <- isReduceSOAC form,
         Just arrs' <- mapM (`lookup` inps) arrs,
-        (Just (flags, offsets), elems) <- flagsAndElems env arrs' -> do
-          elems' <- genSegRed flags offsets elems $ singleReduce reds
+        (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
+          elems' <- genSegRed arr_segments flags offsets elems $ singleReduce reds
           pure $ insertReps (zip (map distResTag res) (map Regular elems')) env
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
