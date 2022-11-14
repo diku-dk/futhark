@@ -723,23 +723,34 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   </> "due to"
                   <+> pretty old_usage <> "."
     Just (HasFields required_fields old_usage) -> do
-      link
       case tp of
         Scalar (Record tp_fields)
           | all (`M.member` tp_fields) $ M.keys required_fields -> do
               required_fields' <- mapM normTypeFully required_fields
+              let tp' = Scalar $ Record $ required_fields <> tp_fields -- Crucially left-biased.
+                  ext = filter (`S.member` freeInType tp') bound
+              modifyConstraints $
+                M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedFields onDims usage bound bcs required_fields' tp_fields
-        Scalar (TypeVar _ _ (QualName [] v) [])
-          | not $ isRigid v constraints -> do
-              case M.lookup v constraints of
-                Just (_, HasFields tp_fields _) ->
-                  unifySharedFields onDims usage bound bcs required_fields tp_fields
-                Just (_, NoConstraint {}) -> pure ()
-                Just (_, Equality {}) -> pure ()
-                _ -> do
-                  notes <- (<>) <$> typeVarNotes vn <*> typeVarNotes v
-                  noRecordType notes
-              link
+        Scalar (TypeVar _ _ (QualName [] v) []) -> do
+          case M.lookup v constraints of
+            Just (_, HasFields tp_fields _) ->
+              unifySharedFields onDims usage bound bcs required_fields tp_fields
+            Just (_, NoConstraint {}) -> pure ()
+            Just (_, Equality {}) -> pure ()
+            _ -> do
+              notes <- (<>) <$> typeVarNotes vn <*> typeVarNotes v
+              noRecordType notes
+          link
+          modifyConstraints $
+            M.insertWith
+              combineFields
+              v
+              (lvl, HasFields required_fields old_usage)
+          where
+            combineFields (_, HasFields fs1 usage1) (_, HasFields fs2 _) =
+              (lvl, HasFields (M.union fs1 fs2) usage1)
+            combineFields hasfs _ = hasfs
         _ ->
           unifyError usage mempty bcs $
             "Cannot instantiate"
