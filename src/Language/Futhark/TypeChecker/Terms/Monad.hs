@@ -572,11 +572,11 @@ instantiateTypeParam qn loc tparam = do
   case tparam of
     TypeParamType x _ _ -> do
       constrain v . NoConstraint x . mkUsage loc . docText $
-        "instantiated type parameter of " <> dquotes (pretty qn) <> "."
+        "instantiated type parameter of " <> dquotes (pretty qn)
       pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (qualName v) [])
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc . docText $
-        "instantiated size parameter of " <> dquotes (pretty qn) <> "."
+        "instantiated size parameter of " <> dquotes (pretty qn)
       pure (v, SizeSubst $ NamedSize $ qualName v)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
