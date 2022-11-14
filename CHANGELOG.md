@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Futhark now works on Windows again (#1734).  This support remains
   very flaky and not well tested.
 
+* Type inference of field projection (#1762).
+
 ## [0.22.3]
 
 ### Fixed
