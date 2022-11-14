@@ -268,19 +268,21 @@ typeNotes ctx =
     . freeInType
 
 typeVarNotes :: MonadUnify m => VName -> m Notes
-typeVarNotes v = maybe mempty (aNote . note . snd) . M.lookup v <$> getConstraints
+typeVarNotes v = maybe mempty (note . snd) . M.lookup v <$> getConstraints
   where
     note (HasConstrs cs _) =
-      prettyName v
-        <+> "="
-        <+> mconcat (map ppConstr (M.toList cs))
-        <+> "..."
+      aNote $
+        prettyName v
+          <+> "="
+          <+> mconcat (map ppConstr (M.toList cs))
+          <+> "..."
     note (Overloaded ts _) =
-      prettyName v <+> "must be one of" <+> mconcat (punctuate ", " (map pretty ts))
+      aNote $ prettyName v <+> "must be one of" <+> mconcat (punctuate ", " (map pretty ts))
     note (HasFields fs _) =
-      prettyName v
-        <+> "="
-        <+> braces (mconcat (punctuate ", " (map ppField (M.toList fs))))
+      aNote $
+        prettyName v
+          <+> "="
+          <+> braces (mconcat (punctuate ", " (map ppField (M.toList fs))))
     note _ = mempty
 
     ppConstr (c, _) = "#" <> pretty c <+> "..." <+> "|"
@@ -442,9 +444,7 @@ unifyWith onDims usage = subunify False
           Scalar (Record arg_fs)
           )
             | M.keys fs == M.keys arg_fs ->
-                forM_ (M.toList $ M.intersectionWith (,) fs arg_fs) $ \(k, (k_t1, k_t2)) -> do
-                  let bcs' = breadCrumb (MatchingFields [k]) bcs
-                  subunify ord bound bcs' k_t1 k_t2
+                unifySharedFields onDims usage bound bcs fs arg_fs
             | otherwise -> do
                 let missing =
                       filter (`notElem` M.keys arg_fs) (M.keys fs)
@@ -728,25 +728,18 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
         Scalar (Record tp_fields)
           | all (`M.member` tp_fields) $ M.keys required_fields -> do
               required_fields' <- mapM normTypeFully required_fields
-              let bcs' =
-                    breadCrumb
-                      ( Matching $
-                          prettyName vn
-                            <+> "must be a record with at least the fields:"
-                            </> indent 2 (pretty (Record required_fields'))
-                            </> "due to"
-                            <+> pretty old_usage <> "."
-                      )
-                      bcs
-              mapM_ (uncurry $ unifyWith onDims usage bound bcs') $
-                M.elems $
-                  M.intersectionWith (,) required_fields tp_fields
+              unifySharedFields onDims usage bound bcs required_fields' tp_fields
         Scalar (TypeVar _ _ (QualName [] v) [])
-          | not $ isRigid v constraints ->
-              modifyConstraints $
-                M.insert
-                  v
-                  (lvl, HasFields required_fields old_usage)
+          | not $ isRigid v constraints -> do
+              case M.lookup v constraints of
+                Just (_, HasFields tp_fields _) ->
+                  unifySharedFields onDims usage bound bcs required_fields tp_fields
+                Just (_, NoConstraint {}) -> pure ()
+                Just (_, Equality {}) -> pure ()
+                _ -> do
+                  notes <- (<>) <$> typeVarNotes vn <*> typeVarNotes v
+                  noRecordType notes
+              link
         _ ->
           unifyError usage mempty bcs $
             "Cannot instantiate"
@@ -771,7 +764,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
               unifySharedConstructors onDims usage bound bcs required_cs ts
         Scalar (TypeVar _ _ (QualName [] v) []) -> do
           case M.lookup v constraints of
-            Just (_, HasConstrs v_cs _) -> do
+            Just (_, HasConstrs v_cs _) ->
               unifySharedConstructors onDims usage bound bcs required_cs v_cs
             Just (_, NoConstraint {}) -> pure ()
             Just (_, Equality {}) -> pure ()
@@ -797,6 +790,12 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
         notes
         bcs
         "Cannot unify a sum type with a non-sum type"
+    noRecordType notes =
+      unifyError
+        usage
+        notes
+        bcs
+        "Cannot unify a record type with a non-record type"
 
 linkVarToDim ::
   MonadUnify m =>
@@ -999,6 +998,19 @@ arrayElemType usage desc =
   arrayElemTypeWith usage $ breadCrumb bc noBreadCrumbs
   where
     bc = Matching $ "When checking" <+> textwrap desc
+
+unifySharedFields ::
+  MonadUnify m =>
+  UnifyDims m ->
+  Usage ->
+  [VName] ->
+  BreadCrumbs ->
+  M.Map Name StructType ->
+  M.Map Name StructType ->
+  m ()
+unifySharedFields onDims usage bound bcs fs1 fs2 =
+  forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(f, (t1, t2)) ->
+    unifyWith onDims usage bound (breadCrumb (MatchingFields [f]) bcs) t1 t2
 
 unifySharedConstructors ::
   MonadUnify m =>
