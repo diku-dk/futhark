@@ -28,8 +28,13 @@ version = Paths_futhark.version
 versionString :: String
 versionString =
   showVersion version
+    ++ unreleased
     ++ gitversion $$tGitInfoCwdTry
   where
+    unreleased =
+      if last (versionBranch version) == 0
+        then " (prerelease - include info below when reporting bugs)"
+        else mempty
     gitversion (Left _) =
       case commitIdFromFile of
         Nothing -> ""
