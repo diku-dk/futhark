@@ -38,7 +38,7 @@ Compiling from source
 
 To compile Futhark you must first install an appropriate version of
 GHC, either with `ghcup <https://www.haskell.org/ghcup>`_ or a package
-manager.  Any version since GHC 8.10 should work.  You also need the
+manager.  Any version since GHC 9.0 should work.  You also need the
 ``cabal`` command line program, which ghcup will install for you as
 well.
 
