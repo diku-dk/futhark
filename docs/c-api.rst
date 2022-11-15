@@ -8,6 +8,11 @@ A Futhark program ``futlib.fut`` compiled to a C library with the
 ``futlib.h``.  The API provided in the ``.h`` file is documented in
 the following.
 
+The ``.h`` file can be included by a C++ source file to access the
+functions (``extern "C"`` is added automatically), but the ``.c`` file
+must be compiled with a proper C compiler and the resulting object
+file linked with the rest of the program.
+
 Using the API requires creating a *configuration object*, which is
 then used to obtain a *context object*, which is then used to perform
 most other operations, such as calling Futhark functions.
