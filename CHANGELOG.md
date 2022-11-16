@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.22.4]
+
+### Added
+
+* Memory short circuiting, a major new optimisation by Philip
+  Munksgaard that avoids copies by constructing values in-place.
+
+### Fixed
+
+* `assert` was sometimes optimised away by CSE.
+
 * `futhark literate` now handles type abbreviations in entry points
   (#1750).
 
@@ -23,6 +34,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Uniqueness checking bug (#1751).
 
 * Simplification bug (#1753).
+
+* A bug related to optimisation of scalar code migrated to GPU.
+
+* Memory optimisation bug for top-level constants (#1755).
+
+* Handling of holes in defunctionalisation (again).
+
+* A few cases where optimisation (safely but perhaps confusingly)
+  removed bounds checks (#1758).
+
+* Futhark now works on Windows again (#1734).  This support remains
+  very flaky and not well tested.
+
+* Type inference of field projection (#1762).
 
 ## [0.22.3]
 

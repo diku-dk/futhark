@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
 -- | This module defines the concept of a simplification rule for
 -- bindings.  The intent is that you pass some context (such as symbol
@@ -256,7 +257,7 @@ ruleBook topdowns bottomups =
 -- of bindings is returned, that bind at least the same names as the
 -- original binding (and possibly more, for intermediate results).
 topDownSimplifyStm ::
-  (MonadFreshNames m, HasScope rep m) =>
+  (MonadFreshNames m, HasScope rep m, PrettyRep rep) =>
   RuleBook rep ->
   ST.SymbolTable rep ->
   Stm rep ->
@@ -269,7 +270,7 @@ topDownSimplifyStm = applyRules . bookTopDownRules
 -- original binding (and possibly more, for intermediate results).
 -- The first argument is the set of names used after this binding.
 bottomUpSimplifyStm ::
-  (MonadFreshNames m, HasScope rep m) =>
+  (MonadFreshNames m, HasScope rep m, PrettyRep rep) =>
   RuleBook rep ->
   (ST.SymbolTable rep, UT.UsageTable) ->
   Stm rep ->
@@ -297,7 +298,7 @@ applyRule _ _ _ =
   Skip
 
 applyRules ::
-  (MonadFreshNames m, HasScope rep m) =>
+  (MonadFreshNames m, HasScope rep m, PrettyRep rep) =>
   Rules rep a ->
   a ->
   Stm rep ->

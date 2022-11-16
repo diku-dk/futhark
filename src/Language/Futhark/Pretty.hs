@@ -300,28 +300,24 @@ prettyAppExp p (Apply f arg _ _) =
 instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
 
+prettyInst :: Annot f => f PatType -> Doc a
+prettyInst t =
+  case unAnnot t of
+    Just t'
+      | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
+          "@" <> parens (align $ pretty t')
+    _ -> mempty
+
 prettyExp :: (Eq vn, IsName vn, Annot f) => Int -> ExpBase f vn -> Doc a
-prettyExp _ (Var name t _) = pretty name <> inst
-  where
-    inst = case unAnnot t of
-      Just t'
-        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
-            "@" <> parens (align $ pretty t')
-      _ -> mempty
-prettyExp _ (Hole t _) = "???" <> inst
-  where
-    inst = case unAnnot t of
-      Just t'
-        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
-            "@" <> parens (align $ pretty t')
-      _ -> mempty
+prettyExp _ (Var name t _) = pretty name <> prettyInst t
+prettyExp _ (Hole t _) = "???" <> prettyInst t
 prettyExp _ (Parens e _) = align $ parens $ pretty e
 prettyExp _ (QualParens (v, _) e _) = pretty v <> "." <> align (parens $ pretty e)
 prettyExp p (Ascript e t _) =
   parensIf (p /= -1) $ prettyExp 0 e <+> ":" <+> align (pretty t)
 prettyExp _ (Literal v _) = pretty v
-prettyExp _ (IntLit v _ _) = pretty v
-prettyExp _ (FloatLit v _ _) = pretty v
+prettyExp _ (IntLit v t _) = pretty v <> prettyInst t
+prettyExp _ (FloatLit v t _) = pretty v <> prettyInst t
 prettyExp _ (TupLit es _)
   | any hasArrayLit es = parens $ commastack $ map pretty es
   | otherwise = parens $ commasep $ map pretty es
@@ -331,14 +327,8 @@ prettyExp _ (RecordLit fs _)
   where
     fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
     fieldArray RecordFieldImplicit {} = False
-prettyExp _ (ArrayLit es info _) =
-  brackets (commasep $ map pretty es) <> info'
-  where
-    info' = case unAnnot info of
-      Just t
-        | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
-            "@" <> parens (align $ pretty t)
-      _ -> mempty
+prettyExp _ (ArrayLit es t _) =
+  brackets (commasep $ map pretty es) <> prettyInst t
 prettyExp _ (StringLit s _) =
   pretty $ show $ map (chr . fromIntegral) s
 prettyExp _ (Project k e _ _) = pretty e <> "." <> pretty k

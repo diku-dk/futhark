@@ -47,7 +47,7 @@ translateGPU target prog =
   let ( prog',
         ToOpenCL kernels device_funs used_types sizes failures
         ) =
-          (`runState` initialOpenCL) . (`runReaderT` defFuns prog) $ do
+          (`runState` initialOpenCL) . (`runReaderT` envFromProg prog) $ do
             let ImpGPU.Definitions
                   types
                   (ImpGPU.Constants ps consts)
@@ -135,12 +135,50 @@ data ToOpenCL = ToOpenCL
 initialOpenCL :: ToOpenCL
 initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
 
-type AllFunctions = ImpGPU.Functions ImpGPU.HostOp
+data Env = Env
+  { envFuns :: ImpGPU.Functions ImpGPU.HostOp,
+    envFunsMayFail :: S.Set Name
+  }
 
-lookupFunction :: Name -> AllFunctions -> Maybe (ImpGPU.Function HostOp)
-lookupFunction fname (ImpGPU.Functions fs) = lookup fname fs
+codeMayFail :: (a -> Bool) -> ImpGPU.Code a -> Bool
+codeMayFail _ (Assert {}) = True
+codeMayFail f (Op x) = f x
+codeMayFail f (x :>>: y) = codeMayFail f x || codeMayFail f y
+codeMayFail f (For _ _ x) = codeMayFail f x
+codeMayFail f (While _ x) = codeMayFail f x
+codeMayFail f (If _ x y) = codeMayFail f x || codeMayFail f y
+codeMayFail f (Comment _ x) = codeMayFail f x
+codeMayFail _ _ = False
 
-type OnKernelM = ReaderT AllFunctions (State ToOpenCL)
+hostOpMayFail :: ImpGPU.HostOp -> Bool
+hostOpMayFail (CallKernel k) = codeMayFail kernelOpMayFail $ kernelBody k
+hostOpMayFail _ = False
+
+kernelOpMayFail :: ImpGPU.KernelOp -> Bool
+kernelOpMayFail = const False
+
+funsMayFail :: M.Map Name (S.Set Name) -> ImpGPU.Functions ImpGPU.HostOp -> S.Set Name
+funsMayFail cg (Functions funs) =
+  S.fromList $ map fst $ filter mayFail funs
+  where
+    base_mayfail =
+      map fst $ filter (codeMayFail hostOpMayFail . ImpGPU.functionBody . snd) funs
+    mayFail (fname, _) =
+      any (`elem` base_mayfail) $ fname : S.toList (M.findWithDefault mempty fname cg)
+
+envFromProg :: ImpGPU.Program -> Env
+envFromProg prog = Env funs (funsMayFail cg funs)
+  where
+    funs = defFuns prog
+    cg = ImpGPU.callGraph calledInHostOp funs
+
+lookupFunction :: Name -> Env -> Maybe (ImpGPU.Function HostOp)
+lookupFunction fname = lookup fname . unFunctions . envFuns
+
+functionMayFail :: Name -> Env -> Bool
+functionMayFail fname = S.member fname . envFunsMayFail
+
+type OnKernelM = ReaderT Env (State ToOpenCL)
 
 addSize :: Name -> SizeClass -> OnKernelM ()
 addSize key sclass =
@@ -158,14 +196,15 @@ onHostOp _ (ImpGPU.GetSizeMax v size_class) =
   pure $ ImpOpenCL.GetSizeMax v size_class
 
 genGPUCode ::
+  Env ->
   OpsMode ->
   KernelCode ->
   [FailureMsg] ->
   GC.CompilerM KernelOp KernelState a ->
   (a, GC.CompilerState KernelState)
-genGPUCode mode body failures =
+genGPUCode env mode body failures =
   GC.runCompilerM
-    (inKernelOperations mode body)
+    (inKernelOperations env mode body)
     blankNameSource
     (newKernelState failures)
 
@@ -175,16 +214,25 @@ generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
 generateDeviceFun fname device_func = do
   when (any memParam $ functionInput device_func) bad
 
+  env <- ask
   failures <- gets clFailures
 
-  let params =
-        [ [C.cparam|__global int *global_failure|],
-          [C.cparam|__global typename int64_t *global_failure_args|]
-        ]
-      (func, cstate) =
-        genGPUCode FunMode (functionBody device_func) failures $
-          GC.compileFun mempty params (fname, device_func)
-      kstate = GC.compUserState cstate
+  let (func, kstate) =
+        if functionMayFail fname env
+          then
+            let params =
+                  [ [C.cparam|__global int *global_failure|],
+                    [C.cparam|__global typename int64_t *global_failure_args|]
+                  ]
+                (f, cstate) =
+                  genGPUCode env FunMode (functionBody device_func) failures $
+                    GC.compileFun mempty params (fname, device_func)
+             in (f, GC.compUserState cstate)
+          else
+            let (f, cstate) =
+                  genGPUCode env FunMode (functionBody device_func) failures $
+                    GC.compileVoidFun mempty (fname, device_func)
+             in (f, GC.compUserState cstate)
 
   modify $ \s ->
     s
@@ -209,22 +257,28 @@ ensureDeviceFun fname host_func = do
   exists <- gets $ M.member fname . clDevFuns
   unless exists $ generateDeviceFun fname host_func
 
+calledInHostOp :: HostOp -> S.Set Name
+calledInHostOp (CallKernel k) = calledFuncs calledInKernelOp $ kernelBody k
+calledInHostOp _ = mempty
+
+calledInKernelOp :: KernelOp -> S.Set Name
+calledInKernelOp = const mempty
+
 ensureDeviceFuns :: ImpGPU.KernelCode -> OnKernelM [Name]
 ensureDeviceFuns code = do
-  let called = calledFuncs code
-  fmap catMaybes $
-    forM (S.toList called) $ \fname -> do
-      def <- asks $ lookupFunction fname
-      case def of
-        Just host_func -> do
-          -- Functions are a priori always considered host-level, so we have
-          -- to convert them to device code.  This is where most of our
-          -- limitations on device-side functions (no arrays, no parallelism)
-          -- comes from.
-          let device_func = fmap toDevice host_func
-          ensureDeviceFun fname device_func
-          pure $ Just fname
-        Nothing -> pure Nothing
+  let called = calledFuncs calledInKernelOp code
+  fmap catMaybes . forM (S.toList called) $ \fname -> do
+    def <- asks $ lookupFunction fname
+    case def of
+      Just host_func -> do
+        -- Functions are a priori always considered host-level, so we have
+        -- to convert them to device code.  This is where most of our
+        -- limitations on device-side functions (no arrays, no parallelism)
+        -- comes from.
+        let device_func = fmap toDevice host_func
+        ensureDeviceFun fname device_func
+        pure $ Just fname
+      Nothing -> pure Nothing
   where
     bad = compilerLimitationS "Cannot generate GPU functions that contain parallelism."
     toDevice :: HostOp -> KernelOp
@@ -237,9 +291,10 @@ onKernel target kernel = do
   -- Crucial that this is done after 'ensureDeviceFuns', as the device
   -- functions may themselves define failure points.
   failures <- gets clFailures
+  env <- ask
 
   let (kernel_body, cstate) =
-        genGPUCode KernelMode (kernelBody kernel) failures . GC.collect $ do
+        genGPUCode env KernelMode (kernelBody kernel) failures . GC.collect $ do
           body <- GC.collect $ GC.compileCode $ kernelBody kernel
           -- No need to free, as we cannot allocate memory in kernels.
           mapM_ GC.item =<< GC.declAllocatedMem
@@ -287,7 +342,9 @@ onKernel target kernel = do
         -- We conservatively assume that any called function can fail.
         | not $ null called =
             ( SafetyFull,
-              [C.citems|volatile __local bool local_failure;|]
+              [C.citems|volatile __local bool local_failure;
+                        // Harmless for all threads to write this.
+                        local_failure = false;|]
             )
         | length (kernelFailures kstate) == length failures =
             if kernelFailureTolerant kernel
@@ -613,10 +670,11 @@ hasCommunication = any communicates
 data OpsMode = KernelMode | FunMode deriving (Eq)
 
 inKernelOperations ::
+  Env ->
   OpsMode ->
   ImpGPU.KernelCode ->
   GC.Operations KernelOp KernelState
-inKernelOperations mode body =
+inKernelOperations env mode body =
   GC.Operations
     { GC.opsCompiler = kernelOps,
       GC.opsMemoryType = kernelMemoryType,
@@ -787,17 +845,21 @@ inKernelOperations mode body =
               then [C.citems|return 1;|]
               else [C.citems|return;|]
 
-    callInKernel dests fname args = do
-      let out_args = [[C.cexp|&$id:d|] | d <- dests]
-          args' =
-            [C.cexp|global_failure|]
-              : [C.cexp|global_failure_args|]
-              : out_args
-              ++ args
+    callInKernel dests fname args
+      | functionMayFail fname env = do
+          let out_args = [[C.cexp|&$id:d|] | d <- dests]
+              args' =
+                [C.cexp|global_failure|]
+                  : [C.cexp|global_failure_args|]
+                  : out_args
+                  ++ args
 
-      what_next <- whatNext
-
-      GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
+          what_next <- whatNext
+          GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
+      | otherwise = do
+          let out_args = [[C.cexp|&$id:d|] | d <- dests]
+              args' = out_args ++ args
+          GC.item [C.citem|$id:(funName fname)($args:args');|]
 
     errorInKernel msg@(ErrorMsg parts) backtrace = do
       n <- length . kernelFailures <$> GC.getUserState
