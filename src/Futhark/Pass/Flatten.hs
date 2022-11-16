@@ -204,30 +204,27 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
     Index arr slice
       | null $ sliceDims slice ->
           scalarCase
-      | Just arr_rep <- lookup arr inps ->
-          case arr_rep of
-            DistInput arr_rt _ ->
-              case resVar arr_rt env of
-                Irregular (IrregularRep arr_ns arr_flags arr_offsets arr_elems) -> do
-                  ns <- letExp "slice_sizes" <=< segMap1 segments $ \is -> do
-                    slice_ns <- mapM (readInput segments env is inps) $ sliceDims slice
-                    fmap varsRes . letTupExp "n" <=< toExp $ product $ map pe64 slice_ns
-                  (_n, offsets, m) <- exScanAndSum ns
-                  (_, _, repiota_elems) <- doRepIota ns
-                  flags <- genFlags m offsets
-                  elems <- letExp "elems" <=< renameExp <=< segMap1 (NE.singleton m) $ \is -> do
-                    segment <- letSubExp "segment" =<< eIndex repiota_elems (map eSubExp is)
-                    segment_start <- letSubExp "segment_start" =<< eIndex offsets [eSubExp segment]
-                    readInputs segments env [segment] inps
-                    let slice' =
-                          fixSlice (fmap pe64 slice) $
-                            map (subtract (pe64 segment_start) . pe64) is
-                    -- TODO: multidimensional segments and non-primitive type.
-                    auxing aux $
-                      fmap (subExpsRes . pure) . letSubExp "v"
-                        =<< eIndex arr (map toExp slice')
-                  let rep = Irregular $ IrregularRep ns flags offsets elems
-                  pure $ insertRep (distResTag res) rep env
+      | otherwise -> do
+          -- Maximally irregular case.
+          ns <- letExp "slice_sizes" <=< segMap1 segments $ \is -> do
+            slice_ns <- mapM (readInput segments env is inps) $ sliceDims slice
+            fmap varsRes . letTupExp "n" <=< toExp $ product $ map pe64 slice_ns
+          (_n, offsets, m) <- exScanAndSum ns
+          (_, _, repiota_elems) <- doRepIota ns
+          flags <- genFlags m offsets
+          elems <- letExp "elems" <=< renameExp <=< segMap1 (NE.singleton m) $ \is -> do
+            segment <- letSubExp "segment" =<< eIndex repiota_elems (map eSubExp is)
+            segment_start <- letSubExp "segment_start" =<< eIndex offsets [eSubExp segment]
+            readInputs segments env [segment] inps
+            let slice' =
+                  fixSlice (fmap pe64 slice) $
+                    map (subtract (pe64 segment_start) . pe64) is
+            -- TODO: multidimensional segments and non-primitive type.
+            auxing aux $
+              fmap (subExpsRes . pure) . letSubExp "v"
+                =<< eIndex arr (map toExp slice')
+          let rep = Irregular $ IrregularRep ns flags offsets elems
+          pure $ insertRep (distResTag res) rep env
     Iota (Var n) x s Int64
       | Just (DistInputFree ns _) <- lookup n inps -> do
           (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
