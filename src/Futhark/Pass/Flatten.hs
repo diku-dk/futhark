@@ -92,6 +92,9 @@ segsAndElems env (DistInput rt _ : vs) =
 
 type Segments = NE.NonEmpty SubExp
 
+segmentsShape :: Segments -> Shape
+segmentsShape = Shape . toList
+
 segMap1 :: Segments -> ([SubExp] -> Builder GPU Result) -> Builder GPU (Exp GPU)
 segMap1 segments f = do
   gtids <- replicateM (length segments) (newVName "gtid")
@@ -172,6 +175,18 @@ distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
           Regular v' -> v'
           Irregular r -> irregularElems r
 
+-- | Only sensible for variables of segment-invariant type.
+elemArr :: Segments -> DistEnv -> [(VName, DistInput)] -> SubExp -> Builder GPU VName
+elemArr segments env inps (Var v)
+  | Just v_inp <- lookup v inps =
+      pure $ case v_inp of
+        DistInputFree ns _ -> ns
+        DistInput rt _ -> case resVar rt env of
+          Irregular r -> irregularElems r
+          Regular vs -> vs
+elemArr segments env inps se =
+  letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
+
 transformDistBasicOp ::
   Segments ->
   DistEnv ->
@@ -230,11 +245,28 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
                 =<< eIndex arr (map toExp slice')
           let rep = Irregular $ IrregularRep ns flags offsets elems
           pure $ insertRep (distResTag res) rep env
-    Iota (Var n) x s Int64
-      | Just (DistInputFree ns _) <- lookup n inps -> do
+    Iota n (Constant x) (Constant s) Int64
+      | zeroIsh x,
+        oneIsh s -> do
+          ns <- elemArr segments env inps n
           (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
           let rep = Irregular $ IrregularRep ns flags offsets elems
           pure $ insertRep (distResTag res) rep env
+    Iota n x s Int64 -> do
+      ns <- elemArr segments env inps n
+      xs <- elemArr segments env inps x
+      ss <- elemArr segments env inps s
+      (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
+      (_, _, repiota_elems) <- doRepIota ns
+      m <- arraySize 0 <$> lookupType elems
+      elems' <- letExp "elems_fixed" <=< segMap1 (NE.singleton m) $ \is -> do
+        segment <- letSubExp "segment" =<< eIndex repiota_elems (map eSubExp is)
+        v' <- letSubExp "v" =<< eIndex elems (map eSubExp is)
+        x' <- letSubExp "x" =<< eIndex xs [eSubExp segment]
+        s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
+        fmap (subExpsRes . pure) . letSubExp "v" =<< toExp (pe64 x' + pe64 v' * pe64 s')
+      let rep = Irregular $ IrregularRep ns flags offsets elems'
+      pure $ insertRep (distResTag res) rep env
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
