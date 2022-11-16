@@ -21,7 +21,13 @@ newtype ResTag = ResTag Int
   deriving (Eq, Ord, Show)
 
 -- | Something that is mapped.
-data DistInput = DistInputFree VName Type | DistInput ResTag Type
+data DistInput
+  = -- | A value bound outside the original map nest.  By necessity
+    -- regular.
+    DistInputFree VName Type
+  | -- | A value constructed inside the original map nest.  May be
+    -- irregular.
+    DistInput ResTag Type
   deriving (Eq, Ord, Show)
 
 distInputType :: DistInput -> Type

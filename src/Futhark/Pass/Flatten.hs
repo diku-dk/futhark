@@ -196,11 +196,14 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       scalarCase
     Opaque op se
       | Var v <- se,
-        Just (DistInput rt_in _) <- lookup v inps -> do
+        Just (DistInput rt_in _) <- lookup v inps ->
           -- TODO: actually insert opaques
           pure $ insertRep (distResTag res) (resVar rt_in env) env
       | otherwise ->
           scalarCase
+    Reshape kind newshape arr
+      | Just (DistInput rt_in _) <- lookup arr inps ->
+          pure $ insertRep (distResTag res) (resVar rt_in env) env
     Index arr slice
       | null $ sliceDims slice ->
           scalarCase
@@ -216,10 +219,12 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             segment <- letSubExp "segment" =<< eIndex repiota_elems (map eSubExp is)
             segment_start <- letSubExp "segment_start" =<< eIndex offsets [eSubExp segment]
             readInputs segments env [segment] inps
+            -- TODO: multidimensional segments
             let slice' =
                   fixSlice (fmap pe64 slice) $
-                    map (subtract (pe64 segment_start) . pe64) is
-            -- TODO: multidimensional segments and non-primitive type.
+                    unflattenIndex (map pe64 (sliceDims slice)) $
+                      subtract (pe64 segment_start) . pe64 $
+                        head is
             auxing aux $
               fmap (subExpsRes . pure) . letSubExp "v"
                 =<< eIndex arr (map toExp slice')
