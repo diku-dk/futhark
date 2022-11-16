@@ -48,7 +48,7 @@ data IrregularRep = IrregularRep
     irregularSegments :: VName,
     irregularFlags :: VName,
     irregularOffsets :: VName,
-    iregularElems :: VName
+    irregularElems :: VName
   }
 
 data ResRep
@@ -161,6 +161,17 @@ transformScalarStm ::
 transformScalarStm segments env inps res stm =
   transformScalarStms segments env inps res (oneStm stm) (patNames (stmPat stm))
 
+distCerts :: [(VName, DistInput)] -> StmAux a -> DistEnv -> Certs
+distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
+  where
+    f v = case lookup v inps of
+      Nothing -> v
+      Just (DistInputFree v _) -> v
+      Just (DistInput rt _) ->
+        case resVar rt env of
+          Regular v' -> v'
+          Irregular r -> irregularElems r
+
 transformDistBasicOp ::
   Segments ->
   DistEnv ->
@@ -193,8 +204,8 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
     Index arr slice
       | null $ sliceDims slice ->
           scalarCase
-      | Just rep <- lookup arr inps ->
-          case rep of
+      | Just arr_rep <- lookup arr inps ->
+          case arr_rep of
             DistInput arr_rt _ ->
               case resVar arr_rt env of
                 Irregular (IrregularRep arr_ns arr_flags arr_offsets arr_elems) -> do
@@ -205,16 +216,21 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
                   (_, _, repiota_elems) <- doRepIota ns
                   flags <- genFlags m offsets
                   elems <- letExp "elems" <=< renameExp <=< segMap1 (NE.singleton m) $ \is -> do
-                    readInputs segments env is inps
                     segment <- letSubExp "segment" =<< eIndex repiota_elems (map eSubExp is)
-                    is <- traverse (toSubExp "x") $ fixSlice (fmap pe64 slice) [pe64 segment] -- TODO - only works for scalars.
-                    fmap (subExpsRes . pure) . letSubExp "v"
-                      =<< eIndex arr_elems (map eSubExp is)
+                    segment_start <- letSubExp "segment_start" =<< eIndex offsets [eSubExp segment]
+                    readInputs segments env [segment] inps
+                    let slice' =
+                          fixSlice (fmap pe64 slice) $
+                            map (subtract (pe64 segment_start) . pe64) is
+                    -- TODO: multidimensional segments and non-primitive type.
+                    auxing aux $
+                      fmap (subExpsRes . pure) . letSubExp "v"
+                        =<< eIndex arr (map toExp slice')
                   let rep = Irregular $ IrregularRep ns flags offsets elems
                   pure $ insertRep (distResTag res) rep env
     Iota (Var n) x s Int64
       | Just (DistInputFree ns _) <- lookup n inps -> do
-          (flags, offsets, elems) <- doSegIota ns
+          (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
           let rep = Irregular $ IrregularRep ns flags offsets elems
           pure $ insertRep (distResTag res) rep env
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
@@ -229,7 +245,7 @@ transformDistStm segments env (DistStm inps res stm) = do
     Let pat aux (BasicOp e) -> do
       let ~[res'] = res
           ~[pe] = patElems pat
-      transformDistBasicOp segments env (inps, res', pe, stmAux stm, e)
+      transformDistBasicOp segments env (inps, res', pe, aux, e)
     Let _ _ (Op (Screma _ arrs form))
       | Just reds <- isReduceSOAC form,
         Just arrs' <- mapM (`lookup` inps) arrs,
