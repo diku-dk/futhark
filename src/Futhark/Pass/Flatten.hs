@@ -18,6 +18,7 @@ import Data.Foldable
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
+import Data.Tuple.Solo
 import Debug.Trace
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
@@ -95,15 +96,14 @@ type Segments = NE.NonEmpty SubExp
 segmentsShape :: Segments -> Shape
 segmentsShape = Shape . toList
 
-segMap1 :: Segments -> ([SubExp] -> Builder GPU Result) -> Builder GPU (Exp GPU)
-segMap1 segments f = do
-  gtids <- replicateM (length segments) (newVName "gtid")
-  space <- mkSegSpace $ zip gtids $ toList segments
+segMap :: Traversable f => f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
+segMap segments f = do
+  gtids <- traverse (const $ newVName "gtid") segments
+  space <- mkSegSpace $ zip (toList gtids) (toList segments)
   ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
-    res <- f $ map Var gtids
+    res <- f $ fmap Var gtids
     ts <- mapM (subExpType . resSubExp) res
-    let resToRes (SubExpRes cs se) = Returns ResultMaySimplify cs se
-    pure (map resToRes res, ts)
+    pure (map mkResult res, ts)
   let kbody = KernelBody () stms res
   pure $ Op $ SegOp $ SegMap (SegThread SegNoVirt Nothing) space ts kbody
   where
@@ -148,8 +148,8 @@ transformScalarStms ::
   [VName] ->
   Builder GPU DistEnv
 transformScalarStms segments env inps distres stms res = do
-  vs <- letTupExp "scalar_dist" <=< renameExp <=< segMap1 segments $ \is -> do
-    readInputs segments env is inps
+  vs <- letTupExp "scalar_dist" <=< renameExp <=< segMap segments $ \is -> do
+    readInputs segments env (toList is) inps
     addStms $ fmap soacsStmToGPU stms
     pure $ subExpsRes $ map Var res
   pure $ insertReps (zip (map distResTag distres) $ map Regular vs) env
@@ -224,14 +224,14 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           scalarCase
       | otherwise -> do
           -- Maximally irregular case.
-          ns <- letExp "slice_sizes" <=< segMap1 segments $ \is -> do
-            slice_ns <- mapM (readInput segments env is inps) $ sliceDims slice
+          ns <- letExp "slice_sizes" <=< segMap segments $ \is -> do
+            slice_ns <- mapM (readInput segments env (toList is) inps) $ sliceDims slice
             fmap varsRes . letTupExp "n" <=< toExp $ product $ map pe64 slice_ns
           (_n, offsets, m) <- exScanAndSum ns
           (_, _, repiota_elems) <- doRepIota ns
           flags <- genFlags m offsets
-          elems <- letExp "elems" <=< renameExp <=< segMap1 (NE.singleton m) $ \is -> do
-            segment <- letSubExp "segment" =<< eIndex repiota_elems (map eSubExp is)
+          elems <- letExp "elems" <=< renameExp <=< segMap (NE.singleton m) $ \is -> do
+            segment <- letSubExp "segment" =<< eIndex repiota_elems (toList $ fmap eSubExp is)
             segment_start <- letSubExp "segment_start" =<< eIndex offsets [eSubExp segment]
             readInputs segments env [segment] inps
             -- TODO: multidimensional segments
@@ -239,7 +239,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
                   fixSlice (fmap pe64 slice) $
                     unflattenIndex (map pe64 (sliceDims slice)) $
                       subtract (pe64 segment_start) . pe64 $
-                        head is
+                        NE.head is
             auxing aux $
               fmap (subExpsRes . pure) . letSubExp "v"
                 =<< eIndex arr (map toExp slice')
@@ -259,9 +259,9 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
       (_, _, repiota_elems) <- doRepIota ns
       m <- arraySize 0 <$> lookupType elems
-      elems' <- letExp "elems_fixed" <=< segMap1 (NE.singleton m) $ \is -> do
-        segment <- letSubExp "segment" =<< eIndex repiota_elems (map eSubExp is)
-        v' <- letSubExp "v" =<< eIndex elems (map eSubExp is)
+      elems' <- letExp "elems_fixed" <=< segMap (Solo m) $ \(Solo i) -> do
+        segment <- letSubExp "segment" =<< eIndex repiota_elems [eSubExp i]
+        v' <- letSubExp "v" =<< eIndex elems [eSubExp i]
         x' <- letSubExp "x" =<< eIndex xs [eSubExp segment]
         s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
         fmap (subExpsRes . pure) . letSubExp "v" =<< toExp (pe64 x' + pe64 v' * pe64 s')

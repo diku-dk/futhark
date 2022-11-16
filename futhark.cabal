@@ -492,6 +492,7 @@ library
     , lsp >= 1.5.0
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
+    , OneTuple
     , megaparsec >=9.0.0
     , mtl >=2.2.1
     , neat-interpolation >=0.3
