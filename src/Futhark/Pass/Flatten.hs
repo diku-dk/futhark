@@ -132,7 +132,7 @@ readInputs segments env is = mapM_ onInput
       case M.lookup rt $ distResMap env of
         Just (Regular arr) ->
           letBindNames [v] =<< eIndex arr (map eSubExp is)
-        Just (Irregular (IrregularRep _ flags offsets elems)) -> do
+        Just (Irregular (IrregularRep _ _ offsets elems)) -> do
           offset <- letSubExp "offset" =<< eIndex offsets (map eSubExp is)
           num_elems <- letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
           let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
@@ -169,22 +169,22 @@ distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
   where
     f v = case lookup v inps of
       Nothing -> v
-      Just (DistInputFree v _) -> v
+      Just (DistInputFree vs _) -> vs
       Just (DistInput rt _) ->
         case resVar rt env of
-          Regular v' -> v'
+          Regular vs -> vs
           Irregular r -> irregularElems r
 
 -- | Only sensible for variables of segment-invariant type.
 elemArr :: Segments -> DistEnv -> [(VName, DistInput)] -> SubExp -> Builder GPU VName
-elemArr segments env inps (Var v)
+elemArr _ env inps (Var v)
   | Just v_inp <- lookup v inps =
       pure $ case v_inp of
         DistInputFree ns _ -> ns
         DistInput rt _ -> case resVar rt env of
           Irregular r -> irregularElems r
           Regular vs -> vs
-elemArr segments env inps se =
+elemArr segments _ _ se =
   letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
 
 transformDistBasicOp ::
@@ -216,7 +216,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           pure $ insertRep (distResTag res) (resVar rt_in env) env
       | otherwise ->
           scalarCase
-    Reshape kind newshape arr
+    Reshape _ _ arr
       | Just (DistInput rt_in _) <- lookup arr inps ->
           pure $ insertRep (distResTag res) (resVar rt_in env) env
     Index arr slice
