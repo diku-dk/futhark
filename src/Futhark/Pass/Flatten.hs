@@ -109,7 +109,7 @@ segMap segments f = do
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
-readInput :: Segments -> DistEnv -> [SubExp] -> [(VName, DistInput)] -> SubExp -> Builder GPU SubExp
+readInput :: Segments -> DistEnv -> [SubExp] -> DistInputs -> SubExp -> Builder GPU SubExp
 readInput _ _ _ _ (Constant x) = pure $ Constant x
 readInput segments env is inputs (Var v) =
   case lookup v inputs of
@@ -123,7 +123,7 @@ readInput segments env is inputs (Var v) =
         Irregular (IrregularRep _ flags offsets elems) ->
           undefined
 
-readInputs :: Segments -> DistEnv -> [SubExp] -> [(VName, DistInput)] -> Builder GPU ()
+readInputs :: Segments -> DistEnv -> [SubExp] -> DistInputs -> Builder GPU ()
 readInputs segments env is = mapM_ onInput
   where
     onInput (v, DistInputFree arr _) =
@@ -142,7 +142,7 @@ readInputs segments env is = mapM_ onInput
 transformScalarStms ::
   Segments ->
   DistEnv ->
-  [(VName, DistInput)] ->
+  DistInputs ->
   [DistResult] ->
   Stms SOACS ->
   [VName] ->
@@ -157,14 +157,14 @@ transformScalarStms segments env inps distres stms res = do
 transformScalarStm ::
   Segments ->
   DistEnv ->
-  [(VName, DistInput)] ->
+  DistInputs ->
   [DistResult] ->
   Stm SOACS ->
   Builder GPU DistEnv
 transformScalarStm segments env inps res stm =
   transformScalarStms segments env inps res (oneStm stm) (patNames (stmPat stm))
 
-distCerts :: [(VName, DistInput)] -> StmAux a -> DistEnv -> Certs
+distCerts :: DistInputs -> StmAux a -> DistEnv -> Certs
 distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
   where
     f v = case lookup v inps of
@@ -176,7 +176,7 @@ distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
           Irregular r -> irregularElems r
 
 -- | Only sensible for variables of segment-invariant type.
-elemArr :: Segments -> DistEnv -> [(VName, DistInput)] -> SubExp -> Builder GPU VName
+elemArr :: Segments -> DistEnv -> DistInputs -> SubExp -> Builder GPU VName
 elemArr _ env inps (Var v)
   | Just v_inp <- lookup v inps =
       pure $ case v_inp of
@@ -190,7 +190,7 @@ elemArr segments _ _ se =
 transformDistBasicOp ::
   Segments ->
   DistEnv ->
-  ( [(VName, DistInput)],
+  ( DistInputs,
     DistResult,
     PatElem Type,
     StmAux (),
@@ -273,6 +273,12 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       transformScalarStm segments env inps [res] $
         Let (Pat [pe]) aux (BasicOp e)
 
+repPerSegment :: SubExp -> VName -> [VName] -> Builder GPU [VName]
+repPerSegment w segments_per_elem vs =
+  letTupExp "replicated" <=< segMap (Solo w) $ \(Solo i) -> do
+    segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
+    subExpsRes <$> mapM (letSubExp "v" <=< flip eIndex [eSubExp segment]) vs
+
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm segments env (DistStm inps res stm) = do
   case stm of
@@ -280,12 +286,34 @@ transformDistStm segments env (DistStm inps res stm) = do
       let ~[res'] = res
           ~[pe] = patElems pat
       transformDistBasicOp segments env (inps, res', pe, aux, e)
-    Let _ _ (Op (Screma _ arrs form))
+    Let pat _ (Op (Screma w arrs form))
       | Just reds <- isReduceSOAC form,
         Just arrs' <- mapM (`lookup` inps) arrs,
         (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
           elems' <- genSegRed arr_segments flags offsets elems $ singleReduce reds
           pure $ insertReps (zip (map distResTag res) (map Regular elems')) env
+      | Just map_lam <- isMapSOAC form -> do
+          arrs' <- mapM (elemArr segments env inps . Var) arrs
+          ws <- elemArr segments env inps w
+          (ws_flags, ws_offsets, ws_elems) <- doRepIota ws
+          new_segment <- arraySize 0 <$> lookupType ws_elems
+          let free_in_map = namesToList $ freeIn map_lam
+          replicated <-
+            repPerSegment new_segment ws_elems
+              =<< mapM (elemArr segments env inps . Var) free_in_map
+          free_ps <-
+            mapM (newParam "free_p" . rowType <=< lookupType) replicated
+          scope <- askScope
+          let substs = M.fromList $ zip free_in_map $ map paramName free_ps
+              map_lam' =
+                (substituteNames substs map_lam)
+                  { lambdaParams = lambdaParams map_lam <> free_ps
+                  }
+              distributed = distributeMap scope pat new_segment (arrs' <> replicated) map_lam'
+              m = transformDistributed (NE.singleton new_segment) distributed
+          addStms =<< runReaderT (runBuilder_ m) scope
+          let mkRep = Irregular . IrregularRep ws ws_flags ws_offsets
+          pure $ insertReps (zip (map distResTag res) (map mkRep (patNames pat))) env
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
 distResCerts :: DistEnv -> [DistInput] -> Certs
@@ -312,7 +340,7 @@ transformStm scope (Let pat _ (Op (Screma w arrs form)))
           m = transformDistributed (NE.singleton w) distributed
       traceM $ prettyString distributed
       runReaderT (runBuilder_ m) scope
-transformStm scope stm = pure $ oneStm $ soacsStmToGPU stm
+transformStm _ stm = pure $ oneStm $ soacsStmToGPU stm
 
 transformStms :: Scope SOACS -> Stms SOACS -> PassM (Stms GPU)
 transformStms scope stms =

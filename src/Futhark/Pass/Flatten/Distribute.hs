@@ -4,6 +4,7 @@ module Futhark.Pass.Flatten.Distribute
     Distributed (..),
     DistStm (..),
     DistInput (..),
+    DistInputs,
     DistType (..),
     DistResult (..),
     ResTag,
@@ -30,6 +31,8 @@ data DistInput
     DistInput ResTag Type
   deriving (Eq, Ord, Show)
 
+type DistInputs = [(VName, DistInput)]
+
 distInputType :: DistInput -> Type
 distInputType (DistInputFree _ t) = t
 distInputType (DistInput _ t) = t
@@ -50,7 +53,7 @@ data DistResult = DistResult {distResTag :: ResTag, distResType :: DistType}
   deriving (Eq, Ord, Show)
 
 data DistStm = DistStm
-  { distStmInputs :: [(VName, DistInput)],
+  { distStmInputs :: DistInputs,
     distStmResult :: [DistResult],
     distStm :: Stm SOACS
   }
@@ -124,7 +127,15 @@ splitIrregDims bound_outside (Array pt shape u) =
     regDim Constant {} = True
 splitIrregDims _ t = (mempty, t)
 
-distributeMap :: Scope SOACS -> Pat Type -> SubExp -> [VName] -> Lambda SOACS -> Distributed
+freeInput :: [(VName, DistInput)] -> VName -> Maybe (VName, DistInput)
+freeInput avail_inputs v =
+  (v,) <$> lookup v avail_inputs
+
+patInput :: ResTag -> PatElem Type -> (VName, DistInput)
+patInput tag pe =
+  (patElemName pe, DistInput tag $ patElemType pe)
+
+distributeMap :: Scope rep -> Pat Type -> SubExp -> [VName] -> Lambda SOACS -> Distributed
 distributeMap outer_scope map_pat w arrs lam =
   let param_inputs =
         zipWith paramInput (lambdaParams lam) arrs
@@ -137,12 +148,7 @@ distributeMap outer_scope map_pat w arrs lam =
   where
     bound_outside = namesFromList $ M.keys outer_scope
     paramInput p arr = (paramName p, DistInputFree arr $ paramType p)
-    freeInput avail_inputs v =
-      (v,) <$> lookup v avail_inputs
-    patInput tag pe =
-      (patElemName pe, DistInput tag $ patElemType pe)
-    distType t =
-      uncurry (DistType w) $ splitIrregDims bound_outside t
+    distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
     distributeStm (ResTag tag, avail_inputs) stm =
       let pat = stmPat stm
           new_tags = map ResTag $ take (patSize pat) [tag ..]

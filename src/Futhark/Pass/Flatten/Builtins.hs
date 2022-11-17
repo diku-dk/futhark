@@ -314,6 +314,7 @@ doSegIota ns = do
       (Safe, mempty, mempty)
   pure (flags, offsets, elems)
 
+-- | Returns @(flags, offsets, elems)@.
 doRepIota :: VName -> Builder GPU (VName, VName, VName)
 doRepIota ns = do
   ns_t <- lookupType ns
