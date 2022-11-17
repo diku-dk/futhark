@@ -76,14 +76,24 @@ pass flag desc mk on_inner on_fparams =
       pure $
         f
           { funDefBody =
-              onBody (foldMap vartab $ M.elems coaltab) $
+              onBody coaltab $
                 removeStms mem_allocs_to_remove $
                   funDefBody f,
             funDefParams = new_fparams
           }
   where
     onBody coaltab body =
-      body {bodyStms = runReader (mapM replaceInStm $ bodyStms body) (Env coaltab on_inner)}
+      let replaceResMem res =
+            case flip M.lookup coaltab =<< subExpResVName res of
+              Just entry -> res {resSubExp = Var $ dstmem entry}
+              Nothing -> res
+       in body
+            { bodyStms =
+                runReader
+                  (mapM replaceInStm $ bodyStms body)
+                  (Env (foldMap vartab $ M.elems coaltab) on_inner),
+              bodyResult = map replaceResMem $ bodyResult body
+            }
 
 replaceInStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stm rep -> ReplaceM inner (Stm rep)
 replaceInStm (Let (Pat elems) d e) = do

@@ -4,7 +4,7 @@
 -- input { [7, 0, 7] }
 -- output { [8, 1, 8] }
 -- structure seq-mem { Alloc 1 }
--- structure gpu-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 0 }
 
 let main [n] (ns: *[n]i32): *[n]i32 =
   let t0 = map (+ 1) ns -- Will use the memory of t1.
