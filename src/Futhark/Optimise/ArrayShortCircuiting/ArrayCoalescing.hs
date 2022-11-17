@@ -1286,18 +1286,18 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                  in (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0)
           success0 = IxFun.hasOneLmad ind_yx
           m_b_aliased_m_yx = areAnyAliased td_env m_b [m_yx] -- m_b \= m_yx
-       in case (success0, not m_b_aliased_m_yx, isInScope td_env m_yx) of -- nameIn m_yx (alloc td_env)
-            (True, True, True) ->
-              -- Finally update the @activeCoals@ table with a fresh
-              --   binding for @m_b@; if such one exists then overwrite.
-              -- Also, add all variables from the alias chain of @b@ to
-              --   @vartab@, for example, in the case of a sequence:
-              --   @ b0 = if cond then ... else ... @
-              --   @ b1 = alias0 b0 @
-              --   @ b  = alias1 b1 @
-              --   @ x[j] = b @
-              -- Then @b1@ and @b0@ should also be added to @vartab@ if
-              --   @alias1@ and @alias0@ are invertible, otherwise fail early!
+       in if success0 && not m_b_aliased_m_yx && isInScope td_env m_yx -- nameIn m_yx (alloc td_env)
+      -- Finally update the @activeCoals@ table with a fresh
+      --   binding for @m_b@; if such one exists then overwrite.
+      -- Also, add all variables from the alias chain of @b@ to
+      --   @vartab@, for example, in the case of a sequence:
+      --   @ b0 = if cond then ... else ... @
+      --   @ b1 = alias0 b0 @
+      --   @ b  = alias1 b1 @
+      --   @ x[j] = b @
+      -- Then @b1@ and @b0@ should also be added to @vartab@ if
+      --   @alias1@ and @alias0@ are invertible, otherwise fail early!
+            then
               let mem_info = Coalesced knd (MemBlock tp_b shp_b m_yx ind_yx) M.empty
                   opts' =
                     if m_yx == m_x
@@ -1323,7 +1323,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                               opts'
                               mempty
                        in M.insert m_b coal_etry acc
-            _ -> acc
+            else acc
 mkCoalsHelper3PatternMatch _ _ _ _ _ _ _ =
   error "In ArrayCoalescing.hs, fun mkCoalsHelper3PatternMatch: Unreachable!!!"
 
