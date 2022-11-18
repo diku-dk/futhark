@@ -1374,8 +1374,9 @@ genSSPointInfoSeqMem _ _ _ _ _ =
 --
 --  3. The array being indexed is last-used in that statement, is free in the
 --  'SegMap', is unique or has been recently allocated (specifically, it should
---  not be a non-unique argument to the enclosing function), and has the exact
---  same 'IxFun' as the pattern of the 'SegMap' statement.
+--  not be a non-unique argument to the enclosing function), has elements with
+--  the same bit-size as the pattern elements, and has the exact same 'IxFun' as
+--  the pattern of the 'SegMap' statement.
 --
 -- There can be multiple candidate arrays, but the current implementation will
 -- always just try the first one.
@@ -1394,7 +1395,7 @@ genSSPointInfoGPUMem
   lutab
   td_env
   scopetab
-  (Pat [PatElem src (_, MemArray _ _ _ (ArrayIn src_mem src_ixf))])
+  (Pat [PatElem src (_, MemArray src_pt _ _ (ArrayIn src_mem src_ixf))])
   (Inner (SegOp (SegMap _ space _ kernel_body)))
     | (dst, MemBlock pt shp dst_mem dst_ixf) : _ <-
         mapMaybe getPotentialMapShortCircuit $
@@ -1410,13 +1411,15 @@ genSSPointInfoGPUMem
           L.sort inds == L.sort (map Var iterators),
           Just last_uses <- M.lookup x lutab,
           dst `nameIn` last_uses,
-          Just memblock <- getScopeMemInfo dst scopetab,
+          Just memblock@(MemBlock dst_pt _ dst_mem dst_ixf) <-
+            getScopeMemInfo dst scopetab,
           -- The 'alloc' table contains allocated memory blocks, including
           -- unique memory blocks from the enclosing function. It does _not_
           -- include non-unique memory blocks from the enclosing function.
-          memName memblock `M.member` alloc td_env,
+          dst_mem `M.member` alloc td_env,
           dst `nameIn` frees,
-          src_ixf == ixfun memblock =
+          src_ixf == dst_ixf,
+          primBitSize src_pt == primBitSize dst_pt =
             Just (dst, memblock)
       getPotentialMapShortCircuit _ = Nothing
 genSSPointInfoGPUMem _ _ _ _ _ =
