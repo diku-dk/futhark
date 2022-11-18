@@ -69,6 +69,21 @@ insertRep rt rep env = env {distResMap = M.insert rt rep $ distResMap env}
 insertReps :: [(ResTag, ResRep)] -> DistEnv -> DistEnv
 insertReps = flip $ foldl (flip $ uncurry insertRep)
 
+insertIrregular :: VName -> VName -> VName -> ResTag -> VName -> DistEnv -> DistEnv
+insertIrregular ns flags offsets rt elems env =
+  let rep = Irregular $ IrregularRep ns flags offsets elems
+   in insertRep rt rep env
+
+insertIrregulars :: VName -> VName -> VName -> [(ResTag, VName)] -> DistEnv -> DistEnv
+insertIrregulars ns flags offsets bnds env =
+  let (tags, elems) = unzip bnds
+      mkRep = Irregular . IrregularRep ns flags offsets
+   in insertReps (zip tags $ map mkRep elems) env
+
+insertRegulars :: [ResTag] -> [VName] -> DistEnv -> DistEnv
+insertRegulars rts xs =
+  insertReps (zip rts $ map Regular xs)
+
 instance Monoid DistEnv where
   mempty = DistEnv mempty
 
@@ -243,15 +258,13 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             auxing aux $
               fmap (subExpsRes . pure) . letSubExp "v"
                 =<< eIndex arr (map toExp slice')
-          let rep = Irregular $ IrregularRep ns flags offsets elems
-          pure $ insertRep (distResTag res) rep env
+          pure $ insertIrregular ns flags offsets (distResTag res) elems env
     Iota n (Constant x) (Constant s) Int64
       | zeroIsh x,
         oneIsh s -> do
           ns <- elemArr segments env inps n
           (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
-          let rep = Irregular $ IrregularRep ns flags offsets elems
-          pure $ insertRep (distResTag res) rep env
+          pure $ insertIrregular ns flags offsets (distResTag res) elems env
     Iota n x s Int64 -> do
       ns <- elemArr segments env inps n
       xs <- elemArr segments env inps x
@@ -265,8 +278,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         x' <- letSubExp "x" =<< eIndex xs [eSubExp segment]
         s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
         fmap (subExpsRes . pure) . letSubExp "v" =<< toExp (pe64 x' + pe64 v' * pe64 s')
-      let rep = Irregular $ IrregularRep ns flags offsets elems'
-      pure $ insertRep (distResTag res) rep env
+      pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
@@ -278,6 +290,37 @@ repPerSegment w segments_per_elem vs =
   letTupExp "replicated" <=< segMap (Solo w) $ \(Solo i) -> do
     segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
     subExpsRes <$> mapM (letSubExp "v" <=< flip eIndex [eSubExp segment]) vs
+
+transformMap ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  Pat Type ->
+  SubExp ->
+  [VName] ->
+  Lambda SOACS ->
+  Builder GPU (VName, VName, VName)
+transformMap segments env inps pat w arrs map_lam = do
+  arrs' <- mapM (elemArr segments env inps . Var) arrs
+  ws <- elemArr segments env inps w
+  (ws_flags, ws_offsets, ws_elems) <- doRepIota ws
+  new_segment <- arraySize 0 <$> lookupType ws_elems
+  let free_in_map = namesToList $ freeIn map_lam
+  replicated <-
+    repPerSegment new_segment ws_elems
+      =<< mapM (elemArr segments env inps . Var) free_in_map
+  free_ps <-
+    mapM (newParam "free_p" . rowType <=< lookupType) replicated
+  scope <- askScope
+  let substs = M.fromList $ zip free_in_map $ map paramName free_ps
+      map_lam' =
+        (substituteNames substs map_lam)
+          { lambdaParams = lambdaParams map_lam <> free_ps
+          }
+      distributed = distributeMap scope pat new_segment (arrs' <> replicated) map_lam'
+      m = transformDistributed (NE.singleton new_segment) distributed
+  addStms =<< runReaderT (runBuilder_ m) scope
+  pure (ws_flags, ws_offsets, ws)
 
 transformDistStm :: Segments -> DistEnv -> DistStm -> Builder GPU DistEnv
 transformDistStm segments env (DistStm inps res stm) = do
@@ -292,28 +335,23 @@ transformDistStm segments env (DistStm inps res stm) = do
         (Just (arr_segments, flags, offsets), elems) <- segsAndElems env arrs' -> do
           elems' <- genSegRed arr_segments flags offsets elems $ singleReduce reds
           pure $ insertReps (zip (map distResTag res) (map Regular elems')) env
+      | Just (reds, map_lam) <- isRedomapSOAC form -> do
+          map_pat <- fmap Pat $ forM (lambdaReturnType map_lam) $ \t ->
+            PatElem <$> newVName "map" <*> pure (t `arrayOfRow` w)
+          (ws_flags, ws_offsets, ws) <-
+            transformMap segments env inps map_pat w arrs map_lam
+          let (redout_names, mapout_names) =
+                splitAt (redResults reds) (patNames map_pat)
+          elems' <-
+            genSegRed ws ws_flags ws_offsets redout_names $
+              singleReduce reds
+          let (red_tags, map_tags) = splitAt (redResults reds) $ map distResTag res
+          pure $
+            insertRegulars red_tags elems' $
+              insertIrregulars ws ws_flags ws_offsets (zip map_tags mapout_names) env
       | Just map_lam <- isMapSOAC form -> do
-          arrs' <- mapM (elemArr segments env inps . Var) arrs
-          ws <- elemArr segments env inps w
-          (ws_flags, ws_offsets, ws_elems) <- doRepIota ws
-          new_segment <- arraySize 0 <$> lookupType ws_elems
-          let free_in_map = namesToList $ freeIn map_lam
-          replicated <-
-            repPerSegment new_segment ws_elems
-              =<< mapM (elemArr segments env inps . Var) free_in_map
-          free_ps <-
-            mapM (newParam "free_p" . rowType <=< lookupType) replicated
-          scope <- askScope
-          let substs = M.fromList $ zip free_in_map $ map paramName free_ps
-              map_lam' =
-                (substituteNames substs map_lam)
-                  { lambdaParams = lambdaParams map_lam <> free_ps
-                  }
-              distributed = distributeMap scope pat new_segment (arrs' <> replicated) map_lam'
-              m = transformDistributed (NE.singleton new_segment) distributed
-          addStms =<< runReaderT (runBuilder_ m) scope
-          let mkRep = Irregular . IrregularRep ws ws_flags ws_offsets
-          pure $ insertReps (zip (map distResTag res) (map mkRep (patNames pat))) env
+          (ws_flags, ws_offsets, ws) <- transformMap segments env inps pat w arrs map_lam
+          pure $ insertIrregulars ws ws_flags ws_offsets (zip (map distResTag res) $ patNames pat) env
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
 distResCerts :: DistEnv -> [DistInput] -> Certs
