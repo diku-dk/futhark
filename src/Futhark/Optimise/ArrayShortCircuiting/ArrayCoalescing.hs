@@ -1073,7 +1073,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ (BasicOp (Update safety x _ _elm))
                           markFailedCoal (actv, inhbt) m_x
 
         -- (c) this stm is also a potential source for coalescing, so process it
-        actv'' <- if safety == Unsafe then mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} (successCoals bu_env) actv' else pure actv'
+        actv'' <- if safety == Unsafe then mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} bu_env {activeCoals = actv'} else pure actv'
         pure $
           bu_env {activeCoals = actv'', inhibit = inhbt'}
 
@@ -1110,7 +1110,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ (BasicOp (FlatUpdate x _ _elm))) t
                           markFailedCoal (actv, inhbt) m_x
 
         -- (c) this stm is also a potential source for coalescing, so process it
-        actv'' <- mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} (successCoals bu_env) actv'
+        actv'' <- mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} bu_env {activeCoals = actv'}
         pure $
           bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
@@ -1125,8 +1125,7 @@ mkCoalsTabStm lutab stm@(Let pat _ (Op op)) td_env bu_env = do
       stm
       lutab
       td_env
-      (successCoals bu_env)
-      (activeCoals bu_env)
+      bu_env
   let bu_env' = bu_env {activeCoals = activeCoals'}
   on_op lutab pat op td_env bu_env'
 mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
@@ -1148,7 +1147,7 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
         foldl (foldfun safe_4) ((activeCoals', inhibit'), successCoals bu_env) (getArrMemAssoc pat)
 
   -- iii) record a potentially coalesced statement in @activeCoals@
-  activeCoals''' <- mkCoalsHelper3PatternMatch stm lutab td_env successCoals' activeCoals''
+  activeCoals''' <- mkCoalsHelper3PatternMatch stm lutab td_env bu_env {successCoals = successCoals', activeCoals = activeCoals''}
   pure bu_env {activeCoals = activeCoals''', inhibit = inhibit'', successCoals = successCoals'}
   where
     foldfun safe_4 ((a_acc, inhb), s_acc) (b, MemBlock tp shp mb _b_indfun) =
@@ -1263,15 +1262,16 @@ mkCoalsHelper3PatternMatch ::
   Stm (Aliases rep) ->
   LUTabFun ->
   TopdownEnv rep ->
-  CoalsTab ->
-  CoalsTab ->
+  BotUpEnv ->
   ShortCircuitM rep CoalsTab
-mkCoalsHelper3PatternMatch stm lutab td_env successCoals_tab activeCoals_tab = do
+mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
   clst <- genCoalStmtInfo lutab td_env (scope td_env) stm
   case clst of
     Nothing -> pure $ activeCoals_tab
     Just clst' -> pure $ foldl processNewCoalesce activeCoals_tab clst'
   where
+    successCoals_tab = successCoals bu_env
+    activeCoals_tab = activeCoals bu_env
     processNewCoalesce acc (knd, alias_fn, x, m_x, ind_x, b, m_b, _, tp_b, shp_b) =
       -- test whether we are in a transitive coalesced case, i.e.,
       --      @let b = scratch ...@
