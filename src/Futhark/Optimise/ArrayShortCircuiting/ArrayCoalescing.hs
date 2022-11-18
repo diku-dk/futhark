@@ -539,7 +539,7 @@ fullSlice shp (Slice slc) =
   Slice $ slc ++ map (\d -> DimSlice 0 d 1) (drop (length slc) shp)
 
 fixPointCoalesce ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   LUTabFun ->
   [Param FParamMem] ->
   Body (Aliases rep) ->
@@ -600,7 +600,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
 
 -- | Perform short-circuiting on 'Stms'.
 mkCoalsTabStms ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   LUTabFun ->
   Stms (Aliases rep) ->
   TopdownEnv rep ->
@@ -643,7 +643,7 @@ mkCoalsTabStms lutab stms0 = traverseStms stms0
 --                          then the checks should be extended to the actual
 --                          array-creation points.
 mkCoalsTabStm ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   LUTabFun ->
   Stm (Aliases rep) ->
   TopdownEnv rep ->
@@ -1259,7 +1259,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
 -- |   Pattern matches a potentially coalesced statement and
 --     records a new association in @activeCoals@
 mkCoalsHelper3PatternMatch ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   Stm (Aliases rep) ->
   LUTabFun ->
   TopdownEnv rep ->
@@ -1553,7 +1553,7 @@ mkSubsTab pat res =
     mki64subst _ = Nothing
 
 computeScalarTable ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   ScopeTab rep ->
   Stm (Aliases rep) ->
   ScalarTableM rep (M.Map VName (PrimExp VName))
