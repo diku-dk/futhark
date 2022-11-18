@@ -1363,6 +1363,26 @@ genSSPointInfoSeqMem _ _ _ _ _ =
   Nothing
 
 -- | Given an 'Op', return a list of potential short-circuit points
+--
+-- For 'SegOp', we currently only handle 'SegMap', and only under the following
+-- circumstances:
+--
+--  1. The 'SegMap' has only one return/pattern value.
+--
+--  2. The 'KernelBody' contains an 'Index' statement that is indexing an array using
+--  only the values from the 'SegSpace'.
+--
+--  3. The array being indexed is last-used in that statement, is free in the
+--  'SegMap', is unique or has been recently allocated (specifically, it should
+--  not be a non-unique argument to the enclosing function), and has the exact
+--  same 'IxFun' as the pattern of the 'SegMap' statement.
+--
+-- There can be multiple candidate arrays, but the current implementation will
+-- always just try the first one.
+--
+-- The first restriction could be relaxed by trying to match up arrays in the
+-- 'KernelBody' with patterns of the 'SegMap', but the current implementation
+-- should be enough to handle many common cases.
 genSSPointInfoGPUMem ::
   LUTabFun ->
   TopdownEnv GPUMem ->
@@ -1391,6 +1411,9 @@ genSSPointInfoGPUMem
           Just last_uses <- M.lookup x lutab,
           dst `nameIn` last_uses,
           Just memblock <- getScopeMemInfo dst scopetab,
+          -- The 'alloc' table contains allocated memory blocks, including
+          -- unique memory blocks from the enclosing function. It does _not_
+          -- include non-unique memory blocks from the enclosing function.
           memName memblock `M.member` alloc td_env,
           dst `nameIn` frees,
           src_ixf == ixfun memblock =
