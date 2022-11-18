@@ -1455,10 +1455,12 @@ genCoalStmtInfo lutab _ scopetab pat (BasicOp (Concat concat_dim (b0 :| bs) _))
                     _ -> (acc, offs, False)
               (res, _, _) = foldl markConcatParts ([], zero, True) (b0 : bs)
            in if null res then Nothing else Just res
+-- case d) short-circuit points from ops. For instance, the result of a segmap
+-- can be considered a short-circuit point.
 genCoalStmtInfo lutab td_env scopetab pat (Op op) = do
   ss_op <- asks ssPointFromOp
   pure $ ss_op lutab td_env scopetab pat op
--- CASE other than a), b), or c) not supported
+-- CASE other than a), b), c), or d) not supported
 genCoalStmtInfo _ _ _ _ _ = pure Nothing
 
 data MemBodyResult = MemBodyResult
