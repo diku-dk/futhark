@@ -54,7 +54,7 @@ lastUseSeqMem :: FunDef (Aliases SeqMem) -> (Name, LUTabFun)
 lastUseSeqMem (FunDef _ _ fname _ _ body) =
   let (res, _) =
         runReader
-          (evalStateT (lastUseBody body (mempty, mempty)) mempty)
+          (evalStateT (lastUseBody body (mempty, freeIn $ bodyResult body)) mempty)
           (LastUseReader lastUseSeqOp)
    in (fname, res)
 
@@ -63,7 +63,7 @@ lastUseGPUMem :: FunDef (Aliases GPUMem) -> (Name, LUTabFun)
 lastUseGPUMem (FunDef _ _ fname _ _ body) =
   let (res, _) =
         runReader
-          (evalStateT (lastUseBody body (mempty, mempty)) mempty)
+          (evalStateT (lastUseBody body (mempty, freeIn $ bodyResult body)) mempty)
           (LastUseReader lastUseGPUOp)
    in (fname, res)
 
