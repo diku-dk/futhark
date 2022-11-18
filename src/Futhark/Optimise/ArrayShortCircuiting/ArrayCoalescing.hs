@@ -57,7 +57,7 @@ data ShortCircuitReader rep = ShortCircuitReader
       ScopeTab rep ->
       Pat (VarAliases, LetDecMem) ->
       Op (Aliases rep) ->
-      Maybe [(CoalescedKind, IxFun -> IxFun, VName, VName, IxFun, VName, VName, IxFun, PrimType, Shape)]
+      Maybe [SSPointInfo]
   }
 
 newtype ShortCircuitM rep a = ShortCircuitM (ReaderT (ShortCircuitReader rep) (State VNameSource) a)
@@ -1337,13 +1337,27 @@ mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
                        in M.insert m_b coal_etry acc
             else acc
 
+-- | Information about a particular short-circuit point
+type SSPointInfo =
+  ( CoalescedKind,
+    IxFun -> IxFun,
+    VName,
+    VName,
+    IxFun,
+    VName,
+    VName,
+    IxFun,
+    PrimType,
+    Shape
+  )
+
 genShortCircuitInfoSeqMem ::
   LUTabFun ->
   TopdownEnv SeqMem ->
   ScopeTab SeqMem ->
   Pat (VarAliases, LetDecMem) ->
   Op (Aliases SeqMem) ->
-  Maybe [(CoalescedKind, IxFun -> IxFun, VName, VName, IxFun, VName, VName, IxFun, PrimType, Shape)]
+  Maybe [SSPointInfo]
 genShortCircuitInfoSeqMem _ _ _ _ _ =
   Nothing
 
@@ -1353,28 +1367,33 @@ genShortCircuitInfoGPUMem ::
   ScopeTab GPUMem ->
   Pat (VarAliases, LetDecMem) ->
   Op (Aliases GPUMem) ->
-  Maybe [(CoalescedKind, IxFun -> IxFun, VName, VName, IxFun, VName, VName, IxFun, PrimType, Shape)]
-genShortCircuitInfoGPUMem lutab td_env scopetab (Pat [PatElem src (_, MemArray _ _ _ (ArrayIn src_mem src_ixf))]) (Inner (SegOp (SegMap _ space _ kernel_body)))
-  | [(dst, MemBlock pt shp dst_mem dst_ixf)] <-
-      mapMaybe getPotentialMapShortCircuit $
-        stmsToList $
-          kernelBodyStms kernel_body =
-      Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, pt, shp)]
-  where
-    iterators = map fst $ unSegSpace space
-    frees = freeIn kernel_body
+  Maybe [SSPointInfo]
+genShortCircuitInfoGPUMem
+  lutab
+  td_env
+  scopetab
+  (Pat [PatElem src (_, MemArray _ _ _ (ArrayIn src_mem src_ixf))])
+  (Inner (SegOp (SegMap _ space _ kernel_body)))
+    | [(dst, MemBlock pt shp dst_mem dst_ixf)] <-
+        mapMaybe getPotentialMapShortCircuit $
+          stmsToList $
+            kernelBodyStms kernel_body =
+        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, pt, shp)]
+    where
+      iterators = map fst $ unSegSpace space
+      frees = freeIn kernel_body
 
-    getPotentialMapShortCircuit (Let (Pat [PatElem x _]) _ (BasicOp (Index dst slc)))
-      | Just inds <- sliceIndices slc,
-        L.sort inds == L.sort (map Var iterators),
-        Just last_uses <- M.lookup x lutab,
-        dst `nameIn` last_uses,
-        Just memblock <- getScopeMemInfo dst scopetab,
-        memName memblock `M.member` alloc td_env,
-        dst `nameIn` frees,
-        src_ixf == ixfun memblock =
-          Just (dst, memblock)
-    getPotentialMapShortCircuit _ = Nothing
+      getPotentialMapShortCircuit (Let (Pat [PatElem x _]) _ (BasicOp (Index dst slc)))
+        | Just inds <- sliceIndices slc,
+          L.sort inds == L.sort (map Var iterators),
+          Just last_uses <- M.lookup x lutab,
+          dst `nameIn` last_uses,
+          Just memblock <- getScopeMemInfo dst scopetab,
+          memName memblock `M.member` alloc td_env,
+          dst `nameIn` frees,
+          src_ixf == ixfun memblock =
+            Just (dst, memblock)
+      getPotentialMapShortCircuit _ = Nothing
 genShortCircuitInfoGPUMem _ _ _ _ _ =
   Nothing
 
@@ -1384,7 +1403,7 @@ genCoalStmtInfo ::
   TopdownEnv rep ->
   ScopeTab rep ->
   Stm (Aliases rep) ->
-  ShortCircuitM rep (Maybe [(CoalescedKind, IxFun -> IxFun, VName, VName, IxFun, VName, VName, IxFun, PrimType, Shape)])
+  ShortCircuitM rep (Maybe [SSPointInfo])
 -- CASE a) @let x <- copy(b^{lu})@
 genCoalStmtInfo lutab _ scopetab (Let pat _ (BasicOp (Copy b)))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
