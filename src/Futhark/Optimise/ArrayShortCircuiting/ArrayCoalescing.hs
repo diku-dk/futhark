@@ -1397,11 +1397,11 @@ genSSPointInfoGPUMem
   scopetab
   (Pat [PatElem src (_, MemArray src_pt _ _ (ArrayIn src_mem src_ixf))])
   (Inner (SegOp (SegMap _ space _ kernel_body)))
-    | (dst, MemBlock pt shp dst_mem dst_ixf) : _ <-
+    | (dst, MemBlock _ shp dst_mem dst_ixf) : _ <-
         mapMaybe getPotentialMapShortCircuit $
           stmsToList $
             kernelBodyStms kernel_body =
-        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, pt, shp)]
+        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, src_pt, shp)]
     where
       iterators = map fst $ unSegSpace space
       frees = freeIn kernel_body
