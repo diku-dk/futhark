@@ -99,7 +99,7 @@ printLastUseGPUSS =
   Action
     { actionName = "print last use ss gpu",
       actionDescription = "Print last use ss information on gpu.",
-      actionProcedure = liftIO . putStrLn . prettyString . M.toList . mconcat . M.elems . LastUseSS.lastUsePrgGPU . aliasAnalysis
+      actionProcedure = liftIO . putStrLn . prettyString . M.toList . LastUseSS.lastUsePrgGPU . aliasAnalysis
     }
 
 -- | Print fusion graph to stdout.
