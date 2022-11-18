@@ -1383,7 +1383,10 @@ genShortCircuitInfoGPUMem ::
   Op (Aliases GPUMem) ->
   Maybe [(CoalescedKind, IxFun -> IxFun, VName, VName, IxFun, VName, VName, IxFun, PrimType, Shape)]
 genShortCircuitInfoGPUMem lutab td_env scopetab (Pat [PatElem src (_, MemArray _ _ _ (ArrayIn src_mem src_ixf))]) (Inner (SegOp (SegMap _ space _ kernel_body)))
-  | [(dst, MemBlock pt shp dst_mem dst_ixf)] <- mapMaybe getPotentialMapShortCircuit $ stmsToList $ kernelBodyStms kernel_body =
+  | [(dst, MemBlock pt shp dst_mem dst_ixf)] <-
+      mapMaybe getPotentialMapShortCircuit $
+        stmsToList $
+          kernelBodyStms kernel_body =
       Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, pt, shp)]
   where
     iterators = map fst $ unSegSpace space
