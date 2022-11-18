@@ -88,14 +88,8 @@ printLastUseGPU =
   Action
     { actionName = "print last use gpu",
       actionDescription = "Print last use information on gpu.",
-      actionProcedure = liftIO . p . LastUse.analyseGPUMem
+      actionProcedure = liftIO . putStrLn . prettyString . M.toList . LastUse.analyseGPUMem
     }
-  where
-    p (lumap, used) = do
-      putStrLn "LastUseMap"
-      putStrLn $ prettyString $ M.toList lumap
-      putStrLn "LastUse"
-      putStrLn $ prettyString used
 
 -- | Print fusion graph to stdout.
 printFusionGraph :: Action SOACS
