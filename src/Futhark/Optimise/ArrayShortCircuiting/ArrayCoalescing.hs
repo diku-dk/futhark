@@ -100,7 +100,7 @@ mkCoalsTab :: (MonadFreshNames m) => FunDef (Aliases SeqMem) -> m CoalsTab
 mkCoalsTab =
   mkCoalsTabFun
     (snd . lastUseSeqMem)
-    (ShortCircuitReader shortCircuitSeqMem genShortCircuitInfoSeqMem)
+    (ShortCircuitReader shortCircuitSeqMem genSSPointInfoSeqMem)
     (ComputeScalarTableOnOp $ const $ const $ pure mempty)
 
 -- | Given a 'FunDef' in 'GPUMem' representation, compute the coalescing table
@@ -109,7 +109,7 @@ mkCoalsTabGPU :: (MonadFreshNames m) => FunDef (Aliases GPUMem) -> m CoalsTab
 mkCoalsTabGPU =
   mkCoalsTabFun
     (snd . lastUseGPUMem)
-    (ShortCircuitReader shortCircuitGPUMem genShortCircuitInfoGPUMem)
+    (ShortCircuitReader shortCircuitGPUMem genSSPointInfoGPUMem)
     (ComputeScalarTableOnOp computeScalarTableGPUMem)
 
 -- | Given a function, compute the coalescing table
@@ -1351,24 +1351,26 @@ type SSPointInfo =
     Shape
   )
 
-genShortCircuitInfoSeqMem ::
+-- | Given an 'Op', return a list of potential short-circuit points
+genSSPointInfoSeqMem ::
   LUTabFun ->
   TopdownEnv SeqMem ->
   ScopeTab SeqMem ->
   Pat (VarAliases, LetDecMem) ->
   Op (Aliases SeqMem) ->
   Maybe [SSPointInfo]
-genShortCircuitInfoSeqMem _ _ _ _ _ =
+genSSPointInfoSeqMem _ _ _ _ _ =
   Nothing
 
-genShortCircuitInfoGPUMem ::
+-- | Given an 'Op', return a list of potential short-circuit points
+genSSPointInfoGPUMem ::
   LUTabFun ->
   TopdownEnv GPUMem ->
   ScopeTab GPUMem ->
   Pat (VarAliases, LetDecMem) ->
   Op (Aliases GPUMem) ->
   Maybe [SSPointInfo]
-genShortCircuitInfoGPUMem
+genSSPointInfoGPUMem
   lutab
   td_env
   scopetab
@@ -1394,7 +1396,7 @@ genShortCircuitInfoGPUMem
           src_ixf == ixfun memblock =
             Just (dst, memblock)
       getPotentialMapShortCircuit _ = Nothing
-genShortCircuitInfoGPUMem _ _ _ _ _ =
+genSSPointInfoGPUMem _ _ _ _ _ =
   Nothing
 
 genCoalStmtInfo ::
