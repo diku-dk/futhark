@@ -99,7 +99,7 @@ emptyBotUpEnv =
 mkCoalsTab :: (MonadFreshNames m) => FunDef (Aliases SeqMem) -> m CoalsTab
 mkCoalsTab =
   mkCoalsTabFun
-    (snd . lastUseSeqMem)
+    lastUseSeqMem
     (ShortCircuitReader shortCircuitSeqMem genSSPointInfoSeqMem)
     (ComputeScalarTableOnOp $ const $ const $ pure mempty)
 
@@ -108,7 +108,7 @@ mkCoalsTab =
 mkCoalsTabGPU :: (MonadFreshNames m) => FunDef (Aliases GPUMem) -> m CoalsTab
 mkCoalsTabGPU =
   mkCoalsTabFun
-    (snd . lastUseGPUMem)
+    lastUseGPUMem
     (ShortCircuitReader shortCircuitGPUMem genSSPointInfoGPUMem)
     (ComputeScalarTableOnOp computeScalarTableGPUMem)
 

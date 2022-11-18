@@ -42,30 +42,30 @@ aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
 
 -- | Perform last-use analysis on a 'Prog' in 'SeqMem'
-lastUsePrg :: Prog (Aliases SeqMem) -> LUTabPrg
-lastUsePrg prg = M.fromList $ map lastUseSeqMem $ progFuns prg
+lastUsePrg :: Prog (Aliases SeqMem) -> LUTabFun
+lastUsePrg prg = foldMap lastUseSeqMem $ progFuns prg
 
 -- | Perform last-use analysis on a 'Prog' in 'GPUMem'
-lastUsePrgGPU :: Prog (Aliases GPUMem) -> LUTabPrg
-lastUsePrgGPU prg = M.fromList $ map lastUseGPUMem $ progFuns prg
+lastUsePrgGPU :: Prog (Aliases GPUMem) -> LUTabFun
+lastUsePrgGPU prg = foldMap lastUseGPUMem $ progFuns prg
 
 -- | Perform last-use analysis on a 'FunDef' in 'SeqMem'
-lastUseSeqMem :: FunDef (Aliases SeqMem) -> (Name, LUTabFun)
-lastUseSeqMem (FunDef _ _ fname _ _ body) =
+lastUseSeqMem :: FunDef (Aliases SeqMem) -> LUTabFun
+lastUseSeqMem (FunDef _ _ _ _ _ body) =
   let (res, _) =
         runReader
           (evalStateT (lastUseBody body (mempty, freeIn $ bodyResult body)) mempty)
           (LastUseReader lastUseSeqOp)
-   in (fname, res)
+   in res
 
 -- | Perform last-use analysis on a 'FunDef' in 'GPUMem'
-lastUseGPUMem :: FunDef (Aliases GPUMem) -> (Name, LUTabFun)
-lastUseGPUMem (FunDef _ _ fname _ _ body) =
+lastUseGPUMem :: FunDef (Aliases GPUMem) -> LUTabFun
+lastUseGPUMem (FunDef _ _ _ _ _ body) =
   let (res, _) =
         runReader
           (evalStateT (lastUseBody body (mempty, freeIn $ bodyResult body)) mempty)
           (LastUseReader lastUseGPUOp)
-   in (fname, res)
+   in res
 
 -- | Performing the last-use analysis on a body.
 --
