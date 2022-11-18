@@ -1073,7 +1073,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update safety x _ _elm
                           markFailedCoal (actv, inhbt) m_x
 
         -- (c) this stm is also a potential source for coalescing, so process it
-        actv'' <- if safety == Unsafe then mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt' else pure actv'
+        actv'' <- if safety == Unsafe then mkCoalsHelper3PatternMatch pat e lutab td_env {inhibited = inhbt'} (successCoals bu_env) actv' else pure actv'
         pure $
           bu_env {activeCoals = actv'', inhibit = inhbt'}
 
@@ -1110,7 +1110,7 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (FlatUpdate x _ _elm)))
                           markFailedCoal (actv, inhbt) m_x
 
         -- (c) this stm is also a potential source for coalescing, so process it
-        actv'' <- mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt'
+        actv'' <- mkCoalsHelper3PatternMatch pat e lutab td_env {inhibited = inhbt'} (successCoals bu_env) actv'
         pure $
           bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
@@ -1128,7 +1128,6 @@ mkCoalsTabStm lutab (Let pat _ e@(Op op)) td_env bu_env = do
       td_env
       (successCoals bu_env)
       (activeCoals bu_env)
-      (inhibited td_env)
   let bu_env' = bu_env {activeCoals = activeCoals'}
   on_op lutab pat op td_env bu_env'
 mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
@@ -1150,7 +1149,7 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
         foldl (foldfun safe_4) ((activeCoals', inhibit'), successCoals bu_env) (getArrMemAssoc pat)
 
   -- iii) record a potentially coalesced statement in @activeCoals@
-  activeCoals''' <- mkCoalsHelper3PatternMatch pat e lutab td_env successCoals' activeCoals'' (inhibited td_env)
+  activeCoals''' <- mkCoalsHelper3PatternMatch pat e lutab td_env successCoals' activeCoals''
   pure bu_env {activeCoals = activeCoals''', inhibit = inhibit'', successCoals = successCoals'}
   where
     foldfun safe_4 ((a_acc, inhb), s_acc) (b, MemBlock tp shp mb _b_indfun) =
@@ -1268,9 +1267,8 @@ mkCoalsHelper3PatternMatch ::
   TopdownEnv rep ->
   CoalsTab ->
   CoalsTab ->
-  InhibitTab ->
   ShortCircuitM rep CoalsTab
-mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab inhibit_tab = do
+mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab = do
   clst <- genCoalStmtInfo lutab td_env (scope td_env) pat e
   case clst of
     Nothing -> pure $ activeCoals_tab
@@ -1322,7 +1320,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                   vtab = M.singleton b mem_info
                   mvtab = addInvAliassesVarTab td_env vtab b
 
-                  is_inhibited = case M.lookup m_b inhibit_tab of
+                  is_inhibited = case M.lookup m_b $ inhibited td_env of
                     Just nms -> m_yx `nameIn` nms
                     Nothing -> False
                in case (is_inhibited, mvtab) of
