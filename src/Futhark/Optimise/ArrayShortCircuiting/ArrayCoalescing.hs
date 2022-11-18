@@ -51,7 +51,7 @@ type ScalarTableM rep a = Reader (ComputeScalarTableOnOp rep) a
 
 data ShortCircuitReader rep = ShortCircuitReader
   { onOp :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases rep) -> TopdownEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv,
-    shortCircuitOp ::
+    ssPointFromOp ::
       LUTabFun ->
       TopdownEnv rep ->
       ScopeTab rep ->
@@ -1456,7 +1456,7 @@ genCoalStmtInfo lutab _ scopetab pat (BasicOp (Concat concat_dim (b0 :| bs) _))
               (res, _, _) = foldl markConcatParts ([], zero, True) (b0 : bs)
            in if null res then Nothing else Just res
 genCoalStmtInfo lutab td_env scopetab pat (Op op) = do
-  ss_op <- asks shortCircuitOp
+  ss_op <- asks ssPointFromOp
   pure $ ss_op lutab td_env scopetab pat op
 -- CASE other than a), b), or c) not supported
 genCoalStmtInfo _ _ _ _ _ = pure Nothing
