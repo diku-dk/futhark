@@ -25,7 +25,7 @@ import Futhark.Util
 ----------------------------------------------------------------
 
 data Env inner = Env
-  { envCoalesceTab :: M.Map VName Coalesced,
+  { envCoalesceTab :: CoalsTab,
     onInner :: inner -> ReplaceM inner inner
   }
 
@@ -83,17 +83,19 @@ pass flag desc mk on_inner on_fparams =
           }
   where
     onBody coaltab body =
-      let replaceResMem res =
-            case flip M.lookup coaltab =<< subExpResVName res of
-              Just entry -> res {resSubExp = Var $ dstmem entry}
-              Nothing -> res
-       in body
-            { bodyStms =
-                runReader
-                  (mapM replaceInStm $ bodyStms body)
-                  (Env (foldMap vartab $ M.elems coaltab) on_inner),
-              bodyResult = map replaceResMem $ bodyResult body
-            }
+      body
+        { bodyStms =
+            runReader
+              (mapM replaceInStm $ bodyStms body)
+              (Env coaltab on_inner),
+          bodyResult = map (replaceResMem coaltab) $ bodyResult body
+        }
+
+replaceResMem :: CoalsTab -> SubExpRes -> SubExpRes
+replaceResMem coaltab res =
+  case flip M.lookup coaltab =<< subExpResVName res of
+    Just entry -> res {resSubExp = Var $ dstmem entry}
+    Nothing -> res
 
 replaceInStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stm rep -> ReplaceM inner (Stm rep)
 replaceInStm (Let (Pat elems) d e) = do
@@ -117,7 +119,9 @@ replaceInExp pat_elems (Match cond_ses cases defbody dec) = do
 replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
   loop_inits' <- mapM (replaceInFParam . fst) loop_inits
   stms' <- mapM replaceInStm stms
-  pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res
+  coalstab <- asks envCoalesceTab
+  let res' = map (replaceResMem coalstab) res
+  pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res'
 replaceInExp _ e@(Op (Alloc _ _)) = pure e
 replaceInExp _ (Op (Inner i)) = do
   on_op <- asks onInner
@@ -147,7 +151,7 @@ generalizeIxfun
   (PatElem vname (MemArray _ _ _ (ArrayIn mem ixf)))
   m@(MemArray pt shp u _) = do
     coaltab <- asks envCoalesceTab
-    if vname `M.member` coaltab
+    if vname `M.member` foldMap vartab coaltab
       then
         existentialiseIxFun (map patElemName pat_elems) ixf
           & ReturnsInBlock mem
@@ -157,9 +161,10 @@ generalizeIxfun
 generalizeIxfun _ _ m = pure m
 
 replaceInIfBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> ReplaceM inner (Body rep)
-replaceInIfBody b@(Body _ stms _) = do
+replaceInIfBody b@(Body _ stms res) = do
+  coaltab <- asks envCoalesceTab
   stms' <- mapM replaceInStm stms
-  pure $ b {bodyStms = stms'}
+  pure $ b {bodyStms = stms', bodyResult = map (replaceResMem coaltab) res}
 
 replaceInFParam :: Param FParamMem -> ReplaceM inner (Param FParamMem)
 replaceInFParam p@(Param _ vname (MemArray _ _ u _)) = do
@@ -173,7 +178,7 @@ lookupAndReplace ::
   ReplaceM inner (Maybe a)
 lookupAndReplace vname f u = do
   coaltab <- asks envCoalesceTab
-  case M.lookup vname coaltab of
+  case M.lookup vname $ foldMap vartab coaltab of
     Just (Coalesced _ (MemBlock pt shp mem ixf) subs) ->
       ixf
         & fixPoint (substituteInIxFun subs)
