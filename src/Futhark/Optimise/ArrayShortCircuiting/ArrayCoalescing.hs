@@ -1267,7 +1267,7 @@ mkCoalsHelper3PatternMatch ::
 mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
   clst <- genCoalStmtInfo lutab td_env (scope td_env) stm
   case clst of
-    Nothing -> pure $ activeCoals_tab
+    Nothing -> pure activeCoals_tab
     Just clst' -> pure $ foldl processNewCoalesce activeCoals_tab clst'
   where
     successCoals_tab = successCoals bu_env
