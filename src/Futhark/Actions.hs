@@ -27,6 +27,7 @@ where
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List (intercalate)
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -87,8 +88,14 @@ printLastUseGPU =
   Action
     { actionName = "print last use gpu",
       actionDescription = "Print last use information on gpu.",
-      actionProcedure = liftIO . print . LastUse.analyseGPUMem
+      actionProcedure = liftIO . p . LastUse.analyseGPUMem
     }
+  where
+    p (lumap, used) = do
+      putStrLn "LastUseMap"
+      putStrLn $ prettyString $ M.toList lumap
+      putStrLn "LastUse"
+      putStrLn $ prettyString used
 
 -- | Print fusion graph to stdout.
 printFusionGraph :: Action SOACS
