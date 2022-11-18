@@ -1376,7 +1376,7 @@ genSSPointInfoGPUMem
   scopetab
   (Pat [PatElem src (_, MemArray _ _ _ (ArrayIn src_mem src_ixf))])
   (Inner (SegOp (SegMap _ space _ kernel_body)))
-    | [(dst, MemBlock pt shp dst_mem dst_ixf)] <-
+    | (dst, MemBlock pt shp dst_mem dst_ixf) : _ <-
         mapMaybe getPotentialMapShortCircuit $
           stmsToList $
             kernelBodyStms kernel_body =
