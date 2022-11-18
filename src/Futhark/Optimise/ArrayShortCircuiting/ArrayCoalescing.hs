@@ -1382,26 +1382,26 @@ genShortCircuitInfoGPUMem ::
   Pat (VarAliases, LetDecMem) ->
   Op (Aliases GPUMem) ->
   Maybe [(CoalescedKind, IxFun -> IxFun, VName, VName, IxFun, VName, VName, IxFun, PrimType, Shape)]
-genShortCircuitInfoGPUMem lutab td_env scopetab pat (Inner (SegOp (SegMap _ space _ kernel_body)))
-  | Pat [PatElem src (_, MemArray _ _ _ (ArrayIn src_mem src_ixf))] <- pat,
-    frees <- freeIn kernel_body,
-    [dst] <- mapMaybe (getPotentialMapShortCircuit lutab $ map fst $ unSegSpace space) $ stmsToList $ kernelBodyStms kernel_body,
-    dst `nameIn` frees,
-    Just (MemBlock pt shp dst_mem dst_ixf) <- getScopeMemInfo dst scopetab,
-    src_ixf == dst_ixf,
-    dst_mem `M.member` alloc td_env =
+genShortCircuitInfoGPUMem lutab td_env scopetab (Pat [PatElem src (_, MemArray _ _ _ (ArrayIn src_mem src_ixf))]) (Inner (SegOp (SegMap _ space _ kernel_body)))
+  | [(dst, MemBlock pt shp dst_mem dst_ixf)] <- mapMaybe getPotentialMapShortCircuit $ stmsToList $ kernelBodyStms kernel_body =
       Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, pt, shp)]
+  where
+    iterators = map fst $ unSegSpace space
+    frees = freeIn kernel_body
+
+    getPotentialMapShortCircuit (Let (Pat [PatElem x _]) _ (BasicOp (Index dst slc)))
+      | Just inds <- sliceIndices slc,
+        L.sort inds == L.sort (map Var iterators),
+        Just last_uses <- M.lookup x lutab,
+        dst `nameIn` last_uses,
+        Just memblock <- getScopeMemInfo dst scopetab,
+        memName memblock `M.member` alloc td_env,
+        dst `nameIn` frees,
+        src_ixf == ixfun memblock =
+          Just (dst, memblock)
+    getPotentialMapShortCircuit _ = Nothing
 genShortCircuitInfoGPUMem _ _ _ _ _ =
   Nothing
-
-getPotentialMapShortCircuit :: LUTabFun -> [VName] -> Stm rep -> Maybe VName
-getPotentialMapShortCircuit lutab iterators (Let (Pat [PatElem x _]) _ (BasicOp (Index dst slc)))
-  | Just inds <- sliceIndices slc,
-    L.sort inds == L.sort (map Var iterators),
-    Just last_uses <- M.lookup x lutab,
-    dst `nameIn` last_uses =
-      Just dst
-getPotentialMapShortCircuit _ _ _ = Nothing
 
 genCoalStmtInfo ::
   HasMemBlock (Aliases rep) =>
