@@ -41,10 +41,10 @@ newtype Env rep = Env {envLastUseOp :: LastUseOp rep}
 
 type LastUseM rep = Reader (Env rep) (LastUse, Used)
 
-analyseGPUMem :: Prog GPUMem -> (LastUseMap, Used)
+analyseGPUMem :: Prog GPUMem -> LastUseMap
 analyseGPUMem = analyseProg analyseGPUOp
 
-analyseSeqMem :: Prog SeqMem -> (LastUseMap, Used)
+analyseSeqMem :: Prog SeqMem -> LastUseMap
 analyseSeqMem = analyseProg analyseSeqOp
 
 analyseGPUOp :: LastUseOp GPUMem
@@ -100,7 +100,7 @@ analyseSeqOp _ (lumap, used) (Inner ()) =
 -- | Analyses a program to return a last-use map, mapping each simple statement
 -- in the program to the values that were last used within that statement, and
 -- the set of all `VName` that were used inside.
-analyseProg :: (CanBeAliased (Op rep), Mem rep inner) => LastUseOp rep -> Prog rep -> (LastUseMap, Used)
+analyseProg :: (CanBeAliased (Op rep), Mem rep inner) => LastUseOp rep -> Prog rep -> LastUseMap
 analyseProg onOp prog =
   runReader helper (Env onOp)
   where
@@ -112,9 +112,9 @@ analyseProg onOp prog =
           prog_alias = aliasAnalysis prog
           consts = progConsts prog_alias
           funs = progFuns prog_alias
-      (consts_lu, consts_used) <- analyseStms mempty mempty consts
-      (lus, used) <- mconcat <$> mapM (analyseFun mempty bound_in_consts) funs
-      pure (flipMap $ consts_lu <> lus, consts_used <> used)
+      (consts_lu, _) <- analyseStms mempty mempty consts
+      (lus, _) <- mconcat <$> mapM (analyseFun mempty bound_in_consts) funs
+      pure $ flipMap $ consts_lu <> lus
 
 analyseFun :: (FreeIn (OpWithAliases (Op rep)), ASTRep rep) => LastUse -> Used -> FunDef (Aliases rep) -> LastUseM rep
 analyseFun lumap used fun = do
