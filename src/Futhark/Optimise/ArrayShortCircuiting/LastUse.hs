@@ -15,25 +15,42 @@
 -- This pass is different from "Futhark.Analysis.LastUse" in that memory blocks
 -- are used to alias arrays. For instance, an 'Update' will not result in a last
 -- use of the array being updated, because the result lives in the same memory.
-module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg, lastUsePrgGPU, lastUseGPUMem) where
+module Futhark.Optimise.ArrayShortCircuiting.LastUse
+  ( lastUseSeqMem,
+    lastUseGPUMem,
+    LUTabFun,
+    LUTabPrg,
+  )
+where
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (bimap)
+import Data.Function ((&))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
-import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Util
+
+type LUTabFun = M.Map VName Names
+-- ^ maps a name indentifying a stmt to the last uses in that stmt
+
+type LUTabPrg = M.Map Name LUTabFun
+-- ^ maps function names to last-use tables
+
+type LastUseOp rep = Op (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names, Names)
 
 -- | 'LastUseReader' allows us to abstract over representations by supplying the
 -- 'onOp' function.
 newtype LastUseReader rep = LastUseReader
-  { onOp :: Op (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names, Names)
+  { onOp :: LastUseOp rep
   }
+
+-- | Maps a variable or memory block to its aliases.
+type AliasTab = M.Map VName Names
 
 type LastUseM rep a = StateT AliasTab (Reader (LastUseReader rep)) a
 
@@ -41,31 +58,28 @@ aliasLookup :: VName -> LastUseM rep Names
 aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
 
--- | Perform last-use analysis on a 'Prog' in 'SeqMem'
-lastUsePrg :: Prog (Aliases SeqMem) -> LUTabPrg
-lastUsePrg prg = M.fromList $ map lastUseSeqMem $ progFuns prg
-
--- | Perform last-use analysis on a 'Prog' in 'GPUMem'
-lastUsePrgGPU :: Prog (Aliases GPUMem) -> LUTabPrg
-lastUsePrgGPU prg = M.fromList $ map lastUseGPUMem $ progFuns prg
+lastUseProg :: (CanBeAliased (Op rep), Mem rep inner) => LastUseOp rep -> Prog (Aliases rep) -> LUTabFun
+lastUseProg onOp prog =
+  runReader (evalStateT m mempty) (LastUseReader onOp)
+  where
+    m = do
+      let bound_in_consts =
+            progConsts prog
+              & concatMap (patNames . stmPat)
+              & namesFromList
+          consts = progConsts prog
+          funs = progFuns prog
+      (consts_lu, _) <- lastUseStms consts mempty mempty
+      (lus, _) <- mconcat <$> mapM (flip lastUseBody (mempty, bound_in_consts) . funDefBody) funs
+      pure $ consts_lu <> lus
 
 -- | Perform last-use analysis on a 'FunDef' in 'SeqMem'
-lastUseSeqMem :: FunDef (Aliases SeqMem) -> (Name, LUTabFun)
-lastUseSeqMem (FunDef _ _ fname _ _ body) =
-  let (res, _) =
-        runReader
-          (evalStateT (lastUseBody body (mempty, freeIn $ bodyResult body)) mempty)
-          (LastUseReader lastUseSeqOp)
-   in (fname, res)
+lastUseSeqMem :: Prog (Aliases SeqMem) -> LUTabFun
+lastUseSeqMem = lastUseProg lastUseSeqOp
 
 -- | Perform last-use analysis on a 'FunDef' in 'GPUMem'
-lastUseGPUMem :: FunDef (Aliases GPUMem) -> (Name, LUTabFun)
-lastUseGPUMem (FunDef _ _ fname _ _ body) =
-  let (res, _) =
-        runReader
-          (evalStateT (lastUseBody body (mempty, freeIn $ bodyResult body)) mempty)
-          (LastUseReader lastUseGPUOp)
-   in (fname, res)
+lastUseGPUMem :: Prog (Aliases GPUMem) -> LUTabFun
+lastUseGPUMem = lastUseProg lastUseGPUOp
 
 -- | Performing the last-use analysis on a body.
 --

@@ -64,14 +64,17 @@ pass ::
   (Mem rep inner, LetDec rep ~ LetDecMem, CanBeAliased inner) =>
   String ->
   String ->
-  (FunDef (Aliases rep) -> Pass.PassM CoalsTab) ->
+  (Prog (Aliases rep) -> Pass.PassM (M.Map Name CoalsTab)) ->
   (inner -> ReplaceM inner inner) ->
   (CoalsTab -> [FParam (Aliases rep)] -> (Names, [FParam (Aliases rep)])) ->
   Pass rep rep
 pass flag desc mk on_inner on_fparams =
-  Pass flag desc $
-    Pass.intraproceduralTransformationWithConsts pure $ \_ f -> do
-      coaltab <- mk (AnlAls.analyseFun f)
+  Pass flag desc $ \prog -> do
+    coaltabs <- mk $ AnlAls.aliasAnalysis prog
+    Pass.intraproceduralTransformationWithConsts pure (onFun coaltabs) prog
+  where
+    onFun coaltabs _ f = do
+      let coaltab = coaltabs M.! funDefName f
       let (mem_allocs_to_remove, new_fparams) = on_fparams coaltab $ funDefParams f
       pure $
         f
@@ -81,7 +84,7 @@ pass flag desc mk on_inner on_fparams =
                   funDefBody f,
             funDefParams = new_fparams
           }
-  where
+
     onBody coaltab body =
       body
         { bodyStms =
@@ -122,11 +125,12 @@ replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
   coalstab <- asks envCoalesceTab
   let res' = map (replaceResMem coalstab) res
   pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res'
-replaceInExp _ e@(Op (Alloc _ _)) = pure e
-replaceInExp _ (Op (Inner i)) = do
-  on_op <- asks onInner
-  Op . Inner <$> on_op i
-replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
+replaceInExp _ (Op op) =
+  case op of
+    Inner i -> do
+      on_op <- asks onInner
+      Op . Inner <$> on_op i
+    _ -> pure $ Op op
 replaceInExp _ e@WithAcc {} = pure e
 replaceInExp _ e@Apply {} = pure e
 
