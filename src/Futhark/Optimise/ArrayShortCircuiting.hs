@@ -110,10 +110,10 @@ replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
   pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res
 replaceInExp _ (Op op) =
   case op of
-    Alloc {} -> pure $ Op op
-    (Inner i) -> do
+    Inner i -> do
       on_op <- asks onInner
       Op . Inner <$> on_op i
+    _ -> pure $ Op op
 replaceInExp _ e@WithAcc {} = pure e
 replaceInExp _ e@Apply {} = pure e
 
