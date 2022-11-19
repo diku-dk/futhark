@@ -64,14 +64,17 @@ pass ::
   (Mem rep inner, LetDec rep ~ LetDecMem, CanBeAliased inner) =>
   String ->
   String ->
-  (FunDef (Aliases rep) -> Pass.PassM CoalsTab) ->
+  (Prog (Aliases rep) -> Pass.PassM (M.Map Name CoalsTab)) ->
   (inner -> ReplaceM inner inner) ->
   (CoalsTab -> [FParam (Aliases rep)] -> (Names, [FParam (Aliases rep)])) ->
   Pass rep rep
 pass flag desc mk on_inner on_fparams =
-  Pass flag desc $
-    Pass.intraproceduralTransformationWithConsts pure $ \_ f -> do
-      coaltab <- mk (AnlAls.analyseFun f)
+  Pass flag desc $ \prog -> do
+    coaltabs <- mk $ AnlAls.aliasAnalysis prog
+    Pass.intraproceduralTransformationWithConsts pure (onFun coaltabs) prog
+  where
+    onFun coaltabs _ f = do
+      let coaltab = coaltabs M.! funDefName f
       let (mem_allocs_to_remove, new_fparams) = on_fparams coaltab $ funDefParams f
       pure $
         f
@@ -81,7 +84,7 @@ pass flag desc mk on_inner on_fparams =
                   funDefBody f,
             funDefParams = new_fparams
           }
-  where
+
     onBody coaltab body =
       body {bodyStms = runReader (mapM replaceInStm $ bodyStms body) (Env coaltab on_inner)}
 
