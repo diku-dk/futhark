@@ -17,8 +17,6 @@
 -- use of the array being updated, because the result lives in the same memory.
 module Futhark.Optimise.ArrayShortCircuiting.LastUse
   ( lastUseSeqMem,
-    lastUsePrg,
-    lastUsePrgGPU,
     lastUseGPUMem,
     LUTabFun,
     LUTabPrg,
@@ -57,14 +55,6 @@ type LastUseM rep a = StateT AliasTab (Reader (LastUseReader rep)) a
 aliasLookup :: VName -> LastUseM rep Names
 aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
-
--- | Perform last-use analysis on a 'Prog' in 'SeqMem'
-lastUsePrg :: Prog (Aliases SeqMem) -> LUTabPrg
-lastUsePrg prg = M.fromList $ map lastUseSeqMem $ progFuns prg
-
--- | Perform last-use analysis on a 'Prog' in 'GPUMem'
-lastUsePrgGPU :: Prog (Aliases GPUMem) -> LUTabPrg
-lastUsePrgGPU prg = M.fromList $ map lastUseGPUMem $ progFuns prg
 
 -- | Perform last-use analysis on a 'FunDef' in 'SeqMem'
 lastUseSeqMem :: FunDef (Aliases SeqMem) -> (Name, LUTabFun)
