@@ -35,6 +35,9 @@ newtype LastUseReader rep = LastUseReader
   { onOp :: Op (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names, Names)
   }
 
+-- | Maps a variable or memory block to its aliases.
+type AliasTab = M.Map VName Names
+
 type LastUseM rep a = StateT AliasTab (Reader (LastUseReader rep)) a
 
 aliasLookup :: VName -> LastUseM rep Names
