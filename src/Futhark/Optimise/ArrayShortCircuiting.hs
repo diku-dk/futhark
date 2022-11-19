@@ -108,11 +108,12 @@ replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
   loop_inits' <- mapM (replaceInFParam . fst) loop_inits
   stms' <- mapM replaceInStm stms
   pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res
-replaceInExp _ e@(Op (Alloc _ _)) = pure e
-replaceInExp _ (Op (Inner i)) = do
-  on_op <- asks onInner
-  Op . Inner <$> on_op i
-replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
+replaceInExp _ (Op op) =
+  case op of
+    Alloc {} -> pure $ Op op
+    (Inner i) -> do
+      on_op <- asks onInner
+      Op . Inner <$> on_op i
 replaceInExp _ e@WithAcc {} = pure e
 replaceInExp _ e@Apply {} = pure e
 
