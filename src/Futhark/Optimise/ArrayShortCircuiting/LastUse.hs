@@ -15,7 +15,15 @@
 -- This pass is different from "Futhark.Analysis.LastUse" in that memory blocks
 -- are used to alias arrays. For instance, an 'Update' will not result in a last
 -- use of the array being updated, because the result lives in the same memory.
-module Futhark.Optimise.ArrayShortCircuiting.LastUse (lastUseSeqMem, lastUsePrg, lastUsePrgGPU, lastUseGPUMem) where
+module Futhark.Optimise.ArrayShortCircuiting.LastUse
+  ( lastUseSeqMem,
+    lastUsePrg,
+    lastUsePrgGPU,
+    lastUseGPUMem,
+    LUTabFun,
+    LUTabPrg,
+  )
+where
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
@@ -26,8 +34,14 @@ import Data.Sequence (Seq (..))
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
-import Futhark.Optimise.ArrayShortCircuiting.DataStructs
+-- import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Util
+
+type LUTabFun = M.Map VName Names
+-- ^ maps a name indentifying a stmt to the last uses in that stmt
+
+type LUTabPrg = M.Map Name LUTabFun
+-- ^ maps function names to last-use tables
 
 -- | 'LastUseReader' allows us to abstract over representations by supplying the
 -- 'onOp' function.
