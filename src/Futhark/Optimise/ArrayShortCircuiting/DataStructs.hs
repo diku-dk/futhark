@@ -8,11 +8,8 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     CoalescedKind (..),
     ArrayMemBound (..),
     AllocTab,
-    AliasTab,
-    LUTabFun,
     CreatesNewArrOp,
     HasMemBlock,
-    LUTabPrg,
     ScalarTab,
     CoalsTab,
     ScopeTab,
@@ -169,15 +166,6 @@ data CoalsEntry = CoalsEntry
 
 type AllocTab = M.Map VName Space
 -- ^ the allocatted memory blocks
-
-type AliasTab = M.Map VName Names
--- ^ maps a variable or memory block to its aliases
-
-type LUTabFun = M.Map VName Names
--- ^ maps a name indentifying a stmt to the last uses in that stmt
-
-type LUTabPrg = M.Map Name LUTabFun
--- ^ maps function names to last-use tables
 
 type ScalarTab = M.Map VName (PrimExp VName)
 -- ^ maps a variable name to its PrimExp scalar expression
