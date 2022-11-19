@@ -87,52 +87,55 @@ emptyBotUpEnv =
 --- Main Coalescing Transformation computes a successful coalescing table    ---
 --------------------------------------------------------------------------------
 
--- | Given a 'FunDef' in 'SegMem' representation, compute the coalescing table
--- by folding over each function.
-mkCoalsTab :: (MonadFreshNames m) => FunDef (Aliases SeqMem) -> m CoalsTab
-mkCoalsTab =
-  mkCoalsTabFun
-    lastUseSeqMem
+-- | Given a 'Prog' in 'SegMem' representation, compute the coalescing table
+-- for each function.
+mkCoalsTab :: (MonadFreshNames m) => Prog (Aliases SeqMem) -> m (M.Map Name CoalsTab)
+mkCoalsTab prog =
+  mkCoalsTabProg
+    (lastUseSeqMem prog)
     (ShortCircuitReader shortCircuitSeqMem)
     (ComputeScalarTableOnOp $ const $ const $ pure mempty)
+    prog
 
--- | Given a 'FunDef' in 'GPUMem' representation, compute the coalescing table
--- by folding over each function.
-mkCoalsTabGPU :: (MonadFreshNames m) => FunDef (Aliases GPUMem) -> m CoalsTab
-mkCoalsTabGPU =
-  mkCoalsTabFun
-    lastUseGPUMem
+-- | Given a 'Prog' in 'GPUMem' representation, compute the coalescing table
+-- for each function.
+mkCoalsTabGPU :: (MonadFreshNames m) => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
+mkCoalsTabGPU prog =
+  mkCoalsTabProg
+    (lastUseGPUMem prog)
     (ShortCircuitReader shortCircuitGPUMem)
     (ComputeScalarTableOnOp computeScalarTableGPUMem)
+    prog
 
 -- | Given a function, compute the coalescing table
-mkCoalsTabFun ::
+mkCoalsTabProg ::
   (MonadFreshNames m, Coalesceable rep inner, FParamInfo rep ~ FParamMem) =>
-  (FunDef (Aliases rep) -> LUTabFun) ->
+  LUTabFun ->
   ShortCircuitReader rep ->
   ComputeScalarTableOnOp rep ->
-  FunDef (Aliases rep) ->
-  m CoalsTab
-mkCoalsTabFun lufun r computeScalarOnOp fun@(FunDef _ _ _ _ fpars body) = do
-  -- First compute last-use information
-  let lutab = lufun fun
-      unique_mems = getUniqueMemFParam fpars
-      scalar_table =
-        runReader
-          ( concatMapM
-              (computeScalarTable $ scopeOf fun <> scopeOf (bodyStms body))
-              (stmsToList $ bodyStms body)
-          )
-          computeScalarOnOp
-      topenv =
-        emptyTopdownEnv
-          { scope = scopeOfFParams fpars,
-            alloc = unique_mems,
-            scalarTable = scalar_table,
-            nonNegatives = foldMap paramSizes fpars
-          }
-      ShortCircuitM m = fixPointCoalesce lutab fpars body topenv
-  modifyNameSource $ runState (runReaderT m r)
+  Prog (Aliases rep) ->
+  m (M.Map Name CoalsTab)
+mkCoalsTabProg lutab r computeScalarOnOp = fmap M.fromList . mapM onFun . progFuns
+  where
+    onFun fun@(FunDef _ _ fname _ fpars body) = do
+      -- First compute last-use information
+      let unique_mems = getUniqueMemFParam fpars
+          scalar_table =
+            runReader
+              ( concatMapM
+                  (computeScalarTable $ scopeOf fun <> scopeOf (bodyStms body))
+                  (stmsToList $ bodyStms body)
+              )
+              computeScalarOnOp
+          topenv =
+            emptyTopdownEnv
+              { scope = scopeOfFParams fpars,
+                alloc = unique_mems,
+                scalarTable = scalar_table,
+                nonNegatives = foldMap paramSizes fpars
+              }
+          ShortCircuitM m = fixPointCoalesce lutab fpars body topenv
+      (fname,) <$> modifyNameSource (runState (runReaderT m r))
 
 paramSizes :: Param FParamMem -> Names
 paramSizes (Param _ _ (MemArray _ shp _ _)) = freeIn shp
