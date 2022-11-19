@@ -57,22 +57,20 @@ aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
 
 -- | Perform last-use analysis on a 'FunDef' in 'SeqMem'
-lastUseSeqMem :: FunDef (Aliases SeqMem) -> (Name, LUTabFun)
-lastUseSeqMem (FunDef _ _ fname _ _ body) =
-  let (res, _) =
-        runReader
-          (evalStateT (lastUseBody body (mempty, mempty)) mempty)
-          (LastUseReader lastUseSeqOp)
-   in (fname, res)
+lastUseSeqMem :: FunDef (Aliases SeqMem) -> LUTabFun
+lastUseSeqMem fd =
+  fst $
+    runReader
+      (evalStateT (lastUseBody (funDefBody fd) (mempty, mempty)) mempty)
+      (LastUseReader lastUseSeqOp)
 
 -- | Perform last-use analysis on a 'FunDef' in 'GPUMem'
-lastUseGPUMem :: FunDef (Aliases GPUMem) -> (Name, LUTabFun)
-lastUseGPUMem (FunDef _ _ fname _ _ body) =
-  let (res, _) =
-        runReader
-          (evalStateT (lastUseBody body (mempty, mempty)) mempty)
-          (LastUseReader lastUseGPUOp)
-   in (fname, res)
+lastUseGPUMem :: FunDef (Aliases GPUMem) -> LUTabFun
+lastUseGPUMem fd =
+  fst $
+    runReader
+      (evalStateT (lastUseBody (funDefBody fd) (mempty, mempty)) mempty)
+      (LastUseReader lastUseGPUOp)
 
 -- | Performing the last-use analysis on a body.
 --
