@@ -1387,6 +1387,9 @@ genSSPointInfoSeqMem _ _ _ _ _ =
 -- The first restriction could be relaxed by trying to match up arrays in the
 -- 'KernelBody' with patterns of the 'SegMap', but the current implementation
 -- should be enough to handle many common cases.
+--
+-- The result of the 'SegMap' is treated as the destination, while the candidate
+-- array from inside the body is treated as the source.
 genSSPointInfoGPUMem ::
   LUTabFun ->
   TopdownEnv GPUMem ->
@@ -1398,33 +1401,33 @@ genSSPointInfoGPUMem
   lutab
   td_env
   scopetab
-  (Pat [PatElem src (_, MemArray src_pt _ _ (ArrayIn src_mem src_ixf))])
+  (Pat [PatElem dst (_, MemArray dst_pt _ _ (ArrayIn dst_mem dst_ixf))])
   (Inner (SegOp (SegMap _ space _ kernel_body)))
-    | (dst, MemBlock _ shp dst_mem dst_ixf) : _ <-
+    | (src, MemBlock _ shp src_mem src_ixf) : _ <-
         mapMaybe getPotentialMapShortCircuit $
           stmsToList $
             kernelBodyStms kernel_body =
-        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, src_pt, shp)]
+        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, dst_pt, shp)]
     where
       iterators = map fst $ unSegSpace space
       frees = freeIn kernel_body
 
-      getPotentialMapShortCircuit (Let (Pat [PatElem x _]) _ (BasicOp (Index dst slc)))
+      getPotentialMapShortCircuit (Let (Pat [PatElem x _]) _ (BasicOp (Index src slc)))
         | Just inds <- sliceIndices slc,
           L.sort inds == L.sort (map Var iterators),
           Just last_uses <- M.lookup x lutab,
-          dst `nameIn` last_uses,
-          Just memblock@(MemBlock dst_pt _ dst_mem dst_ixf) <-
-            getScopeMemInfo dst scopetab,
-          dst_mem `nameIn` last_uses,
+          src `nameIn` last_uses,
+          Just memblock@(MemBlock src_pt _ src_mem src_ixf) <-
+            getScopeMemInfo src scopetab,
+          src_mem `nameIn` last_uses,
           -- The 'alloc' table contains allocated memory blocks, including
           -- unique memory blocks from the enclosing function. It does _not_
           -- include non-unique memory blocks from the enclosing function.
-          dst_mem `M.member` alloc td_env,
-          dst `nameIn` frees,
+          src_mem `M.member` alloc td_env,
+          src `nameIn` frees,
           src_ixf == dst_ixf,
           primBitSize src_pt == primBitSize dst_pt =
-            Just (dst, memblock)
+            Just (src, memblock)
       getPotentialMapShortCircuit _ = Nothing
 genSSPointInfoGPUMem _ _ _ _ _ =
   Nothing
