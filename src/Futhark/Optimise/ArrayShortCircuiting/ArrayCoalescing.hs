@@ -1416,6 +1416,7 @@ genSSPointInfoGPUMem
           dst `nameIn` last_uses,
           Just memblock@(MemBlock dst_pt _ dst_mem dst_ixf) <-
             getScopeMemInfo dst scopetab,
+          dst_mem `nameIn` last_uses,
           -- The 'alloc' table contains allocated memory blocks, including
           -- unique memory blocks from the enclosing function. It does _not_
           -- include non-unique memory blocks from the enclosing function.
