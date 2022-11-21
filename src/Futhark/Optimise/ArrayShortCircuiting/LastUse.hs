@@ -33,6 +33,7 @@ import Data.Sequence (Seq (..))
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
+import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Util
 
 type LUTabFun = M.Map VName Names
@@ -97,7 +98,8 @@ aliasLookup vname =
 lastUseProg ::
   ( LocalScope (Aliases rep) (LastUseM rep),
     Mem rep inner,
-    CanBeAliased (Op rep)
+    CanBeAliased (Op rep),
+    HasMemBlock (Aliases rep)
   ) =>
   Prog (Aliases rep) ->
   LastUseM rep LUTabFun
@@ -116,7 +118,8 @@ lastUseProg prog =
 lastUseFun ::
   ( LocalScope (Aliases rep) (LastUseM rep),
     Mem rep inner,
-    CanBeAliased (Op rep)
+    CanBeAliased (Op rep),
+    HasMemBlock (Aliases rep)
   ) =>
   Names ->
   FunDef (Aliases rep) ->
@@ -143,7 +146,8 @@ lastUseGPUMem = runLastUseM lastUseGPUOp . lastUseProg
 lastUseBody ::
   ( LocalScope (Aliases rep) (LastUseM rep),
     ASTRep rep,
-    FreeIn (OpWithAliases (Op rep))
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep)
   ) =>
   -- | The body of statements
   Body (Aliases rep) ->
@@ -176,7 +180,8 @@ lastUseBody bdy@(Body _ stms result) (lutab, used_nms) =
 lastUseKernelBody ::
   ( LocalScope (Aliases rep) (LastUseM rep),
     CanBeAliased (Op rep),
-    ASTRep rep
+    ASTRep rep,
+    HasMemBlock (Aliases rep)
   ) =>
   -- | The body of statements
   KernelBody (Aliases rep) ->
@@ -200,7 +205,8 @@ lastUseKernelBody bdy@(KernelBody _ stms result) (lutab, used_nms) =
 lastUseStms ::
   ( LocalScope (Aliases rep) (LastUseM rep),
     ASTRep rep,
-    FreeIn (OpWithAliases (Op rep))
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep)
   ) =>
   Stms (Aliases rep) ->
   (LUTabFun, Names) ->
@@ -225,7 +231,8 @@ lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms =
 lastUseStm ::
   ( LocalScope (Aliases rep) (LastUseM rep),
     ASTRep rep,
-    FreeIn (OpWithAliases (Op rep))
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep)
   ) =>
   Stm (Aliases rep) ->
   (LUTabFun, Names) ->
@@ -236,12 +243,20 @@ lastUseStm (Let pat _ e) (lutab, used_nms) = do
   -- (ii) the set of variables lastly used in the current binding.
   -- (iii)  aliased transitive-closure of used names, and
   (lutab', last_uses, used_nms') <- lastUseExp e used_nms
+  sc <- asks scope
+  let lu_mems =
+        namesToList last_uses
+          & mapMaybe (`getScopeMemInfo` sc)
+          & map memName
+          & namesFromList
+          & flip namesSubtract used_nms
+
   -- filter-out the binded names from the set of used variables,
   -- since they go out of scope, and update the last-use table.
   let patnms = patNames pat
       used_nms'' = used_nms' `namesSubtract` namesFromList patnms
       lutab'' =
-        M.union lutab' $ M.insert (head patnms) last_uses lutab
+        M.union lutab' $ M.insert (head patnms) (last_uses <> lu_mems) lutab
   pure (lutab'', used_nms'')
 
 --------------------------------
@@ -250,7 +265,8 @@ lastUseStm (Let pat _ e) (lutab, used_nms) = do
 lastUseExp ::
   ( LocalScope (Aliases rep) (LastUseM rep),
     ASTRep rep,
-    FreeIn (OpWithAliases (Op rep))
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep)
   ) =>
   -- | The expression to analyse
   Exp (Aliases rep) ->
