@@ -155,7 +155,7 @@ generalizeIxfun
   (PatElem vname (MemArray _ _ _ (ArrayIn mem ixf)))
   m@(MemArray pt shp u _) = do
     coaltab <- asks envCoalesceTab
-    if vname `M.member` foldMap vartab coaltab
+    if any (M.member vname . vartab) coaltab
       then
         existentialiseIxFun (map patElemName pat_elems) ixf
           & ReturnsInBlock mem

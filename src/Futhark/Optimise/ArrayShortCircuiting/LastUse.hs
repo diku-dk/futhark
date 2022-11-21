@@ -85,16 +85,6 @@ aliasLookup :: VName -> LastUseM rep Names
 aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
 
--- lastUseProg ::
---   ( Mem rep inner,
---     CanBeAliased (Op rep)
---   ) =>
---   LastUseOp rep ->
---   Prog (Aliases rep) ->
---   LUTabFun
--- lastUseProg onOp prog =
---   runLastUseM onOp (m prog)
-
 lastUseProg ::
   ( LocalScope (Aliases rep) (LastUseM rep),
     Mem rep inner,
@@ -125,9 +115,7 @@ lastUseFun ::
   FunDef (Aliases rep) ->
   LastUseM rep (LUTabFun, Names)
 lastUseFun bound_in_consts f =
-  inScopeOf f $
-    flip lastUseBody (mempty, bound_in_consts) $
-      funDefBody f
+  inScopeOf f $ lastUseBody (funDefBody f) (mempty, bound_in_consts)
 
 -- | Perform last-use analysis on a 'FunDef' in 'SeqMem'
 lastUseSeqMem :: Prog (Aliases SeqMem) -> LUTabFun
@@ -291,32 +279,31 @@ lastUseExp (Match _ cases body _) used_nms = do
   let used_nms' = used_cases <> body_used_nms
   (_, last_used_arrs) <- lastUsedInNames used_nms $ free_in_body <> free_in_cases
   pure (lutab_cases <> lutab', last_used_arrs, used_nms')
-lastUseExp (DoLoop var_ses lf body) used_nms0 =
-  inScopeOf lf $ do
-    free_in_body <- aliasTransitiveClosure $ freeIn body
-    -- compute the aliasing transitive closure of initializers that are not last-uses
-    var_inis <- catMaybes <$> mapM (initHelper (free_in_body <> used_nms0)) var_ses
-    let -- To record last-uses inside the loop body, we call 'lastUseBody' with used-names
-        -- being:  (free_in_body - loop-variants-a) + used_nms0. As such we disable cases b)
-        -- and c) to produce loop-variant last uses inside the loop, and also we prevent
-        -- the free-loop-variables to having last uses inside the loop.
-        free_in_body' = free_in_body `namesSubtract` namesFromList (map fst var_inis)
-        used_nms = used_nms0 <> free_in_body' <> freeIn (bodyResult body)
-    (body_lutab, _) <- lastUseBody body (mempty, used_nms)
+lastUseExp (DoLoop var_ses lf body) used_nms0 = inScopeOf lf $ do
+  free_in_body <- aliasTransitiveClosure $ freeIn body
+  -- compute the aliasing transitive closure of initializers that are not last-uses
+  var_inis <- catMaybes <$> mapM (initHelper (free_in_body <> used_nms0)) var_ses
+  let -- To record last-uses inside the loop body, we call 'lastUseBody' with used-names
+      -- being:  (free_in_body - loop-variants-a) + used_nms0. As such we disable cases b)
+      -- and c) to produce loop-variant last uses inside the loop, and also we prevent
+      -- the free-loop-variables to having last uses inside the loop.
+      free_in_body' = free_in_body `namesSubtract` namesFromList (map fst var_inis)
+      used_nms = used_nms0 <> free_in_body' <> freeIn (bodyResult body)
+  (body_lutab, _) <- lastUseBody body (mempty, used_nms)
 
-    -- add var_inis_a to the body_lutab, i.e., record the last-use of
-    -- initializer in the corresponding loop variant.
-    let lutab_res = body_lutab <> M.fromList var_inis
+  -- add var_inis_a to the body_lutab, i.e., record the last-use of
+  -- initializer in the corresponding loop variant.
+  let lutab_res = body_lutab <> M.fromList var_inis
 
-        -- the result used names are:
-        fpar_nms = namesFromList $ map (identName . paramIdent . fst) var_ses
-        used_nms' = (free_in_body <> freeIn (map snd var_ses)) `namesSubtract` fpar_nms
-        used_nms_res = used_nms0 <> used_nms' <> freeIn (bodyResult body)
+      -- the result used names are:
+      fpar_nms = namesFromList $ map (identName . paramIdent . fst) var_ses
+      used_nms' = (free_in_body <> freeIn (map snd var_ses)) `namesSubtract` fpar_nms
+      used_nms_res = used_nms0 <> used_nms' <> freeIn (bodyResult body)
 
-        -- the last-uses at loop-statement level are the loop free variables that
-        -- do not belong to @used_nms0@; this includes the initializers of b), @lu_ini_b@
-        lu_arrs = used_nms' `namesSubtract` used_nms0
-    pure (lutab_res, lu_arrs, used_nms_res)
+      -- the last-uses at loop-statement level are the loop free variables that
+      -- do not belong to @used_nms0@; this includes the initializers of b), @lu_ini_b@
+      lu_arrs = used_nms' `namesSubtract` used_nms0
+  pure (lutab_res, lu_arrs, used_nms_res)
   where
     initHelper free_and_used (fp, se) = do
       names <- aliasTransitiveClosure $ maybe mempty oneName $ subExpVar se
