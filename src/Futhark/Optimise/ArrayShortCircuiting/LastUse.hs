@@ -214,7 +214,7 @@ lastUseStms ::
   LastUseM rep (LUTabFun, Names)
 lastUseStms Empty (lutab, nms) res_nms = do
   aliases <- concatMapM aliasLookup res_nms
-  pure (lutab, nms <> aliases)
+  pure (lutab, nms <> aliases <> namesFromList res_nms)
 lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms =
   inScopeOf stm $ do
     let extra_alias = case e of
