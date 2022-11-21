@@ -94,7 +94,7 @@ emptyBotUpEnv =
 --- Main Coalescing Transformation computes a successful coalescing table    ---
 --------------------------------------------------------------------------------
 
--- | Given a 'FunDef' in 'SegMem' representation, compute the coalescing table
+-- | Given a 'Prog' in 'SegMem' representation, compute the coalescing table
 -- by folding over each function.
 mkCoalsTab :: (MonadFreshNames m) => Prog (Aliases SeqMem) -> m (M.Map Name CoalsTab)
 mkCoalsTab prog =
@@ -104,7 +104,7 @@ mkCoalsTab prog =
     (ComputeScalarTableOnOp $ const $ const $ pure mempty)
     prog
 
--- | Given a 'FunDef' in 'GPUMem' representation, compute the coalescing table
+-- | Given a 'Prog' in 'GPUMem' representation, compute the coalescing table
 -- by folding over each function.
 mkCoalsTabGPU :: (MonadFreshNames m) => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
 mkCoalsTabGPU prog =
