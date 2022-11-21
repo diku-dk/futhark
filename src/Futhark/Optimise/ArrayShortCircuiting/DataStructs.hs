@@ -103,6 +103,7 @@ data CoalescedKind
     ConcatCoal
   | -- | transitive, i.e., other variables aliased with b.
     TransitiveCoal
+  | MapCoal
 
 -- | Information about a memory block: type, shape, name and ixfun.
 data ArrayMemBound = MemBlock
@@ -207,6 +208,7 @@ instance Pretty CoalescedKind where
   pretty InPlaceCoal = "InPlace"
   pretty ConcatCoal = "Concat"
   pretty TransitiveCoal = "Transitive"
+  pretty MapCoal = "Map"
 
 instance Pretty ArrayMemBound where
   pretty (MemBlock ptp shp m_nm ixfn) =

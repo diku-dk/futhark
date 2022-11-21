@@ -33,6 +33,7 @@ import Data.Sequence (Seq (..))
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.SeqMem
+import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Util
 
 type LUTabFun = M.Map VName Names
@@ -45,41 +46,84 @@ type LastUseOp rep = Op (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names,
 
 -- | 'LastUseReader' allows us to abstract over representations by supplying the
 -- 'onOp' function.
-newtype LastUseReader rep = LastUseReader
-  { onOp :: LastUseOp rep
+data LastUseReader rep = LastUseReader
+  { onOp :: LastUseOp rep,
+    scope :: Scope (Aliases rep)
   }
 
 -- | Maps a variable or memory block to its aliases.
 type AliasTab = M.Map VName Names
 
-type LastUseM rep a = StateT AliasTab (Reader (LastUseReader rep)) a
+newtype LastUseM rep a = LastUseM (StateT AliasTab (Reader (LastUseReader rep)) a)
+  deriving
+    ( Monad,
+      Functor,
+      Applicative,
+      MonadReader (LastUseReader rep),
+      MonadState AliasTab
+    )
+
+instance HasScope (Aliases SeqMem) (LastUseM SeqMem) where
+  askScope = asks scope
+
+instance LocalScope (Aliases SeqMem) (LastUseM SeqMem) where
+  localScope sc (LastUseM m) = LastUseM $ do
+    local (\rd -> rd {scope = scope rd <> sc}) m
+
+instance HasScope (Aliases GPUMem) (LastUseM GPUMem) where
+  askScope = asks scope
+
+instance LocalScope (Aliases GPUMem) (LastUseM GPUMem) where
+  localScope sc (LastUseM m) = LastUseM $ do
+    local (\rd -> rd {scope = scope rd <> sc}) m
+
+runLastUseM :: LastUseOp rep -> LastUseM rep a -> a
+runLastUseM onOp (LastUseM m) =
+  runReader (evalStateT m mempty) (LastUseReader onOp mempty)
 
 aliasLookup :: VName -> LastUseM rep Names
 aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
 
-lastUseProg :: (CanBeAliased (Op rep), Mem rep inner) => LastUseOp rep -> Prog (Aliases rep) -> LUTabFun
-lastUseProg onOp prog =
-  runReader (evalStateT m mempty) (LastUseReader onOp)
-  where
-    m = do
-      let bound_in_consts =
-            progConsts prog
-              & concatMap (patNames . stmPat)
-              & namesFromList
-          consts = progConsts prog
-          funs = progFuns prog
-      (consts_lu, _) <- lastUseStms consts mempty mempty
-      (lus, _) <- mconcat <$> mapM (flip lastUseBody (mempty, bound_in_consts) . funDefBody) funs
-      pure $ consts_lu <> lus
+lastUseProg ::
+  ( LocalScope (Aliases rep) (LastUseM rep),
+    Mem rep inner,
+    CanBeAliased (Op rep),
+    HasMemBlock (Aliases rep)
+  ) =>
+  Prog (Aliases rep) ->
+  LastUseM rep LUTabFun
+lastUseProg prog =
+  let bound_in_consts =
+        progConsts prog
+          & concatMap (patNames . stmPat)
+          & namesFromList
+      consts = progConsts prog
+      funs = progFuns prog
+   in inScopeOf consts $ do
+        (consts_lu, _) <- lastUseStms consts mempty mempty
+        (lus, _) <- mconcat <$> mapM (lastUseFun bound_in_consts) funs
+        pure $ consts_lu <> lus
+
+lastUseFun ::
+  ( LocalScope (Aliases rep) (LastUseM rep),
+    Mem rep inner,
+    CanBeAliased (Op rep),
+    HasMemBlock (Aliases rep)
+  ) =>
+  Names ->
+  FunDef (Aliases rep) ->
+  LastUseM rep (LUTabFun, Names)
+lastUseFun bound_in_consts f =
+  inScopeOf f $ lastUseBody (funDefBody f) (mempty, bound_in_consts)
 
 -- | Perform last-use analysis on a 'FunDef' in 'SeqMem'
 lastUseSeqMem :: Prog (Aliases SeqMem) -> LUTabFun
-lastUseSeqMem = lastUseProg lastUseSeqOp
+lastUseSeqMem = runLastUseM lastUseSeqOp . lastUseProg
 
 -- | Perform last-use analysis on a 'FunDef' in 'GPUMem'
 lastUseGPUMem :: Prog (Aliases GPUMem) -> LUTabFun
-lastUseGPUMem = lastUseProg lastUseGPUOp
+lastUseGPUMem = runLastUseM lastUseGPUOp . lastUseProg
 
 -- | Performing the last-use analysis on a body.
 --
@@ -88,7 +132,11 @@ lastUseGPUMem = lastUseProg lastUseGPUOp
 -- difference between the free-variables in that stmt and the set of variables
 -- known to be used after that statement.
 lastUseBody ::
-  (ASTRep rep, FreeIn (OpWithAliases (Op rep))) =>
+  ( LocalScope (Aliases rep) (LastUseM rep),
+    ASTRep rep,
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep)
+  ) =>
   -- | The body of statements
   Body (Aliases rep) ->
   -- | The current last-use table, tupled with the known set of already used names
@@ -97,18 +145,19 @@ lastUseBody ::
   --      (i) an updated last-use table,
   --     (ii) an updated set of used names (including the binding).
   LastUseM rep (LUTabFun, Names)
-lastUseBody bdy@(Body _ stms result) (lutab, used_nms) = do
+lastUseBody bdy@(Body _ stms result) (lutab, used_nms) =
   -- perform analysis bottom-up in bindings: results are known to be used,
   -- hence they are added to the used_nms set.
-  (lutab', _) <-
-    lastUseStms stms (lutab, used_nms) $
-      namesToList $
-        freeIn $
-          map resSubExp result
-  -- Clean up the used names by recomputing the aliasing transitive-closure
-  -- of the free names in body based on the current alias table @alstab@.
-  used_in_body <- aliasTransitiveClosure $ freeIn bdy
-  pure (lutab', used_nms <> used_in_body)
+  inScopeOf stms $ do
+    (lutab', _) <-
+      lastUseStms stms (lutab, used_nms) $
+        namesToList $
+          freeIn $
+            map resSubExp result
+    -- Clean up the used names by recomputing the aliasing transitive-closure
+    -- of the free names in body based on the current alias table @alstab@.
+    used_in_body <- aliasTransitiveClosure $ freeIn bdy
+    pure (lutab', used_nms <> used_in_body)
 
 -- | Performing the last-use analysis on a body.
 --
@@ -117,7 +166,11 @@ lastUseBody bdy@(Body _ stms result) (lutab, used_nms) = do
 -- difference between the free-variables in that stmt and the set of variables
 -- known to be used after that statement.
 lastUseKernelBody ::
-  (CanBeAliased (Op rep), ASTRep rep) =>
+  ( LocalScope (Aliases rep) (LastUseM rep),
+    CanBeAliased (Op rep),
+    ASTRep rep,
+    HasMemBlock (Aliases rep)
+  ) =>
   -- | The body of statements
   KernelBody (Aliases rep) ->
   -- | The current last-use table, tupled with the known set of already used names
@@ -126,62 +179,83 @@ lastUseKernelBody ::
   --      (i) an updated last-use table,
   --     (ii) an updated set of used names (including the binding).
   LastUseM rep (LUTabFun, Names)
-lastUseKernelBody bdy@(KernelBody _ stms result) (lutab, used_nms) = do
-  -- perform analysis bottom-up in bindings: results are known to be used,
-  -- hence they are added to the used_nms set.
-  (lutab', _) <-
-    lastUseStms stms (lutab, used_nms) $ namesToList $ freeIn result
-  -- Clean up the used names by recomputing the aliasing transitive-closure
-  -- of the free names in body based on the current alias table @alstab@.
-  used_in_body <- aliasTransitiveClosure $ freeIn bdy
-  pure (lutab', used_nms <> used_in_body)
+lastUseKernelBody bdy@(KernelBody _ stms result) (lutab, used_nms) =
+  inScopeOf stms $ do
+    -- perform analysis bottom-up in bindings: results are known to be used,
+    -- hence they are added to the used_nms set.
+    (lutab', _) <-
+      lastUseStms stms (lutab, used_nms) $ namesToList $ freeIn result
+    -- Clean up the used names by recomputing the aliasing transitive-closure
+    -- of the free names in body based on the current alias table @alstab@.
+    used_in_body <- aliasTransitiveClosure $ freeIn bdy
+    pure (lutab', used_nms <> used_in_body)
 
 lastUseStms ::
-  (ASTRep rep, FreeIn (OpWithAliases (Op rep))) =>
+  ( LocalScope (Aliases rep) (LastUseM rep),
+    ASTRep rep,
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep)
+  ) =>
   Stms (Aliases rep) ->
   (LUTabFun, Names) ->
   [VName] ->
   LastUseM rep (LUTabFun, Names)
 lastUseStms Empty (lutab, nms) res_nms = do
   aliases <- concatMapM aliasLookup res_nms
-  pure (lutab, nms <> aliases)
-lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms = do
-  let extra_alias = case e of
-        BasicOp (Update _ old _ _) -> oneName old
-        BasicOp (FlatUpdate old _ _) -> oneName old
-        _ -> mempty
-  -- We build up aliases top-down
-  updateAliasing extra_alias pat
-  -- But compute last use bottom-up
-  (lutab', nms') <- lastUseStms stms (lutab, nms) res_nms
-  (lutab'', nms'') <- lastUseStm stm (lutab', nms')
-  pure (lutab'', nms'')
+  pure (lutab, nms <> aliases <> namesFromList res_nms)
+lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms =
+  inScopeOf stm $ do
+    let extra_alias = case e of
+          BasicOp (Update _ old _ _) -> oneName old
+          BasicOp (FlatUpdate old _ _) -> oneName old
+          _ -> mempty
+    -- We build up aliases top-down
+    updateAliasing extra_alias pat
+    -- But compute last use bottom-up
+    (lutab', nms') <- lastUseStms stms (lutab, nms) res_nms
+    (lutab'', nms'') <- lastUseStm stm (lutab', nms')
+    pure (lutab'', nms'')
 
 lastUseStm ::
-  (ASTRep rep, FreeIn (OpWithAliases (Op rep))) =>
+  ( LocalScope (Aliases rep) (LastUseM rep),
+    ASTRep rep,
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep)
+  ) =>
   Stm (Aliases rep) ->
   (LUTabFun, Names) ->
   LastUseM rep (LUTabFun, Names)
-lastUseStm (Let pat _ e) (lutab, used_nms) =
-  do
-    -- analyse the expression and get the
-    --  (i)  a new last-use table (in case the @e@ contains bodies of stmts)
-    -- (ii) the set of variables lastly used in the current binding.
-    -- (iii)  aliased transitive-closure of used names, and
-    (lutab', last_uses, used_nms') <- lastUseExp e used_nms
-    -- filter-out the binded names from the set of used variables,
-    -- since they go out of scope, and update the last-use table.
-    let patnms = patNames pat
-        used_nms'' = used_nms' `namesSubtract` namesFromList patnms
-        lutab'' =
-          M.union lutab' $ M.insert (head patnms) last_uses lutab
-    pure (lutab'', used_nms'')
+lastUseStm (Let pat _ e) (lutab, used_nms) = do
+  -- analyse the expression and get the
+  --  (i)  a new last-use table (in case the @e@ contains bodies of stmts)
+  -- (ii) the set of variables lastly used in the current binding.
+  -- (iii)  aliased transitive-closure of used names, and
+  (lutab', last_uses, used_nms') <- lastUseExp e used_nms
+  sc <- asks scope
+  let lu_mems =
+        namesToList last_uses
+          & mapMaybe (`getScopeMemInfo` sc)
+          & map memName
+          & namesFromList
+          & flip namesSubtract used_nms
+
+  -- filter-out the binded names from the set of used variables,
+  -- since they go out of scope, and update the last-use table.
+  let patnms = patNames pat
+      used_nms'' = used_nms' `namesSubtract` namesFromList patnms
+      lutab'' =
+        M.union lutab' $ M.insert (head patnms) (last_uses <> lu_mems) lutab
+  pure (lutab'', used_nms'')
 
 --------------------------------
 
 -- | Last-Use Analysis for an expression.
 lastUseExp ::
-  (ASTRep rep, FreeIn (OpWithAliases (Op rep))) =>
+  ( LocalScope (Aliases rep) (LastUseM rep),
+    ASTRep rep,
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep)
+  ) =>
   -- | The expression to analyse
   Exp (Aliases rep) ->
   -- | The set of used names "after" this expression
@@ -205,7 +279,7 @@ lastUseExp (Match _ cases body _) used_nms = do
   let used_nms' = used_cases <> body_used_nms
   (_, last_used_arrs) <- lastUsedInNames used_nms $ free_in_body <> free_in_cases
   pure (lutab_cases <> lutab', last_used_arrs, used_nms')
-lastUseExp (DoLoop var_ses _ body) used_nms0 = do
+lastUseExp (DoLoop var_ses lf body) used_nms0 = inScopeOf lf $ do
   free_in_body <- aliasTransitiveClosure $ freeIn body
   -- compute the aliasing transitive closure of initializers that are not last-uses
   var_inis <- catMaybes <$> mapM (initHelper (free_in_body <> used_nms0)) var_ses
@@ -283,7 +357,7 @@ lastUseSegBinOp sbos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper sbos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
   where
-    helper (SegBinOp _ (Lambda _ body _) neutral shp) = do
+    helper (SegBinOp _ l@(Lambda _ body _) neutral shp) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn neutral <> freeIn shp
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
@@ -293,7 +367,7 @@ lastUseHistOp hos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper hos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
   where
-    helper (HistOp shp rf dest neutral shp' (Lambda _ body _)) = do
+    helper (HistOp shp rf dest neutral shp' l@(Lambda _ body _)) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn shp <> freeIn rf <> freeIn dest <> freeIn neutral <> freeIn shp'
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
