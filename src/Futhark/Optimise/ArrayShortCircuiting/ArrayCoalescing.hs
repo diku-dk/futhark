@@ -49,8 +49,15 @@ newtype ComputeScalarTableOnOp rep = ComputeScalarTableOnOp
 
 type ScalarTableM rep a = Reader (ComputeScalarTableOnOp rep) a
 
-newtype ShortCircuitReader rep = ShortCircuitReader
-  { onOp :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases rep) -> TopdownEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv
+data ShortCircuitReader rep = ShortCircuitReader
+  { onOp :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases rep) -> TopdownEnv rep -> BotUpEnv -> ShortCircuitM rep BotUpEnv,
+    ssPointFromOp ::
+      LUTabFun ->
+      TopdownEnv rep ->
+      ScopeTab rep ->
+      Pat (VarAliases, LetDecMem) ->
+      Op (Aliases rep) ->
+      Maybe [SSPointInfo]
   }
 
 newtype ShortCircuitM rep a = ShortCircuitM (ReaderT (ShortCircuitReader rep) (State VNameSource) a)
@@ -88,22 +95,22 @@ emptyBotUpEnv =
 --------------------------------------------------------------------------------
 
 -- | Given a 'Prog' in 'SegMem' representation, compute the coalescing table
--- for each function.
+-- by folding over each function.
 mkCoalsTab :: (MonadFreshNames m) => Prog (Aliases SeqMem) -> m (M.Map Name CoalsTab)
 mkCoalsTab prog =
   mkCoalsTabProg
     (lastUseSeqMem prog)
-    (ShortCircuitReader shortCircuitSeqMem)
+    (ShortCircuitReader shortCircuitSeqMem genSSPointInfoSeqMem)
     (ComputeScalarTableOnOp $ const $ const $ pure mempty)
     prog
 
 -- | Given a 'Prog' in 'GPUMem' representation, compute the coalescing table
--- for each function.
+-- by folding over each function.
 mkCoalsTabGPU :: (MonadFreshNames m) => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
 mkCoalsTabGPU prog =
   mkCoalsTabProg
     (lastUseGPUMem prog)
-    (ShortCircuitReader shortCircuitGPUMem)
+    (ShortCircuitReader shortCircuitGPUMem genSSPointInfoGPUMem)
     (ComputeScalarTableOnOp computeScalarTableGPUMem)
     prog
 
@@ -535,7 +542,7 @@ fullSlice shp (Slice slc) =
   Slice $ slc ++ map (\d -> DimSlice 0 d 1) (drop (length slc) shp)
 
 fixPointCoalesce ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   LUTabFun ->
   [Param FParamMem] ->
   Body (Aliases rep) ->
@@ -596,7 +603,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
 
 -- | Perform short-circuiting on 'Stms'.
 mkCoalsTabStms ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   LUTabFun ->
   Stms (Aliases rep) ->
   TopdownEnv rep ->
@@ -639,7 +646,7 @@ mkCoalsTabStms lutab stms0 = traverseStms stms0
 --                          then the checks should be extended to the actual
 --                          array-creation points.
 mkCoalsTabStm ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   LUTabFun ->
   Stm (Aliases rep) ->
   TopdownEnv rep ->
@@ -1040,7 +1047,7 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
 
 -- The case of in-place update:
 --   @let x' = x with slice <- elm@
-mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update safety x _ _elm))) td_env bu_env
+mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ (BasicOp (Update safety x _ _elm))) td_env bu_env
   | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
       do
         -- (a) filter by the 3rd safety for @elm@ and @x'@
@@ -1068,14 +1075,14 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (Update safety x _ _elm
                         _ ->
                           markFailedCoal (actv, inhbt) m_x
 
-            -- (c) this stm is also a potential source for coalescing, so process it
-            actv'' = if safety == Unsafe then mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt' else actv'
+        -- (c) this stm is also a potential source for coalescing, so process it
+        actv'' <- if safety == Unsafe then mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} bu_env {activeCoals = actv'} else pure actv'
         pure $
           bu_env {activeCoals = actv'', inhibit = inhbt'}
 
 -- The case of flat in-place update:
 --   @let x' = x with flat-slice <- elm@
-mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (FlatUpdate x _ _elm))) td_env bu_env
+mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ (BasicOp (FlatUpdate x _ _elm))) td_env bu_env
   | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
       do
         -- (a) filter by the 3rd safety for @elm@ and @x'@
@@ -1105,18 +1112,25 @@ mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ e@(BasicOp (FlatUpdate x _ _elm)))
                         _ ->
                           markFailedCoal (actv, inhbt) m_x
 
-            -- (c) this stm is also a potential source for coalescing, so process it
-            actv'' = mkCoalsHelper3PatternMatch pat e lutab td_env (successCoals bu_env) actv' inhbt'
+        -- (c) this stm is also a potential source for coalescing, so process it
+        actv'' <- mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} bu_env {activeCoals = actv'}
         pure $
           bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
 mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
   error $ "In ArrayCoalescing.hs, fun mkCoalsTabStm, illegal pattern for in-place update: " ++ show pat
 -- default handling
-mkCoalsTabStm lutab (Let pat _ (Op op)) td_env bu_env = do
+mkCoalsTabStm lutab stm@(Let pat _ (Op op)) td_env bu_env = do
   -- Process body
   on_op <- asks onOp
-  on_op lutab pat op td_env bu_env
+  activeCoals' <-
+    mkCoalsHelper3PatternMatch
+      stm
+      lutab
+      td_env
+      bu_env
+  let bu_env' = bu_env {activeCoals = activeCoals'}
+  on_op lutab pat op td_env bu_env'
 mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
   --   i) Filter @activeCoals@ by the 3rd safety condition:
   --      this is now relaxed by use of LMAD eqs:
@@ -1135,8 +1149,8 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
       ((activeCoals'', inhibit''), successCoals') =
         foldl (foldfun safe_4) ((activeCoals', inhibit'), successCoals bu_env) (getArrMemAssoc pat)
 
-      -- iii) record a potentially coalesced statement in @activeCoals@
-      activeCoals''' = mkCoalsHelper3PatternMatch pat e lutab td_env successCoals' activeCoals'' (inhibited td_env)
+  -- iii) record a potentially coalesced statement in @activeCoals@
+  activeCoals''' <- mkCoalsHelper3PatternMatch stm lutab td_env bu_env {successCoals = successCoals', activeCoals = activeCoals''}
   pure bu_env {activeCoals = activeCoals''', inhibit = inhibit'', successCoals = successCoals'}
   where
     foldfun safe_4 ((a_acc, inhb), s_acc) (b, MemBlock tp shp mb _b_indfun) =
@@ -1247,22 +1261,20 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
 -- |   Pattern matches a potentially coalesced statement and
 --     records a new association in @activeCoals@
 mkCoalsHelper3PatternMatch ::
-  HasMemBlock (Aliases rep) =>
-  Pat (VarAliases, LetDecMem) ->
-  Exp (Aliases rep) ->
+  Coalesceable rep inner =>
+  Stm (Aliases rep) ->
   LUTabFun ->
   TopdownEnv rep ->
-  CoalsTab ->
-  CoalsTab ->
-  InhibitTab ->
-  CoalsTab
-mkCoalsHelper3PatternMatch pat e lutab td_env _ activeCoals_tab _
-  | Nothing <- genCoalStmtInfo lutab (scope td_env) pat e =
-      activeCoals_tab
-mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab inhibit_tab
-  | Just clst <- genCoalStmtInfo lutab (scope td_env) pat e =
-      foldl processNewCoalesce activeCoals_tab clst
+  BotUpEnv ->
+  ShortCircuitM rep CoalsTab
+mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
+  clst <- genCoalStmtInfo lutab td_env (scope td_env) stm
+  case clst of
+    Nothing -> pure activeCoals_tab
+    Just clst' -> pure $ foldl processNewCoalesce activeCoals_tab clst'
   where
+    successCoals_tab = successCoals bu_env
+    activeCoals_tab = activeCoals bu_env
     processNewCoalesce acc (knd, alias_fn, x, m_x, ind_x, b, m_b, _, tp_b, shp_b) =
       -- test whether we are in a transitive coalesced case, i.e.,
       --      @let b = scratch ...@
@@ -1289,18 +1301,18 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                  in (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0)
           success0 = IxFun.hasOneLmad ind_yx
           m_b_aliased_m_yx = areAnyAliased td_env m_b [m_yx] -- m_b \= m_yx
-       in case (success0, not m_b_aliased_m_yx, isInScope td_env m_yx) of -- nameIn m_yx (alloc td_env)
-            (True, True, True) ->
-              -- Finally update the @activeCoals@ table with a fresh
-              --   binding for @m_b@; if such one exists then overwrite.
-              -- Also, add all variables from the alias chain of @b@ to
-              --   @vartab@, for example, in the case of a sequence:
-              --   @ b0 = if cond then ... else ... @
-              --   @ b1 = alias0 b0 @
-              --   @ b  = alias1 b1 @
-              --   @ x[j] = b @
-              -- Then @b1@ and @b0@ should also be added to @vartab@ if
-              --   @alias1@ and @alias0@ are invertible, otherwise fail early!
+       in if success0 && not m_b_aliased_m_yx && isInScope td_env m_yx -- nameIn m_yx (alloc td_env)
+      -- Finally update the @activeCoals@ table with a fresh
+      --   binding for @m_b@; if such one exists then overwrite.
+      -- Also, add all variables from the alias chain of @b@ to
+      --   @vartab@, for example, in the case of a sequence:
+      --   @ b0 = if cond then ... else ... @
+      --   @ b1 = alias0 b0 @
+      --   @ b  = alias1 b1 @
+      --   @ x[j] = b @
+      -- Then @b1@ and @b0@ should also be added to @vartab@ if
+      --   @alias1@ and @alias0@ are invertible, otherwise fail early!
+            then
               let mem_info = Coalesced knd (MemBlock tp_b shp_b m_yx ind_yx) M.empty
                   opts' =
                     if m_yx == m_x
@@ -1309,7 +1321,7 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                   vtab = M.singleton b mem_info
                   mvtab = addInvAliassesVarTab td_env vtab b
 
-                  is_inhibited = case M.lookup m_b inhibit_tab of
+                  is_inhibited = case M.lookup m_b $ inhibited td_env of
                     Just nms -> m_yx `nameIn` nms
                     Nothing -> False
                in case (is_inhibited, mvtab) of
@@ -1326,30 +1338,120 @@ mkCoalsHelper3PatternMatch pat e lutab td_env successCoals_tab activeCoals_tab i
                               opts'
                               mempty
                        in M.insert m_b coal_etry acc
-            _ -> acc
-mkCoalsHelper3PatternMatch _ _ _ _ _ _ _ =
-  error "In ArrayCoalescing.hs, fun mkCoalsHelper3PatternMatch: Unreachable!!!"
+            else acc
+
+-- | Information about a particular short-circuit point
+type SSPointInfo =
+  ( CoalescedKind,
+    IxFun -> IxFun,
+    VName,
+    VName,
+    IxFun,
+    VName,
+    VName,
+    IxFun,
+    PrimType,
+    Shape
+  )
+
+-- | Given an 'Op', return a list of potential short-circuit points
+genSSPointInfoSeqMem ::
+  LUTabFun ->
+  TopdownEnv SeqMem ->
+  ScopeTab SeqMem ->
+  Pat (VarAliases, LetDecMem) ->
+  Op (Aliases SeqMem) ->
+  Maybe [SSPointInfo]
+genSSPointInfoSeqMem _ _ _ _ _ =
+  Nothing
+
+-- | Given an 'Op', return a list of potential short-circuit points
+--
+-- For 'SegOp', we currently only handle 'SegMap', and only under the following
+-- circumstances:
+--
+--  1. The 'SegMap' has only one return/pattern value.
+--
+--  2. The 'KernelBody' contains an 'Index' statement that is indexing an array using
+--  only the values from the 'SegSpace'.
+--
+--  3. The array being indexed is last-used in that statement, is free in the
+--  'SegMap', is unique or has been recently allocated (specifically, it should
+--  not be a non-unique argument to the enclosing function), has elements with
+--  the same bit-size as the pattern elements, and has the exact same 'IxFun' as
+--  the pattern of the 'SegMap' statement.
+--
+-- There can be multiple candidate arrays, but the current implementation will
+-- always just try the first one.
+--
+-- The first restriction could be relaxed by trying to match up arrays in the
+-- 'KernelBody' with patterns of the 'SegMap', but the current implementation
+-- should be enough to handle many common cases.
+--
+-- The result of the 'SegMap' is treated as the destination, while the candidate
+-- array from inside the body is treated as the source.
+genSSPointInfoGPUMem ::
+  LUTabFun ->
+  TopdownEnv GPUMem ->
+  ScopeTab GPUMem ->
+  Pat (VarAliases, LetDecMem) ->
+  Op (Aliases GPUMem) ->
+  Maybe [SSPointInfo]
+genSSPointInfoGPUMem
+  lutab
+  td_env
+  scopetab
+  (Pat [PatElem dst (_, MemArray dst_pt _ _ (ArrayIn dst_mem dst_ixf))])
+  (Inner (SegOp (SegMap _ space _ kernel_body)))
+    | (src, MemBlock _ shp src_mem src_ixf) : _ <-
+        mapMaybe getPotentialMapShortCircuit $
+          stmsToList $
+            kernelBodyStms kernel_body =
+        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, dst_pt, shp)]
+    where
+      iterators = map fst $ unSegSpace space
+      frees = freeIn kernel_body
+
+      getPotentialMapShortCircuit (Let (Pat [PatElem x _]) _ (BasicOp (Index src slc)))
+        | Just inds <- sliceIndices slc,
+          L.sort inds == L.sort (map Var iterators),
+          Just last_uses <- M.lookup x lutab,
+          src `nameIn` last_uses,
+          Just memblock@(MemBlock src_pt _ src_mem src_ixf) <-
+            getScopeMemInfo src scopetab,
+          src_mem `nameIn` last_uses,
+          -- The 'alloc' table contains allocated memory blocks, including
+          -- unique memory blocks from the enclosing function. It does _not_
+          -- include non-unique memory blocks from the enclosing function.
+          src_mem `M.member` alloc td_env,
+          src `nameIn` frees,
+          src_ixf == dst_ixf,
+          primBitSize src_pt == primBitSize dst_pt =
+            Just (src, memblock)
+      getPotentialMapShortCircuit _ = Nothing
+genSSPointInfoGPUMem _ _ _ _ _ =
+  Nothing
 
 genCoalStmtInfo ::
-  HasMemBlock (Aliases rep) =>
+  Coalesceable rep inner =>
   LUTabFun ->
+  TopdownEnv rep ->
   ScopeTab rep ->
-  Pat (VarAliases, LetDecMem) ->
-  Exp (Aliases rep) ->
-  Maybe [(CoalescedKind, IxFun -> IxFun, VName, VName, IxFun, VName, VName, IxFun, PrimType, Shape)]
+  Stm (Aliases rep) ->
+  ShortCircuitM rep (Maybe [SSPointInfo])
 -- CASE a) @let x <- copy(b^{lu})@
-genCoalStmtInfo lutab scopetab pat (BasicOp (Copy b))
+genCoalStmtInfo lutab _ scopetab (Let pat _ (BasicOp (Copy b)))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
-      case (M.lookup x lutab, getScopeMemInfo b scopetab) of
+      pure $ case (M.lookup x lutab, getScopeMemInfo b scopetab) of
         (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
           if b `notNameIn` last_uses
             then Nothing
             else Just [(CopyCoal, id, x, m_x, ind_x, b, m_b, ind_b, tpb, shpb)]
         _ -> Nothing
 -- CASE c) @let x[i] = b^{lu}@
-genCoalStmtInfo lutab scopetab pat (BasicOp (Update _ x slice_x (Var b)))
+genCoalStmtInfo lutab _ scopetab (Let pat _ (BasicOp (Update _ x slice_x (Var b))))
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
-      case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
+      pure $ case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
         (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
           if b `notNameIn` last_uses
             then Nothing
@@ -1360,9 +1462,9 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Update _ x slice_x (Var b)))
     updateIndFunSlice ind_fun slc_x =
       let slc_x' = map (fmap pe64) $ unSlice slc_x
        in IxFun.slice ind_fun $ Slice slc_x'
-genCoalStmtInfo lutab scopetab pat (BasicOp (FlatUpdate x slice_x b))
+genCoalStmtInfo lutab _ scopetab (Let pat _ (BasicOp (FlatUpdate x slice_x b)))
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
-      case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
+      pure $ case (M.lookup x' lutab, getScopeMemInfo b scopetab) of
         (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
           if b `notNameIn` last_uses
             then Nothing
@@ -1374,9 +1476,9 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (FlatUpdate x slice_x b))
       IxFun.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
 
 -- CASE b) @let x = concat(a, b^{lu})@
-genCoalStmtInfo lutab scopetab pat (BasicOp (Concat concat_dim (b0 :| bs) _))
+genCoalStmtInfo lutab _ scopetab (Let pat _ (BasicOp (Concat concat_dim (b0 :| bs) _)))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
-      case M.lookup x lutab of
+      pure $ case M.lookup x lutab of
         Nothing -> Nothing
         Just last_uses ->
           let zero = pe64 $ intConst Int64 0
@@ -1402,8 +1504,13 @@ genCoalStmtInfo lutab scopetab pat (BasicOp (Concat concat_dim (b0 :| bs) _))
                     _ -> (acc, offs, False)
               (res, _, _) = foldl markConcatParts ([], zero, True) (b0 : bs)
            in if null res then Nothing else Just res
--- CASE other than a), b), or c) not supported
-genCoalStmtInfo _ _ _ _ = Nothing
+-- case d) short-circuit points from ops. For instance, the result of a segmap
+-- can be considered a short-circuit point.
+genCoalStmtInfo lutab td_env scopetab (Let pat _ (Op op)) = do
+  ss_op <- asks ssPointFromOp
+  pure $ ss_op lutab td_env scopetab pat op
+-- CASE other than a), b), c), or d) not supported
+genCoalStmtInfo _ _ _ _ = pure Nothing
 
 data MemBodyResult = MemBodyResult
   { patMem :: VName,
@@ -1500,7 +1607,7 @@ mkSubsTab pat res =
     mki64subst _ = Nothing
 
 computeScalarTable ::
-  (Coalesceable rep inner) =>
+  Coalesceable rep inner =>
   ScopeTab rep ->
   Stm (Aliases rep) ->
   ScalarTableM rep (M.Map VName (PrimExp VName))
