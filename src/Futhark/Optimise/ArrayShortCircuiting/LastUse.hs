@@ -1,6 +1,5 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Last use analysis for array short circuiting
 --
@@ -18,6 +17,7 @@
 module Futhark.Optimise.ArrayShortCircuiting.LastUse
   ( lastUseSeqMem,
     lastUseGPUMem,
+    lastUseMCMem,
     LUTabFun,
     LUTabPrg,
   )
@@ -32,6 +32,9 @@ import Data.Maybe
 import Data.Sequence (Seq (..))
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
+import Futhark.IR.GPUMem qualified as GPU
+import Futhark.IR.MCMem
+import Futhark.IR.MCMem qualified as MC
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Util
@@ -63,19 +66,26 @@ newtype LastUseM rep a = LastUseM (StateT AliasTab (Reader (LastUseReader rep)) 
       MonadState AliasTab
     )
 
-instance HasScope (Aliases SeqMem) (LastUseM SeqMem) where
+instance
+  (RepTypes rep, CanBeAliased (Op rep)) =>
+  HasScope (Aliases rep) (LastUseM rep)
+  where
   askScope = asks scope
 
-instance LocalScope (Aliases SeqMem) (LastUseM SeqMem) where
+instance
+  (RepTypes rep, CanBeAliased (Op rep)) =>
+  LocalScope (Aliases rep) (LastUseM rep)
+  where
   localScope sc (LastUseM m) = LastUseM $ do
     local (\rd -> rd {scope = scope rd <> sc}) m
 
-instance HasScope (Aliases GPUMem) (LastUseM GPUMem) where
-  askScope = asks scope
-
-instance LocalScope (Aliases GPUMem) (LastUseM GPUMem) where
-  localScope sc (LastUseM m) = LastUseM $ do
-    local (\rd -> rd {scope = scope rd <> sc}) m
+type Constraints rep =
+  ( LocalScope (Aliases rep) (LastUseM rep),
+    ASTRep rep,
+    FreeIn (OpWithAliases (Op rep)),
+    HasMemBlock (Aliases rep),
+    CanBeAliased (Op rep)
+  )
 
 runLastUseM :: LastUseOp rep -> LastUseM rep a -> a
 runLastUseM onOp (LastUseM m) =
@@ -86,11 +96,7 @@ aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
 
 lastUseProg ::
-  ( LocalScope (Aliases rep) (LastUseM rep),
-    Mem rep inner,
-    CanBeAliased (Op rep),
-    HasMemBlock (Aliases rep)
-  ) =>
+  Constraints rep =>
   Prog (Aliases rep) ->
   LastUseM rep LUTabFun
 lastUseProg prog =
@@ -106,24 +112,24 @@ lastUseProg prog =
         pure $ consts_lu <> lus
 
 lastUseFun ::
-  ( LocalScope (Aliases rep) (LastUseM rep),
-    Mem rep inner,
-    CanBeAliased (Op rep),
-    HasMemBlock (Aliases rep)
-  ) =>
+  Constraints rep =>
   Names ->
   FunDef (Aliases rep) ->
   LastUseM rep (LUTabFun, Names)
 lastUseFun bound_in_consts f =
   inScopeOf f $ lastUseBody (funDefBody f) (mempty, bound_in_consts)
 
--- | Perform last-use analysis on a 'FunDef' in 'SeqMem'
+-- | Perform last-use analysis on a 'Prog' in 'SeqMem'
 lastUseSeqMem :: Prog (Aliases SeqMem) -> LUTabFun
 lastUseSeqMem = runLastUseM lastUseSeqOp . lastUseProg
 
--- | Perform last-use analysis on a 'FunDef' in 'GPUMem'
+-- | Perform last-use analysis on a 'Prog' in 'GPUMem'
 lastUseGPUMem :: Prog (Aliases GPUMem) -> LUTabFun
-lastUseGPUMem = runLastUseM lastUseGPUOp . lastUseProg
+lastUseGPUMem = runLastUseM (lastUseMemOp lastUseGPUOp) . lastUseProg
+
+-- | Perform last-use analysis on a 'Prog' in 'MCMem'
+lastUseMCMem :: Prog (Aliases MCMem) -> LUTabFun
+lastUseMCMem = runLastUseM (lastUseMemOp lastUseMCOp) . lastUseProg
 
 -- | Performing the last-use analysis on a body.
 --
@@ -132,11 +138,7 @@ lastUseGPUMem = runLastUseM lastUseGPUOp . lastUseProg
 -- difference between the free-variables in that stmt and the set of variables
 -- known to be used after that statement.
 lastUseBody ::
-  ( LocalScope (Aliases rep) (LastUseM rep),
-    ASTRep rep,
-    FreeIn (OpWithAliases (Op rep)),
-    HasMemBlock (Aliases rep)
-  ) =>
+  Constraints rep =>
   -- | The body of statements
   Body (Aliases rep) ->
   -- | The current last-use table, tupled with the known set of already used names
@@ -166,11 +168,7 @@ lastUseBody bdy@(Body _ stms result) (lutab, used_nms) =
 -- difference between the free-variables in that stmt and the set of variables
 -- known to be used after that statement.
 lastUseKernelBody ::
-  ( LocalScope (Aliases rep) (LastUseM rep),
-    CanBeAliased (Op rep),
-    ASTRep rep,
-    HasMemBlock (Aliases rep)
-  ) =>
+  Constraints rep =>
   -- | The body of statements
   KernelBody (Aliases rep) ->
   -- | The current last-use table, tupled with the known set of already used names
@@ -191,11 +189,7 @@ lastUseKernelBody bdy@(KernelBody _ stms result) (lutab, used_nms) =
     pure (lutab', used_nms <> used_in_body)
 
 lastUseStms ::
-  ( LocalScope (Aliases rep) (LastUseM rep),
-    ASTRep rep,
-    FreeIn (OpWithAliases (Op rep)),
-    HasMemBlock (Aliases rep)
-  ) =>
+  Constraints rep =>
   Stms (Aliases rep) ->
   (LUTabFun, Names) ->
   [VName] ->
@@ -217,11 +211,7 @@ lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms =
     pure (lutab'', nms'')
 
 lastUseStm ::
-  ( LocalScope (Aliases rep) (LastUseM rep),
-    ASTRep rep,
-    FreeIn (OpWithAliases (Op rep)),
-    HasMemBlock (Aliases rep)
-  ) =>
+  Constraints rep =>
   Stm (Aliases rep) ->
   (LUTabFun, Names) ->
   LastUseM rep (LUTabFun, Names)
@@ -251,11 +241,7 @@ lastUseStm (Let pat _ e) (lutab, used_nms) = do
 
 -- | Last-Use Analysis for an expression.
 lastUseExp ::
-  ( LocalScope (Aliases rep) (LastUseM rep),
-    ASTRep rep,
-    FreeIn (OpWithAliases (Op rep)),
-    HasMemBlock (Aliases rep)
-  ) =>
+  Constraints rep =>
   -- | The expression to analyse
   Exp (Aliases rep) ->
   -- | The set of used names "after" this expression
@@ -318,41 +304,74 @@ lastUseExp e used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
   pure (M.empty, lu_vars, used_nms')
 
-lastUseGPUOp :: Op (Aliases GPUMem) -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
-lastUseGPUOp (Alloc se sp) used_nms = do
+lastUseMemOp ::
+  (inner -> Names -> LastUseM rep (LUTabFun, Names, Names)) ->
+  MemOp inner ->
+  Names ->
+  LastUseM rep (LUTabFun, Names, Names)
+lastUseMemOp _ (Alloc se sp) used_nms = do
   let free_in_e = freeIn se <> freeIn sp
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
   pure (M.empty, lu_vars, used_nms')
-lastUseGPUOp (Inner (OtherOp ())) used_nms =
-  pure (mempty, mempty, used_nms)
-lastUseGPUOp (Inner (SizeOp sop)) used_nms = do
-  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn sop
-  pure (mempty, lu_vars, used_nms')
-lastUseGPUOp (Inner (SegOp (SegMap _ _ tps kbody))) used_nms = do
+lastUseMemOp onInner (Inner op) used_nms = onInner op used_nms
+
+lastUseSegOp ::
+  Constraints rep =>
+  SegOp lvl (Aliases rep) ->
+  Names ->
+  LastUseM rep (LUTabFun, Names, Names)
+lastUseSegOp (SegMap _ _ tps kbody) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (body_lutab, lu_vars, used_nms' <> used_nms'')
-lastUseGPUOp (Inner (SegOp (SegRed _ _ sbos tps kbody))) used_nms = do
+lastUseSegOp (SegRed _ _ sbos tps kbody) used_nms = do
   (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegBinOp sbos used_nms
   (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
-lastUseGPUOp (Inner (SegOp (SegScan _ _ sbos tps kbody))) used_nms = do
+lastUseSegOp (SegScan _ _ sbos tps kbody) used_nms = do
   (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegBinOp sbos used_nms
   (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
-lastUseGPUOp (Inner (SegOp (SegHist _ _ hos tps kbody))) used_nms = do
+lastUseSegOp (SegHist _ _ hos tps kbody) used_nms = do
   (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseHistOp hos used_nms
   (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
-lastUseGPUOp (Inner (GPUBody tps body)) used_nms = do
+
+lastUseGPUOp :: HostOp (Aliases GPUMem) () -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
+lastUseGPUOp (GPU.OtherOp ()) used_nms =
+  pure (mempty, mempty, used_nms)
+lastUseGPUOp (SizeOp sop) used_nms = do
+  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn sop
+  pure (mempty, lu_vars, used_nms')
+lastUseGPUOp (GPUBody tps body) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
   pure (body_lutab, lu_vars, used_nms' <> used_nms'')
+lastUseGPUOp (SegOp op) used_nms =
+  lastUseSegOp op used_nms
 
-lastUseSegBinOp :: [SegBinOp (Aliases GPUMem)] -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
+lastUseMCOp :: MCOp (Aliases MCMem) () -> Names -> LastUseM MCMem (LUTabFun, Names, Names)
+lastUseMCOp (MC.OtherOp ()) used_nms =
+  pure (mempty, mempty, used_nms)
+lastUseMCOp (MC.ParOp par_op op) used_nms = do
+  (lutab_par_op, lu_vars_par_op, used_names_par_op) <-
+    maybe (pure mempty) (`lastUseSegOp` used_nms) par_op
+  (lutab_op, lu_vars_op, used_names_op) <-
+    lastUseSegOp op used_nms
+  pure
+    ( lutab_par_op <> lutab_op,
+      lu_vars_par_op <> lu_vars_op,
+      used_names_par_op <> used_names_op
+    )
+
+lastUseSegBinOp ::
+  Constraints rep =>
+  [SegBinOp (Aliases rep)] ->
+  Names ->
+  LastUseM rep (LUTabFun, Names, Names)
 lastUseSegBinOp sbos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper sbos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
@@ -362,7 +381,11 @@ lastUseSegBinOp sbos used_nms = do
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
 
-lastUseHistOp :: [HistOp (Aliases GPUMem)] -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
+lastUseHistOp ::
+  Constraints rep =>
+  [HistOp (Aliases rep)] ->
+  Names ->
+  LastUseM rep (LUTabFun, Names, Names)
 lastUseHistOp hos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper hos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')

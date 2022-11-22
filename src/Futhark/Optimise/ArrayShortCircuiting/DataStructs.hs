@@ -39,7 +39,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Aliases
-import Futhark.IR.GPUMem
+import Futhark.IR.GPUMem as GPU
+import Futhark.IR.MCMem as MC
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (line, sep, (</>))
@@ -314,6 +315,14 @@ instance HasMemBlock (Aliases GPUMem) where
       Just (LParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
       _ -> Nothing
 
+instance HasMemBlock (Aliases MCMem) where
+  getScopeMemInfo r scope_env0 =
+    case M.lookup r scope_env0 of
+      Just (LetName (_, MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (FParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (LParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      _ -> Nothing
+
 -- | @True@ if the expression returns a "fresh" array.
 createsNewArrOK :: CreatesNewArrOp (Op rep) => Exp rep -> Bool
 createsNewArrOK (BasicOp Replicate {}) = True
@@ -338,9 +347,18 @@ instance CreatesNewArrOp inner => CreatesNewArrOp (MemOp inner) where
   createsNewArrOp (Inner inner) = createsNewArrOp inner
 
 instance CreatesNewArrOp inner => CreatesNewArrOp (HostOp (Aliases GPUMem) inner) where
-  createsNewArrOp (OtherOp op) = createsNewArrOp op
-  createsNewArrOp (SegOp (SegMap _ _ _ kbody)) = all isReturns $ kernelBodyResult kbody
+  createsNewArrOp (GPU.OtherOp op) = createsNewArrOp op
+  createsNewArrOp (GPUBody {}) = True
+  createsNewArrOp (SegOp op) = createsNewArrOp op
   createsNewArrOp (SizeOp _) = False
+
+instance CreatesNewArrOp inner => CreatesNewArrOp (MCOp rep inner) where
+  createsNewArrOp (MC.OtherOp op) = createsNewArrOp op
+  createsNewArrOp (ParOp par_op op) =
+    maybe False createsNewArrOp par_op || createsNewArrOp op
+
+instance CreatesNewArrOp (SegOp lvl rep) where
+  createsNewArrOp (SegMap _ _ _ kbody) = all isReturns $ kernelBodyResult kbody
   createsNewArrOp _ = undefined
 
 isReturns :: KernelResult -> Bool

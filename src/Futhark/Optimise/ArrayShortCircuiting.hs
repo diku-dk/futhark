@@ -3,7 +3,12 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Perform array short circuiting
-module Futhark.Optimise.ArrayShortCircuiting (optimiseSeqMem, optimiseGPUMem) where
+module Futhark.Optimise.ArrayShortCircuiting
+  ( optimiseSeqMem,
+    optimiseGPUMem,
+    optimiseMCMem,
+  )
+where
 
 import Control.Monad.Reader
 import Data.Function ((&))
@@ -12,6 +17,7 @@ import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias qualified as AnlAls
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
+import Futhark.IR.MCMem
 import Futhark.IR.Mem.IxFun (substituteInIxFun)
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
@@ -36,6 +42,9 @@ optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab pure r
 
 optimiseGPUMem :: Pass GPUMem GPUMem
 optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp replaceInParams
+
+optimiseMCMem :: Pass MCMem MCMem
+optimiseMCMem = pass "short-circuit-gpu" "Array Short-Circuiting (MC)" mkCoalsTabMC replaceInMCOp replaceInParams
 
 replaceInParams :: CoalsTab -> [Param FParamMem] -> (Names, [Param FParamMem])
 replaceInParams coalstab fparams =
@@ -134,20 +143,31 @@ replaceInExp _ (Op op) =
 replaceInExp _ e@WithAcc {} = pure e
 replaceInExp _ e@Apply {} = pure e
 
+replaceInSegOp ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  SegOp lvl rep ->
+  ReplaceM inner (SegOp lvl rep)
+replaceInSegOp (SegMap lvl sp tps body) = do
+  stms <- mapM replaceInStm $ kernelBodyStms body
+  pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+replaceInSegOp (SegRed lvl sp binops tps body) = do
+  stms <- mapM replaceInStm $ kernelBodyStms body
+  pure $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
+replaceInSegOp (SegScan lvl sp binops tps body) = do
+  stms <- mapM replaceInStm $ kernelBodyStms body
+  pure $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
+replaceInSegOp (SegHist lvl sp hist_ops tps body) = do
+  stms <- mapM replaceInStm $ kernelBodyStms body
+  pure $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
+
 replaceInHostOp :: HostOp GPUMem () -> ReplaceM (HostOp GPUMem ()) (HostOp GPUMem ())
-replaceInHostOp (SegOp (SegMap lvl sp tps body)) = do
-  stms <- mapM replaceInStm $ kernelBodyStms body
-  pure $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
-replaceInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
-  stms <- mapM replaceInStm $ kernelBodyStms body
-  pure $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
-replaceInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
-  stms <- mapM replaceInStm $ kernelBodyStms body
-  pure $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
-replaceInHostOp (SegOp (SegHist lvl sp hist_ops tps body)) = do
-  stms <- mapM replaceInStm $ kernelBodyStms body
-  pure $ SegOp $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
+replaceInHostOp (SegOp op) = SegOp <$> replaceInSegOp op
 replaceInHostOp op = pure op
+
+replaceInMCOp :: MCOp MCMem () -> ReplaceM (MCOp MCMem ()) (MCOp MCMem ())
+replaceInMCOp (ParOp par_op op) =
+  ParOp <$> traverse replaceInSegOp par_op <*> replaceInSegOp op
+replaceInMCOp op = pure op
 
 generalizeIxfun :: [PatElem dec] -> PatElem LetDecMem -> BodyReturns -> ReplaceM inner BodyReturns
 generalizeIxfun
