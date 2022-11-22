@@ -44,6 +44,7 @@ import Futhark.Pass
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
+import Futhark.Pass.ExplicitAllocations.MC qualified as MC
 import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
@@ -316,6 +317,9 @@ allocateOption short =
     perform (Seq prog) config =
       SeqMem
         <$> runPipeline (onePass Seq.explicitAllocations) config prog
+    perform (MC prog) config =
+      MCMem
+        <$> runPipeline (onePass MC.explicitAllocations) config prog
     perform s _ =
       externalErrorS $
         "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
@@ -664,9 +668,17 @@ commandLineOptions =
       ["seq-mem"],
     pipelineOption
       getSOACSProg
+      "MC"
+      MC
+      "Run the multicore compilation pipeline"
+      mcPipeline
+      []
+      ["mc"],
+    pipelineOption
+      getSOACSProg
       "MCMem"
       MCMem
-      "Run the multicore compilation pipeline"
+      "Run the multicore+memory compilation pipeline"
       multicorePipeline
       []
       ["mc-mem"]
