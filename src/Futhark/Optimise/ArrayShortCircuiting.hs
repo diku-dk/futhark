@@ -44,7 +44,7 @@ optimiseGPUMem :: Pass GPUMem GPUMem
 optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp replaceInParams
 
 optimiseMCMem :: Pass MCMem MCMem
-optimiseMCMem = pass "short-circuit-gpu" "Array Short-Circuiting (MC)" mkCoalsTabMC replaceInMCOp replaceInParams
+optimiseMCMem = pass "short-circuit-mc" "Array Short-Circuiting (MC)" mkCoalsTabMC replaceInMCOp replaceInParams
 
 replaceInParams :: CoalsTab -> [Param FParamMem] -> (Names, [Param FParamMem])
 replaceInParams coalstab fparams =
