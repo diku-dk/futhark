@@ -8,7 +8,6 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     CoalescedKind (..),
     ArrayMemBound (..),
     AllocTab,
-    CreatesNewArrOp,
     HasMemBlock,
     ScalarTab,
     CoalsTab,
@@ -315,7 +314,7 @@ instance HasMemBlock (Aliases GPUMem) where
       _ -> Nothing
 
 -- | @True@ if the expression returns a "fresh" array.
-createsNewArrOK :: CreatesNewArrOp (Op rep) => Exp rep -> Bool
+createsNewArrOK :: Exp rep -> Bool
 createsNewArrOK (BasicOp Replicate {}) = True
 createsNewArrOK (BasicOp Iota {}) = True
 createsNewArrOK (BasicOp Manifest {}) = True
@@ -324,28 +323,7 @@ createsNewArrOK (BasicOp Concat {}) = True
 createsNewArrOK (BasicOp ArrayLit {}) = True
 createsNewArrOK (BasicOp Scratch {}) = True
 createsNewArrOK (BasicOp Rotate {}) = True
-createsNewArrOK (Op op) = createsNewArrOp op
 createsNewArrOK _ = False
-
-class CreatesNewArrOp rep where
-  createsNewArrOp :: rep -> Bool
-
-instance CreatesNewArrOp () where
-  createsNewArrOp () = False
-
-instance CreatesNewArrOp inner => CreatesNewArrOp (MemOp inner) where
-  createsNewArrOp (Alloc _ _) = True
-  createsNewArrOp (Inner inner) = createsNewArrOp inner
-
-instance CreatesNewArrOp inner => CreatesNewArrOp (HostOp (Aliases GPUMem) inner) where
-  createsNewArrOp (OtherOp op) = createsNewArrOp op
-  createsNewArrOp (SegOp (SegMap _ _ _ kbody)) = all isReturns $ kernelBodyResult kbody
-  createsNewArrOp (SizeOp _) = False
-  createsNewArrOp _ = undefined
-
-isReturns :: KernelResult -> Bool
-isReturns Returns {} = True
-isReturns _ = False
 
 -- | Memory-block removal from active-coalescing table
 --   should only be handled via this function, it is easy
