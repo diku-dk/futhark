@@ -19,7 +19,7 @@ module Futhark.Optimise.ArrayShortCircuiting.LastUse
     lastUseGPUMem,
     lastUseMCMem,
     LUTabFun,
-    LUTabPrg,
+    LUTabProg,
   )
 where
 
@@ -39,11 +39,11 @@ import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Util
 
+-- | Maps a name indentifying a Stm to the last uses in that Stm.
 type LUTabFun = M.Map VName Names
--- ^ maps a name indentifying a stmt to the last uses in that stmt
 
-type LUTabPrg = M.Map Name LUTabFun
--- ^ maps function names to last-use tables
+-- | LU-table for the constants, and for each function.
+type LUTabProg = (LUTabFun, M.Map Name LUTabFun)
 
 type LastUseOp rep = Op (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names, Names)
 
@@ -98,7 +98,7 @@ aliasLookup vname =
 lastUseProg ::
   Constraints rep =>
   Prog (Aliases rep) ->
-  LastUseM rep LUTabFun
+  LastUseM rep LUTabProg
 lastUseProg prog =
   let bound_in_consts =
         progConsts prog
@@ -108,27 +108,27 @@ lastUseProg prog =
       funs = progFuns prog
    in inScopeOf consts $ do
         (consts_lu, _) <- lastUseStms consts mempty mempty
-        (lus, _) <- mconcat <$> mapM (lastUseFun bound_in_consts) funs
-        pure $ consts_lu <> lus
+        lus <- mapM (lastUseFun bound_in_consts) funs
+        pure (consts_lu, M.fromList $ zip (map funDefName funs) lus)
 
 lastUseFun ::
   Constraints rep =>
   Names ->
   FunDef (Aliases rep) ->
-  LastUseM rep (LUTabFun, Names)
+  LastUseM rep LUTabFun
 lastUseFun bound_in_consts f =
-  inScopeOf f $ lastUseBody (funDefBody f) (mempty, bound_in_consts)
+  inScopeOf f $ fst <$> lastUseBody (funDefBody f) (mempty, bound_in_consts)
 
 -- | Perform last-use analysis on a 'Prog' in 'SeqMem'
-lastUseSeqMem :: Prog (Aliases SeqMem) -> LUTabFun
+lastUseSeqMem :: Prog (Aliases SeqMem) -> LUTabProg
 lastUseSeqMem = runLastUseM lastUseSeqOp . lastUseProg
 
 -- | Perform last-use analysis on a 'Prog' in 'GPUMem'
-lastUseGPUMem :: Prog (Aliases GPUMem) -> LUTabFun
+lastUseGPUMem :: Prog (Aliases GPUMem) -> LUTabProg
 lastUseGPUMem = runLastUseM (lastUseMemOp lastUseGPUOp) . lastUseProg
 
 -- | Perform last-use analysis on a 'Prog' in 'MCMem'
-lastUseMCMem :: Prog (Aliases MCMem) -> LUTabFun
+lastUseMCMem :: Prog (Aliases MCMem) -> LUTabProg
 lastUseMCMem = runLastUseM (lastUseMemOp lastUseMCOp) . lastUseProg
 
 -- | Performing the last-use analysis on a body.

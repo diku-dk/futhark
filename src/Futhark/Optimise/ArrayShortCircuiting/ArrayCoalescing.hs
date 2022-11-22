@@ -130,16 +130,17 @@ mkCoalsTabMC prog =
 -- | Given a function, compute the coalescing table
 mkCoalsTabProg ::
   (MonadFreshNames m, Coalesceable rep inner) =>
-  LUTabFun ->
+  LUTabProg ->
   ShortCircuitReader rep ->
   ComputeScalarTableOnOp rep ->
   Prog (Aliases rep) ->
   m (M.Map Name CoalsTab)
-mkCoalsTabProg lutab r computeScalarOnOp = fmap M.fromList . mapM onFun . progFuns
+mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp = fmap M.fromList . mapM onFun . progFuns
   where
     onFun fun@(FunDef _ _ fname _ fpars body) = do
       -- First compute last-use information
       let unique_mems = getUniqueMemFParam fpars
+          lutab = lutab_prog M.! fname
           scalar_table =
             runReader
               ( concatMapM
