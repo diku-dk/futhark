@@ -37,7 +37,6 @@ import Futhark.Util
 -- | A helper type describing representations that can be short-circuited.
 type Coalesceable rep inner =
   ( Mem rep inner,
-    CreatesNewArrOp (OpWithAliases inner),
     ASTRep rep,
     CanBeAliased inner,
     Op rep ~ MemOp inner,
