@@ -104,15 +104,16 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - uses: haskell/actions/setup@v2
+    - id: setup-haskell
+      uses: haskell/actions/setup@v2
       with:
         ghc-version: '9.2.4'
 
     - uses: actions/cache@v2
-      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
+      name: Cache cabal stuff
       with:
         path: |
-          ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
+          ${{ steps.setup-haskell.outputs.cabal-store }}
           dist-newstyle
         key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
 
