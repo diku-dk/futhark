@@ -86,9 +86,11 @@ instance Show ExpectedError where
 -- | How a program can be transformed.
 data StructurePipeline
   = GpuPipeline
+  | MCPipeline
   | SOACSPipeline
   | SeqMemPipeline
   | GpuMemPipeline
+  | MCMemPipeline
   | NoPipeline
   deriving (Show)
 
@@ -342,6 +344,8 @@ optimisePipeline sep =
   choice
     [ lexeme sep "gpu-mem" $> GpuMemPipeline,
       lexeme sep "gpu" $> GpuPipeline,
+      lexeme sep "mc-mem" $> MCMemPipeline,
+      lexeme sep "mc" $> MCPipeline,
       lexeme sep "seq-mem" $> SeqMemPipeline,
       lexeme sep "internalised" $> NoPipeline,
       pure SOACSPipeline
