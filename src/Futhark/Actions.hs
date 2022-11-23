@@ -258,24 +258,24 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
   case ret_ispc of
     Left err ->
       externalErrorS $ "Failed to run " ++ cmdISPC ++ ": " ++ show err
-    Right (ExitFailure code, _, ispcerr) -> throwError code ispcerr
+    Right (ExitFailure code, _, ispcerr) -> throwError cmdISPC code ispcerr
     Right (ExitSuccess, _, _) ->
       case ret of
         Left err ->
           externalErrorS $ "Failed to run ispc: " ++ show err
-        Right (ExitFailure code, _, gccerr) -> throwError code gccerr
+        Right (ExitFailure code, _, gccerr) -> throwError cmdCC code gccerr
         Right (ExitSuccess, _, _) ->
           pure ()
   where
     cmdISPC = "ispc"
     ispcbase = outpath <> ispcextension
-    throwError code gccerr =
+    throwError prog code err =
       externalErrorS $
-        cmdCC
+        prog
           ++ " failed with code "
           ++ show code
           ++ ":\n"
-          ++ gccerr
+          ++ err
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
