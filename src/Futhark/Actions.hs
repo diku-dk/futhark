@@ -27,6 +27,7 @@ where
 
 import Control.Monad
 import Control.Monad.IO.Class
+import Data.Bifunctor
 import Data.List (intercalate)
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
@@ -99,7 +100,13 @@ printLastUseGPUSS =
   Action
     { actionName = "print last use ss gpu",
       actionDescription = "Print last use ss information on gpu.",
-      actionProcedure = liftIO . putStrLn . prettyString . M.toList . LastUseSS.lastUseGPUMem . aliasAnalysis
+      actionProcedure =
+        liftIO
+          . putStrLn
+          . prettyString
+          . bimap M.toList (M.toList . fmap M.toList)
+          . LastUseSS.lastUseGPUMem
+          . aliasAnalysis
     }
 
 -- | Print fusion graph to stdout.

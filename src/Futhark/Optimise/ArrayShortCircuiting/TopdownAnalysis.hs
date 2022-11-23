@@ -22,7 +22,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
-import Futhark.IR.GPUMem
+import Futhark.IR.GPUMem as GPU
+import Futhark.IR.MCMem as MC
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 
@@ -131,19 +132,40 @@ class TopDownHelper inner where
 
   scopeHelper :: inner -> Scope rep
 
+instance TopDownHelper (SegOp lvl rep) where
+  innerNonNegatives _ op =
+    foldMap (oneName . fst) $ unSegSpace $ segSpace op
+
+  innerKnownLessThan op =
+    map (fmap $ primExpFromSubExp $ IntType Int64) $ unSegSpace $ segSpace op
+
+  scopeHelper op = scopeOfSegSpace $ segSpace op
+
 instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
-  innerNonNegatives _ (SegOp seg_op) =
-    foldMap (oneName . fst) $ unSegSpace $ segSpace seg_op
+  innerNonNegatives vs (SegOp op) = innerNonNegatives vs op
   innerNonNegatives [vname] (SizeOp (GetSize _ _)) = oneName vname
   innerNonNegatives [vname] (SizeOp (GetSizeMax _)) = oneName vname
   innerNonNegatives _ _ = mempty
 
-  innerKnownLessThan (SegOp seg_op) =
-    map (fmap $ primExpFromSubExp $ IntType Int64) $ unSegSpace $ segSpace seg_op
+  innerKnownLessThan (SegOp op) = innerKnownLessThan op
   innerKnownLessThan _ = mempty
 
-  scopeHelper (SegOp seg_op) = scopeOfSegSpace $ segSpace seg_op
+  scopeHelper (SegOp op) = scopeHelper op
   scopeHelper _ = mempty
+
+instance TopDownHelper inner => TopDownHelper (MC.MCOp (Aliases MCMem) inner) where
+  innerNonNegatives vs (ParOp par_op op) =
+    maybe mempty (innerNonNegatives vs) par_op
+      <> innerNonNegatives vs op
+  innerNonNegatives vs (MC.OtherOp op) =
+    innerNonNegatives vs op
+  innerKnownLessThan (ParOp par_op op) =
+    maybe mempty innerKnownLessThan par_op <> innerKnownLessThan op
+  innerKnownLessThan (MC.OtherOp op) =
+    innerKnownLessThan op
+  scopeHelper (ParOp par_op op) =
+    maybe mempty scopeHelper par_op <> scopeHelper op
+  scopeHelper MC.OtherOp {} = mempty
 
 instance TopDownHelper () where
   innerNonNegatives _ () = mempty

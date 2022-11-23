@@ -6,11 +6,17 @@
 -- | This pass attempts to lift allocations as far towards the top in their body
 -- as possible. It does not try to hoist allocations outside across body
 -- boundaries.
-module Futhark.Pass.LiftAllocations (liftAllocationsSeqMem, liftAllocationsGPUMem) where
+module Futhark.Pass.LiftAllocations
+  ( liftAllocationsSeqMem,
+    liftAllocationsGPUMem,
+    liftAllocationsMCMem,
+  )
+where
 
 import Control.Monad.Reader
 import Data.Sequence (Seq (..))
 import Futhark.IR.GPUMem
+import Futhark.IR.MCMem
 import Futhark.IR.SeqMem
 import Futhark.Pass (Pass (..))
 
@@ -36,6 +42,19 @@ liftAllocationsGPUMem =
             fmap
               ( \f@FunDef {funDefBody} ->
                   f {funDefBody = runReader (liftAllocationsInBody funDefBody) (Env liftAllocationsInHostOp)}
+              )
+              progFuns
+        }
+
+liftAllocationsMCMem :: Pass MCMem MCMem
+liftAllocationsMCMem =
+  Pass "lift allocations mc" "lift allocations mc" $ \prog@Prog {progFuns} ->
+    pure $
+      prog
+        { progFuns =
+            fmap
+              ( \f@FunDef {funDefBody} ->
+                  f {funDefBody = runReader (liftAllocationsInBody funDefBody) (Env liftAllocationsInMCOp)}
               )
               progFuns
         }
@@ -104,17 +123,28 @@ liftAllocationsInStms (stms :|> stm@(Let pat _ _)) lifted acc to_lift = do
     then liftAllocationsInStms stms (stm :<| lifted) acc ((to_lift `namesSubtract` pat_names) <> freeIn stm)
     else liftAllocationsInStms stms lifted (stm :<| acc) to_lift
 
+liftAllocationsInSegOp ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  SegOp lvl rep ->
+  LiftM inner (SegOp lvl rep)
+liftAllocationsInSegOp (SegMap lvl sp tps body) = do
+  stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
+  pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+liftAllocationsInSegOp (SegRed lvl sp binops tps body) = do
+  stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
+  pure $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
+liftAllocationsInSegOp (SegScan lvl sp binops tps body) = do
+  stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
+  pure $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
+liftAllocationsInSegOp (SegHist lvl sp histops tps body) = do
+  stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
+  pure $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
+
 liftAllocationsInHostOp :: HostOp GPUMem () -> LiftM (HostOp GPUMem ()) (HostOp GPUMem ())
-liftAllocationsInHostOp (SegOp (SegMap lvl sp tps body)) = do
-  stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  pure $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
-liftAllocationsInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
-  stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  pure $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
-liftAllocationsInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
-  stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  pure $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
-liftAllocationsInHostOp (SegOp (SegHist lvl sp histops tps body)) = do
-  stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  pure $ SegOp $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
+liftAllocationsInHostOp (SegOp op) = SegOp <$> liftAllocationsInSegOp op
 liftAllocationsInHostOp op = pure op
+
+liftAllocationsInMCOp :: MCOp MCMem () -> LiftM (MCOp MCMem ()) (MCOp MCMem ())
+liftAllocationsInMCOp (ParOp par op) =
+  ParOp <$> traverse liftAllocationsInSegOp par <*> liftAllocationsInSegOp op
+liftAllocationsInMCOp op = pure op
