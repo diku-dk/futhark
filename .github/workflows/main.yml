@@ -608,7 +608,7 @@ jobs:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
         automatic_release_tag: "nightly"
         prerelease: true
-        title: "nightly build"
+        title: "nightly"
         files: |
           futhark-nightly-windows-x86_64.zip
           futhark-nightly-linux-x86_64.tar.xz
