@@ -502,67 +502,51 @@ makeSegMapCoals ::
   (PatElem (VarAliases, LetDecMem), SegSpace, KernelResult) ->
   (CoalsTab, InhibitTab)
 makeSegMapCoals lvlOK lvl td_env kernel_body (active, inhb) (PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space, Returns _ _ (Var return_name))
-  | Just mb@(MemBlock tp return_shp return_mem _) <-
+  | Just (MemBlock tp return_shp return_mem _) <-
       getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
     lvlOK lvl,
     MemMem pat_space <- runReader (lookupMemInfo pat_mem) $ removeScopeAliases $ scope td_env,
-    MemMem return_space <- runReader (lookupMemInfo return_mem) $ removeScopeAliases $ scope td_env <> scopeOf (kernelBodyStms kernel_body) <> scopeOfSegSpace space,
+    MemMem return_space <-
+      scope td_env <> scopeOf (kernelBodyStms kernel_body) <> scopeOfSegSpace space
+        & removeScopeAliases
+        & runReader (lookupMemInfo return_mem),
     pat_space == return_space =
       case M.lookup pat_mem active of
         Nothing ->
           -- We are not in a transitive case
-          if IxFun.hasOneLmad pat_ixf
-            then case ( maybe False (pat_mem `nameIn`) $ M.lookup return_mem inhb,
-                        Coalesced InPlaceCoal mb mempty
-                          & M.singleton return_name
-                          & flip (addInvAliassesVarTab td_env) return_name
-                          & fmap
-                            ( M.adjust
-                                ( \(Coalesced knd (MemBlock pt shp _ _) subst) ->
-                                    Coalesced
-                                      knd
-                                      ( MemBlock pt shp pat_mem $
-                                          IxFun.slice pat_ixf $
-                                            fullSlice (IxFun.shape pat_ixf) $
-                                              Slice $
-                                                map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-                                                  unSegSpace space
-                                      )
-                                      subst
-                                )
-                                return_name
-                            )
-                      ) of
-              (False, Just vtab) ->
-                (active <> M.singleton return_mem (CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty), inhb)
-              _ -> (active, inhb)
-            else (active, inhb)
-        Just trans ->
-          case ( maybe False (dstmem trans `nameIn`) $ M.lookup return_mem inhb,
-                 Coalesced TransitiveCoal (MemBlock tp return_shp (dstmem trans) (dstind trans)) mempty
+          case ( IxFun.hasOneLmad pat_ixf
+                   && maybe False (pat_mem `nameIn`) (M.lookup return_mem inhb),
+                 Coalesced
+                   InPlaceCoal
+                   (MemBlock tp return_shp pat_mem $ resultSlice pat_ixf)
+                   mempty
                    & M.singleton return_name
                    & flip (addInvAliassesVarTab td_env) return_name
-                   & fmap
-                     ( M.adjust
-                         ( \(Coalesced knd (MemBlock pt shp _ _) subst) ->
-                             let Coalesced _ trans_memblock _ =
-                                   fromMaybe (error "Impossible") $ M.lookup pat_name $ vartab trans
-                              in Coalesced
-                                   knd
-                                   ( MemBlock pt shp (memName trans_memblock) $
-                                       IxFun.slice (ixfun trans_memblock) $
-                                         fullSlice (IxFun.shape $ ixfun trans_memblock) $
-                                           Slice $
-                                             map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-                                               unSegSpace space
-                                   )
-                                   subst
-                         )
-                         return_name
-                     )
                ) of
             (False, Just vtab) ->
-              let opts = if dstmem trans == pat_mem then mempty else M.insert pat_name pat_mem $ optdeps trans
+              ( active
+                  <> M.singleton
+                    return_mem
+                    (CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty),
+                inhb
+              )
+            _ -> (active, inhb)
+        Just trans ->
+          case ( maybe False (dstmem trans `nameIn`) $ M.lookup return_mem inhb,
+                 let Coalesced _ (MemBlock _ _ trans_mem trans_ixf) _ =
+                       fromMaybe (error "Impossible") $ M.lookup pat_name $ vartab trans
+                  in Coalesced
+                       TransitiveCoal
+                       (MemBlock tp return_shp trans_mem $ resultSlice trans_ixf)
+                       mempty
+                       & M.singleton return_name
+                       & flip (addInvAliassesVarTab td_env) return_name
+               ) of
+            (False, Just vtab) ->
+              let opts =
+                    if dstmem trans == pat_mem
+                      then mempty
+                      else M.insert pat_name pat_mem $ optdeps trans
                in ( M.insert
                       return_mem
                       ( CoalsEntry
@@ -577,6 +561,12 @@ makeSegMapCoals lvlOK lvl td_env kernel_body (active, inhb) (PatElem pat_name (_
                     inhb
                   )
             _ -> (active, inhb)
+  where
+    thread_slice =
+      unSegSpace space
+        & map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst)
+        & Slice
+    resultSlice ixf = IxFun.slice ixf $ fullSlice (IxFun.shape ixf) thread_slice
 makeSegMapCoals _ _ td_env _ x (_, _, WriteReturns _ _ return_name _) =
   case getScopeMemInfo return_name $ scope td_env of
     Just (MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
@@ -585,7 +575,7 @@ makeSegMapCoals _ _ td_env _ x (_, _, result) =
   freeIn result
     & namesToList
     & mapMaybe (flip getScopeMemInfo $ scope td_env)
-    & foldr (\(MemBlock _ _ mem _) -> flip markFailedCoal mem) x
+    & foldr (flip markFailedCoal . memName) x
 
 fullSlice :: [TPrimExp Int64 VName] -> Slice (TPrimExp Int64 VName) -> Slice (TPrimExp Int64 VName)
 fullSlice shp (Slice slc) =
