@@ -115,7 +115,7 @@ jobs:
           ~/AppData/Roaming/cabal/packages
           ~/AppData/Roaming/cabal/store
           dist-newstyle
-        key: ${{ runner.os }}-cabal
+        key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
 
     - name: Build
       shell: bash
