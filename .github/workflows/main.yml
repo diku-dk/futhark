@@ -112,8 +112,7 @@ jobs:
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
-          ~/AppData/Roaming/cabal/packages
-          ~/AppData/Roaming/cabal/store
+          ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
           dist-newstyle
         key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
 
