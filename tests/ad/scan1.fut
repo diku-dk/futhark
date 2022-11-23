@@ -1,4 +1,5 @@
 -- Scan with addition.
+-- addition special case
 -- ==
 -- entry: fwd_J rev_J
 -- compiled input { [1.0f32, 2.0f32, 3.0f32, 4.0f32, 5.0f32] }

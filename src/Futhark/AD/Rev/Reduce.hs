@@ -3,6 +3,8 @@
 module Futhark.AD.Rev.Reduce
   ( diffReduce,
     diffMinMaxReduce,
+    diffVecReduce,
+    diffMulReduce,
   )
 where
 
@@ -85,12 +87,12 @@ diffReduce :: VjpOps -> [VName] -> SubExp -> [VName] -> Reduce SOACS -> ADM ()
 diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isAdd op = do
-      adj_rep <-
-        letExp (baseString adj <> "_rep") $
-          BasicOp $
-            Replicate (Shape [w]) $
-              Var adj
-      void $ updateAdj a adj_rep
+    adj_rep <-
+      letExp (baseString adj <> "_rep") $
+        BasicOp $
+          Replicate (Shape [w]) $
+            Var adj
+    void $ updateAdj a adj_rep
   where
     isAdd FAdd {} = True
     isAdd Add {} = True
@@ -201,3 +203,134 @@ diffMinMaxReduce _ops x aux w minmax ne as m = do
     letSubExp "minmax_in_bounds" . BasicOp $
       CmpOp (CmpSlt Int64) (intConst Int64 0) w
   updateAdjIndex as (CheckBounds (Just in_bounds), Var x_ind) (Var x_adj)
+
+--
+-- Special case of vectorised reduce:
+--    let x = reduce (map2 op) nes as
+-- Idea:
+--    rewrite to
+--      let x = map2 (\as ne -> reduce op ne as) (transpose as) nes
+--    and diff
+diffVecReduce ::
+  VjpOps -> Pat Type -> StmAux () -> SubExp -> Commutativity -> Lambda SOACS -> VName -> VName -> ADM () -> ADM ()
+diffVecReduce ops x aux w iscomm lam ne as m = do
+  stms <- collectStms_ $ do
+    rank <- arrayRank <$> lookupType as
+    let rear = [1, 0] ++ drop 2 [0 .. rank -1]
+
+    tran_as <- letExp "tran_as" $ BasicOp $ Rearrange rear as
+    ts <- lookupType tran_as
+    t_ne <- lookupType ne
+
+    as_param <- newParam "as_param" $ rowType ts
+    ne_param <- newParam "ne_param" $ rowType t_ne
+
+    reduce_form <- reduceSOAC [Reduce iscomm lam [Var $ paramName ne_param]]
+
+    map_lam <-
+      mkLambda [as_param, ne_param] $
+        fmap varsRes . letTupExp "idx_res" $
+          Op $ Screma w [paramName as_param] reduce_form
+    addStm $ Let x aux $ Op $ Screma (arraySize 0 ts) [tran_as, ne] $ mapSOAC map_lam
+
+  foldr (vjpStm ops) m stms
+
+--
+-- Special case of reduce with mul:
+--    let x = reduce (*) ne as
+-- Forward trace (assuming w = length as):
+--    let (p, z) = map (\a -> if a == 0 then (1, 1) else (a, 0)) as
+--    non_zero_prod = reduce (*) ne p
+--    zr_count = reduce (+) 0 z
+--    let x =
+--      if 0 == zr_count
+--      then non_zero_prod
+--      else 0
+-- Reverse trace:
+--    as_bar = map2
+--      (\a a_bar ->
+--        if zr_count == 0
+--        then a_bar + non_zero_prod/a * x_bar
+--        else if zr_count == 1
+--        then a_bar + (if a == 0 then non_zero_prod * x_bar else 0)
+--        else as_bar
+--      ) as as_bar
+diffMulReduce ::
+  VjpOps -> VName -> StmAux () -> SubExp -> BinOp -> SubExp -> VName -> ADM () -> ADM ()
+diffMulReduce _ops x aux w mul ne as m = do
+  let t = binOpType mul
+  let const_zero = eSubExp $ Constant $ blankPrimValue t
+
+  a_param <- newParam "a" $ Prim t
+  map_lam <-
+    mkLambda [a_param] $
+      fmap varsRes . letTupExp "map_res"
+        =<< eIf
+          (eCmpOp (CmpEq t) (eParam a_param) const_zero)
+          (eBody $ fmap eSubExp [Constant $ onePrimValue t, intConst Int64 1])
+          (eBody [eParam a_param, eSubExp $ intConst Int64 0])
+
+  ps <- newVName "ps"
+  zs <- newVName "zs"
+  auxing aux $
+    letBindNames [ps, zs] $
+      Op $ Screma w [as] $ mapSOAC map_lam
+
+  red_lam_mul <- binOpLambda mul t
+  red_lam_add <- binOpLambda (Add Int64 OverflowUndef) int64
+
+  red_form_mul <- reduceSOAC $ pure $ Reduce Commutative red_lam_mul $ pure ne
+  red_form_add <- reduceSOAC $ pure $ Reduce Commutative red_lam_add $ pure $ intConst Int64 0
+
+  nz_prods <- newVName "non_zero_prod"
+  zr_count <- newVName "zero_count"
+  auxing aux $ letBindNames [nz_prods] $ Op $ Screma w [ps] red_form_mul
+  auxing aux $ letBindNames [zr_count] $ Op $ Screma w [zs] red_form_add
+
+  auxing aux $
+    letBindNames [x]
+      =<< eIf
+        (toExp $ 0 .==. le64 zr_count)
+        (eBody $ pure $ eSubExp $ Var nz_prods)
+        (eBody $ pure const_zero)
+
+  m
+
+  x_adj <- lookupAdjVal x
+
+  a_param_rev <- newParam "a" $ Prim t
+  map_lam_rev <-
+    mkLambda [a_param_rev] $
+      fmap varsRes . letTupExp "adj_res"
+        =<< eIf
+          (toExp $ 0 .==. le64 zr_count)
+          ( eBody $
+              pure $
+                eBinOp mul (eSubExp $ Var x_adj) $
+                  eBinOp (getDiv t) (eSubExp $ Var nz_prods) $ eParam a_param_rev
+          )
+          ( eBody $
+              pure $
+                eIf
+                  (toExp $ 1 .==. le64 zr_count)
+                  ( eBody $
+                      pure $
+                        eIf
+                          (eCmpOp (CmpEq t) (eParam a_param_rev) const_zero)
+                          ( eBody $
+                              pure $
+                                eBinOp mul (eSubExp $ Var x_adj) $ eSubExp $ Var nz_prods
+                          )
+                          (eBody $ pure const_zero)
+                  )
+                  (eBody $ pure const_zero)
+          )
+
+  as_adjup <- letExp "adjs" $ Op $ Screma w [as] $ mapSOAC map_lam_rev
+
+  updateAdj as as_adjup
+  where
+    getDiv :: PrimType -> BinOp
+    getDiv (IntType t) = SDiv t Unsafe
+    getDiv (FloatType t) = FDiv t
+    getDiv _ = error "In getDiv, Reduce.hs: input not supported"
