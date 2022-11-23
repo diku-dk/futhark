@@ -539,22 +539,24 @@ makeSegMapCoals lvlOK lvl td_env kernel_body (active, inhb) (PatElem pat_name (_
             else (active, inhb)
         Just trans ->
           case ( maybe False (dstmem trans `nameIn`) $ M.lookup return_mem inhb,
-                 Coalesced InPlaceCoal (MemBlock tp return_shp (dstmem trans) (dstind trans)) mempty
+                 Coalesced TransitiveCoal (MemBlock tp return_shp (dstmem trans) (dstind trans)) mempty
                    & M.singleton return_name
                    & flip (addInvAliassesVarTab td_env) return_name
                    & fmap
                      ( M.adjust
-                         ( \(Coalesced knd (MemBlock pt shp mem ixf@(IxFun.IxFun _ base_shape _)) subst) ->
-                             Coalesced
-                               knd
-                               ( MemBlock pt shp mem $
-                                   IxFun.slice ixf $
-                                     fullSlice base_shape $
-                                       Slice $
-                                         map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-                                           unSegSpace space
-                               )
-                               subst
+                         ( \(Coalesced knd (MemBlock pt shp _ _) subst) ->
+                             let Coalesced _ trans_memblock _ =
+                                   fromMaybe (error "Impossible") $ M.lookup pat_name $ vartab trans
+                              in Coalesced
+                                   knd
+                                   ( MemBlock pt shp (memName trans_memblock) $
+                                       IxFun.slice (ixfun trans_memblock) $
+                                         fullSlice (IxFun.shape $ ixfun trans_memblock) $
+                                           Slice $
+                                             map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
+                                               unSegSpace space
+                                   )
+                                   subst
                          )
                          return_name
                      )
