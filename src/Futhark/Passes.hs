@@ -195,5 +195,15 @@ multicorePipeline =
         simplifyMCMem,
         entryPointMemMC,
         doubleBufferMC,
+        simplifyMCMem,
+        performCSE False,
+        LiftAllocations.liftAllocationsMCMem,
+        simplifyMCMem,
+        ArrayShortCircuiting.optimiseMCMem,
+        simplifyMCMem,
+        performCSE False,
+        simplifyMCMem,
+        LowerAllocations.lowerAllocationsMCMem,
+        performCSE False,
         simplifyMCMem
       ]

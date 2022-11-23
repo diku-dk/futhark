@@ -230,6 +230,13 @@ seqMemProg name rep =
   externalErrorS $
     "Pass " ++ name ++ " expects SeqMem representation, but got " ++ representation rep
 
+mcMemProg :: String -> UntypedPassState -> FutharkM (Prog MCMem.MCMem)
+mcMemProg _ (MCMem prog) =
+  pure prog
+mcMemProg name rep =
+  externalErrorS $
+    "Pass " ++ name ++ " expects MCMem representation, but got " ++ representation rep
+
 typedPassOption ::
   Checkable torep =>
   (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
@@ -263,6 +270,13 @@ seqMemPassOption ::
   FutharkOption
 seqMemPassOption =
   typedPassOption seqMemProg SeqMem
+
+mcMemPassOption ::
+  Pass MCMem.MCMem MCMem.MCMem ->
+  String ->
+  FutharkOption
+mcMemPassOption =
+  typedPassOption mcMemProg MCMem
 
 kernelsMemPassOption ::
   Pass GPUMem.GPUMem GPUMem.GPUMem ->
@@ -611,6 +625,7 @@ commandLineOptions =
     seqMemPassOption LowerAllocations.lowerAllocationsSeqMem [],
     kernelsMemPassOption LowerAllocations.lowerAllocationsGPUMem [],
     seqMemPassOption ArrayShortCircuiting.optimiseSeqMem [],
+    mcMemPassOption ArrayShortCircuiting.optimiseMCMem [],
     kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
     simplifyOption "e",

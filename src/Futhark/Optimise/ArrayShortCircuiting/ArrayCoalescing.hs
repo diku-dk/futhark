@@ -1,12 +1,14 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The bulk of the short-circuiting implementation.
-module Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing (mkCoalsTab, CoalsTab, mkCoalsTabGPU) where
+module Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
+  ( mkCoalsTab,
+    CoalsTab,
+    mkCoalsTabGPU,
+    mkCoalsTabMC,
+  )
+where
 
 import Control.Exception.Base qualified as Exc
 import Control.Monad.Reader
@@ -21,7 +23,8 @@ import Data.Sequence (Seq (..))
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
-import Futhark.IR.GPUMem
+import Futhark.IR.GPUMem as GPU
+import Futhark.IR.MCMem as MC
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
@@ -33,7 +36,8 @@ import Futhark.Util
 
 -- | A helper type describing representations that can be short-circuited.
 type Coalesceable rep inner =
-  ( ASTRep rep,
+  ( Mem rep inner,
+    ASTRep rep,
     CanBeAliased inner,
     Op rep ~ MemOp inner,
     HasMemBlock (Aliases rep),
@@ -110,22 +114,33 @@ mkCoalsTabGPU prog =
   mkCoalsTabProg
     (lastUseGPUMem prog)
     (ShortCircuitReader shortCircuitGPUMem genSSPointInfoGPUMem)
-    (ComputeScalarTableOnOp computeScalarTableGPUMem)
+    (ComputeScalarTableOnOp (computeScalarTableMemOp computeScalarTableGPUMem))
+    prog
+
+-- | Given a 'Prog' in 'MCMem' representation, compute the coalescing table
+-- by folding over each function.
+mkCoalsTabMC :: (MonadFreshNames m) => Prog (Aliases MCMem) -> m (M.Map Name CoalsTab)
+mkCoalsTabMC prog =
+  mkCoalsTabProg
+    (lastUseMCMem prog)
+    (ShortCircuitReader shortCircuitMCMem genSSPointInfoMCMem)
+    (ComputeScalarTableOnOp (computeScalarTableMemOp computeScalarTableMCMem))
     prog
 
 -- | Given a function, compute the coalescing table
 mkCoalsTabProg ::
-  (MonadFreshNames m, Coalesceable rep inner, FParamInfo rep ~ FParamMem) =>
-  LUTabFun ->
+  (MonadFreshNames m, Coalesceable rep inner) =>
+  LUTabProg ->
   ShortCircuitReader rep ->
   ComputeScalarTableOnOp rep ->
   Prog (Aliases rep) ->
   m (M.Map Name CoalsTab)
-mkCoalsTabProg lutab r computeScalarOnOp = fmap M.fromList . mapM onFun . progFuns
+mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp = fmap M.fromList . mapM onFun . progFuns
   where
     onFun fun@(FunDef _ _ fname _ fpars body) = do
       -- First compute last-use information
       let unique_mems = getUniqueMemFParam fpars
+          lutab = lutab_prog M.! fname
           scalar_table =
             runReader
               ( concatMapM
@@ -154,28 +169,20 @@ paramSizes _ = mempty
 shortCircuitSeqMem :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Op (Aliases SeqMem) -> TopdownEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
 shortCircuitSeqMem _ _ _ _ = pure
 
--- | Short-circuit handler for 'GPUMem' 'Op'.
---
--- When the 'Op' is a 'SegOp', we handle it accordingly, otherwise we do
--- nothing.
-shortCircuitGPUMem ::
+-- | Short-circuit handler for SegOp.
+shortCircuitSegOp ::
+  Coalesceable rep inner =>
+  (lvl -> Bool) ->
   LUTabFun ->
   Pat (VarAliases, LetDecMem) ->
-  Op (Aliases GPUMem) ->
-  TopdownEnv GPUMem ->
+  SegOp lvl (Aliases rep) ->
+  TopdownEnv rep ->
   BotUpEnv ->
-  ShortCircuitM GPUMem BotUpEnv
-shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = pure bu_env
-shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl@SegThread {} space _ kernel_body))) td_env bu_env =
+  ShortCircuitM rep BotUpEnv
+shortCircuitSegOp lvlOK lutab pat (SegMap lvl space _ kernel_body) td_env bu_env =
   -- No special handling necessary for 'SegMap'. Just call the helper-function.
-  shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env
-shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl@SegGroup {} space _ kernel_body))) td_env bu_env =
-  -- No special handling necessary for 'SegMap'. Just call the helper-function.
-  shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env
-shortCircuitGPUMem lutab pat (Inner (SegOp (SegMap lvl@SegThreadInGroup {} space _ kernel_body))) td_env bu_env =
-  -- No special handling necessary for 'SegMap'. Just call the helper-function.
-  shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env
-shortCircuitGPUMem lutab pat (Inner (SegOp (SegRed lvl space binops _ kernel_body))) td_env bu_env =
+  shortCircuitSegOpHelper 0 lvlOK lvl lutab pat space kernel_body td_env bu_env
+shortCircuitSegOp lvlOK lutab pat (SegRed lvl space binops _ kernel_body) td_env bu_env =
   -- When handling 'SegRed', we we first invalidate all active coalesce-entries
   -- where any of the variables in 'vartab' are also free in the list of
   -- 'SegBinOp'. In other words, anything that is used as part of the reduction
@@ -185,26 +192,26 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegRed lvl space binops _ kernel_bod
         foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
       num_reds = length red_ts
-   in shortCircuitGPUMemHelper num_reds lvl lutab pat space kernel_body td_env bu_env'
+   in shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat space kernel_body td_env bu_env'
   where
     segment_dims = init $ segSpaceDims space
     red_ts = do
       op <- binops
       let shp = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shp) (lambdaReturnType $ segBinOpLambda op)
-shortCircuitGPUMem lutab pat (Inner (SegOp (SegScan lvl space binops _ kernel_body))) td_env bu_env =
+shortCircuitSegOp lvlOK lutab pat (SegScan lvl space binops _ kernel_body) td_env bu_env =
   -- Like in the handling of 'SegRed', we do not want to coalesce anything that
   -- is used in the 'SegBinOp'
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
-   in shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env'
-shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_body))) td_env bu_env = do
+   in shortCircuitSegOpHelper 0 lvlOK lvl lutab pat space kernel_body td_env bu_env'
+shortCircuitSegOp lvlOK lutab pat (SegHist lvl space histops _ kernel_body) td_env bu_env = do
   -- Need to take zipped patterns and histDest (flattened) and insert transitive coalesces
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . histOp) histops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
-  bu_env'' <- shortCircuitGPUMemHelper 0 lvl lutab pat space kernel_body td_env bu_env'
+  bu_env'' <- shortCircuitSegOpHelper 0 lvlOK lvl lutab pat space kernel_body td_env bu_env'
   pure $
     foldl insertHistCoals bu_env'' $
       zip (patElems pat) $
@@ -225,17 +232,33 @@ shortCircuitGPUMem lutab pat (Inner (SegOp (SegHist lvl space histops _ kernel_b
                     }
             Nothing -> acc
         _ -> acc
-shortCircuitGPUMem lutab pat (Inner (GPUBody _ body)) td_env bu_env = do
+
+-- | Short-circuit handler for 'GPUMem' 'Op'.
+--
+-- When the 'Op' is a 'SegOp', we handle it accordingly, otherwise we do
+-- nothing.
+shortCircuitGPUMem ::
+  LUTabFun ->
+  Pat (VarAliases, LetDecMem) ->
+  Op (Aliases GPUMem) ->
+  TopdownEnv GPUMem ->
+  BotUpEnv ->
+  ShortCircuitM GPUMem BotUpEnv
+shortCircuitGPUMem _ _ (Alloc _ _) _ bu_env = pure bu_env
+shortCircuitGPUMem lutab pat (Inner (GPU.SegOp op)) td_env bu_env =
+  shortCircuitSegOp isSegThread lutab pat op td_env bu_env
+shortCircuitGPUMem lutab pat (Inner (GPU.GPUBody _ body)) td_env bu_env = do
   fresh1 <- newNameFromString "gpubody"
   fresh2 <- newNameFromString "gpubody"
-  shortCircuitGPUMemHelper
+  shortCircuitSegOpHelper
     0
+    isSegThread
     -- Construct a 'SegLevel' corresponding to a single thread
-    ( SegThread SegNoVirt $
+    ( GPU.SegThread GPU.SegNoVirt $
         Just $
-          KernelGrid
-            (Count $ Constant $ IntValue $ Int64Value 1)
-            (Count $ Constant $ IntValue $ Int64Value 1)
+          GPU.KernelGrid
+            (GPU.Count $ Constant $ IntValue $ Int64Value 1)
+            (GPU.Count $ Constant $ IntValue $ Int64Value 1)
     )
     lutab
     pat
@@ -243,14 +266,29 @@ shortCircuitGPUMem lutab pat (Inner (GPUBody _ body)) td_env bu_env = do
     (bodyToKernelBody body)
     td_env
     bu_env
-shortCircuitGPUMem _ _ (Inner (SizeOp _)) _ bu_env = pure bu_env
-shortCircuitGPUMem _ _ (Inner (OtherOp ())) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ (Inner (GPU.SizeOp _)) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ (Inner (GPU.OtherOp ())) _ bu_env = pure bu_env
+
+shortCircuitMCMem ::
+  LUTabFun ->
+  Pat (VarAliases, LetDecMem) ->
+  Op (Aliases MCMem) ->
+  TopdownEnv MCMem ->
+  BotUpEnv ->
+  ShortCircuitM MCMem BotUpEnv
+shortCircuitMCMem _ _ (Alloc _ _) _ bu_env = pure bu_env
+shortCircuitMCMem _ _ (Inner (MC.OtherOp ())) _ bu_env = pure bu_env
+shortCircuitMCMem lutab pat (Inner (MC.ParOp (Just par_op) op)) td_env bu_env =
+  shortCircuitSegOp (const True) lutab pat par_op td_env bu_env
+    >>= shortCircuitSegOp (const True) lutab pat op td_env
+shortCircuitMCMem lutab pat (Inner (MC.ParOp Nothing op)) td_env bu_env =
+  shortCircuitSegOp (const True) lutab pat op td_env bu_env
 
 dropLastSegSpace :: SegSpace -> SegSpace
 dropLastSegSpace space = space {unSegSpace = init $ unSegSpace space}
 
-isSegThread :: SegLevel -> Bool
-isSegThread SegThread {} = True
+isSegThread :: GPU.SegLevel -> Bool
+isSegThread GPU.SegThread {} = True
 isSegThread _ = False
 
 -- | Computes the slice written at the end of a thread in a 'SegOp'.
@@ -291,18 +329,21 @@ bodyToKernelBody (Body dec stms res) =
 --
 -- 4. Mark active coalescings as finished, since a 'SegOp' is an array creation
 -- point.
-shortCircuitGPUMemHelper ::
+shortCircuitSegOpHelper ::
+  Coalesceable rep inner =>
   -- | The number of returns for which we should drop the last seg space
   Int ->
-  SegLevel ->
+  -- | Whether we should look at a segop with this lvl.
+  (lvl -> Bool) ->
+  lvl ->
   LUTabFun ->
   Pat (VarAliases, LetDecMem) ->
   SegSpace ->
-  KernelBody (Aliases GPUMem) ->
-  TopdownEnv GPUMem ->
+  KernelBody (Aliases rep) ->
+  TopdownEnv rep ->
   BotUpEnv ->
-  ShortCircuitM GPUMem BotUpEnv
-shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_env bu_env = do
+  ShortCircuitM rep BotUpEnv
+shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) space0 kernel_body td_env bu_env = do
   -- We need to drop the last element of the 'SegSpace' for pattern elements
   -- that correspond to reductions.
   let ps_space_and_res =
@@ -320,7 +361,7 @@ shortCircuitGPUMemHelper num_reds lvl lutab pat@(Pat ps0) space0 kernel_body td_
       (actv_return, inhibit_return) =
         if num_reds > 0
           then (actv0, inhibit0)
-          else foldl (makeSegMapCoals lvl td_env kernel_body) (actv0, inhibit0) ps_space_and_res
+          else foldl (makeSegMapCoals lvlOK lvl td_env kernel_body) (actv0, inhibit0) ps_space_and_res
 
   -- Start from empty references, we'll update with aggregates later.
   let actv0' = M.map (\etry -> etry {memrefs = mempty}) $ actv0 <> actv_return
@@ -451,67 +492,61 @@ ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMAD
 
 -- | Given a pattern element and the corresponding kernel result, try to put the
 -- kernel result directly in the memory block of pattern element
-makeSegMapCoals :: SegLevel -> TopdownEnv GPUMem -> KernelBody (Aliases GPUMem) -> (CoalsTab, InhibitTab) -> (PatElem (VarAliases, LetDecMem), SegSpace, KernelResult) -> (CoalsTab, InhibitTab)
-makeSegMapCoals lvl td_env kernel_body (active, inhb) (PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space, Returns _ _ (Var return_name))
-  | Just mb@(MemBlock tp return_shp return_mem _) <-
+makeSegMapCoals ::
+  (Coalesceable rep inner) =>
+  (lvl -> Bool) ->
+  lvl ->
+  TopdownEnv rep ->
+  KernelBody (Aliases rep) ->
+  (CoalsTab, InhibitTab) ->
+  (PatElem (VarAliases, LetDecMem), SegSpace, KernelResult) ->
+  (CoalsTab, InhibitTab)
+makeSegMapCoals lvlOK lvl td_env kernel_body (active, inhb) (PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space, Returns _ _ (Var return_name))
+  | Just (MemBlock tp return_shp return_mem _) <-
       getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
-    isSegThread lvl,
+    lvlOK lvl,
     MemMem pat_space <- runReader (lookupMemInfo pat_mem) $ removeScopeAliases $ scope td_env,
-    MemMem return_space <- runReader (lookupMemInfo return_mem) $ removeScopeAliases $ scope td_env <> scopeOf (kernelBodyStms kernel_body) <> scopeOfSegSpace space,
+    MemMem return_space <-
+      scope td_env <> scopeOf (kernelBodyStms kernel_body) <> scopeOfSegSpace space
+        & removeScopeAliases
+        & runReader (lookupMemInfo return_mem),
     pat_space == return_space =
       case M.lookup pat_mem active of
         Nothing ->
           -- We are not in a transitive case
-          if IxFun.hasOneLmad pat_ixf
-            then case ( maybe False (pat_mem `nameIn`) $ M.lookup return_mem inhb,
-                        Coalesced InPlaceCoal mb mempty
-                          & M.singleton return_name
-                          & flip (addInvAliassesVarTab td_env) return_name
-                          & fmap
-                            ( M.adjust
-                                ( \(Coalesced knd (MemBlock pt shp _ _) subst) ->
-                                    Coalesced
-                                      knd
-                                      ( MemBlock pt shp pat_mem $
-                                          IxFun.slice pat_ixf $
-                                            fullSlice (IxFun.shape pat_ixf) $
-                                              Slice $
-                                                map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-                                                  unSegSpace space
-                                      )
-                                      subst
-                                )
-                                return_name
-                            )
-                      ) of
-              (False, Just vtab) ->
-                (active <> M.singleton return_mem (CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty), inhb)
-              _ -> (active, inhb)
-            else (active, inhb)
-        Just trans ->
-          case ( maybe False (dstmem trans `nameIn`) $ M.lookup return_mem inhb,
-                 Coalesced InPlaceCoal (MemBlock tp return_shp (dstmem trans) (dstind trans)) mempty
+          case ( IxFun.hasOneLmad pat_ixf
+                   && maybe False (pat_mem `nameIn`) (M.lookup return_mem inhb),
+                 Coalesced
+                   InPlaceCoal
+                   (MemBlock tp return_shp pat_mem $ resultSlice pat_ixf)
+                   mempty
                    & M.singleton return_name
                    & flip (addInvAliassesVarTab td_env) return_name
-                   & fmap
-                     ( M.adjust
-                         ( \(Coalesced knd (MemBlock pt shp mem ixf@(IxFun.IxFun _ base_shape _)) subst) ->
-                             Coalesced
-                               knd
-                               ( MemBlock pt shp mem $
-                                   IxFun.slice ixf $
-                                     fullSlice base_shape $
-                                       Slice $
-                                         map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst) $
-                                           unSegSpace space
-                               )
-                               subst
-                         )
-                         return_name
-                     )
                ) of
             (False, Just vtab) ->
-              let opts = if dstmem trans == pat_mem then mempty else M.insert pat_name pat_mem $ optdeps trans
+              ( active
+                  <> M.singleton
+                    return_mem
+                    (CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty),
+                inhb
+              )
+            _ -> (active, inhb)
+        Just trans ->
+          case ( maybe False (dstmem trans `nameIn`) $ M.lookup return_mem inhb,
+                 let Coalesced _ (MemBlock _ _ trans_mem trans_ixf) _ =
+                       fromMaybe (error "Impossible") $ M.lookup pat_name $ vartab trans
+                  in Coalesced
+                       TransitiveCoal
+                       (MemBlock tp return_shp trans_mem $ resultSlice trans_ixf)
+                       mempty
+                       & M.singleton return_name
+                       & flip (addInvAliassesVarTab td_env) return_name
+               ) of
+            (False, Just vtab) ->
+              let opts =
+                    if dstmem trans == pat_mem
+                      then mempty
+                      else M.insert pat_name pat_mem $ optdeps trans
                in ( M.insert
                       return_mem
                       ( CoalsEntry
@@ -526,15 +561,21 @@ makeSegMapCoals lvl td_env kernel_body (active, inhb) (PatElem pat_name (_, MemA
                     inhb
                   )
             _ -> (active, inhb)
-makeSegMapCoals _ td_env _ x (_, _, WriteReturns _ _ return_name _) =
+  where
+    thread_slice =
+      unSegSpace space
+        & map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst)
+        & Slice
+    resultSlice ixf = IxFun.slice ixf $ fullSlice (IxFun.shape ixf) thread_slice
+makeSegMapCoals _ _ td_env _ x (_, _, WriteReturns _ _ return_name _) =
   case getScopeMemInfo return_name $ scope td_env of
     Just (MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
     Nothing -> error "Should not happen?"
-makeSegMapCoals _ td_env _ x (_, _, result) =
+makeSegMapCoals _ _ td_env _ x (_, _, result) =
   freeIn result
     & namesToList
     & mapMaybe (flip getScopeMemInfo $ scope td_env)
-    & foldr (\(MemBlock _ _ mem _) -> flip markFailedCoal mem) x
+    & foldr (flip markFailedCoal . memName) x
 
 fullSlice :: [TPrimExp Int64 VName] -> Slice (TPrimExp Int64 VName) -> Slice (TPrimExp Int64 VName)
 fullSlice shp (Slice slc) =
@@ -1353,20 +1394,21 @@ type SSPointInfo =
     Shape
   )
 
--- | Given an 'Op', return a list of potential short-circuit points
-genSSPointInfoSeqMem ::
+-- | Given an op, return a list of potential short-circuit points
+type GenSSPoint rep op =
   LUTabFun ->
-  TopdownEnv SeqMem ->
-  ScopeTab SeqMem ->
+  TopdownEnv rep ->
+  ScopeTab rep ->
   Pat (VarAliases, LetDecMem) ->
-  Op (Aliases SeqMem) ->
+  op ->
   Maybe [SSPointInfo]
+
+genSSPointInfoSeqMem ::
+  GenSSPoint SeqMem (Op (Aliases SeqMem))
 genSSPointInfoSeqMem _ _ _ _ _ =
   Nothing
 
--- | Given an 'Op', return a list of potential short-circuit points
---
--- For 'SegOp', we currently only handle 'SegMap', and only under the following
+-- | For 'SegOp', we currently only handle 'SegMap', and only under the following
 -- circumstances:
 --
 --  1. The 'SegMap' has only one return/pattern value.
@@ -1389,19 +1431,14 @@ genSSPointInfoSeqMem _ _ _ _ _ =
 --
 -- The result of the 'SegMap' is treated as the destination, while the candidate
 -- array from inside the body is treated as the source.
-genSSPointInfoGPUMem ::
-  LUTabFun ->
-  TopdownEnv GPUMem ->
-  ScopeTab GPUMem ->
-  Pat (VarAliases, LetDecMem) ->
-  Op (Aliases GPUMem) ->
-  Maybe [SSPointInfo]
-genSSPointInfoGPUMem
+genSSPointInfoSegOp ::
+  Coalesceable rep inner => GenSSPoint rep (SegOp lvl (Aliases rep))
+genSSPointInfoSegOp
   lutab
   td_env
   scopetab
   (Pat [PatElem dst (_, MemArray dst_pt _ _ (ArrayIn dst_mem dst_ixf))])
-  (Inner (SegOp (SegMap _ space _ kernel_body)))
+  (SegMap _ space _ kernel_body)
     | (src, MemBlock _ shp src_mem src_ixf) : _ <-
         mapMaybe getPotentialMapShortCircuit $
           stmsToList $
@@ -1428,8 +1465,31 @@ genSSPointInfoGPUMem
           primBitSize src_pt == primBitSize dst_pt =
             Just (src, memblock)
       getPotentialMapShortCircuit _ = Nothing
-genSSPointInfoGPUMem _ _ _ _ _ =
+genSSPointInfoSegOp _ _ _ _ _ =
   Nothing
+
+genSSPointInfoMemOp ::
+  GenSSPoint rep inner ->
+  GenSSPoint rep (MemOp inner)
+genSSPointInfoMemOp onOp lutab td_end scopetab pat (Inner op) =
+  onOp lutab td_end scopetab pat op
+genSSPointInfoMemOp _ _ _ _ _ _ = Nothing
+
+genSSPointInfoGPUMem ::
+  GenSSPoint GPUMem (Op (Aliases GPUMem))
+genSSPointInfoGPUMem = genSSPointInfoMemOp f
+  where
+    f lutab td_env scopetab pat (GPU.SegOp op) =
+      genSSPointInfoSegOp lutab td_env scopetab pat op
+    f _ _ _ _ _ = Nothing
+
+genSSPointInfoMCMem ::
+  GenSSPoint MCMem (Op (Aliases MCMem))
+genSSPointInfoMCMem = genSSPointInfoMemOp f
+  where
+    f lutab td_env scopetab pat (MC.ParOp Nothing op) =
+      genSSPointInfoSegOp lutab td_env scopetab pat op
+    f _ _ _ _ _ = Nothing
 
 genCoalStmtInfo ::
   Coalesceable rep inner =>
@@ -1640,18 +1700,44 @@ computeScalarTable scope_table (Let _ _ (Op op)) = do
   on_op scope_table op
 computeScalarTable _ _ = pure mempty
 
-computeScalarTableGPUMem :: ScopeTab GPUMem -> Op (Aliases GPUMem) -> ScalarTableM GPUMem (M.Map VName (PrimExp VName))
-computeScalarTableGPUMem _ (Alloc _ _) = pure mempty
-computeScalarTableGPUMem scope_table (Inner (SegOp segop)) = do
+type ComputeScalarTable rep op =
+  ScopeTab rep -> op -> ScalarTableM rep (M.Map VName (PrimExp VName))
+
+computeScalarTableMemOp ::
+  ComputeScalarTable rep inner -> ComputeScalarTable rep (MemOp inner)
+computeScalarTableMemOp _ _ (Alloc _ _) = pure mempty
+computeScalarTableMemOp onInner scope_table (Inner op) = onInner scope_table op
+
+computeScalarTableSegOp ::
+  Coalesceable rep inner =>
+  ComputeScalarTable rep (GPU.SegOp lvl (Aliases rep))
+computeScalarTableSegOp scope_table segop = do
   concatMapM
-    (computeScalarTable $ scope_table <> scopeOf (kernelBodyStms $ segBody segop) <> scopeOfSegSpace (segSpace segop))
+    ( computeScalarTable $
+        scope_table
+          <> scopeOf (kernelBodyStms $ segBody segop)
+          <> scopeOfSegSpace (segSpace segop)
+    )
     (stmsToList $ kernelBodyStms $ segBody segop)
-computeScalarTableGPUMem _ (Inner (SizeOp _)) = pure mempty
-computeScalarTableGPUMem _ (Inner (OtherOp ())) = pure mempty
-computeScalarTableGPUMem scope_table (Inner (GPUBody _ body)) =
+
+computeScalarTableGPUMem ::
+  ComputeScalarTable GPUMem (GPU.HostOp (Aliases GPUMem) ())
+computeScalarTableGPUMem scope_table (GPU.SegOp segop) =
+  computeScalarTableSegOp scope_table segop
+computeScalarTableGPUMem _ (GPU.SizeOp _) = pure mempty
+computeScalarTableGPUMem _ (GPU.OtherOp ()) = pure mempty
+computeScalarTableGPUMem scope_table (GPU.GPUBody _ body) =
   concatMapM
     (computeScalarTable $ scope_table <> scopeOf (bodyStms body))
     (stmsToList $ bodyStms body)
+
+computeScalarTableMCMem ::
+  ComputeScalarTable MCMem (MC.MCOp (Aliases MCMem) ())
+computeScalarTableMCMem _ (MC.OtherOp ()) = pure mempty
+computeScalarTableMCMem scope_table (MC.ParOp par_op segop) =
+  (<>)
+    <$> maybe (pure mempty) (computeScalarTableSegOp scope_table) par_op
+    <*> computeScalarTableSegOp scope_table segop
 
 filterMapM1 :: (Eq k, Monad m) => (v -> m Bool) -> M.Map k v -> m (M.Map k v)
 filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
