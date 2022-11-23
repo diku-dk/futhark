@@ -601,3 +601,15 @@ jobs:
       run: |
         tar -xf prelude-docs.tar.xz
         rsync -rv -e 'ssh -o "StrictHostKeyChecking no"' prelude-docs/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/docs/prelude/
+
+    - name: make nightly release
+      uses: "marvinpinto/action-automatic-releases@v1.2.1"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "nightly"
+        prerelease: true
+        title: "nightly build"
+        files: |
+          futhark-nightly-windows-x86_64.zip
+          futhark-nightly-linux-x86_64.tar.xz
+          futhark-nightly-macos-x86_64.tar.xz
