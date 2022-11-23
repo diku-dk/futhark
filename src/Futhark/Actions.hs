@@ -244,7 +244,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
   ret_ispc <-
     liftIO $
       runProgramWithExitCode
-        "ispc"
+        cmdISPC
         ( [ispcpath, "-o", ispcbase `addExtension` "o"]
             ++ ["--addressing=64", "--pic"]
             ++ cmdISPCFLAGS ispc_flags -- These flags are always needed
@@ -264,8 +264,8 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
         mempty
   case ret_ispc of
     Left err ->
-      externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
-    Right (ExitFailure code, _, gccerr) -> throwError code gccerr
+      externalErrorS $ "Failed to run " ++ cmdISPC ++ ": " ++ show err
+    Right (ExitFailure code, _, ispcerr) -> throwError code ispcerr
     Right (ExitSuccess, _, _) ->
       case ret of
         Left err ->
@@ -274,6 +274,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
         Right (ExitSuccess, _, _) ->
           pure ()
   where
+    cmdISPC = "ispc"
     ispcbase = outpath <> ispcextension
     throwError code gccerr =
       externalErrorS $
