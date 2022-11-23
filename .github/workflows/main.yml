@@ -121,7 +121,7 @@ jobs:
       shell: bash
       run: |
         cabal update
-        try() { cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.; }
+        try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
     - uses: papeloto/action-zip@v1
       with:
