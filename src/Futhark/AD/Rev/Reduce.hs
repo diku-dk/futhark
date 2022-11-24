@@ -87,12 +87,12 @@ diffReduce :: VjpOps -> [VName] -> SubExp -> [VName] -> Reduce SOACS -> ADM ()
 diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isAdd op = do
-    adj_rep <-
-      letExp (baseString adj <> "_rep") $
-        BasicOp $
-          Replicate (Shape [w]) $
-            Var adj
-    void $ updateAdj a adj_rep
+      adj_rep <-
+        letExp (baseString adj <> "_rep") $
+          BasicOp $
+            Replicate (Shape [w]) $
+              Var adj
+      void $ updateAdj a adj_rep
   where
     isAdd FAdd {} = True
     isAdd Add {} = True
@@ -216,7 +216,7 @@ diffVecReduce ::
 diffVecReduce ops x aux w iscomm lam ne as m = do
   stms <- collectStms_ $ do
     rank <- arrayRank <$> lookupType as
-    let rear = [1, 0] ++ drop 2 [0 .. rank -1]
+    let rear = [1, 0] ++ drop 2 [0 .. rank - 1]
 
     tran_as <- letExp "tran_as" $ BasicOp $ Rearrange rear as
     ts <- lookupType tran_as
@@ -230,7 +230,8 @@ diffVecReduce ops x aux w iscomm lam ne as m = do
     map_lam <-
       mkLambda [as_param, ne_param] $
         fmap varsRes . letTupExp "idx_res" $
-          Op $ Screma w [paramName as_param] reduce_form
+          Op $
+            Screma w [paramName as_param] reduce_form
     addStm $ Let x aux $ Op $ Screma (arraySize 0 ts) [tran_as, ne] $ mapSOAC map_lam
 
   foldr (vjpStm ops) m stms
@@ -274,7 +275,9 @@ diffMulReduce _ops x aux w mul ne as m = do
   zs <- newVName "zs"
   auxing aux $
     letBindNames [ps, zs] $
-      Op $ Screma w [as] $ mapSOAC map_lam
+      Op $
+        Screma w [as] $
+          mapSOAC map_lam
 
   red_lam_mul <- binOpLambda mul t
   red_lam_add <- binOpLambda (Add Int64 OverflowUndef) int64
@@ -307,7 +310,8 @@ diffMulReduce _ops x aux w mul ne as m = do
           ( eBody $
               pure $
                 eBinOp mul (eSubExp $ Var x_adj) $
-                  eBinOp (getDiv t) (eSubExp $ Var nz_prods) $ eParam a_param_rev
+                  eBinOp (getDiv t) (eSubExp $ Var nz_prods) $
+                    eParam a_param_rev
           )
           ( eBody $
               pure $
@@ -319,7 +323,9 @@ diffMulReduce _ops x aux w mul ne as m = do
                           (eCmpOp (CmpEq t) (eParam a_param_rev) const_zero)
                           ( eBody $
                               pure $
-                                eBinOp mul (eSubExp $ Var x_adj) $ eSubExp $ Var nz_prods
+                                eBinOp mul (eSubExp $ Var x_adj) $
+                                  eSubExp $
+                                    Var nz_prods
                           )
                           (eBody $ pure const_zero)
                   )

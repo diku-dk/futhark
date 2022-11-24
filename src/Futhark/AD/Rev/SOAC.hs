@@ -75,27 +75,27 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
   | Just [Reduce iscomm lam [Var ne]] <- isReduceSOAC form,
     [a] <- as,
     Just op <- mapOp lam =
-    diffVecReduce ops pat aux w iscomm op ne a m
+      diffVecReduce ops pat aux w iscomm op ne a m
   | Just reds <- isReduceSOAC form,
     length reds > 1 =
-    splitScanRed ops (reduceSOAC, redNeutral) (pat, aux, reds, w, as) m
+      splitScanRed ops (reduceSOAC, redNeutral) (pat, aux, reds, w, as) m
   | Just [red] <- isReduceSOAC form,
     [x] <- patNames pat,
     [ne] <- redNeutral red,
     [a] <- as,
     Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isMinMaxOp op =
-    diffMinMaxReduce ops x aux w op ne a m
+      diffMinMaxReduce ops x aux w op ne a m
   | Just [red] <- isReduceSOAC form,
     [x] <- patNames pat,
     [ne] <- redNeutral red,
     [a] <- as,
     Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isMulOp op =
-    diffMulReduce ops x aux w op ne a m
+      diffMulReduce ops x aux w op ne a m
   | Just red <- singleReduce <$> isReduceSOAC form = do
-    pat_adj <- mapM adjVal =<< commonSOAC pat aux soac m
-    diffReduce ops pat_adj w as red
+      pat_adj <- mapM adjVal =<< commonSOAC pat aux soac m
+      diffReduce ops pat_adj w as red
 
 -- Differentiating Scans
 vjpSOAC ops pat aux soac@(Screma w as form) m
@@ -104,31 +104,31 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
     [a] <- as,
     Just [(op, _, _, _)] <- lamIsBinOp lam,
     isAddOp op = do
-    void $ commonSOAC pat aux soac m
-    diffScanAdd ops x w lam ne a
+      void $ commonSOAC pat aux soac m
+      diffScanAdd ops x w lam ne a
   | Just [Scan lam ne] <- isScanSOAC form,
     Just op <- mapOp lam = do
-    diffScanVec ops (patNames pat) aux w op ne as m
+      diffScanVec ops (patNames pat) aux w op ne as m
   | Just scans <- isScanSOAC form,
     length scans > 1 =
-    splitScanRed ops (scanSOAC, scanNeutral) (pat, aux, scans, w, as) m
+      splitScanRed ops (scanSOAC, scanNeutral) (pat, aux, scans, w, as) m
   | Just red <- singleScan <$> isScanSOAC form = do
-    void $ commonSOAC pat aux soac m
-    diffScan ops (patNames pat) w as red
+      void $ commonSOAC pat aux soac m
+      diffScan ops (patNames pat) w as red
 
 -- Differentiating Maps
 vjpSOAC ops pat aux soac@(Screma w as form) m
   | Just lam <- isMapSOAC form = do
-    pat_adj <- commonSOAC pat aux soac m
-    vjpMap ops pat_adj aux w lam as
+      pat_adj <- commonSOAC pat aux soac m
+      vjpMap ops pat_adj aux w lam as
 
 -- Differentiating Redomaps
 vjpSOAC ops pat _aux (Screma w as form) m
   | Just (reds, map_lam) <-
       isRedomapSOAC form = do
-    (mapstm, redstm) <-
-      redomapToMapAndReduce pat (w, reds, map_lam, as)
-    vjpStm ops mapstm $ vjpStm ops redstm m
+      (mapstm, redstm) <-
+        redomapToMapAndReduce pat (w, reds, map_lam, as)
+      vjpStm ops mapstm $ vjpStm ops redstm m
 
 -- Differentiating Scatter
 vjpSOAC ops pat aux (Scatter w lam ass written_info) m =
@@ -137,8 +137,8 @@ vjpSOAC ops pat aux (Scatter w lam ass written_info) m =
 vjpSOAC ops pat aux (Hist n as histops f) m
   | isIdentityLambda f,
     length histops > 1 = do
-    let (is, vs) = splitAt (length histops) as
-    splitHist ops pat aux histops n is vs m
+      let (is, vs) = splitAt (length histops) as
+      splitHist ops pat aux histops n is vs m
 vjpSOAC ops pat aux (Hist n [is, vs] [histop] f) m
   | isIdentityLambda f,
     [x] <- patNames pat,
@@ -146,30 +146,30 @@ vjpSOAC ops pat aux (Hist n [is, vs] [histop] f) m
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isMinMaxOp op =
-    diffMinMaxHist ops x aux n op ne is vs w rf dst m
+      diffMinMaxHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isMulOp op =
-    diffMulHist ops x aux n op ne is vs w rf dst m
+      diffMulHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isAddOp op =
-    diffAddHist ops x aux n lam ne is vs w rf dst m
+      diffAddHist ops x aux n lam ne is vs w rf dst m
 vjpSOAC ops pat aux (Hist n as [histop] f) m
   | isIdentityLambda f,
     HistOp (Shape w) rf dst ne lam <- histop = do
-    diffHist ops (patNames pat) aux n lam ne as w rf dst m
+      diffHist ops (patNames pat) aux n lam ne as w rf dst m
 vjpSOAC ops pat _aux (Hist n as histops f) m
   | not (isIdentityLambda f) = do
-    (mapstm, redstm) <-
-      histomapToMapAndHist pat (n, histops, f, as)
-    vjpStm ops mapstm $ vjpStm ops redstm m
+      (mapstm, redstm) <-
+        histomapToMapAndHist pat (n, histops, f, as)
+      vjpStm ops mapstm $ vjpStm ops redstm m
 vjpSOAC _ _ _ soac _ =
   error $ "vjpSOAC unhandled:\n" ++ prettyString soac
 
@@ -208,7 +208,7 @@ mapOp (Lambda [pa1, pa2] lam_body _)
     (Screma _ [a1, a2] (ScremaForm [] [] map_lam)) <- scrm,
     (a1 == paramName pa1 && a2 == paramName pa2) || (a1 == paramName pa2 && a2 == paramName pa1),
     r == Var (patElemName pe) =
-    Just map_lam
+      Just map_lam
 mapOp _ = Nothing
 
 -- getting the innermost lambda of a perfect-map nest

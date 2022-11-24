@@ -1,10 +1,10 @@
 -- ==
 -- entry: compare
--- random input { [500]i64 [100][30]f32 [500][30]f32 } output { true }
+-- compiled random input { [500]i64 [100][30]f32 [500][30]f32 } output { true }
 
 -- ==
 -- entry: compare2
--- random input { [100]i64 [50][30][20]f32 [100][30][20]f32 } output { true }
+-- compiled random input { [100]i64 [50][30][20]f32 [100][30][20]f32 } output { true }
 
 -- ==
 -- entry: rev3

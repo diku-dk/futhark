@@ -1,22 +1,22 @@
 -- ==
 -- entry: testmm2by2
--- random input { [250][4]i32 } output { true }
+-- compiled random input { [250][4]i32 } output { true }
 
 -- ==
 -- entry: testmm3by3
--- random input { [111][9]i32 } output { true }
+-- compiled random input { [111][9]i32 } output { true }
 
 -- ==
 -- entry: testmm4by4
--- random input { [62][16]i32 } output { true }
+-- compiled random input { [62][16]i32 } output { true }
 
 -- ==
 -- entry: testlin
--- random input { [500][2]i32 } output { true }
+-- compiled random input { [500][2]i32 } output { true }
 
 -- ==
 -- entry: testlin2by2
--- random input { [166][6]i32 } output { true }
+-- compiled random input { [166][6]i32 } output { true }
 def mm2by2  (a1: i32, b1: i32, c1: i32, d1: i32)
             (a2: i32, b2: i32, c2: i32, d2: i32) =
   ( a1*a2 + b1*c2

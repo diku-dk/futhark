@@ -1,10 +1,10 @@
 -- ==
 -- entry: satadd
--- random input { [1000]u64 [100]i32 [1000]i32 } output { true }
+-- compiled random input { [1000]u64 [100]i32 [1000]i32 } output { true }
 
 -- ==
 -- entry: argmax
--- random input { [500]u64 [50]i32 [50]i32 [500]i32 [500]i32 } output { true }
+-- compiled random input { [500]u64 [50]i32 [50]i32 [500]i32 [500]i32 } output { true }
 let sat_add_u24 (x: i32) (y: i32): i32 =
   let sat_val = (1 << 24) - 1
   in if sat_val - x < y

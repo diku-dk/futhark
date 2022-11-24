@@ -1,10 +1,10 @@
 -- ==
 -- entry: add mul
--- random input { [1000]i32 } output { true }
+-- compiled random input { [1000]i32 } output { true }
 
 -- ==
 -- entry: vecadd vecmul
--- random input { [100][100]i32 } output { true }
+-- compiled random input { [100][100]i32 } output { true }
 
 def add_primal [n] (as: [n]i32) =
   scan (+) 0 as

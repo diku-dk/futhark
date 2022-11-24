@@ -115,13 +115,13 @@ mkScanFusedMapLam ops w scn_lam xs ys ys_adj s d = do
     case_jac :: Int -> SpecialCase -> [[a]] -> [[a]]
     case_jac _ Generic jac = jac
     case_jac k ZeroQuadrant jac =
-      concat $
-        zipWith
+      concat
+        $ zipWith
           ( \i ->
               map (take k . drop (i * k))
           )
           [0 .. d `div` k]
-          $ splitEvery k jac
+        $ splitEvery k jac
     case_jac k MatrixMul jac =
       take k <$> take k jac
 
@@ -186,7 +186,9 @@ mkScanFinalMap ops w scan_lam xs ys ds arr_tp = do
         traverse
           ( \dd ->
               letExp (baseString dd ++ "_dj") $
-                BasicOp $ Index dd $ fullSlice arr_tp [DimFix j]
+                BasicOp $
+                  Index dd $
+                    fullSlice arr_tp [DimFix j]
           )
           ds
 
@@ -235,9 +237,9 @@ subMats d mat zero =
                     all
                       ( \(v, j) -> v == zero || (i `div` m == j `div` m)
                       )
-                      $ zip row [0 .. d -1]
+                      $ zip row [0 .. d - 1]
                 )
-                $ zip mat [0 .. d -1]
+                $ zip mat [0 .. d - 1]
           )
           sub_d
       tmp = filter fst (zip poss sub_d)
@@ -246,10 +248,10 @@ subMats d mat zero =
 cases :: Int -> Type -> [[Exp SOACS]] -> Special
 cases d t mat
   | Just k <- subMats d mat $ zeroExp t =
-    let nonZeros = zipWith (\i -> map (take k . drop (i * k))) [0 .. d `div` k] $ splitEvery k mat
-     in if all (== head nonZeros) $ tail nonZeros
-          then Special (d, k) (d, k * k) 1 k MatrixMul
-          else Special (k, k) (k, k * k) (d `div` k) k ZeroQuadrant
+      let nonZeros = zipWith (\i -> map (take k . drop (i * k))) [0 .. d `div` k] $ splitEvery k mat
+       in if all (== head nonZeros) $ tail nonZeros
+            then Special (d, k) (d, k * k) 1 k MatrixMul
+            else Special (k, k) (k, k * k) (d `div` k) k ZeroQuadrant
 cases d _ _ = Special (d, d) (d, d * d) 1 d Generic
 
 identifyCase :: VjpOps -> Lambda SOACS -> ADM Special
@@ -284,7 +286,9 @@ diffScan ops ys w as scan = do
     letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
   r_scan <-
     letTupExp "adj_ctrb_scan" $
-      Op $ Screma w [iota] $ ScremaForm scan_lams [] map1_lam
+      Op $
+        Screma w [iota] $
+          ScremaForm scan_lams [] map1_lam
 
   as_contribs <- mkScanFinalMap ops w (scanLambda scan) as ys (splitScanRes sc r_scan d) (head as_ts)
   zipWithM_ updateAdj as as_contribs
@@ -311,7 +315,7 @@ diffScanVec ::
 diffScanVec ops ys aux w lam ne as m = do
   stmts <- collectStms_ $ do
     rank <- arrayRank <$> lookupType (head as)
-    let rear = [1, 0] ++ drop 2 [0 .. rank -1]
+    let rear = [1, 0] ++ drop 2 [0 .. rank - 1]
 
     transp_as <-
       traverse
@@ -331,17 +335,21 @@ diffScanVec ops ys aux w lam ne as m = do
     map_lam <-
       mkLambda (as_par ++ ne_par) $
         fmap varsRes . letTupExp "map_res" $
-          Op $ Screma w (map paramName as_par) scan_form
+          Op $
+            Screma w (map paramName as_par) scan_form
 
     transp_ys <-
       letTupExp "trans_ys" $
-        Op $ Screma n (transp_as ++ subExpVars ne) $ mapSOAC map_lam
+        Op $
+          Screma n (transp_as ++ subExpVars ne) $
+            mapSOAC map_lam
 
     zipWithM
       ( \y x ->
           auxing aux $
             letBindNames [y] $
-              BasicOp $ Rearrange rear x
+              BasicOp $
+                Rearrange rear x
       )
       ys
       transp_ys
@@ -357,16 +365,21 @@ diffScanAdd _ops ys n lam' ne as = do
 
   iota <-
     letExp "iota" $
-      BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+      BasicOp $
+        Iota n (intConst Int64 0) (intConst Int64 1) Int64
 
   scan_res <-
     letExp "res_rev" $
-      Op $ Screma n [iota] $ ScremaForm [Scan lam [ne]] [] map_scan
+      Op $
+        Screma n [iota] $
+          ScremaForm [Scan lam [ne]] [] map_scan
 
   rev_lam <- rev_arr_lam scan_res
   contrb <-
     letExp "contrb" $
-      Op $ Screma n [iota] $ mapSOAC rev_lam
+      Op $
+        Screma n [iota] $
+          mapSOAC rev_lam
 
   updateAdj as contrb
   where
@@ -380,5 +393,7 @@ diffScanAdd _ops ys n lam' ne as = do
             =<< toExp (pe64 n - le64 (paramName par_i) - 1)
         a <-
           letExp "ys_bar_rev" $
-            BasicOp $ Index arr $ fullSlice t [DimFix nmim1]
+            BasicOp $
+              Index arr $
+                fullSlice t [DimFix nmim1]
         pure [varRes a]

@@ -1,10 +1,10 @@
 -- ==
 -- entry: add mul max
--- random input { [100]i32 [1000]u64 [1000]i32 }
+-- compiled random input { [100]i32 [1000]u64 [1000]i32 }
 
 -- ==
 -- entry: vecadd vecmul vecmax
--- random input { [10][100]i32 [100]u64 [100][100]i32 } output { true }
+-- compiled random input { [10][100]i32 [100]u64 [100][100]i32 } output { true }
 def add_p [n][m] (is: [n]i64) (dst: [m]i32,vs: [n]i32): [m]i32 =
   reduce_by_index (copy dst) (+) 0 is vs
 

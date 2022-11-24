@@ -52,7 +52,9 @@ elseIf t ((c1, c2) : cs) (bt : bs) =
   eIf
     (eCmpOp (CmpEq t) c1 c2)
     bt
-    $ eBody $ pure $ elseIf t cs bs
+    $ eBody
+    $ pure
+    $ elseIf t cs bs
 elseIf _ _ _ = error "In elseIf, Hist.hs: input not supported"
 
 bindSubExpRes :: String -> [SubExpRes] -> ADM [VName]
@@ -71,7 +73,9 @@ nestedmap s@(h : r) pt lam = do
   body <- nestedmap r pt lam
   mkLambda params $
     fmap varsRes . letTupExp "res" $
-      Op $ Screma h (map paramName params) $ mapSOAC body
+      Op $
+        Screma h (map paramName params) $
+          mapSOAC body
 
 -- \ds hs -> map2 lam ds hs
 mkF' :: Lambda SOACS -> [Type] -> SubExp -> ADM ([VName], [VName], Lambda SOACS)
@@ -85,7 +89,9 @@ mkF' lam tps n = do
   lam_map <-
     mkLambda (ds_params <> hs_params) $
       fmap varsRes . letTupExp "map_f'" $
-        Op $ Screma n (ds_pars <> hs_pars) $ mapSOAC lam'
+        Op $
+          Screma n (ds_pars <> hs_pars) $
+            mapSOAC lam'
 
   pure (ds_pars, hs_pars, lam_map)
 
@@ -110,7 +116,9 @@ mkF lam tps n = do
   lam_map <-
     mkLambda map_params $
       fmap varsRes . letTupExp "map_f" $
-        Op $ Screma n (map paramName map_params) $ mapSOAC lam'
+        Op $
+          Screma n (map paramName map_params) $
+            mapSOAC lam'
 
   pure (map paramName as_params, lam_map)
 
@@ -218,13 +226,18 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
 
   dst_minus_ones <-
     letExp "minus_ones" $
-      BasicOp $ Replicate (Shape dst_dims) $ intConst Int64 (-1)
+      BasicOp $
+        Replicate (Shape dst_dims) $
+          intConst Int64 (-1)
   ne_minus_ones <-
     letSubExp "minus_ones" $
-      BasicOp $ Replicate (Shape inner_dims) $ intConst Int64 (-1)
+      BasicOp $
+        Replicate (Shape inner_dims) $
+          intConst Int64 (-1)
   iota_n <-
     letExp "red_iota" $
-      BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+      BasicOp $
+        Iota n (intConst Int64 0) (intConst Int64 1) Int64
 
   inp_iota <- do
     if nr_dims == 1
@@ -242,7 +255,9 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   f' <- mkIdentityLambda [Prim int64, rowType vs_type, rowType $ Array int64 (Shape vs_dims) NoUniqueness]
   x_inds <- newVName (baseString x <> "_inds")
   auxing aux $
-    letBindNames [x, x_inds] $ Op $ Hist n [is, vs, inp_iota] [hist_op] f'
+    letBindNames [x, x_inds] $
+      Op $
+        Hist n [is, vs, inp_iota] [hist_op] f'
 
   m
 
@@ -262,7 +277,8 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   dst_bar <-
     letExp (baseString dst <> "_bar") $
       Op $
-        Screma w [x_inds, x_bar] $ mapSOAC dst_lam
+        Screma w [x_inds, x_bar] $
+          mapSOAC dst_lam
 
   updateAdj dst dst_bar
 
@@ -294,7 +310,8 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   vs_bar_p <-
     letExp (baseString vs <> "_partial") $
       Op $
-        Screma w (x_bar : inds) $ mapSOAC vs_lam
+        Screma w (x_bar : inds) $
+          mapSOAC vs_lam
 
   q <-
     letSubExp "q"
@@ -319,17 +336,21 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
       reps <- traverse (letExp "rep" . BasicOp . Replicate (Shape [d])) iotas
       iota_d <-
         letExp "red_iota" $
-          BasicOp $ Iota d (intConst Int64 0) (intConst Int64 1) Int64
+          BasicOp $
+            Iota d (intConst Int64 0) (intConst Int64 1) Int64
       pure $ reps ++ [iota_d]
     mk_indices (d : dims) iotas = do
       iota_d <-
         letExp "red_iota" $
-          BasicOp $ Iota d (intConst Int64 0) (intConst Int64 1) Int64
+          BasicOp $
+            Iota d (intConst Int64 0) (intConst Int64 1) Int64
 
       i_param <- newParam "i" $ Prim int64
       lam <-
         mkLambda [i_param] $
-          fmap varsRes $ mk_indices dims $ iotas ++ [Var $ paramName i_param]
+          fmap varsRes $
+            mk_indices dims $
+              iotas ++ [Var $ paramName i_param]
 
       letTupExp "res" $ Op $ Screma d [iota_d] $ mapSOAC lam
 
@@ -398,7 +419,9 @@ diffMulHist _ops x aux n mul ne is vs w rf dst m = do
   nz_prods <- newVName "non_zero_prod"
   zr_counts <- newVName "zero_count"
   auxing aux $
-    letBindNames [nz_prods, zr_counts] $ Op $ Hist n [is, is, ps, zs] [hist_nzp, hist_zrn] f'
+    letBindNames [nz_prods, zr_counts] $
+      Op $
+        Hist n [is, is, ps, zs] [hist_nzp, hist_zrn] f'
 
   p_param <- newParam "prod" $ Prim t
   c_param <- newParam "count" $ Prim int64
@@ -420,7 +443,10 @@ diffMulHist _ops x aux n mul ne is vs w rf dst m = do
   x' <- bindSubExpRes "x" x_res
   auxing aux $
     letBindNames [x] $
-      BasicOp $ SubExp $ Var $ head x'
+      BasicOp $
+        SubExp $
+          Var $
+            head x'
 
   m
 
@@ -684,7 +710,8 @@ radixSort' :: [VName] -> SubExp -> SubExp -> ADM [VName]
 radixSort' xs n w = do
   iota_n <-
     letExp "red_iota" $
-      BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+      BasicOp $
+        Iota n (intConst Int64 0) (intConst Int64 1) Int64
 
   radres <- radixSort [head xs, iota_n] n w
   let [is', iota'] = radres
@@ -745,7 +772,9 @@ diffHist ops xs aux n lam0 ne as w rf dst m = do
   lam0' <- renameLambda lam0
   auxing aux $
     letBindNames xs $
-      Op $ Screma (head w) (dst <> h_part) $ mapSOAC lam0'
+      Op $
+        Screma (head w) (dst <> h_part) $
+          mapSOAC lam0'
 
   m
 
@@ -849,7 +878,8 @@ diffHist ops xs aux n lam0 ne as w rf dst m = do
   scansres <-
     letTupExp "adj_ctrb_scan" $
       Op $
-        Screma n [iota_n] $ ScremaForm (map (`Scan` ne') scan_lams) [] g_lam
+        Screma n [iota_n] $
+          ScremaForm (map (`Scan` ne') scan_lams) [] g_lam
 
   let (_ : ls_arr, _ : rs_arr_rev) = splitAt (length ne + 1) scansres
 
@@ -889,7 +919,7 @@ diffHist ops xs aux n lam0 ne as w rf dst m = do
 
   zipWithM_ updateAdj (tail as) as_bar
   where
-    --map (\i -> if i == 0 then true else is[i] != is[i-1]) (iota n)
+    -- map (\i -> if i == 0 then true else is[i] != is[i-1]) (iota n)
     mkFlagLam :: LParam SOACS -> VName -> ADM (Lambda SOACS)
     mkFlagLam par_i sis =
       mkLambda [par_i] $
