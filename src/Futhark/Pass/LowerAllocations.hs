@@ -5,7 +5,12 @@
 
 -- | This pass attempts to lower allocations as far towards the bottom of their
 -- body as possible.
-module Futhark.Pass.LowerAllocations (lowerAllocationsSeqMem, lowerAllocationsGPUMem) where
+module Futhark.Pass.LowerAllocations
+  ( lowerAllocationsSeqMem,
+    lowerAllocationsGPUMem,
+    lowerAllocationsMCMem,
+  )
+where
 
 import Control.Monad.Reader
 import Data.Function ((&))
@@ -13,6 +18,7 @@ import Data.Map qualified as M
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Futhark.IR.GPUMem
+import Futhark.IR.MCMem
 import Futhark.IR.SeqMem
 import Futhark.Pass (Pass (..))
 
@@ -38,6 +44,19 @@ lowerAllocationsGPUMem =
             fmap
               ( \f@FunDef {funDefBody} ->
                   f {funDefBody = runReader (lowerAllocationsInBody funDefBody) (Env lowerAllocationsInHostOp)}
+              )
+              progFuns
+        }
+
+lowerAllocationsMCMem :: Pass MCMem MCMem
+lowerAllocationsMCMem =
+  Pass "lower allocations mc" "lower allocations mc" $ \prog@Prog {progFuns} ->
+    pure $
+      prog
+        { progFuns =
+            fmap
+              ( \f@FunDef {funDefBody} ->
+                  f {funDefBody = runReader (lowerAllocationsInBody funDefBody) (Env lowerAllocationsInMCOp)}
               )
               progFuns
         }
@@ -98,17 +117,28 @@ insertLoweredAllocs frees alloc acc =
       )
       (alloc, acc)
 
+lowerAllocationsInSegOp ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  SegOp lvl rep ->
+  LowerM inner (SegOp lvl rep)
+lowerAllocationsInSegOp (SegMap lvl sp tps body) = do
+  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
+  pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+lowerAllocationsInSegOp (SegRed lvl sp binops tps body) = do
+  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
+  pure $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
+lowerAllocationsInSegOp (SegScan lvl sp binops tps body) = do
+  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
+  pure $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
+lowerAllocationsInSegOp (SegHist lvl sp histops tps body) = do
+  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
+  pure $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
+
 lowerAllocationsInHostOp :: HostOp GPUMem () -> LowerM (HostOp GPUMem ()) (HostOp GPUMem ())
-lowerAllocationsInHostOp (SegOp (SegMap lvl sp tps body)) = do
-  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
-lowerAllocationsInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
-  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
-lowerAllocationsInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
-  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
-lowerAllocationsInHostOp (SegOp (SegHist lvl sp histops tps body)) = do
-  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegOp $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
+lowerAllocationsInHostOp (SegOp op) = SegOp <$> lowerAllocationsInSegOp op
 lowerAllocationsInHostOp op = pure op
+
+lowerAllocationsInMCOp :: MCOp MCMem () -> LowerM (MCOp MCMem ()) (MCOp MCMem ())
+lowerAllocationsInMCOp (ParOp par op) =
+  ParOp <$> traverse lowerAllocationsInSegOp par <*> lowerAllocationsInSegOp op
+lowerAllocationsInMCOp op = pure op

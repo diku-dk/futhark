@@ -38,7 +38,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Aliases
-import Futhark.IR.GPUMem
+import Futhark.IR.GPUMem as GPU
+import Futhark.IR.MCMem as MC
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (line, sep, (</>))
@@ -306,6 +307,14 @@ instance HasMemBlock (Aliases SeqMem) where
       _ -> Nothing
 
 instance HasMemBlock (Aliases GPUMem) where
+  getScopeMemInfo r scope_env0 =
+    case M.lookup r scope_env0 of
+      Just (LetName (_, MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (FParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (LParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      _ -> Nothing
+
+instance HasMemBlock (Aliases MCMem) where
   getScopeMemInfo r scope_env0 =
     case M.lookup r scope_env0 of
       Just (LetName (_, MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
