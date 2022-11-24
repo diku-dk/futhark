@@ -276,7 +276,7 @@ noMemOverlap td_env (Set is0) (Set js0)
        in null not_disjoints
   where
     less_thans = map (fmap $ fixPoint $ substituteInPrimExp $ scalarTable td_env) $ knownLessThan td_env
-    asserts = map (fixPoint (substituteInPrimExp $ scalarTable td_env) . primExpFromSubExp Bool) $ td_asserts td_env
+    asserts = map (fixPoint (substituteInPrimExp $ scalarTable td_env)) $ td_asserts td_env
     is = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList is0
     js = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList js0
 noMemOverlap _ _ _ = False

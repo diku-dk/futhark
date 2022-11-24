@@ -61,7 +61,7 @@ data TopdownEnv rep = TopdownEnv
     -- gotten from 'LoopForm' and 'SegSpace'.
     knownLessThan :: [(VName, PrimExp VName)],
     -- | A list of the asserts encountered so far
-    td_asserts :: [SubExp]
+    td_asserts :: [PrimExp VName]
   }
 
 isInScope :: TopdownEnv rep -> VName -> Bool
@@ -191,7 +191,7 @@ updateTopdownEnv env stm@(Let pat _ (Op (Inner inner))) =
       knownLessThan = knownLessThan env <> innerKnownLessThan inner
     }
 updateTopdownEnv env (Let (Pat _) _ (BasicOp (Assert se _ _))) =
-  env {td_asserts = se : td_asserts env}
+  env {td_asserts = primExpFromSubExp Bool se : td_asserts env}
 updateTopdownEnv env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
       let ixfn_inv = getInvAliasFromExp e
