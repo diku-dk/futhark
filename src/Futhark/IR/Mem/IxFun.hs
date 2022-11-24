@@ -49,7 +49,7 @@ import Data.List (elemIndex, partition, sort, sortBy, zip4, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromJust, isJust, isNothing)
+import Data.Maybe (isJust, isNothing)
 import Futhark.Analysis.AlgSimplify qualified as AlgSimplify
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
@@ -1083,15 +1083,18 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 =
                 (Just overlapping_dim, _) ->
                   let expanded_offset = AlgSimplify.simplifySofP' <$> expandOffset offset is1
                       splits = splitDim overlapping_dim is1'
-                   in all (\(new_offset, new_is1) -> disjointHelper (i - 1) (joinDims new_is1) (joinDims is2') new_offset) splits
+                   in maybe False (all (\(new_offset, new_is1) -> disjointHelper (i - 1) (joinDims new_is1) (joinDims is2') new_offset)) splits
                         || maybe False (disjointHelper (i - 1) is1 is2) expanded_offset
                 (_, Just overlapping_dim) ->
                   let expanded_offset = AlgSimplify.simplifySofP' <$> expandOffset offset is2
                       splits = splitDim overlapping_dim is2'
-                   in all
-                        ( \(new_offset, new_is2) ->
-                            disjointHelper (i - 1) (joinDims is1') (joinDims new_is2) $
-                              map AlgSimplify.negate new_offset
+                   in maybe
+                        False
+                        ( all
+                            ( \(new_offset, new_is2) ->
+                                disjointHelper (i - 1) (joinDims is1') (joinDims new_is2) $
+                                  map AlgSimplify.negate new_offset
+                            )
                         )
                         splits
                         || maybe False (disjointHelper (i - 1) is1 is2) expanded_offset
@@ -1117,33 +1120,36 @@ mergeDims = helper [] . reverse
         then helper acc $ x {numElements = numElements x * numElements y} : rest
         else helper (x : acc) (y : rest)
 
-splitDim :: Interval -> [Interval] -> [(AlgSimplify.SofP, [Interval])]
+splitDim :: Interval -> [Interval] -> Maybe [(AlgSimplify.SofP, [Interval])]
 splitDim overlapping_dim0 is
-  | [st] <- AlgSimplify.simplify0 $ untyped $ stride overlapping_dim0,
+  | Just (before, overlapping_dim, after) <-
+      elemIndex overlapping_dim0 is
+        >>= (flip focusNth is . (+ 1)),
+    [st] <- AlgSimplify.simplify0 $ untyped $ stride overlapping_dim0,
     [st1] <- AlgSimplify.simplify0 $ untyped $ stride overlapping_dim,
     [spn] <- AlgSimplify.simplify0 $ untyped $ stride overlapping_dim * numElements overlapping_dim,
     lowerBound overlapping_dim == 0,
     Just big_dim_elems <- AlgSimplify.maybeDivide spn st,
     Just small_dim_elems <- AlgSimplify.maybeDivide st st1 =
-      [ ( [],
-          init before
-            <> [ Interval 0 (isInt64 $ AlgSimplify.prodToExp big_dim_elems) (stride overlapping_dim0),
-                 Interval 0 (isInt64 $ AlgSimplify.prodToExp small_dim_elems) (stride overlapping_dim)
-               ]
-            <> after
-        )
-      ]
-  | otherwise =
+      Just
+        [ ( [],
+            init before
+              <> [ Interval 0 (isInt64 $ AlgSimplify.prodToExp big_dim_elems) (stride overlapping_dim0),
+                   Interval 0 (isInt64 $ AlgSimplify.prodToExp small_dim_elems) (stride overlapping_dim)
+                 ]
+              <> after
+          )
+        ]
+  | Just (before, overlapping_dim, after) <-
+      elemIndex overlapping_dim0 is
+        >>= (flip focusNth is . (+ 1)) =
       let shrunk_dim = overlapping_dim {numElements = numElements overlapping_dim - 1}
           point_offset = AlgSimplify.simplify0 $ untyped $ (numElements overlapping_dim - 1 + lowerBound overlapping_dim) * stride overlapping_dim
-       in [ (point_offset, before <> after),
-            ([], before <> [shrunk_dim] <> after)
-          ]
-  where
-    (before, overlapping_dim, after) =
-      fromJust $
-        elemIndex overlapping_dim0 is
-          >>= (flip focusNth is . (+ 1))
+       in Just
+            [ (point_offset, before <> after),
+              ([], before <> [shrunk_dim] <> after)
+            ]
+  | otherwise = Nothing
 
 lmadToIntervals :: LMAD (TPrimExp Int64 VName) -> (AlgSimplify.SofP, [Interval])
 lmadToIntervals (LMAD offset []) = (AlgSimplify.simplify0 $ untyped offset, [Interval 0 1 1])
