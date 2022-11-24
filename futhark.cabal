@@ -159,6 +159,7 @@ library
       Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
+      Futhark.Analysis.CosminSolver
       Futhark.Analysis.DataDependencies
       Futhark.Analysis.HORep.MapNest
       Futhark.Analysis.HORep.SOAC

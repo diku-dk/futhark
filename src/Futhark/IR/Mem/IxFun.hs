@@ -51,6 +51,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust, isNothing)
 import Futhark.Analysis.AlgSimplify qualified as AlgSimplify
+import Futhark.Analysis.CosminSolver qualified as CosminSolver
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem.Interval
@@ -1058,6 +1059,8 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 =
             intervalPairs interval1' interval2'
    in disjointHelper 4 interval1'' interval2'' $ offset1 `AlgSimplify.sub` offset2
   where
+    solver_input = CosminSolver.SolverInput scope asserts less_thans non_negatives
+
     disjointHelper :: Int -> [Interval] -> [Interval] -> AlgSimplify.SofP -> Bool
     disjointHelper 0 _ _ _ = False
     disjointHelper i is10 is20 offset =
@@ -1070,16 +1073,11 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 =
                  distributeOffset (map AlgSimplify.negate neg_offset) is2
                ) of
             (Just is1', Just is2') -> do
-              let overlap1 = selfOverlap scope asserts less_thans non_negatives is1'
-              let overlap2 = selfOverlap scope asserts less_thans non_negatives is2'
+              let overlap1 = CosminSolver.selfOverlap solver_input is1'
+              let overlap2 = CosminSolver.selfOverlap solver_input is2'
               case (overlap1, overlap2) of
                 (Nothing, Nothing) ->
-                  case namesFromList <$> mapM justLeafExp non_negatives of
-                    Just non_negatives' ->
-                      any
-                        (not . uncurry (intervalOverlap less_thans non_negatives'))
-                        (zip is1 is2)
-                    _ -> False
+                  or $ zipWith (CosminSolver.disjoint solver_input) is1' is2'
                 (Just overlapping_dim, _) ->
                   let expanded_offset = AlgSimplify.simplifySofP' <$> expandOffset offset is1
                       splits = splitDim overlapping_dim is1'
