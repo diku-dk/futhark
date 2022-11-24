@@ -13,12 +13,12 @@ let sat_add_u24 (x: i32) (y: i32): i32 =
 def satadd_p [n][m] (is: [n]i64) (dst: [m]i32,vs: [n]i32): [m]i32 =
   reduce_by_index (copy dst) sat_add_u24 0 is vs
 
-def satadd_fwd [n][m] (is: [n]i64) (dst: [m]i32,vs: [n]i32): ([m][m]i32, [m][n]i32) = 
+def satadd_fwd [n][m] (is: [n]i64) (dst: [m]i32,vs: [n]i32): ([m][m]i32, [m][n]i32) =
   let t1 = tabulate m (\i -> jvp (satadd_p is) (dst,vs) (replicate m 0 with [i] = 1,replicate n 0))
   let t2 = tabulate n (\i -> jvp (satadd_p is) (dst,vs) (replicate m 0,replicate n 0 with [i] = 1))
   in (transpose t1,transpose t2)
 
-def satadd_rev [n][m] (is: [n]i64) (dst: [m]i32,vs: [n]i32) : ([m][m]i32, [m][n]i32) = 
+def satadd_rev [n][m] (is: [n]i64) (dst: [m]i32,vs: [n]i32) : ([m][m]i32, [m][n]i32) =
   tabulate m (\i -> vjp (satadd_p is) (dst,vs) (replicate m 0 with [i] = 1))
   |> unzip
 
@@ -39,16 +39,16 @@ let argmax_f (x:i32,i:i32) (y:i32,j:i32) : (i32,i32) =
   else (y, j)
 
 def argmax_p [n][m] (is: [n]i64) (dst_a: [m]i32,dst_b: [m]i32,vs_a: [n]i32,vs_b: [n]i32) =
-  reduce_by_index (zip (copy dst_a) (copy dst_b)) argmax_f (i32.highest, i32.highest) is (zip vs_a vs_b) 
+  reduce_by_index (zip (copy dst_a) (copy dst_b)) argmax_f (i32.highest, i32.highest) is (zip vs_a vs_b)
 
-entry argmax_fwd [n][m] (is: [n]i64) (dst_a: [m]i32) (dst_b: [m]i32) (vs_a: [n]i32) (vs_b: [n]i32): ([m][m]i32,[m][m]i32,[m][n]i32,[m][n]i32,[m][m]i32,[m][m]i32,[m][n]i32,[m][n]i32) =
+def argmax_fwd [n][m] (is: [n]i64) (dst_a: [m]i32) (dst_b: [m]i32) (vs_a: [n]i32) (vs_b: [n]i32): ([m][m]i32,[m][m]i32,[m][n]i32,[m][n]i32,[m][m]i32,[m][m]i32,[m][n]i32,[m][n]i32) =
   let (t1,t2) = tabulate m (\i -> jvp (argmax_p is) (dst_a,dst_b,vs_a,vs_b) (replicate m 0 with [i] = 1, replicate m 0, replicate n 0, replicate n 0)) |> map unzip |> unzip
   let (t3,t4) = tabulate m (\i -> jvp (argmax_p is) (dst_a,dst_b,vs_a,vs_b) (replicate m 0, replicate m 0 with [i] = 1, replicate n 0, replicate n 0)) |> map unzip |> unzip
   let (t5,t6) = tabulate n (\i -> jvp (argmax_p is) (dst_a,dst_b,vs_a,vs_b) (replicate m 0, replicate m 0, replicate n 0 with [i] = 1, replicate n 0)) |> map unzip |> unzip
   let (t7,t8) = tabulate n (\i -> jvp (argmax_p is) (dst_a,dst_b,vs_a,vs_b) (replicate m 0, replicate m 0, replicate n 0, replicate n 0 with [i] = 1)) |> map unzip |> unzip
   in (transpose t1,transpose t2,transpose t5,transpose t6,transpose t3,transpose t4,transpose t7,transpose t8)
 
-entry argmax_rev [n][m] (is: [n]i64) (dst_a: [m]i32) (dst_b: [m]i32) (vs_a: [n]i32) (vs_b: [n]i32): ([m][m]i32,[m][m]i32,[m][n]i32,[m][n]i32,[m][m]i32,[m][m]i32,[m][n]i32,[m][n]i32) =
+def argmax_rev [n][m] (is: [n]i64) (dst_a: [m]i32) (dst_b: [m]i32) (vs_a: [n]i32) (vs_b: [n]i32): ([m][m]i32,[m][m]i32,[m][n]i32,[m][n]i32,[m][m]i32,[m][m]i32,[m][n]i32,[m][n]i32) =
   let (t1,t2,t3,t4) = tabulate m (\i -> vjp (argmax_p is) (dst_a,dst_b,vs_a,vs_b) (zip (replicate m 0 with [i] = 1) (replicate m 0))) |> unzip4
   let (t5,t6,t7,t8) = tabulate m (\i -> vjp (argmax_p is) (dst_a,dst_b,vs_a,vs_b) (zip (replicate m 0) (replicate m 0 with [i] = 1))) |> unzip4
   in (t1,t2,t3,t4,t5,t6,t7,t8)
