@@ -947,6 +947,10 @@ compileOp (ForEachActive name body) = do
         $items:body'
       }
     }|]
+compileOp (ExtractLane dest (ValueExp v) _) =
+  -- extract() on constants is not allowed (type is uniform, not
+  -- varying), so just turn them into an assignment.
+  GC.stm [C.cstm|$id:dest = $exp:v;|]
 compileOp (ExtractLane dest tar lane) = do
   tar' <- compileExp tar
   lane' <- compileExp lane
