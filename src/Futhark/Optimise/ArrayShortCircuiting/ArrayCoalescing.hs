@@ -695,7 +695,7 @@ mkCoalsTabStm ::
 mkCoalsTabStm _ (Let (Pat [pe]) _ e) td_env bu_env
   | Just primexp <- primExpFromExp (vnameToPrimExp (scope td_env) (scals bu_env)) e =
       pure $ bu_env {scals = M.insert (patElemName pe) primexp (scals bu_env)}
-mkCoalsTabStm lutab (Let patt _ (Match _ cases defbody _)) td_env bu_env = do
+mkCoalsTabStm lutab (Let patt _ (Match scrutinees cases defbody _)) td_env bu_env = do
   let pat_val_elms = patElems patt
       -- ToDo: 1. we need to record existential memory blocks in alias table on the top-down pass.
       --       2. need to extend the scope table
@@ -732,7 +732,23 @@ mkCoalsTabStm lutab (Let patt _ (Match _ cases defbody _)) td_env bu_env = do
 
   -- iii) process the then and else bodies
   res_def <- mkCoalsTabStms lutab (bodyStms defbody) td_env (bu_env {activeCoals = actv_def})
-  res_cases <- zipWithM (\c a -> mkCoalsTabStms lutab (bodyStms $ caseBody c) td_env (bu_env {activeCoals = a})) cases actv_cases
+
+  let handleCase c a =
+        let scutineeToPrimExp scrutinee (Just pv)
+              | Just pe <- primExpFromSubExpM (vnameToPrimExp (scope td_env) (scalarTable td_env)) scrutinee,
+                primExpType pe == primValueType pv =
+                  Just $ untyped $ TPrimExp pe .==. TPrimExp (ValueExp pv)
+            scutineeToPrimExp _ Nothing = Nothing
+            scutineeToPrimExp _ _ = error "Impossible"
+
+            new_asserts = catMaybes $ zipWith scutineeToPrimExp scrutinees $ casePat c
+         in mkCoalsTabStms
+              lutab
+              (bodyStms $ caseBody c)
+              (td_env {td_asserts = td_asserts td_env <> new_asserts})
+              (bu_env {activeCoals = a})
+
+  res_cases <- zipWithM handleCase cases actv_cases
   let (actv_def0, succ_def0, inhb_def0) = (activeCoals res_def, successCoals res_def, inhibit res_def)
 
       -- iv) optimistically mark the pattern succesful:
