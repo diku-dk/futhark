@@ -31,6 +31,7 @@ module Language.Futhark.Primitive
     PrimValue (..),
     primValueType,
     blankPrimValue,
+    onePrimValue,
 
     -- * Operations
     Overflow (..),
@@ -357,6 +358,19 @@ blankPrimValue (FloatType Float32) = FloatValue $ Float32Value 0.0
 blankPrimValue (FloatType Float64) = FloatValue $ Float64Value 0.0
 blankPrimValue Bool = BoolValue False
 blankPrimValue Unit = UnitValue
+
+-- | A one value of the given primitive type - this is one
+-- whatever is close to it.
+onePrimValue :: PrimType -> PrimValue
+onePrimValue (IntType Int8) = IntValue $ Int8Value 1
+onePrimValue (IntType Int16) = IntValue $ Int16Value 1
+onePrimValue (IntType Int32) = IntValue $ Int32Value 1
+onePrimValue (IntType Int64) = IntValue $ Int64Value 1
+onePrimValue (FloatType Float16) = FloatValue $ Float16Value 1.0
+onePrimValue (FloatType Float32) = FloatValue $ Float32Value 1.0
+onePrimValue (FloatType Float64) = FloatValue $ Float64Value 1.0
+onePrimValue Bool = BoolValue True
+onePrimValue Unit = UnitValue
 
 -- | Various unary operators.  It is a bit ad-hoc what is a unary
 -- operator and what is a built-in function.  Perhaps these should all
