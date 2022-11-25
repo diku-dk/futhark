@@ -9,14 +9,9 @@ import Futhark.IR.SOACS
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Tools
 import Futhark.Transform.Rename
+import Futhark.Util (chunk)
 
 data FirstOrSecond = WrtFirst | WrtSecond
-
-splitEvery :: Int -> [a] -> [[a]]
-splitEvery _ [] = []
-splitEvery n list = first : splitEvery n rest
-  where
-    (first, rest) = splitAt n list
 
 identityM :: Int -> Type -> ADM [[SubExp]]
 identityM n t =
@@ -40,7 +35,7 @@ vectorAdd = zipWith (~+~)
 orderArgs :: Special -> [a] -> [[a]]
 orderArgs s lst =
   let d = div (length lst) $ specialScans s
-   in splitEvery d lst
+   in chunk d lst
 
 -- computes `d(x op y)/dx` or d(x op y)/dy
 mkScanAdjointLam :: VjpOps -> Lambda SOACS -> FirstOrSecond -> [SubExp] -> ADM (Lambda SOACS)
@@ -116,7 +111,7 @@ mkScanFusedMapLam ops w scn_lam xs ys ys_adj s d = do
               map (take k . drop (i * k))
           )
           [0 .. d `div` k]
-        $ splitEvery k jac
+        $ chunk k jac
     case_jac k MatrixMul jac =
       take k <$> take k jac
 
@@ -125,7 +120,7 @@ linFunT0 :: [PrimExp VName] -> [PrimExp VName] -> [[PrimExp VName]] -> Special -
 linFunT0 a1 a2 b s pt =
   let t = case specialCase s of
         MatrixMul ->
-          concatMap (\v -> matrixVecMul b v pt) $ splitEvery (specialSubSize s) a1
+          concatMap (\v -> matrixVecMul b v pt) $ chunk (specialSubSize s) a1
         _ -> matrixVecMul b a1 pt
    in a2 `vectorAdd` t
 
@@ -141,7 +136,7 @@ mkScanLinFunO t s = do
 
   lam <- mkLambda (map (\v -> Param mempty v (rowType t)) (a1s ++ b1s ++ a2s ++ b2s)) . fmap subExpsRes $ do
     let [a1s', b1s', a2s', b2s'] = (fmap . fmap) pet [a1s, b1s, a2s, b2s]
-    let (b1sm, b2sm) = (splitEvery n b1s', splitEvery n b2s')
+    let (b1sm, b2sm) = (chunk n b1s', chunk n b2s')
 
     let t0 = linFunT0 a1s' a2s' b2sm s pt
     let t1 = concat $ matrixMul b2sm b1sm pt
@@ -243,7 +238,7 @@ subMats d mat zero =
 cases :: Int -> Type -> [[Exp SOACS]] -> Special
 cases d t mat
   | Just k <- subMats d mat $ zeroExp t =
-      let nonZeros = zipWith (\i -> map (take k . drop (i * k))) [0 .. d `div` k] $ splitEvery k mat
+      let nonZeros = zipWith (\i -> map (take k . drop (i * k))) [0 .. d `div` k] $ chunk k mat
        in if all (== head nonZeros) $ tail nonZeros
             then Special (d, k) (d, k * k) 1 k MatrixMul
             else Special (k, k) (k, k * k) (d `div` k) k ZeroQuadrant
@@ -265,7 +260,7 @@ identifyCase ops lam = do
     pure $ concat (transpose lam_rs)
 
   simp <- simplifyLambda jac_lam
-  let jac = splitEvery d $ fmap (BasicOp . SubExp . resSubExp) $ bodyResult $ lambdaBody simp
+  let jac = chunk d $ fmap (BasicOp . SubExp . resSubExp) $ bodyResult $ lambdaBody simp
   pure $ cases d (head t) jac
 
 diffScan :: VjpOps -> [VName] -> SubExp -> [VName] -> Scan SOACS -> ADM ()
