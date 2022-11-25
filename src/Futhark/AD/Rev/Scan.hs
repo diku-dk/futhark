@@ -12,13 +12,6 @@ import Futhark.Transform.Rename
 
 data FirstOrSecond = WrtFirst | WrtSecond
 
-letSubExps ::
-  MonadBuilder m =>
-  String ->
-  [Exp (Rep m)] ->
-  m [SubExp]
-letSubExps desc = mapM $ letSubExp desc
-
 splitEvery :: Int -> [a] -> [[a]]
 splitEvery _ [] = []
 splitEvery n list = first : splitEvery n rest
@@ -27,7 +20,9 @@ splitEvery n list = first : splitEvery n rest
 
 identityM :: Int -> Type -> ADM [[SubExp]]
 identityM n t =
-  traverse (letSubExps "id") $ [[if i == j then oneExp t else zeroExp t | i <- [1 .. n]] | j <- [1 .. n]]
+  traverse
+    (traverse (letSubExp "id"))
+    [[if i == j then oneExp t else zeroExp t | i <- [1 .. n]] | j <- [1 .. n]]
 
 matrixMul :: [[PrimExp VName]] -> [[PrimExp VName]] -> PrimType -> [[PrimExp VName]]
 matrixMul m1 m2 t =

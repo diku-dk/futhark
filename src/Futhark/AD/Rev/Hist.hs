@@ -20,13 +20,6 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-letSubExps ::
-  MonadBuilder m =>
-  String ->
-  [Exp (Rep m)] ->
-  m [SubExp]
-letSubExps desc = mapM $ letSubExp desc
-
 getBinOpPlus :: PrimType -> BinOp
 getBinOpPlus (IntType x) = Add x OverflowUndef
 getBinOpPlus (FloatType f) = FAdd f
@@ -142,7 +135,7 @@ multiScatter n dst is vs = do
   scatter_params <- traverse (newParam "scatter_param" . rowType) tps
   scatter_lam <-
     mkLambda (par_i : scatter_params) $
-      fmap subExpsRes . letSubExps "scatter_map_res" =<< do
+      fmap subExpsRes . mapM (letSubExp "scatter_map_res") =<< do
         p1 <- replicateM (length scatter_params) $ eParam par_i
         p2 <- traverse eParam scatter_params
         pure $ p1 <> p2
@@ -616,7 +609,7 @@ radixSortStep xs tps bit n w = do
   scan_params <- traverse (flip newParam $ Prim int64) ["a1", "b1", "c1", "d1", "a2", "b2", "c2", "d2"]
   scan_lam <-
     mkLambda scan_params $
-      fmap subExpsRes . letSubExps "scan_res" =<< do
+      fmap subExpsRes . mapM (letSubExp "scan_res") =<< do
         uncurry (zipWithM (eBinOp $ Add Int64 OverflowUndef)) $ splitAt 4 $ map eParam scan_params
 
   scan <- scanSOAC $ pure $ Scan scan_lam $ map (intConst Int64) [0, 0, 0, 0]
@@ -813,7 +806,7 @@ diffHist ops xs aux n lam0 ne as w rf dst m = do
   let i' = paramName par_i'
   g_lam <-
     mkLambda [par_i'] $
-      fmap subExpsRes . letSubExps "scan_inps" =<< do
+      fmap subExpsRes . mapM (letSubExp "scan_inps") =<< do
         im1 <- letSubExp "i_1" =<< toExp (le64 i' - 1)
         nmi <- letSubExp "n_i" =<< toExp (pe64 n - le64 i')
         let s1 = [DimFix im1]
