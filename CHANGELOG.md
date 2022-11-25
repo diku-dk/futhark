@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Memory short circuiting now also applied to the `multicore` backend.
 
+* Fixes for AD of `scan` with nonscalar operators.  Work by Lotte
+  Bruun and Ulrik Larsen.
+
+* Generalised histograms now supported in AD.  Work by Lotte Bruun and
+  Ulrik Larsen.
+
 ### Removed
 
 ### Changed
