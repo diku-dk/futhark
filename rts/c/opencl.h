@@ -742,6 +742,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
       unsigned char *buf;
       size_t bufsize;
+      errno = 0;
       if (cache_restore(cache_fname, &h, &buf, &bufsize) != 0) {
         if (ctx->cfg.logging) {
           fprintf(stderr, "Failed to restore cache (errno: %s)\n", strerror(errno));
