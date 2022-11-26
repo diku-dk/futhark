@@ -416,10 +416,11 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
         fprintf(ctx->log, $string:debug_str, $args:debug_args);
         $id:time_start = get_wall_time();
       }
+      typename cl_event *pevent = $exp:(profilingEvent kernel_name);
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueNDRangeKernel(ctx->opencl.queue, ctx->$id:kernel_name, $int:kernel_rank, NULL,
                                $id:global_work_size, $id:local_work_size,
-                               0, NULL, $exp:(profilingEvent kernel_name)));
+                               0, NULL, pevent));
       if (ctx->debugging) {
         OPENCL_SUCCEED_FATAL(clFinish(ctx->opencl.queue));
         $id:time_end = get_wall_time();
