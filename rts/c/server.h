@@ -852,11 +852,10 @@ int restore_array(const struct array_aux *aux, FILE *f,
   if (arr == NULL) {
     return 1;
   }
-  assert(futhark_context_sync(ctx) == 0);
-
+  int err = futhark_context_sync(ctx);
   *(void**)p = arr;
   free(data);
-  return 0;
+  return err;
 }
 
 void store_array(const struct array_aux *aux, FILE *f,
