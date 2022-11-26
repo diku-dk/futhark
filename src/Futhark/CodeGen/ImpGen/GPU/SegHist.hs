@@ -542,10 +542,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment =
           AtomicCAS f -> pure $ const $ pure f
           AtomicLocking f -> pure $ \hist_H_chk -> do
             let lock_shape =
-                  Shape $
-                    tvSize num_subhistos_per_group
-                      : shapeDims (histOpShape op)
-                      ++ [hist_H_chk]
+                  Shape [tvSize num_subhistos_per_group, hist_H_chk]
 
             let dims = map pe64 $ shapeDims lock_shape
 
