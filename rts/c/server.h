@@ -388,6 +388,7 @@ void cmd_restore(struct server_state *s, const char *args[]) {
         return;
       }
 
+      errno = 0;
       if (t->restore(t->aux, f, s->ctx, value_ptr(&v->value)) != 0) {
         failure();
         printf("Failed to restore variable %s.\n"

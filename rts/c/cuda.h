@@ -427,6 +427,7 @@ static void cuda_load_ptx_from_cache(struct cuda_context *ctx, const char *src,
   }
   cache_hash(h, src, strlen(src));
   size_t ptxsize;
+  errno = 0;
   if (cache_restore(cache_fname, h, (unsigned char**)ptx, &ptxsize) != 0) {
     if (ctx->cfg.logging) {
       fprintf(stderr, "Failed to restore cache (errno: %s)\n", strerror(errno));
