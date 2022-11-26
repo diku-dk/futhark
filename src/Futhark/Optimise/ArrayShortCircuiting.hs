@@ -26,10 +26,6 @@ import Futhark.Pass (Pass (..))
 import Futhark.Pass qualified as Pass
 import Futhark.Util
 
-----------------------------------------------------------------
---- Printer/Tester Main Program
-----------------------------------------------------------------
-
 data Env inner = Env
   { envCoalesceTab :: CoalsTab,
     onInner :: inner -> UpdateM inner inner,
