@@ -582,32 +582,6 @@ ascription to disambiguate:
 Module errors
 -------------
 
-.. _nested-entry:
-
-"Entry points may not be declared inside modules."
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-This occurs when the program uses the ``entry`` keyword inside a
-module:
-
-.. code-block:: futhark
-
-  module m = {
-    entry f x = x + 1
-  }
-
-Entry points can only be declared at the top level of a file.  When we
-wish to make a function from inside a module available as an entry
-point, we must define a wrapper function:
-
-.. code-block:: futhark
-
-  module m = {
-    def f x = x + 1
-  }
-
-  entry f = m.f
-
 .. _module-is-parametric:
 
 "Module *x* is a parametric module
@@ -767,3 +741,123 @@ The solution is to put a type annotation on the parameter instead:
 .. code-block:: futhark
 
   def f (r : {x:i32}) = r with x = 0
+
+Entry points
+------------
+
+.. _nested-entry:
+
+"Entry points may not be declared inside modules."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs when the program uses the ``entry`` keyword inside a
+module:
+
+.. code-block:: futhark
+
+  module m = {
+    entry f x = x + 1
+  }
+
+Entry points can only be declared at the top level of a file.  When we
+wish to make a function from inside a module available as an entry
+point, we must define a wrapper function:
+
+.. code-block:: futhark
+
+  module m = {
+    def f x = x + 1
+  }
+
+  entry f = m.f
+
+.. _polymorphic-entry:
+
+"Entry point functions may not be polymorphic."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Entry points are Futhark functions that can be called from other
+languages, and are therefore limited how advanced their types can be.
+In this case, the problem is that an entry point may not have a
+polymorphic type, for example:
+
+.. code-block:: futhark
+
+   entry dup 't (x: t) : (t,t) = x
+
+This is an invalid entry point because it uses a type parameter
+``'t``.  This error occurs frequently when we want to test a
+polymorphic function.  In such cases, the solution is to define one or
+more *monomorphic* entry points, each for a distinct type.  For
+example, to we can define a variety of monomorphic entry points that
+call the built-in function ``scan``:
+
+.. code-block:: futhark
+
+   entry scan_i32 (xs: []i32) = scan (+) 0 xs
+
+   entry scan_f32 (xs: []i32) = scan (*) 1 xs
+
+.. _higher-order-entry:
+
+"Entry point functions may not be higher-order."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Entry points are Futhark functions that can be called from other
+languages, and are therefore limited how advanced their types can be.
+In this case, the problem is that an entry point may use functions as
+input or output.  For example:
+
+.. code-block:: futhark
+
+   entry apply (f: i32 -> i32) (x: i32) = f x
+
+There is no simple workaround for such cases.  One option is to
+manually `defunctionalise
+<https://en.wikipedia.org/wiki/Defunctionalization>`_ to use a
+non-functional encoding of the functional values, but this can quickly
+get very elaborate.  Following up on the example above, if we know
+that the only functions that would ever be passed are ``(+y)`` or
+``(*y)`` for some ``y``, we could do something like the following:
+
+.. code-block:: futhark
+
+   type function = #add i32 | #mul i32
+
+   entry apply (f: function) (x: i32) =
+     match f
+     case #add y -> x + y
+     case #mul y -> x + y
+
+Although in many cases, the best solution is simply to define a
+handful of simpler entry points instead of a single complicated one.
+
+.. _size-polymorphic-entry:
+
+"Entry point functions must not be size-polymorphic in their return type."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This somewhat rare error occurs when an entry point returns an array
+that can have an arbitrary size chosen by its caller.  Contrived example:
+
+.. code-block:: futhark
+
+   -- Entry point taking no parameters.
+   entry f [n] : [0][n]i32 = []
+
+The size ``n`` is chosen by the caller.  Note that the ``n`` might be
+inferred and invisible, as in this example:
+
+.. code-block:: futhark
+
+   entry g : [0][]i32 = []
+
+When calling functions within a Futhark program, size parameters are
+handled by type inference, but entry points are called from the
+outside world, which is not subject to type inference.  If you really
+must have entry points like this, turn the size parameter into an
+ordinary parameter:
+
+.. code-block:: futhark
+
+   entry f (n: i64) : [0][n]i32 = []
