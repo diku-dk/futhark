@@ -642,17 +642,26 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
   case entry' of
     Just _
       | any isTypeParam tparams' ->
-          typeError loc mempty "Entry point functions may not be polymorphic."
+          typeError loc mempty $
+            withIndexLink
+              "polymorphic-entry"
+              "Entry point functions may not be polymorphic."
       | not (all patternOrderZero params')
           || not (all orderZero rettype_params)
           || not (orderZero rettype') ->
-          typeError loc mempty "Entry point functions may not be higher-order."
+          typeError loc mempty $
+            withIndexLink
+              "higher-order-entry"
+              "Entry point functions may not be higher-order."
       | sizes_only_in_ret <-
           S.fromList (map typeParamName tparams')
             `S.intersection` freeInType rettype'
             `S.difference` foldMap freeInType (map patternStructType params' ++ rettype_params),
         not $ S.null sizes_only_in_ret ->
-          typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
+          typeError loc mempty $
+            withIndexLink
+              "size-polymorphic-entry"
+              "Entry point functions must not be size-polymorphic in their return type."
       | p : _ <- filter nastyParameter params' ->
           warn loc $
             "Entry point parameter\n"
