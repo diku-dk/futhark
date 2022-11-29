@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark repl`: unsigned integers are now printed correctly.
+
 ## [0.22.4]
 
 ### Added
