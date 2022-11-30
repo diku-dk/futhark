@@ -141,10 +141,13 @@ instance Ord num => Ord (LMADDim num) where
 -- contiguous, i.e., if we instantiate all the points of the current index
 -- function, do we get a contiguous memory interval?
 --
--- By definition, the LMAD denotes the set of points (simplified):
+-- By definition, the LMAD \( \sigma + \{ (n_1, s_1), \ldots, (n_k, s_k) \} \),
+-- where \(n\) and \(s\) denote the shape and stride of each dimension, denotes
+-- the set of points:
 --
---   \{ o + \Sigma_{j=0}^{k} ((i_j+r_j) `mod` n_j)*s_j,
---      \forall i_j such that 0<=i_j<n_j, j=1..k \}
+-- \[
+--    \{ ~ \sigma + i_1 * s_1 + \ldots + i_m * s_m ~ | ~ 0 \leq i_1 < n_1, \ldots, 0 \leq i_m < n_m ~ \}
+-- \]
 data LMAD num = LMAD
   { lmadOffset :: num,
     lmadDims :: [LMADDim num]
