@@ -39,6 +39,7 @@ module Futhark.CodeGen.ImpGen.GPU.SegHist (compileSegHist) where
 
 import Control.Monad.Except
 import Data.List (foldl', genericLength, zip5)
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
@@ -899,6 +900,19 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
   max_group_size <- dPrim "max_group_size" int32
   sOp $ Imp.GetSizeMax (tvVar max_group_size) Imp.SizeGroup
+
+  -- XXX: we need to record for later use that max_group_size is the
+  -- result of GetSizeMax.  This is an ugly hack that reflects our
+  -- inability to track which variables are actually constants.
+  let withSizeMax vtable =
+        case M.lookup (tvVar max_group_size) vtable of
+          Just (ScalarVar _ se) ->
+            M.insert
+              (tvVar max_group_size)
+              (ScalarVar (Just (Op (Inner (SizeOp (GetSizeMax SizeGroup))))) se)
+              vtable
+          _ -> vtable
+
   let group_size = Imp.Count $ Var $ tvVar max_group_size
   num_groups <-
     fmap (Imp.Count . tvSize) $
@@ -1027,16 +1041,17 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
               Just $
                 untyped $
                   unCount groups_per_segment
-        histKernelLocal
-          hist_M
-          groups_per_segment
-          map_pes
-          num_groups
-          group_size
-          space
-          hist_S
-          slugs
-          kbody
+        localVTable withSizeMax $
+          histKernelLocal
+            hist_M
+            groups_per_segment
+            map_pes
+            num_groups
+            group_size
+            space
+            hist_S
+            slugs
+            kbody
 
   pure (pick_local, run)
 

@@ -217,6 +217,8 @@ def initialise_opencl_object(self,
     if (len(program_src) >= 0):
         build_options += ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
 
+        build_options += ["-D{}={}".format('max_group_size', max_group_size)]
+
         build_options += ["-D{}={}".format(s.
                                            replace('z', 'zz').
                                            replace('.', 'zi').
