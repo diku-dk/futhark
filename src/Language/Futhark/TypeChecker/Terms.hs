@@ -16,7 +16,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Either
-import Data.List (find, foldl', partition)
+import Data.List (find, foldl', maximumBy, partition)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -206,28 +206,40 @@ unscopeType tloc unscoped t = do
 
 -- 'checkApplyExp' is like 'checkExp', but tries to find the "root
 -- function", for better error messages.
-checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
-checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
-  arg <- checkArg e2
-  (e1', (fname, i)) <- checkApplyExp e1
-  t <- expType e1'
-  (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
-  pure
-    ( AppExp
-        (Apply e1' (argExp arg) (Info (diet t1, argext)) loc)
-        (Info $ AppRes rt exts),
-      (fname, i + 1)
-    )
+checkApplyExp :: UncheckedExp -> TermTypeM Exp
 checkApplyExp e = do
-  e' <- checkExp e
-  pure
-    ( e',
-      ( case e' of
-          Var qn _ _ -> Just qn
-          _ -> Nothing,
-        0
-      )
-    )
+  (f, fname, args) <- unrollApply e
+  ft <- expType f
+  let (tps, _) = unfoldFunType ft
+  let argts = map argType args
+  ams <- autoMapInfos tps argts
+  let checkApplyExp' f' (arg : args') (i : is) (am : ams') = do
+        t <- expType f'
+        (t1, rt, argext, exts) <- checkApply (srclocOf e) (fname, i) t arg am
+        let f'' =
+              AppExp
+                (Apply f' (argExp arg) (Info (diet t1, argext, am)) (srclocOf e))
+                (Info $ AppRes (if null args' then bumpReturnShape ams argts rt else rt) exts)
+        checkApplyExp' f'' args' is ams'
+      checkApplyExp' f' _ _ _ = pure f'
+  exp <- checkApplyExp' f args [0 ..] ams
+  pure exp
+  where
+    unrollApply :: UncheckedExp -> TermTypeM (Exp, Maybe (QualName VName), [Arg])
+    unrollApply (AppExp (Apply e1 e2 _ _) _) = do
+      (f, fname, args) <- unrollApply e1
+      arg2 <- checkArg e2
+      pure (f, fname, args ++ [arg2])
+    unrollApply f = do
+      f' <- checkExp f
+      pure
+        ( f',
+          ( case f' of
+              Var qn _ _ -> Just qn
+              _ -> Nothing
+          ),
+          mempty
+        )
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
@@ -347,19 +359,26 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
-  (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
+  let (tps, _) = unfoldFunType ftype
+  let argts = map argType [e1_arg, e2_arg]
+  ams <- autoMapInfos tps argts
+  let [am1, am2] = ams
+
+  (p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg am1
+  (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg am2
+
+  let res' = bumpReturnShape ams argts rt'
 
   pure $
     AppExp
       ( BinOp
           (op', oploc)
           (Info ftype)
-          (argExp e1_arg, Info (toStruct p1_t, p1_ext))
-          (argExp e2_arg, Info (toStruct p2_t, p2_ext))
+          (argExp e1_arg, Info (toStruct p1_t, p1_ext, am1))
+          (argExp e2_arg, Info (toStruct p2_t, p2_ext, am2))
           loc
       )
-      (Info (AppRes rt' retext))
+      (Info (AppRes res' retext))
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
@@ -437,7 +456,7 @@ checkExp (Negate arg loc) = do
 checkExp (Not arg loc) = do
   arg' <- require "logical negation" (Bool : anyIntType) =<< checkExp arg
   pure $ Not arg' loc
-checkExp e@(AppExp Apply {} _) = fst <$> checkApplyExp e
+checkExp e@(AppExp Apply {} _) = checkApplyExp e
 checkExp (AppExp (LetPat sizes pat e body loc) _) =
   sequentially (checkExp e) $ \e' e_occs -> do
     -- Not technically an ascription, but we want the pattern to have
@@ -649,7 +668,10 @@ checkExp (OpSection op _ loc) = do
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
-  (t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
+  let (tps, _) = unfoldFunType ftype
+  ams <- autoMapInfos tps [argType e_arg]
+  let [am] = ams
+  (t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg am
   case (ftype, rt) of
     (Scalar (Arrow _ m1 _ _), Scalar (Arrow _ m2 t2 rettype)) ->
       pure $
@@ -666,14 +688,18 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
 checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
+  let (tps, _) = unfoldFunType ftype
   case ftype of
     Scalar (Arrow as1 m1 t1 (RetType [] (Scalar (Arrow as2 m2 t2 (RetType dims2 ret))))) -> do
+      ams <- autoMapInfos [last tps] [argType e_arg]
+      let [am] = ams
       (t2', ret', argext, _) <-
         checkApply
           loc
           (Just op', 1)
           (Scalar $ Arrow as2 m2 t2 $ RetType [] $ Scalar $ Arrow as1 m1 t1 $ RetType [] ret)
           e_arg
+          am
       pure $
         OpSectionRight
           op'
@@ -862,19 +888,27 @@ checkApply ::
   ApplyOp ->
   PatType ->
   Arg ->
+  AutoMap ->
   TermTypeM (StructType, PatType, Maybe VName, [VName])
 checkApply
   loc
   (fname, _)
-  (Scalar (Arrow as pname tp1 tp2))
-  (argexp, argtype, dflow, argloc) =
+  ty@(Scalar (Arrow as pname tp1 tp2))
+  (argexp, argtype, dflow, argloc)
+  automap =
     onFailure (CheckingApply fname argexp tp1 (toStruct argtype)) $ do
-      expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
+      let rd = automapRank automap
+          peeled_argtype
+            | rd > 0 = toStruct $ fromMaybe (error "") $ peelArray rd argtype
+            | otherwise = toStruct argtype
+
+      expect (mkUsage argloc "use as function argument") tp1 peeled_argtype
 
       -- Perform substitutions of instantiated variables in the types.
       tp1' <- normTypeFully tp1
       (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
       argtype' <- normTypeFully argtype
+      peeled_arg' <- normTypeFully peeled_argtype
 
       -- Check whether this would produce an impossible return type.
       let (tp2_produced_dims, tp2_paramdims) = dimUses $ toStruct tp2'
@@ -901,7 +935,7 @@ checkApply
 
       -- Unification ignores uniqueness in higher-order arguments, so
       -- we check for that here.
-      unless (toStructural argtype' `subtypeOf` setUniqueness (toStructural tp1') Nonunique) $
+      unless (toStructural peeled_arg' `subtypeOf` setUniqueness (toStructural tp1') Nonunique) $
         typeError loc mempty "Consumption/aliasing does not match."
 
       (argext, parsubst) <-
@@ -924,8 +958,8 @@ checkApply
       let appres = S.singleton $ AliasFree v
       let tp2'' = applySubst parsubst $ returnType appres tp2' (diet tp1') argtype'
 
-      pure (tp1', tp2'', argext, ext)
-checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
+      pure (toStruct $ argtype', tp2'', argext, ext)
+checkApply loc fname tfun@(Scalar TypeVar {}) arg am = do
   tv <- newTypeVar loc "b"
   -- Change the uniqueness of the argument type because we never want
   -- to infer that a function is consuming.
@@ -935,8 +969,8 @@ checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
       Arrow mempty Unnamed argt_nonunique $
         RetType [] tv
   tfun' <- normPatType tfun
-  checkApply loc fname tfun' arg
-checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
+  checkApply loc fname tfun' arg am
+checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) _ = do
   let fname' = maybe "expression" (dquotes . pretty) fname
 
   typeError loc mempty $
@@ -960,6 +994,78 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
     arguments
       | prev_applied == 1 = "argument"
       | otherwise = "arguments"
+
+autoMapInfos :: [StructType] -> [PatType] -> TermTypeM [AutoMap]
+autoMapInfos tps argts = do
+  ams <- zipWith autoMapInfo argts <$> rankDifferences tps argts
+  pure $ ams ++ replicate (length argts - length tps) mempty -- this might be really dumb
+  where
+    autoMapInfo :: PatType -> Int -> AutoMap
+    autoMapInfo argtype rd
+      | rd > 0 = AutoMap $ takeDims rd $ arrayShape argtype
+      | otherwise = mempty
+
+    typeVarMap :: [StructType] -> [PatType] -> M.Map (ScalarTypeBase Size ()) [Int]
+    typeVarMap tps' argts' = M.unionsWith (++) $ zipWith link tps' argts'
+      where
+        link (Scalar tv@(TypeVar {})) argt =
+          M.singleton tv $ diff tv argt
+        link (Array _ _ ds1 tv@(TypeVar {})) argt =
+          M.singleton tv $ diff tv (stripArray (shapeRank ds1) argt)
+        link _ _ = mempty
+        diff (TypeVar _ _ (QualName [] v) _) argt = [arrayRank argt]
+        diff _ _ = [0]
+
+    rankDifferences :: [StructType] -> [PatType] -> TermTypeM [Int]
+    rankDifferences tps' argts' =
+      zipWithM (rankDifference $ typeVarMap tps' argts) tps' argts'
+
+    rankDifference ::
+      M.Map (ScalarTypeBase Size ()) [Int] ->
+      StructType ->
+      PatType ->
+      TermTypeM Int
+    rankDifference m param_type arg_type = rankDifference' (toStruct param_type) arg_type
+      where
+        rankDifference' tp argt
+          | not (typeVars argt `S.isSubsetOf` typeVars tp) = pure 0
+        rankDifference' (Scalar tv@(TypeVar _ _ (QualName [] v) _)) argt@(Array _ _ _ et)
+          | tv == et = pure $ arrayRank argt
+          | Just diffs <- M.lookup tv m = do
+              constraints <- getConstraints
+              pure $ case snd <$> M.lookup v constraints of
+                Just Overloaded {} -> arrayRank argt
+                Just (Constraint rt _) ->
+                  minimum diffs - arrayRank (retType rt)
+                _ ->
+                  if all_equal diffs
+                    then 0
+                    else arrayRank argt - minimum diffs
+          | otherwise = pure 0
+        rankDifference' (Array _ _ ds1 et1) (Array _ _ ds2 et2)
+          | et1 == et2 = pure $ shapeRank ds2 - shapeRank ds1
+        rankDifference' (Array _ _ ds tv@(TypeVar {})) argt
+          | Just diffs <- M.lookup tv m =
+              pure $ arrayRank argt - (shapeRank ds + minimum diffs)
+          | otherwise = pure 0
+        rankDifference' tp argt = pure $ arrayRank argt - arrayRank tp
+        all_equal [] = True
+        all_equal (x : xs) = all (== x) xs
+
+bumpReturnShape ::
+  Monoid as =>
+  [AutoMap] ->
+  [PatType] ->
+  TypeBase Size as ->
+  TypeBase Size as
+bumpReturnShape ams argts rt
+  | max_ds == mempty = rt
+  | otherwise = arrayOf Unique max_ds rt
+  where
+    autoMapShape am argt = takeDims (shapeRank $ automapShape am) (arrayShape argt)
+    max_ds =
+      maximumBy (\x y -> shapeRank x `compare` shapeRank y) $
+        zipWith autoMapShape ams argts
 
 consumedByArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Aliasing]
 consumedByArg loc (Scalar (Record ets)) (RecordDiet ds) =
@@ -1050,12 +1156,12 @@ causalityCheck binding_body = do
       onExp known e@(AppExp (LetPat _ _ bindee_e body_e _) (Info res)) = do
         sequencePoint known bindee_e body_e $ appResExt res
         pure e
-      onExp known e@(AppExp (Apply f arg (Info (_, p)) _) (Info res)) = do
+      onExp known e@(AppExp (Apply f arg (Info (_, p, _)) _) (Info res)) = do
         sequencePoint known arg f $ maybeToList p ++ appResExt res
         pure e
       onExp
         known
-        e@(AppExp (BinOp (f, floc) ft (x, Info (_, xp)) (y, Info (_, yp)) _) (Info res)) = do
+        e@(AppExp (BinOp (f, floc) ft (x, Info (_, xp, _)) (y, Info (_, yp, _)) _) (Info res)) = do
           args_known <-
             lift $
               execStateT (sequencePoint known x y $ catMaybes [xp, yp]) mempty
@@ -1141,7 +1247,7 @@ localChecks = void . check
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
-    check e@(AppExp (BinOp (QualName [] v, _) _ (_, Info (Array {}, _)) _ loc) _)
+    check e@(AppExp (BinOp (QualName [] v, _) _ (_, Info (Array {}, _, _)) _ loc) _)
       | baseName v == "==",
         baseTag v <= maxIntrinsicTag = do
           warn loc $

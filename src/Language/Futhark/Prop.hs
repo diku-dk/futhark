@@ -48,6 +48,7 @@ module Language.Futhark.Prop
     unfoldFunType,
     foldFunType,
     typeVars,
+    automapRank,
 
     -- * Operations on types
     peelArray,
@@ -564,6 +565,9 @@ typeVars t =
   where
     typeArgFree (TypeArgType ta _) = typeVars ta
     typeArgFree TypeArgDim {} = mempty
+
+automapRank :: AutoMapBase dim -> Int
+automapRank = length . automapShape
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
 -- a function type, does not contain a function type as a subcomponent, and may

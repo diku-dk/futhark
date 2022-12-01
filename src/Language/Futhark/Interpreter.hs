@@ -760,7 +760,7 @@ evalAppExp env _ (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
 evalAppExp
   env
   _
-  (BinOp (op, _) op_t (x, Info (_, xext)) (y, Info (_, yext)) loc)
+  (BinOp (op, _) op_t (x, Info (_, xext, _)) (y, Info (_, yext, _)) loc)
     | baseString (qualLeaf op) == "&&" = do
         x' <- asBool <$> eval env x
         if x'
@@ -779,7 +779,7 @@ evalAppExp
 evalAppExp env _ (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
-evalAppExp env _ (Apply f x (Info (_, ext)) loc) = do
+evalAppExp env _ (Apply f x (Info (_, ext, _)) loc) = do
   -- It is important that 'x' is evaluated first in order to bring any
   -- sizes into scope that may be used in the type of 'f'.
   x' <- evalArg env x ext

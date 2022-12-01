@@ -23,6 +23,7 @@ module Language.Futhark.Syntax
     Shape (..),
     shapeRank,
     stripDims,
+    takeDims,
     TypeBase (..),
     TypeArg (..),
     SizeExp (..),
@@ -90,6 +91,11 @@ module Language.Futhark.Syntax
     Alias (..),
     Aliasing,
     QualName (..),
+
+    -- * AutoMap
+    AutoMap,
+    AutoMapBase (..),
+    automapShape,
   )
 where
 
@@ -259,6 +265,11 @@ stripDims :: Int -> Shape dim -> Maybe (Shape dim)
 stripDims i (Shape l)
   | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
+
+-- | @takeDims n shape@ takes the outer @n@ dimensions from
+-- @shape@. If @shape@ has m <= n dimensions, it returns $shape$.
+takeDims :: Int -> Shape dim -> Shape dim
+takeDims i (Shape l) = Shape $ take i l
 
 -- | The name (if any) of a function parameter.  The 'Eq' and 'Ord'
 -- instances always compare values of this type equal.
@@ -614,6 +625,23 @@ data SizeBinder vn = SizeBinder {sizeName :: !vn, sizeLoc :: !SrcLoc}
 instance Located (SizeBinder vn) where
   locOf = locOf . sizeLoc
 
+newtype AutoMapBase dim = AutoMap (Shape dim)
+  deriving (Eq, Show)
+
+instance Ord dim => Semigroup (AutoMapBase dim) where
+  AutoMap s1 <> AutoMap s2 = AutoMap $ s1 <> s2
+
+instance Ord dim => Monoid (AutoMapBase dim) where
+  mempty = AutoMap mempty
+
+automapShape :: AutoMapBase dim -> Shape dim
+automapShape (AutoMap s) = s
+
+instance Eq dim => Ord (AutoMapBase dim) where
+  am1 <= am2 = (length . shapeDims . automapShape) am1 <= (length . shapeDims . automapShape) am2
+
+type AutoMap = AutoMapBase Size
+
 -- | An "application expression" is a semantic (not syntactic)
 -- grouping of expressions that have "funcall-like" semantics, mostly
 -- meaning that they can return existential sizes.  In our type
@@ -630,7 +658,7 @@ data AppExpBase f vn
     Apply
       (ExpBase f vn)
       (ExpBase f vn)
-      (f (Diet, Maybe VName))
+      (f (Diet, Maybe VName, AutoMap))
       SrcLoc
   | -- | Size coercion: @e :> t@.
     Coerce (ExpBase f vn) (TypeExp vn) SrcLoc
@@ -666,8 +694,8 @@ data AppExpBase f vn
   | BinOp
       (QualName vn, SrcLoc)
       (f PatType)
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (ExpBase f vn, f (StructType, Maybe VName))
+      (ExpBase f vn, f (StructType, Maybe VName, AutoMap))
+      (ExpBase f vn, f (StructType, Maybe VName, AutoMap))
       SrcLoc
   | LetWith
       (IdentBase f vn)

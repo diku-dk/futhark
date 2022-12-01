@@ -735,7 +735,7 @@ etaExpand e_t e = do
         foldl'
           ( \e1 (e2, t2, argtypes) ->
               AppExp
-                (Apply e1 e2 (Info (diet t2, Nothing)) mempty)
+                (Apply e1 e2 (Info (diet t2, Nothing, mempty)) mempty)
                 (Info (AppRes (foldFunType argtypes ret) []))
           )
           e
@@ -819,12 +819,19 @@ unRetType (RetType ext t) = first onDim t
     onDim (NamedSize d) | qualLeaf d `elem` ext = AnySize Nothing
     onDim d = d
 
+maxAutomap :: AppExp -> AutoMap
+maxAutomap (Apply f _ (Info (_, _, am)) _)
+  | AppExp f_e _ <- f = max (maxAutomap f_e) am
+  | otherwise = am
+maxAutomap _ = mempty
+
 -- | Defunctionalize an application expression at a given depth of application.
 -- Calls to dynamic (first-order) functions are preserved at much as possible,
 -- but a new lifted function is created if a dynamic function is only partially
 -- applied.
 defuncApply :: Int -> Exp -> DefM (Exp, StaticVal)
-defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
+defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, _)) loc) t@(Info (AppRes ret ext))) = do
+  let (AutoMap ds) = maxAutomap app
   let (argtypes, _) = unfoldFunType ret
   (e1', sv1) <- defuncApply (depth + 1) e1
   (e2', sv2) <- defuncExp e2
@@ -850,7 +857,11 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
           params_for_rettype = params ++ svParams sv1 ++ svParams sv2
           svParams (LambdaSV sv_pat _ _ _) = [sv_pat]
           svParams _ = []
-          rettype = buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
+          rettype
+            | ds == mempty =
+                buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
+            | otherwise =
+                arrayOf Unique ds $ buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
 
           already_bound =
             globals
@@ -910,7 +921,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             ( AppExp
                 ( Apply
                     ( AppExp
-                        (Apply fname'' e1' (Info (Observe, Nothing)) loc)
+                        (Apply fname'' e1' (Info (Observe, Nothing, mempty)) loc)
                         ( Info $
                             AppRes
                               ( Scalar $
@@ -936,7 +947,11 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
     DynamicFun _ sv -> do
       let (argtypes', rettype) = dynamicFunType sv argtypes
           restype = foldFunType argtypes' (RetType [] rettype) `setAliases` aliases ret
-          callret = AppRes (combineTypeShapes ret restype) ext
+          rankDiff = arrayRank ret - arrayRank restype
+          restype'
+            | ds == mempty = restype
+            | otherwise = arrayOf Unique (Shape $ take rankDiff $ shapeDims ds) $ combineTypeShapes (stripArray rankDiff ret) restype
+          callret = AppRes (combineTypeShapes ret restype') ext
           apply_e = AppExp (Apply e1' e2' d loc) (Info callret)
       pure (apply_e, sv)
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,

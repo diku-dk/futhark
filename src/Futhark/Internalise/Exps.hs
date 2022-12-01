@@ -6,6 +6,7 @@
 module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad.Reader
+import Data.Either
 import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
@@ -331,7 +332,7 @@ internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseAppExp desc _ e@E.Apply {} =
+internaliseAppExp desc res e@(E.Apply _ _ (Info (_, _, automap)) _) =
   case findFuncall e of
     (FunctionHole t loc, _args) -> do
       -- The function we are supposed to call doesn't exist, but we
@@ -340,50 +341,56 @@ internaliseAppExp desc _ e@E.Apply {} =
       -- create a hole whose type is the type of the entire
       -- application.
       internaliseExp desc (E.Hole (Info (fromStruct $ snd $ E.unfoldFunType t)) loc)
-    (FunctionName qfname, args) -> do
+    (FunctionName qfname, argsam) -> do
       -- Argument evaluation is outermost-in so that any existential sizes
       -- created by function applications can be brought into scope.
       let fname = nameFromString $ prettyString $ baseName $ qualLeaf qfname
           loc = srclocOf e
           arg_desc = nameToString fname ++ "_arg"
+          args = map (\(a, b, _) -> (a, b)) argsam
+          ams = map (\(_, _, c) -> c) argsam
 
       -- Some functions are magical (overloaded) and we handle that here.
       case () of
         ()
           -- Short-circuiting operators are magical.
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            baseString (qualLeaf qfname) == "&&",
-            [(x, _), (y, _)] <- args ->
-              internaliseExp desc $
-                E.AppExp
-                  (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
-                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
+            baseString (qualLeaf qfname) == "&&" ->
+              withAutoMap ams arg_desc args $ \[[x], [y]] -> do
+                letValExp' desc
+                  =<< eIf
+                    (pure $ BasicOp $ SubExp x)
+                    (eBody [pure $ BasicOp $ SubExp y])
+                    (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue $ False])
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            baseString (qualLeaf qfname) == "||",
-            [(x, _), (y, _)] <- args ->
-              internaliseExp desc $
-                E.AppExp
-                  (E.If x (E.Literal (E.BoolValue True) mempty) y mempty)
-                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
+            baseString (qualLeaf qfname) == "||" ->
+              withAutoMap ams arg_desc args $ \[[x], [y]] -> do
+                letValExp' desc
+                  =<< eIf
+                    (pure $ BasicOp $ SubExp x)
+                    (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue $ True])
+                    (eBody [pure $ BasicOp $ SubExp y])
           -- Overloaded and intrinsic functions never take array
           -- arguments (except equality, but those cannot be
           -- existential), so we can safely ignore the existential
           -- dimensions.
-          | Just internalise <- isOverloadedFunction qfname desc loc -> do
-              let prepareArg (arg, _) =
-                    (E.toStruct (E.typeOf arg),) <$> internaliseExp "arg" arg
-              internalise =<< mapM prepareArg args
+          | Just internalise <- isOverloadedFunction qfname desc loc ->
+              withAutoMap ams arg_desc args $ \args' -> do
+                let prepareArg (arg, _, am) arg' =
+                      (E.toStruct $ E.stripArray (automapRank am) (E.typeOf arg), arg')
+                let prep = zipWith prepareArg argsam args'
+                internalise $ zipWith prepareArg argsam args'
           | Just internalise <- isIntrinsicFunction qfname (map fst args) loc ->
               internalise desc
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
-              let tag ses = [(se, I.Observe) | se <- ses]
-              args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-              let args'' = concatMap tag args'
-              letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
-          | otherwise -> do
-              args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-              fst <$> funcall desc qfname args' loc
+            Just (rettype, _) <- M.lookup fname I.builtInFunctions ->
+              withAutoMap ams arg_desc args $ \args' -> do
+                let tag ses = [(se, I.Observe) | se <- ses]
+                let args'' = concatMap tag args'
+                letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+          | otherwise ->
+              withAutoMap ams arg_desc args $ \args' ->
+                fst <$> funcall desc qfname (concat args') loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
@@ -1442,15 +1449,15 @@ data Function
   | FunctionHole E.PatType SrcLoc
   deriving (Show)
 
-findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName)])
-findFuncall (E.Apply f arg (Info (_, argext)) _)
+findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName, AutoMap)])
+findFuncall (E.Apply f arg (Info (_, argext, automap)) _)
   | E.AppExp f_e _ <- f =
       let (f_e', args) = findFuncall f_e
-       in (f_e', args ++ [(arg, argext)])
+       in (f_e', args ++ [(arg, argext, automap)])
   | E.Var fname _ _ <- f =
-      (FunctionName fname, [(arg, argext)])
+      (FunctionName fname, [(arg, argext, automap)])
   | E.Hole (Info t) loc <- f =
-      (FunctionHole t loc, [(arg, argext)])
+      (FunctionHole t loc, [(arg, argext, automap)])
 findFuncall e =
   error $ "Invalid function expression in application:\n" ++ prettyString e
 
@@ -1951,6 +1958,66 @@ flatUpdateHelper desc loc arr1 offset slices arr2 = do
   certifying c $
     forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
       letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
+
+withAutoMap :: [AutoMap] -> String -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
+withAutoMap ams arg_desc args_e innerM = do
+  args <- reverse <$> mapM (internaliseArg arg_desc) (reverse args_e)
+  argts <- (mapM . mapM) subExpType args
+  let ds = map automapRank ams
+  expand args argts ds (maximum ds)
+  where
+    getVName (I.Var vn) = vn
+    getVName _ = error "oops"
+
+    expand nargs argts ds level
+      | level == 0 = innerM nargs
+      | otherwise = do
+          param_args <- forM (zip3 nargs argts ds) $ \(ses, ts, d) -> do
+            if d == level
+              then
+                ( Left
+                    <$> ( forM (zip ses ts) $
+                            ( \(se, t) -> do
+                                p <- newParam "x" $ I.stripArray 1 t
+                                pure $ (se, p)
+                            )
+                        )
+                )
+              else pure $ Right ses
+          let pairss = lefts param_args
+              map_args = (concatMap . map) fst pairss
+              params = (concatMap . map) snd pairss
+              args' =
+                map
+                  ( \xs -> case xs of
+                      Left pairs -> map (I.Var . paramName . snd) pairs
+                      Right ses -> ses
+                  )
+                  param_args
+              argts' =
+                zipWith
+                  ( \pas ts -> case pas of
+                      Left _ -> map (I.stripArray 1) ts
+                      _ -> ts
+                  )
+                  param_args
+                  argts
+              ds' = map (\d -> if d == level then d - 1 else d) ds
+
+          (ses, lam_stms) <- (collectStms $ localScope (scopeOfLParams params) $ expand args' argts' ds' (level - 1))
+
+          lam <- mkLambda params $ do
+            addStms lam_stms
+            pure $ subExpsRes ses
+
+          map_args_names <- forM map_args $ \se -> letExp "map_arg" $ BasicOp $ SubExp se
+
+          t <- lookupType $ head map_args_names
+
+          map_args_names' <- mapM (\se -> (letExp "reshaped" . (BasicOp . SubExp)) =<< ensureShape "foo" mempty t "lol" se) (map I.Var map_args_names)
+
+          ses' <- letValExp' "automap" $ Op $ Screma (arraySize 0 t) map_args_names' $ mapSOAC lam
+          return ses'
 
 funcall ::
   String ->

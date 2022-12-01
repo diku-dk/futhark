@@ -220,7 +220,7 @@ transformFName loc fname t
     applySizeArg (i, f) size_arg =
       ( i - 1,
         AppExp
-          (Apply f size_arg (Info (Observe, Nothing)) loc)
+          (Apply f size_arg (Info (Observe, Nothing, mempty)) loc)
           (Info $ AppRes (foldFunType (replicate i i64) (RetType [] (fromStruct t))) [])
       )
 
@@ -324,12 +324,13 @@ transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
   -- sizes for them.
   (pat_sizes, pat') <- sizesForPat pat
   pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' loc) (Info res)
-transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ext) = do
-  fname' <- transformFName loc fname $ toStruct t
+transformAppExp bop@(BinOp (fname, op_loc) (Info t) (e1, Info (t1, d1, a1)) (e2, Info (t2, d2, a2)) loc) (AppRes ret ext) = do
+  let fname' = qualLeaf fname
+  fname'' <- transformFName loc (QualName [] fname') $ toStruct t
   e1' <- transformExp e1
   e2' <- transformExp e2
   if orderZero (typeOf e1') && orderZero (typeOf e2')
-    then pure $ applyOp fname' e1' e2'
+    then pure $ applyOp fname'' e1' e2'
     else do
       -- We have to flip the arguments to the function, because
       -- operator application is left-to-right, while function
@@ -349,7 +350,7 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
               x_param
               e1'
               ( AppExp
-                  (LetPat [] y_param e2' (applyOp fname' x_param_e y_param_e) loc)
+                  (LetPat [] y_param e2' (applyOp fname'' x_param_e y_param_e) loc)
                   (Info $ AppRes ret mempty)
               )
               mempty
@@ -360,11 +361,11 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
       AppExp
         ( Apply
             ( AppExp
-                (Apply fname' x (Info (Observe, snd (unInfo d1))) loc)
+                (Apply fname' x (Info (Observe, d1, a1)) loc)
                 (Info $ AppRes ret mempty)
             )
             y
-            (Info (Observe, snd (unInfo d2)))
+            (Info (Observe, d2, a2))
             loc
         )
         (Info (AppRes ret ext))
@@ -537,7 +538,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
           ( Apply
               op
               e1
-              (Info (Observe, xext))
+              (Info (Observe, xext, mempty))
               loc
           )
           (Info $ AppRes (Scalar $ Arrow mempty yp ytype (RetType [] t)) [])
@@ -552,7 +553,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
           ( Apply
               apply_left
               e2
-              (Info (Observe, yext))
+              (Info (Observe, yext, mempty))
               loc
           )
           (Info $ AppRes rettype' retext)
