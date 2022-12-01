@@ -326,16 +326,30 @@ staticOpenCLArray name "device" t vs = do
 staticOpenCLArray _ space _ _ =
   error $ "OpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
+kernelConstToExp :: KernelConst -> C.Exp
+kernelConstToExp (SizeConst key) =
+  [C.cexp|*ctx->tuning_params.$id:key|]
+kernelConstToExp (SizeMaxConst size_class) =
+  [C.cexp|ctx->opencl.$id:field|]
+  where
+    field = "max_" <> prettyString size_class
+
+compileGroupDim :: GroupDim -> GC.CompilerM op s C.Exp
+compileGroupDim (Left e) = GC.compileExp e
+compileGroupDim (Right kc) = pure $ kernelConstToExp kc
+
 callKernel :: GC.OpCompiler OpenCL ()
-callKernel (GetSize v key) =
-  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key;|]
+callKernel (GetSize v key) = do
+  let e = kernelConstToExp $ SizeConst key
+  GC.stm [C.cstm|$id:v = $exp:e;|]
 callKernel (CmpSizeLe v key x) = do
+  let e = kernelConstToExp $ SizeConst key
   x' <- GC.compileExp x
-  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key <= $exp:x';|]
+  GC.stm [C.cstm|$id:v = $exp:e <= $exp:x';|]
   sizeLoggingCode v key x'
-callKernel (GetSizeMax v size_class) =
-  let field = "max_" ++ prettyString size_class
-   in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
+callKernel (GetSizeMax v size_class) = do
+  let e = kernelConstToExp $ SizeMaxConst size_class
+  GC.stm [C.cstm|$id:v = $exp:e;|]
 callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   -- The other failure args are set automatically when the kernel is
   -- first created.
@@ -349,7 +363,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
 
   zipWithM_ setKernelArg [numFailureParams safety ..] args
   num_workgroups' <- mapM GC.compileExp num_workgroups
-  workgroup_size' <- mapM GC.compileExp workgroup_size
+  workgroup_size' <- mapM compileGroupDim workgroup_size
   local_bytes <- foldM localBytes [C.cexp|0|] args
 
   launchKernel name num_workgroups' workgroup_size' local_bytes
