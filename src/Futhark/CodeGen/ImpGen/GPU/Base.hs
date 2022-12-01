@@ -874,6 +874,8 @@ isConstExp vtable size = do
         constExp =<< hasExp =<< M.lookup name vtable
       constExp (Op (Inner (SizeOp (GetSize key _)))) =
         Just $ LeafExp (Imp.SizeConst $ keyWithEntryPoint fname key) int32
+      constExp (Op (Inner (SizeOp (GetSizeMax size_class)))) =
+        Just $ LeafExp (Imp.SizeMaxConst size_class) int32
       constExp e = primExpFromExp lookupConstExp e
   pure $ replaceInPrimExpM onLeaf size
   where
@@ -1141,16 +1143,27 @@ sKernelOp attrs constants ops name m = do
   HostEnv atomics _ locks <- askEnv
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
   uses <- computeKernelUses body mempty
+  group_size <- onGroupSize $ kernelGroupSize constants
   emit . Imp.Op . Imp.CallKernel $
     Imp.Kernel
       { Imp.kernelBody = body,
         Imp.kernelUses = uses,
         Imp.kernelNumGroups = [untyped $ kernelNumGroups constants],
-        Imp.kernelGroupSize = [untyped $ kernelGroupSize constants],
+        Imp.kernelGroupSize = [group_size],
         Imp.kernelName = name,
         Imp.kernelFailureTolerant = kAttrFailureTolerant attrs,
         Imp.kernelCheckLocalMemory = kAttrCheckLocalMemory attrs
       }
+  where
+    -- Figure out if this expression actually corresponds to a
+    -- KernelConst.
+    onGroupSize e = do
+      vtable <- getVTable
+      x <- isConstExp vtable $ untyped e
+      pure $
+        case x of
+          Just (LeafExp kc _) -> Right kc
+          _ -> Left $ untyped e
 
 sKernelFailureTolerant ::
   Bool ->

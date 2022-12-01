@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.GenericC.Pretty
     definitionsText,
     typeText,
     idText,
+    funcText,
     funcsText,
   )
 where
@@ -29,5 +30,8 @@ typeText = T.pack . MPP.pretty 8000 . MPP.ppr
 idText :: C.Id -> T.Text
 idText = T.pack . MPP.pretty 8000 . MPP.ppr
 
+funcText :: C.Func -> T.Text
+funcText = T.pack . MPP.pretty 8000 . MPP.ppr
+
 funcsText :: [C.Func] -> T.Text
-funcsText = T.unlines . map (T.pack . MPP.pretty 8000 . MPP.ppr)
+funcsText = T.unlines . map funcText

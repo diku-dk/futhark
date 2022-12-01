@@ -213,6 +213,9 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a, b, c) where
 instance (FreeIn a, FreeIn b, FreeIn c, FreeIn d) => FreeIn (a, b, c, d) where
   freeIn' (a, b, c, d) = freeIn' a <> freeIn' b <> freeIn' c <> freeIn' d
 
+instance (FreeIn a, FreeIn b) => FreeIn (Either a b) where
+  freeIn' = either freeIn' freeIn'
+
 instance FreeIn a => FreeIn [a] where
   freeIn' = foldMap freeIn'
 

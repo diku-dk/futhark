@@ -10,6 +10,7 @@ module Futhark.CodeGen.ImpCode.GPU
     KernelOp (..),
     Fence (..),
     AtomicOp (..),
+    GroupDim,
     Kernel (..),
     KernelUse (..),
     module Futhark.CodeGen.ImpCode,
@@ -32,7 +33,9 @@ type HostCode = Code HostOp
 type KernelCode = Code KernelOp
 
 -- | A run-time constant related to kernels.
-newtype KernelConst = SizeConst Name
+data KernelConst
+  = SizeConst Name
+  | SizeMaxConst SizeClass
   deriving (Eq, Ord, Show)
 
 -- | An expression whose variables are kernel constants.
@@ -46,13 +49,16 @@ data HostOp
   | GetSizeMax VName SizeClass
   deriving (Show)
 
+-- | The size of one dimension of a group.
+type GroupDim = Either Exp KernelConst
+
 -- | A generic kernel containing arbitrary kernel code.
 data Kernel = Kernel
   { kernelBody :: Code KernelOp,
     -- | The host variables referenced by the kernel.
     kernelUses :: [KernelUse],
     kernelNumGroups :: [Exp],
-    kernelGroupSize :: [Exp],
+    kernelGroupSize :: [GroupDim],
     -- | A short descriptive and _unique_ name - should be
     -- alphanumeric and without spaces.
     kernelName :: Name,
@@ -81,6 +87,11 @@ data KernelUse
 
 instance Pretty KernelConst where
   pretty (SizeConst key) = "get_size" <> parens (pretty key)
+  pretty (SizeMaxConst size_class) = "get_max_size" <> parens (pretty size_class)
+
+instance FreeIn KernelConst where
+  freeIn' (SizeConst _) = mempty
+  freeIn' (SizeMaxConst _) = mempty
 
 instance Pretty KernelUse where
   pretty (ScalarUse name t) =
@@ -118,8 +129,11 @@ instance FreeIn HostOp where
 
 instance FreeIn Kernel where
   freeIn' kernel =
-    freeIn' (kernelBody kernel)
-      <> freeIn' [kernelNumGroups kernel, kernelGroupSize kernel]
+    freeIn'
+      ( kernelBody kernel,
+        kernelNumGroups kernel,
+        kernelGroupSize kernel
+      )
 
 instance Pretty Kernel where
   pretty kernel =
@@ -128,7 +142,7 @@ instance Pretty Kernel where
         ( "groups"
             <+> brace (pretty $ kernelNumGroups kernel)
             </> "group_size"
-            <+> brace (pretty $ kernelGroupSize kernel)
+            <+> brace (list $ map (either pretty pretty) $ kernelGroupSize kernel)
             </> "uses"
             <+> brace (commasep $ map pretty $ kernelUses kernel)
             </> "failure_tolerant"

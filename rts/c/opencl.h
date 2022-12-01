@@ -517,6 +517,12 @@ static char* mk_compile_opts(struct opencl_context *ctx,
                    "-DLOCKSTEP_WIDTH=%d ",
                    (int)ctx->lockstep_width);
 
+  // XXX: Ugh
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-D%s=%d ",
+                "max_group_size",
+                (int)ctx->max_group_size);
+
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
                   "-D%s=%d ",

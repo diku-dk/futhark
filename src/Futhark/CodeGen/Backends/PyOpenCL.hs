@@ -199,27 +199,32 @@ compileProg mode class_name prog = do
 asLong :: PyExp -> PyExp
 asLong x = Py.simpleCall "np.int64" [x]
 
+kernelConstToExp :: Imp.KernelConst -> PyExp
+kernelConstToExp (Imp.SizeConst key) =
+  Index (Var "self.sizes") (IdxExp $ String $ prettyString key)
+kernelConstToExp (Imp.SizeMaxConst size_class) =
+  Var $ "self.max_" <> prettyString size_class
+
+compileGroupDim :: Imp.GroupDim -> Py.CompilerM op s PyExp
+compileGroupDim (Left e) = asLong <$> Py.compileExp e
+compileGroupDim (Right kc) = pure $ kernelConstToExp kc
+
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
   v' <- Py.compileVar v
-  Py.stm $
-    Assign v' $
-      Index (Var "self.sizes") (IdxExp $ String $ prettyString key)
+  Py.stm $ Assign v' $ kernelConstToExp $ Imp.SizeConst key
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- Py.compileVar v
   x' <- Py.compileExp x
   Py.stm $
     Assign v' $
-      BinOp "<=" (Index (Var "self.sizes") (IdxExp $ String $ prettyString key)) x'
+      BinOp "<=" (kernelConstToExp (Imp.SizeConst key)) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- Py.compileVar v
-  Py.stm $
-    Assign v' $
-      Var $
-        "self.max_" ++ prettyString size_class
+  Py.stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
 callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
-  workgroup_size' <- mapM (fmap asLong . Py.compileExp) workgroup_size
+  workgroup_size' <- mapM compileGroupDim workgroup_size
   let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
       total_elements = foldl mult_exp (Integer 1) kernel_size
       cond = BinOp "!=" total_elements (Integer 0)

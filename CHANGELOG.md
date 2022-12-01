@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Generalised histograms now supported in AD.  Work by Lotte Bruun and
   Ulrik Larsen.
 
+* OpenCL kernels now embed group size information, which can
+  potentially be used for better register allocation by the OpenCL
+  implementation.
+
 ### Removed
 
 ### Changed

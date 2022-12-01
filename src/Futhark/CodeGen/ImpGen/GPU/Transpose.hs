@@ -327,7 +327,7 @@ mapTransposeKernel desc block_dim_int args t kind =
           <> mapTranspose block_dim args t kind,
       kernelUses = uses,
       kernelNumGroups = map untyped num_groups,
-      kernelGroupSize = map untyped group_size,
+      kernelGroupSize = map (Left . untyped) group_size,
       kernelName = nameFromString name,
       kernelFailureTolerant = True,
       kernelCheckLocalMemory = False
