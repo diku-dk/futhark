@@ -349,6 +349,9 @@ static void cuda_nvrtc_mk_build_options(struct cuda_context *ctx, const char *ex
   } else {
     opts[i++] = strdup("--disable-warnings");
   }
+  opts[i++] = msgprintf("-D%s=%d",
+                        "max_group_size",
+                        (int)ctx->max_block_size);
   for (size_t j = 0; j < ctx->cfg.num_sizes; j++) {
     opts[i++] = msgprintf("-D%s=%zu", ctx->cfg.size_vars[j],
                           ctx->cfg.size_values[j]);

@@ -517,7 +517,6 @@ static char* mk_compile_opts(struct opencl_context *ctx,
                    "-DLOCKSTEP_WIDTH=%d ",
                    (int)ctx->lockstep_width);
 
-  // XXX: Ugh
   w += snprintf(compile_opts+w, compile_opts_size-w,
                 "-D%s=%d ",
                 "max_group_size",
