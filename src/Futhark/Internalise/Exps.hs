@@ -6,6 +6,7 @@
 module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad.Reader
+import Data.Bifunctor
 import Data.Either
 import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -13,6 +14,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -356,26 +358,26 @@ internaliseAppExp desc res e@(E.Apply _ _ (Info (_, _, automap)) _) =
           -- Short-circuiting operators are magical.
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             baseString (qualLeaf qfname) == "&&" ->
-              withAutoMap ams arg_desc args $ \[[x], [y]] -> do
+              withAutoMap ams arg_desc args $ \[([x], x_stms), ([y], y_stms)] -> do
                 letValExp' desc
                   =<< eIf
-                    (pure $ BasicOp $ SubExp x)
-                    (eBody [pure $ BasicOp $ SubExp y])
+                    (addStms x_stms >> (pure $ BasicOp $ SubExp x))
+                    (addStms y_stms >> (eBody [pure $ BasicOp $ SubExp y]))
                     (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue $ False])
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             baseString (qualLeaf qfname) == "||" ->
-              withAutoMap ams arg_desc args $ \[[x], [y]] -> do
+              withAutoMap ams arg_desc args $ \[([x], x_stms), ([y], y_stms)] -> do
                 letValExp' desc
                   =<< eIf
-                    (pure $ BasicOp $ SubExp x)
+                    (addStms x_stms >> (pure $ BasicOp $ SubExp x))
                     (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue $ True])
-                    (eBody [pure $ BasicOp $ SubExp y])
+                    (addStms y_stms >> (eBody [pure $ BasicOp $ SubExp y]))
           -- Overloaded and intrinsic functions never take array
           -- arguments (except equality, but those cannot be
           -- existential), so we can safely ignore the existential
           -- dimensions.
           | Just internalise <- isOverloadedFunction qfname desc loc ->
-              withAutoMap ams arg_desc args $ \args' -> do
+              withAutoMap_ ams arg_desc args $ \args' -> do
                 let prepareArg (arg, _, am) arg' =
                       (E.toStruct $ E.stripArray (automapRank am) (E.typeOf arg), arg')
                 let prep = zipWith prepareArg argsam args'
@@ -384,12 +386,12 @@ internaliseAppExp desc res e@(E.Apply _ _ (Info (_, _, automap)) _) =
               internalise desc
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             Just (rettype, _) <- M.lookup fname I.builtInFunctions ->
-              withAutoMap ams arg_desc args $ \args' -> do
+              withAutoMap_ ams arg_desc args $ \args' -> do
                 let tag ses = [(se, I.Observe) | se <- ses]
                 let args'' = concatMap tag args'
                 letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
           | otherwise ->
-              withAutoMap ams arg_desc args $ \args' ->
+              withAutoMap_ ams arg_desc args $ \args' ->
                 fst <$> funcall desc qfname (concat args') loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
@@ -1959,41 +1961,48 @@ flatUpdateHelper desc loc arr1 offset slices arr2 = do
     forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
       letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
 
-withAutoMap :: [AutoMap] -> String -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
+withAutoMap_ :: [AutoMap] -> String -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
+withAutoMap_ ams arg_desc args_e innerM =
+  withAutoMap ams arg_desc args_e $ \args_stms -> do
+    let (args, stms) = unzip args_stms
+    mapM addStms $ reverse stms
+    innerM args
+
+withAutoMap :: [AutoMap] -> String -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
 withAutoMap ams arg_desc args_e innerM = do
-  args <- reverse <$> mapM (internaliseArg arg_desc) (reverse args_e)
-  argts <- (mapM . mapM) subExpType args
-  let ds = map automapRank ams
-  expand args argts ds (maximum ds)
+  (args, stms) <-
+    foldM
+      ( \(args, stms) arg -> do
+          (arg', stms') <- inScopeOf (reverse stms) $ collectStms $ internaliseArg arg_desc arg
+          pure (arg' : args, stms' : stms)
+      )
+      (mempty, mempty)
+      (reverse args_e)
+  argts <- inScopeOf (reverse stms) $ (mapM . mapM) subExpType args
+  expand (zip args stms) argts ds (maximum ds)
   where
+    ds = map automapRank ams
+
     getVName (I.Var vn) = vn
     getVName _ = error "oops"
 
-    expand nargs argts ds level
-      | level == 0 = innerM nargs
+    expand nargs_stms argts ds level
+      | level == 0 = innerM nargs_stms
       | otherwise = do
-          param_args <- forM (zip3 nargs argts ds) $ \(ses, ts, d) -> do
+          param_args <- forM (zip3 nargs_stms argts ds) $ \(ses_stm, ts, d) -> do
             if d == level
-              then
-                ( Left
-                    <$> ( forM (zip ses ts) $
-                            ( \(se, t) -> do
-                                p <- newParam "x" $ I.stripArray 1 t
-                                pure $ (se, p)
-                            )
-                        )
-                )
-              else pure $ Right ses
-          let pairss = lefts param_args
-              map_args = (concatMap . map) fst pairss
-              params = (concatMap . map) snd pairss
-              args' =
-                map
-                  ( \xs -> case xs of
-                      Left pairs -> map (I.Var . paramName . snd) pairs
-                      Right ses -> ses
-                  )
-                  param_args
+              then do
+                ses_ps <-
+                  forM (zip (fst ses_stm) ts) $
+                    ( \(se, t) -> do
+                        p <- newParam "x" $ I.stripArray 1 t
+                        pure $ (se, p)
+                    )
+                pure $ Left (ses_ps, snd ses_stm)
+              else pure $ Right ses_stm
+          let (se_ps, stms) = unzip $ lefts param_args
+              map_args = (concatMap . map) fst se_ps
+              params = (concatMap . map) snd se_ps
               argts' =
                 zipWith
                   ( \pas ts -> case pas of
@@ -2003,6 +2012,16 @@ withAutoMap ams arg_desc args_e innerM = do
                   param_args
                   argts
               ds' = map (\d -> if d == level then d - 1 else d) ds
+
+          args' <-
+            mapM
+              ( \xs -> case xs of
+                  Left (ses_ps, stm) -> do
+                    addStms stm
+                    pure $ (map (I.Var . paramName . snd) ses_ps, mempty)
+                  Right ses_stm -> pure ses_stm
+              )
+              param_args
 
           (ses, lam_stms) <- (collectStms $ localScope (scopeOfLParams params) $ expand args' argts' ds' (level - 1))
 
