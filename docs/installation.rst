@@ -106,15 +106,12 @@ We build such binary snapshots for the following operating systems:
 Installing Futhark on Linux
 ---------------------------
 
-* `Linuxbrew`_ is a distribution-agnostic package manager that
-  contains a formula for Futhark.  If Linuxbrew is installed (which
-  does not require ``root`` access), installation is as easy as::
+* `Homebrew`_ is a distribution-agnostic package manager for macOS and
+  Linux that contains a formula for Futhark. If Homebrew is already
+  installed (which does not require ``root`` access), installation is
+  as easy as::
 
     $ brew install futhark
-
-  Note that as of this writing, Linuxbrew is hampered by limited
-  compute resources for building packages, so the Futhark version may
-  be a bit behind.
 
 * Arch Linux users can use a `futhark-nightly package
   <https://aur.archlinux.org/packages/futhark-nightly/>`_ or a
