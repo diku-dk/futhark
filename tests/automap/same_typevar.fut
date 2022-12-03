@@ -1,10 +1,11 @@
 -- ==
+-- tags { no_wasm }
 -- entry: big_to_small
--- compiled input { [[1,2],[3,4]] [1,2] 3 }
+-- no_wasm compiled input { [[1,2],[3,4]] [1,2] 3 }
 
 -- ==
 -- entry: small_to_big
--- compiled input { [[1,2],[3,4]] [1,2] 3 }
+-- no_wasm compiled input { [[1,2],[3,4]] [1,2] 3 }
 
 def f 'a (x: a) (y: a) (z: a) = (x, y, z) 
 
