@@ -235,7 +235,6 @@ bindingPat ::
   (Pat -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkForDuplicateNames (map sizeBinderToParam sizes) [p]
   checkPat sizes p t $ \p' -> binding True (S.toList $ patIdents p') $ do
     -- Perform an observation of every declared dimension.  This
     -- prevents unused-name warnings for otherwise unused dimensions.
@@ -354,6 +353,13 @@ checkPat' _ (PatLit l NoInfo loc) NoneInferred = do
   pure $ PatLit l (Info (fromStruct t')) loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
   | Just ts <- M.lookup n cs = do
+      when (length ps /= length ts) $
+        typeError loc mempty $
+          "Pattern #" <> pretty n <> " expects"
+            <+> pretty (length ps)
+            <+> "constructor arguments, but type provides"
+            <+> pretty (length ts)
+            <+> "arguments."
       ps' <- zipWithM (checkPat' sizes) ps $ map Ascribed ts
       pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed t) = do

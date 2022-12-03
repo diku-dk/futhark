@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark repl`: unsigned integers are now printed correctly.
 
+* A bug in the type-checking of `match` (#1783).
+
 ## [0.22.4]
 
 ### Added
