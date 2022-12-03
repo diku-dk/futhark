@@ -213,17 +213,27 @@ checkApplyExp e = do
   let (tps, _) = unfoldFunType ft
   let argts = map argType args
   ams <- autoMapInfos tps argts
-  let checkApplyExp' f' (arg : args') (i : is) (am : ams') = do
-        t <- expType f'
-        (t1, rt, argext, exts) <- checkApply (srclocOf e) (fname, i) t arg am
-        let f'' =
-              AppExp
-                (Apply f' (argExp arg) (Info (diet t1, argext, am)) (srclocOf e))
-                (Info $ AppRes (if null args' then bumpReturnShape ams argts rt else rt) exts)
-        checkApplyExp' f'' args' is ams'
+  let checkApplyExp' f' (arg : args') (i : is) (am : ams') =
+        do
+          t <- expType f'
+          (t1, rt, argext, exts) <-
+            checkApply
+              (srclocOf e)
+              (fname, i)
+              t
+              arg
+              am
+          let f'' =
+                AppExp
+                  (Apply f' (argExp arg) (Info (diet t1, argext, am)) (srclocOf e))
+                  ( Info $
+                      AppRes
+                        (if null args' then bumpReturnShape ams argts rt else rt)
+                        exts
+                  )
+          checkApplyExp' f'' args' is ams'
       checkApplyExp' f' _ _ _ = pure f'
-  exp <- checkApplyExp' f args [0 ..] ams
-  pure exp
+  checkApplyExp' f args [0 ..] ams
   where
     unrollApply :: UncheckedExp -> TermTypeM (Exp, Maybe (QualName VName), [Arg])
     unrollApply (AppExp (Apply e1 e2 _ _) _) = do
@@ -234,10 +244,9 @@ checkApplyExp e = do
       f' <- checkExp f
       pure
         ( f',
-          ( case f' of
-              Var qn _ _ -> Just qn
-              _ -> Nothing
-          ),
+          case f' of
+            Var qn _ _ -> Just qn
+            _ -> Nothing,
           mempty
         )
 
@@ -893,11 +902,11 @@ checkApply ::
 checkApply
   loc
   (fname, _)
-  ty@(Scalar (Arrow as pname tp1 tp2))
+  (Scalar (Arrow as pname tp1 tp2))
   (argexp, argtype, dflow, argloc)
   automap =
     onFailure (CheckingApply fname argexp tp1 (toStruct argtype)) $ do
-      let rd = automapRank automap
+      let rd = autoMapRank automap
           peeled_argtype
             | rd > 0 = toStruct $ fromMaybe (error "") $ peelArray rd argtype
             | otherwise = toStruct argtype
@@ -958,7 +967,7 @@ checkApply
       let appres = S.singleton $ AliasFree v
       let tp2'' = applySubst parsubst $ returnType appres tp2' (diet tp1') argtype'
 
-      pure (toStruct $ argtype', tp2'', argext, ext)
+      pure (toStruct argtype', tp2'', argext, ext)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg am = do
   tv <- newTypeVar loc "b"
   -- Change the uniqueness of the argument type because we never want
@@ -1013,19 +1022,19 @@ autoMapInfos tps argts = do
         link (Array _ _ ds1 tv@(TypeVar {})) argt =
           M.singleton tv $ diff tv (stripArray (shapeRank ds1) argt)
         link _ _ = mempty
-        diff (TypeVar _ _ (QualName [] v) _) argt = [arrayRank argt]
+        diff (TypeVar _ _ (QualName {}) _) argt = [arrayRank argt]
         diff _ _ = [0]
 
     rankDifferences :: [StructType] -> [PatType] -> TermTypeM [Int]
-    rankDifferences tps' argts' =
-      zipWithM (rankDifference $ typeVarMap tps' argts) tps' argts'
+    rankDifferences tps' =
+      zipWithM (rankDifference $ typeVarMap tps' argts) tps'
 
     rankDifference ::
       M.Map (ScalarTypeBase Size ()) [Int] ->
       StructType ->
       PatType ->
       TermTypeM Int
-    rankDifference m param_type arg_type = rankDifference' (toStruct param_type) arg_type
+    rankDifference m param_type = rankDifference' (toStruct param_type)
       where
         rankDifference' tp argt
           | not (typeVars argt `S.isSubsetOf` typeVars tp) = pure 0

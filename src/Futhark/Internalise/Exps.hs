@@ -6,15 +6,13 @@
 module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad.Reader
-import Data.Bifunctor
 import Data.Either
-import Data.List (elemIndex, find, intercalate, intersperse, transpose)
+import Data.List (elemIndex, find, intercalate, intersperse, transpose, zip4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Debug.Trace
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -334,7 +332,7 @@ internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseAppExp desc res e@(E.Apply _ _ (Info (_, _, automap)) _) =
+internaliseAppExp desc _ e@(E.Apply {}) =
   case findFuncall e of
     (FunctionHole t loc, _args) -> do
       -- The function we are supposed to call doesn't exist, but we
@@ -361,17 +359,17 @@ internaliseAppExp desc res e@(E.Apply _ _ (Info (_, _, automap)) _) =
               withAutoMap ams arg_desc args $ \[([x], x_stms), ([y], y_stms)] -> do
                 letValExp' desc
                   =<< eIf
-                    (addStms x_stms >> (pure $ BasicOp $ SubExp x))
-                    (addStms y_stms >> (eBody [pure $ BasicOp $ SubExp y]))
-                    (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue $ False])
+                    (addStms x_stms >> pure (BasicOp $ SubExp x))
+                    (addStms y_stms >> eBody [pure $ BasicOp $ SubExp y])
+                    (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue False])
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             baseString (qualLeaf qfname) == "||" ->
               withAutoMap ams arg_desc args $ \[([x], x_stms), ([y], y_stms)] -> do
                 letValExp' desc
                   =<< eIf
-                    (addStms x_stms >> (pure $ BasicOp $ SubExp x))
-                    (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue $ True])
-                    (addStms y_stms >> (eBody [pure $ BasicOp $ SubExp y]))
+                    (addStms x_stms >> pure (BasicOp $ SubExp x))
+                    (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue True])
+                    (addStms y_stms >> eBody [pure $ BasicOp $ SubExp y])
           -- Overloaded and intrinsic functions never take array
           -- arguments (except equality, but those cannot be
           -- existential), so we can safely ignore the existential
@@ -379,8 +377,7 @@ internaliseAppExp desc res e@(E.Apply _ _ (Info (_, _, automap)) _) =
           | Just internalise <- isOverloadedFunction qfname desc loc ->
               withAutoMap_ ams arg_desc args $ \args' -> do
                 let prepareArg (arg, _, am) arg' =
-                      (E.toStruct $ E.stripArray (automapRank am) (E.typeOf arg), arg')
-                let prep = zipWith prepareArg argsam args'
+                      (E.toStruct $ E.stripArray (autoMapRank am) (E.typeOf arg), arg')
                 internalise $ zipWith prepareArg argsam args'
           | Just internalise <- isIntrinsicFunction qfname (map fst args) loc ->
               internalise desc
@@ -1965,7 +1962,7 @@ withAutoMap_ :: [AutoMap] -> String -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> 
 withAutoMap_ ams arg_desc args_e innerM =
   withAutoMap ams arg_desc args_e $ \args_stms -> do
     let (args, stms) = unzip args_stms
-    mapM addStms $ reverse stms
+    mapM_ addStms $ reverse stms
     innerM args
 
 withAutoMap :: [AutoMap] -> String -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
@@ -1979,64 +1976,61 @@ withAutoMap ams arg_desc args_e innerM = do
       (mempty, mempty)
       (reverse args_e)
   argts <- inScopeOf (reverse stms) $ (mapM . mapM) subExpType args
-  expand (zip args stms) argts ds (maximum ds)
+  expand args stms argts ds (maximum ds)
   where
-    ds = map automapRank ams
-
-    getVName (I.Var vn) = vn
-    getVName _ = error "oops"
-
-    expand nargs_stms argts ds level
-      | level == 0 = innerM nargs_stms
-      | otherwise = do
-          param_args <- forM (zip3 nargs_stms argts ds) $ \(ses_stm, ts, d) -> do
-            if d == level
-              then do
-                ses_ps <-
-                  forM (zip (fst ses_stm) ts) $
-                    ( \(se, t) -> do
-                        p <- newParam "x" $ I.stripArray 1 t
-                        pure $ (se, p)
-                    )
-                pure $ Left (ses_ps, snd ses_stm)
-              else pure $ Right ses_stm
-          let (se_ps, stms) = unzip $ lefts param_args
-              map_args = (concatMap . map) fst se_ps
-              params = (concatMap . map) snd se_ps
-              argts' =
-                zipWith
-                  ( \pas ts -> case pas of
-                      Left _ -> map (I.stripArray 1) ts
-                      _ -> ts
-                  )
-                  param_args
-                  argts
-              ds' = map (\d -> if d == level then d - 1 else d) ds
-
-          args' <-
-            mapM
-              ( \xs -> case xs of
-                  Left (ses_ps, stm) -> do
-                    addStms stm
-                    pure $ (map (I.Var . paramName . snd) ses_ps, mempty)
-                  Right ses_stm -> pure ses_stm
+    ds = map autoMapRank ams
+    mkLambdaParams level (ses, ts, stm, d)
+      | d == level =
+          Left
+            <$> zipWithM
+              ( \se t -> do
+                  let t' = I.stripArray 1 t
+                  p <- newParam "x" t'
+                  addStms stm
+                  pure ((se, p), t')
               )
-              param_args
+              ses
+              ts
+      | otherwise = pure $ Right $ zip ses ts
 
-          (ses, lam_stms) <- (collectStms $ localScope (scopeOfLParams params) $ expand args' argts' ds' (level - 1))
+    expand args stms argts ds' level
+      | level == 0 = innerM $ zip args stms
+      | otherwise = do
+          arg_params <- mapM (mkLambdaParams level) $ zip4 args argts stms ds'
+          let argts' = map (either (map snd) (map snd)) arg_params
+              (ds'', stms') =
+                unzip $
+                  zipWith
+                    ( \d stm ->
+                        if d == level
+                          then (d - 1, mempty)
+                          else (d, stm)
+                    )
+                    ds'
+                    stms
+              args' = map (either (map (I.Var . paramName . snd . fst)) (map fst)) arg_params
+              (map_ses, params) = unzip $ (concatMap . map) fst $ lefts arg_params
 
-          lam <- mkLambda params $ do
-            addStms lam_stms
-            pure $ subExpsRes ses
+          (ses, lam_stms) <- collectStms $ localScope (scopeOfLParams params) $ expand args' stms' argts' ds'' (level - 1)
 
-          map_args_names <- forM map_args $ \se -> letExp "map_arg" $ BasicOp $ SubExp se
+          case map_ses of
+            [] -> pure mempty
+            (arg_se : _) -> do
+              t <- subExpType arg_se
+              map_args <-
+                forM map_ses $
+                  (letExp "reshaped" . (BasicOp . SubExp))
+                    <=< ensureShape
+                      "AutoMap: wrong map argument shape"
+                      mempty
+                      t
+                      "map_arg_right_shape"
 
-          t <- lookupType $ head map_args_names
-
-          map_args_names' <- mapM (\se -> (letExp "reshaped" . (BasicOp . SubExp)) =<< ensureShape "foo" mempty t "lol" se) (map I.Var map_args_names)
-
-          ses' <- letValExp' "automap" $ Op $ Screma (arraySize 0 t) map_args_names' $ mapSOAC lam
-          return ses'
+              letValExp' "automap"
+                . Op
+                . Screma (arraySize 0 t) map_args
+                . mapSOAC
+                =<< mkLambda params (addStms lam_stms >> pure (subExpsRes ses))
 
 funcall ::
   String ->

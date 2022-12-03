@@ -324,7 +324,7 @@ transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
   -- sizes for them.
   (pat_sizes, pat') <- sizesForPat pat
   pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' loc) (Info res)
-transformAppExp bop@(BinOp (fname, op_loc) (Info t) (e1, Info (t1, d1, a1)) (e2, Info (t2, d2, a2)) loc) (AppRes ret ext) = do
+transformAppExp (BinOp (fname, _) (Info t) (e1, Info (_, d1, a1)) (e2, Info (_, d2, a2)) loc) (AppRes ret ext) = do
   let fname' = qualLeaf fname
   fname'' <- transformFName loc (QualName [] fname') $ toStruct t
   e1' <- transformExp e1
