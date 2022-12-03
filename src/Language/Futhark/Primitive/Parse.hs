@@ -25,7 +25,7 @@ import Text.Megaparsec.Char.Lexer qualified as L
 
 -- | Is this character a valid member of an identifier?
 constituent :: Char -> Bool
-constituent c = isAlphaNum c || (c `elem` ("_/'+-=!&^.<>*|" :: String))
+constituent c = isAlphaNum c || (c `elem` ("_/'+-=!&^.<>*|%" :: String))
 
 -- | Consume whitespace (including skipping line comments).
 whitespace :: Parsec Void T.Text ()
