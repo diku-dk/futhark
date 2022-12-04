@@ -1,7 +1,6 @@
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise (transformProg) where
 
-import Control.Arrow qualified as Arrow
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -56,7 +55,7 @@ bindingSV (Binding _ sv) = sv
 type Env = M.Map VName Binding
 
 localEnv :: Env -> DefM a -> DefM a
-localEnv env = local $ Arrow.second (env <>)
+localEnv env = local $ second (env <>)
 
 -- Even when using a "new" environment (for evaluating closures) we
 -- still ram the global environment of DynamicFuns in there.
@@ -68,7 +67,7 @@ askEnv :: DefM Env
 askEnv = asks snd
 
 areGlobal :: [VName] -> DefM a -> DefM a
-areGlobal vs = local $ Arrow.first (S.fromList vs <>)
+areGlobal vs = local $ first (S.fromList vs <>)
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
