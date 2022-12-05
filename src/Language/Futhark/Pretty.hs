@@ -294,8 +294,13 @@ prettyAppExp _ (If c t f _) =
     <+> align (pretty t)
     </> "else"
     <+> align (pretty f)
-prettyAppExp p (Apply f arg _ _) =
-  parensIf (p >= 10) $ prettyExp 0 f <+> prettyExp 10 arg
+prettyAppExp p (Apply f arg t _)
+  | Just (_, _, AutoMap s) <- unAnnot t,
+    s /= mempty,
+    isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 =
+      parens (prettyExp 0 f <+> prettyExp 10 arg) <> "#" <> pretty s
+  | otherwise =
+      parensIf (p >= 10) $ prettyExp 0 f <+> prettyExp 10 arg
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
