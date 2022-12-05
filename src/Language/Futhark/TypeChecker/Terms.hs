@@ -499,8 +499,7 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
             )
             (Info $ AppRes body_t ext)
 checkExp (AppExp (LetWith dest src slice ve body loc) _) =
-  sequentially (checkIdent src) $ \src' _ -> do
-    slice' <- checkSlice slice
+  sequentially ((,) <$> checkIdent src <*> checkSlice slice) $ \(src', slice') _ -> do
     (t, _) <- newArrayType (srclocOf src) "src" $ sliceDims slice'
     unify (mkUsage loc "type of target array") t $ toStruct $ unInfo $ identType src'
 
