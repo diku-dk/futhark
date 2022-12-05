@@ -91,11 +91,7 @@ module Language.Futhark.Syntax
     Alias (..),
     Aliasing,
     QualName (..),
-
-    -- * AutoMap
-    AutoMap,
-    AutoMapBase (..),
-    automapShape,
+    AutoMap (..),
   )
 where
 
@@ -625,22 +621,18 @@ data SizeBinder vn = SizeBinder {sizeName :: !vn, sizeLoc :: !SrcLoc}
 instance Located (SizeBinder vn) where
   locOf = locOf . sizeLoc
 
-newtype AutoMapBase dim = AutoMap (Shape dim)
+-- | For a function application, how much implicit mapping we perform.
+newtype AutoMap = AutoMap {automapShape :: Shape Size}
   deriving (Eq, Show)
 
-instance Ord dim => Semigroup (AutoMapBase dim) where
+instance Semigroup AutoMap where
   AutoMap s1 <> AutoMap s2 = AutoMap $ s1 <> s2
 
-instance Ord dim => Monoid (AutoMapBase dim) where
+instance Monoid AutoMap where
   mempty = AutoMap mempty
 
-automapShape :: AutoMapBase dim -> Shape dim
-automapShape (AutoMap s) = s
-
-instance Eq dim => Ord (AutoMapBase dim) where
+instance Ord AutoMap where
   am1 <= am2 = (length . shapeDims . automapShape) am1 <= (length . shapeDims . automapShape) am2
-
-type AutoMap = AutoMapBase Size
 
 -- | An "application expression" is a semantic (not syntactic)
 -- grouping of expressions that have "funcall-like" semantics, mostly

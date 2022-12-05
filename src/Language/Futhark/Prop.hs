@@ -567,7 +567,7 @@ typeVars t =
     typeArgFree TypeArgDim {} = mempty
 
 -- | Rank of an AutoMap annotation.
-autoMapRank :: AutoMapBase dim -> Int
+autoMapRank :: AutoMap -> Int
 autoMapRank = length . automapShape
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
