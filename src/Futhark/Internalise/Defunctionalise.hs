@@ -818,19 +818,18 @@ unRetType (RetType ext t) = first onDim t
     onDim (NamedSize d) | qualLeaf d `elem` ext = AnySize Nothing
     onDim d = d
 
-maxAutomap :: AppExp -> AutoMap
-maxAutomap (Apply f _ (Info (_, _, am)) _)
-  | AppExp f_e _ <- f = max (maxAutomap f_e) am
+maxAutoMap :: AppExp -> AutoMap
+maxAutoMap (Apply f _ (Info (_, _, am)) _)
+  | AppExp f_e _ <- f = max (maxAutoMap f_e) am
   | otherwise = am
-maxAutomap _ = mempty
+maxAutoMap _ = mempty
 
 -- | Defunctionalize an application expression at a given depth of application.
 -- Calls to dynamic (first-order) functions are preserved at much as possible,
 -- but a new lifted function is created if a dynamic function is only partially
 -- applied.
 defuncApply :: Int -> Exp -> DefM (Exp, StaticVal)
-defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, _)) loc) t@(Info (AppRes ret ext))) = do
-  let (AutoMap ds) = maxAutomap app
+defuncApply depth e@(AppExp app@(Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
   let (argtypes, _) = unfoldFunType ret
   (e1', sv1) <- defuncApply (depth + 1) e1
   (e2', sv2) <- defuncExp e2
@@ -856,11 +855,7 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, _)) loc) t@(Info (Ap
           params_for_rettype = params ++ svParams sv1 ++ svParams sv2
           svParams (LambdaSV sv_pat _ _ _) = [sv_pat]
           svParams _ = []
-          rettype
-            | ds == mempty =
-                buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
-            | otherwise =
-                arrayOf Unique ds $ buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
+          rettype = buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
 
           already_bound =
             globals
@@ -947,6 +942,7 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, _)) loc) t@(Info (Ap
       let (argtypes', rettype) = dynamicFunType sv argtypes
           restype = foldFunType argtypes' (RetType [] rettype) `setAliases` aliases ret
           rankDiff = arrayRank ret - arrayRank restype
+          AutoMap ds = maxAutoMap app
           restype'
             | ds == mempty = restype
             | otherwise = arrayOf Unique (Shape $ take rankDiff $ shapeDims ds) $ combineTypeShapes (stripArray rankDiff ret) restype
