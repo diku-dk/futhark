@@ -17,18 +17,12 @@ import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
 
--- | An expression or an extended 'Lambda' (with size parameters,
--- which AST lambdas do not support).
-data ExtExp
-  = ExtLambda [Pat] Exp StructRetType SrcLoc
-  | ExtExp Exp
-  deriving (Show)
-
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
 data StaticVal
   = Dynamic PatType
-  | LambdaSV Pat StructRetType ExtExp Env
+  | -- | The Env is the lexical closure of the lambda.
+    LambdaSV Pat StructRetType Exp Env
   | RecordSV [(Name, StaticVal)]
   | -- | The constructor that is actually present, plus
     -- the others that are not.
@@ -97,7 +91,7 @@ replaceStaticValSizes globals orig_substs sv =
        in LambdaSV
             (onAST substs param)
             (RetType t_dims (replaceTypeSizes substs t))
-            (onExtExp substs e)
+            (onExp substs e)
             (onEnv orig_substs closure_env) -- intentional
     Dynamic t ->
       Dynamic $ replaceTypeSizes orig_substs t
@@ -139,6 +133,13 @@ replaceStaticValSizes globals orig_substs sv =
       AppExp (Coerce (onExp substs e) te' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
       where
         te' = onTypeExp substs te
+    onExp substs (Lambda params e ret (Info (als, RetType t_dims t)) loc) =
+      Lambda
+        (map (onAST substs) params)
+        (onExp substs e)
+        ret
+        (Info (als, RetType t_dims (replaceTypeSizes substs t)))
+        loc
     onExp substs e = onAST substs e
 
     onTypeExpDim substs d@(SizeExpNamed v loc) =
@@ -174,15 +175,6 @@ replaceStaticValSizes globals orig_substs sv =
       TEDim dims (onTypeExp substs t) loc
     onTypeExp _ (TEVar v loc) =
       TEVar v loc
-
-    onExtExp substs (ExtExp e) =
-      ExtExp $ onExp substs e
-    onExtExp substs (ExtLambda params e (RetType t_dims t) loc) =
-      ExtLambda
-        (map (onAST substs) params)
-        (onExp substs e)
-        (RetType t_dims (replaceTypeSizes substs t))
-        loc
 
     onEnv substs =
       M.fromList
@@ -388,11 +380,11 @@ defuncFun tparams pats e0 ret loc = do
   -- remaining ones (if there are any) into the body of the lambda.
   let (pat, ret', e0') = case pats of
         [] -> error "Received a lambda with no parameters."
-        [pat'] -> (pat', ret, ExtExp e0)
+        [pat'] -> (pat', ret, e0)
         (pat' : pats') ->
           ( pat',
             RetType [] $ foldFunType (map (toStruct . patternType) pats') ret,
-            ExtLambda pats' e0 ret loc
+            Lambda pats' e0 Nothing (Info (mempty, ret)) loc
           )
 
   -- Construct a record literal that closes over the environment of
@@ -685,11 +677,6 @@ defuncExp (Attr info e loc) = do
 defuncExp' :: Exp -> DefM Exp
 defuncExp' = fmap fst . defuncExp
 
-defuncExtExp :: ExtExp -> DefM (Exp, StaticVal)
-defuncExtExp (ExtExp e) = defuncExp e
-defuncExtExp (ExtLambda pats e0 ret loc) =
-  defuncFun [] pats e0 ret loc
-
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
 defuncCase sv (CasePat p e loc) = do
   let p' = updatePat p sv
@@ -834,7 +821,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
           dims = mempty
       (e0', sv) <-
         localNewEnv (env' <> closure_env) $
-          defuncExtExp e0
+          defuncExp e0
 
       let closure_pat = buildEnvPat dims closure_env
           pat' = updatePat pat sv2
