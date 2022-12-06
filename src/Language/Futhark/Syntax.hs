@@ -92,6 +92,7 @@ module Language.Futhark.Syntax
     Aliasing,
     QualName (..),
     AutoMap (..),
+    stripAutoMapDims,
   )
 where
 
@@ -622,7 +623,7 @@ instance Located (SizeBinder vn) where
   locOf = locOf . sizeLoc
 
 -- | For a function application, how much implicit mapping we perform.
-newtype AutoMap = AutoMap {automapShape :: Shape Size}
+newtype AutoMap = AutoMap {autoMapShape :: Shape Size}
   deriving (Eq, Show)
 
 instance Semigroup AutoMap where
@@ -632,7 +633,10 @@ instance Monoid AutoMap where
   mempty = AutoMap mempty
 
 instance Ord AutoMap where
-  am1 <= am2 = (length . shapeDims . automapShape) am1 <= (length . shapeDims . automapShape) am2
+  am1 <= am2 = (length . shapeDims . autoMapShape) am1 <= (length . shapeDims . autoMapShape) am2
+
+stripAutoMapDims :: Int -> AutoMap -> AutoMap
+stripAutoMapDims i (AutoMap (Shape ds)) = AutoMap $ Shape $ drop i ds
 
 -- | An "application expression" is a semantic (not syntactic)
 -- grouping of expressions that have "funcall-like" semantics, mostly

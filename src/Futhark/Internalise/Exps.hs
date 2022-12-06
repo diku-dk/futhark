@@ -1976,7 +1976,7 @@ withAutoMap ams arg_desc args_e innerM = do
       (mempty, mempty)
       (reverse args_e)
   argts <- inScopeOf (reverse stms) $ (mapM . mapM) subExpType args
-  expand args stms argts ds (maximum ds)
+  expand args stms argts ams (maximum ds)
   where
     ds = map autoMapRank ams
     mkLambdaParams level (ses, ts, stm, d)
@@ -1993,42 +1993,45 @@ withAutoMap ams arg_desc args_e innerM = do
               ts
       | otherwise = pure $ Right $ zip ses ts
 
-    expand args stms argts ds' level
-      | level == 0 = innerM $ zip args stms
+    expand args stms argts ams' level
+      | level <= 0 = innerM $ zip args stms
       | otherwise = do
+          let ds' = map autoMapRank ams'
           arg_params <- mapM (mkLambdaParams level) $ zip4 args argts stms ds'
           let argts' = map (either (map snd) (map snd)) arg_params
-              (ds'', stms') =
+              (ams'', stms') =
                 unzip $
                   zipWith
-                    ( \d stm ->
-                        if d == level
-                          then (d - 1, mempty)
-                          else (d, stm)
+                    ( \am stm ->
+                        if autoMapRank am == level
+                          then (stripAutoMapDims 1 am, mempty)
+                          else (am, stm)
                     )
-                    ds'
+                    ams'
                     stms
               args' = map (either (map (I.Var . paramName . snd . fst)) (map fst)) arg_params
               (map_ses, params) = unzip $ (concatMap . map) fst $ lefts arg_params
 
-          (ses, lam_stms) <- collectStms $ localScope (scopeOfLParams params) $ expand args' stms' argts' ds'' (level - 1)
+          (ses, lam_stms) <- collectStms $ localScope (scopeOfLParams params) $ expand args' stms' argts' ams'' (level - 1)
 
           case map_ses of
             [] -> pure mempty
-            (arg_se : _) -> do
-              t <- subExpType arg_se
-              map_args <-
-                forM map_ses $
-                  (letExp "reshaped" . (BasicOp . SubExp))
-                    <=< ensureShape
-                      "AutoMap: wrong map argument shape"
-                      mempty
-                      t
-                      "map_arg_right_shape"
+            (map_se : _) -> do
+              outer_shape <- I.takeDims 1 . I.arrayShape <$> subExpType map_se
+              let I.Shape [outer_shape_se] = outer_shape
+              map_args <- forM map_ses $ \se -> do
+                se_t <- subExpType se
+                se_name <- letExp "map_arg" =<< toExp se
+                letExp "reshaped" $
+                  I.BasicOp $
+                    I.Reshape
+                      I.ReshapeCoerce
+                      (reshapeOuter outer_shape 1 $ I.arrayShape se_t)
+                      se_name
 
               letValExp' "automap"
                 . Op
-                . Screma (arraySize 0 t) map_args
+                . Screma outer_shape_se map_args
                 . mapSOAC
                 =<< mkLambda params (addStms lam_stms >> pure (subExpsRes ses))
 

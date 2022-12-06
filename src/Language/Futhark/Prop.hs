@@ -568,7 +568,7 @@ typeVars t =
 
 -- | Rank of an AutoMap annotation.
 autoMapRank :: AutoMap -> Int
-autoMapRank = length . automapShape
+autoMapRank = length . autoMapShape
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
 -- a function type, does not contain a function type as a subcomponent, and may

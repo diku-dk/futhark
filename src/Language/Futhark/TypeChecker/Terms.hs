@@ -1070,10 +1070,10 @@ bumpReturnShape ams argts rt
   | max_ds == mempty = rt
   | otherwise = arrayOf Unique max_ds rt
   where
-    autoMapShape am argt = takeDims (shapeRank $ automapShape am) (arrayShape argt)
+    am_shapes am argt = takeDims (autoMapRank am) (arrayShape argt)
     max_ds =
       maximumBy (\x y -> shapeRank x `compare` shapeRank y) $
-        zipWith autoMapShape ams argts
+        zipWith am_shapes ams argts
 
 consumedByArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Aliasing]
 consumedByArg loc (Scalar (Record ets)) (RecordDiet ds) =
