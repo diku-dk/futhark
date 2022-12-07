@@ -267,7 +267,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
         copyDWIMFix acc' vec_is ne []
 
   -- Perform sequential scan over the last element of each chunk
-  sFor "i" (nsubtasks' - 1) $ \i -> do
+  sComment "scan carries" $ sFor "i" (nsubtasks' - 1) $ \i -> do
     offset <-- iter_pr_subtask
     sWhen (sExt64 i .<. remainder) (offset <-- offset' + 1)
     offset_index <-- offset_index' + offset'
