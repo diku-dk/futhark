@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Missing sequencing in type-checking of in-place `let` expressions (#1786).
 
+* Crash in defunctionaliser caused by duplicate parameter names
+  (#1780).
+
 ## [0.22.4]
 
 ### Added

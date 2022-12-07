@@ -14,6 +14,7 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
+import Futhark.Util (mapAccumLM)
 import Language.Futhark
 import Language.Futhark.Traversals
 
@@ -708,15 +709,8 @@ defuncSoacExp e
 etaExpand :: PatType -> Exp -> DefM ([Pat], Exp, StructRetType)
 etaExpand e_t e = do
   let (ps, ret) = getType $ RetType [] e_t
-  (pats, vars) <- fmap unzip . forM ps $ \(p, t) -> do
-    let t' = fromStruct t
-    x <- case p of
-      Named x -> pure x
-      Unnamed -> newNameFromString "x"
-    pure
-      ( Id x (Info t') mempty,
-        Var (qualName x) (Info t') mempty
-      )
+  -- Some careful hackery to avoid duplicate names.
+  (_, (pats, vars)) <- second unzip <$> mapAccumLM f [] ps
   let e' =
         foldl'
           ( \e1 (e2, t2, argtypes) ->
@@ -731,6 +725,18 @@ etaExpand e_t e = do
     getType (RetType _ (Scalar (Arrow _ p t1 t2))) =
       let (ps, r) = getType t2 in ((p, t1) : ps, r)
     getType t = ([], t)
+
+    f prev (p, t) = do
+      let t' = fromStruct t
+      x <- case p of
+        Named x | x `notElem` prev -> pure x
+        _ -> newNameFromString "x"
+      pure
+        ( x : prev,
+          ( Id x (Info t') mempty,
+            Var (qualName x) (Info t') mempty
+          )
+        )
 
 -- | Defunctionalize an indexing of a single array dimension.
 defuncDimIndex :: DimIndexBase Info VName -> DefM (DimIndexBase Info VName)
