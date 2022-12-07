@@ -69,13 +69,16 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
           | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested)
           | otherwise = (scanStage1Fallback, scanStage3Fallback)
 
+    emit $ Imp.DebugPrint "Scan stage 1" Nothing
     scanStage1 pat space kbody scan_ops
 
     let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do
       scan_ops2 <- renameSegBinOp scan_ops
+      emit $ Imp.DebugPrint "Scan stage 2" Nothing
       scanStage2 pat nsubtasks space scan_ops2 kbody
       scan_ops3 <- renameSegBinOp scan_ops
+      emit $ Imp.DebugPrint "Scan stage 3" Nothing
       scanStage3 pat space kbody scan_ops3
 
 -- Different ways to generate code for a scan loop
@@ -240,7 +243,6 @@ scanStage2 ::
   KernelBody MCMem ->
   MulticoreGen ()
 scanStage2 pat nsubtasks space scan_ops kbody = do
-  emit $ Imp.DebugPrint "nonsegmentedScan stage 2" Nothing
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map pe64 ns
       per_scan_pes = segBinOpChunks scan_ops $ patElems pat
