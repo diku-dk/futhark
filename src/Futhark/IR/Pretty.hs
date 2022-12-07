@@ -358,7 +358,7 @@ instance PrettyRep rep => Pretty (Lambda rep) where
   pretty (Lambda [] (Body _ stms []) []) | stms == mempty = "nilFn"
   pretty (Lambda params body rettype) =
     "\\"
-      <+> ppTuple' (map pretty params)
+      <+> braces (commastack $ map pretty params)
       </> indent 2 (colon <+> ppTupleLines' (map pretty rettype) <+> "->")
       </> indent 2 (pretty body)
 
