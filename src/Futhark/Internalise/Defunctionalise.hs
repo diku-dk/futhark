@@ -829,21 +829,24 @@ maxAutoMap _ = mempty
 -- but a new lifted function is created if a dynamic function is only partially
 -- applied.
 defuncApply :: Int -> Exp -> DefM (Exp, StaticVal)
-defuncApply depth e@(AppExp app@(Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
+defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (AppRes ret ext))) = do
   let (argtypes, _) = unfoldFunType ret
   (e1', sv1) <- defuncApply (depth + 1) e1
   (e2', sv2) <- defuncExp e2
   let e' = AppExp (Apply e1' e2' d loc) t
+  let sv2_am_rank_fix = case sv2 of
+        (Dynamic ty@(Array {})) -> Dynamic $ stripArray (autoMapRank am) ty
+        _ -> sv2
   case sv1 of
     LambdaSV pat e0_t e0 closure_env -> do
-      let env' = matchPatSV pat sv2
+      let env' = matchPatSV pat sv2_am_rank_fix
           dims = mempty
       (e0', sv) <-
         localNewEnv (env' <> closure_env) $
           defuncExtExp e0
 
       let closure_pat = buildEnvPat dims closure_env
-          pat' = updatePat pat sv2
+          pat' = updatePat pat sv2_am_rank_fix
 
       globals <- asks fst
 
