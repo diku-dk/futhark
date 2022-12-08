@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Crash in defunctionaliser caused by duplicate parameter names
   (#1780).
 
+* Infelicities in multicore codegen for scans (#1777).
+
 ## [0.22.4]
 
 ### Added
