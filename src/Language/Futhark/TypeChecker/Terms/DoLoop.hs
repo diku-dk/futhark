@@ -206,6 +206,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     zeroOrderType
       (mkUsage (srclocOf mergeexp) "use as loop variable")
       "type used as loop variable"
+      . toStruct
       =<< expTypeFully mergeexp'
 
     -- The handling of dimension sizes is a bit intricate, but very
