@@ -25,7 +25,6 @@ let main [num_blocks] (matb: *[num_blocks][num_blocks][16][16]f32) =
   let inner_slice = matb[1:num_blocks,1:num_blocks]
   let internal = lud_internal top_per_irreg col_slice inner_slice
 
-  let matb[1:, 0] = opaque (copy col_slice)
   let matb[1:, 1:] = internal
 
 
