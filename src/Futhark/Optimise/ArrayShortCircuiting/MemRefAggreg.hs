@@ -228,7 +228,7 @@ recordMemRefUses td_env bu_env stm =
             if m_b `nameIn` original_mem_aliases
               then (wrt_lmads' <> lmads'', Set mempty)
               else (wrt_lmads', lmads'')
-          no_overlap = noMemOverlap td_env prev_use wrt_lmads''
+          no_overlap = noMemOverlap td_env (lmads <> prev_use) wrt_lmads''
           wrt_lmads =
             if no_overlap
               then Just wrt_lmads''
