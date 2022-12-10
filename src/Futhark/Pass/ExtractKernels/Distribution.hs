@@ -326,9 +326,12 @@ distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
   let bound_by_stms = namesFromList $ M.keys $ scopeOf stms
       (inner_pat', inner_res', inner_identity_map, inner_expand_target) =
         removeIdentityMappingGeneral bound_by_stms inner_pat inner_res
+      free =
+        (foldMap freeIn stms <> freeIn (map resCerts inner_res))
+          `namesSubtract` bound_by_stms
    in ( DistributionBody
           { distributionTarget = Targets (inner_pat', inner_res') targets,
-            distributionFreeInBody = foldMap freeIn stms `namesSubtract` bound_by_stms,
+            distributionFreeInBody = free,
             distributionIdentityMap = inner_identity_map,
             distributionExpandTarget = inner_expand_target
           },
