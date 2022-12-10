@@ -274,7 +274,7 @@ typeVarNotes v = maybe mempty (note . snd) . M.lookup v <$> getConstraints
       aNote $
         prettyName v
           <+> "="
-          <+> mconcat (map ppConstr (M.toList cs))
+          <+> hsep (map ppConstr (M.toList cs))
           <+> "..."
     note (Overloaded ts _) =
       aNote $ prettyName v <+> "must be one of" <+> mconcat (punctuate ", " (map pretty ts))
@@ -350,6 +350,14 @@ rigidConstraint ParamType {} = True
 rigidConstraint ParamSize {} = True
 rigidConstraint UnknowableSize {} = True
 rigidConstraint _ = False
+
+unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
+unsharedConstructorsMsg cs1 cs2 =
+  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
+  where
+    missing =
+      filter (`notElem` M.keys cs1) (M.keys cs2)
+        ++ filter (`notElem` M.keys cs2) (M.keys cs1)
 
 -- | Instantiate existential context in return type.
 instantiateEmptyArrayDims ::
@@ -535,12 +543,8 @@ unifyWith onDims usage = subunify False
           )
             | M.keys cs == M.keys arg_cs ->
                 unifySharedConstructors onDims usage bound bcs cs arg_cs
-            | otherwise -> do
-                let missing =
-                      filter (`notElem` M.keys arg_cs) (M.keys cs)
-                        ++ filter (`notElem` M.keys cs) (M.keys arg_cs)
-                unifyError usage mempty bcs $
-                  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
+            | otherwise ->
+                unifyError usage mempty bcs $ unsharedConstructorsMsg arg_cs cs
         _
           | t1' == t2' -> pure ()
           | otherwise -> failure
@@ -775,6 +779,8 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedConstructors onDims usage bound bcs required_cs ts
+          | otherwise ->
+              unsharedConstructors required_cs ts =<< typeVarNotes vn
         Scalar (TypeVar _ _ (QualName [] v) []) -> do
           case M.lookup v constraints of
             Just (_, HasConstrs _ v_cs _) ->
@@ -794,21 +800,27 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
             combineConstrs (_, HasConstrs l1 cs1 usage1) (_, HasConstrs l2 cs2 _) =
               (lvl, HasConstrs (l1 `min` l2) (M.union cs1 cs2) usage1)
             combineConstrs hasCs _ = hasCs
-        _ -> noSumType mempty
+        _ -> noSumType =<< typeVarNotes vn
     _ -> link
   where
+    unsharedConstructors cs1 cs2 notes =
+      unifyError
+        usage
+        notes
+        bcs
+        (unsharedConstructorsMsg cs1 cs2)
     noSumType notes =
       unifyError
         usage
         notes
         bcs
-        "Cannot unify a sum type with a non-sum type"
+        "Cannot unify a sum type with a non-sum type."
     noRecordType notes =
       unifyError
         usage
         notes
         bcs
-        "Cannot unify a record type with a non-record type"
+        "Cannot unify a record type with a non-record type."
 
 linkVarToDim ::
   MonadUnify m =>
