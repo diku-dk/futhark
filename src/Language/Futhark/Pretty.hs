@@ -308,6 +308,9 @@ prettyInst t =
           "@" <> parens (align $ pretty t')
     _ -> mempty
 
+prettyAttr :: Pretty a => a -> Doc ann
+prettyAttr attr = "#[" <> pretty attr <> "]"
+
 prettyExp :: (Eq vn, IsName vn, Annot f) => Int -> ExpBase f vn -> Doc a
 prettyExp _ (Var name t _) = pretty name <> prettyInst t
 prettyExp _ (Hole t _) = "???" <> prettyInst t
@@ -366,7 +369,7 @@ prettyExp _ (IndexSection idxs _ _) =
   parens $ "." <> brackets (commasep (map pretty idxs))
 prettyExp _ (Constr n cs _ _) = "#" <> pretty n <+> sep (map pretty cs)
 prettyExp _ (Attr attr e _) =
-  "#[" <> pretty attr <> "]" </> prettyExp (-1) e
+  prettyAttr attr </> prettyExp (-1) e
 prettyExp i (AppExp e _) = prettyAppExp i e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
@@ -467,7 +470,7 @@ instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
   pretty (ValBind entry name retdecl rettype tparams args body _ attrs _) =
-    mconcat (map ((<> line) . pretty) attrs)
+    mconcat (map ((<> line) . prettyAttr) attrs)
       <> fun
       <+> align
         ( sep
