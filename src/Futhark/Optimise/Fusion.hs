@@ -179,29 +179,27 @@ hTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
   | otherwise = pure dg
 
 hFuseContexts :: DepContext -> DepContext -> FusionM (Maybe DepContext)
-hFuseContexts
-  c1@(_, _, nodeT1, _)
-  c2@(_, _, nodeT2, _) = do
-    fres <- hFuseNodeT nodeT1 nodeT2
-    case fres of
-      Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
-      Nothing -> pure Nothing
+hFuseContexts c1 c2 = do
+  let (_, _, nodeT1, _) = c1
+      (_, _, nodeT2, _) = c2
+  fres <- hFuseNodeT nodeT1 nodeT2
+  case fres of
+    Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
+    Nothing -> pure Nothing
 
 vFuseContexts :: [EdgeT] -> [VName] -> DepContext -> DepContext -> FusionM (Maybe DepContext)
-vFuseContexts
-  edgs
-  infusable
-  c1@(i1, n1, nodeT1, o1)
-  c2@(_i2, n2, nodeT2, o2) = do
-    fres <-
-      vFuseNodeT
-        edgs
-        infusable
-        (nodeT1, map fst $ filter ((/=) n2 . snd) i1, map fst o1)
-        (nodeT2, map fst $ filter ((/=) n1 . snd) o2)
-    case fres of
-      Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
-      Nothing -> pure Nothing
+vFuseContexts edgs infusable c1 c2 = do
+  let (i1, n1, nodeT1, o1) = c1
+      (_i2, n2, nodeT2, o2) = c2
+  fres <-
+    vFuseNodeT
+      edgs
+      infusable
+      (nodeT1, map fst $ filter ((/=) n2 . snd) i1, map fst o1)
+      (nodeT2, map fst $ filter ((/=) n1 . snd) o2)
+  case fres of
+    Just nodeT -> pure $ Just (mergedContext nodeT c1 c2)
+    Nothing -> pure Nothing
 
 makeCopiesOfFusedExcept ::
   (LocalScope SOACS m, MonadFreshNames m) =>
