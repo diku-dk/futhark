@@ -551,14 +551,9 @@ compileCode (SetMem dest src space) =
 compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
   | isConstExp (untyped idx) = do
       dest' <- GC.rawMem dest
-      idxexp <- compileExp (untyped idx)
-      varis <- mapM getVariability (namesToList $ freeIn idx)
-      let quals = if all (== Uniform) varis then [C.ctyquals|$tyqual:uniform|] else []
-      tmp <- newVName "tmp_idx"
-      -- Disambiguate the variability of the constant index
-      GC.decl [C.cdecl|$tyquals:quals typename int64_t $id:tmp = $exp:idxexp;|]
+      idxexp <- compileExp $ constFoldPrimExp $ untyped idx
       deref <-
-        GC.derefPointer dest' [C.cexp|$id:tmp|]
+        GC.derefPointer dest' [C.cexp|($tyquals:([varying]) typename int64_t)$exp:idxexp|]
           <$> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
