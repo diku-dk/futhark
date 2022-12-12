@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Mishandling of bounds checks in parallel backends could cause
   compiler crashes (#1791).
 
+* Mis-simplification of certain sequentialised scatters into
+  single-element arrays (#1793).
+
 ## [0.22.5]
 
 ### Added
