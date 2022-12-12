@@ -967,8 +967,8 @@ pIxFunBase pNum =
   braces $ do
     base <- pLab "base" $ brackets (pNum `sepBy` pComma) <* pSemi
     ct <- pLab "contiguous" $ pBool <* pSemi
-    lmads <- pLab "LMADs" $ brackets (pLMAD `sepBy1` pComma)
-    pure $ IxFun.IxFun (NE.fromList lmads) base ct
+    lmads <- pLab "LMADs" $ brackets (pLMAD)
+    pure $ IxFun.IxFun lmads base ct
   where
     pLab s m = keyword s *> pColon *> m
     pMon =

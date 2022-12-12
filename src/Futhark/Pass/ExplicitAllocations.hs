@@ -692,13 +692,13 @@ allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
 numLMADs :: IxFun -> Int
-numLMADs = length . IxFun.ixfunLMADs
+numLMADs = const 1
 
 ixFunPerm :: IxFun -> [Int]
-ixFunPerm = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
+ixFunPerm = map IxFun.ldPerm . IxFun.lmadDims . IxFun.ixfunLMAD
 
 ixFunMon :: IxFun -> [IxFun.Monotonicity]
-ixFunMon = map IxFun.ldMon . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
+ixFunMon = map IxFun.ldMon . IxFun.lmadDims . IxFun.ixfunLMAD
 
 data MemReq
   = MemReq Space [Int] [IxFun.Monotonicity] Rank Bool

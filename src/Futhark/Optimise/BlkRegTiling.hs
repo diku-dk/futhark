@@ -143,7 +143,7 @@ kkLoopBody
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
           Just ixf_fn <- M.lookup x ixfn_env,
-          (IxFun.IxFun (lmad :| []) _ _) <- ixf_fn =
+          (IxFun.IxFun (lmad) _ _) <- ixf_fn =
             let lmad_dims = IxFun.lmadDims lmad
                 q = length lmad_dims
                 last_perm = IxFun.ldPerm $ last lmad_dims
