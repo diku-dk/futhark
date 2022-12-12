@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 
 * A hole in the type checker that allowed one to sneak functions out
-  if conditionals (#1787).
+  of conditionals (#1787).
 
 * `futhark repl`: unsigned integers are now printed correctly.
 
