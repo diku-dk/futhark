@@ -14,7 +14,7 @@ import Futhark.Data.Reader (readValues)
 import Futhark.Pipeline
 import Futhark.Util (toPOSIX)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (AnsiStyle, Doc, hPutDoc)
+import Futhark.Util.Pretty (AnsiStyle, Doc, align, hPutDoc, hPutDocLn, pretty, unAnnotate, (<+>))
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Semantic qualified as T
@@ -154,6 +154,6 @@ runInterpreter' m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ hPutStrLn stderr $ w ++ ": " ++ v
+      liftIO $ hPutDocLn stderr $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c

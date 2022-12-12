@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Slightly better type errors for sum types (#1792).
 
+* Better tracing output in interpreter (#1795).
+
 ### Removed
 
 ### Changed
