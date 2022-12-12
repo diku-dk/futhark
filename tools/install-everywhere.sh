@@ -19,10 +19,12 @@ tarball_url=https://futhark-lang.org/releases/$tarball
 
 commands=$(cat <<EOF
 set -e &&
-cd /tmp &&
+dir=$(mktemp -d) &&
+(cd $dir &&
 wget --quiet $tarball_url &&
 tar xvf $tarball &&
-sudo make -C $name install
+sudo make -C $name install);
+rm -rf $dir
 EOF
         )
 echo $commands
