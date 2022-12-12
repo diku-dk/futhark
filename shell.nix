@@ -13,7 +13,6 @@ pkgs.stdenv.mkDerivation {
       curl
       file
       git
-      git-annex
       parallel
       haskell.compiler.ghc924
       haskell.packages.ghc924.ormolu_0_5_0_1
