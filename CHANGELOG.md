@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Mis-simplification of certain sequentialised scatters into
   single-element arrays (#1793).
 
+* Invalid `scatter` fusion would cause an internal compiler error
+  (#1794).
+
 ## [0.22.5]
 
 ### Added

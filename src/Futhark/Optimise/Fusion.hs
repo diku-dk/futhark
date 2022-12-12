@@ -282,7 +282,7 @@ vFuseNodeT
     ok <- okToFuseProducer soac1
     r <-
       if ok && ots1 == mempty
-        then TF.attemptFusion preserve (patNames pats1) soac1 ker
+        then TF.attemptFusion TF.Vertical preserve (patNames pats1) soac1 ker
         else pure Nothing
     case r of
       Just ker' -> do
@@ -317,7 +317,7 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
                 TF.fsOutNames = patNames pats2
               }
           preserve = namesFromList $ patNames pats1
-      r <- TF.attemptFusion preserve (patNames pats1) soac1 ker
+      r <- TF.attemptFusion TF.Horizontal preserve (patNames pats1) soac1 ker
       case r of
         Just ker' -> do
           let pats2' =
