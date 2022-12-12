@@ -381,9 +381,9 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
             success (fsOutNames ker ++ returned_outvars) $
               SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
     (SOAC.Scatter {}, _) ->
-      fail "Cannot fuse a write with anything else than a write or a map"
+      fail "Cannot fuse a scatter with anything else than a scatter or a map"
     (_, SOAC.Scatter {}) ->
-      fail "Cannot fuse a write with anything else than a write or a map"
+      fail "Cannot fuse a scatter with anything else than a scatter or a map"
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
