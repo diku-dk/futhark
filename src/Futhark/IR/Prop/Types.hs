@@ -4,6 +4,7 @@ module Futhark.IR.Prop.Types
     arrayRank,
     arrayShape,
     setArrayShape,
+    isEmptyArray,
     existential,
     uniqueness,
     unique,
@@ -116,6 +117,13 @@ setArrayShape ::
   newshape ->
   TypeBase newshape u
 setArrayShape t ds = modifyArrayShape (const ds) t
+
+-- | If the array is statically an empty array (meaning any dimension
+-- is a static zero), return the element type and the shape.
+isEmptyArray :: Type -> Maybe (PrimType, Shape)
+isEmptyArray (Array pt (Shape ds) _)
+  | intConst Int64 0 `elem` ds = Just (pt, Shape ds)
+isEmptyArray _ = Nothing
 
 -- | True if the given type has a dimension that is existentially sized.
 existential :: ExtType -> Bool

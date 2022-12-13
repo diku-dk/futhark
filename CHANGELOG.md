@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Better tracing output in interpreter (#1795).
 
+* Improved optimisation of code that uses zero-element arrays
+  (sometimes used for type witnesses).
+
 ### Removed
 
 ### Changed

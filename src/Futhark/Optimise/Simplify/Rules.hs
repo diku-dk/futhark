@@ -38,7 +38,8 @@ import Futhark.Util
 topDownRules :: BuilderOps rep => [TopDownRule rep]
 topDownRules =
   [ RuleGeneric constantFoldPrimFun,
-    RuleGeneric withAccTopDown
+    RuleGeneric withAccTopDown,
+    RuleGeneric emptyArrayToScratch
   ]
 
 bottomUpRules :: (BuilderOps rep, TraverseOpStms rep) => [BottomUpRule rep]
@@ -111,6 +112,18 @@ constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
     isConst (Constant v) = Just v
     isConst _ = Nothing
 constantFoldPrimFun _ _ = Skip
+
+-- | If an expression produces an array with a constant zero anywhere
+-- in its shape, just turn that into a Scratch.
+emptyArrayToScratch :: BuilderOps rep => TopDownRuleGeneric rep
+emptyArrayToScratch _ (Let pat@(Pat [pe]) aux e)
+  | Just (pt, shape) <- isEmptyArray $ patElemType pe,
+    not $ isScratch e =
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ Scratch pt $ shapeDims shape
+  where
+    isScratch (BasicOp Scratch {}) = True
+    isScratch _ = False
+emptyArrayToScratch _ _ = Skip
 
 simplifyIndex :: BuilderOps rep => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
