@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Invalid `scatter` fusion would cause an internal compiler error
   (#1794).
 
+* The code generator flipped the order of `match` cases.
+
 ## [0.22.5]
 
 ### Added
