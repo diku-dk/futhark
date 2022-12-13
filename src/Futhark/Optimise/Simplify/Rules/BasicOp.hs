@@ -49,11 +49,9 @@ fromConcatArg ::
   m VName
 fromConcatArg t (ArgArrayLit ses, cs) =
   certifying cs $ letExp "concat_lit" $ BasicOp $ ArrayLit ses $ rowType t
-fromConcatArg elem_type (ArgReplicate ws se, cs) = do
-  let elem_shape = arrayShape elem_type
-  certifying cs $ do
-    w <- letSubExp "concat_rep_w" =<< toExp (sum $ map pe64 ws)
-    letExp "concat_rep" $ BasicOp $ Replicate (setDim 0 elem_shape w) se
+fromConcatArg _ (ArgReplicate ws se, cs) = certifying cs $ do
+  w <- letSubExp "concat_rep_w" =<< toExp (sum $ map pe64 ws)
+  letExp "concat_rep" $ BasicOp $ Replicate (Shape [w]) se
 fromConcatArg _ (ArgVar v, _) =
   pure v
 
