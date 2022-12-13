@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The code generator flipped the order of `match` cases.
 
+* Simpification of concatenations (#1796).
+
 ## [0.22.5]
 
 ### Added
