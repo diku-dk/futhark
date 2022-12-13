@@ -806,9 +806,9 @@ defCompileExp ::
   Exp rep ->
   ImpM rep r op ()
 defCompileExp pat (Match ses cases defbody _) =
-  foldl f (compileBody pat defbody) cases
+  foldr f (compileBody pat defbody) cases
   where
-    f rest (Case vs body) = sIf (caseMatch ses vs) (compileBody pat body) rest
+    f (Case vs body) = sIf (caseMatch ses vs) (compileBody pat body)
 defCompileExp pat (Apply fname args _ _) = do
   dest <- destinationFromPat pat
   targets <- funcallTargets dest
