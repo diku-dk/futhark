@@ -842,7 +842,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
           params_for_rettype = params ++ svParams sv1 ++ svParams sv2
           svParams (LambdaSV sv_pat _ _ _) = [sv_pat]
           svParams _ = []
-          rettype = buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
+          lifted_rettype = buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
 
           already_bound =
             globals
@@ -872,7 +872,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
       fname <- newNameFromString $ liftedName (0 :: Int) e1
       liftValDec
         fname
-        (RetType [] $ toStruct rettype)
+        (RetType [] $ toStruct lifted_rettype)
         (dims ++ more_dims ++ missing_dims)
         params'
         e0'
@@ -886,20 +886,16 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
               ( Info
                   ( Scalar . Arrow mempty Unnamed t1 . RetType [] $
                       Scalar . Arrow mempty Unnamed t2 $
-                        RetType [] rettype
+                        RetType [] lifted_rettype
                   )
               )
               loc
 
-          -- FIXME: what if this application returns both a function
-          -- and a value?
-          callret
-            | orderZero ret = AppRes ret ext
-            | otherwise = AppRes rettype ext
+          callret = AppRes (combineTypeShapes ret lifted_rettype) ext
 
           innercallret =
             AppRes
-              (Scalar $ Arrow mempty Unnamed t2 $ RetType [] rettype)
+              (Scalar $ Arrow mempty Unnamed t2 $ RetType [] lifted_rettype)
               []
 
       pure
