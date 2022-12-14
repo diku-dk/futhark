@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Simpification of concatenations (#1796).
 
+* Defunctionalisation error for fancy size programming (#1798).
+
 ## [0.22.5]
 
 ### Added
