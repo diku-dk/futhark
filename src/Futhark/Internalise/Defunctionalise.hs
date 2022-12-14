@@ -897,28 +897,23 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
             | orderZero ret = AppRes ret ext
             | otherwise = AppRes rettype ext
 
+          innercallret =
+            AppRes
+              (Scalar $ Arrow mempty Unnamed t2 $ RetType [] rettype)
+              []
+
       pure
-        ( Parens
-            ( AppExp
-                ( Apply
-                    ( AppExp
-                        (Apply fname'' e1' (Info (Observe, Nothing)) loc)
-                        ( Info $
-                            AppRes
-                              ( Scalar $
-                                  Arrow mempty Unnamed t2 $
-                                    RetType [] rettype
-                              )
-                              []
-                        )
-                    )
-                    e2'
-                    d
-                    loc
+        ( AppExp
+            ( Apply
+                ( AppExp
+                    (Apply fname'' e1' (Info (Observe, Nothing)) loc)
+                    (Info innercallret)
                 )
-                (Info callret)
+                e2'
+                d
+                loc
             )
-            mempty,
+            (Info callret),
           sv
         )
 
