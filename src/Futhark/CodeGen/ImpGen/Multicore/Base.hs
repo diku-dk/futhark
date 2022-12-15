@@ -7,7 +7,6 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     MulticoreGen,
     decideScheduling,
     decideScheduling',
-    groupResultArrays,
     renameSegBinOp,
     freeParams,
     renameHistOpLambda,
@@ -149,18 +148,6 @@ freeParams code = do
   ts <- mapM lookupType free
   concat <$> zipWithM toParam free ts
 
--- | Arrays for storing group results shared between threads
-groupResultArrays ::
-  String ->
-  SubExp ->
-  [SegBinOp MCMem] ->
-  MulticoreGen [[VName]]
-groupResultArrays s num_threads reds =
-  forM reds $ \(SegBinOp _ lam _ shape) ->
-    forM (lambdaReturnType lam) $ \t -> do
-      let full_shape = Shape [num_threads] <> shape <> arrayShape t
-      sAllocArray s (elemType t) full_shape DefaultSpace
-
 isLoadBalanced :: Imp.MCCode -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
@@ -173,16 +160,10 @@ isLoadBalanced (Imp.Op (Imp.ForEach _ _ _ a)) = isLoadBalanced a
 isLoadBalanced (Imp.Op (Imp.ISPCKernel a _)) = isLoadBalanced a
 isLoadBalanced _ = True
 
-segBinOpComm' :: [SegBinOp rep] -> Commutativity
-segBinOpComm' = mconcat . map segBinOpComm
-
 decideScheduling' :: SegOp () rep -> Imp.MCCode -> Imp.Scheduling
 decideScheduling' SegHist {} _ = Imp.Static
 decideScheduling' SegScan {} _ = Imp.Static
-decideScheduling' (SegRed _ _ reds _ _) code =
-  case segBinOpComm' reds of
-    Commutative -> decideScheduling code
-    Noncommutative -> Imp.Static
+decideScheduling' SegRed {} _ = Imp.Static
 decideScheduling' SegMap {} code = decideScheduling code
 
 decideScheduling :: Imp.MCCode -> Imp.Scheduling

@@ -80,6 +80,18 @@ renameSlug slug = do
   let op' = op {segBinOpLambda = lambda'}
   pure slug {slugOp = op'}
 
+-- | Arrays for storing group results shared between threads
+groupResultArrays ::
+  String ->
+  SubExp ->
+  [SegBinOp MCMem] ->
+  MulticoreGen [[VName]]
+groupResultArrays s num_threads reds =
+  forM reds $ \(SegBinOp _ lam _ shape) ->
+    forM (lambdaReturnType lam) $ \t -> do
+      let full_shape = Shape [num_threads] <> shape <> arrayShape t
+      sAllocArray s (elemType t) full_shape DefaultSpace
+
 nonsegmentedReduction ::
   Pat LetDecMem ->
   SegSpace ->
@@ -216,7 +228,6 @@ genReductionLoop typ kbodymap slugs slug_local_accs space i = do
     forM_ (zip3 all_red_res' slugs slug_local_accs) $ \(red_res, slug, local_accs) ->
       getNestLoop typ (slugShape slug) $ \vec_is -> do
         let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
-        -- Load accum params
         getRedLoop typ i $ \uni -> do
           sComment "Load accum params" $
             forM_ (zip3 (accParams slug) local_accs lamtypes) $
