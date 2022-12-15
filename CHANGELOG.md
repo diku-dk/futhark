@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Defunctionalisation error for fancy size programming (#1798).
 
+* Code generation for load-unbalanced reductions in multicore backend
+  (#1800).
+
 ## [0.22.5]
 
 ### Added
