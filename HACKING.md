@@ -196,8 +196,8 @@ set -x
 set -e
 futhark c prog.fut -o prog-c
 futhark opencl prog.fut -o prog-opencl
-cat prog.in | ./prog-new -b > output-c
-cat prog.in | ./prog-old -b > output-opencl
+cat prog.in | ./prog-c -b > output-c
+cat prog.in | ./prog-opencl -b > output-opencl
 futhark datacmp output-c output-opencl
 ```
 
