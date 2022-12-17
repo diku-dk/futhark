@@ -1173,6 +1173,7 @@ matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
+matchPatSV pat (HoleSV t _) = matchPatSV pat $ svFromType t
 matchPatSV pat sv =
   error $
     "Tried to match pattern "
@@ -1226,6 +1227,7 @@ updatePat pat@(PatConstr c1 (Info t) ps loc) sv@(SumSV _ svs _)
 updatePat (PatConstr c1 _ ps loc) (Dynamic t) =
   PatConstr c1 (Info t) ps loc
 updatePat pat (Dynamic t) = updatePat pat (svFromType t)
+updatePat pat (HoleSV t _) = updatePat pat (svFromType t)
 updatePat pat sv =
   error $
     "Tried to update pattern "
