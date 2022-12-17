@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Code generation for load-unbalanced reductions in multicore backend
   (#1800).
 
+* Futhark now works on CUDA 12 (#1801).
+
 ## [0.22.5]
 
 ### Added
