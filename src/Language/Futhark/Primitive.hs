@@ -1294,14 +1294,22 @@ primFuns =
       i16 "popc16" $ IntValue . Int32Value . fromIntegral . popCount,
       i32 "popc32" $ IntValue . Int32Value . fromIntegral . popCount,
       i64 "popc64" $ IntValue . Int32Value . fromIntegral . popCount,
-      i8_3 "mad_hi8" mad_hi8,
-      i16_3 "mad_hi16" mad_hi16,
-      i32_3 "mad_hi32" mad_hi32,
-      i64_3 "mad_hi64" mad_hi64,
-      i8_2 "mul_hi8" mul_hi8,
-      i16_2 "mul_hi16" mul_hi16,
-      i32_2 "mul_hi32" mul_hi32,
-      i64_2 "mul_hi64" mul_hi64,
+      i8_3 "umad_hi8" umad_hi8,
+      i16_3 "umad_hi16" umad_hi16,
+      i32_3 "umad_hi32" umad_hi32,
+      i64_3 "umad_hi64" umad_hi64,
+      i8_2 "umul_hi8" umul_hi8,
+      i16_2 "umul_hi16" umul_hi16,
+      i32_2 "umul_hi32" umul_hi32,
+      i64_2 "umul_hi64" umul_hi64,
+      i8_3 "smad_hi8" smad_hi8,
+      i16_3 "smad_hi16" smad_hi16,
+      i32_3 "smad_hi32" smad_hi32,
+      i64_3 "smad_hi64" smad_hi64,
+      i8_2 "smul_hi8" smul_hi8,
+      i16_2 "smul_hi16" smul_hi16,
+      i32_2 "smul_hi32" smul_hi32,
+      i64_2 "smul_hi64" smul_hi64,
       --
       ( "atan2_16",
         ( [FloatType Float16, FloatType Float16],
@@ -1832,38 +1840,74 @@ prettySigned :: Bool -> PrimType -> String
 prettySigned True (IntType it) = 'u' : drop 1 (prettyString it)
 prettySigned _ t = prettyString t
 
-mul_hi8 :: Int8 -> Int8 -> Int8
-mul_hi8 a b =
+umul_hi8 :: Int8 -> Int8 -> Int8
+umul_hi8 a b =
   let a' = fromIntegral (fromIntegral a :: Word8) :: Word64
       b' = fromIntegral (fromIntegral b :: Word8) :: Word64
    in fromIntegral (shiftR (a' * b') 8)
 
-mul_hi16 :: Int16 -> Int16 -> Int16
-mul_hi16 a b =
+umul_hi16 :: Int16 -> Int16 -> Int16
+umul_hi16 a b =
   let a' = fromIntegral (fromIntegral a :: Word16) :: Word64
       b' = fromIntegral (fromIntegral b :: Word16) :: Word64
    in fromIntegral (shiftR (a' * b') 16)
 
-mul_hi32 :: Int32 -> Int32 -> Int32
-mul_hi32 a b =
+umul_hi32 :: Int32 -> Int32 -> Int32
+umul_hi32 a b =
   let a' = fromIntegral (fromIntegral a :: Word32) :: Word64
       b' = fromIntegral (fromIntegral b :: Word32) :: Word64
    in fromIntegral (shiftR (a' * b') 32)
 
-mul_hi64 :: Int64 -> Int64 -> Int64
-mul_hi64 a b =
+umul_hi64 :: Int64 -> Int64 -> Int64
+umul_hi64 a b =
   let a' = toInteger (fromIntegral a :: Word64)
       b' = toInteger (fromIntegral b :: Word64)
    in fromIntegral (shiftR (a' * b') 64)
 
-mad_hi8 :: Int8 -> Int8 -> Int8 -> Int8
-mad_hi8 a b c = mul_hi8 a b + c
+umad_hi8 :: Int8 -> Int8 -> Int8 -> Int8
+umad_hi8 a b c = umul_hi8 a b + c
 
-mad_hi16 :: Int16 -> Int16 -> Int16 -> Int16
-mad_hi16 a b c = mul_hi16 a b + c
+umad_hi16 :: Int16 -> Int16 -> Int16 -> Int16
+umad_hi16 a b c = umul_hi16 a b + c
 
-mad_hi32 :: Int32 -> Int32 -> Int32 -> Int32
-mad_hi32 a b c = mul_hi32 a b + c
+umad_hi32 :: Int32 -> Int32 -> Int32 -> Int32
+umad_hi32 a b c = umul_hi32 a b + c
 
-mad_hi64 :: Int64 -> Int64 -> Int64 -> Int64
-mad_hi64 a b c = mul_hi64 a b + c
+umad_hi64 :: Int64 -> Int64 -> Int64 -> Int64
+umad_hi64 a b c = umul_hi64 a b + c
+
+smul_hi8 :: Int8 -> Int8 -> Int8
+smul_hi8 a b =
+  let a' = fromIntegral a :: Int64
+      b' = fromIntegral b :: Int64
+   in fromIntegral (shiftR (a' * b') 8)
+
+smul_hi16 :: Int16 -> Int16 -> Int16
+smul_hi16 a b =
+  let a' = fromIntegral a :: Int64
+      b' = fromIntegral b :: Int64
+   in fromIntegral (shiftR (a' * b') 16)
+
+smul_hi32 :: Int32 -> Int32 -> Int32
+smul_hi32 a b =
+  let a' = fromIntegral a :: Int64
+      b' = fromIntegral b :: Int64
+   in fromIntegral (shiftR (a' * b') 32)
+
+smul_hi64 :: Int64 -> Int64 -> Int64
+smul_hi64 a b =
+  let a' = toInteger a
+      b' = toInteger b
+   in fromIntegral (shiftR (a' * b') 64)
+
+smad_hi8 :: Int8 -> Int8 -> Int8 -> Int8
+smad_hi8 a b c = smul_hi8 a b + c
+
+smad_hi16 :: Int16 -> Int16 -> Int16 -> Int16
+smad_hi16 a b c = smul_hi16 a b + c
+
+smad_hi32 :: Int32 -> Int32 -> Int32 -> Int32
+smad_hi32 a b c = smul_hi32 a b + c
+
+smad_hi64 :: Int64 -> Int64 -> Int64 -> Int64
+smad_hi64 a b c = smul_hi64 a b + c

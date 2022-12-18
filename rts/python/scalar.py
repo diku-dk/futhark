@@ -394,38 +394,38 @@ def fpconv_f64_f16(x):
 def fpconv_f64_f32(x):
   return np.float32(x)
 
-def futhark_mul_hi8(a, b):
-  a = np.uint64(np.uint8(a))
-  b = np.uint64(np.uint8(b))
-  return np.int8((a*b) >> np.uint64(8))
+def futhark_umul_hi8(a, b):
+  return np.int8((np.uint64(np.uint8(a))*np.uint64(np.uint8(b))) >> np.uint64(8))
 
-def futhark_mul_hi16(a, b):
-  a = np.uint64(np.uint16(a))
-  b = np.uint64(np.uint16(b))
-  return np.int16((a*b) >> np.uint64(16))
+def futhark_umul_hi16(a, b):
+  return np.int16((np.uint64(np.uint16(a))*np.uint64(np.uint16(b))) >> np.uint64(16))
 
-def futhark_mul_hi32(a, b):
-  a = np.uint64(np.uint32(a))
-  b = np.uint64(np.uint32(b))
-  return np.int32((a*b) >> np.uint64(32))
+def futhark_umul_hi32(a, b):
+  return np.int32((np.uint64(np.uint32(a))*np.uint64(np.uint32(b))) >> np.uint64(32))
 
-# This one is done with arbitrary-precision integers.
-def futhark_mul_hi64(a, b):
-  a = int(np.uint64(a))
-  b = int(np.uint64(b))
-  return np.int64(np.uint64(a*b >> 64))
+def futhark_umul_hi64(a, b):
+  return np.int64(np.uint64(int(np.uint64(a))*int(np.uint64(b)) >> 64))
 
-def futhark_mad_hi8(a, b, c):
-  return futhark_mul_hi8(a,b) + c
+def futhark_smul_hi8(a, b):
+  return np.int8((np.int64(a)*np.int64(b)) >> np.int64(8))
 
-def futhark_mad_hi16(a, b, c):
-  return futhark_mul_hi16(a,b) + c
+def futhark_smul_hi16(a, b):
+  return np.int16((np.int64(a)*np.int64(b)) >> np.int64(16))
 
-def futhark_mad_hi32(a, b, c):
-  return futhark_mul_hi32(a,b) + c
+def futhark_smul_hi32(a, b):
+  return np.int32((np.int64(a)*np.int64(b)) >> np.int64(32))
 
-def futhark_mad_hi64(a, b, c):
-  return futhark_mul_hi64(a,b) + c
+def futhark_smul_hi64(a, b):
+  return np.int64(int(a)*int(b) >> 64)
+
+def futhark_umad_hi8(a, b, c):  return futhark_umul_hi8(a,b) + c
+def futhark_umad_hi16(a, b, c): return futhark_umul_hi16(a,b) + c
+def futhark_umad_hi32(a, b, c): return futhark_umul_hi32(a,b) + c
+def futhark_umad_hi64(a, b, c): return futhark_umul_hi64(a,b) + c
+def futhark_smad_hi8(a, b, c):  return futhark_smul_hi8(a,b) + c
+def futhark_smad_hi16(a, b, c): return futhark_smul_hi16(a,b) + c
+def futhark_smad_hi32(a, b, c): return futhark_smul_hi32(a,b) + c
+def futhark_smad_hi64(a, b, c): return futhark_smul_hi64(a,b) + c
 
 def futhark_log64(x):
   return np.float64(np.log(x))
