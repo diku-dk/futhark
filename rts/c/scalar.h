@@ -1322,11 +1322,11 @@ static uint16_t futrts_mul_hi16(uint16_t a, uint16_t b) {
 }
 
 static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
-  return mulhi(a, b);
+  return __umulhi(a, b);
 }
 
 static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
-  return mul64hi(a, b);
+  return __umul64hi(a, b);
 }
 
 #elif ISPC
