@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Futhark now works on CUDA 12 (#1801).
 
+* `mul_hi` and `mad_hi` for signed integer types now actually do
+  signed multiplication (previously it was always unsigned).
+
 ## [0.22.5]
 
 ### Added
