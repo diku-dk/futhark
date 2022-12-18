@@ -1294,78 +1294,14 @@ primFuns =
       i16 "popc16" $ IntValue . Int32Value . fromIntegral . popCount,
       i32 "popc32" $ IntValue . Int32Value . fromIntegral . popCount,
       i64 "popc64" $ IntValue . Int32Value . fromIntegral . popCount,
-      ( "mad_hi8",
-        ( [IntType Int8, IntType Int8, IntType Int8],
-          IntType Int8,
-          \case
-            [IntValue (Int8Value a), IntValue (Int8Value b), IntValue (Int8Value c)] ->
-              Just $ IntValue . Int8Value $ mad_hi8 (Int8Value a) (Int8Value b) c
-            _ -> Nothing
-        )
-      ),
-      ( "mad_hi16",
-        ( [IntType Int16, IntType Int16, IntType Int16],
-          IntType Int16,
-          \case
-            [IntValue (Int16Value a), IntValue (Int16Value b), IntValue (Int16Value c)] ->
-              Just $ IntValue . Int16Value $ mad_hi16 (Int16Value a) (Int16Value b) c
-            _ -> Nothing
-        )
-      ),
-      ( "mad_hi32",
-        ( [IntType Int32, IntType Int32, IntType Int32],
-          IntType Int32,
-          \case
-            [IntValue (Int32Value a), IntValue (Int32Value b), IntValue (Int32Value c)] ->
-              Just $ IntValue . Int32Value $ mad_hi32 (Int32Value a) (Int32Value b) c
-            _ -> Nothing
-        )
-      ),
-      ( "mad_hi64",
-        ( [IntType Int64, IntType Int64, IntType Int64],
-          IntType Int64,
-          \case
-            [IntValue (Int64Value a), IntValue (Int64Value b), IntValue (Int64Value c)] ->
-              Just $ IntValue . Int64Value $ mad_hi64 (Int64Value a) (Int64Value b) c
-            _ -> Nothing
-        )
-      ),
-      ( "mul_hi8",
-        ( [IntType Int8, IntType Int8],
-          IntType Int8,
-          \case
-            [IntValue (Int8Value a), IntValue (Int8Value b)] ->
-              Just $ IntValue . Int8Value $ mul_hi8 (Int8Value a) (Int8Value b)
-            _ -> Nothing
-        )
-      ),
-      ( "mul_hi16",
-        ( [IntType Int16, IntType Int16],
-          IntType Int16,
-          \case
-            [IntValue (Int16Value a), IntValue (Int16Value b)] ->
-              Just $ IntValue . Int16Value $ mul_hi16 (Int16Value a) (Int16Value b)
-            _ -> Nothing
-        )
-      ),
-      ( "mul_hi32",
-        ( [IntType Int32, IntType Int32],
-          IntType Int32,
-          \case
-            [IntValue (Int32Value a), IntValue (Int32Value b)] ->
-              Just $ IntValue . Int32Value $ mul_hi32 (Int32Value a) (Int32Value b)
-            _ -> Nothing
-        )
-      ),
-      ( "mul_hi64",
-        ( [IntType Int64, IntType Int64],
-          IntType Int64,
-          \case
-            [IntValue (Int64Value a), IntValue (Int64Value b)] ->
-              Just $ IntValue . Int64Value $ mul_hi64 (Int64Value a) (Int64Value b)
-            _ -> Nothing
-        )
-      ),
+      i8_3 "mad_hi8" mad_hi8,
+      i16_3 "mad_hi16" mad_hi16,
+      i32_3 "mad_hi32" mad_hi32,
+      i64_3 "mad_hi64" mad_hi64,
+      i8_2 "mul_hi8" mul_hi8,
+      i16_2 "mul_hi16" mul_hi16,
+      i32_2 "mul_hi32" mul_hi32,
+      i64_2 "mul_hi64" mul_hi64,
       --
       ( "atan2_16",
         ( [FloatType Float16, FloatType Float16],
@@ -1542,63 +1478,33 @@ primFuns =
     f16 s f = (s, ([FloatType Float16], FloatType Float16, f16PrimFun f))
     f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
     f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))
-    f16_2 s f =
-      ( s,
-        ( [FloatType Float16, FloatType Float16],
-          FloatType Float16,
-          f16PrimFun2 f
-        )
-      )
-    f32_2 s f =
-      ( s,
-        ( [FloatType Float32, FloatType Float32],
-          FloatType Float32,
-          f32PrimFun2 f
-        )
-      )
-    f64_2 s f =
-      ( s,
-        ( [FloatType Float64, FloatType Float64],
-          FloatType Float64,
-          f64PrimFun2 f
-        )
-      )
-    f16_3 s f =
-      ( s,
-        ( [FloatType Float16, FloatType Float16, FloatType Float16],
-          FloatType Float16,
-          f16PrimFun3 f
-        )
-      )
-    f32_3 s f =
-      ( s,
-        ( [FloatType Float32, FloatType Float32, FloatType Float32],
-          FloatType Float32,
-          f32PrimFun3 f
-        )
-      )
-    f64_3 s f =
-      ( s,
-        ( [FloatType Float64, FloatType Float64, FloatType Float64],
-          FloatType Float64,
-          f64PrimFun3 f
-        )
-      )
+    t_2 t s f = (s, ([t, t], t, f))
+    t_3 t s f = (s, ([t, t, t], t, f))
+    f16_2 s f = t_2 (FloatType Float16) s (f16PrimFun2 f)
+    f32_2 s f = t_2 (FloatType Float32) s (f32PrimFun2 f)
+    f64_2 s f = t_2 (FloatType Float64) s (f64PrimFun2 f)
+    f16_3 s f = t_3 (FloatType Float16) s (f16PrimFun3 f)
+    f32_3 s f = t_3 (FloatType Float32) s (f32PrimFun3 f)
+    f64_3 s f = t_3 (FloatType Float64) s (f64PrimFun3 f)
+    i8_2 s f = t_2 (IntType Int8) s (i8PrimFun2 f)
+    i16_2 s f = t_2 (IntType Int16) s (i16PrimFun2 f)
+    i32_2 s f = t_2 (IntType Int32) s (i32PrimFun2 f)
+    i64_2 s f = t_2 (IntType Int64) s (i64PrimFun2 f)
+    i8_3 s f = t_3 (IntType Int8) s (i8PrimFun3 f)
+    i16_3 s f = t_3 (IntType Int16) s (i16PrimFun3 f)
+    i32_3 s f = t_3 (IntType Int32) s (i32PrimFun3 f)
+    i64_3 s f = t_3 (IntType Int64) s (i64PrimFun3 f)
 
-    i8PrimFun f [IntValue (Int8Value x)] =
-      Just $ f x
+    i8PrimFun f [IntValue (Int8Value x)] = Just $ f x
     i8PrimFun _ _ = Nothing
 
-    i16PrimFun f [IntValue (Int16Value x)] =
-      Just $ f x
+    i16PrimFun f [IntValue (Int16Value x)] = Just $ f x
     i16PrimFun _ _ = Nothing
 
-    i32PrimFun f [IntValue (Int32Value x)] =
-      Just $ f x
+    i32PrimFun f [IntValue (Int32Value x)] = Just $ f x
     i32PrimFun _ _ = Nothing
 
-    i64PrimFun f [IntValue (Int64Value x)] =
-      Just $ f x
+    i64PrimFun f [IntValue (Int64Value x)] = Just $ f x
     i64PrimFun _ _ = Nothing
 
     f16PrimFun f [FloatValue (Float16Value x)] =
@@ -1663,6 +1569,54 @@ primFuns =
         ] =
         Just $ FloatValue $ Float64Value $ f a b c
     f64PrimFun3 _ _ = Nothing
+
+    i8PrimFun2
+      f
+      [IntValue (Int8Value a), IntValue (Int8Value b)] =
+        Just $ IntValue $ Int8Value $ f a b
+    i8PrimFun2 _ _ = Nothing
+
+    i16PrimFun2
+      f
+      [IntValue (Int16Value a), IntValue (Int16Value b)] =
+        Just $ IntValue $ Int16Value $ f a b
+    i16PrimFun2 _ _ = Nothing
+
+    i32PrimFun2
+      f
+      [IntValue (Int32Value a), IntValue (Int32Value b)] =
+        Just $ IntValue $ Int32Value $ f a b
+    i32PrimFun2 _ _ = Nothing
+
+    i64PrimFun2
+      f
+      [IntValue (Int64Value a), IntValue (Int64Value b)] =
+        Just $ IntValue $ Int64Value $ f a b
+    i64PrimFun2 _ _ = Nothing
+
+    i8PrimFun3
+      f
+      [IntValue (Int8Value a), IntValue (Int8Value b), IntValue (Int8Value c)] =
+        Just $ IntValue $ Int8Value $ f a b c
+    i8PrimFun3 _ _ = Nothing
+
+    i16PrimFun3
+      f
+      [IntValue (Int16Value a), IntValue (Int16Value b), IntValue (Int16Value c)] =
+        Just $ IntValue $ Int16Value $ f a b c
+    i16PrimFun3 _ _ = Nothing
+
+    i32PrimFun3
+      f
+      [IntValue (Int32Value a), IntValue (Int32Value b), IntValue (Int32Value c)] =
+        Just $ IntValue $ Int32Value $ f a b c
+    i32PrimFun3 _ _ = Nothing
+
+    i64PrimFun3
+      f
+      [IntValue (Int64Value a), IntValue (Int64Value b), IntValue (Int64Value c)] =
+        Just $ IntValue $ Int64Value $ f a b c
+    i64PrimFun3 _ _ = Nothing
 
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool
@@ -1878,38 +1832,38 @@ prettySigned :: Bool -> PrimType -> String
 prettySigned True (IntType it) = 'u' : drop 1 (prettyString it)
 prettySigned _ t = prettyString t
 
-mul_hi8 :: IntValue -> IntValue -> Int8
+mul_hi8 :: Int8 -> Int8 -> Int8
 mul_hi8 a b =
-  let a' = intToWord64 a
-      b' = intToWord64 b
+  let a' = fromIntegral (fromIntegral a :: Word8) :: Word64
+      b' = fromIntegral (fromIntegral b :: Word8) :: Word64
    in fromIntegral (shiftR (a' * b') 8)
 
-mul_hi16 :: IntValue -> IntValue -> Int16
+mul_hi16 :: Int16 -> Int16 -> Int16
 mul_hi16 a b =
-  let a' = intToWord64 a
-      b' = intToWord64 b
+  let a' = fromIntegral (fromIntegral a :: Word16) :: Word64
+      b' = fromIntegral (fromIntegral b :: Word16) :: Word64
    in fromIntegral (shiftR (a' * b') 16)
 
-mul_hi32 :: IntValue -> IntValue -> Int32
+mul_hi32 :: Int32 -> Int32 -> Int32
 mul_hi32 a b =
-  let a' = intToWord64 a
-      b' = intToWord64 b
+  let a' = fromIntegral (fromIntegral a :: Word32) :: Word64
+      b' = fromIntegral (fromIntegral b :: Word32) :: Word64
    in fromIntegral (shiftR (a' * b') 32)
 
-mul_hi64 :: IntValue -> IntValue -> Int64
+mul_hi64 :: Int64 -> Int64 -> Int64
 mul_hi64 a b =
-  let a' = (toInteger . intToWord64) a
-      b' = (toInteger . intToWord64) b
+  let a' = toInteger (fromIntegral a :: Word64)
+      b' = toInteger (fromIntegral b :: Word64)
    in fromIntegral (shiftR (a' * b') 64)
 
-mad_hi8 :: IntValue -> IntValue -> Int8 -> Int8
+mad_hi8 :: Int8 -> Int8 -> Int8 -> Int8
 mad_hi8 a b c = mul_hi8 a b + c
 
-mad_hi16 :: IntValue -> IntValue -> Int16 -> Int16
+mad_hi16 :: Int16 -> Int16 -> Int16 -> Int16
 mad_hi16 a b c = mul_hi16 a b + c
 
-mad_hi32 :: IntValue -> IntValue -> Int32 -> Int32
+mad_hi32 :: Int32 -> Int32 -> Int32 -> Int32
 mad_hi32 a b c = mul_hi32 a b + c
 
-mad_hi64 :: IntValue -> IntValue -> Int64 -> Int64
+mad_hi64 :: Int64 -> Int64 -> Int64 -> Int64
 mad_hi64 a b c = mul_hi64 a b + c
