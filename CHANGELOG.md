@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Some record field names could cause generation of invalid C API names (#1806).
+
 ## [0.22.6]
 
 ### Added
