@@ -77,6 +77,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     fatMemUnRef,
     criticalSection,
     module Futhark.CodeGen.Backends.SimpleRep,
+    isValidCName,
   )
 where
 
@@ -84,6 +85,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
+import Data.Char (isAlpha, isAlphaNum)
 import Data.DList qualified as DL
 import Data.List (unzip4)
 import Data.Loc
@@ -666,3 +668,12 @@ configType :: CompilerM op s C.Type
 configType = do
   name <- publicName "context_config"
   pure [C.cty|struct $id:name|]
+
+-- | Is this name a valid C identifier?  If not, it should be escaped
+-- before being emitted into C.
+isValidCName :: Name -> Bool
+isValidCName = check . nameToString
+  where
+    check [] = True -- academic
+    check (c : cs) = isAlpha c && all constituent cs
+    constituent c = isAlphaNum c || c == '_'
