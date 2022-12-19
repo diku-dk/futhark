@@ -279,17 +279,13 @@ cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType space =
   error $ "CUDA backend does not support '" ++ space ++ "' memory space."
 
-callKernel :: GC.OpCompiler OpenCL ()
-callKernel (GetSize v key) =
-  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key;|]
-callKernel (CmpSizeLe v key x) = do
-  x' <- GC.compileExp x
-  GC.stm [C.cstm|$id:v = *ctx->tuning_params.$id:key <= $exp:x';|]
-  sizeLoggingCode v key x'
-callKernel (GetSizeMax v size_class) =
-  let field = "max_" ++ cudaSizeClass size_class
-   in GC.stm [C.cstm|$id:v = ctx->cuda.$id:field;|]
+kernelConstToExp :: KernelConst -> C.Exp
+kernelConstToExp (SizeConst key) =
+  [C.cexp|*ctx->tuning_params.$id:key|]
+kernelConstToExp (SizeMaxConst size_class) =
+  [C.cexp|ctx->cuda.$id:field|]
   where
+    field = "max_" <> cudaSizeClass size_class
     cudaSizeClass SizeThreshold {} = "threshold"
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
@@ -297,6 +293,23 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeRegTile = "reg_tile_size"
     cudaSizeClass SizeLocalMemory = "shared_memory"
     cudaSizeClass (SizeBespoke x _) = prettyString x
+
+compileGroupDim :: GroupDim -> GC.CompilerM op s C.Exp
+compileGroupDim (Left e) = GC.compileExp e
+compileGroupDim (Right kc) = pure $ kernelConstToExp kc
+
+callKernel :: GC.OpCompiler OpenCL ()
+callKernel (GetSize v key) = do
+  let e = kernelConstToExp $ SizeConst key
+  GC.stm [C.cstm|$id:v = $exp:e;|]
+callKernel (CmpSizeLe v key x) = do
+  let e = kernelConstToExp $ SizeConst key
+  x' <- GC.compileExp x
+  GC.stm [C.cstm|$id:v = $exp:e <= $exp:x';|]
+  sizeLoggingCode v key x'
+callKernel (GetSizeMax v size_class) = do
+  let e = kernelConstToExp $ SizeMaxConst size_class
+  GC.stm [C.cstm|$id:v = $exp:e;|]
 callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   time_start <- newVName "time_start"
@@ -310,7 +323,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
 
   (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
-  (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
+  (block_x, block_y, block_z) <- mkDims <$> mapM compileGroupDim block_size
   let perm_args
         | length num_blocks == 3 = [[C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|]]
         | otherwise = []

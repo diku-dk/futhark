@@ -155,10 +155,10 @@ prettyValueWith pprPrim = pprPrec 0
 prettyValue :: Value m -> Doc a
 prettyValue = prettyValueWith pprPrim
   where
-    pprPrim (UnsignedValue (Int8Value v)) = pretty v
-    pprPrim (UnsignedValue (Int16Value v)) = pretty v
-    pprPrim (UnsignedValue (Int32Value v)) = pretty v
-    pprPrim (UnsignedValue (Int64Value v)) = pretty v
+    pprPrim (UnsignedValue (Int8Value v)) = pretty (fromIntegral v :: Word8)
+    pprPrim (UnsignedValue (Int16Value v)) = pretty (fromIntegral v :: Word16)
+    pprPrim (UnsignedValue (Int32Value v)) = pretty (fromIntegral v :: Word32)
+    pprPrim (UnsignedValue (Int64Value v)) = pretty (fromIntegral v :: Word64)
     pprPrim (SignedValue (Int8Value v)) = pretty v
     pprPrim (SignedValue (Int16Value v)) = pretty v
     pprPrim (SignedValue (Int32Value v)) = pretty v

@@ -11,6 +11,7 @@ where
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifunctor (second)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -64,13 +65,13 @@ translateGPU target prog =
 
       (device_prototypes, device_defs) = unzip $ M.elems device_funs
       kernels' = M.map fst kernels
-      opencl_code = openClCode $ map snd $ M.elems kernels
+      opencl_code = T.unlines $ map snd $ M.elems kernels
 
       opencl_prelude =
         T.unlines
           [ genPrelude target used_types,
             definitionsText device_prototypes,
-            funcsText device_defs
+            T.unlines device_defs
           ]
    in ImpOpenCL.Program
         opencl_code
@@ -125,8 +126,8 @@ errorLabel :: KernelState -> String
 errorLabel = ("error_" ++) . show . kernelNextSync
 
 data ToOpenCL = ToOpenCL
-  { clGPU :: M.Map KernelName (KernelSafety, C.Func),
-    clDevFuns :: M.Map Name (C.Definition, C.Func),
+  { clGPU :: M.Map KernelName (KernelSafety, T.Text),
+    clDevFuns :: M.Map Name (C.Definition, T.Text),
     clUsedTypes :: S.Set PrimType,
     clSizes :: M.Map Name SizeClass,
     clFailures :: [FailureMsg]
@@ -237,7 +238,7 @@ generateDeviceFun fname device_func = do
   modify $ \s ->
     s
       { clUsedTypes = typesInCode (functionBody device_func) <> clUsedTypes s,
-        clDevFuns = M.insert fname func $ clDevFuns s,
+        clDevFuns = M.insert fname (second funcText func) $ clDevFuns s,
         clFailures = kernelFailures kstate
       }
 
@@ -283,6 +284,15 @@ ensureDeviceFuns code = do
     bad = compilerLimitationS "Cannot generate GPU functions that contain parallelism."
     toDevice :: HostOp -> KernelOp
     toDevice _ = bad
+
+isConst :: GroupDim -> Maybe T.Text
+isConst (Left (ValueExp (IntValue x))) =
+  Just $ prettyText $ intToInt64 x
+isConst (Right (SizeConst v)) =
+  Just $ T.pack $ zEncodeString $ nameToString v
+isConst (Right (SizeMaxConst size_class)) =
+  Just $ T.pack $ "max_" <> prettyString size_class
+isConst _ = Nothing
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
 onKernel target kernel = do
@@ -389,18 +399,30 @@ onKernel target kernel = do
           ++ catMaybes local_memory_params
           ++ use_params
 
+      attribute =
+        case (target, mapM isConst $ kernelGroupSize kernel) of
+          (TargetOpenCL, Just [x, y, z]) ->
+            "__attribute__((reqd_work_group_size" <> prettyText (x, y, z) <> "))\n"
+          (TargetOpenCL, Just [x, y]) ->
+            "__attribute__((reqd_work_group_size" <> prettyText (x, y, 1 :: Int) <> "))\n"
+          (TargetOpenCL, Just [x]) ->
+            "__attribute__((reqd_work_group_size" <> prettyText (x, 1 :: Int, 1 :: Int) <> "))\n"
+          _ -> ""
+
       kernel_fun =
-        [C.cfun|__kernel void $id:name ($params:params) {
-                  $items:(mconcat unpack_params)
-                  $items:const_defs
-                  $items:block_dim_init
-                  $items:local_memory_init
-                  $items:error_init
-                  $items:kernel_body
+        attribute
+          <> funcText
+            [C.cfun|__kernel void $id:name ($params:params) {
+                    $items:(mconcat unpack_params)
+                    $items:const_defs
+                    $items:block_dim_init
+                    $items:local_memory_init
+                    $items:error_init
+                    $items:kernel_body
 
-                  $id:(errorLabel kstate): return;
+                    $id:(errorLabel kstate): return;
 
-                  $items:const_undefs
+                    $items:const_undefs
                 }|]
   modify $ \s ->
     s
@@ -411,9 +433,7 @@ onKernel target kernel = do
 
   -- The argument corresponding to the global_failure parameters is
   -- added automatically later.
-  let args =
-        catMaybes local_memory_args
-          ++ kernelArgs kernel
+  let args = catMaybes local_memory_args ++ kernelArgs kernel
 
   pure $ LaunchKernel safety name args num_groups group_size
   where
@@ -471,15 +491,6 @@ constDef (ConstUse v e) =
     def = "#define " <> idText (C.toIdent v mempty) <> " (" <> expText e' <> ")"
     undef = "#undef " <> idText (C.toIdent v mempty)
 constDef _ = Nothing
-
-openClCode :: [C.Func] -> T.Text
-openClCode kernels =
-  definitionsText [C.cunit|$edecls:funcs|]
-  where
-    funcs =
-      [ [C.cedecl|$func:kernel_func|]
-        | kernel_func <- kernels
-      ]
 
 genOpenClPrelude :: S.Set PrimType -> T.Text
 genOpenClPrelude ts =
@@ -637,6 +648,8 @@ compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
   where
     compileKernelConst (SizeConst key) =
       pure [C.cexp|$id:(zEncodeString (prettyString key))|]
+    compileKernelConst (SizeMaxConst size_class) =
+      pure [C.cexp|$id:("max_" <> prettyString size_class)|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses

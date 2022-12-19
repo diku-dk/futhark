@@ -10,6 +10,7 @@ where
 import Control.Monad
 import Data.List (find, foldl', isSuffixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Maybe (isNothing)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
@@ -49,11 +50,9 @@ fromConcatArg ::
   m VName
 fromConcatArg t (ArgArrayLit ses, cs) =
   certifying cs $ letExp "concat_lit" $ BasicOp $ ArrayLit ses $ rowType t
-fromConcatArg elem_type (ArgReplicate ws se, cs) = do
-  let elem_shape = arrayShape elem_type
-  certifying cs $ do
-    w <- letSubExp "concat_rep_w" =<< toExp (sum $ map pe64 ws)
-    letExp "concat_rep" $ BasicOp $ Replicate (setDim 0 elem_shape w) se
+fromConcatArg _ (ArgReplicate ws se, cs) = certifying cs $ do
+  w <- letSubExp "concat_rep_w" =<< toExp (sum $ map pe64 ws)
+  letExp "concat_rep" $ BasicOp $ Replicate (Shape [w]) se
 fromConcatArg _ (ArgVar v, _) =
   pure v
 
@@ -121,6 +120,12 @@ simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i (x :| xs) new_d)
       Just (Concat j (y :| ys) _, v_cs) | j == i -> (y : ys, v_cs)
       _ -> ([v], mempty)
 
+-- Removing empty arrays from concatenations.
+simplifyConcat (vtable, _) pat aux (Concat i (x :| xs) new_d)
+  | Just ts <- mapM (`ST.lookupType` vtable) $ x : xs,
+    x' : xs' <- map fst $ filter (isNothing . isEmptyArray . snd) $ zip (x : xs) ts,
+    xs' /= xs =
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ Concat i (x' :| xs') new_d
 -- Fusing arguments to the concat when possible.  Only done when
 -- concatenating along the outer dimension for now.
 simplifyConcat (vtable, _) pat aux (Concat 0 (x :| xs) outer_w)
@@ -187,7 +192,7 @@ ruleBasicOp vtable pat aux (Update _ dest destis (Var v))
           True
     arrayFrom _ =
       False
-ruleBasicOp vtable pat aux (Update _ dest is se)
+ruleBasicOp vtable pat aux (Update Unsafe dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
     isFullSlice (arrayShape dest_t) is = Simplify . auxing aux $
       case se of

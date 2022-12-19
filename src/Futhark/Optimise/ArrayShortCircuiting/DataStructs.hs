@@ -8,11 +8,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     CoalescedKind (..),
     ArrayMemBound (..),
     AllocTab,
-    AliasTab,
-    LUTabFun,
-    CreatesNewArrOp,
     HasMemBlock,
-    LUTabPrg,
     ScalarTab,
     CoalsTab,
     ScopeTab,
@@ -42,7 +38,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Aliases
-import Futhark.IR.GPUMem
+import Futhark.IR.GPUMem as GPU
+import Futhark.IR.MCMem as MC
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (line, sep, (</>))
@@ -106,6 +103,7 @@ data CoalescedKind
     ConcatCoal
   | -- | transitive, i.e., other variables aliased with b.
     TransitiveCoal
+  | MapCoal
 
 -- | Information about a memory block: type, shape, name and ixfun.
 data ArrayMemBound = MemBlock
@@ -169,15 +167,6 @@ data CoalsEntry = CoalsEntry
 type AllocTab = M.Map VName Space
 -- ^ the allocatted memory blocks
 
-type AliasTab = M.Map VName Names
--- ^ maps a variable or memory block to its aliases
-
-type LUTabFun = M.Map VName Names
--- ^ maps a name indentifying a stmt to the last uses in that stmt
-
-type LUTabPrg = M.Map Name LUTabFun
--- ^ maps function names to last-use tables
-
 type ScalarTab = M.Map VName (PrimExp VName)
 -- ^ maps a variable name to its PrimExp scalar expression
 
@@ -219,6 +208,7 @@ instance Pretty CoalescedKind where
   pretty InPlaceCoal = "InPlace"
   pretty ConcatCoal = "Concat"
   pretty TransitiveCoal = "Transitive"
+  pretty MapCoal = "Map"
 
 instance Pretty ArrayMemBound where
   pretty (MemBlock ptp shp m_nm ixfn) =
@@ -324,8 +314,16 @@ instance HasMemBlock (Aliases GPUMem) where
       Just (LParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
       _ -> Nothing
 
+instance HasMemBlock (Aliases MCMem) where
+  getScopeMemInfo r scope_env0 =
+    case M.lookup r scope_env0 of
+      Just (LetName (_, MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (FParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      Just (LParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
+      _ -> Nothing
+
 -- | @True@ if the expression returns a "fresh" array.
-createsNewArrOK :: CreatesNewArrOp (Op rep) => Exp rep -> Bool
+createsNewArrOK :: Exp rep -> Bool
 createsNewArrOK (BasicOp Replicate {}) = True
 createsNewArrOK (BasicOp Iota {}) = True
 createsNewArrOK (BasicOp Manifest {}) = True
@@ -334,28 +332,7 @@ createsNewArrOK (BasicOp Concat {}) = True
 createsNewArrOK (BasicOp ArrayLit {}) = True
 createsNewArrOK (BasicOp Scratch {}) = True
 createsNewArrOK (BasicOp Rotate {}) = True
-createsNewArrOK (Op op) = createsNewArrOp op
 createsNewArrOK _ = False
-
-class CreatesNewArrOp rep where
-  createsNewArrOp :: rep -> Bool
-
-instance CreatesNewArrOp () where
-  createsNewArrOp () = False
-
-instance CreatesNewArrOp inner => CreatesNewArrOp (MemOp inner) where
-  createsNewArrOp (Alloc _ _) = True
-  createsNewArrOp (Inner inner) = createsNewArrOp inner
-
-instance CreatesNewArrOp inner => CreatesNewArrOp (HostOp (Aliases GPUMem) inner) where
-  createsNewArrOp (OtherOp op) = createsNewArrOp op
-  createsNewArrOp (SegOp (SegMap _ _ _ kbody)) = all isReturns $ kernelBodyResult kbody
-  createsNewArrOp (SizeOp _) = False
-  createsNewArrOp _ = undefined
-
-isReturns :: KernelResult -> Bool
-isReturns Returns {} = True
-isReturns _ = False
 
 -- | Memory-block removal from active-coalescing table
 --   should only be handled via this function, it is easy

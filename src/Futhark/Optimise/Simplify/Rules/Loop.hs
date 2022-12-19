@@ -35,8 +35,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
 
           resIsNecessary ((v, _), _) =
             usedAfterLoop v
-              || paramName v
-              `nameIn` necessaryForReturned
+              || (paramName v `nameIn` necessaryForReturned)
               || referencedInPat v
               || referencedInForm v
 
@@ -153,6 +152,8 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
               p_init == resSubExp resExp,
               p_res == Var pat_name =
                 True
+            -- (3) It is a statically empty array.
+            | isJust $ isEmptyArray (paramType mergeParam) = True
             | otherwise = False
     checkInvariance
       (_pat_name, (mergeParam, mergeInit), resExp)

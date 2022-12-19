@@ -731,13 +731,13 @@ leafExpTypes (FunExp _ pes _) =
   S.unions $ map leafExpTypes pes
 
 -- | Multiplication of untyped 'PrimExp's, which must have the same
--- type.
+-- type.  Uses 'OverflowWrap' for integer operations.
 (~*~) :: PrimExp v -> PrimExp v -> PrimExp v
 x ~*~ y = BinOpExp op x y
   where
     t = primExpType x
     op = case t of
-      IntType it -> Mul it OverflowUndef
+      IntType it -> Mul it OverflowWrap
       FloatType ft -> FMul ft
       Bool -> LogAnd
       Unit -> LogAnd
@@ -755,23 +755,25 @@ x ~/~ y = BinOpExp op x y
       Unit -> LogAnd
 
 -- | Addition of untyped 'PrimExp's, which must have the same type.
+-- Uses 'OverflowWrap' for integer operations.
 (~+~) :: PrimExp v -> PrimExp v -> PrimExp v
 x ~+~ y = BinOpExp op x y
   where
     t = primExpType x
     op = case t of
-      IntType it -> Add it OverflowUndef
+      IntType it -> Add it OverflowWrap
       FloatType ft -> FAdd ft
       Bool -> LogOr
       Unit -> LogOr
 
 -- | Subtraction of untyped 'PrimExp's, which must have the same type.
+-- Uses 'OverflowWrap' for integer operations.
 (~-~) :: PrimExp v -> PrimExp v -> PrimExp v
 x ~-~ y = BinOpExp op x y
   where
     t = primExpType x
     op = case t of
-      IntType it -> Sub it OverflowUndef
+      IntType it -> Sub it OverflowWrap
       FloatType ft -> FSub ft
       Bool -> LogOr
       Unit -> LogOr

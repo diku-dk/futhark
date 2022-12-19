@@ -551,14 +551,9 @@ compileCode (SetMem dest src space) =
 compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
   | isConstExp (untyped idx) = do
       dest' <- GC.rawMem dest
-      idxexp <- compileExp (untyped idx)
-      varis <- mapM getVariability (namesToList $ freeIn idx)
-      let quals = if all (== Uniform) varis then [C.ctyquals|$tyqual:uniform|] else []
-      tmp <- newVName "tmp_idx"
-      -- Disambiguate the variability of the constant index
-      GC.decl [C.cdecl|$tyquals:quals typename int64_t $id:tmp = $exp:idxexp;|]
+      idxexp <- compileExp $ constFoldPrimExp $ untyped idx
       deref <-
-        GC.derefPointer dest' [C.cexp|$id:tmp|]
+        GC.derefPointer dest' [C.cexp|($tyquals:([varying]) typename int64_t)$exp:idxexp|]
           <$> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
@@ -598,16 +593,26 @@ compileCode code@(Copy pt dest (Count destoffset) DefaultSpace src (Count srcoff
 compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ unRefMem name space
-compileCode (For i bound body) = do
-  let i' = C.toIdent i
-      t = GC.primTypeToCType $ primExpType bound
-  bound' <- compileExp bound
-  body' <- GC.collect $ compileCode body
-  quals <- getVariabilityQuals i
-  GC.stm
-    [C.cstm|for ($tyquals:quals $ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+compileCode (For i bound body)
+  -- The special-case here is to avoid certain pathological/contrived
+  -- programs that construct statically known zero-element arrays.
+  -- Due to the way we do constant-fold index functions, this produces
+  -- code that looks like it has uniform/varying mismatches (i.e. race
+  -- conditions) to ISPC, even though that code is never actually run.
+  | isZero bound = pure ()
+  | otherwise = do
+      let i' = C.toIdent i
+          t = GC.primTypeToCType $ primExpType bound
+      bound' <- compileExp bound
+      body' <- GC.collect $ compileCode body
+      quals <- getVariabilityQuals i
+      GC.stm
+        [C.cstm|for ($tyquals:quals $ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
+  where
+    isZero (ValueExp v) = zeroIsh v
+    isZero _ = False
 compileCode (While cond body) = do
   cond' <- compileExp $ untyped cond
   body' <- GC.collect $ compileCode body
@@ -937,6 +942,10 @@ compileOp (ForEachActive name body) = do
         $items:body'
       }
     }|]
+compileOp (ExtractLane dest (ValueExp v) _) =
+  -- extract() on constants is not allowed (type is uniform, not
+  -- varying), so just turn them into an assignment.
+  GC.stm [C.cstm|$id:dest = $exp:v;|]
 compileOp (ExtractLane dest tar lane) = do
   tar' <- compileExp tar
   lane' <- compileExp lane

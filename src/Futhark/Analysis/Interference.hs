@@ -214,7 +214,7 @@ analyseProgGPU prog =
   applyAliases (MemAlias.analyzeGPUMem prog) $
     onConsts (progConsts prog) <> foldMap onFun (progFuns prog)
   where
-    (lumap, _) = LastUse.analyseGPUMem prog
+    lumap = LastUse.analyseGPUMem prog
     onFun f =
       runReader (analyseGPU lumap $ bodyStms $ funDefBody f) $ scopeOf f
     onConsts stms =

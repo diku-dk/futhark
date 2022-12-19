@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [ master ]
 
   push:
+    branches: [ master ]
 
 jobs:
   build-linux-nix:
@@ -104,24 +104,24 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - uses: haskell/actions/setup@v2
+    - id: setup-haskell
+      uses: haskell/actions/setup@v2
       with:
         ghc-version: '9.2.4'
 
     - uses: actions/cache@v2
-      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
+      name: Cache cabal stuff
       with:
         path: |
-          ~/AppData/Roaming/cabal/packages
-          ~/AppData/Roaming/cabal/store
+          ${{ steps.setup-haskell.outputs.cabal-store }}
           dist-newstyle
-        key: ${{ runner.os }}-cabal
+        key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
 
     - name: Build
       shell: bash
       run: |
         cabal update
-        try() { cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.; }
+        try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
     - uses: papeloto/action-zip@v1
       with:
@@ -601,3 +601,15 @@ jobs:
       run: |
         tar -xf prelude-docs.tar.xz
         rsync -rv -e 'ssh -o "StrictHostKeyChecking no"' prelude-docs/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/docs/prelude/
+
+    - name: make nightly release
+      uses: "marvinpinto/action-automatic-releases@v1.2.1"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "nightly"
+        prerelease: true
+        title: "nightly"
+        files: |
+          futhark-nightly-windows-x86_64.zip
+          futhark-nightly-linux-x86_64.tar.xz
+          futhark-nightly-macos-x86_64.tar.xz

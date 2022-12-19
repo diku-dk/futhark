@@ -4,6 +4,7 @@ module Futhark.Actions
   ( printAction,
     printAliasesAction,
     printLastUseGPU,
+    printLastUseGPUSS,
     printFusionGraph,
     printInterferenceGPU,
     printMemAliasGPU,
@@ -26,7 +27,9 @@ where
 
 import Control.Monad
 import Control.Monad.IO.Class
+import Data.Bifunctor
 import Data.List (intercalate)
+import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -55,6 +58,7 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
+import Futhark.Optimise.ArrayShortCircuiting.LastUse qualified as LastUseSS
 import Futhark.Optimise.Fusion.GraphRep qualified
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
@@ -87,7 +91,22 @@ printLastUseGPU =
   Action
     { actionName = "print last use gpu",
       actionDescription = "Print last use information on gpu.",
-      actionProcedure = liftIO . print . LastUse.analyseGPUMem
+      actionProcedure = liftIO . putStrLn . prettyString . M.toList . LastUse.analyseGPUMem
+    }
+
+-- | Print last use information to stdout.
+printLastUseGPUSS :: Action GPUMem
+printLastUseGPUSS =
+  Action
+    { actionName = "print last use ss gpu",
+      actionDescription = "Print last use ss information on gpu.",
+      actionProcedure =
+        liftIO
+          . putStrLn
+          . prettyString
+          . bimap M.toList (M.toList . fmap M.toList)
+          . LastUseSS.lastUseGPUMem
+          . aliasAnalysis
     }
 
 -- | Print fusion graph to stdout.
@@ -225,7 +244,7 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
   ret_ispc <-
     liftIO $
       runProgramWithExitCode
-        "ispc"
+        cmdISPC
         ( [ispcpath, "-o", ispcbase `addExtension` "o"]
             ++ ["--addressing=64", "--pic"]
             ++ cmdISPCFLAGS ispc_flags -- These flags are always needed
@@ -245,24 +264,25 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
         mempty
   case ret_ispc of
     Left err ->
-      externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
-    Right (ExitFailure code, _, gccerr) -> throwError code gccerr
+      externalErrorS $ "Failed to run " ++ cmdISPC ++ ": " ++ show err
+    Right (ExitFailure code, _, ispcerr) -> throwError cmdISPC code ispcerr
     Right (ExitSuccess, _, _) ->
       case ret of
         Left err ->
           externalErrorS $ "Failed to run ispc: " ++ show err
-        Right (ExitFailure code, _, gccerr) -> throwError code gccerr
+        Right (ExitFailure code, _, gccerr) -> throwError cmdCC code gccerr
         Right (ExitSuccess, _, _) ->
           pure ()
   where
+    cmdISPC = "ispc"
     ispcbase = outpath <> ispcextension
-    throwError code gccerr =
+    throwError prog code err =
       externalErrorS $
-        cmdCC
+        prog
           ++ " failed with code "
           ++ show code
           ++ ":\n"
-          ++ gccerr
+          ++ err
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem

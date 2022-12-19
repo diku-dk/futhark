@@ -1,7 +1,6 @@
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise (transformProg) where
 
-import Control.Arrow qualified as Arrow
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -15,21 +14,16 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
+import Futhark.Util (mapAccumLM)
 import Language.Futhark
 import Language.Futhark.Traversals
-
--- | An expression or an extended 'Lambda' (with size parameters,
--- which AST lambdas do not support).
-data ExtExp
-  = ExtLambda [Pat] Exp StructRetType SrcLoc
-  | ExtExp Exp
-  deriving (Show)
 
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
 data StaticVal
   = Dynamic PatType
-  | LambdaSV Pat StructRetType ExtExp Env
+  | -- | The Env is the lexical closure of the lambda.
+    LambdaSV Pat StructRetType Exp Env
   | RecordSV [(Name, StaticVal)]
   | -- | The constructor that is actually present, plus
     -- the others that are not.
@@ -56,7 +50,7 @@ bindingSV (Binding _ sv) = sv
 type Env = M.Map VName Binding
 
 localEnv :: Env -> DefM a -> DefM a
-localEnv env = local $ Arrow.second (env <>)
+localEnv env = local $ second (env <>)
 
 -- Even when using a "new" environment (for evaluating closures) we
 -- still ram the global environment of DynamicFuns in there.
@@ -68,7 +62,7 @@ askEnv :: DefM Env
 askEnv = asks snd
 
 areGlobal :: [VName] -> DefM a -> DefM a
-areGlobal vs = local $ Arrow.first (S.fromList vs <>)
+areGlobal vs = local $ first (S.fromList vs <>)
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
@@ -98,7 +92,7 @@ replaceStaticValSizes globals orig_substs sv =
        in LambdaSV
             (onAST substs param)
             (RetType t_dims (replaceTypeSizes substs t))
-            (onExtExp substs e)
+            (onExp substs e)
             (onEnv orig_substs closure_env) -- intentional
     Dynamic t ->
       Dynamic $ replaceTypeSizes orig_substs t
@@ -140,6 +134,13 @@ replaceStaticValSizes globals orig_substs sv =
       AppExp (Coerce (onExp substs e) te' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
       where
         te' = onTypeExp substs te
+    onExp substs (Lambda params e ret (Info (als, RetType t_dims t)) loc) =
+      Lambda
+        (map (onAST substs) params)
+        (onExp substs e)
+        ret
+        (Info (als, RetType t_dims (replaceTypeSizes substs t)))
+        loc
     onExp substs e = onAST substs e
 
     onTypeExpDim substs d@(SizeExpNamed v loc) =
@@ -175,15 +176,6 @@ replaceStaticValSizes globals orig_substs sv =
       TEDim dims (onTypeExp substs t) loc
     onTypeExp _ (TEVar v loc) =
       TEVar v loc
-
-    onExtExp substs (ExtExp e) =
-      ExtExp $ onExp substs e
-    onExtExp substs (ExtLambda params e (RetType t_dims t) loc) =
-      ExtLambda
-        (map (onAST substs) params)
-        (onExp substs e)
-        (RetType t_dims (replaceTypeSizes substs t))
-        loc
 
     onEnv substs =
       M.fromList
@@ -389,11 +381,11 @@ defuncFun tparams pats e0 ret loc = do
   -- remaining ones (if there are any) into the body of the lambda.
   let (pat, ret', e0') = case pats of
         [] -> error "Received a lambda with no parameters."
-        [pat'] -> (pat', ret, ExtExp e0)
+        [pat'] -> (pat', ret, e0)
         (pat' : pats') ->
           ( pat',
             RetType [] $ foldFunType (map (toStruct . patternType) pats') ret,
-            ExtLambda pats' e0 ret loc
+            Lambda pats' e0 Nothing (Info (mempty, ret)) loc
           )
 
   -- Construct a record literal that closes over the environment of
@@ -686,11 +678,6 @@ defuncExp (Attr info e loc) = do
 defuncExp' :: Exp -> DefM Exp
 defuncExp' = fmap fst . defuncExp
 
-defuncExtExp :: ExtExp -> DefM (Exp, StaticVal)
-defuncExtExp (ExtExp e) = defuncExp e
-defuncExtExp (ExtLambda pats e0 ret loc) =
-  defuncFun [] pats e0 ret loc
-
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
 defuncCase sv (CasePat p e loc) = do
   let p' = updatePat p sv
@@ -722,15 +709,8 @@ defuncSoacExp e
 etaExpand :: PatType -> Exp -> DefM ([Pat], Exp, StructRetType)
 etaExpand e_t e = do
   let (ps, ret) = getType $ RetType [] e_t
-  (pats, vars) <- fmap unzip . forM ps $ \(p, t) -> do
-    let t' = fromStruct t
-    x <- case p of
-      Named x -> pure x
-      Unnamed -> newNameFromString "x"
-    pure
-      ( Id x (Info t') mempty,
-        Var (qualName x) (Info t') mempty
-      )
+  -- Some careful hackery to avoid duplicate names.
+  (_, (pats, vars)) <- second unzip <$> mapAccumLM f [] ps
   let e' =
         foldl'
           ( \e1 (e2, t2, argtypes) ->
@@ -745,6 +725,18 @@ etaExpand e_t e = do
     getType (RetType _ (Scalar (Arrow _ p t1 t2))) =
       let (ps, r) = getType t2 in ((p, t1) : ps, r)
     getType t = ([], t)
+
+    f prev (p, t) = do
+      let t' = fromStruct t
+      x <- case p of
+        Named x | x `notElem` prev -> pure x
+        _ -> newNameFromString "x"
+      pure
+        ( x : prev,
+          ( Id x (Info t') mempty,
+            Var (qualName x) (Info t') mempty
+          )
+        )
 
 -- | Defunctionalize an indexing of a single array dimension.
 defuncDimIndex :: DimIndexBase Info VName -> DefM (DimIndexBase Info VName)
@@ -835,7 +827,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
           dims = mempty
       (e0', sv) <-
         localNewEnv (env' <> closure_env) $
-          defuncExtExp e0
+          defuncExp e0
 
       let closure_pat = buildEnvPat dims closure_env
           pat' = updatePat pat sv2
@@ -850,7 +842,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
           params_for_rettype = params ++ svParams sv1 ++ svParams sv2
           svParams (LambdaSV sv_pat _ _ _) = [sv_pat]
           svParams _ = []
-          rettype = buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
+          lifted_rettype = buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
 
           already_bound =
             globals
@@ -880,7 +872,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
       fname <- newNameFromString $ liftedName (0 :: Int) e1
       liftValDec
         fname
-        (RetType [] $ toStruct rettype)
+        (RetType [] $ toStruct lifted_rettype)
         (dims ++ more_dims ++ missing_dims)
         params'
         e0'
@@ -894,39 +886,30 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
               ( Info
                   ( Scalar . Arrow mempty Unnamed t1 . RetType [] $
                       Scalar . Arrow mempty Unnamed t2 $
-                        RetType [] rettype
+                        RetType [] lifted_rettype
                   )
               )
               loc
 
-          -- FIXME: what if this application returns both a function
-          -- and a value?
-          callret
-            | orderZero ret = AppRes ret ext
-            | otherwise = AppRes rettype ext
+          callret = AppRes (combineTypeShapes ret lifted_rettype) ext
+
+          innercallret =
+            AppRes
+              (Scalar $ Arrow mempty Unnamed t2 $ RetType [] lifted_rettype)
+              []
 
       pure
-        ( Parens
-            ( AppExp
-                ( Apply
-                    ( AppExp
-                        (Apply fname'' e1' (Info (Observe, Nothing)) loc)
-                        ( Info $
-                            AppRes
-                              ( Scalar $
-                                  Arrow mempty Unnamed t2 $
-                                    RetType [] rettype
-                              )
-                              []
-                        )
-                    )
-                    e2'
-                    d
-                    loc
+        ( AppExp
+            ( Apply
+                ( AppExp
+                    (Apply fname'' e1' (Info (Observe, Nothing)) loc)
+                    (Info innercallret)
                 )
-                (Info callret)
+                e2'
+                d
+                loc
             )
-            mempty,
+            (Info callret),
           sv
         )
 
@@ -1190,6 +1173,7 @@ matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
+matchPatSV pat (HoleSV t _) = matchPatSV pat $ svFromType t
 matchPatSV pat sv =
   error $
     "Tried to match pattern "
@@ -1243,6 +1227,7 @@ updatePat pat@(PatConstr c1 (Info t) ps loc) sv@(SumSV _ svs _)
 updatePat (PatConstr c1 _ ps loc) (Dynamic t) =
   PatConstr c1 (Info t) ps loc
 updatePat pat (Dynamic t) = updatePat pat (svFromType t)
+updatePat pat (HoleSV t _) = updatePat pat (svFromType t)
 updatePat pat sv =
   error $
     "Tried to update pattern "

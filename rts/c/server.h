@@ -388,6 +388,7 @@ void cmd_restore(struct server_state *s, const char *args[]) {
         return;
       }
 
+      errno = 0;
       if (t->restore(t->aux, f, s->ctx, value_ptr(&v->value)) != 0) {
         failure();
         printf("Failed to restore variable %s.\n"
@@ -852,11 +853,10 @@ int restore_array(const struct array_aux *aux, FILE *f,
   if (arr == NULL) {
     return 1;
   }
-  assert(futhark_context_sync(ctx) == 0);
-
+  int err = futhark_context_sync(ctx);
   *(void**)p = arr;
   free(data);
-  return 0;
+  return err;
 }
 
 void store_array(const struct array_aux *aux, FILE *f,

@@ -517,6 +517,11 @@ static char* mk_compile_opts(struct opencl_context *ctx,
                    "-DLOCKSTEP_WIDTH=%d ",
                    (int)ctx->lockstep_width);
 
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-D%s=%d ",
+                "max_group_size",
+                (int)ctx->max_group_size);
+
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
                   "-D%s=%d ",
@@ -742,6 +747,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
 
       unsigned char *buf;
       size_t bufsize;
+      errno = 0;
       if (cache_restore(cache_fname, &h, &buf, &bufsize) != 0) {
         if (ctx->cfg.logging) {
           fprintf(stderr, "Failed to restore cache (errno: %s)\n", strerror(errno));

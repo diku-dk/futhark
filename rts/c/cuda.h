@@ -349,6 +349,9 @@ static void cuda_nvrtc_mk_build_options(struct cuda_context *ctx, const char *ex
   } else {
     opts[i++] = strdup("--disable-warnings");
   }
+  opts[i++] = msgprintf("-D%s=%d",
+                        "max_group_size",
+                        (int)ctx->max_block_size);
   for (size_t j = 0; j < ctx->cfg.num_sizes; j++) {
     opts[i++] = msgprintf("-D%s=%zu", ctx->cfg.size_vars[j],
                           ctx->cfg.size_values[j]);
@@ -427,6 +430,7 @@ static void cuda_load_ptx_from_cache(struct cuda_context *ctx, const char *src,
   }
   cache_hash(h, src, strlen(src));
   size_t ptxsize;
+  errno = 0;
   if (cache_restore(cache_fname, h, (unsigned char**)ptx, &ptxsize) != 0) {
     if (ctx->cfg.logging) {
       fprintf(stderr, "Failed to restore cache (errno: %s)\n", strerror(errno));

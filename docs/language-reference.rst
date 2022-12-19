@@ -291,7 +291,7 @@ definition::
 
   def pair 't (x: t) (y: t) = (x, y)
 
-The application ``pair [1] [2,3]`` will fail at run-time.
+The application ``pair [1] [2,3]`` is ill-typed.
 
 To simplify the handling of in-place updates (see
 :ref:`in-place-updates`), the value returned by a function may not

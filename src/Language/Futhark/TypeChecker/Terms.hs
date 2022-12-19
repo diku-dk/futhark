@@ -37,7 +37,7 @@ import Prelude hiding (mod)
 overloadedTypeVars :: Constraints -> Names
 overloadedTypeVars = mconcat . map f . M.elems
   where
-    f (_, HasFields fs _) = mconcat $ map typeVars $ M.elems fs
+    f (_, HasFields _ fs _) = mconcat $ map typeVars $ M.elems fs
     f _ = mempty
 
 --- Basic checking
@@ -375,7 +375,7 @@ checkExp (AppExp (If e1 e2 e3 loc) _) =
     zeroOrderType
       (mkUsage loc "returning value of this type from 'if' expression")
       "type returned from branch"
-      t'
+      (toStruct t')
 
     pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes t' retext)
   where
@@ -445,8 +445,10 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
     t <- expType e'
     case anyConsumption e_occs of
       Just c ->
-        let msg = "type computed with consumption at " <> locText (location c)
-         in zeroOrderType (mkUsage loc "consumption in right-hand side of 'let'-binding") msg t
+        zeroOrderType
+          (mkUsage loc "consumption in right-hand side of 'let'-binding")
+          ("type computed with consumption at " <> locText (location c))
+          (toStruct t)
       _ -> pure ()
 
     incLevel . bindingSizes sizes $ \sizes' ->
@@ -499,8 +501,7 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
             )
             (Info $ AppRes body_t ext)
 checkExp (AppExp (LetWith dest src slice ve body loc) _) =
-  sequentially (checkIdent src) $ \src' _ -> do
-    slice' <- checkSlice slice
+  sequentially ((,) <$> checkIdent src <*> checkSlice slice) $ \(src', slice') _ -> do
     (t, _) <- newArrayType (srclocOf src) "src" $ sliceDims slice'
     unify (mkUsage loc "type of target array") t $ toStruct $ unInfo $ identType src'
 
@@ -719,7 +720,7 @@ checkExp (AppExp (Match e cs loc) _) =
     zeroOrderType
       (mkUsage loc "being returned 'match'")
       "type returned from pattern match"
-      t
+      (toStruct t)
     pure $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
   Attr <$> checkAttr info <*> checkExp e <*> pure loc
@@ -1258,14 +1259,14 @@ fixOverloadedTypes tyvars_at_toplevel =
       typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be equality type)."
           </> "Add a type annotation to disambiguate the type."
-    fixOverloaded (_, HasFields fs usage) =
+    fixOverloaded (_, HasFields _ fs usage) =
       typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous.  Must be record with fields:"
           </> indent 2 (stack $ map field $ M.toList fs)
           </> "Add a type annotation to disambiguate the type."
       where
         field (l, t) = pretty l <> colon <+> align (pretty t)
-    fixOverloaded (_, HasConstrs cs usage) =
+    fixOverloaded (_, HasConstrs _ cs usage) =
       typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be a sum type with constructors:"
           <+> pretty (Sum cs) <> ")."

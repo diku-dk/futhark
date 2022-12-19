@@ -3,7 +3,12 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Perform array short circuiting
-module Futhark.Optimise.ArrayShortCircuiting (optimiseSeqMem, optimiseGPUMem) where
+module Futhark.Optimise.ArrayShortCircuiting
+  ( optimiseSeqMem,
+    optimiseGPUMem,
+    optimiseMCMem,
+  )
+where
 
 import Control.Monad.Reader
 import Data.Function ((&))
@@ -12,6 +17,7 @@ import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias qualified as AnlAls
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
+import Futhark.IR.MCMem
 import Futhark.IR.Mem.IxFun (substituteInIxFun)
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
@@ -20,22 +26,22 @@ import Futhark.Pass (Pass (..))
 import Futhark.Pass qualified as Pass
 import Futhark.Util
 
-----------------------------------------------------------------
---- Printer/Tester Main Program
-----------------------------------------------------------------
-
 data Env inner = Env
-  { envCoalesceTab :: M.Map VName Coalesced,
-    onInner :: inner -> ReplaceM inner inner
+  { envCoalesceTab :: CoalsTab,
+    onInner :: inner -> UpdateM inner inner,
+    memAllocsToRemove :: Names
   }
 
-type ReplaceM inner a = Reader (Env inner) a
+type UpdateM inner a = Reader (Env inner) a
 
 optimiseSeqMem :: Pass SeqMem SeqMem
 optimiseSeqMem = pass "short-circuit" "Array Short-Circuiting" mkCoalsTab pure replaceInParams
 
 optimiseGPUMem :: Pass GPUMem GPUMem
 optimiseGPUMem = pass "short-circuit-gpu" "Array Short-Circuiting (GPU)" mkCoalsTabGPU replaceInHostOp replaceInParams
+
+optimiseMCMem :: Pass MCMem MCMem
+optimiseMCMem = pass "short-circuit-mc" "Array Short-Circuiting (MC)" mkCoalsTabMC replaceInMCOp replaceInParams
 
 replaceInParams :: CoalsTab -> [Param FParamMem] -> (Names, [Param FParamMem])
 replaceInParams coalstab fparams =
@@ -56,47 +62,68 @@ replaceInParams coalstab fparams =
               (to_remove, Param attrs name (MemArray pt shp u $ ArrayIn (dstmem entry) ixf) : acc)
         _ -> (to_remove, Param attrs name dec : acc)
 
-removeStms :: Names -> Body rep -> Body rep
-removeStms to_remove (Body dec stms res) =
-  Body dec (stmsFromList $ filter (not . flip nameIn to_remove . head . patNames . stmPat) $ stmsToList stms) res
+removeAllocsInStms :: Stms rep -> UpdateM inner (Stms rep)
+removeAllocsInStms stms = do
+  to_remove <- asks memAllocsToRemove
+  stmsToList stms
+    & filter (not . flip nameIn to_remove . head . patNames . stmPat)
+    & stmsFromList
+    & pure
 
 pass ::
   (Mem rep inner, LetDec rep ~ LetDecMem, CanBeAliased inner) =>
   String ->
   String ->
-  (FunDef (Aliases rep) -> Pass.PassM CoalsTab) ->
-  (inner -> ReplaceM inner inner) ->
+  (Prog (Aliases rep) -> Pass.PassM (M.Map Name CoalsTab)) ->
+  (inner -> UpdateM inner inner) ->
   (CoalsTab -> [FParam (Aliases rep)] -> (Names, [FParam (Aliases rep)])) ->
   Pass rep rep
 pass flag desc mk on_inner on_fparams =
-  Pass flag desc $
-    Pass.intraproceduralTransformationWithConsts pure $ \_ f -> do
-      coaltab <- mk (AnlAls.analyseFun f)
+  Pass flag desc $ \prog -> do
+    coaltabs <- mk $ AnlAls.aliasAnalysis prog
+    Pass.intraproceduralTransformationWithConsts pure (onFun coaltabs) prog
+  where
+    onFun coaltabs _ f = do
+      let coaltab = coaltabs M.! funDefName f
       let (mem_allocs_to_remove, new_fparams) = on_fparams coaltab $ funDefParams f
       pure $
         f
-          { funDefBody =
-              onBody (foldMap vartab $ M.elems coaltab) $
-                removeStms mem_allocs_to_remove $
-                  funDefBody f,
+          { funDefBody = onBody coaltab mem_allocs_to_remove $ funDefBody f,
             funDefParams = new_fparams
           }
-  where
-    onBody coaltab body =
-      body {bodyStms = runReader (mapM replaceInStm $ bodyStms body) (Env coaltab on_inner)}
 
-replaceInStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stm rep -> ReplaceM inner (Stm rep)
+    onBody coaltab mem_allocs_to_remove body =
+      body
+        { bodyStms =
+            runReader
+              (updateStms $ bodyStms body)
+              (Env coaltab on_inner mem_allocs_to_remove),
+          bodyResult = map (replaceResMem coaltab) $ bodyResult body
+        }
+
+replaceResMem :: CoalsTab -> SubExpRes -> SubExpRes
+replaceResMem coaltab res =
+  case flip M.lookup coaltab =<< subExpResVName res of
+    Just entry -> res {resSubExp = Var $ dstmem entry}
+    Nothing -> res
+
+updateStms :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stms rep -> UpdateM inner (Stms rep)
+updateStms stms = do
+  stms' <- mapM replaceInStm stms
+  removeAllocsInStms stms'
+
+replaceInStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stm rep -> UpdateM inner (Stm rep)
 replaceInStm (Let (Pat elems) d e) = do
   elems' <- mapM replaceInPatElem elems
   e' <- replaceInExp elems' e
   pure $ Let (Pat elems') d e'
   where
-    replaceInPatElem :: PatElem LetDecMem -> ReplaceM inner (PatElem LetDecMem)
+    replaceInPatElem :: PatElem LetDecMem -> UpdateM inner (PatElem LetDecMem)
     replaceInPatElem p@(PatElem vname (MemArray _ _ u _)) =
       fromMaybe p <$> lookupAndReplace vname PatElem u
     replaceInPatElem p = pure p
 
-replaceInExp :: (Mem rep inner, LetDec rep ~ LetDecMem) => [PatElem LetDecMem] -> Exp rep -> ReplaceM inner (Exp rep)
+replaceInExp :: (Mem rep inner, LetDec rep ~ LetDecMem) => [PatElem LetDecMem] -> Exp rep -> UpdateM inner (Exp rep)
 replaceInExp _ e@(BasicOp _) = pure e
 replaceInExp pat_elems (Match cond_ses cases defbody dec) = do
   defbody' <- replaceInIfBody defbody
@@ -106,38 +133,52 @@ replaceInExp pat_elems (Match cond_ses cases defbody dec) = do
   pure $ Match cond_ses cases' defbody' dec'
 replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
   loop_inits' <- mapM (replaceInFParam . fst) loop_inits
-  stms' <- mapM replaceInStm stms
-  pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res
-replaceInExp _ e@(Op (Alloc _ _)) = pure e
-replaceInExp _ (Op (Inner i)) = do
-  on_op <- asks onInner
-  Op . Inner <$> on_op i
-replaceInExp _ (Op _) = error "Unreachable" -- This shouldn't be possible?
+  stms' <- updateStms stms
+  coalstab <- asks envCoalesceTab
+  let res' = map (replaceResMem coalstab) res
+  pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res'
+replaceInExp _ (Op op) =
+  case op of
+    Inner i -> do
+      on_op <- asks onInner
+      Op . Inner <$> on_op i
+    _ -> pure $ Op op
 replaceInExp _ e@WithAcc {} = pure e
 replaceInExp _ e@Apply {} = pure e
 
-replaceInHostOp :: HostOp GPUMem () -> ReplaceM (HostOp GPUMem ()) (HostOp GPUMem ())
-replaceInHostOp (SegOp (SegMap lvl sp tps body)) = do
-  stms <- mapM replaceInStm $ kernelBodyStms body
-  pure $ SegOp $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
-replaceInHostOp (SegOp (SegRed lvl sp binops tps body)) = do
-  stms <- mapM replaceInStm $ kernelBodyStms body
-  pure $ SegOp $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
-replaceInHostOp (SegOp (SegScan lvl sp binops tps body)) = do
-  stms <- mapM replaceInStm $ kernelBodyStms body
-  pure $ SegOp $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
-replaceInHostOp (SegOp (SegHist lvl sp hist_ops tps body)) = do
-  stms <- mapM replaceInStm $ kernelBodyStms body
-  pure $ SegOp $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
+replaceInSegOp ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  SegOp lvl rep ->
+  UpdateM inner (SegOp lvl rep)
+replaceInSegOp (SegMap lvl sp tps body) = do
+  stms <- updateStms $ kernelBodyStms body
+  pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+replaceInSegOp (SegRed lvl sp binops tps body) = do
+  stms <- updateStms $ kernelBodyStms body
+  pure $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
+replaceInSegOp (SegScan lvl sp binops tps body) = do
+  stms <- updateStms $ kernelBodyStms body
+  pure $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
+replaceInSegOp (SegHist lvl sp hist_ops tps body) = do
+  stms <- updateStms $ kernelBodyStms body
+  pure $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
+
+replaceInHostOp :: HostOp GPUMem () -> UpdateM (HostOp GPUMem ()) (HostOp GPUMem ())
+replaceInHostOp (SegOp op) = SegOp <$> replaceInSegOp op
 replaceInHostOp op = pure op
 
-generalizeIxfun :: [PatElem dec] -> PatElem LetDecMem -> BodyReturns -> ReplaceM inner BodyReturns
+replaceInMCOp :: MCOp MCMem () -> UpdateM (MCOp MCMem ()) (MCOp MCMem ())
+replaceInMCOp (ParOp par_op op) =
+  ParOp <$> traverse replaceInSegOp par_op <*> replaceInSegOp op
+replaceInMCOp op = pure op
+
+generalizeIxfun :: [PatElem dec] -> PatElem LetDecMem -> BodyReturns -> UpdateM inner BodyReturns
 generalizeIxfun
   pat_elems
   (PatElem vname (MemArray _ _ _ (ArrayIn mem ixf)))
   m@(MemArray pt shp u _) = do
     coaltab <- asks envCoalesceTab
-    if vname `M.member` coaltab
+    if any (M.member vname . vartab) coaltab
       then
         existentialiseIxFun (map patElemName pat_elems) ixf
           & ReturnsInBlock mem
@@ -146,12 +187,13 @@ generalizeIxfun
       else pure m
 generalizeIxfun _ _ m = pure m
 
-replaceInIfBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> ReplaceM inner (Body rep)
-replaceInIfBody b@(Body _ stms _) = do
-  stms' <- mapM replaceInStm stms
-  pure $ b {bodyStms = stms'}
+replaceInIfBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> UpdateM inner (Body rep)
+replaceInIfBody b@(Body _ stms res) = do
+  coaltab <- asks envCoalesceTab
+  stms' <- updateStms stms
+  pure $ b {bodyStms = stms', bodyResult = map (replaceResMem coaltab) res}
 
-replaceInFParam :: Param FParamMem -> ReplaceM inner (Param FParamMem)
+replaceInFParam :: Param FParamMem -> UpdateM inner (Param FParamMem)
 replaceInFParam p@(Param _ vname (MemArray _ _ u _)) = do
   fromMaybe p <$> lookupAndReplace vname (Param mempty) u
 replaceInFParam p = pure p
@@ -160,10 +202,10 @@ lookupAndReplace ::
   VName ->
   (VName -> MemBound u -> a) ->
   u ->
-  ReplaceM inner (Maybe a)
+  UpdateM inner (Maybe a)
 lookupAndReplace vname f u = do
   coaltab <- asks envCoalesceTab
-  case M.lookup vname coaltab of
+  case M.lookup vname $ foldMap vartab coaltab of
     Just (Coalesced _ (MemBlock pt shp mem ixf) subs) ->
       ixf
         & fixPoint (substituteInIxFun subs)
