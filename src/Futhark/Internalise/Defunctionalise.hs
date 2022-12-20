@@ -894,7 +894,9 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (A
               )
               loc
 
-          callret = AppRes (combineTypeShapes ret lifted_rettype) ext
+          callret
+            | orderZero ret = AppRes ret ext
+            | otherwise = AppRes (combineTypeShapes ret lifted_rettype) ext
 
           sv'
             | maxAutoMap app /= mempty = Dynamic $ fromStruct ret
