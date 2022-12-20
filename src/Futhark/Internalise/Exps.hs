@@ -332,7 +332,7 @@ internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseAppExp desc _ e@(E.Apply {}) =
+internaliseAppExp desc res e@(E.Apply {}) =
   case findFuncall e of
     (FunctionHole t loc, _args) -> do
       -- The function we are supposed to call doesn't exist, but we
@@ -356,7 +356,7 @@ internaliseAppExp desc _ e@(E.Apply {}) =
           -- Short-circuiting operators are magical.
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             baseString (qualLeaf qfname) == "&&" ->
-              withAutoMap ams arg_desc args $ \[([x], x_stms), ([y], y_stms)] -> do
+              withAutoMap ams arg_desc res args $ \[([x], x_stms), ([y], y_stms)] -> do
                 letValExp' desc
                   =<< eIf
                     (addStms x_stms >> pure (BasicOp $ SubExp x))
@@ -364,7 +364,7 @@ internaliseAppExp desc _ e@(E.Apply {}) =
                     (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue False])
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             baseString (qualLeaf qfname) == "||" ->
-              withAutoMap ams arg_desc args $ \[([x], x_stms), ([y], y_stms)] -> do
+              withAutoMap ams arg_desc res args $ \[([x], x_stms), ([y], y_stms)] -> do
                 letValExp' desc
                   =<< eIf
                     (addStms x_stms >> pure (BasicOp $ SubExp x))
@@ -375,7 +375,7 @@ internaliseAppExp desc _ e@(E.Apply {}) =
           -- existential), so we can safely ignore the existential
           -- dimensions.
           | Just internalise <- isOverloadedFunction qfname desc loc ->
-              withAutoMap_ ams arg_desc args $ \args' -> do
+              withAutoMap_ ams arg_desc res args $ \args' -> do
                 let prepareArg (arg, _, am) arg' =
                       (E.toStruct $ E.stripArray (autoMapRank am) (E.typeOf arg), arg')
                 internalise $ zipWith prepareArg argsam args'
@@ -383,12 +383,12 @@ internaliseAppExp desc _ e@(E.Apply {}) =
               internalise desc
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             Just (rettype, _) <- M.lookup fname I.builtInFunctions ->
-              withAutoMap_ ams arg_desc args $ \args' -> do
+              withAutoMap_ ams arg_desc res args $ \args' -> do
                 let tag ses = [(se, I.Observe) | se <- ses]
                 let args'' = concatMap tag args'
                 letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
           | otherwise ->
-              withAutoMap_ ams arg_desc args $ \args' ->
+              withAutoMap_ ams arg_desc res args $ \args' ->
                 fst <$> funcall desc qfname (concat args') loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
@@ -1958,15 +1958,15 @@ flatUpdateHelper desc loc arr1 offset slices arr2 = do
     forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
       letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
 
-withAutoMap_ :: [AutoMap] -> String -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
-withAutoMap_ ams arg_desc args_e innerM =
-  withAutoMap ams arg_desc args_e $ \args_stms -> do
+withAutoMap_ :: [AutoMap] -> String -> E.AppRes -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
+withAutoMap_ ams arg_desc res args_e innerM =
+  withAutoMap ams arg_desc res args_e $ \args_stms -> do
     let (args, stms) = unzip args_stms
     mapM_ addStms $ reverse stms
     innerM args
 
-withAutoMap :: [AutoMap] -> String -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
-withAutoMap ams arg_desc args_e innerM = do
+withAutoMap :: [AutoMap] -> String -> E.AppRes -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
+withAutoMap ams arg_desc res args_e innerM = do
   (args, stms) <-
     foldM
       ( \(args, stms) arg -> do
@@ -1978,6 +1978,7 @@ withAutoMap ams arg_desc args_e innerM = do
   argts <- inScopeOf (reverse stms) $ (mapM . mapM) subExpType args
   expand args stms argts ams (maximum ds)
   where
+    inner_t = E.stripArray (autoMapRank (maximum ams)) (appResType res)
     ds = map autoMapRank ams
     mkLambdaParams level (ses, ts, stm, d)
       | d == level =
@@ -2012,7 +2013,10 @@ withAutoMap ams arg_desc args_e innerM = do
               args' = map (either (map (I.Var . paramName . snd . fst)) (map fst)) arg_params
               (map_ses, params) = unzip $ (concatMap . map) fst $ lefts arg_params
 
-          (ses, lam_stms) <- collectStms $ localScope (scopeOfLParams params) $ expand args' stms' argts' ams'' (level - 1)
+          ((ses, ses_ts), lam_stms) <- collectStms $ localScope (scopeOfLParams params) $ do
+            ses <- expand args' stms' argts' ams'' (level - 1)
+            ses_ts <- internaliseLambdaReturnType (E.toStruct inner_t) =<< mapM subExpType ses
+            pure (ses, ses_ts)
 
           case map_ses of
             [] -> pure mempty
@@ -2033,7 +2037,14 @@ withAutoMap ams arg_desc args_e innerM = do
                 . Op
                 . Screma outer_shape_se map_args
                 . mapSOAC
-                =<< mkLambda params (addStms lam_stms >> pure (subExpsRes ses))
+                =<< mkLambda
+                  params
+                  ( ensureResultShape
+                      (ErrorMsg [ErrorString "AutoMap: unexpected lambda result size"])
+                      mempty
+                      ses_ts
+                      =<< (addStms lam_stms >> pure (subExpsRes ses))
+                  )
 
 funcall ::
   String ->

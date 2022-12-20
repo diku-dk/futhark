@@ -818,12 +818,6 @@ unRetType (RetType ext t) = first onDim t
     onDim (NamedSize d) | qualLeaf d `elem` ext = AnySize Nothing
     onDim d = d
 
-maxAutoMap :: AppExp -> AutoMap
-maxAutoMap (Apply f _ (Info (_, _, am)) _)
-  | AppExp f_e _ <- f = max (maxAutoMap f_e) am
-  | otherwise = am
-maxAutoMap _ = mempty
-
 -- | Defunctionalize an application expression at a given depth of application.
 -- Calls to dynamic (first-order) functions are preserved at much as possible,
 -- but a new lifted function is created if a dynamic function is only partially
@@ -859,7 +853,6 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (A
           svParams (LambdaSV sv_pat _ _ _) = [sv_pat]
           svParams _ = []
           rettype = buildRetType closure_env params_for_rettype (unRetType e0_t) $ typeOf e0'
-
           already_bound =
             globals
               <> S.fromList dims
@@ -912,6 +905,9 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (A
           callret
             | orderZero ret = AppRes ret ext
             | otherwise = AppRes rettype ext
+          sv'
+            | maxAutoMap app /= mempty = Dynamic $ fromStruct ret
+            | otherwise = sv
 
       pure
         ( Parens
@@ -935,7 +931,7 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (A
                 (Info callret)
             )
             mempty,
-          sv
+          sv'
         )
 
     -- If e1 is a dynamic function, we just leave the application in place,
@@ -947,11 +943,15 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (A
           rankDiff = arrayRank ret - arrayRank restype
           AutoMap ds = maxAutoMap app
           restype'
+            | not (orderZero ret) = restype
             | ds == mempty = restype
             | otherwise = arrayOf Unique (Shape $ take rankDiff $ shapeDims ds) $ combineTypeShapes (stripArray rankDiff ret) restype
           callret = AppRes (combineTypeShapes ret restype') ext
           apply_e = AppExp (Apply e1' e2' d loc) (Info callret)
-      pure (apply_e, sv)
+          sv'
+            | ds /= mempty = Dynamic $ fromStruct restype'
+            | otherwise = sv
+      pure (apply_e, sv')
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.
     IntrinsicSV -> intrinsicOrHole argtypes e' sv1
@@ -977,6 +977,11 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (A
               (pats, body, tp) <- etaExpand (typeOf e') e'
               defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
       | otherwise = pure (e', sv)
+
+    maxAutoMap (Apply f _ (Info (_, _, am')) _)
+      | AppExp f_e _ <- f = max (maxAutoMap f_e) am'
+      | otherwise = am'
+    maxAutoMap _ = mempty
 defuncApply depth e@(Var qn (Info t) loc) = do
   let (argtypes, _) = unfoldFunType t
   sv <- lookupVar (toStruct t) (qualLeaf qn)
