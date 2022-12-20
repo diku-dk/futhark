@@ -769,10 +769,13 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
           let (base, ext) = splitExtension file
 
               readCore parse construct = do
+                logMsg $ "Reading " <> file <> "..."
                 input <- liftIO $ T.readFile file
+                logMsg ("Parsing..." :: T.Text)
                 case parse file input of
                   Left err -> externalErrorS $ T.unpack err
-                  Right prog ->
+                  Right prog -> do
+                    logMsg ("Typechecking..." :: T.Text)
                     case checkProg $ Alias.aliasAnalysis prog of
                       Left err -> externalErrorS $ show err
                       Right () -> runPolyPasses config base $ construct prog

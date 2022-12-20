@@ -1289,70 +1289,28 @@ static int32_t futrts_popc64(uint64_t x) {
 #endif
 
 #if defined(__OPENCL_VERSION__)
-static uint8_t futrts_mul_hi8(uint8_t a, uint8_t b) {
-  return mul_hi(a, b);
-}
-
-static uint16_t futrts_mul_hi16(uint16_t a, uint16_t b) {
-  return mul_hi(a, b);
-}
-
-static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
-  return mul_hi(a, b);
-}
-
-static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
-  return mul_hi(a, b);
-}
-
+static uint8_t  futrts_umul_hi8 ( uint8_t a,  uint8_t b) { return mul_hi(a, b); }
+static uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return mul_hi(a, b); }
+static uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return mul_hi(a, b); }
+static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return mul_hi(a, b); }
+static uint8_t  futrts_smul_hi8 ( int8_t a,  int8_t b) { return mul_hi(a, b); }
+static uint16_t futrts_smul_hi16(int16_t a, int16_t b) { return mul_hi(a, b); }
+static uint32_t futrts_smul_hi32(int32_t a, int32_t b) { return mul_hi(a, b); }
+static uint64_t futrts_smul_hi64(int64_t a, int64_t b) { return mul_hi(a, b); }
 #elif defined(__CUDA_ARCH__)
-
-static uint8_t futrts_mul_hi8(uint8_t a, uint8_t b) {
-  uint16_t aa = a;
-  uint16_t bb = b;
-
-  return aa * bb >> 8;
-}
-
-static uint16_t futrts_mul_hi16(uint16_t a, uint16_t b) {
-  uint32_t aa = a;
-  uint32_t bb = b;
-
-  return aa * bb >> 16;
-}
-
-static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
-  return mulhi(a, b);
-}
-
-static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
-  return mul64hi(a, b);
-}
-
+static  uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
+static uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
+static uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return __umulhi(a, b); }
+static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return __umul64hi(a, b); }
+static  uint8_t futrts_smul_hi8 ( int8_t a, int8_t b) { return ((int16_t)a) * ((int16_t)b) >> 8; }
+static uint16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((int32_t)a) * ((int32_t)b) >> 16; }
+static uint32_t futrts_smul_hi32(int32_t a, int32_t b) { return __mulhi(a, b); }
+static uint64_t futrts_smul_hi64(int64_t a, int64_t b) { return __mul64hi(a, b); }
 #elif ISPC
-
-static uint8_t futrts_mul_hi8(uint8_t a, uint8_t b) {
-  uint16_t aa = a;
-  uint16_t bb = b;
-
-  return aa * bb >> 8;
-}
-
-static uint16_t futrts_mul_hi16(uint16_t a, uint16_t b) {
-  uint32_t aa = a;
-  uint32_t bb = b;
-
-  return aa * bb >> 16;
-}
-
-static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
-  uint64_t aa = a;
-  uint64_t bb = b;
-
-  return aa * bb >> 32;
-}
-
-static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
+static uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
+static uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
+static uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
+static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) {
   uint64_t ah = a >> 32;
   uint64_t al = a & 0xffffffff;
   uint64_t bh = b >> 32;
@@ -1369,7 +1327,33 @@ static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
   uint64_t p2l = p2 & 0xffffffff;
   uint64_t p3l = p3 & 0xffffffff;
 
-  uint64_t l = p1h + p2l  + p3l;
+  uint64_t l = p1h + p2l + p3l;
+  uint64_t m = (p2 >> 32) + (p3 >> 32);
+  uint64_t h = (l >> 32) + m + p4;
+
+  return h;
+}
+static  int8_t futrts_smul_hi8 ( int8_t a,  int8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
+static int16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
+static int32_t futrts_smul_hi32(int32_t a, int32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
+static int64_t futrts_smul_hi64(int64_t a, int64_t b) {
+  uint64_t ah = a >> 32;
+  uint64_t al = a & 0xffffffff;
+  uint64_t bh = b >> 32;
+  uint64_t bl = b & 0xffffffff;
+
+  uint64_t p1 =  al * bl;
+  int64_t  p2 = al * bh;
+  int64_t  p3 = ah * bl;
+  uint64_t p4 =  ah * bh;
+
+  uint64_t p1h = p1 >> 32;
+  uint64_t p2h = p2 >> 32;
+  uint64_t p3h = p3 >> 32;
+  uint64_t p2l = p2 & 0xffffffff;
+  uint64_t p3l = p3 & 0xffffffff;
+
+  uint64_t l = p1h + p2l + p3l;
   uint64_t m = (p2 >> 32) + (p3 >> 32);
   uint64_t h = (l >> 32) + m + p4;
 
@@ -1377,70 +1361,35 @@ static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
 }
 
 #else // Not OpenCL, ISPC, or CUDA, but plain C.
-
-static uint8_t futrts_mul_hi8(uint8_t a, uint8_t b) {
-  uint16_t aa = a;
-  uint16_t bb = b;
-
-  return aa * bb >> 8;
-}
-
-static uint16_t futrts_mul_hi16(uint16_t a, uint16_t b) {
-  uint32_t aa = a;
-  uint32_t bb = b;
-
-  return aa * bb >> 16;
-}
-
-static uint32_t futrts_mul_hi32(uint32_t a, uint32_t b) {
-  uint64_t aa = a;
-  uint64_t bb = b;
-
-  return aa * bb >> 32;
-}
-
-static uint64_t futrts_mul_hi64(uint64_t a, uint64_t b) {
-  __uint128_t aa = a;
-  __uint128_t bb = b;
-
-  return aa * bb >> 64;
-}
+static uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
+static uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
+static uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
+static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return ((__uint128_t)a) * ((__uint128_t)b) >> 64; }
+static int8_t futrts_smul_hi8(int8_t a, int8_t b) { return ((int16_t)a) * ((int16_t)b) >> 8; }
+static int16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((int32_t)a) * ((int32_t)b) >> 16; }
+static int32_t futrts_smul_hi32(int32_t a, int32_t b) { return ((int64_t)a) * ((int64_t)b) >> 32; }
+static int64_t futrts_smul_hi64(int64_t a, int64_t b) { return ((__int128_t)a) * ((__int128_t)b) >> 64; }
 #endif
 
 #if defined(__OPENCL_VERSION__)
-static uint8_t futrts_mad_hi8(uint8_t a, uint8_t b, uint8_t c) {
-  return mad_hi(a, b, c);
-}
-
-static uint16_t futrts_mad_hi16(uint16_t a, uint16_t b, uint16_t c) {
-  return mad_hi(a, b, c);
-}
-
-static uint32_t futrts_mad_hi32(uint32_t a, uint32_t b, uint32_t c) {
-  return mad_hi(a, b, c);
-}
-
-static uint64_t futrts_mad_hi64(uint64_t a, uint64_t b, uint64_t c) {
-  return mad_hi(a, b, c);
-}
-
+static  uint8_t futrts_umad_hi8 ( uint8_t a,  uint8_t b,  uint8_t c) { return mad_hi(a, b, c); }
+static uint16_t futrts_umad_hi16(uint16_t a, uint16_t b, uint16_t c) { return mad_hi(a, b, c); }
+static uint32_t futrts_umad_hi32(uint32_t a, uint32_t b, uint32_t c) { return mad_hi(a, b, c); }
+static uint64_t futrts_umad_hi64(uint64_t a, uint64_t b, uint64_t c) { return mad_hi(a, b, c); }
+static  uint8_t futrts_smad_hi8( int8_t a,  int8_t b,   int8_t c) { return mad_hi(a, b, c); }
+static uint16_t futrts_smad_hi16(int16_t a, int16_t b, int16_t c) { return mad_hi(a, b, c); }
+static uint32_t futrts_smad_hi32(int32_t a, int32_t b, int32_t c) { return mad_hi(a, b, c); }
+static uint64_t futrts_smad_hi64(int64_t a, int64_t b, int64_t c) { return mad_hi(a, b, c); }
 #else // Not OpenCL
 
-static uint8_t futrts_mad_hi8(uint8_t a, uint8_t b, uint8_t c) {
-  return futrts_mul_hi8(a, b) + c;
-}
-
-static uint16_t futrts_mad_hi16(uint16_t a, uint16_t b, uint16_t c) {
-  return futrts_mul_hi16(a, b) + c;
-}
-
-static uint32_t futrts_mad_hi32(uint32_t a, uint32_t b, uint32_t c) {
-  return futrts_mul_hi32(a, b) + c;
-}
-
-static uint64_t futrts_mad_hi64(uint64_t a, uint64_t b, uint64_t c) {
-  return futrts_mul_hi64(a, b) + c;
-}
+static  uint8_t futrts_umad_hi8( uint8_t a,  uint8_t b,  uint8_t c) { return futrts_umul_hi8(a, b) + c; }
+static uint16_t futrts_umad_hi16(uint16_t a, uint16_t b, uint16_t c) { return futrts_umul_hi16(a, b) + c; }
+static uint32_t futrts_umad_hi32(uint32_t a, uint32_t b, uint32_t c) { return futrts_umul_hi32(a, b) + c; }
+static uint64_t futrts_umad_hi64(uint64_t a, uint64_t b, uint64_t c) { return futrts_umul_hi64(a, b) + c; }
+static  uint8_t futrts_smad_hi8 ( int8_t a,  int8_t b,  int8_t c) { return futrts_smul_hi8(a, b) + c; }
+static uint16_t futrts_smad_hi16(int16_t a, int16_t b, int16_t c) { return futrts_smul_hi16(a, b) + c; }
+static uint32_t futrts_smad_hi32(int32_t a, int32_t b, int32_t c) { return futrts_smul_hi32(a, b) + c; }
+static uint64_t futrts_smad_hi64(int64_t a, int64_t b, int64_t c) { return futrts_smul_hi64(a, b) + c; }
 #endif
 
 #if defined(__OPENCL_VERSION__)

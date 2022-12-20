@@ -96,10 +96,13 @@ We build such binary snapshots for the following operating systems:
 **Linux (x86_64)**
   `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
-  You will still likely need to make a C compiler (such as GCC) available on your own.
+**macOS (x86_64)**
+  `futhark-nightly-macos-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-macos-x86_64.zip>`_
 
 **Windows (x86_64)**
   `futhark-nightly-windows-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-windows-x86_64.zip>`_
+
+  You will still likely need to make a C compiler (such as GCC) available on your own.
 
 .. _linux-installation:
 

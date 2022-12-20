@@ -7,7 +7,6 @@ module Futhark.CodeGen.Backends.GenericC.EntryPoints
 where
 
 import Control.Monad.Reader
-import Data.Char (isAlpha, isAlphaNum)
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
@@ -131,13 +130,6 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
           maybeCopyDim (Var d) i =
             [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
       stms $ zipWith maybeCopyDim shape [0 .. rank - 1]
-
-isValidCName :: Name -> Bool
-isValidCName = check . nameToString
-  where
-    check [] = True -- academic
-    check (c : cs) = isAlpha c && all constituent cs
-    constituent c = isAlphaNum c || c == '_'
 
 entryName :: Name -> String
 entryName v

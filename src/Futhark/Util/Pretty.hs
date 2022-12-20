@@ -103,7 +103,10 @@ prettyText = docText . pretty
 -- | Convert a 'Doc' to text.  Thsi ignores any annotations (i.e. it
 -- will be non-coloured output).
 docText :: Doc a -> T.Text
-docText = Prettyprinter.Render.Text.renderStrict . layoutSmart defaultLayoutOptions
+docText = Prettyprinter.Render.Text.renderStrict . layouter
+  where
+    layouter =
+      layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
 
 -- | Prettyprint a value to a 'Text' on a single line.
 prettyTextOneLine :: Pretty a => a -> Text

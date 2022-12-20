@@ -400,14 +400,21 @@ removeUnusedSOACInput ::
 removeUnusedSOACInput _ pat aux op
   | Just (Screma w arrs form :: SOAC rep) <- asSOAC op,
     ScremaForm scan reduce map_lam <- form,
-    (used, unused) <- partition (usedInput map_lam) (zip (lambdaParams map_lam) arrs),
-    not (null unused) = Simplify $ do
-      let (used_params, used_arrs) = unzip used
-          map_lam' = map_lam {lambdaParams = used_params}
-      auxing aux $ letBind pat $ Op $ soacOp $ Screma w used_arrs (ScremaForm scan reduce map_lam')
+    Just (used_arrs, map_lam') <- remove map_lam arrs =
+      Simplify . auxing aux . letBind pat . Op $
+        soacOp (Screma w used_arrs (ScremaForm scan reduce map_lam'))
+  | Just (Scatter w arrs map_lam dests :: SOAC rep) <- asSOAC op,
+    Just (used_arrs, map_lam') <- remove map_lam arrs =
+      Simplify . auxing aux . letBind pat . Op $
+        soacOp (Scatter w used_arrs map_lam' dests)
   where
     used_in_body map_lam = freeIn $ lambdaBody map_lam
     usedInput map_lam (param, _) = paramName param `nameIn` used_in_body map_lam
+    remove map_lam arrs =
+      let (used, unused) = partition (usedInput map_lam) (zip (lambdaParams map_lam) arrs)
+          (used_params, used_arrs) = unzip used
+          map_lam' = map_lam {lambdaParams = used_params}
+       in if null unused then Nothing else Just (used_arrs, map_lam')
 removeUnusedSOACInput _ _ _ _ = Skip
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)

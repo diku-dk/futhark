@@ -21,6 +21,7 @@ module Language.Futhark.Prop
     prettyStacktrace,
     progHoles,
     defaultEntryPoint,
+    paramName,
 
     -- * Queries on expressions
     typeOf,
@@ -348,6 +349,11 @@ combineTypeShapes (Array als1 u1 shape1 et1) (Array als2 _u2 _shape2 et2) =
     (combineTypeShapes (Scalar et1) (Scalar et2) `setAliases` mempty)
 combineTypeShapes _ new_tp = new_tp
 
+-- | The name, if any.
+paramName :: PName -> Maybe VName
+paramName (Named v) = Just v
+paramName Unnamed = Nothing
+
 -- | Match the dimensions of otherwise assumed-equal types.  The
 -- combining function is also passed the names bound within the type
 -- (from named parameters or return types).
@@ -381,7 +387,7 @@ matchDims onDims = matchDims' mempty
         ( Scalar (Arrow als1 p1 a1 (RetType dims1 b1)),
           Scalar (Arrow als2 p2 a2 (RetType dims2 b2))
           ) ->
-            let bound' = mapMaybe maybePName [p1, p2] <> dims1 <> dims2 <> bound
+            let bound' = mapMaybe paramName [p1, p2] <> dims1 <> dims2 <> bound
              in Scalar
                   <$> ( Arrow (als1 <> als2) p1
                           <$> matchDims' bound' a1 a2
@@ -398,9 +404,6 @@ matchDims onDims = matchDims' mempty
     matchTypeArg bound (TypeArgDim x loc) (TypeArgDim y _) =
       TypeArgDim <$> onDims bound x y <*> pure loc
     matchTypeArg _ a _ = pure a
-
-    maybePName (Named v) = Just v
-    maybePName Unnamed = Nothing
 
     onShapes bound shape1 shape2 =
       Shape <$> zipWithM (onDims bound) (shapeDims shape1) (shapeDims shape2)

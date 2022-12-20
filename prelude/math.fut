@@ -332,8 +332,8 @@ module i8: (integral with t = i8) = {
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   def popc = intrinsics.popc8
-  def mul_hi a b = intrinsics.mul_hi8 (i8 a, i8 b)
-  def mad_hi a b c = intrinsics.mad_hi8 (i8 a, i8 b, i8 c)
+  def mul_hi a b = intrinsics.smul_hi8 (i8 a, i8 b)
+  def mad_hi a b c = intrinsics.smad_hi8 (i8 a, i8 b, i8 c)
   def clz = intrinsics.clz8
   def ctz = intrinsics.ctz8
 
@@ -405,8 +405,8 @@ module i16: (integral with t = i16) = {
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   def popc = intrinsics.popc16
-  def mul_hi a b = intrinsics.mul_hi16 (i16 a, i16 b)
-  def mad_hi a b c = intrinsics.mad_hi16 (i16 a, i16 b, i16 c)
+  def mul_hi a b = intrinsics.smul_hi16 (i16 a, i16 b)
+  def mad_hi a b c = intrinsics.smad_hi16 (i16 a, i16 b, i16 c)
   def clz = intrinsics.clz16
   def ctz = intrinsics.ctz16
 
@@ -481,8 +481,8 @@ module i32: (integral with t = i32) = {
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   def popc = intrinsics.popc32
-  def mul_hi a b = intrinsics.mul_hi32 (i32 a, i32 b)
-  def mad_hi a b c = intrinsics.mad_hi32 (i32 a, i32 b, i32 c)
+  def mul_hi a b = intrinsics.smul_hi32 (i32 a, i32 b)
+  def mad_hi a b c = intrinsics.smad_hi32 (i32 a, i32 b, i32 c)
   def clz = intrinsics.clz32
   def ctz = intrinsics.ctz32
 
@@ -557,8 +557,8 @@ module i64: (integral with t = i64) = {
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
   def popc = intrinsics.popc64
-  def mul_hi a b = intrinsics.mul_hi64 (i64 a, i64 b)
-  def mad_hi a b c = intrinsics.mad_hi64 (i64 a, i64 b, i64 c)
+  def mul_hi a b = intrinsics.smul_hi64 (i64 a, i64 b)
+  def mad_hi a b c = intrinsics.smad_hi64 (i64 a, i64 b, i64 c)
   def clz = intrinsics.clz64
   def ctz = intrinsics.ctz64
 
@@ -633,8 +633,8 @@ module u8: (integral with t = u8) = {
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   def popc x = intrinsics.popc8 (sign x)
-  def mul_hi a b = unsign (intrinsics.mul_hi8 (sign a, sign b))
-  def mad_hi a b c = unsign (intrinsics.mad_hi8 (sign a, sign b, sign c))
+  def mul_hi a b = unsign (intrinsics.umul_hi8 (sign a, sign b))
+  def mad_hi a b c = unsign (intrinsics.umad_hi8 (sign a, sign b, sign c))
   def clz x = intrinsics.clz8 (sign x)
   def ctz x = intrinsics.ctz8 (sign x)
 
@@ -709,8 +709,8 @@ module u16: (integral with t = u16) = {
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   def popc x = intrinsics.popc16 (sign x)
-  def mul_hi a b = unsign (intrinsics.mul_hi16 (sign a, sign b))
-  def mad_hi a b c = unsign (intrinsics.mad_hi16 (sign a, sign b, sign c))
+  def mul_hi a b = unsign (intrinsics.umul_hi16 (sign a, sign b))
+  def mad_hi a b c = unsign (intrinsics.umad_hi16 (sign a, sign b, sign c))
   def clz x = intrinsics.clz16 (sign x)
   def ctz x = intrinsics.ctz16 (sign x)
 
@@ -785,8 +785,8 @@ module u32: (integral with t = u32) = {
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   def popc x = intrinsics.popc32 (sign x)
-  def mul_hi a b = unsign (intrinsics.mul_hi32 (sign a, sign b))
-  def mad_hi a b c = unsign (intrinsics.mad_hi32 (sign a, sign b, sign c))
+  def mul_hi a b = unsign (intrinsics.umul_hi32 (sign a, sign b))
+  def mad_hi a b c = unsign (intrinsics.umad_hi32 (sign a, sign b, sign c))
   def clz x = intrinsics.clz32 (sign x)
   def ctz x = intrinsics.ctz32 (sign x)
 
@@ -861,8 +861,8 @@ module u64: (integral with t = u64) = {
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   def popc x = intrinsics.popc64 (sign x)
-  def mul_hi a b = unsign (intrinsics.mul_hi64 (sign a, sign b))
-  def mad_hi a b c = unsign (intrinsics.mad_hi64 (sign a, sign b, sign c))
+  def mul_hi a b = unsign (intrinsics.umul_hi64 (sign a, sign b))
+  def mad_hi a b c = unsign (intrinsics.umad_hi64 (sign a, sign b, sign c))
   def clz x = intrinsics.clz64 (sign x)
   def ctz x = intrinsics.ctz64 (sign x)
 

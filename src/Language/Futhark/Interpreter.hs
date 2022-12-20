@@ -76,7 +76,7 @@ data BreakReason
     BreakNaN
 
 data ExtOp a
-  = ExtOpTrace String String a
+  = ExtOpTrace T.Text (Doc ()) a
   | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
 
@@ -330,9 +330,9 @@ bad loc env s = stacking loc env $ do
   liftF . ExtOpError . InterpreterError $
     "Error at\n" <> prettyStacktrace 0 ss <> s
 
-trace :: String -> Value -> EvalM ()
+trace :: T.Text -> Value -> EvalM ()
 trace w v = do
-  liftF $ ExtOpTrace w (T.unpack $ docText $ oneLine $ prettyValue v) ()
+  liftF $ ExtOpTrace w (prettyValue v) ()
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -995,11 +995,11 @@ eval env (Attr (AttrAtom (AtomName "break") _) e loc) = do
   eval env e
 eval env (Attr (AttrAtom (AtomName "trace") _) e loc) = do
   v <- eval env e
-  trace (locStr (locOf loc)) v
+  trace (locText (locOf loc)) v
   pure v
 eval env (Attr (AttrComp "trace" [AttrAtom (AtomName tag) _] _) e _) = do
   v <- eval env e
-  trace (nameToString tag) v
+  trace (nameToText tag) v
   pure v
 eval env (Attr _ e _) =
   eval env e

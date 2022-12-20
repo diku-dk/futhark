@@ -498,10 +498,10 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
 
         (loop_initial_cond, init_loop_cond_stms) <- collectStms $ do
           forM_ (zip shapepat shapeinit) $ \(p, se) ->
-            letBindNames [paramName p] $ BasicOp $ SubExp se
+            letBindNames [I.paramName p] $ BasicOp $ SubExp se
           forM_ (zip mergepat' mergeinit) $ \(p, se) ->
-            unless (se == I.Var (paramName p)) $
-              letBindNames [paramName p] $
+            unless (se == I.Var (I.paramName p)) $
+              letBindNames [I.paramName p] $
                 BasicOp $
                   case se of
                     I.Var v
@@ -521,13 +521,13 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
           -- Careful not to clobber anything.
           loop_end_cond_body <- renameBody <=< buildBody_ $ do
             forM_ (zip shapepat shapeargs) $ \(p, se) ->
-              unless (se == I.Var (paramName p)) $
-                letBindNames [paramName p] $
+              unless (se == I.Var (I.paramName p)) $
+                letBindNames [I.paramName p] $
                   BasicOp $
                     SubExp se
             forM_ (zip mergepat' ses) $ \(p, se) ->
-              unless (se == I.Var (paramName p)) $
-                letBindNames [paramName p] $
+              unless (se == I.Var (I.paramName p)) $
+                letBindNames [I.paramName p] $
                   BasicOp $
                     case se of
                       I.Var v
@@ -1173,7 +1173,7 @@ internaliseHist dim desc rf hist op ne buckets img loc = do
   img_params <- mapM (newParam "img_p" . rowType) =<< mapM lookupType img'
   let params = bucket_params ++ img_params
       rettype = replicate dim (I.Prim int64) ++ ne_ts
-      body = mkBody mempty $ varsRes $ map paramName params
+      body = mkBody mempty $ varsRes $ map I.paramName params
   lam' <-
     mkLambda params $
       ensureResultShape
@@ -1211,7 +1211,7 @@ internaliseStreamAcc desc dest op lam bs = do
     let w = arraysSize 0 bs_ts
     fmap subExpsRes . letValExp' "acc_res" $
       I.Op $
-        I.Screma w (paramName acc_p : bs') (I.mapSOAC lam')
+        I.Screma w (I.paramName acc_p : bs') (I.mapSOAC lam')
 
   op' <-
     case op of
@@ -2010,7 +2010,7 @@ withAutoMap ams arg_desc res args_e innerM = do
                     )
                     ams'
                     stms
-              args' = map (either (map (I.Var . paramName . snd . fst)) (map fst)) arg_params
+              args' = map (either (map (I.Var . I.paramName . snd . fst)) (map fst)) arg_params
               (map_ses, params) = unzip $ (concatMap . map) fst $ lefts arg_params
 
           ((ses, ses_ts), lam_stms) <- collectStms $ localScope (scopeOfLParams params) $ do

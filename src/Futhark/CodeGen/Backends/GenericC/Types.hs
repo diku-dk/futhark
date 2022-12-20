@@ -18,7 +18,7 @@ import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode
 import Futhark.Manifest qualified as Manifest
-import Futhark.Util (chunks, mapAccumLM)
+import Futhark.Util (chunks, mapAccumLM, zEncodeString)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
@@ -263,7 +263,11 @@ opaqueProjectFunctions types desc fs vds = do
                         $items:(concat (zipWith setField [0..] components))|]
           )
   let onField ((f, et), elems) = do
-        project <- publicName $ "project_" ++ opaqueName desc ++ "_" ++ nameToString f
+        let f' =
+              if isValidCName $ nameFromString (opaqueName desc) <> "_" <> f
+                then nameToString f
+                else zEncodeString (nameToString f)
+        project <- publicName $ "project_" <> opaqueName desc <> "_" <> f'
         (et_ty, project_items) <- mkProject et elems
         headerDecl
           (OpaqueDecl desc)
@@ -316,7 +320,7 @@ opaqueNewFunctions types desc fs vds = do
       let param_name =
             if all isDigit (nameToString f)
               then C.toIdent ("v" <> f) mempty
-              else C.toIdent f mempty
+              else C.toIdent ("f_" <> f) mempty
       case et of
         TypeTransparent (ValueType sign (Rank 0) pt) -> do
           let ct = primAPIType sign pt

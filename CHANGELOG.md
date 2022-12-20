@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+* Some record field names could cause generation of invalid C API names (#1806).
+
+## [0.22.6]
+
+### Added
+
+* Slightly better type errors for sum types (#1792).
+
+* Better tracing output in interpreter (#1795).
+
+* Improved optimisation of code that uses zero-element arrays
+  (sometimes used for type witnesses).
+
+### Fixed
+
+* Mishandling of bounds checks in parallel backends could cause
+  compiler crashes (#1791).
+
+* Mis-simplification of certain sequentialised scatters into
+  single-element arrays (#1793).
+
+* Invalid `scatter` fusion would cause an internal compiler error
+  (#1794).
+
+* The code generator flipped the order of `match` cases.
+
+* Simpification of concatenations (#1796).
+
+* Defunctionalisation error for fancy size programming (#1798).
+
+* Code generation for load-unbalanced reductions in multicore backend
+  (#1800).
+
+* Futhark now works on CUDA 12 (#1801).
+
+* `mul_hi` and `mad_hi` for signed integer types now actually do
+  signed multiplication (previously it was always unsigned).
+
+## [0.22.5]
+
+### Added
+
 * Memory short circuiting now also applied to the `multicore` backend.
 
 * Fixes for AD of `scan` with nonscalar operators.  Work by Lotte
@@ -21,17 +69,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   potentially be used for better register allocation by the OpenCL
   implementation.
 
-### Removed
-
-### Changed
-
 ### Fixed
+
+* A hole in the type checker that allowed one to sneak functions out
+  of conditionals (#1787).
 
 * `futhark repl`: unsigned integers are now printed correctly.
 
 * A bug in the type-checking of `match` (#1783).
 
 * Missing sequencing in type-checking of in-place `let` expressions (#1786).
+
+* Crash in defunctionaliser caused by duplicate parameter names
+  (#1780).
+
+* Infelicities in multicore codegen for scans (#1777).
 
 ## [0.22.4]
 

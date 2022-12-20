@@ -20,7 +20,7 @@ import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, pretty, putDoc, putDocLn, (<+>))
+import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, pretty, putDoc, putDocLn, unAnnotate, (<+>))
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
@@ -324,7 +324,7 @@ runInterpreter m = runF m (pure . Right) intOp
     intOp (I.ExtOpError err) =
       pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putStrLn $ w ++ ": " ++ v
+      liftIO $ putDocLn $ pretty w <> ":" <+> unAnnotate v
       c
     intOp (I.ExtOpBreak w why callstack c) = do
       s <- get
@@ -376,7 +376,7 @@ runInterpreter' m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      liftIO $ putStrLn $ w ++ ": " ++ v
+      liftIO $ putDocLn $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
 

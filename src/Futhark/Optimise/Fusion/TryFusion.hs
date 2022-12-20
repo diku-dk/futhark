@@ -8,6 +8,7 @@
 -- various ways.
 module Futhark.Optimise.Fusion.TryFusion
   ( FusedSOAC (..),
+    Mode (..),
     attemptFusion,
   )
 where
@@ -92,17 +93,18 @@ setInputs :: [SOAC.Input] -> FusedSOAC -> FusedSOAC
 setInputs inps ker = ker {fsSOAC = inps `SOAC.setInputs` fsSOAC ker}
 
 tryOptimizeSOAC ::
+  Mode ->
   Names ->
   [VName] ->
   SOAC ->
   FusedSOAC ->
   TryFusion FusedSOAC
-tryOptimizeSOAC unfus_nms outVars soac ker = do
+tryOptimizeSOAC mode unfus_nms outVars soac ker = do
   (soac', ots) <- optimizeSOAC Nothing soac mempty
   let ker' = map (addInitialTransformIfRelevant ots) (inputs ker) `setInputs` ker
       outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
       ker'' = fixInputTypes outIdents ker'
-  applyFusionRules unfus_nms outVars soac' ker''
+  applyFusionRules mode unfus_nms outVars soac' ker''
   where
     addInitialTransformIfRelevant ots inp
       | SOAC.inputArray inp `elem` outVars =
@@ -111,32 +113,34 @@ tryOptimizeSOAC unfus_nms outVars soac ker = do
           inp
 
 tryOptimizeKernel ::
+  Mode ->
   Names ->
   [VName] ->
   SOAC ->
   FusedSOAC ->
   TryFusion FusedSOAC
-tryOptimizeKernel unfus_nms outVars soac ker = do
+tryOptimizeKernel mode unfus_nms outVars soac ker = do
   ker' <- optimizeKernel (Just outVars) ker
-  applyFusionRules unfus_nms outVars soac ker'
+  applyFusionRules mode unfus_nms outVars soac ker'
 
 tryExposeInputs ::
+  Mode ->
   Names ->
   [VName] ->
   SOAC ->
   FusedSOAC ->
   TryFusion FusedSOAC
-tryExposeInputs unfus_nms outVars soac ker = do
+tryExposeInputs mode unfus_nms outVars soac ker = do
   (ker', ots) <- exposeInputs outVars ker
   if SOAC.nullTransforms ots
-    then fuseSOACwithKer unfus_nms outVars soac ker'
+    then fuseSOACwithKer mode unfus_nms outVars soac ker'
     else do
       guard $ unfus_nms == mempty
       (soac', ots') <- pullOutputTransforms soac ots
       let outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
           ker'' = fixInputTypes outIdents ker'
       if SOAC.nullTransforms ots'
-        then applyFusionRules unfus_nms outVars soac' ker''
+        then applyFusionRules mode unfus_nms outVars soac' ker''
         else fail "tryExposeInputs could not pull SOAC transforms"
 
 fixInputTypes :: [Ident] -> FusedSOAC -> FusedSOAC
@@ -151,20 +155,27 @@ fixInputTypes outIdents ker =
     fixInputType inp = inp
 
 applyFusionRules ::
+  Mode ->
   Names ->
   [VName] ->
   SOAC ->
   FusedSOAC ->
   TryFusion FusedSOAC
-applyFusionRules unfus_nms outVars soac ker =
-  tryOptimizeSOAC unfus_nms outVars soac ker
-    <|> tryOptimizeKernel unfus_nms outVars soac ker
-    <|> fuseSOACwithKer unfus_nms outVars soac ker
-    <|> tryExposeInputs unfus_nms outVars soac ker
+applyFusionRules mode unfus_nms outVars soac ker =
+  tryOptimizeSOAC mode unfus_nms outVars soac ker
+    <|> tryOptimizeKernel mode unfus_nms outVars soac ker
+    <|> fuseSOACwithKer mode unfus_nms outVars soac ker
+    <|> tryExposeInputs mode unfus_nms outVars soac ker
+
+-- | Whether we are doing horizontal or vertical fusion.  Note that
+-- vertical also includes "diagonal" fusion, where some producer
+-- results are also produced by the final SOAC.
+data Mode = Horizontal | Vertical
 
 -- | Attempt fusing the producer into the consumer.
 attemptFusion ::
   (HasScope SOACS m, MonadFreshNames m) =>
+  Mode ->
   -- | Outputs of the producer that should still be output by the
   -- fusion result (corresponding to "diagonal fusion").
   Names ->
@@ -173,9 +184,9 @@ attemptFusion ::
   SOAC ->
   FusedSOAC ->
   m (Maybe FusedSOAC)
-attemptFusion unfus_nms outVars soac ker = do
+attemptFusion mode unfus_nms outVars soac ker = do
   scope <- askScope
-  tryFusion (applyFusionRules unfus_nms outVars soac ker) scope
+  tryFusion (applyFusionRules mode unfus_nms outVars soac ker) scope
 
 -- | Check that the consumer does not use any scan or reduce results.
 scremaFusionOK :: ([VName], [VName]) -> FusedSOAC -> Bool
@@ -190,17 +201,17 @@ mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
+  Mode ->
   Names ->
   [VName] ->
   SOAC ->
   FusedSOAC ->
   TryFusion FusedSOAC
-fuseSOACwithKer unfus_set outVars soac_p ker = do
+fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   -- We are fusing soac_p into soac_c, i.e, the output of soac_p is going
   -- into soac_c.
   let soac_c = fsSOAC ker
       inp_p_arr = SOAC.inputs soac_p
-      horizFuse = unfus_set /= mempty
       inp_c_arr = SOAC.inputs soac_c
       lam_p = SOAC.lambda soac_p
       lam_c = SOAC.lambda soac_c
@@ -242,13 +253,14 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
             res_lam' = res_lam {lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps}
          in (extra_nms, res_lam', new_inp)
 
-  when (horizFuse && not (SOAC.nullTransforms $ fsOutputTransform ker)) $
-    fail "Horizontal fusion is invalid in the presence of output transforms."
-
-  case (soac_c, soac_p) of
+  case (soac_c, soac_p, mode) of
     _ | SOAC.width soac_p /= SOAC.width soac_c -> fail "SOAC widths must match."
+    (_, _, Horizontal)
+      | not (SOAC.nullTransforms $ fsOutputTransform ker) ->
+          fail "Horizontal fusion is invalid in the presence of output transforms."
     ( SOAC.Screma _ (ScremaForm scans_c reds_c _) _,
-      SOAC.Screma _ (ScremaForm scans_p reds_p _) _
+      SOAC.Screma _ (ScremaForm scans_p reds_p _) _,
+      _
       )
         | scremaFusionOK (splitAt (Futhark.scanResults scans_p + Futhark.redResults reds_p) outVars) ker -> do
             let red_nes_p = concatMap redNeutral reds_p
@@ -296,7 +308,8 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
     -- checking that the Scatter is not writing to any array used in
     -- the Map.
     ( SOAC.Scatter _len _lam _ivs dests,
-      SOAC.Screma _ form _
+      SOAC.Screma _ form _,
+      _
       )
         | isJust $ isMapSOAC form,
           -- 1. all arrays produced by the map are ONLY used (consumed)
@@ -314,7 +327,8 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
     -- checking that the Hist is not writing to any array used in
     -- the Map.
     ( SOAC.Hist _ ops _ _,
-      SOAC.Screma _ form _
+      SOAC.Screma _ form _,
+      _
       )
         | isJust $ isMapSOAC form,
           -- 1. all arrays produced by the map are ONLY used (consumed)
@@ -328,66 +342,70 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
 
     -- Hist-Hist fusion
     ( SOAC.Hist _ ops_c _ _,
-      SOAC.Hist _ ops_p _ _
-      )
-        | horizFuse -> do
-            let p_num_buckets = length ops_p
-                c_num_buckets = length ops_c
-                (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
-                body' =
-                  Body
-                    { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
-                      bodyStms = bodyStms body_p <> bodyStms body_c,
-                      bodyResult =
-                        take c_num_buckets (bodyResult body_c)
-                          ++ take p_num_buckets (bodyResult body_p)
-                          ++ drop c_num_buckets (bodyResult body_c)
-                          ++ drop p_num_buckets (bodyResult body_p)
-                    }
-                lam' =
-                  Lambda
-                    { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
-                      lambdaBody = body',
-                      lambdaReturnType =
-                        replicate (c_num_buckets + p_num_buckets) (Prim int64)
-                          ++ drop c_num_buckets (lambdaReturnType lam_c)
-                          ++ drop p_num_buckets (lambdaReturnType lam_p)
-                    }
-            success (fsOutNames ker ++ returned_outvars) $
-              SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
+      SOAC.Hist _ ops_p _ _,
+      Horizontal
+      ) -> do
+        let p_num_buckets = length ops_p
+            c_num_buckets = length ops_c
+            (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
+            body' =
+              Body
+                { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
+                  bodyStms = bodyStms body_p <> bodyStms body_c,
+                  bodyResult =
+                    take c_num_buckets (bodyResult body_c)
+                      ++ take p_num_buckets (bodyResult body_p)
+                      ++ drop c_num_buckets (bodyResult body_c)
+                      ++ drop p_num_buckets (bodyResult body_p)
+                }
+            lam' =
+              Lambda
+                { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
+                  lambdaBody = body',
+                  lambdaReturnType =
+                    replicate (c_num_buckets + p_num_buckets) (Prim int64)
+                      ++ drop c_num_buckets (lambdaReturnType lam_c)
+                      ++ drop p_num_buckets (lambdaReturnType lam_p)
+                }
+        success (fsOutNames ker ++ returned_outvars) $
+          SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
 
     -- Scatter-write fusion.
     ( SOAC.Scatter _len_c _lam_c ivs_c as_c,
-      SOAC.Scatter _len_p _lam_p ivs_p as_p
-      )
-        | horizFuse -> do
-            let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
-                  where
-                    (xs_indices, xs_vals) = splitScatterResults as_xs xs
-                    (ys_indices, ys_vals) = splitScatterResults as_ys ys
-            let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
-            let body' =
-                  Body
-                    { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
-                      bodyStms = bodyStms body_p <> bodyStms body_c,
-                      bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
-                    }
-            let lam' =
-                  Lambda
-                    { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
-                      lambdaBody = body',
-                      lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
-                    }
-            success (fsOutNames ker ++ returned_outvars) $
-              SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
-    (SOAC.Scatter {}, _) ->
-      fail "Cannot fuse a write with anything else than a write or a map"
-    (_, SOAC.Scatter {}) ->
-      fail "Cannot fuse a write with anything else than a write or a map"
+      SOAC.Scatter
+        _len_p
+        _lam_p
+        ivs_p
+        as_p,
+      Horizontal
+      ) -> do
+        let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
+              where
+                (xs_indices, xs_vals) = splitScatterResults as_xs xs
+                (ys_indices, ys_vals) = splitScatterResults as_ys ys
+        let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
+        let body' =
+              Body
+                { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
+                  bodyStms = bodyStms body_p <> bodyStms body_c,
+                  bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
+                }
+        let lam' =
+              Lambda
+                { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
+                  lambdaBody = body',
+                  lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
+                }
+        success (fsOutNames ker ++ returned_outvars) $
+          SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
+    (SOAC.Scatter {}, _, _) ->
+      fail "Cannot fuse a scatter with anything else than a scatter or a map"
+    (_, SOAC.Scatter {}, _) ->
+      fail "Cannot fuse a scatter with anything else than a scatter or a map"
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
-    (SOAC.Stream {}, SOAC.Stream {}) -> do
+    (SOAC.Stream {}, SOAC.Stream {}, _) -> do
       -- fuse two SEQUENTIAL streams
       (res_nms, res_stream) <- fuseStreamHelper (fsOutNames ker) unfus_set outVars outPairs soac_c soac_p
       success res_nms res_stream
@@ -400,18 +418,19 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
     ---   we could run in an infinite recursion, i.e., repeatedly   ---
     ---   fusing map o scan into an infinity of Stream levels!      ---
     -------------------------------------------------------------------
-    (SOAC.Stream {}, _) -> do
+    (SOAC.Stream {}, _, _) -> do
       -- If this rule is matched then soac_p is NOT a stream.
       -- To fuse a stream kernel, we transform soac_p to a stream, which
       -- borrows the sequential/parallel property of the soac_c Stream,
       -- and recursively perform stream-stream fusion.
       (soac_p', newacc_ids) <- SOAC.soacToStream soac_p
       fuseSOACwithKer
+        mode
         (namesFromList (map identName newacc_ids) <> unfus_set)
         (map identName newacc_ids ++ outVars)
         soac_p'
         ker
-    (_, SOAC.Screma _ form _) | Just _ <- Futhark.isScanomapSOAC form -> do
+    (_, SOAC.Screma _ form _, _) | Just _ <- Futhark.isScanomapSOAC form -> do
       -- A Scan soac can be currently only fused as a (sequential) stream,
       -- hence it is first translated to a (sequential) Stream and then
       -- fusion with a kernel is attempted.
@@ -419,12 +438,13 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
       if soac_p' /= soac_p
         then
           fuseSOACwithKer
+            mode
             (namesFromList (map identName newacc_ids) <> unfus_set)
             (map identName newacc_ids ++ outVars)
             soac_p'
             ker
         else fail "SOAC could not be turned into stream."
-    (_, SOAC.Stream {}) -> do
+    (_, SOAC.Stream {}, _) -> do
       -- If it reached this case then soac_c is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
       -- stream-stream fusion recursivelly.
@@ -434,6 +454,7 @@ fuseSOACwithKer unfus_set outVars soac_p ker = do
       if soac_c' /= soac_c
         then
           fuseSOACwithKer
+            mode
             (namesFromList (map identName newacc_ids) <> unfus_set)
             outVars
             soac_p
