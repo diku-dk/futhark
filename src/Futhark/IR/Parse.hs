@@ -600,7 +600,7 @@ pValueType = comb <$> pRank <*> pSignedType
 pEntryPointType :: Parser EntryPointType
 pEntryPointType =
   choice
-    [ keyword "opaque" $> TypeOpaque . T.unpack <*> pStringLiteral,
+    [ keyword "opaque" $> TypeOpaque . nameFromText <*> pStringLiteral,
       TypeTransparent <$> pValueType
     ]
 
@@ -635,10 +635,10 @@ pFunDef pr = do
   FunDef entry attrs fname ret fparams
     <$> (pEqual *> braces (pBody pr))
 
-pOpaqueType :: Parser (String, OpaqueType)
+pOpaqueType :: Parser (Name, OpaqueType)
 pOpaqueType =
   (,)
-    <$> (keyword "type" *> (T.unpack <$> pStringLiteral) <* pEqual)
+    <$> (keyword "type" *> (nameFromText <$> pStringLiteral) <* pEqual)
     <*> choice [pRecord, pOpaque]
   where
     pFieldName = choice [pName, nameFromString . show <$> pInt]

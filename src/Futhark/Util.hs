@@ -40,9 +40,9 @@ module Futhark.Util
     pmapIO,
     interactWithFileSafely,
     convFloat,
-    UserString,
-    EncodedString,
-    zEncodeString,
+    UserText,
+    EncodedText,
+    zEncodeText,
     atMostChars,
     invertMap,
     cartesian,
@@ -356,12 +356,22 @@ type UserString = String
 -- | Encoded form.
 type EncodedString = String
 
--- | Z-encode a string using a slightly simplified variant of GHC
--- Z-encoding.  The encoded string is a valid identifier in most
--- programming languages.
+-- | As 'zEncodeText', but for strings.
 zEncodeString :: UserString -> EncodedString
 zEncodeString "" = ""
 zEncodeString (c : cs) = encodeDigitChar c ++ concatMap encodeChar cs
+
+-- | As the user typed it.
+type UserText = T.Text
+
+-- | Encoded form.
+type EncodedText = T.Text
+
+-- | Z-encode a text using a slightly simplified variant of GHC
+-- Z-encoding.  The encoded string is a valid identifier in most
+-- programming languages.
+zEncodeText :: UserText -> EncodedText
+zEncodeText = T.pack . zEncodeString . T.unpack
 
 unencodedChar :: Char -> Bool -- True for chars that don't need encoding
 unencodedChar 'Z' = False

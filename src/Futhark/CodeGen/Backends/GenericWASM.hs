@@ -40,7 +40,7 @@ extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.Unsigned 
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.Unsigned _)) = "u64"
 extToString (Imp.TransparentValue (Imp.ScalarValue Bool _ _)) = "bool"
 extToString (Imp.TransparentValue (Imp.ScalarValue Unit _ _)) = error "extToString: Unit"
-extToString (Imp.OpaqueValue oname _) = opaqueName oname
+extToString (Imp.OpaqueValue oname _) = T.unpack $ opaqueName oname
 
 type EntryPointType = String
 

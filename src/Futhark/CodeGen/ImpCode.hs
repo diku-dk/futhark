@@ -193,7 +193,7 @@ data ValueDesc
 data ExternalValue
   = -- | The string is a human-readable description with no other
     -- semantics.
-    OpaqueValue String [ValueDesc]
+    OpaqueValue Name [ValueDesc]
   | TransparentValue ValueDesc
   deriving (Show)
 

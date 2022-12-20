@@ -9,12 +9,11 @@ where
 import Control.Monad.State
 import Data.List (find)
 import Data.Map qualified as M
-import Data.Text qualified as T
 import Futhark.IR qualified as I
 import Futhark.Internalise.TypesValues (internalisedTypeSize)
-import Futhark.Util.Pretty (prettyTextOneLine)
+import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import Language.Futhark qualified as E hiding (TypeArg)
-import Language.Futhark.Core (Name, Uniqueness (..), VName)
+import Language.Futhark.Core (Name, Uniqueness (..), VName, nameFromText)
 import Language.Futhark.Semantic qualified as E
 
 -- | The types that are visible to the outside world.
@@ -51,20 +50,20 @@ rootType (E.TEApply te E.TypeArgExpDim {} _) = rootType te
 rootType (E.TEUnique te _) = rootType te
 rootType te = te
 
-typeExpOpaqueName :: E.TypeExp VName -> String
+typeExpOpaqueName :: E.TypeExp VName -> Name
 typeExpOpaqueName = f . rootType
   where
     f (E.TEArray _ te _) =
       let (d, te') = withoutDims te
-       in "arr_" <> typeExpOpaqueName te' <> "_" <> show (1 + d) <> "d"
-    f te = T.unpack $ prettyTextOneLine te
+       in "arr_" <> typeExpOpaqueName te' <> "_" <> nameFromText (prettyText (1 + d)) <> "d"
+    f te = nameFromText $ prettyTextOneLine te
 
 type GenOpaque = State I.OpaqueTypes
 
 runGenOpaque :: GenOpaque a -> (a, I.OpaqueTypes)
 runGenOpaque = flip runState mempty
 
-addType :: String -> I.OpaqueType -> GenOpaque ()
+addType :: Name -> I.OpaqueType -> GenOpaque ()
 addType s t = modify (<> I.OpaqueTypes [(s, t)])
 
 isRecord :: VisibleTypes -> E.TypeExp VName -> Maybe (M.Map Name (E.TypeExp VName))
@@ -129,7 +128,7 @@ entryPointType types t ts
   where
     u = foldl max Nonunique $ map I.uniqueness ts
     desc =
-      maybe (T.unpack $ prettyTextOneLine t') typeExpOpaqueName $
+      maybe (nameFromText $ prettyTextOneLine t') typeExpOpaqueName $
         E.entryAscribed t
     t' = E.noSizes (E.entryType t) `E.setUniqueness` Nonunique
 

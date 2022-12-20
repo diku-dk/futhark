@@ -243,18 +243,18 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _))
 
       GC.libDecl
         =<< pure
-          [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {
+          [C.cedecl|int $id:(funName fname <> "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {
                   return $id:(funName fname)($args:extra_exp, $args:out_args_c, $args:in_args_c);
                 }|]
 
       let ispc_extern =
-            [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:((funName fname) ++ "_extern")
+            [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:((funName fname) <> "_extern")
                       ($params:extra, $params:outparams_extern, $params:inparams_extern);|]
 
           ispc_uniform =
             [C.cedecl|$tyqual:uniform int $id:(funName fname)
                     ($params:extra, $params:outparams_uni, $params:inparams_uni) {
-                      return $id:(funName $ fname<>"_extern")(
+                      return $id:(funName (fname<>"_extern"))(
                         $args:extra_exp,
                         $args:out_args_noderef,
                         $args:in_args_noderef);

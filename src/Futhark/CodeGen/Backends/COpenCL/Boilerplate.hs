@@ -27,7 +27,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.RTS.C (freeListH, openclH)
-import Futhark.Util (chunk, zEncodeString)
+import Futhark.Util (chunk, zEncodeText)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -85,9 +85,10 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 
   mapM_ GC.earlyDecl top_decls
 
-  let size_name_inits = map (\k -> [C.cinit|$string:(prettyString k)|]) $ M.keys sizes
-      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (prettyString k))|]) $ M.keys sizes
-      size_class_inits = map (\c -> [C.cinit|$string:(prettyString c)|]) $ M.elems sizes
+  let strinit s = [C.cinit|$string:(T.unpack s)|]
+      size_name_inits = map (strinit . prettyText) $ M.keys sizes
+      size_var_inits = map (strinit . zEncodeText . prettyText) $ M.keys sizes
+      size_class_inits = map (strinit . prettyText) $ M.elems sizes
       num_sizes = M.size sizes
 
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]

@@ -65,13 +65,13 @@ $assign'
 
 formatFailure :: FailureMsg -> PyExp
 formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
-  String $ concatMap onPart parts ++ "\n" ++ formatEscape backtrace
+  String $ mconcat (map onPart parts) <> "\n" <> formatEscape backtrace
   where
     formatEscape =
       let escapeChar '{' = "{{"
           escapeChar '}' = "}}"
-          escapeChar c = [c]
-       in concatMap escapeChar
+          escapeChar c = T.singleton c
+       in mconcat . map escapeChar
 
     onPart (ErrorString s) = formatEscape $ T.unpack s
     onPart ErrorVal {} = "{}"
@@ -80,9 +80,9 @@ sizeClassesToPython :: M.Map Name SizeClass -> PyExp
 sizeClassesToPython = Dict . map f . M.toList
   where
     f (size_name, size_class) =
-      ( String $ prettyString size_name,
+      ( String $ prettyText size_name,
         Dict
-          [ (String "class", String $ prettyString size_class),
+          [ (String "class", String $ prettyText size_class),
             ( String "value",
               maybe None (Integer . fromIntegral) $
                 sizeDefault size_class
@@ -95,7 +95,7 @@ sizeHeuristicsToPython = List . map f
   where
     f (SizeHeuristic platform_name device_type which what) =
       Tuple
-        [ String platform_name,
+        [ String (T.pack platform_name),
           clDeviceType device_type,
           which',
           what'
@@ -122,4 +122,4 @@ sizeHeuristicsToPython = List . map f
           pure $
             Py.simpleCall
               "device.get_info"
-              [Py.simpleCall "getattr" [Var "cl.device_info", String s]]
+              [Py.simpleCall "getattr" [Var "cl.device_info", String (T.pack s)]]

@@ -30,7 +30,7 @@ data PyExp
   = Integer Integer
   | Bool Bool
   | Float Double
-  | String String
+  | String T.Text
   | RawStringLiteral T.Text
   | Var String
   | BinOp String PyExp PyExp
