@@ -564,7 +564,7 @@ checkOpaques (OpaqueTypes types) = descend [] types
     checkEntryPointType known (TypeOpaque s) =
       when (s `notElem` known) $
         Left . Error [] . TypeError $
-          "Opaque not defined before first use: " <> T.pack s
+          "Opaque not defined before first use: " <> nameToText s
     checkEntryPointType _ (TypeTransparent _) = pure ()
 
 -- | Type check a program containing arbitrary type information,
