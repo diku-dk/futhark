@@ -26,7 +26,7 @@ import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
-import Futhark.Util (zEncodeString)
+import Futhark.Util (zEncodeText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
@@ -289,9 +289,9 @@ isConst :: GroupDim -> Maybe T.Text
 isConst (Left (ValueExp (IntValue x))) =
   Just $ prettyText $ intToInt64 x
 isConst (Right (SizeConst v)) =
-  Just $ T.pack $ zEncodeString $ nameToString v
+  Just $ zEncodeText $ nameToText v
 isConst (Right (SizeMaxConst size_class)) =
-  Just $ T.pack $ "max_" <> prettyString size_class
+  Just $ "max_" <> prettyText size_class
 isConst _ = Nothing
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
@@ -458,7 +458,7 @@ onKernel target kernel = do
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
 useAsParam (ScalarUse name pt) = do
-  let name_bits = zEncodeString (prettyString name) <> "_bits"
+  let name_bits = zEncodeText (prettyText name) <> "_bits"
       ctp = case pt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
@@ -647,7 +647,7 @@ compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
   where
     compileKernelConst (SizeConst key) =
-      pure [C.cexp|$id:(zEncodeString (prettyString key))|]
+      pure [C.cexp|$id:(zEncodeText (prettyText key))|]
     compileKernelConst (SizeMaxConst size_class) =
       pure [C.cexp|$id:("max_" <> prettyString size_class)|]
 

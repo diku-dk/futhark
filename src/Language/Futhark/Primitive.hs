@@ -129,6 +129,7 @@ import Data.Bits
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Map qualified as M
+import Data.Text qualified as T
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CUShort (..))
 import Futhark.Util (convFloat)
@@ -1836,9 +1837,9 @@ convOp :: (Pretty from, Pretty to) => String -> from -> to -> Doc a
 convOp s from to = pretty s <> "_" <> pretty from <> "_" <> pretty to
 
 -- | True if signed.  Only makes a difference for integer types.
-prettySigned :: Bool -> PrimType -> String
-prettySigned True (IntType it) = 'u' : drop 1 (prettyString it)
-prettySigned _ t = prettyString t
+prettySigned :: Bool -> PrimType -> T.Text
+prettySigned True (IntType it) = T.cons 'u' (T.drop 1 (prettyText it))
+prettySigned _ t = prettyText t
 
 umul_hi8 :: Int8 -> Int8 -> Int8
 umul_hi8 a b =

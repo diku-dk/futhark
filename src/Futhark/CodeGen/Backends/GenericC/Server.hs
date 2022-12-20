@@ -14,7 +14,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.RTS.C (serverH, tuningH, valuesH)
 import Futhark.Manifest
-import Futhark.Util (zEncodeString)
+import Futhark.Util (zEncodeText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import Language.Futhark.Core (nameFromText)
@@ -105,8 +105,8 @@ genericOptions =
       }
   ]
 
-typeStructName :: T.Text -> String
-typeStructName tname = "type_" <> zEncodeString (T.unpack tname)
+typeStructName :: T.Text -> T.Text
+typeStructName tname = "type_" <> zEncodeText tname
 
 cType :: Manifest -> TypeName -> C.Type
 cType manifest tname =
@@ -120,8 +120,8 @@ cType manifest tname =
 typeBoilerplate :: Manifest -> (T.Text, Type) -> (C.Definition, C.Initializer, [C.Definition])
 typeBoilerplate _ (tname, TypeArray _ et rank ops) =
   let type_name = typeStructName tname
-      aux_name = type_name ++ "_aux"
-      info_name = T.unpack et ++ "_info"
+      aux_name = type_name <> "_aux"
+      info_name = et <> "_info"
       shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       array_new_wrap = arrayNew ops <> "_wrap"
    in ( [C.cedecl|const struct type $id:type_name;|],

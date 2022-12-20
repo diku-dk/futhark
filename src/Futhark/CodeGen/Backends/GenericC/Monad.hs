@@ -142,9 +142,9 @@ newCompilerState src s =
 -- | In which part of the header file we put the declaration.  This is
 -- to ensure that the header file remains structured and readable.
 data HeaderSection
-  = ArrayDecl String
-  | OpaqueTypeDecl String
-  | OpaqueDecl String
+  = ArrayDecl Name
+  | OpaqueTypeDecl Name
+  | OpaqueDecl Name
   | EntryDecl
   | MiscDecl
   | InitDecl
@@ -353,10 +353,10 @@ cacheMem a = asks $ M.lookup (C.toExp a noLoc) . envCachedMem
 -- header file, and the second is the implementation.  Returns the public
 -- name.
 publicDef ::
-  String ->
+  T.Text ->
   HeaderSection ->
-  (String -> (C.Definition, C.Definition)) ->
-  CompilerM op s String
+  (T.Text -> (C.Definition, C.Definition)) ->
+  CompilerM op s T.Text
 publicDef s h f = do
   s' <- publicName s
   let (pub, priv) = f s'
@@ -366,9 +366,9 @@ publicDef s h f = do
 
 -- | As 'publicDef', but ignores the public name.
 publicDef_ ::
-  String ->
+  T.Text ->
   HeaderSection ->
-  (String -> (C.Definition, C.Definition)) ->
+  (T.Text -> (C.Definition, C.Definition)) ->
   CompilerM op s ()
 publicDef_ s h f = void $ publicDef s h f
 
@@ -416,8 +416,8 @@ decl :: C.InitGroup -> CompilerM op s ()
 decl x = item [C.citem|$decl:x;|]
 
 -- | Public names must have a consitent prefix.
-publicName :: String -> CompilerM op s String
-publicName s = pure $ "futhark_" ++ s
+publicName :: T.Text -> CompilerM op s T.Text
+publicName s = pure $ "futhark_" <> s
 
 memToCType :: VName -> Space -> CompilerM op s C.Type
 memToCType v space = do
@@ -671,9 +671,8 @@ configType = do
 
 -- | Is this name a valid C identifier?  If not, it should be escaped
 -- before being emitted into C.
-isValidCName :: Name -> Bool
-isValidCName = check . nameToString
+isValidCName :: T.Text -> Bool
+isValidCName = maybe True check . T.uncons
   where
-    check [] = True -- academic
-    check (c : cs) = isAlpha c && all constituent cs
+    check (c, cs) = isAlpha c && T.all constituent cs
     constituent c = isAlphaNum c || c == '_'
