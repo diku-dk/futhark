@@ -210,15 +210,17 @@ analyseLambda lumap inuse (Lambda _ body _) =
   analyseBody lumap inuse body
 
 analyseProgGPU :: Prog GPUMem -> Graph VName
-analyseProgGPU prog =
-  applyAliases (MemAlias.analyzeGPUMem prog) $
-    onConsts (progConsts prog) <> foldMap onFun (progFuns prog)
+analyseProgGPU prog = onConsts (progConsts prog) <> foldMap onFun (progFuns prog)
   where
+    (consts_aliases, funs_aliases) = MemAlias.analyzeGPUMem prog
     lumap = LastUse.analyseGPUMem prog
     onFun f =
-      runReader (analyseGPU lumap $ bodyStms $ funDefBody f) $ scopeOf f
+      applyAliases (fromMaybe mempty $ M.lookup (funDefName f) funs_aliases) $
+        runReader (analyseGPU lumap $ bodyStms $ funDefBody f) $
+          scopeOf f
     onConsts stms =
-      runReader (analyseGPU lumap stms) (mempty :: Scope GPUMem)
+      applyAliases consts_aliases $
+        runReader (analyseGPU lumap stms) (mempty :: Scope GPUMem)
 
 applyAliases :: MemAlias.MemAliases -> Graph VName -> Graph VName
 applyAliases aliases =
