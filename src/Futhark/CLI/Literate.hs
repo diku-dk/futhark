@@ -91,6 +91,7 @@ data Directive
   | DirectivePlot Exp (Maybe (Int, Int))
   | DirectiveGnuplot Exp T.Text
   | DirectiveVideo Exp VideoParams
+  | DirectiveAudio Exp
   deriving (Show)
 
 varsInDirective :: Directive -> S.Set EntryName
@@ -101,6 +102,7 @@ varsInDirective (DirectiveImg e _) = varsInExp e
 varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveVideo e _) = varsInExp e
+varsInDirective (DirectiveAudio e) = varsInExp e
 
 pprDirective :: Bool -> Directive -> PP.Doc a
 pprDirective _ (DirectiveRes e) =
@@ -148,6 +150,8 @@ pprDirective True (DirectiveVideo e params) =
     p s f pretty = do
       x <- f params
       Just $ s <> ": " <> pretty x
+pprDirective _ (DirectiveAudio e) =
+  "> :audio " <> PP.align (PP.pretty e)
 
 instance PP.Pretty Directive where
   pretty = pprDirective True
@@ -332,6 +336,10 @@ parseBlock =
             $> DirectiveVideo
             <*> parseExp postlexeme
             <*> parseVideoParams
+            <* eol,
+          directiveName "audio"
+            $> DirectiveAudio
+            <*> parseExp postlexeme
             <* eol
         ]
     directiveName s = try $ token (":" <> s)
@@ -858,6 +866,23 @@ processDirective env (DirectiveVideo e params) = do
           void $ system "ffmpeg" ["-i", webmfile, videofile] mempty
       | otherwise =
           liftIO $ copyFile webmfile videofile
+
+--
+processDirective env (DirectiveAudio e) = do
+  fmap imgBlock . newFile env (Nothing, "audio.wav") $ \wavfile -> do
+    maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+    case maybe_v of
+      Right (ValueAtom (I8Value _ bytes)) -> do
+        withTempDir $ \dir -> do
+          let rawfile = dir </> "raw.pcm"
+          liftIO $ LBS.writeFile rawfile (LBS.fromStrict $ SVec.vectorToByteString bytes)
+          void $ system "ffmpeg" ["-f", "s8", "-i", rawfile, wavfile] mempty
+      Right v -> nope $ fmap valueType v
+      Left t -> nope t
+  where
+    nope t =
+      throwError $
+        "Cannot create audio from value of type " <> prettyText t
 
 -- Did this script block succeed or fail?
 data Failure = Failure | Success
