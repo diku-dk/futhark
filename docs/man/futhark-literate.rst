@@ -32,7 +32,7 @@ programming techniques.
 **Warning:** Do not run untrusted programs.  See SAFETY below.
 
 Image directives and builtin functions shell out to ``convert`` (from
-ImageMagick).  Video generation uses ``ffmpeg``.
+ImageMagick).  Video and audio generation uses ``ffmpeg``.
 
 For an input file ``foo.fut``, all generated files will be in a
 directory named ``foo-img``.  A ``file`` parameter passed to a
@@ -193,6 +193,12 @@ The following directives are supported:
 
   Use ``set term png size width,height`` to change the size to
   ``width`` by ``height`` pixels.
+
+* ``> :audio e``
+
+  Creates a sound-file from ``e``, which must be an expression of type ``[]i8``.
+  It is interpreted as a 8-bit PCM audio at 44100 Hz and turned into a
+  wave-soundfile.
 
 FUTHARKSCRIPT
 =============
