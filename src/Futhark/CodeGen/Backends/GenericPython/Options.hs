@@ -9,6 +9,7 @@ module Futhark.CodeGen.Backends.GenericPython.Options
   )
 where
 
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericPython.AST
 
 -- | Specification if a single command line option.  The option must
@@ -17,7 +18,7 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 -- When the statement is being executed, the argument (if any) will be
 -- stored in the variable @optarg@.
 data Option = Option
-  { optionLongName :: String,
+  { optionLongName :: T.Text,
     optionShortName :: Maybe Char,
     optionArgument :: OptionArgument,
     optionAction :: [PyStmt]
@@ -53,15 +54,14 @@ generateOptionParser options =
     parseOption option =
       Exp $
         Call (Var "parser.add_argument") $
-          map (Arg . String) name_args
-            ++ argument_args
+          map (Arg . String) name_args ++ argument_args
       where
         name_args =
           maybe
             id
-            ((:) . ('-' :) . (: []))
+            (\x l -> ("-" <> T.singleton x) : l)
             (optionShortName option)
-            ["--" ++ optionLongName option]
+            ["--" <> optionLongName option]
         argument_args = case optionArgument option of
           RequiredArgument t ->
             [ ArgKeyword "action" (String "append"),
@@ -82,14 +82,11 @@ generateOptionParser options =
     executeOption option =
       For
         "optarg"
-        ( Index (Var "parser_result") $
-            IdxExp $
-              String $
-                fieldName option
+        ( Index (Var "parser_result") $ IdxExp $ String $ fieldName option
         )
         $ optionAction option
 
-    fieldName = map escape . optionLongName
+    fieldName = T.map escape . optionLongName
       where
         escape '-' = '_'
         escape c = c

@@ -494,7 +494,7 @@ compileConsts used_consts stms = do
     extract s =
       (mempty, s)
 
-lookupOpaqueType :: String -> OpaqueTypes -> OpaqueType
+lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
 lookupOpaqueType v (OpaqueTypes types) =
   case lookup v types of
     Just t -> t

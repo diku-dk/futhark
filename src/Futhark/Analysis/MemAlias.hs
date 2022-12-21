@@ -114,12 +114,13 @@ analyzeStms :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stms rep -> MemAliases
 analyzeStms =
   flip $ foldM analyzeStm
 
-analyzeFun :: (Mem rep inner, LetDec rep ~ LetDecMem) => FunDef rep -> MemAliasesM inner MemAliases
+analyzeFun :: (Mem rep inner, LetDec rep ~ LetDecMem) => FunDef rep -> MemAliasesM inner (Name, MemAliases)
 analyzeFun f =
   funDefParams f
     & mapMaybe justMem
     & mconcat
     & analyzeStms (bodyStms $ funDefBody f)
+    <&> (funDefName f,)
   where
     justMem (Param _ v (MemMem _)) = Just $ singleton v mempty
     justMem _ = Nothing
@@ -135,18 +136,22 @@ transitiveClosure ma@(MemAliases m) =
     m
     <> ma
 
-analyzeSeqMem :: Prog SeqMem -> MemAliases
+-- | Produce aliases for constants and for each function.
+analyzeSeqMem :: Prog SeqMem -> (MemAliases, M.Map Name MemAliases)
 analyzeSeqMem prog = completeBijection $ runReader (analyze prog) $ Env $ \x _ -> pure x
 
-analyzeGPUMem :: Prog GPUMem -> MemAliases
+-- | Produce aliases for constants and for each function.
+analyzeGPUMem :: Prog GPUMem -> (MemAliases, M.Map Name MemAliases)
 analyzeGPUMem prog = completeBijection $ runReader (analyze prog) $ Env analyzeHostOp
 
-analyze :: (Mem rep inner, LetDec rep ~ LetDecMem) => Prog rep -> MemAliasesM inner MemAliases
+analyze :: (Mem rep inner, LetDec rep ~ LetDecMem) => Prog rep -> MemAliasesM inner (MemAliases, M.Map Name MemAliases)
 analyze prog =
-  progFuns prog
-    & foldM (\m f -> (<>) m <$> analyzeFun f) (MemAliases mempty)
-    <&> fixPoint transitiveClosure
+  (,)
+    <$> (progConsts prog & flip analyzeStms mempty <&> fixPoint transitiveClosure)
+    <*> (progFuns prog & mapM analyzeFun <&> M.fromList <&> M.map (fixPoint transitiveClosure))
 
-completeBijection :: MemAliases -> MemAliases
-completeBijection ma@(MemAliases m) =
-  M.foldMapWithKey (\k ns -> foldMap (`singleton` oneName k) (namesToList ns)) m <> ma
+completeBijection :: (MemAliases, M.Map Name MemAliases) -> (MemAliases, M.Map Name MemAliases)
+completeBijection (a, bs) = (f a, fmap f bs)
+  where
+    f ma@(MemAliases m) =
+      M.foldMapWithKey (\k ns -> foldMap (`singleton` oneName k) (namesToList ns)) m <> ma

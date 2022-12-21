@@ -26,7 +26,7 @@ import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.RTS.C (cudaH, freeListH)
-import Futhark.Util (chunk, zEncodeString)
+import Futhark.Util (chunk, zEncodeText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
@@ -88,15 +88,16 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
 
 generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () ()
 generateSizeFuns sizes = do
-  let size_name_inits = map (\k -> [C.cinit|$string:(prettyString k)|]) $ M.keys sizes
-      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (prettyString k))|]) $ M.keys sizes
-      size_class_inits = map (\c -> [C.cinit|$string:(prettyString c)|]) $ M.elems sizes
+  let strinit s = [C.cinit|$string:(T.unpack s)|]
+      size_name_inits = map (strinit . prettyText) $ M.keys sizes
+      size_var_inits = map (strinit . zEncodeText . prettyText) $ M.keys sizes
+      size_class_inits = map (strinit . prettyText) $ M.elems sizes
 
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
 
-generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () String
+generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () T.Text
 generateConfigFuns sizes = do
   let size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys sizes
       num_sizes = M.size sizes
@@ -294,7 +295,7 @@ generateConfigFuns sizes = do
   pure cfg
 
 generateContextFuns ::
-  String ->
+  T.Text ->
   [Name] ->
   M.Map KernelName KernelSafety ->
   M.Map Name SizeClass ->
