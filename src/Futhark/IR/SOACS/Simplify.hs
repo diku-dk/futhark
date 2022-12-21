@@ -744,31 +744,32 @@ fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 arrayOps ::
   forall rep.
   (Buildable rep, HasSOAC rep) =>
+  Certs ->
   Body rep ->
   S.Set (Pat (LetDec rep), ArrayOp)
-arrayOps = mconcat . map onStm . stmsToList . bodyStms
+arrayOps cs = mconcat . map onStm . stmsToList . bodyStms
   where
     onStm (Let pat aux e) =
-      case isArrayOp (stmAuxCerts aux) e of
+      case isArrayOp (cs <> stmAuxCerts aux) e of
         Just op -> S.singleton (pat, op)
-        Nothing -> execState (walkExpM walker e) mempty
-    onOp op
+        Nothing -> execState (walkExpM (walker (stmAuxCerts aux)) e) mempty
+    onOp more_cs op
       | Just soac <- asSOAC op =
           -- Copies are not safe to move out of nested ops (#1753).
           S.filter (notCopy . snd) $
             execWriter $
               mapSOACM
-                identitySOACMapper {mapOnSOACLambda = onLambda}
+                identitySOACMapper {mapOnSOACLambda = onLambda more_cs}
                 (soac :: SOAC rep)
       | otherwise =
           mempty
-    onLambda lam = do
-      tell $ arrayOps $ lambdaBody lam
+    onLambda more_cs lam = do
+      tell $ arrayOps (cs <> more_cs) $ lambdaBody lam
       pure lam
-    walker =
+    walker more_cs =
       identityWalker
-        { walkOnBody = const $ modify . (<>) . arrayOps,
-          walkOnOp = modify . (<>) . onOp
+        { walkOnBody = const $ modify . (<>) . arrayOps (cs <> more_cs),
+          walkOnOp = modify . (<>) . onOp more_cs
         }
     notCopy (ArrayCopy {}) = False
     notCopy _ = True
@@ -827,7 +828,7 @@ simplifyMapIota vtable screma_pat aux op
     Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
     indexings <-
       mapMaybe (indexesWith (paramName p)) . S.toList $
-        arrayOps $
+        arrayOps mempty $
           lambdaBody map_lam,
     not $ null indexings = Simplify $ do
       -- For each indexing with iota, add the corresponding array to
@@ -896,7 +897,7 @@ simplifyMapIota _ _ _ _ = Skip
 -- full array.
 moveTransformToInput :: TopDownRuleOp (Wise SOACS)
 moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan reduce map_lam))
-  | ops <- filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
+  | ops <- filter arrayIsMapParam $ S.toList $ arrayOps mempty $ lambdaBody map_lam,
     not $ null ops = Simplify $ do
       (more_arrs, more_params, replacements) <-
         unzip3 . catMaybes <$> mapM mapOverArr ops
