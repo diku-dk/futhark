@@ -362,7 +362,7 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, Info (_, d1, a1)) (e2, Info (_, 
         ( Apply
             ( AppExp
                 (Apply fname' x (Info (Observe, d1, a1)) loc)
-                (Info $ AppRes ret mempty)
+                (Info $ AppRes (foldFunType [typeOf y] (RetType [] ret)) mempty)
             )
             y
             (Info (Observe, d2, a2))

@@ -899,7 +899,7 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (A
             | otherwise = AppRes (combineTypeShapes ret lifted_rettype) ext
 
           sv'
-            | maxAutoMap app /= mempty = Dynamic $ fromStruct ret
+            | maxAutoMap app /= mempty, orderZero ret = Dynamic $ fromStruct ret
             | otherwise = sv
 
           innercallret =
@@ -936,7 +936,7 @@ defuncApply depth e@(AppExp app@(Apply e1 e2 d@(Info (_, _, am)) loc) t@(Info (A
           callret = AppRes (combineTypeShapes ret restype') ext
           apply_e = AppExp (Apply e1' e2' d loc) (Info callret)
           sv'
-            | ds /= mempty = Dynamic $ fromStruct restype'
+            | ds /= mempty, orderZero ret = Dynamic $ fromStruct restype'
             | otherwise = sv
       pure (apply_e, sv')
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
