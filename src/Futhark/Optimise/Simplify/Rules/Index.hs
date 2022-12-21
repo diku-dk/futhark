@@ -199,10 +199,10 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
                 thisbody <- mkBodyM thisstms [subExpRes thisres]
                 (altres, altstms) <- collectStms $ mkBranch xs_and_starts'
                 altbody <- mkBodyM altstms [subExpRes altres]
-                letSubExp "index_concat_branch" $
+                certifying cs . letSubExp "index_concat_branch" $
                   Match [cmp] [Case [Just $ BoolValue True] thisbody] altbody $
                     MatchDec [primBodyType res_t] MatchNormal
-          SubExpResult cs <$> mkBranch xs_and_starts
+          SubExpResult mempty <$> mkBranch xs_and_starts
     Just (ArrayLit ses _, cs)
       | DimFix (Constant (IntValue (Int64Value i))) : inds' <- inds,
         Just se <- maybeNth i ses ->
