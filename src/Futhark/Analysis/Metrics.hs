@@ -22,6 +22,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.IR
+import Futhark.Util (showText)
 
 -- | Compute the metrics for some operation.
 class OpMetrics op where
@@ -109,7 +110,7 @@ expMetrics (Match _ [Case [Just (BoolValue True)] tb] fb _) =
 expMetrics (Match _ cases defbody _) =
   inside "Match" $ do
     forM_ (zip [0 ..] cases) $ \(i, c) ->
-      inside (T.pack (show (i :: Int))) $ bodyMetrics $ caseBody c
+      inside (showText (i :: Int)) $ bodyMetrics $ caseBody c
     inside "default" $ bodyMetrics defbody
 expMetrics Apply {} =
   seen "Apply"

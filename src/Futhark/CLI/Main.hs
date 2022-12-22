@@ -4,7 +4,6 @@ module Futhark.CLI.Main (main) where
 import Control.Exception
 import Data.List (sortOn)
 import Data.Maybe
-import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.CLI.Autotune qualified as Autotune
 import Futhark.CLI.Bench qualified as Bench
@@ -32,7 +31,7 @@ import Futhark.CLI.Run qualified as Run
 import Futhark.CLI.Test qualified as Test
 import Futhark.CLI.WASM qualified as WASM
 import Futhark.Error
-import Futhark.Util (maxinum)
+import Futhark.Util (maxinum, showText)
 import Futhark.Util.Options
 import GHC.IO.Encoding (setLocaleEncoding)
 import GHC.IO.Exception (IOErrorType (..), IOException (..))
@@ -123,7 +122,7 @@ reportingIOErrors =
       | otherwise = do
           T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
           T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
-          T.hPutStrLn stderr $ T.pack $ show e
+          T.hPutStrLn stderr $ showText e
           exitWith $ ExitFailure 1
 
     onIOException :: IOException -> IO ()

@@ -29,7 +29,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Time (UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
 import Futhark.Pkg.Types
-import Futhark.Util (maybeHead)
+import Futhark.Util (maybeHead, showText)
 import Futhark.Util.Log
 import System.Exit
 import System.FilePath.Posix qualified as Posix
@@ -450,11 +450,11 @@ lookupPackageRev p v
                 | (_, vs) <- majorRevOfPkg p,
                   _svMajor v `notElem` vs =
                     "\nFor major version "
-                      <> T.pack (show (_svMajor v))
+                      <> showText (_svMajor v)
                       <> ", use package path "
                       <> p
                       <> "@"
-                      <> T.pack (show (_svMajor v))
+                      <> showText (_svMajor v)
                 | otherwise = mempty
            in fail $
                 T.unpack $

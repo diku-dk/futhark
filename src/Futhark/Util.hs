@@ -27,6 +27,7 @@ module Futhark.Util
     focusNth,
     focusMaybe,
     hashText,
+    showText,
     unixEnvironment,
     isEnvVarAtLeast,
     startupTime,
@@ -211,6 +212,10 @@ focusMaybe f xs = do
 hashText :: T.Text -> T.Text
 hashText =
   T.decodeUtf8With T.lenientDecode . Base16.encode . MD5.hash . T.encodeUtf8
+
+-- | Like 'show', but produces text.
+showText :: Show a => a -> T.Text
+showText = T.pack . show
 
 {-# NOINLINE unixEnvironment #-}
 

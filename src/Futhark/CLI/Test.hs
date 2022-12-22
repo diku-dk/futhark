@@ -18,7 +18,7 @@ import Data.Text.Encoding qualified as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (atMostChars, fancyTerminal)
+import Futhark.Util (atMostChars, fancyTerminal, showText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (annotate, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
@@ -184,7 +184,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
                 name
                   <> maybePipeline pipeline
                   <> " should have occurred "
-                  <> T.pack (show expected_occurences)
+                  <> showText expected_occurences
                   <> " times, but did not occur at all in optimised program."
         Just actual_occurences
           | expected_occurences /= actual_occurences ->
@@ -192,9 +192,9 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
                 name
                   <> maybePipeline pipeline
                   <> " should have occurred "
-                  <> T.pack (show expected_occurences)
+                  <> showText expected_occurences
                   <> " times, but occurred "
-                  <> T.pack (show actual_occurences)
+                  <> showText actual_occurences
                   <> " times."
         _ -> pure ()
 
@@ -312,8 +312,8 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
     Left (CmdFailure _ err) ->
       pure [Failure err]
     Right (output_types', input_types') -> do
-      let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types' - 1]]
-          ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types' - 1]]
+      let outs = ["out" <> showText i | i <- [0 .. length output_types' - 1]]
+          ins = ["in" <> showText i | i <- [0 .. length input_types' - 1]]
           onRes = either (Failure . pure) (const Success)
       mapM (fmap onRes . runCompiledCase input_types' outs ins) run_cases
   where
@@ -398,7 +398,7 @@ compareResult _ _ _ (RunTimeFailure expectedError) (ErrorResult actualError) =
 compareResult _ _ _ (Succeeds _) (ErrorResult err) =
   E.throwError $ "Function failed with error:\n" <> err
 compareResult _ _ _ (RunTimeFailure f) (SuccessResult _) =
-  E.throwError $ "Program succeeded, but expected failure:\n  " <> T.pack (show f)
+  E.throwError $ "Program succeeded, but expected failure:\n  " <> showText f
 
 ---
 --- Test manager
@@ -420,7 +420,7 @@ catching :: IO TestResult -> IO TestResult
 catching m = m `catch` save
   where
     save :: SomeException -> IO TestResult
-    save e = pure $ Failure [T.pack $ show e]
+    save e = pure $ Failure [showText e]
 
 doTest :: TestCase -> IO TestResult
 doTest = catching . runTestM . runTestCase

@@ -34,6 +34,7 @@ import Futhark.Util
     hashText,
     nubOrd,
     runProgramWithExitCode,
+    showText,
   )
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
@@ -464,14 +465,14 @@ system prog options input = do
   res <- liftIO $ runProgramWithExitCode prog options $ T.encodeUtf8 input
   case res of
     Left err ->
-      throwError $ prog' <> " failed: " <> T.pack (show err)
+      throwError $ prog' <> " failed: " <> showText err
     Right (ExitSuccess, stdout_t, _) ->
       pure $ T.pack stdout_t
     Right (ExitFailure code', _, stderr_t) ->
       throwError $
         prog'
           <> " failed with exit code "
-          <> T.pack (show code')
+          <> showText code'
           <> " and stderr:\n"
           <> T.pack stderr_t
   where
@@ -528,7 +529,7 @@ loadBMP bmpfile = do
   res <- liftIO $ BMP.readBMP bmpfile
   case res of
     Left err ->
-      throwError $ "Failed to read BMP:\n" <> T.pack (show err)
+      throwError $ "Failed to read BMP:\n" <> showText err
     Right bmp -> do
       let bmp_bs = BMP.unpackBMPToRGBA32 bmp
           (w, h) = BMP.bmpDimensions bmp
@@ -706,7 +707,7 @@ processDirective env (DirectivePlot e size) = do
       [x, y] <- plottable v
       Just [x, y]
 
-    tag (Nothing, xys) j = ("data" <> T.pack (show (j :: Int)), xys)
+    tag (Nothing, xys) j = ("data" <> showText (j :: Int), xys)
     tag (Just f, xys) _ = (f, xys)
 
     plotWith xys pngfile =

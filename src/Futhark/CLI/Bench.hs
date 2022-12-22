@@ -21,7 +21,7 @@ import Data.Vector.Unboxed qualified as U
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (atMostChars, fancyTerminal, pmapIO)
+import Futhark.Util (atMostChars, fancyTerminal, pmapIO, showText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (AnsiStyle, Color (..), annotate, bold, color, line, pretty, prettyText, putDoc)
 import Futhark.Util.ProgressBar
@@ -216,7 +216,7 @@ withProgramServer program runner extra_options f = do
     onError :: SomeException -> IO (Maybe a)
     onError e = do
       putBoldRedLn $ "\nFailed to run " <> T.pack program
-      putRedLn $ T.pack $ show e
+      putRedLn $ showText e
       pure Nothing
 
 -- Truncate dataset name display after this many characters.

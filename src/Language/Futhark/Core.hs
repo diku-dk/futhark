@@ -45,6 +45,7 @@ import Data.Int (Int16, Int32, Int64, Int8)
 import Data.String
 import Data.Text qualified as T
 import Data.Word (Word16, Word32, Word64, Word8)
+import Futhark.Util (showText)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty
 import Numeric.Half
@@ -155,7 +156,7 @@ prettyStacktrace cur = T.unlines . zipWith f [(0 :: Int) ..]
     f i x =
       (if cur == i then "-> " else "   ")
         <> "#"
-        <> T.pack (show i)
+        <> showText i
         <> (if i > 9 then "" else " ")
         <> " "
         <> x
