@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark literate` now supports an `:audio` directive for producing audio
+  files from arrays of `i8` (#1810).
+
 ### Removed
 
 ### Changed
