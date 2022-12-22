@@ -84,6 +84,19 @@ defaultVideoParams =
       videoFile = Nothing
     }
 
+data AudioParams = AudioParams
+  { audioSamplingFrequency :: Maybe Int,
+    audioCodec :: Maybe T.Text
+  }
+  deriving (Show)
+
+defaultAudioParams :: AudioParams
+defaultAudioParams =
+  AudioParams
+    { audioSamplingFrequency = Nothing,
+      audioCodec = Nothing
+    }
+
 data Directive
   = DirectiveRes Exp
   | DirectiveBrief Directive
@@ -92,7 +105,7 @@ data Directive
   | DirectivePlot Exp (Maybe (Int, Int))
   | DirectiveGnuplot Exp T.Text
   | DirectiveVideo Exp VideoParams
-  | DirectiveAudio Exp
+  | DirectiveAudio Exp AudioParams
   deriving (Show)
 
 varsInDirective :: Directive -> S.Set EntryName
@@ -103,7 +116,7 @@ varsInDirective (DirectiveImg e _) = varsInExp e
 varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveVideo e _) = varsInExp e
-varsInDirective (DirectiveAudio e) = varsInExp e
+varsInDirective (DirectiveAudio e _) = varsInExp e
 
 pprDirective :: Bool -> Directive -> PP.Doc a
 pprDirective _ (DirectiveRes e) =
@@ -151,8 +164,18 @@ pprDirective True (DirectiveVideo e params) =
     p s f pretty = do
       x <- f params
       Just $ s <> ": " <> pretty x
-pprDirective _ (DirectiveAudio e) =
-  "> :audio " <> PP.align (PP.pretty e)
+pprDirective _ (DirectiveAudio e params) =
+  ("> :audio " <> PP.pretty e)
+    <> if null params' then mempty else ";" <> PP.hardline <> PP.stack params'
+  where
+    params' =
+      catMaybes
+        [ p "sampling_frequency" audioSamplingFrequency PP.pretty,
+          p "codec" audioCodec PP.pretty
+        ]
+    p s f pretty = do
+      x <- f params
+      Just $ s <> ": " <> pretty x
 
 instance PP.Pretty Directive where
   pretty = pprDirective True
@@ -277,6 +300,28 @@ parseVideoParams =
       s <- lexeme $ takeWhileP Nothing (not . isSpace)
       pure params {videoFormat = Just s}
 
+parseAudioParams :: Parser AudioParams
+parseAudioParams =
+  fmap (fromMaybe defaultAudioParams) $
+    optional $
+      ";" *> hspace *> eol *> "-- " *> parseParams defaultAudioParams
+  where
+    parseParams params =
+      choice
+        [ choice
+            [pSamplingFrequency params, pCodec params]
+            >>= parseParams,
+          pure params
+        ]
+    pSamplingFrequency params = do
+      token "sampling_frequency:"
+      hz <- parseInt
+      pure params {audioSamplingFrequency = Just hz}
+    pCodec params = do
+      token "codec:"
+      s <- lexeme $ takeWhileP Nothing (not . isSpace)
+      pure params {audioCodec = Just s}
+
 atStartOfLine :: Parser ()
 atStartOfLine = do
   col <- sourceColumn <$> getSourcePos
@@ -341,6 +386,7 @@ parseBlock =
           directiveName "audio"
             $> DirectiveAudio
             <*> parseExp postlexeme
+            <*> parseAudioParams
             <* eol
         ]
     directiveName s = try $ token (":" <> s)
@@ -869,18 +915,43 @@ processDirective env (DirectiveVideo e params) = do
           liftIO $ copyFile webmfile videofile
 
 --
-processDirective env (DirectiveAudio e) = do
-  fmap imgBlock . newFile env (Nothing, "audio.wav") $ \wavfile -> do
-    maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-    case maybe_v of
-      Right (ValueAtom (I8Value _ bytes)) -> do
-        withTempDir $ \dir -> do
-          let rawfile = dir </> "raw.pcm"
-          liftIO $ LBS.writeFile rawfile (LBS.fromStrict $ SVec.vectorToByteString bytes)
-          void $ system "ffmpeg" ["-f", "s8", "-i", rawfile, wavfile] mempty
-      Right v -> nope $ fmap valueType v
-      Left t -> nope t
+processDirective env (DirectiveAudio e params) = do
+  fmap imgBlock . newFile env (Nothing, "output." <> T.unpack output_format) $
+    \audiofile -> do
+      maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+      case maybe_v of
+        Right (ValueAtom v) | Just (bytes, input_format) <- as_audio v -> do
+          withTempDir $ \dir -> do
+            let rawfile = dir </> "raw.pcm"
+            liftIO $ LBS.writeFile rawfile (LBS.fromStrict bytes)
+            void $
+              system
+                "ffmpeg"
+                [ "-f",
+                  input_format,
+                  "-ar",
+                  show sampling_frequency,
+                  "-i",
+                  rawfile,
+                  "-f",
+                  T.unpack output_format,
+                  audiofile
+                ]
+                mempty
+        Right v -> nope $ fmap valueType v
+        Left t -> nope t
   where
+    as_audio (I8Value _ bytes) = Just (SVec.vectorToByteString bytes, "s8")
+    as_audio (U8Value _ bytes) = Just (SVec.vectorToByteString bytes, "u8")
+    as_audio (I16Value _ bytes) = Just (SVec.vectorToByteString bytes, "s16le")
+    as_audio (U16Value _ bytes) = Just (SVec.vectorToByteString bytes, "u16le")
+    as_audio (I32Value _ bytes) = Just (SVec.vectorToByteString bytes, "s32le")
+    as_audio (U32Value _ bytes) = Just (SVec.vectorToByteString bytes, "u32le")
+    as_audio (F32Value _ bytes) = Just (SVec.vectorToByteString bytes, "f32le")
+    as_audio (F64Value _ bytes) = Just (SVec.vectorToByteString bytes, "f64le")
+    as_audio _ = Nothing
+    output_format = fromMaybe "wav" $ audioCodec params
+    sampling_frequency = fromMaybe 44100 $ audioSamplingFrequency params
     nope t =
       throwError $
         "Cannot create audio from value of type " <> prettyText t
