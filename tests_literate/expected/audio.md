@@ -14,5 +14,5 @@ def main =
 ```
 
 
-![](audio-img/dc2770fc8484099098130e52533f3283-audio.wav)
+![](audio-img/dc2770fc8484099098130e52533f3283-output.wav)
 
