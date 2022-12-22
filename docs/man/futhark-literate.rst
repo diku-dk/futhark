@@ -194,11 +194,38 @@ The following directives are supported:
   Use ``set term png size width,height`` to change the size to
   ``width`` by ``height`` pixels.
 
-* ``> :audio e``
+* ``> :audio e[; parameters...]``
 
-  Creates a sound-file from ``e``, which must be an expression of type ``[]i8``.
-  It is interpreted as a 8-bit PCM audio at 44100 Hz and turned into a
-  wave-soundfile.
+  Creates a sound-file from ``e``.  The optional parameters are lines of the
+  form *key:value*:
+
+  * ``sampling_frequency: <int>``
+
+    The sampling frequency (in Hz) of the input.  Defaults to ``44100``.
+
+  * ``codec: <name>``
+
+    The codec of the output.  Defaults to ``wav``. Other common options include
+    ``mp3``, ``flac``, ``ogg`` and ``opus``.
+
+  The expression ``e`` must have one of the following types:
+
+  * ``[]i8`` and ``[]u8``
+
+    Interpreted as PCM signed/unsigned 8-bit audio.
+
+  * ``[]i16`` and ``[]u16``
+
+    Interpreted as PCM signed/unsigned 16-bit audio.
+
+  * ``[]i32`` and ``[]u32``
+
+    Interpreted as PCM signed/unsigned 32-bit audio.
+
+  * ``[]f32`` and ``[]f64``
+
+    Interpreted as PCM signed/unsigned 32/64 bit floating-point audio. Should
+    only contain values between ``-1.0`` and ``1.0``.
 
 FUTHARKSCRIPT
 =============
