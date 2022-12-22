@@ -10,6 +10,7 @@ where
 
 import Data.ByteString.Char8 qualified as BS
 import Data.FileEmbed
+import Data.Text qualified as T
 import Data.Version
 import Futhark.Util (trim)
 import GitHash
@@ -24,12 +25,10 @@ version = Paths_futhark.version
 
 {-# NOINLINE versionString #-}
 
--- | The version of Futhark that we are using, as a 'String'.
-versionString :: String
+-- | The version of Futhark that we are using, in human-readable form.
+versionString :: T.Text
 versionString =
-  showVersion version
-    ++ unreleased
-    ++ gitversion $$tGitInfoCwdTry
+  T.pack (showVersion version) <> unreleased <> gitversion $$tGitInfoCwdTry
   where
     unreleased =
       if last (versionBranch version) == 0
@@ -38,22 +37,22 @@ versionString =
     gitversion (Left _) =
       case commitIdFromFile of
         Nothing -> ""
-        Just commit -> "\ngit: " <> commit
+        Just commit -> "\ngit: " <> T.pack commit
     gitversion (Right gi) =
-      concat
+      mconcat
         [ "\n",
           "git: ",
           branch,
-          take 7 $ giHash gi,
+          T.pack (take 7 $ giHash gi),
           " (",
-          giCommitDate gi,
+          T.pack (giCommitDate gi),
           ")",
           dirty
         ]
       where
         branch
           | giBranch gi == "master" = ""
-          | otherwise = giBranch gi ++ " @ "
+          | otherwise = T.pack (giBranch gi) <> " @ "
         dirty = if giDirty gi then " [modified]" else ""
 
 commitIdFromFile :: Maybe String
