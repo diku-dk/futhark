@@ -30,6 +30,7 @@ import Data.Time.Clock
 import Data.Vector.Unboxed qualified as U
 import Futhark.Server
 import Futhark.Test
+import Futhark.Util (showText)
 import Statistics.Autocorrelation (autocorrelation)
 import Statistics.Sample (fastStdDev, mean)
 import System.Exit
@@ -276,8 +277,8 @@ benchmarkDataset ::
 benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
   output_types <- cmdEither $ cmdOutputs server entry
   input_types <- cmdEither $ cmdInputs server entry
-  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types - 1]]
-      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types - 1]]
+  let outs = ["out" <> showText i | i <- [0 .. length output_types - 1]]
+      ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
 
   cmdMaybe . liftIO $ cmdClear server
 
@@ -301,7 +302,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
         case mapMaybe runtime call_lines of
           [call_runtime] -> pure (RunResult call_runtime, call_lines)
           [] -> throwError "Could not find runtime in output."
-          ls -> throwError $ "Ambiguous runtimes: " <> T.pack (show ls)
+          ls -> throwError $ "Ambiguous runtimes: " <> showText ls
 
   maybe_call_logs <- liftIO . timeout (runTimeout opts * 1000000) . runExceptT $ do
     -- First one uncounted warmup run.

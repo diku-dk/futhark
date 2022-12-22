@@ -13,7 +13,7 @@ import Data.Tree
 import Futhark.Bench
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (maxinum)
+import Futhark.Util (maxinum, showText)
 import Futhark.Util.Options
 import System.Directory
 import System.Environment (getExecutablePath)
@@ -104,7 +104,7 @@ serverOptions opts =
 setTuningParam :: Server -> String -> Int -> IO ()
 setTuningParam server name val =
   either (error . T.unpack . T.unlines . failureMsg) (const $ pure ())
-    =<< cmdSetTuningParam server (T.pack name) (T.pack (show val))
+    =<< cmdSetTuningParam server (T.pack name) (showText val)
 
 setTuningParams :: Server -> Path -> IO ()
 setTuningParams server = mapM_ (uncurry $ setTuningParam server)
