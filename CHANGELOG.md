@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Simplification mistake could lead to out-of-bounds reads (#1808).
 
+* `futhark lsp` now handles some bookkeeping messages sent by Eglot.
+
 ## [0.22.6]
 
 ### Added
