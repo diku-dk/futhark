@@ -40,12 +40,14 @@ import Data.List
     genericLength,
     genericTake,
     isPrefixOf,
+    sortOn,
     transpose,
   )
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
+import Data.Ord
 import Data.Text qualified as T
 import Futhark.Data qualified as V
 import Futhark.Util (chunk, maybeHead, splitFromEnd)
@@ -779,12 +781,40 @@ evalAppExp
 evalAppExp env _ (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
-evalAppExp env _ (Apply f x (Info (_, ext, _)) loc) = do
-  -- It is important that 'x' is evaluated first in order to bring any
-  -- sizes into scope that may be used in the type of 'f'.
-  x' <- evalArg env x ext
-  f' <- eval env f
-  apply loc env f' x'
+evalAppExp env t app@(Apply f x (Info (_, ext, automap)) loc)
+  | automap == mempty = do
+      -- It is important that 'x' is evaluated first in order to bring any
+      -- sizes into scope that may be used in the type of 'f'.
+      x' <- evalArg env x ext
+      f' <- eval env f
+      apply loc env f' x'
+  | otherwise = do
+      (f', args, ams) <- unrollApply $ AppExp app (Info (AppRes (fromStruct t) []))
+      expand
+        f'
+        ( sortOn
+            (Data.Ord.Down . fst)
+            (M.toList $ M.fromListWith (++) $ zip ams (map pure args))
+        )
+        mempty
+  where
+    unrollApply :: Exp -> EvalM (Value, [Value], [AutoMap])
+    unrollApply (AppExp (Apply e1 e2 (Info (_, ext', am)) _) _) = do
+      arg <- evalArg env e2 ext'
+      (f', args, ams) <- unrollApply e1
+      pure (f', args ++ [arg], ams ++ [am])
+    unrollApply f' = do
+      f'' <- eval env f'
+      pure (f'', mempty, mempty)
+
+    expand :: Value -> [(AutoMap, [Value])] -> [Value] -> EvalM Value
+    expand f' [] xs = foldM (apply loc env) f' xs
+    expand f' ((am, ys) : rest) xs
+      | am == mempty = expand f' [] (xs ++ ys)
+      | otherwise = do
+          vs <- mapM (expand f' rest) $ transpose $ map (snd . fromArray) $ xs ++ ys
+          let rowshape = valueShape $ head vs
+          pure $ toArray' rowshape vs
 evalAppExp env _ (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
