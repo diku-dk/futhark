@@ -13,22 +13,6 @@ import Language.LSP.Server (Handlers, LspM, notificationHandler, requestHandler)
 import Language.LSP.Types
 import Language.LSP.Types.Lens (HasUri (uri))
 
--- | Given an 'IORef' tracking the state, produce a set of handlers.
--- When we want to add more features to the language server, this is
--- the thing to change.
-handlers :: IORef State -> Handlers (LspM ())
-handlers state_mvar =
-  mconcat
-    [ onInitializeHandler,
-      onDocumentOpenHandler state_mvar,
-      onDocumentCloseHandler,
-      onDocumentSaveHandler state_mvar,
-      onDocumentChangeHandler state_mvar,
-      onDocumentFocusHandler state_mvar,
-      goToDefinitionHandler state_mvar,
-      onHoverHandler state_mvar
-    ]
-
 onInitializeHandler :: Handlers (LspM ())
 onInitializeHandler = notificationHandler SInitialized $ \_msg ->
   logStringStderr <& "Initialized"
@@ -83,3 +67,28 @@ onDocumentOpenHandler state_mvar = notificationHandler STextDocumentDidOpen $ \m
 onDocumentCloseHandler :: Handlers (LspM ())
 onDocumentCloseHandler = notificationHandler STextDocumentDidClose $ \_msg ->
   logStringStderr <& "Closed document"
+
+-- Sent by Eglot when first connecting - not sure when else it might
+-- be sent.
+onWorkspaceDidChangeConfiguration :: IORef State -> Handlers (LspM ())
+onWorkspaceDidChangeConfiguration _state_mvar =
+  notificationHandler SWorkspaceDidChangeConfiguration $ \msg -> do
+    let NotificationMessage _ _ (DidChangeConfigurationParams _settings) = msg
+    logStringStderr <& "WorkspaceDidChangeConfiguration"
+
+-- | Given an 'IORef' tracking the state, produce a set of handlers.
+-- When we want to add more features to the language server, this is
+-- the thing to change.
+handlers :: IORef State -> Handlers (LspM ())
+handlers state_mvar =
+  mconcat
+    [ onInitializeHandler,
+      onDocumentOpenHandler state_mvar,
+      onDocumentCloseHandler,
+      onDocumentSaveHandler state_mvar,
+      onDocumentChangeHandler state_mvar,
+      onDocumentFocusHandler state_mvar,
+      goToDefinitionHandler state_mvar,
+      onHoverHandler state_mvar,
+      onWorkspaceDidChangeConfiguration state_mvar
+    ]
