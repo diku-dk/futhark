@@ -16,12 +16,7 @@ import Data.Char (ord, toLower, digitToInt)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
 import Data.Loc (Loc (..), L(..), Pos(..))
-import Data.Bits
 import Data.Function (fix)
-import Data.List
-import Data.Monoid
-import Data.Either
-import Numeric.Half
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Word8, Word16, Word32, Word64,
@@ -30,8 +25,6 @@ import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
 import Language.Futhark.Parser.Lexer.Wrapper
 import Language.Futhark.Parser.Lexer.Tokens
-import qualified Data.ByteString.Internal as ByteString (w2c)
-import qualified Data.ByteString.Lazy as ByteString
 
 }
 
