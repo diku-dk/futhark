@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Parser can now handle arbitrarily complex chaining of indexing and
   projection.
 
+* Detect and complain about source files without .fut extension (#1813).
+
 ## [0.22.6]
 
 ### Added
