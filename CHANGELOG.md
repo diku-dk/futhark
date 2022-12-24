@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark lsp` now handles some bookkeeping messages sent by Eglot.
 
+* Parser can now handle arbitrarily complex chaining of indexing and
+  projection.
+
 ## [0.22.6]
 
 ### Added

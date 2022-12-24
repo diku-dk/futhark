@@ -9,6 +9,7 @@ module Language.Futhark.Parser.Lexer.Wrapper
   ( runAlex,
     Alex,
     AlexInput,
+    alexInputPrevChar,
     Byte,
     LexerError (..),
     alexSetInput,
@@ -45,6 +46,9 @@ type AlexInput =
     BS.ByteString, -- current input string
     Int64 -- bytes consumed so far
   )
+
+alexInputPrevChar :: AlexInput -> Char
+alexInputPrevChar (_, prev, _, _) = prev
 
 {-# INLINE alexGetByte #-}
 alexGetByte :: AlexInput -> Maybe (Byte, AlexInput)
