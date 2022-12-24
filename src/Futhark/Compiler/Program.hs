@@ -53,7 +53,7 @@ import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker qualified as E
 import Language.Futhark.Warnings
 import System.Directory (getModificationTime)
-import System.FilePath (normalise)
+import System.FilePath (normalise, takeExtension)
 import System.FilePath.Posix qualified as Posix
 
 data LoadedFile fm = LoadedFile
@@ -231,26 +231,31 @@ readUntypedLibraryExceptKnown known vfs fps = do
           Just prog_mvar -> pure (state, (include, prog_mvar))
           Nothing -> do
             prog_mvar <- newImportMVar $ do
-              r <- contentsAndModTime fp vfs
-              case r of
-                Just (Right (fs, mod_time)) -> do
-                  handleFile state_mvar vfs $
-                    LoadedFile
-                      { lfImportName = include,
-                        lfMod = fs,
-                        lfModTime = mod_time,
-                        lfPath = fp
-                      }
-                Just (Left e) ->
+              if takeExtension fp /= ".fut"
+                then
                   pure . UncheckedImport . Left . NE.singleton $
                     ProgError NoLoc $
-                      pretty $
-                        show e
-                Nothing ->
-                  pure . UncheckedImport . Left . NE.singleton $
-                    ProgError NoLoc $
-                      pretty $
-                        fp <> ": file not found."
+                      pretty fp <> ": source files must have a .fut extension."
+                else do
+                  r <- contentsAndModTime fp vfs
+                  case r of
+                    Just (Right (fs, mod_time)) -> do
+                      handleFile state_mvar vfs $
+                        LoadedFile
+                          { lfImportName = include,
+                            lfMod = fs,
+                            lfModTime = mod_time,
+                            lfPath = fp
+                          }
+                    Just (Left e) ->
+                      pure . UncheckedImport . Left . NE.singleton $
+                        ProgError NoLoc $
+                          pretty $
+                            show e
+                    Nothing ->
+                      pure . UncheckedImport . Left . NE.singleton $
+                        ProgError NoLoc $
+                          pretty fp <> ": file not found."
             pure (M.insert include prog_mvar state, (include, prog_mvar))
       where
         include = mkInitialImport fp_name
