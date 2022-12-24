@@ -918,43 +918,87 @@ processDirective env (DirectiveVideo e params) = do
 processDirective env (DirectiveAudio e params) = do
   fmap imgBlock . newFile env (Nothing, "output." <> T.unpack output_format) $
     \audiofile -> do
-      maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-      case maybe_v of
-        Right (ValueAtom v) | Just (bytes, input_format) <- as_audio v -> do
-          withTempDir $ \dir -> do
-            let rawfile = dir </> "raw.pcm"
-            liftIO $ LBS.writeFile rawfile (LBS.fromStrict bytes)
+      withTempDir $ \dir -> do
+        maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+        maybe_raw_files <- toRawFiles dir maybe_v
+        case maybe_raw_files of
+          (input_format, raw_files) -> do
             void $
               system
                 "ffmpeg"
-                [ "-f",
-                  input_format,
-                  "-ar",
-                  show sampling_frequency,
-                  "-i",
-                  rawfile,
-                  "-f",
-                  T.unpack output_format,
-                  audiofile
-                ]
+                ( concatMap
+                    ( \raw_file ->
+                        [ "-f",
+                          input_format,
+                          "-ar",
+                          show sampling_frequency,
+                          "-i",
+                          raw_file
+                        ]
+                    )
+                    raw_files
+                    ++ [ "-f",
+                         T.unpack output_format,
+                         "-filter_complex",
+                         concatMap
+                           (\i -> "[" <> show i <> ":a]")
+                           [0 .. length raw_files - 1]
+                           <> "amerge=inputs="
+                           <> show (length raw_files)
+                           <> "[a]",
+                         "-map",
+                         "[a]",
+                         audiofile
+                       ]
+                )
                 mempty
-        Right v -> nope $ fmap valueType v
-        Left t -> nope t
   where
-    as_audio (I8Value _ bytes) = Just (SVec.vectorToByteString bytes, "s8")
-    as_audio (U8Value _ bytes) = Just (SVec.vectorToByteString bytes, "u8")
-    as_audio (I16Value _ bytes) = Just (SVec.vectorToByteString bytes, "s16le")
-    as_audio (U16Value _ bytes) = Just (SVec.vectorToByteString bytes, "u16le")
-    as_audio (I32Value _ bytes) = Just (SVec.vectorToByteString bytes, "s32le")
-    as_audio (U32Value _ bytes) = Just (SVec.vectorToByteString bytes, "u32le")
-    as_audio (F32Value _ bytes) = Just (SVec.vectorToByteString bytes, "f32le")
-    as_audio (F64Value _ bytes) = Just (SVec.vectorToByteString bytes, "f64le")
-    as_audio _ = Nothing
+    writeRaw dir name v = do
+      let rawfile = dir </> name
+      let Just bytes = toBytes v
+      liftIO $ LBS.writeFile rawfile $ LBS.fromStrict bytes
+
+    toRawFiles dir (Right (ValueAtom v))
+      | length (valueShape v) == 1,
+        Just input_format <- toFfmpegFormat v = do
+          writeRaw dir "raw.pcm" v
+          pure (input_format, [dir </> "raw.pcm"])
+      | length (valueShape v) == 2,
+        Just input_format <- toFfmpegFormat v = do
+          (input_format,)
+            <$> zipWithM
+              ( \v' i -> do
+                  let file_name = "raw-" <> show i <> ".pcm"
+                  writeRaw dir file_name v'
+                  pure $ dir </> file_name
+              )
+              (valueElems v)
+              [0 :: Int ..]
+    toRawFiles _ v = nope $ fmap (fmap valueType) v
+
+    toFfmpegFormat I8Value {} = Just "s8"
+    toFfmpegFormat U8Value {} = Just "u8"
+    toFfmpegFormat I16Value {} = Just "s16le"
+    toFfmpegFormat U16Value {} = Just "u16le"
+    toFfmpegFormat I32Value {} = Just "s32le"
+    toFfmpegFormat U32Value {} = Just "u32le"
+    toFfmpegFormat F32Value {} = Just "f32le"
+    toFfmpegFormat F64Value {} = Just "f64le"
+    toFfmpegFormat _ = Nothing
+
+    toBytes (I8Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (U8Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (I16Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (U16Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (I32Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (U32Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (F32Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (F64Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes _ = Nothing
+
     output_format = fromMaybe "wav" $ audioCodec params
     sampling_frequency = fromMaybe 44100 $ audioSamplingFrequency params
-    nope t =
-      throwError $
-        "Cannot create audio from value of type " <> prettyText t
+    nope _ = throwError "Cannot create audio from value"
 
 -- Did this script block succeed or fail?
 data Failure = Failure | Success
