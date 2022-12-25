@@ -227,6 +227,14 @@ The following directives are supported:
     Interpreted as PCM signed/unsigned 32/64 bit floating-point audio. Should
     only contain values between ``-1.0`` and ``1.0``.
 
+  For each type of input, it is also possible to give expressions with a
+  two-dimensional type instead, e.g. ``[][]f32``.  These expressions are
+  interpreted as an array of channels, making it possible to do stereo audio by
+  returning e.g. ``[2][]f32``.  For stereo output, the first row is the left
+  channel and the second row is the right channel.  This functionality uses the
+  amerge filter from ffmpeg, so consult the documentation there for additional
+  information.
+
 FUTHARKSCRIPT
 =============
 
