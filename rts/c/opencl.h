@@ -964,21 +964,19 @@ static int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *
 }
 
 static int opencl_alloc(struct opencl_context *ctx, FILE *log,
-                        size_t min_size, const char *tag, cl_mem *mem_out) {
+                        size_t min_size, const char *tag,
+                        cl_mem *mem_out, size_t *size_out) {
   (void)tag;
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
   }
 
-  size_t size;
-
-  if (free_list_find(&ctx->free_list, min_size, tag, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, min_size, tag, size_out, mem_out) == 0) {
     // Successfully found a free block.  Is it big enough?
-    if (size >= min_size) {
+    if (*size_out >= min_size) {
       if (ctx->cfg.debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
       }
-
       return CL_SUCCESS;
     } else {
       if (ctx->cfg.debugging) {
@@ -991,6 +989,8 @@ static int opencl_alloc(struct opencl_context *ctx, FILE *log,
       }
     }
   }
+
+  *size_out = min_size;
 
   // We have to allocate a new block from the driver.  If the
   // allocation does not succeed, then we might be in an out-of-memory
@@ -1025,17 +1025,10 @@ static int opencl_alloc(struct opencl_context *ctx, FILE *log,
   return error;
 }
 
-static int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) {
-  size_t size;
-  cl_mem existing_mem;
-
-  int error = clGetMemObjectInfo(mem, CL_MEM_SIZE, sizeof(size_t), &size, NULL);
-
-  if (error == CL_SUCCESS) {
-    free_list_insert(&ctx->free_list, size, mem, tag);
-  }
-
-  return error;
+static int opencl_free(struct opencl_context *ctx,
+                       cl_mem mem, size_t size, const char *tag) {
+  free_list_insert(&ctx->free_list, size, mem, tag);
+  return CL_SUCCESS;
 }
 
 static int opencl_free_all(struct opencl_context *ctx) {

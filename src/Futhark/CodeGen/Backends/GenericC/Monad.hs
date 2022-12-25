@@ -183,9 +183,9 @@ type Allocate op s =
   SpaceId ->
   CompilerM op s ()
 
--- | De-allocate the given memory block with the given tag, which is
--- in the given memory space.
-type Deallocate op s = C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
+-- | De-allocate the given memory block, with the given tag, with the
+-- given size,, which is in the given memory space.
+type Deallocate op s = C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
 
 -- | Create a static array of values - initialised at load time.
 type StaticArray op s = VName -> SpaceId -> PrimType -> ArrayContents -> CompilerM op s ()
@@ -485,16 +485,17 @@ allocRawMem dest size space desc = case space of
     stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
 
 freeRawMem ::
-  (C.ToExp a, C.ToExp b) =>
+  (C.ToExp a, C.ToExp b, C.ToExp c) =>
   a ->
-  Space ->
   b ->
+  Space ->
+  c ->
   CompilerM op s ()
-freeRawMem mem space desc =
+freeRawMem mem size space desc =
   case space of
     Space sid -> do
       free_mem <- asks (opsDeallocate . envOperations)
-      free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:desc|] sid
+      free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:size|] [C.cexp|$exp:desc|] sid
     _ -> item [C.citem|free($exp:mem);|]
 
 declMem :: VName -> Space -> CompilerM op s ()
@@ -571,7 +572,7 @@ allocMem mem size space on_failure = do
                        $stm:on_failure
                      }|]
     else do
-      freeRawMem mem space mem_s
+      freeRawMem mem size space mem_s
       allocRawMem mem size space [C.cexp|desc|]
 
 copyMemoryDefaultSpace ::
