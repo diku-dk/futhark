@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Detect and complain about source files without .fut extension (#1813).
 
+* Overly conservative checking of whether a function parameter is
+  allowed by be consumed - it was disallowed if it contained any
+  scalars (#1816).
+
 ## [0.22.6]
 
 ### Added
