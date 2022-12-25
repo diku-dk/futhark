@@ -21,37 +21,43 @@ import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (rem)
 import Prelude hiding (quot, rem)
 
--- GCC supported primitve atomic Operations
--- TODO: Add support for 1, 2, and 16 bytes too
-gccAtomics :: AtomicBinOp
-gccAtomics = flip lookup cpu
-  where
-    cpu =
-      [ (Add Int32 OverflowUndef, Imp.AtomicAdd Int32),
-        (Sub Int32 OverflowUndef, Imp.AtomicSub Int32),
-        (And Int32, Imp.AtomicAnd Int32),
-        (Xor Int32, Imp.AtomicXor Int32),
-        (Or Int32, Imp.AtomicOr Int32),
-        (Add Int64 OverflowUndef, Imp.AtomicAdd Int64),
-        (Sub Int64 OverflowUndef, Imp.AtomicSub Int64),
-        (And Int64, Imp.AtomicAnd Int64),
-        (Xor Int64, Imp.AtomicXor Int64),
-        (Or Int64, Imp.AtomicOr Int64)
-      ]
+opCompiler :: OpCompiler MCMem HostEnv Imp.Multicore
+opCompiler dest (Alloc e space) = compileAlloc dest e space
+opCompiler dest (Inner op) = compileMCOp dest op
 
--- | Compile the program.
-compileProg ::
-  MonadFreshNames m =>
-  Prog MCMem ->
-  m (Warnings, Imp.Definitions Imp.Multicore)
-compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics mempty) ops Imp.DefaultSpace
+parallelCopy :: CopyCompiler MCMem HostEnv Imp.Multicore
+parallelCopy pt destloc srcloc = do
+  seq_code <- collect $ localOps inThreadOps $ do
+    body <- genCopy
+    free_params <- freeParams body
+    emit $ Imp.Op $ Imp.ParLoop "copy" body free_params
+  free_params <- freeParams seq_code
+  s <- prettyString <$> newVName "copy"
+  iterations <- dPrimVE "iterations" $ product $ map pe64 srcshape
+  let scheduling = Imp.SchedulerInfo (untyped iterations) Imp.Static
+  emit . Imp.Op $
+    Imp.SegOp s free_params (Imp.ParallelTask seq_code) Nothing [] scheduling
   where
-    ops =
-      (defaultOperations opCompiler)
-        { opsExpCompiler = compileMCExp
-        }
-    opCompiler dest (Alloc e space) = compileAlloc dest e space
-    opCompiler dest (Inner op) = compileMCOp dest op
+    MemLoc destmem _ _ = destloc
+    MemLoc srcmem srcshape _ = srcloc
+    genCopy = collect . inISPC . generateChunkLoop "copy" Vectorized $ \i -> do
+      is <- dIndexSpace' "i" (map pe64 srcshape) i
+      (_, destspace, destidx) <- fullyIndexArray' destloc is
+      (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
+      tmp <- tvVar <$> dPrim "tmp" pt
+      emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
+      emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
+
+topLevelOps, inThreadOps :: Operations MCMem HostEnv Imp.Multicore
+inThreadOps =
+  (defaultOperations opCompiler)
+    { opsExpCompiler = compileMCExp
+    }
+topLevelOps =
+  (defaultOperations opCompiler)
+    { opsExpCompiler = compileMCExp,
+      opsCopyCompiler = parallelCopy
+    }
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
 updateAcc acc is vs = sComment "UpdateAcc" $ do
@@ -124,7 +130,7 @@ compileMCOp pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
-  seq_code <- collect $ do
+  seq_code <- collect $ localOps inThreadOps $ do
     nsubtasks <- dPrim "nsubtasks" int32
     sOp $ Imp.GetNumTasks $ tvVar nsubtasks
     emit =<< compileSegOp pat op nsubtasks
@@ -163,3 +169,32 @@ compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
   compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =
   compileSegMap pat space kbody
+
+-- GCC supported primitve atomic Operations
+-- TODO: Add support for 1, 2, and 16 bytes too
+gccAtomics :: AtomicBinOp
+gccAtomics = flip lookup cpu
+  where
+    cpu =
+      [ (Add Int32 OverflowUndef, Imp.AtomicAdd Int32),
+        (Sub Int32 OverflowUndef, Imp.AtomicSub Int32),
+        (And Int32, Imp.AtomicAnd Int32),
+        (Xor Int32, Imp.AtomicXor Int32),
+        (Or Int32, Imp.AtomicOr Int32),
+        (Add Int64 OverflowUndef, Imp.AtomicAdd Int64),
+        (Sub Int64 OverflowUndef, Imp.AtomicSub Int64),
+        (And Int64, Imp.AtomicAnd Int64),
+        (Xor Int64, Imp.AtomicXor Int64),
+        (Or Int64, Imp.AtomicOr Int64)
+      ]
+
+-- | Compile the program.
+compileProg ::
+  MonadFreshNames m =>
+  Prog MCMem ->
+  m (Warnings, Imp.Definitions Imp.Multicore)
+compileProg =
+  Futhark.CodeGen.ImpGen.compileProg
+    (HostEnv gccAtomics mempty)
+    topLevelOps
+    Imp.DefaultSpace
