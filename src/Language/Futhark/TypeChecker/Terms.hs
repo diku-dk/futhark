@@ -1320,7 +1320,7 @@ checkReturnAlias loc rettp params =
     notAliasingParam params' names =
       forM_ params' $ \p ->
         let consumedNonunique p' =
-              not (unique $ unInfo $ identType p') && (identName p' `S.member` names)
+              not (consumableParamType $ unInfo $ identType p') && (identName p' `S.member` names)
          in case find consumedNonunique $ S.toList $ patIdents p of
               Just p' ->
                 returnAliased (baseName $ identName p') loc
@@ -1333,6 +1333,13 @@ checkReturnAlias loc rettp params =
       concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
     returnAliasing expected got =
       [(uniqueness expected, S.map aliasVar $ aliases got)]
+
+    consumableParamType (Array _ u _ _) = u == Unique
+    consumableParamType (Scalar Prim {}) = True
+    consumableParamType (Scalar (TypeVar _ u _ _)) = u == Unique
+    consumableParamType (Scalar (Record fs)) = all consumableParamType fs
+    consumableParamType (Scalar (Sum fs)) = all (all consumableParamType) fs
+    consumableParamType (Scalar Arrow {}) = False
 
 checkBinding ::
   ( Name,
