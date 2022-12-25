@@ -200,14 +200,15 @@ allocateCUDABuffer mem size tag "device" =
   GC.stm
     [C.cstm|ctx->error =
      CUDA_SUCCEED_NONFATAL(cuda_alloc(&ctx->cuda, ctx->log,
-                                      (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+                                      (size_t)$exp:size, $exp:tag,
+                                      &$exp:mem, (size_t*)&$exp:size));|]
 allocateCUDABuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateCUDABuffer :: GC.Deallocate OpenCL ()
-deallocateCUDABuffer mem tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_free(&ctx->cuda, $exp:mem, $exp:tag));|]
-deallocateCUDABuffer _ _ space =
+deallocateCUDABuffer mem size tag "device" =
+  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_free(&ctx->cuda, $exp:mem, $exp:size, $exp:tag));|]
+deallocateCUDABuffer _ _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
 copyCUDAMemory :: GC.Copy OpenCL ()

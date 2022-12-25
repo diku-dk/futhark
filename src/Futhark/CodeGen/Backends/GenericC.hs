@@ -134,7 +134,7 @@ defineMemorySpace space = do
   -- Unreferencing a memory block consists of decreasing its reference
   -- count and freeing the corresponding memory if the count reaches
   -- zero.
-  free <- collect $ freeRawMem [C.cexp|block->mem|] space [C.cexp|desc|]
+  free <- collect $ freeRawMem [C.cexp|block->mem|] [C.cexp|block->size|] space [C.cexp|desc|]
   ctx_ty <- contextType
   let unrefdef =
         [C.cedecl|int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {

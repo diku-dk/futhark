@@ -213,14 +213,15 @@ allocateOpenCLBuffer mem size tag "device" =
   GC.stm
     [C.cstm|ctx->error =
      OPENCL_SUCCEED_NONFATAL(opencl_alloc(&ctx->opencl, ctx->log,
-                                          (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+                                          (size_t)$exp:size, $exp:tag,
+                                          &$exp:mem, (size_t*)&$exp:size));|]
 allocateOpenCLBuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
-deallocateOpenCLBuffer mem tag "device" =
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_free(&ctx->opencl, $exp:mem, $exp:tag));|]
-deallocateOpenCLBuffer _ _ space =
+deallocateOpenCLBuffer mem size tag "device" =
+  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_free(&ctx->opencl, $exp:mem, $exp:size, $exp:tag));|]
+deallocateOpenCLBuffer _ _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' space"
 
 syncArg :: GC.CopyBarrier -> C.Exp

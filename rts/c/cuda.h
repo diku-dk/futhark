@@ -697,14 +697,14 @@ static void cuda_cleanup(struct cuda_context *ctx) {
 }
 
 static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
-                           size_t min_size, const char *tag, CUdeviceptr *mem_out) {
+                           size_t min_size, const char *tag,
+                           CUdeviceptr *mem_out, size_t *size_out) {
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
   }
 
-  size_t size;
-  if (free_list_find(&ctx->free_list, min_size, tag, &size, mem_out) == 0) {
-    if (size >= min_size) {
+  if (free_list_find(&ctx->free_list, min_size, tag, size_out, mem_out) == 0) {
+    if (*size_out >= min_size) {
       if (ctx->cfg.debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
       }
@@ -720,6 +720,8 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
       }
     }
   }
+
+  *size_out = min_size;
 
   if (ctx->cfg.debugging) {
     fprintf(log, "Actually allocating the desired block.\n");
@@ -742,17 +744,10 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
   return res;
 }
 
-static CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
-                          const char *tag) {
-  size_t size;
-  CUdeviceptr existing_mem;
-
-  CUresult res = cuMemGetAddressRange(NULL, &size, mem);
-  if (res == CUDA_SUCCESS) {
-    free_list_insert(&ctx->free_list, size, mem, tag);
-  }
-
-  return res;
+static CUresult cuda_free(struct cuda_context *ctx,
+                          CUdeviceptr mem, size_t size, const char *tag) {
+  free_list_insert(&ctx->free_list, size, mem, tag);
+  return CUDA_SUCCESS;
 }
 
 static CUresult cuda_free_all(struct cuda_context *ctx) {
