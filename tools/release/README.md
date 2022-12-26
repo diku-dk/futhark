@@ -31,7 +31,7 @@ corresponds exactly to the state of the Git repository at some point.
 
  * Run `git tag vX.Y.Z`.
 
- * Push the tag: `git push --tags vX.Y.Z`.  This counts as a release on
+ * Push the tag: `git push origin vX.Y.Z`.  This counts as a release on
    GitHub.
 
  * Wait for GitHub Actions to create the new release.
