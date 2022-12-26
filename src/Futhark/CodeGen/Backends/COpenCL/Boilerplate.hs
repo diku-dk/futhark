@@ -26,7 +26,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
-import Futhark.CodeGen.RTS.C (freeListH, openclH)
+import Futhark.CodeGen.RTS.C (openclH)
 import Futhark.Util (chunk, zEncodeText)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
@@ -321,6 +321,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          char *error;
                          typename lock_t error_lock;
                          typename FILE *log;
+                         struct free_list free_list;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
                          typename cl_mem global_failure;
@@ -343,14 +344,13 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      ctx->profiling_paused = 0;
                      ctx->logging = cfg->opencl.logging;
                      ctx->error = NULL;
-                     create_lock(&ctx->error_lock);
+                     context_setup(ctx);
                      ctx->log = stderr;
                      ctx->opencl.profiling_records_capacity = 200;
                      ctx->opencl.profiling_records_used = 0;
                      ctx->opencl.profiling_records =
                        malloc(ctx->opencl.profiling_records_capacity *
                               sizeof(struct profiling_record));
-                     create_lock(&ctx->lock);
 
                      ctx->failure_is_an_option = 0;
                      $stms:init_fields
@@ -454,8 +454,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  $stms:free_fields
-                                 free_constants(ctx);
-                                 free_lock(&ctx->lock);
+                                 context_teardown(ctx);
                                  $stms:(map releaseKernel (M.toList kernels))
                                  OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
                                  OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
@@ -575,8 +574,6 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
     program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
     openCL_boilerplate =
       [C.cunit|
-          $esc:("typedef cl_mem fl_mem_t;")
-          $esc:(T.unpack freeListH)
           $esc:(T.unpack openclH)
           static const char *opencl_program[] = {$inits:program_fragments};|]
 

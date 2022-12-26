@@ -33,7 +33,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, freeListH, halfH, lockH, timingH, utilH)
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
 import Language.C.Quote.OpenCL qualified as C
@@ -403,6 +403,8 @@ $utilH
 $cacheH
 $halfH
 $timingH
+$lockH
+$freeListH
 |]
 
   let early_decls = definitionsText $ DL.toList $ compEarlyDecls endstate
@@ -421,8 +423,6 @@ $timingH
 #include <ctype.h>
 
 $header_extra
-
-$lockH
 
 #define FUTHARK_F64_ENABLED
 

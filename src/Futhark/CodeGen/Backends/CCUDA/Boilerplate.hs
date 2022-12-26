@@ -25,7 +25,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
-import Futhark.CodeGen.RTS.C (cudaH, freeListH)
+import Futhark.CodeGen.RTS.C (cudaH)
 import Futhark.Util (chunk, zEncodeText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -68,8 +68,6 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
     [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
-      $esc:("typedef CUdeviceptr fl_mem_t;")
-      $esc:(T.unpack freeListH)
       $esc:(T.unpack cudaH)
       const char *cuda_program[] = {$inits:fragments, NULL};
       |]
@@ -336,6 +334,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          int profiling;
                          int profiling_paused;
                          int logging;
+                         struct free_list free_list;
                          typename lock_t lock;
                          char *error;
                          typename lock_t error_lock;
@@ -377,7 +376,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->profiling_paused = 0;
                  ctx->logging = cfg->cu_cfg.logging;
                  ctx->error = NULL;
-                 create_lock(&ctx->error_lock);
+                 context_setup(ctx);
                  ctx->log = stderr;
                  ctx->cuda.profiling_records_capacity = 200;
                  ctx->cuda.profiling_records_used = 0;
@@ -386,7 +385,6 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                           sizeof(struct profiling_record));
 
                  ctx->cuda.cfg = cfg->cu_cfg;
-                 create_lock(&ctx->lock);
 
                  ctx->failure_is_an_option = 0;
                  ctx->total_runs = 0;
@@ -424,11 +422,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  $stms:free_fields
-                                 free_constants(ctx);
+                                 context_teardown(ctx);
                                  cuMemFree(ctx->global_failure);
                                  cuMemFree(ctx->global_failure_args);
                                  cuda_cleanup(&ctx->cuda);
-                                 free_lock(&ctx->lock);
                                  ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]

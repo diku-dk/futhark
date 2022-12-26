@@ -147,6 +147,7 @@ generateContext = do
                       typename FILE *log;
                       int total_runs;
                       long int total_runtime;
+                      struct free_list free_list;
                       $sdecls:fields
 
                       // Tuning parameters
@@ -174,9 +175,9 @@ generateContext = do
              ctx->profiling_paused = 0;
              ctx->logging = 0;
              ctx->error = NULL;
-             create_lock(&ctx->error_lock);
              ctx->log = stderr;
-             create_lock(&ctx->lock);
+
+             context_setup(ctx);
 
              int tune_kappa = 0;
              double kappa = 5.1f * 1000;
@@ -206,9 +207,8 @@ generateContext = do
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
              $stms:free_fields
-             free_constants(ctx);
+             context_teardown(ctx);
              (void)scheduler_destroy(&ctx->scheduler);
-             free_lock(&ctx->lock);
              ctx->cfg->in_use = 0;
              free(ctx);
            }|]
