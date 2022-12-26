@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark multicore` now parallelises copies (#1799).
 
+* `futhark multicore` now uses an allocator that better handles large
+  allocations (#1768).
+
 ### Removed
 
 ### Changed
