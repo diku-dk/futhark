@@ -76,6 +76,7 @@ generateBoilerplate = do
                           typename lock_t error_lock;
                           typename FILE *log;
                           int profiling_paused;
+                          struct free_list free_list;
                           $sdecls:fields
                         };|]
     )
@@ -96,9 +97,8 @@ generateBoilerplate = do
                                   ctx->profiling = cfg->debugging;
                                   ctx->logging = cfg->debugging;
                                   ctx->error = NULL;
-                                  create_lock(&ctx->error_lock);
                                   ctx->log = stderr;
-                                  create_lock(&ctx->lock);
+                                  context_setup(ctx);
                                   $stms:init_fields
                                   init_constants(ctx);
                                   return ctx;
@@ -109,8 +109,7 @@ generateBoilerplate = do
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  $stms:free_fields
-                                 free_constants(ctx);
-                                 free_lock(&ctx->lock);
+                                 context_teardown(ctx);
                                  ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]

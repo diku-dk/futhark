@@ -971,19 +971,22 @@ static int opencl_alloc(struct opencl_context *ctx, FILE *log,
     min_size = sizeof(int);
   }
 
-  if (free_list_find(&ctx->free_list, min_size, tag, size_out, mem_out) == 0) {
+  cl_mem* memptr;
+  if (free_list_find(&ctx->free_list, min_size, tag, size_out, (fl_mem*)&memptr) == 0) {
     // Successfully found a free block.  Is it big enough?
     if (*size_out >= min_size) {
       if (ctx->cfg.debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
       }
+      *mem_out = *memptr;
+      free(memptr);
       return CL_SUCCESS;
     } else {
       if (ctx->cfg.debugging) {
         fprintf(log, "Found a free block, but it was too small.\n");
       }
-
-      int error = clReleaseMemObject(*mem_out);
+      int error = clReleaseMemObject(*memptr);
+      free(*memptr);
       if (error != CL_SUCCESS) {
         return error;
       }
@@ -1010,8 +1013,10 @@ static int opencl_alloc(struct opencl_context *ctx, FILE *log,
     if (ctx->cfg.debugging) {
       fprintf(log, "Out of OpenCL memory: releasing entry from the free list...\n");
     }
-    cl_mem mem;
-    if (free_list_first(&ctx->free_list, &mem) == 0) {
+    cl_mem* memptr;
+    if (free_list_first(&ctx->free_list, (fl_mem*)&memptr) == 0) {
+      cl_mem mem = *memptr;
+      free(memptr);
       error = clReleaseMemObject(mem);
       if (error != CL_SUCCESS) {
         return error;
@@ -1027,14 +1032,18 @@ static int opencl_alloc(struct opencl_context *ctx, FILE *log,
 
 static int opencl_free(struct opencl_context *ctx,
                        cl_mem mem, size_t size, const char *tag) {
-  free_list_insert(&ctx->free_list, size, mem, tag);
+  cl_mem* memptr = malloc(sizeof(cl_mem));
+  *memptr = mem;
+  free_list_insert(&ctx->free_list, size, (fl_mem)memptr, tag);
   return CL_SUCCESS;
 }
 
 static int opencl_free_all(struct opencl_context *ctx) {
-  cl_mem mem;
   free_list_pack(&ctx->free_list);
-  while (free_list_first(&ctx->free_list, &mem) == 0) {
+  cl_mem* memptr;
+  while (free_list_first(&ctx->free_list, (fl_mem*)&memptr) == 0) {
+    cl_mem mem = *memptr;
+    free(memptr);
     int error = clReleaseMemObject(mem);
     if (error != CL_SUCCESS) {
       return error;

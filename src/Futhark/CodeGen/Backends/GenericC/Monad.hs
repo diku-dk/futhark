@@ -482,7 +482,8 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
+    stm
+      [C.cstm|host_alloc(ctx, (size_t)$exp:size, $exp:desc, (size_t*)&$exp:size, (void*)&$exp:dest);|]
 
 freeRawMem ::
   (C.ToExp a, C.ToExp b, C.ToExp c) =>
@@ -496,7 +497,9 @@ freeRawMem mem size space desc =
     Space sid -> do
       free_mem <- asks (opsDeallocate . envOperations)
       free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:size|] [C.cexp|$exp:desc|] sid
-    _ -> item [C.citem|free($exp:mem);|]
+    _ ->
+      item
+        [C.citem|host_free(ctx, (size_t)$exp:size, $exp:desc, (void*)$exp:mem);|]
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
