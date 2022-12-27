@@ -103,12 +103,15 @@ generateConfigFuns sizes = do
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {int in_use;
-                              struct cuda_config cu_cfg;
+                              int debugging;
                               int profiling;
+                              int logging;
+                              const char *cache_fname;
+
+                              struct cuda_config cu_cfg;
                               typename int64_t tuning_params[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
-                              const char *cache_fname;
                             };|]
     )
 
@@ -124,16 +127,19 @@ generateConfigFuns sizes = do
                            return NULL;
                          }
                          cfg->in_use = 0;
-
+                         cfg->debugging = 0;
                          cfg->profiling = 0;
+                         cfg->logging = 0;
+                         cfg->cache_fname = NULL;
+
                          cfg->num_nvrtc_opts = 0;
                          cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
-                         cfg->cache_fname = NULL;
                          $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
                                           tuning_param_names, tuning_param_vars,
                                           cfg->tuning_params, tuning_param_classes);
+
                          return cfg;
                        }|]
     )
@@ -160,7 +166,7 @@ generateConfigFuns sizes = do
   GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
-                         cfg->cu_cfg.logging = cfg->cu_cfg.debugging = flag;
+                         cfg->logging = cfg->debugging = flag;
                        }|]
     )
 
@@ -174,7 +180,7 @@ generateConfigFuns sizes = do
   GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
-                         cfg->cu_cfg.logging = flag;
+                         cfg->logging = flag;
                        }|]
     )
 
@@ -364,27 +370,19 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                 assert(!cfg->in_use);
                  struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                  if (ctx == NULL) {
                    return NULL;
                  }
-                 ctx->cfg = cfg;
-                 ctx->cfg->in_use = 1;
-                 ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
-                 ctx->profiling = cfg->profiling;
-                 ctx->profiling_paused = 0;
-                 ctx->logging = cfg->cu_cfg.logging;
-                 ctx->error = NULL;
-                 context_setup(ctx);
-                 ctx->log = stderr;
+                 context_setup(cfg, ctx);
+                 ctx->cuda.cfg.debugging = ctx->debugging;
+                 ctx->cuda.cfg.logging = ctx->logging;
+
                  ctx->cuda.profiling_records_capacity = 200;
                  ctx->cuda.profiling_records_used = 0;
                  ctx->cuda.profiling_records =
                    malloc(ctx->cuda.profiling_records_capacity *
                           sizeof(struct profiling_record));
-
-                 ctx->cuda.cfg = cfg->cu_cfg;
 
                  ctx->failure_is_an_option = 0;
                  ctx->total_runs = 0;
@@ -426,7 +424,6 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                                  cuMemFree(ctx->global_failure);
                                  cuMemFree(ctx->global_failure_args);
                                  cuda_cleanup(&ctx->cuda);
-                                 ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]
     )
