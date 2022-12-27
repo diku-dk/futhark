@@ -71,8 +71,10 @@ generateContext = do
       [C.cedecl|struct $id:s { int in_use;
                                int debugging;
                                int profiling;
-                               int num_threads;
+                               int logging;
                                const char *cache_fname;
+
+                               int num_threads;
                              };|]
     )
 
@@ -86,7 +88,9 @@ generateContext = do
                              cfg->in_use = 0;
                              cfg->debugging = 0;
                              cfg->profiling = 0;
+                             cfg->logging = 0;
                              cfg->cache_fname = NULL;
+
                              cfg->num_threads = 0;
                              return cfg;
                            }|]
@@ -159,25 +163,12 @@ generateContext = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-             assert(!cfg->in_use);
              struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
              if (ctx == NULL) {
                return NULL;
              }
-             ctx->cfg = cfg;
-             ctx->cfg->in_use = 1;
-
              // Initialize rand()
              fast_srand(time(0));
-             ctx->detail_memory = cfg->debugging;
-             ctx->debugging = cfg->debugging;
-             ctx->profiling = cfg->profiling;
-             ctx->profiling_paused = 0;
-             ctx->logging = 0;
-             ctx->error = NULL;
-             ctx->log = stderr;
-
-             context_setup(ctx);
 
              int tune_kappa = 0;
              double kappa = 5.1f * 1000;
@@ -194,11 +185,9 @@ generateContext = do
                                 kappa) != 0) {
                return NULL;
              }
-
              $stms:init_fields
-
+             context_setup(cfg, ctx);
              init_constants(ctx);
-
              return ctx;
           }|]
     )
@@ -209,7 +198,6 @@ generateContext = do
              $stms:free_fields
              context_teardown(ctx);
              (void)scheduler_destroy(&ctx->scheduler);
-             ctx->cfg->in_use = 0;
              free(ctx);
            }|]
     )
