@@ -374,6 +374,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  if (ctx == NULL) {
                    return NULL;
                  }
+                 ctx->cuda.cfg = cfg->cu_cfg;
                  context_setup(cfg, ctx);
                  ctx->cuda.cfg.debugging = ctx->debugging;
                  ctx->cuda.cfg.logging = ctx->logging;
