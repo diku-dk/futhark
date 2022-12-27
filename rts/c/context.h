@@ -72,10 +72,20 @@ static void host_free(struct futhark_context* ctx,
   }
 }
 
-static void context_setup(struct futhark_context *ctx) {
+static void context_setup(struct futhark_context_config* cfg, struct futhark_context *ctx) {
+  assert(!cfg->in_use);
+  ctx->cfg = cfg;
+  ctx->cfg->in_use = 1;
   create_lock(&ctx->error_lock);
   create_lock(&ctx->lock);
   free_list_init(&ctx->free_list);
+  ctx->detail_memory = cfg->debugging;
+  ctx->debugging = cfg->debugging;
+  ctx->logging = cfg->logging;
+  ctx->profiling = cfg->profiling;
+  ctx->profiling_paused = 0;
+  ctx->error = NULL;
+  ctx->log = stderr;
 }
 
 static void context_teardown(struct futhark_context *ctx) {
@@ -84,6 +94,7 @@ static void context_teardown(struct futhark_context *ctx) {
   free_list_destroy(&ctx->free_list);
   free_lock(&ctx->lock);
   free_lock(&ctx->error_lock);
+  ctx->cfg->in_use = 0;
 }
 
 // End of context.h

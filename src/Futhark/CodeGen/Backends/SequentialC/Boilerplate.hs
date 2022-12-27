@@ -11,8 +11,10 @@ generateBoilerplate :: GC.CompilerM op s ()
 generateBoilerplate = do
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { int debugging;
-                               int in_use;
+      [C.cedecl|struct $id:s { int in_use;
+                               int debugging;
+                               int profiling;
+                               int logging;
                                const char *cache_fname;
                              };|]
     )
@@ -26,7 +28,10 @@ generateBoilerplate = do
                                  }
                                  cfg->in_use = 0;
                                  cfg->debugging = 0;
+                                 cfg->profiling = 0;
+                                 cfg->logging = 0;
                                  cfg->cache_fname = NULL;
+
                                  return cfg;
                                }|]
     )
@@ -84,21 +89,11 @@ generateBoilerplate = do
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                                  assert(!cfg->in_use);
                                   struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                                   if (ctx == NULL) {
                                     return NULL;
                                   }
-                                  ctx->cfg = cfg;
-                                  ctx->cfg->in_use = 1;
-
-                                  ctx->detail_memory = cfg->debugging;
-                                  ctx->debugging = cfg->debugging;
-                                  ctx->profiling = cfg->debugging;
-                                  ctx->logging = cfg->debugging;
-                                  ctx->error = NULL;
-                                  ctx->log = stderr;
-                                  context_setup(ctx);
+                                  context_setup(cfg, ctx);
                                   $stms:init_fields
                                   init_constants(ctx);
                                   return ctx;
@@ -110,7 +105,6 @@ generateBoilerplate = do
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  $stms:free_fields
                                  context_teardown(ctx);
-                                 ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]
     )
