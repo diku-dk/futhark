@@ -52,7 +52,7 @@
 
 -- ==
 -- entry: log1p
--- input { [-2f32, -1f32, 2f32, f32.nan, f32.inf, -f32.inf] }
+-- input { [-2f64, -1f64, 2f64, f64.nan, f64.inf, -f64.inf] }
 -- output { [true, false, false, true, false, true] }
 
 entry eqNaN = map (\x -> x == f64.nan)
