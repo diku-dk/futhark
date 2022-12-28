@@ -50,6 +50,11 @@
 -- input { [10f32, f32.nan, f32.inf, -f32.inf] }
 -- output { [false, true, false, true] }
 
+-- ==
+-- entry: log1p
+-- input { [-2f32, -1f32, 2f32, f32.nan, f32.inf, -f32.inf] }
+-- output { [true, false, false, true, false, true] }
+
 entry eqNaN = map (\x -> x == f32.nan)
 entry ltNaN = map (\x -> x < f32.nan)
 entry lteNaN = map (\x -> x <= f32.nan)
@@ -60,3 +65,4 @@ entry sumNaN = map (\x -> f32.isnan (x + f32.nan))
 entry sumInf = map (\x -> f32.isinf (x + f32.inf))
 entry log2 = map (\x -> f32.isnan (f32.log2 (x)))
 entry log10 = map (\x -> f32.isnan (f32.log10 (x)))
+entry log1p = map (\x -> f32.isnan (f32.log1p (x)))

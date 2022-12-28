@@ -50,6 +50,11 @@
 -- input { [10f64, f64.nan, f64.inf, -f64.inf] }
 -- output { [false, true, false, true] }
 
+-- ==
+-- entry: log1p
+-- input { [-2f32, -1f32, 2f32, f32.nan, f32.inf, -f32.inf] }
+-- output { [true, false, false, true, false, true] }
+
 entry eqNaN = map (\x -> x == f64.nan)
 entry ltNaN = map (\x -> x < f64.nan)
 entry lteNaN = map (\x -> x <= f64.nan)
@@ -60,3 +65,4 @@ entry sumNaN = map (\x -> f64.isnan (x + f64.nan))
 entry sumInf = map (\x -> f64.isinf (x + f64.inf))
 entry log2 = map (\x -> f64.isnan (f64.log2 (x)))
 entry log10 = map (\x -> f64.isnan (f64.log10 (x)))
+entry log1p = map (\x -> f64.isnan (f64.log1p (x)))
