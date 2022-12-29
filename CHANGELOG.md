@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Minor parser regression that mostly affects the REPL (#1822).
+
 ## [0.22.7]
 
 ### Added
