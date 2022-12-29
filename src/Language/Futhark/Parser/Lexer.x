@@ -102,10 +102,10 @@ tokens :-
   @intlit u64              { tokenM $ pure . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
   @intlit                  { tokenM $ pure . INTLIT . readIntegral . T.filter (/= '_') }
 
-  [^\.] ^ @reallit f16     { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [^\.] ^ @reallit f32     { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [^\.] ^ @reallit f64     { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [^\.] ^ @reallit         { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
+  [\n[^\.]] ^ @reallit f16     { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit f32     { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit f64     { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit         { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
   @hexreallit f16          { tokenM $ fmap F16LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
