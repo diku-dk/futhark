@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `f16.log1p`/`f32.log1p`/`f64.log1p` by nbos (#1820).
+
 ### Removed
 
 ### Changed
