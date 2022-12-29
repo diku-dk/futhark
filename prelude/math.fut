@@ -187,6 +187,8 @@ module type real = {
   val log2: t -> t
   -- | Base-10 logarithm.
   val log10: t -> t
+  -- | Compute `log (1 + x)` accurately even when `x` is very small.
+  val log1p: t -> t
 
   -- | Round towards infinity.
   val ceil : t -> t
@@ -927,6 +929,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   def log (x: f64) = intrinsics.log64 x
   def log2 (x: f64) = intrinsics.log2_64 x
   def log10 (x: f64) = intrinsics.log10_64 x
+  def log1p (x: f64) = intrinsics.log1p_64 x
   def exp (x: f64) = intrinsics.exp64 x
   def sin (x: f64) = intrinsics.sin64 x
   def cos (x: f64) = intrinsics.cos64 x
@@ -1041,6 +1044,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   def log (x: f32) = intrinsics.log32 x
   def log2 (x: f32) = intrinsics.log2_32 x
   def log10 (x: f32) = intrinsics.log10_32 x
+  def log1p (x: f32) = intrinsics.log1p_32 x
   def exp (x: f32) = intrinsics.exp32 x
   def sin (x: f32) = intrinsics.sin32 x
   def cos (x: f32) = intrinsics.cos32 x
@@ -1159,6 +1163,7 @@ module f16: (float with t = f16 with int_t = u16) = {
   def log (x: f16) = intrinsics.log16 x
   def log2 (x: f16) = intrinsics.log2_16 x
   def log10 (x: f16) = intrinsics.log10_16 x
+  def log1p (x: f16) = intrinsics.log1p_16 x
   def exp (x: f16) = intrinsics.exp16 x
   def sin (x: f16) = intrinsics.sin16 x
   def cos (x: f16) = intrinsics.cos16 x
