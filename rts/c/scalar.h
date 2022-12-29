@@ -1909,7 +1909,7 @@ static inline float futrts_log10_32(float x) {
 }
 
 static inline float futrts_log1p_32(float x) {
-  if(x == -1.0f || (futrts_isinf32(x) && x > 0.0f)) return log(x + 1.0f);
+  if(x == -1.0f || (futrts_isinf32(x) && x > 0.0f)) return x / 0.0f;
   float y = 1.0f + x;
   float z = y - 1.0f;
   return log(y) - (z-x)/y;
@@ -2373,7 +2373,7 @@ static inline double futrts_log10_64(double x) {
 }
 
 static inline double futrts_log1p_64(double x) {
-  if(x == -1.0d || (futrts_isinf64(x) && x > 0.0d)) return log(x + 1.0d);
+  if(x == -1.0d || (futrts_isinf64(x) && x > 0.0d)) return x / 0.0d;
   double y = 1.0d + x;
   double z = y - 1.0d;
   return log(y) - (z-x)/y;

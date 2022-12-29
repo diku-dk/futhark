@@ -351,7 +351,7 @@ static inline f16 futrts_log10_16(f16 x) {
 }
 
 static inline f16 futrts_log1p_16(f16 x) {
-  if(x == -1.0f16 || (futrts_isinf16(x) && x > 0.0f16)) return log(x + 1.0f16);
+  if(x == -1.0f16 || (futrts_isinf16(x) && x > 0.0f16)) return x / 0.0f16;
   f16 y = 1.0f16 + x;
   f16 z = y - 1.0f16;
   return log(y) - (z-x)/y;
