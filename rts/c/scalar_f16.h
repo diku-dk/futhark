@@ -509,7 +509,7 @@ static inline f16 futrts_log10_16(f16 x) {
 }
 
 static inline f16 futrts_log1p_16(f16 x) {
-  return (float16)log1pf((float)x);
+  return (f16)log1pf((float)x);
 }
 
 static inline f16 futrts_sqrt16(f16 x) {
