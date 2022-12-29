@@ -183,6 +183,12 @@ pdBuiltin "log2_32" [x] =
   Just [untyped $ 1 / (isF32 x * log 2)]
 pdBuiltin "log2_64" [x] =
   Just [untyped $ 1 / (isF64 x * log 2)]
+pdBuiltin "log1p_16" [x] =
+  Just [untyped $ 1 / (isF16 x + 1)]
+pdBuiltin "log1p_32" [x] =
+  Just [untyped $ 1 / (isF32 x + 1)]
+pdBuiltin "log1p_64" [x] =
+  Just [untyped $ 1 / (isF64 x + 1)]
 pdBuiltin "exp16" [x] =
   Just [untyped $ exp (isF16 x)]
 pdBuiltin "exp32" [x] =

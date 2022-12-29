@@ -931,6 +931,13 @@ static inline uniform float futrts_log10_32(uniform float x) {
   return futrts_log32(x) / log(10.0f);
 }
 
+static inline uniform float futrts_log1p_32(uniform float x) {
+  if(x == -1.0f || (futrts_isinf32(x) && x > 0.0f)) return x / 0.0f;
+  uniform float y = 1.0f + x;
+  uniform float z = y - 1.0f;
+  return log(y) - (z-x)/y;
+}
+
 static inline uniform float futrts_sqrt32(uniform float x) {
   return sqrt(x);
 }
@@ -1187,6 +1194,13 @@ static inline uniform double futrts_log2_64(uniform double x) {
 
 static inline uniform double futrts_log10_64(uniform double x) {
   return futrts_log64(x)/log(10.0d);
+}
+
+static inline uniform double futrts_log1p_64(uniform double x) {
+  if(x == -1.0d || (futrts_isinf64(x) && x > 0.0d)) return x / 0.0d;
+  uniform double y = 1.0d + x;
+  uniform double z = y - 1.0d;
+  return log(y) - (z-x)/y;
 }
 
 static inline uniform double futrts_sqrt64(uniform double x) {
@@ -1559,6 +1573,13 @@ static inline uniform f16 futrts_log2_16(uniform f16 x) {
 
 static inline uniform f16 futrts_log10_16(uniform f16 x) {
   return futrts_log16(x) / log(10.0f16);
+}
+
+static inline uniform f16 futrts_log1p_16(uniform f16 x) {
+  if(x == -1.0f16 || (futrts_isinf16(x) && x > 0.0f16)) return x / 0.0f16;
+  uniform f16 y = 1.0f16 + x;
+  uniform f16 z = y - 1.0f16;
+  return log(y) - (z-x)/y;
 }
 
 static inline uniform f16 futrts_sqrt16(uniform f16 x) {

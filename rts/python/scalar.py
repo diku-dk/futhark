@@ -436,6 +436,9 @@ def futhark_log2_64(x):
 def futhark_log10_64(x):
   return np.float64(np.log10(x))
 
+def futhark_log1p_64(x):
+  return np.float64(np.log1p(x))
+
 def futhark_sqrt64(x):
   return np.sqrt(x)
 
@@ -534,6 +537,9 @@ def futhark_log2_32(x):
 def futhark_log10_32(x):
   return np.float32(np.log10(x))
 
+def futhark_log1p_32(x):
+  return np.float32(np.log1p(x))
+
 def futhark_sqrt32(x):
   return np.float32(np.sqrt(x))
 
@@ -631,6 +637,9 @@ def futhark_log2_16(x):
 
 def futhark_log10_16(x):
   return np.float16(np.log10(x))
+
+def futhark_log1p_16(x):
+  return np.float16(np.log1p(x))
 
 def futhark_sqrt16(x):
   return np.float16(np.sqrt(x))

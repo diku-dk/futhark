@@ -135,6 +135,7 @@ import Foreign.C.Types (CUShort (..))
 import Futhark.Util (convFloat)
 import Futhark.Util.CMath
 import Futhark.Util.Pretty
+import Numeric (log1p)
 import Numeric.Half
 import Prelude hiding (id, (.))
 
@@ -1193,6 +1194,10 @@ primFuns =
       f16 "log10_16" (logBase 10),
       f32 "log10_32" (logBase 10),
       f64 "log10_64" (logBase 10),
+      --
+      f16 "log1p_16" log1p,
+      f32 "log1p_32" log1p,
+      f64 "log1p_64" log1p,
       --
       f16 "log2_16" (logBase 2),
       f32 "log2_32" (logBase 2),
