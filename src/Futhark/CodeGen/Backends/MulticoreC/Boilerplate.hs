@@ -157,9 +157,9 @@ generateBoilerplate = do
                            }|]
     )
 
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[0];|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[0];|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[0];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[1];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[1];|]
+  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[1];|]
 
   GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
