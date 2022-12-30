@@ -90,16 +90,16 @@ generateSizeFuns sizes = do
       size_name_inits = map (strinit . prettyText) $ M.keys sizes
       size_var_inits = map (strinit . zEncodeText . prettyText) $ M.keys sizes
       size_class_inits = map (strinit . prettyText) $ M.elems sizes
-
+      size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys sizes
+      num_sizes = length sizes
+  GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
+  GC.earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_sizes;|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
 
 generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () T.Text
 generateConfigFuns sizes = do
-  let size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys sizes
-      num_sizes = M.size sizes
-  GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {int in_use;
@@ -107,9 +107,13 @@ generateConfigFuns sizes = do
                               int profiling;
                               int logging;
                               const char *cache_fname;
+                              int num_tuning_params;
+                              typename int64_t *tuning_params;
+                              const char** tuning_param_names;
+                              const char** tuning_param_vars;
+                              const char** tuning_param_classes;
 
                               struct cuda_config cu_cfg;
-                              typename int64_t tuning_params[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
                             };|]
@@ -131,12 +135,17 @@ generateConfigFuns sizes = do
                          cfg->profiling = 0;
                          cfg->logging = 0;
                          cfg->cache_fname = NULL;
+                         cfg->num_tuning_params = num_tuning_params;
+                         cfg->tuning_params = calloc(cfg->num_tuning_params, sizeof(int64_t));
+                         cfg->tuning_param_names = tuning_param_names;
+                         cfg->tuning_param_vars = tuning_param_vars;
+                         cfg->tuning_param_classes = tuning_param_classes;
 
                          cfg->num_nvrtc_opts = 0;
                          cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
                          $stms:size_value_inits
-                         cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
+                         cuda_config_init(&cfg->cu_cfg, cfg->num_tuning_params,
                                           tuning_param_names, tuning_param_vars,
                                           cfg->tuning_params, tuning_param_classes);
 
@@ -260,9 +269,8 @@ generateConfigFuns sizes = do
   GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value);|],
       [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value) {
-
-                         for (int i = 0; i < $int:num_sizes; i++) {
-                           if (strcmp(param_name, tuning_param_names[i]) == 0) {
+                         for (int i = 0; i < cfg->num_tuning_params; i++) {
+                           if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
                              cfg->tuning_params[i] = new_value;
                              return 0;
                            }

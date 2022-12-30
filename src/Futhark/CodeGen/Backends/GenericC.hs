@@ -518,7 +518,7 @@ generateCommonLibFuns memreport = do
   publicDef_ "get_tuning_param_count" InitDecl $ \s ->
     ( [C.cedecl|int $id:s(void);|],
       [C.cedecl|int $id:s(void) {
-                return sizeof(tuning_param_names)/sizeof(tuning_param_names[0]);
+                return num_tuning_params;
               }|]
     )
 
