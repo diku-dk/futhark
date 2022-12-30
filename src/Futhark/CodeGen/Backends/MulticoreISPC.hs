@@ -27,6 +27,7 @@ import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.MulticoreC qualified as MC
+import Futhark.CodeGen.Backends.MulticoreC.Boilerplate (generateBoilerplate)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
 import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGen
@@ -74,7 +75,7 @@ compileProg version prog = do
           operations
           (ISPCState mempty mempty)
           ( do
-              MC.generateContext
+              generateBoilerplate
               mapM_ compileBuiltinFun funs
           )
           mempty
