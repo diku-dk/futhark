@@ -741,3 +741,5 @@ commonOptions =
         optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
       }
   ]
+
+{-# NOINLINE generateBoilerplate #-}

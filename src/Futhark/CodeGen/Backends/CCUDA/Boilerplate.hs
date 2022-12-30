@@ -472,3 +472,5 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
     [C.citem|if (ctx->error == NULL) {
                CUDA_SUCCEED_NONFATAL(cuda_free_all(&ctx->cuda));
              }|]
+
+{-# NOINLINE generateBoilerplate #-}

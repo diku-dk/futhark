@@ -128,3 +128,4 @@ generateBoilerplate = do
                          return 1;
                        }|]
     )
+{-# NOINLINE generateBoilerplate #-}
