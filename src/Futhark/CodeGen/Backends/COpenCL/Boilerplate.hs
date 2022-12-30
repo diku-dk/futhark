@@ -14,6 +14,7 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     kernelRuntime,
     kernelRuns,
     sizeLoggingCode,
+    generateTuningParams,
   )
 where
 
@@ -66,8 +67,8 @@ profilingEvent name =
                              &ctx->$id:(kernelRuns name),
                              &ctx->$id:(kernelRuntime name))|]
 
-generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM op a ()
-generateSizeFuns sizes = do
+generateTuningParams :: M.Map Name SizeClass -> GC.CompilerM op a ()
+generateTuningParams sizes = do
   let strinit s = [C.cinit|$string:(T.unpack s)|]
       intinit x = [C.cinit|$int:x|]
       size_name_inits = map (strinit . prettyText) $ M.keys sizes
@@ -102,7 +103,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 
   mapM_ GC.earlyDecl top_decls
 
-  generateSizeFuns sizes
+  generateTuningParams sizes
 
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],

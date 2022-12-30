@@ -19,6 +19,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
     copyScalarToDev,
     costCentreReport,
     failureSwitch,
+    generateTuningParams,
     kernelRuns,
     kernelRuntime,
   )
@@ -26,7 +27,7 @@ import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.RTS.C (cudaH)
-import Futhark.Util (chunk, zEncodeText)
+import Futhark.Util (chunk)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
@@ -72,7 +73,7 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
       const char *cuda_program[] = {$inits:fragments, NULL};
       |]
 
-  generateSizeFuns sizes
+  generateTuningParams sizes
   cfg <- generateConfigFuns sizes
   generateContextFuns cfg cost_centres kernels sizes failures
 
@@ -83,20 +84,6 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
       [ [C.cinit|$string:s|]
         | s <- chunk 2000 $ T.unpack $ cuda_prelude <> cuda_program
       ]
-
-generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () ()
-generateSizeFuns sizes = do
-  let strinit s = [C.cinit|$string:(T.unpack s)|]
-      size_name_inits = map (strinit . prettyText) $ M.keys sizes
-      size_var_inits = map (strinit . zEncodeText . prettyText) $ M.keys sizes
-      size_class_inits = map (strinit . prettyText) $ M.elems sizes
-      size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys sizes
-      num_sizes = length sizes
-  GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
-  GC.earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_sizes;|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
 
 generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () T.Text
 generateConfigFuns sizes = do
