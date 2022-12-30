@@ -18,6 +18,7 @@ import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericWASM
 import Futhark.CodeGen.Backends.MulticoreC qualified as MC
+import Futhark.CodeGen.Backends.MulticoreC.Boilerplate (generateBoilerplate)
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGen
 import Futhark.IR.MCMem
@@ -48,7 +49,7 @@ compileProg version prog = do
       "wasm_multicore"
       version
       MC.operations
-      MC.generateContext
+      generateBoilerplate
       ""
       (DefaultSpace, [DefaultSpace])
       MC.cliOptions
