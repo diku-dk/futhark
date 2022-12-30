@@ -72,6 +72,26 @@ static void host_free(struct futhark_context* ctx,
   }
 }
 
+static void context_config_setup(struct futhark_context_config* cfg) {
+  cfg->in_use = 0;
+  cfg->debugging = 0;
+  cfg->profiling = 0;
+  cfg->logging = 0;
+  cfg->cache_fname = NULL;
+  cfg->num_tuning_params = num_tuning_params;
+  cfg->tuning_params = malloc(cfg->num_tuning_params * sizeof(int64_t));
+  memcpy(cfg->tuning_params, tuning_param_defaults,
+         cfg->num_tuning_params * sizeof(int64_t));
+  cfg->tuning_param_names = tuning_param_names;
+  cfg->tuning_param_vars = tuning_param_vars;
+  cfg->tuning_param_classes = tuning_param_classes;
+}
+
+static void context_config_teardown(struct futhark_context_config* cfg) {
+  assert(!cfg->in_use);
+  free(cfg->tuning_params);
+}
+
 static void context_setup(struct futhark_context_config* cfg, struct futhark_context *ctx) {
   assert(!cfg->in_use);
   ctx->cfg = cfg;

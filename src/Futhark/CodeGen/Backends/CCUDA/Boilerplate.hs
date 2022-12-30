@@ -9,7 +9,6 @@ module Futhark.CodeGen.Backends.CCUDA.Boilerplate
 where
 
 import Data.Map qualified as M
-import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( copyDevToDev,
@@ -74,7 +73,7 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
       |]
 
   generateTuningParams sizes
-  cfg <- generateConfigFuns sizes
+  cfg <- generateConfigFuns
   generateContextFuns cfg cost_centres kernels sizes failures
 
   GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(&ctx->cuda));|]
@@ -85,8 +84,8 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
         | s <- chunk 2000 $ T.unpack $ cuda_prelude <> cuda_program
       ]
 
-generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () T.Text
-generateConfigFuns sizes = do
+generateConfigFuns :: GC.CompilerM OpenCL () T.Text
+generateConfigFuns = do
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {int in_use;
@@ -106,10 +105,6 @@ generateConfigFuns sizes = do
                             };|]
     )
 
-  let size_value_inits = zipWith sizeInit [0 .. M.size sizes - 1] (M.elems sizes)
-      sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
-        where
-          val = fromMaybe 0 $ sizeDefault size
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:cfg* $id:s(void);|],
       [C.cedecl|struct $id:cfg* $id:s(void) {
@@ -117,21 +112,11 @@ generateConfigFuns sizes = do
                          if (cfg == NULL) {
                            return NULL;
                          }
-                         cfg->in_use = 0;
-                         cfg->debugging = 0;
-                         cfg->profiling = 0;
-                         cfg->logging = 0;
-                         cfg->cache_fname = NULL;
-                         cfg->num_tuning_params = num_tuning_params;
-                         cfg->tuning_params = calloc(cfg->num_tuning_params, sizeof(int64_t));
-                         cfg->tuning_param_names = tuning_param_names;
-                         cfg->tuning_param_vars = tuning_param_vars;
-                         cfg->tuning_param_classes = tuning_param_classes;
+                         context_config_setup(cfg);
 
                          cfg->num_nvrtc_opts = 0;
                          cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
-                         $stms:size_value_inits
                          cuda_config_init(&cfg->cu_cfg, cfg->num_tuning_params,
                                           tuning_param_names, tuning_param_vars,
                                           cfg->tuning_params, tuning_param_classes);
@@ -143,7 +128,7 @@ generateConfigFuns sizes = do
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
-                         assert(!cfg->in_use);
+                         context_config_teardown(cfg);
                          free(cfg->nvrtc_opts);
                          free(cfg);
                        }|]

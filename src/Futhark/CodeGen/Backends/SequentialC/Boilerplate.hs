@@ -16,6 +16,11 @@ generateBoilerplate = do
                                int profiling;
                                int logging;
                                const char *cache_fname;
+                               int num_tuning_params;
+                               typename int64_t *tuning_params;
+                               const char** tuning_param_names;
+                               const char** tuning_param_vars;
+                               const char** tuning_param_classes;
                              };|]
     )
 
@@ -26,12 +31,7 @@ generateBoilerplate = do
                                  if (cfg == NULL) {
                                    return NULL;
                                  }
-                                 cfg->in_use = 0;
-                                 cfg->debugging = 0;
-                                 cfg->profiling = 0;
-                                 cfg->logging = 0;
-                                 cfg->cache_fname = NULL;
-
+                                 context_config_setup(cfg);
                                  return cfg;
                                }|]
     )
@@ -39,7 +39,7 @@ generateBoilerplate = do
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
-                                 assert(!cfg->in_use);
+                                 context_config_teardown(cfg);
                                  free(cfg);
                                }|]
     )
@@ -117,9 +117,11 @@ generateBoilerplate = do
                                }|]
     )
 
+  GC.earlyDecl [C.cedecl|static const int num_tuning_params = 0;|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[1];|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[1];|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[1];|]
+  GC.earlyDecl [C.cedecl|static typename int64_t *tuning_param_defaults[1];|]
 
   GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],

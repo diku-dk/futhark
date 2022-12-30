@@ -131,18 +131,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          if (cfg == NULL) {
                            return NULL;
                          }
-                         cfg->in_use = 0;
-                         cfg->debugging = 0;
-                         cfg->profiling = 0;
-                         cfg->logging = 0;
-                         cfg->cache_fname = NULL;
-                         cfg->num_tuning_params = num_tuning_params;
-                         cfg->tuning_params = malloc(cfg->num_tuning_params * sizeof(int64_t));
-                         memcpy(cfg->tuning_params, tuning_param_defaults,
-                                cfg->num_tuning_params * sizeof(int64_t));
-                         cfg->tuning_param_names = tuning_param_names;
-                         cfg->tuning_param_vars = tuning_param_vars;
-                         cfg->tuning_param_classes = tuning_param_classes;
+                         context_config_setup(cfg);
 
                          cfg->num_build_opts = 0;
                          cfg->build_opts = (const char**) malloc(sizeof(const char*));
@@ -158,8 +147,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
-                         assert(!cfg->in_use);
-                         free(cfg->tuning_params);
+                         context_config_teardown(cfg);
                          free(cfg->build_opts);
                          free(cfg);
                        }|]
