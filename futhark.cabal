@@ -38,6 +38,7 @@ extra-source-files:
 -- here, so for now we spell out every single file.
     rts/c/atomics.h
     rts/c/context.h
+    rts/c/context_prototypes.h
     rts/c/backends/c.h
     rts/c/backends/cuda.h
     rts/c/backends/multicore.h
