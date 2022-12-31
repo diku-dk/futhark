@@ -471,6 +471,10 @@ $entry_point_decls
       (entry_points, entry_points_manifest) <-
         unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
 
+      headerDecl InitDecl [C.cedecl|struct futhark_context_config;|]
+      headerDecl InitDecl [C.cedecl|struct futhark_context_config* futhark_context_config_new(void);|]
+      headerDecl InitDecl [C.cedecl|void futhark_context_config_free(struct futhark_context_config* cfg);|]
+
       extra
 
       mapM_ earlyDecl $ concat memfuns
@@ -507,6 +511,27 @@ generateCommonLibFuns memreport = do
   cfg <- configType
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
+
+  publicDef_ "context_config_set_debugging" InitDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
+                         cfg->profiling = cfg->logging = cfg->debugging = flag;
+                       }|]
+    )
+
+  publicDef_ "context_config_set_profiling" InitDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
+                         cfg->profiling = flag;
+                       }|]
+    )
+
+  publicDef_ "context_config_set_logging" InitDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
+                         cfg->logging = flag;
+                       }|]
+    )
 
   publicDef_ "context_config_set_cache_file" MiscDecl $ \s ->
     ( [C.cedecl|void $id:s($ty:cfg* cfg, const char *f);|],
