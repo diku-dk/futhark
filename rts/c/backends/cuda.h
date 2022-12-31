@@ -432,7 +432,7 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context_config *cfg,
   opts[i++] = msgprintf("-D%s=%d",
                         "max_group_size",
                         (int)ctx->max_block_size);
-  for (size_t j = 0; j < cfg->num_tuning_params; j++) {
+  for (int j = 0; j < cfg->num_tuning_params; j++) {
     opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
                           cfg->tuning_params[j]);
   }
@@ -460,8 +460,7 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context_config *cfg,
   *opts_out = opts;
 }
 
-static char* cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
-                              const char *opts[], size_t n_opts,
+static char* cuda_nvrtc_build(const char *src, const char *opts[], size_t n_opts,
                               char **ptx) {
   nvrtcProgram prog;
   char *problem = NULL;
@@ -497,7 +496,7 @@ static char* cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
   return NULL;
 }
 
-static void cuda_load_ptx_from_cache(struct futhark_context_config *cfg, struct cuda_context *ctx,
+static void cuda_load_ptx_from_cache(struct futhark_context_config *cfg,
                                      const char *src,
                                      const char *opts[], size_t n_opts,
                                      struct cache_hash *h, const char *cache_fname,
@@ -636,7 +635,7 @@ static char* cuda_module_setup(struct futhark_context_config *cfg,
   struct cache_hash h;
   int loaded_ptx_from_cache = 0;
   if (cache_fname != NULL) {
-    cuda_load_ptx_from_cache(cfg, ctx, src, (const char**)opts, n_opts, &h, cache_fname, &ptx);
+    cuda_load_ptx_from_cache(cfg, src, (const char**)opts, n_opts, &h, cache_fname, &ptx);
 
     if (ptx != NULL) {
       if (cfg->logging) {
@@ -658,7 +657,7 @@ static char* cuda_module_setup(struct futhark_context_config *cfg,
   }
 
   if (ptx == NULL) {
-    char* problem = cuda_nvrtc_build(ctx, src, (const char**)opts, n_opts, &ptx);
+    char* problem = cuda_nvrtc_build(src, (const char**)opts, n_opts, &ptx);
     if (problem != NULL) {
       free(src);
       return problem;
