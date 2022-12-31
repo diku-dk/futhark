@@ -136,17 +136,17 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          typename lock_t error_lock;
                          typename FILE *log;
                          struct free_list free_list;
-                         $sdecls:fields
-                         $sdecls:ctx_opencl_fields
                          typename cl_mem global_failure;
                          typename cl_mem global_failure_args;
                          struct opencl_context opencl;
                          struct tuning_params tuning_params;
                          // True if a potentially failing kernel has been enqueued.
                          typename cl_int failure_is_an_option;
-
                          int total_runs;
                          long int total_runtime;
+
+                         $sdecls:fields
+                         $sdecls:ctx_opencl_fields
                        };|]
     )
 

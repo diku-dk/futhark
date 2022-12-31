@@ -29,6 +29,7 @@ generateBoilerplate = do
                           typename FILE *log;
                           int profiling_paused;
                           struct free_list free_list;
+
                           $sdecls:fields
                         };|]
     )

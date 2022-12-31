@@ -35,11 +35,10 @@ generateBoilerplate = do
                       int total_runs;
                       long int total_runtime;
                       struct free_list free_list;
-                      $sdecls:fields
-
-                      // Tuning parameters
                       typename int64_t tuning_timing;
                       typename int64_t tuning_iter;
+
+                      $sdecls:fields
                     };|]
     )
 
