@@ -378,7 +378,8 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   int minor = device_query(dev, COMPUTE_CAPABILITY_MINOR);
 
   int chosen = -1;
-  for (int i = 0; i < sizeof(x)/sizeof(x[0]); i++) {
+  int num_archs = sizeof(x)/sizeof(x[0]);
+  for (int i = 0; i < num_archs; i++) {
     if (x[i].major < major || (x[i].major == major && x[i].minor <= minor)) {
       chosen = i;
     } else {
