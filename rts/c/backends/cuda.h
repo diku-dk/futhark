@@ -1,4 +1,4 @@
-// Start of cuda.h.
+// Start of backends/cuda.h.
 
 #define CUDA_SUCCEED_FATAL(x) cuda_api_succeed_fatal(x, #x, __FILE__, __LINE__)
 #define CUDA_SUCCEED_NONFATAL(x) cuda_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
@@ -67,9 +67,22 @@ static char* nvrtc_api_succeed_nonfatal(nvrtcResult res, const char *call,
   }
 }
 
-struct cuda_config {
+struct futhark_context_config {
+  int in_use;
   int debugging;
+  int profiling;
   int logging;
+  const char *cache_fname;
+  int num_tuning_params;
+  int64_t *tuning_params;
+  const char** tuning_param_names;
+  const char** tuning_param_vars;
+  const char** tuning_param_classes;
+  // Uniform fields above.
+
+  int num_nvrtc_opts;
+  const char **nvrtc_opts;
+
   const char *preferred_device;
   int preferred_device_num;
 
@@ -88,22 +101,13 @@ struct cuda_config {
   int default_block_size_changed;
   int default_grid_size_changed;
   int default_tile_size_changed;
-
-  int num_sizes;
-  const char **size_names;
-  const char **size_vars;
-  int64_t *size_values;
-  const char **size_classes;
 };
 
-static void cuda_config_init(struct cuda_config *cfg,
-                             int num_sizes,
-                             const char *size_names[],
-                             const char *size_vars[],
-                             int64_t *size_values,
-                             const char *size_classes[]) {
-  cfg->debugging = 0;
-  cfg->logging = 0;
+static void backend_context_config_setup(struct futhark_context_config *cfg) {
+  cfg->num_nvrtc_opts = 0;
+  cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
+  cfg->nvrtc_opts[0] = NULL;
+
   cfg->preferred_device_num = 0;
   cfg->preferred_device = "";
   cfg->dump_program_to = NULL;
@@ -121,12 +125,104 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->default_block_size_changed = 0;
   cfg->default_grid_size_changed = 0;
   cfg->default_tile_size_changed = 0;
+}
 
-  cfg->num_sizes = num_sizes;
-  cfg->size_names = size_names;
-  cfg->size_vars = size_vars;
-  cfg->size_values = size_values;
-  cfg->size_classes = size_classes;
+static void backend_context_config_teardown(struct futhark_context_config* cfg) {
+  free(cfg->nvrtc_opts);
+}
+
+void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char *opt) {
+    cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
+    cfg->num_nvrtc_opts++;
+    cfg->nvrtc_opts = (const char **) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts + 1) * sizeof(const char *));
+    cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
+}
+
+void futhark_context_config_set_device(struct futhark_context_config *cfg, const char *s) {
+  int x = 0;
+  if (*s == '#') {
+    s++;
+    while (isdigit(*s)) {
+      x = x * 10 + (*s++)-'0';
+    }
+    // Skip trailing spaces.
+    while (isspace(*s)) {
+      s++;
+    }
+  }
+  cfg->preferred_device = s;
+  cfg->preferred_device_num = x;
+}
+
+void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path) {
+    cfg->dump_program_to = path;
+}
+
+void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path) {
+    cfg->load_program_from = path;
+}
+
+void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path) {
+    cfg->dump_ptx_to = path;
+}
+
+void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char *path) {
+    cfg->load_ptx_from = path;
+}
+
+void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+    cfg->default_block_size = size;
+    cfg->default_block_size_changed = 1;
+}
+
+void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+    cfg->default_grid_size = num;
+    cfg->default_grid_size_changed = 1;
+}
+
+void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
+    cfg->default_tile_size = size;
+    cfg->default_tile_size_changed = 1;
+}
+
+void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size) {
+    cfg->default_reg_tile_size = size;
+}
+
+void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size) {
+    cfg->default_threshold = size;
+}
+
+int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
+                                            const char *param_name,
+                                            size_t new_value) {
+    for (int i = 0; i < 1; i++) {
+        if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
+            cfg->tuning_params[i] = new_value;
+            return 0;
+        }
+    }
+    if (strcmp(param_name, "default_group_size") == 0) {
+        cfg->default_block_size = new_value;
+        return 0;
+    }
+    if (strcmp(param_name, "default_num_groups") == 0) {
+        cfg->default_grid_size = new_value;
+        return 0;
+    }
+    if (strcmp(param_name, "default_threshold") == 0) {
+        cfg->default_threshold = new_value;
+        return 0;
+    }
+    if (strcmp(param_name, "default_tile_size") == 0) {
+        cfg->default_tile_size = new_value;
+        return 0;
+    }
+    if (strcmp(param_name, "default_reg_tile_size") == 0) {
+        cfg->default_reg_tile_size = new_value;
+        return 0;
+    }
+    return 1;
 }
 
 // A record of something that happened.
@@ -140,8 +236,6 @@ struct cuda_context {
   CUdevice dev;
   CUcontext cu_ctx;
   CUmodule module;
-
-  struct cuda_config cfg;
 
   struct free_list free_list;
 
@@ -175,23 +269,8 @@ static int _function_query(CUfunction dev, CUfunction_attribute attrib) {
   return val;
 }
 
-static void set_preferred_device(struct cuda_config *cfg, const char *s) {
-  int x = 0;
-  if (*s == '#') {
-    s++;
-    while (isdigit(*s)) {
-      x = x * 10 + (*s++)-'0';
-    }
-    // Skip trailing spaces.
-    while (isspace(*s)) {
-      s++;
-    }
-  }
-  cfg->preferred_device = s;
-  cfg->preferred_device_num = x;
-}
-
-static int cuda_device_setup(struct cuda_context *ctx) {
+static int cuda_device_setup(struct futhark_context_config *cfg,
+                             struct cuda_context *ctx) {
   char name[256];
   int count, chosen = -1, best_cc = -1;
   int cc_major_best, cc_minor_best;
@@ -216,13 +295,13 @@ static int cuda_device_setup(struct cuda_context *ctx) {
     CUDA_SUCCEED_FATAL(cuDeviceGetName(name, sizeof(name) - 1, dev));
     name[sizeof(name) - 1] = 0;
 
-    if (ctx->cfg.logging) {
+    if (cfg->logging) {
       fprintf(stderr, "Device #%d: name=\"%s\", compute capability=%d.%d\n",
           i, name, cc_major, cc_minor);
     }
 
     if (device_query(dev, COMPUTE_MODE) == CU_COMPUTEMODE_PROHIBITED) {
-      if (ctx->cfg.logging) {
+      if (cfg->logging) {
         fprintf(stderr, "Device #%d is compute-prohibited, ignoring\n", i);
       }
       continue;
@@ -235,8 +314,8 @@ static int cuda_device_setup(struct cuda_context *ctx) {
       cc_minor_best = cc_minor;
     }
 
-    if (strstr(name, ctx->cfg.preferred_device) != NULL &&
-        num_device_matches++ == ctx->cfg.preferred_device_num) {
+    if (strstr(name, cfg->preferred_device) != NULL &&
+        num_device_matches++ == cfg->preferred_device_num) {
       chosen = i;
       break;
     }
@@ -245,7 +324,7 @@ static int cuda_device_setup(struct cuda_context *ctx) {
   if (chosen == -1) { chosen = best_cc; }
   if (chosen == -1) { return 1; }
 
-  if (ctx->cfg.logging) {
+  if (cfg->logging) {
     fprintf(stderr, "Using device #%d\n", chosen);
   }
 
@@ -299,7 +378,8 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   int minor = device_query(dev, COMPUTE_CAPABILITY_MINOR);
 
   int chosen = -1;
-  for (int i = 0; i < sizeof(x)/sizeof(x[0]); i++) {
+  int num_archs = sizeof(x)/sizeof(x[0]);
+  for (int i = 0; i < num_archs; i++) {
     if (x[i].major < major || (x[i].major == major && x[i].minor <= minor)) {
       chosen = i;
     } else {
@@ -320,7 +400,8 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   return x[chosen].arch_str;
 }
 
-static void cuda_nvrtc_mk_build_options(struct cuda_context *ctx, const char *extra_opts[],
+static void cuda_nvrtc_mk_build_options(struct futhark_context_config *cfg,
+                                        struct cuda_context *ctx, const char *extra_opts[],
                                         char*** opts_out, size_t *n_opts) {
   int arch_set = 0, num_extra_opts;
 
@@ -336,14 +417,14 @@ static void cuda_nvrtc_mk_build_options(struct cuda_context *ctx, const char *ex
     }
   }
 
-  size_t i = 0, n_opts_alloc = 20 + num_extra_opts + ctx->cfg.num_sizes;
+  size_t i = 0, n_opts_alloc = 20 + num_extra_opts + cfg->num_tuning_params;
   char **opts = (char**) malloc(n_opts_alloc * sizeof(char *));
   if (!arch_set) {
     opts[i++] = strdup("-arch");
     opts[i++] = strdup(cuda_nvrtc_get_arch(ctx->dev));
   }
   opts[i++] = strdup("-default-device");
-  if (ctx->cfg.debugging) {
+  if (cfg->debugging) {
     opts[i++] = strdup("-G");
     opts[i++] = strdup("-lineinfo");
   } else {
@@ -352,9 +433,9 @@ static void cuda_nvrtc_mk_build_options(struct cuda_context *ctx, const char *ex
   opts[i++] = msgprintf("-D%s=%d",
                         "max_group_size",
                         (int)ctx->max_block_size);
-  for (size_t j = 0; j < ctx->cfg.num_sizes; j++) {
-    opts[i++] = msgprintf("-D%s=%zu", ctx->cfg.size_vars[j],
-                          ctx->cfg.size_values[j]);
+  for (int j = 0; j < cfg->num_tuning_params; j++) {
+    opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
+                          cfg->tuning_params[j]);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
   opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_block_size);
@@ -380,8 +461,7 @@ static void cuda_nvrtc_mk_build_options(struct cuda_context *ctx, const char *ex
   *opts_out = opts;
 }
 
-static char* cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
-                              const char *opts[], size_t n_opts,
+static char* cuda_nvrtc_build(const char *src, const char *opts[], size_t n_opts,
                               char **ptx) {
   nvrtcProgram prog;
   char *problem = NULL;
@@ -417,11 +497,12 @@ static char* cuda_nvrtc_build(struct cuda_context *ctx, const char *src,
   return NULL;
 }
 
-static void cuda_load_ptx_from_cache(struct cuda_context *ctx, const char *src,
+static void cuda_load_ptx_from_cache(struct futhark_context_config *cfg,
+                                     const char *src,
                                      const char *opts[], size_t n_opts,
                                      struct cache_hash *h, const char *cache_fname,
                                      char **ptx) {
-  if (ctx->cfg.logging) {
+  if (cfg->logging) {
     fprintf(stderr, "Restoring cache from from %s...\n", cache_fname);
   }
   cache_hash_init(h);
@@ -432,58 +513,59 @@ static void cuda_load_ptx_from_cache(struct cuda_context *ctx, const char *src,
   size_t ptxsize;
   errno = 0;
   if (cache_restore(cache_fname, h, (unsigned char**)ptx, &ptxsize) != 0) {
-    if (ctx->cfg.logging) {
+    if (cfg->logging) {
       fprintf(stderr, "Failed to restore cache (errno: %s)\n", strerror(errno));
     }
   }
 }
 
-static void cuda_size_setup(struct cuda_context *ctx)
+static void cuda_size_setup(struct futhark_context_config *cfg,
+                            struct cuda_context *ctx)
 {
-  if (ctx->cfg.default_block_size > ctx->max_block_size) {
-    if (ctx->cfg.default_block_size_changed) {
+  if (cfg->default_block_size > ctx->max_block_size) {
+    if (cfg->default_block_size_changed) {
       fprintf(stderr,
           "Note: Device limits default block size to %zu (down from %zu).\n",
-          ctx->max_block_size, ctx->cfg.default_block_size);
+          ctx->max_block_size, cfg->default_block_size);
     }
-    ctx->cfg.default_block_size = ctx->max_block_size;
+    cfg->default_block_size = ctx->max_block_size;
   }
-  if (ctx->cfg.default_grid_size > ctx->max_grid_size) {
-    if (ctx->cfg.default_grid_size_changed) {
+  if (cfg->default_grid_size > ctx->max_grid_size) {
+    if (cfg->default_grid_size_changed) {
       fprintf(stderr,
           "Note: Device limits default grid size to %zu (down from %zu).\n",
-          ctx->max_grid_size, ctx->cfg.default_grid_size);
+          ctx->max_grid_size, cfg->default_grid_size);
     }
-    ctx->cfg.default_grid_size = ctx->max_grid_size;
+    cfg->default_grid_size = ctx->max_grid_size;
   }
-  if (ctx->cfg.default_tile_size > ctx->max_tile_size) {
-    if (ctx->cfg.default_tile_size_changed) {
+  if (cfg->default_tile_size > ctx->max_tile_size) {
+    if (cfg->default_tile_size_changed) {
       fprintf(stderr,
           "Note: Device limits default tile size to %zu (down from %zu).\n",
-          ctx->max_tile_size, ctx->cfg.default_tile_size);
+          ctx->max_tile_size, cfg->default_tile_size);
     }
-    ctx->cfg.default_tile_size = ctx->max_tile_size;
+    cfg->default_tile_size = ctx->max_tile_size;
   }
 
-  if (!ctx->cfg.default_grid_size_changed) {
-    ctx->cfg.default_grid_size =
+  if (!cfg->default_grid_size_changed) {
+    cfg->default_grid_size =
       (device_query(ctx->dev, MULTIPROCESSOR_COUNT) *
        device_query(ctx->dev, MAX_THREADS_PER_MULTIPROCESSOR))
-      / ctx->cfg.default_block_size;
+      / cfg->default_block_size;
   }
 
-  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
-    const char *size_class = ctx->cfg.size_classes[i];
-    int64_t *size_value = &ctx->cfg.size_values[i];
-    const char* size_name = ctx->cfg.size_names[i];
+  for (int i = 0; i < cfg->num_tuning_params; i++) {
+    const char *size_class = cfg->tuning_param_classes[i];
+    int64_t *size_value = &cfg->tuning_params[i];
+    const char* size_name = cfg->tuning_param_names[i];
     int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "group_size") == size_class) {
       max_value = ctx->max_block_size;
-      default_value = ctx->cfg.default_block_size;
+      default_value = cfg->default_block_size;
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = ctx->max_grid_size;
-      default_value = ctx->cfg.default_grid_size;
+      default_value = cfg->default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for
       // histograms by default.  We really should just be smarter
       // about sizes somehow.
@@ -492,13 +574,13 @@ static void cuda_size_setup(struct cuda_context *ctx)
       }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = ctx->max_tile_size;
-      default_value = ctx->cfg.default_tile_size;
+      default_value = cfg->default_tile_size;
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       max_value = 0; // No limit.
-      default_value = ctx->cfg.default_reg_tile_size;
+      default_value = cfg->default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
-      default_value = ctx->cfg.default_threshold;
+      default_value = cfg->default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
     }
@@ -513,36 +595,37 @@ static void cuda_size_setup(struct cuda_context *ctx)
   }
 }
 
-static char* cuda_module_setup(struct cuda_context *ctx,
+static char* cuda_module_setup(struct futhark_context_config *cfg,
+                               struct cuda_context *ctx,
                                const char *src_fragments[],
                                const char *extra_opts[],
                                const char* cache_fname) {
   char *ptx = NULL, *src = NULL;
 
-  if (ctx->cfg.load_program_from == NULL) {
+  if (cfg->load_program_from == NULL) {
     src = concat_fragments(src_fragments);
   } else {
-    src = slurp_file(ctx->cfg.load_program_from, NULL);
+    src = slurp_file(cfg->load_program_from, NULL);
   }
 
-  if (ctx->cfg.load_ptx_from) {
-    if (ctx->cfg.load_program_from != NULL) {
+  if (cfg->load_ptx_from) {
+    if (cfg->load_program_from != NULL) {
       fprintf(stderr,
               "WARNING: Using PTX from %s instead of C code from %s\n",
-              ctx->cfg.load_ptx_from, ctx->cfg.load_program_from);
+              cfg->load_ptx_from, cfg->load_program_from);
     }
-    ptx = slurp_file(ctx->cfg.load_ptx_from, NULL);
+    ptx = slurp_file(cfg->load_ptx_from, NULL);
   }
 
-  if (ctx->cfg.dump_program_to != NULL) {
-    dump_file(ctx->cfg.dump_program_to, src, strlen(src));
+  if (cfg->dump_program_to != NULL) {
+    dump_file(cfg->dump_program_to, src, strlen(src));
   }
 
   char **opts;
   size_t n_opts;
-  cuda_nvrtc_mk_build_options(ctx, extra_opts, &opts, &n_opts);
+  cuda_nvrtc_mk_build_options(cfg, ctx, extra_opts, &opts, &n_opts);
 
-  if (ctx->cfg.logging) {
+  if (cfg->logging) {
     fprintf(stderr, "NVRTC compile options:\n");
     for (size_t j = 0; j < n_opts; j++) {
       fprintf(stderr, "\t%s\n", opts[j]);
@@ -553,19 +636,19 @@ static char* cuda_module_setup(struct cuda_context *ctx,
   struct cache_hash h;
   int loaded_ptx_from_cache = 0;
   if (cache_fname != NULL) {
-    cuda_load_ptx_from_cache(ctx, src, (const char**)opts, n_opts, &h, cache_fname, &ptx);
+    cuda_load_ptx_from_cache(cfg, src, (const char**)opts, n_opts, &h, cache_fname, &ptx);
 
     if (ptx != NULL) {
-      if (ctx->cfg.logging) {
+      if (cfg->logging) {
         fprintf(stderr, "Restored PTX from cache; now loading module...\n");
       }
       if (cuModuleLoadData(&ctx->module, ptx) == CUDA_SUCCESS) {
-        if (ctx->cfg.logging) {
+        if (cfg->logging) {
           fprintf(stderr, "Success!\n");
         }
         loaded_ptx_from_cache = 1;
       } else {
-        if (ctx->cfg.logging) {
+        if (cfg->logging) {
           fprintf(stderr, "Failed!\n");
         }
         free(ptx);
@@ -575,15 +658,15 @@ static char* cuda_module_setup(struct cuda_context *ctx,
   }
 
   if (ptx == NULL) {
-    char* problem = cuda_nvrtc_build(ctx, src, (const char**)opts, n_opts, &ptx);
+    char* problem = cuda_nvrtc_build(src, (const char**)opts, n_opts, &ptx);
     if (problem != NULL) {
       free(src);
       return problem;
     }
   }
 
-  if (ctx->cfg.dump_ptx_to != NULL) {
-    dump_file(ctx->cfg.dump_ptx_to, ptx, strlen(ptx));
+  if (cfg->dump_ptx_to != NULL) {
+    dump_file(cfg->dump_ptx_to, ptx, strlen(ptx));
   }
 
   if (!loaded_ptx_from_cache) {
@@ -591,7 +674,7 @@ static char* cuda_module_setup(struct cuda_context *ctx,
   }
 
   if (cache_fname != NULL && !loaded_ptx_from_cache) {
-    if (ctx->cfg.logging) {
+    if (cfg->logging) {
       fprintf(stderr, "Caching PTX in %s...\n", cache_fname);
     }
     errno = 0;
@@ -613,11 +696,12 @@ static char* cuda_module_setup(struct cuda_context *ctx,
   return NULL;
 }
 
-static char* cuda_setup(struct cuda_context *ctx, const char *src_fragments[],
+static char* cuda_setup(struct futhark_context_config *cfg,
+                        struct cuda_context *ctx, const char *src_fragments[],
                         const char *extra_opts[], const char* cache_fname) {
   CUDA_SUCCEED_FATAL(cuInit(0));
 
-  if (cuda_device_setup(ctx) != 0) {
+  if (cuda_device_setup(cfg, ctx) != 0) {
     futhark_panic(-1, "No suitable CUDA device found.\n");
   }
   CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
@@ -632,8 +716,8 @@ static char* cuda_setup(struct cuda_context *ctx, const char *src_fragments[],
   ctx->max_bespoke = 0;
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
 
-  cuda_size_setup(ctx);
-  return cuda_module_setup(ctx, src_fragments, extra_opts, cache_fname);
+  cuda_size_setup(cfg, ctx);
+  return cuda_module_setup(cfg, ctx, src_fragments, extra_opts, cache_fname);
 }
 
 // Count up the runtime all the profiling_records that occured during execution.
@@ -696,7 +780,8 @@ static void cuda_cleanup(struct cuda_context *ctx) {
   CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
 }
 
-static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
+static CUresult cuda_alloc(struct futhark_context_config *cfg,
+                           struct cuda_context *ctx, FILE *log,
                            size_t min_size, const char *tag,
                            CUdeviceptr *mem_out, size_t *size_out) {
   if (min_size < sizeof(int)) {
@@ -705,12 +790,12 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
 
   if (free_list_find(&ctx->free_list, min_size, tag, size_out, (fl_mem*)mem_out) == 0) {
     if (*size_out >= min_size) {
-      if (ctx->cfg.debugging) {
+      if (cfg->debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
       }
       return CUDA_SUCCESS;
     } else {
-      if (ctx->cfg.debugging) {
+      if (cfg->debugging) {
         fprintf(log, "Found a free block, but it was too small.\n");
       }
 
@@ -723,7 +808,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, FILE *log,
 
   *size_out = min_size;
 
-  if (ctx->cfg.debugging) {
+  if (cfg->debugging) {
     fprintf(log, "Actually allocating the desired block.\n");
   }
 
@@ -763,4 +848,4 @@ static CUresult cuda_free_all(struct cuda_context *ctx) {
   return CUDA_SUCCESS;
 }
 
-// End of cuda.h.
+// End of backends/cuda.h.
