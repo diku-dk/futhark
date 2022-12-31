@@ -145,17 +145,17 @@ generateContextFuns cost_centres kernels sizes failures = do
                          char *error;
                          typename lock_t error_lock;
                          typename FILE *log;
-                         $sdecls:fields
-                         $sdecls:kernel_fields
                          typename CUdeviceptr global_failure;
                          typename CUdeviceptr global_failure_args;
                          struct cuda_context cuda;
                          struct tuning_params tuning_params;
                          // True if a potentially failing kernel has been enqueued.
                          typename int32_t failure_is_an_option;
-
                          int total_runs;
                          long int total_runtime;
+
+                         $sdecls:fields
+                         $sdecls:kernel_fields
                        };|]
     )
 
