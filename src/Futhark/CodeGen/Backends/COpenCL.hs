@@ -212,7 +212,7 @@ allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
   GC.stm
     [C.cstm|ctx->error =
-     OPENCL_SUCCEED_NONFATAL(opencl_alloc(&ctx->opencl, ctx->log,
+     OPENCL_SUCCEED_NONFATAL(opencl_alloc(ctx->cfg, &ctx->opencl, ctx->log,
                                           (size_t)$exp:size, $exp:tag,
                                           &$exp:mem, (size_t*)&$exp:size));|]
 allocateOpenCLBuffer _ _ _ space =

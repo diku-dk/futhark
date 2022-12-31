@@ -39,6 +39,10 @@ extra-source-files:
     rts/c/atomics.h
     rts/c/context.h
     rts/c/context_prototypes.h
+    rts/c/backends/c.h
+    rts/c/backends/cuda.h
+    rts/c/backends/multicore.h
+    rts/c/backends/opencl.h
     rts/c/lock.h
     rts/c/timing.h
     rts/c/errors.h
@@ -46,8 +50,6 @@ extra-source-files:
     rts/c/tuning.h
     rts/c/values.h
     rts/c/half.h
-    rts/c/opencl.h
-    rts/c/cuda.h
     rts/c/cache.h
     rts/c/ispc_util.h
     rts/c/scalar.h

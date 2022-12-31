@@ -5,11 +5,9 @@ module Futhark.CodeGen.RTS.C
   ( atomicsH,
     contextH,
     contextPrototypesH,
-    cudaH,
     freeListH,
     halfH,
     lockH,
-    openclH,
     scalarF16H,
     scalarH,
     schedulerH,
@@ -22,6 +20,10 @@ module Futhark.CodeGen.RTS.C
     cacheH,
     uniformH,
     ispcUtilH,
+    backendsOpenclH,
+    backendsCudaH,
+    backendsCH,
+    backendsMulticoreH,
   )
 where
 
@@ -41,11 +43,6 @@ uniformH :: T.Text
 uniformH = $(embedStringFile "rts/c/uniform.h")
 {-# NOINLINE uniformH #-}
 
--- | @rts/c/cuda.h@
-cudaH :: T.Text
-cudaH = $(embedStringFile "rts/c/cuda.h")
-{-# NOINLINE cudaH #-}
-
 -- | @rts/c/free_list.h@
 freeListH :: T.Text
 freeListH = $(embedStringFile "rts/c/free_list.h")
@@ -60,11 +57,6 @@ halfH = $(embedStringFile "rts/c/half.h")
 lockH :: T.Text
 lockH = $(embedStringFile "rts/c/lock.h")
 {-# NOINLINE lockH #-}
-
--- | @rts/c/opencl.h@
-openclH :: T.Text
-openclH = $(embedStringFile "rts/c/opencl.h")
-{-# NOINLINE openclH #-}
 
 -- | @rts/c/scalar_f16.h@
 scalarF16H :: T.Text
@@ -130,3 +122,23 @@ contextH = $(embedStringFile "rts/c/context.h")
 contextPrototypesH :: T.Text
 contextPrototypesH = $(embedStringFile "rts/c/context_prototypes.h")
 {-# NOINLINE contextPrototypesH #-}
+
+-- | @rts/c/backends/opencl.h@
+backendsOpenclH :: T.Text
+backendsOpenclH = $(embedStringFile "rts/c/backends/opencl.h")
+{-# NOINLINE backendsOpenclH #-}
+
+-- | @rts/c/backends/cuda.h@
+backendsCudaH :: T.Text
+backendsCudaH = $(embedStringFile "rts/c/backends/cuda.h")
+{-# NOINLINE backendsCudaH #-}
+
+-- | @rts/c/backends/c.h@
+backendsCH :: T.Text
+backendsCH = $(embedStringFile "rts/c/backends/c.h")
+{-# NOINLINE backendsCH #-}
+
+-- | @rts/c/backends/multicore.h@
+backendsMulticoreH :: T.Text
+backendsMulticoreH = $(embedStringFile "rts/c/backends/multicore.h")
+{-# NOINLINE backendsMulticoreH #-}

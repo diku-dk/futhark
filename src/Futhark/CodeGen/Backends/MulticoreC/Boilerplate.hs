@@ -5,87 +5,23 @@ module Futhark.CodeGen.Backends.MulticoreC.Boilerplate (generateBoilerplate) whe
 
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
-import Futhark.CodeGen.RTS.C (schedulerH)
+import Futhark.CodeGen.RTS.C (backendsMulticoreH, schedulerH)
 import Language.C.Quote.OpenCL qualified as C
 
 -- | Generate the necessary boilerplate.
 generateBoilerplate :: GC.CompilerM op s ()
 generateBoilerplate = do
   mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack schedulerH)|]
+  mapM_ GC.earlyDecl [C.cunit|$esc:(T.unpack backendsMulticoreH)|]
 
-  cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s { int in_use;
-                               int debugging;
-                               int profiling;
-                               int logging;
-                               const char *cache_fname;
-
-                               int num_threads;
-                             };|]
-    )
-
-  GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:cfg* $id:s(void);|],
-      [C.cedecl|struct $id:cfg* $id:s(void) {
-                             struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
-                             if (cfg == NULL) {
-                               return NULL;
-                             }
-                             cfg->in_use = 0;
-                             cfg->debugging = 0;
-                             cfg->profiling = 0;
-                             cfg->logging = 0;
-                             cfg->cache_fname = NULL;
-
-                             cfg->num_threads = 0;
-                             return cfg;
-                           }|]
-    )
-
-  GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg) {
-                             assert(!cfg->in_use);
-                             free(cfg);
-                           }|]
-    )
-
-  GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
-                      cfg->debugging = detail;
-                    }|]
-    )
-
-  GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
-                      cfg->profiling = flag;
-                    }|]
-    )
-
-  GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
-                             // Does nothing for this backend.
-                             (void)cfg; (void)detail;
-                           }|]
-    )
-
-  GC.publicDef_ "context_config_set_num_threads" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg *cfg, int n);|],
-      [C.cedecl|void $id:s(struct $id:cfg *cfg, int n) {
-                             cfg->num_threads = n;
-                           }|]
-    )
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_num_threads(struct futhark_context_config *cfg, int n);|]
 
   (fields, init_fields, free_fields) <- GC.contextContents
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
-                      struct $id:cfg* cfg;
+                      struct futhark_context_config* cfg;
                       struct scheduler scheduler;
                       int detail_memory;
                       int debugging;
@@ -108,8 +44,8 @@ generateBoilerplate = do
     )
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
-      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+    ( [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg);|],
+      [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg) {
              struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
              if (ctx == NULL) {
                return NULL;
@@ -157,13 +93,15 @@ generateBoilerplate = do
                            }|]
     )
 
+  GC.earlyDecl [C.cedecl|static const int num_tuning_params = 0;|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[1];|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[1];|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[1];|]
+  GC.earlyDecl [C.cedecl|static typename int64_t *tuning_param_defaults[1];|]
 
   GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value);|],
-      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t param_value) {
+    ( [C.cedecl|int $id:s(struct futhark_context_config* cfg, const char *param_name, size_t param_value);|],
+      [C.cedecl|int $id:s(struct futhark_context_config* cfg, const char *param_name, size_t param_value) {
                      (void)cfg; (void)param_name; (void)param_value;
                      return 1;
                    }|]
