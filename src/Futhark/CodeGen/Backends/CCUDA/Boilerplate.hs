@@ -153,6 +153,10 @@ generateContextFuns cost_centres kernels sizes failures = do
                          typename int32_t failure_is_an_option;
                          int total_runs;
                          long int total_runtime;
+                         typename int64_t peak_mem_usage_device;
+                         typename int64_t cur_mem_usage_device;
+                         typename int64_t peak_mem_usage_default;
+                         typename int64_t cur_mem_usage_default;
 
                          $sdecls:fields
                          $sdecls:kernel_fields

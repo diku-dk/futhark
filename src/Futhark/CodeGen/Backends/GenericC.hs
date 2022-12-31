@@ -128,9 +128,6 @@ defineMemorySpace space = do
                                      typename int64_t size;
                                      const char *desc; };|]
 
-  contextField peakname [C.cty|typename int64_t|] $ Just [C.cexp|0|]
-  contextField usagename [C.cty|typename int64_t|] $ Just [C.cexp|0|]
-
   -- Unreferencing a memory block consists of decreasing its reference
   -- count and freeing the corresponding memory if the count reaches
   -- zero.

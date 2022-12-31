@@ -144,6 +144,10 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          typename cl_int failure_is_an_option;
                          int total_runs;
                          long int total_runtime;
+                         typename int64_t peak_mem_usage_device;
+                         typename int64_t cur_mem_usage_device;
+                         typename int64_t peak_mem_usage_default;
+                         typename int64_t cur_mem_usage_default;
 
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields

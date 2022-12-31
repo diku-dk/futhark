@@ -29,6 +29,8 @@ generateBoilerplate = do
                           typename FILE *log;
                           int profiling_paused;
                           struct free_list free_list;
+                          typename int64_t peak_mem_usage_default;
+                          typename int64_t cur_mem_usage_default;
 
                           $sdecls:fields
                         };|]
