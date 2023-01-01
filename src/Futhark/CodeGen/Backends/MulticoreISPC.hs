@@ -509,19 +509,17 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
     ArrayZeros n ->
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
-  -- Fake a memory block.
-  GC.contextField
-    (C.toIdent name noLoc)
-    [C.cty|struct memblock|]
-    $ Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
-  -- Make an exported C shim to access it
+  -- Make an exported C shim to access a faked memory block.
   shim <- MC.multicoreDef "get_static_array_shim" $ \f ->
-    pure [C.cedecl|struct memblock* $id:f(struct futhark_context* ctx) { return &ctx->$id:name; }|]
+    pure
+      [C.cedecl|struct memblock $id:f(struct futhark_context* ctx) {
+                  return (struct memblock){NULL,(unsigned char*)$id:name_realtype,0};
+                }|]
   ispcDecl
-    [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform struct memblock * $tyqual:uniform
+    [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform struct memblock $tyqual:uniform
                         $id:shim($tyqual:uniform struct futhark_context* $tyqual:uniform ctx);|]
   -- Call it
-  GC.item [C.citem|$tyqual:uniform struct memblock $id:name = *$id:shim(ctx);|]
+  GC.item [C.citem|$tyqual:uniform struct memblock $id:name = $id:shim(ctx);|]
 compileCode (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name _ t : SetScalar dest e : code)
