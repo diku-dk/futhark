@@ -31,6 +31,7 @@ generateBoilerplate = do
                           struct free_list free_list;
                           typename int64_t peak_mem_usage_default;
                           typename int64_t cur_mem_usage_default;
+                          struct constants *constants;
 
                           $sdecls:fields
                         };|]

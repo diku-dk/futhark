@@ -140,11 +140,15 @@ generateContextFuns cost_centres kernels sizes failures = do
                          int profiling;
                          int profiling_paused;
                          int logging;
-                         struct free_list free_list;
                          typename lock_t lock;
                          char *error;
                          typename lock_t error_lock;
                          typename FILE *log;
+                         struct constants *constants;
+                         struct free_list free_list;
+                         typename int64_t peak_mem_usage_default;
+                         typename int64_t cur_mem_usage_default;
+
                          typename CUdeviceptr global_failure;
                          typename CUdeviceptr global_failure_args;
                          struct cuda_context cuda;
@@ -155,8 +159,6 @@ generateContextFuns cost_centres kernels sizes failures = do
                          long int total_runtime;
                          typename int64_t peak_mem_usage_device;
                          typename int64_t cur_mem_usage_device;
-                         typename int64_t peak_mem_usage_default;
-                         typename int64_t cur_mem_usage_default;
 
                          $sdecls:fields
                          $sdecls:kernel_fields

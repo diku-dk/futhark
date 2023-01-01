@@ -135,7 +135,11 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          char *error;
                          typename lock_t error_lock;
                          typename FILE *log;
+                         struct constants *constants;
                          struct free_list free_list;
+                         typename int64_t peak_mem_usage_default;
+                         typename int64_t cur_mem_usage_default;
+
                          typename cl_mem global_failure;
                          typename cl_mem global_failure_args;
                          struct opencl_context opencl;
@@ -146,8 +150,6 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          long int total_runtime;
                          typename int64_t peak_mem_usage_device;
                          typename int64_t cur_mem_usage_device;
-                         typename int64_t peak_mem_usage_default;
-                         typename int64_t cur_mem_usage_default;
 
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields

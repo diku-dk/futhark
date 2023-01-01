@@ -9,6 +9,8 @@ struct futhark_context;
 static void set_error(struct futhark_context* ctx, char *error);
 
 // These are called in context/config new/free functions and contain shared setup.
+static int init_constants(struct futhark_context*);
+static int free_constants(struct futhark_context*);
 static void context_setup(struct futhark_context_config* cfg, struct futhark_context *ctx);
 static void context_teardown(struct futhark_context *ctx);
 

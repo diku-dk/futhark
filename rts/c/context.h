@@ -107,6 +107,7 @@ static void context_setup(struct futhark_context_config* cfg, struct futhark_con
   create_lock(&ctx->error_lock);
   create_lock(&ctx->lock);
   free_list_init(&ctx->free_list);
+  ctx->constants = malloc(sizeof(struct constants));
   ctx->detail_memory = cfg->debugging;
   ctx->debugging = cfg->debugging;
   ctx->logging = cfg->logging;
@@ -120,6 +121,7 @@ static void context_teardown(struct futhark_context *ctx) {
   free_constants(ctx);
   free_all_in_free_list(ctx);
   free_list_destroy(&ctx->free_list);
+  free(ctx->constants);
   free_lock(&ctx->lock);
   free_lock(&ctx->error_lock);
   ctx->cfg->in_use = 0;
