@@ -542,7 +542,10 @@ in natural text.
 
 * Function and type application, and prefix operators, bind more
   tightly than any infix operator.  Note that the only prefix
-  operators are ``!`` and ``-``, and more cannot be defined.
+  operators are the builtin ``!`` and ``-``, and more cannot be
+  defined.  In particular, a user-defined operator beginning with
+  ``!`` binds as ``!=``, as on the table below, not as the prefix
+  operator ``!``
 
 * ``#foo #bar`` is interpreted as a constructor with a ``#bar``
   payload, not as applying ``#foo`` to ``#bar`` (the latter would be
@@ -563,7 +566,7 @@ in natural text.
   left               ```op```
   left               ``||``
   left               ``&&``
-  left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=``
+  left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=`` ``!``
   left               ``&`` ``^`` ``|``
   left               ``<<`` ``>>``
   left               ``+`` ``-``
