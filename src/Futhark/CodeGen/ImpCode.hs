@@ -99,6 +99,7 @@ where
 import Data.Bifunctor (second)
 import Data.List (intersperse)
 import Data.Map qualified as M
+import Data.Ord (comparing)
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Traversable
@@ -121,6 +122,7 @@ import Futhark.IR.Syntax.Core
     ValueType (..),
     errorMsgArgTypes,
   )
+import Futhark.Util (nubByOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark.Core
 import Language.Futhark.Primitive
@@ -176,6 +178,13 @@ data Constants a = Constants
 
 instance Functor Constants where
   fmap f (Constants params code) = Constants params (fmap f code)
+
+instance Monoid (Constants a) where
+  mempty = Constants mempty mempty
+
+instance Semigroup (Constants a) where
+  Constants ps1 c1 <> Constants ps2 c2 =
+    Constants (nubByOrd (comparing paramName) $ ps1 <> ps2) (c1 <> c2)
 
 -- | A description of an externally meaningful value.
 data ValueDesc
@@ -571,7 +580,7 @@ instance Pretty op => Pretty (Code op) where
     "assert" <> parens (commasep [pretty msg, pretty e])
   pretty (Copy t dest destoffset destspace src srcoffset srcspace size) =
     "copy"
-      <> parens
+      <> (parens . align)
         ( pretty t <> comma
             </> ppMemLoc dest destoffset <> pretty destspace <> comma
             </> ppMemLoc src srcoffset <> pretty srcspace <> comma
