@@ -119,14 +119,14 @@ opaqueDecls = declsCode isOpaqueDecl
 entryDecls = declsCode (== EntryDecl)
 miscDecls = declsCode (== MiscDecl)
 
-defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.BlockItem)
+defineMemorySpace :: Space -> CompilerM op s ([C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
-  let structdef =
-        [C.cedecl|struct $id:sname { int *references;
-                                     $ty:rm mem;
-                                     typename int64_t size;
-                                     const char *desc; };|]
+  earlyDecl
+    [C.cedecl|struct $id:sname { int *references;
+                                 $ty:rm mem;
+                                 typename int64_t size;
+                                 const char *desc; };|]
 
   -- Unreferencing a memory block consists of decreasing its reference
   -- count and freeing the corresponding memory if the count reaches
@@ -231,8 +231,7 @@ defineMemorySpace space = do
 
   let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
   pure
-    ( structdef,
-      [unrefdef, allocdef, setdef],
+    ( [unrefdef, allocdef, setdef],
       -- Do not report memory usage for DefaultSpace (CPU memory),
       -- because it would not be accurate anyway.  This whole
       -- tracking probably needs to be rethought.
@@ -455,7 +454,7 @@ $entry_point_decls
     Definitions types consts (Functions funs) = prog
 
     compileProgAction = do
-      (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
+      (memfuns, memreport) <- unzip <$> mapM defineMemorySpace spaces
 
       get_consts <- compileConstants consts
 
@@ -464,7 +463,6 @@ $entry_point_decls
       (prototypes, functions) <-
         unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
-      mapM_ earlyDecl memstructs
       (entry_points, entry_points_manifest) <-
         unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
 
@@ -619,13 +617,7 @@ compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do
   ctx_ty <- contextType
   const_fields <- mapM constParamField ps
-  -- Avoid an empty struct, as that is apparently undefined behaviour.
-  let const_fields'
-        | null const_fields = [[C.csdecl|int dummy;|]]
-        | otherwise = const_fields
-  contextField "constants" [C.cty|struct { $sdecls:const_fields' }|] Nothing
-  earlyDecl [C.cedecl|static int init_constants($ty:ctx_ty*);|]
-  earlyDecl [C.cedecl|static int free_constants($ty:ctx_ty*);|]
+  earlyDecl [C.cedecl|struct constants { int dummy; $sdecls:const_fields };|]
 
   inNewFunction $ do
     -- We locally define macros for the constants, so that when we
@@ -672,18 +664,18 @@ compileConstants (Constants ps init_consts) = do
     constMacro p = ([C.citem|$escstm:def|], [C.citem|$escstm:undef|])
       where
         p' = T.unpack $ idText (C.toIdent (paramName p) mempty)
-        def = "#define " ++ p' ++ " (" ++ "ctx->constants." ++ p' ++ ")"
+        def = "#define " ++ p' ++ " (" ++ "ctx->constants->" ++ p' ++ ")"
         undef = "#undef " ++ p'
 
     resetMemConst ScalarParam {} = pure ()
     resetMemConst (MemParam name space) = resetMem name space
 
     freeConst ScalarParam {} = pure ()
-    freeConst (MemParam name space) = unRefMem [C.cexp|ctx->constants.$id:name|] space
+    freeConst (MemParam name space) = unRefMem [C.cexp|ctx->constants->$id:name|] space
 
     getConst (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
-      pure [C.citem|$ty:ctp $id:name = ctx->constants.$id:name;|]
+      pure [C.citem|$ty:ctp $id:name = ctx->constants->$id:name;|]
     getConst (MemParam name space) = do
       ty <- memToCType name space
-      pure [C.citem|$ty:ty $id:name = ctx->constants.$id:name;|]
+      pure [C.citem|$ty:ty $id:name = ctx->constants->$id:name;|]
