@@ -12,7 +12,6 @@ module Futhark.CodeGen.Backends.GenericC.Code
 where
 
 import Control.Monad.Reader
-import Data.Loc
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
@@ -337,15 +336,12 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
     ArrayZeros n ->
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
-  contextField
-    (C.toIdent name noLoc)
-    [C.cty|struct memblock|]
-    $ Just
-      [C.cexp|(struct memblock){NULL,
-                                (unsigned char*)$id:name_realtype,
-                                0,
-                                $string:(prettyString name)}|]
-  item [C.citem|struct memblock $id:name = ctx->$id:name;|]
+  item
+    [C.citem|struct memblock $id:name =
+               (struct memblock){NULL,
+                                 (unsigned char*)$id:name_realtype,
+                                 0,
+                                 $string:(prettyString name)};|]
 compileCode (DeclareArray name (Space space) t vs) =
   join $
     asks (opsStaticArray . envOperations)
