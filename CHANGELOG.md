@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Minor parser regression that mostly affects the REPL (#1822).
 
+* Parser did not recognise custom infix operators that did not have a
+  builtin operator as prefix (#1824).
+
 ## [0.22.7]
 
 ### Added

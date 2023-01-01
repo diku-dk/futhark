@@ -497,8 +497,10 @@ data BinOp
   = -- | A pseudo-operator standing in for any normal
     -- identifier used as an operator (they all have the
     -- same fixity).
-    -- Binary Ops for Numbers
     Backtick
+  | -- | Also not a real operator, but operator with this as a prefix
+    -- may be defined by the user.
+    Bang
   | Plus
   | Minus
   | Pow
@@ -1236,6 +1238,7 @@ instance Pretty PrimType where
 
 instance Pretty BinOp where
   pretty Backtick = "``"
+  pretty Bang = "!"
   pretty Plus = "+"
   pretty Minus = "-"
   pretty Pow = "**"
