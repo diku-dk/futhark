@@ -18,7 +18,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     Deallocate,
     CopyBarrier (..),
     Copy,
-    StaticArray,
 
     -- * Monadic compiler interface
     CompilerM,
@@ -187,9 +186,6 @@ type Allocate op s =
 -- given size,, which is in the given memory space.
 type Deallocate op s = C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
 
--- | Create a static array of values - initialised at load time.
-type StaticArray op s = VName -> SpaceId -> PrimType -> ArrayContents -> CompilerM op s ()
-
 -- | Whether a copying operation should implicitly function as a
 -- barrier regarding further operations on the source.  This is a
 -- rather subtle detail and is mostly useful for letting some
@@ -222,7 +218,6 @@ data Operations op s = Operations
     opsAllocate :: Allocate op s,
     opsDeallocate :: Deallocate op s,
     opsCopy :: Copy op s,
-    opsStaticArray :: StaticArray op s,
     opsMemoryType :: MemoryType op s,
     opsCompiler :: OpCompiler op s,
     opsError :: ErrorCompiler op s,

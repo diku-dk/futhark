@@ -492,9 +492,9 @@ constParams used (Imp.DeclareScalar name _ t)
       ( DL.singleton $ Imp.ScalarParam name t,
         mempty
       )
-constParams used s@(Imp.DeclareArray name space _ _)
+constParams used s@(Imp.DeclareArray name _ _)
   | name `nameIn` used =
-      ( DL.singleton $ Imp.MemParam name space,
+      ( DL.singleton $ Imp.MemParam name DefaultSpace,
         s
       )
 constParams _ s =
@@ -997,7 +997,7 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
       dest_space <- entryMemSpace <$> lookupMemory (memLocName dest_mem)
       let t = primValueType v
       static_array <- newVNameForFun "static_array"
-      emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
+      emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
       let static_src =
             MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
               IxFun.iota [fromIntegral $ length es]
@@ -1888,15 +1888,15 @@ sAllocArray name pt shape space =
   sAllocArrayPerm name pt shape space [0 .. shapeRank shape - 1]
 
 -- | Uses linear/iota index function.
-sStaticArray :: String -> Space -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName
-sStaticArray name space pt vs = do
+sStaticArray :: String -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName
+sStaticArray name pt vs = do
   let num_elems = case vs of
         Imp.ArrayValues vs' -> length vs'
         Imp.ArrayZeros n -> fromIntegral n
       shape = Shape [intConst Int64 $ toInteger num_elems]
   mem <- newVNameForFun $ name ++ "_mem"
-  emit $ Imp.DeclareArray mem space pt vs
-  addVar mem $ MemVar Nothing $ MemEntry space
+  emit $ Imp.DeclareArray mem pt vs
+  addVar mem $ MemVar Nothing $ MemEntry DefaultSpace
   sArray name pt shape mem $ IxFun.iota [fromIntegral num_elems]
 
 sWrite :: VName -> [Imp.TExp Int64] -> Imp.Exp -> ImpM rep r op ()

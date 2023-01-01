@@ -28,7 +28,6 @@ module Futhark.CodeGen.Backends.GenericPython
     ReadScalar,
     Allocate,
     Copy,
-    StaticArray,
     EntryOutput,
     EntryInput,
     CompilerEnv (..),
@@ -102,9 +101,6 @@ type Copy op s =
   PrimType ->
   CompilerM op s ()
 
--- | Create a static array of values - initialised at load time.
-type StaticArray op s = VName -> Imp.SpaceId -> PrimType -> Imp.ArrayContents -> CompilerM op s ()
-
 -- | Construct the Python array being returned from an entry point.
 type EntryOutput op s =
   VName ->
@@ -129,7 +125,6 @@ data Operations op s = Operations
     opsReadScalar :: ReadScalar op s,
     opsAllocate :: Allocate op s,
     opsCopy :: Copy op s,
-    opsStaticArray :: StaticArray op s,
     opsCompiler :: OpCompiler op s,
     opsEntryOutput :: EntryOutput op s,
     opsEntryInput :: EntryInput op s
@@ -145,7 +140,6 @@ defaultOperations =
       opsReadScalar = defReadScalar,
       opsAllocate = defAllocate,
       opsCopy = defCopy,
-      opsStaticArray = defStaticArray,
       opsCompiler = defCompiler,
       opsEntryOutput = defEntryOutput,
       opsEntryInput = defEntryInput
@@ -159,8 +153,6 @@ defaultOperations =
       error "Cannot allocate in non-default memory space"
     defCopy _ _ _ _ _ _ _ _ =
       error "Cannot copy to or from non-default memory space"
-    defStaticArray _ _ _ _ =
-      error "Cannot create static array in non-default memory space"
     defCompiler _ =
       error "The default compiler cannot compile extended operations"
     defEntryOutput _ _ _ _ =
@@ -187,9 +179,6 @@ envAllocate = opsAllocate . envOperations
 
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
-
-envStaticArray :: CompilerEnv op s -> StaticArray op s
-envStaticArray = opsStaticArray . envOperations
 
 envEntryOutput :: CompilerEnv op s -> EntryOutput op s
 envEntryOutput = opsEntryOutput . envOperations
@@ -1197,14 +1186,7 @@ compileCode (Imp.DeclareScalar v _ Unit) = do
   v' <- compileVar v
   stm $ Assign v' $ Var "True"
 compileCode Imp.DeclareScalar {} = pure ()
-compileCode (Imp.DeclareArray name (Space space) t vs) =
-  join $
-    asks envStaticArray
-      <*> pure name
-      <*> pure space
-      <*> pure t
-      <*> pure vs
-compileCode (Imp.DeclareArray name _ t vs) = do
+compileCode (Imp.DeclareArray name t vs) = do
   let arr_name = compileName name <> "_arr"
   -- It is important to store the Numpy array in a temporary variable
   -- to prevent it from going "out-of-scope" before calling
