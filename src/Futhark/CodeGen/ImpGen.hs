@@ -114,6 +114,7 @@ module Futhark.CodeGen.ImpGen
     (<--),
     (<~~),
     function,
+    genConstants,
     warn,
     module Language.Futhark.Warnings,
   )
@@ -285,6 +286,7 @@ data ImpState rep r op = ImpState
   { stateVTable :: VTable rep,
     stateFunctions :: Imp.Functions op,
     stateCode :: Imp.Code op,
+    stateConstants :: Imp.Constants op,
     stateWarnings :: Warnings,
     -- | Maps the arrays backing each accumulator to their
     -- update function and neutral elements.  This works
@@ -297,7 +299,7 @@ data ImpState rep r op = ImpState
   }
 
 newState :: VNameSource -> ImpState rep r op
-newState = ImpState mempty mempty mempty mempty mempty
+newState = ImpState mempty mempty mempty mempty mempty mempty
 
 newtype ImpM rep r op a
   = ImpM (ReaderT (Env rep r op) (State (ImpState rep r op)) a)
@@ -370,6 +372,7 @@ subImpM r ops (ImpM m) = do
             stateFunctions = mempty,
             stateCode = mempty,
             stateNameSource = stateNameSource s,
+            stateConstants = mempty,
             stateWarnings = mempty,
             stateAccs = stateAccs s
           }
@@ -449,7 +452,7 @@ compileProg r ops space (Prog types consts funs) =
           runImpM (compileConsts free_in_funs consts) r ops space $
             combineStates ss
      in ( ( stateWarnings s',
-            Imp.Definitions types consts' (stateFunctions s')
+            Imp.Definitions types (consts' <> stateConstants s') (stateFunctions s')
           ),
           stateNameSource s'
         )
@@ -469,30 +472,38 @@ compileProg r ops space (Prog types consts funs) =
             { stateFunctions =
                 Imp.Functions $ M.toList $ M.fromList funs',
               stateWarnings =
-                mconcat $ map stateWarnings ss
+                mconcat $ map stateWarnings ss,
+              stateConstants =
+                mconcat $ map stateConstants ss
             }
+
+-- Fish out those top-level declarations in the constant
+-- initialisation code that are free in the functions.
+constParams :: Names -> Imp.Code a -> (DL.DList Imp.Param, Imp.Code a)
+constParams used (x Imp.:>>: y) =
+  constParams used x <> constParams used y
+constParams used (Imp.DeclareMem name space)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.MemParam name space,
+        mempty
+      )
+constParams used (Imp.DeclareScalar name _ t)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.ScalarParam name t,
+        mempty
+      )
+constParams used s@(Imp.DeclareArray name space _ _)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.MemParam name space,
+        s
+      )
+constParams _ s =
+  (mempty, s)
 
 compileConsts :: Names -> Stms rep -> ImpM rep r op (Imp.Constants op)
 compileConsts used_consts stms = do
   code <- collect $ compileStms used_consts stms $ pure ()
-  pure $ uncurry Imp.Constants $ first DL.toList $ extract code
-  where
-    -- Fish out those top-level declarations in the constant
-    -- initialisation code that are free in the functions.
-    extract (x Imp.:>>: y) =
-      extract x <> extract y
-    extract (Imp.DeclareMem name space)
-      | name `nameIn` used_consts =
-          ( DL.singleton $ Imp.MemParam name space,
-            mempty
-          )
-    extract (Imp.DeclareScalar name _ t)
-      | name `nameIn` used_consts =
-          ( DL.singleton $ Imp.ScalarParam name t,
-            mempty
-          )
-    extract s =
-      (mempty, s)
+  pure $ uncurry Imp.Constants $ first DL.toList $ constParams used_consts code
 
 lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
 lookupOpaqueType v (OpaqueTypes types) =
@@ -1973,6 +1984,17 @@ function fname outputs inputs m = local newFunction $ do
     addParam (Imp.ScalarParam name bt) =
       addVar name $ ScalarVar Nothing $ ScalarEntry bt
     newFunction env = env {envFunction = Just fname}
+
+-- | Generate constants that get put outside of all functions.  Will
+-- be executed at program startup.  Action must return the names that
+-- should should be made available.  This one has real sharp edges. Do
+-- not use inside 'subImpM'.  Do not use any variable from the context.
+genConstants :: ImpM rep r op (Names, a) -> ImpM rep r op a
+genConstants m = do
+  ((avail, a), code) <- collect' m
+  let consts = uncurry Imp.Constants $ first DL.toList $ constParams avail code
+  modify $ \s -> s {stateConstants = stateConstants s <> consts}
+  pure a
 
 dSlices :: [Imp.TExp Int64] -> ImpM rep r op [Imp.TExp Int64]
 dSlices = fmap (drop 1 . snd) . dSlices'
