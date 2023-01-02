@@ -994,15 +994,13 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
 defCompileBasicOp (Pat [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
       dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
-      dest_space <- entryMemSpace <$> lookupMemory (memLocName dest_mem)
       let t = primValueType v
       static_array <- newVNameForFun "static_array"
       emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
       let static_src =
             MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
               IxFun.iota [fromIntegral $ length es]
-          entry = MemVar Nothing $ MemEntry dest_space
-      addVar static_array entry
+      addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
       copy t dest_mem static_src
   | otherwise =
       forM_ (zip [0 ..] es) $ \(i, e) ->
