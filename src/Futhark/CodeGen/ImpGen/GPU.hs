@@ -217,9 +217,7 @@ withAcc pat inputs lam = do
       | Just (op_lam, _) <- op,
         AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
           let num_locks = 100151
-          locks_arr <-
-            sStaticArray "withacc_locks" (Space "device") int32 $
-              Imp.ArrayZeros num_locks
+          locks_arr <- genZeroes "withacc_locks" num_locks
           let locks = Locks locks_arr num_locks
               extend env = env {hostLocks = M.insert c locks $ hostLocks env}
           localEnv extend $ locksForInputs atomics inputs'

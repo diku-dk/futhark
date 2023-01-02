@@ -185,9 +185,7 @@ prepareAtomicUpdateGlobal l dests slug =
                 ++ [tvSize (slugNumSubhistos slug)]
                 ++ shapeDims (histShape (slugOp slug))
 
-      locks <-
-        sStaticArray "hist_locks" (Space "device") int32 $
-          Imp.ArrayZeros num_locks
+      locks <- genZeroes "hist_locks" num_locks
       let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
       pure (Just l', f l' (Space "global") dests)
 

@@ -700,7 +700,6 @@ inKernelOperations env mode body =
       GC.opsAllocate = cannotAllocate,
       GC.opsDeallocate = cannotDeallocate,
       GC.opsCopy = copyInKernel,
-      GC.opsStaticArray = noStaticArrays,
       GC.opsFatMemory = False,
       GC.opsError = errorInKernel,
       GC.opsCall = callInKernel,
@@ -837,10 +836,6 @@ inKernelOperations env mode body =
     copyInKernel _ _ _ _ _ _ _ _ =
       error "Cannot bulk copy in kernel."
 
-    noStaticArrays :: GC.StaticArray KernelOp KernelState
-    noStaticArrays _ _ _ _ =
-      error "Cannot create static array in kernel."
-
     kernelMemoryType space =
       pure [C.cty|$tyquals:(pointerQuals space) $ty:defaultMemBlockType|]
 
@@ -910,7 +905,7 @@ typesInCode (For _ e c) = typesInExp e <> typesInCode c
 typesInCode (While (TPrimExp e) c) = typesInExp e <> typesInCode c
 typesInCode DeclareMem {} = mempty
 typesInCode (DeclareScalar _ _ t) = S.singleton t
-typesInCode (DeclareArray _ _ t _) = S.singleton t
+typesInCode (DeclareArray _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
 typesInCode (Copy _ _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _ (Count (TPrimExp e3))) =

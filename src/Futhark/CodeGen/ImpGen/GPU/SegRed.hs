@@ -189,9 +189,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
       global_tid = Imp.le64 $ segFlat space
       w = last dims'
 
-  counter <-
-    sStaticArray "counter" (Space "device") int32 $
-      Imp.ArrayZeros (fromIntegral maxNumOps)
+  counter <- genZeroes "counters" $ fromIntegral maxNumOps
 
   reds_group_res_arrs <- groupResultArrays num_groups group_size reds
 
@@ -430,9 +428,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
   -- if the group count exceeds the maximum group size, which is at
   -- most 1024 anyway.
   let num_counters = fromIntegral maxNumOps * 1024
-  counter <-
-    sStaticArray "counter" (Space "device") int32 $
-      Imp.ArrayZeros num_counters
+  counter <- genZeroes "counters" num_counters
 
   sKernelThread "segred_large" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv

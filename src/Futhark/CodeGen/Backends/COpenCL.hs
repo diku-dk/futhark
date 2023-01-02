@@ -78,7 +78,6 @@ compileProg version prog = do
           GC.opsAllocate = allocateOpenCLBuffer,
           GC.opsDeallocate = deallocateOpenCLBuffer,
           GC.opsCopy = copyOpenCLMemory,
-          GC.opsStaticArray = staticOpenCLArray,
           GC.opsMemoryType = openclMemoryType,
           GC.opsFatMemory = True
         }
@@ -285,47 +284,6 @@ openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
 openclMemoryType space =
   error $ "OpenCL backend does not support '" ++ space ++ "' memory space."
-
-staticOpenCLArray :: GC.StaticArray OpenCL ()
-staticOpenCLArray name "device" t vs = do
-  let ct = GC.primTypeToCType t
-  name_realtype <- newVName $ baseString name ++ "_realtype"
-  num_elems <- case vs of
-    ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
-      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
-      pure $ length vs''
-    ArrayZeros n -> do
-      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
-      pure n
-  -- Fake a memory block.
-  GC.contextFieldDyn
-    (C.toIdent name mempty)
-    [C.cty|struct memblock_device|]
-    Nothing
-    [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->$id:name.mem));|]
-  -- During startup, copy the data to where we need it.
-  GC.atInit
-    [C.cstm|{
-    typename cl_int success;
-    ctx->$id:name.references = NULL;
-    ctx->$id:name.size = 0;
-    ctx->$id:name.mem =
-      clCreateBuffer(ctx->opencl.ctx, CL_MEM_READ_WRITE,
-                     ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct), NULL,
-                     &success);
-    OPENCL_SUCCEED_OR_RETURN(success);
-    if ($int:num_elems > 0) {
-      OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueWriteBuffer(ctx->opencl.queue, ctx->$id:name.mem, CL_TRUE,
-                             0, $int:num_elems*sizeof($ty:ct),
-                             $id:name_realtype,
-                             0, NULL, NULL));
-    }
-  }|]
-  GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
-staticOpenCLArray _ space _ _ =
-  error $ "OpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
 kernelConstToExp :: KernelConst -> C.Exp
 kernelConstToExp (SizeConst key) =
