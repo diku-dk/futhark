@@ -54,7 +54,7 @@ replaceInParams coalstab fparams =
   where
     replaceInParam (to_remove, acc) (Param attrs name dec) =
       case dec of
-        MemMem DefaultSpace
+        MemMem _
           | Just entry <- M.lookup name coalstab ->
               (oneName (dstmem entry) <> to_remove, Param attrs (dstmem entry) dec : acc)
         MemArray pt shp u (ArrayIn m ixf)
