@@ -266,7 +266,6 @@ library
       Futhark.CodeGen.ImpGen.Sequential
       Futhark.CodeGen.ImpGen.Transpose
       Futhark.CodeGen.OpenCL.Heuristics
-      Futhark.CodeGen.SetDefaultSpace
       Futhark.Compiler
       Futhark.Compiler.CLI
       Futhark.Compiler.Config
