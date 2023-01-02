@@ -29,6 +29,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     groupCoverSpace,
     fenceForArrays,
     updateAcc,
+    genZeroes,
 
     -- * Host-level bulk operations
     sReplicate,
@@ -161,6 +162,16 @@ updateAcc acc is vs = sComment "UpdateAcc" $ do
                 f locking space arrs is'
               Nothing ->
                 error $ "Missing locks for " ++ prettyString acc
+
+-- | Generate a constant device array of 32-bit integer zeroes with
+-- the given number of elements.  Initialised with a replicate.
+genZeroes :: String -> Int -> CallKernelGen VName
+genZeroes desc n = genConstants $ do
+  counters_mem <- sAlloc (desc <> "_mem") (4 * fromIntegral n) (Space "device")
+  let shape = Shape [intConst Int64 (fromIntegral n)]
+  counters <- sArrayInMem desc int32 shape counters_mem
+  sReplicate counters $ intConst Int32 0
+  pure (namesFromList [counters_mem], counters)
 
 compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =

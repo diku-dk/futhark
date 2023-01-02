@@ -96,7 +96,7 @@ onOpAtomic op = do
       let num_locks = 100151 -- This number is taken from the GPU backend
           dims = map pe64 $ shapeDims (histOpShape op <> histShape op)
       locks <-
-        sStaticArray "hist_locks" DefaultSpace int32 $
+        sStaticArray "hist_locks" int32 $
           Imp.ArrayZeros num_locks
       let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
       pure $ f l'

@@ -500,7 +500,7 @@ compileCode (DeclareScalar name _ t) = do
   let ct = GC.primTypeToCType t
   quals <- getVariabilityQuals name
   GC.decl [C.cdecl|$tyquals:quals $ty:ct $id:name;|]
-compileCode (DeclareArray name DefaultSpace t vs) = do
+compileCode (DeclareArray name t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = GC.primTypeToCType t
   case vs of

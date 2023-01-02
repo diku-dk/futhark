@@ -260,7 +260,7 @@ compileSegScan pat lvl space scanOp kbody = do
   emit $ Imp.DebugPrint "Register constraint" $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
   emit $ Imp.DebugPrint "sumT'" $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
 
-  globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
+  globalId <- genZeroes "id_counter" 1
   statusFlags <- sAllocArray "status_flags" int8 (Shape [unCount num_groups]) (Space "device")
   (aggregateArrays, incprefixArrays) <-
     fmap unzip $

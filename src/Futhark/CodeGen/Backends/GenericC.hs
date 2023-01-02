@@ -66,7 +66,6 @@ defaultOperations =
       opsAllocate = defAllocate,
       opsDeallocate = defDeallocate,
       opsCopy = defCopy,
-      opsStaticArray = defStaticArray,
       opsMemoryType = defMemoryType,
       opsCompiler = defCompiler,
       opsFatMemory = True,
@@ -87,8 +86,6 @@ defaultOperations =
       copyMemoryDefaultSpace destmem destoffset srcmem srcoffset size
     defCopy _ _ _ _ _ _ _ _ =
       error "Cannot copy to or from non-default memory space"
-    defStaticArray _ _ _ _ =
-      error "Cannot create static array in non-default memory space"
     defMemoryType _ =
       error "Has no type for non-default memory space"
     defCompiler _ =

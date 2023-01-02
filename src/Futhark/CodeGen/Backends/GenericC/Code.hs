@@ -324,9 +324,7 @@ compileCode (DeclareMem name space) =
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
-compileCode (DeclareArray name ScalarSpace {} _ _) =
-  error $ "Cannot declare array " ++ prettyString name ++ " in scalar space."
-compileCode (DeclareArray name DefaultSpace t vs) = do
+compileCode (DeclareArray name t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = primTypeToCType t
   case vs of
@@ -342,13 +340,6 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
                                  (unsigned char*)$id:name_realtype,
                                  0,
                                  $string:(prettyString name)};|]
-compileCode (DeclareArray name (Space space) t vs) =
-  join $
-    asks (opsStaticArray . envOperations)
-      <*> pure name
-      <*> pure space
-      <*> pure t
-      <*> pure vs
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no
 -- effect on performance.

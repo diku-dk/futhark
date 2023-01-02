@@ -263,12 +263,10 @@ data Code a
     DeclareMem VName Space
   | -- | Declare a scalar variable with an initially undefined value.
     DeclareScalar VName Volatility PrimType
-  | -- | Create an array containing the given values.  The
-    -- lifetime of the array will be the entire application.
-    -- This is mostly used for constant arrays, but also for
-    -- some bookkeeping data, like the synchronisation
-    -- counts used to implement reduction.
-    DeclareArray VName Space PrimType ArrayContents
+  | -- | Create a DefaultSpace array containing the given values.  The
+    -- lifetime of the array will be the entire application.  This is
+    -- mostly used for constant arrays.
+    DeclareArray VName PrimType ArrayContents
   | -- | Memory space must match the corresponding
     -- 'DeclareMem'.
     Allocate VName (Count Bytes (TExp Int64)) Space
@@ -543,9 +541,9 @@ instance Pretty op => Pretty (Code op) where
       vol' = case vol of
         Volatile -> "volatile "
         Nonvolatile -> mempty
-  pretty (DeclareArray name space t vs) =
+  pretty (DeclareArray name t vs) =
     "array"
-      <+> pretty name <> "@" <> pretty space
+      <+> pretty name
       <+> ":"
       <+> pretty t
       <+> equals
@@ -661,8 +659,8 @@ instance Traversable Code where
     pure $ DeclareMem name space
   traverse _ (DeclareScalar name vol bt) =
     pure $ DeclareScalar name vol bt
-  traverse _ (DeclareArray name space t vs) =
-    pure $ DeclareArray name space t vs
+  traverse _ (DeclareArray name t vs) =
+    pure $ DeclareArray name t vs
   traverse _ (Allocate name size s) =
     pure $ Allocate name size s
   traverse _ (Free name space) =
@@ -693,7 +691,7 @@ instance Traversable Code where
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = oneName name
 declaredIn (DeclareScalar name _ _) = oneName name
-declaredIn (DeclareArray name _ _ _) = oneName name
+declaredIn (DeclareArray name _ _) = oneName name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ body) = oneName i <> declaredIn body
