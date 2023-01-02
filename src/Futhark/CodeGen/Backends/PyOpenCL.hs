@@ -345,10 +345,9 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
             ArgKeyword "device_offset" $ asLong srcidx,
             ArgKeyword "is_blocking" $ Var "synchronous"
           ]
-copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes bt = do
-  let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
-      end = BinOp "+" srcidx divide
-      src = Index srcmem (IdxRange srcidx end)
+copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes _ = do
+  let end = BinOp "+" srcidx nbytes
+      src = Index (Py.simpleCall "createArray" [srcmem, List [nbytes], Var "np.byte"]) (IdxRange srcidx end)
   Py.stm $
     ifNotZeroSize nbytes $
       Exp $

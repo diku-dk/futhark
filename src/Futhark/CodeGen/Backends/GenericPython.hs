@@ -162,7 +162,7 @@ defaultOperations =
 
 data CompilerEnv op s = CompilerEnv
   { envOperations :: Operations op s,
-    envVarExp :: M.Map VName PyExp
+    envVarExp :: M.Map String PyExp
   }
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
@@ -480,7 +480,7 @@ withConstantSubsts (Imp.Constants ps _) =
   where
     constExp p =
       M.singleton
-        (Imp.paramName p)
+        (compileName $ Imp.paramName p)
         (Index (Var "self.constants") $ IdxExp $ String $ prettyText $ Imp.paramName p)
 
 compileConstants :: Imp.Constants op -> CompilerM op s ()
@@ -1094,8 +1094,9 @@ compilePrimValue (BoolValue v) = Bool v
 compilePrimValue UnitValue = Var "None"
 
 compileVar :: VName -> CompilerM op s PyExp
-compileVar v =
-  asks $ fromMaybe (Var $ compileName v) . M.lookup v . envVarExp
+compileVar v = asks $ fromMaybe (Var v') . M.lookup v' . envVarExp
+  where
+    v' = compileName v
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: Monad m => (v -> m PyExp) -> Imp.PrimExp v -> m PyExp
