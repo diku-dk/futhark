@@ -448,11 +448,14 @@ compileProg r ops space (Prog types consts funs) =
           unzip $ parMap rpar (compileFunDef' src) funs
         free_in_funs =
           freeIn $ mconcat $ map stateFunctions ss
-        (consts', s') =
+        ((), s') =
           runImpM (compileConsts free_in_funs consts) r ops space $
             combineStates ss
      in ( ( stateWarnings s',
-            Imp.Definitions types (consts' <> stateConstants s') (stateFunctions s')
+            Imp.Definitions
+              types
+              (stateConstants s' <> foldMap stateConstants ss)
+              (stateFunctions s')
           ),
           stateNameSource s'
         )
@@ -472,38 +475,13 @@ compileProg r ops space (Prog types consts funs) =
             { stateFunctions =
                 Imp.Functions $ M.toList $ M.fromList funs',
               stateWarnings =
-                mconcat $ map stateWarnings ss,
-              stateConstants =
-                mconcat $ map stateConstants ss
+                mconcat $ map stateWarnings ss
             }
 
--- Fish out those top-level declarations in the constant
--- initialisation code that are free in the functions.
-constParams :: Names -> Imp.Code a -> (DL.DList Imp.Param, Imp.Code a)
-constParams used (x Imp.:>>: y) =
-  constParams used x <> constParams used y
-constParams used (Imp.DeclareMem name space)
-  | name `nameIn` used =
-      ( DL.singleton $ Imp.MemParam name space,
-        mempty
-      )
-constParams used (Imp.DeclareScalar name _ t)
-  | name `nameIn` used =
-      ( DL.singleton $ Imp.ScalarParam name t,
-        mempty
-      )
-constParams used s@(Imp.DeclareArray name _ _)
-  | name `nameIn` used =
-      ( DL.singleton $ Imp.MemParam name DefaultSpace,
-        s
-      )
-constParams _ s =
-  (mempty, s)
-
-compileConsts :: Names -> Stms rep -> ImpM rep r op (Imp.Constants op)
-compileConsts used_consts stms = do
-  code <- collect $ compileStms used_consts stms $ pure ()
-  pure $ uncurry Imp.Constants $ first DL.toList $ constParams used_consts code
+compileConsts :: Names -> Stms rep -> ImpM rep r op ()
+compileConsts used_consts stms = genConstants $ do
+  compileStms used_consts stms $ pure ()
+  pure (used_consts, ())
 
 lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
 lookupOpaqueType v (OpaqueTypes types) =
@@ -1982,6 +1960,29 @@ function fname outputs inputs m = local newFunction $ do
     addParam (Imp.ScalarParam name bt) =
       addVar name $ ScalarVar Nothing $ ScalarEntry bt
     newFunction env = env {envFunction = Just fname}
+
+-- Fish out those top-level declarations in the constant
+-- initialisation code that are free in the functions.
+constParams :: Names -> Imp.Code a -> (DL.DList Imp.Param, Imp.Code a)
+constParams used (x Imp.:>>: y) =
+  constParams used x <> constParams used y
+constParams used (Imp.DeclareMem name space)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.MemParam name space,
+        mempty
+      )
+constParams used (Imp.DeclareScalar name _ t)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.ScalarParam name t,
+        mempty
+      )
+constParams used s@(Imp.DeclareArray name _ _)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.MemParam name DefaultSpace,
+        s
+      )
+constParams _ s =
+  (mempty, s)
 
 -- | Generate constants that get put outside of all functions.  Will
 -- be executed at program startup.  Action must return the names that
