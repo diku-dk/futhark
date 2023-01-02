@@ -68,12 +68,12 @@ instance TC.Checkable MCMem where
 instance BuilderOps MCMem where
   mkExpDecB _ _ = pure ()
   mkBodyB stms res = pure $ Body () stms res
-  mkLetNamesB = mkLetNamesB' ()
+  mkLetNamesB = mkLetNamesB' DefaultSpace ()
 
 instance BuilderOps (Engine.Wise MCMem) where
   mkExpDecB pat e = pure $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = pure $ Engine.mkWiseBody () stms res
-  mkLetNamesB = mkLetNamesB''
+  mkLetNamesB = mkLetNamesB'' DefaultSpace
 
 instance TraverseOpStms (Engine.Wise MCMem) where
   traverseOpStms = traverseMemOpStms (traverseMCOpStms (const pure))

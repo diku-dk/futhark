@@ -50,7 +50,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
                 BinOp (Mul Int64 OverflowUndef) num_threads $
                   intConst Int64 2
           let t = paramType x `arrayOfRow` twice_num_threads
-          mem <- allocForArray t DefaultSpace
+          mem <- allocForArray t =<< askDefaultSpace
           -- XXX: this iota ixfun is a bit inefficient; leading to
           -- uncoalesced access.
           let base_dims = map pe64 $ arrayDims t

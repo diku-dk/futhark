@@ -158,7 +158,7 @@ type ErrorCompiler op s = ErrorMsg Exp -> String -> CompilerM op s ()
 
 -- | The address space qualifiers for a pointer of the given type with
 -- the given annotation.
-type PointerQuals op s = String -> CompilerM op s [C.TypeQual]
+type PointerQuals = String -> [C.TypeQual]
 
 -- | The type of a memory block in the given memory space.
 type MemoryType op s = SpaceId -> CompilerM op s C.Type
@@ -634,21 +634,15 @@ volQuals :: Volatility -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
 
-writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
+writeScalarPointerWithQuals :: PointerQuals -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
-  quals <- quals_f space
-  let quals' = volQuals vol ++ quals
-      deref =
-        derefPointer
-          dest
-          i
-          [C.cty|$tyquals:quals' $ty:elemtype*|]
+  let quals' = volQuals vol ++ quals_f space
+      deref = derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
   stm [C.cstm|$exp:deref = $exp:v;|]
 
-readScalarPointerWithQuals :: PointerQuals op s -> ReadScalar op s
+readScalarPointerWithQuals :: PointerQuals -> ReadScalar op s
 readScalarPointerWithQuals quals_f dest i elemtype space vol = do
-  quals <- quals_f space
-  let quals' = volQuals vol ++ quals
+  let quals' = volQuals vol ++ quals_f space
   pure $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
 
 criticalSection :: Operations op s -> [C.BlockItem] -> [C.BlockItem]
