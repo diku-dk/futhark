@@ -18,8 +18,7 @@
 #
 # Also remember this guide: https://github.com/Gabriel439/haskell-nix/blob/master/project1/README.md
 
-{ suffix ? "nightly",
-  commit ? "" }:
+{ commit ? "" }:
 let
   config = {
     packageOverrides = pkgs: rec {
@@ -81,7 +80,7 @@ let
                 ];
 
                 preBuild = ''
-        if [ "${commit}" ]; then echo "${commit}" > commit-id; fi
+        echo "${self.rev or "dirty"}" > commit-id
                 '';
 
                 postBuild = (_drv.postBuild or "") + ''
@@ -107,25 +106,23 @@ let
   futhark = pkgs.haskellPackages.futhark;
 
 in pkgs.stdenv.mkDerivation rec {
-  name = "futhark-" + suffix;
+  name = "futhark";
   version = futhark.version;
   src = tools/release;
 
   buildInputs = [ futhark ];
 
   buildPhase = ''
-    cp -r skeleton futhark-${suffix}
-    cp -r ${futhark}/bin futhark-${suffix}/bin
-    mkdir -p futhark-${suffix}/share
-    cp -r ${futhark}/share/man futhark-${suffix}/share/
-    chmod +w -R futhark-${suffix}
-    cp ${futhark}/share/futhark/LICENSE futhark-${suffix}/
-    [ "${commit}" ] && echo "${commit}" > futhark-${suffix}/commit-id
-    tar -Jcf futhark-${suffix}.tar.xz futhark-${suffix}
+    cp -r skeleton futhark
+    cp -r ${futhark}/bin futhark/bin
+    mkdir -p futhark/share
+    cp -r ${futhark}/share/man futhark/share/
+    chmod +w -R futhark
+    cp ${futhark}/share/futhark/LICENSE futhark/
   '';
 
-  installPhase = ''
-    mkdir -p $out
-    cp futhark-${suffix}.tar.xz $out/futhark-${suffix}.tar.xz
-  '';
+  # installPhase = ''
+  #   mkdir -p $out
+  #   cp futhark.tar.xz $out/futhark.tar.xz
+  # '';
 }

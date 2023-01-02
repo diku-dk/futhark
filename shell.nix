@@ -35,11 +35,12 @@ pkgs.stdenv.mkDerivation {
       python3Packages.sphinx
       python3Packages.sphinxcontrib-bibtex
       imagemagick # needed for literate tests
+      ffmpeg
     ]
-    ++ lib.optionals (stdenv.isLinux)
-      [ opencl-headers
-        ocl-icd
-        oclgrind
-      ]
+    # ++ lib.optionals (stdenv.isLinux)
+    #   [ opencl-headers
+    #     ocl-icd
+    #     oclgrind
+    #   ]
   ;
 }
