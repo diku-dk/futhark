@@ -18,7 +18,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     Deallocate,
     CopyBarrier (..),
     Copy,
-    StaticArray,
 
     -- * Monadic compiler interface
     CompilerM,
@@ -158,7 +157,7 @@ type ErrorCompiler op s = ErrorMsg Exp -> String -> CompilerM op s ()
 
 -- | The address space qualifiers for a pointer of the given type with
 -- the given annotation.
-type PointerQuals op s = String -> CompilerM op s [C.TypeQual]
+type PointerQuals = String -> [C.TypeQual]
 
 -- | The type of a memory block in the given memory space.
 type MemoryType op s = SpaceId -> CompilerM op s C.Type
@@ -183,12 +182,9 @@ type Allocate op s =
   SpaceId ->
   CompilerM op s ()
 
--- | De-allocate the given memory block with the given tag, which is
--- in the given memory space.
-type Deallocate op s = C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
-
--- | Create a static array of values - initialised at load time.
-type StaticArray op s = VName -> SpaceId -> PrimType -> ArrayContents -> CompilerM op s ()
+-- | De-allocate the given memory block, with the given tag, with the
+-- given size,, which is in the given memory space.
+type Deallocate op s = C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
 
 -- | Whether a copying operation should implicitly function as a
 -- barrier regarding further operations on the source.  This is a
@@ -222,7 +218,6 @@ data Operations op s = Operations
     opsAllocate :: Allocate op s,
     opsDeallocate :: Deallocate op s,
     opsCopy :: Copy op s,
-    opsStaticArray :: StaticArray op s,
     opsMemoryType :: MemoryType op s,
     opsCompiler :: OpCompiler op s,
     opsError :: ErrorCompiler op s,
@@ -482,20 +477,24 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
+    stm
+      [C.cstm|host_alloc(ctx, (size_t)$exp:size, $exp:desc, (size_t*)&$exp:size, (void*)&$exp:dest);|]
 
 freeRawMem ::
-  (C.ToExp a, C.ToExp b) =>
+  (C.ToExp a, C.ToExp b, C.ToExp c) =>
   a ->
-  Space ->
   b ->
+  Space ->
+  c ->
   CompilerM op s ()
-freeRawMem mem space desc =
+freeRawMem mem size space desc =
   case space of
     Space sid -> do
       free_mem <- asks (opsDeallocate . envOperations)
-      free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:desc|] sid
-    _ -> item [C.citem|free($exp:mem);|]
+      free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:size|] [C.cexp|$exp:desc|] sid
+    _ ->
+      item
+        [C.citem|host_free(ctx, (size_t)$exp:size, $exp:desc, (void*)$exp:mem);|]
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
@@ -571,7 +570,7 @@ allocMem mem size space on_failure = do
                        $stm:on_failure
                      }|]
     else do
-      freeRawMem mem space mem_s
+      freeRawMem mem size space mem_s
       allocRawMem mem size space [C.cexp|desc|]
 
 copyMemoryDefaultSpace ::
@@ -630,21 +629,15 @@ volQuals :: Volatility -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
 
-writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
+writeScalarPointerWithQuals :: PointerQuals -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
-  quals <- quals_f space
-  let quals' = volQuals vol ++ quals
-      deref =
-        derefPointer
-          dest
-          i
-          [C.cty|$tyquals:quals' $ty:elemtype*|]
+  let quals' = volQuals vol ++ quals_f space
+      deref = derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
   stm [C.cstm|$exp:deref = $exp:v;|]
 
-readScalarPointerWithQuals :: PointerQuals op s -> ReadScalar op s
+readScalarPointerWithQuals :: PointerQuals -> ReadScalar op s
 readScalarPointerWithQuals quals_f dest i elemtype space vol = do
-  quals <- quals_f space
-  let quals' = volQuals vol ++ quals
+  let quals' = volQuals vol ++ quals_f space
   pure $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
 
 criticalSection :: Operations op s -> [C.BlockItem] -> [C.BlockItem]

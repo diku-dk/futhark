@@ -9,7 +9,6 @@ module Futhark.CodeGen.Backends.CCUDA.Boilerplate
 where
 
 import Data.Map qualified as M
-import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( copyDevToDev,
@@ -19,14 +18,15 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
     copyScalarToDev,
     costCentreReport,
     failureSwitch,
+    generateTuningParams,
     kernelRuns,
     kernelRuntime,
   )
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
-import Futhark.CodeGen.RTS.C (cudaH, freeListH)
-import Futhark.Util (chunk, zEncodeText)
+import Futhark.CodeGen.RTS.C (backendsCudaH)
+import Futhark.Util (chunk)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
@@ -68,15 +68,13 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
     [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
-      $esc:("typedef CUdeviceptr fl_mem_t;")
-      $esc:(T.unpack freeListH)
-      $esc:(T.unpack cudaH)
+      $esc:(T.unpack backendsCudaH)
       const char *cuda_program[] = {$inits:fragments, NULL};
       |]
 
-  generateSizeFuns sizes
-  cfg <- generateConfigFuns sizes
-  generateContextFuns cfg cost_centres kernels sizes failures
+  generateTuningParams sizes
+  generateConfigFuns
+  generateContextFuns cost_centres kernels sizes failures
 
   GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(&ctx->cuda));|]
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
@@ -86,222 +84,28 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
         | s <- chunk 2000 $ T.unpack $ cuda_prelude <> cuda_program
       ]
 
-generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () ()
-generateSizeFuns sizes = do
-  let strinit s = [C.cinit|$string:(T.unpack s)|]
-      size_name_inits = map (strinit . prettyText) $ M.keys sizes
-      size_var_inits = map (strinit . zEncodeText . prettyText) $ M.keys sizes
-      size_class_inits = map (strinit . prettyText) $ M.elems sizes
-
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
-
-generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () T.Text
-generateConfigFuns sizes = do
-  let size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys sizes
-      num_sizes = M.size sizes
-  GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
-  cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s {int in_use;
-                              struct cuda_config cu_cfg;
-                              int profiling;
-                              typename int64_t tuning_params[$int:num_sizes];
-                              int num_nvrtc_opts;
-                              const char **nvrtc_opts;
-                              const char *cache_fname;
-                            };|]
-    )
-
-  let size_value_inits = zipWith sizeInit [0 .. M.size sizes - 1] (M.elems sizes)
-      sizeInit i size = [C.cstm|cfg->tuning_params[$int:i] = $int:val;|]
-        where
-          val = fromMaybe 0 $ sizeDefault size
-  GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:cfg* $id:s(void);|],
-      [C.cedecl|struct $id:cfg* $id:s(void) {
-                         struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
-                         if (cfg == NULL) {
-                           return NULL;
-                         }
-                         cfg->in_use = 0;
-
-                         cfg->profiling = 0;
-                         cfg->num_nvrtc_opts = 0;
-                         cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
-                         cfg->nvrtc_opts[0] = NULL;
-                         cfg->cache_fname = NULL;
-                         $stms:size_value_inits
-                         cuda_config_init(&cfg->cu_cfg, $int:num_sizes,
-                                          tuning_param_names, tuning_param_vars,
-                                          cfg->tuning_params, tuning_param_classes);
-                         return cfg;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg) {
-                         assert(!cfg->in_use);
-                         free(cfg->nvrtc_opts);
-                         free(cfg);
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_add_nvrtc_option" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *opt) {
-                         cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
-                         cfg->num_nvrtc_opts++;
-                         cfg->nvrtc_opts = (const char**) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts+1) * sizeof(const char*));
-                         cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
-                         cfg->cu_cfg.logging = cfg->cu_cfg.debugging = flag;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
-                         cfg->profiling = flag;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
-                         cfg->cu_cfg.logging = flag;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_device" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *s) {
-                         set_preferred_device(&cfg->cu_cfg, s);
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_dump_program_to" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
-                         cfg->cu_cfg.dump_program_to = path;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_load_program_from" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
-                         cfg->cu_cfg.load_program_from = path;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_dump_ptx_to" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
-                          cfg->cu_cfg.dump_ptx_to = path;
-                      }|]
-    )
-
-  GC.publicDef_ "context_config_load_ptx_from" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
-                          cfg->cu_cfg.load_ptx_from = path;
-                      }|]
-    )
-
-  GC.publicDef_ "context_config_set_default_group_size" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int size);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
-                         cfg->cu_cfg.default_block_size = size;
-                         cfg->cu_cfg.default_block_size_changed = 1;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_default_num_groups" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int num) {
-                         cfg->cu_cfg.default_grid_size = num;
-                         cfg->cu_cfg.default_grid_size_changed = 1;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_default_tile_size" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
-                         cfg->cu_cfg.default_tile_size = size;
-                         cfg->cu_cfg.default_tile_size_changed = 1;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_default_reg_tile_size" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
-                         cfg->cu_cfg.default_reg_tile_size = size;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_default_threshold" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
-      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
-                         cfg->cu_cfg.default_threshold = size;
-                       }|]
-    )
-
-  GC.publicDef_ "context_config_set_tuning_param" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value);|],
-      [C.cedecl|int $id:s(struct $id:cfg* cfg, const char *param_name, size_t new_value) {
-
-                         for (int i = 0; i < $int:num_sizes; i++) {
-                           if (strcmp(param_name, tuning_param_names[i]) == 0) {
-                             cfg->tuning_params[i] = new_value;
-                             return 0;
-                           }
-                         }
-
-                         if (strcmp(param_name, "default_group_size") == 0) {
-                           cfg->cu_cfg.default_block_size = new_value;
-                           return 0;
-                         }
-
-                         if (strcmp(param_name, "default_num_groups") == 0) {
-                           cfg->cu_cfg.default_grid_size = new_value;
-                           return 0;
-                         }
-
-                         if (strcmp(param_name, "default_threshold") == 0) {
-                           cfg->cu_cfg.default_threshold = new_value;
-                           return 0;
-                         }
-
-                         if (strcmp(param_name, "default_tile_size") == 0) {
-                           cfg->cu_cfg.default_tile_size = new_value;
-                           return 0;
-                         }
-
-                         if (strcmp(param_name, "default_reg_tile_size") == 0) {
-                           cfg->cu_cfg.default_reg_tile_size = new_value;
-                           return 0;
-                         }
-
-                         return 1;
-                       }|]
-    )
-  pure cfg
+generateConfigFuns :: GC.CompilerM OpenCL () ()
+generateConfigFuns = do
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char* opt);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg, const char *param_name, size_t new_value);|]
 
 generateContextFuns ::
-  T.Text ->
   [Name] ->
   M.Map KernelName KernelSafety ->
   M.Map Name SizeClass ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateContextFuns cfg cost_centres kernels sizes failures = do
+generateContextFuns cost_centres kernels sizes failures = do
   final_inits <- GC.contextFinalInits
   (fields, init_fields, free_fields) <- GC.contextContents
   let forCostCentre name =
@@ -330,7 +134,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
-                         struct $id:cfg* cfg;
+                         struct futhark_context_config* cfg;
                          int detail_memory;
                          int debugging;
                          int profiling;
@@ -340,17 +144,24 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          char *error;
                          typename lock_t error_lock;
                          typename FILE *log;
-                         $sdecls:fields
-                         $sdecls:kernel_fields
+                         struct constants *constants;
+                         struct free_list free_list;
+                         typename int64_t peak_mem_usage_default;
+                         typename int64_t cur_mem_usage_default;
+
                          typename CUdeviceptr global_failure;
                          typename CUdeviceptr global_failure_args;
                          struct cuda_context cuda;
                          struct tuning_params tuning_params;
                          // True if a potentially failing kernel has been enqueued.
                          typename int32_t failure_is_an_option;
-
                          int total_runs;
                          long int total_runtime;
+                         typename int64_t peak_mem_usage_device;
+                         typename int64_t cur_mem_usage_device;
+
+                         $sdecls:fields
+                         $sdecls:kernel_fields
                        };|]
     )
 
@@ -363,37 +174,26 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
         foldl max 0 $ map (errorMsgNumArgs . failureError) failures
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
-      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                 assert(!cfg->in_use);
+    ( [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg);|],
+      [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg) {
                  struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                  if (ctx == NULL) {
                    return NULL;
                  }
-                 ctx->cfg = cfg;
-                 ctx->cfg->in_use = 1;
-                 ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
-                 ctx->profiling = cfg->profiling;
-                 ctx->profiling_paused = 0;
-                 ctx->logging = cfg->cu_cfg.logging;
-                 ctx->error = NULL;
-                 create_lock(&ctx->error_lock);
-                 ctx->log = stderr;
+                 context_setup(cfg, ctx);
+
                  ctx->cuda.profiling_records_capacity = 200;
                  ctx->cuda.profiling_records_used = 0;
                  ctx->cuda.profiling_records =
                    malloc(ctx->cuda.profiling_records_capacity *
                           sizeof(struct profiling_record));
 
-                 ctx->cuda.cfg = cfg->cu_cfg;
-                 create_lock(&ctx->lock);
-
                  ctx->failure_is_an_option = 0;
                  ctx->total_runs = 0;
                  ctx->total_runtime = 0;
                  $stms:init_fields
 
-                 ctx->error = cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
+                 ctx->error = cuda_setup(ctx->cfg, &ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
 
                  if (ctx->error != NULL) {
                    futhark_panic(1, "%s\n", ctx->error);
@@ -424,12 +224,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  $stms:free_fields
-                                 free_constants(ctx);
+                                 context_teardown(ctx);
                                  cuMemFree(ctx->global_failure);
                                  cuMemFree(ctx->global_failure_args);
                                  cuda_cleanup(&ctx->cuda);
-                                 free_lock(&ctx->lock);
-                                 ctx->cfg->in_use = 0;
                                  free(ctx);
                                }|]
     )
@@ -477,3 +275,5 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
     [C.citem|if (ctx->error == NULL) {
                CUDA_SUCCEED_NONFATAL(cuda_free_all(&ctx->cuda));
              }|]
+
+{-# NOINLINE generateBoilerplate #-}

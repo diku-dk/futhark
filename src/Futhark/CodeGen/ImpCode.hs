@@ -99,6 +99,7 @@ where
 import Data.Bifunctor (second)
 import Data.List (intersperse)
 import Data.Map qualified as M
+import Data.Ord (comparing)
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Traversable
@@ -121,6 +122,7 @@ import Futhark.IR.Syntax.Core
     ValueType (..),
     errorMsgArgTypes,
   )
+import Futhark.Util (nubByOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark.Core
 import Language.Futhark.Primitive
@@ -176,6 +178,13 @@ data Constants a = Constants
 
 instance Functor Constants where
   fmap f (Constants params code) = Constants params (fmap f code)
+
+instance Monoid (Constants a) where
+  mempty = Constants mempty mempty
+
+instance Semigroup (Constants a) where
+  Constants ps1 c1 <> Constants ps2 c2 =
+    Constants (nubByOrd (comparing paramName) $ ps1 <> ps2) (c1 <> c2)
 
 -- | A description of an externally meaningful value.
 data ValueDesc
@@ -254,12 +263,10 @@ data Code a
     DeclareMem VName Space
   | -- | Declare a scalar variable with an initially undefined value.
     DeclareScalar VName Volatility PrimType
-  | -- | Create an array containing the given values.  The
-    -- lifetime of the array will be the entire application.
-    -- This is mostly used for constant arrays, but also for
-    -- some bookkeeping data, like the synchronisation
-    -- counts used to implement reduction.
-    DeclareArray VName Space PrimType ArrayContents
+  | -- | Create a DefaultSpace array containing the given values.  The
+    -- lifetime of the array will be the entire application.  This is
+    -- mostly used for constant arrays.
+    DeclareArray VName PrimType ArrayContents
   | -- | Memory space must match the corresponding
     -- 'DeclareMem'.
     Allocate VName (Count Bytes (TExp Int64)) Space
@@ -534,9 +541,9 @@ instance Pretty op => Pretty (Code op) where
       vol' = case vol of
         Volatile -> "volatile "
         Nonvolatile -> mempty
-  pretty (DeclareArray name space t vs) =
+  pretty (DeclareArray name t vs) =
     "array"
-      <+> pretty name <> "@" <> pretty space
+      <+> pretty name
       <+> ":"
       <+> pretty t
       <+> equals
@@ -571,7 +578,7 @@ instance Pretty op => Pretty (Code op) where
     "assert" <> parens (commasep [pretty msg, pretty e])
   pretty (Copy t dest destoffset destspace src srcoffset srcspace size) =
     "copy"
-      <> parens
+      <> (parens . align)
         ( pretty t <> comma
             </> ppMemLoc dest destoffset <> pretty destspace <> comma
             </> ppMemLoc src srcoffset <> pretty srcspace <> comma
@@ -652,8 +659,8 @@ instance Traversable Code where
     pure $ DeclareMem name space
   traverse _ (DeclareScalar name vol bt) =
     pure $ DeclareScalar name vol bt
-  traverse _ (DeclareArray name space t vs) =
-    pure $ DeclareArray name space t vs
+  traverse _ (DeclareArray name t vs) =
+    pure $ DeclareArray name t vs
   traverse _ (Allocate name size s) =
     pure $ Allocate name size s
   traverse _ (Free name space) =
@@ -684,7 +691,7 @@ instance Traversable Code where
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = oneName name
 declaredIn (DeclareScalar name _ _) = oneName name
-declaredIn (DeclareArray name _ _ _) = oneName name
+declaredIn (DeclareArray name _ _) = oneName name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ body) = oneName i <> declaredIn body

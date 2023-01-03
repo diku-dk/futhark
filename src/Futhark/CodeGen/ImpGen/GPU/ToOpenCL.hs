@@ -96,14 +96,18 @@ cleanSizes m = M.map clean m
       SizeThreshold (filter ((`elem` known) . fst) path) def
     clean s = s
 
-pointerQuals :: Monad m => String -> m [C.TypeQual]
-pointerQuals "global" = pure [C.ctyquals|__global|]
-pointerQuals "local" = pure [C.ctyquals|__local|]
-pointerQuals "private" = pure [C.ctyquals|__private|]
-pointerQuals "constant" = pure [C.ctyquals|__constant|]
-pointerQuals "write_only" = pure [C.ctyquals|__write_only|]
-pointerQuals "read_only" = pure [C.ctyquals|__read_only|]
-pointerQuals "kernel" = pure [C.ctyquals|__kernel|]
+pointerQuals :: String -> [C.TypeQual]
+pointerQuals "global" = [C.ctyquals|__global|]
+pointerQuals "local" = [C.ctyquals|__local|]
+pointerQuals "private" = [C.ctyquals|__private|]
+pointerQuals "constant" = [C.ctyquals|__constant|]
+pointerQuals "write_only" = [C.ctyquals|__write_only|]
+pointerQuals "read_only" = [C.ctyquals|__read_only|]
+pointerQuals "kernel" = [C.ctyquals|__kernel|]
+-- OpenCL does not actually have a "device" space, but we use it in
+-- the compiler pipeline to defer to memory on the device, as opposed
+-- to the host.  From a kernel's perspective, this is "global".
+pointerQuals "device" = pointerQuals "global"
 pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
 -- In-kernel name and per-workgroup size in bytes.
@@ -696,7 +700,6 @@ inKernelOperations env mode body =
       GC.opsAllocate = cannotAllocate,
       GC.opsDeallocate = cannotDeallocate,
       GC.opsCopy = copyInKernel,
-      GC.opsStaticArray = noStaticArrays,
       GC.opsFatMemory = False,
       GC.opsError = errorInKernel,
       GC.opsCall = callInKernel,
@@ -743,9 +746,9 @@ inKernelOperations env mode body =
 
     atomicCast s t = do
       let volatile = [C.ctyquals|volatile|]
-      quals <- case s of
-        Space sid -> pointerQuals sid
-        _ -> pointerQuals "global"
+      let quals = case s of
+            Space sid -> pointerQuals sid
+            _ -> pointerQuals "global"
       pure [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
     atomicSpace (Space sid) = sid
@@ -833,13 +836,8 @@ inKernelOperations env mode body =
     copyInKernel _ _ _ _ _ _ _ _ =
       error "Cannot bulk copy in kernel."
 
-    noStaticArrays :: GC.StaticArray KernelOp KernelState
-    noStaticArrays _ _ _ _ =
-      error "Cannot create static array in kernel."
-
-    kernelMemoryType space = do
-      quals <- pointerQuals space
-      pure [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
+    kernelMemoryType space =
+      pure [C.cty|$tyquals:(pointerQuals space) $ty:defaultMemBlockType|]
 
     kernelWriteScalar =
       GC.writeScalarPointerWithQuals pointerQuals
@@ -907,7 +905,7 @@ typesInCode (For _ e c) = typesInExp e <> typesInCode c
 typesInCode (While (TPrimExp e) c) = typesInExp e <> typesInCode c
 typesInCode DeclareMem {} = mempty
 typesInCode (DeclareScalar _ _ t) = S.singleton t
-typesInCode (DeclareArray _ _ t _) = S.singleton t
+typesInCode (DeclareArray _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
 typesInCode (Copy _ _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _ (Count (TPrimExp e3))) =

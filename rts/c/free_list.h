@@ -1,19 +1,22 @@
 // Start of free_list.h.
 
+typedef uintptr_t fl_mem;
+
 // An entry in the free list.  May be invalid, to avoid having to
 // deallocate entries as soon as they are removed.  There is also a
 // tag, to help with memory reuse.
 struct free_list_entry {
   size_t size;
-  fl_mem_t mem;
+  fl_mem mem;
   const char *tag;
   unsigned char valid;
 };
 
 struct free_list {
-  struct free_list_entry *entries;        // Pointer to entries.
-  int capacity;                           // Number of entries.
-  int used;                               // Number of valid entries.
+  struct free_list_entry *entries; // Pointer to entries.
+  int capacity;                    // Number of entries.
+  int used;                        // Number of valid entries.
+  lock_t lock;                     // Thread safety.
 };
 
 static void free_list_init(struct free_list *l) {
@@ -23,10 +26,12 @@ static void free_list_init(struct free_list *l) {
   for (int i = 0; i < l->capacity; i++) {
     l->entries[i].valid = 0;
   }
+  create_lock(&l->lock);
 }
 
 // Remove invalid entries from the free list.
 static void free_list_pack(struct free_list *l) {
+  lock_lock(&l->lock);
   int p = 0;
   for (int i = 0; i < l->capacity; i++) {
     if (l->entries[i].valid) {
@@ -46,13 +51,16 @@ static void free_list_pack(struct free_list *l) {
   }
   l->entries = realloc(l->entries, p * sizeof(struct free_list_entry));
   l->capacity = p;
+  lock_unlock(&l->lock);
 }
 
 static void free_list_destroy(struct free_list *l) {
   assert(l->used == 0);
   free(l->entries);
+  free_lock(&l->lock);
 }
 
+// Not part of the interface, so no locking.
 static int free_list_find_invalid(struct free_list *l) {
   int i;
   for (i = 0; i < l->capacity; i++) {
@@ -63,7 +71,8 @@ static int free_list_find_invalid(struct free_list *l) {
   return i;
 }
 
-static void free_list_insert(struct free_list *l, size_t size, fl_mem_t mem, const char *tag) {
+static void free_list_insert(struct free_list *l, size_t size, fl_mem mem, const char *tag) {
+  lock_lock(&l->lock);
   int i = free_list_find_invalid(l);
 
   if (i == l->capacity) {
@@ -83,10 +92,11 @@ static void free_list_insert(struct free_list *l, size_t size, fl_mem_t mem, con
   l->entries[i].tag = tag;
 
   l->used++;
+  lock_unlock(&l->lock);
 }
 
 // Determine whether this entry in the free list is acceptable for
-// satisfying the request.
+// satisfying the request.  Not public, so no locking.
 static bool free_list_acceptable(size_t size, const char* tag, struct free_list_entry *entry) {
   // We check not just the hard requirement (is the entry acceptable
   // and big enough?) but also put a cap on how much wasted space
@@ -130,9 +140,11 @@ static bool free_list_acceptable(size_t size, const char* tag, struct free_list_
 // does not exist, another memory block with exactly the desired size.
 // Returns 0 on success.
 static int free_list_find(struct free_list *l, size_t size, const char *tag,
-                          size_t *size_out, fl_mem_t *mem_out) {
+                          size_t *size_out, fl_mem *mem_out) {
+  lock_lock(&l->lock);
   int size_match = -1;
   int i;
+  int ret = 1;
   for (i = 0; i < l->capacity; i++) {
     if (free_list_acceptable(size, tag, &l->entries[i]) &&
         (size_match < 0 || l->entries[i].size < l->entries[size_match].size)) {
@@ -147,25 +159,28 @@ static int free_list_find(struct free_list *l, size_t size, const char *tag,
     *size_out = l->entries[size_match].size;
     *mem_out = l->entries[size_match].mem;
     l->used--;
-    return 0;
-  } else {
-    return 1;
+    ret = 0;
   }
+  lock_unlock(&l->lock);
+  return ret;
 }
 
 // Remove the first block in the free list.  Returns 0 if a block was
 // removed, and nonzero if the free list was already empty.
-static int free_list_first(struct free_list *l, fl_mem_t *mem_out) {
+static int free_list_first(struct free_list *l, fl_mem *mem_out) {
+  lock_lock(&l->lock);
+  int ret = 1;
   for (int i = 0; i < l->capacity; i++) {
     if (l->entries[i].valid) {
       l->entries[i].valid = 0;
       *mem_out = l->entries[i].mem;
       l->used--;
-      return 0;
+      ret = 0;
+      break;
     }
   }
-
-  return 1;
+  lock_unlock(&l->lock);
+  return ret;
 }
 
 // End of free_list.h.

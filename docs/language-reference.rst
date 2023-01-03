@@ -542,7 +542,10 @@ in natural text.
 
 * Function and type application, and prefix operators, bind more
   tightly than any infix operator.  Note that the only prefix
-  operators are ``!`` and ``-``, and more cannot be defined.
+  operators are the builtin ``!`` and ``-``, and more cannot be
+  defined.  In particular, a user-defined operator beginning with
+  ``!`` binds as ``!=``, as on the table below, not as the prefix
+  operator ``!``
 
 * ``#foo #bar`` is interpreted as a constructor with a ``#bar``
   payload, not as applying ``#foo`` to ``#bar`` (the latter would be
@@ -563,7 +566,7 @@ in natural text.
   left               ```op```
   left               ``||``
   left               ``&&``
-  left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=``
+  left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=`` ``!`` ``=``
   left               ``&`` ``^`` ``|``
   left               ``<<`` ``>>``
   left               ``+`` ``-``
@@ -767,8 +770,8 @@ write, without polluting the global scope with a declaration-level
 
 Apply an operator to ``x`` and ``y``.  Operators are functions like
 any other, and can be user-defined.  Futhark pre-defines certain
-"magical" *overloaded* operators that work on many different types.
-Overloaded functions cannot be defined by the user.  Both operands
+"magical" *overloaded* operators that work on several types.
+Overloaded operators cannot be defined by the user.  Both operands
 must have the same type.  The predefined operators and their semantics
 are:
 
@@ -801,16 +804,16 @@ are:
 
   ``==``, ``!=``
 
-      Compare any two values of builtin or compound type for equality.
+    Compare any two values of builtin or compound type for equality.
 
   ``<``, ``<=``.  ``>``, ``>=``
 
-      Company any two values of numeric type for equality.
+    Company any two values of numeric type for equality.
 
   ```op```
 
-      Use ``op``, which may be any non-operator function name, as an
-      infix operator.
+    Use ``op``, which may be any non-operator function name, as an
+    infix operator.
 
 ``x && y``
 ..........

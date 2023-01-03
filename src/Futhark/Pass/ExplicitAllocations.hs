@@ -10,6 +10,7 @@ module Futhark.Pass.ExplicitAllocations
     explicitAllocationsInStmsGeneric,
     ExpHint (..),
     defaultExpHints,
+    askDefaultSpace,
     Allocable,
     AllocM,
     AllocEnv (..),
@@ -123,22 +124,25 @@ expHints e = do
   f <- asks envExpHints
   f e
 
+-- | The space in which we allocate memory if we have no other
+-- preferences or constraints.
 askDefaultSpace :: AllocM fromrep torep Space
 askDefaultSpace = asks allocSpace
 
 runAllocM ::
   MonadFreshNames m =>
+  Space ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
   AllocM fromrep torep a ->
   m a
-runAllocM handleOp hints (AllocM m) =
+runAllocM space handleOp hints (AllocM m) =
   fmap fst $ modifyNameSource $ runState $ runReaderT (runBuilderT m mempty) env
   where
     env =
       AllocEnv
         { aggressiveReuse = False,
-          allocSpace = DefaultSpace,
+          allocSpace = space,
           envConsts = mempty,
           allocInOp = handleOp,
           envExpHints = hints
@@ -425,7 +429,8 @@ allocInMergeParams merge m = do
                 then do
                   -- Arrays with loop-variant shape cannot be in scalar
                   -- space, so copy them elsewhere and try again.
-                  (_, v') <- lift $ allocLinearArray DefaultSpace (baseString v) v
+                  space <- lift askDefaultSpace
+                  (_, v') <- lift $ allocLinearArray space (baseString v) v
                   allocInMergeParam (mergeparam, Var v')
                 else do
                   p <- newParam "mem_param" $ MemMem v_mem_space
@@ -559,22 +564,23 @@ linearFuncallArg _ _ arg =
 
 explicitAllocationsGeneric ::
   (Allocable fromrep torep inner) =>
+  Space ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
   Pass fromrep torep
-explicitAllocationsGeneric handleOp hints =
+explicitAllocationsGeneric space handleOp hints =
   Pass "explicit allocations" "Transform program to explicit memory representation" $
     intraproceduralTransformationWithConsts onStms allocInFun
   where
     onStms stms =
-      runAllocM handleOp hints $ collectStms_ $ allocInStms stms $ pure ()
+      runAllocM space handleOp hints $ collectStms_ $ allocInStms stms $ pure ()
 
     allocInFun consts (FunDef entry attrs fname rettype params fbody) =
-      runAllocM handleOp hints . inScopeOf consts $
-        allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
+      runAllocM space handleOp hints . inScopeOf consts $
+        allocInFParams (zip params $ repeat space) $ \params' -> do
           (fbody', mem_rets) <-
-            allocInFunBody (map (const $ Just DefaultSpace) rettype) fbody
-          let rettype' = mem_rets ++ memoryInDeclExtType (length mem_rets) rettype
+            allocInFunBody (map (const $ Just space) rettype) fbody
+          let rettype' = mem_rets ++ memoryInDeclExtType space (length mem_rets) rettype
           pure $ FunDef entry attrs fname rettype' params' fbody'
 
 explicitAllocationsInStmsGeneric ::
@@ -582,27 +588,28 @@ explicitAllocationsInStmsGeneric ::
     HasScope torep m,
     Allocable fromrep torep inner
   ) =>
+  Space ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
   Stms fromrep ->
   m (Stms torep)
-explicitAllocationsInStmsGeneric handleOp hints stms = do
+explicitAllocationsInStmsGeneric space handleOp hints stms = do
   scope <- askScope
-  runAllocM handleOp hints $
+  runAllocM space handleOp hints $
     localScope scope $
       collectStms_ $
         allocInStms stms $
           pure ()
 
-memoryInDeclExtType :: Int -> [DeclExtType] -> [FunReturns]
-memoryInDeclExtType k dets = evalState (mapM addMem dets) 0
+memoryInDeclExtType :: Space -> Int -> [DeclExtType] -> [FunReturns]
+memoryInDeclExtType space k dets = evalState (mapM addMem dets) 0
   where
     addMem (Prim t) = pure $ MemPrim t
     addMem Mem {} = error "memoryInDeclExtType: too much memory"
     addMem (Array pt shape u) = do
       i <- get <* modify (+ 1)
       let shape' = fmap shift shape
-      pure . MemArray pt shape' u . ReturnsNewBlock DefaultSpace i $
+      pure . MemArray pt shape' u . ReturnsNewBlock space i $
         IxFun.iota $
           map convert $
             shapeDims shape'
@@ -891,10 +898,11 @@ allocInExp (DoLoop merge form (Body () bodystms bodyres)) =
       pure $ DoLoop merge' form' body'
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
+  space <- askDefaultSpace
   -- We assume that every array is going to be in its own memory.
-  pure $ Apply fname args' (mems ++ memoryInDeclExtType num_arrays rettype) loc
+  pure $ Apply fname args' (mems space ++ memoryInDeclExtType space num_arrays rettype) loc
   where
-    mems = replicate num_arrays (MemMem DefaultSpace)
+    mems space = replicate num_arrays (MemMem space)
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf) rettype
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody
@@ -954,7 +962,8 @@ allocInExp (WithAcc inputs bodylam) =
       pure $ Param attrs p $ MemPrim t
     onYParam is (Param attrs p (Array pt shape u)) arr = do
       arr_t <- lookupType arr
-      mem <- allocForArray arr_t DefaultSpace
+      space <- askDefaultSpace
+      mem <- allocForArray arr_t space
       let base_dims = map pe64 $ arrayDims arr_t
           ixfun = IxFun.iota base_dims
       pure $ mkP attrs p pt shape u mem ixfun is
@@ -1017,12 +1026,13 @@ mkLetNamesB' ::
     MonadBuilder m,
     ExpDec (Rep m) ~ ()
   ) =>
+  Space ->
   ExpDec (Rep m) ->
   [VName] ->
   Exp (Rep m) ->
   m (Stm (Rep m))
-mkLetNamesB' dec names e = do
-  pat <- patWithAllocations DefaultSpace names e nohints
+mkLetNamesB' space dec names e = do
+  pat <- patWithAllocations space names e nohints
   pure $ Let pat (defAux dec) e
   where
     nohints = map (const NoHint) names
@@ -1037,11 +1047,12 @@ mkLetNamesB'' ::
     MonadBuilder m,
     Engine.CanBeWise inner
   ) =>
+  Space ->
   [VName] ->
   Exp (Engine.Wise rep) ->
   m (Stm (Engine.Wise rep))
-mkLetNamesB'' names e = do
-  pat <- patWithAllocations DefaultSpace names e nohints
+mkLetNamesB'' space names e = do
+  pat <- patWithAllocations space names e nohints
   let pat' = Engine.addWisdomToPat pat e
       dec = Engine.mkWiseExpDec pat' () e
   pure $ Let pat' (defAux dec) e

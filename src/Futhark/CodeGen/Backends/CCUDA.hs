@@ -69,7 +69,6 @@ compileProg version prog = do
           GC.opsAllocate = allocateCUDABuffer,
           GC.opsDeallocate = deallocateCUDABuffer,
           GC.opsCopy = copyCUDAMemory,
-          GC.opsStaticArray = staticCUDAArray,
           GC.opsMemoryType = cudaMemoryType,
           GC.opsCompiler = callKernel,
           GC.opsFatMemory = True,
@@ -199,15 +198,16 @@ allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
   GC.stm
     [C.cstm|ctx->error =
-     CUDA_SUCCEED_NONFATAL(cuda_alloc(&ctx->cuda, ctx->log,
-                                      (size_t)$exp:size, $exp:tag, &$exp:mem));|]
+     CUDA_SUCCEED_NONFATAL(cuda_alloc(ctx->cfg, &ctx->cuda, ctx->log,
+                                      (size_t)$exp:size, $exp:tag,
+                                      &$exp:mem, (size_t*)&$exp:size));|]
 allocateCUDABuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
 deallocateCUDABuffer :: GC.Deallocate OpenCL ()
-deallocateCUDABuffer mem tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_free(&ctx->cuda, $exp:mem, $exp:tag));|]
-deallocateCUDABuffer _ _ space =
+deallocateCUDABuffer mem size tag "device" =
+  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_free(&ctx->cuda, $exp:mem, $exp:size, $exp:tag));|]
+deallocateCUDABuffer _ _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
 copyCUDAMemory :: GC.Copy OpenCL ()
@@ -236,43 +236,6 @@ copyCUDAMemory b dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
           ++ "' from '"
           ++ show srcSpace
           ++ "'."
-
-staticCUDAArray :: GC.StaticArray OpenCL ()
-staticCUDAArray name "device" t vs = do
-  let ct = GC.primTypeToCType t
-  name_realtype <- newVName $ baseString name ++ "_realtype"
-  num_elems <- case vs of
-    ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
-      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
-      pure $ length vs''
-    ArrayZeros n -> do
-      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
-      pure n
-  -- Fake a memory block.
-  GC.contextFieldDyn
-    (C.toIdent name mempty)
-    [C.cty|struct memblock_device|]
-    Nothing
-    [C.cstm|cuMemFree(ctx->$id:name.mem);|]
-  -- During startup, copy the data to where we need it.
-  GC.atInit
-    [C.cstm|{
-    ctx->$id:name.references = NULL;
-    ctx->$id:name.size = 0;
-    CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->$id:name.mem,
-                            ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct)));
-    if ($int:num_elems > 0) {
-      CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->$id:name.mem, $id:name_realtype,
-                                $int:num_elems*sizeof($ty:ct)));
-    }
-  }|]
-  GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
-staticCUDAArray _ space _ _ =
-  error $
-    "CUDA backend cannot create static array in '"
-      ++ space
-      ++ "' memory space"
 
 cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
