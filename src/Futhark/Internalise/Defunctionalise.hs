@@ -578,11 +578,11 @@ defuncExp (AppExp (DoLoop sparams pat e1 form e3 loc) res) = do
       M.singleton vn $ Binding Nothing $ Dynamic tp
 defuncExp e@(AppExp BinOp {} _) =
   error $ "defuncExp: unexpected binary operator: " ++ prettyString e
-defuncExp (Project vn e0 tp@(Info tp') loc) = do
+defuncExp (Project vn e0 tp@(Info (tp', am)) loc) = do
   (e0', sv0) <- defuncExp e0
   case sv0 of
     RecordSV svs -> case lookup vn svs of
-      Just sv -> pure (Project vn e0' (Info $ typeFromSV sv) loc, sv)
+      Just sv -> pure (Project vn e0' (Info (typeFromSV sv, am)) loc, sv)
       Nothing -> error "Invalid record projection."
     Dynamic _ -> pure (Project vn e0' tp loc, Dynamic tp')
     _ -> error $ "Projection of an expression with static value " ++ show sv0

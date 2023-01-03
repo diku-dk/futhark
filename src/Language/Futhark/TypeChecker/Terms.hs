@@ -391,8 +391,12 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
-  kt <- mustHaveField (mkUsage loc $ docText $ "projection of field " <> dquotes (pretty k)) k t
-  pure $ Project k e' (Info kt) loc
+  let elem_t = stripArray (arrayRank t) t
+  kt <- mustHaveField (mkUsage loc $ docText $ "projection of field " <> dquotes (pretty k)) k elem_t
+  let kt'
+        | arrayRank t > 0 = arrayOf (uniqueness t) (arrayShape t) kt
+        | otherwise = kt
+  pure $ Project k e' (Info (kt', AutoMap $ arrayShape t)) loc
 checkExp (AppExp (If e1 e2 e3 loc) _) =
   sequentially checkCond $ \e1' _ -> do
     ((e2', e3'), dflow) <- tapOccurrences $ checkExp e2 `alternative` checkExp e3
@@ -456,9 +460,13 @@ checkExp (Var qn NoInfo loc) = do
 
     checkField e k = do
       t <- expType e
-      let usage = mkUsage loc $ docText $ "projection of field " <> dquotes (pretty k)
-      kt <- mustHaveField usage k t
-      pure $ Project k e (Info kt) loc
+      let elem_t = stripArray (arrayRank t) t
+          usage = mkUsage loc $ docText $ "projection of field " <> dquotes (pretty k)
+      kt <- mustHaveField usage k elem_t
+      let kt'
+            | arrayRank t > 0 = arrayOf (uniqueness t) (arrayShape t) kt
+            | otherwise = kt
+      pure $ Project k e (Info (kt', AutoMap $ arrayShape t)) loc
 checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
   pure $ Negate arg' loc

@@ -815,7 +815,7 @@ internaliseExp _ (E.FloatLit v (Info t) _) =
     _ -> error $ "internaliseExp: nonsensical type for float literal: " ++ prettyString t
 -- Builtin operators are handled specially because they are
 -- overloaded.
-internaliseExp desc (E.Project k e (Info rt) _) = do
+internaliseExp desc (E.Project k e (Info (rt, am)) _) = do
   let i' = sum . map internalisedTypeSize $
         case E.typeOf e `setAliases` () of
           E.Scalar (Record fs) ->

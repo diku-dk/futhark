@@ -477,7 +477,7 @@ typeOf (StringLit vs _) =
     Unique
     (Shape [ConstSize $ genericLength vs])
     (Prim (Unsigned Int8))
-typeOf (Project _ _ (Info t) _) = t
+typeOf (Project _ _ (Info (t, _)) _) = t
 typeOf (Var _ (Info t) _) = t
 typeOf (Hole (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e

@@ -774,7 +774,7 @@ data ExpBase f vn
     ArrayLit [ExpBase f vn] (f PatType) SrcLoc
   | -- | An attribute applied to the following expression.
     Attr (AttrInfo vn) (ExpBase f vn) SrcLoc
-  | Project Name (ExpBase f vn) (f PatType) SrcLoc
+  | Project Name (ExpBase f vn) (f (PatType, AutoMap)) SrcLoc
   | -- | Numeric negation (ugly special case; Haskell did it first).
     Negate (ExpBase f vn) SrcLoc
   | -- | Logical and bitwise negation.

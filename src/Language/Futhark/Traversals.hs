@@ -174,8 +174,8 @@ instance ASTMappable (ExpBase Info VName) where
       <*> mapOnExp tv v
       <*> (Info <$> mapOnPatType tv t)
       <*> pure loc
-  astMap tv (Project field e t loc) =
-    Project field <$> mapOnExp tv e <*> traverse (mapOnPatType tv) t <*> pure loc
+  astMap tv (Project field e (Info (t, am)) loc) =
+    Project field <$> mapOnExp tv e <*> (Info <$> ((,) <$> mapOnPatType tv t <*> pure am)) <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
     Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
   astMap tv (Lambda params body ret t loc) =

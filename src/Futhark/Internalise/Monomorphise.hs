@@ -476,14 +476,14 @@ transformExp (ProjectSection fields (Info t) loc) =
 transformExp (IndexSection idxs (Info t) loc) = do
   idxs' <- mapM transformDimIndex idxs
   desugarIndexSection idxs' t loc
-transformExp (Project n e tp loc) = do
+transformExp (Project n e tp@(Info (t, _)) loc) = do
   maybe_fs <- case e of
     Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
     _ -> pure Nothing
   case maybe_fs of
     Just m
       | Just (v, _) <- M.lookup n m ->
-          pure $ Var (qualName v) tp loc
+          pure $ Var (qualName v) (Info t) loc
     _ -> do
       e' <- transformExp e
       pure $ Project n e' tp loc
@@ -597,7 +597,7 @@ desugarProjectSection fields (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
       case typeOf e of
         Scalar (Record fs)
           | Just t <- M.lookup field fs ->
-              Project field e (Info t) mempty
+              Project field e (Info (t, mempty)) mempty
         t ->
           error $
             "desugarOpSection: type "
