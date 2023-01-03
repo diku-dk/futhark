@@ -393,12 +393,12 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v7
+    - uses: mymindstorm/setup-emsdk@v11
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
 
-    - uses: actions/setup-node@v1
+    - uses: actions/setup-node@v3
       with:
         node-version: '16.x'
 
