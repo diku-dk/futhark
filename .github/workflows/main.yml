@@ -615,6 +615,29 @@ jobs:
         name: futhark-opencl-MI100-${{ github.sha }}.json
         path: futhark-opencl-MI100-${{ github.sha }}.json
 
+  benchmark-results:
+    runs-on: ubuntu-22.04
+    needs: [benchmark-A100, benchmark-MI100]
+    if: github.ref == 'refs/heads/gpuci' # FIXME
+    steps:
+    - name: Install SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSHKEY }}
+        known_hosts: ${{ secrets.KNOWN_HOSTS }}
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-opencl-MI100-${{ github.sha }}.json
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-opencl-A100-${{ github.sha }}.json
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-cuda-A100-${{ github.sha }}.json
+    - name: scp to server
+      run: |
+        scp -o StrictHostKeyChecking=no futhark-*.json futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
+
   deploy-nightly:
     runs-on: ubuntu-22.04
     needs: [build-linux-nix, build-mac-cabal, build-windows-cabal, test-tools]
