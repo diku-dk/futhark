@@ -564,11 +564,19 @@ jobs:
     - name: Benchmark OpenCL
       run: |
         futhark bench futhark-benchmarks --no-terminal --backend=opencl --json futhark-opencl-A100-$GITHUB_SHA.json
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-opencl-A100-${{ github.sha }}.json
+        path: futhark-opencl-A100-${{ github.sha }}.json
     - name: Benchmark CUDA
       run: |
         futhark bench futhark-benchmarks --no-terminal --backend=cuda --json futhark-cuda-A100-$GITHUB_SHA.json
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-cuda-A100-${{ github.sha }}.json
+        path: futhark-cuda-A100-${{ github.sha }}.json
 
-  benchmark-Mi100:
+  benchmark-MI100:
     runs-on: MI100
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
@@ -589,6 +597,10 @@ jobs:
     - name: Benchmark OpenCL
       run: |
         futhark bench futhark-benchmarks --no-terminal --backend=opencl --json futhark-opencl-MI100-$GITHUB_SHA.json
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-opencl-MI100-${{ github.sha }}.json
+        path: futhark-opencl-MI100-${{ github.sha }}.json
 
   deploy-nightly:
     runs-on: ubuntu-22.04
