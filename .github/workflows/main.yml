@@ -336,6 +336,8 @@ jobs:
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
+      with:
+        set-safe-directory: false
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -352,6 +354,8 @@ jobs:
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
+      with:
+        set-safe-directory: false
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -368,6 +372,8 @@ jobs:
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
+      with:
+        set-safe-directory: false
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -552,6 +558,7 @@ jobs:
       with:
         submodules: recursive
         fetch-depth: 0
+        set-safe-directory: false
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
