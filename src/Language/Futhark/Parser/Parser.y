@@ -391,6 +391,7 @@ BindingBinOp :: { Name }
                      Just "Cannot use a qualified name in binding position."
                    pure name }
       | '-'   { nameFromString "-" }
+      | '!'   {% parseErrorAt $1 $ Just $ "'!' is a prefix operator and cannot be used as infix operator." }
 
 BindingId :: { (Name, Loc) }
      : id                   { let L loc (ID name) = $1 in (name, loc) }
