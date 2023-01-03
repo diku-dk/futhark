@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install Nix
       uses: cachix/install-nix-action@v12
@@ -33,13 +33,13 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - uses: haskell/actions/setup@v2
       with:
         ghc-version: '9.2.4'
 
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -60,7 +60,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
@@ -68,7 +68,7 @@ jobs:
         echo "/usr/local/opt/sphinx-doc/bin" >> $GITHUB_PATH
         echo "/usr/local/opt/ghc@9/bin" >> $GITHUB_PATH
 
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -102,14 +102,14 @@ jobs:
     runs-on: windows-2019
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - id: setup-haskell
       uses: haskell/actions/setup@v2
       with:
         ghc-version: '9.2.4'
 
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       name: Cache cabal stuff
       with:
         path: |
@@ -138,12 +138,12 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install Nix
       uses: cachix/install-nix-action@v12
 
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -161,12 +161,12 @@ jobs:
   #   runs-on: ubuntu-22.04
 
   #   steps:
-  #   - uses: actions/checkout@v2
+  #   - uses: actions/checkout@v3
 
   #   - name: Install Nix
   #     uses: cachix/install-nix-action@v12
 
-  #   - uses: actions/cache@v2
+  #   - uses: actions/cache@v3
   #     name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
   #     with:
   #       path: |
@@ -185,9 +185,9 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -205,14 +205,14 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-jsonschema
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -232,14 +232,14 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-jsonschema
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -259,7 +259,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
@@ -269,7 +269,7 @@ jobs:
     - name: Install Nix
       uses: cachix/install-nix-action@v12
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -289,14 +289,14 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-numpy
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -315,14 +315,14 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind python3-jsonschema
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -340,7 +340,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
@@ -348,7 +348,7 @@ jobs:
         sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind
         sudo apt-get install -y python3-numpy python3-pyopencl
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -366,14 +366,14 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install OS dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y nvidia-cuda-dev
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -391,7 +391,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - uses: mymindstorm/setup-emsdk@v7
       with:
@@ -402,7 +402,7 @@ jobs:
       with:
         node-version: '16.x'
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -423,7 +423,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - uses: mymindstorm/setup-emsdk@v7
       with:
@@ -434,7 +434,7 @@ jobs:
       with:
         node-version: '16.x'
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -455,7 +455,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - uses: mymindstorm/setup-emsdk@v7
       with:
@@ -470,7 +470,7 @@ jobs:
       run: |
         npm install jest --global
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -490,9 +490,9 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -515,9 +515,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg
 
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -556,7 +556,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
       with:
         submodules: recursive
         fetch-depth: 0
@@ -566,7 +566,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -594,19 +594,19 @@ jobs:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-windows-x86_64.zip
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-macos-x86_64.tar.xz
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: prelude-docs.tar.xz
 
