@@ -498,9 +498,12 @@ data BinOp
     -- identifier used as an operator (they all have the
     -- same fixity).
     Backtick
-  | -- | Also not a real operator, but operator with this as a prefix
-    -- may be defined by the user.
+  | -- | Not a real operator, but operator with this as a prefix may
+    -- be defined by the user.
     Bang
+  | -- | Not a real operator, but operator with this as a prefix
+    -- may be defined by the user.
+    Equ
   | Plus
   | Minus
   | Pow
@@ -1239,6 +1242,7 @@ instance Pretty PrimType where
 instance Pretty BinOp where
   pretty Backtick = "``"
   pretty Bang = "!"
+  pretty Equ = "="
   pretty Plus = "+"
   pretty Minus = "-"
   pretty Pow = "**"

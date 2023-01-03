@@ -565,6 +565,7 @@ prettyBinOp p bop x y =
     precedence Equal = 2
     precedence NotEqual = 2
     precedence Bang = 2
+    precedence Equ = 2
     precedence Less = 2
     precedence Leq = 2
     precedence Greater = 2

@@ -125,6 +125,7 @@ import Language.Futhark.Parser.Monad
       '||...'         { L _ (SYMBOL LogOr _ _) }
       '&&...'         { L _ (SYMBOL LogAnd _ _) }
       '!...'          { L _ (SYMBOL Bang _ _) }
+      '=...'          { L _ (SYMBOL Equ _ _) }
 
       '('             { L $$ LPAR }
       ')'             { L $$ RPAR }
@@ -175,7 +176,7 @@ import Language.Futhark.Parser.Monad
 %right '<|...'
 %left '||...'
 %left '&&...'
-%left '<=...' '>=...' '>...' '<' '<...' '==...' '!=...' '!...'
+%left '<=...' '>=...' '>...' '<' '<...' '==...' '!=...' '!...' '=...'
 %left '&...' '^...' '^' '|...' '|'
 %left '<<...' '>>...'
 %left '+...' '-...' '-'
@@ -381,6 +382,7 @@ BinOp :: { (QualName Name, Loc) }
       | '|>...'    { binOpName $1 }
       | '<'        { (qualName (nameFromString "<"), $1) }
       | '!...'     { binOpName $1 }
+      | '=...'     { binOpName $1 }
       | '`' QualName '`' { $2 }
 
 BindingBinOp :: { Name }
@@ -744,6 +746,7 @@ BinOpExp :: { UncheckedExp }
   | Exp2 '<|...' Exp2   { binOp $1 $2 $3 }
   | Exp2 '<' Exp2       { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
   | Exp2 '!...' Exp2    { binOp $1 $2 $3 }
+  | Exp2 '=...' Exp2    { binOp $1 $2 $3 }
   | Exp2 '`' QualName '`' Exp2 { AppExp (BinOp (second srclocOf $3) NoInfo ($1, NoInfo) ($5, NoInfo) (srcspan $1 $>)) NoInfo }
 
 SectionExp :: { UncheckedExp }
