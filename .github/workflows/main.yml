@@ -570,14 +570,14 @@ jobs:
         cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
     - name: Benchmark OpenCL
       run: |
-        futhark bench futhark-benchmarks --no-terminal --backend=opencl --json futhark-opencl-A100-$GITHUB_SHA.json
+        futhark bench futhark-benchmarks --backend=opencl --json futhark-opencl-A100-$GITHUB_SHA.json
     - uses: actions/upload-artifact@v1
       with:
         name: futhark-opencl-A100-${{ github.sha }}.json
         path: futhark-opencl-A100-${{ github.sha }}.json
     - name: Benchmark CUDA
       run: |
-        futhark bench futhark-benchmarks --no-terminal --backend=cuda --json futhark-cuda-A100-$GITHUB_SHA.json
+        futhark bench futhark-benchmarks --backend=cuda --json futhark-cuda-A100-$GITHUB_SHA.json
     - uses: actions/upload-artifact@v1
       with:
         name: futhark-cuda-A100-${{ github.sha }}.json
@@ -603,7 +603,7 @@ jobs:
         cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
     - name: Benchmark OpenCL
       run: |
-        futhark bench futhark-benchmarks --no-terminal --backend=opencl --json futhark-opencl-MI100-$GITHUB_SHA.json
+        futhark bench futhark-benchmarks --backend=opencl --json futhark-opencl-MI100-$GITHUB_SHA.json
     - uses: actions/upload-artifact@v1
       with:
         name: futhark-opencl-MI100-${{ github.sha }}.json
