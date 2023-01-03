@@ -1,6 +1,6 @@
 -- ==
 -- entry: main
--- compiled random input { [12]f32 [12]f32 [12]f32 [10]f32 [10]f32 [10]f32 [12]f32 [12]f32 }
+-- random input { [12]f32 [12]f32 [12]f32 [10]f32 [10]f32 [10]f32 [12]f32 [12]f32 }
 -- output { true }
 
 def main_orig [numK][numX]

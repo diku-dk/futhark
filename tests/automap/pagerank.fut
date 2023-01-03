@@ -1,6 +1,6 @@
 -- ==
 -- entry: calculate_dangling_ranks
--- compiled random input { [12]f32 [12]i32}
+-- random input { [12]f32 [12]i32}
 -- output { true }
 
 def calculate_dangling_ranks_orig [n] (ranks: [n]f32) (sizes: [n]i32): *[]f32 =

@@ -685,6 +685,27 @@ returned env ret retext v = do
         valueShape v
   pure v
 
+withAutoMap :: [AutoMap] -> [Value] -> ([Value] -> EvalM Value) -> EvalM Value
+withAutoMap ams args doApp = expand sortedArgs mempty
+  where
+    sortedArgs =
+      sortOn
+        (Data.Ord.Down . fst)
+        (M.toList $ M.fromListWith (++) $ zip ams (zipWith (curry pure) [0 ..] args))
+    expand :: [(AutoMap, [(Int, Value)])] -> [(Int, Value)] -> EvalM Value
+    expand [] xs = doApp $ map snd xs
+    expand ((am, ys) : rest) xs
+      | am == mempty = expand [] (sortOn fst $ xs ++ ys)
+      | otherwise = do
+          vs <-
+            mapM (expand rest . zip [0 ..]) $
+              transpose $
+                map (snd . fromArray . snd) $
+                  sortOn fst $
+                    xs ++ ys
+          let rowshape = valueShape $ head vs
+          pure $ toArray' rowshape vs
+
 evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
 evalAppExp env _ (Range start maybe_second end loc) = do
   start' <- asInteger <$> eval env start
@@ -762,7 +783,13 @@ evalAppExp env _ (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
 evalAppExp
   env
   _
-  (BinOp (op, _) op_t (x, Info (_, xext, _)) (y, Info (_, yext, _)) loc)
+  (BinOp (op, _) op_t (x, Info (_, xext, xam)) (y, Info (_, yext, yam)) loc)
+    -- AutoMapped `&&` and `||` don't short-circuit in the interpreter.
+    | xam /= mempty || yam /= mempty = do
+        vs <- mapM (eval env) [x, y]
+        withAutoMap [xam, yam] vs $ \[x', y'] -> do
+          op' <- eval env $ Var op op_t loc
+          apply2 loc env op' x' y'
     | baseString (qualLeaf op) == "&&" = do
         x' <- asBool <$> eval env x
         if x'
@@ -790,13 +817,7 @@ evalAppExp env t app@(Apply f x (Info (_, ext, automap)) loc)
       apply loc env f' x'
   | otherwise = do
       (f', args, ams) <- unrollApply $ AppExp app (Info (AppRes (fromStruct t) []))
-      expand
-        f'
-        ( sortOn
-            (Data.Ord.Down . fst)
-            (M.toList $ M.fromListWith (++) $ zip ams (map pure args))
-        )
-        mempty
+      withAutoMap ams args $ foldM (apply loc env) f'
   where
     unrollApply :: Exp -> EvalM (Value, [Value], [AutoMap])
     unrollApply (AppExp (Apply e1 e2 (Info (_, ext', am)) _) _) = do
@@ -806,15 +827,6 @@ evalAppExp env t app@(Apply f x (Info (_, ext, automap)) loc)
     unrollApply f' = do
       f'' <- eval env f'
       pure (f'', mempty, mempty)
-
-    expand :: Value -> [(AutoMap, [Value])] -> [Value] -> EvalM Value
-    expand f' [] xs = foldM (apply loc env) f' xs
-    expand f' ((am, ys) : rest) xs
-      | am == mempty = expand f' [] (xs ++ ys)
-      | otherwise = do
-          vs <- mapM (expand f' rest) $ transpose $ map (snd . fromArray) $ xs ++ ys
-          let rowshape = valueShape $ head vs
-          pure $ toArray' rowshape vs
 evalAppExp env _ (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e

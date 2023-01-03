@@ -1,6 +1,6 @@
 -- ==
 -- entry: main
--- compiled input { [0,1,2,3] }
+-- input { [0,1,2,3] }
 -- output { [1,2,3,4] }
 
 def automap 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x = f as

@@ -1,16 +1,16 @@
 -- ==
 -- entry: sobolIndR
--- compiled random input { [12][10]i32 i32 }
+-- random input { [12][10]i32 i32 }
 -- output { true }
 
 -- ==
 -- entry: sobolRecI
--- compiled random input { [12][10]i32 [12]i32 i32}
+-- random input { [12][10]i32 [12]i32 i32}
 -- output { true }
 
 -- ==
 -- entry: sobolReci2
--- compiled random input { [12][10]i32 [12]i32 i32}
+-- random input { [12][10]i32 [12]i32 i32}
 -- output { true }
 
 def grayCode(x: i32): i32 = (x >> 1) ^ x

@@ -1,6 +1,6 @@
 -- ==
 -- entry: main
--- compiled input { [[1,2],[3,4]] [10,20] }
+-- input { [[1,2],[3,4]] [10,20] }
 -- output { [[11, 22],[13, 24]] }
 
 def (+^) [n] (xs: [n]i32) (ys: [n]i32) : [n]i32 = xs + ys

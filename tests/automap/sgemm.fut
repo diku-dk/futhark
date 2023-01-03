@@ -1,6 +1,6 @@
 -- ==
 -- entry: main
--- compiled random input { [5][10]f32 [10][3]f32 [5][3]f32 f32 f32 }
+-- random input { [5][10]f32 [10][3]f32 [5][3]f32 f32 f32 }
 -- output { true }
 
 def mult_orig [n][m][p] (xss: [n][m]f32, yss: [m][p]f32): [n][p]f32 =
