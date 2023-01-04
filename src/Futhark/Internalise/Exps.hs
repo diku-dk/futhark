@@ -349,6 +349,7 @@ internaliseAppExp desc res e@(E.Apply {}) =
           arg_desc = nameToString fname ++ "_arg"
           args = map (\(a, b, _) -> (a, b)) argsam
           ams = map (\(_, _, c) -> c) argsam
+          res_t = appResType res
 
       -- Some functions are magical (overloaded) and we handle that here.
       case () of
@@ -356,7 +357,7 @@ internaliseAppExp desc res e@(E.Apply {}) =
           -- Short-circuiting operators are magical.
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             baseString (qualLeaf qfname) == "&&" ->
-              withAutoMap ams arg_desc res args $ \[([x], x_stms), ([y], y_stms)] -> do
+              withAutoMap ams arg_desc res_t args $ \[([x], x_stms), ([y], y_stms)] -> do
                 letValExp' desc
                   =<< eIf
                     (addStms x_stms >> pure (BasicOp $ SubExp x))
@@ -364,7 +365,7 @@ internaliseAppExp desc res e@(E.Apply {}) =
                     (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue False])
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             baseString (qualLeaf qfname) == "||" ->
-              withAutoMap ams arg_desc res args $ \[([x], x_stms), ([y], y_stms)] -> do
+              withAutoMap ams arg_desc res_t args $ \[([x], x_stms), ([y], y_stms)] -> do
                 letValExp' desc
                   =<< eIf
                     (addStms x_stms >> pure (BasicOp $ SubExp x))
@@ -375,7 +376,7 @@ internaliseAppExp desc res e@(E.Apply {}) =
           -- existential), so we can safely ignore the existential
           -- dimensions.
           | Just internalise <- isOverloadedFunction qfname desc loc ->
-              withAutoMap_ ams arg_desc res args $ \args' -> do
+              withAutoMap_ ams arg_desc res_t args $ \args' -> do
                 let prepareArg (arg, _, am) arg' =
                       (E.toStruct $ E.stripArray (autoMapRank am) (E.typeOf arg), arg')
                 internalise $ zipWith prepareArg argsam args'
@@ -383,12 +384,12 @@ internaliseAppExp desc res e@(E.Apply {}) =
               internalise desc
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
             Just (rettype, _) <- M.lookup fname I.builtInFunctions ->
-              withAutoMap_ ams arg_desc res args $ \args' -> do
+              withAutoMap_ ams arg_desc res_t args $ \args' -> do
                 let tag ses = [(se, I.Observe) | se <- ses]
                 let args'' = concatMap tag args'
                 letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
           | otherwise ->
-              withAutoMap_ ams arg_desc res args $ \args' ->
+              withAutoMap_ ams arg_desc res_t args $ \args' ->
                 fst <$> funcall desc qfname (concat args') loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
@@ -815,14 +816,14 @@ internaliseExp _ (E.FloatLit v (Info t) _) =
     _ -> error $ "internaliseExp: nonsensical type for float literal: " ++ prettyString t
 -- Builtin operators are handled specially because they are
 -- overloaded.
-internaliseExp desc (E.Project k e (Info (rt, am)) _) = do
-  let i' = sum . map internalisedTypeSize $
-        case E.typeOf e `setAliases` () of
-          E.Scalar (Record fs) ->
-            map snd $ takeWhile ((/= k) . fst) $ sortFields fs
-          t -> [t]
-  take (internalisedTypeSize $ rt `setAliases` ()) . drop i'
-    <$> internaliseExp desc e
+internaliseExp desc (E.Project k e (Info (rt, am)) _) =
+  withAutoMap_ [am] desc rt [(e, Nothing)] $ \[e'] -> do
+    let i' = sum . map internalisedTypeSize $
+          case E.stripArray (autoMapRank am) $ E.typeOf e `setAliases` () of
+            E.Scalar (Record fs) ->
+              map snd $ takeWhile ((/= k) . fst) $ sortFields fs
+            t -> [t]
+    pure $ take (internalisedTypeSize $ rt `setAliases` ()) $ drop i' e'
 internaliseExp _ e@E.Lambda {} =
   error $ "internaliseExp: Unexpected lambda at " ++ locStr (srclocOf e)
 internaliseExp _ e@E.OpSection {} =
@@ -1958,15 +1959,15 @@ flatUpdateHelper desc loc arr1 offset slices arr2 = do
     forM (zip arrs1 arrs2) $ \(arr1', arr2') ->
       letSubExp desc $ I.BasicOp $ I.FlatUpdate arr1' slice arr2'
 
-withAutoMap_ :: [AutoMap] -> String -> E.AppRes -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
-withAutoMap_ ams arg_desc res args_e innerM =
-  withAutoMap ams arg_desc res args_e $ \args_stms -> do
+withAutoMap_ :: [AutoMap] -> String -> E.PatType -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
+withAutoMap_ ams arg_desc res_t args_e innerM =
+  withAutoMap ams arg_desc res_t args_e $ \args_stms -> do
     let (args, stms) = unzip args_stms
     mapM_ addStms $ reverse stms
     innerM args
 
-withAutoMap :: [AutoMap] -> String -> E.AppRes -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
-withAutoMap ams arg_desc res args_e innerM = do
+withAutoMap :: [AutoMap] -> String -> E.PatType -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
+withAutoMap ams arg_desc res_t args_e innerM = do
   (args, stms) <-
     foldM
       ( \(args, stms) arg -> do
@@ -1978,7 +1979,7 @@ withAutoMap ams arg_desc res args_e innerM = do
   argts <- inScopeOf (reverse stms) $ (mapM . mapM) subExpType args
   expand args stms argts ams (maximum ds)
   where
-    inner_t = E.stripArray (autoMapRank (maximum ams)) (appResType res)
+    inner_t = E.stripArray (autoMapRank (maximum ams)) res_t
     ds = map autoMapRank ams
     mkLambdaParams level (ses, ts, stm, d)
       | d == level =
