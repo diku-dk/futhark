@@ -592,9 +592,12 @@ jobs:
     - uses: actions/download-artifact@v3
     - run: |
         ls -R
+    - name: Compress JSONs
+      run: |
+        gzip */futhark-*.json
     - name: scp to server
       run: |
-        scp -o StrictHostKeyChecking=no */futhark-*.json futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
+        scp -o StrictHostKeyChecking=no */futhark-*.json.gz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
 
   deploy-nightly:
     runs-on: ubuntu-22.04
