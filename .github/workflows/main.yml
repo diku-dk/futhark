@@ -554,7 +554,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: ./.github/actions/benchmark
+    - uses: './.github/actions/benchmark/action.yml'
       with:
         backend: cuda
         system: A100
@@ -564,7 +564,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: ./.github/actions/benchmark
+    - uses: './.github/actions/benchmark/action.yml'
       with:
         backend: opencl
         system: A100
@@ -574,7 +574,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: ./.github/actions/benchmark
+    - uses: './.github/actions/benchmark/action.yml'
       with:
         backend: opencl
         system: MI100
