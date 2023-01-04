@@ -344,7 +344,7 @@ jobs:
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
     - run: |
-        futhark test tests --no-terminal --backend=opencl --cache-extension=cache
+        futhark test tests --no-terminal --backend=opencl --cache-extension=cache --concurrency=16
 
   test-pyopencl:
     runs-on: opencl
@@ -366,7 +366,7 @@ jobs:
         pip install numpy pyopencl jsonschema
     - run: |
         source virtualenv/bin/activate
-        futhark test tests --no-terminal --backend=pyopencl
+        futhark test tests --no-terminal --backend=pyopencl --concurrency=16
 
   test-cuda:
     runs-on: cuda
@@ -382,7 +382,7 @@ jobs:
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
     - run: |
-        futhark test tests --no-terminal --backend=cuda
+        futhark test tests --no-terminal --backend=cuda --concurrency=16
 
   test-wasm:
     runs-on: ubuntu-22.04
@@ -558,7 +558,6 @@ jobs:
       with:
         backend: cuda
         system: A100
-        options: "--concurrency=16"
 
   benchmark-A100-opencl:
     runs-on: A100
@@ -569,7 +568,6 @@ jobs:
       with:
         backend: opencl
         system: A100
-        options: "--concurrency=16"
 
   benchmark-MI100-opencl:
     runs-on: MI100
