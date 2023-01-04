@@ -1055,6 +1055,8 @@ autoMapInfos tps argts = do
                 Just Overloaded {} -> arrayRank argt
                 Just (Constraint rt _) ->
                   minimum diffs - arrayRank (retType rt)
+                Just (HasFields {}) ->
+                  arrayRank argt
                 _ ->
                   if all_equal diffs
                     then 0
