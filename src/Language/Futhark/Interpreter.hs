@@ -703,8 +703,9 @@ withAutoMap ams args doApp = expand sortedArgs mempty
                 map (snd . fromArray . snd) $
                   sortOn fst $
                     xs ++ ys
-          let rowshape = valueShape $ head vs
-          pure $ toArray' rowshape vs
+          case vs of
+            [] -> pure $ snd $ head ys
+            (v : _) -> pure $ toArray' (valueShape v) vs
 
 evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
 evalAppExp env _ (Range start maybe_second end loc) = do
