@@ -336,8 +336,6 @@ jobs:
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
-      with:
-        set-safe-directory: false
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -354,8 +352,6 @@ jobs:
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
-      with:
-        set-safe-directory: false
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -378,8 +374,6 @@ jobs:
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
-      with:
-        set-safe-directory: false
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -564,7 +558,6 @@ jobs:
       with:
         submodules: recursive
         fetch-depth: 0
-        set-safe-directory: false
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -618,7 +611,7 @@ jobs:
   benchmark-results:
     runs-on: ubuntu-22.04
     needs: [benchmark-A100, benchmark-MI100]
-    if: github.ref == 'refs/heads/gpuci' # FIXME
+#    if: github.ref == 'refs/heads/master'
     steps:
     - name: Install SSH key
       uses: shimataro/ssh-key-action@v2
