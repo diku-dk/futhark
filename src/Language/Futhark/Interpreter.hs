@@ -1019,11 +1019,12 @@ eval _ (ProjectSection ks _ _) =
     walk (ValueRecord fs) f
       | Just v' <- M.lookup f fs = pure v'
     walk _ _ = error "Value does not have expected field."
-eval env (Project f e _ _) = do
+eval env (Project f e (Info (_, am)) _) = do
   v <- eval env e
-  case v of
-    ValueRecord fs | Just v' <- M.lookup f fs -> pure v'
-    _ -> error "Value does not have expected field."
+  withAutoMap [am] [v] $ \[v'] ->
+    case v' of
+      ValueRecord fs | Just v'' <- M.lookup f fs -> pure v''
+      _ -> error "Value does not have expected field."
 eval env (Assert what e (Info s) loc) = do
   cond <- asBool <$> eval env what
   unless cond $ bad loc env s
