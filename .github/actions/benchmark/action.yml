@@ -7,6 +7,10 @@ inputs:
   system:
     description: 'Name of system (e.g. GPU name)'
     required: true
+  options:
+    description: 'Options to pass to futhark bench'
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -29,7 +33,7 @@ runs:
     - name: Run benchmarks
       shell: bash
       run: |
-        futhark bench futhark-benchmarks --ignore-files /lib/ --backend=${{inputs.backend}} --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json
+        futhark bench futhark-benchmarks --ignore-files /lib/ --backend=${{inputs.backend}} --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json ${{inputs.options}}
     - uses: actions/upload-artifact@v1
       with:
         name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json

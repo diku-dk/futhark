@@ -558,6 +558,7 @@ jobs:
       with:
         backend: cuda
         system: A100
+        options: "--concurrency=16"
 
   benchmark-A100-opencl:
     runs-on: A100
@@ -568,6 +569,7 @@ jobs:
       with:
         backend: opencl
         system: A100
+        options: "--concurrency=16"
 
   benchmark-MI100-opencl:
     runs-on: MI100
