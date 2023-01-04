@@ -18,12 +18,16 @@ runs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
     - name: Setup compiler
+      shell: bash
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
-    - run: |
+    - name: Get data
+      shell: bash
+      run: |
         cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
     - name: Run benchmarks
+      shell: bash
       run: |
         futhark bench futhark-benchmarks --ignore-files /lib/ --backend=${{inputs.backend}} --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json
     - uses: actions/upload-artifact@v1
