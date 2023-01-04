@@ -1,0 +1,33 @@
+name: 'Benchmark'
+description: 'Run benchmark suite'
+inputs:
+  backend:
+    description: 'Backend to use'
+    required: true
+  system:
+    description: 'Name of system (e.g. GPU name)'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+    - name: Setup compiler
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
+    - run: |
+        cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
+    - name: Run benchmarks
+      run: |
+        futhark bench futhark-benchmarks --backend=${{inputs.backend}} --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
+        path: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
