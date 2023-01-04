@@ -14,6 +14,7 @@ static int dump_file(const char *file, const void *buf, size_t n);
 struct str_builder;
 static void str_builder_init(struct str_builder *b);
 static void str_builder(struct str_builder *b, const char *s, ...);
+static char *strclone(const char *str);
 
 static void futhark_panic(int eval, const char *fmt, ...) {
   va_list ap;
@@ -133,6 +134,18 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
   va_start(vl, s); // Must re-init.
   vsnprintf(b->str+b->used, b->capacity-b->used, s, vl);
   b->used += needed;
+}
+
+
+static char *strclone(const char *str) {
+  size_t size = strlen(str) + 1;
+  char *copy = (char*) malloc(size);
+  if (copy == NULL) {
+    return NULL;
+  }
+
+  memcpy(copy, str, size);
+  return copy;
 }
 
 // End of util.h.

@@ -39,6 +39,10 @@ extra-source-files:
     rts/c/atomics.h
     rts/c/context.h
     rts/c/context_prototypes.h
+    rts/c/backends/c.h
+    rts/c/backends/cuda.h
+    rts/c/backends/multicore.h
+    rts/c/backends/opencl.h
     rts/c/lock.h
     rts/c/timing.h
     rts/c/errors.h
@@ -46,8 +50,6 @@ extra-source-files:
     rts/c/tuning.h
     rts/c/values.h
     rts/c/half.h
-    rts/c/opencl.h
-    rts/c/cuda.h
     rts/c/cache.h
     rts/c/ispc_util.h
     rts/c/scalar.h
@@ -223,6 +225,7 @@ library
       Futhark.CodeGen.Backends.GenericPython.Options
       Futhark.CodeGen.Backends.GenericWASM
       Futhark.CodeGen.Backends.MulticoreC
+      Futhark.CodeGen.Backends.MulticoreC.Boilerplate
       Futhark.CodeGen.Backends.MulticoreISPC
       Futhark.CodeGen.Backends.MulticoreWASM
       Futhark.CodeGen.Backends.PyOpenCL
@@ -263,7 +266,6 @@ library
       Futhark.CodeGen.ImpGen.Sequential
       Futhark.CodeGen.ImpGen.Transpose
       Futhark.CodeGen.OpenCL.Heuristics
-      Futhark.CodeGen.SetDefaultSpace
       Futhark.Compiler
       Futhark.Compiler.CLI
       Futhark.Compiler.Config

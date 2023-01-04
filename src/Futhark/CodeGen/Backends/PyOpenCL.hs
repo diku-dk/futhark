@@ -16,8 +16,8 @@ import Futhark.CodeGen.ImpGen.OpenCL qualified as ImpGen
 import Futhark.CodeGen.RTS.Python (openclPy)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
-import Futhark.Util (zEncodeString)
-import Futhark.Util.Pretty (prettyString)
+import Futhark.Util (zEncodeText)
+import Futhark.Util.Pretty (prettyString, prettyText)
 
 -- | Compile the program to Python with calls to OpenCL.
 compileProg ::
@@ -45,8 +45,8 @@ compileProg mode class_name prog = do
             ( \x ->
                 prettyString $
                   Assign
-                    (Var ("self." ++ zEncodeString (nameToString x) ++ "_var"))
-                    (Var $ "program." ++ zEncodeString (nameToString x))
+                    (Var (T.unpack ("self." <> zEncodeText (nameToText x) <> "_var")))
+                    (Var $ T.unpack $ "program." <> zEncodeText (nameToText x))
             )
           $ M.keys kernels
 
@@ -189,7 +189,6 @@ compileProg mode class_name prog = do
           Py.opsReadScalar = readOpenCLScalar,
           Py.opsAllocate = allocateOpenCLBuffer,
           Py.opsCopy = copyOpenCLMemory,
-          Py.opsStaticArray = staticOpenCLArray,
           Py.opsEntryOutput = packArrayOutput,
           Py.opsEntryInput = unpackArrayInput
         }
@@ -201,7 +200,7 @@ asLong x = Py.simpleCall "np.int64" [x]
 
 kernelConstToExp :: Imp.KernelConst -> PyExp
 kernelConstToExp (Imp.SizeConst key) =
-  Index (Var "self.sizes") (IdxExp $ String $ prettyString key)
+  Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
 
@@ -249,7 +248,7 @@ launchKernel ::
 launchKernel kernel_name safety kernel_dims workgroup_dims args = do
   let kernel_dims' = Tuple kernel_dims
       workgroup_dims' = Tuple workgroup_dims
-      kernel_name' = "self." ++ zEncodeString (nameToString kernel_name) ++ "_var"
+      kernel_name' = "self." <> zEncodeText (nameToText kernel_name) <> "_var"
   args' <- mapM processKernelArg args
   let failure_args =
         take
@@ -260,13 +259,13 @@ launchKernel kernel_name safety kernel_dims workgroup_dims args = do
           ]
   Py.stm $
     Exp $
-      Py.simpleCall (kernel_name' ++ ".set_args") $
+      Py.simpleCall (T.unpack $ kernel_name' <> ".set_args") $
         failure_args ++ args'
   Py.stm $
     Exp $
       Py.simpleCall
         "cl.enqueue_nd_range_kernel"
-        [Var "self.queue", Var kernel_name', kernel_dims', workgroup_dims']
+        [Var "self.queue", Var (T.unpack kernel_name'), kernel_dims', workgroup_dims']
   finishIfSynchronous
   where
     processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
@@ -326,7 +325,7 @@ allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" =
   Py.stm $
     Assign mem $
-      Py.simpleCall "opencl_alloc" [Var "self", size, String $ prettyString mem]
+      Py.simpleCall "opencl_alloc" [Var "self", size, String $ prettyText mem]
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
 
@@ -346,10 +345,9 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
             ArgKeyword "device_offset" $ asLong srcidx,
             ArgKeyword "is_blocking" $ Var "synchronous"
           ]
-copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes bt = do
-  let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
-      end = BinOp "+" srcidx divide
-      src = Index srcmem (IdxRange srcidx end)
+copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes _ = do
+  let end = BinOp "+" srcidx nbytes
+      src = Index (Py.simpleCall "createArray" [srcmem, List [nbytes], Var "np.byte"]) (IdxRange srcidx end)
   Py.stm $
     ifNotZeroSize nbytes $
       Exp $
@@ -379,58 +377,6 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx Imp.DefaultSpace
   Py.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
-
-staticOpenCLArray :: Py.StaticArray Imp.OpenCL ()
-staticOpenCLArray name "device" t vs = do
-  mapM_ Py.atInit <=< Py.collect $ do
-    -- Create host-side Numpy array with intended values.
-    Py.stm $
-      Assign (Var name') $ case vs of
-        Imp.ArrayValues vs' ->
-          Call
-            (Var "np.array")
-            [ Arg $ List $ map Py.compilePrimValue vs',
-              ArgKeyword "dtype" $ Var $ Py.compilePrimToNp t
-            ]
-        Imp.ArrayZeros n ->
-          Call
-            (Var "np.zeros")
-            [ Arg $ Integer $ fromIntegral n,
-              ArgKeyword "dtype" $ Var $ Py.compilePrimToNp t
-            ]
-
-    let num_elems = case vs of
-          Imp.ArrayValues vs' -> length vs'
-          Imp.ArrayZeros n -> n
-
-    -- Create memory block on the device.
-    static_mem <- newVName "static_mem"
-    let size = Integer $ toInteger num_elems * Imp.primByteSize t
-    allocateOpenCLBuffer (Var (Py.compileName static_mem)) size "device"
-
-    -- Copy Numpy array to the device memory block.
-    Py.stm $
-      ifNotZeroSize size $
-        Exp $
-          Call
-            (Var "cl.enqueue_copy")
-            [ Arg $ Var "self.queue",
-              Arg $ Var $ Py.compileName static_mem,
-              Arg $ Call (Var "normaliseArray") [Arg (Var name')],
-              ArgKeyword "is_blocking" $ Var "synchronous"
-            ]
-
-    -- Store the memory block for later reference.
-    Py.stm $
-      Assign (Field (Var "self") name') $
-        Var $
-          Py.compileName static_mem
-
-  Py.stm $ Assign (Var name') (Field (Var "self") name')
-  where
-    name' = Py.compileName name
-staticOpenCLArray _ space _ _ =
-  error $ "PyOpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
 packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do

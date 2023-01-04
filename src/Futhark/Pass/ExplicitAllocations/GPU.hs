@@ -30,8 +30,8 @@ allocAtLevel lvl = local $ \env ->
   where
     space = case lvl of
       SegGroup {} -> Space "local"
-      SegThread {} -> DefaultSpace
-      SegThreadInGroup {} -> DefaultSpace
+      SegThread {} -> Space "device"
+      SegThreadInGroup {} -> Space "device"
 
 handleSegOp ::
   Maybe SegLevel ->
@@ -96,7 +96,7 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
       ixfun = IxFun.permute (IxFun.iota $ map pe64 dims') perm_inv
-  pure [Hint ixfun DefaultSpace]
+  pure [Hint ixfun $ Space "device"]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@(SegThread _ _) space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
 kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space reds ts body)))) =
@@ -124,7 +124,7 @@ mapResultHint _lvl space = hint
     hint t Returns {}
       | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
           let space_dims = segSpaceDims space
-          pure $ Hint (innermost space_dims (arrayDims t)) DefaultSpace
+          pure $ Hint (innermost space_dims (arrayDims t)) $ Space "device"
     hint _ _ = pure NoHint
 
 innermost :: [SubExp] -> [SubExp] -> IxFun
@@ -184,11 +184,11 @@ inThreadExpHints e = do
 
 -- | The pass from 'GPU' to 'GPUMem'.
 explicitAllocations :: Pass GPU GPUMem
-explicitAllocations = explicitAllocationsGeneric (handleHostOp Nothing) kernelExpHints
+explicitAllocations = explicitAllocationsGeneric (Space "device") (handleHostOp Nothing) kernelExpHints
 
 -- | Convert some 'GPU' stms to 'GPUMem'.
 explicitAllocationsInStms ::
   (MonadFreshNames m, HasScope GPUMem m) =>
   Stms GPU ->
   m (Stms GPUMem)
-explicitAllocationsInStms = explicitAllocationsInStmsGeneric (handleHostOp Nothing) kernelExpHints
+explicitAllocationsInStms = explicitAllocationsInStmsGeneric (Space "device") (handleHostOp Nothing) kernelExpHints

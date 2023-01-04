@@ -55,7 +55,7 @@ instance TC.Checkable SeqMem where
 instance BuilderOps SeqMem where
   mkExpDecB _ _ = pure ()
   mkBodyB stms res = pure $ Body () stms res
-  mkLetNamesB = mkLetNamesB' ()
+  mkLetNamesB = mkLetNamesB' DefaultSpace ()
 
 instance TraverseOpStms SeqMem where
   traverseOpStms _ = pure
@@ -63,7 +63,7 @@ instance TraverseOpStms SeqMem where
 instance BuilderOps (Engine.Wise SeqMem) where
   mkExpDecB pat e = pure $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = pure $ Engine.mkWiseBody () stms res
-  mkLetNamesB = mkLetNamesB''
+  mkLetNamesB = mkLetNamesB'' DefaultSpace
 
 instance TraverseOpStms (Engine.Wise SeqMem) where
   traverseOpStms _ = pure

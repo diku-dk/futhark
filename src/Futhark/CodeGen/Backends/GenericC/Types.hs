@@ -18,11 +18,11 @@ import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode
 import Futhark.Manifest qualified as Manifest
-import Futhark.Util (chunks, mapAccumLM)
+import Futhark.Util (chunks, mapAccumLM, zEncodeText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
-opaqueToCType :: String -> CompilerM op s C.Type
+opaqueToCType :: Name -> CompilerM op s C.Type
 opaqueToCType desc = do
   name <- publicName $ opaqueName desc
   pure [C.cty|struct $id:name|]
@@ -46,17 +46,17 @@ arrayLibraryFunctions ::
 arrayLibraryFunctions pub space pt signed rank = do
   let pt' = primAPIType signed pt
       name = arrayName pt signed rank
-      arr_name = "futhark_" ++ name
+      arr_name = "futhark_" <> name
       array_type = [C.cty|struct $id:arr_name|]
 
-  new_array <- publicName $ "new_" ++ name
-  new_raw_array <- publicName $ "new_raw_" ++ name
-  free_array <- publicName $ "free_" ++ name
-  values_array <- publicName $ "values_" ++ name
-  values_raw_array <- publicName $ "values_raw_" ++ name
-  shape_array <- publicName $ "shape_" ++ name
+  new_array <- publicName $ "new_" <> name
+  new_raw_array <- publicName $ "new_raw_" <> name
+  free_array <- publicName $ "free_" <> name
+  values_array <- publicName $ "values_" <> name
+  values_raw_array <- publicName $ "values_raw_" <> name
+  shape_array <- publicName $ "shape_" <> name
 
-  let shape_names = ["dim" ++ show i | i <- [0 .. rank - 1]]
+  let shape_names = ["dim" <> prettyText i | i <- [0 .. rank - 1]]
       shape_params = [[C.cparam|typename int64_t $id:k|] | k <- shape_names]
       arr_size = cproduct [[C.cexp|$id:k|] | k <- shape_names]
       arr_size_array = cproduct [[C.cexp|arr->shape[$int:i]|] | i <- [0 .. rank - 1]]
@@ -117,7 +117,7 @@ arrayLibraryFunctions pub space pt signed rank = do
   ops <- asks envOperations
 
   let proto = case pub of
-        Public -> headerDecl (ArrayDecl name)
+        Public -> headerDecl (ArrayDecl (nameFromText name))
         Private -> libDecl
 
   proto
@@ -183,13 +183,13 @@ arrayLibraryFunctions pub space pt signed rank = do
 
   pure $
     Manifest.ArrayOps
-      { Manifest.arrayFree = T.pack free_array,
-        Manifest.arrayShape = T.pack shape_array,
-        Manifest.arrayValues = T.pack values_array,
-        Manifest.arrayNew = T.pack new_array
+      { Manifest.arrayFree = free_array,
+        Manifest.arrayShape = shape_array,
+        Manifest.arrayValues = values_array,
+        Manifest.arrayNew = new_array
       }
 
-lookupOpaqueType :: String -> OpaqueTypes -> OpaqueType
+lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
 lookupOpaqueType v (OpaqueTypes types) =
   case lookup v types of
     Just t -> t
@@ -207,7 +207,7 @@ entryPointTypeToCType _ (TypeOpaque desc) = opaqueToCType desc
 entryPointTypeToCType pub (TypeTransparent vt) = valueTypeToCType pub vt
 
 entryTypeName :: EntryPointType -> Manifest.TypeName
-entryTypeName (TypeOpaque desc) = T.pack desc
+entryTypeName (TypeOpaque desc) = nameToText desc
 entryTypeName (TypeTransparent vt) = prettyText vt
 
 -- | Figure out which of the members of an opaque type corresponds to
@@ -221,7 +221,7 @@ recordFieldPayloads types = chunks . map typeLength
 
 opaqueProjectFunctions ::
   OpaqueTypes ->
-  String ->
+  Name ->
   [(Name, EntryPointType)] ->
   [ValueType] ->
   CompilerM op s [Manifest.RecordField]
@@ -263,7 +263,11 @@ opaqueProjectFunctions types desc fs vds = do
                         $items:(concat (zipWith setField [0..] components))|]
           )
   let onField ((f, et), elems) = do
-        project <- publicName $ "project_" ++ opaqueName desc ++ "_" ++ nameToString f
+        let f' =
+              if isValidCName $ opaqueName desc <> "_" <> nameToText f
+                then nameToText f
+                else zEncodeText (nameToText f)
+        project <- publicName $ "project_" <> opaqueName desc <> "_" <> f'
         (et_ty, project_items) <- mkProject et elems
         headerDecl
           (OpaqueDecl desc)
@@ -276,14 +280,14 @@ opaqueProjectFunctions types desc fs vds = do
                       *out = v;
                       return 0;
                     }|]
-        pure $ Manifest.RecordField (nameToText f) (entryTypeName et) (T.pack project)
+        pure $ Manifest.RecordField (nameToText f) (entryTypeName et) project
 
   mapM onField . zip fs . recordFieldPayloads types (map snd fs) $
     zip [0 ..] vds
 
 opaqueNewFunctions ::
   OpaqueTypes ->
-  String ->
+  Name ->
   [(Name, EntryPointType)] ->
   [ValueType] ->
   CompilerM op s Manifest.CFuncName
@@ -291,7 +295,7 @@ opaqueNewFunctions types desc fs vds = do
   opaque_type <- opaqueToCType desc
   ctx_ty <- contextType
   ops <- asks envOperations
-  new <- publicName $ "new_" ++ opaqueName desc
+  new <- publicName $ "new_" <> opaqueName desc
 
   (params, new_stms) <-
     fmap (unzip . snd)
@@ -310,13 +314,13 @@ opaqueNewFunctions types desc fs vds = do
                 *out = v;
                 return 0;
               }|]
-  pure $ T.pack new
+  pure new
   where
     onField offset ((f, et), f_vts) = do
       let param_name =
-            if all isDigit (nameToString f)
+            if T.all isDigit (nameToText f)
               then C.toIdent ("v" <> f) mempty
-              else C.toIdent f mempty
+              else C.toIdent ("f_" <> f) mempty
       case et of
         TypeTransparent (ValueType sign (Rank 0) pt) -> do
           let ct = primAPIType sign pt
@@ -358,7 +362,7 @@ opaqueNewFunctions types desc fs vds = do
 
 processOpaqueRecord ::
   OpaqueTypes ->
-  String ->
+  Name ->
   OpaqueType ->
   [ValueType] ->
   CompilerM op s (Maybe Manifest.RecordOps)
@@ -372,20 +376,20 @@ processOpaqueRecord types desc (OpaqueRecord fs) vds =
 
 opaqueLibraryFunctions ::
   OpaqueTypes ->
-  String ->
+  Name ->
   OpaqueType ->
   CompilerM op s (Manifest.OpaqueOps, Maybe Manifest.RecordOps)
 opaqueLibraryFunctions types desc ot = do
   name <- publicName $ opaqueName desc
-  free_opaque <- publicName $ "free_" ++ opaqueName desc
-  store_opaque <- publicName $ "store_" ++ opaqueName desc
-  restore_opaque <- publicName $ "restore_" ++ opaqueName desc
+  free_opaque <- publicName $ "free_" <> opaqueName desc
+  store_opaque <- publicName $ "store_" <> opaqueName desc
+  restore_opaque <- publicName $ "restore_" <> opaqueName desc
 
   let opaque_type = [C.cty|struct $id:name|]
 
       freeComponent i (ValueType signed (Rank rank) pt) = unless (rank == 0) $ do
         let field = tupleField i
-        free_array <- publicName $ "free_" ++ arrayName pt signed rank
+        free_array <- publicName $ "free_" <> arrayName pt signed rank
         -- Protect against NULL here, because we also want to use this
         -- to free partially loaded opaques.
         stm
@@ -403,8 +407,8 @@ opaqueLibraryFunctions types desc ot = do
       storeComponent i (ValueType sign (Rank rank) pt) =
         let arr_name = arrayName pt sign rank
             field = tupleField i
-            shape_array = "futhark_shape_" ++ arr_name
-            values_array = "futhark_values_" ++ arr_name
+            shape_array = "futhark_shape_" <> arr_name
+            values_array = "futhark_values_" <> arr_name
             shape' = [C.cexp|$id:shape_array(ctx, obj->$id:field)|]
             num_elems = cproduct [[C.cexp|$exp:shape'[$int:j]|] | j <- [0 .. rank - 1]]
          in ( storageSize pt rank shape',
@@ -438,9 +442,9 @@ opaqueLibraryFunctions types desc ot = do
       restoreComponent i (ValueType sign (Rank rank) pt) = do
         let field = tupleField i
             arr_name = arrayName pt sign rank
-            new_array = "futhark_new_" ++ arr_name
-            dataptr = "data_" ++ show i
-            shapearr = "shape_" ++ show i
+            new_array = "futhark_new_" <> arr_name
+            dataptr = "data_" <> prettyText i
+            shapearr = "shape_" <> prettyText i
             dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank - 1]]
             num_elems = cproduct dims
         item [C.citem|typename int64_t $id:shapearr[$int:rank] = {0};|]
@@ -516,9 +520,9 @@ opaqueLibraryFunctions types desc ot = do
 
   pure
     ( Manifest.OpaqueOps
-        { Manifest.opaqueFree = T.pack free_opaque,
-          Manifest.opaqueStore = T.pack store_opaque,
-          Manifest.opaqueRestore = T.pack restore_opaque
+        { Manifest.opaqueFree = free_opaque,
+          Manifest.opaqueStore = store_opaque,
+          Manifest.opaqueRestore = restore_opaque
         },
       record
     )
@@ -532,7 +536,7 @@ generateArray space ((signed, pt, rank), pub) = do
   let memty = fatMemType space
   libDecl [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
   ops <- arrayLibraryFunctions pub space pt signed rank
-  let pt_name = T.pack $ prettySigned (signed == Unsigned) pt
+  let pt_name = prettySigned (signed == Unsigned) pt
       pretty_name = mconcat (replicate rank "[]") <> pt_name
       arr_type = [C.cty|struct $id:name*|]
   case pub of
@@ -547,7 +551,7 @@ generateArray space ((signed, pt, rank), pub) = do
 
 generateOpaque ::
   OpaqueTypes ->
-  (String, OpaqueType) ->
+  (Name, OpaqueType) ->
   CompilerM op s (T.Text, Manifest.Type)
 generateOpaque types (desc, ot) = do
   name <- publicName $ opaqueName desc
@@ -555,7 +559,7 @@ generateOpaque types (desc, ot) = do
   libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
   (ops, record) <- opaqueLibraryFunctions types desc ot
   let opaque_type = [C.cty|struct $id:name*|]
-  pure (T.pack desc, Manifest.TypeOpaque (typeText opaque_type) ops record)
+  pure (nameToText desc, Manifest.TypeOpaque (typeText opaque_type) ops record)
   where
     field vt@(ValueType _ (Rank r) _) i = do
       ct <- valueTypeToCType Private vt

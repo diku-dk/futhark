@@ -10,3 +10,4 @@
 - error: {lhs: nameIn x y, rhs: x `nameIn` y, side: not (isInfixApp original) && not (isParen result), name: Use infix}
 - error: {lhs: not (x `nameIn` y), rhs: x `notNameIn` y}
 - error: {lhs: not (any (`nameIn` x) y), rhs: all (`notNameIn` x) y}
+- error: {lhs: Data.Text.pack (show x), rhs: Futhark.Util.showText x}

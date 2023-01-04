@@ -27,6 +27,7 @@ import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.MulticoreC qualified as MC
+import Futhark.CodeGen.Backends.MulticoreC.Boilerplate (generateBoilerplate)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Multicore
 import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGen
@@ -74,7 +75,7 @@ compileProg version prog = do
           operations
           (ISPCState mempty mempty)
           ( do
-              MC.generateContext
+              generateBoilerplate
               mapM_ compileBuiltinFun funs
           )
           mempty
@@ -243,18 +244,18 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _))
 
       GC.libDecl
         =<< pure
-          [C.cedecl|int $id:((funName fname) ++ "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {
+          [C.cedecl|int $id:(funName fname <> "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {
                   return $id:(funName fname)($args:extra_exp, $args:out_args_c, $args:in_args_c);
                 }|]
 
       let ispc_extern =
-            [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:((funName fname) ++ "_extern")
+            [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform int $id:((funName fname) <> "_extern")
                       ($params:extra, $params:outparams_extern, $params:inparams_extern);|]
 
           ispc_uniform =
             [C.cedecl|$tyqual:uniform int $id:(funName fname)
                     ($params:extra, $params:outparams_uni, $params:inparams_uni) {
-                      return $id:(funName $ fname<>"_extern")(
+                      return $id:(funName (fname<>"_extern"))(
                         $args:extra_exp,
                         $args:out_args_noderef,
                         $args:in_args_noderef);
@@ -499,7 +500,7 @@ compileCode (DeclareScalar name _ t) = do
   let ct = GC.primTypeToCType t
   quals <- getVariabilityQuals name
   GC.decl [C.cdecl|$tyquals:quals $ty:ct $id:name;|]
-compileCode (DeclareArray name DefaultSpace t vs) = do
+compileCode (DeclareArray name t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = GC.primTypeToCType t
   case vs of
@@ -508,19 +509,17 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
     ArrayZeros n ->
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
-  -- Fake a memory block.
-  GC.contextField
-    (C.toIdent name noLoc)
-    [C.cty|struct memblock|]
-    $ Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
-  -- Make an exported C shim to access it
+  -- Make an exported C shim to access a faked memory block.
   shim <- MC.multicoreDef "get_static_array_shim" $ \f ->
-    pure [C.cedecl|struct memblock* $id:f(struct futhark_context* ctx) { return &ctx->$id:name; }|]
+    pure
+      [C.cedecl|struct memblock $id:f(struct futhark_context* ctx) {
+                  return (struct memblock){NULL,(unsigned char*)$id:name_realtype,0};
+                }|]
   ispcDecl
-    [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform struct memblock * $tyqual:uniform
+    [C.cedecl|extern "C" $tyqual:unmasked $tyqual:uniform struct memblock $tyqual:uniform
                         $id:shim($tyqual:uniform struct futhark_context* $tyqual:uniform ctx);|]
   -- Call it
-  GC.item [C.citem|$tyqual:uniform struct memblock $id:name = *$id:shim(ctx);|]
+  GC.item [C.citem|$tyqual:uniform struct memblock $id:name = $id:shim(ctx);|]
 compileCode (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
   where
     go (DeclareScalar name _ t : SetScalar dest e : code)

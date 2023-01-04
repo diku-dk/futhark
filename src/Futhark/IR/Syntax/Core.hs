@@ -584,7 +584,7 @@ data ValueType
 -- indicating how it maps to the original source program type.
 data EntryPointType
   = -- | An opaque type of this name.
-    TypeOpaque String
+    TypeOpaque Name
   | -- | A transparent type, which is scalar if the rank is zero.
     TypeTransparent ValueType
   deriving (Eq, Show, Ord)
@@ -598,7 +598,7 @@ data OpaqueType
   deriving (Eq, Ord, Show)
 
 -- | Names of opaque types and their representation.
-newtype OpaqueTypes = OpaqueTypes [(String, OpaqueType)]
+newtype OpaqueTypes = OpaqueTypes [(Name, OpaqueType)]
   deriving (Eq, Ord, Show)
 
 instance Monoid OpaqueTypes where

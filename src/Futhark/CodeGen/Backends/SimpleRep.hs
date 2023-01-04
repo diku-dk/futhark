@@ -39,7 +39,7 @@ import Data.Char (isAlphaNum, isDigit, ord)
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
-import Futhark.Util (zEncodeString)
+import Futhark.Util (zEncodeText)
 import Language.C.Quote.C qualified as C
 import Language.C.Syntax qualified as C
 import Text.Printf
@@ -96,34 +96,36 @@ tupleField i = "v" ++ show i
 
 -- | @funName f@ is the name of the C function corresponding to
 -- the Futhark function @f@.
-funName :: Name -> String
-funName = ("futrts_" ++) . zEncodeString . nameToString
+funName :: Name -> T.Text
+funName = ("futrts_" <>) . zEncodeText . nameToText
 
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type
 defaultMemBlockType = [C.cty|unsigned char*|]
 
 -- | The name of exposed array type structs.
-arrayName :: PrimType -> Signedness -> Int -> String
+arrayName :: PrimType -> Signedness -> Int -> T.Text
 arrayName pt signed rank =
-  prettySigned (signed == Unsigned) pt ++ "_" ++ show rank ++ "d"
+  prettySigned (signed == Unsigned) pt <> "_" <> prettyText rank <> "d"
 
 -- | The name of exposed opaque types.
-opaqueName :: String -> String
+opaqueName :: Name -> T.Text
 opaqueName "()" = "opaque_unit" -- Hopefully this ad-hoc convenience won't bite us.
 opaqueName s
-  | valid = "opaque_" ++ s
+  | valid = "opaque_" <> s'
   where
+    s' = nameToText s
     valid =
-      head s /= '_'
-        && not (isDigit $ head s)
-        && all ok s
+      T.head s' /= '_'
+        && not (isDigit $ T.head s')
+        && T.all ok s'
     ok c = isAlphaNum c || c == '_'
-opaqueName s = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord s)
+opaqueName s = "opaque_" <> hash (zipWith xor [0 ..] $ map ord (nameToString s))
   where
     -- FIXME: a stupid hash algorithm; may have collisions.
     hash =
-      printf "%x"
+      T.pack
+        . printf "%x"
         . foldl xor 0
         . map
           ( iter
@@ -169,14 +171,14 @@ csum (e : es) = foldl mult e es
     mult x y = [C.cexp|$exp:x + $exp:y|]
 
 instance C.ToIdent Name where
-  toIdent = C.toIdent . zEncodeString . nameToString
+  toIdent = C.toIdent . zEncodeText . nameToText
 
 -- Orphan!
 instance C.ToIdent T.Text where
   toIdent = C.toIdent . T.unpack
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . zEncodeString . prettyString
+  toIdent = C.toIdent . zEncodeText . prettyText
 
 instance C.ToExp VName where
   toExp v _ = [C.cexp|$id:v|]

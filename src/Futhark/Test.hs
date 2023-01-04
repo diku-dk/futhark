@@ -47,7 +47,7 @@ import Futhark.Server
 import Futhark.Server.Values
 import Futhark.Test.Spec
 import Futhark.Test.Values qualified as V
-import Futhark.Util (isEnvVarAtLeast, pmapIO)
+import Futhark.Util (isEnvVarAtLeast, pmapIO, showText)
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import System.Directory
 import System.Exit
@@ -190,7 +190,7 @@ valuesAsVars server names_and_types _ dir (InFile file)
       s <- liftIO $ readAndDecompress $ dir </> file
       case s of
         Left e ->
-          throwError $ T.pack $ show file <> ": " <> show e
+          throwError $ showText file <> ": " <> showText e
         Right s' ->
           cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
             BS.hPutStr tmpf_h s'
@@ -497,7 +497,7 @@ checkResult program expected_vs actual_vs =
           <> " and "
           <> T.pack expectedf
           <> " do not match:\n"
-          <> T.pack (show mismatch)
+          <> showText mismatch
           <> if null mismatches
             then mempty
             else "\n...and " <> prettyText (length mismatches) <> " other mismatches."

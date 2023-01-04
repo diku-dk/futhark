@@ -21,6 +21,7 @@ import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.SimpleRep (opaqueName)
 import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
 import Futhark.CodeGen.RTS.JavaScript
+import Futhark.Util (showText)
 import Language.Futhark.Primitive
 import NeatInterpolation (text)
 
@@ -40,7 +41,7 @@ extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.Unsigned 
 extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.Unsigned _)) = "u64"
 extToString (Imp.TransparentValue (Imp.ScalarValue Bool _ _)) = "bool"
 extToString (Imp.TransparentValue (Imp.ScalarValue Unit _ _)) = error "extToString: Unit"
-extToString (Imp.OpaqueValue oname _) = opaqueName oname
+extToString (Imp.OpaqueValue oname _) = T.unpack $ opaqueName oname
 
 type EntryPointType = String
 
@@ -154,8 +155,8 @@ dicEntry jse =
   |]
   where
     ename = T.pack $ name jse
-    params = T.pack $ show $ parameters jse
-    rets = T.pack $ show $ ret jse
+    params = showText $ parameters jse
+    rets = showText $ ret jse
 
 jsWrapEntryPoint :: JSEntryPoint -> T.Text
 jsWrapEntryPoint jse =
@@ -315,7 +316,7 @@ toFutharkArray typ =
     fvalues = "this.wasm._futhark_values_raw_" ++ signature
     ffree = "this.wasm._futhark_free_" ++ signature
     arraynd = "array" ++ show d ++ "d"
-    shift = T.pack $ show (typeShift ftype)
+    shift = showText (typeShift ftype)
     heapType = T.pack heap
     arraynd_flat = if d > 1 then arraynd ++ ".flat()" else arraynd
     arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d - 1]]

@@ -16,12 +16,7 @@ import Data.Char (ord, toLower, digitToInt)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
 import Data.Loc (Loc (..), L(..), Pos(..))
-import Data.Bits
 import Data.Function (fix)
-import Data.List
-import Data.Monoid
-import Data.Either
-import Numeric.Half
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Word8, Word16, Word32, Word64,
@@ -30,8 +25,6 @@ import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
 import Language.Futhark.Parser.Lexer.Wrapper
 import Language.Futhark.Parser.Lexer.Tokens
-import qualified Data.ByteString.Internal as ByteString (w2c)
-import qualified Data.ByteString.Lazy as ByteString
 
 }
 
@@ -47,7 +40,8 @@ import qualified Data.ByteString.Lazy as ByteString
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
 
-@identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
+@constituent = [a-zA-Z0-9_']
+@identifier = [a-zA-Z] @constituent* | "_" [a-zA-Z0-9] @constituent*
 @qualidentifier = (@identifier ".")+ @identifier
 
 $opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
@@ -68,7 +62,9 @@ tokens :-
   "="                      { tokenC EQU }
   "("                      { tokenC LPAR }
   ")"                      { tokenC RPAR }
-  ")["                     { tokenC RPAR_THEN_LBRACKET }
+  [a-zA-Z0-9_'] ^ "["      { tokenC INDEXING }
+  \)            ^ "["      { tokenC INDEXING }
+  \]            ^ "["      { tokenC INDEXING }
   "["                      { tokenC LBRACKET }
   "]"                      { tokenC RBRACKET }
   "{"                      { tokenC LCURLY }
@@ -95,6 +91,7 @@ tokens :-
   "$"                      { tokenC DOLLAR }
   "???"                    { tokenC HOLE }
 
+  @declit                  { tokenS $ \s -> NATLIT (nameFromText s) (readIntegral s) }
   @intlit i8               { tokenM $ pure . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ pure . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
   @intlit i32              { tokenM $ pure . I32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
@@ -105,10 +102,10 @@ tokens :-
   @intlit u64              { tokenM $ pure . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
   @intlit                  { tokenM $ pure . INTLIT . readIntegral . T.filter (/= '_') }
 
-  @reallit f16             { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  @reallit                 { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
+  [\n[^\.]] ^ @reallit f16     { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit f32     { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit f64     { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit         { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
   @hexreallit f16          { tokenM $ fmap F16LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
@@ -117,16 +114,10 @@ tokens :-
   \" @stringcharlit* \"    { tokenM $ fmap (STRINGLIT . T.pack) . tryRead "string"  }
 
   @identifier              { tokenS keyword }
-  @identifier "["          { tokenPosM $ fmap INDEXING . indexing . second (T.takeWhile (/='[')) }
-  @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
-  @identifier "." "("      { tokenPosM $ fmap (QUALPAREN []) . indexing . second (T.init . T.takeWhile (/='(')) }
-  @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
   @binop                   { tokenM $ pure . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; pure (symbol qs k) }
-
-  "." [0-9]+               { tokenS $ PROJ_INTFIELD . nameFromText . T.drop 1 }
 {
 
 getToken :: Alex (Lexeme Token)

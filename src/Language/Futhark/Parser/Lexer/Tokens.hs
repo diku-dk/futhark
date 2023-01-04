@@ -53,12 +53,10 @@ import Prelude hiding (exponent)
 data Token
   = ID Name
   | COMMENT T.Text
-  | INDEXING Name
-  | QUALINDEXING [Name] Name
-  | QUALPAREN [Name] Name
+  | INDEXING -- A left bracket immediately following an identifier.
   | SYMBOL BinOp [Name] Name
   | CONSTRUCTOR Name
-  | PROJ_INTFIELD Name
+  | NATLIT Name Integer
   | INTLIT Integer
   | STRINGLIT T.Text
   | I8LIT Int8
@@ -89,7 +87,6 @@ data Token
   | THREE_DOTS
   | LPAR
   | RPAR
-  | RPAR_THEN_LBRACKET
   | LBRACKET
   | RBRACKET
   | LCURLY

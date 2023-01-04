@@ -71,12 +71,12 @@ instance TC.Checkable GPUMem where
 instance BuilderOps GPUMem where
   mkExpDecB _ _ = pure ()
   mkBodyB stms res = pure $ Body () stms res
-  mkLetNamesB = mkLetNamesB' ()
+  mkLetNamesB = mkLetNamesB' (Space "device") ()
 
 instance BuilderOps (Engine.Wise GPUMem) where
   mkExpDecB pat e = pure $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = pure $ Engine.mkWiseBody () stms res
-  mkLetNamesB = mkLetNamesB''
+  mkLetNamesB = mkLetNamesB'' (Space "device")
 
 instance TraverseOpStms (Engine.Wise GPUMem) where
   traverseOpStms = traverseMemOpStms (traverseHostOpStms (const pure))

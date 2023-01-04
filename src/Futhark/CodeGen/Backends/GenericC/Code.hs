@@ -12,7 +12,6 @@ module Futhark.CodeGen.Backends.GenericC.Code
 where
 
 import Control.Monad.Reader
-import Data.Loc
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
@@ -325,9 +324,7 @@ compileCode (DeclareMem name space) =
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
-compileCode (DeclareArray name ScalarSpace {} _ _) =
-  error $ "Cannot declare array " ++ prettyString name ++ " in scalar space."
-compileCode (DeclareArray name DefaultSpace t vs) = do
+compileCode (DeclareArray name t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = primTypeToCType t
   case vs of
@@ -337,22 +334,12 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
     ArrayZeros n ->
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
-  contextField
-    (C.toIdent name noLoc)
-    [C.cty|struct memblock|]
-    $ Just
-      [C.cexp|(struct memblock){NULL,
-                                (unsigned char*)$id:name_realtype,
-                                0,
-                                $string:(prettyString name)}|]
-  item [C.citem|struct memblock $id:name = ctx->$id:name;|]
-compileCode (DeclareArray name (Space space) t vs) =
-  join $
-    asks (opsStaticArray . envOperations)
-      <*> pure name
-      <*> pure space
-      <*> pure t
-      <*> pure vs
+  item
+    [C.citem|struct memblock $id:name =
+               (struct memblock){NULL,
+                                 (unsigned char*)$id:name_realtype,
+                                 0,
+                                 $string:(prettyString name)};|]
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no
 -- effect on performance.

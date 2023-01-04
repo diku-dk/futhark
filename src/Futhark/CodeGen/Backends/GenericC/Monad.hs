@@ -18,7 +18,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     Deallocate,
     CopyBarrier (..),
     Copy,
-    StaticArray,
 
     -- * Monadic compiler interface
     CompilerM,
@@ -77,6 +76,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     fatMemUnRef,
     criticalSection,
     module Futhark.CodeGen.Backends.SimpleRep,
+    isValidCName,
   )
 where
 
@@ -84,6 +84,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
+import Data.Char (isAlpha, isAlphaNum)
 import Data.DList qualified as DL
 import Data.List (unzip4)
 import Data.Loc
@@ -140,9 +141,9 @@ newCompilerState src s =
 -- | In which part of the header file we put the declaration.  This is
 -- to ensure that the header file remains structured and readable.
 data HeaderSection
-  = ArrayDecl String
-  | OpaqueTypeDecl String
-  | OpaqueDecl String
+  = ArrayDecl Name
+  | OpaqueTypeDecl Name
+  | OpaqueDecl Name
   | EntryDecl
   | MiscDecl
   | InitDecl
@@ -156,7 +157,7 @@ type ErrorCompiler op s = ErrorMsg Exp -> String -> CompilerM op s ()
 
 -- | The address space qualifiers for a pointer of the given type with
 -- the given annotation.
-type PointerQuals op s = String -> CompilerM op s [C.TypeQual]
+type PointerQuals = String -> [C.TypeQual]
 
 -- | The type of a memory block in the given memory space.
 type MemoryType op s = SpaceId -> CompilerM op s C.Type
@@ -181,12 +182,9 @@ type Allocate op s =
   SpaceId ->
   CompilerM op s ()
 
--- | De-allocate the given memory block with the given tag, which is
--- in the given memory space.
-type Deallocate op s = C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
-
--- | Create a static array of values - initialised at load time.
-type StaticArray op s = VName -> SpaceId -> PrimType -> ArrayContents -> CompilerM op s ()
+-- | De-allocate the given memory block, with the given tag, with the
+-- given size,, which is in the given memory space.
+type Deallocate op s = C.Exp -> C.Exp -> C.Exp -> SpaceId -> CompilerM op s ()
 
 -- | Whether a copying operation should implicitly function as a
 -- barrier regarding further operations on the source.  This is a
@@ -220,7 +218,6 @@ data Operations op s = Operations
     opsAllocate :: Allocate op s,
     opsDeallocate :: Deallocate op s,
     opsCopy :: Copy op s,
-    opsStaticArray :: StaticArray op s,
     opsMemoryType :: MemoryType op s,
     opsCompiler :: OpCompiler op s,
     opsError :: ErrorCompiler op s,
@@ -351,10 +348,10 @@ cacheMem a = asks $ M.lookup (C.toExp a noLoc) . envCachedMem
 -- header file, and the second is the implementation.  Returns the public
 -- name.
 publicDef ::
-  String ->
+  T.Text ->
   HeaderSection ->
-  (String -> (C.Definition, C.Definition)) ->
-  CompilerM op s String
+  (T.Text -> (C.Definition, C.Definition)) ->
+  CompilerM op s T.Text
 publicDef s h f = do
   s' <- publicName s
   let (pub, priv) = f s'
@@ -364,9 +361,9 @@ publicDef s h f = do
 
 -- | As 'publicDef', but ignores the public name.
 publicDef_ ::
-  String ->
+  T.Text ->
   HeaderSection ->
-  (String -> (C.Definition, C.Definition)) ->
+  (T.Text -> (C.Definition, C.Definition)) ->
   CompilerM op s ()
 publicDef_ s h f = void $ publicDef s h f
 
@@ -414,8 +411,8 @@ decl :: C.InitGroup -> CompilerM op s ()
 decl x = item [C.citem|$decl:x;|]
 
 -- | Public names must have a consitent prefix.
-publicName :: String -> CompilerM op s String
-publicName s = pure $ "futhark_" ++ s
+publicName :: T.Text -> CompilerM op s T.Text
+publicName s = pure $ "futhark_" <> s
 
 memToCType :: VName -> Space -> CompilerM op s C.Type
 memToCType v space = do
@@ -480,20 +477,24 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm [C.cstm|$exp:dest = (unsigned char*) malloc((size_t)$exp:size);|]
+    stm
+      [C.cstm|host_alloc(ctx, (size_t)$exp:size, $exp:desc, (size_t*)&$exp:size, (void*)&$exp:dest);|]
 
 freeRawMem ::
-  (C.ToExp a, C.ToExp b) =>
+  (C.ToExp a, C.ToExp b, C.ToExp c) =>
   a ->
-  Space ->
   b ->
+  Space ->
+  c ->
   CompilerM op s ()
-freeRawMem mem space desc =
+freeRawMem mem size space desc =
   case space of
     Space sid -> do
       free_mem <- asks (opsDeallocate . envOperations)
-      free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:desc|] sid
-    _ -> item [C.citem|free($exp:mem);|]
+      free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:size|] [C.cexp|$exp:desc|] sid
+    _ ->
+      item
+        [C.citem|host_free(ctx, (size_t)$exp:size, $exp:desc, (void*)$exp:mem);|]
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
@@ -569,7 +570,7 @@ allocMem mem size space on_failure = do
                        $stm:on_failure
                      }|]
     else do
-      freeRawMem mem space mem_s
+      freeRawMem mem size space mem_s
       allocRawMem mem size space [C.cexp|desc|]
 
 copyMemoryDefaultSpace ::
@@ -628,21 +629,15 @@ volQuals :: Volatility -> [C.TypeQual]
 volQuals Volatile = [C.ctyquals|volatile|]
 volQuals Nonvolatile = []
 
-writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
+writeScalarPointerWithQuals :: PointerQuals -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
-  quals <- quals_f space
-  let quals' = volQuals vol ++ quals
-      deref =
-        derefPointer
-          dest
-          i
-          [C.cty|$tyquals:quals' $ty:elemtype*|]
+  let quals' = volQuals vol ++ quals_f space
+      deref = derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
   stm [C.cstm|$exp:deref = $exp:v;|]
 
-readScalarPointerWithQuals :: PointerQuals op s -> ReadScalar op s
+readScalarPointerWithQuals :: PointerQuals -> ReadScalar op s
 readScalarPointerWithQuals quals_f dest i elemtype space vol = do
-  quals <- quals_f space
-  let quals' = volQuals vol ++ quals
+  let quals' = volQuals vol ++ quals_f space
   pure $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
 
 criticalSection :: Operations op s -> [C.BlockItem] -> [C.BlockItem]
@@ -666,3 +661,11 @@ configType :: CompilerM op s C.Type
 configType = do
   name <- publicName "context_config"
   pure [C.cty|struct $id:name|]
+
+-- | Is this name a valid C identifier?  If not, it should be escaped
+-- before being emitted into C.
+isValidCName :: T.Text -> Bool
+isValidCName = maybe True check . T.uncons
+  where
+    check (c, cs) = isAlpha c && T.all constituent cs
+    constituent c = isAlphaNum c || c == '_'

@@ -217,6 +217,10 @@ static inline f16 futrts_log10_16(f16 x) {
   return log10(x);
 }
 
+static inline f16 futrts_log1p_16(f16 x) {
+  return log1p(x);
+}
+
 static inline f16 futrts_sqrt16(f16 x) {
   return sqrt(x);
 }
@@ -344,6 +348,13 @@ static inline f16 futrts_log2_16(f16 x) {
 
 static inline f16 futrts_log10_16(f16 x) {
   return futrts_log16(x) / log(10.0f16);
+}
+
+static inline f16 futrts_log1p_16(f16 x) {
+  if(x == -1.0f16 || (futrts_isinf16(x) && x > 0.0f16)) return x / 0.0f16;
+  f16 y = 1.0f16 + x;
+  f16 z = y - 1.0f16;
+  return log(y) - (z-x)/y;
 }
 
 static inline f16 futrts_sqrt16(f16 x) {
@@ -495,6 +506,10 @@ static inline f16 futrts_log2_16(f16 x) {
 
 static inline f16 futrts_log10_16(f16 x) {
   return hlog10(x);
+}
+
+static inline f16 futrts_log1p_16(f16 x) {
+  return (f16)log1pf((float)x);
 }
 
 static inline f16 futrts_sqrt16(f16 x) {
@@ -693,6 +708,10 @@ static inline f16 futrts_log2_16(f16 x) {
 
 static inline f16 futrts_log10_16(f16 x) {
   return futrts_log10_32(x);
+}
+
+static inline f16 futrts_log1p_16(f16 x) {
+  return futrts_log1p_32(x);
 }
 
 static inline f16 futrts_sqrt16(f16 x) {

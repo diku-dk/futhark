@@ -32,7 +32,7 @@ programming techniques.
 **Warning:** Do not run untrusted programs.  See SAFETY below.
 
 Image directives and builtin functions shell out to ``convert`` (from
-ImageMagick).  Video generation uses ``ffmpeg``.
+ImageMagick).  Video and audio generation uses ``ffmpeg``.
 
 For an input file ``foo.fut``, all generated files will be in a
 directory named ``foo-img``.  A ``file`` parameter passed to a
@@ -193,6 +193,47 @@ The following directives are supported:
 
   Use ``set term png size width,height`` to change the size to
   ``width`` by ``height`` pixels.
+
+* ``> :audio e[; parameters...]``
+
+  Creates a sound-file from ``e``.  The optional parameters are lines of the
+  form *key:value*:
+
+  * ``sampling_frequency: <int>``
+
+    The sampling frequency (in Hz) of the input.  Defaults to ``44100``.
+
+  * ``codec: <name>``
+
+    The codec of the output.  Defaults to ``wav``. Other common options include
+    ``mp3``, ``flac``, ``ogg`` and ``opus``.
+
+  The expression ``e`` must have one of the following types:
+
+  * ``[]i8`` and ``[]u8``
+
+    Interpreted as PCM signed/unsigned 8-bit audio.
+
+  * ``[]i16`` and ``[]u16``
+
+    Interpreted as PCM signed/unsigned 16-bit audio.
+
+  * ``[]i32`` and ``[]u32``
+
+    Interpreted as PCM signed/unsigned 32-bit audio.
+
+  * ``[]f32`` and ``[]f64``
+
+    Interpreted as PCM signed/unsigned 32/64 bit floating-point audio. Should
+    only contain values between ``-1.0`` and ``1.0``.
+
+  For each type of input, it is also possible to give expressions with a
+  two-dimensional type instead, e.g. ``[][]f32``.  These expressions are
+  interpreted as an array of channels, making it possible to do stereo audio by
+  returning e.g. ``[2][]f32``.  For stereo output, the first row is the left
+  channel and the second row is the right channel.  This functionality uses the
+  amerge filter from ffmpeg, so consult the documentation there for additional
+  information.
 
 FUTHARKSCRIPT
 =============

@@ -7,14 +7,13 @@ module Futhark.CodeGen.Backends.GenericC.EntryPoints
 where
 
 import Control.Monad.Reader
-import Data.Char (isAlpha, isAlphaNum)
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Types (opaqueToCType, valueTypeToCType)
 import Futhark.CodeGen.ImpCode
 import Futhark.Manifest qualified as Manifest
-import Futhark.Util (zEncodeString)
+import Futhark.Util (zEncodeText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
@@ -132,17 +131,10 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
             [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
       stms $ zipWith maybeCopyDim shape [0 .. rank - 1]
 
-isValidCName :: Name -> Bool
-isValidCName = check . nameToString
-  where
-    check [] = True -- academic
-    check (c : cs) = isAlpha c && all constituent cs
-    constituent c = isAlphaNum c || c == '_'
-
-entryName :: Name -> String
+entryName :: Name -> T.Text
 entryName v
-  | isValidCName v = "entry_" <> nameToString v
-  | otherwise = "entry_" <> zEncodeString (nameToString v)
+  | isValidCName (nameToText v) = "entry_" <> nameToText v
+  | otherwise = "entry_" <> zEncodeText (nameToText v)
 
 onEntryPoint ::
   [C.BlockItem] ->
@@ -221,7 +213,7 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
 
       manifest =
         Manifest.EntryPoint
-          { Manifest.entryPointCFun = T.pack entry_point_function_name,
+          { Manifest.entryPointCFun = entry_point_function_name,
             -- Note that our convention about what is "input/output"
             -- and what is "results/args" is different between the
             -- manifest and ImpCode.
@@ -238,13 +230,12 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
       decl [C.cdecl|$ty:ty' $id:name;|]
 
     vdType (TransparentValue (ScalarValue pt signed _)) =
-      T.pack $ prettySigned (signed == Unsigned) pt
+      prettySigned (signed == Unsigned) pt
     vdType (TransparentValue (ArrayValue _ _ pt signed shape)) =
-      T.pack $
-        mconcat (replicate (length shape) "[]")
-          <> prettySigned (signed == Unsigned) pt
+      mconcat (replicate (length shape) "[]")
+        <> prettySigned (signed == Unsigned) pt
     vdType (OpaqueValue name _) =
-      T.pack name
+      nameToText name
 
     outputManifest (u, vd) =
       Manifest.Output

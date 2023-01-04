@@ -10,6 +10,7 @@ where
 
 import Control.Monad.IO.Class
 import Data.List (sortBy)
+import Data.Text.IO qualified as T
 import Futhark.Version
 import System.Console.GetOpt
 import System.Environment (getProgName)
@@ -100,10 +101,10 @@ commonOptions prog usage options =
   ]
   where
     header = do
-      putStrLn $ "Futhark " ++ versionString
-      putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
-      putStrLn "This is free software: you are free to change and redistribute it."
-      putStrLn "There is NO WARRANTY, to the extent permitted by law."
+      T.putStrLn $ "Futhark " <> versionString
+      T.putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
+      T.putStrLn "This is free software: you are free to change and redistribute it."
+      T.putStrLn "There is NO WARRANTY, to the extent permitted by law."
 
 -- | Terminate the program with this error message (but don't report
 -- it as an ICE, as happens with 'error').

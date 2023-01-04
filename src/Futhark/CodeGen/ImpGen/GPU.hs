@@ -12,7 +12,6 @@ module Futhark.CodeGen.ImpGen.GPU
 where
 
 import Control.Monad.Except
-import Data.Bifunctor (second)
 import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe
@@ -25,7 +24,6 @@ import Futhark.CodeGen.ImpGen.GPU.SegMap
 import Futhark.CodeGen.ImpGen.GPU.SegRed
 import Futhark.CodeGen.ImpGen.GPU.SegScan
 import Futhark.CodeGen.ImpGen.GPU.Transpose
-import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.IxFun qualified as IxFun
@@ -78,19 +76,10 @@ compileProg ::
   HostEnv ->
   Prog GPUMem ->
   m (Warnings, Imp.Program)
-compileProg env prog =
-  second (fmap setOpSpace . setDefaultSpace device_space)
-    <$> Futhark.CodeGen.ImpGen.compileProg env callKernelOperations device_space prog
+compileProg env =
+  Futhark.CodeGen.ImpGen.compileProg env callKernelOperations device_space
   where
     device_space = Imp.Space "device"
-    global_space = Imp.Space "global"
-    setOpSpace (Imp.CallKernel kernel) =
-      Imp.CallKernel
-        kernel
-          { Imp.kernelBody =
-              setDefaultCodeSpace global_space $ Imp.kernelBody kernel
-          }
-    setOpSpace op = op
 
 -- | Compile a 'GPUMem' program to low-level parallel code, with
 -- either CUDA or OpenCL characteristics.
@@ -228,9 +217,7 @@ withAcc pat inputs lam = do
       | Just (op_lam, _) <- op,
         AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
           let num_locks = 100151
-          locks_arr <-
-            sStaticArray "withacc_locks" (Space "device") int32 $
-              Imp.ArrayZeros num_locks
+          locks_arr <- genZeroes "withacc_locks" num_locks
           let locks = Locks locks_arr num_locks
               extend env = env {hostLocks = M.insert c locks $ hostLocks env}
           localEnv extend $ locksForInputs atomics inputs'

@@ -33,7 +33,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, freeListH, halfH, lockH, timingH, utilH)
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
 import Language.C.Quote.OpenCL qualified as C
@@ -66,7 +66,6 @@ defaultOperations =
       opsAllocate = defAllocate,
       opsDeallocate = defDeallocate,
       opsCopy = defCopy,
-      opsStaticArray = defStaticArray,
       opsMemoryType = defMemoryType,
       opsCompiler = defCompiler,
       opsFatMemory = True,
@@ -87,8 +86,6 @@ defaultOperations =
       copyMemoryDefaultSpace destmem destoffset srcmem srcoffset size
     defCopy _ _ _ _ _ _ _ _ =
       error "Cannot copy to or from non-default memory space"
-    defStaticArray _ _ _ _ =
-      error "Cannot create static array in non-default memory space"
     defMemoryType _ =
       error "Has no type for non-default memory space"
     defCompiler _ =
@@ -119,22 +116,19 @@ opaqueDecls = declsCode isOpaqueDecl
 entryDecls = declsCode (== EntryDecl)
 miscDecls = declsCode (== MiscDecl)
 
-defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.BlockItem)
+defineMemorySpace :: Space -> CompilerM op s ([C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
-  let structdef =
-        [C.cedecl|struct $id:sname { int *references;
-                                     $ty:rm mem;
-                                     typename int64_t size;
-                                     const char *desc; };|]
-
-  contextField peakname [C.cty|typename int64_t|] $ Just [C.cexp|0|]
-  contextField usagename [C.cty|typename int64_t|] $ Just [C.cexp|0|]
+  earlyDecl
+    [C.cedecl|struct $id:sname { int *references;
+                                 $ty:rm mem;
+                                 typename int64_t size;
+                                 const char *desc; };|]
 
   -- Unreferencing a memory block consists of decreasing its reference
   -- count and freeing the corresponding memory if the count reaches
   -- zero.
-  free <- collect $ freeRawMem [C.cexp|block->mem|] space [C.cexp|desc|]
+  free <- collect $ freeRawMem [C.cexp|block->mem|] [C.cexp|block->size|] space [C.cexp|desc|]
   ctx_ty <- contextType
   let unrefdef =
         [C.cedecl|int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
@@ -234,8 +228,7 @@ defineMemorySpace space = do
 
   let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
   pure
-    ( structdef,
-      [unrefdef, allocdef, setdef],
+    ( [unrefdef, allocdef, setdef],
       -- Do not report memory usage for DefaultSpace (CPU memory),
       -- because it would not be accurate anyway.  This whole
       -- tracking probably needs to be rethought.
@@ -403,6 +396,8 @@ $utilH
 $cacheH
 $halfH
 $timingH
+$lockH
+$freeListH
 |]
 
   let early_decls = definitionsText $ DL.toList $ compEarlyDecls endstate
@@ -421,8 +416,6 @@ $timingH
 #include <ctype.h>
 
 $header_extra
-
-$lockH
 
 #define FUTHARK_F64_ENABLED
 
@@ -458,7 +451,7 @@ $entry_point_decls
     Definitions types consts (Functions funs) = prog
 
     compileProgAction = do
-      (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
+      (memfuns, memreport) <- unzip <$> mapM defineMemorySpace spaces
 
       get_consts <- compileConstants consts
 
@@ -467,9 +460,12 @@ $entry_point_decls
       (prototypes, functions) <-
         unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
-      mapM_ earlyDecl memstructs
       (entry_points, entry_points_manifest) <-
         unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
+
+      headerDecl InitDecl [C.cedecl|struct futhark_context_config;|]
+      headerDecl InitDecl [C.cedecl|struct futhark_context_config* futhark_context_config_new(void);|]
+      headerDecl InitDecl [C.cedecl|void futhark_context_config_free(struct futhark_context_config* cfg);|]
 
       extra
 
@@ -508,6 +504,27 @@ generateCommonLibFuns memreport = do
   ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
 
+  publicDef_ "context_config_set_debugging" InitDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
+                         cfg->profiling = cfg->logging = cfg->debugging = flag;
+                       }|]
+    )
+
+  publicDef_ "context_config_set_profiling" InitDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
+                         cfg->profiling = flag;
+                       }|]
+    )
+
+  publicDef_ "context_config_set_logging" InitDecl $ \s ->
+    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
+      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
+                         cfg->logging = flag;
+                       }|]
+    )
+
   publicDef_ "context_config_set_cache_file" MiscDecl $ \s ->
     ( [C.cedecl|void $id:s($ty:cfg* cfg, const char *f);|],
       [C.cedecl|void $id:s($ty:cfg* cfg, const char *f) {
@@ -518,7 +535,7 @@ generateCommonLibFuns memreport = do
   publicDef_ "get_tuning_param_count" InitDecl $ \s ->
     ( [C.cedecl|int $id:s(void);|],
       [C.cedecl|int $id:s(void) {
-                return sizeof(tuning_param_names)/sizeof(tuning_param_names[0]);
+                return num_tuning_params;
               }|]
     )
 
@@ -597,13 +614,7 @@ compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do
   ctx_ty <- contextType
   const_fields <- mapM constParamField ps
-  -- Avoid an empty struct, as that is apparently undefined behaviour.
-  let const_fields'
-        | null const_fields = [[C.csdecl|int dummy;|]]
-        | otherwise = const_fields
-  contextField "constants" [C.cty|struct { $sdecls:const_fields' }|] Nothing
-  earlyDecl [C.cedecl|static int init_constants($ty:ctx_ty*);|]
-  earlyDecl [C.cedecl|static int free_constants($ty:ctx_ty*);|]
+  earlyDecl [C.cedecl|struct constants { int dummy; $sdecls:const_fields };|]
 
   inNewFunction $ do
     -- We locally define macros for the constants, so that when we
@@ -650,18 +661,18 @@ compileConstants (Constants ps init_consts) = do
     constMacro p = ([C.citem|$escstm:def|], [C.citem|$escstm:undef|])
       where
         p' = T.unpack $ idText (C.toIdent (paramName p) mempty)
-        def = "#define " ++ p' ++ " (" ++ "ctx->constants." ++ p' ++ ")"
+        def = "#define " ++ p' ++ " (" ++ "ctx->constants->" ++ p' ++ ")"
         undef = "#undef " ++ p'
 
     resetMemConst ScalarParam {} = pure ()
     resetMemConst (MemParam name space) = resetMem name space
 
     freeConst ScalarParam {} = pure ()
-    freeConst (MemParam name space) = unRefMem [C.cexp|ctx->constants.$id:name|] space
+    freeConst (MemParam name space) = unRefMem [C.cexp|ctx->constants->$id:name|] space
 
     getConst (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
-      pure [C.citem|$ty:ctp $id:name = ctx->constants.$id:name;|]
+      pure [C.citem|$ty:ctp $id:name = ctx->constants->$id:name;|]
     getConst (MemParam name space) = do
       ty <- memToCType name space
-      pure [C.citem|$ty:ty $id:name = ctx->constants.$id:name;|]
+      pure [C.citem|$ty:ty $id:name = ctx->constants->$id:name;|]

@@ -27,6 +27,7 @@ module Futhark.Util
     focusNth,
     focusMaybe,
     hashText,
+    showText,
     unixEnvironment,
     isEnvVarAtLeast,
     startupTime,
@@ -40,9 +41,9 @@ module Futhark.Util
     pmapIO,
     interactWithFileSafely,
     convFloat,
-    UserString,
-    EncodedString,
-    zEncodeString,
+    UserText,
+    EncodedText,
+    zEncodeText,
     atMostChars,
     invertMap,
     cartesian,
@@ -212,6 +213,10 @@ hashText :: T.Text -> T.Text
 hashText =
   T.decodeUtf8With T.lenientDecode . Base16.encode . MD5.hash . T.encodeUtf8
 
+-- | Like 'show', but produces text.
+showText :: Show a => a -> T.Text
+showText = T.pack . show
+
 {-# NOINLINE unixEnvironment #-}
 
 -- | The Unix environment when the Futhark compiler started.
@@ -356,12 +361,22 @@ type UserString = String
 -- | Encoded form.
 type EncodedString = String
 
--- | Z-encode a string using a slightly simplified variant of GHC
--- Z-encoding.  The encoded string is a valid identifier in most
--- programming languages.
+-- | As 'zEncodeText', but for strings.
 zEncodeString :: UserString -> EncodedString
 zEncodeString "" = ""
 zEncodeString (c : cs) = encodeDigitChar c ++ concatMap encodeChar cs
+
+-- | As the user typed it.
+type UserText = T.Text
+
+-- | Encoded form.
+type EncodedText = T.Text
+
+-- | Z-encode a text using a slightly simplified variant of GHC
+-- Z-encoding.  The encoded string is a valid identifier in most
+-- programming languages.
+zEncodeText :: UserText -> EncodedText
+zEncodeText = T.pack . zEncodeString . T.unpack
 
 unencodedChar :: Char -> Bool -- True for chars that don't need encoding
 unencodedChar 'Z' = False

@@ -34,6 +34,7 @@ import Futhark.Util
     hashText,
     nubOrd,
     runProgramWithExitCode,
+    showText,
   )
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
@@ -83,6 +84,19 @@ defaultVideoParams =
       videoFile = Nothing
     }
 
+data AudioParams = AudioParams
+  { audioSamplingFrequency :: Maybe Int,
+    audioCodec :: Maybe T.Text
+  }
+  deriving (Show)
+
+defaultAudioParams :: AudioParams
+defaultAudioParams =
+  AudioParams
+    { audioSamplingFrequency = Nothing,
+      audioCodec = Nothing
+    }
+
 data Directive
   = DirectiveRes Exp
   | DirectiveBrief Directive
@@ -91,6 +105,7 @@ data Directive
   | DirectivePlot Exp (Maybe (Int, Int))
   | DirectiveGnuplot Exp T.Text
   | DirectiveVideo Exp VideoParams
+  | DirectiveAudio Exp AudioParams
   deriving (Show)
 
 varsInDirective :: Directive -> S.Set EntryName
@@ -101,6 +116,7 @@ varsInDirective (DirectiveImg e _) = varsInExp e
 varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveVideo e _) = varsInExp e
+varsInDirective (DirectiveAudio e _) = varsInExp e
 
 pprDirective :: Bool -> Directive -> PP.Doc a
 pprDirective _ (DirectiveRes e) =
@@ -145,6 +161,18 @@ pprDirective True (DirectiveVideo e params) =
           p "file" videoFile PP.pretty
         ]
     ppBool b = if b then "true" else "false"
+    p s f pretty = do
+      x <- f params
+      Just $ s <> ": " <> pretty x
+pprDirective _ (DirectiveAudio e params) =
+  ("> :audio " <> PP.pretty e)
+    <> if null params' then mempty else ";" <> PP.hardline <> PP.stack params'
+  where
+    params' =
+      catMaybes
+        [ p "sampling_frequency" audioSamplingFrequency PP.pretty,
+          p "codec" audioCodec PP.pretty
+        ]
     p s f pretty = do
       x <- f params
       Just $ s <> ": " <> pretty x
@@ -272,6 +300,28 @@ parseVideoParams =
       s <- lexeme $ takeWhileP Nothing (not . isSpace)
       pure params {videoFormat = Just s}
 
+parseAudioParams :: Parser AudioParams
+parseAudioParams =
+  fmap (fromMaybe defaultAudioParams) $
+    optional $
+      ";" *> hspace *> eol *> "-- " *> parseParams defaultAudioParams
+  where
+    parseParams params =
+      choice
+        [ choice
+            [pSamplingFrequency params, pCodec params]
+            >>= parseParams,
+          pure params
+        ]
+    pSamplingFrequency params = do
+      token "sampling_frequency:"
+      hz <- parseInt
+      pure params {audioSamplingFrequency = Just hz}
+    pCodec params = do
+      token "codec:"
+      s <- lexeme $ takeWhileP Nothing (not . isSpace)
+      pure params {audioCodec = Just s}
+
 atStartOfLine :: Parser ()
 atStartOfLine = do
   col <- sourceColumn <$> getSourcePos
@@ -332,6 +382,11 @@ parseBlock =
             $> DirectiveVideo
             <*> parseExp postlexeme
             <*> parseVideoParams
+            <* eol,
+          directiveName "audio"
+            $> DirectiveAudio
+            <*> parseExp postlexeme
+            <*> parseAudioParams
             <* eol
         ]
     directiveName s = try $ token (":" <> s)
@@ -456,14 +511,14 @@ system prog options input = do
   res <- liftIO $ runProgramWithExitCode prog options $ T.encodeUtf8 input
   case res of
     Left err ->
-      throwError $ prog' <> " failed: " <> T.pack (show err)
+      throwError $ prog' <> " failed: " <> showText err
     Right (ExitSuccess, stdout_t, _) ->
       pure $ T.pack stdout_t
     Right (ExitFailure code', _, stderr_t) ->
       throwError $
         prog'
           <> " failed with exit code "
-          <> T.pack (show code')
+          <> showText code'
           <> " and stderr:\n"
           <> T.pack stderr_t
   where
@@ -520,7 +575,7 @@ loadBMP bmpfile = do
   res <- liftIO $ BMP.readBMP bmpfile
   case res of
     Left err ->
-      throwError $ "Failed to read BMP:\n" <> T.pack (show err)
+      throwError $ "Failed to read BMP:\n" <> showText err
     Right bmp -> do
       let bmp_bs = BMP.unpackBMPToRGBA32 bmp
           (w, h) = BMP.bmpDimensions bmp
@@ -698,7 +753,7 @@ processDirective env (DirectivePlot e size) = do
       [x, y] <- plottable v
       Just [x, y]
 
-    tag (Nothing, xys) j = ("data" <> T.pack (show (j :: Int)), xys)
+    tag (Nothing, xys) j = ("data" <> showText (j :: Int), xys)
     tag (Just f, xys) _ = (f, xys)
 
     plotWith xys pngfile =
@@ -858,6 +913,92 @@ processDirective env (DirectiveVideo e params) = do
           void $ system "ffmpeg" ["-i", webmfile, videofile] mempty
       | otherwise =
           liftIO $ copyFile webmfile videofile
+
+--
+processDirective env (DirectiveAudio e params) = do
+  fmap imgBlock . newFile env (Nothing, "output." <> T.unpack output_format) $
+    \audiofile -> do
+      withTempDir $ \dir -> do
+        maybe_v <- evalExpToGround literateBuiltin (envServer env) e
+        maybe_raw_files <- toRawFiles dir maybe_v
+        case maybe_raw_files of
+          (input_format, raw_files) -> do
+            void $
+              system
+                "ffmpeg"
+                ( concatMap
+                    ( \raw_file ->
+                        [ "-f",
+                          input_format,
+                          "-ar",
+                          show sampling_frequency,
+                          "-i",
+                          raw_file
+                        ]
+                    )
+                    raw_files
+                    ++ [ "-f",
+                         T.unpack output_format,
+                         "-filter_complex",
+                         concatMap
+                           (\i -> "[" <> show i <> ":a]")
+                           [0 .. length raw_files - 1]
+                           <> "amerge=inputs="
+                           <> show (length raw_files)
+                           <> "[a]",
+                         "-map",
+                         "[a]",
+                         audiofile
+                       ]
+                )
+                mempty
+  where
+    writeRaw dir name v = do
+      let rawfile = dir </> name
+      let Just bytes = toBytes v
+      liftIO $ LBS.writeFile rawfile $ LBS.fromStrict bytes
+
+    toRawFiles dir (Right (ValueAtom v))
+      | length (valueShape v) == 1,
+        Just input_format <- toFfmpegFormat v = do
+          writeRaw dir "raw.pcm" v
+          pure (input_format, [dir </> "raw.pcm"])
+      | length (valueShape v) == 2,
+        Just input_format <- toFfmpegFormat v = do
+          (input_format,)
+            <$> zipWithM
+              ( \v' i -> do
+                  let file_name = "raw-" <> show i <> ".pcm"
+                  writeRaw dir file_name v'
+                  pure $ dir </> file_name
+              )
+              (valueElems v)
+              [0 :: Int ..]
+    toRawFiles _ v = nope $ fmap (fmap valueType) v
+
+    toFfmpegFormat I8Value {} = Just "s8"
+    toFfmpegFormat U8Value {} = Just "u8"
+    toFfmpegFormat I16Value {} = Just "s16le"
+    toFfmpegFormat U16Value {} = Just "u16le"
+    toFfmpegFormat I32Value {} = Just "s32le"
+    toFfmpegFormat U32Value {} = Just "u32le"
+    toFfmpegFormat F32Value {} = Just "f32le"
+    toFfmpegFormat F64Value {} = Just "f64le"
+    toFfmpegFormat _ = Nothing
+
+    toBytes (I8Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (U8Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (I16Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (U16Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (I32Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (U32Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (F32Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes (F64Value _ bytes) = Just $ SVec.vectorToByteString bytes
+    toBytes _ = Nothing
+
+    output_format = fromMaybe "wav" $ audioCodec params
+    sampling_frequency = fromMaybe 44100 $ audioSamplingFrequency params
+    nope _ = throwError "Cannot create audio from value"
 
 -- Did this script block succeed or fail?
 data Failure = Failure | Success

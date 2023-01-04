@@ -114,6 +114,7 @@ module Futhark.CodeGen.ImpGen
     (<--),
     (<~~),
     function,
+    genConstants,
     warn,
     module Language.Futhark.Warnings,
   )
@@ -285,6 +286,7 @@ data ImpState rep r op = ImpState
   { stateVTable :: VTable rep,
     stateFunctions :: Imp.Functions op,
     stateCode :: Imp.Code op,
+    stateConstants :: Imp.Constants op,
     stateWarnings :: Warnings,
     -- | Maps the arrays backing each accumulator to their
     -- update function and neutral elements.  This works
@@ -297,7 +299,7 @@ data ImpState rep r op = ImpState
   }
 
 newState :: VNameSource -> ImpState rep r op
-newState = ImpState mempty mempty mempty mempty mempty
+newState = ImpState mempty mempty mempty mempty mempty mempty
 
 newtype ImpM rep r op a
   = ImpM (ReaderT (Env rep r op) (State (ImpState rep r op)) a)
@@ -370,6 +372,7 @@ subImpM r ops (ImpM m) = do
             stateFunctions = mempty,
             stateCode = mempty,
             stateNameSource = stateNameSource s,
+            stateConstants = mempty,
             stateWarnings = mempty,
             stateAccs = stateAccs s
           }
@@ -445,11 +448,14 @@ compileProg r ops space (Prog types consts funs) =
           unzip $ parMap rpar (compileFunDef' src) funs
         free_in_funs =
           freeIn $ mconcat $ map stateFunctions ss
-        (consts', s') =
+        ((), s') =
           runImpM (compileConsts free_in_funs consts) r ops space $
             combineStates ss
      in ( ( stateWarnings s',
-            Imp.Definitions types consts' (stateFunctions s')
+            Imp.Definitions
+              types
+              (stateConstants s' <> foldMap stateConstants ss)
+              (stateFunctions s')
           ),
           stateNameSource s'
         )
@@ -472,29 +478,12 @@ compileProg r ops space (Prog types consts funs) =
                 mconcat $ map stateWarnings ss
             }
 
-compileConsts :: Names -> Stms rep -> ImpM rep r op (Imp.Constants op)
-compileConsts used_consts stms = do
-  code <- collect $ compileStms used_consts stms $ pure ()
-  pure $ uncurry Imp.Constants $ first DL.toList $ extract code
-  where
-    -- Fish out those top-level declarations in the constant
-    -- initialisation code that are free in the functions.
-    extract (x Imp.:>>: y) =
-      extract x <> extract y
-    extract (Imp.DeclareMem name space)
-      | name `nameIn` used_consts =
-          ( DL.singleton $ Imp.MemParam name space,
-            mempty
-          )
-    extract (Imp.DeclareScalar name _ t)
-      | name `nameIn` used_consts =
-          ( DL.singleton $ Imp.ScalarParam name t,
-            mempty
-          )
-    extract s =
-      (mempty, s)
+compileConsts :: Names -> Stms rep -> ImpM rep r op ()
+compileConsts used_consts stms = genConstants $ do
+  compileStms used_consts stms $ pure ()
+  pure (used_consts, ())
 
-lookupOpaqueType :: String -> OpaqueTypes -> OpaqueType
+lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
 lookupOpaqueType v (OpaqueTypes types) =
   case lookup v types of
     Just t -> t
@@ -946,13 +935,10 @@ defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   copy (elemType (patElemType pe)) (flatSliceMemLoc pe_loc slice') v_loc
   where
     slice' = fmap pe64 slice
-defCompileBasicOp (Pat [pe]) (Replicate (Shape ds) se)
+defCompileBasicOp (Pat [pe]) (Replicate shape se)
   | Acc {} <- patElemType pe = pure ()
-  | otherwise = do
-      ds' <- mapM toExp ds
-      is <- replicateM (length ds) (newVName "i")
-      copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.le64) is) se []
-      emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
+  | otherwise =
+      sLoopNest shape $ \is -> copyDWIMFix (patElemName pe) is se []
 defCompileBasicOp _ Scratch {} =
   pure ()
 defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
@@ -986,15 +972,13 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
 defCompileBasicOp (Pat [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
       dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
-      dest_space <- entryMemSpace <$> lookupMemory (memLocName dest_mem)
       let t = primValueType v
       static_array <- newVNameForFun "static_array"
-      emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
+      emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
       let static_src =
             MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
               IxFun.iota [fromIntegral $ length es]
-          entry = MemVar Nothing $ MemEntry dest_space
-      addVar static_array entry
+      addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
       copy t dest_mem static_src
   | otherwise =
       forM_ (zip [0 ..] es) $ \(i, e) ->
@@ -1880,15 +1864,15 @@ sAllocArray name pt shape space =
   sAllocArrayPerm name pt shape space [0 .. shapeRank shape - 1]
 
 -- | Uses linear/iota index function.
-sStaticArray :: String -> Space -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName
-sStaticArray name space pt vs = do
+sStaticArray :: String -> PrimType -> Imp.ArrayContents -> ImpM rep r op VName
+sStaticArray name pt vs = do
   let num_elems = case vs of
         Imp.ArrayValues vs' -> length vs'
         Imp.ArrayZeros n -> fromIntegral n
       shape = Shape [intConst Int64 $ toInteger num_elems]
   mem <- newVNameForFun $ name ++ "_mem"
-  emit $ Imp.DeclareArray mem space pt vs
-  addVar mem $ MemVar Nothing $ MemEntry space
+  emit $ Imp.DeclareArray mem pt vs
+  addVar mem $ MemVar Nothing $ MemEntry DefaultSpace
   sArray name pt shape mem $ IxFun.iota [fromIntegral num_elems]
 
 sWrite :: VName -> [Imp.TExp Int64] -> Imp.Exp -> ImpM rep r op ()
@@ -1976,6 +1960,40 @@ function fname outputs inputs m = local newFunction $ do
     addParam (Imp.ScalarParam name bt) =
       addVar name $ ScalarVar Nothing $ ScalarEntry bt
     newFunction env = env {envFunction = Just fname}
+
+-- Fish out those top-level declarations in the constant
+-- initialisation code that are free in the functions.
+constParams :: Names -> Imp.Code a -> (DL.DList Imp.Param, Imp.Code a)
+constParams used (x Imp.:>>: y) =
+  constParams used x <> constParams used y
+constParams used (Imp.DeclareMem name space)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.MemParam name space,
+        mempty
+      )
+constParams used (Imp.DeclareScalar name _ t)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.ScalarParam name t,
+        mempty
+      )
+constParams used s@(Imp.DeclareArray name _ _)
+  | name `nameIn` used =
+      ( DL.singleton $ Imp.MemParam name DefaultSpace,
+        s
+      )
+constParams _ s =
+  (mempty, s)
+
+-- | Generate constants that get put outside of all functions.  Will
+-- be executed at program startup.  Action must return the names that
+-- should should be made available.  This one has real sharp edges. Do
+-- not use inside 'subImpM'.  Do not use any variable from the context.
+genConstants :: ImpM rep r op (Names, a) -> ImpM rep r op a
+genConstants m = do
+  ((avail, a), code) <- collect' m
+  let consts = uncurry Imp.Constants $ first DL.toList $ constParams avail code
+  modify $ \s -> s {stateConstants = stateConstants s <> consts}
+  pure a
 
 dSlices :: [Imp.TExp Int64] -> ImpM rep r op [Imp.TExp Int64]
 dSlices = fmap (drop 1 . snd) . dSlices'

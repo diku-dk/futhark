@@ -9,11 +9,52 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `f16.log1p`/`f32.log1p`/`f64.log1p` by nbos (#1820).
+
+* Better syntax errors for invalid use of `!`.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* Minor parser regression that mostly affects the REPL (#1822).
+
+* Parser did not recognise custom infix operators that did not have a
+  builtin operator as prefix (#1824).
+
+## [0.22.7]
+
+### Added
+
+* `futhark literate` now supports an `:audio` directive for producing audio
+  files from arrays of `i8` (#1810).
+
+* `futhark multicore` now parallelises copies (#1799).
+
+* `futhark multicore` now uses an allocator that better handles large
+  allocations (#1768).
+
+### Fixed
+
+* Some record field names could cause generation of invalid C API names (#1806).
+
+* Memory block merging was extremely and unnecessarily slow for
+  programs with many entry points.
+
+* Simplification mistake could lead to out-of-bounds reads (#1808).
+
+* `futhark lsp` now handles some bookkeeping messages sent by Eglot.
+
+* Parser can now handle arbitrarily complex chaining of indexing and
+  projection.
+
+* Detect and complain about source files without .fut extension (#1813).
+
+* Overly conservative checking of whether a function parameter is
+  allowed by be consumed - it was disallowed if it contained any
+  scalars (#1816).
 
 ## [0.22.6]
 
