@@ -691,11 +691,11 @@ withAutoMap ams args doApp = expand sortedArgs mempty
     sortedArgs =
       sortOn
         (Data.Ord.Down . fst)
-        (M.toList $ M.fromListWith (++) $ zip ams (zipWith (curry pure) [0 ..] args))
-    expand :: [(AutoMap, [(Int, Value)])] -> [(Int, Value)] -> EvalM Value
+        (M.toList $ M.fromListWith (++) $ zip (map autoMapRank ams) (zipWith (curry pure) [0 ..] args))
+    expand :: [(Int, [(Int, Value)])] -> [(Int, Value)] -> EvalM Value
     expand [] xs = doApp $ map snd xs
     expand ((am, ys) : rest) xs
-      | am == mempty = expand [] (sortOn fst $ xs ++ ys)
+      | am == 0 = expand [] (sortOn fst $ xs ++ ys)
       | otherwise = do
           vs <-
             mapM (expand rest . zip [0 ..]) $
@@ -703,9 +703,11 @@ withAutoMap ams args doApp = expand sortedArgs mempty
                 map (snd . fromArray . snd) $
                   sortOn fst $
                     xs ++ ys
-          case vs of
-            [] -> pure $ snd $ head ys
-            (v : _) -> pure $ toArray' (valueShape v) vs
+          let shape =
+                case vs of
+                  [] -> valueShape $ snd $ head ys
+                  (v : _) -> valueShape v
+          pure $ toArray' shape vs
 
 evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
 evalAppExp env _ (Range start maybe_second end loc) = do
