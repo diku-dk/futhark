@@ -30,6 +30,10 @@ runs:
       shell: bash
       run: |
         cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
+    - name: Debug
+      shell: bash
+      run: |
+        env
     - name: Run benchmarks
       shell: bash
       run: |
