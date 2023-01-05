@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Better syntax errors for invalid use of `!`.
 
+* `futhark literate` now supports a `$loadaudio` builtin function for loading
+  audio to Futhark programs (#1829).
+
 ### Removed
 
 ### Changed

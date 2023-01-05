@@ -18,6 +18,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
+import Data.Text.Read qualified as T
 import Data.Vector.Storable qualified as SVec
 import Data.Vector.Storable.ByteString qualified as SVec
 import Data.Void
@@ -609,6 +610,33 @@ loadData datafile = do
     Just vs ->
       pure $ ValueTuple $ map ValueAtom vs
 
+loadPCM :: Int -> FilePath -> ScriptM (Compound Value)
+loadPCM num_channels pcmfile = do
+  contents <- liftIO $ LBS.readFile pcmfile
+  let v = SVec.byteStringToVector $ LBS.toStrict contents
+      channel_length = SVec.length v `div` num_channels
+      shape =
+        SVec.fromList
+          [ fromIntegral num_channels,
+            fromIntegral channel_length
+          ]
+      -- ffmpeg outputs audio data in column-major format. `backPermuter` computes the
+      -- tranposed indexes for a backpermutation.
+      backPermuter i = (i `mod` channel_length) * num_channels + i `div` channel_length
+      perm = SVec.generate (SVec.length v) backPermuter
+  pure $ ValueAtom $ F64Value shape $ SVec.backpermute v perm
+
+loadAudio :: FilePath -> ScriptM (Compound Value)
+loadAudio audiofile = do
+  s <- system "ffprobe" [audiofile, "-show_entries", "stream=channels", "-select_streams", "a", "-of", "compact=p=0:nk=1", "-v", "0"] mempty
+  case T.decimal s of
+    Right (num_channels, _) -> do
+      withTempDir $ \dir -> do
+        let pcmfile = dir </> takeBaseName audiofile `replaceExtension` "pcm"
+        void $ system "ffmpeg" ["-i", audiofile, "-c:a", "pcm_f64le", "-map", "0", "-f", "data", pcmfile] mempty
+        loadPCM num_channels pcmfile
+    _ -> throwError "$loadImg failed to detect the number of channels in the audio input"
+
 literateBuiltin :: EvalBuiltin ScriptM
 literateBuiltin "loadimg" vs =
   case vs of
@@ -629,6 +657,16 @@ literateBuiltin "loaddata" vs =
     _ ->
       throwError $
         "$loaddata does not accept arguments of types: "
+          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
+literateBuiltin "loadaudio" vs =
+  case vs of
+    [ValueAtom v]
+      | Just path <- getValue v -> do
+          let path' = map (chr . fromIntegral) (path :: [Word8])
+          loadAudio path'
+    _ ->
+      throwError $
+        "$loadaudio does not accept arguments of types: "
           <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
 literateBuiltin f _ =
   throwError $ "Unknown builtin function $" <> prettyText f
