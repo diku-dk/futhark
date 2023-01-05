@@ -685,29 +685,32 @@ returned env ret retext v = do
         valueShape v
   pure v
 
-withAutoMap :: [AutoMap] -> [Value] -> ([Value] -> EvalM Value) -> EvalM Value
-withAutoMap ams args doApp = expand sortedArgs mempty
+withAutoMap :: StructType -> [AutoMap] -> [Value] -> ([Value] -> EvalM Value) -> EvalM Value
+withAutoMap res_t ams args doApp = do
+  expand res_t sortedArgs mempty
   where
+    ranks = map autoMapRank ams
     sortedArgs =
       sortOn
-        (Data.Ord.Down . fst)
-        (M.toList $ M.fromListWith (++) $ zip (map autoMapRank ams) (zipWith (curry pure) [0 ..] args))
-    expand :: [(Int, [(Int, Value)])] -> [(Int, Value)] -> EvalM Value
-    expand [] xs = doApp $ map snd xs
-    expand ((am, ys) : rest) xs
-      | am == 0 = expand [] (sortOn fst $ xs ++ ys)
+        (Down . fst)
+        ( M.toList $
+            M.fromListWith (++) (zip ranks $ zipWith (curry pure) [0 ..] args)
+              `M.union` M.fromList (zip [0 .. maximum ranks] $ repeat [])
+        )
+    expand :: StructType -> [(Int, [(Int, Value)])] -> [(Int, Value)] -> EvalM Value
+    expand res_t [] xs = doApp $ map snd xs
+    expand res_t ((am, ys) : rest) xs
+      | am == 0 = expand res_t [] (sortOn fst $ xs ++ ys)
       | otherwise = do
+          let args' = sortOn fst $ xs ++ ys
+              args_order = map fst args'
+              row_t = stripArray 1 res_t
+              row_shape = sequenceA $ structTypeShape mempty row_t
           vs <-
-            mapM (expand rest . zip [0 ..]) $
+            mapM (expand row_t rest . zip args_order) $
               transpose $
-                map (snd . fromArray . snd) $
-                  sortOn fst $
-                    xs ++ ys
-          let shape =
-                case vs of
-                  [] -> valueShape $ snd $ head ys
-                  (v : _) -> valueShape v
-          pure $ toArray' shape vs
+                map (snd . fromArray . snd) args'
+          pure $ toArray' (fromMaybe (error "") row_shape) vs
 
 evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
 evalAppExp env _ (Range start maybe_second end loc) = do
@@ -785,12 +788,12 @@ evalAppExp env _ (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
 evalAppExp
   env
-  _
+  res_t
   (BinOp (op, _) op_t (x, Info (_, xext, xam)) (y, Info (_, yext, yam)) loc)
     -- AutoMapped `&&` and `||` don't short-circuit in the interpreter.
     | xam /= mempty || yam /= mempty = do
         vs <- mapM (eval env) [x, y]
-        withAutoMap [xam, yam] vs $ \[x', y'] -> do
+        withAutoMap res_t [xam, yam] vs $ \[x', y'] -> do
           op' <- eval env $ Var op op_t loc
           apply2 loc env op' x' y'
     | baseString (qualLeaf op) == "&&" = do
@@ -820,7 +823,7 @@ evalAppExp env t app@(Apply f x (Info (_, ext, automap)) loc)
       apply loc env f' x'
   | otherwise = do
       (f', args, ams) <- unrollApply $ AppExp app (Info (AppRes (fromStruct t) []))
-      withAutoMap ams args $ foldM (apply loc env) f'
+      withAutoMap t ams args $ foldM (apply loc env) f'
   where
     unrollApply :: Exp -> EvalM (Value, [Value], [AutoMap])
     unrollApply (AppExp (Apply e1 e2 (Info (_, ext', am)) _) _) = do
@@ -1022,9 +1025,9 @@ eval _ (ProjectSection ks _ _) =
     walk (ValueRecord fs) f
       | Just v' <- M.lookup f fs = pure v'
     walk _ _ = error "Value does not have expected field."
-eval env (Project f e (Info (_, am)) _) = do
+eval env (Project f e (Info (t, am)) _) = do
   v <- eval env e
-  withAutoMap [am] [v] $ \[v'] ->
+  withAutoMap (toStruct t) [am] [v] $ \[v'] ->
     case v' of
       ValueRecord fs | Just v'' <- M.lookup f fs -> pure v''
       _ -> error "Value does not have expected field."
