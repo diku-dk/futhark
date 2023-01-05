@@ -698,13 +698,13 @@ withAutoMap res_t ams args doApp = do
               `M.union` M.fromList (zip [0 .. maximum ranks] $ repeat [])
         )
     expand :: StructType -> [(Int, [(Int, Value)])] -> [(Int, Value)] -> EvalM Value
-    expand res_t [] xs = doApp $ map snd xs
-    expand res_t ((am, ys) : rest) xs
-      | am == 0 = expand res_t [] (sortOn fst $ xs ++ ys)
+    expand _ [] xs = doApp $ map snd xs
+    expand t ((am, ys) : rest) xs
+      | am == 0 = expand t [] (sortOn fst $ xs ++ ys)
       | otherwise = do
           let args' = sortOn fst $ xs ++ ys
               args_order = map fst args'
-              row_t = stripArray 1 res_t
+              row_t = stripArray 1 t
               row_shape = sequenceA $ structTypeShape mempty row_t
           vs <-
             mapM (expand row_t rest . zip args_order) $
