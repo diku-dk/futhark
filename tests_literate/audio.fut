@@ -76,3 +76,7 @@ entry surround =
   in [left, right, right, right, right, right]
 
 -- > :audio surround
+
+-- > $loadaudio "mono.wav"
+
+-- > $loadaudio "stereo.wav"
