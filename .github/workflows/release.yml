@@ -21,8 +21,8 @@ jobs:
     - name: Prepare metadata
       id: metadata
       run: |
-        echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/v}
-        echo ::set-output name=TARBALL::futhark-${GITHUB_REF#refs/tags/v}-linux-x86_64.tar.xz
+        echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        echo "TARBALL=futhark-${GITHUB_REF#refs/tags/v}-linux-x86_64.tar.xz" >> $GITHUB_OUTPUT
 
     - name: Build tarball
       env:
