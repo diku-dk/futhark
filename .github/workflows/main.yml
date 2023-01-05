@@ -578,8 +578,6 @@ jobs:
       with:
         backend: opencl
         system: MI100
-      env:
-        LD_LIBRARY_PATH: "/opt/rocm/lib:/opt/rocm/opencl/lib"
 
   benchmark-results:
     runs-on: ubuntu-22.04
