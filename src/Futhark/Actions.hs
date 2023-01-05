@@ -3,7 +3,6 @@
 module Futhark.Actions
   ( printAction,
     printAliasesAction,
-    printLastUseGPU,
     printLastUseGPUSS,
     printFusionGraph,
     printInterferenceGPU,
@@ -36,7 +35,6 @@ import Data.Text.IO qualified as T
 import Futhark.Analysis.Alias
 import Futhark.Analysis.CallGraph (buildCallGraph)
 import Futhark.Analysis.Interference qualified as Interference
-import Futhark.Analysis.LastUse qualified as LastUse
 import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.Analysis.Metrics
 import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
@@ -83,15 +81,6 @@ printAliasesAction =
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
       actionProcedure = liftIO . putStrLn . prettyString . aliasAnalysis
-    }
-
--- | Print last use information to stdout.
-printLastUseGPU :: Action GPUMem
-printLastUseGPU =
-  Action
-    { actionName = "print last use gpu",
-      actionDescription = "Print last use information on gpu.",
-      actionProcedure = liftIO . putStrLn . prettyString . M.toList . LastUse.analyseGPUMem
     }
 
 -- | Print last use information to stdout.

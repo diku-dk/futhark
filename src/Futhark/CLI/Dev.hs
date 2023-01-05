@@ -502,14 +502,6 @@ commandLineOptions =
       "Print fusion graph.",
     Option
       []
-      ["print-last-use-gpu"]
-      ( NoArg $
-          Right $ \opts ->
-            opts {futharkAction = GPUMemAction $ \_ _ _ -> printLastUseGPU}
-      )
-      "Print last use information.",
-    Option
-      []
       ["print-last-use-gpu-ss"]
       ( NoArg $
           Right $ \opts ->
