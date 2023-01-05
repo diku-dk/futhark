@@ -123,7 +123,7 @@ jobs:
         cabal update
         try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
-    - uses: papeloto/action-zip@v1
+    - uses: papeloto/action-zip@v1.1
       with:
         files: futhark.exe
         dest: futhark-nightly-windows-x86_64.zip
@@ -396,7 +396,7 @@ jobs:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
 
-    - uses: actions/setup-node@v3
+    - uses: actions/setup-node@v3.5.1
       with:
         node-version: '16.x'
 
@@ -423,12 +423,12 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v7
+    - uses: mymindstorm/setup-emsdk@v11
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
 
-    - uses: actions/setup-node@v1
+    - uses: actions/setup-node@v3.5.1
       with:
         node-version: '16.x'
 
@@ -455,12 +455,12 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v7
+    - uses: mymindstorm/setup-emsdk@v11
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
 
-    - uses: actions/setup-node@v1
+    - uses: actions/setup-node@v3.5.1
       with:
         node-version: '16.x'
 

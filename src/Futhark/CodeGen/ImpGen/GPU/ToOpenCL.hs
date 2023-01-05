@@ -352,13 +352,17 @@ onKernel target kernel = do
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
 
+  -- The local_failure variable is an int despite only really storing
+  -- a single bit of information, as some OpenCL implementations
+  -- (e.g. AMD) does not like byte-sized local memory (and the others
+  -- likely pad to a whole word anyway).
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
         | not $ null called =
             ( SafetyFull,
-              [C.citems|volatile __local bool local_failure;
+              [C.citems|volatile __local int local_failure;
                         // Harmless for all threads to write this.
-                        local_failure = false;|]
+                        local_failure = 0;|]
             )
         | length (kernelFailures kstate) == length failures =
             if kernelFailureTolerant kernel
@@ -378,7 +382,7 @@ onKernel target kernel = do
               else
                 ( SafetyFull,
                   [C.citems|
-                     volatile __local bool local_failure;
+                     volatile __local int local_failure;
                      if (failure_is_an_option) {
                        int failed = *global_failure >= 0;
                        if (failed) {
@@ -386,7 +390,7 @@ onKernel target kernel = do
                        }
                      }
                      // All threads write this value - it looks like CUDA has a compiler bug otherwise.
-                     local_failure = false;
+                     local_failure = 0;
                      barrier(CLK_LOCAL_MEM_FENCE);
                   |]
                 )
@@ -850,7 +854,7 @@ inKernelOperations env mode body =
       pendingError True
       pure $
         if has_communication
-          then [C.citems|local_failure = true; goto $id:label;|]
+          then [C.citems|local_failure = 1; goto $id:label;|]
           else
             if mode == FunMode
               then [C.citems|return 1;|]
