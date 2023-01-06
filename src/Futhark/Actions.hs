@@ -3,7 +3,7 @@
 module Futhark.Actions
   ( printAction,
     printAliasesAction,
-    printLastUseGPUSS,
+    printLastUseGPU,
     printFusionGraph,
     printInterferenceGPU,
     printMemAliasGPU,
@@ -35,6 +35,7 @@ import Data.Text.IO qualified as T
 import Futhark.Analysis.Alias
 import Futhark.Analysis.CallGraph (buildCallGraph)
 import Futhark.Analysis.Interference qualified as Interference
+import Futhark.Analysis.LastUse qualified as LastUse
 import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.Analysis.Metrics
 import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
@@ -56,7 +57,6 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
-import Futhark.Optimise.ArrayShortCircuiting.LastUse qualified as LastUseSS
 import Futhark.Optimise.Fusion.GraphRep qualified
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
@@ -84,17 +84,17 @@ printAliasesAction =
     }
 
 -- | Print last use information to stdout.
-printLastUseGPUSS :: Action GPUMem
-printLastUseGPUSS =
+printLastUseGPU :: Action GPUMem
+printLastUseGPU =
   Action
-    { actionName = "print last use ss gpu",
-      actionDescription = "Print last use ss information on gpu.",
+    { actionName = "print last use gpu",
+      actionDescription = "Print last use information on gpu.",
       actionProcedure =
         liftIO
           . putStrLn
           . prettyString
           . bimap M.toList (M.toList . fmap M.toList)
-          . LastUseSS.lastUseGPUMem
+          . LastUse.lastUseGPUMem
           . aliasAnalysis
     }
 
