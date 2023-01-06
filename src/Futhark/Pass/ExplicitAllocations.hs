@@ -1059,21 +1059,32 @@ mkLetNamesB'' space names e = do
   where
     nohints = map (const NoHint) names
 
+simplifyMemOp ::
+  Engine.SimplifiableRep rep =>
+  (inner -> Engine.SimpleM rep (inner, Stms (Engine.Wise rep))) ->
+  MemOp inner ->
+  Engine.SimpleM rep (MemOp inner, Stms (Engine.Wise rep))
+simplifyMemOp _ (Alloc size space) =
+  (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty
+simplifyMemOp onInner (Inner k) = do
+  (k', hoisted) <- onInner k
+  pure (Inner k', hoisted)
+
 simplifiable ::
   ( Engine.SimplifiableRep rep,
     LetDec rep ~ LetDecMem,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    OpReturns (Engine.OpWithWisdom inner),
-    AliasedOp (Engine.OpWithWisdom inner),
-    IndexOp (Engine.OpWithWisdom inner),
-    Mem rep inner
+    Mem (Engine.Wise rep) inner,
+    OpReturns inner,
+    AliasedOp inner,
+    IndexOp inner
   ) =>
-  (Engine.OpWithWisdom inner -> UT.UsageTable) ->
-  (Engine.OpWithWisdom inner -> Engine.SimpleM rep (Engine.OpWithWisdom inner, Stms (Engine.Wise rep))) ->
+  (inner -> UT.UsageTable) ->
+  (inner -> Engine.SimpleM rep (inner, Stms (Engine.Wise rep))) ->
   SimpleOps rep
 simplifiable innerUsage simplifyInnerOp =
-  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyPat simplifyOp
+  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyPat (simplifyMemOp simplifyInnerOp)
   where
     mkExpDecS' _ pat e =
       pure $ Engine.mkWiseExpDec pat () e
@@ -1096,12 +1107,6 @@ simplifiable innerUsage simplifyInnerOp =
       mempty
     opUsage (Inner inner) =
       innerUsage inner
-
-    simplifyOp (Alloc size space) =
-      (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty
-    simplifyOp (Inner k) = do
-      (k', hoisted) <- simplifyInnerOp k
-      pure (Inner k', hoisted)
 
     simplifyPat (Pat pes) e = do
       rets <- expReturns e
