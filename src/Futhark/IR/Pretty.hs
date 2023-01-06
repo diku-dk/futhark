@@ -1,4 +1,3 @@
-{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
