@@ -686,8 +686,7 @@ returned env ret retext v = do
   pure v
 
 withAutoMap :: StructType -> [AutoMap] -> [Value] -> ([Value] -> EvalM Value) -> EvalM Value
-withAutoMap res_t ams args doApp = do
-  expand res_t sortedArgs mempty
+withAutoMap res_t ams args doApp = expand res_t sortedArgs mempty
   where
     ranks = map autoMapRank ams
     sortedArgs =
@@ -699,18 +698,20 @@ withAutoMap res_t ams args doApp = do
         )
     expand :: StructType -> [(Int, [(Int, Value)])] -> [(Int, Value)] -> EvalM Value
     expand _ [] xs = doApp $ map snd xs
-    expand t ((am, ys) : rest) xs
-      | am == 0 = expand t [] (sortOn fst $ xs ++ ys)
+    expand t ((rank, ys) : rest) xs
+      | rank == 0 = expand t [] (sortOn fst $ xs ++ ys)
       | otherwise = do
           let args' = sortOn fst $ xs ++ ys
               args_order = map fst args'
               row_t = stripArray 1 t
-              row_shape = sequenceA $ structTypeShape mempty row_t
-          vs <-
-            mapM (expand row_t rest . zip args_order) $
-              transpose $
-                map (snd . fromArray . snd) args'
-          pure $ toArray' (fromMaybe (error "") row_shape) vs
+              row_shape =
+                fromMaybe
+                  (error $ "AutoMap: bad pure type: " <> prettyString res_t)
+                  (sequence $ structTypeShape mempty row_t)
+          toArray' row_shape
+            <$> mapM
+              (expand row_t rest . zip args_order)
+              (transpose $ map (snd . fromArray . snd) args')
 
 evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
 evalAppExp env _ (Range start maybe_second end loc) = do
