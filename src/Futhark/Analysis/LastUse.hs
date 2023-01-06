@@ -10,11 +10,7 @@
 -- results of a body do not have a last use, and neither do a function
 -- parameters if it happens to not be used inside function's body.  Such cases
 -- are supposed to be treated separately.
---
--- This pass is different from "Futhark.Analysis.LastUse" in that memory blocks
--- are used to alias arrays. For instance, an 'Update' will not result in a last
--- use of the array being updated, because the result lives in the same memory.
-module Futhark.Optimise.ArrayShortCircuiting.LastUse
+module Futhark.Analysis.LastUse
   ( lastUseSeqMem,
     lastUseGPUMem,
     lastUseMCMem,

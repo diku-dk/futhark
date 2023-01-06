@@ -13,10 +13,10 @@ import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.Alias qualified as AnlAls
+import Futhark.Analysis.LastUse (LUTabFun)
+import Futhark.Analysis.LastUse qualified as LastUse
 import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.IR.GPUMem
-import Futhark.Optimise.ArrayShortCircuiting.LastUse (LUTabFun)
-import Futhark.Optimise.ArrayShortCircuiting.LastUse qualified as LastUse
 import Futhark.Util (cartesian, invertMap)
 
 -- | The set of 'VName' currently in use.
