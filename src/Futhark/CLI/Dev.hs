@@ -507,14 +507,6 @@ commandLineOptions =
           Right $ \opts ->
             opts {futharkAction = GPUMemAction $ \_ _ _ -> printLastUseGPU}
       )
-      "Print last use information.",
-    Option
-      []
-      ["print-last-use-gpu-ss"]
-      ( NoArg $
-          Right $ \opts ->
-            opts {futharkAction = GPUMemAction $ \_ _ _ -> printLastUseGPUSS}
-      )
       "Print last use information ss.",
     Option
       []
