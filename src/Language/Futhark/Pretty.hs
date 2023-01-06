@@ -1,4 +1,3 @@
-{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
@@ -157,7 +156,7 @@ prettyTypeArg :: Pretty (Shape dim) => Int -> TypeArg dim -> Doc a
 prettyTypeArg _ (TypeArgDim d _) = pretty $ Shape [d]
 prettyTypeArg p (TypeArgType t _) = prettyType p t
 
-instance Pretty (Shape dim) => Pretty (TypeArg dim) where
+instance Pretty (TypeArg Size) where
   pretty = prettyTypeArg 0
 
 instance (Eq vn, IsName vn) => Pretty (TypeExp vn) where
