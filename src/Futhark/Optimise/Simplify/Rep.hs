@@ -118,7 +118,12 @@ instance FreeIn BodyWisdom where
 instance FreeDec BodyWisdom where
   precomputed = const . fvNames . unAliases . bodyWisdomFree
 
-instance (RepTypes rep, CanBeWise (Op rep)) => RepTypes (Wise rep) where
+instance
+  ( RepTypes rep,
+    ASTConstraints (OpWithWisdom (Op rep))
+  ) =>
+  RepTypes (Wise rep)
+  where
   type LetDec (Wise rep) = (VarWisdom, LetDec rep)
   type ExpDec (Wise rep) = (ExpWisdom, ExpDec rep)
   type BodyDec (Wise rep) = (BodyWisdom, BodyDec rep)
@@ -136,20 +141,37 @@ withoutWisdom m = do
   scope <- asksScope removeScopeWisdom
   runReaderT m scope
 
-instance (ASTRep rep, CanBeWise (Op rep)) => ASTRep (Wise rep) where
+instance
+  ( ASTRep rep,
+    IsOp (OpWithWisdom (Op rep)), -- Needed for superclass constraints
+    CanBeWise (Op rep)
+  ) =>
+  ASTRep (Wise rep)
+  where
   expTypesFromPat =
     withoutWisdom . expTypesFromPat . removePatWisdom
 
 instance Pretty VarWisdom where
   pretty _ = pretty ()
 
-instance (PrettyRep rep, CanBeWise (Op rep)) => PrettyRep (Wise rep) where
+instance
+  ( PrettyRep rep,
+    Pretty (OpWithWisdom (Op rep)), -- Needed for superclass constraints
+    CanBeWise (Op rep)
+  ) =>
+  PrettyRep (Wise rep)
+  where
   ppExpDec (_, dec) = ppExpDec dec . removeExpWisdom
 
 instance AliasesOf (VarWisdom, dec) where
   aliasesOf = unAliases . varWisdomAliases . fst
 
-instance (ASTRep rep, CanBeWise (Op rep)) => Aliased (Wise rep) where
+instance
+  ( ASTRep rep,
+    AliasedOp (OpWithWisdom (Op rep))
+  ) =>
+  Aliased (Wise rep)
+  where
   bodyAliases = map unAliases . bodyWisdomAliases . fst . bodyDec
   consumedInBody = unAliases . bodyWisdomConsumed . fst . bodyDec
 

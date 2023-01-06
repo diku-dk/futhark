@@ -104,7 +104,12 @@ type ConsumedInExp = AliasDec
 -- consumed inside of it.
 type BodyAliasing = ([VarAliases], ConsumedInExp)
 
-instance (RepTypes rep, CanBeAliased (Op rep)) => RepTypes (Aliases rep) where
+instance
+  ( RepTypes rep,
+    ASTConstraints (OpWithAliases (Op rep))
+  ) =>
+  RepTypes (Aliases rep)
+  where
   type LetDec (Aliases rep) = (VarAliases, LetDec rep)
   type ExpDec (Aliases rep) = (ConsumedInExp, ExpDec rep)
   type BodyDec (Aliases rep) = (BodyAliasing, BodyDec rep)
@@ -127,15 +132,32 @@ withoutAliases m = do
   scope <- asksScope removeScopeAliases
   runReaderT m scope
 
-instance (ASTRep rep, CanBeAliased (Op rep)) => ASTRep (Aliases rep) where
+instance
+  ( ASTRep rep,
+    IsOp (OpWithAliases (Op rep)), -- Needed for superclass constraints
+    CanBeAliased (Op rep)
+  ) =>
+  ASTRep (Aliases rep)
+  where
   expTypesFromPat =
     withoutAliases . expTypesFromPat . removePatAliases
 
-instance (ASTRep rep, CanBeAliased (Op rep)) => Aliased (Aliases rep) where
+instance
+  ( ASTRep rep,
+    AliasedOp (OpWithAliases (Op rep))
+  ) =>
+  Aliased (Aliases rep)
+  where
   bodyAliases = map unAliases . fst . fst . bodyDec
   consumedInBody = unAliases . snd . fst . bodyDec
 
-instance (ASTRep rep, CanBeAliased (Op rep)) => PrettyRep (Aliases rep) where
+instance
+  ( ASTRep rep,
+    Pretty (OpWithAliases (Op rep)), -- Needed for superclass constraints
+    CanBeAliased (Op rep)
+  ) =>
+  PrettyRep (Aliases rep)
+  where
   ppExpDec (consumed, inner) e =
     maybeComment . catMaybes $
       [exp_dec, merge_dec, ppExpDec inner $ removeExpAliases e]
