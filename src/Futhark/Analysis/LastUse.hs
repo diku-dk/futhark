@@ -1,5 +1,4 @@
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 -- | Last use analysis for array short circuiting
 --
@@ -62,16 +61,10 @@ newtype LastUseM rep a = LastUseM (StateT AliasTab (Reader (LastUseReader rep)) 
       MonadState AliasTab
     )
 
-instance
-  (RepTypes rep, CanBeAliased (Op rep)) =>
-  HasScope (Aliases rep) (LastUseM rep)
-  where
+instance RepTypes (Aliases rep) => HasScope (Aliases rep) (LastUseM rep) where
   askScope = asks scope
 
-instance
-  (RepTypes rep, CanBeAliased (Op rep)) =>
-  LocalScope (Aliases rep) (LastUseM rep)
-  where
+instance RepTypes (Aliases rep) => LocalScope (Aliases rep) (LastUseM rep) where
   localScope sc (LastUseM m) = LastUseM $ do
     local (\rd -> rd {scope = scope rd <> sc}) m
 
