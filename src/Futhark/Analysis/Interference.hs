@@ -12,7 +12,8 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as S
-import Futhark.Analysis.LastUse (LastUseMap)
+import Futhark.Analysis.Alias qualified as AnlAls
+import Futhark.Analysis.LastUse (LUTabFun)
 import Futhark.Analysis.LastUse qualified as LastUse
 import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.IR.GPUMem
@@ -39,7 +40,7 @@ makeEdge v1 v2
 
 analyseStm ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   Stm GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -103,7 +104,7 @@ analyseLoopParams merge (inuse, lastused, graph) =
 
 analyseExp ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   Exp GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -122,7 +123,7 @@ analyseExp lumap inuse_outside expr =
 
 analyseKernelBody ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   KernelBody GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -130,7 +131,7 @@ analyseKernelBody lumap inuse body = analyseStms lumap inuse $ kernelBodyStms bo
 
 analyseBody ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   Body GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -138,7 +139,7 @@ analyseBody lumap inuse body = analyseStms lumap inuse $ bodyStms body
 
 analyseStms ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   Stms GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -151,7 +152,7 @@ analyseStms lumap inuse0 stms = do
 
 analyseSegOp ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   SegOp lvl GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -168,7 +169,7 @@ analyseSegOp lumap inuse (SegHist _ _ histops _ body) = do
 
 segWithBinOps ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
@@ -184,7 +185,7 @@ segWithBinOps lumap inuse binops body = do
 
 analyseSegBinOp ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   SegBinOp GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -193,7 +194,7 @@ analyseSegBinOp lumap inuse (SegBinOp _ lambda _ _) =
 
 analyseHistOp ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   HistOp GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -202,7 +203,7 @@ analyseHistOp lumap inuse histop =
 
 analyseLambda ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   InUse ->
   Lambda GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -213,14 +214,14 @@ analyseProgGPU :: Prog GPUMem -> Graph VName
 analyseProgGPU prog = onConsts (progConsts prog) <> foldMap onFun (progFuns prog)
   where
     (consts_aliases, funs_aliases) = MemAlias.analyzeGPUMem prog
-    lumap = LastUse.analyseGPUMem prog
+    (lumap_consts, lumap) = LastUse.lastUseGPUMem $ AnlAls.aliasAnalysis prog
     onFun f =
       applyAliases (fromMaybe mempty $ M.lookup (funDefName f) funs_aliases) $
-        runReader (analyseGPU lumap $ bodyStms $ funDefBody f) $
+        runReader (analyseGPU (lumap M.! funDefName f) $ bodyStms $ funDefBody f) $
           scopeOf f
     onConsts stms =
       applyAliases consts_aliases $
-        runReader (analyseGPU lumap stms) (mempty :: Scope GPUMem)
+        runReader (analyseGPU lumap_consts stms) (mempty :: Scope GPUMem)
 
 applyAliases :: MemAlias.MemAliases -> Graph VName -> Graph VName
 applyAliases aliases =
@@ -237,7 +238,7 @@ applyAliases aliases =
 -- within, and the resulting graph.
 analyseGPU ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   Stms GPUMem ->
   m (Graph VName)
 analyseGPU lumap stms = do
@@ -304,7 +305,7 @@ memSpaces stms =
 
 analyseGPU' ::
   LocalScope GPUMem m =>
-  LastUseMap ->
+  LUTabFun ->
   Stms GPUMem ->
   m (InUse, LastUsed, Graph VName)
 analyseGPU' lumap stms =
