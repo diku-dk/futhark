@@ -45,9 +45,12 @@ type Coalesceable rep inner =
     TopDownHelper (OpWithAliases inner)
   )
 
+type ComputeScalarTable rep op =
+  ScopeTab rep -> op -> ScalarTableM rep (M.Map VName (PrimExp VName))
+
 -- Helper type for computing scalar tables on ops.
 newtype ComputeScalarTableOnOp rep = ComputeScalarTableOnOp
-  { scalarTableOnOp :: ScopeTab rep -> Op (Aliases rep) -> ScalarTableM rep (M.Map VName (PrimExp VName))
+  { scalarTableOnOp :: ComputeScalarTable rep (Op (Aliases rep))
   }
 
 type ScalarTableM rep a = Reader (ComputeScalarTableOnOp rep) a
@@ -1699,9 +1702,6 @@ computeScalarTable scope_table (Let _ _ (Op op)) = do
   on_op <- asks scalarTableOnOp
   on_op scope_table op
 computeScalarTable _ _ = pure mempty
-
-type ComputeScalarTable rep op =
-  ScopeTab rep -> op -> ScalarTableM rep (M.Map VName (PrimExp VName))
 
 computeScalarTableMemOp ::
   ComputeScalarTable rep inner -> ComputeScalarTable rep (MemOp inner)
