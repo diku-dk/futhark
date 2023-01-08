@@ -39,10 +39,11 @@ type Coalesceable rep inner =
   ( Mem rep inner,
     ASTRep rep,
     CanBeAliased inner,
-    Op rep ~ MemOp inner,
+    AliasableRep rep,
+    Op rep ~ MemOp inner rep,
     HasMemBlock (Aliases rep),
     LetDec rep ~ LetDecMem,
-    TopDownHelper (OpWithAliases inner)
+    TopDownHelper (inner (Aliases rep))
   )
 
 type ComputeScalarTable rep op =
@@ -112,7 +113,7 @@ mkCoalsTab prog =
 
 -- | Given a 'Prog' in 'GPUMem' representation, compute the coalescing table
 -- by folding over each function.
-mkCoalsTabGPU :: (MonadFreshNames m) => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
+mkCoalsTabGPU :: MonadFreshNames m => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
 mkCoalsTabGPU prog =
   mkCoalsTabProg
     (lastUseGPUMem prog)
@@ -270,7 +271,7 @@ shortCircuitGPUMem lutab pat (Inner (GPU.GPUBody _ body)) td_env bu_env = do
     td_env
     bu_env
 shortCircuitGPUMem _ _ (Inner (GPU.SizeOp _)) _ bu_env = pure bu_env
-shortCircuitGPUMem _ _ (Inner (GPU.OtherOp ())) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ (Inner (GPU.OtherOp NoOp)) _ bu_env = pure bu_env
 
 shortCircuitMCMem ::
   LUTabFun ->
@@ -280,7 +281,7 @@ shortCircuitMCMem ::
   BotUpEnv ->
   ShortCircuitM MCMem BotUpEnv
 shortCircuitMCMem _ _ (Alloc _ _) _ bu_env = pure bu_env
-shortCircuitMCMem _ _ (Inner (MC.OtherOp ())) _ bu_env = pure bu_env
+shortCircuitMCMem _ _ (Inner (MC.OtherOp NoOp)) _ bu_env = pure bu_env
 shortCircuitMCMem lutab pat (Inner (MC.ParOp (Just par_op) op)) td_env bu_env =
   shortCircuitSegOp (const True) lutab pat par_op td_env bu_env
     >>= shortCircuitSegOp (const True) lutab pat op td_env
@@ -1472,8 +1473,8 @@ genSSPointInfoSegOp _ _ _ _ _ =
   Nothing
 
 genSSPointInfoMemOp ::
-  GenSSPoint rep inner ->
-  GenSSPoint rep (MemOp inner)
+  GenSSPoint rep (inner (Aliases rep)) ->
+  GenSSPoint rep (MemOp inner (Aliases rep))
 genSSPointInfoMemOp onOp lutab td_end scopetab pat (Inner op) =
   onOp lutab td_end scopetab pat op
 genSSPointInfoMemOp _ _ _ _ _ _ = Nothing
@@ -1704,7 +1705,7 @@ computeScalarTable scope_table (Let _ _ (Op op)) = do
 computeScalarTable _ _ = pure mempty
 
 computeScalarTableMemOp ::
-  ComputeScalarTable rep inner -> ComputeScalarTable rep (MemOp inner)
+  ComputeScalarTable rep (inner (Aliases rep)) -> ComputeScalarTable rep (MemOp inner (Aliases rep))
 computeScalarTableMemOp _ _ (Alloc _ _) = pure mempty
 computeScalarTableMemOp onInner scope_table (Inner op) = onInner scope_table op
 
@@ -1721,19 +1722,19 @@ computeScalarTableSegOp scope_table segop = do
     (stmsToList $ kernelBodyStms $ segBody segop)
 
 computeScalarTableGPUMem ::
-  ComputeScalarTable GPUMem (GPU.HostOp (Aliases GPUMem) ())
+  ComputeScalarTable GPUMem (GPU.HostOp NoOp (Aliases GPUMem))
 computeScalarTableGPUMem scope_table (GPU.SegOp segop) =
   computeScalarTableSegOp scope_table segop
 computeScalarTableGPUMem _ (GPU.SizeOp _) = pure mempty
-computeScalarTableGPUMem _ (GPU.OtherOp ()) = pure mempty
+computeScalarTableGPUMem _ (GPU.OtherOp NoOp) = pure mempty
 computeScalarTableGPUMem scope_table (GPU.GPUBody _ body) =
   concatMapM
     (computeScalarTable $ scope_table <> scopeOf (bodyStms body))
     (stmsToList $ bodyStms body)
 
 computeScalarTableMCMem ::
-  ComputeScalarTable MCMem (MC.MCOp (Aliases MCMem) ())
-computeScalarTableMCMem _ (MC.OtherOp ()) = pure mempty
+  ComputeScalarTable MCMem (MC.MCOp NoOp (Aliases MCMem))
+computeScalarTableMCMem _ (MC.OtherOp NoOp) = pure mempty
 computeScalarTableMCMem scope_table (MC.ParOp par_op segop) =
   (<>)
     <$> maybe (pure mempty) (computeScalarTableSegOp scope_table) par_op

@@ -35,9 +35,7 @@ where
 import Control.Category
 import Control.Monad.Identity
 import Control.Monad.Reader
-import Data.Kind qualified
 import Data.Map.Strict qualified as M
-import Futhark.Analysis.Rephrase
 import Futhark.Builder
 import Futhark.IR
 import Futhark.IR.Aliases
@@ -118,7 +116,7 @@ instance FreeIn BodyWisdom where
 instance FreeDec BodyWisdom where
   precomputed = const . fvNames . unAliases . bodyWisdomFree
 
-instance (RepTypes rep, CanBeWise (Op rep)) => RepTypes (Wise rep) where
+instance Informing rep => RepTypes (Wise rep) where
   type LetDec (Wise rep) = (VarWisdom, LetDec rep)
   type ExpDec (Wise rep) = (ExpWisdom, ExpDec rep)
   type BodyDec (Wise rep) = (BodyWisdom, BodyDec rep)
@@ -126,7 +124,7 @@ instance (RepTypes rep, CanBeWise (Op rep)) => RepTypes (Wise rep) where
   type LParamInfo (Wise rep) = LParamInfo rep
   type RetType (Wise rep) = RetType rep
   type BranchType (Wise rep) = BranchType rep
-  type Op (Wise rep) = OpWithWisdom (Op rep)
+  type OpC (Wise rep) = OpC rep
 
 withoutWisdom ::
   (HasScope (Wise rep) m, Monad m) =>
@@ -136,24 +134,24 @@ withoutWisdom m = do
   scope <- asksScope removeScopeWisdom
   runReaderT m scope
 
-instance (ASTRep rep, CanBeWise (Op rep)) => ASTRep (Wise rep) where
+instance Informing rep => ASTRep (Wise rep) where
   expTypesFromPat =
     withoutWisdom . expTypesFromPat . removePatWisdom
 
 instance Pretty VarWisdom where
   pretty _ = pretty ()
 
-instance (PrettyRep rep, CanBeWise (Op rep)) => PrettyRep (Wise rep) where
+instance Informing rep => PrettyRep (Wise rep) where
   ppExpDec (_, dec) = ppExpDec dec . removeExpWisdom
 
 instance AliasesOf (VarWisdom, dec) where
   aliasesOf = unAliases . varWisdomAliases . fst
 
-instance (ASTRep rep, CanBeWise (Op rep)) => Aliased (Wise rep) where
+instance Informing rep => Aliased (Wise rep) where
   bodyAliases = map unAliases . bodyWisdomAliases . fst . bodyDec
   consumedInBody = unAliases . bodyWisdomConsumed . fst . bodyDec
 
-removeWisdom :: CanBeWise (Op rep) => Rephraser Identity (Wise rep) rep
+removeWisdom :: RephraseOp (OpC rep) => Rephraser Identity (Wise rep) rep
 removeWisdom =
   Rephraser
     { rephraseExpDec = pure . snd,
@@ -163,7 +161,7 @@ removeWisdom =
       rephraseLParamDec = pure,
       rephraseRetType = pure,
       rephraseBranchType = pure,
-      rephraseOp = pure . removeOpWisdom
+      rephraseOp = rephraseInOp removeWisdom
     }
 
 -- | Remove simplifier information from scope.
@@ -186,23 +184,23 @@ addScopeWisdom = M.map alias
     alias (IndexName it) = IndexName it
 
 -- | Remove simplifier information from function.
-removeFunDefWisdom :: CanBeWise (Op rep) => FunDef (Wise rep) -> FunDef rep
+removeFunDefWisdom :: RephraseOp (OpC rep) => FunDef (Wise rep) -> FunDef rep
 removeFunDefWisdom = runIdentity . rephraseFunDef removeWisdom
 
 -- | Remove simplifier information from statement.
-removeStmWisdom :: CanBeWise (Op rep) => Stm (Wise rep) -> Stm rep
+removeStmWisdom :: RephraseOp (OpC rep) => Stm (Wise rep) -> Stm rep
 removeStmWisdom = runIdentity . rephraseStm removeWisdom
 
 -- | Remove simplifier information from lambda.
-removeLambdaWisdom :: CanBeWise (Op rep) => Lambda (Wise rep) -> Lambda rep
+removeLambdaWisdom :: RephraseOp (OpC rep) => Lambda (Wise rep) -> Lambda rep
 removeLambdaWisdom = runIdentity . rephraseLambda removeWisdom
 
 -- | Remove simplifier information from body.
-removeBodyWisdom :: CanBeWise (Op rep) => Body (Wise rep) -> Body rep
+removeBodyWisdom :: RephraseOp (OpC rep) => Body (Wise rep) -> Body rep
 removeBodyWisdom = runIdentity . rephraseBody removeWisdom
 
 -- | Remove simplifier information from expression.
-removeExpWisdom :: CanBeWise (Op rep) => Exp (Wise rep) -> Exp rep
+removeExpWisdom :: RephraseOp (OpC rep) => Exp (Wise rep) -> Exp rep
 removeExpWisdom = runIdentity . rephraseExp removeWisdom
 
 -- | Remove simplifier information from pattern.
@@ -211,7 +209,7 @@ removePatWisdom = runIdentity . rephrasePat (pure . snd)
 
 -- | Add simplifier information to pattern.
 addWisdomToPat ::
-  (ASTRep rep, CanBeWise (Op rep)) =>
+  Informing rep =>
   Pat (LetDec rep) ->
   Exp (Wise rep) ->
   Pat (LetDec (Wise rep))
@@ -222,7 +220,7 @@ addWisdomToPat pat e =
 
 -- | Produce a body with simplifier information.
 mkWiseBody ::
-  (ASTRep rep, CanBeWise (Op rep)) =>
+  Informing rep =>
   BodyDec rep ->
   Stms (Wise rep) ->
   Result ->
@@ -239,7 +237,7 @@ mkWiseBody dec stms res =
 
 -- | Produce a statement with simplifier information.
 mkWiseStm ::
-  (ASTRep rep, CanBeWise (Op rep)) =>
+  Informing rep =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Wise rep) ->
@@ -250,7 +248,7 @@ mkWiseStm pat (StmAux cs attrs dec) e =
 
 -- | Produce simplifier information for an expression.
 mkWiseExpDec ::
-  (ASTRep rep, CanBeWise (Op rep)) =>
+  Informing rep =>
   Pat (LetDec (Wise rep)) ->
   ExpDec rep ->
   Exp (Wise rep) ->
@@ -262,7 +260,7 @@ mkWiseExpDec pat expdec e =
     expdec
   )
 
-instance (Buildable rep, CanBeWise (Op rep)) => Buildable (Wise rep) where
+instance (Buildable rep, Informing rep) => Buildable (Wise rep) where
   mkExpPat ids e =
     addWisdomToPat (mkExpPat ids $ removeExpWisdom e) e
 
@@ -281,18 +279,20 @@ instance (Buildable rep, CanBeWise (Op rep)) => Buildable (Wise rep) where
 
 -- | Constraints that let us transform a representation into a 'Wise'
 -- representation.
-type Informing rep = (ASTRep rep, CanBeWise (Op rep))
+type Informing rep =
+  ( ASTRep rep,
+    AliasedOp (OpC rep (Wise rep)),
+    RephraseOp (OpC rep),
+    CanBeWise (OpC rep),
+    FreeIn (OpC rep (Wise rep))
+  )
 
 -- | A type class for indicating that this operation can be lifted into the simplifier representation.
-class (AliasedOp (OpWithWisdom op), IsOp (OpWithWisdom op)) => CanBeWise op where
-  type OpWithWisdom op :: Data.Kind.Type
-  removeOpWisdom :: OpWithWisdom op -> op
-  addOpWisdom :: op -> OpWithWisdom op
+class CanBeWise op where
+  addOpWisdom :: Informing rep => op rep -> op (Wise rep)
 
-instance CanBeWise () where
-  type OpWithWisdom () = ()
-  removeOpWisdom () = ()
-  addOpWisdom () = ()
+instance CanBeWise NoOp where
+  addOpWisdom _ = undefined
 
 -- | Construct a 'Wise' statement.
 informStm :: Informing rep => Stm rep -> Stm (Wise rep)

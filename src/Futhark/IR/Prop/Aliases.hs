@@ -25,22 +25,20 @@ module Futhark.IR.Prop.Aliases
     -- * Extensibility
     AliasTable,
     AliasedOp (..),
-    CanBeAliased (..),
   )
 where
 
 import Data.Bifunctor (first, second)
-import Data.Kind qualified
 import Data.List (find, transpose)
 import Data.Map qualified as M
-import Futhark.IR.Prop (IsOp, NameInfo (..), Scope)
+import Futhark.IR.Prop (ASTRep, IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
 import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Types
 import Futhark.IR.Syntax
 
 -- | The class of representations that contain aliasing information.
-class (RepTypes rep, AliasedOp (Op rep), AliasesOf (LetDec rep)) => Aliased rep where
+class (ASTRep rep, AliasedOp (Op rep), AliasesOf (LetDec rep)) => Aliased rep where
   -- | The aliases of the body results.
   bodyAliases :: Body rep -> [Names]
 
@@ -215,28 +213,10 @@ class IsOp op => AliasedOp op where
   opAliases :: op -> [Names]
   consumedInOp :: op -> Names
 
-instance AliasedOp () where
-  opAliases () = []
-  consumedInOp () = mempty
+instance AliasedOp (NoOp rep) where
+  opAliases NoOp = []
+  consumedInOp NoOp = mempty
 
 -- | Pre-existing aliases for variables.  Used to add transitive
 -- aliases.
 type AliasTable = M.Map VName Names
-
--- | The class of operations that can be given aliasing information.
--- This is a somewhat subtle concept that is only used in the
--- simplifier and when using "rep adapters".
-class AliasedOp (OpWithAliases op) => CanBeAliased op where
-  -- | The op that results when we add aliases to this op.
-  type OpWithAliases op :: Data.Kind.Type
-
-  -- | Remove aliases from this op.
-  removeOpAliases :: OpWithAliases op -> op
-
-  -- | Add aliases to this op.
-  addOpAliases :: AliasTable -> op -> OpWithAliases op
-
-instance CanBeAliased () where
-  type OpWithAliases () = ()
-  removeOpAliases = id
-  addOpAliases = const id

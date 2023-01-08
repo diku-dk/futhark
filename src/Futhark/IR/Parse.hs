@@ -941,7 +941,7 @@ pSegLevel =
         <$> (lexeme "groups=" $> GPU.Count <*> pSubExp <* pSemi)
         <*> (lexeme "groupsize=" $> GPU.Count <*> pSubExp)
 
-pHostOp :: PR rep -> Parser op -> Parser (GPU.HostOp rep op)
+pHostOp :: PR rep -> Parser (op rep) -> Parser (GPU.HostOp op rep)
 pHostOp pr pOther =
   choice
     [ GPU.SegOp <$> pSegOp pr pSegLevel,
@@ -950,7 +950,7 @@ pHostOp pr pOther =
       keyword "gpu" $> GPU.GPUBody <*> (pColon *> pTypes) <*> braces (pBody pr)
     ]
 
-pMCOp :: PR rep -> Parser op -> Parser (MC.MCOp rep op)
+pMCOp :: PR rep -> Parser (op rep) -> Parser (MC.MCOp op rep)
 pMCOp pr pOther =
   choice
     [ MC.ParOp . Just
@@ -1060,7 +1060,7 @@ pLParamMem = pMemInfo pSubExp (pure NoUniqueness) pMemBind
 pLetDecMem :: Parser LetDecMem
 pLetDecMem = pMemInfo pSubExp (pure NoUniqueness) pMemBind
 
-pMemOp :: Parser inner -> Parser (MemOp inner)
+pMemOp :: Parser (inner rep) -> Parser (MemOp inner rep)
 pMemOp pInner =
   choice
     [ keyword "alloc"

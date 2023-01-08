@@ -222,6 +222,9 @@ instance FreeIn a => FreeIn [a] where
 instance FreeIn a => FreeIn (S.Set a) where
   freeIn' = foldMap freeIn'
 
+instance FreeIn (NoOp rep) where
+  freeIn' NoOp = mempty
+
 instance
   ( FreeDec (ExpDec rep),
     FreeDec (BodyDec rep),
