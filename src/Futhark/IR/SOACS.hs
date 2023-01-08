@@ -27,15 +27,13 @@ import Futhark.IR.TypeCheck qualified as TC
 data SOACS
 
 instance RepTypes SOACS where
-  type Op SOACS = SOAC SOACS
+  type OpC SOACS = SOAC
 
 instance ASTRep SOACS where
   expTypesFromPat = pure . expExtTypesFromPat
 
-instance TC.CheckableOp SOACS where
+instance TC.Checkable SOACS where
   checkOp = typeCheckSOAC
-
-instance TC.Checkable SOACS
 
 instance Buildable SOACS where
   mkBody = Body ()

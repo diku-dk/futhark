@@ -122,9 +122,9 @@ compileMCExp dest e =
 
 compileMCOp ::
   Pat LetDecMem ->
-  MCOp MCMem () ->
+  MCOp NoOp MCMem ->
   ImpM MCMem HostEnv Imp.Multicore ()
-compileMCOp _ (OtherOp ()) = pure ()
+compileMCOp _ (OtherOp NoOp) = pure ()
 compileMCOp pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)

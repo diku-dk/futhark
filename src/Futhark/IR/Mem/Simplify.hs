@@ -31,18 +31,20 @@ type SimplifyMemory rep inner =
     LetDec rep ~ LetDecMem,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    CanBeWise (Op rep),
+    CanBeWise (OpC rep),
     BuilderOps (Wise rep),
-    OpReturns (OpWithWisdom inner),
-    ST.IndexOp (OpWithWisdom inner),
-    AliasedOp (OpWithWisdom inner),
-    Mem rep inner
+    OpReturns (inner (Wise rep)),
+    ST.IndexOp (inner (Wise rep)),
+    AliasedOp (inner (Wise rep)),
+    Mem rep inner,
+    CanBeWise inner,
+    RephraseOp inner
   )
 
 simpleGeneric ::
   (SimplifyMemory rep inner) =>
-  (OpWithWisdom inner -> UT.UsageTable) ->
-  Simplify.SimplifyOp rep (OpWithWisdom inner) ->
+  (inner (Wise rep) -> UT.UsageTable) ->
+  Simplify.SimplifyOp rep (inner (Wise rep)) ->
   Simplify.SimpleOps rep
 simpleGeneric = simplifiable
 
@@ -85,17 +87,17 @@ simplifyStmsGeneric ops stms = do
     scope
     stms
 
-isResultAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
+isResultAlloc :: OpC rep ~ MemOp op => Engine.BlockPred rep
 isResultAlloc _ usage (Let (Pat [pe]) _ (Op Alloc {})) =
   UT.isInResult (patElemName pe) usage
 isResultAlloc _ _ _ = False
 
-isAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
+isAlloc :: OpC rep ~ MemOp op => Engine.BlockPred rep
 isAlloc _ _ (Let _ _ (Op Alloc {})) = True
 isAlloc _ _ _ = False
 
 blockers ::
-  (Op rep ~ MemOp inner) =>
+  (OpC rep ~ MemOp inner) =>
   Simplify.HoistBlockers rep
 blockers =
   Engine.noExtraHoistBlockers

@@ -118,7 +118,7 @@ inPlaceLowering onOp lower =
     descend [] m = m
     descend (stm : stms) m = bindingStm stm $ descend stms m
 
-type Constraints rep = (Buildable rep, CanBeAliased (Op rep))
+type Constraints rep = (Buildable rep, AliasableRep rep)
 
 optimiseBody ::
   Constraints rep =>
@@ -198,7 +198,7 @@ optimiseExp e = mapExpM optimise e
         }
 
 onSegOp ::
-  (Buildable rep, CanBeAliased (Op rep)) =>
+  Constraints rep =>
   SegOp lvl (Aliases rep) ->
   ForwardingM rep (SegOp lvl (Aliases rep))
 onSegOp op =

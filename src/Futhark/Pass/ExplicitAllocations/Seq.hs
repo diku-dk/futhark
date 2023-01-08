@@ -10,4 +10,8 @@ import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations
 
 explicitAllocations :: Pass Seq SeqMem
-explicitAllocations = explicitAllocationsGeneric DefaultSpace (pure . Inner) defaultExpHints
+explicitAllocations =
+  explicitAllocationsGeneric
+    DefaultSpace
+    (const $ pure $ Inner NoOp)
+    defaultExpHints

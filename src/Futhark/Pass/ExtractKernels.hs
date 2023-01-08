@@ -823,6 +823,56 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
       -- FIXME: work around bogus targets.
       acc' {distTargets = singleTarget (mempty, mempty)}
 
+    -- GHC 9.2 loops without the type annotation.
+    generate ::
+      [Int] ->
+      KernelNest ->
+      Pat Type ->
+      Lambda SOACS ->
+      DistEnv GPU DistribM ->
+      Scope GPU ->
+      DistribM (Stms GPU)
+    generate perm nest pat' lam' dist_env extra_scope = localScope extra_scope $ do
+      let maploop' = MapLoop pat' aux w lam' arrs
+
+          exploitInnerParallelism path' = do
+            let dist_env' =
+                  dist_env
+                    { distOnTopLevelStms = onTopLevelStms path',
+                      distOnInnerMap = onInnerMap path'
+                    }
+            runDistNestT dist_env' . inNesting nest . localScope extra_scope $
+              discardTargets
+                <$> distributeMap maploop' acc {distStms = mempty}
+      -- Normally the permutation is for the output pattern, but
+      -- we can't really change that, so we change the result
+      -- order instead.
+      let lam_res' =
+            rearrangeShape (rearrangeInverse perm) $
+              bodyResult $
+                lambdaBody lam'
+          lam'' = lam' {lambdaBody = (lambdaBody lam') {bodyResult = lam_res'}}
+          map_nesting = MapNesting pat' aux w $ zip (lambdaParams lam') arrs
+          nest' = pushInnerKernelNesting (pat', lam_res') map_nesting nest
+
+      -- XXX: we do not construct a new KernelPath when
+      -- sequentialising.  This is only OK as long as further
+      -- versioning does not take place down that branch (it currently
+      -- does not).
+      (sequentialised_kernel, nestw_stms) <- localScope extra_scope $ do
+        let sequentialised_lam = soacsLambdaToGPU lam''
+        constructKernel segThreadCapped nest' $ lambdaBody sequentialised_lam
+
+      let outer_pat = loopNestingPat $ fst nest
+      (nestw_stms <>)
+        <$> onMap'
+          nest'
+          path
+          (const $ pure $ oneStm sequentialised_kernel)
+          exploitInnerParallelism
+          outer_pat
+          lam''
+
     multiVersion perm nest acc' pat' lam' = do
       -- The kernel can be distributed by itself, so now we can
       -- decide whether to just sequentialise, or exploit inner
@@ -830,48 +880,6 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
       dist_env <- ask
       let extra_scope = targetsScope $ distTargets acc'
 
-      stms <- liftInner $
-        localScope extra_scope $ do
-          let maploop' = MapLoop pat' aux w lam' arrs
-
-              exploitInnerParallelism path' = do
-                let dist_env' =
-                      dist_env
-                        { distOnTopLevelStms = onTopLevelStms path',
-                          distOnInnerMap = onInnerMap path'
-                        }
-                runDistNestT dist_env' . inNesting nest . localScope extra_scope $
-                  discardTargets
-                    <$> distributeMap maploop' acc {distStms = mempty}
-
-          -- Normally the permutation is for the output pattern, but
-          -- we can't really change that, so we change the result
-          -- order instead.
-          let lam_res' =
-                rearrangeShape (rearrangeInverse perm) $
-                  bodyResult $
-                    lambdaBody lam'
-              lam'' = lam' {lambdaBody = (lambdaBody lam') {bodyResult = lam_res'}}
-              map_nesting = MapNesting pat' aux w $ zip (lambdaParams lam') arrs
-              nest' = pushInnerKernelNesting (pat', lam_res') map_nesting nest
-
-          -- XXX: we do not construct a new KernelPath when
-          -- sequentialising.  This is only OK as long as further
-          -- versioning does not take place down that branch (it currently
-          -- does not).
-          (sequentialised_kernel, nestw_stms) <- localScope extra_scope $ do
-            let sequentialised_lam = soacsLambdaToGPU lam''
-            constructKernel segThreadCapped nest' $ lambdaBody sequentialised_lam
-
-          let outer_pat = loopNestingPat $ fst nest
-          (nestw_stms <>)
-            <$> onMap'
-              nest'
-              path
-              (const $ pure $ oneStm sequentialised_kernel)
-              exploitInnerParallelism
-              outer_pat
-              lam''
-
+      stms <- liftInner $ generate perm nest pat' lam' dist_env extra_scope
       postStm stms
       pure acc'

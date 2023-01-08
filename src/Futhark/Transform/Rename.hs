@@ -325,6 +325,9 @@ instance Rename ExtSize where
 instance Rename () where
   rename = pure
 
+instance Rename (NoOp rep) where
+  rename NoOp = pure NoOp
+
 instance Rename d => Rename (DimIndex d) where
   rename (DimFix i) = DimFix <$> rename i
   rename (DimSlice i n s) = DimSlice <$> rename i <*> rename n <*> rename s
