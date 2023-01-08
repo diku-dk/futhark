@@ -1141,5 +1141,5 @@ data ExpHint
   = NoHint
   | Hint IxFun Space
 
-defaultExpHints :: (Monad m, ASTRep rep) => Exp rep -> m [ExpHint]
-defaultExpHints e = pure $ replicate (expExtTypeSize e) NoHint
+defaultExpHints :: (ASTRep rep, HasScope rep m) => Exp rep -> m [ExpHint]
+defaultExpHints e = map (const NoHint) <$> expExtType e

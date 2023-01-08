@@ -104,8 +104,7 @@ kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space reds ts body)
   where
     num_reds = segBinOpResults reds
     (red_res, map_res) = splitAt num_reds $ kernelBodyResult body
-kernelExpHints e =
-  pure $ replicate (expExtTypeSize e) NoHint
+kernelExpHints e = defaultExpHints e
 
 mapResultHint ::
   SegLevel ->
@@ -167,7 +166,7 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
   where
     private (Returns ResultPrivate _ _) = True
     private _ = False
-inGroupExpHints e = pure $ replicate (expExtTypeSize e) NoHint
+inGroupExpHints e = defaultExpHints e
 
 inThreadExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
 inThreadExpHints e = do
