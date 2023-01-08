@@ -379,7 +379,7 @@ appendCoalsInfo mb info_new coalstab =
 -- argument. Otherwise look up the type of the argument and return a 'LeafExp'
 -- if it is a 'PrimType'.
 vnameToPrimExp ::
-  (CanBeAliased (Op rep), RepTypes rep) =>
+  (AliasableRep rep) =>
   ScopeTab rep ->
   ScalarTab ->
   VName ->

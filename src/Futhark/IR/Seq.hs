@@ -30,16 +30,13 @@ import Futhark.Pass
 -- | The phantom type for the Seq representation.
 data Seq
 
-instance RepTypes Seq where
-  type Op Seq = ()
+instance RepTypes Seq
 
 instance ASTRep Seq where
   expTypesFromPat = pure . expExtTypesFromPat
 
-instance TC.CheckableOp Seq where
-  checkOp = pure
-
-instance TC.Checkable Seq
+instance TC.Checkable Seq where
+  checkOp NoOp = pure ()
 
 instance Buildable Seq where
   mkBody = Body ()
@@ -60,7 +57,7 @@ instance TraverseOpStms (Engine.Wise Seq) where
   traverseOpStms _ = pure
 
 simpleSeq :: Simplify.SimpleOps Seq
-simpleSeq = Simplify.bindableSimpleOps (const $ pure ((), mempty))
+simpleSeq = Simplify.bindableSimpleOps (const $ pure (NoOp, mempty))
 
 -- | Simplify a sequential program.
 simplifyProg :: Prog Seq -> PassM (Prog Seq)

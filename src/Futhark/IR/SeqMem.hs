@@ -28,20 +28,16 @@ instance RepTypes SeqMem where
   type LParamInfo SeqMem = LParamMem
   type RetType SeqMem = RetTypeMem
   type BranchType SeqMem = BranchTypeMem
-  type Op SeqMem = MemOp ()
+  type OpC SeqMem = MemOp NoOp
 
 instance ASTRep SeqMem where
   expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
 instance PrettyRep SeqMem
 
-instance TC.CheckableOp SeqMem where
-  checkOp (Alloc size _) =
-    TC.require [Prim int64] size
-  checkOp (Inner ()) =
-    pure ()
-
 instance TC.Checkable SeqMem where
+  checkOp (Alloc size _) = TC.require [Prim int64] size
+  checkOp (Inner NoOp) = pure ()
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
@@ -73,4 +69,4 @@ simplifyProg = simplifyProgGeneric simpleSeqMem
 
 simpleSeqMem :: Engine.SimpleOps SeqMem
 simpleSeqMem =
-  simpleGeneric (const mempty) $ const $ pure ((), mempty)
+  simpleGeneric (const mempty) $ const $ pure (NoOp, mempty)

@@ -54,7 +54,6 @@ import Futhark.Compiler.CLI
 import Futhark.IR
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
-import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.Fusion.GraphRep qualified
@@ -75,7 +74,7 @@ printAction =
     }
 
 -- | Print the result to stdout, alias annotations.
-printAliasesAction :: (ASTRep rep, CanBeAliased (Op rep)) => Action rep
+printAliasesAction :: AliasableRep rep => Action rep
 printAliasesAction =
   Action
     { actionName = "Prettyprint",

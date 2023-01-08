@@ -10,6 +10,7 @@
 -- the building blocks do).
 module Futhark.Analysis.Alias
   ( aliasAnalysis,
+    AliasableRep,
 
     -- * Ad-hoc utilities
     analyseFun,
@@ -26,7 +27,7 @@ import Futhark.IR.Aliases
 
 -- | Perform alias analysis on a Futhark program.
 aliasAnalysis ::
-  (ASTRep rep, CanBeAliased (Op rep)) =>
+  AliasableRep rep =>
   Prog rep ->
   Prog (Aliases rep)
 aliasAnalysis prog =
@@ -37,7 +38,7 @@ aliasAnalysis prog =
 
 -- | Perform alias analysis on function.
 analyseFun ::
-  (ASTRep rep, CanBeAliased (Op rep)) =>
+  AliasableRep rep =>
   FunDef rep ->
   FunDef (Aliases rep)
 analyseFun (FunDef entry attrs fname restype params body) =
@@ -47,9 +48,7 @@ analyseFun (FunDef entry attrs fname restype params body) =
 
 -- | Perform alias analysis on Body.
 analyseBody ::
-  ( ASTRep rep,
-    CanBeAliased (Op rep)
-  ) =>
+  AliasableRep rep =>
   AliasTable ->
   Body rep ->
   Body (Aliases rep)
@@ -59,7 +58,7 @@ analyseBody atable (Body rep stms result) =
 
 -- | Perform alias analysis on statements.
 analyseStms ::
-  (ASTRep rep, CanBeAliased (Op rep)) =>
+  AliasableRep rep =>
   AliasTable ->
   Stms rep ->
   (Stms (Aliases rep), AliasesAndConsumed)
@@ -72,7 +71,7 @@ analyseStms orig_aliases =
        in (stms <> oneStm stm', atable')
 
 analyseStm ::
-  (ASTRep rep, CanBeAliased (Op rep)) =>
+  AliasableRep rep =>
   AliasTable ->
   Stm rep ->
   Stm (Aliases rep)
@@ -84,7 +83,7 @@ analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
 
 -- | Perform alias analysis on expression.
 analyseExp ::
-  (ASTRep rep, CanBeAliased (Op rep)) =>
+  AliasableRep rep =>
   AliasTable ->
   Exp rep ->
   Exp (Aliases rep)
@@ -124,7 +123,7 @@ analyseExp aliases e = mapExp analyse e
 
 -- | Perform alias analysis on lambda.
 analyseLambda ::
-  (ASTRep rep, CanBeAliased (Op rep)) =>
+  AliasableRep rep =>
   AliasTable ->
   Lambda rep ->
   Lambda (Aliases rep)

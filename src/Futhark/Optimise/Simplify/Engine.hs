@@ -557,7 +557,7 @@ provides :: Stm rep -> [VName]
 provides = patNames . stmPat
 
 expandUsage ::
-  (ASTRep rep, Aliased rep) =>
+  Aliased rep =>
   (Stm rep -> UT.UsageTable) ->
   ST.SymbolTable rep ->
   UT.UsageTable ->
@@ -666,7 +666,7 @@ loopInvariantStm vtable =
   all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
 
 matchBlocker ::
-  (ASTRep rep, CanBeWise (Op rep)) =>
+  SimplifiableRep rep =>
   [SubExp] ->
   MatchDec rt ->
   SimpleM rep (BlockPred (Wise rep))
@@ -966,8 +966,10 @@ type SimplifiableRep rep =
     Simplifiable (RetType rep),
     Simplifiable (BranchType rep),
     TraverseOpStms (Wise rep),
-    CanBeWise (Op rep),
-    ST.IndexOp (OpWithWisdom (Op rep)),
+    CanBeWise (OpC rep),
+    ST.IndexOp (Op (Wise rep)),
+    AliasedOp (Op (Wise rep)),
+    RephraseOp (OpC rep),
     BuilderOps (Wise rep),
     IsOp (Op rep)
   )

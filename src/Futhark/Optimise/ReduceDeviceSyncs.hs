@@ -351,7 +351,7 @@ optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
 
 -- | Optimize a host operation. 'Index' statements are added to kernel code
 -- that depends on migrated scalars.
-optimizeHostOp :: HostOp GPU op -> ReduceM (HostOp GPU op)
+optimizeHostOp :: HostOp op GPU -> ReduceM (HostOp op GPU)
 optimizeHostOp (SegOp (SegMap lvl space types kbody)) =
   SegOp . SegMap lvl space types <$> addReadsToKernelBody kbody
 optimizeHostOp (SegOp (SegRed lvl space ops types kbody)) = do

@@ -19,4 +19,4 @@ compileProg = ImpGen.compileProg () ops Imp.DefaultSpace
     ops = ImpGen.defaultOperations opCompiler
     opCompiler dest (Alloc e space) =
       ImpGen.compileAlloc dest e space
-    opCompiler _ (Inner ()) = pure ()
+    opCompiler _ (Inner NoOp) = pure ()

@@ -13,6 +13,7 @@ module Futhark.IR.Prop
     module Futhark.IR.Prop.Patterns,
     module Futhark.IR.Prop.Names,
     module Futhark.IR.RetType,
+    module Futhark.IR.Rephrase,
 
     -- * Built-in functions
     isBuiltInFunction,
@@ -49,6 +50,7 @@ import Futhark.IR.Prop.Rearrange
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.TypeOf
 import Futhark.IR.Prop.Types
+import Futhark.IR.Rephrase
 import Futhark.IR.RetType
 import Futhark.IR.Syntax
 import Futhark.Transform.Rename (Rename, Renameable)
@@ -177,7 +179,7 @@ certify :: Certs -> Stm rep -> Stm rep
 certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
   Let pat (StmAux (cs2 <> cs1) attrs dec) e
 
--- | A handy shorthand for properties that we usually want to things
+-- | A handy shorthand for properties that we usually want for things
 -- we stuff into ASTs.
 type ASTConstraints a =
   (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a)
@@ -190,9 +192,9 @@ class (ASTConstraints op, TypedOp op) => IsOp op where
   -- | Should we try to hoist this out of branches?
   cheapOp :: op -> Bool
 
-instance IsOp () where
-  safeOp () = True
-  cheapOp () = True
+instance IsOp (NoOp rep) where
+  safeOp NoOp = True
+  cheapOp NoOp = True
 
 -- | Representation-specific attributes; also means the rep supports
 -- some basic facilities.
@@ -208,7 +210,8 @@ class
     FreeIn (LParamInfo rep),
     FreeIn (RetType rep),
     FreeIn (BranchType rep),
-    IsOp (Op rep)
+    IsOp (Op rep),
+    RephraseOp (OpC rep)
   ) =>
   ASTRep rep
   where

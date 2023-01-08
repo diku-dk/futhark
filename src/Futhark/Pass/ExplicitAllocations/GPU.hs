@@ -79,8 +79,8 @@ handleSegOp outer_lvl op = do
 
 handleHostOp ::
   Maybe SegLevel ->
-  HostOp GPU (SOAC GPU) ->
-  AllocM GPU GPUMem (MemOp (HostOp GPUMem ()))
+  HostOp SOAC GPU ->
+  AllocM GPU GPUMem (MemOp (HostOp NoOp) GPUMem)
 handleHostOp _ (SizeOp op) =
   pure $ Inner $ SizeOp op
 handleHostOp _ (OtherOp op) =

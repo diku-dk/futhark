@@ -1,6 +1,7 @@
--- | Facilities for changing the rep of some fragment, with no
--- context.  We call this "rephrasing", for no deep reason.
-module Futhark.Analysis.Rephrase
+-- | Facilities for changing the representation of some fragment,
+-- within a monadic context.  We call this "rephrasing", for no deep
+-- reason.
+module Futhark.IR.Rephrase
   ( rephraseProg,
     rephraseFunDef,
     rephraseExp,
@@ -10,10 +11,12 @@ module Futhark.Analysis.Rephrase
     rephrasePat,
     rephrasePatElem,
     Rephraser (..),
+    RephraseOp (..),
   )
 where
 
-import Futhark.IR
+import Futhark.IR.Syntax
+import Futhark.IR.Traversals
 
 -- | A collection of functions that together allow us to rephrase some
 -- IR fragment, in some monad @m@.  If we let @m@ be the 'Maybe'
@@ -101,3 +104,11 @@ mapper rephraser =
       mapOnLParam = rephraseParam (rephraseLParamDec rephraser),
       mapOnOp = rephraseOp rephraser
     }
+
+-- | Rephrasing any fragments inside an Op from one representation to
+-- another.
+class RephraseOp op where
+  rephraseInOp :: Monad m => Rephraser m from to -> op from -> m (op to)
+
+instance RephraseOp NoOp where
+  rephraseInOp _ NoOp = pure NoOp

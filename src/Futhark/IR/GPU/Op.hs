@@ -30,7 +30,7 @@ import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
-import Futhark.IR.Aliases (Aliases, removeBodyAliases)
+import Futhark.IR.Aliases (Aliases, CanBeAliased (..))
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
@@ -239,11 +239,11 @@ typeCheckSizeOp (CalcNumGroups w _ group_size) = do
   TC.require [Prim int64] group_size
 
 -- | A host-level operation; parameterised by what else it can do.
-data HostOp rep op
+data HostOp op rep
   = -- | A segmented operation.
     SegOp (SegOp SegLevel rep)
   | SizeOp SizeOp
-  | OtherOp op
+  | OtherOp (op rep)
   | -- | Code to run sequentially on the GPU,
     -- in a single thread.
     GPUBody [Type] (Body rep)
@@ -252,8 +252,8 @@ data HostOp rep op
 -- | A helper for defining 'TraverseOpStms'.
 traverseHostOpStms ::
   Monad m =>
-  OpStmsTraverser m op rep ->
-  OpStmsTraverser m (HostOp rep op) rep
+  OpStmsTraverser m (op rep) rep ->
+  OpStmsTraverser m (HostOp op rep) rep
 traverseHostOpStms _ f (SegOp segop) = SegOp <$> traverseSegOpStms f segop
 traverseHostOpStms _ _ (SizeOp sizeop) = pure $ SizeOp sizeop
 traverseHostOpStms onOtherOp f (OtherOp other) = OtherOp <$> onOtherOp f other
@@ -261,7 +261,7 @@ traverseHostOpStms _ f (GPUBody ts body) = do
   stms <- f mempty $ bodyStms body
   pure $ GPUBody ts $ body {bodyStms = stms}
 
-instance (ASTRep rep, Substitute op) => Substitute (HostOp rep op) where
+instance (ASTRep rep, Substitute (op rep)) => Substitute (HostOp op rep) where
   substituteNames substs (SegOp op) =
     SegOp $ substituteNames substs op
   substituteNames substs (OtherOp op) =
@@ -271,13 +271,13 @@ instance (ASTRep rep, Substitute op) => Substitute (HostOp rep op) where
   substituteNames substs (GPUBody ts body) =
     GPUBody (substituteNames substs ts) (substituteNames substs body)
 
-instance (ASTRep rep, Rename op) => Rename (HostOp rep op) where
+instance (ASTRep rep, Rename (op rep)) => Rename (HostOp op rep) where
   rename (SegOp op) = SegOp <$> rename op
   rename (OtherOp op) = OtherOp <$> rename op
   rename (SizeOp op) = SizeOp <$> rename op
   rename (GPUBody ts body) = GPUBody <$> rename ts <*> rename body
 
-instance (ASTRep rep, IsOp op) => IsOp (HostOp rep op) where
+instance (ASTRep rep, IsOp (op rep)) => IsOp (HostOp op rep) where
   safeOp (SegOp op) = safeOp op
   safeOp (OtherOp op) = safeOp op
   safeOp (SizeOp op) = safeOp op
@@ -291,14 +291,14 @@ instance (ASTRep rep, IsOp op) => IsOp (HostOp rep op) where
     -- transfer scalars to device.
     SQ.null (bodyStms body) && all ((== 0) . arrayRank) types
 
-instance TypedOp op => TypedOp (HostOp rep op) where
+instance TypedOp (op rep) => TypedOp (HostOp op rep) where
   opType (SegOp op) = opType op
   opType (OtherOp op) = opType op
   opType (SizeOp op) = opType op
   opType (GPUBody ts _) =
     pure $ staticShapes $ map (`arrayOfRow` intConst Int64 1) ts
 
-instance (Aliased rep, AliasedOp op, ASTRep rep) => AliasedOp (HostOp rep op) where
+instance (Aliased rep, AliasedOp (op rep)) => AliasedOp (HostOp op rep) where
   opAliases (SegOp op) = opAliases op
   opAliases (OtherOp op) = opAliases op
   opAliases (SizeOp op) = opAliases op
@@ -309,55 +309,47 @@ instance (Aliased rep, AliasedOp op, ASTRep rep) => AliasedOp (HostOp rep op) wh
   consumedInOp (SizeOp op) = consumedInOp op
   consumedInOp (GPUBody _ body) = consumedInBody body
 
-instance (ASTRep rep, FreeIn op) => FreeIn (HostOp rep op) where
+instance (ASTRep rep, FreeIn (op rep)) => FreeIn (HostOp op rep) where
   freeIn' (SegOp op) = freeIn' op
   freeIn' (OtherOp op) = freeIn' op
   freeIn' (SizeOp op) = freeIn' op
   freeIn' (GPUBody ts body) = freeIn' ts <> freeIn' body
 
-instance (CanBeAliased (Op rep), CanBeAliased op, ASTRep rep) => CanBeAliased (HostOp rep op) where
-  type OpWithAliases (HostOp rep op) = HostOp (Aliases rep) (OpWithAliases op)
-
+instance CanBeAliased op => CanBeAliased (HostOp op) where
   addOpAliases aliases (SegOp op) = SegOp $ addOpAliases aliases op
   addOpAliases aliases (GPUBody ts body) = GPUBody ts $ Alias.analyseBody aliases body
   addOpAliases aliases (OtherOp op) = OtherOp $ addOpAliases aliases op
   addOpAliases _ (SizeOp op) = SizeOp op
 
-  removeOpAliases (SegOp op) = SegOp $ removeOpAliases op
-  removeOpAliases (OtherOp op) = OtherOp $ removeOpAliases op
-  removeOpAliases (SizeOp op) = SizeOp op
-  removeOpAliases (GPUBody ts body) = GPUBody ts $ removeBodyAliases body
-
-instance (CanBeWise (Op rep), CanBeWise op, ASTRep rep) => CanBeWise (HostOp rep op) where
-  type OpWithWisdom (HostOp rep op) = HostOp (Wise rep) (OpWithWisdom op)
-
-  removeOpWisdom (SegOp op) = SegOp $ removeOpWisdom op
-  removeOpWisdom (OtherOp op) = OtherOp $ removeOpWisdom op
-  removeOpWisdom (SizeOp op) = SizeOp op
-  removeOpWisdom (GPUBody ts body) = GPUBody ts $ removeBodyWisdom body
-
+instance CanBeWise op => CanBeWise (HostOp op) where
   addOpWisdom (SegOp op) = SegOp $ addOpWisdom op
   addOpWisdom (OtherOp op) = OtherOp $ addOpWisdom op
   addOpWisdom (SizeOp op) = SizeOp op
   addOpWisdom (GPUBody ts body) = GPUBody ts $ informBody body
 
-instance (ASTRep rep, ST.IndexOp op) => ST.IndexOp (HostOp rep op) where
+instance (ASTRep rep, ST.IndexOp (op rep)) => ST.IndexOp (HostOp op rep) where
   indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
   indexOp _ _ _ _ = Nothing
 
-instance (PrettyRep rep, PP.Pretty op) => PP.Pretty (HostOp rep op) where
+instance (PrettyRep rep, PP.Pretty (op rep)) => PP.Pretty (HostOp op rep) where
   pretty (SegOp op) = pretty op
   pretty (OtherOp op) = pretty op
   pretty (SizeOp op) = pretty op
   pretty (GPUBody ts body) =
     "gpu" <+> PP.colon <+> ppTuple' (map pretty ts) <+> PP.nestedBlock "{" "}" (pretty body)
 
-instance (OpMetrics (Op rep), OpMetrics op) => OpMetrics (HostOp rep op) where
+instance (OpMetrics (Op rep), OpMetrics (op rep)) => OpMetrics (HostOp op rep) where
   opMetrics (SegOp op) = opMetrics op
   opMetrics (OtherOp op) = opMetrics op
   opMetrics (SizeOp op) = opMetrics op
   opMetrics (GPUBody _ body) = inside "GPUBody" $ bodyMetrics body
+
+instance RephraseOp op => RephraseOp (HostOp op) where
+  rephraseInOp r (SegOp op) = SegOp <$> rephraseInOp r op
+  rephraseInOp r (OtherOp op) = OtherOp <$> rephraseInOp r op
+  rephraseInOp _ (SizeOp op) = pure $ SizeOp op
+  rephraseInOp r (GPUBody ts body) = GPUBody ts <$> rephraseBody r body
 
 checkGrid :: TC.Checkable rep => KernelGrid -> TC.TypeM rep ()
 checkGrid grid = do
@@ -390,10 +382,10 @@ checkSegLevel Nothing (SegGroup _virt grid) =
 
 typeCheckHostOp ::
   TC.Checkable rep =>
-  (SegLevel -> OpWithAliases (Op rep) -> TC.TypeM rep ()) ->
+  (SegLevel -> Op (Aliases rep) -> TC.TypeM rep ()) ->
   Maybe SegLevel ->
-  (op -> TC.TypeM rep ()) ->
-  HostOp (Aliases rep) op ->
+  (op (Aliases rep) -> TC.TypeM rep ()) ->
+  HostOp op (Aliases rep) ->
   TC.TypeM rep ()
 typeCheckHostOp checker lvl _ (SegOp op) =
   TC.checkOpWith (checker $ segLevel op) $

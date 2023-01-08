@@ -28,6 +28,8 @@ module Futhark.IR.Aliases
     mkAliasedBody,
     mkAliasedPat,
     mkBodyAliasing,
+    CanBeAliased (..),
+    AliasableRep,
 
     -- * Removing aliases
     removeProgAliases,
@@ -49,9 +51,9 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.Reader
+import Data.Kind qualified
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Futhark.Analysis.Rephrase
 import Futhark.Builder
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
@@ -63,7 +65,7 @@ import Futhark.Transform.Substitute
 import Futhark.Util.Pretty qualified as PP
 
 -- | The rep for the basic representation.
-data Aliases rep
+data Aliases (rep :: Data.Kind.Type)
 
 -- | A wrapper around 'AliasDec' to get around the fact that we need an
 -- 'Ord' instance, which 'AliasDec does not have.
@@ -104,7 +106,7 @@ type ConsumedInExp = AliasDec
 -- consumed inside of it.
 type BodyAliasing = ([VarAliases], ConsumedInExp)
 
-instance (RepTypes rep, CanBeAliased (Op rep)) => RepTypes (Aliases rep) where
+instance (RepTypes rep, ASTConstraints (OpC rep (Aliases rep))) => RepTypes (Aliases rep) where
   type LetDec (Aliases rep) = (VarAliases, LetDec rep)
   type ExpDec (Aliases rep) = (ConsumedInExp, ExpDec rep)
   type BodyDec (Aliases rep) = (BodyAliasing, BodyDec rep)
@@ -112,7 +114,7 @@ instance (RepTypes rep, CanBeAliased (Op rep)) => RepTypes (Aliases rep) where
   type LParamInfo (Aliases rep) = LParamInfo rep
   type RetType (Aliases rep) = RetType rep
   type BranchType (Aliases rep) = BranchType rep
-  type Op (Aliases rep) = OpWithAliases (Op rep)
+  type OpC (Aliases rep) = OpC rep
 
 instance AliasesOf (VarAliases, dec) where
   aliasesOf = unAliases . fst
@@ -127,15 +129,15 @@ withoutAliases m = do
   scope <- asksScope removeScopeAliases
   runReaderT m scope
 
-instance (ASTRep rep, CanBeAliased (Op rep)) => ASTRep (Aliases rep) where
+instance (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) => ASTRep (Aliases rep) where
   expTypesFromPat =
     withoutAliases . expTypesFromPat . removePatAliases
 
-instance (ASTRep rep, CanBeAliased (Op rep)) => Aliased (Aliases rep) where
+instance (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) => Aliased (Aliases rep) where
   bodyAliases = map unAliases . fst . fst . bodyDec
   consumedInBody = unAliases . snd . fst . bodyDec
 
-instance (ASTRep rep, CanBeAliased (Op rep)) => PrettyRep (Aliases rep) where
+instance (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) => PrettyRep (Aliases rep) where
   ppExpDec (consumed, inner) e =
     maybeComment . catMaybes $
       [exp_dec, merge_dec, ppExpDec inner $ removeExpAliases e]
@@ -176,7 +178,7 @@ resultAliasComment name als =
             <> " aliases "
             <> PP.commasep (map PP.pretty als')
 
-removeAliases :: CanBeAliased (Op rep) => Rephraser Identity (Aliases rep) rep
+removeAliases :: RephraseOp (OpC rep) => Rephraser Identity (Aliases rep) rep
 removeAliases =
   Rephraser
     { rephraseExpDec = pure . snd,
@@ -186,7 +188,7 @@ removeAliases =
       rephraseLParamDec = pure,
       rephraseRetType = pure,
       rephraseBranchType = pure,
-      rephraseOp = pure . removeOpAliases
+      rephraseOp = rephraseInOp removeAliases
     }
 
 -- | Remove alias information from an aliased scope.
@@ -200,42 +202,42 @@ removeScopeAliases = M.map unAlias
 
 -- | Remove alias information from a program.
 removeProgAliases ::
-  CanBeAliased (Op rep) =>
+  RephraseOp (OpC rep) =>
   Prog (Aliases rep) ->
   Prog rep
 removeProgAliases = runIdentity . rephraseProg removeAliases
 
 -- | Remove alias information from a function.
 removeFunDefAliases ::
-  CanBeAliased (Op rep) =>
+  RephraseOp (OpC rep) =>
   FunDef (Aliases rep) ->
   FunDef rep
 removeFunDefAliases = runIdentity . rephraseFunDef removeAliases
 
 -- | Remove alias information from an expression.
 removeExpAliases ::
-  CanBeAliased (Op rep) =>
+  RephraseOp (OpC rep) =>
   Exp (Aliases rep) ->
   Exp rep
 removeExpAliases = runIdentity . rephraseExp removeAliases
 
 -- | Remove alias information from statements.
 removeStmAliases ::
-  CanBeAliased (Op rep) =>
+  RephraseOp (OpC rep) =>
   Stm (Aliases rep) ->
   Stm rep
 removeStmAliases = runIdentity . rephraseStm removeAliases
 
 -- | Remove alias information from body.
 removeBodyAliases ::
-  CanBeAliased (Op rep) =>
+  RephraseOp (OpC rep) =>
   Body (Aliases rep) ->
   Body rep
 removeBodyAliases = runIdentity . rephraseBody removeAliases
 
 -- | Remove alias information from lambda.
 removeLambdaAliases ::
-  CanBeAliased (Op rep) =>
+  RephraseOp (OpC rep) =>
   Lambda (Aliases rep) ->
   Lambda rep
 removeLambdaAliases = runIdentity . rephraseLambda removeAliases
@@ -249,7 +251,7 @@ removePatAliases = runIdentity . rephrasePat (pure . snd)
 -- | Augment a body decoration with aliasing information provided by
 -- the statements and result of that body.
 mkAliasedBody ::
-  (ASTRep rep, CanBeAliased (Op rep)) =>
+  (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) =>
   BodyDec rep ->
   Stms (Aliases rep) ->
   Result ->
@@ -360,7 +362,7 @@ trackAliases (aliasmap, consumed) stm =
     look k = M.findWithDefault mempty k aliasmap
 
 mkAliasedStm ::
-  (ASTRep rep, CanBeAliased (Op rep)) =>
+  (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
@@ -371,7 +373,7 @@ mkAliasedStm pat (StmAux cs attrs dec) e =
     (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
     e
 
-instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
+instance (Buildable rep, AliasedOp (OpC rep (Aliases rep))) => Buildable (Aliases rep) where
   mkExpDec pat e =
     let dec = mkExpDec (removePatAliases pat) $ removeExpAliases e
      in (AliasDec $ consumedInExp e, dec)
@@ -391,7 +393,26 @@ instance (Buildable rep, CanBeAliased (Op rep)) => Buildable (Aliases rep) where
 
 instance
   ( ASTRep rep,
-    CanBeAliased (Op rep),
+    AliasedOp (OpC rep (Aliases rep)),
     Buildable (Aliases rep)
   ) =>
   BuilderOps (Aliases rep)
+
+-- | What we require of an aliasable representation.
+type AliasableRep rep =
+  ( ASTRep rep,
+    RephraseOp (OpC rep),
+    CanBeAliased (OpC rep),
+    AliasedOp (OpC rep (Aliases rep))
+  )
+
+-- | The class of operations that can be given aliasing information.
+-- This is a somewhat subtle concept that is only used in the
+-- simplifier and when using "rep adapters".
+class CanBeAliased op where
+  -- | Add aliases to this op.
+  addOpAliases ::
+    AliasableRep rep => AliasTable -> op rep -> op (Aliases rep)
+
+instance CanBeAliased NoOp where
+  addOpAliases _ NoOp = NoOp

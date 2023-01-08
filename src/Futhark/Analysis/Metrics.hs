@@ -32,8 +32,8 @@ instance OpMetrics a => OpMetrics (Maybe a) where
   opMetrics Nothing = pure ()
   opMetrics (Just x) = opMetrics x
 
-instance OpMetrics () where
-  opMetrics () = pure ()
+instance OpMetrics (NoOp rep) where
+  opMetrics NoOp = pure ()
 
 newtype CountMetrics = CountMetrics [([Text], Text)]
 

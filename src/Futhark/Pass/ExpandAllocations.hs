@@ -11,7 +11,6 @@ import Data.Either (rights)
 import Data.List (find, foldl')
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Futhark.Analysis.Rephrase
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Error
 import Futhark.IR

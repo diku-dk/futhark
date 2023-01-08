@@ -75,7 +75,7 @@ translateAccessSummary _ _ _ = Undeterminable
 
 -- | This function computes the written and read memory references for the current statement
 getUseSumFromStm ::
-  (Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
+  (Op rep ~ MemOp inner rep, HasMemBlock (Aliases rep)) =>
   TopdownEnv rep ->
   CoalsTab ->
   Stm (Aliases rep) ->
@@ -152,7 +152,7 @@ getUseSumFromStm _ _ _ =
 --     2. fails the entries in active coalesced table for which the write set
 --          overlaps the uses of the destination (to that point)
 recordMemRefUses ::
-  (CanBeAliased (Op rep), RepTypes rep, Op rep ~ MemOp inner, HasMemBlock (Aliases rep)) =>
+  (AliasableRep rep, Op rep ~ MemOp inner rep, HasMemBlock (Aliases rep)) =>
   TopdownEnv rep ->
   BotUpEnv ->
   Stm (Aliases rep) ->
@@ -254,7 +254,7 @@ recordMemRefUses td_env bu_env stm =
 --
 -- This check is conservative, so unless we can guarantee that there is no
 -- overlap, we return 'False'.
-noMemOverlap :: (CanBeAliased (Op rep), RepTypes rep) => TopdownEnv rep -> AccessSummary -> AccessSummary -> Bool
+noMemOverlap :: (AliasableRep rep) => TopdownEnv rep -> AccessSummary -> AccessSummary -> Bool
 noMemOverlap _ _ (Set mr)
   | mr == mempty = True
 noMemOverlap _ (Set mr) _

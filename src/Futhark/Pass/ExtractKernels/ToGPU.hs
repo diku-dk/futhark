@@ -13,7 +13,6 @@ where
 
 import Control.Monad.Identity
 import Data.List ()
-import Futhark.Analysis.Rephrase
 import Futhark.IR
 import Futhark.IR.GPU
 import Futhark.IR.SOACS (SOACS)
@@ -21,7 +20,7 @@ import Futhark.IR.SOACS.SOAC qualified as SOAC
 import Futhark.Tools
 
 getSize ::
-  (MonadBuilder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
+  (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
   String ->
   SizeClass ->
   m SubExp
@@ -30,7 +29,7 @@ getSize desc size_class = do
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
 
 segThread ::
-  (MonadBuilder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
+  (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
   String ->
   m SegLevel
 segThread desc =

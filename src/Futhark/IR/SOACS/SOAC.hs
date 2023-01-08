@@ -62,7 +62,7 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
 import Futhark.IR
-import Futhark.IR.Aliases (Aliases, removeLambdaAliases)
+import Futhark.IR.Aliases (Aliases, CanBeAliased (..))
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.TypeCheck qualified as TC
 import Futhark.Optimise.Simplify.Rep
@@ -529,7 +529,7 @@ soacType (Screma w _arrs form) =
 instance ASTRep rep => TypedOp (SOAC rep) where
   opType = pure . staticShapes . soacType
 
-instance (ASTRep rep, Aliased rep) => AliasedOp (SOAC rep) where
+instance Aliased rep => AliasedOp (SOAC rep) where
   opAliases = map (const mempty) . soacType
 
   consumedInOp JVP {} = mempty
@@ -560,15 +560,7 @@ mapHistOp ::
 mapHistOp f (HistOp w rf dests nes lam) =
   HistOp w rf dests nes $ f lam
 
-instance
-  ( ASTRep rep,
-    ASTRep (Aliases rep),
-    CanBeAliased (Op rep)
-  ) =>
-  CanBeAliased (SOAC rep)
-  where
-  type OpWithAliases (SOAC rep) = SOAC (Aliases rep)
-
+instance CanBeAliased SOAC where
   addOpAliases aliases (JVP lam args vec) =
     JVP (Alias.analyseLambda aliases lam) args vec
   addOpAliases aliases (VJP lam args vec) =
@@ -593,10 +585,6 @@ instance
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
 
-  removeOpAliases = runIdentity . mapSOACM remove
-    where
-      remove = SOACMapper pure (pure . removeLambdaAliases) pure
-
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
@@ -614,10 +602,7 @@ substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
   M.findWithDefault (Var idd) idd subs
 
-instance (ASTRep rep, CanBeWise (Op rep)) => CanBeWise (SOAC rep) where
-  type OpWithWisdom (SOAC rep) = SOAC (Wise rep)
-
-  removeOpWisdom = runIdentity . mapSOACM (SOACMapper pure (pure . removeLambdaWisdom) pure)
+instance CanBeWise SOAC where
   addOpWisdom = runIdentity . mapSOACM (SOACMapper pure (pure . informLambda) pure)
 
 instance RepTypes rep => ST.IndexOp (SOAC rep) where
@@ -836,6 +821,31 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
     $ "Map function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given scan and reduction functions."
+
+instance RephraseOp SOAC where
+  rephraseInOp r (VJP lam args vec) =
+    VJP <$> rephraseLambda r lam <*> pure args <*> pure vec
+  rephraseInOp r (JVP lam args vec) =
+    JVP <$> rephraseLambda r lam <*> pure args <*> pure vec
+  rephraseInOp r (Stream w arrs acc lam) =
+    Stream w arrs acc <$> rephraseLambda r lam
+  rephraseInOp r (Scatter w arrs lam dests) =
+    Scatter w arrs <$> rephraseLambda r lam <*> pure dests
+  rephraseInOp r (Hist w arrs ops lam) =
+    Hist w arrs <$> mapM onOp ops <*> rephraseLambda r lam
+    where
+      onOp (HistOp dest_shape rf dests nes op) =
+        HistOp dest_shape rf dests nes <$> rephraseLambda r op
+  rephraseInOp r (Screma w arrs (ScremaForm scans red lam)) =
+    Screma w arrs
+      <$> ( ScremaForm
+              <$> mapM onScan scans
+              <*> mapM onRed red
+              <*> rephraseLambda r lam
+          )
+    where
+      onScan (Scan op nes) = Scan <$> rephraseLambda r op <*> pure nes
+      onRed (Reduce comm op nes) = Reduce comm <$> rephraseLambda r op <*> pure nes
 
 instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
   opMetrics (VJP lam _ _) =

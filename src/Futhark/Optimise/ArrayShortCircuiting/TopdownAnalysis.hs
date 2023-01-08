@@ -141,7 +141,7 @@ instance TopDownHelper (SegOp lvl rep) where
 
   scopeHelper op = scopeOfSegSpace $ segSpace op
 
-instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
+instance TopDownHelper (HostOp NoOp (Aliases GPUMem)) where
   innerNonNegatives vs (SegOp op) = innerNonNegatives vs op
   innerNonNegatives [vname] (SizeOp (GetSize _ _)) = oneName vname
   innerNonNegatives [vname] (SizeOp (GetSizeMax _)) = oneName vname
@@ -153,7 +153,7 @@ instance TopDownHelper (HostOp (Aliases GPUMem) ()) where
   scopeHelper (SegOp op) = scopeHelper op
   scopeHelper _ = mempty
 
-instance TopDownHelper inner => TopDownHelper (MC.MCOp (Aliases MCMem) inner) where
+instance TopDownHelper (inner (Aliases MCMem)) => TopDownHelper (MC.MCOp inner (Aliases MCMem)) where
   innerNonNegatives vs (ParOp par_op op) =
     maybe mempty (innerNonNegatives vs) par_op
       <> innerNonNegatives vs op
@@ -167,14 +167,14 @@ instance TopDownHelper inner => TopDownHelper (MC.MCOp (Aliases MCMem) inner) wh
     maybe mempty scopeHelper par_op <> scopeHelper op
   scopeHelper MC.OtherOp {} = mempty
 
-instance TopDownHelper () where
-  innerNonNegatives _ () = mempty
-  innerKnownLessThan () = mempty
-  scopeHelper () = mempty
+instance TopDownHelper (NoOp rep) where
+  innerNonNegatives _ NoOp = mempty
+  innerKnownLessThan NoOp = mempty
+  scopeHelper NoOp = mempty
 
 -- | fills in the TopdownEnv table
 updateTopdownEnv ::
-  (ASTRep rep, Op rep ~ MemOp inner, TopDownHelper (OpWithAliases inner)) =>
+  (ASTRep rep, Op rep ~ MemOp inner rep, TopDownHelper (inner (Aliases rep))) =>
   TopdownEnv rep ->
   Stm (Aliases rep) ->
   TopdownEnv rep

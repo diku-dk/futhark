@@ -147,10 +147,11 @@ expExtType (Op op) = opType op
 
 -- | The number of values returned by an expression.
 expExtTypeSize ::
+  forall rep.
   (RepTypes rep, TypedOp (Op rep)) =>
   Exp rep ->
   Int
-expExtTypeSize = length . feelBad . expExtType
+expExtTypeSize = length . (feelBad :: FeelBad rep [ExtType] -> [ExtType]) . expExtType
 
 -- FIXME, this is a horrible quick hack.
 newtype FeelBad rep a = FeelBad {feelBad :: a}
@@ -178,5 +179,5 @@ loopExtType params =
 class TypedOp op where
   opType :: HasScope t m => op -> m [ExtType]
 
-instance TypedOp () where
-  opType () = pure []
+instance TypedOp (NoOp rep) where
+  opType NoOp = pure []

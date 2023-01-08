@@ -9,7 +9,6 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bitraversable
-import Futhark.Analysis.Rephrase
 import Futhark.IR
 import Futhark.IR.MC
 import Futhark.IR.MC qualified as MC

@@ -33,6 +33,9 @@ class
   ppExpDec :: ExpDec rep -> Exp rep -> Maybe (Doc a)
   ppExpDec _ _ = Nothing
 
+instance Pretty (NoOp rep) where
+  pretty NoOp = "noop"
+
 instance Pretty VName where
   pretty (VName vn i) = pretty vn <> "_" <> pretty (show i)
 

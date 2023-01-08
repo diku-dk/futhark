@@ -264,8 +264,8 @@ type SinkRep rep = Aliases rep
 
 sink ::
   ( Buildable rep,
-    CanBeAliased (Op rep),
-    ST.IndexOp (OpWithAliases (Op rep))
+    AliasableRep rep,
+    ST.IndexOp (Op (Aliases rep))
   ) =>
   Sinker (SinkRep rep) (Op (SinkRep rep)) ->
   Pass rep rep
