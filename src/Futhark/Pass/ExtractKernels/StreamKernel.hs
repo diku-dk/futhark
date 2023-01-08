@@ -38,7 +38,7 @@ data KernelSize = KernelSize
   deriving (Eq, Ord, Show)
 
 numberOfGroups ::
-  (MonadBuilder m, Op (Rep m) ~ HostOp (Rep m) inner) =>
+  (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
   String ->
   SubExp ->
   SubExp ->

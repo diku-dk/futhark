@@ -70,10 +70,8 @@ instance RepTypes (Aliases rep) => LocalScope (Aliases rep) (LastUseM rep) where
 
 type Constraints rep =
   ( LocalScope (Aliases rep) (LastUseM rep),
-    ASTRep rep,
-    FreeIn (OpWithAliases (Op rep)),
     HasMemBlock (Aliases rep),
-    CanBeAliased (Op rep)
+    AliasableRep rep
   )
 
 runLastUseM :: LastUseOp rep -> LastUseM rep a -> a
@@ -294,8 +292,8 @@ lastUseExp e used_nms = do
   pure (M.empty, lu_vars, used_nms')
 
 lastUseMemOp ::
-  (inner -> Names -> LastUseM rep (LUTabFun, Names, Names)) ->
-  MemOp inner ->
+  (inner (Aliases rep) -> Names -> LastUseM rep (LUTabFun, Names, Names)) ->
+  MemOp inner (Aliases rep) ->
   Names ->
   LastUseM rep (LUTabFun, Names, Names)
 lastUseMemOp _ (Alloc se sp) used_nms = do
@@ -329,8 +327,8 @@ lastUseSegOp (SegHist _ _ hos tps kbody) used_nms = do
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
 
-lastUseGPUOp :: HostOp (Aliases GPUMem) () -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
-lastUseGPUOp (GPU.OtherOp ()) used_nms =
+lastUseGPUOp :: HostOp NoOp (Aliases GPUMem) -> Names -> LastUseM GPUMem (LUTabFun, Names, Names)
+lastUseGPUOp (GPU.OtherOp NoOp) used_nms =
   pure (mempty, mempty, used_nms)
 lastUseGPUOp (SizeOp sop) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn sop
@@ -342,8 +340,8 @@ lastUseGPUOp (GPUBody tps body) used_nms = do
 lastUseGPUOp (SegOp op) used_nms =
   lastUseSegOp op used_nms
 
-lastUseMCOp :: MCOp (Aliases MCMem) () -> Names -> LastUseM MCMem (LUTabFun, Names, Names)
-lastUseMCOp (MC.OtherOp ()) used_nms =
+lastUseMCOp :: MCOp NoOp (Aliases MCMem) -> Names -> LastUseM MCMem (LUTabFun, Names, Names)
+lastUseMCOp (MC.OtherOp NoOp) used_nms =
   pure (mempty, mempty, used_nms)
 lastUseMCOp (MC.ParOp par_op op) used_nms = do
   (lutab_par_op, lu_vars_par_op, used_names_par_op) <-
@@ -389,7 +387,7 @@ lastUseSeqOp (Alloc se sp) used_nms = do
   let free_in_e = freeIn se <> freeIn sp
   (used_nms', lu_vars) <- lastUsedInNames used_nms free_in_e
   pure (mempty, lu_vars, used_nms')
-lastUseSeqOp (Inner ()) used_nms = do
+lastUseSeqOp (Inner NoOp) used_nms = do
   pure (mempty, mempty, used_nms)
 
 ------------------------------------------------------

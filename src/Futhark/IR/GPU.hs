@@ -17,6 +17,7 @@ where
 
 import Futhark.Builder
 import Futhark.Construct
+import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.GPU.Op
 import Futhark.IR.GPU.Sizes
 import Futhark.IR.Pretty
@@ -30,18 +31,21 @@ import Futhark.IR.TypeCheck qualified as TC
 data GPU
 
 instance RepTypes GPU where
-  type Op GPU = HostOp GPU (SOAC GPU)
+  type OpC GPU = HostOp SOAC
 
 instance ASTRep GPU where
   expTypesFromPat = pure . expExtTypesFromPat
 
-instance TC.CheckableOp GPU where
+instance TC.Checkable GPU where
   checkOp = typeCheckGPUOp Nothing
     where
+      -- GHC 9.2 goes into an infinite loop without the type annotation.
+      typeCheckGPUOp ::
+        Maybe SegLevel ->
+        HostOp SOAC (Aliases GPU) ->
+        TC.TypeM GPU ()
       typeCheckGPUOp lvl =
         typeCheckHostOp (typeCheckGPUOp . Just) lvl typeCheckSOAC
-
-instance TC.Checkable GPU
 
 instance Buildable GPU where
   mkBody = Body ()

@@ -21,8 +21,8 @@ import Control.Monad
 import Control.Monad.Writer
 import Futhark.Analysis.PrimExp
 import Futhark.IR
+import Futhark.IR.Aliases (AliasableRep)
 import Futhark.IR.GPU.Op (SegVirt (..))
-import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -37,7 +37,7 @@ type DistRep rep =
     LetDec rep ~ Type,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    CanBeAliased (Op rep)
+    AliasableRep rep
   )
 
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt

@@ -47,7 +47,7 @@ lowerUpdate ::
   ( MonadFreshNames m,
     Buildable rep,
     LetDec rep ~ Type,
-    CanBeAliased (Op rep)
+    AliasableRep rep
   ) =>
   LowerUpdate rep m
 lowerUpdate scope (Let pat aux (DoLoop merge form body)) updates = do
