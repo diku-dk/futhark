@@ -1,5 +1,7 @@
 // Start of backends/opencl.h
 
+extern int required_types;
+
 #define OPENCL_SUCCEED_FATAL(e) opencl_succeed_fatal(e, #e, __FILE__, __LINE__)
 #define OPENCL_SUCCEED_NONFATAL(e) opencl_succeed_nonfatal(e, #e, __FILE__, __LINE__)
 // Take care not to override an existing error.
@@ -607,7 +609,6 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
                                             struct opencl_context *ctx,
                                             cl_command_queue queue,
                                             const char *srcs[],
-                                            int required_types,
                                             const char *extra_build_opts[],
                                             const char* cache_fname) {
   int error;
@@ -900,7 +901,6 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
 static void setup_opencl(struct futhark_context_config *cfg,
                          struct opencl_context *ctx,
                          const char *srcs[],
-                         int required_types,
                          const char *extra_build_opts[],
                          const char* cache_fname) {
 
@@ -931,7 +931,7 @@ static void setup_opencl(struct futhark_context_config *cfg,
                          &clCreateCommandQueue_error);
   OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
-  setup_opencl_with_command_queue(cfg, ctx, queue, srcs, required_types, extra_build_opts,
+  setup_opencl_with_command_queue(cfg, ctx, queue, srcs, extra_build_opts,
                                   cache_fname);
 }
 

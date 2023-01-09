@@ -209,9 +209,11 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                          typename int64_t peak_mem_usage_device;
                          typename int64_t cur_mem_usage_device;
                          struct program* program;
+                         int max_failure_args;
                        };|]
     )
 
+  let max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
   GC.earlyDecl
     [C.cedecl|static void init_context_early(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
                      context_setup(cfg, ctx);
@@ -223,6 +225,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                      ctx->failure_is_an_option = 0;
                      ctx->total_runs = 0;
                      ctx->total_runtime = 0;
+                     ctx->max_failure_args = $int:max_failure_args;
   }|]
 
   let set_tuning_params =
@@ -230,8 +233,6 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
           (\i k -> [C.cstm|ctx->tuning_params.$id:k = &cfg->tuning_params[$int:i];|])
           [(0 :: Int) ..]
           $ M.keys sizes
-      max_failure_args =
-        foldl max 0 $ map (errorMsgNumArgs . failureError) failures
 
   GC.earlyDecl
     [C.cedecl|static void set_tuning_params(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
@@ -253,7 +254,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                      ctx->global_failure_args =
                        clCreateBuffer(ctx->opencl.ctx,
                                       CL_MEM_READ_WRITE,
-                                      sizeof(int64_t)*($int:max_failure_args+1), NULL, &error);
+                                      sizeof(int64_t)*(ctx->max_failure_args+1), NULL, &error);
                      OPENCL_SUCCEED_OR_RETURN(error);
 
                      set_tuning_params(cfg, ctx);
@@ -265,11 +266,6 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                      return futhark_context_sync(ctx);
   }|]
 
-  let set_required_types =
-        [ [C.cstm|required_types |= OPENCL_F64; |]
-          | FloatType Float64 `elem` types
-        ]
-
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg) {
@@ -278,11 +274,8 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                             return NULL;
                           }
 
-                          int required_types = 0;
-                          $stms:set_required_types
-
                           init_context_early(cfg, ctx);
-                          setup_opencl(ctx->cfg, &ctx->opencl, opencl_program, required_types, cfg->build_opts,
+                          setup_opencl(ctx->cfg, &ctx->opencl, opencl_program, cfg->build_opts,
                                        cfg->cache_fname);
                           init_context_late(cfg, ctx);
                           return ctx;
@@ -297,11 +290,8 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                             return NULL;
                           }
 
-                          int required_types = 0;
-                          $stms:set_required_types
-
                           init_context_early(cfg, ctx);
-                          setup_opencl_with_command_queue(ctx->cfg, &ctx->opencl, queue, opencl_program, required_types, cfg->build_opts,
+                          setup_opencl_with_command_queue(ctx->cfg, &ctx->opencl, queue, opencl_program, cfg->build_opts,
                                                           cfg->cache_fname);
                           init_context_late(cfg, ctx);
                           return ctx;
@@ -349,7 +339,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                                          0, sizeof(cl_int), &no_failure,
                                          0, NULL, NULL));
 
-                   typename int64_t args[$int:max_failure_args+1];
+                   typename int64_t args[ctx->max_failure_args+1];
                    OPENCL_SUCCEED_OR_RETURN(
                      clEnqueueReadBuffer(ctx->opencl.queue,
                                          ctx->global_failure_args,
@@ -372,15 +362,18 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                }|]
     )
 
+  let required_types
+        | FloatType Float64 `elem` types = [C.cexp|OPENCL_F64|]
+        | otherwise = [C.cexp|0|]
+  GC.libDecl [C.cedecl|int required_types = $exp:required_types;|]
+
   GC.onClear
     [C.citem|if (ctx->error == NULL) {
                         ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
                       }|]
 
   GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(&ctx->opencl));|]
-  mapM_ GC.profileReport $
-    costCentreReport $
-      cost_centres ++ M.keys kernels
+  mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
 
 kernelRuntime :: KernelName -> Name
 kernelRuntime = (<> "_total_runtime")
