@@ -341,7 +341,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       }
       $items:bef
       CUDA_SUCCEED_OR_RETURN(
-        cuLaunchKernel(ctx->$id:kernel_name,
+        cuLaunchKernel(ctx->program->$id:kernel_name,
                        grid[0], grid[1], grid[2],
                        $exp:block_x, $exp:block_y, $exp:block_z,
                        $exp:shared_tot, NULL,
