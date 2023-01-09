@@ -315,7 +315,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   when (safety == SafetyFull) $
     GC.stm
       [C.cstm|
-      OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, 1,
+      OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, 1,
                                               sizeof(ctx->failure_is_an_option),
                                               &ctx->failure_is_an_option));
     |]
@@ -343,19 +343,19 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
         _ -> GC.compileExpToName "kernel_arg" pt e
       GC.stm
         [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($id:v), &$id:v));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, sizeof($id:v), &$id:v));
           |]
     setKernelArg i (MemKArg v) = do
       v' <- GC.rawMem v
       GC.stm
         [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($exp:v'), &$exp:v'));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, sizeof($exp:v'), &$exp:v'));
           |]
     setKernelArg i (SharedMemoryKArg num_bytes) = do
       num_bytes' <- GC.compileExp $ unCount num_bytes
       GC.stm
         [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, (size_t)$exp:num_bytes', NULL));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, (size_t)$exp:num_bytes', NULL));
             |]
 
     localBytes cur (SharedMemoryKArg num_bytes) = do
@@ -391,7 +391,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
       }
       typename cl_event *pevent = $exp:(profilingEvent kernel_name);
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueNDRangeKernel(ctx->opencl.queue, ctx->$id:kernel_name, $int:kernel_rank, NULL,
+        clEnqueueNDRangeKernel(ctx->opencl.queue, ctx->program->$id:kernel_name, $int:kernel_rank, NULL,
                                $id:global_work_size, $id:local_work_size,
                                0, NULL, pevent));
       if (ctx->debugging) {

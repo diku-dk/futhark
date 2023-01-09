@@ -454,6 +454,7 @@ struct opencl_context {
   cl_device_id device;
   cl_context ctx;
   cl_command_queue queue;
+  cl_program program;
 
   struct free_list free_list;
 
@@ -602,13 +603,13 @@ static char* mk_compile_opts(struct futhark_context_config *cfg,
 // C does not guarantee that the compiler supports particularly large
 // literals.  Notably, Visual C has a limit of 2048 characters.  The
 // array must be NULL-terminated.
-static cl_program setup_opencl_with_command_queue(struct futhark_context_config *cfg,
-                                                  struct opencl_context *ctx,
-                                                  cl_command_queue queue,
-                                                  const char *srcs[],
-                                                  int required_types,
-                                                  const char *extra_build_opts[],
-                                                  const char* cache_fname) {
+static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
+                                            struct opencl_context *ctx,
+                                            cl_command_queue queue,
+                                            const char *srcs[],
+                                            int required_types,
+                                            const char *extra_build_opts[],
+                                            const char* cache_fname) {
   int error;
 
   free_list_init(&ctx->free_list);
@@ -893,15 +894,15 @@ static cl_program setup_opencl_with_command_queue(struct futhark_context_config 
     dump_file(cfg->dump_binary_to, binary, binary_size);
   }
 
-  return prog;
+  ctx->program = prog;
 }
 
-static cl_program setup_opencl(struct futhark_context_config *cfg,
-                               struct opencl_context *ctx,
-                               const char *srcs[],
-                               int required_types,
-                               const char *extra_build_opts[],
-                               const char* cache_fname) {
+static void setup_opencl(struct futhark_context_config *cfg,
+                         struct opencl_context *ctx,
+                         const char *srcs[],
+                         int required_types,
+                         const char *extra_build_opts[],
+                         const char* cache_fname) {
 
   ctx->lockstep_width = 0; // Real value set later.
 
@@ -930,8 +931,8 @@ static cl_program setup_opencl(struct futhark_context_config *cfg,
                          &clCreateCommandQueue_error);
   OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
-  return setup_opencl_with_command_queue(cfg, ctx, queue, srcs, required_types, extra_build_opts,
-                                         cache_fname);
+  setup_opencl_with_command_queue(cfg, ctx, queue, srcs, required_types, extra_build_opts,
+                                  cache_fname);
 }
 
 // Count up the runtime all the profiling_records that occured during execution.
@@ -1117,6 +1118,7 @@ static void teardown_opencl(struct opencl_context *ctx) {
   (void)opencl_tally_profiling_records(ctx);
   free(ctx->profiling_records);
   (void)opencl_free_all(ctx);
+  (void)clReleaseProgram(ctx->program);
   (void)clReleaseCommandQueue(ctx->queue);
   (void)clReleaseContext(ctx->ctx);
 }
