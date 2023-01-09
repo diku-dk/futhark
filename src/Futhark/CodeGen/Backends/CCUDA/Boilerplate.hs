@@ -171,6 +171,11 @@ generateContextFuns cost_centres kernels sizes failures = do
       max_failure_args =
         foldl max 0 $ map (errorMsgNumArgs . failureError) failures
 
+  GC.earlyDecl
+    [C.cedecl|static void set_tuning_params(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
+             $stms:set_tuning_params
+       }|]
+
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg);|],
       [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg) {
@@ -202,8 +207,7 @@ generateContextFuns cost_centres kernels sizes failures = do
                  // The +1 is to avoid zero-byte allocations.
                  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*($int:max_failure_args+1)));
 
-                 $stms:set_tuning_params
-
+                 set_tuning_params(cfg, ctx);
                  setup_program(cfg, ctx);
                  init_constants(ctx);
                  // Clear the free list of any deallocations that occurred while initialising constants.

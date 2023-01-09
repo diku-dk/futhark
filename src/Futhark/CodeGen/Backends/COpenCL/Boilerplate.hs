@@ -234,6 +234,11 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
         foldl max 0 $ map (errorMsgNumArgs . failureError) failures
 
   GC.earlyDecl
+    [C.cedecl|static void set_tuning_params(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
+             $stms:set_tuning_params
+       }|]
+
+  GC.earlyDecl
     [C.cedecl|static int init_context_late(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
                      typename cl_int error;
 
@@ -251,8 +256,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                                       sizeof(int64_t)*($int:max_failure_args+1), NULL, &error);
                      OPENCL_SUCCEED_OR_RETURN(error);
 
-                     $stms:set_tuning_params
-
+                     set_tuning_params(cfg, ctx);
                      setup_program(cfg, ctx);
                      init_constants(ctx);
                      // Clear the free list of any deallocations that occurred while initialising constants.
