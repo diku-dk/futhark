@@ -123,8 +123,14 @@ generateOpenCLDecls cost_centres kernels = do
       (loadKernel (name, safety))
       (releaseKernel (name, safety))
   forM_ (cost_centres <> M.keys kernels) $ \name -> do
-    GC.contextField (C.toIdent (kernelRuntime name) mempty) [C.cty|typename int64_t|] (Just [C.cexp|0|])
-    GC.contextField (C.toIdent (kernelRuns name) mempty) [C.cty|int|] (Just [C.cexp|0|])
+    GC.contextField
+      (C.toIdent (kernelRuntime name) mempty)
+      [C.cty|typename int64_t|]
+      (Just [C.cexp|0|])
+    GC.contextField
+      (C.toIdent (kernelRuns name) mempty)
+      [C.cty|int|]
+      (Just [C.cexp|0|])
   GC.earlyDecl
     [C.cedecl|
 void post_opencl_setup(struct futhark_context_config *cfg, struct opencl_context *ctx, struct opencl_device_option *option) {

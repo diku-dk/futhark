@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.CCUDA.Boilerplate
   )
 where
 
+import Control.Monad
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
@@ -75,7 +76,6 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
   generateTuningParams sizes
   generateConfigFuns
   generateContextFuns cost_centres kernels sizes failures
-  GC.generateProgramStruct
 
   GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(&ctx->cuda));|]
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
@@ -107,28 +107,29 @@ generateContextFuns ::
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
 generateContextFuns cost_centres kernels sizes failures = do
-  let forCostCentre name =
-        [ ( [C.csdecl|typename int64_t $id:(kernelRuntime name);|],
-            [C.cstm|ctx->program->$id:(kernelRuntime name) = 0;|]
-          ),
-          ( [C.csdecl|int $id:(kernelRuns name);|],
-            [C.cstm|ctx->program->$id:(kernelRuns name) = 0;|]
-          )
-        ]
+  let forCostCentre name = do
+        GC.contextField
+          (C.toIdent (kernelRuntime name) mempty)
+          [C.cty|typename int64_t|]
+          (Just [C.cexp|0|])
+        GC.contextField
+          (C.toIdent (kernelRuns name) mempty)
+          [C.cty|int|]
+          (Just [C.cexp|0|])
 
-      forKernel name =
-        ( [C.csdecl|typename CUfunction $id:name;|],
-          [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
+  forM_ (M.keys kernels) $ \name -> do
+    GC.contextFieldDyn
+      (C.toIdent name mempty)
+      [C.cty|typename CUfunction|]
+      [C.cstm|
+             CUDA_SUCCEED_FATAL(cuModuleGetFunction(
                                      &ctx->program->$id:name,
                                      ctx->cuda.module,
                                      $string:(T.unpack (idText (C.toIdent name mempty)))));|]
-        )
-          : forCostCentre name
+      [C.cstm|{}|]
+    forCostCentre name
 
-      (kernel_fields, init_kernel_fields) =
-        unzip $
-          concatMap forKernel (M.keys kernels)
-            ++ concatMap forCostCentre cost_centres
+  mapM_ forCostCentre cost_centres
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
@@ -158,8 +159,7 @@ generateContextFuns cost_centres kernels sizes failures = do
                          long int total_runtime;
                          typename int64_t peak_mem_usage_device;
                          typename int64_t cur_mem_usage_device;
-
-                         $sdecls:kernel_fields
+                         struct program* program;
                        };|]
     )
 
@@ -189,7 +189,6 @@ generateContextFuns cost_centres kernels sizes failures = do
                  ctx->failure_is_an_option = 0;
                  ctx->total_runs = 0;
                  ctx->total_runtime = 0;
-                 setup_program(cfg, ctx);
 
                  ctx->error = cuda_setup(ctx->cfg, &ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
 
@@ -203,10 +202,9 @@ generateContextFuns cost_centres kernels sizes failures = do
                  // The +1 is to avoid zero-byte allocations.
                  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*($int:max_failure_args+1)));
 
-                 $stms:init_kernel_fields
-
                  $stms:set_tuning_params
 
+                 setup_program(cfg, ctx);
                  init_constants(ctx);
                  // Clear the free list of any deallocations that occurred while initialising constants.
                  CUDA_SUCCEED_FATAL(cuda_free_all(&ctx->cuda));
@@ -228,6 +226,8 @@ generateContextFuns cost_centres kernels sizes failures = do
                   free(ctx);
                 }|]
     )
+
+  GC.generateProgramStruct
 
   GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
