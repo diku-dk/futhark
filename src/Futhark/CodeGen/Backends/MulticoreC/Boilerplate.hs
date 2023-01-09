@@ -16,8 +16,6 @@ generateBoilerplate = do
 
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_num_threads(struct futhark_context_config *cfg, int n);|]
 
-  (fields, init_fields, free_fields) <- GC.contextContents
-
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
@@ -38,11 +36,10 @@ generateBoilerplate = do
                       typename int64_t peak_mem_usage_default;
                       typename int64_t cur_mem_usage_default;
                       struct constants *constants;
+                      struct program *program;
 
                       typename int64_t tuning_timing;
                       typename int64_t tuning_iter;
-
-                      $sdecls:fields
                     };|]
     )
 
@@ -71,8 +68,8 @@ generateBoilerplate = do
                                 kappa) != 0) {
                return NULL;
              }
-             $stms:init_fields
              context_setup(cfg, ctx);
+             setup_program(cfg, ctx);
              init_constants(ctx);
              return ctx;
           }|]
@@ -81,11 +78,11 @@ generateBoilerplate = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-             $stms:free_fields
-             context_teardown(ctx);
-             (void)scheduler_destroy(&ctx->scheduler);
-             free(ctx);
-           }|]
+                  teardown_program(ctx);
+                  context_teardown(ctx);
+                  (void)scheduler_destroy(&ctx->scheduler);
+                  free(ctx);
+                }|]
     )
 
   GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
@@ -95,6 +92,8 @@ generateBoilerplate = do
                              return 0;
                            }|]
     )
+
+  GC.generateProgramStruct
 
   GC.earlyDecl [C.cedecl|static const int num_tuning_params = 0;|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[1];|]

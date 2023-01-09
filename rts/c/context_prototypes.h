@@ -13,6 +13,8 @@ static int init_constants(struct futhark_context*);
 static int free_constants(struct futhark_context*);
 static void context_setup(struct futhark_context_config* cfg, struct futhark_context *ctx);
 static void context_teardown(struct futhark_context *ctx);
+static void setup_program(struct futhark_context_config *cfg, struct futhark_context* ctx);
+static void teardown_program(struct futhark_context *ctx);
 
 // Allocate host memory.  Must be freed with host_free().
 static void host_alloc(struct futhark_context* ctx, size_t size, const char* tag, size_t* size_out, void** mem_out);

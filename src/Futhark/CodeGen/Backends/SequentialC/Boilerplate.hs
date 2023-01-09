@@ -11,8 +11,6 @@ import Language.C.Quote.OpenCL qualified as C
 -- | Generate the necessary boilerplate.
 generateBoilerplate :: GC.CompilerM op s ()
 generateBoilerplate = do
-  (fields, init_fields, free_fields) <- GC.contextContents
-
   GC.earlyDecl [C.cedecl|$esc:(T.unpack backendsCH)|]
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
@@ -32,8 +30,7 @@ generateBoilerplate = do
                           typename int64_t peak_mem_usage_default;
                           typename int64_t cur_mem_usage_default;
                           struct constants *constants;
-
-                          $sdecls:fields
+                          struct program* program;
                         };|]
     )
 
@@ -45,7 +42,7 @@ generateBoilerplate = do
                                     return NULL;
                                   }
                                   context_setup(cfg, ctx);
-                                  $stms:init_fields
+                                  setup_program(cfg, ctx);
                                   init_constants(ctx);
                                   return ctx;
                                }|]
@@ -54,7 +51,7 @@ generateBoilerplate = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                                 $stms:free_fields
+                                 teardown_program(ctx);
                                  context_teardown(ctx);
                                  free(ctx);
                                }|]
@@ -67,6 +64,8 @@ generateBoilerplate = do
                                  return 0;
                                }|]
     )
+
+  GC.generateProgramStruct
 
   GC.earlyDecl [C.cedecl|static const int num_tuning_params = 0;|]
   GC.earlyDecl [C.cedecl|static const char *tuning_param_names[1];|]

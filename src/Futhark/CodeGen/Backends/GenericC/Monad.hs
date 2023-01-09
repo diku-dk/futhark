@@ -25,8 +25,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     CompilerEnv (..),
     getUserState,
     modifyUserState,
-    contextContents,
-    contextFinalInits,
+    generateProgramStruct,
     runCompilerM,
     inNewFunction,
     cachingMemory,
@@ -37,7 +36,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     stm,
     stms,
     decl,
-    atInit,
     headerDecl,
     publicDef,
     publicDef_,
@@ -109,7 +107,6 @@ type ArrayType = (Signedness, PrimType, Int)
 data CompilerState s = CompilerState
   { compArrayTypes :: M.Map ArrayType Publicness,
     compEarlyDecls :: DL.DList C.Definition,
-    compInit :: [C.Stm],
     compNameSrc :: VNameSource,
     compUserState :: s,
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
@@ -126,7 +123,6 @@ newCompilerState src s =
   CompilerState
     { compArrayTypes = mempty,
       compEarlyDecls = mempty,
-      compInit = [],
       compNameSrc = src,
       compUserState = s,
       compHeaderDecls = mempty,
@@ -260,13 +256,27 @@ contextContents = do
           | (name, ty) <- zip field_names field_types
         ]
       init_fields =
-        [ [C.cstm|ctx->$id:name = $exp:e;|]
+        [ [C.cstm|ctx->program->$id:name = $exp:e;|]
           | (name, Just e) <- zip field_names field_values
         ]
   pure (fields, init_fields, catMaybes field_frees)
 
-contextFinalInits :: CompilerM op s [C.Stm]
-contextFinalInits = gets compInit
+generateProgramStruct :: CompilerM op s ()
+generateProgramStruct = do
+  (fields, init_fields, free_fields) <- contextContents
+  mapM_
+    earlyDecl
+    [C.cunit|struct program {
+               $sdecls:fields
+             };
+             static void setup_program(struct futhark_context_config *cfg, struct futhark_context* ctx) {
+               ctx->program = malloc(sizeof(struct program));
+               $stms:init_fields
+             }
+             static void teardown_program(struct futhark_context *ctx) {
+               $stms:free_fields
+               free(ctx->program);
+             }|]
 
 newtype CompilerM op s a
   = CompilerM (ReaderT (CompilerEnv op s) (State (CompilerState s)) a)
@@ -299,10 +309,6 @@ getUserState = gets compUserState
 modifyUserState :: (s -> s) -> CompilerM op s ()
 modifyUserState f = modify $ \compstate ->
   compstate {compUserState = f $ compUserState compstate}
-
-atInit :: C.Stm -> CompilerM op s ()
-atInit x = modify $ \s ->
-  s {compInit = compInit s ++ [x]}
 
 collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 collect m = snd <$> collect' m

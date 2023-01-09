@@ -96,8 +96,6 @@ generateBoilerplate ::
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
 generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes failures = do
-  final_inits <- GC.contextFinalInits
-
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
         openClDecls cost_centres kernels (opencl_prelude <> opencl_code)
 
@@ -121,7 +119,6 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg, const char *param_name, size_t new_value);|]
 
-  (fields, init_fields, free_fields) <- GC.contextContents
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s {
@@ -150,8 +147,8 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          long int total_runtime;
                          typename int64_t peak_mem_usage_device;
                          typename int64_t cur_mem_usage_device;
+                         struct program* program;
 
-                         $sdecls:fields
                          $sdecls:ctx_opencl_fields
                        };|]
     )
@@ -167,11 +164,11 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      ctx->opencl.profiling_records =
                        malloc(ctx->opencl.profiling_records_capacity *
                               sizeof(struct profiling_record));
-
                      ctx->failure_is_an_option = 0;
                      ctx->total_runs = 0;
                      ctx->total_runtime = 0;
-                     $stms:init_fields
+                     setup_program(cfg, ctx);
+
                      $stms:ctx_opencl_inits
   }|]
 
@@ -204,7 +201,6 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      // Load all the kernels.
                      $stms:(map loadKernel (M.toList kernels))
 
-                     $stms:final_inits
                      $stms:set_tuning_params
 
                      init_constants(ctx);
@@ -265,11 +261,11 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                                 $stms:free_fields
                                  context_teardown(ctx);
                                  $stms:(map releaseKernel (M.toList kernels))
                                  OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
                                  OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
+                                 teardown_program(ctx);
                                  teardown_opencl(&ctx->opencl);
                                  ctx->cfg->in_use = 0;
                                  free(ctx);
@@ -324,6 +320,8 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                  return ctx->opencl.queue;
                }|]
     )
+
+  GC.generateProgramStruct
 
   GC.onClear
     [C.citem|if (ctx->error == NULL) {

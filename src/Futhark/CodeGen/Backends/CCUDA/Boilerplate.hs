@@ -69,12 +69,13 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
       $esc:(T.unpack backendsCudaH)
-      const char *cuda_program[] = {$inits:fragments, NULL};
+      static const char *cuda_program[] = {$inits:fragments, NULL};
       |]
 
   generateTuningParams sizes
   generateConfigFuns
   generateContextFuns cost_centres kernels sizes failures
+  GC.generateProgramStruct
 
   GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(&ctx->cuda));|]
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
@@ -106,8 +107,6 @@ generateContextFuns ::
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
 generateContextFuns cost_centres kernels sizes failures = do
-  final_inits <- GC.contextFinalInits
-  (fields, init_fields, free_fields) <- GC.contextContents
   let forCostCentre name =
         [ ( [C.csdecl|typename int64_t $id:(kernelRuntime name);|],
             [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
@@ -160,7 +159,6 @@ generateContextFuns cost_centres kernels sizes failures = do
                          typename int64_t peak_mem_usage_device;
                          typename int64_t cur_mem_usage_device;
 
-                         $sdecls:fields
                          $sdecls:kernel_fields
                        };|]
     )
@@ -191,7 +189,7 @@ generateContextFuns cost_centres kernels sizes failures = do
                  ctx->failure_is_an_option = 0;
                  ctx->total_runs = 0;
                  ctx->total_runtime = 0;
-                 $stms:init_fields
+                 setup_program(cfg, ctx);
 
                  ctx->error = cuda_setup(ctx->cfg, &ctx->cuda, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
 
@@ -207,7 +205,6 @@ generateContextFuns cost_centres kernels sizes failures = do
 
                  $stms:init_kernel_fields
 
-                 $stms:final_inits
                  $stms:set_tuning_params
 
                  init_constants(ctx);
@@ -223,13 +220,13 @@ generateContextFuns cost_centres kernels sizes failures = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                                 $stms:free_fields
-                                 context_teardown(ctx);
-                                 cuMemFree(ctx->global_failure);
-                                 cuMemFree(ctx->global_failure_args);
-                                 cuda_cleanup(&ctx->cuda);
-                                 free(ctx);
-                               }|]
+                  teardown_program(ctx);
+                  context_teardown(ctx);
+                  cuMemFree(ctx->global_failure);
+                  cuMemFree(ctx->global_failure_args);
+                  cuda_cleanup(&ctx->cuda);
+                  free(ctx);
+                }|]
     )
 
   GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->

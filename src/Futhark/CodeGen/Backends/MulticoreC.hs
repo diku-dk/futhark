@@ -240,12 +240,12 @@ multiCoreReport names = report_kernels
                        fprintf(ctx->log,
                          $string:(format_string name is_array),
                          i,
-                         ctx->$id:runs[i],
-                         (long int) ctx->$id:total_runtime[i] / (ctx->$id:runs[i] != 0 ? ctx->$id:runs[i] : 1),
-                         (long int) ctx->$id:total_runtime[i],
-                         (double) ctx->$id:total_runtime[i] /  (ctx->$id:iters[i] == 0 ? 1 : (double)ctx->$id:iters[i]),
-                         (long int) (ctx->$id:iters[i]),
-                         (long int) (ctx->$id:iters[i]) / (ctx->$id:runs[i] != 0 ? ctx->$id:runs[i] : 1)
+                         ctx->program->$id:runs[i],
+                         (long int) ctx->program->$id:total_runtime[i] / (ctx->program->$id:runs[i] != 0 ? ctx->program->$id:runs[i] : 1),
+                         (long int) ctx->program->$id:total_runtime[i],
+                         (double) ctx->program->$id:total_runtime[i] /  (ctx->program->$id:iters[i] == 0 ? 1 : (double)ctx->program->$id:iters[i]),
+                         (long int) (ctx->program->$id:iters[i]),
+                         (long int) (ctx->program->$id:iters[i]) / (ctx->program->$id:runs[i] != 0 ? ctx->program->$id:runs[i] : 1)
                          );
                      }
                    |]
@@ -254,15 +254,15 @@ multiCoreReport names = report_kernels
               [ [C.citem|
                     fprintf(ctx->log,
                        $string:(format_string name is_array),
-                       ctx->$id:runs,
-                       (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
-                       (long int) ctx->$id:total_runtime,
-                       (double) ctx->$id:total_runtime /  (ctx->$id:iters == 0 ? 1 : (double)ctx->$id:iters),
-                       (long int) (ctx->$id:iters),
-                       (long int) (ctx->$id:iters) / (ctx->$id:runs != 0 ? ctx->$id:runs : 1));
+                       ctx->program->$id:runs,
+                       (long int) ctx->program->$id:total_runtime / (ctx->program->$id:runs != 0 ? ctx->program->$id:runs : 1),
+                       (long int) ctx->program->$id:total_runtime,
+                       (double) ctx->program->$id:total_runtime /  (ctx->program->$id:iters == 0 ? 1 : (double)ctx->program->$id:iters),
+                       (long int) (ctx->program->$id:iters),
+                       (long int) (ctx->program->$id:iters) / (ctx->program->$id:runs != 0 ? ctx->program->$id:runs : 1));
                    |],
-                [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
-                [C.citem|ctx->total_runs += ctx->$id:runs;|]
+                [C.citem|ctx->total_runtime += ctx->program->$id:total_runtime;|],
+                [C.citem|ctx->total_runs += ctx->program->$id:runs;|]
               ]
 
 addBenchmarkFields :: Name -> Maybe C.Id -> GC.CompilerM op s ()
@@ -271,17 +271,17 @@ addBenchmarkFields name (Just _) = do
     (functionRuntime name)
     [C.cty|typename int64_t*|]
     (Just [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|])
-    [C.cstm|free(ctx->$id:(functionRuntime name));|]
+    [C.cstm|free(ctx->program->$id:(functionRuntime name));|]
   GC.contextFieldDyn
     (functionRuns name)
     [C.cty|int*|]
     (Just [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|])
-    [C.cstm|free(ctx->$id:(functionRuns name));|]
+    [C.cstm|free(ctx->program->$id:(functionRuns name));|]
   GC.contextFieldDyn
     (functionIter name)
     [C.cty|typename int64_t*|]
     (Just [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|])
-    [C.cstm|free(ctx->$id:(functionIter name));|]
+    [C.cstm|free(ctx->program->$id:(functionIter name));|]
 addBenchmarkFields name Nothing = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
@@ -307,13 +307,13 @@ benchmarkCode name tid code = do
     start = name <> "_start"
     end = name <> "_end"
     updateFields Nothing =
-      [C.citems|__atomic_fetch_add(&ctx->$id:(functionRuns name), 1, __ATOMIC_RELAXED);
-                                            __atomic_fetch_add(&ctx->$id:(functionRuntime name), elapsed, __ATOMIC_RELAXED);
-                                            __atomic_fetch_add(&ctx->$id:(functionIter name), iterations, __ATOMIC_RELAXED);|]
+      [C.citems|__atomic_fetch_add(&ctx->program->$id:(functionRuns name), 1, __ATOMIC_RELAXED);
+                                            __atomic_fetch_add(&ctx->program->$id:(functionRuntime name), elapsed, __ATOMIC_RELAXED);
+                                            __atomic_fetch_add(&ctx->program->$id:(functionIter name), iterations, __ATOMIC_RELAXED);|]
     updateFields (Just _tid') =
-      [C.citems|ctx->$id:(functionRuns name)[tid]++;
-                                            ctx->$id:(functionRuntime name)[tid] += elapsed;
-                                            ctx->$id:(functionIter name)[tid] += iterations;|]
+      [C.citems|ctx->program->$id:(functionRuns name)[tid]++;
+                                            ctx->program->$id:(functionRuntime name)[tid] += elapsed;
+                                            ctx->program->$id:(functionIter name)[tid] += iterations;|]
 
 functionTiming :: Name -> C.Id
 functionTiming = (`C.toIdent` mempty) . (<> "_total_time")
@@ -434,8 +434,8 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
   GC.stm [C.cstm|$id:ftask_name.iterations = $exp:e';|]
   -- Create the timing fields for the task
-  GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->$id:(functionTiming fpar_task);|]
-  GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(functionIterations fpar_task);|]
+  GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->program->$id:(functionTiming fpar_task);|]
+  GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->program->$id:(functionIterations fpar_task);|]
 
   case sched of
     Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
