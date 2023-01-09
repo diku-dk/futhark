@@ -40,8 +40,8 @@ profilingEnclosure name =
       typename cudaEvent_t *pevents = NULL;
       if (ctx->profiling && !ctx->profiling_paused) {
         pevents = cuda_get_events(&ctx->cuda,
-                                  &ctx->$id:(kernelRuns name),
-                                  &ctx->$id:(kernelRuntime name));
+                                  &ctx->program->$id:(kernelRuns name),
+                                  &ctx->program->$id:(kernelRuntime name));
         CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[0], 0));
       }
       |],
@@ -109,17 +109,17 @@ generateContextFuns ::
 generateContextFuns cost_centres kernels sizes failures = do
   let forCostCentre name =
         [ ( [C.csdecl|typename int64_t $id:(kernelRuntime name);|],
-            [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
+            [C.cstm|ctx->program->$id:(kernelRuntime name) = 0;|]
           ),
           ( [C.csdecl|int $id:(kernelRuns name);|],
-            [C.cstm|ctx->$id:(kernelRuns name) = 0;|]
+            [C.cstm|ctx->program->$id:(kernelRuns name) = 0;|]
           )
         ]
 
       forKernel name =
         ( [C.csdecl|typename CUfunction $id:name;|],
           [C.cstm|CUDA_SUCCEED_FATAL(cuModuleGetFunction(
-                                     &ctx->$id:name,
+                                     &ctx->program->$id:name,
                                      ctx->cuda.module,
                                      $string:(T.unpack (idText (C.toIdent name mempty)))));|]
         )
