@@ -172,8 +172,9 @@ allConsumed = S.unions . map (fromMaybe mempty . consumed)
 allOccurring :: Occurrences -> Names
 allOccurring occs = allConsumed occs <> allObserved occs
 
+-- | Find any consumption that references a variable in scope.
 anyConsumption :: Occurrences -> Maybe Occurrence
-anyConsumption = find (isJust . consumed)
+anyConsumption = find (maybe False (not . null) . consumed)
 
 seqOccurrences :: Occurrences -> Occurrences -> Occurrences
 seqOccurrences occurs1 occurs2 =

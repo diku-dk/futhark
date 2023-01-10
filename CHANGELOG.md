@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark literate` now supports a `$loadaudio` builtin function for loading
   audio to Futhark programs (#1829).
 
+* You can now mix consumption and higher-order terms in slightly more
+  cases (#1836).
+
 ### Removed
 
 ### Changed
