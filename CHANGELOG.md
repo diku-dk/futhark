@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Parser did not recognise custom infix operators that did not have a
   builtin operator as prefix (#1824).
 
+* GPU backends: expansion of irregular nested allocations involving
+  consumption (#1837).
+
 ## [0.22.7]
 
 ### Added
