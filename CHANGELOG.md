@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   builtin operator as prefix (#1824).
 
 * GPU backends: expansion of irregular nested allocations involving
-  consumption (#1837).
+  consumption (#1837, #1838).
 
 ## [0.22.7]
 

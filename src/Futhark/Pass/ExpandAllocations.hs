@@ -247,7 +247,7 @@ transformScanRed lvl space ops kbody = do
     then pure (mempty, (lvl, ops, kbody))
     else do
       (lvl_stms, lvl', grid) <- ensureGridKnown lvl
-      allocsForBody variant_allocs invariant_allocs grid space kbody' $ \alloc_stms kbody'' -> do
+      allocsForBody variant_allocs invariant_allocs grid space kbody kbody' $ \alloc_stms kbody'' -> do
         ops'' <- forM ops' $ \op' ->
           localScope (scopeOf op') $ offsetMemoryInLambda op'
         pure (lvl_stms <> alloc_stms, (lvl', ops'', kbody''))
@@ -265,14 +265,15 @@ allocsForBody ::
   KernelGrid ->
   SegSpace ->
   KernelBody GPUMem ->
+  KernelBody GPUMem ->
   (Stms GPUMem -> KernelBody GPUMem -> OffsetM b) ->
   ExpandM b
-allocsForBody variant_allocs invariant_allocs grid space kbody' m = do
+allocsForBody variant_allocs invariant_allocs grid space kbody kbody' m = do
   (alloc_offsets, alloc_stms) <-
     memoryRequirements
       grid
       space
-      (kernelBodyStms kbody')
+      (kernelBodyStms kbody)
       variant_allocs
       invariant_allocs
 
@@ -748,14 +749,18 @@ unAllocGPUStms = unAllocStms False
     unAllocKernelBody (KernelBody dec stms res) =
       KernelBody dec <$> unAllocStms True stms <*> pure res
 
-    unAllocStms nested =
-      fmap (stmsFromList . catMaybes) . mapM (unAllocStm nested) . stmsToList
+    unAllocStms nested = mapM (unAllocStm nested)
 
-    unAllocStm nested stm@(Let _ _ (Op Alloc {}))
-      | nested = throwError $ "Cannot handle nested allocation: " ++ prettyString stm
-      | otherwise = pure Nothing
+    unAllocStm nested stm@(Let pat dec (Op Alloc {}))
+      | nested =
+          throwError $ "Cannot handle nested allocation: " <> prettyString stm
+      | otherwise =
+          Let
+            <$> unAllocPat pat
+            <*> pure dec
+            <*> pure (BasicOp (SubExp $ Constant UnitValue))
     unAllocStm _ (Let pat dec e) =
-      Just <$> (Let <$> unAllocPat pat <*> pure dec <*> mapExpM unAlloc' e)
+      Let <$> unAllocPat pat <*> pure dec <*> mapExpM unAlloc' e
 
     unAllocLambda (Lambda params body ret) =
       Lambda (map unParam params) <$> unAllocBody body <*> pure ret
@@ -820,6 +825,8 @@ copyConsumed stms = do
   where
     copy v = letExp (baseString v <> "_copy") $ BasicOp $ Copy v
 
+-- Important for edge cases (#1838) that the Stms here still have the
+-- Allocs we are actually trying to get rid of.
 sliceKernelSizes ::
   SubExp ->
   [SubExp] ->
