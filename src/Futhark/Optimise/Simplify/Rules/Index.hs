@@ -210,6 +210,10 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
             [] -> Just $ pure $ SubExpResult cs se
             _ | Var v2 <- se -> Just $ pure $ IndexResult cs v2 $ Slice inds'
             _ -> Nothing
+    Just (Update Unsafe _ (Slice update_inds) se, cs)
+      | inds == update_inds,
+        ST.subExpAvailable se vtable ->
+          Just $ pure $ SubExpResult cs se
     -- Indexing single-element arrays.  We know the index must be 0.
     _
       | Just t <- seType $ Var idd,
