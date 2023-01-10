@@ -11,6 +11,7 @@ import Data.Either (rights)
 import Data.List (find, foldl')
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Error
 import Futhark.IR
@@ -26,6 +27,7 @@ import Futhark.Pass.ExtractKernels.ToGPU (segThread)
 import Futhark.Tools
 import Futhark.Transform.CopyPropagate (copyPropagateInFun)
 import Futhark.Transform.Rename (renameStm)
+import Futhark.Transform.Substitute
 import Futhark.Util (mapAccumLM)
 import Futhark.Util.IntegralExp
 import Prelude hiding (quot)
@@ -808,6 +810,16 @@ removeCommonSizes = M.toList . foldl' comb mempty . M.toList
   where
     comb m (mem, (_, size, space)) = M.insertWith (++) size [(mem, space)] m
 
+copyConsumed :: (MonadBuilder m, AliasableRep (Rep m)) => Stms (Rep m) -> m (Stms (Rep m))
+copyConsumed stms = do
+  let consumed = namesToList $ snd $ snd $ Alias.analyseStms mempty stms
+  collectStms_ $ do
+    consumed' <- mapM copy consumed
+    let substs = M.fromList (zip consumed consumed')
+    addStms $ substituteNames substs stms
+  where
+    copy v = letExp (baseString v <> "_copy") $ BasicOp $ Copy v
+
 sliceKernelSizes ::
   SubExp ->
   [SubExp] ->
@@ -833,27 +845,19 @@ sliceKernelSizes num_threads sizes space kstms = do
 
   flat_gtid_lparam <- newParam "flat_gtid" (Prim (IntType Int64))
 
-  (size_lam', _) <- flip runBuilderT kernels_scope $ do
-    params <- replicateM num_sizes $ newParam "x" (Prim int64)
-    (zs, stms) <- localScope
-      (scopeOfLParams params <> scopeOfLParams [flat_gtid_lparam])
-      $ collectStms
-      $ do
-        -- Even though this SegRed is one-dimensional, we need to
-        -- provide indexes corresponding to the original potentially
-        -- multi-dimensional construct.
-        let (kspace_gtids, kspace_dims) = unzip $ unSegSpace space
-            new_inds =
-              unflattenIndex
-                (map pe64 kspace_dims)
-                (pe64 $ Var $ paramName flat_gtid_lparam)
-        zipWithM_ letBindNames (map pure kspace_gtids) =<< mapM toExp new_inds
-
-        mapM_ addStm kstms'
-        pure $ subExpsRes sizes
-
-    localScope (scopeOfSegSpace space) $
-      GPU.simplifyLambda (Lambda [flat_gtid_lparam] (Body () stms zs) i64s)
+  size_lam' <- localScope (scopeOfSegSpace space) . fmap fst . flip runBuilderT kernels_scope $
+    GPU.simplifyLambda <=< mkLambda [flat_gtid_lparam] $ do
+      -- Even though this SegRed is one-dimensional, we need to
+      -- provide indexes corresponding to the original potentially
+      -- multi-dimensional construct.
+      let (kspace_gtids, kspace_dims) = unzip $ unSegSpace space
+          new_inds =
+            unflattenIndex
+              (map pe64 kspace_dims)
+              (pe64 $ Var $ paramName flat_gtid_lparam)
+      zipWithM_ letBindNames (map pure kspace_gtids) =<< mapM toExp new_inds
+      mapM_ addStm =<< copyConsumed kstms'
+      pure $ subExpsRes sizes
 
   ((maxes_per_thread, size_sums), slice_stms) <- flip runBuilderT kernels_scope $ do
     pat <-
