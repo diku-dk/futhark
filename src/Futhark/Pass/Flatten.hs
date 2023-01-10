@@ -279,6 +279,23 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
         fmap (subExpsRes . pure) . letSubExp "v" =<< toExp (pe64 x' + pe64 v' * pe64 s')
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
+    Update _ vname slice exp2 -> do
+      let [DimSlice b n s] = unSlice slice
+      bs <- elemArr segments env inps b
+      ns <- elemArr segments env inps n
+      ss <- elemArr segments env inps s
+      
+
+      
+
+      -- Access the slice dimensions
+      -- dims <- unslice slice 
+  
+
+
+      pure mempty
+      -- slice_ns <- mapM (readInput segments env (toList ))
+      -- (_, _, repiota_elems) <- doRepIota -- II1
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
