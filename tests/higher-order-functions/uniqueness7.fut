@@ -1,5 +1,5 @@
 -- ==
--- error: consumption
+-- input { 1 } output { [0,1,1] }
 
 def zero (xs: *[]i32) (i: i32) =
   xs with [i] = 0
