@@ -518,7 +518,7 @@ library
 executable futhark
   import: common
   main-is: src/main.hs
-  ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
+  ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A16M"
   build-depends: base, futhark
 
 test-suite unit
