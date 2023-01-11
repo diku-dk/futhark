@@ -5,6 +5,7 @@ module Futhark.Pass.Flatten.Builtins
     genFlags,
     genSegScan,
     genSegRed,
+    genScatter,
     exScanAndSum,
     doSegIota,
     doPrefixSum,
