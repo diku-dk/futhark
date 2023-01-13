@@ -18,7 +18,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
     copyScalarFromDev,
     copyScalarToDev,
     costCentreReport,
-    failureSwitch,
+    failureMsgFunction,
     generateTuningParams,
     kernelRuns,
     kernelRuntime,
@@ -72,6 +72,7 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
       $esc:(T.unpack backendsCudaH)
       static const char *cuda_program[] = {$inits:fragments, NULL};
       |]
+  GC.earlyDecl $ failureMsgFunction failures
 
   generateTuningParams sizes
   generateConfigFuns
@@ -262,7 +263,7 @@ generateContextFuns cost_centres kernels sizes failures = do
                                     ctx->global_failure_args,
                                     sizeof(args)));
 
-                     $stm:(failureSwitch failures)
+                     ctx->error = get_failure_msg(failure_idx, args);
 
                      return FUTHARK_PROGRAM_ERROR;
                    }

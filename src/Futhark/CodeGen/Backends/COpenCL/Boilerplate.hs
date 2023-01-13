@@ -9,7 +9,7 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     copyScalarToDev,
     copyScalarFromDev,
     commonOptions,
-    failureSwitch,
+    failureMsgFunction,
     costCentreReport,
     kernelRuntime,
     kernelRuns,
@@ -36,8 +36,8 @@ import Language.C.Syntax qualified as C
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
-failureSwitch :: [FailureMsg] -> C.Stm
-failureSwitch failures =
+failureMsgFunction :: [FailureMsg] -> C.Definition
+failureMsgFunction failures =
   let printfEscape =
         let escapeChar '%' = "%%"
             escapeChar c = [c]
@@ -48,10 +48,12 @@ failureSwitch failures =
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
         let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
             msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg - 1]]
-         in [C.cstm|case $int:i: {ctx->error = msgprintf($string:msg, $args:msgargs); break;}|]
+         in [C.cstm|case $int:i: {return msgprintf($string:msg, $args:msgargs); break;}|]
       failure_cases =
         zipWith onFailure [(0 :: Int) ..] failures
-   in [C.cstm|switch (failure_idx) { $stms:failure_cases }|]
+   in [C.cedecl|static char* get_failure_msg(int failure_idx, typename int64_t args[]) {
+                  switch (failure_idx) { $stms:failure_cases }
+                }|]
 
 copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: Name
 copyDevToDev = "copy_dev_to_dev"
@@ -159,6 +161,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
     GC.earlyDecl
     [C.cunit|$esc:(T.unpack backendsOpenclH)
              static const char *opencl_program[] = {$inits:program_fragments};|]
+  GC.earlyDecl $ failureMsgFunction failures
 
   generateOpenCLDecls cost_centres kernels
 
@@ -347,7 +350,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                                          0, sizeof(args), &args,
                                          0, NULL, $exp:(profilingEvent copyDevToHost)));
 
-                   $stm:(failureSwitch failures)
+                   ctx->error = get_failure_msg(failure_idx, args);
 
                    return FUTHARK_PROGRAM_ERROR;
                  }
