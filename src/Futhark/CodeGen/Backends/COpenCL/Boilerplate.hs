@@ -162,6 +162,8 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
     [C.cunit|$esc:(T.unpack backendsOpenclH)
              static const char *opencl_program[] = {$inits:program_fragments};|]
   GC.earlyDecl $ failureMsgFunction failures
+  let max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+  GC.earlyDecl [C.cedecl|static const int max_failure_args = $int:max_failure_args;|]
 
   generateOpenCLDecls cost_centres kernels
 
@@ -212,11 +214,9 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                          typename int64_t peak_mem_usage_device;
                          typename int64_t cur_mem_usage_device;
                          struct program* program;
-                         int max_failure_args;
                        };|]
     )
 
-  let max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
   GC.earlyDecl
     [C.cedecl|static void init_context_early(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
                      context_setup(cfg, ctx);
@@ -228,7 +228,6 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                      ctx->failure_is_an_option = 0;
                      ctx->total_runs = 0;
                      ctx->total_runtime = 0;
-                     ctx->max_failure_args = $int:max_failure_args;
   }|]
 
   let set_tuning_params =
@@ -257,7 +256,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                      ctx->global_failure_args =
                        clCreateBuffer(ctx->opencl.ctx,
                                       CL_MEM_READ_WRITE,
-                                      sizeof(int64_t)*(ctx->max_failure_args+1), NULL, &error);
+                                      sizeof(int64_t)*(max_failure_args+1), NULL, &error);
                      OPENCL_SUCCEED_OR_RETURN(error);
 
                      set_tuning_params(cfg, ctx);
@@ -340,7 +339,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                                          0, sizeof(cl_int), &no_failure,
                                          0, NULL, NULL));
 
-                   typename int64_t args[ctx->max_failure_args+1];
+                   typename int64_t args[max_failure_args+1];
                    OPENCL_SUCCEED_OR_RETURN(
                      clEnqueueReadBuffer(ctx->opencl.queue,
                                          ctx->global_failure_args,

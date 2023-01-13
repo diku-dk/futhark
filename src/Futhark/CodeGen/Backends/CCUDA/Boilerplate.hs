@@ -73,10 +73,12 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
       static const char *cuda_program[] = {$inits:fragments, NULL};
       |]
   GC.earlyDecl $ failureMsgFunction failures
+  let max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+  GC.earlyDecl [C.cedecl|static const int max_failure_args = $int:max_failure_args;|]
 
   generateTuningParams sizes
   generateConfigFuns
-  generateContextFuns cost_centres kernels sizes failures
+  generateContextFuns cost_centres kernels sizes
 
   GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(&ctx->cuda));|]
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
@@ -105,9 +107,8 @@ generateContextFuns ::
   [Name] ->
   M.Map KernelName KernelSafety ->
   M.Map Name SizeClass ->
-  [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateContextFuns cost_centres kernels sizes failures = do
+generateContextFuns cost_centres kernels sizes = do
   let forCostCentre name = do
         GC.contextField
           (C.toIdent (kernelRuntime name) mempty)
@@ -169,8 +170,6 @@ generateContextFuns cost_centres kernels sizes failures = do
           (\i k -> [C.cstm|ctx->tuning_params.$id:k = &cfg->tuning_params[$int:i];|])
           [(0 :: Int) ..]
           $ M.keys sizes
-      max_failure_args =
-        foldl max 0 $ map (errorMsgNumArgs . failureError) failures
 
   GC.earlyDecl
     [C.cedecl|static void set_tuning_params(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
@@ -206,7 +205,7 @@ generateContextFuns cost_centres kernels sizes failures = do
                  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
                  CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
                  // The +1 is to avoid zero-byte allocations.
-                 CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*($int:max_failure_args+1)));
+                 CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*(max_failure_args+1)));
 
                  set_tuning_params(cfg, ctx);
                  setup_program(cfg, ctx);
@@ -255,7 +254,7 @@ generateContextFuns cost_centres kernels sizes failures = do
                                     &no_failure,
                                     sizeof(int32_t)));
 
-                     typename int64_t args[ctx->max_failure_args+1];
+                     typename int64_t args[max_failure_args+1];
                      CUDA_SUCCEED_OR_RETURN(
                        cuMemcpyDtoH(&args,
                                     ctx->global_failure_args,
