@@ -202,27 +202,17 @@ elemArr _ env inps (Var v)
 elemArr segments _ _ se =
   letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
 
--- [WIP] Get the array size of irregular segments.
--- This could propbably be a pure function
-segmentArr :: Segments -> DistEnv -> DistInputs -> SubExp -> Builder GPU VName
-segmentArr _ env inps (Var v)
-  | Just v_inp <- lookup v inps =
-      pure $ case v_inp of
-        DistInputFree _ _ -> error "segmentArr: Free variables not handled (yet)"
-        DistInput rt _ -> case resVar rt env of
-          Irregular r -> irregularSegments r
-          Regular _ -> error "segmentArr: Regulat arrays not handled (yet)"
-
 -- Get the irregular representation of a var.
 -- Var *must* be irregular
-getIrregRep :: DistEnv -> DistInputs -> VName -> IrregularRep
-getIrregRep env inps v
-  | Just v_inp <- lookup v inps =
-      case v_inp of
+getIrregRep :: Segments -> DistEnv -> DistInputs -> VName -> Builder GPU IrregularRep
+getIrregRep _ env inps v =
+  case lookup v inps of
+    Just v_inp -> case v_inp of
         DistInputFree _ _ -> error "getIrregRep: Free variables not handled (yet)"
         DistInput rt _ -> case resVar rt env of
-          Irregular r -> r
+          Irregular r -> pure r
           Regular _ -> error "getIrregRep: Regulat arrays not handled (yet)"
+    Nothing -> error $ "getIrregRep: variable '" ++ prettyString v ++ "' not found"
 
 transformDistBasicOp ::
   Segments ->
@@ -301,28 +291,28 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
         fmap (subExpsRes . pure) . letSubExp "v" =<< toExp (pe64 x' + pe64 v' * pe64 s')
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
-    Update safety as slice vs ->
+    Update _ as slice v ->
       case unSlice slice of
         [DimSlice x n s] -> do
-          vs' <- letExp "vs" =<< toExp vs   -- VName of `vs`
+          vs <- elemArr segments env inps v
           ns <- elemArr segments env inps n
           xs <- elemArr segments env inps x
           ss <- elemArr segments env inps s
-          let (IrregularRep shape flags offsets elems) = getIrregRep env inps as  -- Irregular representation of `as`
+          IrregularRep shape flags offsets elems <- getIrregRep segments env inps as  -- Irregular representation of `as`
           (_, _, ii1_ns) <- doRepIota ns
           (_, _, ii2_ns) <- certifying (distCerts inps aux env) $ doSegIota ns
           m <- arraySize 0 <$> lookupType ii2_ns
-          genScatter as m $ \gid -> do
+          elems' <- letExp "elems_scatter" <=< genScatter elems m $ \gid -> do
             segment <- letSubExp "segment" =<< eIndex ii1_ns [eSubExp gid]
-            v' <- letExp "v" =<< eIndex vs' [eSubExp gid]       -- Value to write
+            v' <- letExp "v" =<< eIndex vs [eSubExp gid]       -- Value to write
             n' <- letSubExp "n" =<< eIndex ii2_ns [eSubExp gid]
             x' <- letSubExp "x" =<< eIndex xs [eSubExp segment]
             s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
             o' <- letSubExp "o" =<< eIndex offsets [eSubExp segment]
             i' <- letSubExp "i" =<< toExp (pe64 o' + pe64 x' + pe64 n' * pe64 s') -- Index to write at
             pure (v', i')
-          pure $ insertIrregular shape flags offsets (distResTag res) as env      -- ??
-        [DimFix n]       -> error $ "Update: Single dimension fixed index unhandled.\n" ++ prettyString e
+          pure $ insertIrregular shape flags offsets (distResTag res) elems' env      -- ??
+        [DimFix _]       -> error $ "Update: Single dimension fixed index unhandled.\n" ++ prettyString e
         _                -> error $ "Multi dimension update unhandled:\n" ++ prettyString e
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
