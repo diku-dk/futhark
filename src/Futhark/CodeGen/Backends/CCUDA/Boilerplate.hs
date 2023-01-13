@@ -232,8 +232,6 @@ generateContextFuns cost_centres kernels sizes failures = do
                 }|]
     )
 
-  GC.generateProgramStruct
-
   GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|int $id:s(struct $id:ctx* ctx) {
@@ -257,7 +255,7 @@ generateContextFuns cost_centres kernels sizes failures = do
                                     &no_failure,
                                     sizeof(int32_t)));
 
-                     typename int64_t args[$int:max_failure_args+1];
+                     typename int64_t args[ctx->max_failure_args+1];
                      CUDA_SUCCEED_OR_RETURN(
                        cuMemcpyDtoH(&args,
                                     ctx->global_failure_args,
@@ -272,6 +270,8 @@ generateContextFuns cost_centres kernels sizes failures = do
                  return 0;
                }|]
     )
+
+  GC.generateProgramStruct
 
   GC.onClear
     [C.citem|if (ctx->error == NULL) {

@@ -314,8 +314,6 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                                }|]
     )
 
-  GC.generateProgramStruct
-
   GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|int $id:s(struct $id:ctx* ctx) {
@@ -327,7 +325,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                                          ctx->global_failure,
                                          CL_FALSE,
                                          0, sizeof(typename cl_int), &failure_idx,
-                                         0, NULL, $exp:(profilingEvent copyScalarFromDev)));
+                                         0, NULL, NULL));
                    ctx->failure_is_an_option = 0;
                  }
 
@@ -348,7 +346,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                                          ctx->global_failure_args,
                                          CL_TRUE,
                                          0, sizeof(args), &args,
-                                         0, NULL, $exp:(profilingEvent copyDevToHost)));
+                                         0, NULL, NULL));
 
                    ctx->error = get_failure_msg(failure_idx, args);
 
@@ -364,6 +362,8 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
                  return ctx->opencl.queue;
                }|]
     )
+
+  GC.generateProgramStruct
 
   let required_types
         | FloatType Float64 `elem` types = [C.cexp|OPENCL_F64|]
