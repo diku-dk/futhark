@@ -1,12 +1,10 @@
 -- | @futhark pkg@
 module Futhark.CLI.Pkg (main) where
 
-import Codec.Archive.Zip qualified as Zip
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.ByteString.Lazy qualified as LBS
-import Data.List (intercalate, isPrefixOf)
+import Data.List (intercalate)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Monoid
@@ -22,57 +20,17 @@ import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
-import System.FilePath.Posix qualified as Posix
 import System.IO
+import System.IO.Temp (withSystemTempDirectory)
 import Prelude
 
 --- Installing packages
 
-installInDir :: BuildList -> FilePath -> PkgM ()
-installInDir (BuildList bl) dir = do
-  let putEntry from_dir pdir entry
-        -- The archive may contain all kinds of other stuff that we don't want.
-        | not (isInPkgDir from_dir $ Zip.eRelativePath entry)
-            || hasTrailingPathSeparator (Zip.eRelativePath entry) =
-            pure Nothing
-        | otherwise = do
-            -- Since we are writing to paths indicated in a zipfile we
-            -- downloaded from the wild Internet, we are going to be a
-            -- little bit paranoid.  Specifically, we want to avoid
-            -- writing outside of the 'lib/' directory.  We do this by
-            -- bailing out if the path contains any '..' components.  We
-            -- have to use System.FilePath.Posix, because the zip library
-            -- claims to encode filepaths with '/' directory seperators no
-            -- matter the host OS.
-            when (".." `elem` Posix.splitPath (Zip.eRelativePath entry)) $
-              fail $
-                "Zip archive for "
-                  <> pdir
-                  <> " contains suspicious path: "
-                  <> Zip.eRelativePath entry
-            let f = pdir </> makeRelative from_dir (Zip.eRelativePath entry)
-            createDirectoryIfMissing True $ takeDirectory f
-            LBS.writeFile f $ Zip.fromEntry entry
-            pure $ Just f
-
-      isInPkgDir from_dir f =
-        Posix.splitPath from_dir `isPrefixOf` Posix.splitPath f
-
+installInDir :: CacheDir -> BuildList -> FilePath -> PkgM ()
+installInDir cachedir (BuildList bl) dir =
   forM_ (M.toList bl) $ \(p, v) -> do
-    info <- lookupPackageRev p v
-    a <- downloadZipball info
-    m <- getManifest $ pkgRevGetManifest info
-
-    -- Compute the directory in the zipball that should contain the
-    -- package files.
-    let noPkgDir =
-          fail $
-            "futhark.pkg for "
-              ++ T.unpack p
-              ++ "-"
-              ++ T.unpack (prettySemVer v)
-              ++ " does not define a package path."
-    from_dir <- maybe noPkgDir (pure . (pkgRevZipballDir info <>)) $ pkgDir m
+    info <- lookupPackageRev cachedir p v
+    (filedir, files) <- getFiles $ pkgGetFiles info
 
     -- The directory in the local file system that will contain the
     -- package files.
@@ -83,17 +41,13 @@ installInDir (BuildList bl) dir = do
     -- have a way to recognise this situation, and not download the
     -- zipball in that case.
     liftIO $ removePathForcibly pdir
-    liftIO $ createDirectoryIfMissing True pdir
 
-    written <-
-      catMaybes <$> liftIO (mapM (putEntry from_dir pdir) $ Zip.zEntries a)
-
-    when (null written) $
-      fail $
-        "Zip archive for package "
-          ++ T.unpack p
-          ++ " does not contain any files in "
-          ++ from_dir
+    forM_ files $ \file -> do
+      let from = filedir </> file
+          to = pdir </> file
+      liftIO $ createDirectoryIfMissing True $ takeDirectory to
+      logMsg $ "Copying " <> from <> "\n" <> "to      " <> to
+      liftIO $ copyFile from to
 
 libDir, libNewDir, libOldDir :: FilePath
 (libDir, libNewDir, libOldDir) = ("lib", "lib~new", "lib~old")
@@ -124,8 +78,8 @@ libDir, libNewDir, libOldDir :: FilePath
 -- Since POSIX at least guarantees atomic renames, the only place this
 -- can fail is between steps 3, 4, and 5.  In that case, at least the
 -- @lib~old@ will still exist and can be put back by the user.
-installBuildList :: Maybe PkgPath -> BuildList -> PkgM ()
-installBuildList p bl = do
+installBuildList :: CacheDir -> Maybe PkgPath -> BuildList -> PkgM ()
+installBuildList cachedir p bl = do
   libdir_exists <- liftIO $ doesDirectoryExist libDir
 
   -- 1
@@ -134,7 +88,7 @@ installBuildList p bl = do
     createDirectoryIfMissing False libNewDir
 
   -- 2
-  installInDir bl libNewDir
+  installInDir cachedir bl libNewDir
 
   -- 3
   when libdir_exists $
@@ -230,61 +184,65 @@ doFmt = mainWithOptions () [] "" $ \args () ->
       T.writeFile futharkPkg $ prettyPkgManifest m
     _ -> Nothing
 
+withCacheDir :: (CacheDir -> IO a) -> IO a
+withCacheDir f = withSystemTempDirectory "futhark-pkg" $ f . CacheDir
+
 doCheck :: String -> [String] -> IO ()
 doCheck = cmdMain "check" $ \args cfg ->
   case args of
-    [] -> Just $
-      runPkgM cfg $ do
-        m <- getPkgManifest
-        bl <- solveDeps $ pkgRevDeps m
+    [] -> Just . withCacheDir $ \cachedir -> runPkgM cfg $ do
+      m <- getPkgManifest
+      bl <- solveDeps cachedir $ pkgRevDeps m
 
-        liftIO $ T.putStrLn "Dependencies chosen:"
-        liftIO $ T.putStr $ prettyBuildList bl
+      liftIO $ T.putStrLn "Dependencies chosen:"
+      liftIO $ T.putStr $ prettyBuildList bl
 
-        case commented $ manifestPkgPath m of
-          Nothing -> pure ()
-          Just p -> do
-            let pdir = "lib" </> T.unpack p
+      case commented $ manifestPkgPath m of
+        Nothing -> pure ()
+        Just p -> do
+          let pdir = "lib" </> T.unpack p
 
-            pdir_exists <- liftIO $ doesDirectoryExist pdir
+          pdir_exists <- liftIO $ doesDirectoryExist pdir
 
-            unless pdir_exists $
-              liftIO $ do
-                T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not exist."
-                exitFailure
+          unless pdir_exists $
+            liftIO $ do
+              T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not exist."
+              exitFailure
 
-            anything <-
-              liftIO $
-                any ((== ".fut") . takeExtension)
-                  <$> directoryContents ("lib" </> T.unpack p)
-            unless anything $
-              liftIO $ do
-                T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not contain any .fut files."
-                exitFailure
+          anything <-
+            liftIO $
+              any ((== ".fut") . takeExtension)
+                <$> directoryContents ("lib" </> T.unpack p)
+          unless anything $
+            liftIO $ do
+              T.putStrLn $ "Problem: the directory " <> T.pack pdir <> " does not contain any .fut files."
+              exitFailure
     _ -> Nothing
 
 doSync :: String -> [String] -> IO ()
 doSync = cmdMain "" $ \args cfg ->
   case args of
-    [] -> Just $
-      runPkgM cfg $ do
-        m <- getPkgManifest
-        bl <- solveDeps $ pkgRevDeps m
-        installBuildList (commented $ manifestPkgPath m) bl
+    [] -> Just . withCacheDir $ \cachedir -> runPkgM cfg $ do
+      m <- getPkgManifest
+      bl <- solveDeps cachedir $ pkgRevDeps m
+      installBuildList cachedir (commented $ manifestPkgPath m) bl
     _ -> Nothing
 
 doAdd :: String -> [String] -> IO ()
 doAdd = cmdMain "PKGPATH" $ \args cfg ->
   case args of
-    [p, v] | Right v' <- parseVersion $ T.pack v -> Just $ runPkgM cfg $ doAdd' (T.pack p) v'
+    [p, v]
+      | Right v' <- parseVersion $ T.pack v ->
+          Just $ withCacheDir $ \cachedir ->
+            runPkgM cfg $ doAdd' cachedir (T.pack p) v'
     [p] ->
-      Just $
+      Just $ withCacheDir $ \cachedir ->
         runPkgM cfg $
           -- Look up the newest revision of the package.
-          doAdd' (T.pack p) =<< lookupNewestRev (T.pack p)
+          doAdd' cachedir (T.pack p) =<< lookupNewestRev cachedir (T.pack p)
     _ -> Nothing
   where
-    doAdd' p v = do
+    doAdd' cachedir p v = do
       m <- getPkgManifest
 
       -- See if this package (and its dependencies) even exists.  We
@@ -292,11 +250,11 @@ doAdd = cmdMain "PKGPATH" $ \args cfg ->
       -- in the manifest, plus this new one.  The Monoid instance for
       -- PkgRevDeps is left-biased, so we are careful to use the new
       -- version for this package.
-      _ <- solveDeps $ PkgRevDeps (M.singleton p (v, Nothing)) <> pkgRevDeps m
+      _ <- solveDeps cachedir $ PkgRevDeps (M.singleton p (v, Nothing)) <> pkgRevDeps m
 
       -- We either replace any existing occurence of package 'p', or
       -- we add a new one.
-      p_info <- lookupPackageRev p v
+      p_info <- lookupPackageRev cachedir p v
       let hash = case (_svMajor v, _svMinor v, _svPatch v) of
             -- We do not perform hash-pinning for
             -- (0,0,0)-versions, because these already embed a
@@ -372,19 +330,18 @@ doInit = cmdMain "PKGPATH" $ \args cfg ->
 doUpgrade :: String -> [String] -> IO ()
 doUpgrade = cmdMain "" $ \args cfg ->
   case args of
-    [] -> Just $
-      runPkgM cfg $ do
-        m <- getPkgManifest
-        rs <- traverse (mapM (traverse upgrade)) $ manifestRequire m
-        putPkgManifest m {manifestRequire = rs}
-        if rs == manifestRequire m
-          then liftIO $ T.putStrLn "Nothing to upgrade."
-          else liftIO $ T.putStrLn "Remember to run 'futhark pkg sync'."
+    [] -> Just . withCacheDir $ \cachedir -> runPkgM cfg $ do
+      m <- getPkgManifest
+      rs <- traverse (mapM (traverse (upgrade cachedir))) $ manifestRequire m
+      putPkgManifest m {manifestRequire = rs}
+      if rs == manifestRequire m
+        then liftIO $ T.putStrLn "Nothing to upgrade."
+        else liftIO $ T.putStrLn "Remember to run 'futhark pkg sync'."
     _ -> Nothing
   where
-    upgrade req = do
-      v <- lookupNewestRev $ requiredPkg req
-      h <- pkgRevCommit <$> lookupPackageRev (requiredPkg req) v
+    upgrade cachedir req = do
+      v <- lookupNewestRev cachedir $ requiredPkg req
+      h <- pkgRevCommit <$> lookupPackageRev cachedir (requiredPkg req) v
 
       when (v /= requiredPkgRev req) $
         liftIO $
@@ -406,12 +363,13 @@ doUpgrade = cmdMain "" $ \args cfg ->
 doVersions :: String -> [String] -> IO ()
 doVersions = cmdMain "PKGPATH" $ \args cfg ->
   case args of
-    [p] -> Just $ runPkgM cfg $ doVersions' $ T.pack p
+    [p] -> Just $ withCacheDir $ \cachedir ->
+      runPkgM cfg $ doVersions' cachedir $ T.pack p
     _ -> Nothing
   where
-    doVersions' =
+    doVersions' cachedir =
       mapM_ (liftIO . T.putStrLn . prettySemVer) . M.keys . pkgVersions
-        <=< lookupPackage
+        <=< lookupPackage cachedir
 
 -- | Run @futhark pkg@.
 main :: String -> [String] -> IO ()
@@ -453,12 +411,11 @@ main prog args = do
     _ -> do
       let bad _ () = Just $ do
             let k = maxinum (map (length . fst) commands) + 3
-            usageMsg $
-              T.unlines $
-                ["<command> ...:", "", "Commands:"]
-                  ++ [ "   " <> T.pack cmd <> T.pack (replicate (k - length cmd) ' ') <> desc
-                       | (cmd, (_, desc)) <- commands
-                     ]
+            usageMsg . T.unlines $
+              ["<command> ...:", "", "Commands:"]
+                ++ [ "   " <> T.pack cmd <> T.pack (replicate (k - length cmd) ' ') <> desc
+                     | (cmd, (_, desc)) <- commands
+                   ]
 
       mainWithOptions () [] usage bad prog args
   where

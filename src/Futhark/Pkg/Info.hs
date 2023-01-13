@@ -6,7 +6,8 @@ module Futhark.Pkg.Info
     pkgInfo,
     PkgRevInfo (..),
     GetManifest (getManifest),
-    downloadZipball,
+    GetFiles (getFiles),
+    CacheDir (..),
 
     -- * Package registry
     PkgRegistry,
@@ -17,41 +18,26 @@ module Futhark.Pkg.Info
   )
 where
 
-import Codec.Archive.Zip qualified as Zip
+import Control.Monad (unless, void)
 import Control.Monad.IO.Class
 import Data.ByteString qualified as BS
-import Data.ByteString.Lazy qualified as LBS
 import Data.IORef
 import Data.List (foldl', intersperse)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
-import Data.Time (UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
+import Data.Text.IO qualified as T
+import Data.Time (UTCTime, defaultTimeLocale, formatTime)
+import Data.Time.Format.ISO8601 (iso8601ParseM)
+import Data.Time.LocalTime (zonedTimeToUTC)
 import Futhark.Pkg.Types
-import Futhark.Util (maybeHead, showText)
+import Futhark.Util (directoryContents, showText, zEncodeText)
 import Futhark.Util.Log
+import System.Directory (doesDirectoryExist)
 import System.Exit
-import System.FilePath.Posix qualified as Posix
-import System.IO
+import System.FilePath (makeRelative, (</>))
 import System.Process.ByteString (readProcessWithExitCode)
-
--- | Download URL via shelling out to @curl@.
-curl :: String -> IO (Either String BS.ByteString)
-curl url = do
-  (code, out, err) <-
-    -- The -L option follows HTTP redirects.
-    liftIO $ readProcessWithExitCode "curl" ["-L", url] mempty
-  case code of
-    ExitFailure 127 ->
-      pure $
-        Left $
-          "'" <> unwords ["curl", "-L", url] <> "' failed (program not found?)."
-    ExitFailure _ -> do
-      liftIO $ BS.hPutStr stderr err
-      pure $ Left $ "'" <> unwords ["curl", "-L", url] <> "' failed."
-    ExitSuccess ->
-      pure $ Right out
 
 -- | The manifest is stored as a monadic action, because we want to
 -- fetch them on-demand.  It would be a waste to fetch it information
@@ -65,24 +51,28 @@ instance Show (GetManifest m) where
 instance Eq (GetManifest m) where
   _ == _ = True
 
+-- | Get the absolute path to a package directory, as well as
+-- /relative/ paths to files that should be installed from this
+-- package.  Composing the package directory and one of these paths
+-- refers to a local file (pointing into the cache) and isn valid at
+-- least until the next cache operation.
+newtype GetFiles m = GetFiles {getFiles :: m (FilePath, [FilePath])}
+
+instance Show (GetFiles m) where
+  show _ = "#<GetFiles>"
+
+instance Eq (GetFiles m) where
+  _ == _ = True
+
 -- | Information about a version of a single package.  The version
 -- number is stored separately.
 data PkgRevInfo m = PkgRevInfo
-  { pkgRevZipballUrl :: T.Text,
-    -- | The directory inside the zipball
-    -- containing the @lib@ directory, in
-    -- which the package files themselves
-    -- are stored (Based on the package
-    -- path).
-    pkgRevZipballDir :: FilePath,
-    -- | The commit ID can be used for
-    -- verification ("freezing"), by
-    -- storing what it was at the time this
-    -- version was last selected.
+  { pkgGetFiles :: GetFiles m,
+    -- | The commit ID can be used for verification ("freezing"), by
+    -- storing what it was at the time this version was last selected.
     pkgRevCommit :: T.Text,
     pkgRevGetManifest :: GetManifest m,
-    -- | Timestamp for when the revision
-    -- was made (rarely used).
+    -- | Timestamp for when the revision was made (rarely used).
     pkgRevTime :: UTCTime
   }
   deriving (Eq, Show)
@@ -103,25 +93,6 @@ memoiseGetManifest (GetManifest m) = do
           liftIO $ writeIORef ref $ Just v'
           pure v'
 
--- | Download the zip archive corresponding to a specific package
--- version.
-downloadZipball ::
-  (MonadLogger m, MonadIO m, MonadFail m) =>
-  PkgRevInfo m ->
-  m Zip.Archive
-downloadZipball info = do
-  let url = pkgRevZipballUrl info
-  logMsg $ "Downloading " <> T.unpack url
-
-  let bad = fail . (("When downloading " <> T.unpack url <> ": ") <>)
-  http <- liftIO $ curl $ T.unpack url
-  case http of
-    Left e -> bad e
-    Right r ->
-      case Zip.toArchiveOrFail $ LBS.fromStrict r of
-        Left e -> bad $ show e
-        Right a -> pure a
-
 -- | Information about a package.  The name of the package is stored
 -- separately.
 data PkgInfo m = PkgInfo
@@ -135,44 +106,11 @@ data PkgInfo m = PkgInfo
 lookupPkgRev :: SemVer -> PkgInfo m -> Maybe (PkgRevInfo m)
 lookupPkgRev v = M.lookup v . pkgVersions
 
-majorRevOfPkg :: PkgPath -> (PkgPath, [Word])
+majorRevOfPkg :: PkgPath -> (T.Text, [Word])
 majorRevOfPkg p =
   case T.splitOn "@" p of
     [p', v] | [(v', "")] <- reads $ T.unpack v -> (p', [v'])
     _ -> (p, [0, 1])
-
--- | Retrieve information about a package based on its package path.
--- This uses Semantic Import Versioning when interacting with
--- repositories.  For example, a package @github.com/user/repo@ will
--- match version 0.* or 1.* tags only, a package
--- @github.com/user/repo/v2@ will match 2.* tags, and so forth..
-pkgInfo ::
-  (MonadIO m, MonadLogger m, MonadFail m) =>
-  PkgPath ->
-  m (Either T.Text (PkgInfo m))
-pkgInfo path
-  | ["github.com", owner, repo] <- T.splitOn "/" path =
-      let (repo', vs) = majorRevOfPkg repo
-       in ghPkgInfo owner repo' vs
-  | "github.com" : owner : repo : _ <- T.splitOn "/" path =
-      pure $
-        Left $
-          T.intercalate
-            "\n"
-            [nope, "Do you perhaps mean 'github.com/" <> owner <> "/" <> repo <> "'?"]
-  | ["gitlab.com", owner, repo] <- T.splitOn "/" path =
-      let (repo', vs) = majorRevOfPkg repo
-       in glPkgInfo owner repo' vs
-  | "gitlab.com" : owner : repo : _ <- T.splitOn "/" path =
-      pure $
-        Left $
-          T.intercalate
-            "\n"
-            [nope, "Do you perhaps mean 'gitlab.com/" <> owner <> "/" <> repo <> "'?"]
-  | otherwise =
-      pure $ Left nope
-  where
-    nope = "Unable to handle package paths of the form '" <> path <> "'"
 
 -- For GitHub, we unfortunately cannot use the (otherwise very nice)
 -- GitHub web API, because it is rate-limited to 60 requests per hour
@@ -182,190 +120,120 @@ pkgInfo path
 -- by other systems (Go most notably), so we should not be stepping on
 -- any toes.
 
-gitCmd :: (MonadIO m, MonadFail m) => [String] -> m BS.ByteString
+gitCmd :: (MonadIO m, MonadLogger m, MonadFail m) => [String] -> m BS.ByteString
 gitCmd opts = do
+  logMsg $ "Running command: " <> T.unwords ("git" : map T.pack opts)
   (code, out, err) <- liftIO $ readProcessWithExitCode "git" opts mempty
-  liftIO $ BS.hPutStr stderr err
+  unless (err == mempty) $ logMsg $ T.decodeUtf8 err
   case code of
     ExitFailure 127 -> fail $ "'" <> unwords ("git" : opts) <> "' failed (program not found?)."
     ExitFailure _ -> fail $ "'" <> unwords ("git" : opts) <> "' failed."
     ExitSuccess -> pure out
 
--- The GitLab and GitHub interactions are very similar, so we define a
--- couple of generic functions that are used to implement support for
--- both.
+gitCmd_ :: (MonadIO m, MonadLogger m, MonadFail m) => [String] -> m ()
+gitCmd_ = void . gitCmd
 
-ghglRevGetManifest ::
+gitCmdLines :: (MonadIO m, MonadLogger m, MonadFail m) => [String] -> m [T.Text]
+gitCmdLines = fmap (T.lines . T.decodeUtf8) . gitCmd
+
+-- | A temporary directory in which we store Git checkouts while
+-- running.  This is to avoid constantly re-cloning.  Will be deleted
+-- when @futhark pkg@ terminates.  In principle we could keep this
+-- around for longer, but then we would have to 'git pull' now and
+-- then also.  Note that the cache is stateful - we are going to use
+-- @git checkout@ to move around the history.  It is generally not
+-- safe to have multiple operations running concurrently.
+newtype CacheDir = CacheDir FilePath
+
+ensureGit ::
   (MonadIO m, MonadLogger m, MonadFail m) =>
+  CacheDir ->
   T.Text ->
-  T.Text ->
-  T.Text ->
-  T.Text ->
-  GetManifest m
-ghglRevGetManifest url owner repo tag = GetManifest $ do
-  logMsg $ "Downloading package manifest from " <> url
-
-  let path =
-        T.unpack $
-          owner
-            <> "/"
-            <> repo
-            <> "@"
-            <> tag
-            <> "/"
-            <> T.pack futharkPkg
-      msg = (("When reading " <> path <> ": ") <>)
-  http <- liftIO $ curl $ T.unpack url
-  case http of
-    Left e -> fail e
-    Right r' ->
-      case T.decodeUtf8' r' of
-        Left e -> fail $ msg $ show e
-        Right s ->
-          case parsePkgManifest path s of
-            Left e -> fail $ msg $ errorBundlePretty e
-            Right pm -> pure pm
-
-ghglLookupCommit ::
-  (MonadIO m, MonadLogger m, MonadFail m) =>
-  T.Text ->
-  T.Text ->
-  (T.Text -> T.Text) ->
-  T.Text ->
-  T.Text ->
-  T.Text ->
-  T.Text ->
-  T.Text ->
-  m (PkgRevInfo m)
-ghglLookupCommit archive_url manifest_url mk_zip_dir owner repo d ref hash = do
-  gd <- memoiseGetManifest $ ghglRevGetManifest manifest_url owner repo ref
-  let dir = Posix.addTrailingPathSeparator $ T.unpack $ mk_zip_dir d
-  time <- liftIO getCurrentTime -- FIXME
-  pure $ PkgRevInfo archive_url dir hash gd time
-
-ghglPkgInfo ::
-  (MonadIO m, MonadLogger m, MonadFail m) =>
-  T.Text ->
-  (T.Text -> T.Text) ->
-  (T.Text -> T.Text) ->
-  (T.Text -> T.Text) ->
-  T.Text ->
-  T.Text ->
-  [Word] ->
-  m (Either T.Text (PkgInfo m))
-ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir owner repo versions = do
-  logMsg $ "Retrieving list of tags from " <> repo_url
-  remote_lines <- T.lines . T.decodeUtf8 <$> gitCmd ["ls-remote", T.unpack repo_url]
-
-  head_ref <-
-    maybe (fail $ "Cannot find HEAD ref for " <> T.unpack repo_url) pure $
-      maybeHead $
-        mapMaybe isHeadRef remote_lines
-  let def = fromMaybe head_ref
-
-  rev_info <- M.fromList . catMaybes <$> mapM revInfo remote_lines
-
-  pure $
-    Right $
-      PkgInfo rev_info $ \r ->
-        ghglLookupCommit
-          (mk_archive_url (def r))
-          (mk_manifest_url (def r))
-          mk_zip_dir
-          owner
-          repo
-          (def r)
-          (def r)
-          (def r)
+  m FilePath
+ensureGit (CacheDir cachedir) url = do
+  exists <- liftIO $ doesDirectoryExist gitdir
+  unless exists $
+    gitCmd_ ["-C", cachedir, "clone", "https://" <> T.unpack url, url']
+  pure gitdir
   where
-    isHeadRef l
-      | [hash, "HEAD"] <- T.words l = Just hash
+    url' = T.unpack $ zEncodeText url
+    gitdir = cachedir </> url'
+
+-- A git reference (tag, commit, HEAD, etc).
+type Ref = String
+
+versionRef :: SemVer -> Ref
+versionRef v = T.unpack $ "v" <> prettySemVer v
+
+revInfo ::
+  (MonadIO m, MonadLogger m, MonadFail m) =>
+  FilePath ->
+  PkgPath ->
+  Ref ->
+  m (PkgRevInfo m)
+revInfo gitdir path ref = do
+  gitCmd_ ["-C", gitdir, "rev-parse", ref, "--"]
+  [sha] <- gitCmdLines ["-C", gitdir, "rev-list", "-n1", ref]
+  [time] <- gitCmdLines ["-C", gitdir, "show", "-s", "--format=%cI", ref]
+  utc <- zonedTimeToUTC <$> iso8601ParseM (T.unpack time)
+  gd <- memoiseGetManifest getManifest
+  pure $
+    PkgRevInfo
+      { pkgGetFiles = getFiles,
+        pkgRevCommit = sha,
+        pkgRevGetManifest = gd,
+        pkgRevTime = utc
+      }
+  where
+    dir = "lib" </> T.unpack path
+
+    getFiles = GetFiles $ do
+      gitCmd_ ["-C", gitdir, "checkout", ref, "--"]
+      let pkgdir = gitdir </> dir
+      fs <- liftIO $ directoryContents pkgdir
+      pure (pkgdir, map (makeRelative pkgdir) fs)
+
+    getManifest = GetManifest $ do
+      gitCmd_ ["-C", gitdir, "checkout", ref, "--"]
+      let f = gitdir </> futharkPkg
+      s <- liftIO $ T.readFile f
+      let msg =
+            "When reading package manifest for "
+              <> T.unpack path
+              <> " "
+              <> ref
+              <> ":\n"
+      case parsePkgManifest f s of
+        Left e -> fail $ msg <> errorBundlePretty e
+        Right pm -> pure pm
+
+-- | Retrieve information about a package based on its package path.
+-- This uses Semantic Import Versioning when interacting with
+-- repositories.  For example, a package @github.com/user/repo@ will
+-- match version 0.* or 1.* tags only, a package
+-- @github.com/user/repo/v2@ will match 2.* tags, and so forth..
+pkgInfo ::
+  (MonadIO m, MonadLogger m, MonadFail m) =>
+  CacheDir ->
+  PkgPath ->
+  m (PkgInfo m)
+pkgInfo cachedir path = do
+  gitdir <- ensureGit cachedir url
+  versions <- mapMaybe isVersionRef <$> gitCmdLines ["-C", gitdir, "tag"]
+  versions' <-
+    M.fromList . zip versions
+      <$> mapM (revInfo gitdir path . versionRef) versions
+  pure $ PkgInfo versions' $ lookupCommit gitdir
+  where
+    (url, path_versions) = majorRevOfPkg path
+    isVersionRef l
+      | "v" `T.isPrefixOf` l,
+        Right v <- parseVersion $ T.drop 1 l,
+        _svMajor v `elem` path_versions =
+          Just v
       | otherwise = Nothing
 
-    revInfo l
-      | [hash, ref] <- T.words l,
-        ["refs", "tags", t] <- T.splitOn "/" ref,
-        "v" `T.isPrefixOf` t,
-        Right v <- parseVersion $ T.drop 1 t,
-        _svMajor v `elem` versions = do
-          pinfo <-
-            ghglLookupCommit
-              (mk_archive_url t)
-              (mk_manifest_url t)
-              mk_zip_dir
-              owner
-              repo
-              (prettySemVer v)
-              t
-              hash
-          pure $ Just (v, pinfo)
-      | otherwise = pure Nothing
-
-ghPkgInfo ::
-  (MonadIO m, MonadLogger m, MonadFail m) =>
-  T.Text ->
-  T.Text ->
-  [Word] ->
-  m (Either T.Text (PkgInfo m))
-ghPkgInfo owner repo versions =
-  ghglPkgInfo
-    repo_url
-    mk_archive_url
-    mk_manifest_url
-    mk_zip_dir
-    owner
-    repo
-    versions
-  where
-    repo_url = "https://github.com/" <> owner <> "/" <> repo
-    mk_archive_url r = repo_url <> "/archive/" <> r <> ".zip"
-    mk_manifest_url r =
-      "https://raw.githubusercontent.com/"
-        <> owner
-        <> "/"
-        <> repo
-        <> "/"
-        <> r
-        <> "/"
-        <> T.pack futharkPkg
-    mk_zip_dir r = repo <> "-" <> r
-
-glPkgInfo ::
-  (MonadIO m, MonadLogger m, MonadFail m) =>
-  T.Text ->
-  T.Text ->
-  [Word] ->
-  m (Either T.Text (PkgInfo m))
-glPkgInfo owner repo versions =
-  ghglPkgInfo
-    repo_url
-    mk_archive_url
-    mk_manifest_url
-    mk_zip_dir
-    owner
-    repo
-    versions
-  where
-    base_url = "https://gitlab.com/" <> owner <> "/" <> repo
-    repo_url = base_url <> ".git"
-    mk_archive_url r =
-      base_url
-        <> "/-/archive/"
-        <> r
-        <> "/"
-        <> repo
-        <> "-"
-        <> r
-        <> ".zip"
-    mk_manifest_url r =
-      base_url
-        <> "/raw/"
-        <> r
-        <> "/"
-        <> T.pack futharkPkg
-    mk_zip_dir r
-      | Right _ <- parseVersion r = repo <> "-v" <> r
-      | otherwise = repo <> "-" <> r
+    lookupCommit gitdir = revInfo gitdir path . maybe "HEAD" T.unpack
 
 -- | A package registry is a mapping from package paths to information
 -- about the package.  It is unlikely that any given registry is
@@ -395,28 +263,27 @@ class (MonadIO m, MonadLogger m, MonadFail m) => MonadPkgRegistry m where
 -- | Given a package path, look up information about that package.
 lookupPackage ::
   MonadPkgRegistry m =>
+  CacheDir ->
   PkgPath ->
   m (PkgInfo m)
-lookupPackage p = do
+lookupPackage cachedir p = do
   r@(PkgRegistry m) <- getPkgRegistry
   case lookupKnownPackage p r of
     Just info ->
       pure info
     Nothing -> do
-      e <- pkgInfo p
-      case e of
-        Left e' -> fail $ T.unpack e'
-        Right pinfo -> do
-          putPkgRegistry $ PkgRegistry $ M.insert p pinfo m
-          pure pinfo
+      pinfo <- pkgInfo cachedir p
+      putPkgRegistry $ PkgRegistry $ M.insert p pinfo m
+      pure pinfo
 
 lookupPackageCommit ::
   MonadPkgRegistry m =>
+  CacheDir ->
   PkgPath ->
   Maybe T.Text ->
   m (SemVer, PkgRevInfo m)
-lookupPackageCommit p ref = do
-  pinfo <- lookupPackage p
+lookupPackageCommit cachedir p ref = do
+  pinfo <- lookupPackage cachedir p
   rev_info <- pkgLookupCommit pinfo ref
   let timestamp =
         T.pack $
@@ -431,14 +298,15 @@ lookupPackageCommit p ref = do
 -- | Look up information about a specific version of a package.
 lookupPackageRev ::
   MonadPkgRegistry m =>
+  CacheDir ->
   PkgPath ->
   SemVer ->
   m (PkgRevInfo m)
-lookupPackageRev p v
+lookupPackageRev cachedir p v
   | Just commit <- isCommitVersion v =
-      snd <$> lookupPackageCommit p (Just commit)
+      snd <$> lookupPackageCommit cachedir p (Just commit)
   | otherwise = do
-      pinfo <- lookupPackage p
+      pinfo <- lookupPackage cachedir p
       case lookupPkgRev v pinfo of
         Nothing ->
           let versions = case M.keys $ pkgVersions pinfo of
@@ -470,12 +338,13 @@ lookupPackageRev p v
 -- | Find the newest version of a package.
 lookupNewestRev ::
   MonadPkgRegistry m =>
+  CacheDir ->
   PkgPath ->
   m SemVer
-lookupNewestRev p = do
-  pinfo <- lookupPackage p
+lookupNewestRev cachedir p = do
+  pinfo <- lookupPackage cachedir p
   case M.keys $ pkgVersions pinfo of
     [] -> do
       logMsg $ "Package " <> p <> " has no released versions.  Using HEAD."
-      fst <$> lookupPackageCommit p Nothing
+      fst <$> lookupPackageCommit cachedir p Nothing
     v : vs -> pure $ foldl' max v vs
