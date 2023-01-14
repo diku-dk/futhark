@@ -46,15 +46,15 @@ import System.Process.ByteString (readProcessWithExitCode)
 newtype GetManifest m = GetManifest {getManifest :: m PkgManifest}
 
 instance Show (GetManifest m) where
-  show _ = "#<revdeps>"
+  show _ = "#<GetManifest>"
 
 instance Eq (GetManifest m) where
   _ == _ = True
 
--- | Get the absolute path to a package directory, as well as
+-- | Get the absolute path to a package directory on disk, as well as
 -- /relative/ paths to files that should be installed from this
 -- package.  Composing the package directory and one of these paths
--- refers to a local file (pointing into the cache) and isn valid at
+-- refers to a local file (pointing into the cache) and is valid at
 -- least until the next cache operation.
 newtype GetFiles m = GetFiles {getFiles :: m (FilePath, [FilePath])}
 
@@ -79,7 +79,7 @@ data PkgRevInfo m = PkgRevInfo
 
 -- | Create memoisation around a 'GetManifest' action to ensure that
 -- multiple inspections of the same revisions will not result in
--- potentially expensive network round trips.
+-- potentially expensive IO operations.
 memoiseGetManifest :: MonadIO m => GetManifest m -> m (GetManifest m)
 memoiseGetManifest (GetManifest m) = do
   ref <- liftIO $ newIORef Nothing
@@ -111,14 +111,6 @@ majorRevOfPkg p =
   case T.splitOn "@" p of
     [p', v] | [(v', "")] <- reads $ T.unpack v -> (p', [v'])
     _ -> (p, [0, 1])
-
--- For GitHub, we unfortunately cannot use the (otherwise very nice)
--- GitHub web API, because it is rate-limited to 60 requests per hour
--- for non-authenticated users.  Instead we fall back to a combination
--- of calling 'git' directly and retrieving things from the GitHub
--- webserver, which is not rate-limited.  This approach is also used
--- by other systems (Go most notably), so we should not be stepping on
--- any toes.
 
 gitCmd :: (MonadIO m, MonadLogger m, MonadFail m) => [String] -> m BS.ByteString
 gitCmd opts = do
