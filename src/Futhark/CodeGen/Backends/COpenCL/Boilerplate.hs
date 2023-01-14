@@ -65,7 +65,7 @@ copyScalarFromDev = "copy_scalar_from_dev"
 profilingEvent :: Name -> C.Exp
 profilingEvent name =
   [C.cexp|(ctx->profiling_paused || !ctx->profiling) ? NULL
-          : opencl_get_event(&ctx->opencl,
+          : opencl_get_event(ctx,
                              &ctx->program->$id:(kernelRuns name),
                              &ctx->program->$id:(kernelRuntime name))|]
 
@@ -92,7 +92,7 @@ releaseKernel (name, _) = [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseKernel(ctx->prog
 loadKernel :: (KernelName, KernelSafety) -> C.Stm
 loadKernel (name, safety) =
   [C.cstm|{
-  ctx->program->$id:name = clCreateKernel(ctx->opencl.program, $string:(T.unpack (idText (C.toIdent name mempty))), &error);
+  ctx->program->$id:name = clCreateKernel(ctx->clprogram, $string:(T.unpack (idText (C.toIdent name mempty))), &error);
   OPENCL_SUCCEED_FATAL(error);
   $items:set_args
   if (ctx->debugging) {
@@ -135,7 +135,7 @@ generateOpenCLDecls cost_centres kernels = do
       (Just [C.cexp|0|])
   GC.earlyDecl
     [C.cedecl|
-void post_opencl_setup(struct futhark_context_config *cfg, struct opencl_context *ctx, struct opencl_device_option *option) {
+void post_opencl_setup(struct futhark_context_config *cfg, struct futhark_context *ctx, struct opencl_device_option *option) {
   $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
 }|]
 
@@ -157,17 +157,21 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
         -- concatenate it again at runtime.
         [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack $ opencl_prelude <> opencl_program]
       program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
+      f64_required
+        | FloatType Float64 `elem` types = [C.cexp|1|]
+        | otherwise = [C.cexp|0|]
+      max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+  generateTuningParams sizes
   mapM_
     GC.earlyDecl
-    [C.cunit|$esc:(T.unpack backendsOpenclH)
-             static const char *opencl_program[] = {$inits:program_fragments};|]
+    [C.cunit|static const int max_failure_args = $int:max_failure_args;
+             static const int f64_required = $exp:f64_required;
+             static const char *opencl_program[] = {$inits:program_fragments};
+             $esc:(T.unpack backendsOpenclH)
+            |]
   GC.earlyDecl $ failureMsgFunction failures
-  let max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
-  GC.earlyDecl [C.cedecl|static const int max_failure_args = $int:max_failure_args;|]
 
   generateOpenCLDecls cost_centres kernels
-
-  generateTuningParams sizes
 
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_add_build_option(struct futhark_context_config *cfg, const char* opt);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
@@ -185,50 +189,8 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg, const char *param_name, size_t new_value);|]
 
-  ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:s;|],
-      [C.cedecl|struct $id:s {
-                         struct futhark_context_config* cfg;
-                         int detail_memory;
-                         int debugging;
-                         int profiling;
-                         int profiling_paused;
-                         int logging;
-                         typename lock_t lock;
-                         char *error;
-                         typename lock_t error_lock;
-                         typename FILE *log;
-                         struct constants *constants;
-                         struct free_list free_list;
-                         typename int64_t peak_mem_usage_default;
-                         typename int64_t cur_mem_usage_default;
-
-                         typename cl_mem global_failure;
-                         typename cl_mem global_failure_args;
-                         struct opencl_context opencl;
-                         struct tuning_params tuning_params;
-                         // True if a potentially failing kernel has been enqueued.
-                         typename cl_int failure_is_an_option;
-                         int total_runs;
-                         long int total_runtime;
-                         typename int64_t peak_mem_usage_device;
-                         typename int64_t cur_mem_usage_device;
-                         struct program* program;
-                       };|]
-    )
-
-  GC.earlyDecl
-    [C.cedecl|static void init_context_early(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
-                     context_setup(cfg, ctx);
-                     ctx->opencl.profiling_records_capacity = 200;
-                     ctx->opencl.profiling_records_used = 0;
-                     ctx->opencl.profiling_records =
-                       malloc(ctx->opencl.profiling_records_capacity *
-                              sizeof(struct profiling_record));
-                     ctx->failure_is_an_option = 0;
-                     ctx->total_runs = 0;
-                     ctx->total_runtime = 0;
-  }|]
+  GC.headerDecl GC.InitDecl [C.cedecl|struct futhark_context* futhark_context_new_with_command_queue(struct futhark_context_config* cfg, typename cl_command_queue queue);|]
+  GC.headerDecl GC.MiscDecl [C.cedecl|typename cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx);|]
 
   let set_tuning_params =
         zipWith
@@ -237,144 +199,17 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
           $ M.keys sizes
 
   GC.earlyDecl
-    [C.cedecl|static void set_tuning_params(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
-             $stms:set_tuning_params
-       }|]
-
-  GC.earlyDecl
-    [C.cedecl|static int init_context_late(struct futhark_context_config *cfg, struct $id:ctx* ctx) {
-                     typename cl_int error;
-
-                     typename cl_int no_error = -1;
-                     ctx->global_failure =
-                       clCreateBuffer(ctx->opencl.ctx,
-                                      CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-                                      sizeof(cl_int), &no_error, &error);
-                     OPENCL_SUCCEED_OR_RETURN(error);
-
-                     // The +1 is to avoid zero-byte allocations.
-                     ctx->global_failure_args =
-                       clCreateBuffer(ctx->opencl.ctx,
-                                      CL_MEM_READ_WRITE,
-                                      sizeof(int64_t)*(max_failure_args+1), NULL, &error);
-                     OPENCL_SUCCEED_OR_RETURN(error);
-
-                     set_tuning_params(cfg, ctx);
-                     setup_program(cfg, ctx);
-                     init_constants(ctx);
-                     // Clear the free list of any deallocations that occurred while initialising constants.
-                     OPENCL_SUCCEED_OR_RETURN(opencl_free_all(&ctx->opencl));
-
-                     return futhark_context_sync(ctx);
-  }|]
-
-  GC.publicDef_ "context_new" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg);|],
-      [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg) {
-                          struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
-                          if (ctx == NULL) {
-                            return NULL;
-                          }
-
-                          init_context_early(cfg, ctx);
-                          setup_opencl(ctx->cfg, &ctx->opencl, opencl_program, cfg->build_opts,
-                                       cfg->cache_fname);
-                          init_context_late(cfg, ctx);
-                          return ctx;
-                       }|]
-    )
-
-  GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
-    ( [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg, typename cl_command_queue queue);|],
-      [C.cedecl|struct $id:ctx* $id:s(struct futhark_context_config* cfg, typename cl_command_queue queue) {
-                          struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
-                          if (ctx == NULL) {
-                            return NULL;
-                          }
-
-                          init_context_early(cfg, ctx);
-                          setup_opencl_with_command_queue(ctx->cfg, &ctx->opencl, queue, opencl_program, cfg->build_opts,
-                                                          cfg->cache_fname);
-                          init_context_late(cfg, ctx);
-                          return ctx;
-                       }|]
-    )
-
-  GC.publicDef_ "context_free" GC.InitDecl $ \s ->
-    ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                                 context_teardown(ctx);
-                                 teardown_program(ctx);
-                                 OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
-                                 OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
-                                 teardown_opencl(&ctx->opencl);
-                                 ctx->cfg->in_use = 0;
-                                 free(ctx);
-                               }|]
-    )
-
-  GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                 // Check for any delayed error.
-                 typename cl_int failure_idx = -1;
-                 if (ctx->failure_is_an_option) {
-                   OPENCL_SUCCEED_OR_RETURN(
-                     clEnqueueReadBuffer(ctx->opencl.queue,
-                                         ctx->global_failure,
-                                         CL_FALSE,
-                                         0, sizeof(typename cl_int), &failure_idx,
-                                         0, NULL, NULL));
-                   ctx->failure_is_an_option = 0;
-                 }
-
-                 OPENCL_SUCCEED_OR_RETURN(clFinish(ctx->opencl.queue));
-
-                 if (failure_idx >= 0) {
-                   // We have to clear global_failure so that the next entry point
-                   // is not considered a failure from the start.
-                   typename cl_int no_failure = -1;
-                   OPENCL_SUCCEED_OR_RETURN(
-                    clEnqueueWriteBuffer(ctx->opencl.queue, ctx->global_failure, CL_TRUE,
-                                         0, sizeof(cl_int), &no_failure,
-                                         0, NULL, NULL));
-
-                   typename int64_t args[max_failure_args+1];
-                   OPENCL_SUCCEED_OR_RETURN(
-                     clEnqueueReadBuffer(ctx->opencl.queue,
-                                         ctx->global_failure_args,
-                                         CL_TRUE,
-                                         0, sizeof(args), &args,
-                                         0, NULL, NULL));
-
-                   ctx->error = get_failure_msg(failure_idx, args);
-
-                   return FUTHARK_PROGRAM_ERROR;
-                 }
-                 return 0;
-               }|]
-    )
-
-  GC.publicDef_ "context_get_command_queue" GC.InitDecl $ \s ->
-    ( [C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx);|],
-      [C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx) {
-                 return ctx->opencl.queue;
-               }|]
-    )
+    [C.cedecl|static void set_tuning_params(struct futhark_context_config *cfg,
+                                            struct futhark_context* ctx) {
+                $stms:set_tuning_params
+              }|]
 
   GC.generateProgramStruct
 
-  let required_types
-        | FloatType Float64 `elem` types = [C.cexp|OPENCL_F64|]
-        | otherwise = [C.cexp|0|]
-  GC.libDecl [C.cedecl|int required_types = $exp:required_types;|]
-
   GC.onClear
-    [C.citem|if (ctx->error == NULL) {
-                        ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
-                      }|]
+    [C.citem|if (ctx->error == NULL) { ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(ctx)); }|]
 
-  GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(&ctx->opencl));|]
+  GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(ctx));|]
   mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
 
 kernelRuntime :: KernelName -> Name

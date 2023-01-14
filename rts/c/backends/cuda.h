@@ -1,20 +1,27 @@
 // Start of backends/cuda.h.
 
+// Forward declarations.
+// Invoked by setup_opencl() after the platform and device has been
+// found, but before the program is loaded.  Its intended use is to
+// tune constants based on the selected platform and device.
+static void set_tuning_params(struct futhark_context_config *cfg, struct futhark_context* ctx);
+static char* get_failure_msg(int failure_idx, int64_t args[]);
+
 #define CUDA_SUCCEED_FATAL(x) cuda_api_succeed_fatal(x, #x, __FILE__, __LINE__)
 #define CUDA_SUCCEED_NONFATAL(x) cuda_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED_FATAL(x) nvrtc_api_succeed_fatal(x, #x, __FILE__, __LINE__)
 #define NVRTC_SUCCEED_NONFATAL(x) nvrtc_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
 // Take care not to override an existing error.
-#define CUDA_SUCCEED_OR_RETURN(e) {               \
-    char *serror = CUDA_SUCCEED_NONFATAL(e);      \
-    if (serror) {                                 \
-      if (!ctx->error) {                          \
-        ctx->error = serror;                      \
-        return bad;                               \
-      } else {                                    \
-        free(serror);                             \
-      }                                           \
-    }                                             \
+#define CUDA_SUCCEED_OR_RETURN(e) {             \
+    char *serror = CUDA_SUCCEED_NONFATAL(e);    \
+    if (serror) {                               \
+      if (!ctx->error) {                        \
+        ctx->error = serror;                    \
+        return bad;                             \
+      } else {                                  \
+        free(serror);                           \
+      }                                         \
+    }                                           \
   }
 
 // CUDA_SUCCEED_OR_RETURN returns the value of the variable 'bad' in
@@ -24,24 +31,24 @@
 static const int bad = 1;
 
 static inline void cuda_api_succeed_fatal(CUresult res, const char *call,
-    const char *file, int line) {
+                                          const char *file, int line) {
   if (res != CUDA_SUCCESS) {
     const char *err_str;
     cuGetErrorString(res, &err_str);
     if (err_str == NULL) { err_str = "Unknown"; }
     futhark_panic(-1, "%s:%d: CUDA call\n  %s\nfailed with error code %d (%s)\n",
-        file, line, call, res, err_str);
+                  file, line, call, res, err_str);
   }
 }
 
 static char* cuda_api_succeed_nonfatal(CUresult res, const char *call,
-    const char *file, int line) {
+                                       const char *file, int line) {
   if (res != CUDA_SUCCESS) {
     const char *err_str;
     cuGetErrorString(res, &err_str);
     if (err_str == NULL) { err_str = "Unknown"; }
     return msgprintf("%s:%d: CUDA call\n  %s\nfailed with error code %d (%s)\n",
-        file, line, call, res, err_str);
+                     file, line, call, res, err_str);
   } else {
     return NULL;
   }
@@ -52,7 +59,7 @@ static inline void nvrtc_api_succeed_fatal(nvrtcResult res, const char *call,
   if (res != NVRTC_SUCCESS) {
     const char *err_str = nvrtcGetErrorString(res);
     futhark_panic(-1, "%s:%d: NVRTC call\n  %s\nfailed with error code %d (%s)\n",
-        file, line, call, res, err_str);
+                  file, line, call, res, err_str);
   }
 }
 
@@ -132,10 +139,10 @@ static void backend_context_config_teardown(struct futhark_context_config* cfg) 
 }
 
 void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char *opt) {
-    cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
-    cfg->num_nvrtc_opts++;
-    cfg->nvrtc_opts = (const char **) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts + 1) * sizeof(const char *));
-    cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
+  cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
+  cfg->num_nvrtc_opts++;
+  cfg->nvrtc_opts = (const char **) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts + 1) * sizeof(const char *));
+  cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
 }
 
 void futhark_context_config_set_device(struct futhark_context_config *cfg, const char *s) {
@@ -155,74 +162,74 @@ void futhark_context_config_set_device(struct futhark_context_config *cfg, const
 }
 
 void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path) {
-    cfg->dump_program_to = path;
+  cfg->dump_program_to = path;
 }
 
 void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path) {
-    cfg->load_program_from = path;
+  cfg->load_program_from = path;
 }
 
 void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path) {
-    cfg->dump_ptx_to = path;
+  cfg->dump_ptx_to = path;
 }
 
 void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char *path) {
-    cfg->load_ptx_from = path;
+  cfg->load_ptx_from = path;
 }
 
 void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
-    cfg->default_block_size = size;
-    cfg->default_block_size_changed = 1;
+  cfg->default_block_size = size;
+  cfg->default_block_size_changed = 1;
 }
 
 void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
-    cfg->default_grid_size = num;
-    cfg->default_grid_size_changed = 1;
+  cfg->default_grid_size = num;
+  cfg->default_grid_size_changed = 1;
 }
 
 void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
-    cfg->default_tile_size = size;
-    cfg->default_tile_size_changed = 1;
+  cfg->default_tile_size = size;
+  cfg->default_tile_size_changed = 1;
 }
 
 void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size) {
-    cfg->default_reg_tile_size = size;
+  cfg->default_reg_tile_size = size;
 }
 
 void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size) {
-    cfg->default_threshold = size;
+  cfg->default_threshold = size;
 }
 
 int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
                                             const char *param_name,
                                             size_t new_value) {
-    for (int i = 0; i < cfg->num_tuning_params; i++) {
-        if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
-            cfg->tuning_params[i] = new_value;
-            return 0;
-        }
+  for (int i = 0; i < cfg->num_tuning_params; i++) {
+    if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
+      cfg->tuning_params[i] = new_value;
+      return 0;
     }
-    if (strcmp(param_name, "default_group_size") == 0) {
-        cfg->default_block_size = new_value;
-        return 0;
-    }
-    if (strcmp(param_name, "default_num_groups") == 0) {
-        cfg->default_grid_size = new_value;
-        return 0;
-    }
-    if (strcmp(param_name, "default_threshold") == 0) {
-        cfg->default_threshold = new_value;
-        return 0;
-    }
-    if (strcmp(param_name, "default_tile_size") == 0) {
-        cfg->default_tile_size = new_value;
-        return 0;
-    }
-    if (strcmp(param_name, "default_reg_tile_size") == 0) {
-        cfg->default_reg_tile_size = new_value;
-        return 0;
-    }
-    return 1;
+  }
+  if (strcmp(param_name, "default_group_size") == 0) {
+    cfg->default_block_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_num_groups") == 0) {
+    cfg->default_grid_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_threshold") == 0) {
+    cfg->default_threshold = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_tile_size") == 0) {
+    cfg->default_tile_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_reg_tile_size") == 0) {
+    cfg->default_reg_tile_size = new_value;
+    return 0;
+  }
+  return 1;
 }
 
 // A record of something that happened.
@@ -232,7 +239,34 @@ struct profiling_record {
   int64_t *runtime;
 };
 
-struct cuda_context {
+struct futhark_context {
+  struct futhark_context_config* cfg;
+  int detail_memory;
+  int debugging;
+  int profiling;
+  int profiling_paused;
+  int logging;
+  lock_t lock;
+  char *error;
+  lock_t error_lock;
+  FILE *log;
+  struct constants *constants;
+  struct free_list cu_free_list;
+  int64_t peak_mem_usage_default;
+  int64_t cur_mem_usage_default;
+  // Uniform above
+
+  CUdeviceptr global_failure;
+  CUdeviceptr global_failure_args;
+  struct tuning_params tuning_params;
+  // True if a potentially failing kernel has been enqueued.
+  int32_t failure_is_an_option;
+  int total_runs;
+  long int total_runtime;
+  int64_t peak_mem_usage_device;
+  int64_t cur_mem_usage_device;
+  struct program* program;
+
   CUdevice dev;
   CUcontext cu_ctx;
   CUmodule module;
@@ -270,7 +304,7 @@ static int _function_query(CUfunction dev, CUfunction_attribute attrib) {
 }
 
 static int cuda_device_setup(struct futhark_context_config *cfg,
-                             struct cuda_context *ctx) {
+                             struct futhark_context *ctx) {
   char name[256];
   int count, chosen = -1, best_cc = -1;
   int cc_major_best, cc_minor_best;
@@ -297,7 +331,7 @@ static int cuda_device_setup(struct futhark_context_config *cfg,
 
     if (cfg->logging) {
       fprintf(stderr, "Device #%d: name=\"%s\", compute capability=%d.%d\n",
-          i, name, cc_major, cc_minor);
+              i, name, cc_major, cc_minor);
     }
 
     if (device_query(dev, COMPUTE_MODE) == CU_COMPUTEMODE_PROHIBITED) {
@@ -401,7 +435,7 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
 }
 
 static void cuda_nvrtc_mk_build_options(struct futhark_context_config *cfg,
-                                        struct cuda_context *ctx, const char *extra_opts[],
+                                        struct futhark_context *ctx, const char *extra_opts[],
                                         char*** opts_out, size_t *n_opts) {
   int arch_set = 0, num_extra_opts;
 
@@ -520,29 +554,29 @@ static void cuda_load_ptx_from_cache(struct futhark_context_config *cfg,
 }
 
 static void cuda_size_setup(struct futhark_context_config *cfg,
-                            struct cuda_context *ctx)
+                            struct futhark_context *ctx)
 {
   if (cfg->default_block_size > ctx->max_block_size) {
     if (cfg->default_block_size_changed) {
       fprintf(stderr,
-          "Note: Device limits default block size to %zu (down from %zu).\n",
-          ctx->max_block_size, cfg->default_block_size);
+              "Note: Device limits default block size to %zu (down from %zu).\n",
+              ctx->max_block_size, cfg->default_block_size);
     }
     cfg->default_block_size = ctx->max_block_size;
   }
   if (cfg->default_grid_size > ctx->max_grid_size) {
     if (cfg->default_grid_size_changed) {
       fprintf(stderr,
-          "Note: Device limits default grid size to %zu (down from %zu).\n",
-          ctx->max_grid_size, cfg->default_grid_size);
+              "Note: Device limits default grid size to %zu (down from %zu).\n",
+              ctx->max_grid_size, cfg->default_grid_size);
     }
     cfg->default_grid_size = ctx->max_grid_size;
   }
   if (cfg->default_tile_size > ctx->max_tile_size) {
     if (cfg->default_tile_size_changed) {
       fprintf(stderr,
-          "Note: Device limits default tile size to %zu (down from %zu).\n",
-          ctx->max_tile_size, cfg->default_tile_size);
+              "Note: Device limits default tile size to %zu (down from %zu).\n",
+              ctx->max_tile_size, cfg->default_tile_size);
     }
     cfg->default_tile_size = ctx->max_tile_size;
   }
@@ -596,7 +630,7 @@ static void cuda_size_setup(struct futhark_context_config *cfg,
 }
 
 static char* cuda_module_setup(struct futhark_context_config *cfg,
-                               struct cuda_context *ctx,
+                               struct futhark_context *ctx,
                                const char *src_fragments[],
                                const char *extra_opts[],
                                const char* cache_fname) {
@@ -697,7 +731,7 @@ static char* cuda_module_setup(struct futhark_context_config *cfg,
 }
 
 static char* cuda_setup(struct futhark_context_config *cfg,
-                        struct cuda_context *ctx, const char *src_fragments[],
+                        struct futhark_context *ctx, const char *src_fragments[],
                         const char *extra_opts[], const char* cache_fname) {
   CUDA_SUCCEED_FATAL(cuInit(0));
 
@@ -706,7 +740,7 @@ static char* cuda_setup(struct futhark_context_config *cfg,
   }
   CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
 
-  free_list_init(&ctx->free_list);
+  free_list_init(&ctx->cu_free_list);
 
   ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
   ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
@@ -722,7 +756,7 @@ static char* cuda_setup(struct futhark_context_config *cfg,
 
 // Count up the runtime all the profiling_records that occured during execution.
 // Also clears the buffer of profiling_records.
-static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
+static cudaError_t cuda_tally_profiling_records(struct futhark_context *ctx) {
   cudaError_t err;
   for (int i = 0; i < ctx->profiling_records_used; i++) {
     struct profiling_record record = ctx->profiling_records[i];
@@ -752,43 +786,33 @@ static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
 }
 
 // Returns pointer to two events.
-static cudaEvent_t* cuda_get_events(struct cuda_context *ctx, int *runs, int64_t *runtime) {
-    if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
-      ctx->profiling_records_capacity *= 2;
-      ctx->profiling_records =
-        realloc(ctx->profiling_records,
-                ctx->profiling_records_capacity *
-                sizeof(struct profiling_record));
-    }
-    cudaEvent_t *events = calloc(2, sizeof(cudaEvent_t));
-    cudaEventCreate(&events[0]);
-    cudaEventCreate(&events[1]);
-    ctx->profiling_records[ctx->profiling_records_used].events = events;
-    ctx->profiling_records[ctx->profiling_records_used].runs = runs;
-    ctx->profiling_records[ctx->profiling_records_used].runtime = runtime;
-    ctx->profiling_records_used++;
-    return events;
-}
-
-static CUresult cuda_free_all(struct cuda_context *ctx);
-
-static void cuda_cleanup(struct cuda_context *ctx) {
-  CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
-  (void)cuda_tally_profiling_records(ctx);
-  free(ctx->profiling_records);
-  CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
-  CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
+static cudaEvent_t* cuda_get_events(struct futhark_context *ctx, int *runs, int64_t *runtime) {
+  if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
+    ctx->profiling_records_capacity *= 2;
+    ctx->profiling_records =
+      realloc(ctx->profiling_records,
+              ctx->profiling_records_capacity *
+              sizeof(struct profiling_record));
+  }
+  cudaEvent_t *events = calloc(2, sizeof(cudaEvent_t));
+  cudaEventCreate(&events[0]);
+  cudaEventCreate(&events[1]);
+  ctx->profiling_records[ctx->profiling_records_used].events = events;
+  ctx->profiling_records[ctx->profiling_records_used].runs = runs;
+  ctx->profiling_records[ctx->profiling_records_used].runtime = runtime;
+  ctx->profiling_records_used++;
+  return events;
 }
 
 static CUresult cuda_alloc(struct futhark_context_config *cfg,
-                           struct cuda_context *ctx, FILE *log,
+                           struct futhark_context *ctx, FILE *log,
                            size_t min_size, const char *tag,
                            CUdeviceptr *mem_out, size_t *size_out) {
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
   }
 
-  if (free_list_find(&ctx->free_list, min_size, tag, size_out, (fl_mem*)mem_out) == 0) {
+  if (free_list_find(&ctx->cu_free_list, min_size, tag, size_out, (fl_mem*)mem_out) == 0) {
     if (*size_out >= min_size) {
       if (cfg->debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
@@ -815,7 +839,7 @@ static CUresult cuda_alloc(struct futhark_context_config *cfg,
   CUresult res = cuMemAlloc(mem_out, min_size);
   while (res == CUDA_ERROR_OUT_OF_MEMORY) {
     CUdeviceptr mem;
-    if (free_list_first(&ctx->free_list, (fl_mem*)&mem) == 0) {
+    if (free_list_first(&ctx->cu_free_list, (fl_mem*)&mem) == 0) {
       res = cuMemFree(mem);
       if (res != CUDA_SUCCESS) {
         return res;
@@ -829,16 +853,16 @@ static CUresult cuda_alloc(struct futhark_context_config *cfg,
   return res;
 }
 
-static CUresult cuda_free(struct cuda_context *ctx,
+static CUresult cuda_free(struct futhark_context *ctx,
                           CUdeviceptr mem, size_t size, const char *tag) {
-  free_list_insert(&ctx->free_list, size, (fl_mem)mem, tag);
+  free_list_insert(&ctx->cu_free_list, size, (fl_mem)mem, tag);
   return CUDA_SUCCESS;
 }
 
-static CUresult cuda_free_all(struct cuda_context *ctx) {
+static CUresult cuda_free_all(struct futhark_context *ctx) {
   CUdeviceptr mem;
-  free_list_pack(&ctx->free_list);
-  while (free_list_first(&ctx->free_list, (fl_mem*)&mem) == 0) {
+  free_list_pack(&ctx->cu_free_list);
+  while (free_list_first(&ctx->cu_free_list, (fl_mem*)&mem) == 0) {
     CUresult res = cuMemFree(mem);
     if (res != CUDA_SUCCESS) {
       return res;
@@ -846,6 +870,95 @@ static CUresult cuda_free_all(struct cuda_context *ctx) {
   }
 
   return CUDA_SUCCESS;
+}
+
+int futhark_context_sync(struct futhark_context* ctx) {
+  CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cu_ctx));
+  CUDA_SUCCEED_OR_RETURN(cuCtxSynchronize());
+  if (ctx->failure_is_an_option) {
+    // Check for any delayed error.
+    int32_t failure_idx;
+    CUDA_SUCCEED_OR_RETURN(
+                           cuMemcpyDtoH(&failure_idx,
+                                        ctx->global_failure,
+                                        sizeof(int32_t)));
+    ctx->failure_is_an_option = 0;
+
+    if (failure_idx >= 0) {
+      // We have to clear global_failure so that the next entry point
+      // is not considered a failure from the start.
+      int32_t no_failure = -1;
+      CUDA_SUCCEED_OR_RETURN(
+                             cuMemcpyHtoD(ctx->global_failure,
+                                          &no_failure,
+                                          sizeof(int32_t)));
+
+      int64_t args[max_failure_args+1];
+      CUDA_SUCCEED_OR_RETURN(
+                             cuMemcpyDtoH(&args,
+                                          ctx->global_failure_args,
+                                          sizeof(args)));
+
+      ctx->error = get_failure_msg(failure_idx, args);
+
+      return FUTHARK_PROGRAM_ERROR;
+    }
+  }
+  CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cu_ctx));
+  return 0;
+}
+
+struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) {
+  struct futhark_context* ctx = (struct futhark_context*) malloc(sizeof(struct futhark_context));
+  if (ctx == NULL) {
+    return NULL;
+  }
+  context_setup(cfg, ctx);
+
+  ctx->profiling_records_capacity = 200;
+  ctx->profiling_records_used = 0;
+  ctx->profiling_records =
+    malloc(ctx->profiling_records_capacity *
+           sizeof(struct profiling_record));
+
+  ctx->failure_is_an_option = 0;
+  ctx->total_runs = 0;
+  ctx->total_runtime = 0;
+
+  ctx->error = cuda_setup(ctx->cfg, ctx, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
+
+  if (ctx->error != NULL) {
+    futhark_panic(1, "%s\n", ctx->error);
+  }
+
+  int32_t no_error = -1;
+  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
+  CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
+  // The +1 is to avoid zero-byte allocations.
+  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*(max_failure_args+1)));
+
+  set_tuning_params(cfg, ctx);
+  setup_program(cfg, ctx);
+  init_constants(ctx);
+  // Clear the free list of any deallocations that occurred while initialising constants.
+  CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
+
+  futhark_context_sync(ctx);
+
+  return ctx;
+}
+
+void futhark_context_free(struct futhark_context* ctx) {
+  teardown_program(ctx);
+  context_teardown(ctx);
+  cuMemFree(ctx->global_failure);
+  cuMemFree(ctx->global_failure_args);
+  CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
+  (void)cuda_tally_profiling_records(ctx);
+  free(ctx->profiling_records);
+  CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
+  CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
+  free(ctx);
 }
 
 // End of backends/cuda.h.
