@@ -800,7 +800,7 @@ evalAppExp env _ (LetWith dest src is v body loc) = do
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
-    oob = bad loc env "Bad update"
+    oob = bad loc env "Update out of bounds"
 evalAppExp env _ (DoLoop sparams pat init_e form body _) = do
   init_v <- eval env init_e
   case form of

@@ -508,7 +508,6 @@ library
     , transformers >=0.3
     , vector >=0.12
     , versions >=5.0.0
-    , zip-archive >=0.3.1.1
     , zlib >=0.6.1.2
     , statistics
     , mwc-random
@@ -518,7 +517,7 @@ library
 executable futhark
   import: common
   main-is: src/main.hs
-  ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
+  ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A16M"
   build-depends: base, futhark
 
 test-suite unit
