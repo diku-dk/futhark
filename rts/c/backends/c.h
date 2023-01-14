@@ -44,21 +44,13 @@ struct futhark_context {
   struct program* program;
 };
 
-struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) {
-  struct futhark_context* ctx = (struct futhark_context*) malloc(sizeof(struct futhark_context));
-  if (ctx == NULL) {
-    return NULL;
-  }
-  context_setup(cfg, ctx);
-  setup_program(cfg, ctx);
-  init_constants(ctx);
-  return ctx;
+int backend_context_setup(struct futhark_context* ctx) {
+  (void)ctx;
+  return 0;
 }
 
-void futhark_context_free(struct futhark_context* ctx) {
-  teardown_program(ctx);
-  context_teardown(ctx);
-  free(ctx);
+void backend_context_teardown(struct futhark_context* ctx) {
+  (void)ctx;
 }
 
 int futhark_context_sync(struct futhark_context* ctx) {

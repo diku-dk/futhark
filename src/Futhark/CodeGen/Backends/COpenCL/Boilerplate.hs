@@ -53,6 +53,7 @@ failureMsgFunction failures =
         zipWith onFailure [(0 :: Int) ..] failures
    in [C.cedecl|static char* get_failure_msg(int failure_idx, typename int64_t args[]) {
                   switch (failure_idx) { $stms:failure_cases }
+                  return strdup("Unknown error.  This is a compiler bug.");
                 }|]
 
 copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: Name
@@ -135,7 +136,7 @@ generateOpenCLDecls cost_centres kernels = do
       (Just [C.cexp|0|])
   GC.earlyDecl
     [C.cedecl|
-void post_opencl_setup(struct futhark_context_config *cfg, struct futhark_context *ctx, struct opencl_device_option *option) {
+void post_opencl_setup(struct futhark_context *ctx, struct opencl_device_option *option) {
   $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
 }|]
 
@@ -188,18 +189,16 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
 
-  GC.headerDecl GC.InitDecl [C.cedecl|struct futhark_context* futhark_context_new_with_command_queue(struct futhark_context_config* cfg, typename cl_command_queue queue);|]
   GC.headerDecl GC.MiscDecl [C.cedecl|typename cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx);|]
 
   let set_tuning_params =
         zipWith
-          (\i k -> [C.cstm|ctx->tuning_params.$id:k = &cfg->tuning_params[$int:i];|])
+          (\i k -> [C.cstm|ctx->tuning_params.$id:k = &ctx->cfg->tuning_params[$int:i];|])
           [(0 :: Int) ..]
           $ M.keys sizes
 
   GC.earlyDecl
-    [C.cedecl|static void set_tuning_params(struct futhark_context_config *cfg,
-                                            struct futhark_context* ctx) {
+    [C.cedecl|static void set_tuning_params(struct futhark_context* ctx) {
                 $stms:set_tuning_params
               }|]
 
@@ -260,11 +259,11 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
 
     which' = case which of
       LockstepWidth -> [C.cexp|ctx->lockstep_width|]
-      NumGroups -> [C.cexp|cfg->default_num_groups|]
-      GroupSize -> [C.cexp|cfg->default_group_size|]
-      TileSize -> [C.cexp|cfg->default_tile_size|]
-      RegTileSize -> [C.cexp|cfg->default_reg_tile_size|]
-      Threshold -> [C.cexp|cfg->default_threshold|]
+      NumGroups -> [C.cexp|ctx->cfg->default_num_groups|]
+      GroupSize -> [C.cexp|ctx->cfg->default_group_size|]
+      TileSize -> [C.cexp|ctx->cfg->default_tile_size|]
+      RegTileSize -> [C.cexp|ctx->cfg->default_reg_tile_size|]
+      Threshold -> [C.cexp|ctx->cfg->default_threshold|]
 
     get_size =
       let (e, m) = runState (GC.compilePrimExp onLeaf what) mempty

@@ -198,7 +198,7 @@ allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
   GC.stm
     [C.cstm|ctx->error =
-     CUDA_SUCCEED_NONFATAL(cuda_alloc(ctx->cfg, ctx, ctx->log,
+     CUDA_SUCCEED_NONFATAL(cuda_alloc(ctx, ctx->log,
                                       (size_t)$exp:size, $exp:tag,
                                       &$exp:mem, (size_t*)&$exp:size));|]
 allocateCUDABuffer _ _ _ space =

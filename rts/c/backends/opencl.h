@@ -5,8 +5,8 @@ struct opencl_device_option;
 // Invoked by setup_opencl() after the platform and device has been
 // found, but before the program is loaded.  Its intended use is to
 // tune constants based on the selected platform and device.
-static void post_opencl_setup(struct futhark_context_config*, struct futhark_context*, struct opencl_device_option*);
-static void set_tuning_params(struct futhark_context_config *cfg, struct futhark_context* ctx);
+static void post_opencl_setup(struct futhark_context*, struct opencl_device_option*);
+static void set_tuning_params(struct futhark_context* ctx);
 static char* get_failure_msg(int failure_idx, int64_t args[]);
 
 #define OPENCL_SUCCEED_FATAL(e) opencl_succeed_fatal(e, #e, __FILE__, __LINE__)
@@ -545,14 +545,13 @@ static cl_build_status build_opencl_program(cl_program program, cl_device_id dev
   return build_status;
 }
 
-static char* mk_compile_opts(struct futhark_context_config *cfg,
-                             struct futhark_context *ctx,
+static char* mk_compile_opts(struct futhark_context *ctx,
                              const char *extra_build_opts[],
                              struct opencl_device_option device_option) {
   int compile_opts_size = 1024;
 
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    compile_opts_size += strlen(cfg->tuning_param_names[i]) + 20;
+  for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
+    compile_opts_size += strlen(ctx->cfg->tuning_param_names[i]) + 20;
   }
 
   for (int i = 0; extra_build_opts[i] != NULL; i++) {
@@ -570,11 +569,11 @@ static char* mk_compile_opts(struct futhark_context_config *cfg,
                 "max_group_size",
                 (int)ctx->max_group_size);
 
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
+  for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
                   "-D%s=%d ",
-                  cfg->tuning_param_vars[i],
-                  (int)cfg->tuning_params[i]);
+                  ctx->cfg->tuning_param_vars[i],
+                  (int)ctx->cfg->tuning_params[i]);
   }
 
   for (int i = 0; extra_build_opts[i] != NULL; i++) {
@@ -677,8 +676,7 @@ static int opencl_alloc_actual(struct futhark_context *ctx, size_t size, cl_mem 
   return error;
 }
 
-static int opencl_alloc(struct futhark_context_config *cfg,
-                        struct futhark_context *ctx, FILE *log,
+static int opencl_alloc(struct futhark_context *ctx, FILE *log,
                         size_t min_size, const char *tag,
                         cl_mem *mem_out, size_t *size_out) {
   (void)tag;
@@ -690,14 +688,14 @@ static int opencl_alloc(struct futhark_context_config *cfg,
   if (free_list_find(&ctx->cl_free_list, min_size, tag, size_out, (fl_mem*)&memptr) == 0) {
     // Successfully found a free block.  Is it big enough?
     if (*size_out >= min_size) {
-      if (cfg->debugging) {
+      if (ctx->cfg->debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
       }
       *mem_out = *memptr;
       free(memptr);
       return CL_SUCCESS;
     } else {
-      if (cfg->debugging) {
+      if (ctx->cfg->debugging) {
         fprintf(log, "Found a free block, but it was too small.\n");
       }
       int error = clReleaseMemObject(*memptr);
@@ -718,14 +716,14 @@ static int opencl_alloc(struct futhark_context_config *cfg,
   // have to check after every deallocation.  This might be pretty
   // expensive.  Let's hope that this case is hit rarely.
 
-  if (cfg->debugging) {
+  if (ctx->cfg->debugging) {
     fprintf(log, "Actually allocating the desired block.\n");
   }
 
   int error = opencl_alloc_actual(ctx, min_size, mem_out);
 
   while (error == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
-    if (cfg->debugging) {
+    if (ctx->cfg->debugging) {
       fprintf(log, "Out of OpenCL memory: releasing entry from the free list...\n");
     }
     cl_mem* memptr;
@@ -812,8 +810,7 @@ int futhark_context_sync(struct futhark_context* ctx) {
 // C does not guarantee that the compiler supports particularly large
 // literals.  Notably, Visual C has a limit of 2048 characters.  The
 // array must be NULL-terminated.
-static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
-                                            struct futhark_context *ctx,
+static void setup_opencl_with_command_queue(struct futhark_context *ctx,
                                             cl_command_queue queue,
                                             const char *srcs[],
                                             const char *extra_build_opts[],
@@ -884,22 +881,22 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
   }
 
   // Make sure this function is defined.
-  post_opencl_setup(cfg, ctx, &device_option);
+  post_opencl_setup(ctx, &device_option);
 
-  if (max_group_size < cfg->default_group_size) {
-    if (cfg->default_group_size_changed) {
+  if (max_group_size < ctx->cfg->default_group_size) {
+    if (ctx->cfg->default_group_size_changed) {
       fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
-              max_group_size, cfg->default_group_size);
+              max_group_size, ctx->cfg->default_group_size);
     }
-    cfg->default_group_size = max_group_size;
+    ctx->cfg->default_group_size = max_group_size;
   }
 
-  if (max_tile_size < cfg->default_tile_size) {
-    if (cfg->default_tile_size_changed) {
+  if (max_tile_size < ctx->cfg->default_tile_size) {
+    if (ctx->cfg->default_tile_size_changed) {
       fprintf(stderr, "Note: Device limits default tile size to %zu (down from %zu).\n",
-              max_tile_size, cfg->default_tile_size);
+              max_tile_size, ctx->cfg->default_tile_size);
     }
-    cfg->default_tile_size = max_tile_size;
+    ctx->cfg->default_tile_size = max_tile_size;
   }
 
   ctx->max_group_size = max_group_size;
@@ -909,18 +906,18 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
 
   // Now we go through all the sizes, clamp them to the valid range,
   // or set them to the default.
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    const char *size_class = cfg->tuning_param_classes[i];
-    int64_t *size_value = &cfg->tuning_params[i];
-    const char* size_name = cfg->tuning_param_names[i];
+  for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
+    const char *size_class = ctx->cfg->tuning_param_classes[i];
+    int64_t *size_value = &ctx->cfg->tuning_params[i];
+    const char* size_name = ctx->cfg->tuning_param_names[i];
     int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "group_size") == size_class) {
       max_value = max_group_size;
-      default_value = cfg->default_group_size;
+      default_value = ctx->cfg->default_group_size;
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = max_group_size; // Futhark assumes this constraint.
-      default_value = cfg->default_num_groups;
+      default_value = ctx->cfg->default_num_groups;
       // XXX: as a quick and dirty hack, use twice as many threads for
       // histograms by default.  We really should just be smarter
       // about sizes somehow.
@@ -929,13 +926,13 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
       }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = sqrt(max_group_size);
-      default_value = cfg->default_tile_size;
+      default_value = ctx->cfg->default_tile_size;
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       max_value = 0; // No limit.
-      default_value = cfg->default_reg_tile_size;
+      default_value = ctx->cfg->default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
-      default_value = cfg->default_threshold;
+      default_value = ctx->cfg->default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
     }
@@ -952,15 +949,15 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
     ctx->lockstep_width = 1;
   }
 
-  if (cfg->logging) {
+  if (ctx->cfg->logging) {
     fprintf(stderr, "Lockstep width: %d\n", (int)ctx->lockstep_width);
-    fprintf(stderr, "Default group size: %d\n", (int)cfg->default_group_size);
-    fprintf(stderr, "Default number of groups: %d\n", (int)cfg->default_num_groups);
+    fprintf(stderr, "Default group size: %d\n", (int)ctx->cfg->default_group_size);
+    fprintf(stderr, "Default number of groups: %d\n", (int)ctx->cfg->default_num_groups);
   }
 
-  char *compile_opts = mk_compile_opts(cfg, ctx, extra_build_opts, device_option);
+  char *compile_opts = mk_compile_opts(ctx, extra_build_opts, device_option);
 
-  if (cfg->logging) {
+  if (ctx->cfg->logging) {
     fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
   }
 
@@ -971,12 +968,12 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
   struct cache_hash h;
 
   int loaded_from_cache = 0;
-  if (cfg->load_binary_from == NULL) {
+  if (ctx->cfg->load_binary_from == NULL) {
     size_t src_size = 0;
 
     // Maybe we have to read OpenCL source from somewhere else (used for debugging).
-    if (cfg->load_program_from != NULL) {
-      fut_opencl_src = slurp_file(cfg->load_program_from, NULL);
+    if (ctx->cfg->load_program_from != NULL) {
+      fut_opencl_src = slurp_file(ctx->cfg->load_program_from, NULL);
       assert(fut_opencl_src != NULL);
     } else {
       // Construct the OpenCL source concatenating all the fragments.
@@ -994,16 +991,16 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
       fut_opencl_src[src_size] = 0;
     }
 
-    if (cfg->dump_program_to != NULL) {
-      if (cfg->logging) {
-        fprintf(stderr, "Dumping OpenCL source to %s...\n", cfg->dump_program_to);
+    if (ctx->cfg->dump_program_to != NULL) {
+      if (ctx->cfg->logging) {
+        fprintf(stderr, "Dumping OpenCL source to %s...\n", ctx->cfg->dump_program_to);
       }
 
-      dump_file(cfg->dump_program_to, fut_opencl_src, strlen(fut_opencl_src));
+      dump_file(ctx->cfg->dump_program_to, fut_opencl_src, strlen(fut_opencl_src));
     }
 
     if (cache_fname != NULL) {
-      if (cfg->logging) {
+      if (ctx->cfg->logging) {
         fprintf(stderr, "Restoring cache from from %s...\n", cache_fname);
       }
       cache_hash_init(&h);
@@ -1014,11 +1011,11 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
       size_t bufsize;
       errno = 0;
       if (cache_restore(cache_fname, &h, &buf, &bufsize) != 0) {
-        if (cfg->logging) {
+        if (ctx->cfg->logging) {
           fprintf(stderr, "Failed to restore cache (errno: %s)\n", strerror(errno));
         }
       } else {
-        if (cfg->logging) {
+        if (ctx->cfg->logging) {
           fprintf(stderr, "Cache restored; loading OpenCL binary...\n");
         }
 
@@ -1028,11 +1025,11 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
                                          &status, &error);
         if (status == CL_SUCCESS) {
           loaded_from_cache = 1;
-          if (cfg->logging) {
+          if (ctx->cfg->logging) {
             fprintf(stderr, "Loading succeeded.\n");
           }
         } else {
-          if (cfg->logging) {
+          if (ctx->cfg->logging) {
             fprintf(stderr, "Loading failed.\n");
           }
         }
@@ -1040,7 +1037,7 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
     }
 
     if (!loaded_from_cache) {
-      if (cfg->logging) {
+      if (ctx->cfg->logging) {
         fprintf(stderr, "Creating OpenCL program...\n");
       }
 
@@ -1049,12 +1046,12 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
       OPENCL_SUCCEED_FATAL(error);
     }
   } else {
-    if (cfg->logging) {
-      fprintf(stderr, "Loading OpenCL binary from %s...\n", cfg->load_binary_from);
+    if (ctx->cfg->logging) {
+      fprintf(stderr, "Loading OpenCL binary from %s...\n", ctx->cfg->load_binary_from);
     }
     size_t binary_size;
     unsigned char *fut_opencl_bin =
-      (unsigned char*) slurp_file(cfg->load_binary_from, &binary_size);
+      (unsigned char*) slurp_file(ctx->cfg->load_binary_from, &binary_size);
     assert(fut_opencl_bin != NULL);
     const unsigned char *binaries[1] = { fut_opencl_bin };
     cl_int status = 0;
@@ -1067,7 +1064,7 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
     OPENCL_SUCCEED_FATAL(error);
   }
 
-  if (cfg->logging) {
+  if (ctx->cfg->logging) {
     fprintf(stderr, "Building OpenCL program...\n");
   }
   OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
@@ -1078,7 +1075,7 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
   size_t binary_size = 0;
   unsigned char *binary = NULL;
   int store_in_cache = cache_fname != NULL && !loaded_from_cache;
-  if (store_in_cache || cfg->dump_binary_to != NULL) {
+  if (store_in_cache || ctx->cfg->dump_binary_to != NULL) {
     OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARY_SIZES,
                                           sizeof(size_t), &binary_size, NULL));
     binary = (unsigned char*) malloc(binary_size);
@@ -1087,7 +1084,7 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
   }
 
   if (store_in_cache) {
-    if (cfg->logging) {
+    if (ctx->cfg->logging) {
       fprintf(stderr, "Caching OpenCL binary in %s...\n", cache_fname);
     }
     if (cache_store(cache_fname, &h, binary, binary_size) != 0) {
@@ -1095,11 +1092,11 @@ static void setup_opencl_with_command_queue(struct futhark_context_config *cfg,
     }
   }
 
-  if (cfg->dump_binary_to != NULL) {
-    if (cfg->logging) {
-      fprintf(stderr, "Dumping OpenCL binary to %s...\n", cfg->dump_binary_to);
+  if (ctx->cfg->dump_binary_to != NULL) {
+    if (ctx->cfg->logging) {
+      fprintf(stderr, "Dumping OpenCL binary to %s...\n", ctx->cfg->dump_binary_to);
     }
-    dump_file(cfg->dump_binary_to, binary, binary_size);
+    dump_file(ctx->cfg->dump_binary_to, binary, binary_size);
   }
 
   ctx->clprogram = prog;
@@ -1136,14 +1133,13 @@ static struct opencl_device_option get_preferred_device(const struct futhark_con
   exit(1); // Never reached
 }
 
-static void setup_opencl(struct futhark_context_config *cfg,
-                         struct futhark_context *ctx,
+static void setup_opencl(struct futhark_context *ctx,
                          const char *srcs[],
                          const char *extra_build_opts[],
                          const char* cache_fname) {
-  struct opencl_device_option device_option = get_preferred_device(cfg);
+  struct opencl_device_option device_option = get_preferred_device(ctx->cfg);
 
-  if (cfg->logging) {
+  if (ctx->cfg->logging) {
     fprintf(stderr, "Using platform: %s\n", device_option.platform_name);
     fprintf(stderr, "Using device: %s\n", device_option.device_name);
   }
@@ -1163,16 +1159,14 @@ static void setup_opencl(struct futhark_context_config *cfg,
   cl_command_queue queue =
     clCreateCommandQueue(ctx->ctx,
                          device_option.device,
-                         cfg->profiling ? CL_QUEUE_PROFILING_ENABLE : 0,
+                         ctx->cfg->profiling ? CL_QUEUE_PROFILING_ENABLE : 0,
                          &clCreateCommandQueue_error);
   OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
-  setup_opencl_with_command_queue(cfg, ctx, queue, srcs, extra_build_opts,
-                                  cache_fname);
+  setup_opencl_with_command_queue(ctx, queue, srcs, extra_build_opts, cache_fname);
 }
 
-static void init_context_early(struct futhark_context_config *cfg, struct futhark_context* ctx) {
-  context_setup(cfg, ctx);
+int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 0; // Real value set later.
   ctx->profiling_records_capacity = 200;
   ctx->profiling_records_used = 0;
@@ -1182,11 +1176,10 @@ static void init_context_early(struct futhark_context_config *cfg, struct futhar
   ctx->failure_is_an_option = 0;
   ctx->total_runs = 0;
   ctx->total_runtime = 0;
-}
 
-static int init_context_late(struct futhark_context_config *cfg, struct futhark_context* ctx) {
+  setup_opencl(ctx, opencl_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+
   cl_int error;
-
   cl_int no_error = -1;
   ctx->global_failure =
     clCreateBuffer(ctx->ctx,
@@ -1201,44 +1194,11 @@ static int init_context_late(struct futhark_context_config *cfg, struct futhark_
                    sizeof(int64_t)*(max_failure_args+1), NULL, &error);
   OPENCL_SUCCEED_OR_RETURN(error);
 
-  set_tuning_params(cfg, ctx);
-  setup_program(cfg, ctx);
-  init_constants(ctx);
-  // Clear the free list of any deallocations that occurred while initialising constants.
-  OPENCL_SUCCEED_OR_RETURN(opencl_free_all(ctx));
-
-  return futhark_context_sync(ctx);
+  set_tuning_params(ctx);
+  return 0;
 }
 
-struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) {
-  struct futhark_context* ctx = (struct futhark_context*) malloc(sizeof(struct futhark_context));
-  if (ctx == NULL) {
-    return NULL;
-  }
-
-  init_context_early(cfg, ctx);
-  setup_opencl(ctx->cfg, ctx, opencl_program, cfg->build_opts,
-               cfg->cache_fname);
-  init_context_late(cfg, ctx);
-  return ctx;
-}
-
-struct futhark_context* futhark_context_new_with_command_queue(struct futhark_context_config* cfg, cl_command_queue queue) {
-  struct futhark_context* ctx = (struct futhark_context*) malloc(sizeof(struct futhark_context));
-  if (ctx == NULL) {
-    return NULL;
-  }
-
-  init_context_early(cfg, ctx);
-  setup_opencl_with_command_queue(ctx->cfg, ctx, queue, opencl_program, cfg->build_opts,
-                                  cfg->cache_fname);
-  init_context_late(cfg, ctx);
-  return ctx;
-}
-
-void futhark_context_free(struct futhark_context* ctx) {
-  context_teardown(ctx);
-  teardown_program(ctx);
+void backend_context_teardown(struct futhark_context* ctx) {
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
   (void)opencl_tally_profiling_records(ctx);
@@ -1247,8 +1207,6 @@ void futhark_context_free(struct futhark_context* ctx) {
   (void)clReleaseProgram(ctx->clprogram);
   (void)clReleaseCommandQueue(ctx->queue);
   (void)clReleaseContext(ctx->ctx);
-  ctx->cfg->in_use = 0;
-  free(ctx);
 }
 
 cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx) {

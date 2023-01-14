@@ -496,12 +496,6 @@ The following API functions are available only when using the
    Immediately conduct an interactive dialogue on standard output to
    select the platform and device from a list.
 
-.. c:function:: struct futhark_context *futhark_context_new_with_command_queue(struct futhark_context_config *cfg, cl_command_queue queue)
-
-   Construct a context that uses a pre-existing command queue.  This
-   allows the caller to directly customise which device and platform
-   is used.
-
 .. c:function:: cl_command_queue futhark_context_get_command_queue(struct futhark_context *ctx)
 
    Retrieve the command queue used by the Futhark context.  Be very

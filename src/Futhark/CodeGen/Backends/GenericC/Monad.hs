@@ -270,9 +270,8 @@ generateProgramStruct = do
     [C.cunit|struct program {
                $sdecls:fields
              };
-             static void setup_program(struct futhark_context_config *cfg,
-                                       struct futhark_context* ctx) {
-               (void)cfg; (void)ctx;
+             static void setup_program(struct futhark_context* ctx) {
+               (void)ctx;
                int error = 0;
                (void)error;
                ctx->program = malloc(sizeof(struct program));

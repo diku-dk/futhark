@@ -4,7 +4,7 @@
 // Invoked by setup_opencl() after the platform and device has been
 // found, but before the program is loaded.  Its intended use is to
 // tune constants based on the selected platform and device.
-static void set_tuning_params(struct futhark_context_config *cfg, struct futhark_context* ctx);
+static void set_tuning_params(struct futhark_context* ctx);
 static char* get_failure_msg(int failure_idx, int64_t args[]);
 
 #define CUDA_SUCCEED_FATAL(x) cuda_api_succeed_fatal(x, #x, __FILE__, __LINE__)
@@ -303,8 +303,8 @@ static int _function_query(CUfunction dev, CUfunction_attribute attrib) {
   return val;
 }
 
-static int cuda_device_setup(struct futhark_context_config *cfg,
-                             struct futhark_context *ctx) {
+static int cuda_device_setup(struct futhark_context *ctx) {
+  struct futhark_context_config *cfg = ctx->cfg;
   char name[256];
   int count, chosen = -1, best_cc = -1;
   int cc_major_best, cc_minor_best;
@@ -434,10 +434,10 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   return x[chosen].arch_str;
 }
 
-static void cuda_nvrtc_mk_build_options(struct futhark_context_config *cfg,
-                                        struct futhark_context *ctx, const char *extra_opts[],
+static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char *extra_opts[],
                                         char*** opts_out, size_t *n_opts) {
   int arch_set = 0, num_extra_opts;
+  struct futhark_context_config *cfg = ctx->cfg;
 
   // nvrtc cannot handle multiple -arch options.  Hence, if one of the
   // extra_opts is -arch, we have to be careful not to do our usual
@@ -553,9 +553,9 @@ static void cuda_load_ptx_from_cache(struct futhark_context_config *cfg,
   }
 }
 
-static void cuda_size_setup(struct futhark_context_config *cfg,
-                            struct futhark_context *ctx)
+static void cuda_size_setup(struct futhark_context *ctx)
 {
+  struct futhark_context_config *cfg = ctx->cfg;
   if (cfg->default_block_size > ctx->max_block_size) {
     if (cfg->default_block_size_changed) {
       fprintf(stderr,
@@ -629,12 +629,12 @@ static void cuda_size_setup(struct futhark_context_config *cfg,
   }
 }
 
-static char* cuda_module_setup(struct futhark_context_config *cfg,
-                               struct futhark_context *ctx,
+static char* cuda_module_setup(struct futhark_context *ctx,
                                const char *src_fragments[],
                                const char *extra_opts[],
                                const char* cache_fname) {
   char *ptx = NULL, *src = NULL;
+  struct futhark_context_config *cfg = ctx->cfg;
 
   if (cfg->load_program_from == NULL) {
     src = concat_fragments(src_fragments);
@@ -657,7 +657,7 @@ static char* cuda_module_setup(struct futhark_context_config *cfg,
 
   char **opts;
   size_t n_opts;
-  cuda_nvrtc_mk_build_options(cfg, ctx, extra_opts, &opts, &n_opts);
+  cuda_nvrtc_mk_build_options(ctx, extra_opts, &opts, &n_opts);
 
   if (cfg->logging) {
     fprintf(stderr, "NVRTC compile options:\n");
@@ -730,12 +730,11 @@ static char* cuda_module_setup(struct futhark_context_config *cfg,
   return NULL;
 }
 
-static char* cuda_setup(struct futhark_context_config *cfg,
-                        struct futhark_context *ctx, const char *src_fragments[],
+static char* cuda_setup(struct futhark_context *ctx, const char *src_fragments[],
                         const char *extra_opts[], const char* cache_fname) {
   CUDA_SUCCEED_FATAL(cuInit(0));
 
-  if (cuda_device_setup(cfg, ctx) != 0) {
+  if (cuda_device_setup(ctx) != 0) {
     futhark_panic(-1, "No suitable CUDA device found.\n");
   }
   CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
@@ -750,8 +749,8 @@ static char* cuda_setup(struct futhark_context_config *cfg,
   ctx->max_bespoke = 0;
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
 
-  cuda_size_setup(cfg, ctx);
-  return cuda_module_setup(cfg, ctx, src_fragments, extra_opts, cache_fname);
+  cuda_size_setup(ctx);
+  return cuda_module_setup(ctx, src_fragments, extra_opts, cache_fname);
 }
 
 // Count up the runtime all the profiling_records that occured during execution.
@@ -804,8 +803,7 @@ static cudaEvent_t* cuda_get_events(struct futhark_context *ctx, int *runs, int6
   return events;
 }
 
-static CUresult cuda_alloc(struct futhark_context_config *cfg,
-                           struct futhark_context *ctx, FILE *log,
+static CUresult cuda_alloc(struct futhark_context *ctx, FILE *log,
                            size_t min_size, const char *tag,
                            CUdeviceptr *mem_out, size_t *size_out) {
   if (min_size < sizeof(int)) {
@@ -814,12 +812,12 @@ static CUresult cuda_alloc(struct futhark_context_config *cfg,
 
   if (free_list_find(&ctx->cu_free_list, min_size, tag, size_out, (fl_mem*)mem_out) == 0) {
     if (*size_out >= min_size) {
-      if (cfg->debugging) {
+      if (ctx->cfg->debugging) {
         fprintf(log, "No need to allocate: Found a block in the free list.\n");
       }
       return CUDA_SUCCESS;
     } else {
-      if (cfg->debugging) {
+      if (ctx->cfg->debugging) {
         fprintf(log, "Found a free block, but it was too small.\n");
       }
 
@@ -832,7 +830,7 @@ static CUresult cuda_alloc(struct futhark_context_config *cfg,
 
   *size_out = min_size;
 
-  if (cfg->debugging) {
+  if (ctx->cfg->debugging) {
     fprintf(log, "Actually allocating the desired block.\n");
   }
 
@@ -908,24 +906,17 @@ int futhark_context_sync(struct futhark_context* ctx) {
   return 0;
 }
 
-struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) {
-  struct futhark_context* ctx = (struct futhark_context*) malloc(sizeof(struct futhark_context));
-  if (ctx == NULL) {
-    return NULL;
-  }
-  context_setup(cfg, ctx);
-
+int backend_context_setup(struct futhark_context* ctx) {
   ctx->profiling_records_capacity = 200;
   ctx->profiling_records_used = 0;
   ctx->profiling_records =
     malloc(ctx->profiling_records_capacity *
            sizeof(struct profiling_record));
-
   ctx->failure_is_an_option = 0;
   ctx->total_runs = 0;
   ctx->total_runtime = 0;
 
-  ctx->error = cuda_setup(ctx->cfg, ctx, cuda_program, cfg->nvrtc_opts, cfg->cache_fname);
+  ctx->error = cuda_setup(ctx, cuda_program, ctx->cfg->nvrtc_opts, ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {
     futhark_panic(1, "%s\n", ctx->error);
@@ -937,20 +928,11 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   // The +1 is to avoid zero-byte allocations.
   CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*(max_failure_args+1)));
 
-  set_tuning_params(cfg, ctx);
-  setup_program(cfg, ctx);
-  init_constants(ctx);
-  // Clear the free list of any deallocations that occurred while initialising constants.
-  CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
-
-  futhark_context_sync(ctx);
-
-  return ctx;
+  set_tuning_params(ctx);
+  return 0;
 }
 
-void futhark_context_free(struct futhark_context* ctx) {
-  teardown_program(ctx);
-  context_teardown(ctx);
+void backend_context_teardown(struct futhark_context* ctx) {
   cuMemFree(ctx->global_failure);
   cuMemFree(ctx->global_failure_args);
   CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
@@ -958,7 +940,6 @@ void futhark_context_free(struct futhark_context* ctx) {
   free(ctx->profiling_records);
   CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
   CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
-  free(ctx);
 }
 
 // End of backends/cuda.h.

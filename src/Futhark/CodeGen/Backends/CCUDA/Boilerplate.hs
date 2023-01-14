@@ -125,13 +125,12 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
 
   let set_tuning_params =
         zipWith
-          (\i k -> [C.cstm|ctx->tuning_params.$id:k = &cfg->tuning_params[$int:i];|])
+          (\i k -> [C.cstm|ctx->tuning_params.$id:k = &ctx->cfg->tuning_params[$int:i];|])
           [(0 :: Int) ..]
           $ M.keys sizes
 
   GC.earlyDecl
-    [C.cedecl|static void set_tuning_params(struct futhark_context_config *cfg,
-                                            struct futhark_context* ctx) {
+    [C.cedecl|static void set_tuning_params(struct futhark_context* ctx) {
                 $stms:set_tuning_params
               }|]
 

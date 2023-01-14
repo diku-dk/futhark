@@ -56,14 +56,9 @@ struct futhark_context {
   long int total_runtime;
   int64_t tuning_timing;
   int64_t tuning_iter;
-
 };
 
-struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) {
-  struct futhark_context* ctx = (struct futhark_context*) malloc(sizeof(struct futhark_context));
-  if (ctx == NULL) {
-    return NULL;
-  }
+int backend_context_setup(struct futhark_context* ctx) {
   // Initialize rand()
   fast_srand(time(0));
 
@@ -72,27 +67,22 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
 
   if (tune_kappa) {
     if (determine_kappa(&kappa) != 0) {
-      return NULL;
+      ctx->error = strdup("Failed to determine kappa.");
+      return 1;
     }
   }
 
   if (scheduler_init(&ctx->scheduler,
-                     cfg->num_threads > 0 ?
-                     cfg->num_threads : num_processors(),
+                     ctx->cfg->num_threads > 0 ?
+                     ctx->cfg->num_threads : num_processors(),
                      kappa) != 0) {
-    return NULL;
+    ctx->error = strdup("Failed to initialise scheduler.");
+    return 1;
   }
-  context_setup(cfg, ctx);
-  setup_program(cfg, ctx);
-  init_constants(ctx);
-  return ctx;
 }
 
-void futhark_context_free(struct futhark_context* ctx) {
-  teardown_program(ctx);
-  context_teardown(ctx);
+void backend_context_teardown(struct futhark_context* ctx) {
   (void)scheduler_destroy(&ctx->scheduler);
-  free(ctx);
 }
 
 int futhark_context_sync(struct futhark_context* ctx) {
