@@ -508,7 +508,6 @@ library
     , transformers >=0.3
     , vector >=0.12
     , versions >=5.0.0
-    , zip-archive >=0.3.1.1
     , zlib >=0.6.1.2
     , statistics
     , mwc-random
