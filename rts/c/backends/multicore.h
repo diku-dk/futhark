@@ -79,6 +79,8 @@ int backend_context_setup(struct futhark_context* ctx) {
     ctx->error = strdup("Failed to initialise scheduler.");
     return 1;
   }
+
+  return 0;
 }
 
 void backend_context_teardown(struct futhark_context* ctx) {
