@@ -75,9 +75,10 @@ doSolveDeps (PkgRevDeps deps) = mapM_ add $ M.toList deps
 -- a cache of the lookups performed, as well as a build list.
 solveDeps ::
   MonadPkgRegistry m =>
+  CacheDir ->
   PkgRevDeps ->
   m BuildList
-solveDeps deps =
+solveDeps cachedir deps =
   buildList (depRoots deps)
     <$> runF
       (execStateT (doSolveDeps deps) emptyRoughBuildList)
@@ -85,7 +86,7 @@ solveDeps deps =
       step
   where
     step (OpGetDeps p v h c) = do
-      pinfo <- lookupPackageRev p v
+      pinfo <- lookupPackageRev cachedir p v
 
       checkHash p v pinfo h
 

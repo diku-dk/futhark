@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * You can now mix consumption and higher-order terms in slightly more
   cases (#1836).
 
+* `futhark pkg` now invokes Git directly rather than scraping
+  GitHub/GitLab.  This means package paths can now refer to any Git
+  repository, as long as `git clone` works.  In particular, you can
+  use private and self-hosted repositories.
+
 ### Removed
 
 ### Changed

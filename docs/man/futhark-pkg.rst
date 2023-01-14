@@ -53,8 +53,8 @@ afterwards.
 Most commands take a ``-v``/``--verbose`` option that makes
 ``futhark pkg`` write running diagnostics to stderr.
 
-Network requests (exclusively HTTP GETs) are done via ``curl``, which
-must be available on the ``PATH``.
+Packages must correspond to Git repositories, and all interactions are
+done by invoking ``git``.
 
 COMMANDS
 ========
@@ -159,10 +159,8 @@ as well, it is possible for a package to depend unwittingly on one of
 the dependencies of its dependencies, without the ``futhark.pkg`` file
 reflecting this.
 
-There is no caching of zipballs and version lists between invocations,
-so the network traffic can be rather heavy.
-
-Only GitHub and GitLab are supported as code hosting sites.
+There is no caching of package metadata between invocations, so the
+network traffic can be rather heavy.
 
 SEE ALSO
 ========

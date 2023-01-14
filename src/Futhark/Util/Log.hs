@@ -13,6 +13,8 @@ import Control.Monad.RWS.Strict qualified
 import Control.Monad.Writer
 import Data.DList qualified as DL
 import Data.Text qualified as T
+import Data.Text.IO qualified as T
+import System.IO (stderr)
 
 -- | An efficiently catenable sequence of log entries.
 newtype Log = Log {unLog :: DL.DList T.Text}
@@ -55,3 +57,6 @@ instance Monad m => MonadLogger (Control.Monad.RWS.Lazy.RWST r Log s m) where
 
 instance Monad m => MonadLogger (Control.Monad.RWS.Strict.RWST r Log s m) where
   addLog = tell
+
+instance MonadLogger IO where
+  addLog = mapM_ (T.hPutStrLn stderr) . unLog
