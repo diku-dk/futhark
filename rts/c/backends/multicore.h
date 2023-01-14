@@ -52,6 +52,8 @@ struct futhark_context {
   // Uniform fields above.
 
   struct scheduler scheduler;
+  int total_runs;
+  long int total_runtime;
   int64_t tuning_timing;
   int64_t tuning_iter;
 
