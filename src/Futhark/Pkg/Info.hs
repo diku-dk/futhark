@@ -176,24 +176,41 @@ revInfo gitdir path ref = do
   [sha] <- gitCmdLines ["-C", gitdir, "rev-list", "-n1", ref]
   [time] <- gitCmdLines ["-C", gitdir, "show", "-s", "--format=%cI", ref]
   utc <- zonedTimeToUTC <$> iso8601ParseM (T.unpack time)
-  gd <- memoiseGetManifest getManifest
+  gm <- memoiseGetManifest getManifest'
   pure $
     PkgRevInfo
-      { pkgGetFiles = getFiles,
+      { pkgGetFiles = getFiles gm,
         pkgRevCommit = sha,
-        pkgRevGetManifest = gd,
+        pkgRevGetManifest = gm,
         pkgRevTime = utc
       }
   where
-    dir = "lib" </> T.unpack path
+    noPkgDir pdir =
+      fail $
+        T.unpack path
+          <> "-"
+          <> ref
+          <> " does not contain a directory "
+          <> pdir
 
-    getFiles = GetFiles $ do
+    noPkgPath =
+      fail $
+        "futhark.pkg for "
+          <> T.unpack path
+          <> "-"
+          <> ref
+          <> " does not define a package path."
+
+    getFiles gm = GetFiles $ do
       gitCmd_ ["-C", gitdir, "checkout", ref, "--"]
-      let pkgdir = gitdir </> dir
-      fs <- liftIO $ directoryContents pkgdir
-      pure (pkgdir, map (makeRelative pkgdir) fs)
+      pdir <- maybe noPkgPath pure . pkgDir =<< getManifest gm
+      let pdir_abs = gitdir </> pdir
+      exists <- liftIO $ doesDirectoryExist pdir_abs
+      unless exists $ noPkgDir pdir
+      fs <- liftIO $ directoryContents pdir_abs
+      pure (pdir_abs, map (makeRelative pdir_abs) fs)
 
-    getManifest = GetManifest $ do
+    getManifest' = GetManifest $ do
       gitCmd_ ["-C", gitdir, "checkout", ref, "--"]
       let f = gitdir </> futharkPkg
       s <- liftIO $ T.readFile f
