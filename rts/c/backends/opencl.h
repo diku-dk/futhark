@@ -137,6 +137,9 @@ struct futhark_context_config {
   int default_tile_size_changed;
   int num_build_opts;
   const char **build_opts;
+
+  cl_command_queue queue;
+  int queue_set;
 };
 
 static void backend_context_config_setup(struct futhark_context_config* cfg) {
@@ -163,6 +166,8 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
 
   cfg->default_group_size_changed = 0;
   cfg->default_tile_size_changed = 0;
+
+  cfg->queue_set = 0;
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
@@ -1177,7 +1182,11 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->total_runs = 0;
   ctx->total_runtime = 0;
 
-  setup_opencl(ctx, opencl_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+  if (ctx->cfg->queue_set) {
+    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, opencl_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+  } else {
+    setup_opencl(ctx, opencl_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+  }
 
   cl_int error;
   cl_int no_error = -1;
