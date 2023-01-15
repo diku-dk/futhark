@@ -19,9 +19,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * You can now mix consumption and higher-order terms in slightly more
   cases (#1836).
 
+* `futhark pkg` now invokes Git directly rather than scraping
+  GitHub/GitLab.  This means package paths can now refer to any Git
+  repository, as long as `git clone` works.  In particular, you can
+  use private and self-hosted repositories.
+
 ### Removed
 
 ### Changed
+
+* The C API function `futhark_context_new_with_command_queue()` for
+  the OpenCL backend has been replaced with a configuration setting
+  `futhark_context_config_set_command_queue()`.
 
 ### Fixed
 
@@ -29,6 +38,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Parser did not recognise custom infix operators that did not have a
   builtin operator as prefix (#1824).
+
+* GPU backends: expansion of irregular nested allocations involving
+  consumption (#1837, #1838).
 
 ## [0.22.7]
 

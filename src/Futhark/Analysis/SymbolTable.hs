@@ -30,6 +30,7 @@ module Futhark.Analysis.SymbolTable
     lookupLoopParam,
     aliases,
     available,
+    subExpAvailable,
     consume,
     index,
     index',
@@ -280,6 +281,11 @@ aliases x y vtable = x == y || (x `nameIn` lookupAliases y vtable)
 -- | In symbol table and not consumed.
 available :: VName -> SymbolTable rep -> Bool
 available name = maybe False (not . entryConsumed) . M.lookup name . bindings
+
+-- | Constant or 'available'
+subExpAvailable :: SubExp -> SymbolTable rep -> Bool
+subExpAvailable (Var name) = available name
+subExpAvailable Constant {} = const True
 
 index ::
   ASTRep rep =>

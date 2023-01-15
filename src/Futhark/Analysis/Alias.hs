@@ -63,8 +63,13 @@ analyseStms ::
   Stms rep ->
   (Stms (Aliases rep), AliasesAndConsumed)
 analyseStms orig_aliases =
-  foldl' f (mempty, (orig_aliases, mempty)) . stmsToList
+  withoutBound . foldl' f (mempty, (orig_aliases, mempty)) . stmsToList
   where
+    withoutBound (stms, (aliases, consumed)) =
+      let bound = foldMap (namesFromList . patNames . stmPat) stms
+          consumed' = consumed `namesSubtract` bound
+       in (stms, (aliases, consumed'))
+
     f (stms, aliases) stm =
       let stm' = analyseStm (fst aliases) stm
           atable' = trackAliases aliases stm'

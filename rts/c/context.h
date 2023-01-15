@@ -100,7 +100,11 @@ void futhark_context_config_free(struct futhark_context_config* cfg) {
   free(cfg);
 }
 
-static void context_setup(struct futhark_context_config* cfg, struct futhark_context *ctx) {
+struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) {
+  struct futhark_context* ctx = malloc(sizeof(struct futhark_context));
+  if (ctx == NULL) {
+    return NULL;
+  }
   assert(!cfg->in_use);
   ctx->cfg = cfg;
   ctx->cfg->in_use = 1;
@@ -115,16 +119,26 @@ static void context_setup(struct futhark_context_config* cfg, struct futhark_con
   ctx->profiling_paused = 0;
   ctx->error = NULL;
   ctx->log = stderr;
+  if (backend_context_setup(ctx) == 0) {
+    setup_program(ctx);
+    init_constants(ctx);
+    (void)futhark_context_clear_caches(ctx);
+    (void)futhark_context_sync(ctx);
+  }
+  return ctx;
 }
 
-static void context_teardown(struct futhark_context *ctx) {
+void futhark_context_free(struct futhark_context* ctx) {
   free_constants(ctx);
+  teardown_program(ctx);
+  backend_context_teardown(ctx);
   free_all_in_free_list(ctx);
   free_list_destroy(&ctx->free_list);
   free(ctx->constants);
   free_lock(&ctx->lock);
   free_lock(&ctx->error_lock);
   ctx->cfg->in_use = 0;
+  free(ctx);
 }
 
 // End of context.h

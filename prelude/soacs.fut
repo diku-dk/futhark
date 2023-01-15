@@ -211,7 +211,7 @@ def all [n] 'a (f: a -> bool) (as: [n]a): bool =
 def any [n] 'a (f: a -> bool) (as: [n]a): bool =
   reduce (||) false (map f as)
 
--- | `r = spread x k is vs` produces an array `r` such that `r[i] =
+-- | `r = spread k x is vs` produces an array `r` such that `r[i] =
 -- vs[j]` where `is[j] == i`, or `x` if no such `j` exists.
 -- Intuitively, `is` is an array indicating where the corresponding
 -- elements of `vs` should be located in the result.  Out-of-bounds

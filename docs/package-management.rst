@@ -14,9 +14,11 @@ Basic Concepts
 
 A package is uniquely identified with a *package path*, which is
 similar to a URL, except without a protocol.  At the moment, package
-paths are always links to Git repositories hosted on GitHub or GitLab.
-In the future, this will become more flexible.  As an example, a
-package path may be ``github.com/athas/fut-foo``.
+paths must be something that can be passed to ``git clone``.  In
+particular, this includes paths to repositories on major code hosting
+sites such as GitLab and GitHub. In the future, this will become more
+flexible.  As an example, a package path may be
+``github.com/athas/fut-foo``.
 
 Packages are versioned with `semantic version numbers
 <https://semver.org/>`_ of the form ``X.Y.Z``.  Whenever versions are
@@ -359,3 +361,23 @@ behaviour.  You should not use untrusted code that employs ``unsafe``
 (but the ``--safe`` compiler option may help).  However, this is not
 any worse than calling external code in a conventional impure
 language, which generally can perform any conceivable harmful action.
+
+Private repositories
+--------------------
+
+The Futhark package manager is intentionally very simple - perhaps
+even simplistic.  The key philosophy is that if you can ``git clone``
+a repository from the command line, then ``futhark pkg`` can also
+access it.  However, ``futhark pkg`` always uses the ``https://``
+protocol when converting package paths to the URLs that are passed to
+``git``, which is sometimes inconvenient for self-hosted or private
+repositories.  As a workaround, you can modify your Git configuration
+file to transparently replace ``https://`` with ``ssh://`` for certain
+repositories.  For example, you can add the following entry
+``$HOME/.gitconfig``::
+
+  [url "ssh://git@github.com/sturluson"]
+	insteadOf = https://github.com/sturluson
+
+This will make all interactions with repositories owned by the
+``sturluson`` user on GitHub use SSH instead of HTTPS.
