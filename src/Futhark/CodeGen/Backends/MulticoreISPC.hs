@@ -781,8 +781,8 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
     GC.stm [C.cstm|$id:ftask_name.iterations = iterations;|]
     -- Create the timing fields for the task
-    GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->$id:(MC.functionTiming fpar_task);|]
-    GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(MC.functionIterations fpar_task);|]
+    GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->program->$id:(MC.functionTiming fpar_task);|]
+    GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->program->$id:(MC.functionIterations fpar_task);|]
 
     case sched of
       Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]

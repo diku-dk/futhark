@@ -176,7 +176,7 @@ writeOpenCLScalar mem i t "device" _ val = do
   GC.stm
     [C.cstm|{$item:decl
                   OPENCL_SUCCEED_OR_RETURN(
-                    clEnqueueWriteBuffer(ctx->opencl.queue, $exp:mem, $exp:blocking,
+                    clEnqueueWriteBuffer(ctx->queue, $exp:mem, $exp:blocking,
                                          $exp:i * sizeof($ty:t), sizeof($ty:t),
                                          &$id:val',
                                          0, NULL, $exp:(profilingEvent copyScalarToDev)));
@@ -194,7 +194,7 @@ readOpenCLScalar mem i t "device" _ = do
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm
     [C.cstm|OPENCL_SUCCEED_OR_RETURN(
-                   clEnqueueReadBuffer(ctx->opencl.queue, $exp:mem,
+                   clEnqueueReadBuffer(ctx->queue, $exp:mem,
                                        ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
                                        $exp:i * sizeof($ty:t), sizeof($ty:t),
                                        &$id:val,
@@ -211,7 +211,7 @@ allocateOpenCLBuffer :: GC.Allocate OpenCL ()
 allocateOpenCLBuffer mem size tag "device" =
   GC.stm
     [C.cstm|ctx->error =
-     OPENCL_SUCCEED_NONFATAL(opencl_alloc(ctx->cfg, &ctx->opencl, ctx->log,
+     OPENCL_SUCCEED_NONFATAL(opencl_alloc(ctx, ctx->log,
                                           (size_t)$exp:size, $exp:tag,
                                           &$exp:mem, (size_t*)&$exp:size));|]
 allocateOpenCLBuffer _ _ _ space =
@@ -219,7 +219,7 @@ allocateOpenCLBuffer _ _ _ space =
 
 deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
 deallocateOpenCLBuffer mem size tag "device" =
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_free(&ctx->opencl, $exp:mem, $exp:size, $exp:tag));|]
+  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_free(ctx, $exp:mem, $exp:size, $exp:tag));|]
 deallocateOpenCLBuffer _ _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' space"
 
@@ -237,7 +237,7 @@ copyOpenCLMemory b destmem destidx DefaultSpace srcmem srcidx (Space "device") n
     if ($exp:nbytes > 0) {
       typename cl_bool sync_call = $exp:(syncArg b);
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueReadBuffer(ctx->opencl.queue, $exp:srcmem,
+        clEnqueueReadBuffer(ctx->queue, $exp:srcmem,
                             ctx->failure_is_an_option ? CL_FALSE : sync_call,
                             (size_t)$exp:srcidx, (size_t)$exp:nbytes,
                             $exp:destmem + $exp:destidx,
@@ -252,7 +252,7 @@ copyOpenCLMemory b destmem destidx (Space "device") srcmem srcidx DefaultSpace n
     [C.cstm|
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueWriteBuffer(ctx->opencl.queue, $exp:destmem, $exp:(syncArg b),
+        clEnqueueWriteBuffer(ctx->queue, $exp:destmem, $exp:(syncArg b),
                              (size_t)$exp:destidx, (size_t)$exp:nbytes,
                              $exp:srcmem + $exp:srcidx,
                              0, NULL, $exp:(profilingEvent copyDevToHost)));
@@ -265,13 +265,13 @@ copyOpenCLMemory _ destmem destidx (Space "device") srcmem srcidx (Space "device
     [C.cstm|{
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueCopyBuffer(ctx->opencl.queue,
+        clEnqueueCopyBuffer(ctx->queue,
                             $exp:srcmem, $exp:destmem,
                             (size_t)$exp:srcidx, (size_t)$exp:destidx,
                             (size_t)$exp:nbytes,
                             0, NULL, $exp:(profilingEvent copyDevToDev)));
       if (ctx->debugging) {
-        OPENCL_SUCCEED_FATAL(clFinish(ctx->opencl.queue));
+        OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
       }
     }
   }|]
@@ -289,7 +289,7 @@ kernelConstToExp :: KernelConst -> C.Exp
 kernelConstToExp (SizeConst key) =
   [C.cexp|*ctx->tuning_params.$id:key|]
 kernelConstToExp (SizeMaxConst size_class) =
-  [C.cexp|ctx->opencl.$id:field|]
+  [C.cexp|ctx->$id:field|]
   where
     field = "max_" <> prettyString size_class
 
@@ -315,7 +315,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   when (safety == SafetyFull) $
     GC.stm
       [C.cstm|
-      OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, 1,
+      OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, 1,
                                               sizeof(ctx->failure_is_an_option),
                                               &ctx->failure_is_an_option));
     |]
@@ -343,19 +343,19 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
         _ -> GC.compileExpToName "kernel_arg" pt e
       GC.stm
         [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($id:v), &$id:v));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, sizeof($id:v), &$id:v));
           |]
     setKernelArg i (MemKArg v) = do
       v' <- GC.rawMem v
       GC.stm
         [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($exp:v'), &$exp:v'));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, sizeof($exp:v'), &$exp:v'));
           |]
     setKernelArg i (SharedMemoryKArg num_bytes) = do
       num_bytes' <- GC.compileExp $ unCount num_bytes
       GC.stm
         [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, (size_t)$exp:num_bytes', NULL));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, (size_t)$exp:num_bytes', NULL));
             |]
 
     localBytes cur (SharedMemoryKArg num_bytes) = do
@@ -391,11 +391,11 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
       }
       typename cl_event *pevent = $exp:(profilingEvent kernel_name);
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueNDRangeKernel(ctx->opencl.queue, ctx->$id:kernel_name, $int:kernel_rank, NULL,
+        clEnqueueNDRangeKernel(ctx->queue, ctx->program->$id:kernel_name, $int:kernel_rank, NULL,
                                $id:global_work_size, $id:local_work_size,
                                0, NULL, pevent));
       if (ctx->debugging) {
-        OPENCL_SUCCEED_FATAL(clFinish(ctx->opencl.queue));
+        OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
         $id:time_end = get_wall_time();
         long int $id:time_diff = $id:time_end - $id:time_start;
         fprintf(ctx->log, "kernel %s runtime: %ldus\n",

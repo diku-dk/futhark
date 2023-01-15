@@ -73,8 +73,8 @@ compileProg version prog = do
           GC.opsCompiler = callKernel,
           GC.opsFatMemory = True,
           GC.opsCritical =
-            ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cuda.cu_ctx));|],
-              [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cuda.cu_ctx));|]
+            ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cu_ctx));|],
+              [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cu_ctx));|]
             )
         }
     cuda_includes =
@@ -198,7 +198,7 @@ allocateCUDABuffer :: GC.Allocate OpenCL ()
 allocateCUDABuffer mem size tag "device" =
   GC.stm
     [C.cstm|ctx->error =
-     CUDA_SUCCEED_NONFATAL(cuda_alloc(ctx->cfg, &ctx->cuda, ctx->log,
+     CUDA_SUCCEED_NONFATAL(cuda_alloc(ctx, ctx->log,
                                       (size_t)$exp:size, $exp:tag,
                                       &$exp:mem, (size_t*)&$exp:size));|]
 allocateCUDABuffer _ _ _ space =
@@ -206,7 +206,7 @@ allocateCUDABuffer _ _ _ space =
 
 deallocateCUDABuffer :: GC.Deallocate OpenCL ()
 deallocateCUDABuffer mem size tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_free(&ctx->cuda, $exp:mem, $exp:size, $exp:tag));|]
+  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(cuda_free(ctx, $exp:mem, $exp:size, $exp:tag));|]
 deallocateCUDABuffer _ _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
@@ -246,7 +246,7 @@ kernelConstToExp :: KernelConst -> C.Exp
 kernelConstToExp (SizeConst key) =
   [C.cexp|*ctx->tuning_params.$id:key|]
 kernelConstToExp (SizeMaxConst size_class) =
-  [C.cexp|ctx->cuda.$id:field|]
+  [C.cexp|ctx->$id:field|]
   where
     field = "max_" <> cudaSizeClass size_class
     cudaSizeClass SizeThreshold {} = "threshold"
@@ -341,7 +341,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       }
       $items:bef
       CUDA_SUCCEED_OR_RETURN(
-        cuLaunchKernel(ctx->$id:kernel_name,
+        cuLaunchKernel(ctx->program->$id:kernel_name,
                        grid[0], grid[1], grid[2],
                        $exp:block_x, $exp:block_y, $exp:block_z,
                        $exp:shared_tot, NULL,

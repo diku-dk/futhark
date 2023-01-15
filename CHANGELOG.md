@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+* The C API function `futhark_context_new_with_command_queue()` for
+  the OpenCL backend has been replaced with a configuration setting
+  `futhark_context_config_set_command_queue()`.
+
 ### Fixed
 
 * Minor parser regression that mostly affects the REPL (#1822).

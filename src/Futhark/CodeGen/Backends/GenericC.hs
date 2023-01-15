@@ -466,6 +466,12 @@ $entry_point_decls
       headerDecl InitDecl [C.cedecl|struct futhark_context_config;|]
       headerDecl InitDecl [C.cedecl|struct futhark_context_config* futhark_context_config_new(void);|]
       headerDecl InitDecl [C.cedecl|void futhark_context_config_free(struct futhark_context_config* cfg);|]
+      headerDecl InitDecl [C.cedecl|int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg, const char *param_name, size_t new_value);|]
+
+      headerDecl InitDecl [C.cedecl|struct futhark_context;|]
+      headerDecl InitDecl [C.cedecl|struct futhark_context* futhark_context_new(struct futhark_context_config* cfg);|]
+      headerDecl InitDecl [C.cedecl|void futhark_context_free(struct futhark_context* cfg);|]
+      headerDecl MiscDecl [C.cedecl|int futhark_context_sync(struct futhark_context* ctx);|]
 
       extra
 
@@ -605,9 +611,9 @@ generateCommonLibFuns memreport = do
   publicDef_ "context_clear_caches" MiscDecl $ \s ->
     ( [C.cedecl|int $id:s($ty:ctx* ctx);|],
       [C.cedecl|int $id:s($ty:ctx* ctx) {
-                         $items:(criticalSection ops clears)
-                         return ctx->error != NULL;
-                       }|]
+                  $items:(criticalSection ops clears)
+                  return ctx->error != NULL;
+                }|]
     )
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
