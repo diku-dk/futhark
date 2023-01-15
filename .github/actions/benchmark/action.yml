@@ -37,7 +37,7 @@ runs:
     - name: Run benchmarks
       shell: bash
       run: |
-        futhark bench futhark-benchmarks --ignore-files /lib/ --backend=${{inputs.backend}} --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json ${{inputs.options}}
+        futhark bench futhark-benchmarks --ignore-files /lib/ --backend=${{inputs.backend}} --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json --exclude no_${{inputs.system}} ${{inputs.options}}
     - uses: actions/upload-artifact@v1
       with:
         name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
