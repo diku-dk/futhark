@@ -298,20 +298,25 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           ns <- elemArr segments env inps n
           xs <- elemArr segments env inps x
           ss <- elemArr segments env inps s
-          IrregularRep shape flags offsets elems <- getIrregRep segments env inps as  -- Irregular representation of `as`
+          -- Irregular representation of `as`
+          IrregularRep shape flags offsets elems <- getIrregRep segments env inps as
+          -- Inner indices (1 and 2) of `ns`
           (_, _, ii1_ns) <- doRepIota ns
           (_, _, ii2_ns) <- certifying (distCerts inps aux env) $ doSegIota ns
+          -- Number of updates to preform
           m <- arraySize 0 <$> lookupType ii2_ns
           elems' <- letExp "elems_scatter" <=< genScatter elems m $ \gid -> do
             segment <- letSubExp "segment" =<< eIndex ii1_ns [eSubExp gid]
-            v' <- letExp "v" =<< eIndex vs [eSubExp gid]       -- Value to write
+            -- Value to write
+            v' <- letSubExp "v" =<< eIndex vs [eSubExp gid]
             n' <- letSubExp "n" =<< eIndex ii2_ns [eSubExp gid]
             x' <- letSubExp "x" =<< eIndex xs [eSubExp segment]
             s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
             o' <- letSubExp "o" =<< eIndex offsets [eSubExp segment]
-            i' <- letSubExp "i" =<< toExp (pe64 o' + pe64 x' + pe64 n' * pe64 s') -- Index to write at
-            pure (v', i')
-          pure $ insertIrregular shape flags offsets (distResTag res) elems' env      -- ??
+            -- Index to write `v'` at
+            i' <- letExp "i" =<< toExp (pe64 o' + pe64 x' + pe64 n' * pe64 s')
+            pure (i', v')
+          pure $ insertIrregular shape flags offsets (distResTag res) elems' env
         [DimFix _]       -> error $ "Update: Single dimension fixed index unhandled.\n" ++ prettyString e
         _                -> error $ "Multi dimension update unhandled:\n" ++ prettyString e
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
