@@ -582,7 +582,7 @@ jobs:
   benchmark-results:
     runs-on: ubuntu-22.04
     needs: [benchmark-A100-cuda, benchmark-A100-opencl, benchmark-MI100-opencl]
-#    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master'
     steps:
     - name: Install SSH key
       uses: shimataro/ssh-key-action@v2
