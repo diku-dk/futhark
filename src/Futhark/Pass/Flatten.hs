@@ -208,10 +208,10 @@ getIrregRep :: Segments -> DistEnv -> DistInputs -> VName -> Builder GPU Irregul
 getIrregRep _ env inps v =
   case lookup v inps of
     Just v_inp -> case v_inp of
-        DistInputFree _ _ -> error "getIrregRep: Free variables not handled (yet)"
-        DistInput rt _ -> case resVar rt env of
-          Irregular r -> pure r
-          Regular _ -> error "getIrregRep: Regulat arrays not handled (yet)"
+      DistInputFree _ _ -> error "getIrregRep: Free variables not handled (yet)"
+      DistInput rt _ -> case resVar rt env of
+        Irregular r -> pure r
+        Regular _ -> error "getIrregRep: Regulat arrays not handled (yet)"
     Nothing -> error $ "getIrregRep: variable '" ++ prettyString v ++ "' not found"
 
 transformDistBasicOp ::
@@ -317,7 +317,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             i' <- letExp "i" =<< toExp (pe64 o' + pe64 x' + pe64 n' * pe64 s')
             pure (i', v')
           pure $ insertIrregular shape flags offsets (distResTag res) elems' env
-        [DimFix n]       -> do
+        [DimFix n] -> do
           -- Irregular representation of `as`
           IrregularRep shape flags offsets elems <- getIrregRep segments env inps as
           vs <- elemArr segments env inps v
@@ -333,7 +333,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             i' <- letExp "i" =<< toExp (pe64 o' + pe64 n')
             pure (i', v')
           pure $ insertIrregular shape flags offsets (distResTag res) elems' env
-        _                -> error $ "Multi dimension update unhandled:\n" ++ prettyString e
+        _ -> error $ "Multi dimension update unhandled:\n" ++ prettyString e
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
