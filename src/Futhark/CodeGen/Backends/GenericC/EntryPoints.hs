@@ -131,7 +131,7 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
       stms $ zipWith maybeCopyDim shape [0 .. rank - 1]
 
 entryName :: Name -> T.Text
-entryName = escapeName . nameToText
+entryName = ("entry_" <>) . escapeName . nameToText
 
 onEntryPoint ::
   [C.BlockItem] ->
