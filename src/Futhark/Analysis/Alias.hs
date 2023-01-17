@@ -15,6 +15,7 @@ module Futhark.Analysis.Alias
     -- * Ad-hoc utilities
     analyseFun,
     analyseStms,
+    analyseStm,
     analyseExp,
     analyseBody,
     analyseLambda,
@@ -75,6 +76,7 @@ analyseStms orig_aliases =
           atable' = trackAliases aliases stm'
        in (stms <> oneStm stm', atable')
 
+-- | Perform alias analysis on statement.
 analyseStm ::
   AliasableRep rep =>
   AliasTable ->

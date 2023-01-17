@@ -184,9 +184,9 @@ consumedInExp (Op op) = consumedInOp op
 consumedByLambda :: Aliased rep => Lambda rep -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
--- | The aliases of each pattern element (including the context).
+-- | The aliases of each pattern element.
 patAliases :: AliasesOf dec => Pat dec -> [Names]
-patAliases = map (aliasesOf . patElemDec) . patElems
+patAliases = map aliasesOf . patElems
 
 -- | Something that contains alias information.
 class AliasesOf a where

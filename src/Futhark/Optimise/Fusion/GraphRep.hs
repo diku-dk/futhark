@@ -243,18 +243,19 @@ addDeps = augWithFun toDep
 addConsAndAliases :: Monad m => DepGraphAug m
 addConsAndAliases = augWithFun edges
   where
-    edges (StmNode s) = consEdges e <> aliasEdges e
+    edges (StmNode s) = consEdges s' <> aliasEdges s'
       where
-        e = Alias.analyseExp mempty $ stmExp s
+        s' = Alias.analyseStm mempty s
     edges _ = mempty
-    consEdges e = zip names (map Cons names)
+    consEdges s = zip names (map Cons names)
       where
-        names = namesToList $ consumedInExp e
+        names = namesToList $ consumedInStm s
     aliasEdges =
       map (\vname -> (vname, Alias vname))
         . namesToList
         . mconcat
-        . expAliases
+        . patAliases
+        . stmPat
 
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it (now also adds fake edges to aliases - hope this
