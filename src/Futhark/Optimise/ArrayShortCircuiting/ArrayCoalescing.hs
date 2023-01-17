@@ -1265,10 +1265,10 @@ filterSafetyCond2and5 ::
   TopdownEnv rep ->
   [PatElem (VarAliases, LetDecMem)] ->
   (CoalsTab, InhibitTab)
-filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
-  foldl helper (act_coal, inhb_coal)
+filterSafetyCond2and5 act_coal inhb_coal scals_env td_env pes =
+  foldl helper (act_coal, inhb_coal) pes
   where
-    helper (acc, inhb) patel =
+    helper (acc, inhb) patel = do
       -- For each pattern element in the input list
       case (patElemName patel, patElemDec patel) of
         (b, (_, MemArray tp0 shp0 _ (ArrayIn m_b _idxfn_b))) ->
@@ -1278,27 +1278,33 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
             Just info@(CoalsEntry x_mem _ _ vtab _ _) ->
               -- And m_b we're trying to coalesce m_b
               let failed = markFailedCoal (acc, inhb) m_b
-               in case M.lookup b vtab of
-                    Nothing ->
-                      case getDirAliasedIxfn td_env acc b of
-                        Nothing -> failed
-                        Just (_, _, b_indfun') ->
-                          -- And we have the index function of b
-                          case freeVarSubstitutions (scope td_env) scals_env b_indfun' of
-                            Nothing -> failed
-                            Just fv_subst ->
-                              let mem_info = Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
-                                  info' = info {vartab = M.insert b mem_info vtab}
-                               in (M.insert m_b info' acc, inhb)
-                    Just (Coalesced k (MemBlock pt shp _ new_indfun) _) ->
-                      let safe_2 = isInScope td_env x_mem
-                       in case freeVarSubstitutions (scope td_env) scals_env new_indfun of
-                            Just fv_subst
-                              | safe_2 ->
-                                  let mem_info = Coalesced k (MemBlock pt shp x_mem new_indfun) fv_subst
-                                      info' = info {vartab = M.insert b mem_info vtab}
-                                   in (M.insert m_b info' acc, inhb)
-                            _ -> failed
+               in -- It is not safe to short circuit if some other pattern
+                  -- element is aliased to this one, as this indicates the
+                  -- two pattern elements reference the same physical
+                  -- value somehow.
+                  if any ((`nameIn` aliasesOf patel) . patElemName) pes
+                    then failed
+                    else case M.lookup b vtab of
+                      Nothing ->
+                        case getDirAliasedIxfn td_env acc b of
+                          Nothing -> failed
+                          Just (_, _, b_indfun') ->
+                            -- And we have the index function of b
+                            case freeVarSubstitutions (scope td_env) scals_env b_indfun' of
+                              Nothing -> failed
+                              Just fv_subst ->
+                                let mem_info = Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
+                                    info' = info {vartab = M.insert b mem_info vtab}
+                                 in (M.insert m_b info' acc, inhb)
+                      Just (Coalesced k (MemBlock pt shp _ new_indfun) _) ->
+                        let safe_2 = isInScope td_env x_mem
+                         in case freeVarSubstitutions (scope td_env) scals_env new_indfun of
+                              Just fv_subst
+                                | safe_2 ->
+                                    let mem_info = Coalesced k (MemBlock pt shp x_mem new_indfun) fv_subst
+                                        info' = info {vartab = M.insert b mem_info vtab}
+                                     in (M.insert m_b info' acc, inhb)
+                              _ -> failed
         _ -> (acc, inhb)
 
 -- |   Pattern matches a potentially coalesced statement and
