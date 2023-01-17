@@ -473,7 +473,7 @@ existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
 
 instance PP.Pretty MemReturn where
   pretty (ReturnsInBlock v ixfun) =
-    PP.parens $ pretty v <+> "->" PP.</> PP.pretty ixfun
+    pretty v <+> "->" PP.</> PP.pretty ixfun
   pretty (ReturnsNewBlock space i ixfun) =
     "?" <> pretty i <> PP.pretty space <+> "->" PP.</> PP.pretty ixfun
 
