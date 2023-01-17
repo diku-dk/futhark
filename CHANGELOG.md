@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Various oversights in the type checking of uniqueness annotations
   for higher-order functions (#1842).
 
+* Invalid short-circuiting could cause compiler crashes (#1843).
+
 ## [0.22.7]
 
 ### Added
