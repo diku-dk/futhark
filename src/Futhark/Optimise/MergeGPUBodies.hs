@@ -138,7 +138,7 @@ reorderStm aliases (Let pat (StmAux cs attrs _) e) = do
   -- To move X before Y then the dependencies of X must also not overlap with
   -- the variables bound by Y.
 
-  let observed = namesToSet $ rootAliasesOf (fold $ expAliases e) aliases
+  let observed = namesToSet $ rootAliasesOf (fold $ patAliases pat) aliases
   let consumed = namesToSet $ rootAliasesOf (consumedInExp e) aliases
   let usage =
         Usage
