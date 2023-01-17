@@ -124,10 +124,10 @@ class Server {
     var vals = this.ctx[entry[0]].apply(this.ctx, ins);
     var aft = performance.now()*1000;
     if (num_outs == 1) {
-      this._set_var(out_vnames[0], vals, entry[1][0]);
+      this._set_var(out_vnames[0], vals, entry[2][0]);
     } else {
       for (var i = 0; i < out_vnames.length; i++) {
-        this._set_var(out_vnames[i], vals[i], entry[1][i]);
+        this._set_var(out_vnames[i], vals[i], entry[2][i]);
       }
     }
     console.log("runtime: " + Math.round(aft-bef));
