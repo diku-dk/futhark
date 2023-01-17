@@ -283,7 +283,7 @@ checkPat' _ (Id name NoInfo loc) NoneInferred = do
   t <- newTypeVar loc "t"
   pure $ Id name' (Info t) loc
 checkPat' _ (Wildcard _ loc) (Ascribed t) =
-  pure $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
+  pure $ Wildcard (Info t) loc
 checkPat' _ (Wildcard NoInfo loc) NoneInferred = do
   t <- newTypeVar loc "t"
   pure $ Wildcard (Info t) loc

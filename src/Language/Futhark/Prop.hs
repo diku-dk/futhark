@@ -192,8 +192,10 @@ traverseDims f = go mempty PosImmediate
 uniqueness :: TypeBase shape as -> Uniqueness
 uniqueness (Array _ u _ _) = u
 uniqueness (Scalar (TypeVar _ u _ _)) = u
-uniqueness (Scalar (Sum ts)) = foldMap (foldMap uniqueness) $ M.elems ts
-uniqueness (Scalar (Record fs)) = foldMap uniqueness $ M.elems fs
+uniqueness (Scalar (Sum ts))
+  | any (any unique) ts = Unique
+uniqueness (Scalar (Record fs))
+  | any unique fs = Unique
 uniqueness _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
