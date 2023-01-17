@@ -266,26 +266,22 @@ mkAliasedPat ::
   Pat dec ->
   Exp rep ->
   Pat (VarAliases, dec)
-mkAliasedPat pat e = Pat $ zipWith annotatePatElem (patElems pat) als
+mkAliasedPat (Pat pes) e =
+  Pat $ zipWith annotate pes $ expAliases pes e
   where
-    -- Repeat mempty in case the pattern has more elements (this
-    -- implies a type error).
-    als = expAliases e ++ repeat mempty
-    annotatePatElem bindee names =
-      bindee `setPatElemDec` (AliasDec names', patElemDec bindee)
+    annotate (PatElem v dec) names = PatElem v (AliasDec names', dec)
       where
         names' =
-          case patElemType bindee of
+          case typeOf dec of
             Array {} -> names
             Mem _ -> names
             _ -> mempty
 
 -- | Given statements (with aliasing information) and a body result,
 -- produce aliasing information for the corresponding body as a whole.
--- This is basically just looking up the aliasing of each element of
--- the result, and removing the names that are no longer in scope.
--- Note that this does *not* include aliases of results that are not
--- bound in the statements!
+-- The aliasing includes names bound in the body, i.e. which are not
+-- in scope outside of it.  Note that this does *not* include aliases
+-- of results that are not bound in the statements!
 mkBodyAliasing ::
   Aliased rep =>
   Stms rep ->
@@ -298,9 +294,8 @@ mkBodyAliasing stms res =
   -- bound in stms.
   let (aliases, consumed) = mkStmsAliases stms res
       boundNames = foldMap (namesFromList . patNames . stmPat) stms
-      aliases' = map (`namesSubtract` boundNames) aliases
       consumed' = consumed `namesSubtract` boundNames
-   in (map AliasDec aliases', AliasDec consumed')
+   in (map AliasDec aliases, AliasDec consumed')
 
 -- | The aliases of the result and everything consumed in the given
 -- statements.
