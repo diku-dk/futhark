@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * GPU backends: expansion of irregular nested allocations involving
   consumption (#1837, #1838).
 
+* CLI executables now handle entry points with names that are not
+  valid C identifiers (#1841).
+
 ## [0.22.7]
 
 ### Added
