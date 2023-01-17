@@ -570,6 +570,10 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
     - uses: ./.github/actions/benchmark
       with:
         backend: cuda
@@ -580,6 +584,10 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
     - uses: ./.github/actions/benchmark
       with:
         backend: opencl
@@ -590,6 +598,10 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
     - uses: ./.github/actions/benchmark
       with:
         backend: opencl
