@@ -775,8 +775,7 @@ mkCoalsTabStm lutab (Let patt _ (Match _ cases defbody _)) td_env bu_env = do
           )
   pure
     bu_env
-      { activeCoals =
-          actv_res,
+      { activeCoals = actv_res,
         successCoals = succ_res,
         inhibit = inhibit_res
       }

@@ -46,10 +46,7 @@ optimiseMCMem = pass "short-circuit-mc" "Array Short-Circuiting (MC)" mkCoalsTab
 replaceInParams :: CoalsTab -> [Param FParamMem] -> (Names, [Param FParamMem])
 replaceInParams coalstab fparams =
   let (mem_allocs_to_remove, fparams') =
-        foldl
-          replaceInParam
-          (mempty, mempty)
-          fparams
+        foldl replaceInParam (mempty, mempty) fparams
    in (mem_allocs_to_remove, reverse fparams')
   where
     replaceInParam (to_remove, acc) (Param attrs name dec) =
