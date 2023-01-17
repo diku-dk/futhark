@@ -151,9 +151,10 @@ getErrorFun =
 dicEntry :: JSEntryPoint -> T.Text
 dicEntry jse =
   [text|
-  '${ename}' : [${params}, ${rets}]
+       "${ename}" : ["${fname}", ${params}, ${rets}]
   |]
   where
+    fname = GC.escapeName $ T.pack $ name jse
     ename = T.pack $ name jse
     params = showText $ parameters jse
     rets = showText $ ret jse
@@ -176,7 +177,7 @@ jsWrapEntryPoint jse =
   }
   |]
   where
-    func_name = T.pack $ name jse
+    func_name = GC.escapeName $ T.pack $ name jse
 
     alp = [0 .. length (parameters jse) - 1]
     inparams = T.pack $ intercalate ", " ["in" ++ show i | i <- alp]

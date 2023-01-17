@@ -59,7 +59,7 @@ class Server {
 
   _cmd_inputs(args) {
     var entry = this._get_arg(args, 0);
-    var inputs = this._get_entry_point(entry)[0];
+    var inputs = this._get_entry_point(entry)[1];
     for (var i = 0; i < inputs.length; i++) {
       console.log(inputs[i]);
     }
@@ -67,7 +67,7 @@ class Server {
 
   _cmd_outputs(args) {
     var entry = this._get_arg(args, 0);
-    var outputs = this._get_entry_point(entry)[1];
+    var outputs = this._get_entry_point(entry)[2];
     for (var i = 0; i < outputs.length; i++) {
       console.log(outputs[i]);
     }
@@ -99,8 +99,8 @@ class Server {
 
   _cmd_call(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
-    var num_ins = entry[0].length;
-    var num_outs = entry[1].length;
+    var num_ins = entry[1].length;
+    var num_outs = entry[2].length;
     var expected_len = 1 + num_outs + num_ins
 
     if (args.length != expected_len) {
@@ -121,7 +121,7 @@ class Server {
     }
     // Call entry point function from string name
     var bef = performance.now()*1000;
-    var vals = this.ctx[args[0]].apply(this.ctx, ins);
+    var vals = this.ctx[entry[0]].apply(this.ctx, ins);
     var aft = performance.now()*1000;
     if (num_outs == 1) {
       this._set_var(out_vnames[0], vals, entry[1][0]);
