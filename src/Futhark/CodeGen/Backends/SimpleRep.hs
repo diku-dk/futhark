@@ -18,6 +18,8 @@ module Futhark.CodeGen.Backends.SimpleRep
     primAPIType,
     arrayName,
     opaqueName,
+    isValidCName,
+    escapeName,
     toStorage,
     fromStorage,
     cproduct,
@@ -35,7 +37,7 @@ module Futhark.CodeGen.Backends.SimpleRep
 where
 
 import Data.Bits (shiftR, xor)
-import Data.Char (isAlphaNum, isDigit, ord)
+import Data.Char (isAlpha, isAlphaNum, isDigit, ord)
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
@@ -107,6 +109,21 @@ defaultMemBlockType = [C.cty|unsigned char*|]
 arrayName :: PrimType -> Signedness -> Int -> T.Text
 arrayName pt signed rank =
   prettySigned (signed == Unsigned) pt <> "_" <> prettyText rank <> "d"
+
+-- | Is this name a valid C identifier?  If not, it should be escaped
+-- before being emitted into C.
+isValidCName :: T.Text -> Bool
+isValidCName = maybe True check . T.uncons
+  where
+    check (c, cs) = isAlpha c && T.all constituent cs
+    constituent c = isAlphaNum c || c == '_'
+
+-- | If the provided text is a valid C identifier, then return it
+-- verbatim.  Otherwise, escape it such that it becomes valid.
+escapeName :: T.Text -> T.Text
+escapeName v
+  | isValidCName v = v
+  | otherwise = zEncodeText v
 
 -- | The name of exposed opaque types.
 opaqueName :: Name -> T.Text

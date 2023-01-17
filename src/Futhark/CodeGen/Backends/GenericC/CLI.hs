@@ -13,6 +13,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
   ( cproduct,
+    escapeName,
     primAPIType,
     primStorageType,
     scalarToPrim,
@@ -305,7 +306,8 @@ cliEntryPoint manifest entry_point_name (EntryPoint cfun outputs inputs) =
       printstms =
         printResult manifest $ zip (map outputType outputs) output_vals
 
-      cli_entry_point_function_name = "futrts_cli_entry_" ++ T.unpack entry_point_name
+      cli_entry_point_function_name =
+        "futrts_cli_entry_" <> T.unpack (escapeName entry_point_name)
 
       pause_profiling = "futhark_context_pause_profiling" :: T.Text
       unpause_profiling = "futhark_context_unpause_profiling" :: T.Text

@@ -13,7 +13,6 @@ import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.Backends.GenericC.Types (opaqueToCType, valueTypeToCType)
 import Futhark.CodeGen.ImpCode
 import Futhark.Manifest qualified as Manifest
-import Futhark.Util (zEncodeText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
@@ -132,9 +131,7 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
       stms $ zipWith maybeCopyDim shape [0 .. rank - 1]
 
 entryName :: Name -> T.Text
-entryName v
-  | isValidCName (nameToText v) = "entry_" <> nameToText v
-  | otherwise = "entry_" <> zEncodeText (nameToText v)
+entryName = escapeName . nameToText
 
 onEntryPoint ::
   [C.BlockItem] ->
