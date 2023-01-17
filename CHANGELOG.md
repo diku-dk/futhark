@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * CLI executables now handle entry points with names that are not
   valid C identifiers (#1841).
 
+* Various oversights in the type checking of uniqueness annotations
+  for higher-order functions (#1842).
+
 ## [0.22.7]
 
 ### Added
