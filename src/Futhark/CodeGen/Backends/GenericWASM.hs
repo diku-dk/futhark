@@ -53,7 +53,7 @@ data JSEntryPoint = JSEntryPoint
 
 emccExportNames :: [JSEntryPoint] -> [String]
 emccExportNames jses =
-  map (\jse -> "'_futhark_entry_" ++ name jse ++ "'") jses
+  map (\jse -> "'_futhark_entry_" ++ T.unpack (GC.escapeName (T.pack (name jse))) ++ "'") jses
     ++ map (\arg -> "'" ++ gfn "new" arg ++ "'") arrays
     ++ map (\arg -> "'" ++ gfn "free" arg ++ "'") arrays
     ++ map (\arg -> "'" ++ gfn "shape" arg ++ "'") arrays
