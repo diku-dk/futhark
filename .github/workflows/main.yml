@@ -345,6 +345,8 @@ jobs:
         echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
     - run: |
         futhark test tests --no-terminal --backend=opencl --cache-extension=cache --concurrency=16
+    - run: |
+        FUTHARK_BACKEND=opencl make -C tests_lib/c -j
 
   test-pyopencl:
     runs-on: opencl
@@ -383,6 +385,8 @@ jobs:
         echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
     - run: |
         futhark test tests --no-terminal --backend=cuda --concurrency=16
+    - run: |
+        FUTHARK_BACKEND=cuda make -C tests_lib/c -j
 
   test-wasm:
     runs-on: ubuntu-22.04
