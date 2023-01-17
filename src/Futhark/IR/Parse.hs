@@ -1038,7 +1038,7 @@ pMemBind = ArrayIn <$> pVName <* lexeme "->" <*> pIxFun
 pMemReturn :: Parser MemReturn
 pMemReturn =
   choice
-    [ parens $ ReturnsInBlock <$> pVName <* lexeme "->" <*> pExtIxFun,
+    [ ReturnsInBlock <$> pVName <* lexeme "->" <*> pExtIxFun,
       do
         i <- "?" *> pInt
         space <- choice [pSpace, pure DefaultSpace] <* lexeme "->"
