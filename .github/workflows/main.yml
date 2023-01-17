@@ -351,6 +351,7 @@ jobs:
         source virtualenv/bin/activate
         pip install jsonschema
     - run: |
+        source virtualenv/bin/activate
         FUTHARK_BACKEND=opencl make -C tests_lib/c -j
 
   test-pyopencl:
@@ -396,6 +397,7 @@ jobs:
         source virtualenv/bin/activate
         pip install jsonschema
     - run: |
+        source virtualenv/bin/activate
         FUTHARK_BACKEND=cuda make -C tests_lib/c -j
 
   test-wasm:
