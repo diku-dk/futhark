@@ -242,12 +242,13 @@ is efficiently represented as
 
    (u8, [n]i32)
 
+However the type
 
 .. code-block:: futhark
 
    #foo [n]i32 | #bar [n]f32
 
-becomes
+is represented as
 
 .. code-block:: futhark
 
